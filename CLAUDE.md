@@ -2,6 +2,17 @@
 
 MAGPIE (Macondo Accordant Game Program and Inference Engine) is a crossword game engine written in C99. It supports move generation, Monte Carlo simulation, exhaustive inference, autoplay, superleave generation, and endgame solving.
 
+## Initial Setup (fresh clone)
+
+After cloning, you must download data and convert lexica before anything will work:
+
+```bash
+./download_data.sh             # downloads data/ and testdata/ from MAGPIE-DATA repo
+./convert_lexica.sh            # builds MAGPIE, converts .kwg → .txt → .wmp
+```
+
+`data/` and `testdata/` are gitignored. If tests fail with missing file errors, this is almost certainly the reason — run these scripts first.
+
 ## Build
 
 ```bash
@@ -13,6 +24,8 @@ make clean                     # remove build artifacts
 ```
 
 Build variables: `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic.
+
+**Use `BUILD=release` for anything that runs more than a few seconds.** The default dev build (`-O0` + ASAN/UBSAN) is extremely slow — reserve it for debugging crashes and memory errors.
 
 ## Tests
 
@@ -30,6 +43,8 @@ Build variables: `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel mak
 ```
 
 Tests run in both release and dev mode. Dev mode has ASAN/UBSAN enabled, so it catches memory errors and undefined behavior. CI also runs tests with `BOARD_DIM=21`.
+
+On-demand (non-CI) tests are registered in `test/test.c` in `on_demand_test_table[]`.
 
 ## CI Checks (the hard part)
 
@@ -82,41 +97,37 @@ If you don't have the exact tool versions installed, at minimum:
 - Include headers directly for every symbol you use (the #1 clang-tidy failure)
 - Keep include blocks contiguous with no non-include lines mixed in
 
-## Code Conventions
+## Development Methodology
 
-### File organization
-- `src/def/` — type definitions, constants, struct definitions
-- `src/ent/` — entity implementations (core data structures)
-- `src/impl/` — algorithms and business logic
-- `src/str/` — string formatting and serialization
-- `src/util/` — general utilities (I/O, math, string)
-- `src/compat/` — platform compatibility, vendored code (linenoise). **Excluded from formatting and linting.**
-- `test/` — unit tests (`*_test.c` / `*_test.h` pairs)
-- `cmd/` — entry point (`magpie.c`)
+Speed and correctness are both critical to MAGPIE. Keep performance work and quality work separate — mixing them makes it hard to attribute regressions or improvements.
 
-### Naming
-- Files: `snake_case.c/h`
-- Types/Structs: `PascalCase`
-- Functions: `entity_action_verb()` (e.g., `game_create`, `board_get_square`)
-- Constants/Macros: `UPPER_SNAKE_CASE`
-- Enum values: `UPPER_SNAKE_CASE` with a type prefix
+### Performance work
 
-### Include order (enforced by format.py)
-For `.c` files:
-```c
-#include "myfile.h"
+When optimizing code, the goal is to make it faster **without changing behavior**:
+- Validate correctness by running autoplay or writing temporary on-demand tests that compare outputs before and after the change.
+- Profile to measure targeted impact on the functions you changed:
+  - `make magpie BUILD=profile` — build with profiling support
+  - On macOS, use `sample <pid>` to capture call stacks of a running process
+- Focus measurements on the specific functions changed, not just wall-clock time of a full run.
 
-#include "other_local_headers.h"
-#include <stdlib.h>
-#include <string.h>
+### Quality work
+
+When improving play quality (e.g., better simulation, inference, move selection), validate rigorously with **game pairs** — two engine variants play the same sequence of tile draws, alternating who goes first, to control for luck. Don't rely on small samples or single-game anecdotes.
+
+**Using autoplay with game pairs** (interactive console or CLI):
+```bash
+# Configure two players with different strategies, then run game pairs
+set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all -numplays 1
+autoplay games 1000 -gp true -threads 8 -seed 42
 ```
-Self-header first, blank line, then everything else in one contiguous block.
+Key options: `-gp true` enables game pairs (each "game" becomes a pair with swapped sides, so `games 1000` plays 2000 total). `-s1`/`-s2` set player strategies. `-seed` makes runs reproducible. Always use `-wmp true` for speed (word maps vs. KWG traversal) and `-threads <N>` to use multiple cores.
 
-### Style rules
-- C99 standard (`-std=c99`)
-- No magic numbers in general, but this clang-tidy check is disabled
-- Use project abstractions (e.g., `Timer` from `ctime.h`, threading wrappers from `cpthread.h`) instead of raw POSIX types
-- Header guards use `#ifndef FILENAME_H` / `#define FILENAME_H` / `#endif`
+**Using on-demand tests** for automated comparison:
+Register a test in `test/test.c`'s `on_demand_test_table[]`, then run it with `./run u <test_name>`. This is useful for before/after comparisons when changing move selection or evaluation logic — the test can assert that results match or report divergence stats.
+
+### When speed *is* quality
+
+When a time limit is in effect (e.g., endgame benchmarks with a fixed search budget), faster code finds better solutions in the same time. Measuring quality under a time limit is a good way to test whether optimizations pay off in the use cases we care about.
 
 ## Common Pitfalls (from PR history)
 
@@ -149,20 +160,6 @@ Test-only assertions and checks belong in `test/*.c` files, not in `src/` header
 ### 8. Resource leaks on error paths
 cppcheck catches missing `fclose` / `free` on error return paths. When writing error handling, ensure all resources acquired before the error point are released.
 
-## Suppressing false positives
-
-```c
-// cppcheck-suppress constVariablePointer
-char *ptr = get_ptr();
-
-// NOLINTNEXTLINE(cert-env33-c)
-system(cmd);
-
-// clang-format off
-// ... code exempt from formatting ...
-// clang-format on
-```
-
 ## Debugging
 
 - Dev build (`make magpie` with no BUILD flag) enables ASAN and UBSAN — most memory bugs surface immediately
@@ -171,6 +168,11 @@ system(cmd);
 - `./run c` generates an HTML coverage report
 - Thread sanitizer: `make magpie BUILD=thread`
 
+## Platform Notes
+
+- macOS `awk` does not support `asorti` — use hardcoded arrays or `gawk` instead.
+- CI runs on Ubuntu 24.04; macOS-specific behavior may differ.
+
 ## PR Workflow Tips
 
 1. **Run `python3 format.py --write` before every push.** This is the #1 cause of CI failure.
@@ -178,4 +180,3 @@ system(cmd);
 3. **Keep PRs focused.** Large PRs with multiple concerns tend to get closed and resubmitted. Split into smaller, mergeable units.
 4. **Check `const` qualifiers proactively.** Add `const` to every pointer parameter and variable that doesn't need mutation.
 5. **Include what you use.** Don't rely on transitive includes.
-6. **CI runs on Ubuntu 24.04.** macOS-specific behavior may differ — test on Linux if possible.
