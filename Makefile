@@ -1,7 +1,9 @@
 ifeq ($(origin NPROCS), undefined)
 NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
 endif
+ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
 MAKEFLAGS += -j$(NPROCS)
+endif
 
 SRC_DIR := src
 TEST_DIR := test
