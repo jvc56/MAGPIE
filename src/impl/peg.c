@@ -135,7 +135,8 @@ static double peg_greedy_eval_play(EndgameSolverWorker *worker,
                                    const SmallMove *move, int mover_idx,
                                    int opp_idx,
                                    const uint8_t unseen[MAX_ALPHABET_SIZE],
-                                   int ld_size,
+                                   int ld_size, int total_weight,
+                                   double cutoff_win_pct,
                                    double *win_pct_out) {
   Game *game_copy = endgame_solver_worker_get_game(worker);
   Board *board = game_get_board(game_copy);
@@ -202,6 +203,13 @@ static double peg_greedy_eval_play(EndgameSolverWorker *worker,
 
     rack_take_letter(mover_rack, (MachineLetter)t);
     rack_copy(opp_rack, &saved_opp);
+
+    // Early cutoff: if even winning all remaining scenarios can't beat the
+    // current best, stop evaluating this candidate.
+    int remaining = total_weight - weight;
+    if (remaining > 0 && (wins + remaining) / total_weight <= cutoff_win_pct) {
+      break;
+    }
   }
 
   endgame_solver_worker_set_requested_plies(worker, saved_plies);
@@ -260,7 +268,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          const SmallMove *move, int mover_idx,
                                          int opp_idx, int plies,
                                          const uint8_t unseen[MAX_ALPHABET_SIZE],
-                                         int ld_size,
+                                         int ld_size, int total_weight,
+                                         double cutoff_win_pct,
                                          ThreadControl *tc,
                                          TranspositionTable *shared_tt,
                                          dual_lexicon_mode_t dual_lexicon_mode,
@@ -308,6 +317,13 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
     weight += cnt;
 
     game_destroy(scenario);
+
+    // Early cutoff: if even winning all remaining scenarios can't beat the
+    // current best, stop evaluating this candidate.
+    int remaining = total_weight - weight;
+    if (remaining > 0 && (wins + remaining) / total_weight <= cutoff_win_pct) {
+      break;
+    }
   }
 
   if (weight == 0) {
@@ -556,6 +572,17 @@ static void peg_eval_pass_recursive(const PegArgs *outer_args, int opp_idx,
 // Thread arguments and worker functions -- greedy pass
 // ---------------------------------------------------------------------------
 
+// Shared atomic best win percentage (stored as millipcts, i.e. win_pct * 1000).
+// Threads update this as they find better candidates, enabling early cutoff
+// of weaker candidates across all threads.
+static void update_best_win_millipct(atomic_int *best, int new_val) {
+  int old = atomic_load(best);
+  while (new_val > old) {
+    if (atomic_compare_exchange_weak(best, &old, new_val))
+      break;
+  }
+}
+
 typedef struct PegGreedyThreadArgs {
   PegCandidate *candidates;
   atomic_int *next_candidate;
@@ -565,6 +592,8 @@ typedef struct PegGreedyThreadArgs {
   int opp_idx;
   const uint8_t *unseen;
   int ld_size;
+  int total_weight;
+  atomic_int *best_win_millipct;
   // For recursive pass evaluation.
   const PegArgs *outer_args;
 } PegGreedyThreadArgs;
@@ -581,9 +610,12 @@ static void *peg_greedy_thread(void *arg) {
                               a->unseen, a->ld_size, 0, NULL,
                               &c->win_pct, &c->expected_value);
     } else {
+      // No early cutoff for greedy: evaluations are cheap and aggressive
+      // cutoff can misrank candidates needed by deeper passes.
       c->expected_value = peg_greedy_eval_play(
           a->worker, &c->move, a->mover_idx, a->opp_idx,
-          a->unseen, a->ld_size, &c->win_pct);
+          a->unseen, a->ld_size, a->total_weight, -1.0,
+          &c->win_pct);
     }
   }
   return NULL;
@@ -605,6 +637,8 @@ typedef struct PegEndgameThreadArgs {
   int plies;
   const uint8_t *unseen;
   int ld_size;
+  int total_weight;
+  atomic_int *best_win_millipct;
   ThreadControl *thread_control;
   TranspositionTable *shared_tt;
   dual_lexicon_mode_t dual_lexicon_mode;
@@ -619,6 +653,7 @@ static void *peg_endgame_thread(void *arg) {
     if (idx >= a->num_candidates)
       break;
     PegCandidate *c = &a->candidates[idx];
+    double cutoff = (double)atomic_load(a->best_win_millipct) / 1000.0;
     if (small_move_is_pass(&c->move)) {
       peg_eval_pass_recursive(a->outer_args, a->opp_idx,
                               a->unseen, a->ld_size, a->plies,
@@ -628,9 +663,12 @@ static void *peg_endgame_thread(void *arg) {
       c->expected_value = peg_endgame_eval_candidate(
           a->endgame_solver, a->endgame_results, a->base_game, &c->move,
           a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
+          a->total_weight, cutoff,
           a->thread_control, a->shared_tt, a->dual_lexicon_mode,
           a->thread_index_base, &c->win_pct);
     }
+    update_best_win_millipct(a->best_win_millipct,
+                             (int)(c->win_pct * 1000.0));
   }
   return NULL;
 }
@@ -847,6 +885,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
 
   atomic_int greedy_next;
   atomic_init(&greedy_next, 0);
+  atomic_int greedy_best_win;
+  atomic_init(&greedy_best_win, 0);
   PegGreedyThreadArgs *greedy_targs =
       malloc_or_die(num_threads * sizeof(PegGreedyThreadArgs));
   cpthread_t *greedy_threads = malloc_or_die(num_threads * sizeof(cpthread_t));
@@ -861,6 +901,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         .opp_idx = opp_idx,
         .unseen = unseen,
         .ld_size = ld_size,
+        .total_weight = total_unseen,
+        .best_win_millipct = &greedy_best_win,
         .outer_args = args,
     };
     cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
@@ -931,6 +973,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
 
     atomic_int next_candidate;
     atomic_init(&next_candidate, 0);
+    atomic_int eg_best_win;
+    atomic_init(&eg_best_win, 0);
 
     PegEndgameThreadArgs *eg_targs =
         malloc_or_die(num_threads * sizeof(PegEndgameThreadArgs));
@@ -949,6 +993,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .plies = plies,
           .unseen = unseen,
           .ld_size = ld_size,
+          .total_weight = total_unseen,
+          .best_win_millipct = &eg_best_win,
           .thread_control = args->thread_control,
           .shared_tt = shared_tt,
           .dual_lexicon_mode = args->dual_lexicon_mode,
