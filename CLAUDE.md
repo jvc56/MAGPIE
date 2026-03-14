@@ -105,6 +105,14 @@ The codebase is primarily C99 but uses these C11 features:
 
 Do not introduce C features beyond C11 or C11 features not already used in the codebase without asking first.
 
+## Naming
+
+Avoid single-character or overly terse variable names. Names should make it clear what they represent without needing to check the declaration.
+- Prefer `row` and `col` over `i` and `j`
+- Loop variables over arrays: use a descriptive `foo_idx` pattern (e.g., `player_idx`, `tile_idx`)
+- For letters/tiles, `ml` (machine letter) is the idiomatic name
+- Never use single characters that are ambiguous: `p` could mean player, ply, or pointer
+
 ## Development Methodology
 
 Speed and correctness are both critical to MAGPIE. Keep performance work and quality work separate — mixing them makes it hard to attribute regressions or improvements.
@@ -165,7 +173,10 @@ Diagnostic `printf`/`fprintf` statements should not appear in production code. M
 ### 7. Keep tests in test files
 Test-only assertions and checks belong in `test/*.c` files, not in `src/` headers or source files.
 
-### 8. Resource leaks on error paths
+### 8. Equity is millipoints, not points
+`Equity` is a `int32_t` representing **millipoints** (1 point = 1000). A score of 42 is stored as `42000`. Use `int_to_equity()` / `equity_to_int()` / `double_to_equity()` to convert — don't multiply or divide by 1000 manually. Reading raw equity values as integer points is a common mistake.
+
+### 9. Resource leaks on error paths
 cppcheck catches missing `fclose` / `free` on error return paths. When writing error handling, ensure all resources acquired before the error point are released.
 
 ## Debugging
