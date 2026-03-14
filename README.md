@@ -11,7 +11,7 @@ MAGPIE is a crossword game playing and analysis program that supports the follow
 - Superleave generation
 - Exhaustive endgame
 
-MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo) but has since incorporated a variety of new features, algorithms, and data strctures. It uses several concepts originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
+MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo) but has since incorporated a variety of new features, algorithms, and data structures. It uses several concepts originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
 
 ## Getting Started
 
@@ -106,7 +106,7 @@ Script mode executes a single command and then exits immediately. To run in scri
 - A command which is not `set` or `cgp` is given
 - No execution mode is specified with the `mode` setting.
 
-If the conditions above are not met, MAGPIE will run in interative mode and wait for user input.
+If the conditions above are not met, MAGPIE will run in interactive mode and wait for user input.
 
 #### Interactive Modes (REPL)
 
@@ -136,7 +136,7 @@ The asynchronous commands can also be specified by their shortest unambiguous st
 
 ##### Synchronous Interactive Mode
 
-Synchronous mode blocks while a command is running and does will not accept new commands until the previous command has completed. This mode can be set with the `-mode sync` setting. It is not recommended for human users to run in sync mode.
+Synchronous mode blocks while a command is running and will not accept new commands until the previous command has completed. This mode can be set with the `-mode sync` setting. It is not recommended for human users to run in sync mode.
 
 For running many commands programatically from another process, it is recommended to use sync mode instead of script mode to avoid the overhead startup costs.
 
@@ -196,7 +196,7 @@ This directory contains the following file types:
 
 - .txt (plain text lexica files)
 - .kwg (Kurnia Word Graph (KWG), courtesy of [wolges](https://github.com/andy-k/wolges))
-- .klv (KWG that stores leave values, , courtesy of [wolges](https://github.com/andy-k/wolges))
+- .klv (KWG that stores leave values, courtesy of [wolges](https://github.com/andy-k/wolges))
 - .wmp (Word Maps)
 
 ### strategy

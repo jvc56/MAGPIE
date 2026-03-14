@@ -1,6 +1,6 @@
 # CLAUDE.md — MAGPIE
 
-MAGPIE (Macondo Accordant Game Program and Inference Engine) is a crossword game engine written in C99. It supports move generation, Monte Carlo simulation, exhaustive inference, autoplay, superleave generation, and endgame solving.
+MAGPIE (Macondo Accordant Game Program and Inference Engine) is a crossword game engine written in C (primarily C11, using `_Atomic` for lock-free concurrency). It supports move generation, Monte Carlo simulation, exhaustive inference, autoplay, superleave generation, and endgame solving.
 
 ## Initial Setup (fresh clone)
 
@@ -32,7 +32,7 @@ Build variables: `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel mak
 ```bash
 ./run u              # full test suite: release then dev, BOARD_DIM=15
 ./run u 21           # full test suite with BOARD_DIM=21
-./run u move_gen     # run a specific test (by name)
+./run u movegen      # run a specific test (by name)
 ./run v              # valgrind (leak check)
 ./run v move_gen     # valgrind on specific test
 ./run g              # gdb
@@ -96,6 +96,14 @@ If you don't have the exact tool versions installed, at minimum:
 - Mark pointers and parameters `const` wherever possible (the #1 cppcheck failure)
 - Include headers directly for every symbol you use (the #1 clang-tidy failure)
 - Keep include blocks contiguous with no non-include lines mixed in
+
+## C Standard
+
+The codebase is primarily C99 but uses these C11 features:
+- `_Atomic` / `<stdatomic.h>` with explicit memory ordering (thread_control, transposition_table, endgame, sim_results)
+- `static_assert` for compile-time size validation (transposition_table.h, wmp_maker.c)
+
+Do not introduce C features beyond C11 or C11 features not already used in the codebase without asking first.
 
 ## Development Methodology
 
