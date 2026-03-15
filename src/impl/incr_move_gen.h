@@ -81,6 +81,9 @@ typedef struct IncrMoveList {
   IncrTileMapping tile_mapping;
   int player_index;       // which player's moves these are
   int rack_total_letters;  // rack size when generated (for staleness check)
+  int board_tiles_played; // board_get_tiles_played when generated
+  Equity score_p0;        // player 0 score when generated
+  Equity score_p1;        // player 1 score when generated
 } IncrMoveList;
 
 // Create/destroy
@@ -101,27 +104,30 @@ void incr_move_list_populate_from_small_moves(IncrMoveList *iml,
                                               const Rack *rack,
                                               int player_index);
 
-// Invalidate moves affected by two played moves (our move + opponent's move).
-// Removes moves with position overlap, rack infeasibility, or cross-set
-// proximity. board must have current cross-sets valid.
-// If affected_rows_out is non-NULL, sets affected_rows_out[dir*BOARD_DIM+row]
-// to true for each (dir, row) pair that had at least one move removed.
-// Returns number of moves removed.
-int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
-                              const MoveUndo *undo2,
-                              const Rack *remaining_rack,
-                              const Board *board, int cross_index,
-                              bool *affected_rows_out);
-
 // Copy src into dest, growing dest's capacity if needed.
 void incr_move_list_copy_into(IncrMoveList *dest, const IncrMoveList *src);
 
-// Regenerate moves for specified (dir, row) pairs. Runs movegen only for
-// those pairs, appends new moves to iml (deduplicating against existing
-// entries), and ensures pass is present. affected_rows[dir*BOARD_DIM+row]
-// indicates which pairs to process. move_list is scratch space for movegen.
+// Compute dirty lanes from two MoveUndos. A lane is (dir, movegen_row).
+// dirty_lanes[dir * BOARD_DIM + row] is set to true for each dirty lane.
+// Dirty lanes include: direct lanes containing filled squares, perpendicular
+// word fragment lanes (cross-set propagation), and ±1 adjacent lanes (new
+// anchors). Also removes rack-infeasible moves from iml (these are
+// direction-independent so handled separately from lane logic).
+void incr_compute_dirty_lanes(const MoveUndo *undo1, const MoveUndo *undo2,
+                              const Board *board, bool *dirty_lanes);
+
+// Remove all moves from dirty lanes AND rack-infeasible moves.
+// Returns number of moves removed.
+int incr_move_list_remove_dirty(IncrMoveList *iml, const bool *dirty_lanes,
+                                const Rack *remaining_rack);
+
+// Regenerate moves for dirty lanes. Runs movegen only for those lanes,
+// appends results to iml. Also ensures pass is present.
+// move_list is used as scratch space for movegen output.
+// No dedup needed: surviving moves are from clean lanes, regenerated
+// moves are from dirty lanes — zero overlap.
 void incr_move_list_regenerate(IncrMoveList *iml,
-                               const bool *affected_rows, Game *game,
+                               const bool *dirty_lanes, Game *game,
                                MoveList *move_list, const KWG *pruned_kwg,
                                int thread_index);
 
@@ -130,17 +136,27 @@ void incr_move_list_regenerate(IncrMoveList *iml,
 void incr_move_list_assert_matches_small_moves(const IncrMoveList *iml,
                                                const MoveList *ml);
 
-// Assert that every move in `subset` also appears in `superset` (by
-// tiny_move). Used to validate that incremental invalidation doesn't keep
-// moves that full movegen would not generate.
-void incr_move_list_assert_subset_of(const IncrMoveList *subset,
-                                     const IncrMoveList *superset);
-
 // Assert that two IncrMoveLists contain exactly the same set of moves
 // (by tiny_move, ignoring order). Used to validate that incremental
 // invalidation + regeneration produces the same result as full movegen.
 void incr_move_list_assert_equal_sets(const IncrMoveList *a,
                                       const IncrMoveList *b);
+
+// Extract a move's lane index for the dirty_lanes array.
+// Returns dir * BOARD_DIM + movegen_row.
+static inline int incr_move_get_lane(const SmallMove *sm) {
+  const uint64_t tm = sm->tiny_move;
+  const int dir = (int)(tm & 1);
+  int movegen_row;
+  if (dir == 0) {
+    // Horizontal: movegen row = actual row = bits 6-10
+    movegen_row = (int)((tm & SMALL_MOVE_ROW_BITMASK) >> 6);
+  } else {
+    // Vertical: movegen row = actual column = bits 1-5
+    movegen_row = (int)((tm & SMALL_MOVE_COL_BITMASK) >> 1);
+  }
+  return dir * BOARD_DIM + movegen_row;
+}
 
 // Check if a move's tiles are feasible with the given packed rack counts.
 // Both tiles_used and rack_packed use 7 x 3-bit fields at indices 0..6.

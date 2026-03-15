@@ -844,6 +844,9 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     IncrMoveList *iml = worker->incr_lists[ply];
     incr_move_list_populate_from_small_moves(iml, worker->move_list, stm_rack,
                                                 stm_idx);
+    iml->board_tiles_played = board_get_tiles_played(board);
+    iml->score_p0 = player_get_score(game_get_player(worker->game_copy, 0));
+    iml->score_p1 = player_get_score(game_get_player(worker->game_copy, 1));
     incr_move_list_assert_matches_small_moves(iml, worker->move_list);
 
     // At ply >= 2: validate incremental invalidation. Copy the same player's
@@ -853,7 +856,34 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       const IncrMoveList *base = worker->incr_lists[ply - 2];
       // Only validate if base was generated for the same player
       // (guards against stale data from previous ID iterations)
-      if (base->count > 0 && base->player_index == stm_idx) {
+      // Verify base was generated for the exact same game state:
+      // same player, and scores at base time + intervening move scores
+      // == current scores (uniquely identifies the path).
+      Equity cur_p0 = player_get_score(
+          game_get_player(worker->game_copy, 0));
+      Equity cur_p1 = player_get_score(
+          game_get_player(worker->game_copy, 1));
+      Equity expected_p0 = base->score_p0 +
+          (worker->move_undos[ply - 2].old_scores[0] != cur_p0 ?
+           cur_p0 - worker->move_undos[ply - 2].old_scores[0] : 0);
+      // Simpler: just check current scores match base + 2 moves of change
+      // by verifying the undo chain is consistent
+      bool path_valid = (base->count > 0 &&
+                         base->player_index == stm_idx &&
+                         base->score_p0 ==
+                             worker->move_undos[ply - 2].old_scores[0] &&
+                         base->score_p1 ==
+                             worker->move_undos[ply - 2].old_scores[1]);
+      (void)cur_p0;
+      (void)cur_p1;
+      (void)expected_p0;
+      if (!path_valid && base->count > 0 && base->player_index == stm_idx) {
+        log_warn("PATH INVALID: base_p0=%d base_p1=%d undo_p0=%d undo_p1=%d",
+                 base->score_p0, base->score_p1,
+                 worker->move_undos[ply - 2].old_scores[0],
+                 worker->move_undos[ply - 2].old_scores[1]);
+      }
+      if (path_valid) {
         // Use a thread-local scratch list. We allocate on the heap to keep
         // the stack small in deep searches.
         IncrMoveList *scratch = incr_move_list_create(base->capacity);
@@ -862,29 +892,36 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
         const MoveUndo *our_undo = &worker->move_undos[ply - 2];
         const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
 
-        bool kwgs_shared =
-            game_get_data_is_shared(worker->game_copy, PLAYERS_DATA_TYPE_KWG);
-        int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
+        // Compute dirty lanes from the two intervening moves
+        bool dirty_lanes[2 * BOARD_DIM];
+        incr_compute_dirty_lanes(our_undo, opp_undo, board, dirty_lanes);
 
-        bool affected_rows[2 * BOARD_DIM];
-        incr_move_list_invalidate(scratch, our_undo, opp_undo, stm_rack,
-                                  board, ci, affected_rows);
+        // Remove all moves from dirty lanes + rack-infeasible moves
+        incr_move_list_remove_dirty(scratch, dirty_lanes, stm_rack);
 
-        // Cross-set changes can propagate to any row/column sharing a line
-        // with a filled square, so regenerate all rows for now.
-        // TODO: narrow this by tracking exactly which cross-sets changed.
-        for (int idx = 0; idx < 2 * BOARD_DIM; idx++) {
-          affected_rows[idx] = true;
-        }
-
-        // Regenerate moves for affected rows
+        // Regenerate moves for dirty lanes only
         incr_move_list_regenerate(
-            scratch, affected_rows, worker->game_copy,
+            scratch, dirty_lanes, worker->game_copy,
             worker->move_list,
             solver_get_pruned_kwg(worker->solver, stm_idx),
             worker->thread_index);
 
         // The incremental result must exactly match the full movegen result.
+        if (scratch->count != iml->count) {
+          int ndirty = 0;
+          for (int di = 0; di < 2 * BOARD_DIM; di++) {
+            if (dirty_lanes[di]) {
+              ndirty++;
+            }
+          }
+          log_warn("INCR FAIL: ply=%d base_ply=%d base_count=%d "
+                   "base_player=%d base_rack=%d stm=%d stm_rack=%d "
+                   "dirty=%d surviving=%d regen=%d full=%d",
+                   ply, ply - 2, base->count, base->player_index,
+                   base->rack_total_letters, stm_idx,
+                   stm_rack->number_of_letters, ndirty, scratch->count,
+                   worker->move_list->count, iml->count);
+        }
         incr_move_list_assert_equal_sets(scratch, iml);
         atomic_fetch_add(&worker->solver->incr_validations, 1);
 
@@ -2269,6 +2306,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
+    // Reset incremental movelists to avoid stale data from previous depths
+    for (int incr_idx = 0; incr_idx < MAX_SEARCH_DEPTH; incr_idx++) {
+      worker->incr_lists[incr_idx]->count = 0;
+      worker->incr_lists[incr_idx]->player_index = -1;
+    }
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
       atomic_store(&worker->solver->current_depth, ply);
