@@ -61,6 +61,10 @@ typedef struct PegArgs {
   // If non-NULL, all endgame solves share this TT instead of creating their
   // own.  The caller owns the lifetime.
   TranspositionTable *shared_tt;
+
+  // When true, skip the greedy pass entirely and jump straight to endgame
+  // passes. Candidates are ordered by static score (descending).
+  bool skip_greedy;
 } PegArgs;
 
 typedef struct PegResult {
@@ -73,6 +77,8 @@ typedef struct PegResult {
   int passes_completed;
   // Candidates remaining after the last completed pass.
   int candidates_remaining;
+  // Total candidates evaluated (across all passes).
+  int candidates_evaluated;
 } PegResult;
 
 typedef struct PegSolver PegSolver;

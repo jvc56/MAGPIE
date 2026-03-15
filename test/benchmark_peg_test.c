@@ -262,7 +262,7 @@ void test_generate_peg1_cgps(void) {
 // ---------------------------------------------------------------------------
 
 void test_benchmark_peg1(void) {
-  int num_positions = 10;
+  int num_positions = 200;
   double peg_time_budget = 0.5;      // PEG solve budget per position (seconds)
   double endgame_time_budget = 0.0;  // Per-scenario endgame budget (0 = no limit)
   int endgame_plies = 2;             // Depth for empirical playout evaluation
@@ -298,17 +298,18 @@ void test_benchmark_peg1(void) {
   fclose(f);
   assert(loaded == num_positions);
 
-  printf("\n%-4s %-22s %6s %7s %6s %7s  %-22s %6s %7s  %6s %s\n",
+  printf("\n%-4s %-22s %6s %7s %6s %7s  %-22s %6s %7s  %5s %6s %s\n",
          "Pos", "PEG Best", "EstW%", "EstSpr", "EmpW%", "Spread",
-         "Static Best", "EmpW%", "Spread", "Time", "Match");
+         "Static Best", "EmpW%", "Spread", "#Eval", "Time", "Match");
   printf("---- ---------------------- ------ ------- ------ -------  "
-         "---------------------- ------ -------  ------ -----\n");
+         "---------------------- ------ -------  ----- ------ -----\n");
 
   int same_move = 0, diff_move = 0;
   int peg_better = 0, static_better = 0, tied = 0;
   double total_peg_wp = 0, total_static_wp = 0;
   double total_peg_spread = 0, total_static_spread = 0;
   double total_peg_time = 0;
+  int total_candidates_evaluated = 0;
 
   for (int pos = 0; pos < num_positions; pos++) {
     // Load position.
@@ -352,9 +353,9 @@ void test_benchmark_peg1(void) {
     char *static_str = format_move_str(game, static_move);
     Move static_copy = *static_move;
 
-    // --- PEG solve: 2-ply, skip greedy & 1-ply, time-budgeted ---
-    // Evaluate candidates in static equity order. The solver starts from the
-    // best equity move and evaluates as many as it can within the time budget.
+    // --- PEG solve: skip greedy, go straight to 2-ply endgame ---
+    // Candidates ordered by static score (best first). Evaluates as many
+    // as fit within the time budget, starting from the highest-scoring move.
     PegSolver *solver = peg_solver_create();
     PegArgs peg_args = {
         .game = game,
@@ -363,6 +364,7 @@ void test_benchmark_peg1(void) {
         .num_threads = 1,
         .tt_fraction_of_mem = 0.1,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .skip_greedy = true,
         .num_passes = 1,
         .pass_candidate_limits = {9999},
     };
@@ -421,14 +423,16 @@ void test_benchmark_peg1(void) {
     total_static_wp += static_emp_wp;
     total_peg_spread += peg_emp_spread;
     total_static_spread += static_emp_spread;
+    total_candidates_evaluated += peg_result.candidates_evaluated;
 
-    printf("%-4d %-22s %5.1f%% %+7.2f %5.1f%% %+7.2f  %-22s %5.1f%% %+7.2f  %5.2fs %s\n",
+    printf("%-4d %-22s %5.1f%% %+7.2f %5.1f%% %+7.2f  %-22s %5.1f%% %+7.2f  %5d %5.2fs %s\n",
            pos + 1,
            peg_str, peg_result.best_win_pct * 100.0,
            peg_result.best_expected_spread,
            peg_emp_wp * 100.0, peg_emp_spread,
            static_str,
            static_emp_wp * 100.0, static_emp_spread,
+           peg_result.candidates_evaluated,
            peg_time,
            moves_match ? "SAME" : "DIFF");
 
@@ -452,6 +456,8 @@ void test_benchmark_peg1(void) {
          total_static_spread / num_positions);
   printf("Spread outcomes: PEG better=%d  Static better=%d  Tied=%d\n",
          peg_better, static_better, tied);
+  printf("Avg candidates:  %.1f per position\n",
+         (double)total_candidates_evaluated / num_positions);
   printf("PEG total time:  %.2fs (avg %.2fs/pos)\n",
          total_peg_time, total_peg_time / num_positions);
 

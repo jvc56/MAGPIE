@@ -76,6 +76,15 @@ static int compare_peg_candidates_desc(const void *a, const void *b) {
   return 0;
 }
 
+// Sort by static score descending (for skip_greedy mode).
+static int compare_peg_candidates_score_desc(const void *a, const void *b) {
+  const PegCandidate *ca = (const PegCandidate *)a;
+  const PegCandidate *cb = (const PegCandidate *)b;
+  int sa = (int)small_move_get_score(&ca->move);
+  int sb = (int)small_move_get_score(&cb->move);
+  return sb - sa;
+}
+
 // ---------------------------------------------------------------------------
 // Unseen tile computation
 // ---------------------------------------------------------------------------
@@ -752,6 +761,12 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   }
   small_move_list_destroy(initial_ml);
 
+  // Sort candidates by score descending so the highest-scoring moves are
+  // evaluated first. This matters especially for skip_greedy mode where
+  // the time budget may only allow evaluating a few candidates.
+  qsort(candidates, num_candidates, sizeof(PegCandidate),
+        compare_peg_candidates_score_desc);
+
   if (num_candidates == 0) {
     free(candidates);
     kwg_destroy(pruned_kwgs[0]);
@@ -763,78 +778,85 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     return;
   }
 
-  // =========================================================================
-  // Pass 0: greedy evaluation for all candidates
-  // =========================================================================
-
-  // Set up per-thread EndgameSolverWorkers for greedy evaluation.
-  EndgameSolver **greedy_solvers =
-      malloc_or_die(num_threads * sizeof(EndgameSolver *));
-  EndgameSolverWorker **greedy_workers =
-      malloc_or_die(num_threads * sizeof(EndgameSolverWorker *));
-  for (int ti = 0; ti < num_threads; ti++) {
-    greedy_solvers[ti] = endgame_solver_create();
-    EndgameArgs greedy_ea = {
-        .thread_control = args->thread_control,
-        .game = base_game,
-        .plies = 0,
-        .tt_fraction_of_mem = 0,
-        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-        .num_threads = 1,
-        .use_heuristics = true,
-        .dual_lexicon_mode = args->dual_lexicon_mode,
-        .skip_word_pruning = true,
-    };
-    endgame_solver_reset(greedy_solvers[ti], &greedy_ea);
-    greedy_workers[ti] = endgame_solver_create_worker(
-        greedy_solvers[ti], ti, (uint64_t)ti * 54321 + 1);
-  }
-
-  int chunk = (num_candidates + num_threads - 1) / num_threads;
-  PegGreedyThreadArgs *greedy_targs =
-      malloc_or_die(num_threads * sizeof(PegGreedyThreadArgs));
-  cpthread_t *greedy_threads = malloc_or_die(num_threads * sizeof(cpthread_t));
-
-  for (int ti = 0; ti < num_threads; ti++) {
-    greedy_targs[ti] = (PegGreedyThreadArgs){
-        .candidates = candidates,
-        .start = ti * chunk,
-        .end = (ti + 1) * chunk > num_candidates ? num_candidates
-                                                  : (ti + 1) * chunk,
-        .worker = greedy_workers[ti],
-        .mover_idx = mover_idx,
-        .opp_idx = opp_idx,
-        .unseen = unseen,
-        .ld_size = ld_size,
-        .peg_timer = &peg_timer,
-        .time_budget_seconds = args->time_budget_seconds,
-        .thread_control = args->thread_control,
-        .outer_args = args,
-    };
-    cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
-  }
-  for (int ti = 0; ti < num_threads; ti++) {
-    cpthread_join(greedy_threads[ti]);
-  }
-
-  for (int ti = 0; ti < num_threads; ti++) {
-    endgame_solver_worker_destroy(greedy_workers[ti]);
-    endgame_solver_destroy(greedy_solvers[ti]);
-  }
-  free(greedy_workers);
-  free(greedy_solvers);
-  free(greedy_targs);
-  free(greedy_threads);
-
-  qsort(candidates, num_candidates, sizeof(PegCandidate),
-        compare_peg_candidates_desc);
-
-  double prev_elapsed = ctimer_elapsed_seconds(&peg_timer);
-  invoke_per_pass_callback(args, 0, num_candidates, candidates, num_candidates,
-                           args->pass_candidate_limits[0], prev_elapsed,
-                           prev_elapsed);
-
+  double prev_elapsed = 0.0;
   int passes_completed = 0;
+  int total_evaluated = 0;
+
+  // =========================================================================
+  // Pass 0: greedy evaluation for all candidates (unless skip_greedy)
+  // =========================================================================
+
+  if (!args->skip_greedy) {
+    EndgameSolver **greedy_solvers =
+        malloc_or_die(num_threads * sizeof(EndgameSolver *));
+    EndgameSolverWorker **greedy_workers =
+        malloc_or_die(num_threads * sizeof(EndgameSolverWorker *));
+    for (int ti = 0; ti < num_threads; ti++) {
+      greedy_solvers[ti] = endgame_solver_create();
+      EndgameArgs greedy_ea = {
+          .thread_control = args->thread_control,
+          .game = base_game,
+          .plies = 0,
+          .tt_fraction_of_mem = 0,
+          .initial_small_move_arena_size =
+              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+          .num_threads = 1,
+          .use_heuristics = true,
+          .dual_lexicon_mode = args->dual_lexicon_mode,
+          .skip_word_pruning = true,
+      };
+      endgame_solver_reset(greedy_solvers[ti], &greedy_ea);
+      greedy_workers[ti] = endgame_solver_create_worker(
+          greedy_solvers[ti], ti, (uint64_t)ti * 54321 + 1);
+    }
+
+    int chunk = (num_candidates + num_threads - 1) / num_threads;
+    PegGreedyThreadArgs *greedy_targs =
+        malloc_or_die(num_threads * sizeof(PegGreedyThreadArgs));
+    cpthread_t *greedy_threads =
+        malloc_or_die(num_threads * sizeof(cpthread_t));
+
+    for (int ti = 0; ti < num_threads; ti++) {
+      greedy_targs[ti] = (PegGreedyThreadArgs){
+          .candidates = candidates,
+          .start = ti * chunk,
+          .end = (ti + 1) * chunk > num_candidates ? num_candidates
+                                                    : (ti + 1) * chunk,
+          .worker = greedy_workers[ti],
+          .mover_idx = mover_idx,
+          .opp_idx = opp_idx,
+          .unseen = unseen,
+          .ld_size = ld_size,
+          .peg_timer = &peg_timer,
+          .time_budget_seconds = args->time_budget_seconds,
+          .thread_control = args->thread_control,
+          .outer_args = args,
+      };
+      cpthread_create(&greedy_threads[ti], peg_greedy_thread,
+                      &greedy_targs[ti]);
+    }
+    for (int ti = 0; ti < num_threads; ti++) {
+      cpthread_join(greedy_threads[ti]);
+    }
+
+    for (int ti = 0; ti < num_threads; ti++) {
+      endgame_solver_worker_destroy(greedy_workers[ti]);
+      endgame_solver_destroy(greedy_solvers[ti]);
+    }
+    free(greedy_workers);
+    free(greedy_solvers);
+    free(greedy_targs);
+    free(greedy_threads);
+
+    qsort(candidates, num_candidates, sizeof(PegCandidate),
+          compare_peg_candidates_desc);
+
+    prev_elapsed = ctimer_elapsed_seconds(&peg_timer);
+    invoke_per_pass_callback(args, 0, num_candidates, candidates,
+                             num_candidates, args->pass_candidate_limits[0],
+                             prev_elapsed, prev_elapsed);
+  }
+  // When skip_greedy, candidates stay in static score order (from movegen).
 
   // =========================================================================
   // Passes 1..num_passes: progressively deeper endgame search on top-K
@@ -853,7 +875,10 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       break;
     }
 
-    int plies = pass + 1;
+    // When skip_greedy, the first endgame pass starts at 2-ply (skipping
+    // both the greedy heuristic and 1-ply, which are too shallow to be
+    // useful without greedy pre-filtering).
+    int plies = args->skip_greedy ? pass + 2 : pass + 1;
     int limit = args->pass_candidate_limits[pass];
     if (limit <= 0) {
       static const int kDefaultLimits[] = {
@@ -910,6 +935,11 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       cpthread_join(eg_threads[ti]);
     }
 
+    int evaluated_this_pass = atomic_load(&next_candidate);
+    if (evaluated_this_pass > limit)
+      evaluated_this_pass = limit;
+    total_evaluated += evaluated_this_pass;
+
     for (int ti = 0; ti < num_threads; ti++) {
       endgame_solver_destroy(eg_solvers[ti]);
       endgame_results_destroy(eg_results[ti]);
@@ -919,10 +949,11 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     free(eg_targs);
     free(eg_threads);
 
-    qsort(candidates, limit, sizeof(PegCandidate), compare_peg_candidates_desc);
+    qsort(candidates, evaluated_this_pass, sizeof(PegCandidate),
+          compare_peg_candidates_desc);
 
     passes_completed++;
-    num_candidates = limit;
+    num_candidates = evaluated_this_pass;
     double now = ctimer_elapsed_seconds(&peg_timer);
     invoke_per_pass_callback(args, pass + 1, limit, candidates, num_candidates,
                              num_candidates, now, now - prev_elapsed);
@@ -938,6 +969,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   result->best_expected_spread = candidates[0].expected_value;
   result->passes_completed = passes_completed;
   result->candidates_remaining = num_candidates;
+  result->candidates_evaluated = total_evaluated;
 
   free(candidates);
   kwg_destroy(pruned_kwgs[0]);
