@@ -345,6 +345,87 @@ static void test_peg_mt_greedy_only(void) {
   config_destroy(config);
 }
 
+// Benchmark: compare 2-ply PEG candidate throughput with and without
+// first_win optimization. Runs the same position twice with a 5s time budget,
+// 4 threads, reporting how many candidates each mode evaluates.
+void test_peg_first_win_benchmark(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/"
+      "E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/"
+      "1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex "
+      "NWL20";
+
+  printf("\n=== PEG 2-ply first_win benchmark (5s, 4 threads) ===\n");
+
+  // Run without first_win
+  {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, cgp);
+    Game *game = config_get_game(config);
+
+    PegSolver *solver = peg_solver_create();
+    PegArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .time_budget_seconds = 5.0,
+        .num_threads = 4,
+        .tt_fraction_of_mem = 0.5,
+        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .num_passes = 1,
+        .start_pass = 1,
+        .first_win = false,
+        .per_pass_callback = peg_progress_callback,
+        .per_pass_num_top = 5,
+    };
+
+    PegResult result;
+    ErrorStack *error_stack = error_stack_create();
+    peg_solve(solver, &args, &result, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    printf("  [normal]    candidates_remaining=%d  passes=%d\n",
+           result.candidates_remaining, result.passes_completed);
+    print_peg_result(&result, game);
+
+    peg_solver_destroy(solver);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+
+  // Run with first_win
+  {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, cgp);
+    Game *game = config_get_game(config);
+
+    PegSolver *solver = peg_solver_create();
+    PegArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .time_budget_seconds = 5.0,
+        .num_threads = 4,
+        .tt_fraction_of_mem = 0.5,
+        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .num_passes = 1,
+        .start_pass = 1,
+        .first_win = true,
+        .per_pass_callback = peg_progress_callback,
+        .per_pass_num_top = 5,
+    };
+
+    PegResult result;
+    ErrorStack *error_stack = error_stack_create();
+    peg_solve(solver, &args, &result, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    printf("  [first_win] candidates_remaining=%d  passes=%d\n",
+           result.candidates_remaining, result.passes_completed);
+    print_peg_result(&result, game);
+
+    peg_solver_destroy(solver);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
 void test_peg(void) {
   test_peg_mt_greedy_only();
   test_peg_multithreaded();

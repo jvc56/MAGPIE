@@ -280,6 +280,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          TranspositionTable *shared_tt,
                                          dual_lexicon_mode_t dual_lexicon_mode,
                                          int thread_index_base,
+                                         bool first_win,
                                          double *win_pct_out) {
   double total = 0.0;
   double wins = 0.0;
@@ -309,6 +310,7 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
         .dual_lexicon_mode = dual_lexicon_mode,
         .skip_word_pruning = true,
         .thread_index_base = thread_index_base,
+        .first_win = first_win,
     };
 
     ErrorStack *local_es = error_stack_create();
@@ -653,6 +655,7 @@ typedef struct PegEndgameThreadArgs {
   int thread_index_base;
   const Timer *timer;
   double time_budget;
+  bool first_win;
 } PegEndgameThreadArgs;
 
 static void *peg_endgame_thread(void *arg) {
@@ -679,7 +682,7 @@ static void *peg_endgame_thread(void *arg) {
           a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
           a->total_weight, cutoff,
           a->thread_control, a->shared_tt, a->dual_lexicon_mode,
-          a->thread_index_base, &c->win_pct);
+          a->thread_index_base, a->first_win, &c->win_pct);
     }
     c->endgame_evaluated = true;
     update_best_win_millipct(a->best_win_millipct,
@@ -1014,6 +1017,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .thread_index_base = ti_offset + ti,
           .timer = &peg_timer,
           .time_budget = args->time_budget_seconds,
+          .first_win = args->first_win,
       };
       cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
     }

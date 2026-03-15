@@ -393,7 +393,7 @@ static void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 }
 
 void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
-  es->first_win_optim = false;
+  es->first_win_optim = endgame_args->first_win;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;

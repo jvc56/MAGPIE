@@ -58,6 +58,11 @@ typedef struct PegArgs {
   // How many top candidates to pass to the callback (0 = default 5).
   int per_pass_num_top;
 
+  // If true, endgame passes use first-win optimization: zero-width window
+  // around 0 to determine win/loss/draw without computing exact spread.
+  // Faster but spread values will be inaccurate.
+  bool first_win;
+
   // Internal flag: set by peg_eval_pass_recursive to skip the pass candidate
   // in the inner recursive call, preventing infinite mutual recursion.
   // Callers should leave this at 0.
