@@ -110,7 +110,7 @@ void incr_move_list_populate_from_small_moves(IncrMoveList *iml,
 int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
                               const MoveUndo *undo2,
                               const Rack *remaining_rack,
-                              const Board *board,
+                              const Board *board, int cross_index,
                               bool *affected_rows_out);
 
 // Copy src into dest, growing dest's capacity if needed.

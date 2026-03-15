@@ -126,7 +126,7 @@ static void small_move_decode_position(const SmallMove *sm, int *row, int *col,
 // also actual board coordinates (small_move_to_move uses them with
 // board_get_letter which takes actual coords).
 static bool incr_move_affected_by_square(const SmallMove *sm, int sq_row,
-                                         int sq_col) {
+                                         int sq_col, const Board *board) {
   if (small_move_is_pass(sm)) {
     return false;
   }
@@ -134,10 +134,55 @@ static bool incr_move_affected_by_square(const SmallMove *sm, int sq_row,
   small_move_decode_position(sm, &row, &col, &row_inc, &col_inc);
   const int play_length = small_move_get_play_length(sm);
 
-  for (int pos = -1; pos <= play_length; pos++) {
+  // Check within span (overlap)
+  for (int pos = 0; pos < play_length; pos++) {
     int r = row + pos * row_inc;
     int c = col + pos * col_inc;
     if (r == sq_row && c == sq_col) {
+      return true;
+    }
+  }
+
+  // Check beyond span endpoints: walk through contiguous existing tiles
+  // to find the actual word boundary, then check if the filled square is
+  // at or beyond that boundary. This catches main-word extension through
+  // chains of existing tiles.
+  // Walk backward from start
+  {
+    int r = row - row_inc;
+    int c = col - col_inc;
+    while (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM) {
+      if (r == sq_row && c == sq_col) {
+        return true;
+      }
+      if (board_is_empty(board, r, c)) {
+        break; // reached the word boundary
+      }
+      r -= row_inc;
+      c -= col_inc;
+    }
+    // Check one more (the first empty square beyond existing tiles)
+    if (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
+        r == sq_row && c == sq_col) {
+      return true;
+    }
+  }
+  // Walk forward from end
+  {
+    int r = row + play_length * row_inc;
+    int c = col + play_length * col_inc;
+    while (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM) {
+      if (r == sq_row && c == sq_col) {
+        return true;
+      }
+      if (board_is_empty(board, r, c)) {
+        break;
+      }
+      r += row_inc;
+      c += col_inc;
+    }
+    if (r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
+        r == sq_row && c == sq_col) {
       return true;
     }
   }
@@ -173,49 +218,53 @@ static int incr_get_filled_squares(const MoveUndo *undo, int *out_rows,
   return count;
 }
 
-// Check if a SmallMove is still valid on the current board by verifying
-// cross-sets at each position where the move places a tile. Also checks
-// that the score is unchanged (cross-word scores may have changed).
-// Returns false if the move is no longer valid or has a stale score.
-// Check if any position in a SmallMove's span shares a row or column with
-// any of the filled squares. This conservatively catches cross-set changes
-// that propagate through connected tiles along a row/column.
-static bool incr_move_shares_line_with_filled(const SmallMove *sm,
-                                              const Board *board,
-                                              const int *filled_rows,
-                                              const int *filled_cols,
-                                              int num_filled) {
-  if (small_move_is_pass(sm) || num_filled == 0) {
+// Check if a SmallMove's placed tiles are still valid against the board's
+// current cross-sets. Returns true if any placed tile fails its cross-set
+// check (the perpendicular word constraint has changed).
+static bool incr_move_cross_set_invalid(const SmallMove *sm,
+                                        const Board *board,
+                                        int cross_index) {
+  if (small_move_is_pass(sm)) {
     return false;
   }
+  const uint64_t tm = sm->tiny_move;
+  const bool vert = (tm & 1) != 0;
+  const int dir =
+      vert ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
+
   int row, col, row_inc, col_inc;
   small_move_decode_position(sm, &row, &col, &row_inc, &col_inc);
   const int play_length = small_move_get_play_length(sm);
+  int tile_idx = 0;
 
   for (int pos = 0; pos < play_length; pos++) {
     int r = row + pos * row_inc;
     int c = col + pos * col_inc;
 
     if (!board_is_empty(board, r, c)) {
-      continue; // played-through position, skip
+      continue; // played-through position
     }
 
-    // Check if any filled square shares a row or column with this position.
-    // Same row → horizontal cross-set may have changed.
-    // Same col → vertical cross-set may have changed.
-    for (int sq_idx = 0; sq_idx < num_filled; sq_idx++) {
-      if (filled_rows[sq_idx] == r || filled_cols[sq_idx] == c) {
-        return true;
-      }
+    // Extract the tile placed here
+    MachineLetter tile = (MachineLetter)((tm >> (20 + 6 * tile_idx)) & 63);
+    bool is_blank = (tm & (1ULL << (12 + tile_idx))) != 0;
+    tile_idx++;
+
+    MachineLetter cs_ml = is_blank ? BLANK_MACHINE_LETTER : tile;
+    uint64_t cross_set = board_get_cross_set(board, r, c, dir, cross_index);
+
+    if (!(cross_set & (1ULL << cs_ml))) {
+      return true; // tile no longer allowed by cross-set
     }
   }
   return false;
 }
 
+
 int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
                               const MoveUndo *undo2,
                               const Rack *remaining_rack,
-                              const Board *board,
+                              const Board *board, int cross_index,
                               bool *affected_rows_out) {
   if (affected_rows_out) {
     memset(affected_rows_out, 0, sizeof(bool) * 2 * BOARD_DIM);
@@ -257,7 +306,7 @@ int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
     // Check position overlap with filled squares
     for (int sq_idx = 0; sq_idx < num_filled; sq_idx++) {
       if (incr_move_affected_by_square(&im->small_move, filled_rows[sq_idx],
-                                    filled_cols[sq_idx])) {
+                                    filled_cols[sq_idx], board)) {
         invalid = true;
         break;
       }
@@ -271,12 +320,37 @@ int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
       }
     }
 
-    // Check if any placed-tile position is adjacent to a newly-filled square
-    // (cross-word validity or score may have changed)
+    // Check cross-set validity (perpendicular word constraints may have changed)
     if (!invalid) {
-      if (incr_move_shares_line_with_filled(&im->small_move, board, filled_rows,
-                                       filled_cols, num_filled)) {
+      if (incr_move_cross_set_invalid(&im->small_move, board, cross_index)) {
         invalid = true;
+      }
+    }
+
+    // Check if any filled square is in the same lane OR same perpendicular
+    // line as any placed-tile position. Same lane catches main-word and
+    // extension-set changes; same perpendicular line catches cross-word
+    // score changes and extension-set changes in the other direction.
+    if (!invalid && !small_move_is_pass(&im->small_move)) {
+      int row, col, row_inc, col_inc;
+      small_move_decode_position(&im->small_move, &row, &col, &row_inc,
+                                 &col_inc);
+      int plen = small_move_get_play_length(&im->small_move);
+      for (int sq_idx = 0; sq_idx < num_filled && !invalid; sq_idx++) {
+        int fr = filled_rows[sq_idx];
+        int fc = filled_cols[sq_idx];
+        for (int pos = 0; pos < plen; pos++) {
+          int r = row + pos * row_inc;
+          int c = col + pos * col_inc;
+          if (!board_is_empty(board, r, c)) {
+            continue; // played-through, skip
+          }
+          // Same row OR same column as this placed-tile position
+          if (fr == r || fc == c) {
+            invalid = true;
+            break;
+          }
+        }
       }
     }
 
@@ -530,6 +604,36 @@ void incr_move_list_assert_subset_of(const IncrMoveList *subset,
 void incr_move_list_assert_equal_sets(const IncrMoveList *a,
                                       const IncrMoveList *b) {
   if (a->count != b->count) {
+    // Find the extra/missing moves for debugging
+    IncrMove *sa = (IncrMove *)malloc_or_die(sizeof(IncrMove) * a->count);
+    memcpy(sa, a->moves, sizeof(IncrMove) * a->count);
+    qsort(sa, a->count, sizeof(IncrMove), compare_incr_moves_by_tiny_move);
+    IncrMove *sb = (IncrMove *)malloc_or_die(sizeof(IncrMove) * b->count);
+    memcpy(sb, b->moves, sizeof(IncrMove) * b->count);
+    qsort(sb, b->count, sizeof(IncrMove), compare_incr_moves_by_tiny_move);
+    int ai = 0, bi = 0;
+    while (ai < a->count && bi < b->count) {
+      if (sa[ai].small_move.tiny_move < sb[bi].small_move.tiny_move) {
+        log_warn("  EXTRA in incremental: 0x%llx score=%d tp=%d pl=%d",
+                 (unsigned long long)sa[ai].small_move.tiny_move,
+                 small_move_get_score(&sa[ai].small_move),
+                 small_move_get_tiles_played(&sa[ai].small_move),
+                 small_move_get_play_length(&sa[ai].small_move));
+        ai++;
+      } else if (sa[ai].small_move.tiny_move > sb[bi].small_move.tiny_move) {
+        bi++;
+      } else {
+        ai++;
+        bi++;
+      }
+    }
+    for (; ai < a->count; ai++) {
+      log_warn("  EXTRA in incremental: 0x%llx score=%d",
+               (unsigned long long)sa[ai].small_move.tiny_move,
+               small_move_get_score(&sa[ai].small_move));
+    }
+    free(sa);
+    free(sb);
     log_fatal("incr_move_list_assert_equal_sets: count mismatch: "
               "incremental=%d full=%d",
               a->count, b->count);

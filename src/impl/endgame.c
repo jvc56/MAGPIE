@@ -862,11 +862,17 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
         const MoveUndo *our_undo = &worker->move_undos[ply - 2];
         const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
 
+        bool kwgs_shared =
+            game_get_data_is_shared(worker->game_copy, PLAYERS_DATA_TYPE_KWG);
+        int ci = board_get_cross_set_index(kwgs_shared, stm_idx);
+
         bool affected_rows[2 * BOARD_DIM];
         incr_move_list_invalidate(scratch, our_undo, opp_undo, stm_rack,
-                                  board, affected_rows);
+                                  board, ci, affected_rows);
 
-        // Regenerate ALL rows for now to verify correctness.
+        // Cross-set changes can propagate to any row/column sharing a line
+        // with a filled square, so regenerate all rows for now.
+        // TODO: narrow this by tracking exactly which cross-sets changed.
         for (int idx = 0; idx < 2 * BOARD_DIM; idx++) {
           affected_rows[idx] = true;
         }
