@@ -16,6 +16,7 @@ Equity calculate_end_rack_points(const Rack *rack,
                                  const LetterDistribution *ld);
 Equity calculate_end_rack_penalty(const Rack *rack,
                                   const LetterDistribution *ld);
+void play_move_on_board(const Move *move, const Game *game);
 void play_move(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
