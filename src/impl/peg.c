@@ -36,6 +36,22 @@ struct PegSolver {
   int _unused;
 };
 
+// Returns true if the PEG time budget has been exhausted.
+// When triggered, sets USER_INTERRUPT on the ThreadControl so that any
+// in-flight endgame solves and greedy playouts bail out promptly.
+static bool peg_budget_exhausted(const Timer *peg_timer,
+                                 double time_budget_seconds,
+                                 ThreadControl *tc) {
+  if (time_budget_seconds <= 0.0)
+    return false;
+  if (ctimer_elapsed_seconds(peg_timer) < time_budget_seconds)
+    return false;
+  if (tc) {
+    thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+  return true;
+}
+
 // ---------------------------------------------------------------------------
 // Candidate tracking
 // ---------------------------------------------------------------------------
@@ -273,6 +289,9 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
     int cnt = (int)unseen[t];
     if (cnt == 0)
       continue;
+    // Check for interrupt before starting a new scenario.
+    if (thread_control_get_status(tc) == THREAD_CONTROL_STATUS_USER_INTERRUPT)
+      break;
     Game *scenario =
         setup_endgame_scenario(base_game, move, mover_idx, opp_idx,
                                (MachineLetter)t, unseen, ld_size);
@@ -497,6 +516,9 @@ typedef struct PegGreedyThreadArgs {
   int opp_idx;
   const uint8_t *unseen;
   int ld_size;
+  const Timer *peg_timer;
+  double time_budget_seconds;
+  ThreadControl *thread_control;
   // For recursive pass evaluation.
   const PegArgs *outer_args;
 } PegGreedyThreadArgs;
@@ -504,6 +526,9 @@ typedef struct PegGreedyThreadArgs {
 static void *peg_greedy_thread(void *arg) {
   PegGreedyThreadArgs *a = (PegGreedyThreadArgs *)arg;
   for (int i = a->start; i < a->end; i++) {
+    if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
+                             a->thread_control))
+      break;
     PegCandidate *c = &a->candidates[i];
     if (small_move_is_pass(&c->move)) {
       peg_eval_pass_recursive(a->outer_args, a->opp_idx,
@@ -531,6 +556,8 @@ typedef struct PegEndgameThreadArgs {
   const Game *base_game;
   int mover_idx;
   int opp_idx;
+  const Timer *peg_timer;
+  double time_budget_seconds;
   int plies;
   const uint8_t *unseen;
   int ld_size;
@@ -543,6 +570,9 @@ typedef struct PegEndgameThreadArgs {
 static void *peg_endgame_thread(void *arg) {
   PegEndgameThreadArgs *a = (PegEndgameThreadArgs *)arg;
   while (true) {
+    if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
+                             a->thread_control))
+      break;
     int idx = atomic_fetch_add(a->next_candidate, 1);
     if (idx >= a->num_candidates)
       break;
@@ -776,6 +806,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         .opp_idx = opp_idx,
         .unseen = unseen,
         .ld_size = ld_size,
+        .peg_timer = &peg_timer,
+        .time_budget_seconds = args->time_budget_seconds,
+        .thread_control = args->thread_control,
         .outer_args = args,
     };
     cpthread_create(&greedy_threads[ti], peg_greedy_thread, &greedy_targs[ti]);
@@ -815,8 +848,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   }
 
   for (int pass = 0; pass < args->num_passes; pass++) {
-    if (args->time_budget_seconds > 0.0 &&
-        ctimer_elapsed_seconds(&peg_timer) >= args->time_budget_seconds) {
+    if (peg_budget_exhausted(&peg_timer, args->time_budget_seconds,
+                             args->thread_control)) {
       break;
     }
 
@@ -864,6 +897,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .plies = plies,
           .unseen = unseen,
           .ld_size = ld_size,
+          .peg_timer = &peg_timer,
+          .time_budget_seconds = args->time_budget_seconds,
           .thread_control = args->thread_control,
           .shared_tt = shared_tt,
           .dual_lexicon_mode = args->dual_lexicon_mode,
