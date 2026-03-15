@@ -361,7 +361,7 @@ void test_benchmark_peg1(void) {
         .game = game,
         .thread_control = config_get_thread_control(config),
         .time_budget_seconds = peg_time_budget,
-        .num_threads = 8,
+        .num_threads = 1,
         .tt_fraction_of_mem = 0.1,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_greedy = true,

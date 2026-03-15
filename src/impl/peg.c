@@ -36,20 +36,24 @@ struct PegSolver {
   int _unused;
 };
 
-// Returns true if the PEG time budget has been exhausted.
-// When triggered, sets USER_INTERRUPT on the ThreadControl so that any
-// in-flight endgame solves and greedy playouts bail out promptly.
-static bool peg_budget_exhausted(const Timer *peg_timer,
-                                 double time_budget_seconds,
-                                 ThreadControl *tc) {
-  if (time_budget_seconds <= 0.0)
-    return false;
-  if (ctimer_elapsed_seconds(peg_timer) < time_budget_seconds)
-    return false;
-  if (tc) {
-    thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+// Returns true if the PEG time budget has been exhausted or an external
+// interrupt was requested. Uses a PEG-internal atomic flag (not ThreadControl)
+// to avoid poisoning the shared ThreadControl for concurrent work.
+static bool peg_check_stop(const Timer *peg_timer, double time_budget_seconds,
+                           ThreadControl *tc, atomic_int *peg_stop) {
+  if (atomic_load(peg_stop))
+    return true;
+  if (tc && thread_control_get_status(tc) ==
+                THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    atomic_store(peg_stop, 1);
+    return true;
   }
-  return true;
+  if (time_budget_seconds > 0.0 &&
+      ctimer_elapsed_seconds(peg_timer) >= time_budget_seconds) {
+    atomic_store(peg_stop, 1);
+    return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -466,6 +470,7 @@ typedef struct PegGreedyThreadArgs {
   const Timer *peg_timer;
   double time_budget_seconds;
   ThreadControl *thread_control;
+  atomic_int *peg_stop;
   // For recursive pass evaluation.
   const PegArgs *outer_args;
 } PegGreedyThreadArgs;
@@ -473,8 +478,8 @@ typedef struct PegGreedyThreadArgs {
 static void *peg_greedy_thread(void *arg) {
   PegGreedyThreadArgs *a = (PegGreedyThreadArgs *)arg;
   for (int i = a->start; i < a->end; i++) {
-    if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
-                             a->thread_control))
+    if (peg_check_stop(a->peg_timer, a->time_budget_seconds,
+                       a->thread_control, a->peg_stop))
       break;
     PegCandidate *c = &a->candidates[i];
     if (small_move_is_pass(&c->move)) {
@@ -531,14 +536,15 @@ typedef struct PegDecompThreadArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   const Timer *peg_timer;
   double time_budget_seconds;
+  atomic_int *peg_stop;
 } PegDecompThreadArgs;
 
 static void *peg_decomp_thread(void *arg) {
   PegDecompThreadArgs *a = (PegDecompThreadArgs *)arg;
 
   while (true) {
-    if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
-                             a->thread_control))
+    if (peg_check_stop(a->peg_timer, a->time_budget_seconds,
+                       a->thread_control, a->peg_stop))
       break;
     int idx = atomic_fetch_add(a->next_item, 1);
     if (idx >= a->total_items)
@@ -569,8 +575,8 @@ static void *peg_decomp_thread(void *arg) {
     } else {
       // Wait for preparation to complete (or budget exhaustion).
       while (atomic_load(&acc->prepared) != 2) {
-        if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
-                                 a->thread_control))
+        if (peg_check_stop(a->peg_timer, a->time_budget_seconds,
+                           a->thread_control, a->peg_stop))
           break;
       }
       if (atomic_load(&acc->prepared) != 2)
@@ -808,6 +814,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   double prev_elapsed = 0.0;
   int passes_completed = 0;
   int total_evaluated = 0;
+  atomic_int peg_stop;
+  atomic_init(&peg_stop, 0);
 
   // =========================================================================
   // Pass 0: greedy evaluation for all candidates (unless skip_greedy)
@@ -857,6 +865,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .peg_timer = &peg_timer,
           .time_budget_seconds = args->time_budget_seconds,
           .thread_control = args->thread_control,
+          .peg_stop = &peg_stop,
           .outer_args = args,
       };
       cpthread_create(&greedy_threads[ti], peg_greedy_thread,
@@ -897,8 +906,8 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   }
 
   for (int pass = 0; pass < args->num_passes; pass++) {
-    if (peg_budget_exhausted(&peg_timer, args->time_budget_seconds,
-                             args->thread_control)) {
+    if (peg_check_stop(&peg_timer, args->time_budget_seconds,
+                       args->thread_control, &peg_stop)) {
       break;
     }
 
@@ -986,6 +995,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
           .dual_lexicon_mode = args->dual_lexicon_mode,
           .peg_timer = &peg_timer,
           .time_budget_seconds = args->time_budget_seconds,
+          .peg_stop = &peg_stop,
       };
       cpthread_create(&threads[ti], peg_decomp_thread, &targs[ti]);
     }
