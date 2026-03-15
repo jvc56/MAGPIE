@@ -541,7 +541,6 @@ typedef struct PegDecompThreadArgs {
 
 static void *peg_decomp_thread(void *arg) {
   PegDecompThreadArgs *a = (PegDecompThreadArgs *)arg;
-
   while (true) {
     if (peg_check_stop(a->peg_timer, a->time_budget_seconds,
                        a->thread_control, a->peg_stop))
@@ -611,9 +610,7 @@ static void *peg_decomp_thread(void *arg) {
         .thread_index_offset = a->thread_index,
     };
 
-    ErrorStack *local_es = error_stack_create();
-    endgame_solve(a->endgame_solver, &ea, a->endgame_results, local_es);
-    error_stack_destroy(local_es);
+    endgame_solve_inline(a->endgame_solver, &ea, a->endgame_results);
 
     int eg_val =
         endgame_results_get_value(a->endgame_results, ENDGAME_RESULT_BEST);

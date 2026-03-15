@@ -75,6 +75,11 @@ typedef struct EndgameArgs {
 EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads.
+void endgame_solve_inline(EndgameSolver *solver,
+                          const EndgameArgs *endgame_args,
+                          EndgameResults *results);
 void endgame_solver_destroy(EndgameSolver *es);
 const TranspositionTable *
 endgame_solver_get_transposition_table(const EndgameSolver *es);

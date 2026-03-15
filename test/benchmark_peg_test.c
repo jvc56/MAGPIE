@@ -262,6 +262,7 @@ void test_generate_peg1_cgps(void) {
 // ---------------------------------------------------------------------------
 
 void test_benchmark_peg1(void) {
+  log_set_level(LOG_FATAL); // Suppress WARN logs from concurrent endgame solves
   int num_positions = 10;
   double peg_time_budget = 0.5;      // PEG solve budget per position (seconds)
   double endgame_time_budget = 0.0;  // Per-scenario endgame budget (0 = no limit)
@@ -361,8 +362,8 @@ void test_benchmark_peg1(void) {
         .game = game,
         .thread_control = config_get_thread_control(config),
         .time_budget_seconds = peg_time_budget,
-        .num_threads = 1,
-        .tt_fraction_of_mem = 0.1,
+        .num_threads = 1, // >1 hangs, see commit msg
+        .tt_fraction_of_mem = 0,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_greedy = true,
         .num_passes = 1,

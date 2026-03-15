@@ -2592,6 +2592,37 @@ static int extract_multi_pvs(const EndgameSolver *solver,
   return k;
 }
 
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads.
+void endgame_solve_inline(EndgameSolver *solver,
+                          const EndgameArgs *endgame_args,
+                          EndgameResults *results) {
+  solver->results = results;
+  endgame_solver_reset(solver, endgame_args);
+
+  solver->initial_opp_stuck_frac = 0.0F;
+  if (solver->use_heuristics) {
+    solver->initial_opp_stuck_frac =
+        compute_initial_stuck_fraction(solver, endgame_args->game);
+  }
+
+  uint64_t base_seed = (uint64_t)ctime_get_current_time();
+  EndgameSolverWorker *worker = endgame_solver_create_worker(
+      solver, solver->thread_index_offset, base_seed);
+
+  // Suppress stuck-tile log to avoid localtime thread safety issues.
+  atomic_store(&solver->stuck_tile_logged, 1);
+
+  // Run IDS directly in the calling thread.
+  iterative_deepening(worker, solver->requested_plies);
+
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  solver->principal_variation = *best_pv;
+
+  solver_worker_destroy(worker);
+}
+
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
