@@ -48,6 +48,9 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
+  // Use incremental move generation: derive move lists from 2 plies ago
+  // instead of regenerating from scratch. Experimental.
+  bool incremental_movegen;
   // IDS time management (0 = no limit, rely on external timer only):
   // After each completed depth, if elapsed > soft_time_limit, stop.
   // If elapsed < soft_time_limit, estimate next depth time via EBF.

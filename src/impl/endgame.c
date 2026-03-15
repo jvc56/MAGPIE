@@ -112,6 +112,7 @@ struct EndgameSolver {
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
+  bool incremental_movegen;
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
@@ -406,6 +407,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
+  es->incremental_movegen = endgame_args->incremental_movegen;
   int num_top_moves = endgame_args->num_top_moves;
   if (num_top_moves <= 0) {
     num_top_moves = 1;
@@ -828,99 +830,84 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     return generate_single_tile_plays(worker);
   }
 
-  const MoveGenArgs args = {
-      .game = worker->game_copy,
-      .move_list = worker->move_list,
-      .move_record_type = MOVE_RECORD_ALL_SMALL,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
-      .thread_index = worker->thread_index,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&args);
+  const int ply = worker->solver->requested_plies - depth;
+  const bool use_incr = worker->solver->incremental_movegen;
 
-  const int full_move_count = worker->move_list->count;
-  SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
-      worker->small_move_arena, full_move_count * sizeof(SmallMove));
-  for (int i = 0; i < full_move_count; i++) {
-    arena_small_moves[i] = *(worker->move_list->small_moves[i]);
+  // Check if we can derive incrementally from 2 plies ago
+  bool incr_valid = false;
+  if (use_incr && ply >= 2 && ply < MAX_SEARCH_DEPTH) {
+    const IncrMoveList *base = worker->incr_lists[ply - 2];
+    incr_valid = (base->count > 0 && base->player_index == stm_idx &&
+                  base->generation_id == worker->incr_generation);
   }
 
-  // Incremental movegen: populate IncrMoveList for this ply from full movegen
-  const int ply = worker->solver->requested_plies - depth;
-  if (ply >= 0 && ply < MAX_SEARCH_DEPTH) {
+  int result_count;
+
+  if (incr_valid) {
+    // Incremental path: derive from base at ply - 2
     IncrMoveList *iml = worker->incr_lists[ply];
-    incr_move_list_populate_from_small_moves(iml, worker->move_list, stm_rack,
-                                                stm_idx);
+    const IncrMoveList *base = worker->incr_lists[ply - 2];
+    incr_move_list_copy_into(iml, base);
+
+    const MoveUndo *our_undo = &worker->move_undos[ply - 2];
+    const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
+
+    bool dirty_lanes[2 * BOARD_DIM];
+    incr_compute_dirty_lanes(our_undo, opp_undo, board, dirty_lanes);
+    incr_move_list_remove_dirty(iml, dirty_lanes, stm_rack);
+    incr_move_list_regenerate(iml, dirty_lanes, worker->game_copy,
+                              worker->move_list,
+                              solver_get_pruned_kwg(worker->solver, stm_idx),
+                              worker->thread_index);
+
+    iml->player_index = stm_idx;
+    iml->rack_total_letters = rack_get_total_letters(stm_rack);
     iml->board_tiles_played = board_get_tiles_played(board);
     iml->generation_id = worker->incr_generation;
-    incr_move_list_assert_matches_small_moves(iml, worker->move_list);
 
-    // At ply >= 2: validate incremental invalidation. Copy the same player's
-    // list from 2 plies ago, invalidate it with the two intervening moves,
-    // and assert the surviving moves are a subset of the full-regen result.
-    if (ply >= 2) {
-      const IncrMoveList *base = worker->incr_lists[ply - 2];
-      // The base is valid if: same player, has moves, and the search tree
-      // guarantees it's from the current path (generate_stm_plays always
-      // populates incr_lists[ply] at the top of each node, and single-tile
-      // plies reset it to prevent stale data).
-      if (base->count > 0 && base->player_index == stm_idx &&
-          base->generation_id == worker->incr_generation) {
-        // Use a thread-local scratch list. We allocate on the heap to keep
-        // the stack small in deep searches.
-        IncrMoveList *scratch = incr_move_list_create(base->capacity);
-        incr_move_list_copy_into(scratch, base);
+    // Copy to arena for the search loop
+    result_count = iml->count;
+    SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
+        worker->small_move_arena, result_count * sizeof(SmallMove));
+    for (int move_idx = 0; move_idx < result_count; move_idx++) {
+      arena_small_moves[move_idx] = iml->moves[move_idx].small_move;
+    }
 
-        const MoveUndo *our_undo = &worker->move_undos[ply - 2];
-        const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
+    atomic_fetch_add(&worker->solver->incr_validations, 1);
+  } else {
+    // Full movegen path
+    const MoveGenArgs args = {
+        .game = worker->game_copy,
+        .move_list = worker->move_list,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
+        .thread_index = worker->thread_index,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
 
-        // Compute dirty lanes from the two intervening moves
-        bool dirty_lanes[2 * BOARD_DIM];
-        incr_compute_dirty_lanes(our_undo, opp_undo, board, dirty_lanes);
+    result_count = worker->move_list->count;
+    SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
+        worker->small_move_arena, result_count * sizeof(SmallMove));
+    for (int move_idx = 0; move_idx < result_count; move_idx++) {
+      arena_small_moves[move_idx] =
+          *(worker->move_list->small_moves[move_idx]);
+    }
 
-        // Remove all moves from dirty lanes + rack-infeasible moves
-        incr_move_list_remove_dirty(scratch, dirty_lanes, stm_rack);
-
-        // Regenerate moves for dirty lanes only
-        incr_move_list_regenerate(
-            scratch, dirty_lanes, worker->game_copy,
-            worker->move_list,
-            solver_get_pruned_kwg(worker->solver, stm_idx),
-            worker->thread_index);
-
-        // The incremental result must exactly match the full movegen result.
-        if (scratch->count != iml->count) {
-          int ndirty = 0;
-          for (int di = 0; di < 2 * BOARD_DIM; di++) {
-            if (dirty_lanes[di]) {
-              ndirty++;
-            }
-          }
-          log_warn("INCR FAIL: ply=%d base_ply=%d base_count=%d "
-                   "base_player=%d base_rack=%d stm=%d stm_rack=%d "
-                   "dirty=%d surviving=%d regen=%d full=%d "
-                   "gen=%llu base_gen=%llu base_btp=%d cur_btp=%d",
-                   ply, ply - 2, base->count, base->player_index,
-                   base->rack_total_letters, stm_idx,
-                   stm_rack->number_of_letters, ndirty, scratch->count,
-                   worker->move_list->count, iml->count,
-                   (unsigned long long)worker->incr_generation,
-                   (unsigned long long)base->generation_id,
-                   base->board_tiles_played,
-                   board_get_tiles_played(board));
-        }
-        incr_move_list_assert_equal_sets(scratch, iml);
-        atomic_fetch_add(&worker->solver->incr_validations, 1);
-
-        incr_move_list_destroy(scratch);
-      }
+    // Populate IncrMoveList for future incremental derivation
+    if (ply >= 0 && ply < MAX_SEARCH_DEPTH) {
+      IncrMoveList *iml = worker->incr_lists[ply];
+      incr_move_list_populate_from_small_moves(iml, worker->move_list,
+                                               stm_rack, stm_idx);
+      iml->board_tiles_played = board_get_tiles_played(board);
+      iml->generation_id = worker->incr_generation;
     }
   }
 
-  return full_move_count;
+  return result_count;
 }
 
 // Sum face values of placed tiles in a move, skipping played-through markers.
