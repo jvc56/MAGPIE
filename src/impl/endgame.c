@@ -177,6 +177,8 @@ typedef struct EndgameSolverWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
+  // Monotonic counter for IncrMoveList generation tracking
+  uint64_t incr_generation;
   // Incremental movegen: per-ply IncrMoveLists. incr_lists[ply] holds the
   // move list for the side-to-move at that ply. At ply N >= 2, the list is
   // derived lazily from incr_lists[N-2] (same player, 2 plies earlier).
@@ -560,6 +562,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
+  solver_worker->incr_generation = 0;
 
   for (int ply = 0; ply < MAX_SEARCH_DEPTH; ply++) {
     solver_worker->incr_lists[ply] =
@@ -815,6 +818,13 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
       player_get_rack(game_get_player(worker->game_copy, stm_idx));
 
   if (stm_rack->number_of_letters == 1) {
+    // Reset IncrMoveList to prevent stale data from being used as a base
+    // 2 plies later (generate_single_tile_plays doesn't populate it).
+    const int ply_st = worker->solver->requested_plies - depth;
+    if (ply_st >= 0 && ply_st < MAX_SEARCH_DEPTH) {
+      worker->incr_lists[ply_st]->count = 0;
+      worker->incr_lists[ply_st]->player_index = -1;
+    }
     return generate_single_tile_plays(worker);
   }
 
@@ -845,8 +855,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     incr_move_list_populate_from_small_moves(iml, worker->move_list, stm_rack,
                                                 stm_idx);
     iml->board_tiles_played = board_get_tiles_played(board);
-    iml->score_p0 = player_get_score(game_get_player(worker->game_copy, 0));
-    iml->score_p1 = player_get_score(game_get_player(worker->game_copy, 1));
+    iml->generation_id = worker->incr_generation;
     incr_move_list_assert_matches_small_moves(iml, worker->move_list);
 
     // At ply >= 2: validate incremental invalidation. Copy the same player's
@@ -854,36 +863,12 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
     // and assert the surviving moves are a subset of the full-regen result.
     if (ply >= 2) {
       const IncrMoveList *base = worker->incr_lists[ply - 2];
-      // Only validate if base was generated for the same player
-      // (guards against stale data from previous ID iterations)
-      // Verify base was generated for the exact same game state:
-      // same player, and scores at base time + intervening move scores
-      // == current scores (uniquely identifies the path).
-      Equity cur_p0 = player_get_score(
-          game_get_player(worker->game_copy, 0));
-      Equity cur_p1 = player_get_score(
-          game_get_player(worker->game_copy, 1));
-      Equity expected_p0 = base->score_p0 +
-          (worker->move_undos[ply - 2].old_scores[0] != cur_p0 ?
-           cur_p0 - worker->move_undos[ply - 2].old_scores[0] : 0);
-      // Simpler: just check current scores match base + 2 moves of change
-      // by verifying the undo chain is consistent
-      bool path_valid = (base->count > 0 &&
-                         base->player_index == stm_idx &&
-                         base->score_p0 ==
-                             worker->move_undos[ply - 2].old_scores[0] &&
-                         base->score_p1 ==
-                             worker->move_undos[ply - 2].old_scores[1]);
-      (void)cur_p0;
-      (void)cur_p1;
-      (void)expected_p0;
-      if (!path_valid && base->count > 0 && base->player_index == stm_idx) {
-        log_warn("PATH INVALID: base_p0=%d base_p1=%d undo_p0=%d undo_p1=%d",
-                 base->score_p0, base->score_p1,
-                 worker->move_undos[ply - 2].old_scores[0],
-                 worker->move_undos[ply - 2].old_scores[1]);
-      }
-      if (path_valid) {
+      // The base is valid if: same player, has moves, and the search tree
+      // guarantees it's from the current path (generate_stm_plays always
+      // populates incr_lists[ply] at the top of each node, and single-tile
+      // plies reset it to prevent stale data).
+      if (base->count > 0 && base->player_index == stm_idx &&
+          base->generation_id == worker->incr_generation) {
         // Use a thread-local scratch list. We allocate on the heap to keep
         // the stack small in deep searches.
         IncrMoveList *scratch = incr_move_list_create(base->capacity);
@@ -916,11 +901,16 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
           }
           log_warn("INCR FAIL: ply=%d base_ply=%d base_count=%d "
                    "base_player=%d base_rack=%d stm=%d stm_rack=%d "
-                   "dirty=%d surviving=%d regen=%d full=%d",
+                   "dirty=%d surviving=%d regen=%d full=%d "
+                   "gen=%llu base_gen=%llu base_btp=%d cur_btp=%d",
                    ply, ply - 2, base->count, base->player_index,
                    base->rack_total_letters, stm_idx,
                    stm_rack->number_of_letters, ndirty, scratch->count,
-                   worker->move_list->count, iml->count);
+                   worker->move_list->count, iml->count,
+                   (unsigned long long)worker->incr_generation,
+                   (unsigned long long)base->generation_id,
+                   base->board_tiles_played,
+                   board_get_tiles_played(board));
         }
         incr_move_list_assert_equal_sets(scratch, iml);
         atomic_fetch_add(&worker->solver->incr_validations, 1);
@@ -2306,11 +2296,10 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    // Reset incremental movelists to avoid stale data from previous depths
-    for (int incr_idx = 0; incr_idx < MAX_SEARCH_DEPTH; incr_idx++) {
-      worker->incr_lists[incr_idx]->count = 0;
-      worker->incr_lists[incr_idx]->player_index = -1;
-    }
+    // Bump generation counter to invalidate all IncrMoveLists from
+    // previous ID depths. Lists with generation_id < incr_generation
+    // are stale and won't be used as bases.
+    worker->incr_generation++;
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
       atomic_store(&worker->solver->current_depth, ply);

@@ -81,9 +81,8 @@ typedef struct IncrMoveList {
   IncrTileMapping tile_mapping;
   int player_index;       // which player's moves these are
   int rack_total_letters;  // rack size when generated (for staleness check)
-  int board_tiles_played; // board_get_tiles_played when generated
-  Equity score_p0;        // player 0 score when generated
-  Equity score_p1;        // player 1 score when generated
+  int board_tiles_played;  // board_get_tiles_played when generated
+  uint64_t generation_id;  // monotonic counter for staleness detection
 } IncrMoveList;
 
 // Create/destroy

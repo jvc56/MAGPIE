@@ -16,6 +16,7 @@ IncrMoveList *incr_move_list_create(int capacity) {
   memset(&iml->tile_mapping, 0, sizeof(IncrTileMapping));
   iml->player_index = -1;
   iml->rack_total_letters = 0;
+  iml->generation_id = 0;
   return iml;
 }
 
@@ -162,24 +163,50 @@ void incr_compute_dirty_lanes(const MoveUndo *undo1, const MoveUndo *undo2,
     }
 
     // Perpendicular word fragment: walk column fc up and down from fr
-    // through contiguous tiles. Each row in the fragment gets its
-    // horizontal lane marked dirty (cross-set/extension-set changed).
-    for (int r = fr - 1; r >= 0 && !board_is_empty(board, r, fc); r--) {
-      dirty_lanes[0 * BOARD_DIM + r] = true;
+    // through contiguous tiles. Mark each row in the fragment PLUS the
+    // empty boundary squares (cross-sets there change because the
+    // perpendicular word above/below them extended).
+    {
+      int r = fr - 1;
+      while (r >= 0 && !board_is_empty(board, r, fc)) {
+        dirty_lanes[0 * BOARD_DIM + r] = true;
+        r--;
+      }
+      if (r >= 0) {
+        dirty_lanes[0 * BOARD_DIM + r] = true; // boundary empty square
+      }
     }
-    for (int r = fr + 1; r < BOARD_DIM && !board_is_empty(board, r, fc);
-         r++) {
-      dirty_lanes[0 * BOARD_DIM + r] = true;
+    {
+      int r = fr + 1;
+      while (r < BOARD_DIM && !board_is_empty(board, r, fc)) {
+        dirty_lanes[0 * BOARD_DIM + r] = true;
+        r++;
+      }
+      if (r < BOARD_DIM) {
+        dirty_lanes[0 * BOARD_DIM + r] = true; // boundary empty square
+      }
     }
 
-    // Walk row fr left and right from fc through contiguous tiles.
-    // Each column in the fragment gets its vertical lane marked dirty.
-    for (int c = fc - 1; c >= 0 && !board_is_empty(board, fr, c); c--) {
-      dirty_lanes[1 * BOARD_DIM + c] = true;
+    // Walk row fr left and right, same pattern with boundary.
+    {
+      int c = fc - 1;
+      while (c >= 0 && !board_is_empty(board, fr, c)) {
+        dirty_lanes[1 * BOARD_DIM + c] = true;
+        c--;
+      }
+      if (c >= 0) {
+        dirty_lanes[1 * BOARD_DIM + c] = true;
+      }
     }
-    for (int c = fc + 1; c < BOARD_DIM && !board_is_empty(board, fr, c);
-         c++) {
-      dirty_lanes[1 * BOARD_DIM + c] = true;
+    {
+      int c = fc + 1;
+      while (c < BOARD_DIM && !board_is_empty(board, fr, c)) {
+        dirty_lanes[1 * BOARD_DIM + c] = true;
+        c++;
+      }
+      if (c < BOARD_DIM) {
+        dirty_lanes[1 * BOARD_DIM + c] = true;
+      }
     }
   }
 }
