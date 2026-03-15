@@ -279,70 +279,8 @@ static Game *setup_endgame_scenario(const Game *base_game,
   return g;
 }
 
-static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
-                                         EndgameResults *results,
-                                         const Game *base_game,
-                                         const SmallMove *move, int mover_idx,
-                                         int opp_idx, int plies,
-                                         const uint8_t unseen[MAX_ALPHABET_SIZE],
-                                         int ld_size,
-                                         ThreadControl *tc,
-                                         TranspositionTable *shared_tt,
-                                         dual_lexicon_mode_t dual_lexicon_mode,
-                                         double *win_pct_out) {
-  double total = 0.0;
-  double wins = 0.0;
-  int weight = 0;
-
-  for (int t = 0; t < ld_size; t++) {
-    int cnt = (int)unseen[t];
-    if (cnt == 0)
-      continue;
-    // Check for interrupt before starting a new scenario.
-    if (thread_control_get_status(tc) == THREAD_CONTROL_STATUS_USER_INTERRUPT)
-      break;
-    Game *scenario =
-        setup_endgame_scenario(base_game, move, mover_idx, opp_idx,
-                               (MachineLetter)t, unseen, ld_size);
-
-    int32_t mover_lead =
-        equity_to_int(player_get_score(game_get_player(scenario, mover_idx))) -
-        equity_to_int(player_get_score(game_get_player(scenario, opp_idx)));
-
-    EndgameArgs ea = {
-        .thread_control = tc,
-        .game = scenario,
-        .plies = plies,
-        .shared_tt = shared_tt,
-        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-        .num_threads = 1,
-        .use_heuristics = true,
-        .num_top_moves = 1,
-        .dual_lexicon_mode = dual_lexicon_mode,
-        .skip_word_pruning = true,
-    };
-
-    ErrorStack *local_es = error_stack_create();
-    endgame_solve(endgame_solver, &ea, results, local_es);
-    error_stack_destroy(local_es);
-
-    int endgame_val =
-        endgame_results_get_value(results, ENDGAME_RESULT_BEST);
-    int32_t mover_total = mover_lead - endgame_val;
-    total += (double)mover_total * cnt;
-    wins += ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
-    weight += cnt;
-
-    game_destroy(scenario);
-  }
-
-  if (weight == 0) {
-    *win_pct_out = 0.0;
-    return 0.0;
-  }
-  *win_pct_out = wins / weight;
-  return total / weight;
-}
+// peg_endgame_eval_candidate removed: replaced by decomposed parallel
+// evaluation via peg_decomp_thread.
 
 // ---------------------------------------------------------------------------
 // Recursive pass evaluation
@@ -553,51 +491,137 @@ static void *peg_greedy_thread(void *arg) {
 }
 
 // ---------------------------------------------------------------------------
-// Thread arguments and worker function -- endgame passes
+// Decomposed parallel endgame evaluation (scenario-level work stealing)
 // ---------------------------------------------------------------------------
 
-typedef struct PegEndgameThreadArgs {
+// Per-candidate state for parallel aggregation.
+typedef struct PegCandAccum {
+  atomic_int wins_x2;     // wins*2 + ties*1 (avoids float atomics)
+  atomic_int spread_sum;  // weighted spread sum (integer)
+  atomic_int weight_done; // scenarios completed so far
+  int total_weight;       // total weight (sum of tile counts)
+  Game *post_cand_game;   // post-candidate game (play + cross-sets), shared
+  atomic_int prepared;    // 0=not started, 1=in progress, 2=done
+} PegCandAccum;
+
+// Flat work item: one (candidate, tile_type) pair.
+typedef struct PegWorkItem {
+  int cand_idx;
+  MachineLetter tile;
+  int tile_count;
+} PegWorkItem;
+
+typedef struct PegDecompThreadArgs {
+  PegWorkItem *work_items;
+  atomic_int *next_item;
+  int total_items;
+  PegCandAccum *accums;
   PegCandidate *candidates;
-  atomic_int *next_candidate;
-  int num_candidates;
-  EndgameSolver *endgame_solver;
-  EndgameResults *endgame_results;
   const Game *base_game;
   int mover_idx;
   int opp_idx;
-  const Timer *peg_timer;
-  double time_budget_seconds;
   int plies;
+  int thread_index; // unique per thread, for movegen cache isolation
   const uint8_t *unseen;
   int ld_size;
+  EndgameSolver *endgame_solver;
+  EndgameResults *endgame_results;
   ThreadControl *thread_control;
   TranspositionTable *shared_tt;
   dual_lexicon_mode_t dual_lexicon_mode;
-  const PegArgs *outer_args;
-} PegEndgameThreadArgs;
+  const Timer *peg_timer;
+  double time_budget_seconds;
+} PegDecompThreadArgs;
 
-static void *peg_endgame_thread(void *arg) {
-  PegEndgameThreadArgs *a = (PegEndgameThreadArgs *)arg;
+static void *peg_decomp_thread(void *arg) {
+  PegDecompThreadArgs *a = (PegDecompThreadArgs *)arg;
+
   while (true) {
     if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
                              a->thread_control))
       break;
-    int idx = atomic_fetch_add(a->next_candidate, 1);
-    if (idx >= a->num_candidates)
+    int idx = atomic_fetch_add(a->next_item, 1);
+    if (idx >= a->total_items)
       break;
-    PegCandidate *c = &a->candidates[idx];
-    if (small_move_is_pass(&c->move)) {
-      peg_eval_pass_recursive(a->outer_args, a->opp_idx,
-                              a->unseen, a->ld_size, a->plies,
-                              a->shared_tt,
-                              &c->win_pct, &c->expected_value);
+
+    PegWorkItem *item = &a->work_items[idx];
+    int ci = item->cand_idx;
+    PegCandAccum *acc = &a->accums[ci];
+
+    // Lazy-prepare the post-candidate game (first thread to touch wins).
+    int expected = 0;
+    if (atomic_compare_exchange_strong(&acc->prepared, &expected, 1)) {
+      // We won: play candidate, update cross-sets.
+      Game *g = game_duplicate(a->base_game);
+      game_set_endgame_solving_mode(g);
+      game_set_backup_mode(g, BACKUP_MODE_OFF);
+      Move m;
+      small_move_to_move(&m, &a->candidates[ci].move, game_get_board(g));
+      play_move_without_drawing_tiles(&m, g);
+      if (game_get_game_end_reason(g) != GAME_END_REASON_NONE) {
+        Equity bonus = calculate_end_rack_points(
+            player_get_rack(game_get_player(g, a->opp_idx)), game_get_ld(g));
+        player_add_to_score(game_get_player(g, a->mover_idx), -bonus);
+        game_set_game_end_reason(g, GAME_END_REASON_NONE);
+      }
+      acc->post_cand_game = g;
+      atomic_store(&acc->prepared, 2);
     } else {
-      c->expected_value = peg_endgame_eval_candidate(
-          a->endgame_solver, a->endgame_results, a->base_game, &c->move,
-          a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
-          a->thread_control, a->shared_tt, a->dual_lexicon_mode,
-          &c->win_pct);
+      // Wait for preparation to complete (or budget exhaustion).
+      while (atomic_load(&acc->prepared) != 2) {
+        if (peg_budget_exhausted(a->peg_timer, a->time_budget_seconds,
+                                 a->thread_control))
+          break;
+      }
+      if (atomic_load(&acc->prepared) != 2)
+        break; // Budget exhausted before prep finished.
     }
+
+    // Duplicate the post-candidate game and set racks for this scenario.
+    Game *scenario = game_duplicate(acc->post_cand_game);
+    Rack *opp_rack = player_get_rack(game_get_player(scenario, a->opp_idx));
+    set_opp_rack_for_scenario(opp_rack, a->unseen, a->ld_size, item->tile);
+    Rack *mover_rack =
+        player_get_rack(game_get_player(scenario, a->mover_idx));
+    rack_add_letter(mover_rack, item->tile);
+
+    int32_t mover_lead =
+        equity_to_int(
+            player_get_score(game_get_player(scenario, a->mover_idx))) -
+        equity_to_int(
+            player_get_score(game_get_player(scenario, a->opp_idx)));
+
+    EndgameArgs ea = {
+        .thread_control = a->thread_control,
+        .game = scenario,
+        .plies = a->plies,
+        .shared_tt = a->shared_tt,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 1,
+        .use_heuristics = true,
+        .num_top_moves = 1,
+        .dual_lexicon_mode = a->dual_lexicon_mode,
+        .skip_word_pruning = true,
+        .thread_index_offset = a->thread_index,
+    };
+
+    ErrorStack *local_es = error_stack_create();
+    endgame_solve(a->endgame_solver, &ea, a->endgame_results, local_es);
+    error_stack_destroy(local_es);
+
+    int eg_val =
+        endgame_results_get_value(a->endgame_results, ENDGAME_RESULT_BEST);
+    int32_t mover_total = mover_lead - eg_val;
+
+    // Accumulate into per-candidate atomics.
+    int win_contrib =
+        (mover_total > 0) ? 2 * item->tile_count
+                          : (mover_total == 0 ? item->tile_count : 0);
+    atomic_fetch_add(&acc->wins_x2, win_contrib);
+    atomic_fetch_add(&acc->spread_sum, (int)(mover_total * item->tile_count));
+    atomic_fetch_add(&acc->weight_done, item->tile_count);
+
+    game_destroy(scenario);
   }
   return NULL;
 }
@@ -676,13 +700,16 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     return;
   }
 
-  // Build a base game with an empty bag.
+  // Build a base game with an empty bag by drawing each tile and then
+  // returning it from the rack (net effect: bag empty, rack unchanged).
   Game *base_game = game_duplicate(args->game);
   {
     Bag *base_bag = game_get_bag(base_game);
+    Rack *mover_rack = player_get_rack(game_get_player(base_game, mover_idx));
     for (int ml = 0; ml < ld_size; ml++) {
       while (bag_get_letter(base_bag, ml) > 0) {
         bag_draw_letter(base_bag, (MachineLetter)ml, mover_idx);
+        rack_take_letter(mover_rack, (MachineLetter)ml);
       }
     }
   }
@@ -875,9 +902,6 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       break;
     }
 
-    // When skip_greedy, the first endgame pass starts at 2-ply (skipping
-    // both the greedy heuristic and 1-ply, which are too shallow to be
-    // useful without greedy pre-filtering).
     int plies = args->skip_greedy ? pass + 2 : pass + 1;
     int limit = args->pass_candidate_limits[pass];
     if (limit <= 0) {
@@ -893,6 +917,38 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     if (limit > num_candidates)
       limit = num_candidates;
 
+    // Build flat work queue: (candidate, tile_type) pairs for all candidates.
+    // Distinct tile types from the unseen array.
+    int num_tile_types = 0;
+    MachineLetter tile_types[MAX_ALPHABET_SIZE];
+    int tile_counts[MAX_ALPHABET_SIZE];
+    for (int ml = 0; ml < ld_size; ml++) {
+      if (unseen[ml] > 0) {
+        tile_types[num_tile_types] = (MachineLetter)ml;
+        tile_counts[num_tile_types] = (int)unseen[ml];
+        num_tile_types++;
+      }
+    }
+
+    int total_items = limit * num_tile_types;
+    PegWorkItem *work_items =
+        malloc_or_die(total_items * sizeof(PegWorkItem));
+    PegCandAccum *accums =
+        calloc_or_die(limit, sizeof(PegCandAccum));
+
+    for (int ci = 0; ci < limit; ci++) {
+      int tw = 0;
+      for (int ti = 0; ti < num_tile_types; ti++) {
+        int idx = ci * num_tile_types + ti;
+        work_items[idx].cand_idx = ci;
+        work_items[idx].tile = tile_types[ti];
+        work_items[idx].tile_count = tile_counts[ti];
+        tw += tile_counts[ti];
+      }
+      accums[ci].total_weight = tw;
+    }
+
+    // Per-thread endgame solvers.
     EndgameSolver **eg_solvers =
         malloc_or_die(num_threads * sizeof(EndgameSolver *));
     EndgameResults **eg_results =
@@ -902,42 +958,58 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_results[ti] = endgame_results_create();
     }
 
-    atomic_int next_candidate;
-    atomic_init(&next_candidate, 0);
+    atomic_int next_item;
+    atomic_init(&next_item, 0);
 
-    PegEndgameThreadArgs *eg_targs =
-        malloc_or_die(num_threads * sizeof(PegEndgameThreadArgs));
-    cpthread_t *eg_threads = malloc_or_die(num_threads * sizeof(cpthread_t));
+    PegDecompThreadArgs *targs =
+        malloc_or_die(num_threads * sizeof(PegDecompThreadArgs));
+    cpthread_t *threads = malloc_or_die(num_threads * sizeof(cpthread_t));
 
     for (int ti = 0; ti < num_threads; ti++) {
-      eg_targs[ti] = (PegEndgameThreadArgs){
+      targs[ti] = (PegDecompThreadArgs){
+          .work_items = work_items,
+          .next_item = &next_item,
+          .total_items = total_items,
+          .accums = accums,
           .candidates = candidates,
-          .next_candidate = &next_candidate,
-          .num_candidates = limit,
-          .endgame_solver = eg_solvers[ti],
-          .endgame_results = eg_results[ti],
           .base_game = base_game,
           .mover_idx = mover_idx,
           .opp_idx = opp_idx,
           .plies = plies,
+          .thread_index = ti,
           .unseen = unseen,
           .ld_size = ld_size,
-          .peg_timer = &peg_timer,
-          .time_budget_seconds = args->time_budget_seconds,
+          .endgame_solver = eg_solvers[ti],
+          .endgame_results = eg_results[ti],
           .thread_control = args->thread_control,
           .shared_tt = shared_tt,
           .dual_lexicon_mode = args->dual_lexicon_mode,
-          .outer_args = args,
+          .peg_timer = &peg_timer,
+          .time_budget_seconds = args->time_budget_seconds,
       };
-      cpthread_create(&eg_threads[ti], peg_endgame_thread, &eg_targs[ti]);
+      cpthread_create(&threads[ti], peg_decomp_thread, &targs[ti]);
     }
     for (int ti = 0; ti < num_threads; ti++) {
-      cpthread_join(eg_threads[ti]);
+      cpthread_join(threads[ti]);
     }
 
-    int evaluated_this_pass = atomic_load(&next_candidate);
-    if (evaluated_this_pass > limit)
-      evaluated_this_pass = limit;
+    // Harvest results from per-candidate accumulators.
+    int evaluated_this_pass = 0;
+    for (int ci = 0; ci < limit; ci++) {
+      int w = atomic_load(&accums[ci].weight_done);
+      if (w == 0)
+        continue; // not touched (budget exhausted before reaching this cand)
+      evaluated_this_pass++;
+      double total_w = (double)accums[ci].total_weight;
+      candidates[ci].win_pct =
+          (double)atomic_load(&accums[ci].wins_x2) / (2.0 * total_w);
+      candidates[ci].expected_value =
+          (double)atomic_load(&accums[ci].spread_sum) / total_w;
+      // Clean up post-candidate game.
+      if (accums[ci].post_cand_game) {
+        game_destroy(accums[ci].post_cand_game);
+      }
+    }
     total_evaluated += evaluated_this_pass;
 
     for (int ti = 0; ti < num_threads; ti++) {
@@ -946,8 +1018,10 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     }
     free(eg_solvers);
     free(eg_results);
-    free(eg_targs);
-    free(eg_threads);
+    free(targs);
+    free(threads);
+    free(work_items);
+    free(accums);
 
     qsort(candidates, evaluated_this_pass, sizeof(PegCandidate),
           compare_peg_candidates_desc);
@@ -955,8 +1029,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     passes_completed++;
     num_candidates = evaluated_this_pass;
     double now = ctimer_elapsed_seconds(&peg_timer);
-    invoke_per_pass_callback(args, pass + 1, limit, candidates, num_candidates,
-                             num_candidates, now, now - prev_elapsed);
+    invoke_per_pass_callback(args, pass + 1, evaluated_this_pass, candidates,
+                             num_candidates, num_candidates, now,
+                             now - prev_elapsed);
     prev_elapsed = now;
   }
 

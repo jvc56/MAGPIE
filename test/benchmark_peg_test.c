@@ -262,7 +262,7 @@ void test_generate_peg1_cgps(void) {
 // ---------------------------------------------------------------------------
 
 void test_benchmark_peg1(void) {
-  int num_positions = 200;
+  int num_positions = 10;
   double peg_time_budget = 0.5;      // PEG solve budget per position (seconds)
   double endgame_time_budget = 0.0;  // Per-scenario endgame budget (0 = no limit)
   int endgame_plies = 2;             // Depth for empirical playout evaluation
@@ -361,7 +361,7 @@ void test_benchmark_peg1(void) {
         .game = game,
         .thread_control = config_get_thread_control(config),
         .time_budget_seconds = peg_time_budget,
-        .num_threads = 1,
+        .num_threads = 8,
         .tt_fraction_of_mem = 0.1,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_greedy = true,

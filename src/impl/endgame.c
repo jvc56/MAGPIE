@@ -121,6 +121,7 @@ struct EndgameSolver {
   int solve_multiple_variations;
   int requested_plies;
   int threads;
+  int thread_index_offset;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
@@ -407,6 +408,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   if (es->threads < 1) {
     es->threads = 1;
   }
+  es->thread_index_offset = endgame_args->thread_index_offset;
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -2626,8 +2628,8 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
       malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index, base_seed);
+    solver_workers[thread_index] = endgame_solver_create_worker(
+        solver, solver->thread_index_offset + thread_index, base_seed);
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
                     solver_workers[thread_index]);
   }
