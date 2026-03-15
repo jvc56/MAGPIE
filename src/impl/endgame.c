@@ -37,6 +37,7 @@
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
+#include "incr_move_gen.h"
 #include "move_gen.h"
 #include "word_prune.h"
 #include <assert.h>
@@ -174,6 +175,10 @@ typedef struct EndgameSolverWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
+  // Incremental movegen: per-ply IncrMoveLists. incr_lists[ply] holds the
+  // move list for the side-to-move at that ply. At ply N >= 2, the list is
+  // derived lazily from incr_lists[N-2] (same player, 2 plies earlier).
+  IncrMoveList *incr_lists[MAX_SEARCH_DEPTH];
 } EndgameSolverWorker;
 
 #ifndef MAX
@@ -553,6 +558,11 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
 
+  for (int ply = 0; ply < MAX_SEARCH_DEPTH; ply++) {
+    solver_worker->incr_lists[ply] =
+        incr_move_list_create(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
+  }
+
   return solver_worker;
 }
 
@@ -564,6 +574,9 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   small_move_list_destroy(solver_worker->move_list);
   arena_destroy(solver_worker->small_move_arena);
   prng_destroy(solver_worker->prng);
+  for (int ply = 0; ply < MAX_SEARCH_DEPTH; ply++) {
+    incr_move_list_destroy(solver_worker->incr_lists[ply]);
+  }
   free(solver_worker);
 }
 
@@ -820,6 +833,42 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   for (int i = 0; i < worker->move_list->count; i++) {
     arena_small_moves[i] = *(worker->move_list->small_moves[i]);
   }
+
+  // Incremental movegen: populate IncrMoveList for this ply from full movegen
+  const int ply = worker->solver->requested_plies - depth;
+  if (ply >= 0 && ply < MAX_SEARCH_DEPTH) {
+    IncrMoveList *iml = worker->incr_lists[ply];
+    incr_move_list_populate_from_small_moves(iml, worker->move_list, stm_rack,
+                                                stm_idx);
+    incr_move_list_assert_matches_small_moves(iml, worker->move_list);
+
+    // At ply >= 2: validate incremental invalidation. Copy the same player's
+    // list from 2 plies ago, invalidate it with the two intervening moves,
+    // and assert the surviving moves are a subset of the full-regen result.
+    if (ply >= 2) {
+      const IncrMoveList *base = worker->incr_lists[ply - 2];
+      // Only validate if base was generated for the same player
+      // (guards against stale data from previous ID iterations)
+      if (base->count > 0 && base->player_index == stm_idx) {
+        // Use a thread-local scratch list. We allocate on the heap to keep
+        // the stack small in deep searches.
+        IncrMoveList *scratch = incr_move_list_create(base->capacity);
+        incr_move_list_copy_into(scratch, base);
+
+        const MoveUndo *our_undo = &worker->move_undos[ply - 2];
+        const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
+
+        incr_move_list_invalidate(scratch, our_undo, opp_undo, stm_rack,
+                                  board);
+
+        // Every surviving move must appear in the full movegen result.
+        incr_move_list_assert_subset_of(scratch, iml);
+
+        incr_move_list_destroy(scratch);
+      }
+    }
+  }
+
   return worker->move_list->count;
 }
 
