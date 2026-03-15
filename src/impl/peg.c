@@ -699,6 +699,9 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   bool create_separate_kwgs =
       (dlm == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
+  Timer peg_timer;
+  ctimer_start(&peg_timer);
+
   KWG *pruned_kwgs[2] = {NULL, NULL};
   for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
        player_idx++) {
@@ -714,9 +717,6 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   // Set override KWGs on base_game so all duplicates inherit them.
   game_set_override_kwgs(base_game, pruned_kwgs[0], pruned_kwgs[1], dlm);
   game_gen_all_cross_sets(base_game);
-
-  Timer peg_timer;
-  ctimer_start(&peg_timer);
 
   // Generate all candidate moves.
   MoveList *initial_ml = move_list_create_small(PEG_MOVELIST_CAPACITY);
