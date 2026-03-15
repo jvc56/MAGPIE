@@ -828,9 +828,10 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
   };
   generate_moves(&args);
 
+  const int full_move_count = worker->move_list->count;
   SmallMove *arena_small_moves = (SmallMove *)arena_alloc(
-      worker->small_move_arena, worker->move_list->count * sizeof(SmallMove));
-  for (int i = 0; i < worker->move_list->count; i++) {
+      worker->small_move_arena, full_move_count * sizeof(SmallMove));
+  for (int i = 0; i < full_move_count; i++) {
     arena_small_moves[i] = *(worker->move_list->small_moves[i]);
   }
 
@@ -858,18 +859,31 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
         const MoveUndo *our_undo = &worker->move_undos[ply - 2];
         const MoveUndo *opp_undo = &worker->move_undos[ply - 1];
 
+        bool affected_rows[2 * BOARD_DIM];
         incr_move_list_invalidate(scratch, our_undo, opp_undo, stm_rack,
-                                  board);
+                                  board, affected_rows);
 
-        // Every surviving move must appear in the full movegen result.
-        incr_move_list_assert_subset_of(scratch, iml);
+        // Regenerate ALL rows for now to verify correctness.
+        for (int idx = 0; idx < 2 * BOARD_DIM; idx++) {
+          affected_rows[idx] = true;
+        }
+
+        // Regenerate moves for affected rows
+        incr_move_list_regenerate(
+            scratch, affected_rows, worker->game_copy,
+            worker->move_list,
+            solver_get_pruned_kwg(worker->solver, stm_idx),
+            worker->thread_index);
+
+        // The incremental result must exactly match the full movegen result.
+        incr_move_list_assert_equal_sets(scratch, iml);
 
         incr_move_list_destroy(scratch);
       }
     }
   }
 
-  return worker->move_list->count;
+  return full_move_count;
 }
 
 // Sum face values of placed tiles in a move, skipping played-through markers.

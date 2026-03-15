@@ -195,4 +195,11 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
+// Generate scoring plays (ALL_SMALL mode) for only the specified (dir, row)
+// pairs. affected_rows[dir * BOARD_DIM + row] is true for rows to process.
+// gen must be loaded via gen_load_position with MOVE_RECORD_ALL_SMALL.
+// Does NOT add the pass move — caller must handle pass separately.
+void gen_record_scoring_plays_small_for_rows(MoveGen *gen,
+                                             const bool *affected_rows);
+
 #endif

@@ -1,8 +1,10 @@
 #include "incr_move_gen.h"
 
+#include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../util/io_util.h"
+#include "move_gen.h"
 #include <assert.h>
 #include <stdlib.h>
 #include <string.h>
@@ -213,7 +215,11 @@ static bool incr_move_shares_line_with_filled(const SmallMove *sm,
 int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
                               const MoveUndo *undo2,
                               const Rack *remaining_rack,
-                              const Board *board) {
+                              const Board *board,
+                              bool *affected_rows_out) {
+  if (affected_rows_out) {
+    memset(affected_rows_out, 0, sizeof(bool) * 2 * BOARD_DIM);
+  }
   // Build packed rack counts for feasibility check
   IncrTileMapping temp_mapping;
   memset(temp_mapping.tile_to_index, 0xFF, sizeof(temp_mapping.tile_to_index));
@@ -279,6 +285,14 @@ int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
         iml->moves[write_idx] = iml->moves[read_idx];
       }
       write_idx++;
+    } else if (affected_rows_out && !small_move_is_pass(&im->small_move)) {
+      // Record which (dir, row) pair this invalidated move belonged to.
+      // bits 6-10 = movegen "row" (actual row for horiz, actual col for vert)
+      // bit 0 = direction
+      uint64_t tm = im->small_move.tiny_move;
+      int dir = (int)(tm & 1);
+      int movegen_row = (int)((tm & SMALL_MOVE_ROW_BITMASK) >> 6);
+      affected_rows_out[dir * BOARD_DIM + movegen_row] = true;
     }
   }
 
@@ -291,18 +305,7 @@ int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
   return removed;
 }
 
-void incr_move_list_copy_into(IncrMoveList *dest, const IncrMoveList *src) {
-  if (src->count > dest->capacity) {
-    dest->capacity = src->count;
-    dest->moves = (IncrMove *)realloc_or_die(dest->moves,
-                                             sizeof(IncrMove) * dest->capacity);
-  }
-  memcpy(dest->moves, src->moves, sizeof(IncrMove) * src->count);
-  dest->count = src->count;
-  dest->tile_mapping = src->tile_mapping;
-}
-
-// Compare IncrMoves by tiny_move for set-equivalence assertions.
+// Compare IncrMoves by tiny_move for set-equivalence assertions and sorting.
 static int compare_incr_moves_by_tiny_move(const void *a, const void *b) {
   const IncrMove *ma = (const IncrMove *)a;
   const IncrMove *mb = (const IncrMove *)b;
@@ -325,6 +328,110 @@ static int compare_small_moves_by_tiny_move(const void *a, const void *b) {
     return 1;
   }
   return 0;
+}
+
+void incr_move_list_regenerate(IncrMoveList *iml,
+                               const bool *affected_rows, Game *game,
+                               MoveList *move_list, const KWG *pruned_kwg,
+                               int thread_index) {
+  // Set up movegen for partial generation
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = pruned_kwg,
+      .thread_index = thread_index,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  MoveGen *gen = get_movegen(thread_index);
+  gen_load_position(gen, &args);
+
+  // Reset the move list count before partial generation
+  small_move_list_reset(move_list);
+
+  // Generate moves only for affected rows
+  gen_record_scoring_plays_small_for_rows(gen, affected_rows);
+
+  // Add newly generated moves to IncrMoveList, skipping duplicates.
+  // Build a set of existing tiny_moves for fast lookup.
+  // For small counts, a sorted array + binary search is fine.
+  // Sort existing moves by tiny_move for binary search.
+  qsort(iml->moves, iml->count, sizeof(IncrMove),
+        compare_incr_moves_by_tiny_move);
+
+  // Pre-allocate capacity for surviving + all partial gen moves + pass
+  int needed = iml->count + move_list->count + 1;
+  if (needed > iml->capacity) {
+    iml->capacity = needed;
+    iml->moves = (IncrMove *)realloc_or_die(iml->moves,
+                                            sizeof(IncrMove) * iml->capacity);
+  }
+
+  // Save the sorted count — only search within the original sorted range.
+  const int sorted_count = iml->count;
+  int new_moves_added = 0;
+  for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
+    const SmallMove *sm = move_list->small_moves[move_idx];
+    uint64_t target = sm->tiny_move;
+
+    // Binary search in the ORIGINAL sorted portion only
+    bool found = false;
+    int lo = 0;
+    int hi = sorted_count - 1;
+    while (lo <= hi) {
+      int mid = (lo + hi) / 2;
+      uint64_t mid_tm = iml->moves[mid].small_move.tiny_move;
+      if (mid_tm == target) {
+        found = true;
+        break;
+      } else if (mid_tm < target) {
+        lo = mid + 1;
+      } else {
+        hi = mid - 1;
+      }
+    }
+
+    if (!found) {
+      IncrMove *im = &iml->moves[iml->count];
+      im->small_move = *sm;
+      uint32_t tiles_used =
+          incr_move_compute_tiles_used(&iml->tile_mapping, sm);
+      incr_move_set_tiles_and_anchor(im, tiles_used, 0, 0, 0);
+      iml->count++;
+      new_moves_added++;
+    }
+  }
+
+  // Ensure pass is present
+  bool has_pass = false;
+  for (int move_idx = 0; move_idx < iml->count; move_idx++) {
+    if (small_move_is_pass(&iml->moves[move_idx].small_move)) {
+      has_pass = true;
+      break;
+    }
+  }
+  if (!has_pass) {
+    IncrMove *pass_im = &iml->moves[iml->count];
+    small_move_set_as_pass(&pass_im->small_move);
+    pass_im->tiles_and_anchor = 0;
+    iml->count++;
+  }
+
+  (void)new_moves_added;
+}
+
+void incr_move_list_copy_into(IncrMoveList *dest, const IncrMoveList *src) {
+  if (src->count > dest->capacity) {
+    dest->capacity = src->count;
+    dest->moves = (IncrMove *)realloc_or_die(dest->moves,
+                                             sizeof(IncrMove) * dest->capacity);
+  }
+  memcpy(dest->moves, src->moves, sizeof(IncrMove) * src->count);
+  dest->count = src->count;
+  dest->tile_mapping = src->tile_mapping;
 }
 
 void incr_move_list_assert_matches_small_moves(const IncrMoveList *iml,
@@ -408,4 +515,37 @@ void incr_move_list_assert_subset_of(const IncrMoveList *subset,
 
   free(sorted_sub);
   free(sorted_sup);
+}
+
+void incr_move_list_assert_equal_sets(const IncrMoveList *a,
+                                      const IncrMoveList *b) {
+  if (a->count != b->count) {
+    log_fatal("incr_move_list_assert_equal_sets: count mismatch: "
+              "incremental=%d full=%d",
+              a->count, b->count);
+  }
+
+  IncrMove *sorted_a =
+      (IncrMove *)malloc_or_die(sizeof(IncrMove) * a->count);
+  memcpy(sorted_a, a->moves, sizeof(IncrMove) * a->count);
+  qsort(sorted_a, a->count, sizeof(IncrMove), compare_incr_moves_by_tiny_move);
+
+  IncrMove *sorted_b =
+      (IncrMove *)malloc_or_die(sizeof(IncrMove) * b->count);
+  memcpy(sorted_b, b->moves, sizeof(IncrMove) * b->count);
+  qsort(sorted_b, b->count, sizeof(IncrMove), compare_incr_moves_by_tiny_move);
+
+  for (int move_idx = 0; move_idx < a->count; move_idx++) {
+    if (sorted_a[move_idx].small_move.tiny_move !=
+        sorted_b[move_idx].small_move.tiny_move) {
+      log_fatal("incr_move_list_assert_equal_sets: move mismatch at index %d: "
+                "incremental=0x%llx full=0x%llx",
+                move_idx,
+                (unsigned long long)sorted_a[move_idx].small_move.tiny_move,
+                (unsigned long long)sorted_b[move_idx].small_move.tiny_move);
+    }
+  }
+
+  free(sorted_a);
+  free(sorted_b);
 }

@@ -2606,6 +2606,44 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
   }
 }
 
+void gen_record_scoring_plays_small_for_rows(MoveGen *gen,
+                                             const bool *affected_rows) {
+  gen->tiles_played = 0;
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (!affected_rows[dir * BOARD_DIM + row]) {
+        continue;
+      }
+      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+        continue;
+      }
+      gen->current_row_index = row;
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+
+      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+      for (int col = 0; col < BOARD_DIM; col++) {
+        if (gen_cache_get_is_anchor(gen, col)) {
+          gen->current_anchor_col = col;
+          gen->last_anchor_col = last_anchor_col;
+          gen->anchor_right_extension_set =
+              gen_cache_get_right_extension_set(gen, col);
+          gen->current_anchor_highest_possible_score = EQUITY_MAX_VALUE;
+
+          recursive_gen_small(gen, col, kwg_root_node_index, col, col,
+                              gen->dir == BOARD_HORIZONTAL_DIRECTION, 0, 1, 0);
+          last_anchor_col = col;
+          if (!gen_cache_is_empty(gen, col)) {
+            last_anchor_col++;
+          }
+        }
+      }
+    }
+  }
+}
+
 void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->threshold_exceeded) {
     return;

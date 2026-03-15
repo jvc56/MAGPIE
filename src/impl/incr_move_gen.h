@@ -6,6 +6,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/board.h"
+#include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
 #include "../ent/rack.h"
@@ -101,16 +103,27 @@ void incr_move_list_populate_from_small_moves(IncrMoveList *iml,
 
 // Invalidate moves affected by two played moves (our move + opponent's move).
 // Removes moves with position overlap, rack infeasibility, or cross-set
-// violation. board must have current cross-sets valid. cross_index is the
-// cross-set index for the side-to-move.
+// proximity. board must have current cross-sets valid.
+// If affected_rows_out is non-NULL, sets affected_rows_out[dir*BOARD_DIM+row]
+// to true for each (dir, row) pair that had at least one move removed.
 // Returns number of moves removed.
 int incr_move_list_invalidate(IncrMoveList *iml, const MoveUndo *undo1,
                               const MoveUndo *undo2,
                               const Rack *remaining_rack,
-                              const Board *board);
+                              const Board *board,
+                              bool *affected_rows_out);
 
 // Copy src into dest, growing dest's capacity if needed.
 void incr_move_list_copy_into(IncrMoveList *dest, const IncrMoveList *src);
+
+// Regenerate moves for specified (dir, row) pairs. Runs movegen only for
+// those pairs, appends new moves to iml (deduplicating against existing
+// entries), and ensures pass is present. affected_rows[dir*BOARD_DIM+row]
+// indicates which pairs to process. move_list is scratch space for movegen.
+void incr_move_list_regenerate(IncrMoveList *iml,
+                               const bool *affected_rows, Game *game,
+                               MoveList *move_list, const KWG *pruned_kwg,
+                               int thread_index);
 
 // Assert that the IncrMoveList contains the same moves as the MoveList
 // (set equivalence, ignoring order). For debugging/validation.
@@ -122,6 +135,12 @@ void incr_move_list_assert_matches_small_moves(const IncrMoveList *iml,
 // moves that full movegen would not generate.
 void incr_move_list_assert_subset_of(const IncrMoveList *subset,
                                      const IncrMoveList *superset);
+
+// Assert that two IncrMoveLists contain exactly the same set of moves
+// (by tiny_move, ignoring order). Used to validate that incremental
+// invalidation + regeneration produces the same result as full movegen.
+void incr_move_list_assert_equal_sets(const IncrMoveList *a,
+                                      const IncrMoveList *b);
 
 // Check if a move's tiles are feasible with the given packed rack counts.
 // Both tiles_used and rack_packed use 7 x 3-bit fields at indices 0..6.
