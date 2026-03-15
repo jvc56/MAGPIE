@@ -436,7 +436,11 @@ void incr_move_list_copy_into(IncrMoveList *dest, const IncrMoveList *src) {
 
 void incr_move_list_assert_matches_small_moves(const IncrMoveList *iml,
                                                const MoveList *ml) {
-  assert(iml->count == ml->count);
+  if (iml->count != ml->count) {
+    log_fatal("incr_move_list_assert_matches_small_moves: count mismatch: "
+              "incr=%d ml=%d",
+              iml->count, ml->count);
+  }
 
   // Make sorted copies by tiny_move for comparison
   IncrMove *sorted_incr =
@@ -454,10 +458,16 @@ void incr_move_list_assert_matches_small_moves(const IncrMoveList *iml,
         compare_small_moves_by_tiny_move);
 
   for (int move_idx = 0; move_idx < iml->count; move_idx++) {
-    assert(sorted_incr[move_idx].small_move.tiny_move ==
-           sorted_sm[move_idx].tiny_move);
-    assert(sorted_incr[move_idx].small_move.metadata.score ==
-           sorted_sm[move_idx].metadata.score);
+    if (sorted_incr[move_idx].small_move.tiny_move !=
+        sorted_sm[move_idx].tiny_move) {
+      log_fatal("incr_move_list_assert_matches: tiny_move mismatch at %d",
+                move_idx);
+    }
+    if (sorted_incr[move_idx].small_move.metadata.score !=
+        sorted_sm[move_idx].metadata.score) {
+      log_fatal("incr_move_list_assert_matches: score mismatch at %d",
+                move_idx);
+    }
   }
 
   free(sorted_incr);

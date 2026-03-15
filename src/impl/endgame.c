@@ -133,6 +133,8 @@ struct EndgameSolver {
   _Atomic int64_t depth_deadline_ns;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
+  // Counter for incremental movegen validation passes
+  atomic_int incr_validations;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
   float initial_opp_stuck_frac;
 
@@ -462,6 +464,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
+  atomic_store(&es->incr_validations, 0);
   atomic_store(&es->root_moves_completed, 0);
   atomic_store(&es->root_moves_total, 0);
   atomic_store(&es->current_depth, 0);
@@ -877,6 +880,7 @@ int generate_stm_plays(EndgameSolverWorker *worker, int depth) {
 
         // The incremental result must exactly match the full movegen result.
         incr_move_list_assert_equal_sets(scratch, iml);
+        atomic_fetch_add(&worker->solver->incr_validations, 1);
 
         incr_move_list_destroy(scratch);
       }
@@ -2536,6 +2540,8 @@ static void log_final_pvs(const PVLine *multi_pvs, int num_pvs,
     string_builder_destroy(final_sb);
     game_destroy(final_game_copy);
   }
+  log_warn("Incremental movegen: %d validations passed",
+           atomic_load(&solver->incr_validations));
 }
 
 // Read root SmallMoves from best thread's arena, swap PV move to front,
