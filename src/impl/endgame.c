@@ -2257,6 +2257,13 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
 
+  // Set generation_id to 1 so the initial incr_lists[0] matches the first
+  // ID iteration's generation (which also starts at 1 after the bump).
+  worker->incr_generation = 1;
+  if (worker->incr_lists[0]->count > 0) {
+    worker->incr_lists[0]->generation_id = 1;
+  }
+
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
   if (!worker->solver->iterative_deepening_optim) {
@@ -2287,6 +2294,11 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     // previous ID depths. Lists with generation_id < incr_generation
     // are stale and won't be used as bases.
     worker->incr_generation++;
+    // Re-stamp the root ply's incr_list — the root board state is the same
+    // across all iterations, so incr_lists[0] is always valid.
+    if (worker->incr_lists[0]->count > 0) {
+      worker->incr_lists[0]->generation_id = worker->incr_generation;
+    }
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
       atomic_store(&worker->solver->current_depth, ply);
