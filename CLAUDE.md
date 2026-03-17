@@ -48,6 +48,10 @@ python3 find_circ_deps.py      # circular dependencies (requires: pip install ne
 
 C99 with two C11 exceptions: `_Atomic`/`<stdatomic.h>` and `static_assert`. Do not introduce other C11+ features without asking.
 
+## Style
+
+Always use `{}` braces for `if`, `else if`, and `else` blocks, even when the body is a single statement. No exceptions.
+
 ## Naming
 
 Avoid single-character or terse variable names.
