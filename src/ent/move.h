@@ -635,6 +635,11 @@ static inline void move_list_insert_spare_move(MoveList *ml, Equity equity) {
   }
 }
 
+static inline void move_list_add_move(MoveList *ml, const Move *move) {
+  move_copy(ml->spare_move, move);
+  move_list_insert_spare_move(ml, move->equity);
+}
+
 // Converts the MoveList from a min heap
 // to a descending sorted array. The
 // count stays constant.
