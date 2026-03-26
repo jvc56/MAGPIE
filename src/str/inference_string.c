@@ -253,58 +253,15 @@ void string_builder_add_inference_description(
   string_grid_destroy(sg);
 }
 
-void string_builder_add_inference(StringBuilder *inference_string,
-                                  InferenceResults *inference_results,
-                                  const LetterDistribution *ld,
-                                  int max_num_leaves_to_display,
-                                  bool use_ucgi_format) {
-  StringBuilder *tmp_sb = string_builder_create();
-
-  int target_number_of_tiles_exchanged =
-      inference_results_get_target_number_of_tiles_exchanged(inference_results);
-  const Rack *target_played_tiles =
-      inference_results_get_target_played_tiles(inference_results);
-  const Rack *target_unplayed_tiles =
-      inference_results_get_target_known_unplayed_tiles(inference_results);
-  int number_of_tiles_played_or_exchanged =
-      rack_get_total_letters(target_played_tiles);
-  bool is_exchange = false;
-  if (target_number_of_tiles_exchanged > 0) {
-    number_of_tiles_played_or_exchanged = target_number_of_tiles_exchanged;
-    is_exchange = true;
-  }
-
-  // Create a transient stat to use the stat functions
-  Stat *letter_stat = stat_create(false);
-
-  const Rack *bag_as_rack =
-      inference_results_get_bag_as_rack(inference_results);
-
-  string_builder_add_inference_type(
-      inference_string, inference_results, INFERENCE_TYPE_LEAVE, ld,
-      target_unplayed_tiles, bag_as_rack, letter_stat,
-      number_of_tiles_played_or_exchanged, use_ucgi_format, tmp_sb);
-  inference_stat_t common_leaves_type = INFERENCE_TYPE_LEAVE;
-  if (is_exchange) {
-    common_leaves_type = INFERENCE_TYPE_RACK;
-    string_builder_add_string(inference_string, "\n\nTiles Exchanged\n\n");
-    Rack unknown_exchange_rack;
-    rack_set_dist_size_and_reset(&unknown_exchange_rack, ld_get_size(ld));
-    string_builder_add_inference_type(
-        inference_string, inference_results, INFERENCE_TYPE_EXCHANGED, ld,
-        &unknown_exchange_rack, bag_as_rack, letter_stat,
-        number_of_tiles_played_or_exchanged, use_ucgi_format, tmp_sb);
-    string_builder_add_string(inference_string, "\n\nRack\n\n");
-    string_builder_add_inference_type(inference_string, inference_results,
-                                      INFERENCE_TYPE_RACK, ld,
-                                      target_unplayed_tiles, bag_as_rack,
-                                      letter_stat, 0, use_ucgi_format, tmp_sb);
-  }
-  stat_destroy(letter_stat);
-  string_builder_add_string(inference_string, "\n");
-
+StringGrid *get_common_leaves_string_grid(
+    InferenceResults *inference_results, const int max_num_leaves_to_display,
+    const bool use_ucgi_format, StringBuilder *tmp_sb, const bool is_exchange,
+    const LetterDistribution *ld, const inference_stat_t common_leaves_type) {
   const LeaveRackList *leave_rack_list =
       inference_results_get_leave_rack_list(inference_results);
+  if (!leave_rack_list || leave_rack_list_get_count(leave_rack_list) == 0) {
+    return NULL;
+  }
   // Get the list of most common leaves
   int num_leaves_to_display = leave_rack_list_get_count(leave_rack_list);
   if (num_leaves_to_display > max_num_leaves_to_display) {
@@ -399,7 +356,64 @@ void string_builder_add_inference(StringBuilder *inference_string,
     }
     curr_row++;
   }
-  string_builder_add_string_grid(inference_string, sg_common_leaves, false);
+  return sg_common_leaves;
+}
+
+void string_builder_add_inference(StringBuilder *inference_string,
+                                  InferenceResults *inference_results,
+                                  const LetterDistribution *ld,
+                                  int max_num_leaves_to_display,
+                                  bool use_ucgi_format) {
+  StringBuilder *tmp_sb = string_builder_create();
+
+  int target_number_of_tiles_exchanged =
+      inference_results_get_target_number_of_tiles_exchanged(inference_results);
+  const Rack *target_played_tiles =
+      inference_results_get_target_played_tiles(inference_results);
+  const Rack *target_unplayed_tiles =
+      inference_results_get_target_known_unplayed_tiles(inference_results);
+  int number_of_tiles_played_or_exchanged =
+      rack_get_total_letters(target_played_tiles);
+  bool is_exchange = false;
+  if (target_number_of_tiles_exchanged > 0) {
+    number_of_tiles_played_or_exchanged = target_number_of_tiles_exchanged;
+    is_exchange = true;
+  }
+
+  // Create a transient stat to use the stat functions
+  Stat *letter_stat = stat_create(false);
+
+  const Rack *bag_as_rack =
+      inference_results_get_bag_as_rack(inference_results);
+
+  string_builder_add_inference_type(
+      inference_string, inference_results, INFERENCE_TYPE_LEAVE, ld,
+      target_unplayed_tiles, bag_as_rack, letter_stat,
+      number_of_tiles_played_or_exchanged, use_ucgi_format, tmp_sb);
+  inference_stat_t common_leaves_type = INFERENCE_TYPE_LEAVE;
+  if (is_exchange) {
+    common_leaves_type = INFERENCE_TYPE_RACK;
+    string_builder_add_string(inference_string, "\n\nTiles Exchanged\n\n");
+    Rack unknown_exchange_rack;
+    rack_set_dist_size_and_reset(&unknown_exchange_rack, ld_get_size(ld));
+    string_builder_add_inference_type(
+        inference_string, inference_results, INFERENCE_TYPE_EXCHANGED, ld,
+        &unknown_exchange_rack, bag_as_rack, letter_stat,
+        number_of_tiles_played_or_exchanged, use_ucgi_format, tmp_sb);
+    string_builder_add_string(inference_string, "\n\nRack\n\n");
+    string_builder_add_inference_type(inference_string, inference_results,
+                                      INFERENCE_TYPE_RACK, ld,
+                                      target_unplayed_tiles, bag_as_rack,
+                                      letter_stat, 0, use_ucgi_format, tmp_sb);
+  }
+  stat_destroy(letter_stat);
+  string_builder_add_string(inference_string, "\n");
+  StringGrid *sg_common_leaves = get_common_leaves_string_grid(
+      inference_results, max_num_leaves_to_display, use_ucgi_format, tmp_sb,
+      is_exchange, ld, common_leaves_type);
+  if (sg_common_leaves) {
+    string_builder_add_string_grid(inference_string, sg_common_leaves, false);
+  }
   string_builder_add_string(inference_string, "\n");
   if (!use_ucgi_format) {
     string_builder_clear(tmp_sb);

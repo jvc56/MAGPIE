@@ -6,6 +6,7 @@
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "bai_test.h"
+#include "benchmark_endgame_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -24,6 +25,7 @@
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
+#include "infer_cmp_test.h"
 #include "infer_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
@@ -45,7 +47,6 @@
 #include "string_util_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
-#include "wasm_api_test.h"
 #include "win_pct_test.h"
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
@@ -98,7 +99,6 @@ static TestEntry test_table[] = {
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
-    {"wasm", test_wasm_api},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
@@ -113,9 +113,26 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {NULL, NULL} // Sentinel value to mark end of array
+};
+
+// Tests that only run when explicitly requested (not included in run_all)
+static TestEntry on_demand_test_table[] = {
+    {"endgame_wasm", test_endgame_wasm},
+    {"infercmp", test_infer_cmp},
+    {"genstuck", test_generate_stuck_cgps},
+    {"gennonstuck", test_generate_nonstuck_cgps},
+    {"gennonstuck2", test_generate_nonstuck_cgps2},
+    {"benchfp", test_benchmark_forced_pass},
+    {"benchns", test_benchmark_nonstuck},
+    {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"multipv", test_multi_pv},
+    {"kue", test_kue},
+    {"monsterq", test_monster_q},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -130,6 +147,13 @@ void run_test(const char *subtest) {
   for (int i = 0; test_table[i].name != NULL; ++i) {
     if (strcmp(subtest, test_table[i].name) == 0) {
       test_table[i].func();
+      return;
+    }
+  }
+  // Check on-demand tests (not run by run_all)
+  for (int i = 0; on_demand_test_table[i].name != NULL; ++i) {
+    if (strcmp(subtest, on_demand_test_table[i].name) == 0) {
+      on_demand_test_table[i].func();
       return;
     }
   }

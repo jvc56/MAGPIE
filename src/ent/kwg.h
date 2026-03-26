@@ -180,10 +180,17 @@ static inline void kwg_write_to_file(const KWG *kwg, const char *filename,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+#if IS_LITTLE_ENDIAN
+  // On little-endian systems, write the entire array at once
+  fwrite_or_die(kwg->nodes, sizeof(uint32_t), kwg->number_of_nodes, stream,
+                "kwg nodes");
+#else
+  // On big-endian systems, convert each node
   for (int i = 0; i < kwg->number_of_nodes; i++) {
     const uint32_t node = htole32(kwg->nodes[i]);
     fwrite_or_die(&node, sizeof(uint32_t), 1, stream, "kwg node");
   }
+#endif
   fclose_or_die(stream);
 }
 

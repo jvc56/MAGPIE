@@ -1,4 +1,6 @@
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/static_eval_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
@@ -124,6 +126,8 @@ void assert_opening_penalties(Game *game, const char *data_paths,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   generate_moves_for_game(&move_gen_args);
   const Move *move = move_list_get_move(move_list, 0);
@@ -284,7 +288,7 @@ void test_board_layout_correctness(void) {
   load_cgp_or_die(game, ENTASIS_OPENING_CGP);
 
   ValidatedMoves *vms = validated_moves_create_and_assert_status(
-      game, 0, "7J.FRAWZEY", false, false, false,
+      game, 0, "7J FRAWZEY", false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OUT_OF_BOUNDS);
   validated_moves_destroy(vms);
 
@@ -292,7 +296,7 @@ void test_board_layout_correctness(void) {
   load_game_with_test_board(game, data_paths, "5_by_5_bricked_box_15");
 
   vms = validated_moves_create_and_assert_status(
-      game, 0, "8H.FRAWZEY", false, false, false,
+      game, 0, "8H FRAWZEY", false, false,
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_OVER_BRICK);
   validated_moves_destroy(vms);
 

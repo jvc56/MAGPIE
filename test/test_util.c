@@ -2,6 +2,7 @@
 
 #include "../src/def/board_defs.h"
 #include "../src/def/cross_set_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -32,6 +33,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/impl/wmp_move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
@@ -169,7 +171,8 @@ char *cross_set_to_string(const LetterDistribution *ld, uint64_t input) {
 Config *config_create_default_test(void) {
   ErrorStack *error_stack = error_stack_create();
   ConfigArgs args = {.data_paths = DEFAULT_TEST_DATA_PATH,
-                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME};
+                     .settings_filename = DEFAULT_TEST_SETTINGS_FILENAME,
+                     .use_wmp = true};
   Config *config = config_create(&args, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     error_stack_reset(error_stack);
@@ -178,7 +181,7 @@ Config *config_create_default_test(void) {
   error_stack_destroy(error_stack);
   load_and_exec_config_or_die(
       config, "set -threads 1 -savesettings false -hr "
-              "false -numplays 15 -im 0 -minp 100 -autosave false");
+              "false -numplays 15 -ima 0 -minp 100 -autosave false");
   return config;
 }
 
@@ -371,6 +374,8 @@ void play_top_n_equity_move(Game *game, int n) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&args);
@@ -717,18 +722,21 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
                                           const char *move_tiles,
                                           const int move_score,
                                           const bool play_move_on_board) {
-  const Player *player =
-      game_get_player(game, game_get_player_on_turn_index(game));
-  Rack *player_rack = player_get_rack(player);
   MoveList *move_list = move_list_create(1);
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
-  rack_set_to_string(game_get_ld(game), player_rack, rack_string);
+  const int player_index = game_get_player_on_turn_index(game);
+
+  return_rack_to_bag(game, 0);
+  return_rack_to_bag(game, 1);
+  draw_rack_string_from_bag(game, player_index, rack_string);
 
   generate_moves_for_game(&move_gen_args);
   char *gen_move_string;
@@ -744,18 +752,21 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   char *move_tiles_no_parens = remove_parentheses(move_tiles);
   char *vm_move_string;
   if (strings_equal(move_position, "exch")) {
-    vm_move_string = get_formatted_string("ex.%s", move_tiles_no_parens);
+    vm_move_string = get_formatted_string("ex %s", move_tiles_no_parens);
   } else {
     vm_move_string =
-        get_formatted_string("%s.%s", move_position, move_tiles_no_parens);
+        get_formatted_string("%s %s", move_position, move_tiles_no_parens);
   }
   free(move_tiles_no_parens);
 
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(game, 0, vm_move_string, false,
-                                               true, false, error_stack);
+  ValidatedMoves *vms = validated_moves_create(
+      game, player_index, vm_move_string, false, false, error_stack);
   free(vm_move_string);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  if (error_stack_top(error_stack) != ERROR_STATUS_SUCCESS) {
+    error_stack_print_and_reset(error_stack);
+    assert(0);
+  }
 
   if (play_move_on_board) {
     play_move(move_list_get_move(move_list, 0), game, NULL);
@@ -767,17 +778,17 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
 }
 
 ValidatedMoves *validated_moves_create_and_assert_status(
-    const Game *game, int player_index, const char *ucgi_moves_string,
-    bool allow_phonies, bool allow_unknown_exchanges, bool allow_playthrough,
-    error_code_t expected_status) {
+    const Game *game, int player_index, const char *moves_string,
+    bool allow_phonies, bool allow_playthrough, error_code_t expected_status) {
   ErrorStack *error_stack = error_stack_create();
-  ValidatedMoves *vms = validated_moves_create(
-      game, player_index, ucgi_moves_string, allow_phonies,
-      allow_unknown_exchanges, allow_playthrough, error_stack);
+  ValidatedMoves *vms =
+      validated_moves_create(game, player_index, moves_string, allow_phonies,
+                             allow_playthrough, error_stack);
   const bool ok = error_stack_top(error_stack) == expected_status;
   if (!ok) {
-    printf("validated_moves_create return unexpected status for %s: %d != %d\n",
-           ucgi_moves_string, error_stack_top(error_stack), expected_status);
+    printf(
+        "validated_moves_create return unexpected status for >%s<: %d != %d\n",
+        moves_string, error_stack_top(error_stack), expected_status);
     error_stack_print_and_reset(error_stack);
     assert(0);
   }
@@ -785,13 +796,13 @@ ValidatedMoves *validated_moves_create_and_assert_status(
   return vms;
 }
 
-error_code_t config_simulate_and_return_status(const Config *config,
+error_code_t config_simulate_and_return_status(Config *config, SimCtx **sim_ctx,
                                                Rack *known_opp_rack,
                                                SimResults *sim_results) {
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  config_simulate(config, known_opp_rack, sim_results, error_stack);
+  config_simulate(config, sim_ctx, known_opp_rack, sim_results, error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
     printf("config simulate finished with error: %d\n", status);
@@ -809,9 +820,16 @@ ValidatedMoves *assert_validated_move_success(Game *game, const char *cgp_str,
   load_cgp_or_die(game, cgp_str);
   ErrorStack *error_stack = error_stack_create();
   ValidatedMoves *vms =
-      validated_moves_create(game, player_index, move_str, allow_phonies, true,
+      validated_moves_create(game, player_index, move_str, allow_phonies,
                              allow_playthrough, error_stack);
-  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  const bool success = error_stack_top(error_stack) == ERROR_STATUS_SUCCESS;
+  if (!success) {
+    printf(
+        "validated_moves_create failed with status %d for move string: >%s<\n",
+        error_stack_top(error_stack), move_str);
+    error_stack_print_and_reset(error_stack);
+    assert(0);
+  }
   error_stack_destroy(error_stack);
   return vms;
 }
@@ -974,14 +992,6 @@ void assert_rack_score(const LetterDistribution *ld, const Rack *rack,
   assert(rack_get_score(ld, rack) == int_to_equity(expected_score));
 }
 
-void assert_validated_moves_challenge_points(const ValidatedMoves *vms, int i,
-                                             int expected_challenge_points) {
-  const Equity expected_challenge_points_eq =
-      int_to_equity(expected_challenge_points);
-  assert(validated_moves_get_challenge_points(vms, i) ==
-         expected_challenge_points_eq);
-}
-
 void assert_anchor_equity_int(const AnchorHeap *ah, int i, int expected) {
   assert_anchor_equity_exact(ah, i, int_to_equity(expected));
 }
@@ -1010,6 +1020,8 @@ void generate_anchors_for_test(Game *game) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   gen_load_position(gen, &args);
   gen_look_up_leaves_and_record_exchanges(gen);

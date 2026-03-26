@@ -1,3 +1,10 @@
+ifeq ($(origin NPROCS), undefined)
+NPROCS := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)
+endif
+ifeq ($(filter -j% --jobs%,$(MAKEFLAGS)),)
+MAKEFLAGS += -j$(NPROCS)
+endif
+
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
@@ -38,18 +45,20 @@ cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 cflags.dll_dev = -g -O0 -fpic -Wall
 cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
 
 lflags.cov := --coverage
 
-ldflags.dev := -Llib -pthread $(FSAN_ARG)
-ldflags.thread := -Llib -pthread -fsanitize=thread
-ldflags.vlg := -Llib -pthread
-ldflags.release := -Llib -pthread
-ldflags.cov := -Llib -pthread
-ldflags.dll_dev := -Llib -pthread
-ldflags.dll_release := -Llib -pthread
+ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.thread := -pthread -fsanitize=thread
+ldflags.vlg := -pthread
+ldflags.release := -pthread
+ldflags.profile := -pthread
+ldflags.cov := -pthread
+ldflags.dll_dev := -pthread
+ldflags.dll_release := -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 

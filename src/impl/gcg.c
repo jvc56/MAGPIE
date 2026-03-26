@@ -3,7 +3,6 @@
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
-#include "../def/letter_distribution_defs.h"
 #include "../def/validated_move_defs.h"
 #include "../ent/board_layout.h"
 #include "../ent/equity.h"
@@ -103,6 +102,8 @@ struct GCGParser {
 #define GCG_TILE_DISTRIBUTION_STRING "tile-distribution"
 #define GCG_PLAYER_STRING "player"
 #define GCG_RACK_STRING "rack"
+
+#define GCG_DESCRIPTION_CREATION_TEXT "Created with MAGPIE"
 
 typedef struct TokenStringRegexPair {
   gcg_token_t token;
@@ -433,12 +434,6 @@ void add_letters_played_to_string_builder(StringBuilder *sb,
                                           int group_index) {
   char *matching_group_string =
       get_matching_group_as_string(gcg_parser, gcg_line, group_index);
-  size_t matching_group_string_length = string_length(matching_group_string);
-  for (size_t i = 0; i < matching_group_string_length; i++) {
-    if (matching_group_string[i] == ASCII_PLAYED_THROUGH) {
-      matching_group_string[i] = ASCII_UCGI_PLAYED_THROUGH;
-    }
-  }
   string_builder_add_string(sb, matching_group_string);
   free(matching_group_string);
 }
@@ -482,7 +477,6 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
     // The following pragmas must always be before move events
     // and must be unique
   case GCG_TITLE_TOKEN:
-  case GCG_DESCRIPTION_TOKEN:
   case GCG_ID_TOKEN:
   case GCG_LEXICON_TOKEN:
   case GCG_BOARD_LAYOUT_TOKEN:
@@ -504,6 +498,7 @@ void common_gcg_token_validation(GCGParser *gcg_parser, gcg_token_t token,
     break;
     // The following pragmas must always be before move events
   case GCG_PLAYER_TOKEN:
+  case GCG_DESCRIPTION_TOKEN:
     if (number_of_events > 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_PRAGMA_SUCCEEDED_EVENT,
@@ -722,9 +717,19 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     break;
   }
   case GCG_DESCRIPTION_TOKEN: {
-    char *description = get_matching_group_as_string(gcg_parser, gcg_line, 1);
-    game_history_set_description(game_history, description);
-    free(description);
+    char *new_description =
+        get_matching_group_as_string(gcg_parser, gcg_line, 1);
+    const char *existing_description =
+        game_history_get_description(game_history);
+    if (existing_description != NULL) {
+      char *combined =
+          get_formatted_string("%s\n%s", existing_description, new_description);
+      game_history_set_description(game_history, combined);
+      free(combined);
+    } else {
+      game_history_set_description(game_history, new_description);
+    }
+    free(new_description);
     break;
   }
   case GCG_ID_TOKEN: {
@@ -777,16 +782,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     // Position
     add_matching_group_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 3);
-    string_builder_add_char(move_string_builder, '.');
+    string_builder_add_char(move_string_builder, ' ');
 
     // Play
     add_letters_played_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 4);
-    string_builder_add_char(move_string_builder, '.');
 
-    // Rack
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
       string_builder_destroy(move_string_builder);
@@ -1003,25 +1004,15 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
     game_event_set_player_index(game_event, player_index);
     game_event_set_type(game_event, GAME_EVENT_PASS);
 
-    move_string_builder = string_builder_create();
-
-    // Add the pass to the builder
-    string_builder_add_formatted_string(move_string_builder, "%s.",
-                                        UCGI_PASS_MOVE);
-    // Add the rack to the builder
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
-      string_builder_destroy(move_string_builder);
       error_stack_push(
           error_stack, ERROR_STATUS_GCG_PARSE_RACK_MALFORMED,
           get_formatted_string("could not parse pass rack: %s", gcg_line));
       return false;
     }
 
-    cgp_move_string = string_builder_dump(move_string_builder, NULL);
-    string_builder_destroy(move_string_builder);
+    cgp_move_string = string_duplicate(UCGI_PASS_MOVE);
 
     copy_cumulative_score_to_game_event(gcg_parser, game_event, gcg_line, 3,
                                         error_stack);
@@ -1121,17 +1112,12 @@ bool parse_gcg_line(GCGParser *gcg_parser, const char *gcg_line,
 
     move_string_builder = string_builder_create();
 
-    // Exchange token
-    string_builder_add_formatted_string(move_string_builder, "%s.",
+    // Exchange token and tiles exchanged
+    string_builder_add_formatted_string(move_string_builder, "%s ",
                                         UCGI_EXCHANGE_MOVE);
-    // Tiles exchanged
     add_matching_group_to_string_builder(move_string_builder, gcg_parser,
                                          gcg_line, 3);
-    string_builder_add_char(move_string_builder, '.');
 
-    // Rack
-    add_matching_group_to_string_builder(move_string_builder, gcg_parser,
-                                         gcg_line, 2);
     if (!set_rack_from_matching(gcg_parser, gcg_line, 2,
                                 game_event_get_rack(game_event))) {
       string_builder_destroy(move_string_builder);
@@ -1236,6 +1222,9 @@ void parse_gcg_events(GCGParser *gcg_parser, Game *game,
 
   finalize_note(gcg_parser);
 
+  // Remove trailing overtime penalties for incomplete games
+  game_history_trim_trailing_overtime_penalties(gcg_parser->game_history);
+
   // Play through the game to detected errors
   game_play_n_events(gcg_parser->game_history, game,
                      game_history_get_num_events(gcg_parser->game_history),
@@ -1247,8 +1236,25 @@ void string_builder_add_gcg(StringBuilder *gcg_sb, const LetterDistribution *ld,
                             const bool star_last_played_move) {
   string_builder_add_formatted_string(gcg_sb, "#%s UTF-8\n",
                                       GCG_CHAR_ENCODING_STRING);
-  string_builder_add_formatted_string(gcg_sb, "#%s Created with MAGPIE\n",
-                                      GCG_DESCRIPTION_STRING);
+  const char *description = game_history_get_description(game_history);
+  if (!description || !has_iprefix("Created with", description)) {
+    string_builder_add_formatted_string(gcg_sb, "#%s %s\n",
+                                        GCG_DESCRIPTION_STRING,
+                                        GCG_DESCRIPTION_CREATION_TEXT);
+  }
+  if (description) {
+    StringSplitter *description_lines =
+        split_string_by_newline(description, true);
+    const int number_of_description_lines =
+        string_splitter_get_number_of_items(description_lines);
+    for (int i = 0; i < number_of_description_lines; i++) {
+      const char *description_line =
+          string_splitter_get_item(description_lines, i);
+      string_builder_add_formatted_string(
+          gcg_sb, "#%s %s\n", GCG_DESCRIPTION_STRING, description_line);
+    }
+    string_splitter_destroy(description_lines);
+  }
   const char *id_auth = game_history_get_id_auth(game_history);
   const char *uid = game_history_get_uid(game_history);
   if (id_auth && !uid) {

@@ -12,6 +12,7 @@
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/wmp.h"
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
@@ -25,7 +26,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
                                 const char *output_name,
                                 DictionaryWordList *strings,
                                 ConversionResults *conversion_results,
-                                ErrorStack *error_stack) {
+                                int num_threads, ErrorStack *error_stack) {
 
   char *input_filename = data_filepaths_get_readable_filename(
       data_paths, input_name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
@@ -33,37 +34,45 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     return;
   }
 
-  FILE *input_file = fopen_safe(input_filename, "r", error_stack);
+  FILE *input_file = stream_from_filename(input_filename, error_stack);
   free(input_filename);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+
+  // Initialize fast converter once for O(1) ASCII lookups
+  FastStringConverter fc;
+  fast_converter_init(&fc, ld);
+
   char *line = NULL;
   size_t len = 0;
   ssize_t read;
+  // Use BOARD_DIM + 2 so we can distinguish "too long" (mls_length ==
+  // BOARD_DIM + 1) from "invalid letter" (mls_length == -1). Multi-byte
+  // or multichar tiles (e.g. UTF-8, [QU]) mean raw byte length can exceed
+  // BOARD_DIM even when the word has <= BOARD_DIM tiles.
+  MachineLetter mls[BOARD_DIM + 2];
   while ((read = getline_ignore_carriage_return(&line, &len, input_file)) !=
          -1) {
     if (read > 0 && line[read - 1] == '\n') {
       line[read - 1] = '\0';
+      read--;
     }
-    const size_t line_length = string_length(line);
-    MachineLetter *mls = malloc_or_die(line_length);
-    const int mls_length = ld_str_to_mls(ld, line, false, mls, line_length);
-    if (mls_length > BOARD_DIM) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
-          get_formatted_string(
-              "could not convert word '%s' with a length greater than %d", line,
-              mls_length));
-      free(mls);
-      break;
-    }
+    const int mls_length =
+        fast_str_to_mls(&fc, line, false, mls, BOARD_DIM + 2);
     if (mls_length < 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
           get_formatted_string(
               "could not convert word '%s' with invalid letter", line));
-      free(mls);
+      break;
+    }
+    if (mls_length > BOARD_DIM) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG,
+          get_formatted_string(
+              "could not convert word '%s' with a length greater than %d", line,
+              BOARD_DIM));
       break;
     }
     if (!unblank_machine_letters(mls, mls_length)) {
@@ -71,7 +80,6 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_INVALID_LETTER,
           get_formatted_string(
               "could not convert word '%s' with invalid letter", line));
-      free(mls);
       break;
     }
     if (mls_length < 2) {
@@ -79,11 +87,9 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
           error_stack, ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_SHORT,
           get_formatted_string("could not convert word less than length 2: %s",
                                line));
-      free(mls);
       break;
     }
     dictionary_word_list_add_word(strings, mls, mls_length);
-    free(mls);
   }
   if (line != NULL) {
     free(line);
@@ -99,7 +105,7 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-    WMP *wmp = make_wmp_from_words(strings, ld);
+    WMP *wmp = make_wmp_from_words(strings, ld, num_threads);
     wmp_write_to_file(wmp, wmp_output_filename, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_push(
@@ -141,7 +147,7 @@ void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
                         const char *output_name,
-                        ConversionResults *conversion_results,
+                        ConversionResults *conversion_results, int num_threads,
                         ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
@@ -150,7 +156,7 @@ void convert_with_names(const LetterDistribution *ld,
     DictionaryWordList *strings = dictionary_word_list_create();
     convert_from_text_with_dwl(ld, conversion_type, data_paths, input_name,
                                output_name, strings, conversion_results,
-                               error_stack);
+                               num_threads, error_stack);
     dictionary_word_list_destroy(strings);
   } else if (conversion_type == CONVERT_DAWG2TEXT) {
     KWG *kwg = kwg_create(data_paths, input_name, error_stack);
@@ -160,6 +166,25 @@ void convert_with_names(const LetterDistribution *ld,
       dictionary_word_list_write_to_file(words, ld, data_paths, output_name,
                                          error_stack);
       dictionary_word_list_destroy(words);
+    }
+    kwg_destroy(kwg);
+  } else if (conversion_type == CONVERT_DAWG2WORDMAP) {
+    KWG *kwg = kwg_create(data_paths, input_name, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      char *wmp_output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_WORDMAP, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        WMP *wmp = make_wmp_from_kwg(kwg, ld, num_threads);
+        wmp_write_to_file(wmp, wmp_output_filename, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+              get_formatted_string("could not write wordmap to output file: %s",
+                                   wmp_output_filename));
+        }
+        wmp_destroy(wmp);
+        free(wmp_output_filename);
+      }
     }
     kwg_destroy(kwg);
   } else if (conversion_type == CONVERT_CSV2KLV) {
@@ -200,6 +225,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_KLV2CSV;
   } else if (strings_equal(conversion_type_string, "text2wordmap")) {
     conversion_type = CONVERT_TEXT2WORDMAP;
+  } else if (strings_equal(conversion_type_string, "dawg2wordmap")) {
+    conversion_type = CONVERT_DAWG2WORDMAP;
   }
   return conversion_type;
 }
@@ -243,6 +270,6 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
 
   convert_with_names(ld, conversion_type, args->data_paths,
                      args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, error_stack);
+                     conversion_results, args->num_threads, error_stack);
   ld_destroy(ld);
 }

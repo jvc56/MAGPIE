@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 enum {
   MAX_CACHE_SIZE = 32,
@@ -24,6 +25,9 @@ static FileCache file_cache = {0};
 
 FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   // Look in cache.
+  if (!filename) {
+    log_fatal("attempted to get stream for null filename");
+  }
   for (int i = 0; i < file_cache.num_items; i++) {
     if (strings_equal(file_cache.entries[i].filename, filename)) {
       log_debug("Found %s in cache...", filename);
@@ -36,6 +40,15 @@ FILE *stream_from_filename(const char *filename, ErrorStack *error_stack) {
   FILE *stream;
   stream = fopen_safe(filename, "r", error_stack);
   return stream;
+}
+
+char *fileproxy_get_string_from_filename(const char *filename,
+                                         ErrorStack *error_stack) {
+  FILE *file = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  return get_string_from_file_handle(file, filename, error_stack);
 }
 
 void precache_file_data(const char *filename, const char *raw_data,
@@ -57,4 +70,15 @@ void fileproxy_destroy_cache(void) {
     free(file_cache.entries[i].raw_data);
   }
   file_cache.num_items = 0;
+}
+
+bool fileproxy_file_exists(const char *filename) {
+  // Check cache first
+  for (int i = 0; i < file_cache.num_items; i++) {
+    if (strings_equal(file_cache.entries[i].filename, filename)) {
+      return true;
+    }
+  }
+  // Fall back to filesystem check
+  return access(filename, F_OK | R_OK) == 0;
 }

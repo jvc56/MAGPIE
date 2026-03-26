@@ -10,7 +10,8 @@ void assert_win_pct_get(const float actual, const double expected) {
 
 void test_win_pct(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1");
+      "set -lex CSW21 -s1 score -s2 score -r1 all -r2 all -numplays 1 "
+      "-winpct winpct");
   const WinPct *win_pct = config_get_win_pcts(config);
   // Test "corners"
   assert_win_pct_get(win_pct_get(win_pct, -600, 1), 0.0);

@@ -1,6 +1,7 @@
 #include "board_layout.h"
 
 #include "../def/board_defs.h"
+#include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bonus_square.h"
@@ -133,13 +134,18 @@ void board_layout_load(BoardLayout *bl, const char *data_paths,
   char *layout_filename = data_filepaths_get_readable_filename(
       data_paths, board_layout_name, DATA_FILEPATH_TYPE_LAYOUT, error_stack);
   if (error_stack_is_empty(error_stack)) {
-    StringSplitter *layout_rows =
-        split_file_by_newline(layout_filename, error_stack);
+    char *file_contents =
+        fileproxy_get_string_from_filename(layout_filename, error_stack);
     if (error_stack_is_empty(error_stack)) {
-      board_layout_parse_split_file(bl, board_layout_name, layout_rows,
-                                    error_stack);
+      StringSplitter *layout_rows =
+          split_string_by_newline(file_contents, error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        board_layout_parse_split_file(bl, board_layout_name, layout_rows,
+                                      error_stack);
+      }
+      string_splitter_destroy(layout_rows);
     }
-    string_splitter_destroy(layout_rows);
+    free(file_contents);
   }
   free(layout_filename);
 }

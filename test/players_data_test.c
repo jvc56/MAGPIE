@@ -30,7 +30,7 @@ void assert_players_data(const PlayersData *players_data,
 void test_for_data_type(const char **data_names, const char *data_paths,
                         players_data_t players_data_type,
                         int number_of_data_names, ErrorStack *error_stack) {
-  PlayersData *players_data = players_data_create();
+  PlayersData *players_data = players_data_create(true);
   // Verify initial NULL values
   for (int i = 0; i < NUMBER_OF_DATA; i++) {
     assert(!players_data_get_is_shared(players_data, (players_data_t)i));
@@ -74,7 +74,7 @@ void test_for_data_type(const char **data_names, const char *data_paths,
 }
 
 void test_unshared_data(void) {
-  PlayersData *players_data = players_data_create();
+  PlayersData *players_data = players_data_create(true);
 
   move_sort_t p1_move_sort_type = MOVE_SORT_SCORE;
   move_record_t p1_move_record_type = MOVE_RECORD_ALL;
@@ -98,7 +98,7 @@ void test_unshared_data(void) {
 }
 
 void test_reloaded_data(void) {
-  PlayersData *players_data = players_data_create();
+  PlayersData *players_data = players_data_create(true);
   ErrorStack *error_stack = error_stack_create();
 
   players_data_set_move_sort_type(players_data, 0, MOVE_SORT_SCORE);
@@ -136,7 +136,7 @@ void test_reloaded_data(void) {
 }
 
 void test_null_data(void) {
-  PlayersData *players_data = players_data_create();
+  PlayersData *players_data = players_data_create(true);
   ErrorStack *error_stack = error_stack_create();
 
   // Confirm that WMP can be set to NULL without errors.

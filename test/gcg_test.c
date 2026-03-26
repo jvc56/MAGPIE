@@ -1205,6 +1205,165 @@ void test_vs_jeremy_gcg(GameHistory *game_history) {
   config_destroy(config);
 }
 
+void test_multiple_description_pragmas(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+
+  StringBuilder *multi_desc_sb = string_builder_create();
+
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+
+  for (int i = 0; i < num_lines; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    string_builder_add_formatted_string(multi_desc_sb, "%s\n", line);
+    if (strings_equal(line, "#description Created with Macondo")) {
+      string_builder_add_string(multi_desc_sb, "#description Second line\n");
+      string_builder_add_string(multi_desc_sb, "#description Third line\n");
+    }
+  }
+
+  char *multi_desc_gcg = string_builder_dump(multi_desc_sb, NULL);
+
+  string_builder_destroy(multi_desc_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  assert(test_parse_gcg_string(multi_desc_gcg, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  free(multi_desc_gcg);
+
+  assert_strings_equal(game_history_get_description(game_history),
+                       "Created with Macondo\nSecond line\nThird line");
+
+  config_destroy(config);
+}
+
+void test_description_write(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  // Case 0: No description (NULL) — should still emit the MAGPIE creation line
+  // and no other description lines.
+  assert(test_parse_gcg("success", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  assert(game_history_get_description(game_history) == NULL);
+  StringBuilder *gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+  const char *output = string_builder_peek(gcg_sb);
+  assert(has_substring(output, "#description Created with MAGPIE\n"));
+  string_builder_destroy(gcg_sb);
+
+  // Load the standard GCG to get a fully-populated game history with a
+  // description
+  assert(test_parse_gcg("success_standard", config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+
+  // Case 1: Description starts with "Created with" but not "Created with
+  // MAGPIE" Expect no prefix to be prepended; the existing line is left as-is.
+  assert_strings_equal(game_history_get_description(game_history),
+                       "Created with Macondo");
+  gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+  output = string_builder_peek(gcg_sb);
+  assert(!has_substring(output, "#description Created with MAGPIE\n"));
+  assert(has_substring(output, "#description Created with Macondo\n"));
+  string_builder_destroy(gcg_sb);
+
+  // Case 2: Description already starts with "Created with MAGPIE"
+  // Expect no extra prefix line; just the single description line.
+  game_history_set_description(game_history, "Created with MAGPIE");
+  gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+  output = string_builder_peek(gcg_sb);
+  assert(has_substring(output, "#description Created with MAGPIE\n"));
+  // The MAGPIE line should not be duplicated
+  const char *first_magpie =
+      strstr(output, "#description Created with MAGPIE\n");
+  assert(strstr(first_magpie + 1, "#description Created with MAGPIE\n") ==
+         NULL);
+  string_builder_destroy(gcg_sb);
+
+  // Case 3: Multi-line description starting with "Created with Macondo"
+  // Expect no prefix prepended; all lines written in order as-is.
+  game_history_set_description(game_history,
+                               "Created with Macondo\nSecond line\nThird line");
+  gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+  output = string_builder_peek(gcg_sb);
+  assert(!has_substring(output, "#description Created with MAGPIE\n"));
+  assert(has_substring(output, "#description Created with Macondo\n"));
+  assert(has_substring(output, "#description Second line\n"));
+  assert(has_substring(output, "#description Third line\n"));
+  assert(strstr(output, "#description Created with Macondo\n") <
+         strstr(output, "#description Second line\n"));
+  assert(strstr(output, "#description Second line\n") <
+         strstr(output, "#description Third line\n"));
+  string_builder_destroy(gcg_sb);
+
+  // Case 4: Multi-line description with MAGPIE prefix
+  // Expect no extra prefix; both lines written in order without duplication.
+  game_history_set_description(game_history, "Created with MAGPIE\nSome notes");
+  gcg_sb = string_builder_create();
+  string_builder_add_gcg(gcg_sb, config_get_ld(config), game_history, false);
+  output = string_builder_peek(gcg_sb);
+  assert(has_substring(output, "#description Created with MAGPIE\n"));
+  assert(has_substring(output, "#description Some notes\n"));
+  first_magpie = strstr(output, "#description Created with MAGPIE\n");
+  assert(strstr(first_magpie + 1, "#description Created with MAGPIE\n") ==
+         NULL);
+  assert(strstr(output, "#description Created with MAGPIE\n") <
+         strstr(output, "#description Some notes\n"));
+  string_builder_destroy(gcg_sb);
+
+  config_destroy(config);
+}
+
+void test_success_trailing_overtime_penalty(GameHistory *game_history) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+
+  // Load an existing GCG and build a partial game string (3 moves, game not
+  // over)
+  char *std_gcg =
+      get_string_from_file_or_die("testdata/gcgs/success_standard.gcg");
+  StringSplitter *split_standard = split_string_by_newline(std_gcg, true);
+  StringBuilder *partial_gcg_sb = string_builder_create();
+  const int num_lines = string_splitter_get_number_of_items(split_standard);
+  int events_seen = 0;
+  for (int i = 0; i < num_lines && events_seen < 3; i++) {
+    const char *line = string_splitter_get_item(split_standard, i);
+    string_builder_add_formatted_string(partial_gcg_sb, "%s\n", line);
+    if (line[0] == '>') {
+      events_seen++;
+    }
+  }
+
+  // Append an overtime penalty before the game is over
+  string_builder_add_string(partial_gcg_sb, ">HastyBot:  (time) -10 69\n");
+  string_builder_add_string(partial_gcg_sb,
+                            ">RightBehindYou:  (time) -10 69\n");
+
+  char *gcg_with_penalty = string_builder_dump(partial_gcg_sb, NULL);
+  string_builder_destroy(partial_gcg_sb);
+  string_splitter_destroy(split_standard);
+  free(std_gcg);
+
+  // Should parse successfully with the overtime penalty stripped
+  assert(test_parse_gcg_string(gcg_with_penalty, config, game_history) ==
+         ERROR_STATUS_SUCCESS);
+  // Only 3 events remain (the overtime penalty was stripped)
+  assert(game_history_get_num_events(game_history) == 3);
+
+  free(gcg_with_penalty);
+  config_destroy(config);
+}
+
 void test_gcg(void) {
   // Use the same game_history for all tests to thoroughly test the
   // game_history_reset function
@@ -1226,5 +1385,8 @@ void test_gcg(void) {
   test_write_gcg(game_history);
   test_partially_known_rack_from_phonies(game_history);
   test_success_board_layout_pragma(game_history);
+  test_multiple_description_pragmas(game_history);
+  test_description_write(game_history);
+  test_success_trailing_overtime_penalty(game_history);
   game_history_destroy(game_history);
 }

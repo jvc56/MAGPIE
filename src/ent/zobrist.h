@@ -9,6 +9,7 @@
 #include "move.h"
 #include "rack.h"
 #include "xoshiro.h"
+#include <assert.h>
 #include <stdint.h>
 
 #define ZOBRIST_MAX_LETTERS 35 // For the purposes of Zobrist hashing.
@@ -44,8 +45,8 @@ static Zobrist *zobrist_create(uint64_t seed) {
   z->our_rack_table =
       malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->our_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
-    for (int j = 0; j < RACK_SIZE; j++) {
+    z->our_rack_table[i] = malloc_or_die((RACK_SIZE + 1) * sizeof(uint64_t));
+    for (int j = 0; j <= RACK_SIZE; j++) {
       z->our_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
@@ -53,8 +54,8 @@ static Zobrist *zobrist_create(uint64_t seed) {
   z->their_rack_table =
       malloc_or_die((size_t)ZOBRIST_MAX_LETTERS * sizeof(uint64_t *));
   for (int i = 0; i < ZOBRIST_MAX_LETTERS; i++) {
-    z->their_rack_table[i] = malloc_or_die(RACK_SIZE * sizeof(uint64_t));
-    for (int j = 0; j < RACK_SIZE; j++) {
+    z->their_rack_table[i] = malloc_or_die((RACK_SIZE + 1) * sizeof(uint64_t));
+    for (int j = 0; j <= RACK_SIZE; j++) {
       z->their_rack_table[i][j] = prng_get_random_number(z->prng, UINT64_MAX);
     }
   }
@@ -105,16 +106,19 @@ zobrist_calculate_hash(const Zobrist *z, const Board *game_board,
   }
 
   for (uint16_t i = 0; i < our_rack->dist_size; i++) {
-    int8_t ct = our_rack->array[i];
+    int ct = (int)our_rack->array[i];
+    assert(ct >= 0 && ct <= RACK_SIZE);
     key ^= z->our_rack_table[i][ct];
   }
   for (uint16_t i = 0; i < their_rack->dist_size; i++) {
-    int8_t ct = their_rack->array[i];
+    int ct = (int)their_rack->array[i];
+    assert(ct >= 0 && ct <= RACK_SIZE);
     key ^= z->their_rack_table[i][ct];
   }
   if (their_turn) {
     key ^= z->their_turn;
   }
+  assert(scoreless_turns >= 0 && scoreless_turns <= 2);
   key ^= z->scoreless_turns[scoreless_turns];
   return key;
 }
@@ -181,6 +185,8 @@ inline static uint64_t zobrist_add_move(const Zobrist *z, uint64_t key,
   }
 
   if (last_scoreless_turns != scoreless_turns) {
+    assert(last_scoreless_turns >= 0 && last_scoreless_turns <= 2);
+    assert(scoreless_turns >= 0 && scoreless_turns <= 2);
     key ^= z->scoreless_turns[last_scoreless_turns];
     key ^= z->scoreless_turns[scoreless_turns];
   }

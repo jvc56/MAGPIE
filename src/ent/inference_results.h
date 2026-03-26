@@ -12,7 +12,7 @@ typedef struct InferenceResults InferenceResults;
 
 InferenceResults *inference_results_create(AliasMethod *alias_method);
 void inference_results_destroy(InferenceResults *inference_results);
-void inference_results_reset(InferenceResults *results, int move_capacity,
+void inference_results_reset(InferenceResults *results, int leave_list_capacity,
                              int ld_size);
 void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *target_known_unplayed_tiles,

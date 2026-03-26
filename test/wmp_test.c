@@ -39,7 +39,7 @@ void write_words_to_testdata_wmp(const DictionaryWordList *words,
                                  const char *wmp_filename) {
   Timer timer;
   ctimer_start(&timer);
-  WMP *wmp = make_wmp_from_words(words, ld);
+  WMP *wmp = make_wmp_from_words(words, ld, 0);
   double seconds_elapsed = ctimer_elapsed_seconds(&timer);
   ErrorStack *error_stack = error_stack_create();
   wmp_write_to_file(wmp, wmp_filename, error_stack);

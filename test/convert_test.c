@@ -10,7 +10,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/convert.h"
 #include "../src/util/io_util.h"
-#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdlib.h>
@@ -64,6 +63,31 @@ void test_convert_error(void) {
   args.input_and_output_name = "CSW21_too_long_2";
   convert_and_assert_status(&args, conversion_results,
                             ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
+
+  // SEHENSWÜRDIGKEIT has 16 tiles (> BOARD_DIM) and 18 bytes in UTF-8
+  // (Ü is 2 bytes). Ensures too-long words are rejected by tile count.
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "german";
+  args.input_and_output_name = "german_too_long";
+  convert_and_assert_status(&args, conversion_results,
+                            ERROR_STATUS_CONVERT_TEXT_CONTAINS_WORD_TOO_LONG);
+
+  // ABFRÜHSTÜCKEND is 14 tiles but 16 bytes (two 2-byte Ü's).
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "german";
+  args.input_and_output_name = "german_max_length";
+  convert_and_assert_status(&args, conversion_results, ERROR_STATUS_SUCCESS);
+
+  // ABARRAN[QU]ESSEM is 13 tiles but 16 bytes ([QU] is a digraph tile).
+  args.conversion_type_string = "text2dawg";
+  args.data_paths = DEFAULT_TEST_DATA_PATH;
+  args.ld_name = "catalan";
+  args.input_and_output_name = "catalan_max_length";
+  convert_and_assert_status(&args, conversion_results, ERROR_STATUS_SUCCESS);
+  args.ld_name = NULL;
+
   args.conversion_type_string = "text2dawg";
   args.data_paths = DEFAULT_TEST_DATA_PATH;
   args.input_and_output_name = "CSW21_invalid_letter";
@@ -96,27 +120,33 @@ void test_convert_success(void) {
 
   load_and_exec_config_or_die(config, "convert text2dawg CSW21_dawg_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_only");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 BRAVO/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.BRAVO", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 BRAVO", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "convert text2dawg CSW21_gaddag_only");
   load_and_exec_config_or_die(config, "set -lex CSW21_gaddag_only");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 CHARLIE/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.CHARLIE", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 CHARLIE", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config,
                               "convert text2dawg CSW21_dawg_and_gaddag");
   load_and_exec_config_or_die(config, "set -lex CSW21_dawg_and_gaddag");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 QUEBEC/ 0/0 0 "
+              "-lex CSW21;");
   game = config_get_game(config);
-  vms = validated_moves_create_and_assert_status(
-      game, 0, "H8.QUEBEC", false, false, false, ERROR_STATUS_SUCCESS);
+  vms = validated_moves_create_and_assert_status(game, 0, "H8 QUEBEC", false,
+                                                 false, ERROR_STATUS_SUCCESS);
   validated_moves_destroy(vms);
 
   load_and_exec_config_or_die(config, "convert text2wordmap CSW21_small");

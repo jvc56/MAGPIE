@@ -1,0 +1,16 @@
+# run after new changes
+
+make clean && make magpie_test BUILD=release
+
+# get kwg and klv2 files
+
+https://github.com/domino14/liwords/tree/master/liwords-ui/public/wasm
+
+# make kwg files
+
+cd W
+cargo run --release --bin buildlex -- english-kwg ods8.txt ods8.kwg
+
+# run self-play with dual lexicons
+
+./bin/magpie_test autoplay -d ./data/letterdistributions/english.csv -g1 ./data/lexica/CSW21.kwg -l1 ./data/lexica/CSW21.klv2 -g2 ./data/lexica/NWL20.kwg -l2 ./data/lexica/NWL20.klv2 -n 10000 -h 10

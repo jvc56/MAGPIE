@@ -1,5 +1,7 @@
 #include "cmd_api.h"
 
+#include "../def/thread_control_defs.h"
+#include "../ent/thread_control.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "config.h"
@@ -15,7 +17,8 @@ struct Magpie {
 Magpie *magpie_create(const char *data_paths) {
   Magpie *ret = malloc_or_die(sizeof(Magpie));
   ret->error = error_stack_create();
-  ConfigArgs args = {.data_paths = data_paths, .settings_filename = NULL};
+  ConfigArgs args = {
+      .data_paths = data_paths, .settings_filename = NULL, .use_wmp = false};
   ret->config = config_create(&args, ret->error);
   ret->output = empty_string();
   return ret;
@@ -51,3 +54,10 @@ char *magpie_get_last_command_status_message(Magpie *mp) {
 char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
 }
+
+void magpie_stop_current_command(const Magpie *mp) {
+  ThreadControl *tc = config_get_thread_control(mp->config);
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+}
+
+Config *magpie_get_config(const Magpie *mp) { return mp->config; }

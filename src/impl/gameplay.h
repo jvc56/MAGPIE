@@ -6,7 +6,9 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/move.h"
+#include "../ent/move_undo.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "move_gen.h"
 
 void draw_starting_racks(Game *game);
@@ -17,7 +19,11 @@ Equity calculate_end_rack_penalty(const Rack *rack,
 void play_move(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
-Move *get_top_equity_move(Game *game, int thread_index, MoveList *move_list);
+const Move *get_top_equity_move(Game *game, int movegen_index,
+                                MoveList *move_list);
+Move *get_top_equity_move_for_inferences(
+    Game *game, int movegen_index, MoveList *move_list, Equity target_equity,
+    int target_leave_size_for_exchange_cutoff, Equity equity_margin);
 void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
 void generate_moves_for_game(const MoveGenArgs *args);
@@ -33,6 +39,21 @@ bool rack_is_drawable(const Game *game, int player_index,
                       const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
+
+// Cross-set update for move affected squares
+void update_cross_set_for_move(const Move *move, const Game *game);
+
+// Incremental play/unplay functions for endgame solver optimization
+void play_move_incremental(const Move *move, Game *game, MoveUndo *undo);
+void unplay_move_incremental(Game *game, const MoveUndo *undo);
+void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
+void update_cross_sets_after_unplay(const Move *move, const Game *game);
+
+// MoveUndo-based cross-set update functions (use tiles_placed_mask)
+void update_cross_set_for_move_from_undo(const MoveUndo *undo,
+                                         const Game *game);
+void update_cross_sets_after_unplay_from_undo(const MoveUndo *undo,
+                                              const Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);

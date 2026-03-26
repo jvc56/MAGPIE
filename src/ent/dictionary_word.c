@@ -49,108 +49,108 @@ dictionary_word_list_get_word(const DictionaryWordList *dictionary_word_list,
   return &dictionary_word_list->dictionary_words[index];
 }
 
+// Compare two dictionary words lexicographically
 static inline int dictionary_word_compare(const DictionaryWord *word_a,
                                           const DictionaryWord *word_b) {
-  const int length_a = word_a->length;
-  const int length_b = word_b->length;
-  const int min_length = length_a < length_b ? length_a : length_b;
+  const int len_a = word_a->length;
+  const int len_b = word_b->length;
+  const int min_len = len_a < len_b ? len_a : len_b;
 
-  int cmp_result =
-      memcmp(word_a->word, word_b->word, min_length * sizeof(MachineLetter));
-  if (cmp_result != 0) {
-    return cmp_result;
+  int cmp = memcmp(word_a->word, word_b->word, min_len);
+  if (cmp != 0) {
+    return cmp;
   }
-
-  // If the words are the same up to the length of the shorter word,
-  // the shorter word is considered "less" than the longer one
-  if (length_a < length_b) {
-    return -1;
-  }
-  if (length_a > length_b) {
-    return 1;
-  }
-  return 0;
+  return len_a - len_b;
 }
 
-static inline void insertion_sort(DictionaryWord *arr, int left, int right) {
-  for (int i = left + 1; i <= right; i++) {
-    DictionaryWord tmp = arr[i];
-    int j = i - 1;
-    while (j >= left && dictionary_word_compare(&arr[j], &tmp) > 0) {
-      arr[j + 1] = arr[j];
-      j--;
-    }
-    arr[j + 1] = tmp;
+// LSD Radix Sort for DictionaryWordList
+// Optimized for machine letters (small integers)
+// Uses stable counting sort at each position, processing right to left
+// Variable-length strings are handled by treating positions past the end as -1
+
+// Alphabet size for radix sort - must cover all machine letters (0 to
+// MAX_ALPHABET_SIZE) For most languages: 27 (English), 33 (Polish), etc. We use
+// MAX_ALPHABET_SIZE + 1 to cover separator (0) and all letters (1 to 50).
+#define RADIX_SIZE (MAX_ALPHABET_SIZE + 1)
+
+// Get the sort key for a character at a given position
+// Returns 0 for positions past the string end (sorts before all letters)
+// Returns letter + 1 for actual letters (so they sort after end-of-string)
+static inline int get_radix_key(const DictionaryWord *word, int pos) {
+  if (pos >= word->length) {
+    return 0; // End-of-string marker, sorts first
   }
+  return word->word[pos] + 1;
 }
 
-// Merge two sorted subarrays into a single sorted array using a buffer
-static inline void merge(DictionaryWord *arr, int left, int mid, int right,
-                         DictionaryWord *temp) {
-  int n1 = mid - left + 1;
-  int n2 = right - mid;
-
-  // Copy data to temporary arrays in temp[]
-  for (int i = 0; i < n1; i++) {
-    temp[i] = arr[left + i];
-  }
-  for (int j = 0; j < n2; j++) {
-    temp[n1 + j] = arr[mid + 1 + j];
+// Single pass of counting sort on position 'pos'
+// Uses double buffering: reads from src, writes to dst
+static inline void radix_sort_pass(const DictionaryWord *src,
+                                   DictionaryWord *dst, int n, int pos,
+                                   int *count) {
+  // Count phase - count occurrences of each key
+  memset(count, 0, (RADIX_SIZE + 2) * sizeof(int));
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    int key = get_radix_key(&src[word_idx], pos);
+    count[key + 1]++;
   }
 
-  // Merge the temp arrays back into arr[left..right]
-  int i = 0;
-  int j = n1;
-  int k = left;
-  while (i < n1 && j < n1 + n2) {
-    if (dictionary_word_compare(&temp[i], &temp[j]) <= 0) {
-      arr[k++] = temp[i++];
-    } else {
-      arr[k++] = temp[j++];
-    }
+  // Prefix sum - convert counts to starting positions
+  for (int radix = 0; radix < RADIX_SIZE; radix++) {
+    count[radix + 1] += count[radix];
   }
 
-  // Copy any remaining elements from the left part of temp (if any)
-  while (i < n1) {
-    arr[k++] = temp[i++];
-  }
-
-  // Copy any remaining elements of the right subarray in temp (if any)
-  while (j < n1 + n2) {
-    arr[k++] = temp[j++];
+  // Distribute phase - place elements in sorted order
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    int key = get_radix_key(&src[word_idx], pos);
+    dst[count[key]++] = src[word_idx];
   }
 }
 
-static inline void merge_sort(DictionaryWord *arr, int n) {
-  // Step 1: Sort individual runs using insertion sort
-  for (int i = 0; i < n; i += DICTIONARY_INSERTION_SORT_THRESHOLD) {
-    int right = (i + DICTIONARY_INSERTION_SORT_THRESHOLD - 1 < n)
-                    ? i + DICTIONARY_INSERTION_SORT_THRESHOLD - 1
-                    : n - 1;
-    insertion_sort(arr, i, right);
+// LSD Radix Sort - O(n * max_length) time complexity
+// Much faster than O(n * log(n) * avg_length) comparison sort for small
+// alphabets
+static inline void radix_sort(DictionaryWord *arr, int n) {
+  if (n <= 1) {
+    return;
   }
 
-  // Step 2: Allocate a temporary array to be reused in the merging phase
-  DictionaryWord *temp =
-      (DictionaryWord *)malloc_or_die(sizeof(DictionaryWord) * n);
-
-  // Step 3: Start merging runs
-  for (int size = DICTIONARY_INSERTION_SORT_THRESHOLD; size < n;
-       size = 2 * size) {
-    // Merge runs in pairs of size 'size'
-    for (int start = 0; start < n; start += 2 * size) {
-      // Find the right index for merging
-      int mid = (start + size - 1 < n) ? start + size - 1 : n - 1;
-      int end = (start + 2 * size - 1 < n) ? start + 2 * size - 1 : n - 1;
-
-      // Merge the two subarrays arr[start..mid] and arr[mid+1..end]
-      if (mid < end) {
-        merge(arr, start, mid, end, temp);
-      }
+  // Find maximum string length
+  int max_len = 0;
+  for (int word_idx = 0; word_idx < n; word_idx++) {
+    if (arr[word_idx].length > max_len) {
+      max_len = arr[word_idx].length;
     }
   }
 
-  // Free the temporary array after use
+  if (max_len == 0) {
+    return;
+  }
+
+  // Allocate temp array for double buffering
+  DictionaryWord *temp = malloc_or_die(sizeof(DictionaryWord) * (size_t)n);
+  // Need RADIX_SIZE + 2 because count phase uses count[key + 1] and max key is
+  // RADIX_SIZE
+  int count[RADIX_SIZE + 2];
+
+  // LSD: process from rightmost position to leftmost
+  // Double buffering: alternate between arr and temp to avoid copying
+  DictionaryWord *src = arr;
+  DictionaryWord *dst = temp;
+
+  for (int pos = max_len - 1; pos >= 0; pos--) {
+    radix_sort_pass(src, dst, n, pos, count);
+    // Swap buffers for next pass
+    DictionaryWord *swap = src;
+    src = dst;
+    dst = swap;
+  }
+
+  // If final result is in temp, copy back to arr
+  if (src != arr) {
+    memcpy(arr, src, sizeof(DictionaryWord) * (size_t)n);
+  }
+
   free(temp);
 }
 
@@ -158,7 +158,7 @@ void dictionary_word_list_sort(DictionaryWordList *dictionary_word_list) {
   if (dictionary_word_list->count <= 1) {
     return;
   }
-  merge_sort(dictionary_word_list->dictionary_words,
+  radix_sort(dictionary_word_list->dictionary_words,
              dictionary_word_list->count);
 }
 

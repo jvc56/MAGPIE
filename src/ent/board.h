@@ -10,6 +10,7 @@
 #include "../util/string_util.h"
 #include "board_layout.h"
 #include "letter_distribution.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -41,6 +42,9 @@ typedef struct Board {
   int tiles_played;
   // Start coordinates used to reset the board
   int start_coords[2];
+  // Flag for lazy cross-set evaluation in endgame solver.
+  // When false, cross-sets need to be recalculated before move generation.
+  bool cross_sets_valid;
 } Board;
 
 // Square: Letter
@@ -458,6 +462,21 @@ static inline void board_increment_tiles_played(Board *board,
   board->tiles_played += tiles_played;
 }
 
+static inline void board_set_tiles_played(Board *board, int tiles_played) {
+  board->tiles_played = tiles_played;
+}
+
+// Board: cross_sets_valid
+
+static inline bool board_get_cross_sets_valid(const Board *board) {
+  return board->cross_sets_valid;
+}
+
+static inline void board_set_cross_sets_valid(Board *board,
+                                              bool cross_sets_valid) {
+  board->cross_sets_valid = cross_sets_valid;
+}
+
 // Board auxilllary functions
 
 static inline int board_get_cross_set_index(bool kwgs_are_shared,
@@ -674,6 +693,7 @@ static inline void board_reset(Board *board) {
   // it is used to calculate the index for board_set_letter.
   board->tiles_played = 0;
   board->transposed = 0;
+  board->cross_sets_valid = true;
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -841,6 +861,41 @@ static inline int board_toggle_dir(int dir) {
   // return (dir == BOARD_VERTICAL_DIRECTION) ? BOARD_HORIZONTAL_DIRECTION
   //                                          : BOARD_VERTICAL_DIRECTION;
   return dir ^ (BOARD_VERTICAL_DIRECTION | BOARD_HORIZONTAL_DIRECTION);
+}
+
+// Scans the board once and returns a bitvector of all machine letters that
+// have a valid single-tile play somewhere on the board. Bit i is set if
+// machine letter i can be placed at some empty square adjacent to existing
+// tiles where both horizontal and vertical cross sets allow it.
+//
+// If rack_tiles_bv is nonzero, exits early once every bit in rack_tiles_bv
+// is covered (all rack tiles found playable). Blank (bit 0) should NOT be
+// included in rack_tiles_bv — handle blank playability at the call site by
+// checking if any non-blank bit is set in the returned bitvector.
+static inline uint64_t board_get_playable_tiles_bv(const Board *board,
+                                                   int cross_set_index,
+                                                   uint64_t rack_tiles_bv) {
+  assert(!(rack_tiles_bv & 1)); // blank (bit 0) must be excluded by caller
+  uint64_t playable = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_nonempty_or_bricked(board, row, col)) {
+        continue;
+      }
+      if (board_are_all_adjacent_squares_empty(board, row, col)) {
+        continue;
+      }
+      uint64_t h = board_get_cross_set(
+          board, row, col, BOARD_HORIZONTAL_DIRECTION, cross_set_index);
+      uint64_t v = board_get_cross_set(
+          board, row, col, BOARD_VERTICAL_DIRECTION, cross_set_index);
+      playable |= h & v;
+      if (rack_tiles_bv && (playable & rack_tiles_bv) == rack_tiles_bv) {
+        return playable;
+      }
+    }
+  }
+  return playable;
 }
 
 #endif

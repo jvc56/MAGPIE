@@ -202,7 +202,7 @@ const char *players_data_get_data_name(const PlayersData *players_data,
   return data_name;
 }
 
-PlayersData *players_data_create(void) {
+PlayersData *players_data_create(bool use_wmp) {
   PlayersData *players_data = malloc_or_die(sizeof(PlayersData));
   for (int player_index = 0; player_index < 2; player_index++) {
     for (int data_index = 0; data_index < NUMBER_OF_DATA; data_index++) {
@@ -210,8 +210,9 @@ PlayersData *players_data_create(void) {
           (players_data_t)data_index, player_index);
       players_data->data_is_shared[data_index] = false;
       players_data->data[player_data_index] = NULL;
-      players_data_set_use_when_available(players_data, data_index,
-                                          player_index, true);
+      players_data_set_use_when_available(
+          players_data, data_index, player_index,
+          use_wmp || data_index != PLAYERS_DATA_TYPE_WMP);
     }
     players_data_set_move_sort_type(players_data, player_index,
                                     DEFAULT_MOVE_SORT_TYPE);

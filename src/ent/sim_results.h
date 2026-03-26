@@ -47,7 +47,7 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
 
 typedef struct SimResults SimResults;
 
-SimResults *sim_results_create(void);
+SimResults *sim_results_create(const double cutoff);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);
@@ -67,6 +67,12 @@ void sim_results_set_known_opp_rack(SimResults *sim_results,
                                     const Rack *known_opp_rack);
 BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
+double sim_results_get_cutoff(const SimResults *sim_results);
+void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
+uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results);
+void sim_results_set_num_infer_leaves(SimResults *sim_results,
+                                      uint64_t num_infer_leaves);
+
 void sim_results_lock_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_simmed_plays(SimResults *sim_results);
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
@@ -77,6 +83,11 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results);
 void sim_results_unlock_display_infos(SimResults *sim_results);
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,
                                                 int play_index);
-bool sim_results_plays_are_similar(const SimResults *sim_results, int i, int j);
+bool sim_results_plays_are_similar(const SimResults *sim_results, int sp1_index,
+                                   int sp2_index);
+bool sim_results_display_plays_are_similar(const SimResults *sim_results,
+                                           const int sp1_index,
+                                           const int sp2_index);
+const Move *sim_results_get_best_move(const SimResults *sim_results);
 
 #endif

@@ -12,6 +12,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
@@ -86,6 +87,11 @@ void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->data = rv_uniform;
 }
 
+void rv_uniform_reset(RandomVariables *rvs, const uint64_t seed) {
+  RVUniform *rv_uniform = (RVUniform *)rvs->data;
+  prng_seed(rv_uniform->xoshiro_prng, seed);
+}
+
 typedef struct RVUniformPredetermined {
   uint64_t num_samples;
   uint64_t index;
@@ -141,6 +147,12 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
          rv_uniform_predetermined->num_samples * sizeof(double));
   cpthread_mutex_init(&rv_uniform_predetermined->mutex);
   rvs->data = rv_uniform_predetermined;
+}
+
+void rv_uniform_predetermined_reset(RandomVariables *rvs) {
+  RVUniformPredetermined *rv_uniform_predetermined =
+      (RVUniformPredetermined *)rvs->data;
+  rv_uniform_predetermined->index = 0;
 }
 
 typedef struct RVNormal {
@@ -200,6 +212,11 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
          rvs->num_rvs * 2 * sizeof(double));
   cpthread_mutex_init(&rv_normal->mutex);
   rvs->data = rv_normal;
+}
+
+void rv_normal_reset(RandomVariables *rvs, const uint64_t seed) {
+  RVNormal *rv_normal = (RVNormal *)rvs->data;
+  prng_seed(rv_normal->xoshiro_prng, seed);
 }
 
 typedef struct RVNormalPredetermined {
@@ -284,6 +301,12 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->data = rv_normal_predetermined;
 }
 
+void rv_normal_predetermined_reset(RandomVariables *rvs) {
+  RVNormalPredetermined *rv_normal_predetermined =
+      (RVNormalPredetermined *)rvs->data;
+  rv_normal_predetermined->index = 0;
+}
+
 typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
@@ -302,8 +325,15 @@ typedef struct Simmer {
   bool use_alias_method;
   const InferenceResults *inference_results;
   int num_threads;
+  // In PGP mode, each autoplay worker has its own simmer with num_threads
+  // workers indexed 0..num_threads-1. However, the global rvs_thread_index
+  // passed to rv_sim_sample is parent_worker_thread_index + bai_thread_index,
+  // which can exceed num_threads-1. Storing parent_worker_thread_index lets us
+  // compute the local 0-based worker index: thread_index - parent_offset.
+  int parent_worker_thread_index;
   int print_interval;
   int max_num_display_plays;
+  int max_num_display_plies;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -315,6 +345,10 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
   return simmer_worker;
+}
+
+void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
+  game_copy(simmer_worker->game, game);
 }
 
 void simmer_worker_destroy(SimmerWorker *simmer_worker) {
@@ -334,7 +368,19 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, (int)play_index);
-  SimmerWorker *simmer_worker = simmer->workers[thread_index];
+  // In PGP mode, rvs_thread_index = parent_worker_thread_index +
+  // bai_thread_index. The local index into the workers array is always
+  // bai_thread_index (0-based), while the global thread_index is used for
+  // movegen to avoid cache conflicts.
+  const int local_worker_index =
+      thread_index - simmer->parent_worker_thread_index;
+  if (local_worker_index < 0 || local_worker_index >= simmer->num_threads) {
+    log_fatal("local worker index (%d) is out of bounds for simmer with "
+              "num_threads %d (thread_index=%d, parent=%d)",
+              local_worker_index, simmer->num_threads, thread_index,
+              simmer->parent_worker_thread_index);
+  }
+  SimmerWorker *simmer_worker = simmer->workers[local_worker_index];
   Game *game = simmer_worker->game;
   MoveList *move_list = simmer_worker->move_list;
   const int plies = sim_results_get_num_plies(sim_results);
@@ -346,6 +392,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_seed(game, seed);
 
   int player_off_turn_index = 1 - game_get_player_on_turn_index(game);
+  bool set_player_off_turn_rack_with_known_opp_rack = false;
   if (simmer->use_alias_method) {
     Rack inferred_rack;
     rack_set_dist_size(&inferred_rack, simmer->dist_size);
@@ -353,8 +400,14 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
             inference_results_get_alias_method(simmer->inference_results),
             simmer_worker->prng, &inferred_rack)) {
       set_random_rack(game, player_off_turn_index, &inferred_rack);
+    } else {
+      set_player_off_turn_rack_with_known_opp_rack = true;
     }
   } else {
+    set_player_off_turn_rack_with_known_opp_rack = true;
+  }
+
+  if (set_player_off_turn_rack_with_known_opp_rack) {
     set_random_rack(game, player_off_turn_index, simmer->known_opp_rack);
   }
 
@@ -421,7 +474,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   if (simmer->print_interval > 0 &&
       sample_count % simmer->print_interval == 0) {
     sim_results_print(simmer->thread_control, simmer_worker->game,
-                      simmer->sim_results, simmer->max_num_display_plays, true);
+                      simmer->sim_results, simmer->max_num_display_plays,
+                      simmer->max_num_display_plies, true, NULL);
   }
   sim_results_increment_iteration_count(sim_results);
 
@@ -474,8 +528,11 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->dist_size = ld_get_size(game_get_ld(sim_args->game));
 
   simmer->num_threads = sim_args->num_threads;
+  simmer->parent_worker_thread_index =
+      sim_args->bai_options.parent_worker_thread_index;
   simmer->print_interval = sim_args->print_interval;
   simmer->max_num_display_plays = sim_args->max_num_display_plays;
+  simmer->max_num_display_plies = sim_args->max_num_display_plies;
 
   simmer->workers =
       malloc_or_die((sizeof(SimmerWorker *)) * (simmer->num_threads));
@@ -499,6 +556,49 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   rvs->data = simmer;
   return rvs;
+}
+
+void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
+  Simmer *simmer = (Simmer *)rvs->data;
+  rvs->num_rvs = move_list_get_count(sim_args->move_list);
+
+  simmer->initial_player = game_get_player_on_turn_index(sim_args->game);
+  const Player *player =
+      game_get_player(sim_args->game, simmer->initial_player);
+  const Player *opponent =
+      game_get_player(sim_args->game, 1 - simmer->initial_player);
+
+  simmer->initial_spread =
+      player_get_score(player) - player_get_score(opponent);
+
+  const Rack *known_opp_rack = sim_args->known_opp_rack;
+  if (known_opp_rack && !rack_is_empty(known_opp_rack)) {
+    if (!simmer->known_opp_rack) {
+      simmer->known_opp_rack = rack_duplicate(known_opp_rack);
+    } else {
+      rack_copy(simmer->known_opp_rack, known_opp_rack);
+    }
+  } else {
+    if (simmer->known_opp_rack) {
+      // FIXME: avoid repeated alloc/free if resetting multiple times
+      rack_destroy(simmer->known_opp_rack);
+    }
+    simmer->known_opp_rack = NULL;
+  }
+
+  for (int thread_index = 0; thread_index < simmer->num_threads;
+       thread_index++) {
+    simmer_reset_worker(simmer->workers[thread_index], sim_args->game);
+  }
+
+  simmer->use_inference = sim_args->use_inference;
+  simmer->use_alias_method =
+      simmer->use_inference &&
+      (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  sim_results_reset(sim_args->move_list, simmer->sim_results,
+                    sim_args->num_plies, sim_args->seed,
+                    sim_args->use_heat_map);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
@@ -531,7 +631,35 @@ RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
   return rvs;
 }
 
+void rvs_reset(RandomVariables *rvs, const RandomVariablesArgs *rvs_args) {
+  rvs->num_rvs = rvs_args->num_rvs;
+  atomic_store(&rvs->total_samples, 0);
+  switch (rvs_args->type) {
+  case RANDOM_VARIABLES_UNIFORM:
+    rv_uniform_reset(rvs, rvs_args->seed);
+    break;
+  case RANDOM_VARIABLES_UNIFORM_PREDETERMINED:
+    rv_uniform_predetermined_reset(rvs);
+    break;
+  case RANDOM_VARIABLES_NORMAL:
+    rv_normal_reset(rvs, rvs_args->seed);
+    break;
+  case RANDOM_VARIABLES_NORMAL_PREDETERMINED:
+    rv_normal_predetermined_reset(rvs);
+    break;
+  case RANDOM_VARIABLES_SIMMED_PLAYS:
+    rv_sim_reset(rvs, rvs_args->sim_args);
+    break;
+  }
+}
+
 void rvs_destroy(RandomVariables *rvs) {
+  if (!rvs) {
+    return;
+  }
+  if (rvs->destroy_data_func == NULL) {
+    return;
+  }
   rvs->destroy_data_func(rvs);
   free(rvs);
 }
@@ -542,8 +670,6 @@ double rvs_sample(RandomVariables *rvs, const uint64_t k,
   return rvs->sample_func(rvs, k, thread_index, prev_total_samples + 1,
                           bai_logger);
 }
-
-void rvs_reset(RandomVariables *rvs) { rvs->total_samples = 0; }
 
 bool rvs_are_similar(RandomVariables *rvs, const int i, const int j) {
   return rvs->similar_func(rvs, i, j);

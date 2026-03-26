@@ -5,6 +5,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "letter_distribution.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -140,6 +141,7 @@ static inline void rack_union(Rack *rack_to_update,
 }
 
 static inline void rack_take_letter(Rack *rack, MachineLetter letter) {
+  assert(rack->array[letter] > 0);
   rack->array[letter]--;
   rack->number_of_letters--;
 }

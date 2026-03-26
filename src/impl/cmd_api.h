@@ -50,4 +50,8 @@ char *magpie_get_last_command_status_message(Magpie *mp);
 
 char *magpie_get_last_command_output(const Magpie *mp);
 
+void magpie_stop_current_command(const Magpie *mp);
+
+Config *magpie_get_config(const Magpie *mp);
+
 #endif

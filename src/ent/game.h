@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "bag.h"
 #include "board.h"
+#include "kwg.h"
 #include "letter_distribution.h"
 #include "player.h"
 #include <stdbool.h>
@@ -24,6 +25,7 @@ Game *game_create(const GameArgs *game_args);
 void game_destroy(Game *game);
 void game_update(Game *game, const GameArgs *game_args);
 Game *game_duplicate(const Game *game);
+void game_copy(Game *dst, const Game *src);
 void game_reset(Game *game);
 void game_seed(Game *game, uint64_t seed);
 
@@ -46,6 +48,7 @@ bool game_get_data_is_shared(const Game *game,
                              players_data_t players_data_type);
 
 void game_set_consecutive_scoreless_turns(Game *game, int value);
+void game_set_player_on_turn_index(Game *game, int player_index);
 int game_get_max_scoreless_turns(const Game *game);
 bool game_reached_max_scoreless_turns(const Game *game);
 void game_increment_consecutive_scoreless_turns(Game *game);
@@ -57,8 +60,15 @@ void game_set_backup_mode(Game *game, backup_mode_t backup_mode);
 void game_backup(Game *game);
 void game_unplay_last_move(Game *game);
 void game_set_starting_player_index(Game *game, int starting_player_index);
-void game_gen_all_cross_sets(Game *game);
-void game_gen_cross_set(Game *game, int row, int col, int dir,
+void game_gen_all_cross_sets(const Game *game);
+void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index);
+
+// Override KWGs for cross-set generation (e.g., word-pruned KWGs in endgame).
+// kwg0/kwg1 are not owned by Game. In IGNORANT mode, kwg0 is used for both
+// cross-set indices. In INFORMED mode, kwg0/kwg1 are used for indices 0/1.
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            dual_lexicon_mode_t mode);
+void game_clear_override_kwgs(Game *game);
 
 #endif

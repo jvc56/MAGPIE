@@ -24,13 +24,12 @@ typedef struct BAIOptions {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   double delta;
-  // If the sampling rule is round robin, the sample limit
-  // refers to the total number of round robins instead
-  // of the total number of samples.
   uint64_t sample_limit;
   uint64_t sample_minimum;
   uint64_t time_limit_seconds;
   int num_threads;
+  int parent_worker_thread_index;
+  double cutoff;
 } BAIOptions;
 
 #endif

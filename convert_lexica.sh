@@ -37,5 +37,5 @@ for path in data/lexica/*.kwg; do
         continue
     fi
     echo "Converting $lexicon.txt to $lexicon.wmp"
-    bin/magpie convert text2wordmap "$lexicon"
+    bin/magpie convert text2wordmap "$lexicon" -threads 4
 done

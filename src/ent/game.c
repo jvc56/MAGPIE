@@ -55,9 +55,12 @@ struct Game {
 
   // Owned by the caller
   const LetterDistribution *ld;
-  // Used by cross set generation
-  Rack *cross_set_rack;
   game_variant_t variant;
+  // Optional override KWGs for cross-set generation (e.g., word-pruned KWGs
+  // in the endgame solver). When non-NULL, cross-set computation uses these
+  // instead of the player's full KWG. Not owned by Game.
+  const KWG *override_kwgs[2];
+  dual_lexicon_mode_t dual_lexicon_mode;
   // Backups
   MinimalGameBackup *sim_game_backups[MAX_SEARCH_DEPTH];
   int backup_cursor;
@@ -132,6 +135,10 @@ bool game_get_data_is_shared(const Game *game,
 
 void game_set_consecutive_scoreless_turns(Game *game, int value) {
   game->consecutive_scoreless_turns = value;
+}
+
+void game_set_player_on_turn_index(Game *game, int player_index) {
+  game->player_on_turn_index = player_index;
 }
 
 void game_increment_consecutive_scoreless_turns(Game *game) {
@@ -211,7 +218,34 @@ static inline void traverse_backwards_add_to_rack(const Board *board, int row,
   }
 }
 
-static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
+void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
+                            dual_lexicon_mode_t mode) {
+  game->override_kwgs[0] = kwg0;
+  game->override_kwgs[1] = kwg1;
+  game->dual_lexicon_mode = mode;
+}
+
+void game_clear_override_kwgs(Game *game) {
+  game->override_kwgs[0] = NULL;
+  game->override_kwgs[1] = NULL;
+  game->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+}
+
+// Returns the KWG to use for cross-set generation at the given cross_set_index.
+// If override KWGs are set, uses those (respecting dual-lexicon mode).
+// Otherwise falls back to the player's standard KWG.
+static inline const KWG *get_kwg_for_cross_set(const Game *game,
+                                               int cross_set_index) {
+  if (game->override_kwgs[0] != NULL) {
+    if (game->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+      return game->override_kwgs[0];
+    }
+    return game->override_kwgs[cross_set_index];
+  }
+  return player_get_kwg(game_get_player(game, cross_set_index));
+}
+
+static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
                                             int dir, int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
@@ -239,22 +273,23 @@ static inline void game_gen_alpha_cross_set(Game *game, int row, int col,
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
   Equity score = 0;
 
-  rack_reset(game->cross_set_rack);
+  Rack cross_set_rack;
+  rack_set_dist_size_and_reset(&cross_set_rack, ld_get_size(ld));
   if (left_col < col) {
-    traverse_backwards_add_to_rack(board, row, col - 1, game->cross_set_rack);
+    traverse_backwards_add_to_rack(board, row, col - 1, &cross_set_rack);
     score += traverse_backwards_for_score(board, ld, row, col - 1);
   }
 
   if (right_col > col) {
-    traverse_backwards_add_to_rack(board, row, right_col, game->cross_set_rack);
+    traverse_backwards_add_to_rack(board, row, right_col, &cross_set_rack);
     score += traverse_backwards_for_score(board, ld, row, right_col);
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
 
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
-      kwg_compute_alpha_cross_set(kwg, game->cross_set_rack));
+      kwg_compute_alpha_cross_set(kwg, &cross_set_rack));
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
@@ -279,7 +314,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     return;
   }
 
-  const KWG *kwg = player_get_kwg(game_get_player(game, cross_set_index));
+  const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
   const LetterDistribution *ld = game_get_ld(game);
 
@@ -387,7 +422,7 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   board_set_cross_score(board, row, col, dir, cross_set_index, score);
 }
 
-void game_gen_cross_set(Game *game, int row, int col, int dir,
+void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
   if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
     game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
@@ -396,7 +431,7 @@ void game_gen_cross_set(Game *game, int row, int col, int dir,
   }
 }
 
-void game_gen_all_cross_sets(Game *game) {
+void game_gen_all_cross_sets(const Game *game) {
   Board *board = game_get_board(game);
   bool kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
 
@@ -491,12 +526,6 @@ void game_update(Game *game, const GameArgs *game_args) {
   board_apply_layout(game_args->board_layout, game->board);
 
   game->variant = game_args->game_variant;
-  rack_destroy(game->cross_set_rack);
-  if (game->variant == GAME_VARIANT_WORDSMOG) {
-    game->cross_set_rack = rack_create(ld_get_size(game->ld));
-  } else {
-    game->cross_set_rack = NULL;
-  }
 }
 
 Game *game_create(const GameArgs *game_args) {
@@ -519,13 +548,10 @@ Game *game_create(const GameArgs *game_args) {
   game->consecutive_scoreless_turns = 0;
   game->max_scoreless_turns = MAX_SCORELESS_TURNS;
   game->game_end_reason = GAME_END_REASON_NONE;
-
   game->variant = game_args->game_variant;
-  if (game->variant == GAME_VARIANT_WORDSMOG) {
-    game->cross_set_rack = rack_create(ld_get_size(game->ld));
-  } else {
-    game->cross_set_rack = NULL;
-  }
+  game->override_kwgs[0] = NULL;
+  game->override_kwgs[1] = NULL;
+  game->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
 
   for (int i = 0; i < MAX_SEARCH_DEPTH; i++) {
     game->sim_game_backups[i] = NULL;
@@ -556,13 +582,10 @@ Game *game_duplicate(const Game *game) {
   new_game->consecutive_scoreless_turns = game->consecutive_scoreless_turns;
   new_game->max_scoreless_turns = game->max_scoreless_turns;
   new_game->game_end_reason = game->game_end_reason;
-
   new_game->variant = game->variant;
-  if (new_game->variant == GAME_VARIANT_WORDSMOG) {
-    new_game->cross_set_rack = rack_create(ld_get_size(new_game->ld));
-  } else {
-    new_game->cross_set_rack = NULL;
-  }
+  new_game->override_kwgs[0] = game->override_kwgs[0];
+  new_game->override_kwgs[1] = game->override_kwgs[1];
+  new_game->dual_lexicon_mode = game->dual_lexicon_mode;
 
   // note: game backups must be explicitly handled by the caller if they want
   // game copies to have backups.
@@ -573,6 +596,31 @@ Game *game_duplicate(const Game *game) {
   new_game->backup_mode = BACKUP_MODE_OFF;
   new_game->gcg_game_backup = NULL;
   return new_game;
+}
+
+void game_copy(Game *dst, const Game *src) {
+  bag_copy(dst->bag, src->bag);
+  board_copy(dst->board, src->board);
+  dst->ld = src->ld;
+  dst->bingo_bonus = src->bingo_bonus;
+
+  for (int j = 0; j < 2; j++) {
+    player_copy(dst->players[j], src->players[j]);
+  }
+  for (int i = 0; i < NUMBER_OF_DATA; i++) {
+    dst->data_is_shared[i] = src->data_is_shared[i];
+  }
+  dst->player_on_turn_index = src->player_on_turn_index;
+  dst->starting_player_index = src->starting_player_index;
+  dst->consecutive_scoreless_turns = src->consecutive_scoreless_turns;
+  dst->max_scoreless_turns = src->max_scoreless_turns;
+  dst->game_end_reason = src->game_end_reason;
+  dst->variant = src->variant;
+  dst->override_kwgs[0] = src->override_kwgs[0];
+  dst->override_kwgs[1] = src->override_kwgs[1];
+  dst->dual_lexicon_mode = src->dual_lexicon_mode;
+  dst->backup_cursor = 0;
+  dst->backup_mode = BACKUP_MODE_OFF;
 }
 
 // Backups do not restore the move list or
@@ -666,7 +714,6 @@ void game_destroy(Game *game) {
   bag_destroy(game->bag);
   player_destroy(game->players[0]);
   player_destroy(game->players[1]);
-  rack_destroy(game->cross_set_rack);
   backups_destroy(game);
   free(game);
 }

@@ -7,7 +7,8 @@
 // Passes and exchanges can exceed the board size when racks are bigger than the
 // board dimension.
 enum {
-  MOVE_MAX_TILES = ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE))
+  MOVE_MAX_TILES = ((BOARD_DIM) > (RACK_SIZE) ? (BOARD_DIM) : (RACK_SIZE)),
+  UNSET_LEAVE_SIZE = -1
 };
 
 typedef enum {
@@ -20,6 +21,8 @@ typedef enum {
   MOVE_RECORD_BEST,
   MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
   MOVE_RECORD_ALL_SMALL,
+  MOVE_RECORD_TILES_PLAYED,
+  MOVE_RECORD_BEST_SMALL,
 } move_record_t;
 
 #define MOVE_SORT_EQUITY_STRING "equity"
@@ -28,6 +31,4 @@ typedef enum {
 #define MOVE_RECORD_ALL_STRING "all"
 #define MOVE_RECORD_BEST_STRING "best"
 #define MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST_STRING "equity"
-#define MOVE_RECORD_ALL_SMALL_STRING "small"
-
 #endif

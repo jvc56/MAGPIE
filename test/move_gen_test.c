@@ -113,6 +113,8 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves_for_game(&move_gen_args);
@@ -166,6 +168,8 @@ void macondo_tests(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   // TestSimpleRowGen
@@ -420,6 +424,8 @@ void unfound_leave_lookup_test(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const char cgp[300] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
@@ -464,6 +470,8 @@ void exchange_tests(void) {
       .override_kwg = NULL,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   generate_moves(&move_gen_args);
@@ -503,6 +511,8 @@ void movegen_many_moves(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   load_cgp_or_die(game, MANY_MOVES);
@@ -529,6 +539,8 @@ void equity_test(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_sort_type(player, MOVE_SORT_EQUITY);
@@ -580,6 +592,8 @@ void top_equity_play_recorder_test(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_BEST);
@@ -607,8 +621,7 @@ void small_play_recorder_test(void) {
   // TODO(olaugh): WMP doesn't support small move. Still under analysis whether
   // it would be better than recursive_gen for endgame.
   Config *config =
-      config_create_or_die("set -lex NWL20 -s1 score -s2 score -r1 small -r2 "
-                           "small -numsmallplays 100000 -wmp false");
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
   Player *player = game_get_player(game, 0);
@@ -618,6 +631,8 @@ void small_play_recorder_test(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   player_set_move_record_type(player, MOVE_RECORD_ALL_SMALL);
@@ -667,6 +682,69 @@ void small_play_recorder_test(void) {
   config_destroy(config);
 }
 
+void best_small_play_recorder_test(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -s1 score -s2 score -wmp false");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  MoveList *move_list = move_list_create_small(1);
+
+  // Test 1: VS_JEREMY position — best score should be 106
+  load_cgp_or_die(game, VS_JEREMY);
+  rack_set_to_string(ld, player_get_rack(player), "DDESW??");
+  draw_to_full_rack(game, 1);
+
+  const MoveGenArgs args1 = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args1);
+
+  assert(move_list_get_count(move_list) == 1);
+  assert(small_move_get_score(move_list->small_moves[0]) == 106);
+
+  // Convert to Move and verify details match small_play_recorder_test
+  small_move_to_move(move_list->spare_move, move_list->small_moves[0],
+                     game_get_board(game));
+  assert(move_list->spare_move->col_start == 1);
+  assert(move_list->spare_move->row_start == 13);
+  assert(move_list->spare_move->dir == BOARD_HORIZONTAL_DIRECTION);
+  assert(move_list->spare_move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE);
+  assert_move_score(move_list->spare_move, 106);
+  assert(move_list->spare_move->tiles_played == 7);
+
+  // Test 2: VS_OXY position — best score should be 1780
+  load_cgp_or_die(game, VS_OXY);
+  rack_set_to_string(ld, player_get_rack(player), "ABEOPXZ");
+  draw_to_full_rack(game, 1);
+
+  const MoveGenArgs args2 = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_BEST_SMALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args2);
+
+  assert(move_list_get_count(move_list) == 1);
+  assert(small_move_get_score(move_list->small_moves[0]) == 1780);
+
+  small_move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void distinct_lexica_test(bool w1) {
   Config *config =
       w1 ? config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 equity -s2 equity "
@@ -681,6 +759,8 @@ void distinct_lexica_test(bool w1) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -813,6 +893,8 @@ void consistent_tiebreaking_test(void) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   const Player *player0 = game_get_player(game, 0);
@@ -917,7 +999,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 64");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 64);
   validated_moves_destroy(vms);
@@ -929,7 +1011,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 54");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 54);
   validated_moves_destroy(vms);
@@ -941,7 +1023,7 @@ void movegen_var_bingo_bonus_test(void) {
               "8D BUSUUTI 324");
 
   vms = assert_validated_move_success(config_get_game(config),
-                                      opening_busuuti_cgp, "8D.BUSUUTI", 0,
+                                      opening_busuuti_cgp, "8D BUSUUTI", 0,
                                       false, false);
   assert_move_score(validated_moves_get_move(vms, 0), 324);
   validated_moves_destroy(vms);
@@ -989,6 +1071,8 @@ void movegen_within_x_of_best_test(bool use_wmp) {
       .move_list = move_list,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
   int all_move_list_count = 0;
   int move_list_count = 0;
@@ -1181,6 +1265,8 @@ void movegen_does_not_return_early_from_anchor(void) {
       .move_sort_type = MOVE_SORT_EQUITY,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   // A8 BRRR 72 should be 1 equity better than A8 BRR 69
@@ -1231,6 +1317,8 @@ void movegen_one_tile_nonwmp(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   SortedMoveList *sml = NULL;
@@ -1274,6 +1362,8 @@ void movegen_one_tile_wmp(void) {
       .move_sort_type = MOVE_SORT_SCORE,
       .thread_index = 0,
       .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
   };
 
   SortedMoveList *sml = NULL;
@@ -1519,6 +1609,7 @@ void test_move_gen(void) {
   equity_test();
   top_equity_play_recorder_test();
   small_play_recorder_test();
+  best_small_play_recorder_test();
   distinct_lexica_test(false);
   distinct_lexica_test(true);
   consistent_tiebreaking_test();
