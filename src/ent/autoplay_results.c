@@ -7,12 +7,15 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
+#include "../str/letter_distribution_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
+#include "bonus_square.h"
 #include "data_filepaths.h"
+#include "dictionary_word.h"
 #include "equity.h"
 #include "game.h"
 #include "klv.h"
@@ -23,6 +26,7 @@
 #include "players_data.h"
 #include "rack.h"
 #include "stats.h"
+#include "words.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -1023,6 +1027,389 @@ void leaves_data_finalize(Recorder **recorder_list, int list_size,
   free(leaves_count_name);
 }
 
+// Word stats recorder functions
+
+typedef struct WordStatsEntry {
+  uint64_t primary_count;
+  int64_t primary_total_score;
+  uint64_t secondary_count;
+  int64_t secondary_total_score;
+} WordStatsEntry;
+
+typedef struct WordStatsData {
+  int num_words;
+  WordStatsEntry *entries;
+} WordStatsData;
+
+typedef struct WordStatsSharedData {
+  DictionaryWordList *words; // sorted alphabetically for binary search
+} WordStatsSharedData;
+
+// Enumerate all words from KWG DAWG via recursive traversal
+void word_stats_enumerate_words(const KWG *kwg, uint32_t node_index,
+                                MachineLetter *prefix, int prefix_length,
+                                bool accepts, DictionaryWordList *words) {
+  if (accepts && prefix_length >= 2) {
+    dictionary_word_list_add_word(words, prefix, prefix_length);
+  }
+  if (node_index == 0) {
+    return;
+  }
+  for (uint32_t i = node_index;; i++) {
+    const uint32_t node = kwg_node(kwg, i);
+    const MachineLetter ml = kwg_node_tile(node);
+    const uint32_t next = kwg_node_arc_index(node);
+    const bool node_accepts = kwg_node_accepts(node);
+    if (prefix_length < BOARD_DIM) {
+      prefix[prefix_length] = ml;
+    }
+    word_stats_enumerate_words(kwg, next, prefix, prefix_length + 1,
+                               node_accepts, words);
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
+// Binary search for a word in the sorted dictionary list.
+// Returns the index or -1 if not found.
+int word_stats_find_word(const DictionaryWordList *words,
+                         const MachineLetter *word, int word_length) {
+  int lo = 0;
+  int hi = dictionary_word_list_get_count(words) - 1;
+  while (lo <= hi) {
+    int mid = lo + (hi - lo) / 2;
+    const DictionaryWord *dw = dictionary_word_list_get_word(words, mid);
+    const MachineLetter *dw_word = dictionary_word_get_word(dw);
+    int dw_len = dictionary_word_get_length(dw);
+    int min_len = word_length < dw_len ? word_length : dw_len;
+    int cmp = memcmp(word, dw_word, min_len * sizeof(MachineLetter));
+    if (cmp == 0) {
+      if (word_length < dw_len) {
+        cmp = -1;
+      } else if (word_length > dw_len) {
+        cmp = 1;
+      }
+    }
+    if (cmp < 0) {
+      hi = mid - 1;
+    } else if (cmp > 0) {
+      lo = mid + 1;
+    } else {
+      return mid;
+    }
+  }
+  return -1;
+}
+
+void word_stats_data_reset(Recorder *recorder) {
+  WordStatsData *data = (WordStatsData *)recorder->data;
+  if (data->entries) {
+    memset(data->entries, 0, sizeof(WordStatsEntry) * data->num_words);
+  }
+}
+
+void word_stats_data_create(Recorder *recorder) {
+  WordStatsData *data = malloc_or_die(sizeof(WordStatsData));
+  WordStatsSharedData *shared_data = NULL;
+
+  if (recorder->owns_thread_shared_data) {
+    shared_data = malloc_or_die(sizeof(WordStatsSharedData));
+    const KWG *kwg =
+        players_data_get_kwg(recorder->recorder_context->players_data, 0);
+    shared_data->words = dictionary_word_list_create();
+    MachineLetter prefix[BOARD_DIM];
+    uint32_t dawg_root = kwg_get_dawg_root_node_index(kwg);
+    word_stats_enumerate_words(kwg, dawg_root, prefix, 0, false,
+                               shared_data->words);
+    dictionary_word_list_sort(shared_data->words);
+    recorder->thread_shared_data = shared_data;
+  }
+
+  // We can't set num_words yet if we don't own the shared data,
+  // because thread_shared_data hasn't been assigned yet.
+  // Set a temporary value; it will be corrected after creation.
+  data->num_words = 0;
+  data->entries = NULL;
+  recorder->data = data;
+}
+
+// Called after thread_shared_data is assigned to initialize the entries array
+void word_stats_data_init_entries(Recorder *recorder) {
+  WordStatsData *data = (WordStatsData *)recorder->data;
+  if (data->entries != NULL) {
+    return; // already initialized
+  }
+  const WordStatsSharedData *shared_data =
+      (const WordStatsSharedData *)recorder->thread_shared_data;
+  data->num_words = dictionary_word_list_get_count(shared_data->words);
+  data->entries = calloc_or_die(data->num_words, sizeof(WordStatsEntry));
+}
+
+void word_stats_data_destroy(Recorder *recorder) {
+  WordStatsData *data = (WordStatsData *)recorder->data;
+  free(data->entries);
+  free(data);
+  if (recorder->owns_thread_shared_data) {
+    WordStatsSharedData *shared_data =
+        (WordStatsSharedData *)recorder->thread_shared_data;
+    dictionary_word_list_destroy(shared_data->words);
+    free(shared_data);
+  }
+}
+
+void word_stats_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  const Move *move = args->move;
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+
+  WordStatsData *data = (WordStatsData *)recorder->data;
+  word_stats_data_init_entries(recorder);
+  const WordStatsSharedData *shared_data =
+      (const WordStatsSharedData *)recorder->thread_shared_data;
+  const Game *game = args->game;
+  Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  int tiles_played = move_get_tiles_played(move);
+  int tiles_length = move_get_tiles_length(move);
+  int row_start = move_get_row_start(move);
+  int col_start = move_get_col_start(move);
+  int move_dir = move_get_dir(move);
+
+  // Transpose board if needed (will undo at end)
+  bool board_was_transposed = false;
+  if (!board_matches_dir(board, move_dir)) {
+    board_transpose(board);
+    board_was_transposed = true;
+    int tmp = row_start;
+    row_start = col_start;
+    col_start = tmp;
+  }
+
+  // Compute the main word score and per-cross-word scores
+  Equity main_word_score = 0;
+  int word_multiplier = 1;
+  Equity bingo_bonus = 0;
+  if (tiles_played == RACK_SIZE) {
+    bingo_bonus = game_get_bingo_bonus(game);
+  }
+
+  // Track which cross words are formed and their scores
+  // Max cross words = tiles_played (one per fresh tile)
+  Equity cross_word_scores[RACK_SIZE];
+  MachineLetter cross_words[RACK_SIZE][BOARD_DIM];
+  int cross_word_lengths[RACK_SIZE];
+  int num_cross_words = 0;
+
+  // Build the main word and compute scores
+  MachineLetter main_word[BOARD_DIM];
+  int main_word_length = 0;
+
+  int cross_set_index = board_get_cross_set_index(
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG),
+      game_get_player_on_turn_index(game));
+
+  for (int idx = 0; idx < tiles_length; idx++) {
+    MachineLetter ml = move_get_tile(move, idx);
+    BonusSquare bonus_square =
+        board_get_bonus_square(board, row_start, col_start + idx);
+    int letter_multiplier = 1;
+    int this_word_multiplier = 1;
+    bool fresh_tile = false;
+
+    if (ml == PLAYED_THROUGH_MARKER) {
+      ml = board_get_letter(board, row_start, col_start + idx);
+    } else {
+      fresh_tile = true;
+      this_word_multiplier = bonus_square_get_word_multiplier(bonus_square);
+      letter_multiplier = bonus_square_get_letter_multiplier(bonus_square);
+      word_multiplier *= this_word_multiplier;
+    }
+
+    Equity ls;
+    if (get_is_blanked(ml)) {
+      ls = ld_get_score(ld, BLANK_MACHINE_LETTER);
+    } else {
+      ls = ld_get_score(ld, ml);
+    }
+
+    main_word_score += ls * letter_multiplier;
+    main_word[main_word_length++] =
+        get_unblanked_machine_letter(ml);
+
+    // Check for cross word
+    bool actual_cross_word =
+        (row_start > 0 &&
+         !board_is_empty(board, row_start - 1, col_start + idx)) ||
+        ((row_start < BOARD_DIM - 1) &&
+         !board_is_empty(board, row_start + 1, col_start + idx));
+
+    if (fresh_tile && actual_cross_word) {
+      Equity cs = board_get_cross_score(board, row_start, col_start + idx,
+                                        BOARD_HORIZONTAL_DIRECTION,
+                                        cross_set_index);
+      cross_word_scores[num_cross_words] =
+          ls * letter_multiplier * this_word_multiplier +
+          cs * this_word_multiplier;
+
+      // Build the cross word letters
+      int rbegin;
+      for (rbegin = row_start - 1; rbegin >= 0; rbegin--) {
+        if (board_is_empty(board, rbegin, col_start + idx)) {
+          rbegin++;
+          break;
+        }
+      }
+      if (rbegin < 0) {
+        rbegin = 0;
+      }
+      int rend;
+      for (rend = rbegin; rend < BOARD_DIM; rend++) {
+        if (rend != row_start &&
+            board_is_empty(board, rend, col_start + idx)) {
+          rend--;
+          break;
+        }
+      }
+      if (rend == BOARD_DIM) {
+        rend = BOARD_DIM - 1;
+      }
+
+      int cw_len = 0;
+      for (int r = rbegin; r <= rend; r++) {
+        MachineLetter cw_ml;
+        if (r != row_start) {
+          cw_ml = get_unblanked_machine_letter(
+              board_get_letter(board, r, col_start + idx));
+        } else {
+          cw_ml = get_unblanked_machine_letter(ml);
+        }
+        cross_words[num_cross_words][cw_len++] = cw_ml;
+      }
+      cross_word_lengths[num_cross_words] = cw_len;
+      num_cross_words++;
+    }
+  }
+
+  if (board_was_transposed) {
+    board_transpose(board);
+  }
+
+  Equity primary_score = main_word_score * word_multiplier + bingo_bonus;
+
+  // Determine if this is the single-tile edge case where both words are primary
+  bool single_tile_both_primary = (tiles_played == 1 && num_cross_words == 1);
+
+  // Record main word
+  if (main_word_length >= 2) {
+    int word_idx =
+        word_stats_find_word(shared_data->words, main_word, main_word_length);
+    if (word_idx >= 0) {
+      data->entries[word_idx].primary_count++;
+      data->entries[word_idx].primary_total_score += primary_score;
+    }
+  }
+
+  // Record cross words
+  for (int i = 0; i < num_cross_words; i++) {
+    if (cross_word_lengths[i] < 2) {
+      continue;
+    }
+    int word_idx = word_stats_find_word(shared_data->words, cross_words[i],
+                                        cross_word_lengths[i]);
+    if (word_idx >= 0) {
+      if (single_tile_both_primary) {
+        data->entries[word_idx].primary_count++;
+        data->entries[word_idx].primary_total_score += cross_word_scores[i];
+      } else {
+        data->entries[word_idx].secondary_count++;
+        data->entries[word_idx].secondary_total_score += cross_word_scores[i];
+      }
+    }
+  }
+}
+
+void word_stats_data_finalize(Recorder **recorder_list, int list_size,
+                              Recorder *primary_recorder) {
+  WordStatsData *primary_data = (WordStatsData *)primary_recorder->data;
+  word_stats_data_init_entries(primary_recorder);
+  const WordStatsSharedData *shared_data =
+      (const WordStatsSharedData *)primary_recorder->thread_shared_data;
+  const int num_words = dictionary_word_list_get_count(shared_data->words);
+
+  // Combine per-thread data
+  for (int i = 0; i < list_size; i++) {
+    WordStatsData *thread_data = (WordStatsData *)recorder_list[i]->data;
+    word_stats_data_init_entries(recorder_list[i]);
+    for (int j = 0; j < num_words; j++) {
+      primary_data->entries[j].primary_count +=
+          thread_data->entries[j].primary_count;
+      primary_data->entries[j].primary_total_score +=
+          thread_data->entries[j].primary_total_score;
+      primary_data->entries[j].secondary_count +=
+          thread_data->entries[j].secondary_count;
+      primary_data->entries[j].secondary_total_score +=
+          thread_data->entries[j].secondary_total_score;
+    }
+  }
+
+  // Write to CSV file
+  char *word_stats_name = get_formatted_string(
+      "%s_word_stats",
+      players_data_get_data_name(
+          primary_recorder->recorder_context->players_data,
+          PLAYERS_DATA_TYPE_KWG, 0));
+
+  ErrorStack *error_stack = error_stack_create();
+
+  char *word_stats_filename = data_filepaths_get_writable_filename(
+      primary_recorder->recorder_context->data_paths, word_stats_name,
+      DATA_FILEPATH_TYPE_LEAVES, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error creating word stats filename: %s", word_stats_filename);
+  }
+
+  const LetterDistribution *ld = primary_recorder->recorder_context->ld;
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(
+      sb,
+      "word,primary_count,primary_total_score,secondary_count,"
+      "secondary_total_score\n");
+
+  for (int i = 0; i < num_words; i++) {
+    const WordStatsEntry *entry = &primary_data->entries[i];
+    if (entry->primary_count == 0 && entry->secondary_count == 0) {
+      continue;
+    }
+    const DictionaryWord *dw =
+        dictionary_word_list_get_word(shared_data->words, i);
+    for (int j = 0; j < dictionary_word_get_length(dw); j++) {
+      string_builder_add_user_visible_letter(
+          sb, ld, dictionary_word_get_word(dw)[j]);
+    }
+    string_builder_add_formatted_string(
+        sb, ",%lu,%ld,%lu,%ld\n", entry->primary_count,
+        entry->primary_total_score, entry->secondary_count,
+        entry->secondary_total_score);
+  }
+
+  write_string_to_file(word_stats_filename, "w", string_builder_peek(sb),
+                        error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error writing word stats file '%s'", word_stats_filename);
+  }
+
+  error_stack_destroy(error_stack);
+  string_builder_destroy(sb);
+  free(word_stats_filename);
+  free(word_stats_name);
+}
+
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
@@ -1146,6 +1533,11 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_LEAVES,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_finalize, get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WORD_STATS,
+      word_stats_data_reset, word_stats_data_create, word_stats_data_destroy,
+      word_stats_data_add_move, add_game_noop, word_stats_data_finalize,
+      get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -1172,6 +1564,9 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
+    } else if (has_iprefix(option_str, "wordstats")) {
+      options |=
+          autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WORD_STATS);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
