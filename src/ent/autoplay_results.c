@@ -1420,8 +1420,9 @@ void word_stats_data_finalize(Recorder **recorder_list, int list_size,
     }
     string_builder_add_formatted_string(
         sb, ",%lu,%ld,%lu,%ld\n", entry->primary_count,
-        entry->primary_total_score, entry->secondary_count,
-        entry->secondary_total_score);
+        entry->primary_total_score / EQUITY_RESOLUTION,
+        entry->secondary_count,
+        entry->secondary_total_score / EQUITY_RESOLUTION);
   }
 
   write_string_to_file(word_stats_filename, "w", string_builder_peek(sb),
