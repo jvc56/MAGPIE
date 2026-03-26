@@ -1045,30 +1045,58 @@ typedef struct WordStatsSharedData {
   DictionaryWordList *words; // sorted alphabetically for binary search
 } WordStatsSharedData;
 
-// Enumerate all words from KWG DAWG via recursive traversal
-void word_stats_enumerate_words(const KWG *kwg, uint32_t node_index,
-                                MachineLetter *prefix, int prefix_length,
-                                bool accepts, DictionaryWordList *words) {
-  if (accepts && prefix_length >= 2) {
-    dictionary_word_list_add_word(words, prefix, prefix_length);
+// Load words from lexicon text file into the dictionary word list.
+void word_stats_load_words_from_file(const char *data_paths,
+                                     const char *lex_name,
+                                     const LetterDistribution *ld,
+                                     DictionaryWordList *words) {
+  ErrorStack *error_stack = error_stack_create();
+  char *filename = data_filepaths_get_readable_filename(
+      data_paths, lex_name, DATA_FILEPATH_TYPE_LEXICON, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error finding lexicon file for %s", lex_name);
   }
-  if (node_index == 0) {
-    return;
+  char *content = get_string_from_file(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error reading lexicon file: %s", filename);
   }
-  for (uint32_t i = node_index;; i++) {
-    const uint32_t node = kwg_node(kwg, i);
-    const MachineLetter ml = kwg_node_tile(node);
-    const uint32_t next = kwg_node_arc_index(node);
-    const bool node_accepts = kwg_node_accepts(node);
-    if (prefix_length < BOARD_DIM) {
-      prefix[prefix_length] = ml;
+  free(filename);
+  error_stack_destroy(error_stack);
+
+  // Build fast char-to-ML lookup table
+  MachineLetter char_to_ml[256];
+  memset(char_to_ml, 0xFF, sizeof(char_to_ml));
+  for (int i = 0; i < MACHINE_LETTER_MAX_VALUE; i++) {
+    char *hl = ld_ml_to_hl(ld, i);
+    if (hl && string_length(hl) == 1) {
+      char_to_ml[(unsigned char)hl[0]] = i;
     }
-    word_stats_enumerate_words(kwg, next, prefix, prefix_length + 1,
-                               node_accepts, words);
-    if (kwg_node_is_end(node)) {
-      break;
+    free(hl);
+  }
+
+  MachineLetter mls[BOARD_DIM];
+  int ml_count = 0;
+  for (const char *p = content; *p; p++) {
+    if (*p == '\n' || *p == '\r') {
+      if (ml_count >= 2) {
+        dictionary_word_list_add_word(words, mls, ml_count);
+      }
+      ml_count = 0;
+      continue;
+    }
+    if (ml_count < BOARD_DIM) {
+      MachineLetter ml = char_to_ml[(unsigned char)*p];
+      if (ml != (MachineLetter)0xFF) {
+        mls[ml_count++] = ml;
+      }
     }
   }
+  if (ml_count >= 2) {
+    dictionary_word_list_add_word(words, mls, ml_count);
+  }
+  free(content);
 }
 
 // Binary search for a word in the sorted dictionary list.
@@ -1115,13 +1143,12 @@ void word_stats_data_create(Recorder *recorder) {
 
   if (recorder->owns_thread_shared_data) {
     shared_data = malloc_or_die(sizeof(WordStatsSharedData));
-    const KWG *kwg =
-        players_data_get_kwg(recorder->recorder_context->players_data, 0);
+    const char *lex_name = players_data_get_data_name(
+        recorder->recorder_context->players_data, PLAYERS_DATA_TYPE_KWG, 0);
     shared_data->words = dictionary_word_list_create();
-    MachineLetter prefix[BOARD_DIM];
-    uint32_t dawg_root = kwg_get_dawg_root_node_index(kwg);
-    word_stats_enumerate_words(kwg, dawg_root, prefix, 0, false,
-                               shared_data->words);
+    word_stats_load_words_from_file(recorder->recorder_context->data_paths,
+                                    lex_name, recorder->recorder_context->ld,
+                                    shared_data->words);
     dictionary_word_list_sort(shared_data->words);
     recorder->thread_shared_data = shared_data;
   }
