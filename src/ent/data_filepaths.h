@@ -10,6 +10,7 @@
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
+#define EGCAL_EXTENSION ".egcal"
 #define LEXICON_EXTENSION ".txt"
 
 typedef enum {
@@ -22,6 +23,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_LEAVES,
   DATA_FILEPATH_TYPE_LEXICON,
   DATA_FILEPATH_TYPE_WORDMAP,
+  DATA_FILEPATH_TYPE_EGCAL,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,

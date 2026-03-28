@@ -54,6 +54,7 @@
 #include "autoplay.h"
 #include "cgp.h"
 #include "convert.h"
+#include "egcal.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "gcg.h"
@@ -197,6 +198,8 @@ typedef enum {
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
+  ARG_TOKEN_EGCAL,
+  ARG_TOKEN_EGCAL_CONFIDENCE,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -296,6 +299,8 @@ struct Config {
   GameHistory *game_history_backup;
   MoveList *move_list;
   EndgameSolver *endgame_solver;
+  EgcalTable *egcal_table;
+  int egcal_confidence_idx;
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
@@ -1044,6 +1049,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "letter distribution is specified, the current letter distribution "
           "is used. Currently, only the 'klv' type is supported.";
       break;
+    case ARG_TOKEN_EGCAL:
+      usages[0] = "<num_positions>";
+      examples[0] = "50000";
+      text =
+          "Generates endgame calibration data for the current lexicon. "
+          "Plays random games to the endgame, then evaluates each position "
+          "with both a greedy playout and the exact solver. The error "
+          "distribution is binned by position features and written to a "
+          "binary .egcal file. Use BUILD=release for large runs.";
+      break;
     case ARG_TOKEN_LOAD:
       usages[0] = "<source_identifier>";
       examples[0] = "54938";
@@ -1373,6 +1388,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "1";
       examples[1] = "5";
       text = "Number of top moves to return with full PVs from endgame solver.";
+      break;
+    case ARG_TOKEN_EGCAL_CONFIDENCE:
+      usages[0] = "<percentile_index>";
+      examples[0] = "-1";
+      examples[1] = "2";
+      examples[2] = "4";
+      text =
+          "Egcal lossy pruning confidence level for endgame solver. -1 disables "
+          "pruning (default). 0=p90, 1=p95, 2=p99, 3=p99.5, 4=p99.9, "
+          "5=p99.95, 6=p99.99. Requires a .egcal file for the current lexicon.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2565,6 +2590,8 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->egcal_table = config->egcal_table;
+  endgame_args->egcal_confidence_idx = config->egcal_confidence_idx;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -2581,6 +2608,28 @@ void impl_endgame(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot run endgame without lexicon"));
     return;
   }
+
+  // Lazy-load egcal table when pruning is enabled
+  if (config->egcal_confidence_idx >= 0 && !config->egcal_table) {
+    const char *lexicon_name = players_data_get_data_name(
+        config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+    char *est_name = get_formatted_string("%s_est", lexicon_name);
+    char *egcal_filename = data_filepaths_get_readable_filename(
+        config->data_paths, est_name, DATA_FILEPATH_TYPE_EGCAL, error_stack);
+    free(est_name);
+    if (!error_stack_is_empty(error_stack)) {
+      // No .egcal file found — disable pruning and continue without error
+      error_stack_reset(error_stack);
+      config->egcal_confidence_idx = -1;
+    } else {
+      config->egcal_table = egcal_table_load(egcal_filename, error_stack);
+      free(egcal_filename);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
+
   config_init_game(config);
   config_endgame(config, config->endgame_results, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2815,6 +2864,48 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
                   error_stack);
+}
+
+// Egcal
+
+void impl_egcal(const Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot run egcal without lexicon"));
+    return;
+  }
+
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("egcal requires both players to share a lexicon"));
+    return;
+  }
+
+  const char *num_positions_str =
+      config_get_parg_value(config, ARG_TOKEN_EGCAL, 0);
+  uint64_t num_positions =
+      string_to_uint64(num_positions_str, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  EgcalArgs egcal_args = {0};
+  GameArgs game_args;
+  config_fill_game_args(config, &game_args);
+  egcal_args.game_args = &game_args;
+  egcal_args.data_paths = config_get_data_paths(config);
+  egcal_args.lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  egcal_args.thread_control = config_get_thread_control(config);
+  egcal_args.num_positions = num_positions;
+  egcal_args.num_threads = config->num_threads;
+  egcal_args.print_interval = config->print_interval;
+  egcal_args.seed = config->seed;
+
+  egcal(&egcal_args, error_stack);
 }
 
 // Create
@@ -5702,6 +5793,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Load egcal confidence index (-1 = disabled, 0-6 = percentile level)
+  config_load_int(config, ARG_TOKEN_EGCAL_CONFIDENCE, -1,
+                  EGCAL_NUM_PERCENTILES - 1, &config->egcal_confidence_idx,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -6642,6 +6741,15 @@ char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_egcal(Config *config, ErrorStack *error_stack) {
+  impl_egcal(config, error_stack);
+}
+
+char *str_api_egcal(Config *config, ErrorStack *error_stack) {
+  impl_egcal(config, error_stack);
+  return empty_string();
+}
+
 void execute_create_data(Config *config, ErrorStack *error_stack) {
   impl_create_data(config, error_stack);
 }
@@ -6729,6 +6837,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
+  cmd(ARG_TOKEN_EGCAL, "egcal", 1, 1, egcal, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
   cmd(ARG_TOKEN_GOTO, "goto", 1, 1, goto, generic, false);
@@ -6760,6 +6869,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
+  arg(ARG_TOKEN_EGCAL_CONFIDENCE, "ecal", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -6910,6 +7020,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->autoplay_results = autoplay_results_create();
   config->conversion_results = conversion_results_create();
   config->tt_fraction_of_mem = 0.25;
+  config->egcal_table = NULL;
+  config->egcal_confidence_idx = -1;
   config->game_string_options = game_string_options_create_pretty();
 
   autoplay_results_set_players_data(config->autoplay_results,
@@ -6934,6 +7046,7 @@ void config_destroy(Config *config) {
   game_history_destroy(config->game_history);
   game_history_destroy(config->game_history_backup);
   endgame_solver_destroy(config->endgame_solver);
+  egcal_table_destroy(config->egcal_table);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);
@@ -7031,6 +7144,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NOTE:
     case ARG_TOKEN_P1_NAME:
     case ARG_TOKEN_P2_NAME:
+    case ARG_TOKEN_EGCAL:
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       string_builder_add_formatted_string(sb, " -%s ",
@@ -7166,6 +7280,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_top_k);
+      break;
+    case ARG_TOKEN_EGCAL_CONFIDENCE:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->egcal_confidence_idx);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

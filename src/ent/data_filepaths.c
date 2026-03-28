@@ -9,7 +9,7 @@
 
 static const char *const filepath_type_names[] = {
     "kwg", "klv",    "board layout", "win percentage", "letter distribution",
-    "gcg", "leaves", "lexicon",      "wordmap"};
+    "gcg", "leaves", "lexicon",      "wordmap",        "egcal"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
@@ -20,6 +20,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_LEXICON:
   case DATA_FILEPATH_TYPE_WORDMAP:
   case DATA_FILEPATH_TYPE_LEAVES:
+  case DATA_FILEPATH_TYPE_EGCAL:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -67,6 +68,9 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_LEXICON:
     file_ext = LEXICON_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_EGCAL:
+    file_ext = EGCAL_EXTENSION;
     break;
   }
   string_builder_add_string(filepath_sb, file_ext);

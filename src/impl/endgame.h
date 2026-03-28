@@ -7,6 +7,7 @@
 // search. The board-size limitation comes from MoveUndo's 16-bit
 // tiles_placed_mask.
 
+#include "../ent/egcal_table.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -54,6 +55,13 @@ typedef struct EndgameArgs {
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  // Egcal lossy pruning (NULL = disabled):
+  // Prune non-PV moves whose greedy playout + calibrated margin can't beat
+  // alpha. egcal_confidence_idx selects the percentile level (0=p90 .. 6=p99.99)
+  const EgcalTable *egcal_table;
+  int egcal_confidence_idx;
+  int thread_index_offset; // added to worker indices to avoid movegen cache
+                           // collisions when multiple solvers run in parallel
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

@@ -18,6 +18,8 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "egcal_benchmark_test.h"
+#include "egcal_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -112,6 +114,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"egcal", test_egcal},
     {"endgame", test_endgame},
     {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
@@ -133,6 +136,7 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"benchegcal", test_egcal_benchmark},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

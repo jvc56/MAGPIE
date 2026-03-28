@@ -4,6 +4,7 @@
 #include "../compat/csched.h"
 #include "../compat/ctime.h"
 #include "../def/board_defs.h"
+#include "../def/egcal_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -117,6 +118,10 @@ struct EndgameSolver {
   dual_lexicon_mode_t dual_lexicon_mode;
   double soft_time_limit;
   double hard_time_limit;
+
+  const EgcalTable *egcal_table;
+  int egcal_confidence_idx;
+  int thread_index_offset;
 
   int solve_multiple_variations;
   int requested_plies;
@@ -434,6 +439,9 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   }
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
+  es->egcal_table = endgame_args->egcal_table;
+  es->egcal_confidence_idx = endgame_args->egcal_confidence_idx;
+  es->thread_index_offset = endgame_args->thread_index_offset;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
@@ -522,7 +530,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   EndgameSolverWorker *solver_worker =
       malloc_or_die(sizeof(EndgameSolverWorker));
 
-  solver_worker->thread_index = worker_index;
+  solver_worker->thread_index = worker_index + solver->thread_index_offset;
   solver_worker->game_copy = game_duplicate(solver->game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
@@ -1873,6 +1881,34 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // Track whether thread 0 is inside root move #1's subtree
       if (is_root && worker->thread_index == 0 && pass == 0) {
         worker->in_first_root_move = (idx == 0);
+      }
+
+      // Egcal futility pruning: use the move's estimated_value (already
+      // computed during move ordering) as a zero-cost proxy. Only for moves
+      // ranked #4+ at non-PV, non-root nodes. Check BEFORE play to avoid
+      // the play/unplay cost entirely.
+      if (worker->solver->egcal_table && !pv_node && idx >= 3 && !is_root) {
+        int32_t est = small_move_get_estimated_value(small_move);
+        // Skip pruning for flagged moves (going-out, hash move, early pass)
+        if (est < GOING_OUT_BF) {
+          int child_tiles_otk = stm_rack_tiles -
+                                small_move_get_tiles_played(small_move);
+          int child_tiles_ott = rack_get_total_letters(
+              player_get_rack(other_player));
+          int child_total = child_tiles_otk + child_tiles_ott;
+          if (child_total >= EGCAL_TOTAL_TILES_MIN &&
+              child_total <= EGCAL_TOTAL_TILES_MAX) {
+            int32_t lower_pcts[EGCAL_NUM_PERCENTILES];
+            egcal_table_lookup(worker->solver->egcal_table, child_total,
+                               child_tiles_ott, -1, -1, -1, -1, -1, NULL,
+                               NULL, lower_pcts);
+            int32_t margin =
+                -lower_pcts[worker->solver->egcal_confidence_idx];
+            if (est + margin <= alpha) {
+              continue;
+            }
+          }
+        }
       }
 
       int last_consecutive_scoreless_turns =
