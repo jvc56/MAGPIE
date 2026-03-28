@@ -1884,10 +1884,11 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       }
 
       // Egcal futility pruning: use the move's estimated_value (already
-      // computed during move ordering) as a zero-cost proxy. Only for moves
-      // ranked #4+ at non-PV, non-root nodes. Check BEFORE play to avoid
-      // the play/unplay cost entirely.
-      if (worker->solver->egcal_table && !pv_node && idx >= 3 && !is_root) {
+      // computed during move ordering) as a zero-cost proxy. Skip stuck-tile
+      // positions where static estimates are unreliable. Prune from move #2
+      // onward at non-PV, non-root nodes.
+      if (worker->solver->egcal_table && !pv_node && idx >= 1 && !is_root &&
+          opp_stuck_frac == 0.0F) {
         int32_t est = small_move_get_estimated_value(small_move);
         // Skip pruning for flagged moves (going-out, hash move, early pass)
         if (est < GOING_OUT_BF) {

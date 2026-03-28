@@ -535,7 +535,10 @@ static void egcal_sample_position(EgcalWorker *worker, Game *sample_game) {
   endgame_results_reset(worker->endgame_results);
   EndgameArgs endgame_args = {0};
   endgame_args.game = sample_game;
-  endgame_args.plies = total_tiles;
+  // Cap plies at 4 for tractable solve times. The greedy leaf playout
+  // extends evaluation to full game depth, so 4-ply values are reasonable
+  // even for positions with 14 total tiles.
+  endgame_args.plies = total_tiles < 4 ? total_tiles : 4;
   endgame_args.num_threads = 1;
   endgame_args.tt_fraction_of_mem = 0.01;
   endgame_args.use_heuristics = true;
@@ -642,7 +645,7 @@ static void *egcal_worker_loop(void *arg) {
       // Avoid sampling the same total_tiles twice in a row (e.g., after a
       // pass). Skip exact solving for positions with too many tiles — the
       // solver can spend minutes on deep positions.
-      if (total != prev_total && total <= 8) {
+      if (total != prev_total) {
         egcal_sample_position(worker, sample_game);
         prev_total = total;
       }
