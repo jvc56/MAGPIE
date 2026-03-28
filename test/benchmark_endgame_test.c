@@ -477,7 +477,8 @@ void test_benchmark_nonstuck_3v3(void) {
 
 // A/B benchmark: compare endgame solving with and without TT-informed move
 // ordering (MMST + child-TT probing). Generates bag-empty positions inline
-// and solves at a fixed ply. Separate solvers prevent TT cross-contamination.
+// and solves under a time budget. The hard_time_limit triggers a mid-depth
+// cutoff via depth_deadline_ns. Separate solvers prevent TT cross-contamination.
 void test_benchmark_tt_move_ordering(void) {
   log_set_level(LOG_FATAL);
 
@@ -491,7 +492,9 @@ void test_benchmark_tt_move_ordering(void) {
   const uint64_t base_seed = 99999;
   const int max_attempts = 50000;
   const int num_threads = 8;
-  const int ply = 3;
+  const int ply = 25;
+  const double soft_limit = 1.0;
+  const double hard_limit = 2.0;
 
   // Collect endgame positions with reduced racks (play a few moves past
   // bag-empty so positions are tractable at the chosen ply depth).
@@ -523,7 +526,9 @@ void test_benchmark_tt_move_ordering(void) {
   printf("\n");
   printf("==============================================================\n");
   printf("  TT Move Ordering Benchmark: %d positions\n", found);
-  printf("  %d-ply, %d threads, separate TTs (0.25 each)\n", ply, num_threads);
+  printf("  %d-ply (soft=%.1fs hard=%.1fs), %d threads, separate TTs (0.25 "
+         "each)\n",
+         ply, soft_limit, hard_limit, num_threads);
   printf("  Old: static heuristics only\n");
   printf("  New: MMST + child-TT probing\n");
   printf("==============================================================\n");
@@ -574,6 +579,8 @@ void test_benchmark_tt_move_ordering(void) {
                           .num_top_moves = 1,
                           .use_heuristics = true,
                           .forced_pass_bypass = true,
+                          .soft_time_limit = soft_limit,
+                          .hard_time_limit = hard_limit,
                           .use_tt_move_ordering = is_new};
 
       Timer timer;
@@ -618,7 +625,8 @@ void test_benchmark_tt_move_ordering(void) {
 
   printf("  ----  -------- --------  -------- --------  ------\n");
   printf("\n");
-  printf("  Results (%d positions, %d-ply):\n", solved, ply);
+  printf("  Results (%d positions, %d-ply, soft=%.1fs hard=%.1fs):\n", solved,
+         ply, soft_limit, hard_limit);
   printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
          old_better, same);
   printf("    Total value delta: %+d (avg %+.2f per position)\n", total_delta,
