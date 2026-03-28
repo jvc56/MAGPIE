@@ -488,13 +488,13 @@ void test_benchmark_tt_move_ordering(void) {
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  const int target = 50;
+  const int target = 250;
   const uint64_t base_seed = 99999;
-  const int max_attempts = 50000;
+  const int max_attempts = 250000;
   const int num_threads = 8;
   const int ply = 25;
-  const double soft_limit = 1.0;
-  const double hard_limit = 2.0;
+  const double soft_limit = 5.0;
+  const double hard_limit = 10.0;
 
   // Collect endgame positions with reduced racks (play a few moves past
   // bag-empty so positions are tractable at the chosen ply depth).
