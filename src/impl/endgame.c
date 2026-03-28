@@ -72,6 +72,16 @@ enum {
   CONSERVATION_VALUE_WEIGHT = 2,
   // Random noise range for thread jitter, centered around zero
   THREAD_JITTER_NOISE = 8,
+  // Multi-Move Score Table: per-(position, move) score cache for move ordering.
+  // Stores scores from previous IDS iterations for all searched moves, not just
+  // the TT best-move. 2^22 entries * 4 bytes = 16 MB.
+  MMST_SIZE_POWER = 22,
+  MMST_SIZE = (1 << MMST_SIZE_POWER),
+  MMST_MASK = (MMST_SIZE - 1),
+  // Bonus for moves that have an MMST or child-TT estimate.
+  // Ensures TT-informed ordering beats static heuristics, but stays below
+  // GOING_OUT_BF so going-out moves (which have exact estimates) still win.
+  TT_ESTIMATE_BF = 1 << 26,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -123,6 +133,7 @@ struct EndgameSolver {
   int threads;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
+  _Atomic uint32_t *move_score_table; // MMST: per-(position, move) score cache
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
@@ -183,6 +194,38 @@ typedef struct EndgameSolverWorker {
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
+
+// Multi-Move Score Table (MMST) helpers.
+// Stores per-(position, move) scores from previous searches for move ordering.
+// Entry format: [31:16] verification bits, [15:0] int16_t score.
+// Key: node_key XOR (tiny_move * golden ratio).
+
+static inline uint64_t mmst_compute_key(uint64_t node_key, uint64_t tiny_move) {
+  return node_key ^ (tiny_move * 0x9E3779B97F4A7C15ULL);
+}
+
+static inline void mmst_store(_Atomic uint32_t *table, uint64_t node_key,
+                              uint64_t tiny_move, int16_t score) {
+  uint64_t key = mmst_compute_key(node_key, tiny_move);
+  uint32_t idx = (uint32_t)(key >> 32) & MMST_MASK;
+  uint16_t verify = (uint16_t)(key & 0xFFFF);
+  uint32_t entry = ((uint32_t)verify << 16) | (uint16_t)score;
+  atomic_store_explicit(&table[idx], entry, memory_order_relaxed);
+}
+
+static inline bool mmst_lookup(const _Atomic uint32_t *table,
+                               uint64_t node_key, uint64_t tiny_move,
+                               int16_t *score_out) {
+  uint64_t key = mmst_compute_key(node_key, tiny_move);
+  uint32_t idx = (uint32_t)(key >> 32) & MMST_MASK;
+  uint16_t verify = (uint16_t)(key & 0xFFFF);
+  uint32_t entry = atomic_load_explicit(&table[idx], memory_order_relaxed);
+  if ((entry >> 16) == verify) {
+    *score_out = (int16_t)(entry & 0xFFFF);
+    return true;
+  }
+  return false;
+}
 
 // Insert a value into a sorted (descending) top-K array.
 // Returns the Kth-best value (or -LARGE_VALUE if fewer than K values stored).
@@ -476,6 +519,15 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
         transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  // Allocate MMST alongside TT for move ordering
+  if (es->transposition_table && !es->move_score_table) {
+    es->move_score_table = (_Atomic uint32_t *)malloc_or_die(
+        sizeof(_Atomic uint32_t) * MMST_SIZE);
+    memset(es->move_score_table, 0, sizeof(_Atomic uint32_t) * MMST_SIZE);
+  } else if (!es->transposition_table) {
+    free(es->move_score_table);
+    es->move_score_table = NULL;
+  }
   if (es->results) {
     endgame_results_reset(es->results);
     endgame_results_set_valid_for_current_game_state(es->results, true);
@@ -510,6 +562,7 @@ void endgame_solver_destroy(EndgameSolver *es) {
     return;
   }
   transposition_table_destroy(es->transposition_table);
+  free(es->move_score_table);
   kwg_destroy(es->pruned_kwgs[0]);
   kwg_destroy(es->pruned_kwgs[1]);
   free(es);
@@ -1015,7 +1068,8 @@ static int *compute_build_chain_values(EndgameSolverWorker *worker,
 }
 
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
-                               uint64_t tt_move, float opp_stuck_frac) {
+                               uint64_t tt_move, float opp_stuck_frac,
+                               uint64_t node_key) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1033,22 +1087,24 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
 
+  // TT-based move ordering: try MMST and child TT probes before static
+  // heuristics. These give scores from previous IDS iterations for all
+  // searched moves, not just the TT best-move.
+  const _Atomic uint32_t *mmst = worker->solver->move_score_table;
+  const bool has_tt =
+      worker->solver->transposition_table_optim && node_key != 0;
+  const bool was_our_move =
+      (player_index == worker->solver->solving_player);
+  const int last_scoreless_turns =
+      game_get_consecutive_scoreless_turns(worker->game_copy);
+  const Board *board = game_get_board(worker->game_copy);
+
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
     SmallMove *current_move =
         (SmallMove *)(worker->small_move_arena->memory + element_offset);
 
-    bool is_non_pass_partial =
-        !small_move_is_pass(current_move) &&
-        small_move_get_tiles_played(current_move) < ntiles_on_rack;
-
-    // Conservation bonus: penalize playing tiles when opponent has stuck tiles.
-    int conservation_bonus = 0;
-    if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
-      conservation_bonus =
-          compute_conservation_bonus(current_move, est_ld, opp_stuck_frac);
-    }
-
+    // Going-out moves: exact estimate, no TT probing needed.
     if (small_move_get_tiles_played(current_move) == ntiles_on_rack) {
       small_move_set_estimated_value(
           current_move,
@@ -1056,32 +1112,102 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
                         (calculate_end_rack_points(
                             other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
-    } else if (build_values) {
-      // Use build-chain estimate as center: when opponent has stuck tiles,
-      // prorate the chain boost by stuck fraction. build_values[i] includes
-      // the move's own score plus any extension chain value.
-      int score = small_move_get_score(current_move);
-      int estimate;
-      if (build_values[i] > score) {
-        estimate =
-            score + (int)(opp_stuck_frac * (float)(build_values[i] - score));
-      } else {
-        estimate = score;
-      }
-      estimate -= conservation_bonus;
-      estimate += compute_thread_jitter(
-          worker, small_move_get_tiles_played(current_move));
-      small_move_set_estimated_value(current_move, estimate);
     } else {
-      int score = small_move_get_score(current_move);
-      int estimate = score - conservation_bonus;
-      // Static endgame equity: score minus face value of tiles played.
-      if (is_non_pass_partial) {
-        estimate -= compute_played_tiles_face_value(current_move, est_ld);
+      bool got_tt_estimate = false;
+
+      // Try MMST lookup first (cheapest: single hash + atomic load).
+      if (mmst != NULL) {
+        int16_t mmst_score;
+        if (mmst_lookup(mmst, node_key, current_move->tiny_move,
+                        &mmst_score)) {
+          small_move_set_estimated_value(
+              current_move, (int32_t)mmst_score + TT_ESTIMATE_BF);
+          got_tt_estimate = true;
+        }
       }
-      estimate += compute_thread_jitter(
-          worker, small_move_get_tiles_played(current_move));
-      small_move_set_estimated_value(current_move, estimate);
+
+      // Fallback: probe child position's TT entry.
+      // More expensive (small_move_to_move + rack copy + zobrist_add_move +
+      // TT lookup) but covers positions reached via alternate paths whose
+      // MMST entries were evicted.
+      if (!got_tt_estimate && has_tt) {
+        small_move_to_move(worker->move_list->spare_move, current_move,
+                           board);
+        Rack post_rack;
+        rack_copy(&post_rack, stm_rack);
+        const Move *probe_move = worker->move_list->spare_move;
+        if (!small_move_is_pass(current_move)) {
+          for (int tile_idx = 0; tile_idx < probe_move->tiles_length;
+               tile_idx++) {
+            MachineLetter tile = probe_move->tiles[tile_idx];
+            if (tile == PLAYED_THROUGH_MARKER) {
+              continue;
+            }
+            rack_take_letter(&post_rack,
+                             get_is_blanked(tile) ? 0 : tile);
+          }
+        }
+        int child_scoreless = small_move_is_pass(current_move)
+                                  ? MIN(last_scoreless_turns + 1, 2)
+                                  : 0;
+        uint64_t child_key = zobrist_add_move(
+            worker->solver->transposition_table->zobrist, node_key,
+            probe_move, &post_rack, was_our_move, child_scoreless,
+            last_scoreless_turns);
+        TTEntry child_entry = transposition_table_lookup(
+            worker->solver->transposition_table, child_key);
+        if (ttentry_valid(child_entry)) {
+          // From parent's perspective: value = move_score - child_stored.
+          // child_stored = child_value - child_spread, and
+          // child_spread = -(parent_spread + move_score), so
+          // -(child_value) - parent_spread = move_score - child_stored.
+          // parent_spread is constant; for ordering, rank by this.
+          int estimate = small_move_get_score(current_move) -
+                         (int)ttentry_score(child_entry);
+          small_move_set_estimated_value(
+              current_move, estimate + TT_ESTIMATE_BF);
+          got_tt_estimate = true;
+        }
+      }
+
+      // Fallback: static heuristic (build chains, conservation, face value).
+      if (!got_tt_estimate) {
+        bool is_non_pass_partial =
+            !small_move_is_pass(current_move) &&
+            small_move_get_tiles_played(current_move) < ntiles_on_rack;
+        int conservation_bonus = 0;
+        if (opp_stuck_frac > 0.0F && is_non_pass_partial) {
+          conservation_bonus =
+              compute_conservation_bonus(current_move, est_ld, opp_stuck_frac);
+        }
+        if (build_values) {
+          // Use build-chain estimate as center: when opponent has stuck tiles,
+          // prorate the chain boost by stuck fraction. build_values[i] includes
+          // the move's own score plus any extension chain value.
+          int score = small_move_get_score(current_move);
+          int estimate;
+          if (build_values[i] > score) {
+            estimate = score + (int)(opp_stuck_frac *
+                                     (float)(build_values[i] - score));
+          } else {
+            estimate = score;
+          }
+          estimate -= conservation_bonus;
+          estimate += compute_thread_jitter(
+              worker, small_move_get_tiles_played(current_move));
+          small_move_set_estimated_value(current_move, estimate);
+        } else {
+          int score = small_move_get_score(current_move);
+          int estimate = score - conservation_bonus;
+          // Static endgame equity: score minus face value of tiles played.
+          if (is_non_pass_partial) {
+            estimate -= compute_played_tiles_face_value(current_move, est_ld);
+          }
+          estimate += compute_thread_jitter(
+              worker, small_move_get_tiles_played(current_move));
+          small_move_set_estimated_value(current_move, estimate);
+        }
+      }
     }
 
     if (current_move->tiny_move == tt_move) {
@@ -1471,7 +1597,8 @@ static void negamax_tt_store(const EndgameSolverWorker *worker,
 // nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
 static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
                                            int depth, uint64_t tt_move,
-                                           float *opp_stuck_frac) {
+                                           float *opp_stuck_frac,
+                                           uint64_t node_key) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
@@ -1537,7 +1664,7 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
     }
   }
 
-  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
+  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac, node_key);
   return nplays;
 }
 
@@ -1685,7 +1812,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       return ABDADA_INTERRUPTED;
     }
     nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
-                                             &opp_stuck_frac);
+                                             &opp_stuck_frac, node_key);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
@@ -2006,6 +2133,15 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
                       best_value - worker->solver->initial_spread);
         pv->negamax_depth = child_pv.negamax_depth + 1;
       }
+      // Store per-move score in MMST for future move ordering.
+      // Normalized: (-value) - on_turn_spread removes the position-specific
+      // offset so scores are comparable across different paths to the same
+      // position.
+      if (worker->solver->move_score_table != NULL) {
+        int16_t normalized = (int16_t)(-value - on_turn_spread);
+        mmst_store(worker->solver->move_score_table, node_key,
+                   small_move->tiny_move, normalized);
+      }
       if (is_root) {
         // At the very top depth, set the estimated value of the small move,
         // for the next iterative deepening iteration.
@@ -2165,7 +2301,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, initial_move_count, INVALID_TINY_MOVE,
-                            initial_opp_stuck_frac);
+                            initial_opp_stuck_frac, initial_hash_key);
   worker->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
