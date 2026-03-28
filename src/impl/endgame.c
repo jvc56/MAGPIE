@@ -82,13 +82,6 @@ enum {
   // Ensures TT-informed ordering beats static heuristics, but stays below
   // GOING_OUT_BF so going-out moves (which have exact estimates) still win.
   TT_ESTIMATE_BF = 1 << 26,
-  // Minimum remaining depth (plies left) to enable child-TT probing.
-  // At shallow remaining depths, probing overhead exceeds pruning benefit.
-  MIN_DEPTH_FOR_CHILD_TT = 3,
-  // Maximum number of moves to child-TT probe (after MMST misses).
-  // Only the top-K moves by static heuristic are probed; the rest are
-  // unlikely to be searched and don't benefit from expensive probing.
-  MAX_CHILD_TT_PROBES = 8,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -1117,45 +1110,9 @@ static inline void assign_static_estimate(SmallMove *current_move,
   }
 }
 
-// Probe child position's TT entry to get an ordering estimate.
-// Returns true and sets estimated_value if the child has a valid TT entry.
-static bool probe_child_tt(EndgameSolverWorker *worker, SmallMove *current_move,
-                           const Rack *stm_rack, const Board *board,
-                           uint64_t node_key, bool was_our_move,
-                           int last_scoreless_turns) {
-  small_move_to_move(worker->move_list->spare_move, current_move, board);
-  Rack post_rack;
-  rack_copy(&post_rack, stm_rack);
-  const Move *probe_move = worker->move_list->spare_move;
-  if (!small_move_is_pass(current_move)) {
-    for (int tile_idx = 0; tile_idx < probe_move->tiles_length; tile_idx++) {
-      MachineLetter tile = probe_move->tiles[tile_idx];
-      if (tile == PLAYED_THROUGH_MARKER) {
-        continue;
-      }
-      rack_take_letter(&post_rack, get_is_blanked(tile) ? 0 : tile);
-    }
-  }
-  int child_scoreless = small_move_is_pass(current_move)
-                            ? MIN(last_scoreless_turns + 1, 2)
-                            : 0;
-  uint64_t child_key = zobrist_add_move(
-      worker->solver->transposition_table->zobrist, node_key, probe_move,
-      &post_rack, was_our_move, child_scoreless, last_scoreless_turns);
-  TTEntry child_entry =
-      transposition_table_lookup(worker->solver->transposition_table, child_key);
-  if (ttentry_valid(child_entry)) {
-    int estimate =
-        small_move_get_score(current_move) - (int)ttentry_score(child_entry);
-    small_move_set_estimated_value(current_move, estimate + TT_ESTIMATE_BF);
-    return true;
-  }
-  return false;
-}
-
 void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
                                uint64_t tt_move, float opp_stuck_frac,
-                               uint64_t node_key, int depth, int ids_ply) {
+                               uint64_t node_key, int ids_ply) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1173,20 +1130,10 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
 
-  // TT-based move ordering: MMST is cheap (single hash + atomic load) and
-  // always attempted. Child-TT probing is expensive and gated by depth,
-  // IDS iteration, and limited to top-K moves after static sorting.
+  // MMST move ordering: cheap (single hash + atomic load per move).
+  // Skip on first IDS iteration (table is empty).
   const _Atomic uint32_t *mmst = worker->solver->move_score_table;
-  // Skip MMST on the first IDS iteration (table is empty).
   const bool use_mmst = (mmst != NULL && ids_ply > 1);
-  // Child-TT probing: only at sufficient remaining depth and after the
-  // first IDS iteration has populated the TT.
-  const bool use_child_tt = worker->solver->use_tt_move_ordering &&
-                            worker->solver->transposition_table_optim &&
-                            node_key != 0 && depth >= MIN_DEPTH_FOR_CHILD_TT &&
-                            ids_ply > 1;
-
-  // Pass 1: assign MMST or static heuristic estimates to all moves.
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
     SmallMove *current_move =
@@ -1233,44 +1180,10 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
   }
   free(build_values);
 
-  // Sort by current estimates (MMST + static heuristic).
   SmallMove *small_moves =
       (SmallMove *)(worker->small_move_arena->memory + arena_offset);
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
-
-  // Pass 2: child-TT probe the top-K moves that don't already have a
-  // TT-informed estimate (going-out, MMST hit, or hash move).
-  // Only the top moves by static heuristic are worth the expensive probe;
-  // lower-ranked moves will be pruned by alpha-beta regardless.
-  if (use_child_tt) {
-    const bool was_our_move =
-        (player_index == worker->solver->solving_player);
-    const int last_scoreless_turns =
-        game_get_consecutive_scoreless_turns(worker->game_copy);
-    const Board *board = game_get_board(worker->game_copy);
-    int probes_done = 0;
-    bool needs_resort = false;
-    for (int move_idx = 0;
-         move_idx < move_count && probes_done < MAX_CHILD_TT_PROBES;
-         move_idx++) {
-      SmallMove *current_move = &small_moves[move_idx];
-      int32_t est = small_move_get_estimated_value(current_move);
-      // Skip moves that already have TT-informed or exact estimates.
-      if (est >= TT_ESTIMATE_BF) {
-        continue;
-      }
-      if (probe_child_tt(worker, current_move, stm_rack, board, node_key,
-                         was_our_move, last_scoreless_turns)) {
-        needs_resort = true;
-      }
-      probes_done++;
-    }
-    if (needs_resort) {
-      qsort(small_moves, move_count, sizeof(SmallMove),
-            compare_small_moves_by_estimated_value);
-    }
-  }
 }
 
 static bool iterative_deepening_should_stop(EndgameSolver *solver);
@@ -1709,7 +1622,6 @@ static int negamax_generate_and_sort_moves(EndgameSolverWorker *worker,
   }
 
   assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac, node_key,
-                            depth,
                             worker->current_iterative_deepening_depth);
   return nplays;
 }
@@ -2347,8 +2259,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
       generate_stm_plays(worker, worker->solver->requested_plies);
   // Arena pointer better have started at 0, since it was empty.
   assign_estimates_and_sort(worker, initial_move_count, INVALID_TINY_MOVE,
-                            initial_opp_stuck_frac, initial_hash_key,
-                            worker->solver->requested_plies, 0);
+                            initial_opp_stuck_frac, initial_hash_key, 0);
   worker->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));

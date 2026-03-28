@@ -476,7 +476,7 @@ void test_benchmark_nonstuck_3v3(void) {
 }
 
 // A/B benchmark: compare endgame solving with and without TT-informed move
-// ordering (MMST + child-TT probing). Generates bag-empty positions inline
+// ordering (MMST). Generates bag-empty positions inline
 // and solves under a time budget. The hard_time_limit triggers a mid-depth
 // cutoff via depth_deadline_ns. Separate solvers prevent TT cross-contamination.
 void test_benchmark_tt_move_ordering(void) {
@@ -530,7 +530,7 @@ void test_benchmark_tt_move_ordering(void) {
          "each)\n",
          ply, soft_limit, hard_limit, num_threads);
   printf("  Old: static heuristics only\n");
-  printf("  New: MMST + child-TT probing\n");
+  printf("  New: MMST move ordering\n");
   printf("==============================================================\n");
   printf("  %4s  %8s %8s  %8s %8s  %6s\n", "Pos", "Old Val", "New Val",
          "Old Time", "New Time", "Delta");
