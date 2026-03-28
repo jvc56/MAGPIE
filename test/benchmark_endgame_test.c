@@ -389,7 +389,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
-                        .forced_pass_bypass = false};
+                        .forced_pass_bypass = false,
+                        .use_tt_move_ordering = true};
 
     // --- OLD (no bypass) ---
     Timer t;
@@ -472,4 +473,168 @@ void test_benchmark_nonstuck(void) {
 void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
   run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
+}
+
+// A/B benchmark: compare endgame solving with and without TT-informed move
+// ordering (MMST + child-TT probing). Generates bag-empty positions inline
+// and solves at a fixed ply. Separate solvers prevent TT cross-contamination.
+void test_benchmark_tt_move_ordering(void) {
+  log_set_level(LOG_FATAL);
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  const int target = 50;
+  const uint64_t base_seed = 99999;
+  const int max_attempts = 50000;
+  const int num_threads = 8;
+  const int ply = 3;
+
+  // Collect endgame positions with reduced racks (play a few moves past
+  // bag-empty so positions are tractable at the chosen ply depth).
+  char (*cgp_lines)[4096] = malloc((size_t)target * 4096);
+  assert(cgp_lines);
+  int found = 0;
+
+  for (int attempt = 0; found < target && attempt < max_attempts; attempt++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)attempt);
+    draw_starting_racks(game);
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game, true);
+    size_t len = strlen(cgp);
+    if (len < 4096) {
+      memcpy(cgp_lines[found], cgp, len + 1);
+      found++;
+    }
+    free(cgp);
+  }
+
+  move_list_destroy(move_list);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  TT Move Ordering Benchmark: %d positions\n", found);
+  printf("  %d-ply, %d threads, separate TTs (0.25 each)\n", ply, num_threads);
+  printf("  Old: static heuristics only\n");
+  printf("  New: MMST + child-TT probing\n");
+  printf("==============================================================\n");
+  printf("  %4s  %8s %8s  %8s %8s  %6s\n", "Pos", "Old Val", "New Val",
+         "Old Time", "New Time", "Delta");
+  printf("  ----  -------- --------  -------- --------  ------\n");
+
+  EndgameSolver *solver_old = endgame_solver_create();
+  EndgameSolver *solver_new = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  double total_time_old = 0;
+  double total_time_new = 0;
+  int new_better = 0;
+  int old_better = 0;
+  int same = 0;
+  int total_delta = 0;
+  int solved = 0;
+
+  for (int ci = 0; ci < found; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    // Alternate solve order to reduce systematic bias
+    bool new_first = (ci % 2 == 0);
+
+    int32_t val_old = 0;
+    int32_t val_new = 0;
+    double time_old = 0;
+    double time_new = 0;
+
+    for (int pass = 0; pass < 2; pass++) {
+      bool is_new = (pass == 0) ? new_first : !new_first;
+      EndgameSolver *solver = is_new ? solver_new : solver_old;
+
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = ply,
+                          .tt_fraction_of_mem = 0.25,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = num_threads,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .forced_pass_bypass = true,
+                          .use_tt_move_ordering = is_new};
+
+      Timer timer;
+      ctimer_start(&timer);
+      err = error_stack_create();
+      endgame_solve(solver, &args, results, err);
+      double elapsed = ctimer_elapsed_seconds(&timer);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      int32_t val =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+      if (is_new) {
+        val_new = val;
+        time_new = elapsed;
+      } else {
+        val_old = val;
+        time_old = elapsed;
+      }
+    }
+
+    int delta = val_new - val_old;
+    total_delta += delta;
+    if (delta > 0) {
+      new_better++;
+    } else if (delta < 0) {
+      old_better++;
+    } else {
+      same++;
+    }
+
+    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old,
+           val_new, time_old, time_new, delta);
+    total_time_old += time_old;
+    total_time_new += time_new;
+    solved++;
+
+    if ((ci + 1) % 25 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("  ----  -------- --------  -------- --------  ------\n");
+  printf("\n");
+  printf("  Results (%d positions, %d-ply):\n", solved, ply);
+  printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
+         old_better, same);
+  printf("    Total value delta: %+d (avg %+.2f per position)\n", total_delta,
+         solved > 0 ? (double)total_delta / solved : 0.0);
+  printf("    Old total time: %.3fs (avg %.3fs)\n", total_time_old,
+         solved > 0 ? total_time_old / solved : 0.0);
+  printf("    New total time: %.3fs (avg %.3fs)\n", total_time_new,
+         solved > 0 ? total_time_new / solved : 0.0);
+  printf("    Speedup: %.2fx\n",
+         total_time_new > 0 ? total_time_old / total_time_new : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver_old);
+  endgame_solver_destroy(solver_new);
+  config_destroy(config);
 }

@@ -2565,6 +2565,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->use_tt_move_ordering = true;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,

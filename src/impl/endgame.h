@@ -54,6 +54,9 @@ typedef struct EndgameArgs {
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  // Enable MMST + child-TT move ordering (default: true when TT is active).
+  // Set to false to benchmark the impact of TT-informed move ordering.
+  bool use_tt_move_ordering;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

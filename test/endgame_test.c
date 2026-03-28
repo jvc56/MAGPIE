@@ -164,6 +164,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
+  endgame_args.use_tt_move_ordering = true;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -348,6 +349,7 @@ void test_kue(void) {
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
   endgame_args.num_top_moves = 10;
+  endgame_args.use_tt_move_ordering = true;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -411,6 +413,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
+      .use_tt_move_ordering = true,
   };
 
   endgame_solve(solver, &args, results, error_stack);
@@ -474,6 +477,7 @@ void test_monster_q(void) {
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.num_top_moves = 1;
+  endgame_args.use_tt_move_ordering = true;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
 
@@ -523,6 +527,7 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.use_tt_move_ordering = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
 

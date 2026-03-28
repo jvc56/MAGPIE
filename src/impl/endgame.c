@@ -121,6 +121,7 @@ struct EndgameSolver {
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
+  bool use_tt_move_ordering;
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
@@ -440,6 +441,7 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
+  es->use_tt_move_ordering = endgame_args->use_tt_move_ordering;
   int num_top_moves = endgame_args->num_top_moves;
   if (num_top_moves <= 0) {
     num_top_moves = 1;
@@ -519,12 +521,13 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
         transposition_table_create(endgame_args->tt_fraction_of_mem);
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
-  // Allocate MMST alongside TT for move ordering
-  if (es->transposition_table && !es->move_score_table) {
+  // Allocate MMST alongside TT for move ordering (only when enabled)
+  if (es->transposition_table && es->use_tt_move_ordering &&
+      !es->move_score_table) {
     es->move_score_table = (_Atomic uint32_t *)malloc_or_die(
         sizeof(_Atomic uint32_t) * MMST_SIZE);
     memset(es->move_score_table, 0, sizeof(_Atomic uint32_t) * MMST_SIZE);
-  } else if (!es->transposition_table) {
+  } else if (!es->transposition_table || !es->use_tt_move_ordering) {
     free(es->move_score_table);
     es->move_score_table = NULL;
   }
@@ -1091,8 +1094,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
   // heuristics. These give scores from previous IDS iterations for all
   // searched moves, not just the TT best-move.
   const _Atomic uint32_t *mmst = worker->solver->move_score_table;
-  const bool has_tt =
-      worker->solver->transposition_table_optim && node_key != 0;
+  const bool has_tt = worker->solver->use_tt_move_ordering &&
+                      worker->solver->transposition_table_optim &&
+                      node_key != 0;
   const bool was_our_move =
       (player_index == worker->solver->solving_player);
   const int last_scoreless_turns =
