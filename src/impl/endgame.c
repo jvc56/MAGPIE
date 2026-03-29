@@ -494,35 +494,35 @@ static EndgameCtx *endgame_ctx_create(void) {
 }
 
 const TranspositionTable *
-endgame_ctx_get_transposition_table(const EndgameCtx *es) {
-  return es->transposition_table;
+endgame_ctx_get_transposition_table(const EndgameCtx *ctx) {
+  return ctx->transposition_table;
 }
 
-void endgame_ctx_get_progress(const EndgameCtx *es, int *current_depth,
+void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed,
                               int *ply2_moves_total) {
-  *current_depth = atomic_load(&es->current_depth);
-  *root_moves_completed = atomic_load(&es->root_moves_completed);
-  *root_moves_total = atomic_load(&es->root_moves_total);
-  *ply2_moves_completed = atomic_load(&es->ply2_moves_completed);
-  *ply2_moves_total = atomic_load(&es->ply2_moves_total);
+  *current_depth = atomic_load(&ctx->current_depth);
+  *root_moves_completed = atomic_load(&ctx->root_moves_completed);
+  *root_moves_total = atomic_load(&ctx->root_moves_total);
+  *ply2_moves_completed = atomic_load(&ctx->ply2_moves_completed);
+  *ply2_moves_total = atomic_load(&ctx->ply2_moves_total);
 }
 
 static void solver_worker_destroy(EndgameCtxWorker *solver_worker);
 
-void endgame_ctx_destroy(EndgameCtx *es) {
-  if (!es) {
+void endgame_ctx_destroy(EndgameCtx *ctx) {
+  if (!ctx) {
     return;
   }
-  for (int i = 0; i < es->num_workers; i++) {
-    solver_worker_destroy(es->workers[i]);
+  for (int i = 0; i < ctx->num_workers; i++) {
+    solver_worker_destroy(ctx->workers[i]);
   }
-  free(es->workers);
-  transposition_table_destroy(es->transposition_table);
-  kwg_destroy(es->pruned_kwgs[0]);
-  kwg_destroy(es->pruned_kwgs[1]);
-  free(es);
+  free(ctx->workers);
+  transposition_table_destroy(ctx->transposition_table);
+  kwg_destroy(ctx->pruned_kwgs[0]);
+  kwg_destroy(ctx->pruned_kwgs[1]);
+  free(ctx);
 }
 
 // Create a new worker, duplicating the template game (which already has
