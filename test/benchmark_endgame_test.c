@@ -542,6 +542,13 @@ static void run_mmst_benchmark(const char *cgp_file, const char *label,
     }
     error_stack_destroy(err);
 
+    // Build pruned KWGs once per position and share between both solvers.
+    // This avoids the ~250ms KWG generation cost on the second solve.
+    KWG *shared_kwg0 = NULL;
+    KWG *shared_kwg1 = NULL;
+    endgame_build_pruned_kwgs(game, DUAL_LEXICON_MODE_IGNORANT, &shared_kwg0,
+                              &shared_kwg1);
+
     // Alternate solve order to reduce systematic bias
     bool new_first = (ci % 2 == 0);
 
@@ -566,7 +573,8 @@ static void run_mmst_benchmark(const char *cgp_file, const char *label,
                           .forced_pass_bypass = true,
                           .soft_time_limit = soft_limit,
                           .hard_time_limit = hard_limit,
-                          .use_tt_move_ordering = is_new};
+                          .use_tt_move_ordering = is_new,
+                          .prebuilt_pruned_kwgs = {shared_kwg0, shared_kwg1}};
 
       Timer timer;
       ctimer_start(&timer);
@@ -586,6 +594,9 @@ static void run_mmst_benchmark(const char *cgp_file, const char *label,
         time_old = elapsed;
       }
     }
+
+    kwg_destroy(shared_kwg0);
+    kwg_destroy(shared_kwg1);
 
     int delta = val_new - val_old;
     total_delta += delta;
@@ -698,6 +709,12 @@ static void run_mmst_asymmetric_benchmark(const char *cgp_file,
     }
     error_stack_destroy(err);
 
+    // Build pruned KWGs once per position and share between both solvers.
+    KWG *shared_kwg0 = NULL;
+    KWG *shared_kwg1 = NULL;
+    endgame_build_pruned_kwgs(game, DUAL_LEXICON_MODE_IGNORANT, &shared_kwg0,
+                              &shared_kwg1);
+
     bool new_first = (ci % 2 == 0);
 
     int32_t val_old = 0;
@@ -723,7 +740,8 @@ static void run_mmst_asymmetric_benchmark(const char *cgp_file,
                           .forced_pass_bypass = true,
                           .soft_time_limit = soft,
                           .hard_time_limit = hard,
-                          .use_tt_move_ordering = is_new};
+                          .use_tt_move_ordering = is_new,
+                          .prebuilt_pruned_kwgs = {shared_kwg0, shared_kwg1}};
 
       Timer timer;
       ctimer_start(&timer);
@@ -743,6 +761,9 @@ static void run_mmst_asymmetric_benchmark(const char *cgp_file,
         time_old = elapsed;
       }
     }
+
+    kwg_destroy(shared_kwg0);
+    kwg_destroy(shared_kwg1);
 
     int delta = val_new - val_old;
     total_delta += delta;

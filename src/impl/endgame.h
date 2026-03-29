@@ -57,12 +57,22 @@ typedef struct EndgameArgs {
   // Enable MMST + child-TT move ordering (default: true when TT is active).
   // Set to false to benchmark the impact of TT-informed move ordering.
   bool use_tt_move_ordering;
+  // Pre-built pruned KWGs to borrow (NULL = build from scratch).
+  // When non-NULL, the solver borrows these pointers and does NOT free them.
+  // The caller must ensure they remain valid for the duration of the solve.
+  KWG *prebuilt_pruned_kwgs[2];
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);
 void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 void endgame_solver_destroy(EndgameSolver *es);
+// Build pruned KWGs for a given game state. Caller owns the returned KWGs
+// and must free them with kwg_destroy(). Pass via EndgameArgs.prebuilt_pruned_kwgs
+// to share across multiple solves of the same position.
+void endgame_build_pruned_kwgs(const Game *game,
+                               dual_lexicon_mode_t dual_lexicon_mode,
+                               KWG **kwg0_out, KWG **kwg1_out);
 const TranspositionTable *
 endgame_solver_get_transposition_table(const EndgameSolver *es);
 void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,

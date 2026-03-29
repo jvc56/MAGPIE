@@ -125,6 +125,7 @@ struct EndgameSolver {
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
+  bool kwgs_borrowed; // true if pruned_kwgs were supplied by caller (don't free)
   dual_lexicon_mode_t dual_lexicon_mode;
   double soft_time_limit;
   double hard_time_limit;
@@ -463,10 +464,14 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->initial_spread =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
 
-  kwg_destroy(es->pruned_kwgs[0]);
-  kwg_destroy(es->pruned_kwgs[1]);
+  // Free previously owned KWGs (skip if they were borrowed from caller)
+  if (!es->kwgs_borrowed) {
+    kwg_destroy(es->pruned_kwgs[0]);
+    kwg_destroy(es->pruned_kwgs[1]);
+  }
   es->pruned_kwgs[0] = NULL;
   es->pruned_kwgs[1] = NULL;
+  es->kwgs_borrowed = false;
 
   es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
   // INFORMED mode with shared KWGs is meaningless (both players have the same
@@ -479,23 +484,31 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   }
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
-  bool create_separate_kwgs =
-      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
-  // Generate pruned KWG(s) from the set of possible words on this board.
-  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
-  // In INFORMED mode with different lexicons, each player index gets its own
-  // pruned KWG so that cross-set index i uses the pruned KWG derived from
-  // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
-       player_idx++) {
-    const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, player_idx));
-    DictionaryWordList *word_list = dictionary_word_list_create();
-    generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
-        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(word_list);
+  // Use prebuilt pruned KWGs if provided (borrowed, not owned).
+  if (endgame_args->prebuilt_pruned_kwgs[0] != NULL) {
+    es->pruned_kwgs[0] = endgame_args->prebuilt_pruned_kwgs[0];
+    es->pruned_kwgs[1] = endgame_args->prebuilt_pruned_kwgs[1];
+    es->kwgs_borrowed = true;
+  } else {
+    bool create_separate_kwgs =
+        (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
+
+    // Generate pruned KWG(s) from the set of possible words on this board.
+    // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+    // In INFORMED mode with different lexicons, each player index gets its own
+    // pruned KWG so that cross-set index i uses the pruned KWG derived from
+    // player i's lexicon.
+    for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+         player_idx++) {
+      const KWG *full_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+    }
   }
 
   // Initialize ABDADA synchronization
@@ -566,9 +579,40 @@ void endgame_solver_destroy(EndgameSolver *es) {
   }
   transposition_table_destroy(es->transposition_table);
   free(es->move_score_table);
-  kwg_destroy(es->pruned_kwgs[0]);
-  kwg_destroy(es->pruned_kwgs[1]);
+  if (!es->kwgs_borrowed) {
+    kwg_destroy(es->pruned_kwgs[0]);
+    kwg_destroy(es->pruned_kwgs[1]);
+  }
   free(es);
+}
+
+void endgame_build_pruned_kwgs(const Game *game,
+                               dual_lexicon_mode_t dual_lexicon_mode,
+                               KWG **kwg0_out, KWG **kwg1_out) {
+  *kwg0_out = NULL;
+  *kwg1_out = NULL;
+  bool shared_kwg =
+      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  if (dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
+    dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+  }
+  bool create_separate_kwgs =
+      (dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
+  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+       player_idx++) {
+    const KWG *full_kwg =
+        player_get_kwg(game_get_player(game, player_idx));
+    DictionaryWordList *word_list = dictionary_word_list_create();
+    generate_possible_words(game, full_kwg, word_list);
+    KWG *pruned = make_kwg_from_words_small(
+        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(word_list);
+    if (player_idx == 0) {
+      *kwg0_out = pruned;
+    } else {
+      *kwg1_out = pruned;
+    }
+  }
 }
 
 EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
