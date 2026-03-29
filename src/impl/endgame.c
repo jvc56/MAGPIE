@@ -2659,6 +2659,15 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   Timer solve_timer;
   ctimer_start(&solve_timer);
 
+  // Set the hard deadline immediately so it covers setup overhead (stuck-tile
+  // computation, worker creation, game duplication). The per-depth code in the
+  // IDS loop will tighten or refresh this as depths start.
+  if (solver->hard_time_limit > 0) {
+    int64_t now_ns = ctimer_monotonic_ns();
+    atomic_store(&solver->depth_deadline_ns,
+                 now_ns + (int64_t)(solver->hard_time_limit * 1e9));
+  }
+
   // Compute initial stuck-tile fraction for root move ordering.
   // Per-node detection in abdada_negamax recomputes this dynamically.
   solver->initial_opp_stuck_frac = 0.0F;
