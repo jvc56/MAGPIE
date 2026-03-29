@@ -1052,7 +1052,7 @@ void test_benchmark_tournament(void) {
       EndgameArgs args = {.game = game,
                           .thread_control = config_get_thread_control(config),
                           .plies = 25,
-                          .tt_fraction_of_mem = 0.12,
+                          .tt_fraction_of_mem = 0.08,
                           .initial_small_move_arena_size =
                               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
                           .num_threads = 4,
