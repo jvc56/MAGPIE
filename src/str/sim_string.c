@@ -209,9 +209,9 @@ bool string_builder_add_sim_stats_with_display_lock(
         sg, curr_row, curr_col++,
         get_formatted_string("%.2f", stat_get_mean(equity_stat)));
     if (use_ucgi_format) {
-      string_grid_set_cell(sg, curr_row, curr_col++,
-                           get_formatted_string("%.4f",
-                                                stat_get_sem(equity_stat)));
+      string_grid_set_cell(
+          sg, curr_row, curr_col++,
+          get_formatted_string("%.4f", stat_get_sem(equity_stat)));
     }
 
     double move_equity;
@@ -270,9 +270,8 @@ bool string_builder_add_sim_stats_with_display_lock(
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Time:"));
-  string_grid_set_cell(
-      summary_sg, curr_row, 1,
-      get_formatted_string("%.2f seconds", elapsed_time));
+  string_grid_set_cell(summary_sg, curr_row, 1,
+                       get_formatted_string("%.2f seconds", elapsed_time));
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Opp Rack:"));
