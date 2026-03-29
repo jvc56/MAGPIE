@@ -54,7 +54,7 @@ enum {
   // How many abdada_negamax calls between per-depth deadline checks.
   // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
   // 4096 nodes ≈ 40ms granularity — cheap but responsive enough to bail early.
-  DEPTH_DEADLINE_CHECK_INTERVAL = 4096,
+  DEPTH_DEADLINE_CHECK_INTERVAL = 1024,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning
