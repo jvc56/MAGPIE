@@ -889,8 +889,9 @@ void test_benchmark_startup(void) {
   config_destroy(config);
 }
 
-// Tournament: run N players (old/new × multiple time budgets) across many
-// positions. Reports head-to-head results, net spread, time, and Elo ratings.
+// Tournament with game-pair playout: two solvers alternate moves from the same
+// position until game end. Each matchup plays two games per position (swap who
+// goes first) so position advantage cancels out. Final spread determines winner.
 enum {
   TOURN_MAX_PLAYERS = 8,
 };
@@ -906,7 +907,8 @@ typedef struct {
   int wins;
   int losses;
   int draws;
-  int spread; // sum of (val_i - val_j) across all positions
+  int spread;
+  double time_used;
 } HeadToHead;
 
 // Compute Elo ratings from pairwise results using iterative optimization.
@@ -916,27 +918,21 @@ static void compute_elo_ratings(const HeadToHead *h2h, int num_players,
   for (int p = 0; p < num_players; p++) {
     elo_out[p] = 0.0;
   }
-
-  // Iterative: adjust each player's rating based on actual vs expected score
   for (int iter = 0; iter < 200; iter++) {
     double new_elo[TOURN_MAX_PLAYERS];
     for (int p = 0; p < num_players; p++) {
       new_elo[p] = elo_out[p];
     }
-
     for (int player_idx = 1; player_idx < num_players; player_idx++) {
       double actual_score = 0.0;
       double expected_score = 0.0;
       double total_games = 0.0;
-
       for (int opp_idx = 0; opp_idx < num_players; opp_idx++) {
         if (opp_idx == player_idx) {
           continue;
         }
-        const HeadToHead *match =
-            &h2h[player_idx * num_players + opp_idx];
-        double games =
-            (double)(match->wins + match->losses + match->draws);
+        const HeadToHead *match = &h2h[player_idx * num_players + opp_idx];
+        double games = (double)(match->wins + match->losses + match->draws);
         if (games == 0) {
           continue;
         }
@@ -948,17 +944,83 @@ static void compute_elo_ratings(const HeadToHead *h2h, int num_players,
         total_games += games;
       }
       if (total_games > 0 && expected_score > 0.001) {
-        // Adjust proportionally
         double ratio = actual_score / expected_score;
         double adjustment = 400.0 * log10(ratio);
         new_elo[player_idx] = elo_out[player_idx] + adjustment * 0.2;
       }
     }
-
     for (int p = 0; p < num_players; p++) {
       elo_out[p] = new_elo[p];
     }
   }
+}
+
+// Play one endgame: solver_a controls starting_side, solver_b controls the
+// other. Returns final spread from solver_a's perspective.
+// time_a/time_b accumulate solve time for each side.
+static int play_one_endgame(Game *game_copy, int starting_side,
+                            EndgameSolver *solver_a, EndgameSolver *solver_b,
+                            const TournPlayer *player_a,
+                            const TournPlayer *player_b,
+                            ThreadControl *thread_control,
+                            EndgameResults *results, double *time_a,
+                            double *time_b) {
+  *time_a = 0;
+  *time_b = 0;
+
+  // Safety limit to avoid infinite loops (e.g., consecutive scoreless turns)
+  for (int move_count = 0; move_count < 50 && !game_over(game_copy);
+       move_count++) {
+    int side = game_get_player_on_turn_index(game_copy);
+    bool is_a = (side == starting_side);
+    EndgameSolver *solver = is_a ? solver_a : solver_b;
+    const TournPlayer *player = is_a ? player_a : player_b;
+
+    EndgameArgs args = {.game = game_copy,
+                        .thread_control = thread_control,
+                        .plies = 25,
+                        .tt_fraction_of_mem = 0.08,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = 4,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .forced_pass_bypass = true,
+                        .soft_time_limit = player->soft_limit,
+                        .hard_time_limit = player->hard_limit,
+                        .use_tt_move_ordering = player->use_mmst};
+
+    Timer timer;
+    ctimer_start(&timer);
+    ErrorStack *err = error_stack_create();
+    endgame_solve(solver, &args, results, err);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    if (is_a) {
+      *time_a += elapsed;
+    } else {
+      *time_b += elapsed;
+    }
+
+    // Extract best move from PV and play it
+    const PVLine *pv =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    if (pv->num_moves == 0) {
+      break;
+    }
+    Move move;
+    small_move_to_move(&move, &pv->moves[0], game_get_board(game_copy));
+    play_move(&move, game_copy, NULL);
+  }
+
+  // Final spread from solver_a's perspective
+  int score_a = equity_to_int(
+      player_get_score(game_get_player(game_copy, starting_side)));
+  int score_b = equity_to_int(
+      player_get_score(game_get_player(game_copy, 1 - starting_side)));
+  return score_a - score_b;
 }
 
 void test_benchmark_tournament(void) {
@@ -985,7 +1047,6 @@ void test_benchmark_tournament(void) {
   }
   (void)fclose(fp);
 
-  // 6 players: old/new × 3 time budgets
   const int num_players = 6;
   TournPlayer players[6] = {
       {"old-0.2s", false, 0.1, 0.2},  {"new-0.2s", true, 0.1, 0.2},
@@ -993,11 +1054,15 @@ void test_benchmark_tournament(void) {
       {"old-5.0s", false, 2.5, 5.0},  {"new-5.0s", true, 2.5, 5.0},
   };
 
+  // Number of pairwise matchups
+  const int num_pairs = num_players * (num_players - 1) / 2;
+
   printf("\n");
   printf("================================================================"
          "==============\n");
-  printf("  Tournament: %d positions, %d players, 4 threads, 25-ply\n", found,
-         num_players);
+  printf("  Game-Pair Tournament: %d positions, %d players, %d matchups\n",
+         found, num_players, num_pairs);
+  printf("  4 threads, 25-ply, game pairs (swap sides per position)\n");
   printf("  Players: ");
   for (int p = 0; p < num_players; p++) {
     printf("%s%s", players[p].label, p < num_players - 1 ? ", " : "\n");
@@ -1011,97 +1076,87 @@ void test_benchmark_tournament(void) {
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  // One solver per player for TT isolation
-  EndgameSolver *solvers[TOURN_MAX_PLAYERS];
-  for (int p = 0; p < num_players; p++) {
-    solvers[p] = endgame_solver_create();
-  }
+  // Two solvers per pair (reused across positions via persistent workers)
+  EndgameSolver *solver_pool[2];
+  solver_pool[0] = endgame_solver_create();
+  solver_pool[1] = endgame_solver_create();
   EndgameResults *results = endgame_results_create();
 
-  // Pairwise head-to-head matrix
+  // Pairwise head-to-head: h2h[a * num_players + b] = a's record vs b
   HeadToHead h2h[TOURN_MAX_PLAYERS * TOURN_MAX_PLAYERS];
   memset(h2h, 0, sizeof(h2h));
 
-  // Per-player totals
-  double total_time[TOURN_MAX_PLAYERS];
-  int64_t total_value[TOURN_MAX_PLAYERS];
-  memset(total_time, 0, sizeof(total_time));
-  memset(total_value, 0, sizeof(total_value));
+  int pair_idx = 0;
+  for (int a = 0; a < num_players; a++) {
+    for (int b = a + 1; b < num_players; b++) {
+      pair_idx++;
+      printf("\n  Matchup %d/%d: %s vs %s\n", pair_idx, num_pairs,
+             players[a].label, players[b].label);
+      (void)fflush(stdout);
 
-  int solved = 0;
-  for (int ci = 0; ci < found; ci++) {
-    ErrorStack *err = error_stack_create();
-    game_load_cgp(game, cgp_lines[ci], err);
-    if (!error_stack_is_empty(err)) {
-      error_stack_destroy(err);
-      continue;
-    }
-    error_stack_destroy(err);
+      HeadToHead *ab = &h2h[a * num_players + b];
+      HeadToHead *ba = &h2h[b * num_players + a];
 
-    int32_t vals[TOURN_MAX_PLAYERS];
-    double times[TOURN_MAX_PLAYERS];
+      int positions_done = 0;
+      for (int ci = 0; ci < found; ci++) {
+        ErrorStack *err = error_stack_create();
+        game_load_cgp(game, cgp_lines[ci], err);
+        if (!error_stack_is_empty(err)) {
+          error_stack_destroy(err);
+          continue;
+        }
+        error_stack_destroy(err);
 
-    // Solve order: rotate to reduce systematic bias
-    int order[TOURN_MAX_PLAYERS];
-    for (int p = 0; p < num_players; p++) {
-      order[p] = (p + ci) % num_players;
-    }
+        int starting_side = game_get_player_on_turn_index(game);
 
-    for (int oi = 0; oi < num_players; oi++) {
-      int p = order[oi];
-      EndgameArgs args = {.game = game,
-                          .thread_control = config_get_thread_control(config),
-                          .plies = 25,
-                          .tt_fraction_of_mem = 0.08,
-                          .initial_small_move_arena_size =
-                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                          .num_threads = 4,
-                          .num_top_moves = 1,
-                          .use_heuristics = true,
-                          .forced_pass_bypass = true,
-                          .soft_time_limit = players[p].soft_limit,
-                          .hard_time_limit = players[p].hard_limit,
-                          .use_tt_move_ordering = players[p].use_mmst};
+        // Game 1: A controls starting side
+        Game *g1 = game_duplicate(game);
+        double time_a1 = 0;
+        double time_b1 = 0;
+        int spread1 = play_one_endgame(g1, starting_side, solver_pool[0],
+                                       solver_pool[1], &players[a],
+                                       &players[b], config_get_thread_control(config),
+                                       results, &time_a1, &time_b1);
+        game_destroy(g1);
 
-      Timer timer;
-      ctimer_start(&timer);
-      err = error_stack_create();
-      endgame_solve(solvers[p], &args, results, err);
-      times[p] = ctimer_elapsed_seconds(&timer);
-      assert(error_stack_is_empty(err));
-      error_stack_destroy(err);
+        // Game 2: B controls starting side (swap)
+        Game *g2 = game_duplicate(game);
+        double time_a2 = 0;
+        double time_b2 = 0;
+        int spread2 = play_one_endgame(g2, starting_side, solver_pool[1],
+                                       solver_pool[0], &players[b],
+                                       &players[a], config_get_thread_control(config),
+                                       results, &time_a2, &time_b2);
+        game_destroy(g2);
 
-      vals[p] =
-          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
-      total_time[p] += times[p];
-      total_value[p] += vals[p];
-    }
+        // Net spread from A's perspective: game1 spread + (-game2 spread)
+        int net_spread = spread1 - spread2;
+        ab->spread += net_spread;
+        ba->spread -= net_spread;
+        ab->time_used += time_a1 + time_a2;
+        ba->time_used += time_b1 + time_b2;
 
-    // Update head-to-head
-    for (int a = 0; a < num_players; a++) {
-      for (int b = a + 1; b < num_players; b++) {
-        HeadToHead *ab = &h2h[a * num_players + b];
-        HeadToHead *ba = &h2h[b * num_players + a];
-        int delta = vals[a] - vals[b];
-        ab->spread += delta;
-        ba->spread -= delta;
-        if (delta > 0) {
+        if (net_spread > 0) {
           ab->wins++;
           ba->losses++;
-        } else if (delta < 0) {
+        } else if (net_spread < 0) {
           ab->losses++;
           ba->wins++;
         } else {
           ab->draws++;
           ba->draws++;
         }
+
+        positions_done++;
+        if (positions_done % 50 == 0) {
+          printf("    %d/%d (A: %d-%d=%d, spread %+d)\n", positions_done,
+                 found, ab->wins, ab->losses, ab->draws, ab->spread);
+          (void)fflush(stdout);
+        }
       }
-    }
 
-    solved++;
-
-    if (solved % 25 == 0) {
-      printf("  ... %d/%d positions done\n", solved, found);
+      printf("    Final: %s %d-%d=%d (%+d spread) vs %s\n", players[a].label,
+             ab->wins, ab->losses, ab->draws, ab->spread, players[b].label);
       (void)fflush(stdout);
     }
   }
@@ -1112,58 +1167,59 @@ void test_benchmark_tournament(void) {
 
   // Print per-player summary
   printf("\n");
-  printf("  %-10s  %6s  %8s  %8s  %6s  %6s\n", "Player", "Elo", "AvgVal",
-         "AvgTime", "Wins", "Losses");
-  printf("  ----------  ------  --------  --------  ------  ------\n");
+  printf("  %-10s  %6s  %8s  %6s  %6s  %6s\n", "Player", "Elo", "Spread",
+         "Wins", "Losses", "Draws");
+  printf("  ----------  ------  --------  ------  ------  ------\n");
   for (int p = 0; p < num_players; p++) {
     int total_wins = 0;
     int total_losses = 0;
+    int total_draws = 0;
+    int total_spread = 0;
     for (int opp = 0; opp < num_players; opp++) {
       if (opp == p) {
         continue;
       }
       total_wins += h2h[p * num_players + opp].wins;
       total_losses += h2h[p * num_players + opp].losses;
+      total_draws += h2h[p * num_players + opp].draws;
+      total_spread += h2h[p * num_players + opp].spread;
     }
-    printf("  %-10s  %+6.0f  %+8.1f  %7.3fs  %6d  %6d\n", players[p].label,
-           elo[p], solved > 0 ? (double)total_value[p] / solved : 0.0,
-           solved > 0 ? total_time[p] / solved : 0.0, total_wins,
-           total_losses);
+    printf("  %-10s  %+6.0f  %+8d  %6d  %6d  %6d\n", players[p].label,
+           elo[p], total_spread, total_wins, total_losses, total_draws);
   }
 
   // Print head-to-head matrix
-  printf("\n  Head-to-head (row vs col): W-L=D, spread\n\n");
+  printf("\n  Head-to-head (row vs col): W-L=D, spread, time\n\n");
   printf("  %-10s", "");
-  for (int b = 0; b < num_players; b++) {
-    printf("  %-20s", players[b].label);
+  for (int b_idx = 0; b_idx < num_players; b_idx++) {
+    printf("  %-28s", players[b_idx].label);
   }
   printf("\n");
 
-  for (int a = 0; a < num_players; a++) {
-    printf("  %-10s", players[a].label);
-    for (int b = 0; b < num_players; b++) {
-      if (a == b) {
-        printf("  %-20s", "---");
+  for (int a_idx = 0; a_idx < num_players; a_idx++) {
+    printf("  %-10s", players[a_idx].label);
+    for (int b_idx = 0; b_idx < num_players; b_idx++) {
+      if (a_idx == b_idx) {
+        printf("  %-28s", "---");
       } else {
-        const HeadToHead *match = &h2h[a * num_players + b];
-        char buf[32];
-        snprintf(buf, sizeof(buf), "%d-%d=%d %+d", match->wins,
-                 match->losses, match->draws, match->spread);
-        printf("  %-20s", buf);
+        const HeadToHead *match = &h2h[a_idx * num_players + b_idx];
+        char buf[40];
+        snprintf(buf, sizeof(buf), "%d-%d=%d %+d %.0fs", match->wins,
+                 match->losses, match->draws, match->spread, match->time_used);
+        printf("  %-28s", buf);
       }
     }
     printf("\n");
   }
 
-  printf("\n  %d positions solved.\n", solved);
+  printf("\n  %d positions, %d game pairs per matchup.\n", found, found);
   printf("================================================================"
          "==============\n");
   (void)fflush(stdout);
 
   free(cgp_lines);
   endgame_results_destroy(results);
-  for (int p = 0; p < num_players; p++) {
-    endgame_solver_destroy(solvers[p]);
-  }
+  endgame_solver_destroy(solver_pool[0]);
+  endgame_solver_destroy(solver_pool[1]);
   config_destroy(config);
 }
