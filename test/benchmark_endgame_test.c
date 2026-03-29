@@ -1064,8 +1064,8 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
 
 void test_benchmark_mmst_playout(void) {
   log_set_level(LOG_FATAL);
-  // 50ms MMST vs 100ms static, 10 threads, 500 game pairs
+  // 100ms MMST vs 115ms static, 10 threads, 500 game pairs
   run_mmst_playout_benchmark("/tmp/nonstuck_cgps.txt",
-                             "50ms MMST vs 100ms static", 500, 10, 25, 0.025,
-                             0.05, 0.05, 0.1);
+                             "100ms MMST vs 115ms static", 500, 10, 25, 0.05,
+                             0.1, 0.0575, 0.115);
 }
