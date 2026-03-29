@@ -155,9 +155,13 @@ struct EndgameCtx {
   ThreadControl *thread_control;
   const Game *game;
 
-  // Persistent worker pool (reused across solves)
+  // Persistent worker pool (reused across solves).
+  // workers_ld tracks the LD the pool was allocated against; if it changes
+  // (e.g., different lexicon), the pool is destroyed and rebuilt to avoid
+  // bag_copy into incompatibly-sized allocations.
   EndgameCtxWorker **workers;
   int num_workers;
+  const LetterDistribution *workers_ld;
 };
 
 struct EndgameCtxWorker {
@@ -594,6 +598,20 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
 // increased, and resets all active workers from the template.
 static void endgame_ctx_prepare_workers(EndgameCtx *solver,
                                         uint64_t base_seed) {
+  const LetterDistribution *ld = game_get_ld(solver->game);
+
+  // If the letter distribution changed (e.g., different lexicon), the worker
+  // game copies have incompatibly-sized bags/racks. Destroy and rebuild.
+  if (solver->workers_ld != NULL && solver->workers_ld != ld) {
+    for (int idx = 0; idx < solver->num_workers; idx++) {
+      solver_worker_destroy(solver->workers[idx]);
+    }
+    free(solver->workers);
+    solver->workers = NULL;
+    solver->num_workers = 0;
+  }
+  solver->workers_ld = ld;
+
   Game *template_game = game_duplicate(solver->game);
   game_set_override_kwgs(template_game, solver->pruned_kwgs[0],
                          solver->pruned_kwgs[1], solver->dual_lexicon_mode);
