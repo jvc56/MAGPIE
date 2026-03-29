@@ -21,6 +21,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
+#include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -1048,6 +1049,23 @@ static int play_one_endgame(Game *game_copy, int starting_side,
       player_get_score(game_get_player(game_copy, 1 - starting_side)));
 
   if (move_log) {
+    game_end_reason_t end_reason = game_get_game_end_reason(game_copy);
+    if (end_reason == GAME_END_REASON_STANDARD) {
+      // One player went out — find who has tiles left
+      const Rack *rack_a =
+          player_get_rack(game_get_player(game_copy, starting_side));
+      const Rack *rack_b =
+          player_get_rack(game_get_player(game_copy, 1 - starting_side));
+      const Rack *loser_rack = rack_is_empty(rack_a) ? rack_b : rack_a;
+      const char *loser_label = rack_is_empty(rack_a) ? "B" : "A";
+      int rack_pts = equity_to_int(rack_get_score(ld, loser_rack));
+      string_builder_add_formatted_string(move_log, " | %s left: ", loser_label);
+      string_builder_add_rack(move_log, loser_rack, ld, false);
+      string_builder_add_formatted_string(move_log, " (%d pts, +%d adj)",
+                                          rack_pts, 2 * rack_pts);
+    } else if (end_reason == GAME_END_REASON_CONSECUTIVE_ZEROS) {
+      string_builder_add_string(move_log, " | consecutive zeros");
+    }
     string_builder_add_formatted_string(move_log, " | Final: A=%d B=%d (%+d)",
                                         score_a, score_b, score_a - score_b);
   }
