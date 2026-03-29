@@ -116,7 +116,10 @@ bool string_builder_add_sim_stats_with_display_lock(
   const int num_plies = sim_results_get_num_plies(sim_results);
   const int num_display_plies =
       max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
-  const int num_cols = MIN_NUM_SIM_RESULT_COLS + num_display_plies * 2;
+  // UCGI mode adds 2 extra base columns (WpSE, EqSE) and 1 extra per-ply
+  // column (PlyN-SD score stdev) between the score mean and bingo columns.
+  const int num_cols = MIN_NUM_SIM_RESULT_COLS + (use_ucgi_format ? 2 : 0) +
+                       num_display_plies * (use_ucgi_format ? 3 : 2);
   StringGrid *sg = string_grid_create(num_rows, num_cols, 1);
 
   int curr_row = 0;
@@ -185,6 +188,9 @@ bool string_builder_add_sim_stats_with_display_lock(
     if (bai_result_status == BAI_RESULT_STATUS_THRESHOLD && i > 0 &&
         sim_results_display_plays_are_similar(sim_results, 0, i)) {
       string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("X"));
+    } else if (use_ucgi_format) {
+      // Always output a token for Ig in UCGI mode so field-splitting is stable.
+      string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("-"));
     }
     curr_col++;
 
@@ -192,11 +198,21 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(
         sg, curr_row, curr_col++,
         get_formatted_string("%.2f", stat_get_mean(win_pct_stat) * 100));
+    if (use_ucgi_format) {
+      string_grid_set_cell(
+          sg, curr_row, curr_col++,
+          get_formatted_string("%.4f", stat_get_sem(win_pct_stat) * 100));
+    }
 
+    const Stat *equity_stat = simmed_play_get_equity_stat(sp);
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%.2f",
-                             stat_get_mean(simmed_play_get_equity_stat(sp))));
+        get_formatted_string("%.2f", stat_get_mean(equity_stat)));
+    if (use_ucgi_format) {
+      string_grid_set_cell(
+          sg, curr_row, curr_col++,
+          get_formatted_string("%.4f", stat_get_sem(equity_stat)));
+    }
 
     double move_equity;
     if (move_get_type(move) == GAME_EVENT_PASS) {
@@ -217,6 +233,11 @@ bool string_builder_add_sim_stats_with_display_lock(
       string_grid_set_cell(
           sg, curr_row, curr_col++,
           get_formatted_string("%.2f", stat_get_mean(score_stat)));
+      if (use_ucgi_format) {
+        string_grid_set_cell(
+            sg, curr_row, curr_col++,
+            get_formatted_string("%.2f", stat_get_stdev(score_stat)));
+      }
       string_grid_set_cell(
           sg, curr_row, curr_col++,
           get_formatted_string("%.2f", stat_get_mean(bingo_stat) * 100.0));
@@ -231,7 +252,13 @@ bool string_builder_add_sim_stats_with_display_lock(
       sb, "\nShowing %d of %d plays\nShowing %d of %d plies\n\n",
       num_display_plays, num_simmed_plays, num_display_plies, num_plies);
 
-  StringGrid *summary_sg = string_grid_create(6, 2, 1);
+  const double elapsed_time = bai_result_get_elapsed_seconds(bai_result);
+  const double nps =
+      elapsed_time > 0.0
+          ? (double)sim_results_get_node_count(sim_results) / elapsed_time
+          : 0.0;
+
+  StringGrid *summary_sg = string_grid_create(7, 2, 1);
 
   curr_row = 0;
 
@@ -243,10 +270,8 @@ bool string_builder_add_sim_stats_with_display_lock(
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Time:"));
-  string_grid_set_cell(
-      summary_sg, curr_row, 1,
-      get_formatted_string("%.2f seconds",
-                           bai_result_get_elapsed_seconds(bai_result)));
+  string_grid_set_cell(summary_sg, curr_row, 1,
+                       get_formatted_string("%.2f seconds", elapsed_time));
   curr_row++;
 
   string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Opp Rack:"));
@@ -299,6 +324,12 @@ bool string_builder_add_sim_stats_with_display_lock(
   }
 
   string_grid_set_cell(summary_sg, curr_row, 1, status_str);
+  curr_row++;
+
+  string_grid_set_cell(summary_sg, curr_row, 0, string_duplicate("Nps:"));
+  string_grid_set_cell(summary_sg, curr_row, 1,
+                       get_formatted_string("%.0f", nps));
+
   string_builder_add_string_grid(sb, summary_sg, false);
   string_grid_destroy(summary_sg);
 
@@ -333,15 +364,6 @@ void string_builder_add_sim_stats(
         sb, game, sim_results, max_num_display_plays, max_num_display_plies,
         filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, use_ucgi_format);
-    if (use_ucgi_format) {
-      double elapsed = bai_result_get_elapsed_seconds(
-          sim_results_get_bai_result(sim_results));
-      double nps =
-          elapsed > 0.0
-              ? (double)sim_results_get_node_count(sim_results) / elapsed
-              : 0.0;
-      string_builder_add_formatted_string(sb, "\ninfo nps %f\n", nps);
-    }
   }
   sim_results_unlock_display_infos(sim_results);
 }
