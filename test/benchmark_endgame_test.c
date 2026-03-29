@@ -816,3 +816,202 @@ void test_benchmark_tt_move_ordering(void) {
       "/tmp/nonstuck_cgps.txt", "nonstuck 50ms-MMST vs 200ms-old", 250, 10, 25,
       0.1, 0.2, 0.025, 0.05);
 }
+
+// Play out an endgame move-by-move with two solver configurations.
+// solver_a controls player on turn (pot), solver_b controls opponent.
+// Returns final spread from player-on-turn's perspective.
+static int play_endgame_out(Game *game, EndgameSolver *solver_a,
+                            EndgameSolver *solver_b, EndgameResults *results,
+                            ThreadControl *tc, int num_threads, int ply,
+                            double soft_limit, double hard_limit,
+                            bool a_uses_mmst, bool b_uses_mmst,
+                            KWG *shared_kwg0, KWG *shared_kwg1) {
+  const int initial_pot = game_get_player_on_turn_index(game);
+  while (!game_over(game)) {
+    int current_player = game_get_player_on_turn_index(game);
+    bool is_a_turn = (current_player == initial_pot);
+    EndgameSolver *solver = is_a_turn ? solver_a : solver_b;
+    bool use_mmst = is_a_turn ? a_uses_mmst : b_uses_mmst;
+
+    thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+    EndgameArgs args = {.game = game,
+                        .thread_control = tc,
+                        .plies = ply,
+                        .tt_fraction_of_mem = 0.25,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = num_threads,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .forced_pass_bypass = true,
+                        .soft_time_limit = soft_limit,
+                        .hard_time_limit = hard_limit,
+                        .use_tt_move_ordering = use_mmst,
+                        .prebuilt_pruned_kwgs = {shared_kwg0, shared_kwg1}};
+
+    ErrorStack *err = error_stack_create();
+    endgame_solve(solver, &args, results, err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    // Extract and play the best move
+    const PVLine *pv =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    if (pv->num_moves == 0) {
+      break; // No moves found (shouldn't happen)
+    }
+    const SmallMove *best_sm = &pv->moves[0];
+    const Board *board = game_get_board(game);
+    Move best_move;
+    small_move_to_move(&best_move, best_sm, board);
+    play_move(&best_move, game, NULL);
+  }
+
+  // Return final spread from initial player-on-turn's perspective
+  int p0_score =
+      equity_to_int(player_get_score(game_get_player(game, initial_pot)));
+  int p1_score =
+      equity_to_int(player_get_score(game_get_player(game, 1 - initial_pot)));
+  return p0_score - p1_score;
+}
+
+// Playout-based MMST benchmark: solvers play against each other move-by-move.
+// For each position, plays two games (game pair):
+//   Game A: MMST plays as player on turn, static responds
+//   Game B: static plays as player on turn, MMST responds
+// Measures actual game outcomes, not self-reported valuations.
+static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
+                                       int max_positions, int num_threads,
+                                       int ply, double soft_limit,
+                                       double hard_limit) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
+           cgp_file);
+    return;
+  }
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int found = 0;
+  while (found < max_positions && fgets(cgp_lines[found], 4096, fp)) {
+    size_t len = strlen(cgp_lines[found]);
+    if (len > 0 && cgp_lines[found][len - 1] == '\n') {
+      cgp_lines[found][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[found]) > 0) {
+      found++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  MMST Playout Benchmark [%s]: %d positions\n", label, found);
+  printf("  %d-ply, %d threads, soft=%.3fs hard=%.3fs (per move)\n", ply,
+         num_threads, soft_limit, hard_limit);
+  printf("  Game pairs: MMST vs static, alternating who plays first\n");
+  printf("==============================================================\n");
+  printf("  %4s  %8s %8s  %6s\n", "Pos", "MMST 1st", "Stat 1st", "Delta");
+  printf("  ----  -------- --------  ------\n");
+
+  // Four separate solvers: MMST and static each get their own for game A/B
+  // to avoid TT cross-contamination between roles
+  EndgameSolver *solver_mmst_a = endgame_solver_create();
+  EndgameSolver *solver_static_a = endgame_solver_create();
+  EndgameSolver *solver_mmst_b = endgame_solver_create();
+  EndgameSolver *solver_static_b = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+  ThreadControl *tc = config_get_thread_control(config);
+
+  int mmst_wins = 0;
+  int static_wins = 0;
+  int ties = 0;
+  int total_delta = 0;
+  int solved = 0;
+
+  for (int ci = 0; ci < found; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    // Build pruned KWGs once, share across all four solvers
+    KWG *shared_kwg0 = NULL;
+    KWG *shared_kwg1 = NULL;
+    endgame_build_pruned_kwgs(game, DUAL_LEXICON_MODE_IGNORANT, &shared_kwg0,
+                              &shared_kwg1);
+
+    // Game A: MMST plays first (as player on turn)
+    Game *game_a = game_duplicate(game);
+    int spread_mmst_first = play_endgame_out(
+        game_a, solver_mmst_a, solver_static_a, results, tc, num_threads, ply,
+        soft_limit, hard_limit, true, false, shared_kwg0, shared_kwg1);
+    game_destroy(game_a);
+
+    // Game B: static plays first (as player on turn)
+    Game *game_b = game_duplicate(game);
+    int spread_static_first = play_endgame_out(
+        game_b, solver_static_b, solver_mmst_b, results, tc, num_threads, ply,
+        soft_limit, hard_limit, false, true, shared_kwg0, shared_kwg1);
+    game_destroy(game_b);
+
+    kwg_destroy(shared_kwg0);
+    kwg_destroy(shared_kwg1);
+
+    // MMST advantage = how much better MMST did when playing first
+    // minus how much better static did when playing first.
+    // Positive = MMST is stronger.
+    int mmst_advantage = spread_mmst_first - spread_static_first;
+    total_delta += mmst_advantage;
+    if (mmst_advantage > 0) {
+      mmst_wins++;
+    } else if (mmst_advantage < 0) {
+      static_wins++;
+    } else {
+      ties++;
+    }
+
+    printf("  %4d  %+8d %+8d  %+5d\n", ci + 1, spread_mmst_first,
+           spread_static_first, mmst_advantage);
+    solved++;
+
+    if ((ci + 1) % 10 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("  ----  -------- --------  ------\n");
+  printf("\n");
+  printf("  Results (%d game pairs [%s]):\n", solved, label);
+  printf("    MMST better: %d  |  Static better: %d  |  Tied: %d\n",
+         mmst_wins, static_wins, ties);
+  printf("    Total advantage: %+d (avg %+.2f per pair)\n", total_delta,
+         solved > 0 ? (double)total_delta / solved : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver_mmst_a);
+  endgame_solver_destroy(solver_static_a);
+  endgame_solver_destroy(solver_mmst_b);
+  endgame_solver_destroy(solver_static_b);
+  config_destroy(config);
+}
+
+void test_benchmark_mmst_playout(void) {
+  log_set_level(LOG_FATAL);
+  // Same time budget for both, 10 threads, 50ms per move
+  run_mmst_playout_benchmark("/tmp/nonstuck_cgps.txt",
+                             "nonstuck playout 50ms/move", 100, 10, 25, 0.025,
+                             0.05);
+}
