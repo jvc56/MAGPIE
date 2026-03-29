@@ -632,8 +632,165 @@ static void run_mmst_benchmark(const char *cgp_file, const char *label,
   config_destroy(config);
 }
 
+// Asymmetric A/B benchmark: old gets one time budget, new (MMST) gets another.
+// Tests whether MMST at a smaller budget can match or beat baseline at a larger
+// one.
+static void run_mmst_asymmetric_benchmark(const char *cgp_file,
+                                          const char *label, int max_positions,
+                                          int num_threads, int ply,
+                                          double old_soft, double old_hard,
+                                          double new_soft, double new_hard) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
+           cgp_file);
+    return;
+  }
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int found = 0;
+  while (found < max_positions && fgets(cgp_lines[found], 4096, fp)) {
+    size_t len = strlen(cgp_lines[found]);
+    if (len > 0 && cgp_lines[found][len - 1] == '\n') {
+      cgp_lines[found][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[found]) > 0) {
+      found++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  MMST Asymmetric Benchmark [%s]: %d positions\n", label, found);
+  printf("  %d-ply, %d threads, separate TTs (0.25 each)\n", ply, num_threads);
+  printf("  Old: static (soft=%.3fs hard=%.3fs)\n", old_soft, old_hard);
+  printf("  New: MMST   (soft=%.3fs hard=%.3fs)\n", new_soft, new_hard);
+  printf("==============================================================\n");
+  printf("  %4s  %8s %8s  %8s %8s  %6s\n", "Pos", "Old Val", "New Val",
+         "Old Time", "New Time", "Delta");
+  printf("  ----  -------- --------  -------- --------  ------\n");
+
+  EndgameSolver *solver_old = endgame_solver_create();
+  EndgameSolver *solver_new = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  double total_time_old = 0;
+  double total_time_new = 0;
+  int new_better = 0;
+  int old_better = 0;
+  int same = 0;
+  int total_delta = 0;
+  int solved = 0;
+
+  for (int ci = 0; ci < found; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    bool new_first = (ci % 2 == 0);
+
+    int32_t val_old = 0;
+    int32_t val_new = 0;
+    double time_old = 0;
+    double time_new = 0;
+
+    for (int pass = 0; pass < 2; pass++) {
+      bool is_new = (pass == 0) ? new_first : !new_first;
+      EndgameSolver *solver = is_new ? solver_new : solver_old;
+      double soft = is_new ? new_soft : old_soft;
+      double hard = is_new ? new_hard : old_hard;
+
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = ply,
+                          .tt_fraction_of_mem = 0.25,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = num_threads,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .forced_pass_bypass = true,
+                          .soft_time_limit = soft,
+                          .hard_time_limit = hard,
+                          .use_tt_move_ordering = is_new};
+
+      Timer timer;
+      ctimer_start(&timer);
+      err = error_stack_create();
+      endgame_solve(solver, &args, results, err);
+      double elapsed = ctimer_elapsed_seconds(&timer);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      int32_t val =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+      if (is_new) {
+        val_new = val;
+        time_new = elapsed;
+      } else {
+        val_old = val;
+        time_old = elapsed;
+      }
+    }
+
+    int delta = val_new - val_old;
+    total_delta += delta;
+    if (delta > 0) {
+      new_better++;
+    } else if (delta < 0) {
+      old_better++;
+    } else {
+      same++;
+    }
+
+    printf("  %4d  %+8d %+8d  %7.3fs %7.3fs  %+5d\n", ci + 1, val_old,
+           val_new, time_old, time_new, delta);
+    total_time_old += time_old;
+    total_time_new += time_new;
+    solved++;
+
+    if ((ci + 1) % 25 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("  ----  -------- --------  -------- --------  ------\n");
+  printf("\n");
+  printf("  Results (%d positions [%s], %d-ply):\n", solved, label, ply);
+  printf("    Old: soft=%.3fs hard=%.3fs | New (MMST): soft=%.3fs hard=%.3fs\n",
+         old_soft, old_hard, new_soft, new_hard);
+  printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
+         old_better, same);
+  printf("    Total value delta: %+d (avg %+.2f per position)\n", total_delta,
+         solved > 0 ? (double)total_delta / solved : 0.0);
+  printf("    Old total time: %.3fs (avg %.3fs)\n", total_time_old,
+         solved > 0 ? total_time_old / solved : 0.0);
+  printf("    New total time: %.3fs (avg %.3fs)\n", total_time_new,
+         solved > 0 ? total_time_new / solved : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver_old);
+  endgame_solver_destroy(solver_new);
+  config_destroy(config);
+}
+
 void test_benchmark_tt_move_ordering(void) {
   log_set_level(LOG_FATAL);
-  run_mmst_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 250, 8, 25, 0.05,
-                     0.1);
+  // MMST at 50ms vs baseline at 100ms: can MMST at half budget match?
+  run_mmst_asymmetric_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck 50ms-MMST vs 100ms-old",
+                                250, 8, 25, 0.05, 0.1, 0.025, 0.05);
 }
