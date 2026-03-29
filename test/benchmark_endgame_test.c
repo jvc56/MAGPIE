@@ -820,13 +820,26 @@ void test_benchmark_tt_move_ordering(void) {
 // Play out an endgame move-by-move with two solver configurations.
 // solver_a controls player on turn (pot), solver_b controls opponent.
 // Returns final spread from player-on-turn's perspective.
+// Time tracking for each player role in a playout
+typedef struct {
+  double time_a; // Total time for player A (plays first)
+  double time_b; // Total time for player B (responds)
+  int moves_a;
+  int moves_b;
+} PlayoutTimes;
+
 static int play_endgame_out(Game *game, EndgameSolver *solver_a,
                             EndgameSolver *solver_b, EndgameResults *results,
                             ThreadControl *tc, int num_threads, int ply,
                             double soft_limit, double hard_limit,
                             bool a_uses_mmst, bool b_uses_mmst,
-                            KWG *shared_kwg0, KWG *shared_kwg1) {
+                            KWG *shared_kwg0, KWG *shared_kwg1,
+                            PlayoutTimes *times) {
   const int initial_pot = game_get_player_on_turn_index(game);
+  times->time_a = 0;
+  times->time_b = 0;
+  times->moves_a = 0;
+  times->moves_b = 0;
   while (!game_over(game)) {
     int current_player = game_get_player_on_turn_index(game);
     bool is_a_turn = (current_player == initial_pot);
@@ -849,10 +862,21 @@ static int play_endgame_out(Game *game, EndgameSolver *solver_a,
                         .use_tt_move_ordering = use_mmst,
                         .prebuilt_pruned_kwgs = {shared_kwg0, shared_kwg1}};
 
+    Timer move_timer;
+    ctimer_start(&move_timer);
     ErrorStack *err = error_stack_create();
     endgame_solve(solver, &args, results, err);
+    double move_time = ctimer_elapsed_seconds(&move_timer);
     assert(error_stack_is_empty(err));
     error_stack_destroy(err);
+
+    if (is_a_turn) {
+      times->time_a += move_time;
+      times->moves_a++;
+    } else {
+      times->time_b += move_time;
+      times->moves_b++;
+    }
 
     // Extract and play the best move
     const PVLine *pv =
@@ -934,6 +958,10 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
   int ties = 0;
   int total_delta = 0;
   int solved = 0;
+  double total_mmst_time = 0;
+  double total_static_time = 0;
+  int total_mmst_moves = 0;
+  int total_static_moves = 0;
 
   for (int ci = 0; ci < found; ci++) {
     ErrorStack *err = error_stack_create();
@@ -950,19 +978,31 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
     endgame_build_pruned_kwgs(game, DUAL_LEXICON_MODE_IGNORANT, &shared_kwg0,
                               &shared_kwg1);
 
+    PlayoutTimes times_a;
+    PlayoutTimes times_b;
+
     // Game A: MMST plays first (as player on turn)
     Game *game_a = game_duplicate(game);
     int spread_mmst_first = play_endgame_out(
         game_a, solver_mmst_a, solver_static_a, results, tc, num_threads, ply,
-        soft_limit, hard_limit, true, false, shared_kwg0, shared_kwg1);
+        soft_limit, hard_limit, true, false, shared_kwg0, shared_kwg1,
+        &times_a);
     game_destroy(game_a);
 
     // Game B: static plays first (as player on turn)
     Game *game_b = game_duplicate(game);
     int spread_static_first = play_endgame_out(
         game_b, solver_static_b, solver_mmst_b, results, tc, num_threads, ply,
-        soft_limit, hard_limit, false, true, shared_kwg0, shared_kwg1);
+        soft_limit, hard_limit, false, true, shared_kwg0, shared_kwg1,
+        &times_b);
     game_destroy(game_b);
+
+    // Accumulate: in game A, player_a=MMST, player_b=static
+    //             in game B, player_a=static, player_b=MMST
+    total_mmst_time += times_a.time_a + times_b.time_b;
+    total_static_time += times_a.time_b + times_b.time_a;
+    total_mmst_moves += times_a.moves_a + times_b.moves_b;
+    total_static_moves += times_a.moves_b + times_b.moves_a;
 
     kwg_destroy(shared_kwg0);
     kwg_destroy(shared_kwg1);
@@ -996,6 +1036,15 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
          mmst_wins, static_wins, ties);
   printf("    Total advantage: %+d (avg %+.2f per pair)\n", total_delta,
          solved > 0 ? (double)total_delta / solved : 0.0);
+  printf("    MMST time:   %.1fs total, %d moves, %.1fms/move avg\n",
+         total_mmst_time, total_mmst_moves,
+         total_mmst_moves > 0 ? total_mmst_time / total_mmst_moves * 1000
+                               : 0.0);
+  printf("    Static time: %.1fs total, %d moves, %.1fms/move avg\n",
+         total_static_time, total_static_moves,
+         total_static_moves > 0
+             ? total_static_time / total_static_moves * 1000
+             : 0.0);
   printf("==============================================================\n");
   (void)fflush(stdout);
 
@@ -1012,6 +1061,6 @@ void test_benchmark_mmst_playout(void) {
   log_set_level(LOG_FATAL);
   // Same time budget for both, 10 threads, 50ms per move
   run_mmst_playout_benchmark("/tmp/nonstuck_cgps.txt",
-                             "nonstuck playout 50ms/move", 100, 10, 25, 0.025,
+                             "nonstuck playout 50ms/move", 500, 10, 25, 0.025,
                              0.05);
 }
