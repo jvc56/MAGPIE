@@ -2284,8 +2284,10 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   }
 
   for (int ply = start; ply <= plies; ply++) {
-    // Check if another thread has completed the full search
-    if (iterative_deepening_should_stop(worker->solver)) {
+    // Check if another thread has completed the full search, or if setup
+    // already consumed the hard time budget.
+    if (iterative_deepening_should_stop(worker->solver) ||
+        check_depth_deadline(worker)) {
       break;
     }
 
