@@ -2656,7 +2656,11 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   }
 
   solver->results = results;
+
+  Timer setup_timer;
+  ctimer_start(&setup_timer);
   endgame_solver_reset(solver, endgame_args);
+  double reset_time = ctimer_elapsed_seconds(&setup_timer);
 
   Timer solve_timer;
   ctimer_start(&solve_timer);
@@ -2672,16 +2676,19 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
 
   // Compute initial stuck-tile fraction for root move ordering.
   // Per-node detection in abdada_negamax recomputes this dynamically.
+  ctimer_start(&setup_timer);
   solver->initial_opp_stuck_frac = 0.0F;
   if (solver->use_heuristics) {
     solver->initial_opp_stuck_frac =
         compute_initial_stuck_fraction(solver, endgame_args->game);
   }
+  double stuck_time = ctimer_elapsed_seconds(&setup_timer);
 
   // Generate base seed for ABDADA jitter using current time
   uint64_t base_seed = (uint64_t)ctime_get_current_time();
 
   // Kick-off iterative deepening threads (ABDADA)
+  ctimer_start(&setup_timer);
   EndgameSolverWorker **solver_workers =
       malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
   cpthread_t *worker_ids =
@@ -2693,6 +2700,11 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
                     solver_workers[thread_index]);
   }
+  double worker_create_time = ctimer_elapsed_seconds(&setup_timer);
+  log_warn("Startup: reset=%.1fms stuck=%.1fms workers(%d)=%.1fms total=%.1fms",
+           reset_time * 1000, stuck_time * 1000, solver->threads,
+           worker_create_time * 1000,
+           (reset_time + stuck_time + worker_create_time) * 1000);
 
   // Wait for all threads to complete
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
