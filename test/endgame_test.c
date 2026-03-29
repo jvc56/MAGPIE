@@ -148,7 +148,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   load_and_exec_config_or_die(config, cgp);
 
   // Create solver
-  EndgameSolver *endgame_solver = endgame_solver_create();
+  EndgameCtx *endgame_solver = NULL;
 
   // Create args
   Game *game = config_get_game(config);
@@ -190,7 +190,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
 
   printf("Solving %d-ply endgame with %d threads...\n", endgame_args.plies,
          endgame_args.num_threads);
-  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  endgame_solve(&endgame_solver, &endgame_args, endgame_results, error_stack);
 
   // Join the timeout thread if it was created
   if (timeout > 0) {
@@ -214,7 +214,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
   }
 
-  endgame_solver_destroy(endgame_solver);
+  endgame_ctx_destroy(endgame_solver);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -333,7 +333,7 @@ void test_kue(void) {
               "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
               "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
 
-  EndgameSolver *endgame_solver = endgame_solver_create();
+  EndgameCtx *endgame_solver = NULL;
   Game *game = config_get_game(config);
   Timer timer;
   ctimer_start(&timer);
@@ -365,14 +365,14 @@ void test_kue(void) {
          "ttfraction=%.1f...\n",
          endgame_args.plies, endgame_args.num_threads,
          endgame_args.num_top_moves, endgame_args.tt_fraction_of_mem);
-  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  endgame_solve(&endgame_solver, &endgame_args, endgame_results, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   const PVLine *pv_line =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
   assert(pv_line->score == 52);
 
-  endgame_solver_destroy(endgame_solver);
+  endgame_ctx_destroy(endgame_solver);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -394,7 +394,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       " -threads 1 -eplies 4");
   load_and_exec_config_or_die(config, TWO_LEXICON_CGP);
 
-  EndgameSolver *solver = endgame_solver_create();
+  EndgameCtx *solver = NULL;
   Game *game = config_get_game(config);
   ErrorStack *error_stack = error_stack_create();
   EndgameResults *results = config_get_endgame_results(config);
@@ -413,14 +413,14 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .dual_lexicon_mode = mode,
   };
 
-  endgame_solve(solver, &args, results, error_stack);
+  endgame_solve(&solver, &args, results, error_stack);
   assert(error_stack_is_empty(error_stack));
   const PVLine *pv_line =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   assert(pv_line->score == expected_score);
 
   error_stack_destroy(error_stack);
-  endgame_solver_destroy(solver);
+  endgame_ctx_destroy(solver);
   config_destroy(config);
 }
 
@@ -458,7 +458,7 @@ void test_monster_q(void) {
                               "E3HARN7 "
                               "ADEIIU?/MNPQRT 369/399 0 -lex CSW21;");
 
-  EndgameSolver *endgame_solver = endgame_solver_create();
+  EndgameCtx *endgame_solver = NULL;
   Game *game = config_get_game(config);
   Timer timer;
   ctimer_start(&timer);
@@ -490,10 +490,10 @@ void test_monster_q(void) {
   printf("Solving %d-ply endgame with %d threads, ttfraction=%.1f...\n",
          endgame_args.plies, endgame_args.num_threads,
          endgame_args.tt_fraction_of_mem);
-  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  endgame_solve(&endgame_solver, &endgame_args, endgame_results, error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  endgame_solver_destroy(endgame_solver);
+  endgame_ctx_destroy(endgame_solver);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
@@ -510,7 +510,7 @@ void test_multi_pv(void) {
               "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
   // First: solve single-PV to get the reference best value
-  EndgameSolver *endgame_solver = endgame_solver_create();
+  EndgameCtx *endgame_solver = NULL;
   Game *game = config_get_game(config);
 
   EndgameArgs endgame_args = {0};
@@ -529,18 +529,18 @@ void test_multi_pv(void) {
   EndgameResults *endgame_results = endgame_results_create();
   ErrorStack *error_stack = error_stack_create();
 
-  endgame_solve(endgame_solver, &endgame_args, endgame_results, error_stack);
+  endgame_solve(&endgame_solver, &endgame_args, endgame_results, error_stack);
   assert(error_stack_is_empty(error_stack));
   const PVLine *single_pv =
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
   int32_t single_best_score = single_pv->score;
 
-  endgame_solver_destroy(endgame_solver);
+  endgame_ctx_destroy(endgame_solver);
 
   // Now: solve multi-PV with top 5
   // Multi-PV ranked moves are reported via the per-ply callback;
   // the results struct stores only the best PV.
-  endgame_solver = endgame_solver_create();
+  endgame_solver = NULL;
   endgame_args.num_top_moves = 5;
   Timer timer;
   ctimer_start(&timer);
@@ -559,7 +559,7 @@ void test_multi_pv(void) {
          endgame_args.num_top_moves);
 
   EndgameResults *multi_results = endgame_results_create();
-  endgame_solve(endgame_solver, &endgame_args, multi_results, error_stack);
+  endgame_solve(&endgame_solver, &endgame_args, multi_results, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   // Best PV should match single-PV result
@@ -576,7 +576,7 @@ void test_multi_pv(void) {
   printf("Multi-PV output:\n%s\n", result_str);
   free(result_str);
 
-  endgame_solver_destroy(endgame_solver);
+  endgame_ctx_destroy(endgame_solver);
   endgame_results_destroy(multi_results);
   endgame_results_destroy(endgame_results);
   error_stack_destroy(error_stack);
