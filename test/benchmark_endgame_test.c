@@ -790,8 +790,8 @@ static void run_mmst_asymmetric_benchmark(const char *cgp_file,
 
 void test_benchmark_tt_move_ordering(void) {
   log_set_level(LOG_FATAL);
-  // MMST at 50ms vs baseline at 200ms, 4 threads
+  // MMST at 100ms vs baseline at 1s, 4 threads
   run_mmst_asymmetric_benchmark(
-      "/tmp/nonstuck_cgps.txt", "nonstuck 50ms-MMST vs 200ms-old", 250, 4, 25,
-      0.1, 0.2, 0.025, 0.05);
+      "/tmp/nonstuck_cgps.txt", "nonstuck 100ms-MMST vs 1s-old", 250, 4, 25,
+      0.5, 1.0, 0.05, 0.1);
 }
