@@ -831,8 +831,8 @@ typedef struct {
 static int play_endgame_out(Game *game, EndgameSolver *solver_a,
                             EndgameSolver *solver_b, EndgameResults *results,
                             ThreadControl *tc, int num_threads, int ply,
-                            double soft_limit, double hard_limit,
-                            bool a_uses_mmst, bool b_uses_mmst,
+                            double soft_a, double hard_a, double soft_b,
+                            double hard_b, bool a_uses_mmst, bool b_uses_mmst,
                             KWG *shared_kwg0, KWG *shared_kwg1,
                             PlayoutTimes *times) {
   const int initial_pot = game_get_player_on_turn_index(game);
@@ -845,6 +845,8 @@ static int play_endgame_out(Game *game, EndgameSolver *solver_a,
     bool is_a_turn = (current_player == initial_pot);
     EndgameSolver *solver = is_a_turn ? solver_a : solver_b;
     bool use_mmst = is_a_turn ? a_uses_mmst : b_uses_mmst;
+    double soft = is_a_turn ? soft_a : soft_b;
+    double hard = is_a_turn ? hard_a : hard_b;
 
     thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
     EndgameArgs args = {.game = game,
@@ -857,8 +859,8 @@ static int play_endgame_out(Game *game, EndgameSolver *solver_a,
                         .num_top_moves = 1,
                         .use_heuristics = true,
                         .forced_pass_bypass = true,
-                        .soft_time_limit = soft_limit,
-                        .hard_time_limit = hard_limit,
+                        .soft_time_limit = soft,
+                        .hard_time_limit = hard,
                         .use_tt_move_ordering = use_mmst,
                         .prebuilt_pruned_kwgs = {shared_kwg0, shared_kwg1}};
 
@@ -906,8 +908,9 @@ static int play_endgame_out(Game *game, EndgameSolver *solver_a,
 // Measures actual game outcomes, not self-reported valuations.
 static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
                                        int max_positions, int num_threads,
-                                       int ply, double soft_limit,
-                                       double hard_limit) {
+                                       int ply, double mmst_soft,
+                                       double mmst_hard, double static_soft,
+                                       double static_hard) {
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
     printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
@@ -937,8 +940,10 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
   printf("\n");
   printf("==============================================================\n");
   printf("  MMST Playout Benchmark [%s]: %d positions\n", label, found);
-  printf("  %d-ply, %d threads, soft=%.3fs hard=%.3fs (per move)\n", ply,
-         num_threads, soft_limit, hard_limit);
+  printf("  %d-ply, %d threads\n", ply, num_threads);
+  printf("  MMST:   soft=%.3fs hard=%.3fs per move\n", mmst_soft, mmst_hard);
+  printf("  Static: soft=%.3fs hard=%.3fs per move\n", static_soft,
+         static_hard);
   printf("  Game pairs: MMST vs static, alternating who plays first\n");
   printf("==============================================================\n");
   printf("  %4s  %8s %8s  %6s\n", "Pos", "MMST 1st", "Stat 1st", "Delta");
@@ -985,16 +990,16 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
     Game *game_a = game_duplicate(game);
     int spread_mmst_first = play_endgame_out(
         game_a, solver_mmst_a, solver_static_a, results, tc, num_threads, ply,
-        soft_limit, hard_limit, true, false, shared_kwg0, shared_kwg1,
-        &times_a);
+        mmst_soft, mmst_hard, static_soft, static_hard, true, false,
+        shared_kwg0, shared_kwg1, &times_a);
     game_destroy(game_a);
 
     // Game B: static plays first (as player on turn)
     Game *game_b = game_duplicate(game);
     int spread_static_first = play_endgame_out(
         game_b, solver_static_b, solver_mmst_b, results, tc, num_threads, ply,
-        soft_limit, hard_limit, false, true, shared_kwg0, shared_kwg1,
-        &times_b);
+        static_soft, static_hard, mmst_soft, mmst_hard, false, true,
+        shared_kwg0, shared_kwg1, &times_b);
     game_destroy(game_b);
 
     // Accumulate: in game A, player_a=MMST, player_b=static
@@ -1059,8 +1064,8 @@ static void run_mmst_playout_benchmark(const char *cgp_file, const char *label,
 
 void test_benchmark_mmst_playout(void) {
   log_set_level(LOG_FATAL);
-  // Same time budget for both, 10 threads, 50ms per move
+  // 50ms MMST vs 100ms static, 10 threads, 500 game pairs
   run_mmst_playout_benchmark("/tmp/nonstuck_cgps.txt",
-                             "nonstuck playout 50ms/move", 500, 10, 25, 0.025,
-                             0.05);
+                             "50ms MMST vs 100ms static", 500, 10, 25, 0.025,
+                             0.05, 0.05, 0.1);
 }
