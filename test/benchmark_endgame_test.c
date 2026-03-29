@@ -19,7 +19,10 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/str/game_string.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
@@ -958,15 +961,18 @@ static void compute_elo_ratings(const HeadToHead *h2h, int num_players,
 // Play one endgame: solver_a controls starting_side, solver_b controls the
 // other. Returns final spread from solver_a's perspective.
 // time_a/time_b accumulate solve time for each side.
+// If move_log is non-NULL, appends move descriptions to it.
 static int play_one_endgame(Game *game_copy, int starting_side,
                             EndgameSolver *solver_a, EndgameSolver *solver_b,
                             const TournPlayer *player_a,
                             const TournPlayer *player_b,
                             ThreadControl *thread_control,
                             EndgameResults *results, double *time_a,
-                            double *time_b) {
+                            double *time_b, StringBuilder *move_log) {
   *time_a = 0;
   *time_b = 0;
+
+  const LetterDistribution *ld = game_get_ld(game_copy);
 
   // Safety limit to avoid infinite loops (e.g., consecutive scoreless turns)
   for (int move_count = 0; move_count < 50 && !game_over(game_copy);
@@ -1012,6 +1018,17 @@ static int play_one_endgame(Game *game_copy, int starting_side,
     }
     Move move;
     small_move_to_move(&move, &pv->moves[0], game_get_board(game_copy));
+
+    if (move_log) {
+      if (move_count > 0) {
+        string_builder_add_string(move_log, " ");
+      }
+      string_builder_add_formatted_string(move_log, "[%s] ",
+                                          is_a ? "A" : "B");
+      string_builder_add_move(move_log, game_get_board(game_copy), &move, ld,
+                              true);
+    }
+
     play_move(&move, game_copy, NULL);
   }
 
@@ -1109,27 +1126,49 @@ void test_benchmark_tournament(void) {
         int starting_side = game_get_player_on_turn_index(game);
 
         // Game 1: A controls starting side
+        StringBuilder *log1 = string_builder_create();
         Game *g1 = game_duplicate(game);
         double time_a1 = 0;
         double time_b1 = 0;
-        int spread1 = play_one_endgame(g1, starting_side, solver_pool[0],
-                                       solver_pool[1], &players[a],
-                                       &players[b], config_get_thread_control(config),
-                                       results, &time_a1, &time_b1);
+        int spread1 = play_one_endgame(
+            g1, starting_side, solver_pool[0], solver_pool[1], &players[a],
+            &players[b], config_get_thread_control(config), results, &time_a1,
+            &time_b1, log1);
         game_destroy(g1);
 
         // Game 2: B controls starting side (swap)
+        StringBuilder *log2 = string_builder_create();
         Game *g2 = game_duplicate(game);
         double time_a2 = 0;
         double time_b2 = 0;
-        int spread2 = play_one_endgame(g2, starting_side, solver_pool[1],
-                                       solver_pool[0], &players[b],
-                                       &players[a], config_get_thread_control(config),
-                                       results, &time_a2, &time_b2);
+        int spread2 = play_one_endgame(
+            g2, starting_side, solver_pool[1], solver_pool[0], &players[b],
+            &players[a], config_get_thread_control(config), results, &time_a2,
+            &time_b2, log2);
         game_destroy(g2);
 
         // Net spread from A's perspective: game1 spread + (-game2 spread)
         int net_spread = spread1 - spread2;
+
+        // Print position + moves when the pair disagrees
+        if (net_spread != 0) {
+          StringBuilder *board_sb = string_builder_create();
+          GameStringOptions *gso = game_string_options_create_default();
+          string_builder_add_game(game, NULL, gso, NULL, board_sb);
+          game_string_options_destroy(gso);
+
+          printf("\n    === Position %d (net %+d for %s) ===\n",
+                 positions_done + 1, net_spread, players[a].label);
+          printf("%s\n", string_builder_peek(board_sb));
+          printf("    Game 1 (A=%s first, spread %+d):\n      %s\n",
+                 players[a].label, spread1, string_builder_peek(log1));
+          printf("    Game 2 (B=%s first, spread %+d):\n      %s\n",
+                 players[b].label, spread2, string_builder_peek(log2));
+          (void)fflush(stdout);
+          string_builder_destroy(board_sb);
+        }
+        string_builder_destroy(log1);
+        string_builder_destroy(log2);
         ab->spread += net_spread;
         ba->spread -= net_spread;
         ab->time_used += time_a1 + time_a2;
