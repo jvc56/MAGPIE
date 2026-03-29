@@ -110,6 +110,8 @@ static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
   return (float)stuck_score / (float)total_score;
 }
 
+typedef struct EndgameSolverWorker EndgameSolverWorker;
+
 struct EndgameSolver {
   int initial_spread;
   int solving_player;
@@ -160,13 +162,17 @@ struct EndgameSolver {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
+  // Persistent worker pool: created once, reset between solves.
+  EndgameSolverWorker **workers;
+  int num_workers;
+
   // Owned by the caller:
   EndgameResults *results;
   ThreadControl *thread_control;
   const Game *game;
 };
 
-typedef struct EndgameSolverWorker {
+struct EndgameSolverWorker {
   int thread_index;
   Game *game_copy;
   Arena *small_move_arena;
@@ -186,7 +192,7 @@ typedef struct EndgameSolverWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
-} EndgameSolverWorker;
+};
 
 #ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -560,10 +566,16 @@ void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,
   *ply2_moves_total = atomic_load(&es->ply2_moves_total);
 }
 
+static void solver_worker_destroy(EndgameSolverWorker *solver_worker);
+
 void endgame_solver_destroy(EndgameSolver *es) {
   if (!es) {
     return;
   }
+  for (int worker_idx = 0; worker_idx < es->num_workers; worker_idx++) {
+    solver_worker_destroy(es->workers[worker_idx]);
+  }
+  free(es->workers);
   transposition_table_destroy(es->transposition_table);
   free(es->move_score_table);
   kwg_destroy(es->pruned_kwgs[0]);
@@ -612,7 +624,7 @@ EndgameSolverWorker *endgame_solver_create_worker(EndgameSolver *solver,
   return solver_worker;
 }
 
-void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
+static void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   if (!solver_worker) {
     return;
   }
@@ -621,6 +633,34 @@ void solver_worker_destroy(EndgameSolverWorker *solver_worker) {
   arena_destroy(solver_worker->small_move_arena);
   prng_destroy(solver_worker->prng);
   free(solver_worker);
+}
+
+// Reset a persistent worker for a new solve: copy game state from the solver's
+// game, re-set override KWGs, regenerate cross-sets, and zero tracking fields.
+// Avoids the cost of game_duplicate, game_set_backup_mode (25 board copies),
+// arena/move_list allocation, and PRNG creation.
+static void endgame_solver_reset_worker(EndgameSolverWorker *worker,
+                                        EndgameSolver *solver) {
+  game_copy(worker->game_copy, solver->game);
+  game_set_endgame_solving_mode(worker->game_copy);
+  // Restore backup mode — game_copy resets it to OFF, but
+  // game_set_backup_mode is a no-op when backups already exist.
+  game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
+  game_set_override_kwgs(worker->game_copy, solver->pruned_kwgs[0],
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+  game_gen_all_cross_sets(worker->game_copy);
+
+  arena_reset(worker->small_move_arena);
+  worker->solver = solver;
+  memset(worker->move_undos, 0, sizeof(worker->move_undos));
+  worker->best_pv.game = worker->game_copy;
+  worker->best_pv.num_moves = 0;
+  worker->best_pv_value = -LARGE_VALUE;
+  worker->completed_depth = 0;
+  worker->current_iterative_deepening_depth = 0;
+  worker->n_initial_moves = 0;
+  worker->in_first_root_move = false;
+  worker->nodes_since_deadline_check = 0;
 }
 
 // Returns the pruned KWG for the given player index.
@@ -2501,21 +2541,6 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-// Compute the initial stuck-tile fraction for the opponent at the root.
-// Duplicates the game to avoid modifying the original.
-static float compute_initial_stuck_fraction(const EndgameSolver *solver,
-                                            const Game *game) {
-  int opp_idx = 1 - solver->solving_player;
-  Game *root_game = game_duplicate(game);
-  MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
-  float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      NULL, NULL);
-  small_move_list_destroy(tmp_ml);
-  game_destroy(root_game);
-  return frac;
-}
-
 // Format and log all final PV lines: move-by-move replay, game-end
 // annotations (rack points, 6 zeros), win/loss/tie summary.
 static void log_final_pvs(const PVLine *multi_pvs, int num_pvs,
@@ -2670,28 +2695,47 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
                  now_ns + (int64_t)(solver->hard_time_limit * 1e9));
   }
 
-  // Compute initial stuck-tile fraction for root move ordering.
-  // Per-node detection in abdada_negamax recomputes this dynamically.
-  solver->initial_opp_stuck_frac = 0.0F;
-  if (solver->use_heuristics) {
-    solver->initial_opp_stuck_frac =
-        compute_initial_stuck_fraction(solver, endgame_args->game);
+  // Create or resize the persistent worker pool. Workers are created once and
+  // reset between solves to avoid repeated game_duplicate, backup allocation,
+  // arena/move_list creation, and PRNG setup.
+  if (solver->num_workers != solver->threads) {
+    // Thread count changed — destroy old workers and create new ones.
+    for (int worker_idx = 0; worker_idx < solver->num_workers; worker_idx++) {
+      solver_worker_destroy(solver->workers[worker_idx]);
+    }
+    free(solver->workers);
+    uint64_t base_seed = (uint64_t)ctime_get_current_time();
+    solver->workers =
+        malloc_or_die(sizeof(EndgameSolverWorker *) * solver->threads);
+    for (int worker_idx = 0; worker_idx < solver->threads; worker_idx++) {
+      solver->workers[worker_idx] =
+          endgame_solver_create_worker(solver, worker_idx, base_seed);
+    }
+    solver->num_workers = solver->threads;
+  } else {
+    // Same thread count — reset existing workers with new game state.
+    for (int worker_idx = 0; worker_idx < solver->num_workers; worker_idx++) {
+      endgame_solver_reset_worker(solver->workers[worker_idx], solver);
+    }
   }
 
-  // Generate base seed for ABDADA jitter using current time
-  uint64_t base_seed = (uint64_t)ctime_get_current_time();
+  // Compute initial stuck-tile fraction using worker 0's game copy (already
+  // reset with the current game state), avoiding an extra game_duplicate.
+  solver->initial_opp_stuck_frac = 0.0F;
+  if (solver->use_heuristics) {
+    int opp_idx = 1 - solver->solving_player;
+    solver->initial_opp_stuck_frac = compute_opp_stuck_fraction(
+        solver->workers[0]->game_copy, solver->workers[0]->move_list,
+        solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0, NULL, NULL);
+  }
 
   // Kick-off iterative deepening threads (ABDADA)
-  EndgameSolverWorker **solver_workers =
-      malloc_or_die((sizeof(EndgameSolverWorker *)) * solver->threads);
   cpthread_t *worker_ids =
-      malloc_or_die((sizeof(cpthread_t)) * (solver->threads));
+      malloc_or_die(sizeof(cpthread_t) * solver->threads);
 
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_workers[thread_index] =
-        endgame_solver_create_worker(solver, thread_index, base_seed);
     cpthread_create(&worker_ids[thread_index], solver_worker_start,
-                    solver_workers[thread_index]);
+                    solver->workers[thread_index]);
   }
 
   // Wait for all threads to complete
@@ -2716,24 +2760,18 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
   if (num_top > 1) {
     // Find the thread that completed the deepest search for its root move arena
     int best_thread = 0;
-    int best_depth = solver_workers[0]->completed_depth;
+    int best_depth = solver->workers[0]->completed_depth;
     for (int thread_index = 1; thread_index < solver->threads; thread_index++) {
-      int thread_depth = solver_workers[thread_index]->completed_depth;
+      int thread_depth = solver->workers[thread_index]->completed_depth;
       if (thread_depth > best_depth) {
         best_depth = thread_depth;
         best_thread = thread_index;
       }
     }
-    num_pvs = extract_multi_pvs(solver, solver_workers[best_thread],
+    num_pvs = extract_multi_pvs(solver, solver->workers[best_thread],
                                 endgame_args->game, multi_pvs, num_top);
   }
 
-  // Clean up workers
-  for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
-    solver_worker_destroy(solver_workers[thread_index]);
-  }
-
-  free(solver_workers);
   free(worker_ids);
 
   // Calculate elapsed time

@@ -479,9 +479,10 @@ void test_benchmark_nonstuck_3v3(void) {
 // ordering (MMST). Reads positions from a CGP file and solves under a time
 // budget. The hard_time_limit triggers a mid-depth cutoff via depth_deadline_ns.
 // Separate solvers prevent TT cross-contamination.
-static void run_mmst_benchmark(const char *cgp_file, const char *label,
-                               int max_positions, int num_threads, int ply,
-                               double soft_limit, double hard_limit) {
+__attribute__((unused)) static void
+run_mmst_benchmark(const char *cgp_file, const char *label, int max_positions,
+                   int num_threads, int ply, double soft_limit,
+                   double hard_limit) {
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
     printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
@@ -794,4 +795,95 @@ void test_benchmark_tt_move_ordering(void) {
   run_mmst_asymmetric_benchmark(
       "/tmp/nonstuck_cgps.txt", "nonstuck 100ms-MMST vs 1s-old", 250, 4, 25,
       0.5, 1.0, 0.05, 0.1);
+}
+
+// Benchmark startup overhead: solve many positions with a tiny time budget
+// to measure the fraction of time spent in setup vs. search.
+void test_benchmark_startup(void) {
+  log_set_level(LOG_FATAL);
+
+  FILE *fp = fopen("/tmp/nonstuck_cgps.txt", "re");
+  if (!fp) {
+    printf("No CGP file found — run gennonstuck first.\n");
+    return;
+  }
+
+  int max_positions = 50;
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int found = 0;
+  while (found < max_positions && fgets(cgp_lines[found], 4096, fp)) {
+    size_t len = strlen(cgp_lines[found]);
+    if (len > 0 && cgp_lines[found][len - 1] == '\n') {
+      cgp_lines[found][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[found]) > 0) {
+      found++;
+    }
+  }
+  (void)fclose(fp);
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  EndgameSolver *solver = endgame_solver_create();
+  EndgameResults *results = endgame_results_create();
+
+  printf("\n");
+  printf("==============================================================\n");
+  printf("  Startup Benchmark: %d positions, 25ms budget, 4 threads\n", found);
+  printf("==============================================================\n");
+  printf("  %4s  %8s  %8s\n", "Pos", "Time", "Value");
+  printf("  ----  --------  --------\n");
+
+  double total_time = 0;
+  for (int ci = 0; ci < found; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = 25,
+                        .tt_fraction_of_mem = 0.25,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = 4,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .forced_pass_bypass = true,
+                        .soft_time_limit = 0.0125,
+                        .hard_time_limit = 0.025,
+                        .use_tt_move_ordering = true};
+
+    Timer timer;
+    ctimer_start(&timer);
+    err = error_stack_create();
+    endgame_solve(solver, &args, results, err);
+    double elapsed = ctimer_elapsed_seconds(&timer);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    int32_t val =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+    printf("  %4d  %7.3fs  %+8d\n", ci + 1, elapsed, val);
+    total_time += elapsed;
+  }
+
+  printf("  ----  --------  --------\n");
+  printf("  Total: %.3fs, Avg: %.3fs\n", total_time,
+         found > 0 ? total_time / found : 0.0);
+  printf("==============================================================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_solver_destroy(solver);
+  config_destroy(config);
 }
