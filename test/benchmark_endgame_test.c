@@ -476,57 +476,42 @@ void test_benchmark_nonstuck_3v3(void) {
 }
 
 // A/B benchmark: compare endgame solving with and without TT-informed move
-// ordering (MMST). Generates bag-empty positions inline
-// and solves under a time budget. The hard_time_limit triggers a mid-depth
-// cutoff via depth_deadline_ns. Separate solvers prevent TT cross-contamination.
-void test_benchmark_tt_move_ordering(void) {
-  log_set_level(LOG_FATAL);
+// ordering (MMST). Reads positions from a CGP file and solves under a time
+// budget. The hard_time_limit triggers a mid-depth cutoff via depth_deadline_ns.
+// Separate solvers prevent TT cross-contamination.
+static void run_mmst_benchmark(const char *cgp_file, const char *label,
+                               int max_positions, int num_threads, int ply,
+                               double soft_limit, double hard_limit) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s — run genstuck/gennonstuck first.\n",
+           cgp_file);
+    return;
+  }
 
   Config *config =
       config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
-  MoveList *move_list = move_list_create(1);
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  const int target = 250;
-  const uint64_t base_seed = 99999;
-  const int max_attempts = 250000;
-  const int num_threads = 8;
-  const int ply = 25;
-  const double soft_limit = 5.0;
-  const double hard_limit = 10.0;
-
-  // Collect endgame positions with reduced racks (play a few moves past
-  // bag-empty so positions are tractable at the chosen ply depth).
-  char (*cgp_lines)[4096] = malloc((size_t)target * 4096);
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
   assert(cgp_lines);
   int found = 0;
-
-  for (int attempt = 0; found < target && attempt < max_attempts; attempt++) {
-    game_reset(game);
-    game_seed(game, base_seed + (uint64_t)attempt);
-    draw_starting_racks(game);
-    if (!play_until_bag_empty(game, move_list)) {
-      continue;
+  while (found < max_positions && fgets(cgp_lines[found], 4096, fp)) {
+    size_t len = strlen(cgp_lines[found]);
+    if (len > 0 && cgp_lines[found][len - 1] == '\n') {
+      cgp_lines[found][len - 1] = '\0';
     }
-    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-      continue;
-    }
-    char *cgp = game_get_cgp(game, true);
-    size_t len = strlen(cgp);
-    if (len < 4096) {
-      memcpy(cgp_lines[found], cgp, len + 1);
+    if (strlen(cgp_lines[found]) > 0) {
       found++;
     }
-    free(cgp);
   }
-
-  move_list_destroy(move_list);
+  (void)fclose(fp);
 
   printf("\n");
   printf("==============================================================\n");
-  printf("  TT Move Ordering Benchmark: %d positions\n", found);
-  printf("  %d-ply (soft=%.1fs hard=%.1fs), %d threads, separate TTs (0.25 "
+  printf("  MMST Benchmark [%s]: %d positions\n", label, found);
+  printf("  %d-ply (soft=%.2fs hard=%.2fs), %d threads, separate TTs (0.25 "
          "each)\n",
          ply, soft_limit, hard_limit, num_threads);
   printf("  Old: static heuristics only\n");
@@ -625,8 +610,8 @@ void test_benchmark_tt_move_ordering(void) {
 
   printf("  ----  -------- --------  -------- --------  ------\n");
   printf("\n");
-  printf("  Results (%d positions, %d-ply, soft=%.1fs hard=%.1fs):\n", solved,
-         ply, soft_limit, hard_limit);
+  printf("  Results (%d positions [%s], %d-ply, soft=%.2fs hard=%.2fs):\n",
+         solved, label, ply, soft_limit, hard_limit);
   printf("    New better: %d  |  Old better: %d  |  Same: %d\n", new_better,
          old_better, same);
   printf("    Total value delta: %+d (avg %+.2f per position)\n", total_delta,
@@ -645,4 +630,10 @@ void test_benchmark_tt_move_ordering(void) {
   endgame_solver_destroy(solver_old);
   endgame_solver_destroy(solver_new);
   config_destroy(config);
+}
+
+void test_benchmark_tt_move_ordering(void) {
+  log_set_level(LOG_FATAL);
+  run_mmst_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 250, 8, 25, 0.05,
+                     0.1);
 }
