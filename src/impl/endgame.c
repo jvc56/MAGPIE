@@ -74,14 +74,13 @@ enum {
   THREAD_JITTER_NOISE = 8,
   // Multi-Move Score Table: per-(position, move) score cache for move ordering.
   // Stores scores from previous IDS iterations for all searched moves, not just
-  // the TT best-move. 2^22 entries * 4 bytes = 16 MB.
-  MMST_SIZE_POWER = 22,
+  // the TT best-move. 2^18 entries * 4 bytes = 1 MB (fits in L2 cache).
+  MMST_SIZE_POWER = 18,
   MMST_SIZE = (1 << MMST_SIZE_POWER),
   MMST_MASK = (MMST_SIZE - 1),
-  // Bonus for moves that have an MMST or child-TT estimate.
-  // Ensures TT-informed ordering beats static heuristics, but stays below
-  // GOING_OUT_BF so going-out moves (which have exact estimates) still win.
-  TT_ESTIMATE_BF = 1 << 26,
+  // Minimum remaining depth to store MMST entries. Only store at non-leaf
+  // depths where the entry reflects meaningful search, not just a static eval.
+  MMST_MIN_STORE_DEPTH = 2,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -1087,17 +1086,10 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 
   const LetterDistribution *est_ld = game_get_ld(worker->game_copy);
 
-  // TT-based move ordering: try MMST and child TT probes before static
-  // heuristics. These give scores from previous IDS iterations for all
-  // searched moves, not just the TT best-move.
+  // MMST-based move ordering: use per-(position, move) scores from previous
+  // IDS iterations. MMST scores are normalized and on a similar scale to
+  // static heuristics, so they compete directly without a bonus flag.
   const _Atomic uint32_t *mmst = worker->solver->move_score_table;
-  const bool has_tt =
-      worker->solver->transposition_table_optim && node_key != 0;
-  const bool was_our_move =
-      (player_index == worker->solver->solving_player);
-  const int last_scoreless_turns =
-      game_get_consecutive_scoreless_turns(worker->game_copy);
-  const Board *board = game_get_board(worker->game_copy);
 
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
@@ -1113,65 +1105,26 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
                             other_rack, game_get_ld(worker->game_copy)))) |
               GOING_OUT_BF);
     } else {
-      bool got_tt_estimate = false;
+      bool got_mmst_estimate = false;
 
-      // Try MMST lookup first (cheapest: single hash + atomic load).
+      // Try MMST lookup (cheap: single hash + atomic load).
+      // MMST scores are normalized (value - spread) so they're on a similar
+      // scale to static heuristic estimates and can compete directly.
+      // Thread jitter is still applied for ABDADA diversity.
       if (mmst != NULL) {
         int16_t mmst_score;
         if (mmst_lookup(mmst, node_key, current_move->tiny_move,
                         &mmst_score)) {
-          small_move_set_estimated_value(
-              current_move, (int32_t)mmst_score + TT_ESTIMATE_BF);
-          got_tt_estimate = true;
-        }
-      }
-
-      // Fallback: probe child position's TT entry.
-      // More expensive (small_move_to_move + rack copy + zobrist_add_move +
-      // TT lookup) but covers positions reached via alternate paths whose
-      // MMST entries were evicted.
-      if (!got_tt_estimate && has_tt) {
-        small_move_to_move(worker->move_list->spare_move, current_move,
-                           board);
-        Rack post_rack;
-        rack_copy(&post_rack, stm_rack);
-        const Move *probe_move = worker->move_list->spare_move;
-        if (!small_move_is_pass(current_move)) {
-          for (int tile_idx = 0; tile_idx < probe_move->tiles_length;
-               tile_idx++) {
-            MachineLetter tile = probe_move->tiles[tile_idx];
-            if (tile == PLAYED_THROUGH_MARKER) {
-              continue;
-            }
-            rack_take_letter(&post_rack,
-                             get_is_blanked(tile) ? 0 : tile);
-          }
-        }
-        int child_scoreless = small_move_is_pass(current_move)
-                                  ? MIN(last_scoreless_turns + 1, 2)
-                                  : 0;
-        uint64_t child_key = zobrist_add_move(
-            worker->solver->transposition_table->zobrist, node_key,
-            probe_move, &post_rack, was_our_move, child_scoreless,
-            last_scoreless_turns);
-        TTEntry child_entry = transposition_table_lookup(
-            worker->solver->transposition_table, child_key);
-        if (ttentry_valid(child_entry)) {
-          // From parent's perspective: value = move_score - child_stored.
-          // child_stored = child_value - child_spread, and
-          // child_spread = -(parent_spread + move_score), so
-          // -(child_value) - parent_spread = move_score - child_stored.
-          // parent_spread is constant; for ordering, rank by this.
-          int estimate = small_move_get_score(current_move) -
-                         (int)ttentry_score(child_entry);
-          small_move_set_estimated_value(
-              current_move, estimate + TT_ESTIMATE_BF);
-          got_tt_estimate = true;
+          int estimate = (int32_t)mmst_score;
+          estimate += compute_thread_jitter(
+              worker, small_move_get_tiles_played(current_move));
+          small_move_set_estimated_value(current_move, estimate);
+          got_mmst_estimate = true;
         }
       }
 
       // Fallback: static heuristic (build chains, conservation, face value).
-      if (!got_tt_estimate) {
+      if (!got_mmst_estimate) {
         bool is_non_pass_partial =
             !small_move_is_pass(current_move) &&
             small_move_get_tiles_played(current_move) < ntiles_on_rack;
@@ -2134,10 +2087,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
         pv->negamax_depth = child_pv.negamax_depth + 1;
       }
       // Store per-move score in MMST for future move ordering.
+      // Only store at non-leaf depths where the score reflects real search.
       // Normalized: (-value) - on_turn_spread removes the position-specific
       // offset so scores are comparable across different paths to the same
       // position.
-      if (worker->solver->move_score_table != NULL) {
+      if (worker->solver->move_score_table != NULL &&
+          depth >= MMST_MIN_STORE_DEPTH) {
         int16_t normalized = (int16_t)(-value - on_turn_spread);
         mmst_store(worker->solver->move_score_table, node_key,
                    small_move->tiny_move, normalized);
