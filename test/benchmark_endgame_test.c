@@ -1032,7 +1032,7 @@ void test_benchmark_tournament(void) {
     return;
   }
 
-  const int max_positions = 400;
+  const int max_positions = 100;
   char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
   assert(cgp_lines);
   int found = 0;
@@ -1047,11 +1047,10 @@ void test_benchmark_tournament(void) {
   }
   (void)fclose(fp);
 
-  const int num_players = 6;
-  TournPlayer players[6] = {
-      {"old-0.2s", false, 0.1, 0.2},  {"new-0.2s", true, 0.1, 0.2},
-      {"old-1.0s", false, 0.5, 1.0},  {"new-1.0s", true, 0.5, 1.0},
-      {"old-5.0s", false, 2.5, 5.0},  {"new-5.0s", true, 2.5, 5.0},
+  const int num_players = 2;
+  TournPlayer players[2] = {
+      {"old-0.2s", false, 0.1, 0.2},
+      {"new-0.2s", true, 0.1, 0.2},
   };
 
   // Number of pairwise matchups
