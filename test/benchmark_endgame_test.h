@@ -9,5 +9,6 @@ void test_benchmark_nonstuck(void);
 void test_benchmark_nonstuck_3v3(void);
 void test_benchmark_tt_move_ordering(void);
 void test_benchmark_startup(void);
+void test_benchmark_tournament(void);
 
 #endif
