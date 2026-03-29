@@ -1076,13 +1076,13 @@ static int play_one_endgame(Game *game_copy, int starting_side,
 void test_benchmark_tournament(void) {
   log_set_level(LOG_FATAL);
 
-  FILE *fp = fopen("/tmp/nonstuck_cgps.txt", "re");
+  FILE *fp = fopen("/tmp/nonstuck_cgps_1000.txt", "re");
   if (!fp) {
-    printf("No CGP file found — run gennonstuck first.\n");
+    printf("No CGP file found — concatenate nonstuck CGP files first.\n");
     return;
   }
 
-  const int max_positions = 100;
+  const int max_positions = 1000;
   char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
   assert(cgp_lines);
   int found = 0;
