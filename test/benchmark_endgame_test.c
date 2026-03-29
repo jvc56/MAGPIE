@@ -974,6 +974,15 @@ static int play_one_endgame(Game *game_copy, int starting_side,
 
   const LetterDistribution *ld = game_get_ld(game_copy);
 
+  if (move_log) {
+    int start_a = equity_to_int(
+        player_get_score(game_get_player(game_copy, starting_side)));
+    int start_b = equity_to_int(
+        player_get_score(game_get_player(game_copy, 1 - starting_side)));
+    string_builder_add_formatted_string(move_log, "Start: A=%d B=%d | ",
+                                        start_a, start_b);
+  }
+
   // Safety limit to avoid infinite loops (e.g., consecutive scoreless turns)
   for (int move_count = 0; move_count < 50 && !game_over(game_copy);
        move_count++) {
@@ -1037,6 +1046,12 @@ static int play_one_endgame(Game *game_copy, int starting_side,
       player_get_score(game_get_player(game_copy, starting_side)));
   int score_b = equity_to_int(
       player_get_score(game_get_player(game_copy, 1 - starting_side)));
+
+  if (move_log) {
+    string_builder_add_formatted_string(move_log, " | Final: A=%d B=%d (%+d)",
+                                        score_a, score_b, score_a - score_b);
+  }
+
   return score_a - score_b;
 }
 
