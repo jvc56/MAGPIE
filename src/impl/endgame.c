@@ -499,10 +499,9 @@ endgame_ctx_get_transposition_table(const EndgameCtx *es) {
 }
 
 void endgame_ctx_get_progress(const EndgameCtx *es, int *current_depth,
-                                 int *root_moves_completed,
-                                 int *root_moves_total,
-                                 int *ply2_moves_completed,
-                                 int *ply2_moves_total) {
+                              int *root_moves_completed, int *root_moves_total,
+                              int *ply2_moves_completed,
+                              int *ply2_moves_total) {
   *current_depth = atomic_load(&es->current_depth);
   *root_moves_completed = atomic_load(&es->root_moves_completed);
   *root_moves_total = atomic_load(&es->root_moves_total);
@@ -528,12 +527,11 @@ void endgame_ctx_destroy(EndgameCtx *es) {
 
 // Create a new worker, duplicating the template game (which already has
 // pruned-KWG cross-sets computed). Called only when growing the worker pool.
-static EndgameCtxWorker *
-endgame_ctx_create_worker(EndgameCtx *solver, int worker_index,
-                             uint64_t base_seed,
-                             const Game *template_game) {
-  EndgameCtxWorker *solver_worker =
-      malloc_or_die(sizeof(EndgameCtxWorker));
+static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
+                                                   int worker_index,
+                                                   uint64_t base_seed,
+                                                   const Game *template_game) {
+  EndgameCtxWorker *solver_worker = malloc_or_die(sizeof(EndgameCtxWorker));
 
   solver_worker->thread_index = worker_index;
   solver_worker->game_copy = game_duplicate(template_game);
@@ -563,9 +561,9 @@ endgame_ctx_create_worker(EndgameCtx *solver, int worker_index,
 // Reset an existing worker for a new solve without reallocating.
 // The template game already has override KWGs set and cross-sets computed.
 static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
-                                        EndgameCtx *solver,
-                                        const Game *template_game,
-                                        uint64_t base_seed) {
+                                     EndgameCtx *solver,
+                                     const Game *template_game,
+                                     uint64_t base_seed) {
   worker->solver = solver;
   game_copy(worker->game_copy, template_game);
   game_set_endgame_solving_mode(worker->game_copy);
@@ -595,7 +593,7 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
 // pruned-KWG cross-sets computed once, grows the pool if the thread count
 // increased, and resets all active workers from the template.
 static void endgame_ctx_prepare_workers(EndgameCtx *solver,
-                                           uint64_t base_seed) {
+                                        uint64_t base_seed) {
   Game *template_game = game_duplicate(solver->game);
   game_set_override_kwgs(template_game, solver->pruned_kwgs[0],
                          solver->pruned_kwgs[1], solver->dual_lexicon_mode);
@@ -616,7 +614,7 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   // Reset all active workers for this solve
   for (int idx = 0; idx < solver->threads; idx++) {
     endgame_ctx_reset_worker(solver->workers[idx], solver, template_game,
-                                base_seed);
+                             base_seed);
   }
 
   game_destroy(template_game);
@@ -914,8 +912,7 @@ static int compute_conservation_bonus(const SmallMove *sm,
 // Thread jitter for ABDADA search diversity: each thread gets a unique bias
 // based on tiles played. Odd threads favor aggressive play, even threads favor
 // conservative play. Returns 0 for single-threaded or thread 0.
-static int compute_thread_jitter(EndgameCtxWorker *worker,
-                                 int tiles_played) {
+static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
   int thread_idx = worker->thread_index;
   if (worker->solver->threads <= 1 || thread_idx == 0) {
     return 0;
@@ -932,8 +929,8 @@ static int compute_thread_jitter(EndgameCtxWorker *worker,
 // scoring sequences (e.g., ED->RED->IRED->AIRED->WAIRED).
 // Returns malloc'd int[] (caller frees), or NULL when move_count <= 1 or
 // opp_stuck_frac == 0.
-static int *compute_build_chain_values(EndgameCtxWorker *worker,
-                                       int move_count, size_t arena_offset,
+static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
+                                       size_t arena_offset,
                                        float opp_stuck_frac) {
   if (opp_stuck_frac <= 0.0F || move_count <= 1) {
     return NULL;
@@ -1502,10 +1499,10 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
 }
 
 // Compute TT flag (UPPER/LOWER/EXACT) and store entry at end of search.
-static void negamax_tt_store(const EndgameCtxWorker *worker,
-                             uint64_t node_key, int depth, int32_t best_value,
-                             int32_t alpha_orig, int32_t beta,
-                             int32_t on_turn_spread, uint64_t best_tiny_move) {
+static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
+                             int depth, int32_t best_value, int32_t alpha_orig,
+                             int32_t beta, int32_t on_turn_spread,
+                             uint64_t best_tiny_move) {
   int16_t score = (int16_t)(best_value - on_turn_spread);
   uint8_t flag;
   TTEntry entry_to_store = {.score = score};
@@ -1524,8 +1521,8 @@ static void negamax_tt_store(const EndgameCtxWorker *worker,
 
 // Stuck-tile detection, move generation, logging, and sorting for non-root
 // nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker,
-                                           int depth, uint64_t tt_move,
+static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
+                                           uint64_t tt_move,
                                            float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
@@ -1615,9 +1612,9 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   return false;
 }
 
-int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key,
-                       int depth, int32_t alpha, int32_t beta, PVLine *pv,
-                       bool pv_node, bool exclusive_p, float opp_stuck_frac) {
+int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
+                       int32_t alpha, int32_t beta, PVLine *pv, bool pv_node,
+                       bool exclusive_p, float opp_stuck_frac) {
 
   assert(pv_node || alpha == beta - 1);
 
@@ -2432,8 +2429,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 }
 
 void *solver_worker_start(void *uncasted_solver_worker) {
-  EndgameCtxWorker *solver_worker =
-      (EndgameCtxWorker *)uncasted_solver_worker;
+  EndgameCtxWorker *solver_worker = (EndgameCtxWorker *)uncasted_solver_worker;
   const EndgameCtx *solver = solver_worker->solver;
   iterative_deepening(solver_worker, solver->requested_plies);
   return NULL;

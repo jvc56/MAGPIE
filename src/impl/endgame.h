@@ -62,9 +62,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 const TranspositionTable *
 endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
-                              int *root_moves_completed,
-                              int *root_moves_total,
-                              int *ply2_moves_completed,
-                              int *ply2_moves_total);
+                              int *root_moves_completed, int *root_moves_total,
+                              int *ply2_moves_completed, int *ply2_moves_total);
 
 #endif
