@@ -137,6 +137,7 @@ struct EndgameSolver {
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   _Atomic uint32_t *move_score_table; // MMST: per-(position, move) score cache
+  bool mmst_active; // Per-solve: true when MMST should be used (nonstuck only)
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
@@ -1172,7 +1173,9 @@ void assign_estimates_and_sort(EndgameSolverWorker *worker, int move_count,
 
   // MMST move ordering: cheap (single hash + atomic load per move).
   // Skip on first IDS iteration (table is empty).
-  const _Atomic uint32_t *mmst = worker->solver->move_score_table;
+  const _Atomic uint32_t *mmst = worker->solver->mmst_active
+                                     ? worker->solver->move_score_table
+                                     : NULL;
   const bool use_mmst = (mmst != NULL && ids_ply > 1);
   for (size_t i = 0; i < (size_t)move_count; i++) {
     size_t element_offset = arena_offset + i * sizeof(SmallMove);
@@ -2135,7 +2138,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       // Normalized: (-value) - on_turn_spread removes the position-specific
       // offset so scores are comparable across different paths to the same
       // position.
-      if (worker->solver->move_score_table != NULL) {
+      if (worker->solver->mmst_active) {
         int16_t normalized = (int16_t)(-value - on_turn_spread);
         mmst_store(worker->solver->move_score_table, node_key,
                    small_move->tiny_move, normalized);
@@ -2728,6 +2731,11 @@ void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
         solver->workers[0]->game_copy, solver->workers[0]->move_list,
         solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0, NULL, NULL);
   }
+
+  // MMST is only beneficial for nonstuck positions (high branching factor).
+  // Stuck-tile endgames have small trees and solve quickly without it.
+  solver->mmst_active =
+      solver->move_score_table != NULL && solver->initial_opp_stuck_frac == 0.0F;
 
   // Kick-off iterative deepening threads (ABDADA)
   cpthread_t *worker_ids =
