@@ -148,6 +148,8 @@ static TestEntry on_demand_test_table[] = {
     {"peg2fwbench", test_peg2_fw_bench},
     {"genpeg1", test_generate_peg1_cgps},
     {"benchpeg1", test_benchmark_peg1},
+    {"benchgreedy", test_benchmark_greedy},
+    {"bench1ply", test_benchmark_1ply},
     {"benchpeg1wide", test_benchmark_peg1_wide},
     {"pegpos6eg", test_peg_pos6_endgame},
     {"pegpos8", test_peg_pos8},

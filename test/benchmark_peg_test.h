@@ -3,6 +3,8 @@
 
 void test_generate_peg1_cgps(void);
 void test_benchmark_peg1(void);
+void test_benchmark_greedy(void);
+void test_benchmark_1ply(void);
 void test_benchmark_peg1_wide(void);
 void test_peg_pos6_endgame(void);
 void test_peg_pos8(void);

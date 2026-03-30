@@ -205,14 +205,9 @@ static void bench_track_callback(int pass, int num_evaluated,
                                   const double *top_eval_seconds, int num_top,
                                   const Game *game, double elapsed,
                                   double stage_seconds, void *user_data) {
-  (void)pass;
-  (void)num_evaluated;
-  (void)top_values;
-  (void)top_win_pcts;
   (void)top_spread_known;
   (void)top_eval_seconds;
   (void)elapsed;
-  (void)stage_seconds;
 
   BenchTracker *t = (BenchTracker *)user_data;
   int s = t->num_stages;
@@ -233,6 +228,17 @@ static void bench_track_callback(int pass, int num_evaluated,
     }
     free(ms);
   }
+
+  // Print stage leader eagerly.
+  if (count > 0) {
+    char *top_ms = format_move(game, &top_moves[0]);
+    printf("      [stage %d] #1: %-16s  W%%=%.1f%%  spr=%+.1f  (%d cands, %.1fs)\n",
+           pass, top_ms, top_win_pcts[0] * 100.0, top_values[0],
+           num_evaluated, stage_seconds);
+    free(top_ms);
+    (void)fflush(stdout);
+  }
+
   t->num_stages++;
 }
 
@@ -479,10 +485,24 @@ typedef struct {
   int num_stages;
   int stage_limits[PEG_MAX_STAGES];
   int num_limits;
+  // Minimum candidates per tile-length bucket at each stage transition.
+  // 0 = no tiered selection (plain top-K).
+  int stage_min_per_length[PEG_MAX_STAGES];
+  int num_min_per_length;
+  // Per-stage move-count cap for interior endgame nodes (0 = uncapped).
+  uint16_t endgame_move_cap[PEG_MAX_STAGES];
+  int num_endgame_move_caps;
+  int16_t endgame_window_width[PEG_MAX_STAGES];
+  int num_endgame_window_widths;
+  int num_spread_final_stages;
   peg_first_win_mode_t first_win_mode;
   bool first_win_spread_all_final;
   double tt_fraction;
   bool early_cutoff;
+  bool skip_greedy_oneply;
+  bool skip_root_pass;
+  bool skip_greedy;
+  int skip_greedy_max_per_length;
   // Optional callback for stage tracking (NULL to disable).
   PegPerPassCallback per_pass_callback;
   void *per_pass_callback_data;
@@ -503,12 +523,23 @@ static PegResult run_peg_config(Config *config, Game *game,
       .early_cutoff = pc->early_cutoff,
       .first_win_mode = pc->first_win_mode,
       .first_win_spread_all_final = pc->first_win_spread_all_final,
+      .num_spread_final_stages = pc->num_spread_final_stages,
+      .skip_greedy_oneply = pc->skip_greedy_oneply,
+      .skip_root_pass = pc->skip_root_pass,
+      .skip_greedy = pc->skip_greedy,
+      .skip_greedy_max_per_length = pc->skip_greedy_max_per_length,
       .per_pass_callback = pc->per_pass_callback,
       .per_pass_callback_data = pc->per_pass_callback_data,
       .per_pass_num_top = pc->per_pass_num_top,
   };
   for (int i = 0; i < pc->num_limits && i < PEG_MAX_STAGES; i++)
     args.stage_candidate_limits[i] = pc->stage_limits[i];
+  for (int i = 0; i < pc->num_min_per_length && i < PEG_MAX_STAGES; i++)
+    args.stage_min_per_length[i] = pc->stage_min_per_length[i];
+  for (int i = 0; i < pc->num_endgame_move_caps && i < PEG_MAX_STAGES; i++)
+    args.endgame_move_cap[i] = pc->endgame_move_cap[i];
+  for (int i = 0; i < pc->num_endgame_window_widths && i < PEG_MAX_STAGES; i++)
+    args.endgame_window_width[i] = pc->endgame_window_width[i];
 
   PegResult result;
   ErrorStack *error_stack = error_stack_create();
@@ -918,14 +949,19 @@ void test_benchmark_peg1(void) {
   log_set_level(LOG_FATAL);
 
   PegBenchConfig peg = {
-      .label = "4-stg {200,20,16}",
+      .label = "4-stg {200,20,16} mc{5,5,5} aw{0,25,25} spr=2",
       .num_stages = 4,
       .stage_limits = {200, 20, 16},
       .num_limits = 3,
       .first_win_mode = PEG_FIRST_WIN_WIN_PCT_THEN_SPREAD,
       .first_win_spread_all_final = true,
+      .num_spread_final_stages = 2,
       .tt_fraction = 0.5,
       .early_cutoff = true,
+      .endgame_move_cap = {5, 5, 5},
+      .num_endgame_move_caps = 3,
+      .endgame_window_width = {0, 25, 25},
+      .num_endgame_window_widths = 3,
   };
 
   // Endgame playout time budgets per scenario.
@@ -933,6 +969,233 @@ void test_benchmark_peg1(void) {
   double hard_time = 2.0;
 
   run_peg1_ab_benchmark("/tmp/peg1_cgps.txt", &peg, soft_time, hard_time, 500);
+}
+
+// ---------------------------------------------------------------------------
+// Greedy-only benchmark: measures just the greedy phase (num_stages=1)
+// across many positions. No endgame playout verification — pure speed test.
+// ---------------------------------------------------------------------------
+
+static void run_peg_benchmark(const char *cgp_file, int max_positions,
+                              const PegBenchConfig *cfg, double playout_time) {
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file found at %s - run genpeg1 first.\n", cgp_file);
+    return;
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -threads 8 -s1 score -s2 score -r1 small -r2 small");
+  exec_config_quiet_peg(config, "new");
+  Game *game = config_get_game(config);
+  MoveList *static_ml = move_list_create(1);
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n')
+      cgp_lines[num_cgps][len - 1] = '\0';
+    if (strlen(cgp_lines[num_cgps]) > 0)
+      num_cgps++;
+  }
+  (void)fclose(fp);
+
+  bool do_playout = (playout_time > 0);
+
+  printf("\n");
+  printf("================================================================"
+         "======================================\n");
+  printf("  PEG Benchmark: %s | %d positions", cfg->label, num_cgps);
+  if (do_playout)
+    printf(" | playout %.1fs/scenario", playout_time);
+  printf("\n");
+  printf("================================================================"
+         "======================================\n");
+  if (do_playout) {
+    printf("  %4s  %-20s %6s %7s %6s %7s  %-20s %6s %7s  %7s  %5s\n",
+           "Pos", "Greedy Best", "EstW%", "EstSpr", "EmpW%", "EmpSpr",
+           "Static Best", "EmpW%", "EmpSpr", "GrdyT", "Match");
+    printf("  ----  %-20s ------ ------- ------ -------  %-20s ------ "
+           "-------  -------  -----\n",
+           "--------------------", "--------------------");
+  } else {
+    printf("  %4s  %-24s %6s %7s  %8s  %5s\n", "Pos", "Best Move", "W%",
+           "Spread", "Time(s)", "#Cand");
+    printf("  ----  %-24s ------ -------  --------  -----\n",
+           "------------------------");
+  }
+
+  TranspositionTable *shared_tt =
+      do_playout ? transposition_table_create(0.5) : NULL;
+
+  double total_greedy_time = 0;
+  double min_time = 1e9, max_time = 0;
+  int solved = 0;
+  int same_move = 0, diff_move = 0;
+  double total_greedy_emp_wp = 0, total_static_emp_wp = 0;
+  double total_greedy_spread = 0, total_static_spread = 0;
+
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    if (bag_get_letters(game_get_bag(game)) != 1)
+      continue;
+
+    int mover_idx = game_get_player_on_turn_index(game);
+    int ld_size = ld_get_size(game_get_ld(game));
+
+    double elapsed;
+    PegResult res = run_peg_config(config, game, cfg, &elapsed);
+
+    // Reload for formatting/playout.
+    err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    char *greedy_move_str = format_move(game, &res.best_move);
+
+    total_greedy_time += elapsed;
+    if (elapsed < min_time)
+      min_time = elapsed;
+    if (elapsed > max_time)
+      max_time = elapsed;
+
+    if (do_playout) {
+      uint8_t unseen[MAX_ALPHABET_SIZE];
+      bench_compute_unseen(game, mover_idx, unseen);
+
+      // Static eval: top equity move.
+      const Move *static_move = get_top_equity_move(game, 0, static_ml);
+      Move static_move_copy;
+      move_copy(&static_move_copy, static_move);
+      char *static_move_str = format_move(game, &static_move_copy);
+      bool moves_match = (strcmp(greedy_move_str, static_move_str) == 0);
+
+      // Playout greedy's move.
+      double greedy_emp_wp = 0, greedy_emp_spread = 0;
+      eval_move_all_draws(game, &res.best_move, mover_idx, unseen, ld_size,
+                          playout_time, playout_time,
+                          config_get_thread_control(config), shared_tt, NULL,
+                          &greedy_emp_wp, &greedy_emp_spread);
+
+      // Playout static's move (reuse if same).
+      double static_emp_wp = 0, static_emp_spread = 0;
+      if (moves_match) {
+        static_emp_wp = greedy_emp_wp;
+        static_emp_spread = greedy_emp_spread;
+      } else {
+        eval_move_all_draws(game, &static_move_copy, mover_idx, unseen,
+                            ld_size, playout_time, playout_time,
+                            config_get_thread_control(config), shared_tt, NULL,
+                            &static_emp_wp, &static_emp_spread);
+      }
+
+      printf("  %4d  %-20s %5.1f%% %+6.1f %5.1f%% %+6.1f  %-20s %5.1f%% "
+             "%+6.1f  %6.3fs  %s\n",
+             ci + 1, greedy_move_str, res.best_win_pct * 100.0,
+             res.spread_known ? res.best_expected_spread : 0.0,
+             greedy_emp_wp * 100.0, greedy_emp_spread, static_move_str,
+             static_emp_wp * 100.0, static_emp_spread, elapsed,
+             moves_match ? "same" : "DIFF");
+
+      if (moves_match)
+        same_move++;
+      else
+        diff_move++;
+      total_greedy_emp_wp += greedy_emp_wp;
+      total_static_emp_wp += static_emp_wp;
+      total_greedy_spread += greedy_emp_spread;
+      total_static_spread += static_emp_spread;
+
+      free(static_move_str);
+    } else {
+      printf("  %4d  %-24s %5.1f%% %+6.1f  %7.4fs  %5d\n", ci + 1,
+             greedy_move_str, res.best_win_pct * 100.0,
+             res.spread_known ? res.best_expected_spread : 0.0, elapsed,
+             res.candidates_remaining);
+    }
+
+    free(greedy_move_str);
+    solved++;
+
+    (void)fflush(stdout);
+  }
+
+  if (do_playout) {
+    printf("  ----  %-20s ------ ------- ------ -------  %-20s ------ "
+           "-------  -------  -----\n",
+           "--------------------", "--------------------");
+  } else {
+    printf("  ----  %-24s ------ -------  --------  -----\n",
+           "------------------------");
+  }
+  printf("\n");
+  printf("  Results (%d positions):\n", solved);
+  printf("    Greedy total time: %.3fs (avg %.4fs, min %.4fs, max %.4fs)\n",
+         total_greedy_time,
+         solved > 0 ? total_greedy_time / solved : 0.0,
+         min_time < 1e9 ? min_time : 0.0, max_time);
+  if (do_playout) {
+    printf("    Same best move: %d  |  Different: %d  (%.1f%% agreement)\n",
+           same_move, diff_move,
+           solved > 0 ? 100.0 * same_move / solved : 0.0);
+    printf("    Greedy avg empirical W%%:  %.2f%%\n",
+           solved > 0 ? 100.0 * total_greedy_emp_wp / solved : 0.0);
+    printf("    Static avg empirical W%%:  %.2f%%\n",
+           solved > 0 ? 100.0 * total_static_emp_wp / solved : 0.0);
+    printf("    Greedy avg spread:  %+.2f\n",
+           solved > 0 ? total_greedy_spread / solved : 0.0);
+    printf("    Static avg spread:  %+.2f\n",
+           solved > 0 ? total_static_spread / solved : 0.0);
+  }
+  printf("================================================================"
+         "======================================\n");
+  (void)fflush(stdout);
+
+  if (shared_tt)
+    transposition_table_destroy(shared_tt);
+  move_list_destroy(static_ml);
+  free(cgp_lines);
+  config_destroy(config);
+}
+
+void test_benchmark_greedy(void) {
+  log_set_level(LOG_FATAL);
+  PegBenchConfig greedy_cfg = {
+      .label = "greedy-only",
+      .num_stages = 1,
+      .tt_fraction = 0.0,
+      .early_cutoff = false,
+      .skip_greedy_oneply = true,
+      .skip_root_pass = true,
+  };
+  run_peg_benchmark("/tmp/peg1_cgps.txt", 25, &greedy_cfg, 1.0);
+}
+
+void test_benchmark_1ply(void) {
+  log_set_level(LOG_FATAL);
+  PegBenchConfig oneply = {
+      .label = "1-ply skip-greedy 50/len cutoff+fw",
+      .num_stages = 2,
+      .stage_limits = {9999},
+      .num_limits = 1,
+      .tt_fraction = 0.5,
+      .early_cutoff = true,
+      .skip_root_pass = true,
+      .skip_greedy = true,
+      .skip_greedy_max_per_length = 50,
+      .first_win_mode = PEG_FIRST_WIN_WIN_PCT_ONLY,
+  };
+  run_peg_benchmark("/tmp/peg1_cgps.txt", 25, &oneply, 1.0);
 }
 
 void test_benchmark_peg1_wide(void) {

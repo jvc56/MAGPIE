@@ -132,6 +132,20 @@ static int compare_peg_candidates_by_equity_desc(const void *a, const void *b) {
   return (eb > ea) ? 1 : (eb < ea) ? -1 : 0;
 }
 
+// Sort by tiles_played descending, then by static equity descending.
+static int compare_peg_candidates_by_length_then_equity_desc(const void *a,
+                                                              const void *b) {
+  const PegCandidate *ca = (const PegCandidate *)a;
+  const PegCandidate *cb = (const PegCandidate *)b;
+  int ta = ca->move.tiles_played;
+  int tb = cb->move.tiles_played;
+  if (tb != ta)
+    return tb - ta;  // descending tiles_played
+  Equity ea = move_get_equity(&ca->move);
+  Equity eb = move_get_equity(&cb->move);
+  return (eb > ea) ? 1 : (eb < ea) ? -1 : 0;
+}
+
 static int compare_peg_candidates_desc(const void *a, const void *b) {
   const PegCandidate *ca = (const PegCandidate *)a;
   const PegCandidate *cb = (const PegCandidate *)b;
@@ -146,6 +160,100 @@ static int compare_peg_candidates_desc(const void *a, const void *b) {
   if (cb->expected_value < ca->expected_value)
     return -1;
   return 0;
+}
+
+// Sort by tiles_played descending (longest first), breaking ties by
+// win_pct descending, then equity descending.  Used for evaluation order
+// within endgame stages when length-tiered selection is active.
+static int compare_peg_candidates_longest_first(const void *a, const void *b) {
+  const PegCandidate *ca = (const PegCandidate *)a;
+  const PegCandidate *cb = (const PegCandidate *)b;
+  if (cb->move.tiles_played != ca->move.tiles_played)
+    return (int)cb->move.tiles_played - (int)ca->move.tiles_played;
+  if (cb->win_pct > ca->win_pct + 1e-9)
+    return 1;
+  if (ca->win_pct > cb->win_pct + 1e-9)
+    return -1;
+  Equity ea = move_get_equity(&ca->move);
+  Equity eb = move_get_equity(&cb->move);
+  return (eb > ea) ? 1 : (eb < ea) ? -1 : 0;
+}
+
+// Select candidates for the next stage using length-tiered pruning.
+// Precondition: candidates[0..num_candidates-1] sorted by valuation desc.
+// Postcondition: selected candidates are in [0..return_value-1].
+//
+// Phase 1a: guarantee at least 1 candidate per tile-length bucket so all
+//           play lengths are represented.
+// Phase 1b: fill up to min_per_length per bucket (best by valuation).
+// Phase 2:  fill remaining slots longest-first among unselected candidates.
+//
+// Returns the number of selected candidates (<= limit).
+static int peg_length_tiered_select(PegCandidate *candidates,
+                                     int num_candidates, int limit,
+                                     int min_per_length) {
+  if (min_per_length <= 0 || num_candidates <= limit)
+    return num_candidates < limit ? num_candidates : limit;
+
+  bool *selected = calloc(num_candidates, sizeof(bool));
+  int selected_count = 0;
+  int bucket_reserved[RACK_SIZE + 2] = {0};
+
+  // Phase 1a: guarantee at least 1 per length bucket.
+  for (int i = 0; i < num_candidates && selected_count < limit; i++) {
+    int tp = candidates[i].move.tiles_played;
+    if (tp > RACK_SIZE)
+      tp = RACK_SIZE;
+    if (bucket_reserved[tp] == 0) {
+      selected[i] = true;
+      selected_count++;
+      bucket_reserved[tp] = 1;
+    }
+  }
+
+  // Phase 1b: fill up to min_per_length per bucket.
+  for (int i = 0; i < num_candidates && selected_count < limit; i++) {
+    if (selected[i])
+      continue;
+    int tp = candidates[i].move.tiles_played;
+    if (tp > RACK_SIZE)
+      tp = RACK_SIZE;
+    if (bucket_reserved[tp] < min_per_length) {
+      selected[i] = true;
+      selected_count++;
+      bucket_reserved[tp]++;
+    }
+  }
+
+  // Phase 2: fill remaining slots longest-first.
+  for (int len = RACK_SIZE; len >= 0 && selected_count < limit; len--) {
+    for (int i = 0; i < num_candidates && selected_count < limit; i++) {
+      if (selected[i])
+        continue;
+      int tp = candidates[i].move.tiles_played;
+      if (tp > RACK_SIZE)
+        tp = RACK_SIZE;
+      if (tp == len) {
+        selected[i] = true;
+        selected_count++;
+      }
+    }
+  }
+
+  // Compact: selected to front, unselected to back.
+  PegCandidate *temp = malloc_or_die(num_candidates * sizeof(PegCandidate));
+  memcpy(temp, candidates, num_candidates * sizeof(PegCandidate));
+  int front = 0, back = selected_count;
+  for (int i = 0; i < num_candidates; i++) {
+    if (selected[i])
+      candidates[front++] = temp[i];
+    else if (back < num_candidates)
+      candidates[back++] = temp[i];
+  }
+  free(temp);
+  free(selected);
+
+  return selected_count < limit ? selected_count : limit;
 }
 
 // ---------------------------------------------------------------------------
@@ -711,7 +819,9 @@ static int32_t peg_eval_endgame_scenario(EndgameSolver *endgame_solver,
                                          TranspositionTable *shared_tt,
                                          dual_lexicon_mode_t dual_lexicon_mode,
                                          int thread_index,
-                                         bool first_win_optim) {
+                                         bool first_win_optim,
+                                         uint16_t move_cap,
+                                         int16_t window_width) {
   int32_t mover_lead =
       equity_to_int(player_get_score(game_get_player(scenario, mover_idx))) -
       equity_to_int(player_get_score(game_get_player(scenario, opp_idx)));
@@ -729,6 +839,8 @@ static int32_t peg_eval_endgame_scenario(EndgameSolver *endgame_solver,
       .skip_word_pruning = true,
       .thread_index_offset = thread_index,
       .first_win_optim = first_win_optim,
+      .move_cap = move_cap,
+      .window_width = window_width,
   };
 
   ErrorStack *local_es = error_stack_create();
@@ -1565,6 +1677,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                          double *win_pct_out,
                                          bool *pruned_out,
                                          bool first_win_optim,
+                                         uint16_t move_cap,
+                                         int16_t window_width,
                                          KillerDraws *killer_draws) {
   int tiles_played = move->tiles_played;
 
@@ -1623,7 +1737,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
                                               opp_idx, t, unseen, ld_size);
       int32_t mover_total = peg_eval_endgame_scenario(
           endgame_solver, results, scenario, mover_idx, opp_idx, plies, tc,
-          shared_tt, dual_lexicon_mode, thread_index, first_win_optim);
+          shared_tt, dual_lexicon_mode, thread_index, first_win_optim,
+          move_cap, window_width);
       total += (double)mover_total * cnt;
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
@@ -1679,7 +1794,8 @@ static double peg_endgame_eval_candidate(EndgameSolver *endgame_solver,
           ld_size);
       int32_t mover_total = peg_eval_endgame_scenario(
           endgame_solver, results, scenario, mover_idx, opp_idx, plies, tc,
-          shared_tt, dual_lexicon_mode, thread_index, first_win_optim);
+          shared_tt, dual_lexicon_mode, thread_index, first_win_optim,
+          move_cap, window_width);
       total += (double)mover_total * cnt;
       wins +=
           ((mover_total > 0) ? 1.0 : (mover_total == 0 ? 0.5 : 0.0)) * cnt;
@@ -1766,9 +1882,15 @@ static void peg_eval_pass_one_scenario(
         .skip_greedy_oneply = true,
         .pass_opp_candidates = outer_args->pass_opp_candidates,
     };
-    for (int i = 0; i < PEG_MAX_STAGES; i++)
+    for (int i = 0; i < PEG_MAX_STAGES; i++) {
       inner_args.stage_candidate_limits[i] =
           outer_args->stage_candidate_limits[i];
+      inner_args.stage_min_per_length[i] =
+          outer_args->stage_min_per_length[i];
+      inner_args.endgame_move_cap[i] = outer_args->endgame_move_cap[i];
+      inner_args.endgame_window_width[i] =
+          outer_args->endgame_window_width[i];
+    }
 
     ErrorStack *inner_es = error_stack_create();
     peg_solve(inner_solver, &inner_args, &inner_result, inner_es);
@@ -1922,9 +2044,15 @@ static void peg_eval_pass_one_scenario_pair(
       .first_win_mode = outer_args->first_win_mode,
       .first_win_spread_all_final = outer_args->first_win_spread_all_final,
   };
-  for (int i = 0; i < PEG_MAX_STAGES; i++)
+  for (int i = 0; i < PEG_MAX_STAGES; i++) {
     inner_args.stage_candidate_limits[i] =
         outer_args->stage_candidate_limits[i];
+    inner_args.stage_min_per_length[i] =
+        outer_args->stage_min_per_length[i];
+    inner_args.endgame_move_cap[i] = outer_args->endgame_move_cap[i];
+    inner_args.endgame_window_width[i] =
+        outer_args->endgame_window_width[i];
+  }
 
   PegResult inner_result;
   ErrorStack *inner_es = error_stack_create();
@@ -2095,6 +2223,10 @@ typedef struct PegEndgameThreadArgs {
   double *pass_wins;
   // When true, endgame solves use narrow-window (α=-1,β=1) for win/loss only.
   bool first_win_optim;
+  // Move-count cap for interior endgame nodes (0 = uncapped).
+  uint16_t move_cap;
+  // Aspiration window half-width (0 = default).
+  int16_t window_width;
   // Speculative next-stage evaluation for idle threads. When next_stage_work
   // is non-NULL, threads that exhaust current-stage work items pull from this
   // counter and evaluate non-pass candidates at next_plies depth, storing
@@ -2103,6 +2235,8 @@ typedef struct PegEndgameThreadArgs {
   int next_stage_num_items;
   int next_plies;
   bool next_first_win_optim;
+  uint16_t next_move_cap;
+  int16_t next_window_width;
   // Skip array: when non-NULL, skip[idx] == true means the candidate at
   // position idx was pre-evaluated from a previous stage's speculation.
   // The thread should skip evaluation and just update the cutoff.
@@ -2156,7 +2290,7 @@ static void *peg_endgame_thread(void *arg) {
             a->endgame_solver, a->endgame_results, scenario,
             a->mover_idx, a->opp_idx, a->plies, a->thread_control,
             a->shared_tt, a->dual_lexicon_mode, a->thread_index,
-            a->first_win_optim);
+            a->first_win_optim, a->move_cap, a->window_width);
         a->cand_spreads[idx] = (double)spread;
         a->cand_wins[idx] =
             (spread > 0) ? 1.0 : (spread == 0 ? 0.5 : 0.0);
@@ -2227,7 +2361,8 @@ static void *peg_endgame_thread(void *arg) {
               a->mover_idx, a->opp_idx, a->plies, a->unseen, a->ld_size,
               a->tiles_in_bag, a->thread_control, a->shared_tt,
               a->dual_lexicon_mode, a->thread_index, a->outer_args, a->cutoff,
-              &c->win_pct, &pruned, a->first_win_optim, a->killer_draws);
+              &c->win_pct, &pruned, a->first_win_optim, a->move_cap,
+              a->window_width, a->killer_draws);
           c->pruned = pruned;
           c->spread_known = !a->first_win_optim;
           c->eval_seconds = 0.0;
@@ -2270,7 +2405,7 @@ static void *peg_endgame_thread(void *arg) {
           a->tiles_in_bag, a->thread_control, a->shared_tt,
           a->dual_lexicon_mode, a->thread_index, a->outer_args, NULL,
           &c->next_win_pct, &pruned, a->next_first_win_optim,
-          a->killer_draws);
+          a->next_move_cap, a->next_window_width, a->killer_draws);
       c->next_spread_known =
           (a->tiles_in_bag >= 2 && c->move.tiles_played < a->tiles_in_bag)
               ? true
@@ -2509,6 +2644,62 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     tt_is_owned = true;
   }
 
+  bool top_level = args->per_pass_callback != NULL;
+  double prev_elapsed = 0;
+  int stages_completed = 0;
+
+  // =========================================================================
+  // Skip greedy: order candidates by static equity and jump to endgame stages.
+  // =========================================================================
+  if (args->skip_greedy) {
+    // Remove pass.
+    for (int i = 0; i < num_candidates; i++) {
+      if (move_get_type(&candidates[i].move) == GAME_EVENT_PASS) {
+        candidates[i] = candidates[num_candidates - 1];
+        num_candidates--;
+        break;
+      }
+    }
+
+    // Sort by static equity descending within each tiles_played bucket.
+    qsort(candidates, num_candidates, sizeof(PegCandidate),
+          compare_peg_candidates_by_equity_desc);
+
+    // Cap at skip_greedy_max_per_length per tiles_played bucket.
+    int max_per_len = args->skip_greedy_max_per_length;
+    if (max_per_len > 0) {
+      // Count per bucket and compact.
+      int bucket_counts[RACK_SIZE + 1];
+      memset(bucket_counts, 0, sizeof(bucket_counts));
+      int kept = 0;
+      for (int i = 0; i < num_candidates; i++) {
+        int tp = candidates[i].move.tiles_played;
+        if (tp > RACK_SIZE) tp = RACK_SIZE;
+        if (bucket_counts[tp] < max_per_len) {
+          bucket_counts[tp]++;
+          candidates[kept++] = candidates[i];
+        }
+      }
+      if (top_level)
+        printf("[PEG] skip_greedy: %d -> %d candidates (max %d per length)\n",
+               num_candidates, kept, max_per_len);
+      num_candidates = kept;
+    }
+
+    // Sort: longest plays first, break ties by descending equity.
+    qsort(candidates, num_candidates, sizeof(PegCandidate),
+          compare_peg_candidates_by_length_then_equity_desc);
+
+    prev_elapsed = ctimer_elapsed_seconds(&peg_timer);
+    if (top_level) {
+      invoke_per_pass_callback(args, 0, num_candidates, candidates,
+                               num_candidates, num_candidates,
+                               prev_elapsed, prev_elapsed);
+    }
+    stages_completed = 1;
+    goto endgame_stages;
+  }
+
   // Set up one EndgameSolver and one EndgameSolverWorker per thread.
   // Each worker's game_copy is a duplicate of base_game (empty bag).
   EndgameSolver **greedy_solvers =
@@ -2648,7 +2839,6 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       }
     }
   }
-  bool top_level = args->per_pass_callback != NULL;
   atomic_int greedy_next;
   atomic_init(&greedy_next, 0);
   atomic_int greedy_progress;
@@ -3118,12 +3308,12 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   qsort(candidates, num_candidates, sizeof(PegCandidate),
         compare_peg_candidates_desc);
 
-  double prev_elapsed = ctimer_elapsed_seconds(&peg_timer);
+  prev_elapsed = ctimer_elapsed_seconds(&peg_timer);
   invoke_per_pass_callback(args, 0, num_candidates, candidates, num_candidates,
                            args->stage_candidate_limits[0], prev_elapsed,
                            prev_elapsed);
 
-  int stages_completed = 1; // stage 0 (greedy) is already done
+  stages_completed = 1; // stage 0 (greedy) is already done
 
   // =========================================================================
   // Greedy spread re-eval: for first_win modes in single-stage (greedy-only)
@@ -3197,6 +3387,7 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
   // Stages 1..num_stages-1: progressively deeper endgame search on top-K
   // =========================================================================
 
+endgame_stages:
   for (int stage = 1; stage < args->num_stages; stage++) {
     // Check time budget.
     if (args->time_budget_seconds > 0.0 &&
@@ -3219,6 +3410,12 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     }
     if (limit > num_candidates)
       limit = num_candidates;
+
+    // Apply length-tiered candidate selection if configured.
+    int min_pl = args->stage_min_per_length[stage - 1];
+    if (min_pl > 0)
+      limit = peg_length_tiered_select(candidates, num_candidates, limit,
+                                        min_pl);
 
     // Set up per-thread endgame solvers and results.
     EndgameSolver **eg_solvers =
@@ -3275,11 +3472,18 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       eg_non_pass_count = limit - 1;
     }
 
-    // Sort non-pass candidates by static equity descending so strong
-    // candidates are evaluated first, establishing higher cutoff bars
-    // earlier and pruning more weak candidates.
-    qsort(candidates, eg_non_pass_count, sizeof(PegCandidate),
-          compare_peg_candidates_by_equity_desc);
+    // Sort non-pass candidates for evaluation order.
+    if (min_pl > 0) {
+      // Longest-first: long plays produce shallower endgame trees, are
+      // faster to evaluate, and often strong — setting tight cutoff bars
+      // early and pruning expensive short plays.
+      qsort(candidates, eg_non_pass_count, sizeof(PegCandidate),
+            compare_peg_candidates_longest_first);
+    } else {
+      // Default: static equity descending for early strong-candidate eval.
+      qsort(candidates, eg_non_pass_count, sizeof(PegCandidate),
+            compare_peg_candidates_by_equity_desc);
+    }
 
     // Build scenario arrays. For 1-bag positions, this is always populated
     // (used by both non-pass candidate decomposition and pass evaluation).
@@ -3359,6 +3563,18 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
       stage_first_win = true;
       break;
     }
+    // Override: force spread on the last N stages.
+    if (args->num_spread_final_stages > 0 &&
+        stage >= args->num_stages - args->num_spread_final_stages) {
+      stage_first_win = false;
+    }
+
+    // Move-count cap for this stage (last stage always uncapped).
+    uint16_t stage_move_cap =
+        is_last_stage ? 0 : args->endgame_move_cap[stage - 1];
+    // Aspiration window for this stage. Unlike move_cap, windows are TT-safe
+    // on the last stage too — they just cause re-searches on fail, not data loss.
+    int16_t stage_window_width = args->endgame_window_width[stage - 1];
 
     // Pre-process cached results from the previous stage's speculation.
     // Candidates that were speculatively evaluated at this stage's plies
@@ -3408,6 +3624,10 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
         next_stage_first_win = true;
         break;
       }
+      if (args->num_spread_final_stages > 0 &&
+          stage + 1 >= args->num_stages - args->num_spread_final_stages) {
+        next_stage_first_win = false;
+      }
       // Limit speculation to at most the next stage's candidate limit.
       int next_limit = args->stage_candidate_limits[stage];
       if (next_limit <= 0) {
@@ -3424,6 +3644,12 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
                        : next_limit;
       atomic_init(&next_stage_work, 0);
     }
+    uint16_t next_stage_move_cap =
+        (can_speculate && (stage + 1 < args->num_stages - 1))
+            ? args->endgame_move_cap[stage]
+            : 0;
+    int16_t next_stage_window_width =
+        can_speculate ? args->endgame_window_width[stage] : 0;
 
     // Allocate per-scenario result arrays for decomposed candidates (1-bag).
     int num_cand_scenarios = (tiles_in_bag == 1) ? eg_num_scenarios : 0;
@@ -3492,10 +3718,14 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
             .pass_spreads = eg_pass_spreads,
             .pass_wins = eg_pass_wins,
             .first_win_optim = stage_first_win,
+            .move_cap = stage_move_cap,
+            .window_width = stage_window_width,
             .next_stage_work = can_speculate ? &next_stage_work : NULL,
             .next_stage_num_items = spec_count,
             .next_plies = next_plies,
             .next_first_win_optim = next_stage_first_win,
+            .next_window_width = next_stage_window_width,
+            .next_move_cap = next_stage_move_cap,
             .skip = skip,
             .num_cand_scenarios = num_cand_scenarios,
             .cand_spreads = eg_cand_spreads,
@@ -3564,18 +3794,18 @@ void peg_solve(PegSolver *solver, const PegArgs *args, PegResult *result,
     if (eg_pass_idx >= 0) {
       double pass_wins_accum = 0.0;
       int pass_weight_accum = 0;
-      int total_scenario_weight = 0;
+      int pass_total_weight = 0;
       for (int si = 0; si < eg_num_pass_scenarios; si++)
-        total_scenario_weight += eg_scenario_counts[si];
+        pass_total_weight += eg_scenario_counts[si];
 
       for (int si = 0; si < eg_num_pass_scenarios; si++) {
         // Check cutoff before each scenario.
         if (cutoff_ptr && pass_weight_accum > 0) {
           double threshold = peg_cutoff_get(cutoff_ptr);
           if (threshold >= 0) {
-            int remaining = total_scenario_weight - pass_weight_accum;
+            int remaining = pass_total_weight - pass_weight_accum;
             double best_possible =
-                (pass_wins_accum + remaining) / (double)total_scenario_weight;
+                (pass_wins_accum + remaining) / (double)pass_total_weight;
             if (best_possible < threshold - 1e-9) {
               eg_pass_pruned = true;
               break;

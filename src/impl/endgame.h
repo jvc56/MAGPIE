@@ -76,6 +76,18 @@ typedef struct EndgameArgs {
   // When true, search with α=-1, β=1 to determine win/loss without finding
   // the exact best spread. Much faster due to narrow-window cutoffs.
   bool first_win_optim;
+  // Maximum number of moves to search at each interior (non-root) node.
+  // 0 = search all moves (default).  When > 0, only the top move_cap moves
+  // (after ordering) are searched; remaining moves are skipped.  TT-safe:
+  // entries from capped searches are stored with depth=0 so later full
+  // searches re-evaluate the position but still benefit from the best-move
+  // hint stored in the TT entry.
+  uint16_t move_cap;
+  // Aspiration window half-width for IDS.  0 = default behavior (full-width at
+  // depth 1, ±25 aspiration at depth 2+).  >0 = use ±window_width centered on
+  // 0 (depth 1) or prev value (depth 2+), with progressive doubling on fail.
+  // Ignored when first_win_optim is true (which uses ±1).
+  int16_t window_width;
 } EndgameArgs;
 
 EndgameSolver *endgame_solver_create(void);

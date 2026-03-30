@@ -108,6 +108,8 @@ struct EndgameSolver {
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
+  uint16_t move_cap;
+  int16_t window_width;
   PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
@@ -401,6 +403,8 @@ void endgame_solver_reset(EndgameSolver *es, const EndgameArgs *endgame_args) {
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
+  es->move_cap = endgame_args->move_cap;
+  es->window_width = endgame_args->window_width;
   int num_top_moves = endgame_args->num_top_moves;
   if (num_top_moves <= 0) {
     num_top_moves = 1;
@@ -1843,6 +1847,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     }
   }
 
+  // Move-cap: at non-root interior nodes, limit how many moves are searched.
+  // Capped nodes store TT entries at depth=0 (best-move hint only).
+  const uint16_t move_cap = worker->solver->move_cap;
+  const bool cap_active = (move_cap > 0 && !is_root);
+  int moves_searched = 0;
+  bool was_capped = false;
+
   // ABDADA two-phase iteration:
   // Pass 0: search all moves with exclusion (defer busy nodes).
   // Pass 1+: retry only deferred moves without exclusion.
@@ -1852,6 +1863,13 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
     all_done = true;
 
     for (int idx = 0; idx < nplays; idx++) {
+      // Move-cap: stop after searching enough moves (first pass only).
+      if (cap_active && pass == 0 && moves_searched >= (int)move_cap) {
+        was_capped = true;
+        all_done = true;
+        break;
+      }
+
       // After the first pass, skip moves that aren't deferred
       // (they were already successfully searched)
       if (pass > 0 && deferred != NULL && !deferred[idx]) {
@@ -1998,6 +2016,7 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
       if (deferred != NULL) {
         deferred[idx] = false;
       }
+      moves_searched++;
 
       // Re-assign small_move. Its pointer location may have changed after all
       // the calls to negamax and possible reallocations in the
@@ -2063,8 +2082,12 @@ int32_t abdada_negamax(EndgameSolverWorker *worker, uint64_t node_key,
 
   if (worker->solver->transposition_table_optim &&
       best_value != ABDADA_INTERRUPTED) {
-    negamax_tt_store(worker, node_key, depth, best_value, alpha_orig, beta,
-                     on_turn_spread, best_tiny_move);
+    // Capped searches store depth=0: later full searches will ignore the
+    // score for cutoffs (depth < search_depth) but still use the best-move
+    // hint for ordering via the tiny_move field.
+    int store_depth = was_capped ? 0 : depth;
+    negamax_tt_store(worker, node_key, store_depth, best_value, alpha_orig,
+                     beta, on_turn_spread, best_tiny_move);
   }
 
   if (arena_alloced) {
@@ -2187,7 +2210,7 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
   // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
   // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
   const int num_threads = worker->solver->threads;
-  if (num_threads > 1 && worker->thread_index > 0) {
+  if (num_threads > 1 && worker->thread_index > 0 && plies > 1) {
     // Spread across up to 4 different starting depths to reduce contention.
     // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at
     // d5
@@ -2221,8 +2244,46 @@ void iterative_deepening(EndgameSolverWorker *worker, int plies) {
     // Track whether this depth's search completed validly
     bool search_valid = true;
 
-    // Use aspiration windows after depth 1
-    if (use_aspiration && ply > 1 && !worker->solver->first_win_optim) {
+    // Aspiration window selection:
+    // 1. Custom window_width: ±W centered on 0 (depth 1) or prev_value
+    //    (depth 2+). Overrides default aspiration. Ignored under first_win_optim.
+    // 2. Default aspiration (±25) after depth 1 when not first_win_optim.
+    // 3. Full-width or first_win (±1) otherwise.
+    const int16_t ww = worker->solver->window_width;
+    const bool use_custom_window =
+        (ww > 0 && !worker->solver->first_win_optim);
+
+    if (use_custom_window) {
+      int32_t center = (ply == 1) ? worker->solver->initial_spread : prev_value;
+      int32_t window = ww;
+      alpha = center - window;
+      beta = center + window;
+
+      while (true) {
+        if (iterative_deepening_should_stop(worker->solver)) {
+          search_valid = false;
+          break;
+        }
+
+        val = abdada_negamax(worker, initial_hash_key, ply, alpha, beta, &pv,
+                             true, false, initial_opp_stuck_frac);
+
+        if (val <= alpha) {
+          window *= 2;
+          alpha = (window >= LARGE_VALUE / 2) ? -LARGE_VALUE
+                                              : center - window;
+        } else if (val >= beta) {
+          window *= 2;
+          beta = (window >= LARGE_VALUE / 2) ? LARGE_VALUE
+                                             : center + window;
+        } else {
+          break;
+        }
+
+        pv.num_moves = 0;
+      }
+    } else if (use_aspiration && ply > 1 &&
+               !worker->solver->first_win_optim) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;

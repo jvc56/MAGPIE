@@ -81,6 +81,12 @@ typedef struct PegArgs {
   //   ...
   int num_stages;
   int stage_candidate_limits[PEG_MAX_STAGES];
+  // Minimum candidates per tile-length bucket when transitioning between
+  // stages.  stage_min_per_length[i] is the minimum per-length reservation
+  // when promoting from stage i to stage i+1.  0 = no tiered selection
+  // (plain top-K by valuation).  When set, candidates are also evaluated
+  // longest-first within each stage for better early cutoff.
+  int stage_min_per_length[PEG_MAX_STAGES];
 
   // Optional progress callback (NULL to disable).
   PegPerPassCallback per_pass_callback;
@@ -145,8 +151,28 @@ typedef struct PegArgs {
   // pass-evaluation solves; callers should leave this at false.
   bool skip_greedy_oneply;
 
+  // When true, skip the greedy phase entirely and jump straight to endgame
+  // stages.  Candidates are ordered longest-first, breaking ties by
+  // descending static equity.  Requires num_stages >= 2.
+  bool skip_greedy;
+  // When skip_greedy is true, max candidates per tiles_played bucket.
+  // 0 = no limit.
+  int skip_greedy_max_per_length;
+
   // When true, print per-scenario details during greedy evaluation.
   bool verbose_greedy;
+
+  // Maximum moves to search at interior endgame nodes per stage.
+  // endgame_move_cap[i] applies to stage i+1 (0 = uncapped).  The last
+  // stage should typically be 0 for full accuracy.  E.g., {15, 30, 0}
+  // means 1-ply uses cap=15, 2-ply uses cap=30, 3-ply is uncapped.
+  uint16_t endgame_move_cap[PEG_MAX_STAGES];
+
+  // Per-stage aspiration window half-width for endgame solves.
+  // endgame_window_width[i] applies to stage i+1 (0 = default aspiration).
+  // The last stage should typically be 0 for full accuracy.
+  // Ignored when the stage uses first_win_optim (α=-1,β=1).
+  int16_t endgame_window_width[PEG_MAX_STAGES];
 
   // First-win optimization mode for endgame stages (default: NEVER).
   // When non-NEVER, some or all endgame stages use α=-1,β=1 narrow-window
@@ -155,6 +181,11 @@ typedef struct PegArgs {
   // For WIN_PCT_THEN_SPREAD: when true (mode 3b), compute spread for all
   // final-stage survivors, not just those tied on win%. Default false (3a).
   bool first_win_spread_all_final;
+  // Override: force the last N endgame stages to compute spread (not first_win)
+  // regardless of first_win_mode.  0 = use first_win_mode logic as-is.
+  // E.g., with num_stages=4 and num_spread_final_stages=2, stages 2-3 compute
+  // spread while stage 1 uses first_win.
+  int num_spread_final_stages;
 } PegArgs;
 
 enum { PEG_RESULT_MAX_RANKED = 16 };
