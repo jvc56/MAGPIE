@@ -123,8 +123,10 @@ struct EndgameCtx {
   int solve_multiple_variations;
   int requested_plies;
   int threads;
+  int thread_index_offset;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
+  bool tt_is_external; // true when using a caller-provided shared TT
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
@@ -416,6 +418,7 @@ void endgame_ctx_reset(EndgameCtx *es, const EndgameArgs *endgame_args) {
   if (es->threads < 1) {
     es->threads = 1;
   }
+  es->thread_index_offset = endgame_args->thread_index_offset;
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -447,20 +450,25 @@ void endgame_ctx_reset(EndgameCtx *es, const EndgameArgs *endgame_args) {
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
-  // Generate pruned KWG(s) from the set of possible words on this board.
-  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
-  // In INFORMED mode with different lexicons, each player index gets its own
-  // pruned KWG so that cross-set index i uses the pruned KWG derived from
-  // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
-       player_idx++) {
-    const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, player_idx));
-    DictionaryWordList *word_list = dictionary_word_list_create();
-    generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
-        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(word_list);
+  // skip_word_pruning: leave pruned_kwgs NULL so move gen uses the full KWG
+  // (or any override KWGs the caller set on the game). Used by PEG which
+  // builds its own pruned KWGs once at the root position.
+  if (!endgame_args->skip_word_pruning) {
+    // Generate pruned KWG(s) from the set of possible words on this board.
+    // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+    // In INFORMED mode with different lexicons, each player index gets its own
+    // pruned KWG so that cross-set index i uses the pruned KWG derived from
+    // player i's lexicon.
+    for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+         player_idx++) {
+      const KWG *full_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+    }
   }
 
   // Initialize ABDADA synchronization
@@ -477,15 +485,40 @@ void endgame_ctx_reset(EndgameCtx *es, const EndgameArgs *endgame_args) {
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
-  if (endgame_args->tt_fraction_of_mem == 0) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table = NULL;
-  } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table =
-        transposition_table_create(endgame_args->tt_fraction_of_mem);
+  if (endgame_args->shared_tt) {
+    // Use caller-provided TT. Free any previously owned TT.
+    if (!es->tt_is_external) {
+      transposition_table_destroy(es->transposition_table);
+    }
+    es->transposition_table = endgame_args->shared_tt;
+    es->tt_fraction_of_mem = 0;
+    es->tt_is_external = true;
+  } else {
+    if (!es->tt_is_external) {
+      if (endgame_args->tt_fraction_of_mem == 0) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table = NULL;
+      } else if (es->tt_fraction_of_mem !=
+                 endgame_args->tt_fraction_of_mem) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    } else {
+      // Transitioning from external to owned. Don't destroy the external TT.
+      es->transposition_table = NULL;
+      if (endgame_args->tt_fraction_of_mem > 0) {
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    }
+    es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+    es->tt_is_external = false;
   }
-  es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  // Disable TT optimization when no TT is available.
+  if (es->transposition_table == NULL) {
+    es->transposition_table_optim = false;
+  }
   if (es->results) {
     endgame_results_reset(es->results);
     endgame_results_set_valid_for_current_game_state(es->results, true);
@@ -523,7 +556,9 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
     solver_worker_destroy(ctx->workers[i]);
   }
   free(ctx->workers);
-  transposition_table_destroy(ctx->transposition_table);
+  if (!ctx->tt_is_external) {
+    transposition_table_destroy(ctx->transposition_table);
+  }
   kwg_destroy(ctx->pruned_kwgs[0]);
   kwg_destroy(ctx->pruned_kwgs[1]);
   free(ctx);
@@ -615,18 +650,23 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   if (solver->num_workers == 0) {
     solver->workers =
         realloc_or_die(solver->workers, sizeof(EndgameCtxWorker *));
-    solver->workers[0] =
-        endgame_ctx_create_worker(solver, 0, base_seed, solver->game);
+    solver->workers[0] = endgame_ctx_create_worker(
+        solver, solver->thread_index_offset, base_seed, solver->game);
     solver->num_workers = 1;
   }
 
   // Reset worker 0 from the current game state
   endgame_ctx_reset_worker(solver->workers[0], solver, solver->game, base_seed);
 
-  // Compute cross-sets once on worker 0's game copy
-  game_set_override_kwgs(solver->workers[0]->game_copy, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
-  game_gen_all_cross_sets(solver->workers[0]->game_copy);
+  // Compute cross-sets once on worker 0's game copy.
+  // When skip_word_pruning was used, pruned_kwgs are NULL; the game's existing
+  // KWGs and cross-sets (set by the caller, e.g. PEG) are preserved.
+  if (solver->pruned_kwgs[0] != NULL) {
+    game_set_override_kwgs(solver->workers[0]->game_copy,
+                           solver->pruned_kwgs[0], solver->pruned_kwgs[1],
+                           solver->dual_lexicon_mode);
+    game_gen_all_cross_sets(solver->workers[0]->game_copy);
+  }
 
   // Grow the pool if the thread count increased, duplicating from worker 0
   if (solver->num_workers < solver->threads) {
@@ -634,7 +674,8 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
         solver->workers, sizeof(EndgameCtxWorker *) * solver->threads);
     for (int idx = solver->num_workers; idx < solver->threads; idx++) {
       solver->workers[idx] = endgame_ctx_create_worker(
-          solver, idx, base_seed, solver->workers[0]->game_copy);
+          solver, solver->thread_index_offset + idx, base_seed,
+          solver->workers[0]->game_copy);
     }
     solver->num_workers = solver->threads;
   }
@@ -649,8 +690,13 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
 // Returns the pruned KWG for the given player index.
 // In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
 // In non-shared mode, each player index maps to its own pruned KWG.
+// When skip_word_pruning was used (pruned_kwgs are NULL), falls back to the
+// game's effective KWG (which respects any override KWGs set by the caller).
 static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
                                                int player_index) {
+  if (solver->pruned_kwgs[0] == NULL) {
+    return game_get_effective_kwg(solver->game, player_index);
+  }
   if (solver->pruned_kwgs[1] == NULL) {
     return solver->pruned_kwgs[0];
   }
@@ -2469,8 +2515,8 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      NULL, NULL);
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx,
+      solver->thread_index_offset, NULL, NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -2603,11 +2649,43 @@ static int extract_multi_pvs(const EndgameCtx *solver,
   return k;
 }
 
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads.
+void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
+                          EndgameResults *results) {
+  if (*ctx == NULL) {
+    *ctx = endgame_ctx_create();
+  }
+  EndgameCtx *solver = *ctx;
+
+  solver->results = results;
+  endgame_ctx_reset(solver, endgame_args);
+
+  solver->initial_opp_stuck_frac = 0.0F;
+  if (solver->use_heuristics) {
+    solver->initial_opp_stuck_frac =
+        compute_initial_stuck_fraction(solver, endgame_args->game);
+  }
+
+  uint64_t base_seed = (uint64_t)ctime_get_current_time();
+  endgame_ctx_prepare_workers(solver, base_seed);
+
+  // Suppress stuck-tile log to avoid localtime thread safety issues.
+  atomic_store(&solver->stuck_tile_logged, 1);
+
+  // Run IDS directly in the calling thread.
+  iterative_deepening(solver->workers[0], solver->requested_plies);
+
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  solver->principal_variation = *best_pv;
+}
+
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   assert(ctx);
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
-  if (bag_size != 0) {
+  if (bag_size != 0 && !endgame_args->allow_nonempty_bag) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
                      get_formatted_string(
                          "bag must be empty to solve an endgame, but have %d "

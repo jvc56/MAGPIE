@@ -54,11 +54,31 @@ typedef struct EndgameArgs {
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  // If true, skip word pruning (KWG build) during reset. Move generation will
+  // use the full KWG (or any override KWGs set by the caller on the game).
+  // Useful when the caller builds pruned KWGs once and reuses them across many
+  // endgame solves.
+  bool skip_word_pruning;
+  // If true, allow the bag to be non-empty when endgame_solve is called.
+  bool allow_nonempty_bag;
+  // If non-NULL, the solver uses this TT instead of creating/destroying its
+  // own. The caller is responsible for the lifetime of the shared TT.
+  // tt_fraction_of_mem is ignored when shared_tt is set.
+  TranspositionTable *shared_tt;
+  // Offset added to worker thread indices. When multiple endgame_solve calls
+  // run concurrently, each must use a distinct range to avoid collisions on
+  // the global per-thread MoveGen cache.
+  int thread_index_offset;
 } EndgameArgs;
 
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads
+// when each thread uses a distinct thread_index_offset in EndgameArgs.
+void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
+                          EndgameResults *results);
 const TranspositionTable *
 endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
