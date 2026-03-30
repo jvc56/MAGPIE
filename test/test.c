@@ -8,6 +8,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -38,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "peg_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -122,6 +124,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"peg", test_peg},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -144,6 +147,9 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"genpeg1", test_generate_peg1_cgps},
+    {"benchpeg1", test_benchmark_peg1},
+    {"benchpegc", test_benchmark_peg1_configs},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
