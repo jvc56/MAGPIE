@@ -593,9 +593,9 @@ static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   free(solver_worker);
 }
 
-// Prepare the worker pool for a new solve. Builds a template game with
-// pruned-KWG cross-sets computed once, grows the pool if the thread count
-// increased, and resets all active workers from the template.
+// Prepare the worker pool for a new solve. Computes pruned-KWG cross-sets
+// on worker 0's game copy, then copies that state to the remaining workers.
+// No temporary template game is allocated.
 static void endgame_ctx_prepare_workers(EndgameCtx *solver,
                                         uint64_t base_seed) {
   const LetterDistribution *ld = game_get_ld(solver->game);
@@ -612,30 +612,39 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   }
   solver->workers_ld = ld;
 
-  Game *template_game = game_duplicate(solver->game);
-  game_set_override_kwgs(template_game, solver->pruned_kwgs[0],
-                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
-  game_gen_all_cross_sets(template_game);
-  game_set_endgame_solving_mode(template_game);
+  // Ensure worker 0 exists
+  if (solver->num_workers == 0) {
+    solver->workers =
+        realloc_or_die(solver->workers, sizeof(EndgameCtxWorker *));
+    solver->workers[0] =
+        endgame_ctx_create_worker(solver, 0, base_seed, solver->game);
+    solver->num_workers = 1;
+  }
 
-  // Grow the pool if the thread count increased
+  // Reset worker 0 from the current game state
+  endgame_ctx_reset_worker(solver->workers[0], solver, solver->game, base_seed);
+
+  // Compute cross-sets once on worker 0's game copy
+  game_set_override_kwgs(solver->workers[0]->game_copy, solver->pruned_kwgs[0],
+                         solver->pruned_kwgs[1], solver->dual_lexicon_mode);
+  game_gen_all_cross_sets(solver->workers[0]->game_copy);
+
+  // Grow the pool if the thread count increased, duplicating from worker 0
   if (solver->num_workers < solver->threads) {
     solver->workers = realloc_or_die(
         solver->workers, sizeof(EndgameCtxWorker *) * solver->threads);
     for (int idx = solver->num_workers; idx < solver->threads; idx++) {
-      solver->workers[idx] =
-          endgame_ctx_create_worker(solver, idx, base_seed, template_game);
+      solver->workers[idx] = endgame_ctx_create_worker(
+          solver, idx, base_seed, solver->workers[0]->game_copy);
     }
     solver->num_workers = solver->threads;
   }
 
-  // Reset all active workers for this solve
-  for (int idx = 0; idx < solver->threads; idx++) {
-    endgame_ctx_reset_worker(solver->workers[idx], solver, template_game,
-                             base_seed);
+  // Copy worker 0's game state (with cross-sets) to workers 1..N-1
+  for (int idx = 1; idx < solver->threads; idx++) {
+    endgame_ctx_reset_worker(solver->workers[idx], solver,
+                             solver->workers[0]->game_copy, base_seed);
   }
-
-  game_destroy(template_game);
 }
 
 // Returns the pruned KWG for the given player index.
