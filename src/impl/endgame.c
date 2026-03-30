@@ -529,8 +529,8 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   free(ctx);
 }
 
-// Create a new worker, duplicating the template game (which already has
-// pruned-KWG cross-sets computed). Called only when growing the worker pool.
+// Create a new worker, duplicating the given game state.
+// Called only when growing the worker pool.
 static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
                                                    int worker_index,
                                                    uint64_t base_seed,
@@ -563,7 +563,6 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
 }
 
 // Reset an existing worker for a new solve without reallocating.
-// The template game already has override KWGs set and cross-sets computed.
 static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
                                      EndgameCtx *solver,
                                      const Game *template_game,
