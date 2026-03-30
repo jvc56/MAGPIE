@@ -332,8 +332,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
   exec_config_quiet(config, "new");
   Game *game = config_get_game(config);
 
-  EndgameSolver *solver_old = endgame_solver_create();
-  EndgameSolver *solver_new = endgame_solver_create();
+  EndgameCtx *solver_old = NULL;
+  EndgameCtx *solver_new = NULL;
   EndgameResults *results = endgame_results_create();
 
   // Read CGPs into array (heap-allocated for large counts)
@@ -395,7 +395,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
     Timer t;
     ctimer_start(&t);
     err = error_stack_create();
-    endgame_solve(solver_old, &args, results, err);
+    endgame_solve(&solver_old, &args, results, err);
     double time_old = ctimer_elapsed_seconds(&t);
     assert(error_stack_is_empty(err));
     error_stack_destroy(err);
@@ -407,7 +407,7 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
     args.forced_pass_bypass = true;
     ctimer_start(&t);
     err = error_stack_create();
-    endgame_solve(solver_new, &args, results, err);
+    endgame_solve(&solver_new, &args, results, err);
     double time_new = ctimer_elapsed_seconds(&t);
     assert(error_stack_is_empty(err));
     error_stack_destroy(err);
@@ -454,8 +454,8 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
 
   free(cgp_lines);
   endgame_results_destroy(results);
-  endgame_solver_destroy(solver_old);
-  endgame_solver_destroy(solver_new);
+  endgame_ctx_destroy(solver_old);
+  endgame_ctx_destroy(solver_new);
   config_destroy(config);
 }
 

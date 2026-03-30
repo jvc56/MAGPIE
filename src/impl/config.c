@@ -295,7 +295,7 @@ struct Config {
   GameHistory *game_history;
   GameHistory *game_history_backup;
   MoveList *move_list;
-  EndgameSolver *endgame_solver;
+  EndgameCtx *endgame_ctx;
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
@@ -2571,7 +2571,7 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
                     ErrorStack *error_stack) {
   EndgameArgs endgame_args;
   config_fill_endgame_args(config, &endgame_args);
-  endgame_solve(config->endgame_solver, &endgame_args, endgame_results,
+  endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
                 error_stack);
 }
 
@@ -6903,7 +6903,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->move_list = NULL;
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
-  config->endgame_solver = endgame_solver_create();
+  config->endgame_ctx = NULL;
   config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();
@@ -6933,7 +6933,7 @@ void config_destroy(Config *config) {
   game_destroy(config->game_backup);
   game_history_destroy(config->game_history);
   game_history_destroy(config->game_history_backup);
-  endgame_solver_destroy(config->endgame_solver);
+  endgame_ctx_destroy(config->endgame_ctx);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);

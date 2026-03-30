@@ -20,7 +20,7 @@ enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
 };
 
-typedef struct EndgameSolver EndgameSolver;
+typedef struct EndgameCtx EndgameCtx;
 
 // Callback for per-ply PV reporting during iterative deepening
 // Parameters: depth, value (spread delta), pv_line, game,
@@ -56,16 +56,13 @@ typedef struct EndgameArgs {
   double hard_time_limit;
 } EndgameArgs;
 
-EndgameSolver *endgame_solver_create(void);
-void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
+void endgame_ctx_destroy(EndgameCtx *ctx);
+void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
-void endgame_solver_destroy(EndgameSolver *es);
 const TranspositionTable *
-endgame_solver_get_transposition_table(const EndgameSolver *es);
-void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,
-                                 int *root_moves_completed,
-                                 int *root_moves_total,
-                                 int *ply2_moves_completed,
-                                 int *ply2_moves_total);
+endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
+void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
+                              int *root_moves_completed, int *root_moves_total,
+                              int *ply2_moves_completed, int *ply2_moves_total);
 
 #endif
