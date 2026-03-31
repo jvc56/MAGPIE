@@ -37,6 +37,7 @@ typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 typedef uint64_t (*rvs_get_arm_sample_count_func_t)(const RandomVariables *,
                                                     uint64_t);
+typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
 
 struct RandomVariables {
   uint64_t num_rvs;
@@ -45,6 +46,7 @@ struct RandomVariables {
   rvs_similar_func_t similar_func;
   rvs_destroy_data_func_t destroy_data_func;
   rvs_get_arm_sample_count_func_t get_arm_sample_count_func;
+  rvs_get_best_arm_index_func_t get_best_arm_index_func;
   void *data;
 };
 
@@ -90,11 +92,19 @@ static uint64_t rv_unsupported_get_arm_sample_count(const RandomVariables *rvs
   return 0;
 }
 
+static int rv_unsupported_get_best_arm_index(const RandomVariables *rvs
+                                             __attribute__((unused))) {
+  log_fatal("rvs_get_best_arm_index called on non-simmed-plays "
+            "RandomVariables");
+  return -1;
+}
+
 void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->sample_func = rv_uniform_sample;
   rvs->similar_func = rv_uniform_are_similar;
   rvs->destroy_data_func = rv_uniform_destroy;
   rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
   cpthread_mutex_init(&rv_uniform->mutex);
@@ -152,6 +162,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rvs->similar_func = rv_uniform_predetermined_are_similar;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
   rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
   rv_uniform_predetermined->num_samples = num_samples;
@@ -221,6 +232,7 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   rvs->similar_func = rv_normal_are_similar;
   rvs->destroy_data_func = rv_normal_destroy;
   rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
@@ -302,6 +314,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->similar_func = rv_normal_predetermined_are_similar;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
   rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
   rv_normal_predetermined->num_samples = num_samples;
@@ -499,6 +512,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   return wpct;
 }
 
+static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  return sim_results_get_best_move_index(simmer->sim_results);
+}
+
 static uint64_t rv_sim_get_arm_sample_count(const RandomVariables *rvs,
                                             const uint64_t k) {
   const Simmer *simmer = (const Simmer *)rvs->data;
@@ -529,6 +547,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
   rvs->get_arm_sample_count_func = rv_sim_get_arm_sample_count;
+  rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
 
@@ -711,4 +730,8 @@ uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
 uint64_t rvs_get_arm_sample_count(const RandomVariables *rvs,
                                   const uint64_t k) {
   return rvs->get_arm_sample_count_func(rvs, k);
+}
+
+int rvs_get_best_arm_index(const RandomVariables *rvs) {
+  return rvs->get_best_arm_index_func(rvs);
 }

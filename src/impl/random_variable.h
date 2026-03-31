@@ -43,5 +43,6 @@ bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
 uint64_t rvs_get_arm_sample_count(const RandomVariables *rvs, uint64_t k);
+int rvs_get_best_arm_index(const RandomVariables *rvs);
 
 #endif

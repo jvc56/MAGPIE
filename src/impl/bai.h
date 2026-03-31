@@ -60,6 +60,7 @@ typedef struct BAISyncData {
   int *avoid_prune_arms;
   int avoid_prune_count;    // remaining arms still needing top-up
   int avoid_prune_next_idx; // round-robin cursor
+  int avoid_prune_best_arm_idx;
 } BAISyncData;
 
 static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
@@ -73,6 +74,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->num_total_samples_requested = 0;
   bai_sync_data->astar_index = -1;
   bai_sync_data->challenger_index = -1;
+  bai_sync_data->avoid_prune_best_arm_idx = -1;
   bai_sync_data->initial_phase = true;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
@@ -369,7 +371,12 @@ static inline bool bai_should_stop(BAIResult *bai_result,
          BAI_RESULT_STATUS_NONE;
 }
 
-static inline void bai_noop_prebroadcast(void *data __attribute__((unused))) {}
+static inline void bai_noop_prebroadcast(void *data) {
+  BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)data;
+  BAISyncData *sync_data = bai_worker_args->sync_data;
+  sync_data->avoid_prune_best_arm_idx =
+      rvs_get_best_arm_index(bai_worker_args->rvs);
+}
 
 static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)uncasted_bai_worker_args;
@@ -427,16 +434,12 @@ static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
 
 static inline void sim_unpruned_to_winner(BAIWorkerArgs *bai_worker_args) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
-  if (!sync_data->avoid_prune_arms) {
-    return;
-  }
   const BAIOptions *bai_options = bai_worker_args->bai_options;
   RandomVariables *rvs = bai_worker_args->rvs;
   const int rvs_thread_index =
       bai_options->parent_worker_thread_index + bai_worker_args->thread_index;
-  const uint64_t winner_count =
-      rvs_get_arm_sample_count(rvs, (uint64_t)sync_data->astar_index);
-
+  const uint64_t winner_count = rvs_get_arm_sample_count(
+      rvs, (uint64_t)sync_data->avoid_prune_best_arm_idx);
   while (true) {
     const int arm_index =
         get_avoid_prune_next_idx(sync_data, rvs, winner_count);
@@ -492,8 +495,10 @@ static inline void *bai_worker(void *args) {
   bai_worker_sample_loop(bai_worker_args);
   checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
   bai_worker_sample_loop(bai_worker_args);
-  checkpoint_wait(bai_worker_args->avoid_prune_checkpoint, bai_worker_args);
-  sim_unpruned_to_winner(bai_worker_args);
+  if (bai_worker_args->sync_data->avoid_prune_arms) {
+    checkpoint_wait(bai_worker_args->avoid_prune_checkpoint, bai_worker_args);
+    sim_unpruned_to_winner(bai_worker_args);
+  }
   return NULL;
 }
 
