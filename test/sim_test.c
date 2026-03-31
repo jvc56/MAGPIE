@@ -868,7 +868,7 @@ void test_sim_avoid_prune_cmd(void) {
   load_and_exec_config_or_die(config, "rack AEIQRST");
   load_and_exec_config_or_die(config, "gen");
   // "-" = empty opp rack; "8G QI" = avoid-prune move
-  load_and_exec_config_or_die(config, "simulate - 8G QI");
+  load_and_exec_config_or_die(config, "snoprune - 8G QI");
 
   const SimResults *sim_results = config_get_sim_results(config);
   const int winner_arm =
@@ -943,7 +943,7 @@ void test_sim_avoid_prune_cmd_multi(void) {
   load_and_exec_config_or_die(config, "addmoves 8G QI,8H QI");
   // "-" = empty opp rack; "8G QI" and "8H QI" = comma-separated avoid-prune
   // moves. The comma is required because validated_moves_create splits on ','.
-  load_and_exec_config_or_die(config, "simulate - 8G QI,8H QI");
+  load_and_exec_config_or_die(config, "snoprune - 8G QI,8H QI");
 
   const SimResults *sim_results = config_get_sim_results(config);
   const int winner_arm =
@@ -953,6 +953,55 @@ void test_sim_avoid_prune_cmd_multi(void) {
           sim_results_get_simmed_play(sim_results, winner_arm)));
 
   const char *avoid_prune_moves[] = {"8G QI", "8H QI"};
+  const int num_avoid_prune = 2;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  int found_count = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    const char *move_str = string_builder_peek(move_string_builder);
+    for (int ap_idx = 0; ap_idx < num_avoid_prune; ap_idx++) {
+      if (strings_equal(move_str, avoid_prune_moves[ap_idx])) {
+        const uint64_t ap_count =
+            stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+        assert(ap_count == winner_count);
+        found_count++;
+      }
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_count == num_avoid_prune);
+  config_destroy(config);
+}
+
+void test_snoprune_with_opp_rack_and_mixed_coords(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // Add both moves explicitly to ensure they appear in the move list.
+  // "H8 QI" uses letter-first coordinates (vertical play at the center
+  // square), "8H QI" uses number-first coordinates (horizontal play at
+  // the center square). Together they verify that the snoprune parser
+  // accepts both coordinate formats.
+  load_and_exec_config_or_die(config, "addmoves H8 QI,8H QI");
+  // "AB" is a non-empty, non-"-" opp rack.
+  load_and_exec_config_or_die(config, "snoprune AB H8 QI,8H QI");
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+
+  const char *avoid_prune_moves[] = {"H8 QI", "8H QI"};
   const int num_avoid_prune = 2;
   const int num_plays = sim_results_get_number_of_plays(sim_results);
   int found_count = 0;
@@ -988,7 +1037,7 @@ void test_sim_avoid_prune_not_found(void) {
   // 8H QATERS is a phony using rack tiles AEIQRST (minus I) starting at H8.
   // It passes move validation (phonies allowed, start square occupied) but
   // is not in the generated NWL20 move list.
-  assert_config_exec_status(config, "simulate - 8H QATERS",
+  assert_config_exec_status(config, "snoprune - 8H QATERS",
                             ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND);
   config_destroy(config);
 }
@@ -1018,6 +1067,7 @@ void test_sim(void) {
     test_sim_avoid_prune_multi();
     test_sim_avoid_prune_cmd();
     test_sim_avoid_prune_cmd_multi();
+    test_snoprune_with_opp_rack_and_mixed_coords();
     test_sim_avoid_prune_not_found();
   }
 }

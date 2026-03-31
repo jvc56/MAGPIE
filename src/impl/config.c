@@ -86,6 +86,7 @@ typedef enum {
   ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
+  ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
@@ -951,6 +952,18 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "known rack from the game history is used. If the game history "
              "has a known rack for the opponent, you can use '-' to force the "
              "sim to use a completely random rack.";
+      break;
+    case ARG_TOKEN_SNOPRUNE:
+      usages[0] = "[[<opponent_known_rack>] <move1>[,<move2>,...]]";
+      examples[0] = "";
+      examples[1] = "8G QI";
+      examples[2] = "- 8G QI,8H QI";
+      text = "Runs a Monte Carlo simulation for the current position, "
+             "preventing the BAI algorithm from pruning the specified moves. "
+             "An optional opponent rack may precede the comma-separated move "
+             "list; if omitted the opponent's currently known rack is used. "
+             "Use '-' to force a random opponent rack. Moves are "
+             "comma-separated and may contain spaces (e.g. '8G QI').";
       break;
     case ARG_TOKEN_GEN_AND_SIM:
       usages[0] = "[<opponent_known_rack>]";
@@ -1821,6 +1834,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
+        ARG_TOKEN_SNOPRUNE,             /* snoprune */
     };
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
@@ -2453,15 +2467,61 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   }
 }
 
-// Returns true if str is the start of a move position string.
-// Move positions always begin with a digit (e.g., "8G", "15A"). Rack strings,
-// by contrast, never begin with a digit.
-static bool is_start_of_move_position(const char *str) {
-  return str && isdigit((unsigned char)str[0]);
-}
-
 void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
               const int known_opp_rack_str_index, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot simulate without lexicon"));
+    return;
+  }
+
+  config_init_game(config);
+
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+
+  const char *known_opp_rack_str = config_get_parg_value(
+      config, known_opp_rack_arg_token, known_opp_rack_str_index);
+  if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
+    load_rack_or_push_to_error_stack(
+        known_opp_rack_str, game_get_ld(config->game),
+        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else if (!known_opp_rack_str) {
+    // If no input rack is specified, default to simming with the opponent's
+    // currently known rack.
+    rack_copy(
+        &known_opp_rack,
+        player_get_rack(game_get_player(
+            config->game, 1 - game_get_player_on_turn_index(config->game))));
+  }
+
+  config_simulate(config, NULL, &known_opp_rack, config->sim_results, NULL, 0,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const bool use_inference_for_this_run =
+      config->sim_with_inference &&
+      game_history_get_num_events(config->game_history) > 0;
+  bool sim_results_valid = true;
+  if (use_inference_for_this_run) {
+    // This will always set the state to false if it was interrupted
+    inference_results_set_valid_for_current_game_state(
+        config->inference_results, true);
+    // If the inference was interrupted, the sim results will be invalid
+    sim_results_valid = inference_results_get_valid_for_current_game_state(
+        config->inference_results);
+  }
+  sim_results_set_valid_for_current_game_state(config->sim_results,
+                                               sim_results_valid);
+}
+
+void impl_snoprune(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
                      string_duplicate("cannot simulate without lexicon"));
@@ -2477,127 +2537,98 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   int *arm_avoid_prune = NULL;
   int num_arm_avoid_prune = 0;
 
-  if (known_opp_rack_arg_token == ARG_TOKEN_SIM) {
-    const int num_parg_values =
-        config_get_parg_num_set_values(config, ARG_TOKEN_SIM);
-    int move_start_idx = 0;
+  const char *snoprune_arg =
+      config_get_parg_value(config, ARG_TOKEN_SNOPRUNE, 0);
+  const char *moves_str = NULL;
+  bool rack_provided = false;
 
-    if (num_parg_values > 0) {
-      const char *first_token = config_get_parg_value(config, ARG_TOKEN_SIM, 0);
-      // A move position always starts with a digit (e.g., "8G", "15A").
-      // Anything else is treated as the known opponent rack for backward
-      // compatibility. If the first token starts with a digit, all parg
-      // values are avoid-prune move tokens and the opponent rack defaults
-      // to their current rack.
-      if (!is_start_of_move_position(first_token)) {
-        if (!strings_equal(first_token, "-")) {
-          load_rack_or_push_to_error_stack(
-              first_token, game_get_ld(config->game),
-              ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
-              error_stack);
-          if (!error_stack_is_empty(error_stack)) {
-            return;
-          }
-        }
-        move_start_idx = 1;
-      }
+  if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
+    // The snoprune arg is the entire string after "snoprune". The optional
+    // rack is the first space-delimited token; moves are everything after it,
+    // comma-separated. A move position always contains a digit (e.g. "8G" or
+    // "H8"), while a rack contains only letters. If the first token contains
+    // a digit, the whole string is treated as the comma-separated move list
+    // with no rack specified.
+    const char *space = strchr(snoprune_arg, ' ');
+    char *first_token = NULL;
+    if (space) {
+      const size_t first_token_len = (size_t)(space - snoprune_arg);
+      first_token = malloc_or_die(first_token_len + 1);
+      memcpy(first_token, snoprune_arg, first_token_len);
+      first_token[first_token_len] = '\0';
+      moves_str = space + 1;
+    } else {
+      first_token = string_duplicate(snoprune_arg);
     }
 
-    if (move_start_idx < num_parg_values) {
-      // Join parg values [move_start_idx..num_parg_values-1] with spaces
-      // to form the avoid-prune move string.
-      size_t total_len = 0;
-      for (int parg_idx = move_start_idx; parg_idx < num_parg_values;
-           parg_idx++) {
-        if (parg_idx > move_start_idx) {
-          total_len++;
-        }
-        total_len +=
-            strlen(config_get_parg_value(config, ARG_TOKEN_SIM, parg_idx));
-      }
-      char *avoid_prune_str = malloc_or_die(total_len + 1);
-      char *ptr = avoid_prune_str;
-      for (int parg_idx = move_start_idx; parg_idx < num_parg_values;
-           parg_idx++) {
-        if (parg_idx > move_start_idx) {
-          *ptr++ = ' ';
-        }
-        const char *val =
-            config_get_parg_value(config, ARG_TOKEN_SIM, parg_idx);
-        const size_t val_len = strlen(val);
-        memcpy(ptr, val, val_len);
-        ptr += val_len;
-      }
-      *ptr = '\0';
-
-      ValidatedMoves *avoid_prune_vms = validated_moves_create(
-          config->game, game_get_player_on_turn_index(config->game),
-          avoid_prune_str, true, true, error_stack);
-      free(avoid_prune_str);
-      if (!error_stack_is_empty(error_stack)) {
-        return;
-      }
-
-      const int num_parsed =
-          validated_moves_get_number_of_moves(avoid_prune_vms);
-      const int num_arms = move_list_get_count(config->move_list);
-      const Rack *move_rack = move_list_get_rack(config->move_list);
-      arm_avoid_prune = malloc_or_die(num_parsed * sizeof(int));
-
-      for (int vm_idx = 0; vm_idx < num_parsed; vm_idx++) {
-        const Move *avoid_move =
-            validated_moves_get_move(avoid_prune_vms, vm_idx);
-        const uint64_t avoid_key =
-            move_get_similarity_key(avoid_move, move_rack);
-        bool found = false;
-        for (int arm_index = 0; arm_index < num_arms; arm_index++) {
-          if (move_get_similarity_key(
-                  move_list_get_move(config->move_list, arm_index),
-                  move_rack) == avoid_key) {
-            arm_avoid_prune[num_arm_avoid_prune++] = arm_index;
-            found = true;
-            break;
-          }
-        }
-        if (!found) {
-          error_stack_push(
-              error_stack, ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND,
-              get_formatted_string(
-                  "avoid-prune move was not found in the current move list"));
-          free(arm_avoid_prune);
-          validated_moves_destroy(avoid_prune_vms);
+    if (!contains_digit(first_token)) {
+      // No digit in first token → it is a rack (or "-" meaning empty rack).
+      rack_provided = true;
+      if (!strings_equal(first_token, "-")) {
+        load_rack_or_push_to_error_stack(
+            first_token, game_get_ld(config->game),
+            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          free(first_token);
           return;
         }
       }
-      validated_moves_destroy(avoid_prune_vms);
+      // moves_str already points past the rack token (or is NULL if no
+      // moves were specified).
+    } else {
+      // First token contains a digit → it is a move position; no rack given.
+      moves_str = snoprune_arg;
+    }
+    free(first_token);
+  }
+
+  if (!rack_provided) {
+    // Default to the opponent's currently known rack.
+    rack_copy(
+        &known_opp_rack,
+        player_get_rack(game_get_player(
+            config->game, 1 - game_get_player_on_turn_index(config->game))));
+  }
+
+  if (moves_str && !is_string_empty_or_whitespace(moves_str)) {
+    ValidatedMoves *avoid_prune_vms = validated_moves_create(
+        config->game, game_get_player_on_turn_index(config->game), moves_str,
+        true, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
 
-    if (move_start_idx == 0) {
-      rack_copy(
-          &known_opp_rack,
-          player_get_rack(game_get_player(
-              config->game, 1 - game_get_player_on_turn_index(config->game))));
-    }
-  } else {
-    // existing path for rgsimulate
-    const char *known_opp_rack_str = config_get_parg_value(
-        config, known_opp_rack_arg_token, known_opp_rack_str_index);
-    if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
-      load_rack_or_push_to_error_stack(
-          known_opp_rack_str, game_get_ld(config->game),
-          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
-          error_stack);
-      if (!error_stack_is_empty(error_stack)) {
+    const int num_parsed = validated_moves_get_number_of_moves(avoid_prune_vms);
+    const int num_arms = move_list_get_count(config->move_list);
+    const Rack *move_rack = move_list_get_rack(config->move_list);
+    arm_avoid_prune = malloc_or_die(num_parsed * sizeof(int));
+
+    for (int vm_idx = 0; vm_idx < num_parsed; vm_idx++) {
+      const Move *avoid_move =
+          validated_moves_get_move(avoid_prune_vms, vm_idx);
+      const uint64_t avoid_key = move_get_similarity_key(avoid_move, move_rack);
+      bool found = false;
+      for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+        if (move_get_similarity_key(
+                move_list_get_move(config->move_list, arm_index), move_rack) ==
+            avoid_key) {
+          arm_avoid_prune[num_arm_avoid_prune++] = arm_index;
+          found = true;
+          break;
+        }
+      }
+      if (!found) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND,
+            get_formatted_string(
+                "avoid-prune move was not found in the current move list"));
+        free(arm_avoid_prune);
+        validated_moves_destroy(avoid_prune_vms);
         return;
       }
-    } else if (!known_opp_rack_str) {
-      // If no input rack is specified, default to simming with the opponent's
-      // currently known rack
-      rack_copy(
-          &known_opp_rack,
-          player_get_rack(game_get_player(
-              config->game, 1 - game_get_player_on_turn_index(config->game))));
     }
+    validated_moves_destroy(avoid_prune_vms);
   }
 
   config_simulate(config, NULL, &known_opp_rack, config->sim_results,
@@ -2631,6 +2662,8 @@ char *status_sim(Config *config) {
       config->game, sim_results, config->max_num_display_plays, config->shplies,
       -1, -1, NULL, 0, false, !config->human_readable, NULL);
 }
+
+char *status_snoprune(Config *config) { return status_sim(config); }
 
 // Gen and Sim
 
@@ -5121,7 +5154,8 @@ void config_load_parsed_args(Config *config,
           current_arg_token == ARG_TOKEN_CNOTE ||
           current_arg_token == ARG_TOKEN_P1_NAME ||
           current_arg_token == ARG_TOKEN_P2_NAME ||
-          current_arg_token == ARG_TOKEN_MOVES) {
+          current_arg_token == ARG_TOKEN_MOVES ||
+          current_arg_token == ARG_TOKEN_SNOPRUNE) {
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.
@@ -6681,6 +6715,19 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_snoprune(Config *config, ErrorStack *error_stack) {
+  impl_snoprune(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_snoprune(Config *config, ErrorStack *error_stack) {
+  impl_snoprune(config, error_stack);
+  return empty_string();
+}
+
 void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -6836,7 +6883,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
-  cmd(ARG_TOKEN_SIM, "simulate", 0, 32, sim, sim, false);
+  cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
@@ -7120,6 +7168,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
+    case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
