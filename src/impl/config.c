@@ -2422,7 +2422,8 @@ void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
+                     SimResults *sim_results, int *arm_avoid_prune,
+                     int num_arm_avoid_prune, ErrorStack *error_stack) {
   // Lazy load win_pcts if not already loaded
   config_load_win_pcts(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2440,6 +2441,8 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
                        &nontarget_known_tiles, &target_known_inference_tiles,
                        &args);
+  args.bai_options.arm_avoid_prune = arm_avoid_prune;
+  args.bai_options.num_arm_avoid_prune = num_arm_avoid_prune;
   if (game_history_get_num_events(config->game_history) == 0) {
     args.use_inference = false;
   }
@@ -2448,6 +2451,13 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   } else {
     simulate_without_ctx(&args, sim_results, error_stack);
   }
+}
+
+// Returns true if str is the start of a move position string.
+// Move positions always begin with a digit (e.g., "8G", "15A"). Rack strings,
+// by contrast, never begin with a digit.
+static bool is_start_of_move_position(const char *str) {
+  return str && isdigit((unsigned char)str[0]);
 }
 
 void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
@@ -2461,30 +2471,138 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
-  const char *known_opp_rack_str = config_get_parg_value(
-      config, known_opp_rack_arg_token, known_opp_rack_str_index);
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
-  // Set setting empty opp rack with '-'
-  if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
-    load_rack_or_push_to_error_stack(
-        known_opp_rack_str, game_get_ld(config->game),
-        ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
-        error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+  int *arm_avoid_prune = NULL;
+  int num_arm_avoid_prune = 0;
+
+  if (known_opp_rack_arg_token == ARG_TOKEN_SIM) {
+    const int num_parg_values =
+        config_get_parg_num_set_values(config, ARG_TOKEN_SIM);
+    int move_start_idx = 0;
+
+    if (num_parg_values > 0) {
+      const char *first_token = config_get_parg_value(config, ARG_TOKEN_SIM, 0);
+      // A move position always starts with a digit (e.g., "8G", "15A").
+      // Anything else is treated as the known opponent rack for backward
+      // compatibility. If the first token starts with a digit, all parg
+      // values are avoid-prune move tokens and the opponent rack defaults
+      // to their current rack.
+      if (!is_start_of_move_position(first_token)) {
+        if (!strings_equal(first_token, "-")) {
+          load_rack_or_push_to_error_stack(
+              first_token, game_get_ld(config->game),
+              ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+              error_stack);
+          if (!error_stack_is_empty(error_stack)) {
+            return;
+          }
+        }
+        move_start_idx = 1;
+      }
     }
-  } else if (!known_opp_rack_str) {
-    // If no input rack is specified, default to simming with the opponent's
-    // currently known rack
-    rack_copy(
-        &known_opp_rack,
-        player_get_rack(game_get_player(
-            config->game, 1 - game_get_player_on_turn_index(config->game))));
+
+    if (move_start_idx < num_parg_values) {
+      // Join parg values [move_start_idx..num_parg_values-1] with spaces
+      // to form the avoid-prune move string.
+      size_t total_len = 0;
+      for (int parg_idx = move_start_idx; parg_idx < num_parg_values;
+           parg_idx++) {
+        if (parg_idx > move_start_idx) {
+          total_len++;
+        }
+        total_len +=
+            strlen(config_get_parg_value(config, ARG_TOKEN_SIM, parg_idx));
+      }
+      char *avoid_prune_str = malloc_or_die(total_len + 1);
+      char *ptr = avoid_prune_str;
+      for (int parg_idx = move_start_idx; parg_idx < num_parg_values;
+           parg_idx++) {
+        if (parg_idx > move_start_idx) {
+          *ptr++ = ' ';
+        }
+        const char *val =
+            config_get_parg_value(config, ARG_TOKEN_SIM, parg_idx);
+        const size_t val_len = strlen(val);
+        memcpy(ptr, val, val_len);
+        ptr += val_len;
+      }
+      *ptr = '\0';
+
+      ValidatedMoves *avoid_prune_vms = validated_moves_create(
+          config->game, game_get_player_on_turn_index(config->game),
+          avoid_prune_str, true, true, error_stack);
+      free(avoid_prune_str);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+
+      const int num_parsed =
+          validated_moves_get_number_of_moves(avoid_prune_vms);
+      const int num_arms = move_list_get_count(config->move_list);
+      const Rack *move_rack = move_list_get_rack(config->move_list);
+      arm_avoid_prune = malloc_or_die(num_parsed * sizeof(int));
+
+      for (int vm_idx = 0; vm_idx < num_parsed; vm_idx++) {
+        const Move *avoid_move =
+            validated_moves_get_move(avoid_prune_vms, vm_idx);
+        const uint64_t avoid_key =
+            move_get_similarity_key(avoid_move, move_rack);
+        bool found = false;
+        for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+          if (move_get_similarity_key(
+                  move_list_get_move(config->move_list, arm_index),
+                  move_rack) == avoid_key) {
+            arm_avoid_prune[num_arm_avoid_prune++] = arm_index;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND,
+              get_formatted_string(
+                  "avoid-prune move was not found in the current move list"));
+          free(arm_avoid_prune);
+          validated_moves_destroy(avoid_prune_vms);
+          return;
+        }
+      }
+      validated_moves_destroy(avoid_prune_vms);
+    }
+
+    if (move_start_idx == 0) {
+      rack_copy(
+          &known_opp_rack,
+          player_get_rack(game_get_player(
+              config->game, 1 - game_get_player_on_turn_index(config->game))));
+    }
+  } else {
+    // existing path for rgsimulate
+    const char *known_opp_rack_str = config_get_parg_value(
+        config, known_opp_rack_arg_token, known_opp_rack_str_index);
+    if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
+      load_rack_or_push_to_error_stack(
+          known_opp_rack_str, game_get_ld(config->game),
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+          error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    } else if (!known_opp_rack_str) {
+      // If no input rack is specified, default to simming with the opponent's
+      // currently known rack
+      rack_copy(
+          &known_opp_rack,
+          player_get_rack(game_get_player(
+              config->game, 1 - game_get_player_on_turn_index(config->game))));
+    }
   }
+
   config_simulate(config, NULL, &known_opp_rack, config->sim_results,
-                  error_stack);
+                  arm_avoid_prune, num_arm_avoid_prune, error_stack);
+  free(arm_avoid_prune);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6718,7 +6836,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
-  cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_SIM, "simulate", 0, 32, sim, sim, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
