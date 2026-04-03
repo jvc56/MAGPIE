@@ -444,8 +444,7 @@ static inline void sim_unpruned_to_winner(BAIWorkerArgs *bai_worker_args) {
   const uint64_t winner_count =
       sync_data->arm_data[sync_data->avoid_prune_best_arm_idx].num_samples;
   while (true) {
-    const int arm_index =
-        get_avoid_prune_next_idx(sync_data, winner_count);
+    const int arm_index = get_avoid_prune_next_idx(sync_data, winner_count);
     if (arm_index < 0) {
       break;
     }
