@@ -958,6 +958,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "";
       examples[1] = "8G QI";
       examples[2] = "- 8G QI,8H QI";
+      examples[3] = "ABC 8G QI,8H QI";
       text = "Runs a Monte Carlo simulation for the current position, "
              "preventing the BAI algorithm from pruning the specified moves. "
              "An optional opponent rack may precede the comma-separated move "
@@ -2475,6 +2476,12 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     return;
   }
 
+  if (config->move_list == NULL ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
+                     string_duplicate("cannot simulate without any moves"));
+    return;
+  }
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
@@ -2528,14 +2535,21 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  if (config->move_list == NULL ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
+                     string_duplicate("cannot simulate without any moves"));
+    return;
+  }
+
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
-  int *arm_avoid_prune = NULL;
-  int num_arm_avoid_prune = 0;
+  int *unpruned_move_idxs = NULL;
+  int num_unpruned_moves = 0;
 
   const char *snoprune_arg =
       config_get_parg_value(config, ARG_TOKEN_SNOPRUNE, 0);
@@ -2545,10 +2559,7 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
     // The snoprune arg is the entire string after "snoprune". The optional
     // rack is the first space-delimited token; moves are everything after it,
-    // comma-separated. A move position always contains a digit (e.g. "8G" or
-    // "H8"), while a rack contains only letters. If the first token contains
-    // a digit, the whole string is treated as the comma-separated move list
-    // with no rack specified.
+    // comma-separated.
     const char *space = strchr(snoprune_arg, ' ');
     char *first_token = NULL;
     if (space) {
@@ -2592,48 +2603,69 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   }
 
   if (moves_str && !is_string_empty_or_whitespace(moves_str)) {
-    ValidatedMoves *avoid_prune_vms = validated_moves_create(
+    ValidatedMoves *unpruned_vms = validated_moves_create(
         config->game, game_get_player_on_turn_index(config->game), moves_str,
         true, true, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
-
-    const int num_parsed = validated_moves_get_number_of_moves(avoid_prune_vms);
-    const int num_arms = move_list_get_count(config->move_list);
+    num_unpruned_moves = validated_moves_get_number_of_moves(unpruned_vms);
+    const int num_moves = move_list_get_count(config->move_list);
     const Rack *move_rack = move_list_get_rack(config->move_list);
-    arm_avoid_prune = malloc_or_die(num_parsed * sizeof(int));
-
-    for (int vm_idx = 0; vm_idx < num_parsed; vm_idx++) {
-      const Move *avoid_move =
-          validated_moves_get_move(avoid_prune_vms, vm_idx);
-      const uint64_t avoid_key = move_get_similarity_key(avoid_move, move_rack);
-      bool found = false;
-      for (int arm_index = 0; arm_index < num_arms; arm_index++) {
-        if (move_get_similarity_key(
-                move_list_get_move(config->move_list, arm_index), move_rack) ==
-            avoid_key) {
-          arm_avoid_prune[num_arm_avoid_prune++] = arm_index;
-          found = true;
+    unpruned_move_idxs = malloc_or_die(num_unpruned_moves * sizeof(int));
+    uint64_t *unpruned_moves_keys =
+        malloc_or_die(num_unpruned_moves * sizeof(uint64_t));
+    for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+      const uint64_t move_key = move_get_similarity_key(
+          move_list_get_move(config->move_list, move_idx), move_rack);
+      for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+           unpruned_vm_idx++) {
+        uint64_t unpruned_move_key;
+        if (move_idx == 0) {
+          // Cache the similarity keys for the unpruned moves to avoid redundant
+          // calculations in the inner loop.
+          unpruned_move_key = move_get_similarity_key(
+              validated_moves_get_move(unpruned_vms, unpruned_vm_idx),
+              move_rack);
+          unpruned_moves_keys[unpruned_vm_idx] = unpruned_move_key;
+          unpruned_move_idxs[unpruned_vm_idx] = -1;
+        } else {
+          unpruned_move_key = unpruned_moves_keys[unpruned_vm_idx];
+        }
+        if (move_key == unpruned_move_key) {
+          unpruned_move_idxs[unpruned_vm_idx] = move_idx;
           break;
         }
       }
-      if (!found) {
+    }
+    for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+         unpruned_vm_idx++) {
+      if (unpruned_move_idxs[unpruned_vm_idx] < 0) {
+        const Move *unfound_move =
+            validated_moves_get_move(unpruned_vms, unpruned_vm_idx);
+        StringBuilder *unfound_move_sb = string_builder_create();
+        string_builder_add_move(unfound_move_sb, game_get_board(config->game),
+                                unfound_move, game_get_ld(config->game), false);
         error_stack_push(
             error_stack, ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND,
             get_formatted_string(
-                "avoid-prune move was not found in the current move list"));
-        free(arm_avoid_prune);
-        validated_moves_destroy(avoid_prune_vms);
-        return;
+                "unpruned move '%s' was not found in the current move list",
+                string_builder_peek(unfound_move_sb)));
+        string_builder_destroy(unfound_move_sb);
+        break;
       }
     }
-    validated_moves_destroy(avoid_prune_vms);
+    validated_moves_destroy(unpruned_vms);
+    free(unpruned_moves_keys);
+    if (!error_stack_is_empty(error_stack)) {
+      free(unpruned_move_idxs);
+      return;
+    }
   }
 
   config_simulate(config, NULL, &known_opp_rack, config->sim_results,
-                  arm_avoid_prune, num_arm_avoid_prune, error_stack);
-  free(arm_avoid_prune);
+                  unpruned_move_idxs, num_unpruned_moves, error_stack);
+  free(unpruned_move_idxs);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

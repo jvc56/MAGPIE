@@ -35,8 +35,6 @@ typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
                                     const int, const uint64_t, BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
-typedef uint64_t (*rvs_get_arm_sample_count_func_t)(const RandomVariables *,
-                                                    uint64_t);
 typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
 
 struct RandomVariables {
@@ -45,7 +43,6 @@ struct RandomVariables {
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
   rvs_destroy_data_func_t destroy_data_func;
-  rvs_get_arm_sample_count_func_t get_arm_sample_count_func;
   rvs_get_best_arm_index_func_t get_best_arm_index_func;
   void *data;
 };
@@ -83,15 +80,6 @@ void rv_uniform_destroy(RandomVariables *rvs) {
   free(rv_uniform);
 }
 
-static uint64_t rv_unsupported_get_arm_sample_count(const RandomVariables *rvs
-                                                    __attribute__((unused)),
-                                                    uint64_t k
-                                                    __attribute__((unused))) {
-  log_fatal("rvs_get_arm_sample_count called on non-simmed-plays "
-            "RandomVariables");
-  return 0;
-}
-
 static int rv_unsupported_get_best_arm_index(const RandomVariables *rvs
                                              __attribute__((unused))) {
   log_fatal("rvs_get_best_arm_index called on non-simmed-plays "
@@ -103,7 +91,6 @@ void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->sample_func = rv_uniform_sample;
   rvs->similar_func = rv_uniform_are_similar;
   rvs->destroy_data_func = rv_uniform_destroy;
-  rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
@@ -161,7 +148,6 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rvs->sample_func = rv_uniform_predetermined_sample;
   rvs->similar_func = rv_uniform_predetermined_are_similar;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
-  rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
@@ -231,7 +217,6 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   rvs->sample_func = rv_normal_sample;
   rvs->similar_func = rv_normal_are_similar;
   rvs->destroy_data_func = rv_normal_destroy;
-  rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
@@ -313,7 +298,6 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->sample_func = rv_normal_predetermined_sample;
   rvs->similar_func = rv_normal_predetermined_are_similar;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
-  rvs->get_arm_sample_count_func = rv_unsupported_get_arm_sample_count;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
@@ -517,14 +501,6 @@ static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
   return sim_results_get_best_move_index(simmer->sim_results);
 }
 
-static uint64_t rv_sim_get_arm_sample_count(const RandomVariables *rvs,
-                                            const uint64_t k) {
-  const Simmer *simmer = (const Simmer *)rvs->data;
-  const SimmedPlay *simmed_play =
-      sim_results_get_simmed_play(simmer->sim_results, (int)k);
-  return stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
-}
-
 bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
   const Simmer *simmer = (Simmer *)rvs->data;
   return sim_results_plays_are_similar(simmer->sim_results, i, j);
@@ -546,7 +522,6 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->sample_func = rv_sim_sample;
   rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
-  rvs->get_arm_sample_count_func = rv_sim_get_arm_sample_count;
   rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
@@ -725,11 +700,6 @@ uint64_t rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
 // NOT THREAD SAFE: caller is responsible for ensuring thread safety.
 uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
   return rvs->total_samples;
-}
-
-uint64_t rvs_get_arm_sample_count(const RandomVariables *rvs,
-                                  const uint64_t k) {
-  return rvs->get_arm_sample_count_func(rvs, k);
 }
 
 int rvs_get_best_arm_index(const RandomVariables *rvs) {

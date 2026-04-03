@@ -927,7 +927,7 @@ void test_sim_avoid_prune_multi(void) {
   for (int arm_idx = 0; arm_idx < 3; arm_idx++) {
     const uint64_t ap_count = stat_get_num_samples(simmed_play_get_equity_stat(
         sim_results_get_simmed_play(sim_results, avoid_prune_arms[arm_idx])));
-    assert(ap_count >= winner_count);
+    assert(ap_count == winner_count);
   }
 
   config_destroy(config);
@@ -1027,7 +1027,7 @@ void test_snoprune_with_opp_rack_and_mixed_coords(void) {
   config_destroy(config);
 }
 
-void test_sim_avoid_prune_not_found(void) {
+void test_sim_avoid_prune_errors(void) {
   Config *config = config_create_or_die(
       "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none");
@@ -1039,6 +1039,8 @@ void test_sim_avoid_prune_not_found(void) {
   // is not in the generated NWL20 move list.
   assert_config_exec_status(config, "snoprune - 8H QATERS",
                             ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND);
+  assert_config_exec_status(config, "snoprune A-A 8H QATERS",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   config_destroy(config);
 }
 
@@ -1068,6 +1070,6 @@ void test_sim(void) {
     test_sim_avoid_prune_cmd();
     test_sim_avoid_prune_cmd_multi();
     test_snoprune_with_opp_rack_and_mixed_coords();
-    test_sim_avoid_prune_not_found();
+    test_sim_avoid_prune_errors();
   }
 }

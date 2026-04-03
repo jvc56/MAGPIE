@@ -371,7 +371,7 @@ static inline bool bai_should_stop(BAIResult *bai_result,
          BAI_RESULT_STATUS_NONE;
 }
 
-static inline void bai_noop_prebroadcast(void *data) {
+static inline void bai_avoid_prune_prebroadcast(void *data) {
   BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)data;
   BAISyncData *sync_data = bai_worker_args->sync_data;
   sync_data->avoid_prune_best_arm_idx =
@@ -407,8 +407,10 @@ static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
       bai_worker_args->bai_options->delta, bai_sync_data->astar_index, true);
 }
 
+// Selects the next arm to sample from the avoid-prune list. Modifies the
+// BAIArmDatum for the selected arm by incrementing its num_samples field,
+// which tracks the number of samples requested for that arm.
 static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
-                                           const RandomVariables *rvs,
                                            const uint64_t winner_count) {
   cpthread_mutex_lock(&sync_data->mutex);
   int result = -1;
@@ -416,7 +418,7 @@ static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
     const int idx =
         sync_data->avoid_prune_next_idx % sync_data->avoid_prune_count;
     const int arm_index = sync_data->avoid_prune_arms[idx];
-    if (rvs_get_arm_sample_count(rvs, (uint64_t)arm_index) >= winner_count) {
+    if (sync_data->arm_data[arm_index].num_samples >= winner_count) {
       // Arm is done: swap with last and shrink
       sync_data->avoid_prune_arms[idx] =
           sync_data->avoid_prune_arms[sync_data->avoid_prune_count - 1];
@@ -425,6 +427,7 @@ static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
     } else {
       sync_data->avoid_prune_next_idx++;
       result = arm_index;
+      sync_data->arm_data[arm_index].num_samples++;
       break;
     }
   }
@@ -438,11 +441,11 @@ static inline void sim_unpruned_to_winner(BAIWorkerArgs *bai_worker_args) {
   RandomVariables *rvs = bai_worker_args->rvs;
   const int rvs_thread_index =
       bai_options->parent_worker_thread_index + bai_worker_args->thread_index;
-  const uint64_t winner_count = rvs_get_arm_sample_count(
-      rvs, (uint64_t)sync_data->avoid_prune_best_arm_idx);
+  const uint64_t winner_count =
+      sync_data->arm_data[sync_data->avoid_prune_best_arm_idx].num_samples;
   while (true) {
     const int arm_index =
-        get_avoid_prune_next_idx(sync_data, rvs, winner_count);
+        get_avoid_prune_next_idx(sync_data, winner_count);
     if (arm_index < 0) {
       break;
     }
@@ -522,7 +525,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
 
   Checkpoint *avoid_prune_checkpoint =
-      checkpoint_create(bai_options->num_threads, bai_noop_prebroadcast);
+      checkpoint_create(bai_options->num_threads, bai_avoid_prune_prebroadcast);
 
   BAIWorkerArgs bai_worker_args = {
       .sync_data = sync_data,
