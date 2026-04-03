@@ -14,7 +14,6 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
