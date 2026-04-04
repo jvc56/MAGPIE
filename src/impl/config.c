@@ -175,6 +175,7 @@ typedef enum {
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
+  ARG_TOKEN_FG_REQUIRED,
   ARG_TOKEN_SHOW_GAME_WITH_MOVES,
   ARG_TOKEN_P1_SIM_PLIES,
   ARG_TOKEN_P2_SIM_PLIES,
@@ -253,6 +254,7 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool autosave_gcg;
+  bool fg_required;
   bool loaded_settings;
   char *record_filepath;
   char *settings_filename;
@@ -467,6 +469,10 @@ bool config_get_show_prompt(const Config *config) {
 
 bool config_get_save_settings(const Config *config) {
   return config->save_settings;
+}
+
+bool config_get_fg_required(const Config *config) {
+  return config->fg_required;
 }
 
 bool config_get_loaded_settings(const Config *config) {
@@ -1651,6 +1657,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to automatically save the game history "
              "as a GCG after every change.";
       break;
+    case ARG_TOKEN_FG_REQUIRED:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not a filename is required for the newgame "
+             "command.";
+      break;
     case ARG_TOKEN_P1_SIM_PLIES:
     case ARG_TOKEN_P2_SIM_PLIES:
       usages[0] = "<plies>";
@@ -1917,6 +1930,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
         ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
         ARG_TOKEN_EXEC_MODE,         /* mode */
         ARG_TOKEN_DATA_PATH,         /* path */
         ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
@@ -3369,12 +3383,19 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
         string_duplicate("cannot create new game without lexicon"));
     return empty_string();
   }
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
+  if (config->fg_required && !user_provided_filename) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("cannot create a new game without a filename while "
+                         "the fgrequired option is enabled"));
+    return empty_string();
+  }
   config_init_game(config);
   game_reset(config->game);
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
-  const char *user_provided_filename =
-      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
   }
@@ -5891,6 +5912,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // FG required
+  config_load_bool(config, ARG_TOKEN_FG_REQUIRED, &config->fg_required,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Board color
 
   const char *board_color_str =
@@ -6817,6 +6845,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
+  arg(ARG_TOKEN_FG_REQUIRED, "fgrequired", 1, 1);
   arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
 
 #undef cmd
@@ -6893,6 +6922,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_prompt = true;
   config->save_settings = true;
   config->autosave_gcg = true;
+  config->fg_required = true;
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
@@ -7429,6 +7459,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOSAVE_GCG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->autosave_gcg);
+      break;
+    case ARG_TOKEN_FG_REQUIRED:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->fg_required);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token when saving settings");
