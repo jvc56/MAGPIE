@@ -4219,7 +4219,7 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
       }
       if (num_moves == 0) {
         error_stack_push(
-            error_stack, ERROR_STATUS_NOTE_NO_MOVES,
+            error_stack, ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE,
             string_duplicate("no moves available for $N interpolation"));
         string_builder_destroy(sb);
         return NULL;
@@ -4866,7 +4866,7 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  if (game_history_get_num_events(config->game_history) == 0) {
+  if (game_history_get_num_played_events(config->game_history) == 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,
         string_duplicate("cannot add a note to an empty game history"));
