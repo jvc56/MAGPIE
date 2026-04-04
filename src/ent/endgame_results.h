@@ -52,5 +52,10 @@ void endgame_results_set_start_game(EndgameResults *endgame_results,
 const Game *
 endgame_results_get_start_game(const EndgameResults *endgame_results);
 void endgame_results_stop_ctimer(EndgameResults *endgame_results);
+void endgame_results_set_multi_pvs(EndgameResults *endgame_results,
+                                   const PVLine *pvs, int num_pvs);
+int endgame_results_get_num_pvs(const EndgameResults *endgame_results);
+const PVLine *endgame_results_get_multi_pvline(
+    const EndgameResults *endgame_results, int idx);
 
 #endif

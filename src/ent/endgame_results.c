@@ -24,6 +24,9 @@ struct EndgameResults {
   // shendgame to decode the PV even if config->game has since changed (e.g.
   // after newgame).
   Game *start_game;
+  // Top-K PVs from the most recent completed solve; NULL until solve finishes.
+  PVLine *multi_pvs;
+  int num_pvs;
 };
 
 EndgameResults *endgame_results_create(void) {
@@ -38,11 +41,14 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
   endgame_results->start_game = NULL;
+  endgame_results->multi_pvs = NULL;
+  endgame_results->num_pvs = 0;
   return endgame_results;
 }
 
 void endgame_results_destroy(EndgameResults *endgame_results) {
   game_destroy(endgame_results->start_game);
+  free(endgame_results->multi_pvs);
   free(endgame_results);
 }
 
@@ -56,6 +62,9 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   ctimer_start(&endgame_results->timer);
   game_destroy(endgame_results->start_game);
   endgame_results->start_game = NULL;
+  free(endgame_results->multi_pvs);
+  endgame_results->multi_pvs = NULL;
+  endgame_results->num_pvs = 0;
 }
 
 bool endgame_results_get_valid_for_current_game_state(
@@ -176,4 +185,23 @@ endgame_results_get_start_game(const EndgameResults *endgame_results) {
 
 void endgame_results_stop_ctimer(EndgameResults *endgame_results) {
   ctimer_stop(&endgame_results->timer);
+}
+
+void endgame_results_set_multi_pvs(EndgameResults *endgame_results,
+                                   const PVLine *pvs, int num_pvs) {
+  free(endgame_results->multi_pvs);
+  endgame_results->multi_pvs = malloc_or_die(num_pvs * sizeof(PVLine));
+  endgame_results->num_pvs = num_pvs;
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    endgame_results->multi_pvs[pv_idx] = pvs[pv_idx];
+  }
+}
+
+int endgame_results_get_num_pvs(const EndgameResults *endgame_results) {
+  return endgame_results->num_pvs;
+}
+
+const PVLine *endgame_results_get_multi_pvline(
+    const EndgameResults *endgame_results, int idx) {
+  return &endgame_results->multi_pvs[idx];
 }

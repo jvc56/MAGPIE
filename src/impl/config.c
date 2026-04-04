@@ -5719,7 +5719,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_VARIANT_LENGTH,
+  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, INT_MAX,
                   &config->endgame_top_k, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
