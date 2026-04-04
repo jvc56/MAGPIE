@@ -1197,7 +1197,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[7] = "10 4 b";
       text = "Shows the heat map for the given play, ply, and type. If no ply "
              "is given, a default of 1 will be used. If no type is given, a "
-             "default of 'all' will be used.";
+             "default of 'all' will be used. Heat maps are not recorded by "
+             "default during the simulation. To enable heat maps, set the "
+             "'useheatmap' option to true.";
       break;
     case ARG_TOKEN_NEXT:
       usages[0] = "";
