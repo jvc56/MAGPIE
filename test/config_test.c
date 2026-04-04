@@ -2293,7 +2293,12 @@ void test_config_note_move_interpolation(void) {
   config = config_create_or_die("set -lex CSW21");
   assert_config_exec_status(config, "load testdata/gcgs/success.gcg",
                             ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "note $1", ERROR_STATUS_NOTE_NO_MOVES);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE);
   config_destroy(config);
 
   // Set up a game with generated moves for the remaining tests.
