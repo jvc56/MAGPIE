@@ -630,18 +630,30 @@ bool sim_results_plays_are_similar(const SimResults *sim_results,
 }
 
 // Not thread safe, assumes the sim is finished.
-const Move *sim_results_get_best_move(const SimResults *sim_results) {
+int sim_results_get_best_move_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   if (num_simmed_plays == 0) {
-    return NULL;
+    return -1;
   }
   const SimmedPlay *current_best_simmed_play =
       sim_results_get_simmed_play(sim_results, 0);
-  for (int i = 1; i < num_simmed_plays; i++) {
-    const SimmedPlay *sp = sim_results_get_simmed_play(sim_results, i);
+  int best_play_idx = 0;
+  for (int play_idx = 1; play_idx < num_simmed_plays; play_idx++) {
+    const SimmedPlay *sp = sim_results_get_simmed_play(sim_results, play_idx);
     if (compare_simmed_plays(&sp, &current_best_simmed_play) < 0) {
       current_best_simmed_play = sp;
+      best_play_idx = play_idx;
     }
   }
-  return simmed_play_get_move(current_best_simmed_play);
+  return best_play_idx;
+}
+
+// Not thread safe, assumes the sim is finished.
+const Move *sim_results_get_best_move(const SimResults *sim_results) {
+  const int best_play_idx = sim_results_get_best_move_index(sim_results);
+  if (best_play_idx < 0) {
+    return NULL;
+  }
+  return simmed_play_get_move(
+      sim_results_get_simmed_play(sim_results, best_play_idx));
 }
