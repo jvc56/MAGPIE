@@ -443,7 +443,8 @@ static inline void sim_unpruned_to_winner(BAIWorkerArgs *bai_worker_args) {
       bai_options->parent_worker_thread_index + bai_worker_args->thread_index;
   const uint64_t winner_count =
       sync_data->arm_data[sync_data->avoid_prune_best_arm_idx].num_samples;
-  while (true) {
+  while (thread_control_get_status(sync_data->thread_control) !=
+         THREAD_CONTROL_STATUS_USER_INTERRUPT) {
     const int arm_index = get_avoid_prune_next_idx(sync_data, winner_count);
     if (arm_index < 0) {
       break;

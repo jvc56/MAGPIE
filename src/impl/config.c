@@ -2557,41 +2557,52 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
   bool rack_provided = false;
 
   if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
-    // The snoprune arg is the entire string after "snoprune". The optional
-    // rack is the first space-delimited token; moves are everything after it,
-    // comma-separated.
-    const char *space = strchr(snoprune_arg, ' ');
-    char *first_token = NULL;
-    if (space) {
-      const size_t first_token_len = (size_t)(space - snoprune_arg);
-      first_token = malloc_or_die(first_token_len + 1);
-      memcpy(first_token, snoprune_arg, first_token_len);
-      first_token[first_token_len] = '\0';
-      moves_str = space + 1;
-    } else {
-      first_token = string_duplicate(snoprune_arg);
+    // Format: [rack][optional whitespace],moves
+    // The first comma separates the optional rack from the move list.
+    // Example with rack:    "AB, H8 QI" or "-, H8 QI"
+    // Example without rack: ", H8 QI"
+    const char *comma = strchr(snoprune_arg, ',');
+    if (!comma) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+          string_duplicate("snoprune requires a comma separating the optional "
+                           "rack from the move list (e.g. ', H8 QI' or "
+                           "'AB, H8 QI')"));
+      return;
     }
-
-    if (!contains_digit(first_token)) {
-      // No digit in first token → it is a rack (or "-" meaning empty rack).
+    // Extract and trim the pre-comma portion as the optional rack
+    const size_t pre_comma_len = (size_t)(comma - snoprune_arg);
+    char *rack_str = malloc_or_die(pre_comma_len + 1);
+    memcpy(rack_str, snoprune_arg, pre_comma_len);
+    rack_str[pre_comma_len] = '\0';
+    // Trim trailing whitespace from the rack string
+    size_t trimmed_len = pre_comma_len;
+    while (trimmed_len > 0 && rack_str[trimmed_len - 1] == ' ') {
+      trimmed_len--;
+    }
+    rack_str[trimmed_len] = '\0';
+    // Everything after the comma is the moves string; skip leading whitespace
+    moves_str = comma + 1;
+    while (*moves_str == ' ') {
+      moves_str++;
+    }
+    if (trimmed_len == 0) {
+      // No rack token before the comma; use the opponent's current rack
+      rack_provided = false;
+    } else {
       rack_provided = true;
-      if (!strings_equal(first_token, "-")) {
+      if (!strings_equal(rack_str, "-")) {
         load_rack_or_push_to_error_stack(
-            first_token, game_get_ld(config->game),
+            rack_str, game_get_ld(config->game),
             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
             error_stack);
         if (!error_stack_is_empty(error_stack)) {
-          free(first_token);
+          free(rack_str);
           return;
         }
       }
-      // moves_str already points past the rack token (or is NULL if no
-      // moves were specified).
-    } else {
-      // First token contains a digit → it is a move position; no rack given.
-      moves_str = snoprune_arg;
     }
-    free(first_token);
+    free(rack_str);
   }
 
   if (!rack_provided) {
@@ -2607,6 +2618,7 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
         config->game, game_get_player_on_turn_index(config->game), moves_str,
         true, true, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      validated_moves_destroy(unpruned_vms);
       return;
     }
     num_unpruned_moves = validated_moves_get_number_of_moves(unpruned_vms);
