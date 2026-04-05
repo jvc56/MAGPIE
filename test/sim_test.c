@@ -3,6 +3,7 @@
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
 #include "../src/ent/game.h"
@@ -11,6 +12,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -828,6 +830,310 @@ void test_sim_endgame(void) {
   config_destroy(config);
 }
 
+void test_sim_avoid_prune(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+
+  SimResults *sim_results = config_get_sim_results(config);
+
+  // Mark arm index 3 as avoid-prune
+  int arm_avoid_prune[] = {3};
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  ErrorStack *error_stack = error_stack_create();
+  config_simulate(config, NULL, NULL, sim_results, arm_avoid_prune, 1,
+                  error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  error_stack_destroy(error_stack);
+
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+  const uint64_t ap_count = stat_get_num_samples(
+      simmed_play_get_equity_stat(sim_results_get_simmed_play(sim_results, 3)));
+  assert(ap_count == winner_count);
+
+  config_destroy(config);
+}
+
+void test_sim_avoid_prune_cmd(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // "-" = empty opp rack; "8G QI" = avoid-prune move
+  load_and_exec_config_or_die(config, "snoprune -, 8G QI");
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  bool found = false;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    if (strings_equal(string_builder_peek(move_string_builder), "8G QI")) {
+      const uint64_t ap_count =
+          stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+      assert(ap_count == winner_count);
+      found = true;
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found);
+  config_destroy(config);
+}
+
+void test_sim_avoid_prune_multi(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 4 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+
+  SimResults *sim_results = config_get_sim_results(config);
+
+  // Mark arms 1, 5, and 9 as avoid-prune
+  int arm_avoid_prune[] = {1, 5, 9};
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+  ErrorStack *error_stack = error_stack_create();
+  config_simulate(config, NULL, NULL, sim_results, arm_avoid_prune, 3,
+                  error_stack);
+  assert(error_stack_top(error_stack) == ERROR_STATUS_SUCCESS);
+  error_stack_destroy(error_stack);
+
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+  const int avoid_prune_arms[] = {1, 5, 9};
+  for (int arm_idx = 0; arm_idx < 3; arm_idx++) {
+    const uint64_t ap_count = stat_get_num_samples(simmed_play_get_equity_stat(
+        sim_results_get_simmed_play(sim_results, avoid_prune_arms[arm_idx])));
+    assert(ap_count == winner_count);
+  }
+
+  config_destroy(config);
+}
+
+void test_sim_avoid_prune_cmd_multi(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack QUICKEN");
+  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "addmoves 8G QI,8H QI");
+  // "-" = empty opp rack; "8G QI" and "8H QI" = comma-separated avoid-prune
+  // moves. The comma is required because validated_moves_create splits on ','.
+  load_and_exec_config_or_die(config, "snoprune -, 8G QI,8H QI");
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+
+  const char *avoid_prune_moves[] = {"8G QI", "8H QI"};
+  const int num_avoid_prune = 2;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  int found_count = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    const char *move_str = string_builder_peek(move_string_builder);
+    for (int ap_idx = 0; ap_idx < num_avoid_prune; ap_idx++) {
+      if (strings_equal(move_str, avoid_prune_moves[ap_idx])) {
+        const uint64_t ap_count =
+            stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+        assert(ap_count == winner_count);
+        found_count++;
+      }
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_count == num_avoid_prune);
+  config_destroy(config);
+}
+
+void test_snoprune_with_opp_rack_and_mixed_coords(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // Add both moves explicitly to ensure they appear in the move list.
+  // "H8 QI" uses letter-first coordinates (vertical play at the center
+  // square), "8H QI" uses number-first coordinates (horizontal play at
+  // the center square). Together they verify that the snoprune parser
+  // accepts both coordinate formats.
+  load_and_exec_config_or_die(config, "addmoves H8 QI,8H QI");
+  // "AB" is a non-empty, non-"-" opp rack.
+  load_and_exec_config_or_die(config, "snoprune AB, H8 QI,8H QI");
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+
+  const char *avoid_prune_moves[] = {"H8 QI", "8H QI"};
+  const int num_avoid_prune = 2;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  int found_count = 0;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    const char *move_str = string_builder_peek(move_string_builder);
+    for (int ap_idx = 0; ap_idx < num_avoid_prune; ap_idx++) {
+      if (strings_equal(move_str, avoid_prune_moves[ap_idx])) {
+        const uint64_t ap_count =
+            stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+        assert(ap_count == winner_count);
+        found_count++;
+      }
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_count == num_avoid_prune);
+  config_destroy(config);
+}
+
+void test_sim_avoid_prune_errors(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 500 -scond none");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // 8H QATERS is a phony using rack tiles AEIQRST (minus I) starting at H8.
+  // It passes move validation (phonies allowed, start square occupied) but
+  // is not in the generated NWL20 move list.
+  assert_config_exec_status(config, "snoprune -, 8H QATERS",
+                            ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND);
+  assert_config_exec_status(config, "snoprune A-A, 8H QATERS",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  // "H8" alone (no tiles) causes validated_moves_create to fail with
+  // MISSING_FIELDS, exercising the validated_moves_destroy-on-error path.
+  assert_config_exec_status(config, "snoprune -, H8",
+                            ERROR_STATUS_MOVE_VALIDATION_MISSING_FIELDS);
+  // Missing comma: snoprune_arg is non-empty but has no comma separator.
+  assert_config_exec_status(config, "snoprune PASS",
+                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  config_destroy(config);
+}
+
+void test_snoprune_exchange_and_pass(void) {
+  // Verify that EXCH and PASS moves work as avoid-prune targets using the
+  // comma-prefix format (no rack specified). The old digit-based heuristic
+  // would have misparsed "EXCH AE" or "PASS" as rack tokens.
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 200 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // Add EXCH AE and PASS explicitly; they won't appear in the top-15 list for
+  // rack AEIQRST on an empty board.
+  load_and_exec_config_or_die(config, "addmoves ex AE,pass");
+  // Avoid-prune EXCH AE with no rack specified (comma-prefix syntax).
+  load_and_exec_config_or_die(config, "snoprune , ex AE");
+
+  const SimResults *sim_results = config_get_sim_results(config);
+  const int winner_arm =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm)));
+
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  bool found_exch = false;
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    if (strings_equal(string_builder_peek(move_string_builder), "(Exch AE)")) {
+      const uint64_t ap_count =
+          stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+      assert(ap_count == winner_count);
+      found_exch = true;
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_exch);
+  config_destroy(config);
+
+  // Now test PASS with no rack specified.
+  config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 2 -threads 1 -iter 200 -scond none -seed 42");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  load_and_exec_config_or_die(config, "addmoves pass");
+  load_and_exec_config_or_die(config, "snoprune , pass");
+
+  sim_results = config_get_sim_results(config);
+  const int winner_arm2 =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  const uint64_t winner_count2 =
+      stat_get_num_samples(simmed_play_get_equity_stat(
+          sim_results_get_simmed_play(sim_results, winner_arm2)));
+
+  const int num_plays2 = sim_results_get_number_of_plays(sim_results);
+  bool found_pass = false;
+  for (int play_idx = 0; play_idx < num_plays2; play_idx++) {
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, play_idx);
+    StringBuilder *move_string_builder = string_builder_create();
+    string_builder_add_move_description(move_string_builder,
+                                        simmed_play_get_move(simmed_play),
+                                        config_get_ld(config));
+    if (strings_equal(string_builder_peek(move_string_builder), "(Pass)")) {
+      const uint64_t ap_count =
+          stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+      assert(ap_count == winner_count2);
+      found_pass = true;
+    }
+    string_builder_destroy(move_string_builder);
+  }
+  assert(found_pass);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -849,5 +1155,12 @@ void test_sim(void) {
     test_sim_one_ply();
     test_sim_ctx();
     test_sim_endgame();
+    test_sim_avoid_prune();
+    test_sim_avoid_prune_multi();
+    test_sim_avoid_prune_cmd();
+    test_sim_avoid_prune_cmd_multi();
+    test_snoprune_with_opp_rack_and_mixed_coords();
+    test_snoprune_exchange_and_pass();
+    test_sim_avoid_prune_errors();
   }
 }

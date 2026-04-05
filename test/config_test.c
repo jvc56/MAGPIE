@@ -2279,11 +2279,26 @@ static void assert_note_with_move_ref(Config *config, int move_idx) {
 }
 
 void test_config_note_move_interpolation(void) {
-  // No moves: game has events but no moves have been generated.
+  // Adding a note after navigating back to the start should not crash.
   Config *config = config_create_or_die("set -lex CSW21");
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com h8 RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note test",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+  config_destroy(config);
+
+  // No moves: game has events but no moves have been generated.
+  config = config_create_or_die("set -lex CSW21");
   assert_config_exec_status(config, "load testdata/gcgs/success.gcg",
                             ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "note $1", ERROR_STATUS_NOTE_NO_MOVES);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE);
   config_destroy(config);
 
   // Set up a game with generated moves for the remaining tests.

@@ -76,6 +76,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.cutoff = cutoff;
   // This will be overwritten in autoplay
   sim_args->bai_options.parent_worker_thread_index = 0;
+  sim_args->bai_options.arm_avoid_prune = NULL;
+  sim_args->bai_options.num_arm_avoid_prune = 0;
 }
 
 #endif
