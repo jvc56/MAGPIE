@@ -124,13 +124,13 @@ static void *timeout_thread_function(void *arg) {
   const TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
   char *endgame_string =
       endgame_results_get_string(config_get_endgame_results(args->config),
-                                 config_get_game(args->config), NULL, true);
+                                 config_get_game(args->config));
   free(endgame_string);
   for (int i = 0; i < args->timeout; i++) {
     ctime_nap(1);
     endgame_string =
         endgame_results_get_string(config_get_endgame_results(args->config),
-                                   config_get_game(args->config), NULL, true);
+                                   config_get_game(args->config));
     free(endgame_string);
   }
   thread_control_set_status(config_get_thread_control(args->config),
@@ -572,7 +572,7 @@ void test_multi_pv(void) {
 
   // Test string output
   char *result_str =
-      endgame_results_get_string(multi_results, game, NULL, false);
+      endgame_results_get_string(multi_results, game);
   printf("Multi-PV output:\n%s\n", result_str);
   free(result_str);
 

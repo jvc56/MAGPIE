@@ -2808,8 +2808,7 @@ char *status_endgame(Config *config) {
     return get_formatted_string("endgame results are not yet initialized for "
                                 "the current game state.\n");
   }
-  return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history, true);
+  return endgame_results_get_string(config->endgame_results, config->game);
 }
 
 // Autoplay
@@ -3335,9 +3334,7 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
-  return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history,
-                                    config->human_readable);
+  return endgame_results_get_string(config->endgame_results, config->game);
 }
 
 void execute_show_endgame(Config *config, ErrorStack *error_stack) {

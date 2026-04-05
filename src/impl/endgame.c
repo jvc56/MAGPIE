@@ -2665,7 +2665,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // destroying workers.
   const int num_top = solver->solve_multiple_variations;
   int num_pvs = 1;
-  PVLine *multi_pvs = malloc_or_die(num_top * sizeof(PVLine));
+  PVLine *multi_pvs = malloc_or_die((num_top > 1 ? num_top : 1) * sizeof(PVLine));
   multi_pvs[0] = solver->principal_variation;
 
   if (num_top > 1) {
