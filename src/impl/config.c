@@ -1081,12 +1081,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "to the GCG file, or a local GCG file.";
       break;
     case ARG_TOKEN_NEW_GAME:
-      usages[0] = "[<gcg_filename>]";
+      usages[0] = "<gcg_filename>";
       examples[0] = "";
       examples[1] = "alice_vs_bob";
       examples[2] = "alice_vs_bob.gcg";
       text = "Starts a new game, resetting the previous game and game history. "
-             "The GCG filename can be optionally specified.";
+             "The GCG filename must be specified if fgrequired is enabled.";
       break;
     case ARG_TOKEN_EXPORT:
       usages[0] = "[<output_gcg_filename>]";

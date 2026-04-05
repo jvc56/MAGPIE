@@ -122,15 +122,15 @@ typedef struct {
 
 static void *timeout_thread_function(void *arg) {
   const TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
-  char *endgame_string =
-      endgame_results_get_string(config_get_endgame_results(args->config),
-                                 config_get_game(args->config));
+  char *endgame_string = endgame_results_get_string(
+      config_get_endgame_results(args->config), config_get_game(args->config));
   free(endgame_string);
   for (int i = 0; i < args->timeout; i++) {
     ctime_nap(1);
     endgame_string =
         endgame_results_get_string(config_get_endgame_results(args->config),
                                    config_get_game(args->config));
+    printf("%s\n", endgame_string);
     free(endgame_string);
   }
   thread_control_set_status(config_get_thread_control(args->config),
@@ -212,6 +212,12 @@ void test_single_endgame(const char *config_settings, const char *cgp,
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
+    printf(
+        "Endgame solved successfully with expected score %d and is_pass=%d\n",
+        expected_score, is_pass);
+    char *endgame_string = endgame_results_get_string(endgame_results, game);
+    printf("%s\n", endgame_string);
+    free(endgame_string);
   }
 
   endgame_ctx_destroy(endgame_ctx);
@@ -315,7 +321,7 @@ void test_small_arena_realloc(void) {
 
 void test_endgame_interrupt(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -threads 1 -eplies 25",
+      "set -s1 score -s2 score -threads 1 -eplies 25 -etopk 10",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -571,8 +577,7 @@ void test_multi_pv(void) {
   assert(best_pv->num_moves >= 1);
 
   // Test string output
-  char *result_str =
-      endgame_results_get_string(multi_results, game);
+  char *result_str = endgame_results_get_string(multi_results, game);
   printf("Multi-PV output:\n%s\n", result_str);
   free(result_str);
 
