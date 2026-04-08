@@ -1081,7 +1081,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "to the GCG file, or a local GCG file.";
       break;
     case ARG_TOKEN_NEW_GAME:
-      usages[0] = "<gcg_filename>";
+      usages[0] = "[<gcg_filename>]";
       examples[0] = "";
       examples[1] = "alice_vs_bob";
       examples[2] = "alice_vs_bob.gcg";
@@ -1196,8 +1196,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Shows the inference result.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
-      usages[0] = "";
-      text = "Shows the endgame solver result.";
+      usages[0] = "[<pv_index>]";
+      text = "Shows the endgame solver result. If a PV index is given, "
+             "displays only that PV line (1-indexed) in full move-by-move "
+             "detail.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -2772,10 +2774,12 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->num_threads = config->num_threads;
   endgame_args->num_top_moves = config->endgame_top_k;
   endgame_args->use_heuristics = true;
+  endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->seed = config->seed;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -2808,7 +2812,8 @@ char *status_endgame(Config *config) {
     return get_formatted_string("endgame results are not yet initialized for "
                                 "the current game state.\n");
   }
-  return endgame_results_get_string(config->endgame_results, config->game);
+  return endgame_results_get_string(config->endgame_results, config->game,
+                                    config->game_history);
 }
 
 // Autoplay
@@ -3334,7 +3339,44 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
-  return endgame_results_get_string(config->endgame_results, config->game);
+
+  const char *pv_index_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_ENDGAME, 0);
+  if (!pv_index_str) {
+    return endgame_results_get_string(config->endgame_results, config->game,
+                                      config->game_history);
+  }
+
+  // Optional pv_index: show a single PV line in full move-by-move detail.
+  const int num_pvs =
+      endgame_results_get_num_pvs(config->endgame_results);
+  int pv_index;
+  string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
+                              ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,
+                              &pv_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  // Convert from 1-indexed user input to 0-indexed internal.
+  pv_index--;
+
+  const Game *source_game =
+      endgame_results_get_start_game(config->endgame_results);
+  if (!source_game) {
+    source_game = config->game;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_BEST);
+  endgame_results_update_display_data(config->endgame_results);
+  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_BEST);
+  string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
+                                   config->game_history, pv_index);
+  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
 
 void execute_show_endgame(Config *config, ErrorStack *error_stack) {
@@ -6948,7 +6990,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
-  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
