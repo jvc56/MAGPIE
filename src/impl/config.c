@@ -3348,8 +3348,7 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   }
 
   // Optional pv_index: show a single PV line in full move-by-move detail.
-  const int num_pvs =
-      endgame_results_get_num_pvs(config->endgame_results);
+  const int num_pvs = endgame_results_get_num_pvs(config->endgame_results);
   int pv_index;
   string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
                               ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,

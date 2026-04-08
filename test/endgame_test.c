@@ -287,14 +287,13 @@ void test_single_pv_display(void) {
   // Solve a multi-PV endgame, then verify that shendgame <n> produces output
   // via string_builder_endgame_single_pv for each valid PV index and returns
   // an error for an out-of-range index.
-  Config *config = config_create_or_die(
-      "set -s1 score -s2 score -eplies 4 -etopk 5");
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -eplies 4 -etopk 5");
   load_and_exec_config_or_die(
-      config,
-      "cgp "
-      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
   Game *game = config_get_game(config);
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -349,8 +348,7 @@ void test_ctx_reuse(void) {
       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
 
-  Config *config =
-      config_create_or_die("set -s1 score -s2 score -eplies 4");
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 4");
   load_and_exec_config_or_die(config, cgp);
 
   Game *game = config_get_game(config);

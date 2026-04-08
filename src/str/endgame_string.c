@@ -71,8 +71,7 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
   const int final_spread = initial_on_turn_spread + endgame_value;
 
   string_builder_add_formatted_string(
-      sb,
-      "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs)\n",
+      sb, "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs)\n",
       pv_idx + 1, final_spread, endgame_value, depth, pv->num_moves,
       endgame_results_get_seconds_elapsed(endgame_results));
 
@@ -85,8 +84,8 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
       equity_to_int(player_get_score(game_get_player(source_game, 0)));
   const int p1_initial =
       equity_to_int(player_get_score(game_get_player(source_game, 1)));
-  const int initial_spread = (solving_player == 0) ? p0_initial - p1_initial
-                                                    : p1_initial - p0_initial;
+  const int initial_spread =
+      (solving_player == 0) ? p0_initial - p1_initial : p1_initial - p0_initial;
 
   // A separator row of dashes is inserted between the exact (negamax) moves
   // and the greedy continuation moves.
@@ -111,9 +110,9 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
       }
     }
     // Rows after the negamax boundary are shifted down by the separator row.
-    const int grid_row =
-        (has_separator && move_idx >= pv->negamax_depth) ? move_idx + 2
-                                                         : move_idx + 1;
+    const int grid_row = (has_separator && move_idx >= pv->negamax_depth)
+                             ? move_idx + 2
+                             : move_idx + 1;
     const int player_idx = game_get_player_on_turn_index(gc);
 
     // Player column: nickname if available, otherwise numeric index.
@@ -201,7 +200,8 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   }
 
   // num_pvs > 0: solve is complete; multi_pvs are already fully extended by
-  // endgame_solve, so display them directly in a StringGrid without re-extending.
+  // endgame_solve, so display them directly in a StringGrid without
+  // re-extending.
   string_builder_add_formatted_string(
       pv_description, "Endgame (depth: %d, time: %.3fs)\n", depth,
       endgame_results_get_seconds_elapsed(endgame_results));
@@ -215,7 +215,8 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   // Find the maximum sequence length across all PVs.
   int max_seq_len = 0;
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv = endgame_results_get_multi_pvline(endgame_results, pv_idx);
+    const PVLine *pv =
+        endgame_results_get_multi_pvline(endgame_results, pv_idx);
     if (pv->num_moves > max_seq_len) {
       max_seq_len = pv->num_moves;
     }
@@ -236,14 +237,16 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
 
   StringBuilder *tmp_sb = string_builder_create();
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv = endgame_results_get_multi_pvline(endgame_results, pv_idx);
+    const PVLine *pv =
+        endgame_results_get_multi_pvline(endgame_results, pv_idx);
 
     Game *gc = game_duplicate(source_game);
     for (int move_idx = 0; move_idx < pv->num_moves; move_idx++) {
       Move move;
       small_move_to_move(&move, &pv->moves[move_idx], game_get_board(gc));
 
-      // Prepend "| " to the first greedy move to mark the solved/greedy boundary.
+      // Prepend "| " to the first greedy move to mark the solved/greedy
+      // boundary.
       if (move_idx == pv->negamax_depth && pv->negamax_depth > 0) {
         string_builder_add_string(tmp_sb, "| ");
       }

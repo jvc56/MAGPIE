@@ -39,8 +39,8 @@ int endgame_results_get_value(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
-double endgame_results_get_seconds_elapsed(
-    const EndgameResults *endgame_results);
+double
+endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results);
 void endgame_results_lock(EndgameResults *endgame_results,
                           endgame_result_t type);
 void endgame_results_unlock(EndgameResults *endgame_results,
@@ -62,8 +62,9 @@ void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
 PVLine *endgame_results_get_pvs_writable(EndgameResults *endgame_results);
 void endgame_results_set_num_pvs(EndgameResults *endgame_results, int num_pvs);
 int endgame_results_get_num_pvs(const EndgameResults *endgame_results);
-const PVLine *endgame_results_get_multi_pvline(
-    const EndgameResults *endgame_results, int idx);
+const PVLine *
+endgame_results_get_multi_pvline(const EndgameResults *endgame_results,
+                                 int idx);
 void endgame_results_set_pvline_extend_args(EndgameResults *endgame_results,
                                             TranspositionTable *tt,
                                             int solving_player, int max_depth);

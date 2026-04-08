@@ -145,8 +145,8 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
   return depth;
 }
 
-double endgame_results_get_seconds_elapsed(
-    const EndgameResults *endgame_results) {
+double
+endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results) {
   return endgame_results->seconds_elapsed;
 }
 
