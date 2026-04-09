@@ -32,7 +32,6 @@
 #include "../ent/xoshiro.h"
 #include "../ent/zobrist.h"
 #include "../str/letter_distribution_string.h"
-#include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"

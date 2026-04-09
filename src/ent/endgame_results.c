@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "game.h"
 #include <stdlib.h>

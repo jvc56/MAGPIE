@@ -7,6 +7,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/transposition_table.h"
 #include "../impl/endgame.h"
 #include "../impl/gameplay.h"
 #include "../str/move_string.h"
