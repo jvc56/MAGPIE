@@ -55,11 +55,11 @@ const Game *
 endgame_results_get_start_game(const EndgameResults *endgame_results);
 void endgame_results_stop_ctimer(EndgameResults *endgame_results);
 // Ensure the multi-PV array has room for at least n entries (reallocs if
-// needed). Callers write directly via endgame_results_get_pvs_writable.
+// needed). Callers write directly via endgame_results_get_multi_pvs.
 void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
                                          int n);
 // Return a writable pointer to the multi-PV array.
-PVLine *endgame_results_get_pvs_writable(EndgameResults *endgame_results);
+PVLine *endgame_results_get_multi_pvs(const EndgameResults *endgame_results);
 void endgame_results_set_num_pvs(EndgameResults *endgame_results, int num_pvs);
 int endgame_results_get_num_pvs(const EndgameResults *endgame_results);
 const PVLine *
@@ -72,12 +72,6 @@ TranspositionTable *
 endgame_results_get_tt(const EndgameResults *endgame_results);
 int endgame_results_get_solving_player(const EndgameResults *endgame_results);
 int endgame_results_get_max_depth(const EndgameResults *endgame_results);
-// Ensure the extended-PV array has room for at least n entries.
-void endgame_results_ensure_extended_pvs_capacity(
-    EndgameResults *endgame_results, int n);
-// Return a writable pointer to the extended-PV array.
-PVLine *
-endgame_results_get_extended_pvs_writable(EndgameResults *endgame_results);
 // Prepare the shared ext_game for PV extension: creates it via game_duplicate
 // on first call, then resets it via game_copy on subsequent calls. Always sets
 // endgame solving mode. Returns the ready-to-use game.

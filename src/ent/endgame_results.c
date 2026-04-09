@@ -33,10 +33,6 @@ struct EndgameResults {
   TranspositionTable *tt;
   int solving_player;
   int max_depth;
-  // Extended PVs for display (TT + greedy playout applied). Grown with
-  // realloc_or_die as needed; freed only on destroy.
-  PVLine *extended_pvs;
-  int extended_pvs_capacity;
   // Reusable game copy for PV extension (avoid repeated game_duplicate).
   Game *ext_game;
 };
@@ -59,8 +55,6 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->tt = NULL;
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
-  endgame_results->extended_pvs = NULL;
-  endgame_results->extended_pvs_capacity = 0;
   endgame_results->ext_game = NULL;
   return endgame_results;
 }
@@ -69,7 +63,6 @@ void endgame_results_destroy(EndgameResults *endgame_results) {
   game_destroy(endgame_results->start_game);
   game_destroy(endgame_results->ext_game);
   free(endgame_results->multi_pvs);
-  free(endgame_results->extended_pvs);
   free(endgame_results);
 }
 
@@ -220,7 +213,7 @@ void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
   }
 }
 
-PVLine *endgame_results_get_pvs_writable(EndgameResults *endgame_results) {
+PVLine *endgame_results_get_multi_pvs(const EndgameResults *endgame_results) {
   return endgame_results->multi_pvs;
 }
 
@@ -257,20 +250,6 @@ int endgame_results_get_solving_player(const EndgameResults *endgame_results) {
 
 int endgame_results_get_max_depth(const EndgameResults *endgame_results) {
   return endgame_results->max_depth;
-}
-
-void endgame_results_ensure_extended_pvs_capacity(
-    EndgameResults *endgame_results, int n) {
-  if (n > endgame_results->extended_pvs_capacity) {
-    endgame_results->extended_pvs =
-        realloc_or_die(endgame_results->extended_pvs, n * sizeof(PVLine));
-    endgame_results->extended_pvs_capacity = n;
-  }
-}
-
-PVLine *
-endgame_results_get_extended_pvs_writable(EndgameResults *endgame_results) {
-  return endgame_results->extended_pvs;
 }
 
 Game *endgame_results_prepare_ext_game(EndgameResults *endgame_results,

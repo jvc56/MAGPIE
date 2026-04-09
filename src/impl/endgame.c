@@ -378,9 +378,11 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 
     SmallMove sm = {0};
     sm.tiny_move = tiny_move;
-    small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
     uint16_t move_score = 0;
-    if (!small_move_is_pass(&sm)) {
+    if (small_move_is_pass(&sm)) {
+      move_list_set_spare_move_as_pass(move_list);
+    } else {
+      small_move_to_move(move_list->spare_move, &sm, game_get_board(game_copy));
       const bool kwgs_shared =
           game_get_data_is_shared(game_copy, PLAYERS_DATA_TYPE_KWG);
       const int on_turn_idx = game_get_player_on_turn_index(game_copy);
@@ -414,13 +416,114 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   small_move_list_destroy(move_list);
 }
 
+static bool iterative_deepening_should_stop(EndgameCtx *solver);
+
+// Returns the pruned KWG for the given player index.
+// In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
+// In non-shared mode, each player index maps to its own pruned KWG.
 static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
-                                               int player_index);
+                                               int player_index) {
+  if (solver->pruned_kwgs[1] == NULL) {
+    return solver->pruned_kwgs[0];
+  }
+  return solver->pruned_kwgs[player_index];
+}
+
+// Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
+// fraction. Saves and restores player-on-turn if it differs from opp_idx.
+// If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
+// that appear in at least one valid move.
+// solver is nullable; when non-NULL an interrupt check is performed before
+// the expensive generate_moves call so a fired interrupt cuts the work short.
+// Callers detect the interrupt themselves after this returns.
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
                                         int thread_index,
                                         uint64_t *tiles_played_bv_out,
-                                        EndgameCtx *solver);
+                                        EndgameCtx *solver) {
+  int saved_on_turn = game_get_player_on_turn_index(game);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, opp_idx);
+  }
+  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+  // Cross-set scan: scan the board to find which rack tiles have valid
+  // single-tile plays. If all tiles are playable, skip movegen entirely.
+  // For 1-tile racks the result is authoritative. For multi-tile partial
+  // results, fall through to movegen with opp_tiles_bv pre-seeded.
+  uint64_t opp_tiles_bv = 0;
+  const Board *board = game_get_board(game);
+  if (board_get_cross_sets_valid(board)) {
+    bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+    int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
+    const LetterDistribution *ld = game_get_ld(game);
+    int ld_size = ld_get_size(ld);
+    uint64_t rack_tiles_bv = 0;
+    for (int ml = 0; ml < ld_size; ml++) {
+      if (rack_get_letter(opp_rack, ml) > 0) {
+        rack_tiles_bv |= ((uint64_t)1 << ml);
+      }
+    }
+    uint64_t rack_non_blank = rack_tiles_bv & ~(uint64_t)1;
+    uint64_t playable_bv =
+        board_get_playable_tiles_bv(board, ci, rack_non_blank);
+    opp_tiles_bv = playable_bv & rack_tiles_bv;
+    if ((rack_tiles_bv & 1) && (playable_bv >> 1)) {
+      opp_tiles_bv |= 1;
+    }
+    bool all_playable = (opp_tiles_bv == rack_tiles_bv);
+    if (all_playable || rack_get_total_letters(opp_rack) == 1) {
+      float frac = all_playable ? 0.0F
+                                : stuck_tile_fraction_from_bv(ld, opp_rack,
+                                                              opp_tiles_bv);
+      if (saved_on_turn != opp_idx) {
+        game_set_player_on_turn_index(game, saved_on_turn);
+      }
+      if (tiles_played_bv_out) {
+        *tiles_played_bv_out = opp_tiles_bv;
+      }
+      return frac;
+    }
+    // Multi-tile partial result: not authoritative. Fall through to movegen
+    // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
+    // already-known playable tiles.
+  }
+  // Check for interrupt before the expensive movegen call.  If already fired,
+  // restore game state and return early — the caller will re-detect the
+  // interrupt immediately and discard this 0.0F result.
+  if (solver && iterative_deepening_should_stop(solver)) {
+    if (saved_on_turn != opp_idx) {
+      game_set_player_on_turn_index(game, saved_on_turn);
+    }
+    if (tiles_played_bv_out) {
+      *tiles_played_bv_out = opp_tiles_bv;
+    }
+    return 0.0F;
+  }
+  const MoveGenArgs tp_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_TILES_PLAYED,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = pruned_kwg,
+      .thread_index =
+          endgame_get_movegen_index(thread_index, ENDGAME_MOVEGEN_WORKER),
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .tiles_played_bv = &opp_tiles_bv,
+      .initial_tiles_bv = opp_tiles_bv,
+  };
+  generate_moves(&tp_args);
+  float movegen_result =
+      stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
+  if (saved_on_turn != opp_idx) {
+    game_set_player_on_turn_index(game, saved_on_turn);
+  }
+  if (tiles_played_bv_out) {
+    *tiles_played_bv_out = opp_tiles_bv;
+  }
+  return movegen_result;
+}
 
 // Compute the initial stuck-tile fraction for the opponent at the root.
 // Duplicates the game to avoid modifying the original.
@@ -678,22 +781,14 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
     solver->cap_workers = solver->threads;
   }
   // Copy worker 0's game state (with cross-sets) to workers 1..N-1
-  endgame_ctx_reset_worker_and_game(solver, base_seed, 0);
-  for (int idx = 1; idx < solver->threads; idx++) {
-    endgame_ctx_reset_worker(solver->workers[idx], solver,
-                             solver->workers[0]->game_copy, base_seed);
+  for (int idx = 0; idx < solver->threads; idx++) {
+    if (idx == 0) {
+      endgame_ctx_reset_worker_and_game(solver, base_seed, idx);
+    } else {
+      endgame_ctx_reset_worker(solver->workers[idx], solver,
+                               solver->workers[0]->game_copy, base_seed);
+    }
   }
-}
-
-// Returns the pruned KWG for the given player index.
-// In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
-// In non-shared mode, each player index maps to its own pruned KWG.
-static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
-                                               int player_index) {
-  if (solver->pruned_kwgs[1] == NULL) {
-    return solver->pruned_kwgs[0];
-  }
-  return solver->pruned_kwgs[player_index];
 }
 
 // Generate moves for a single-tile rack by scanning cross-sets, bypassing
@@ -1219,104 +1314,6 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
       (SmallMove *)(worker->small_move_arena->memory + arena_offset);
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
-}
-
-static bool iterative_deepening_should_stop(EndgameCtx *solver);
-
-// Generate opponent's moves in TILES_PLAYED mode and return stuck-tile
-// fraction. Saves and restores player-on-turn if it differs from opp_idx.
-// If tiles_played_bv_out is non-NULL, writes the bitvector of tile types
-// that appear in at least one valid move.
-// solver is nullable; when non-NULL an interrupt check is performed before
-// the expensive generate_moves call so a fired interrupt cuts the work short.
-// Callers detect the interrupt themselves after this returns.
-static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
-                                        const KWG *pruned_kwg, int opp_idx,
-                                        int thread_index,
-                                        uint64_t *tiles_played_bv_out,
-                                        EndgameCtx *solver) {
-  int saved_on_turn = game_get_player_on_turn_index(game);
-  if (saved_on_turn != opp_idx) {
-    game_set_player_on_turn_index(game, opp_idx);
-  }
-  const Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
-  // Cross-set scan: scan the board to find which rack tiles have valid
-  // single-tile plays. If all tiles are playable, skip movegen entirely.
-  // For 1-tile racks the result is authoritative. For multi-tile partial
-  // results, fall through to movegen with opp_tiles_bv pre-seeded.
-  uint64_t opp_tiles_bv = 0;
-  const Board *board = game_get_board(game);
-  if (board_get_cross_sets_valid(board)) {
-    bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
-    int ci = board_get_cross_set_index(kwgs_shared, opp_idx);
-    const LetterDistribution *ld = game_get_ld(game);
-    int ld_size = ld_get_size(ld);
-    uint64_t rack_tiles_bv = 0;
-    for (int ml = 0; ml < ld_size; ml++) {
-      if (rack_get_letter(opp_rack, ml) > 0) {
-        rack_tiles_bv |= ((uint64_t)1 << ml);
-      }
-    }
-    uint64_t rack_non_blank = rack_tiles_bv & ~(uint64_t)1;
-    uint64_t playable_bv =
-        board_get_playable_tiles_bv(board, ci, rack_non_blank);
-    opp_tiles_bv = playable_bv & rack_tiles_bv;
-    if ((rack_tiles_bv & 1) && (playable_bv >> 1)) {
-      opp_tiles_bv |= 1;
-    }
-    bool all_playable = (opp_tiles_bv == rack_tiles_bv);
-    if (all_playable || rack_get_total_letters(opp_rack) == 1) {
-      float frac = all_playable ? 0.0F
-                                : stuck_tile_fraction_from_bv(ld, opp_rack,
-                                                              opp_tiles_bv);
-      if (saved_on_turn != opp_idx) {
-        game_set_player_on_turn_index(game, saved_on_turn);
-      }
-      if (tiles_played_bv_out) {
-        *tiles_played_bv_out = opp_tiles_bv;
-      }
-      return frac;
-    }
-    // Multi-tile partial result: not authoritative. Fall through to movegen
-    // with opp_tiles_bv pre-seeded so movegen skips re-discovering the
-    // already-known playable tiles.
-  }
-  // Check for interrupt before the expensive movegen call.  If already fired,
-  // restore game state and return early — the caller will re-detect the
-  // interrupt immediately and discard this 0.0F result.
-  if (solver && iterative_deepening_should_stop(solver)) {
-    if (saved_on_turn != opp_idx) {
-      game_set_player_on_turn_index(game, saved_on_turn);
-    }
-    if (tiles_played_bv_out) {
-      *tiles_played_bv_out = opp_tiles_bv;
-    }
-    return 0.0F;
-  }
-  const MoveGenArgs tp_args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_TILES_PLAYED,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = pruned_kwg,
-      .thread_index =
-          endgame_get_movegen_index(thread_index, ENDGAME_MOVEGEN_WORKER),
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .tiles_played_bv = &opp_tiles_bv,
-      .initial_tiles_bv = opp_tiles_bv,
-  };
-  generate_moves(&tp_args);
-  float movegen_result =
-      stuck_tile_fraction_from_bv(game_get_ld(game), opp_rack, opp_tiles_bv);
-  if (saved_on_turn != opp_idx) {
-    game_set_player_on_turn_index(game, saved_on_turn);
-  }
-  if (tiles_played_bv_out) {
-    *tiles_played_bv_out = opp_tiles_bv;
-  }
-  return movegen_result;
 }
 
 // Greedy playout at depth==0 leaf nodes: generate moves iteratively,
@@ -2605,7 +2602,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   if (endgame_args->enable_pv_display) {
     // Extract top-K root moves from best thread's arena
     endgame_results_ensure_pvs_capacity(results, solver->num_top_moves);
-    PVLine *multi_pvs = endgame_results_get_pvs_writable(results);
+    PVLine *multi_pvs = endgame_results_get_multi_pvs(results);
     // Get the best PV from the search results (tracked via
     // endgame_results_set_best_pvline during the search).
     multi_pvs[0] = *endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);

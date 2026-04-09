@@ -3366,13 +3366,8 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   }
 
   StringBuilder *sb = string_builder_create();
-  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
-  endgame_results_lock(config->endgame_results, ENDGAME_RESULT_BEST);
-  endgame_results_update_display_data(config->endgame_results);
-  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_BEST);
   string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
                                    config->game_history, pv_index);
-  endgame_results_unlock(config->endgame_results, ENDGAME_RESULT_DISPLAY);
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return result;

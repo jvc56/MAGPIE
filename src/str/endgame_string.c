@@ -1,4 +1,4 @@
-#include "../ent/board.h"
+#include "../def/game_defs.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -6,6 +6,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/rack.h"
 #include "../impl/endgame.h"
 #include "../impl/gameplay.h"
 #include "../str/move_string.h"
@@ -22,12 +23,11 @@
 // When num_pvs == 0 (solve in progress), pv_idx is ignored and the current
 // best display PV (TT-extended) is shown. When num_pvs > 0 (solve complete),
 // pv_idx selects which multi-PV line to display.
-void string_builder_endgame_single_pv(StringBuilder *sb,
-                                      EndgameResults *endgame_results,
-                                      const Game *source_game,
-                                      const GameHistory *game_history,
-                                      int pv_idx) {
-  const PVLine *pv;
+// Assumes the display lock is already held by the caller.
+static void string_builder_endgame_single_pv_with_lock(
+    StringBuilder *sb, EndgameResults *endgame_results, const Game *source_game,
+    const GameHistory *game_history, int pv_idx) {
+  PVLine pv;
   int solving_player;
   int endgame_value;
   int depth;
@@ -42,24 +42,20 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
     depth = endgame_results_get_depth(endgame_results, ENDGAME_RESULT_DISPLAY);
     solving_player = endgame_results_get_solving_player(endgame_results);
 
-    endgame_results_ensure_extended_pvs_capacity(endgame_results, 1);
-    PVLine *extended_pvs =
-        endgame_results_get_extended_pvs_writable(endgame_results);
-    extended_pvs[0] = *raw_pv;
+    pv = *raw_pv;
     TranspositionTable *tt = endgame_results_get_tt(endgame_results);
     const int max_depth = endgame_results_get_max_depth(endgame_results);
     Game *ext_game =
         endgame_results_prepare_ext_game(endgame_results, source_game);
-    pvline_extend_from_tt(&extended_pvs[0], ext_game, tt, solving_player,
-                          max_depth, 0, ENDGAME_MOVEGEN_RESULT_DISPLAY);
-    pv = &extended_pvs[0];
+    pvline_extend_from_tt(&pv, ext_game, tt, solving_player, max_depth, 0,
+                          ENDGAME_MOVEGEN_RESULT_DISPLAY);
   } else {
     // Solve complete: display the requested PV directly.
-    pv = endgame_results_get_multi_pvline(endgame_results, pv_idx);
+    pv = *endgame_results_get_multi_pvline(endgame_results, pv_idx);
     // Use the PV's own negamax_depth as the exact-search depth for this line.
-    depth = pv->negamax_depth;
+    depth = pv.negamax_depth;
     solving_player = game_get_player_on_turn_index(source_game);
-    endgame_value = pv->score;
+    endgame_value = pv.score;
   }
 
   const int p0_score =
@@ -72,10 +68,10 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
 
   string_builder_add_formatted_string(
       sb, "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs)\n",
-      pv_idx + 1, final_spread, endgame_value, depth, pv->num_moves,
+      pv_idx + 1, final_spread, endgame_value, depth, pv.num_moves,
       endgame_results_get_seconds_elapsed(endgame_results));
 
-  if (pv->num_moves == 0) {
+  if (pv.num_moves == 0) {
     return;
   }
 
@@ -90,8 +86,8 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
   // A separator row of dashes is inserted between the exact (negamax) moves
   // and the greedy continuation moves.
   const bool has_separator =
-      (pv->negamax_depth > 0 && pv->negamax_depth < pv->num_moves);
-  const int num_rows = pv->num_moves + 1 + (has_separator ? 1 : 0);
+      (pv.negamax_depth > 0 && pv.negamax_depth < pv.num_moves);
+  const int num_rows = pv.num_moves + 1 + (has_separator ? 1 : 0);
   StringGrid *sg = string_grid_create(num_rows, 5, 1);
   string_grid_set_cell(sg, 0, 0, string_duplicate("Player"));
   string_grid_set_cell(sg, 0, 1, string_duplicate("Move"));
@@ -101,16 +97,16 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
 
   Game *gc = game_duplicate(source_game);
   StringBuilder *tmp_sb = string_builder_create();
-  for (int move_idx = 0; move_idx < pv->num_moves; move_idx++) {
+  for (int move_idx = 0; move_idx < pv.num_moves; move_idx++) {
     // Insert separator row of dashes after the last exact (negamax) move.
-    if (has_separator && move_idx == pv->negamax_depth) {
-      const int sep_row = pv->negamax_depth + 1;
+    if (has_separator && move_idx == pv.negamax_depth) {
+      const int sep_row = pv.negamax_depth + 1;
       for (int col_idx = 0; col_idx < 5; col_idx++) {
         string_grid_set_cell(sg, sep_row, col_idx, string_duplicate("---"));
       }
     }
     // Rows after the negamax boundary are shifted down by the separator row.
-    const int grid_row = (has_separator && move_idx >= pv->negamax_depth)
+    const int grid_row = (has_separator && move_idx >= pv.negamax_depth)
                              ? move_idx + 2
                              : move_idx + 1;
     const int player_idx = game_get_player_on_turn_index(gc);
@@ -129,7 +125,7 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
 
     // Move column: move string with optional end-rack annotation.
     Move move;
-    small_move_to_move(&move, &pv->moves[move_idx], game_get_board(gc));
+    small_move_to_move(&move, &pv.moves[move_idx], game_get_board(gc));
     string_builder_add_move(tmp_sb, game_get_board(gc), &move, ld, true);
     play_move(&move, gc, NULL);
 
@@ -148,7 +144,7 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
     string_builder_clear(tmp_sb);
 
     // Score column: the move's individual point value.
-    const int move_score = (int)small_move_get_score(&pv->moves[move_idx]);
+    const int move_score = (int)small_move_get_score(&pv.moves[move_idx]);
     string_grid_set_cell(sg, grid_row, 2,
                          get_formatted_string("%d", move_score));
 
@@ -167,6 +163,20 @@ void string_builder_endgame_single_pv(StringBuilder *sb,
 
   string_builder_add_string_grid(sb, sg, false);
   string_grid_destroy(sg);
+}
+
+void string_builder_endgame_single_pv(StringBuilder *sb,
+                                      EndgameResults *endgame_results,
+                                      const Game *source_game,
+                                      const GameHistory *game_history,
+                                      int pv_idx) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_DISPLAY);
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
+  endgame_results_update_display_data(endgame_results);
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
+  string_builder_endgame_single_pv_with_lock(sb, endgame_results, source_game,
+                                             game_history, pv_idx);
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_DISPLAY);
 }
 
 static void string_builder_endgame_results(StringBuilder *pv_description,
@@ -194,8 +204,8 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   // num_pvs == 0: a solve is in progress; show the current best PV with TT
   // extension in a per-move table for live display.
   if (num_pvs == 0) {
-    string_builder_endgame_single_pv(pv_description, endgame_results,
-                                     source_game, game_history, 0);
+    string_builder_endgame_single_pv_with_lock(pv_description, endgame_results,
+                                               source_game, game_history, 0);
     return;
   }
 
