@@ -89,6 +89,7 @@ typedef enum {
   ARG_TOKEN_RANDOM_RACK,
   ARG_TOKEN_GEN,
   ARG_TOKEN_SIM,
+  ARG_TOKEN_SNOPRUNE,
   ARG_TOKEN_GEN_AND_SIM,
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
@@ -178,6 +179,7 @@ typedef enum {
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
+  ARG_TOKEN_FG_REQUIRED,
   ARG_TOKEN_SHOW_GAME_WITH_MOVES,
   ARG_TOKEN_P1_SIM_PLIES,
   ARG_TOKEN_P2_SIM_PLIES,
@@ -257,6 +259,7 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool autosave_gcg;
+  bool fg_required;
   bool loaded_settings;
   char *record_filepath;
   char *settings_filename;
@@ -299,7 +302,7 @@ struct Config {
   GameHistory *game_history;
   GameHistory *game_history_backup;
   MoveList *move_list;
-  EndgameSolver *endgame_solver;
+  EndgameCtx *endgame_ctx;
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
@@ -471,6 +474,10 @@ bool config_get_show_prompt(const Config *config) {
 
 bool config_get_save_settings(const Config *config) {
   return config->save_settings;
+}
+
+bool config_get_fg_required(const Config *config) {
+  return config->fg_required;
 }
 
 bool config_get_loaded_settings(const Config *config) {
@@ -956,6 +963,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "has a known rack for the opponent, you can use '-' to force the "
              "sim to use a completely random rack.";
       break;
+    case ARG_TOKEN_SNOPRUNE:
+      usages[0] = "[[<opponent_known_rack>] <move1>[,<move2>,...]]";
+      examples[0] = "";
+      examples[1] = "8G QI";
+      examples[2] = "- 8G QI,8H QI";
+      examples[3] = "ABC 8G QI,8H QI";
+      text = "Runs a Monte Carlo simulation for the current position, "
+             "preventing the BAI algorithm from pruning the specified moves. "
+             "An optional opponent rack may precede the comma-separated move "
+             "list; if omitted the opponent's currently known rack is used. "
+             "Use '-' to force a random opponent rack. Moves are "
+             "comma-separated and may contain spaces (e.g. '8G QI').";
+      break;
     case ARG_TOKEN_GEN_AND_SIM:
       usages[0] = "[<opponent_known_rack>]";
       examples[0] = "";
@@ -1084,7 +1104,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "alice_vs_bob";
       examples[2] = "alice_vs_bob.gcg";
       text = "Starts a new game, resetting the previous game and game history. "
-             "The GCG filename can be optionally specified.";
+             "The GCG filename must be specified if fgrequired is enabled.";
       break;
     case ARG_TOKEN_EXPORT:
       usages[0] = "[<output_gcg_filename>]";
@@ -1194,8 +1214,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Shows the inference result.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
-      usages[0] = "";
-      text = "Shows the endgame solver result.";
+      usages[0] = "[<pv_index>]";
+      text = "Shows the endgame solver result. If a PV index is given, "
+             "displays only that PV line (1-indexed) in full move-by-move "
+             "detail.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -1209,7 +1231,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[7] = "10 4 b";
       text = "Shows the heat map for the given play, ply, and type. If no ply "
              "is given, a default of 1 will be used. If no type is given, a "
-             "default of 'all' will be used.";
+             "default of 'all' will be used. Heat maps are not recorded by "
+             "default during the simulation. To enable heat maps, set the "
+             "'useheatmap' option to true.";
       break;
     case ARG_TOKEN_NEXT:
       usages[0] = "";
@@ -1669,6 +1693,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to automatically save the game history "
              "as a GCG after every change.";
       break;
+    case ARG_TOKEN_FG_REQUIRED:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not a filename is required for the newgame "
+             "command.";
+      break;
     case ARG_TOKEN_P1_SIM_PLIES:
     case ARG_TOKEN_P2_SIM_PLIES:
       usages[0] = "<plies>";
@@ -1840,6 +1871,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
+        ARG_TOKEN_SNOPRUNE,             /* snoprune */
     };
     // Other Commands (alphabetical by name)
     static const arg_token_t other_cmds[] = {
@@ -1936,6 +1968,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
         ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
         ARG_TOKEN_EXEC_MODE,         /* mode */
         ARG_TOKEN_DATA_PATH,         /* path */
         ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
@@ -2441,7 +2474,8 @@ void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
-                     SimResults *sim_results, ErrorStack *error_stack) {
+                     SimResults *sim_results, int *arm_avoid_prune,
+                     int num_arm_avoid_prune, ErrorStack *error_stack) {
   // Lazy load win_pcts if not already loaded
   config_load_win_pcts(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2459,6 +2493,8 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
   config_fill_sim_args(config, known_opp_rack, &target_played_tiles,
                        &nontarget_known_tiles, &target_known_inference_tiles,
                        &args);
+  args.bai_options.arm_avoid_prune = arm_avoid_prune;
+  args.bai_options.num_arm_avoid_prune = num_arm_avoid_prune;
   if (game_history_get_num_events(config->game_history) == 0) {
     args.use_inference = false;
   }
@@ -2477,15 +2513,20 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     return;
   }
 
+  if (config->move_list == NULL ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
+                     string_duplicate("cannot simulate without any moves"));
+    return;
+  }
   config_init_game(config);
 
   const int ld_size = ld_get_size(game_get_ld(config->game));
-  const char *known_opp_rack_str = config_get_parg_value(
-      config, known_opp_rack_arg_token, known_opp_rack_str_index);
   Rack known_opp_rack;
   rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
 
-  // Set setting empty opp rack with '-'
+  const char *known_opp_rack_str = config_get_parg_value(
+      config, known_opp_rack_arg_token, known_opp_rack_str_index);
   if (known_opp_rack_str && !strings_equal(known_opp_rack_str, "-")) {
     load_rack_or_push_to_error_stack(
         known_opp_rack_str, game_get_ld(config->game),
@@ -2496,14 +2537,184 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     }
   } else if (!known_opp_rack_str) {
     // If no input rack is specified, default to simming with the opponent's
-    // currently known rack
+    // currently known rack.
     rack_copy(
         &known_opp_rack,
         player_get_rack(game_get_player(
             config->game, 1 - game_get_player_on_turn_index(config->game))));
   }
-  config_simulate(config, NULL, &known_opp_rack, config->sim_results,
+
+  config_simulate(config, NULL, &known_opp_rack, config->sim_results, NULL, 0,
                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const bool use_inference_for_this_run =
+      config->sim_with_inference &&
+      game_history_get_num_events(config->game_history) > 0;
+  bool sim_results_valid = true;
+  if (use_inference_for_this_run) {
+    // This will always set the state to false if it was interrupted
+    inference_results_set_valid_for_current_game_state(
+        config->inference_results, true);
+    // If the inference was interrupted, the sim results will be invalid
+    sim_results_valid = inference_results_get_valid_for_current_game_state(
+        config->inference_results);
+  }
+  sim_results_set_valid_for_current_game_state(config->sim_results,
+                                               sim_results_valid);
+}
+
+void impl_snoprune(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot simulate without lexicon"));
+    return;
+  }
+
+  if (config->move_list == NULL ||
+      move_list_get_count(config->move_list) == 0) {
+    error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
+                     string_duplicate("cannot simulate without any moves"));
+    return;
+  }
+
+  config_init_game(config);
+
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack known_opp_rack;
+  rack_set_dist_size_and_reset(&known_opp_rack, ld_size);
+
+  int *unpruned_move_idxs = NULL;
+  int num_unpruned_moves = 0;
+
+  const char *snoprune_arg =
+      config_get_parg_value(config, ARG_TOKEN_SNOPRUNE, 0);
+  const char *moves_str = NULL;
+  bool rack_provided = false;
+
+  if (snoprune_arg && !is_string_empty_or_whitespace(snoprune_arg)) {
+    // Format: [rack][optional whitespace],moves
+    // The first comma separates the optional rack from the move list.
+    // Example with rack:    "AB, H8 QI" or "-, H8 QI"
+    // Example without rack: ", H8 QI"
+    const char *comma = strchr(snoprune_arg, ',');
+    if (!comma) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG,
+          string_duplicate("snoprune requires a comma separating the optional "
+                           "rack from the move list (e.g. ', H8 QI' or "
+                           "'AB, H8 QI')"));
+      return;
+    }
+    // Extract and trim the pre-comma portion as the optional rack
+    const size_t pre_comma_len = (size_t)(comma - snoprune_arg);
+    char *rack_str = malloc_or_die(pre_comma_len + 1);
+    memcpy(rack_str, snoprune_arg, pre_comma_len);
+    rack_str[pre_comma_len] = '\0';
+    // Trim trailing whitespace from the rack string
+    size_t trimmed_len = pre_comma_len;
+    while (trimmed_len > 0 && rack_str[trimmed_len - 1] == ' ') {
+      trimmed_len--;
+    }
+    rack_str[trimmed_len] = '\0';
+    // Everything after the comma is the moves string; skip leading whitespace
+    moves_str = comma + 1;
+    while (*moves_str == ' ') {
+      moves_str++;
+    }
+    if (trimmed_len == 0) {
+      // No rack token before the comma; use the opponent's current rack
+      rack_provided = false;
+    } else {
+      rack_provided = true;
+      if (!strings_equal(rack_str, "-")) {
+        load_rack_or_push_to_error_stack(
+            rack_str, game_get_ld(config->game),
+            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG, &known_opp_rack,
+            error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          free(rack_str);
+          return;
+        }
+      }
+    }
+    free(rack_str);
+  }
+
+  if (!rack_provided) {
+    // Default to the opponent's currently known rack.
+    rack_copy(
+        &known_opp_rack,
+        player_get_rack(game_get_player(
+            config->game, 1 - game_get_player_on_turn_index(config->game))));
+  }
+
+  if (moves_str && !is_string_empty_or_whitespace(moves_str)) {
+    ValidatedMoves *unpruned_vms = validated_moves_create(
+        config->game, game_get_player_on_turn_index(config->game), moves_str,
+        true, true, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      validated_moves_destroy(unpruned_vms);
+      return;
+    }
+    num_unpruned_moves = validated_moves_get_number_of_moves(unpruned_vms);
+    const int num_moves = move_list_get_count(config->move_list);
+    const Rack *move_rack = move_list_get_rack(config->move_list);
+    unpruned_move_idxs = malloc_or_die(num_unpruned_moves * sizeof(int));
+    uint64_t *unpruned_moves_keys =
+        malloc_or_die(num_unpruned_moves * sizeof(uint64_t));
+    for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+      const uint64_t move_key = move_get_similarity_key(
+          move_list_get_move(config->move_list, move_idx), move_rack);
+      for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+           unpruned_vm_idx++) {
+        uint64_t unpruned_move_key;
+        if (move_idx == 0) {
+          // Cache the similarity keys for the unpruned moves to avoid redundant
+          // calculations in the inner loop.
+          unpruned_move_key = move_get_similarity_key(
+              validated_moves_get_move(unpruned_vms, unpruned_vm_idx),
+              move_rack);
+          unpruned_moves_keys[unpruned_vm_idx] = unpruned_move_key;
+          unpruned_move_idxs[unpruned_vm_idx] = -1;
+        } else {
+          unpruned_move_key = unpruned_moves_keys[unpruned_vm_idx];
+        }
+        if (move_key == unpruned_move_key) {
+          unpruned_move_idxs[unpruned_vm_idx] = move_idx;
+          break;
+        }
+      }
+    }
+    for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+         unpruned_vm_idx++) {
+      if (unpruned_move_idxs[unpruned_vm_idx] < 0) {
+        const Move *unfound_move =
+            validated_moves_get_move(unpruned_vms, unpruned_vm_idx);
+        StringBuilder *unfound_move_sb = string_builder_create();
+        string_builder_add_move(unfound_move_sb, game_get_board(config->game),
+                                unfound_move, game_get_ld(config->game), false);
+        error_stack_push(
+            error_stack, ERROR_STATUS_SIM_AVOID_PRUNE_MOVE_NOT_FOUND,
+            get_formatted_string(
+                "unpruned move '%s' was not found in the current move list",
+                string_builder_peek(unfound_move_sb)));
+        string_builder_destroy(unfound_move_sb);
+        break;
+      }
+    }
+    validated_moves_destroy(unpruned_vms);
+    free(unpruned_moves_keys);
+    if (!error_stack_is_empty(error_stack)) {
+      free(unpruned_move_idxs);
+      return;
+    }
+  }
+
+  config_simulate(config, NULL, &known_opp_rack, config->sim_results,
+                  unpruned_move_idxs, num_unpruned_moves, error_stack);
+  free(unpruned_move_idxs);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -2532,6 +2743,8 @@ char *status_sim(Config *config) {
       config->game, sim_results, config->max_num_display_plays, config->shplies,
       -1, -1, NULL, 0, false, !config->human_readable, NULL);
 }
+
+char *status_snoprune(Config *config) { return status_sim(config); }
 
 // Gen and Sim
 
@@ -2580,17 +2793,19 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->num_threads = config->num_threads;
   endgame_args->num_top_moves = config->endgame_top_k;
   endgame_args->use_heuristics = true;
+  endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->seed = config->seed;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
                     ErrorStack *error_stack) {
   EndgameArgs endgame_args;
   config_fill_endgame_args(config, &endgame_args);
-  endgame_solve(config->endgame_solver, &endgame_args, endgame_results,
+  endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
                 error_stack);
 }
 
@@ -2617,7 +2832,7 @@ char *status_endgame(Config *config) {
                                 "the current game state.\n");
   }
   return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history, true);
+                                    config->game_history);
 }
 
 // Autoplay
@@ -3143,9 +3358,38 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
-  return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history,
-                                    config->human_readable);
+
+  const char *pv_index_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_ENDGAME, 0);
+  if (!pv_index_str) {
+    return endgame_results_get_string(config->endgame_results, config->game,
+                                      config->game_history);
+  }
+
+  // Optional pv_index: show a single PV line in full move-by-move detail.
+  const int num_pvs = endgame_results_get_num_pvs(config->endgame_results);
+  int pv_index;
+  string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
+                              ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,
+                              &pv_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  // Convert from 1-indexed user input to 0-indexed internal.
+  pv_index--;
+
+  const Game *source_game =
+      endgame_results_get_start_game(config->endgame_results);
+  if (!source_game) {
+    source_game = config->game;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
+                                   config->game_history, pv_index);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
 
 void execute_show_endgame(Config *config, ErrorStack *error_stack) {
@@ -3388,12 +3632,19 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
         string_duplicate("cannot create new game without lexicon"));
     return empty_string();
   }
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
+  if (config->fg_required && !user_provided_filename) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("cannot create a new game without a filename while "
+                         "the fgrequired option is enabled"));
+    return empty_string();
+  }
   config_init_game(config);
   game_reset(config->game);
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
-  const char *user_provided_filename =
-      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
   }
@@ -4043,7 +4294,7 @@ static char *build_interpolated_note(const Config *config, const char *raw_note,
       }
       if (num_moves == 0) {
         error_stack_push(
-            error_stack, ERROR_STATUS_NOTE_NO_MOVES,
+            error_stack, ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE,
             string_duplicate("no moves available for $N interpolation"));
         string_builder_destroy(sb);
         return NULL;
@@ -4690,7 +4941,7 @@ char *impl_note(Config *config, ErrorStack *error_stack) {
     return empty_string();
   }
 
-  if (game_history_get_num_events(config->game_history) == 0) {
+  if (game_history_get_num_played_events(config->game_history) == 0) {
     error_stack_push(
         error_stack, ERROR_STATUS_NOTE_NO_GAME_EVENTS,
         string_duplicate("cannot add a note to an empty game history"));
@@ -5022,7 +5273,8 @@ void config_load_parsed_args(Config *config,
           current_arg_token == ARG_TOKEN_CNOTE ||
           current_arg_token == ARG_TOKEN_P1_NAME ||
           current_arg_token == ARG_TOKEN_P2_NAME ||
-          current_arg_token == ARG_TOKEN_MOVES) {
+          current_arg_token == ARG_TOKEN_MOVES ||
+          current_arg_token == ARG_TOKEN_SNOPRUNE) {
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.
@@ -5715,7 +5967,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_VARIANT_LENGTH,
+  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, INT_MAX,
                   &config->endgame_top_k, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -5905,6 +6157,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Autosave GCG
   config_load_bool(config, ARG_TOKEN_AUTOSAVE_GCG, &config->autosave_gcg,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // FG required
+  config_load_bool(config, ARG_TOKEN_FG_REQUIRED, &config->fg_required,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -6582,6 +6841,19 @@ char *str_api_sim(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_snoprune(Config *config, ErrorStack *error_stack) {
+  impl_snoprune(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  execute_show_moves_or_sim_results(config, error_stack);
+}
+
+char *str_api_snoprune(Config *config, ErrorStack *error_stack) {
+  impl_snoprune(config, error_stack);
+  return empty_string();
+}
+
 void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -6973,13 +7245,14 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
-  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
   cmd(ARG_TOKEN_RANDOM_RACK, "rrack", 0, 0, set_random_rack, generic, true);
   cmd(ARG_TOKEN_GEN, "generate", 0, 0, move_gen, generic, true);
   cmd(ARG_TOKEN_SIM, "simulate", 0, 1, sim, sim, false);
+  cmd(ARG_TOKEN_SNOPRUNE, "snoprune", 0, 1, snoprune, snoprune, false);
   cmd(ARG_TOKEN_GEN_AND_SIM, "gsimulate", 0, 1, gen_and_sim, gen_and_sim,
       false);
   cmd(ARG_TOKEN_RACK_AND_GEN_AND_SIM, "rgsimulate", 1, 2, rack_and_gen_and_sim,
@@ -7078,6 +7351,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
+  arg(ARG_TOKEN_FG_REQUIRED, "fgrequired", 1, 1);
   arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
 
 #undef cmd
@@ -7154,6 +7428,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_prompt = true;
   config->save_settings = true;
   config->autosave_gcg = true;
+  config->fg_required = true;
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
@@ -7164,7 +7439,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->move_list = NULL;
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
-  config->endgame_solver = endgame_solver_create();
+  config->endgame_ctx = NULL;
   config->sim_results = sim_results_create(config->cutoff);
   config->inference_results = inference_results_create(NULL);
   config->endgame_results = endgame_results_create();
@@ -7194,7 +7469,7 @@ void config_destroy(Config *config) {
   game_destroy(config->game_backup);
   game_history_destroy(config->game_history);
   game_history_destroy(config->game_history_backup);
-  endgame_solver_destroy(config->endgame_solver);
+  endgame_ctx_destroy(config->endgame_ctx);
   move_list_destroy(config->move_list);
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);
@@ -7263,6 +7538,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
     case ARG_TOKEN_SIM:
+    case ARG_TOKEN_SNOPRUNE:
     case ARG_TOKEN_GEN_AND_SIM:
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
@@ -7691,6 +7967,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOSAVE_GCG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->autosave_gcg);
+      break;
+    case ARG_TOKEN_FG_REQUIRED:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->fg_required);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token when saving settings");

@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "game.h"
 #include <stdlib.h>
@@ -19,11 +20,22 @@ struct EndgameResults {
   PVData display_pv_data;
   bool valid_for_current_game_state;
   Timer timer;
-  double display_seconds_elapsed;
+  double seconds_elapsed;
   // Snapshot of the game state when the endgame solve began; used by
   // shendgame to decode the PV even if config->game has since changed (e.g.
   // after newgame).
   Game *start_game;
+  // Top-K PVs from the most recent completed solve.  The array is grown with
+  // realloc_or_die as needed and freed only on destroy (reset keeps it).
+  PVLine *multi_pvs;
+  _Atomic int num_pvs;
+  int multi_pvs_capacity;
+  // Arguments forwarded to pvline_extend_from_tt for PV display extension.
+  TranspositionTable *tt;
+  int solving_player;
+  int max_depth;
+  // Reusable game copy for PV extension (avoid repeated game_duplicate).
+  Game *ext_game;
 };
 
 EndgameResults *endgame_results_create(void) {
@@ -38,11 +50,20 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
   endgame_results->start_game = NULL;
+  endgame_results->multi_pvs = NULL;
+  endgame_results->num_pvs = 0;
+  endgame_results->multi_pvs_capacity = 0;
+  endgame_results->tt = NULL;
+  endgame_results->solving_player = 0;
+  endgame_results->max_depth = 0;
+  endgame_results->ext_game = NULL;
   return endgame_results;
 }
 
 void endgame_results_destroy(EndgameResults *endgame_results) {
   game_destroy(endgame_results->start_game);
+  game_destroy(endgame_results->ext_game);
+  free(endgame_results->multi_pvs);
   free(endgame_results);
 }
 
@@ -56,6 +77,11 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   ctimer_start(&endgame_results->timer);
   game_destroy(endgame_results->start_game);
   endgame_results->start_game = NULL;
+  // Keep multi_pvs buffer alive for reuse; just reset the count.
+  endgame_results->num_pvs = 0;
+  endgame_results->tt = NULL;
+  endgame_results->solving_player = 0;
+  endgame_results->max_depth = 0;
 }
 
 bool endgame_results_get_valid_for_current_game_state(
@@ -113,9 +139,9 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
   return depth;
 }
 
-double endgame_results_get_display_seconds_elapsed(
-    const EndgameResults *endgame_results) {
-  return endgame_results->display_seconds_elapsed;
+double
+endgame_results_get_seconds_elapsed(const EndgameResults *endgame_results) {
+  return endgame_results->seconds_elapsed;
 }
 
 void endgame_results_lock(EndgameResults *endgame_results,
@@ -147,7 +173,7 @@ void endgame_results_update_display_data(EndgameResults *endgame_results) {
       endgame_results->best_pv_data.pv_line;
   endgame_results->display_pv_data.value = endgame_results->best_pv_data.value;
   endgame_results->display_pv_data.depth = endgame_results->best_pv_data.depth;
-  endgame_results->display_seconds_elapsed =
+  endgame_results->seconds_elapsed =
       ctimer_elapsed_seconds(&endgame_results->timer);
 }
 
@@ -176,4 +202,64 @@ endgame_results_get_start_game(const EndgameResults *endgame_results) {
 
 void endgame_results_stop_ctimer(EndgameResults *endgame_results) {
   ctimer_stop(&endgame_results->timer);
+}
+
+// NOT THREAD SAFE: Caller must ensure synchronization
+void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
+                                         int n) {
+  if (n > endgame_results->multi_pvs_capacity) {
+    endgame_results->multi_pvs =
+        realloc_or_die(endgame_results->multi_pvs, n * sizeof(PVLine));
+    endgame_results->multi_pvs_capacity = n;
+  }
+}
+
+PVLine *endgame_results_get_multi_pvs(const EndgameResults *endgame_results) {
+  return endgame_results->multi_pvs;
+}
+
+void endgame_results_set_num_pvs(EndgameResults *endgame_results, int num_pvs) {
+  atomic_store(&endgame_results->num_pvs, num_pvs);
+}
+
+int endgame_results_get_num_pvs(const EndgameResults *endgame_results) {
+  return atomic_load(&endgame_results->num_pvs);
+}
+
+const PVLine *
+endgame_results_get_multi_pvline(const EndgameResults *endgame_results,
+                                 int idx) {
+  return &endgame_results->multi_pvs[idx];
+}
+
+void endgame_results_set_pvline_extend_args(EndgameResults *endgame_results,
+                                            TranspositionTable *tt,
+                                            int solving_player, int max_depth) {
+  endgame_results->tt = tt;
+  endgame_results->solving_player = solving_player;
+  endgame_results->max_depth = max_depth;
+}
+
+TranspositionTable *
+endgame_results_get_tt(const EndgameResults *endgame_results) {
+  return endgame_results->tt;
+}
+
+int endgame_results_get_solving_player(const EndgameResults *endgame_results) {
+  return endgame_results->solving_player;
+}
+
+int endgame_results_get_max_depth(const EndgameResults *endgame_results) {
+  return endgame_results->max_depth;
+}
+
+Game *endgame_results_prepare_ext_game(EndgameResults *endgame_results,
+                                       const Game *source_game) {
+  if (!endgame_results->ext_game) {
+    endgame_results->ext_game = game_duplicate(source_game);
+  } else {
+    game_copy(endgame_results->ext_game, source_game);
+  }
+  game_set_endgame_solving_mode(endgame_results->ext_game);
+  return endgame_results->ext_game;
 }

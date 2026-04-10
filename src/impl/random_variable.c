@@ -34,6 +34,7 @@ typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
                                     const int, const uint64_t, BAILogger *);
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
+typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
 
 struct RandomVariables {
   uint64_t num_rvs;
@@ -41,6 +42,7 @@ struct RandomVariables {
   rvs_sample_func_t sample_func;
   rvs_similar_func_t similar_func;
   rvs_destroy_data_func_t destroy_data_func;
+  rvs_get_best_arm_index_func_t get_best_arm_index_func;
   void *data;
 };
 
@@ -77,10 +79,18 @@ void rv_uniform_destroy(RandomVariables *rvs) {
   free(rv_uniform);
 }
 
+static int rv_unsupported_get_best_arm_index(const RandomVariables *rvs
+                                             __attribute__((unused))) {
+  log_fatal("rvs_get_best_arm_index called on non-simmed-plays "
+            "RandomVariables");
+  return -1;
+}
+
 void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->sample_func = rv_uniform_sample;
   rvs->similar_func = rv_uniform_are_similar;
   rvs->destroy_data_func = rv_uniform_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
   cpthread_mutex_init(&rv_uniform->mutex);
@@ -137,6 +147,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rvs->sample_func = rv_uniform_predetermined_sample;
   rvs->similar_func = rv_uniform_predetermined_are_similar;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
   rv_uniform_predetermined->num_samples = num_samples;
@@ -205,6 +216,7 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   rvs->sample_func = rv_normal_sample;
   rvs->similar_func = rv_normal_are_similar;
   rvs->destroy_data_func = rv_normal_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->xoshiro_prng = prng_create(seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
@@ -285,6 +297,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->sample_func = rv_normal_predetermined_sample;
   rvs->similar_func = rv_normal_predetermined_are_similar;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
+  rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
   rv_normal_predetermined->num_samples = num_samples;
@@ -482,6 +495,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   return wpct;
 }
 
+static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  return sim_results_get_best_move_index(simmer->sim_results);
+}
+
 bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
   const Simmer *simmer = (Simmer *)rvs->data;
   return sim_results_plays_are_similar(simmer->sim_results, i, j);
@@ -503,6 +521,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->sample_func = rv_sim_sample;
   rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
+  rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
 
@@ -680,4 +699,8 @@ uint64_t rvs_get_num_rvs(const RandomVariables *rvs) { return rvs->num_rvs; }
 // NOT THREAD SAFE: caller is responsible for ensuring thread safety.
 uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
   return rvs->total_samples;
+}
+
+int rvs_get_best_arm_index(const RandomVariables *rvs) {
+  return rvs->get_best_arm_index_func(rvs);
 }

@@ -181,7 +181,8 @@ Config *config_create_default_test(void) {
   error_stack_destroy(error_stack);
   load_and_exec_config_or_die(
       config, "set -threads 1 -savesettings false -hr "
-              "false -numplays 15 -ima 0 -minp 100 -autosave false");
+              "false -numplays 15 -ima 0 -minp 100 -autosave false "
+              "-fgrequired false");
   return config;
 }
 
@@ -802,7 +803,8 @@ error_code_t config_simulate_and_return_status(Config *config, SimCtx **sim_ctx,
   ErrorStack *error_stack = error_stack_create();
   thread_control_set_status(config_get_thread_control(config),
                             THREAD_CONTROL_STATUS_STARTED);
-  config_simulate(config, sim_ctx, known_opp_rack, sim_results, error_stack);
+  config_simulate(config, sim_ctx, known_opp_rack, sim_results, NULL, 0,
+                  error_stack);
   error_code_t status = error_stack_top(error_stack);
   if (status != ERROR_STATUS_SUCCESS) {
     printf("config simulate finished with error: %d\n", status);

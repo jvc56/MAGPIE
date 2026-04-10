@@ -2279,11 +2279,26 @@ static void assert_note_with_move_ref(Config *config, int move_idx) {
 }
 
 void test_config_note_move_interpolation(void) {
-  // No moves: game has events but no moves have been generated.
+  // Adding a note after navigating back to the start should not crash.
   Config *config = config_create_or_die("set -lex CSW21");
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "r RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com h8 RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note test",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+  config_destroy(config);
+
+  // No moves: game has events but no moves have been generated.
+  config = config_create_or_die("set -lex CSW21");
   assert_config_exec_status(config, "load testdata/gcgs/success.gcg",
                             ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "note $1", ERROR_STATUS_NOTE_NO_MOVES);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_GAME_EVENTS);
+  assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "n", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "note $1",
+                            ERROR_STATUS_NOTE_NO_MOVES_TO_INTERPOLATE);
   config_destroy(config);
 
   // Set up a game with generated moves for the remaining tests.
@@ -2336,6 +2351,22 @@ void test_config_note_move_interpolation(void) {
   config_destroy(config);
 }
 
+void test_config_fg_required(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+
+  // fgrequired defaults to false in test config, so newgame without a
+  // filename should succeed.
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+
+  // Enable fgrequired; newgame without a filename should now fail.
+  assert_config_exec_status(config, "set -fgrequired true",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame",
+                            ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2351,4 +2382,5 @@ void test_config(void) {
   test_config_lexical_data();
   test_config_wmp();
   test_config_note_move_interpolation();
+  test_config_fg_required();
 }

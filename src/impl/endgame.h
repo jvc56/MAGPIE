@@ -20,7 +20,7 @@ enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
 };
 
-typedef struct EndgameSolver EndgameSolver;
+typedef struct EndgameCtx EndgameCtx;
 
 // Callback for per-ply PV reporting during iterative deepening
 // Parameters: depth, value (spread delta), pv_line, game,
@@ -48,24 +48,37 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
+  bool enable_pv_display; // Whether to prepare PVLine data for display
+                          // (default: false)
   // IDS time management (0 = no limit, rely on external timer only):
   // After each completed depth, if elapsed > soft_time_limit, stop.
   // If elapsed < soft_time_limit, estimate next depth time via EBF.
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  uint64_t seed;
 } EndgameArgs;
 
-EndgameSolver *endgame_solver_create(void);
-void endgame_solve(EndgameSolver *solver, const EndgameArgs *endgame_args,
+// Selects the movegen cache slot to avoid races between concurrent callers.
+// RESULT_DISPLAY (slot 0) and SOLVER (slot 1) can run simultaneously during
+// a solve; WORKER threads use slot thread_index + 2.
+typedef enum {
+  ENDGAME_MOVEGEN_RESULT_DISPLAY,
+  ENDGAME_MOVEGEN_SOLVER,
+  ENDGAME_MOVEGEN_WORKER,
+} endgame_movegen_caller_t;
+
+void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
+                           TranspositionTable *tt, int solving_player,
+                           int max_depth, int thread_index,
+                           endgame_movegen_caller_t caller);
+void endgame_ctx_destroy(EndgameCtx *ctx);
+void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
-void endgame_solver_destroy(EndgameSolver *es);
 const TranspositionTable *
-endgame_solver_get_transposition_table(const EndgameSolver *es);
-void endgame_solver_get_progress(const EndgameSolver *es, int *current_depth,
-                                 int *root_moves_completed,
-                                 int *root_moves_total,
-                                 int *ply2_moves_completed,
-                                 int *ply2_moves_total);
+endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
+void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
+                              int *root_moves_completed, int *root_moves_total,
+                              int *ply2_moves_completed, int *ply2_moves_total);
 
 #endif
