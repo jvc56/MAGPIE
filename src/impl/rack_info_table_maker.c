@@ -270,7 +270,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
   memset(entry->multi_pt_tp7_bitvec, 0,
-         RIT_MULTI_PT_TP7_ALPHABET_SIZE * sizeof(uint8_t));
+         RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS * sizeof(uint32_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
   for (int leave_idx = 0;
@@ -315,7 +315,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 typedef struct {
   const uint8_t *rack_letter_counts; // BIT_RACK_MAX_ALPHABET_SIZE
   uint8_t submultiset_counts[BIT_RACK_MAX_ALPHABET_SIZE];
-  int bit_pos;
+  int len_idx; // Index into multi_pt_tp7_bitvec[] for the current word length
   const RackInfoTable *rit;
   RackInfoTableEntry *entries;
 } SubmultisetEnumState;
@@ -341,15 +341,16 @@ static void enumerate_7tile_submultisets_recursive(SubmultisetEnumState *state,
     // lookup. We need a mutable pointer to OR into the bitvec.
     const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
     RackInfoTableEntry *entry = &state->entries[entry_idx];
-    const uint8_t mask = (uint8_t)(1U << state->bit_pos);
-    // Set the bit for every letter in (M - S) = rack_letter_counts[i] -
-    // submultiset_counts[i] for each i. Don't set the blank slot (blank
-    // playthrough never queries this bitvec).
+    // The bitvec is indexed by word length: build one uint32 mask per
+    // length where bit L is set iff letter L appears in (M - S). OR it
+    // into the entry's slot for this word length.
+    uint32_t letter_mask = 0;
     for (int ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
       if (state->rack_letter_counts[ml] > state->submultiset_counts[ml]) {
-        entry->multi_pt_tp7_bitvec[ml] |= mask;
+        letter_mask |= (1U << ml);
       }
     }
+    entry->multi_pt_tp7_bitvec[state->len_idx] |= letter_mask;
     return;
   }
 
@@ -396,7 +397,7 @@ static void populate_multi_pt_tp7_bitvec(const WMP *wmp,
       }
       state.rack_letter_counts = rack_letter_counts;
       memset(state.submultiset_counts, 0, sizeof(state.submultiset_counts));
-      state.bit_pos = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
+      state.len_idx = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
       state.rit = rit;
       state.entries = entries;
 

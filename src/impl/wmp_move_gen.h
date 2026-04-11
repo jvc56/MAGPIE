@@ -153,14 +153,12 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
   }
 }
 
-// Necessary-only prune for the tp=7 multi-playthrough full-rack case. Uses
-// the RIT's per-letter multi_pt_tp7_bitvec to check, independently for each
-// letter L in the current playthrough_bit_rack, whether some word of length
-// (RACK_SIZE + num_tiles_played_through) exists that contains the player's
-// full rack + {L} + any (num_tiles_played_through - 1) other letters. If
-// any playthrough letter fails that check there can be no valid word, so
-// the anchor is pruned. This is strictly a pre-filter: the caller still
-// runs the exact wmp_get_word_entry fallback on anchors the bitvec lets
+// Necessary-only prune for the tp=7 multi-playthrough full-rack case. Loads
+// the single uint32 length-indexed bitvec for the target word length and
+// tests, for each playthrough letter L, whether bit L is set. If any
+// playthrough letter's bit is clear there can be no valid word, so the
+// anchor is pruned. This is strictly a pre-filter: the caller still runs
+// the exact wmp_get_word_entry fallback on anchors the bitvec lets
 // through.
 //
 // Returns true if the bitvec proves no word exists (caller should prune).
@@ -176,6 +174,13 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
 // Returns false if the word length is outside the bitvec's covered range
 // [RIT_MULTI_PT_TP7_MIN_WORD_LENGTH, RIT_MULTI_PT_TP7_MAX_WORD_LENGTH]; the
 // caller should treat that as "can't prune here" and fall through.
+//
+// Iteration walks only the letters actually set in playthrough_bit_rack via
+// __builtin_ctzll on each 64-bit half. After the single bitvec load each
+// per-letter test is a register-only `(length_bitvec >> ml) & 1` -- no
+// further memory traffic, no per-letter byte loads, and the dependency
+// chain is short enough that out-of-order execution can overlap the
+// per-letter checks with whatever else shadow_record is doing.
 static inline bool wmp_move_gen_multi_pt_tp7_bitvec_says_prune(
     const WMPMoveGen *wmp_move_gen,
     const RackInfoTableEntry *rit_entry) {
@@ -185,15 +190,48 @@ static inline bool wmp_move_gen_multi_pt_tp7_bitvec_says_prune(
       word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
     return false;
   }
-  const int bit_pos = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
-  const uint8_t mask = (uint8_t)(1U << bit_pos);
+  const uint32_t length_bitvec =
+      rit_entry->multi_pt_tp7_bitvec[word_length -
+                                     RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
   const BitRack *pt_br = &wmp_move_gen->playthrough_bit_rack;
-  for (int ml = 1; ml < (int)BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-    if (bit_rack_get_letter(pt_br, ml) > 0) {
-      if ((rit_entry->multi_pt_tp7_bitvec[ml] & mask) == 0) {
-        return true;
-      }
+  uint64_t low = bit_rack_get_low_64(pt_br);
+  while (low != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    const int bit_idx = __builtin_ctzll(low);
+#else
+    int bit_idx = 0;
+    uint64_t scan = low;
+    while ((scan & 1U) == 0) {
+      scan >>= 1;
+      bit_idx++;
     }
+#endif
+    const int ml = bit_idx / BIT_RACK_BITS_PER_LETTER;
+    if (((length_bitvec >> ml) & 1U) == 0) {
+      return true;
+    }
+    // Clear the entire 4-bit slot for this letter so the next ctz steps
+    // to the next set letter.
+    low &= ~((uint64_t)0xFU << (ml * BIT_RACK_BITS_PER_LETTER));
+  }
+  uint64_t high = bit_rack_get_high_64(pt_br);
+  while (high != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    const int bit_idx = __builtin_ctzll(high);
+#else
+    int bit_idx = 0;
+    uint64_t scan = high;
+    while ((scan & 1U) == 0) {
+      scan >>= 1;
+      bit_idx++;
+    }
+#endif
+    const int ml_offset = bit_idx / BIT_RACK_BITS_PER_LETTER;
+    const int ml = 16 + ml_offset;
+    if (((length_bitvec >> ml) & 1U) == 0) {
+      return true;
+    }
+    high &= ~((uint64_t)0xFU << (ml_offset * BIT_RACK_BITS_PER_LETTER));
   }
   return false;
 }
