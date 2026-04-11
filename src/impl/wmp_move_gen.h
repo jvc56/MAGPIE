@@ -153,6 +153,51 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
   }
 }
 
+// Necessary-only prune for the tp=7 multi-playthrough full-rack case. Uses
+// the RIT's per-letter multi_pt_tp7_bitvec to check, independently for each
+// letter L in the current playthrough_bit_rack, whether some word of length
+// (RACK_SIZE + num_tiles_played_through) exists that contains the player's
+// full rack + {L} + any (num_tiles_played_through - 1) other letters. If
+// any playthrough letter fails that check there can be no valid word, so
+// the anchor is pruned. This is strictly a pre-filter: the caller still
+// runs the exact wmp_get_word_entry fallback on anchors the bitvec lets
+// through.
+//
+// Returns true if the bitvec proves no word exists (caller should prune).
+// Returns false if the bitvec can't prove it (fall through to exact check).
+//
+// Preconditions:
+//   - rit_entry is non-NULL (caller verified)
+//   - num_tiles_played_through >= 2 (single-pt handled by playthrough_union)
+//   - player_rack_size == RACK_SIZE (i.e. not endgame partial)
+//   - player_bit_rack has no blanks (bitvec only populated for blankless
+//     racks; caller must check)
+//
+// Returns false if the word length is outside the bitvec's covered range
+// [RIT_MULTI_PT_TP7_MIN_WORD_LENGTH, RIT_MULTI_PT_TP7_MAX_WORD_LENGTH]; the
+// caller should treat that as "can't prune here" and fall through.
+static inline bool wmp_move_gen_multi_pt_tp7_bitvec_says_prune(
+    const WMPMoveGen *wmp_move_gen,
+    const RackInfoTableEntry *rit_entry) {
+  const int word_length =
+      RACK_SIZE + wmp_move_gen->num_tiles_played_through;
+  if (word_length < RIT_MULTI_PT_TP7_MIN_WORD_LENGTH ||
+      word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
+    return false;
+  }
+  const int bit_pos = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
+  const uint8_t mask = (uint8_t)(1U << bit_pos);
+  const BitRack *pt_br = &wmp_move_gen->playthrough_bit_rack;
+  for (int ml = 1; ml < (int)BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (bit_rack_get_letter(pt_br, ml) > 0) {
+      if ((rit_entry->multi_pt_tp7_bitvec[ml] & mask) == 0) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 static inline bool
 wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   // Not necessarily a bingo (RACK_SIZE) as this could be in an endgame

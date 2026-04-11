@@ -31,6 +31,7 @@ static const char *const category_names[WMP_STATS_NUM_CATEGORIES] = {
     "SHADOW_FAST_PATH_BYPASS_NO_COVERAGE",
     "SHADOW_FAST_PATH_PRUNED",
     "SHADOW_FALLBACK_FULL_RACK",
+    "SHADOW_MULTI_PT_BITVEC_PRUNED",
 };
 
 static uint64_t load_counter(int category, int bucket) {
@@ -77,11 +78,13 @@ void wmp_stats_print(void) {
       row_total(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_COVERAGE);
   const uint64_t fallback_full_rack =
       row_total(WMP_STATS_SHADOW_FALLBACK_FULL_RACK);
+  const uint64_t multi_pt_bitvec_pruned =
+      row_total(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED);
   fprintf(stderr, "  total shadow_record calls:          %llu\n",
           (unsigned long long)shadow_total);
-  fprintf(stderr, "  fast_path_taken:                    %llu (of which %llu pruned)\n",
-          (unsigned long long)fp_taken,
-          (unsigned long long)fp_pruned);
+  fprintf(stderr,
+          "  fast_path_taken:                    %llu (of which %llu pruned)\n",
+          (unsigned long long)fp_taken, (unsigned long long)fp_pruned);
   fprintf(stderr, "  bypass_no_rit_entry:                %llu\n",
           (unsigned long long)fp_no_entry);
   fprintf(stderr, "  bypass_multi_playthrough:           %llu\n",
@@ -90,6 +93,8 @@ void wmp_stats_print(void) {
           (unsigned long long)fp_no_cov);
   fprintf(stderr, "  fallback_full_rack_wmp_call:        %llu\n",
           (unsigned long long)fallback_full_rack);
+  fprintf(stderr, "  multi_pt_tp7_bitvec_pruned:         %llu\n",
+          (unsigned long long)multi_pt_bitvec_pruned);
   fprintf(stderr, "\n");
 
   fprintf(stderr, "Per-category, per-bucket counts (row totals on right):\n");

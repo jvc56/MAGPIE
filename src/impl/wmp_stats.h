@@ -69,6 +69,12 @@ enum {
   // Redundant with PT_FULL_RACK_TOTAL but bucketed by tiles_played here.
   WMP_STATS_SHADOW_FALLBACK_FULL_RACK,
 
+  // Number of times the tp=7 multi-playthrough bitvec pre-filter proved
+  // no word exists and pruned the anchor before the exact wmp hash-walk
+  // fallback. Bucket = tiles_played (always RACK_SIZE where the filter
+  // fires, but bucketed for uniformity with the other shadow counters).
+  WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
+
   WMP_STATS_NUM_CATEGORIES,
 };
 

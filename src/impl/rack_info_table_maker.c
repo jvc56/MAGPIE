@@ -190,9 +190,9 @@ static void compute_entry_recursive(EntryComputeState *state,
             // query bitrack, so this handles 0-, 1-, and 2-blank racks
             // uniformly.
             uint32_t bitmask = 0;
-            const int cap = state->ld_size < (int)BIT_RACK_MAX_ALPHABET_SIZE
+            const int cap = state->ld_size < BIT_RACK_MAX_ALPHABET_SIZE
                                 ? state->ld_size
-                                : (int)BIT_RACK_MAX_ALPHABET_SIZE;
+                                : BIT_RACK_MAX_ALPHABET_SIZE;
             for (int ml_candidate = 1; ml_candidate < cap; ml_candidate++) {
               BitRack query = played_bit_rack;
               bit_rack_add_letter(&query, (MachineLetter)ml_candidate);
@@ -269,6 +269,8 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
          RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
+  memset(entry->multi_pt_tp7_bitvec, 0,
+         RIT_MULTI_PT_TP7_ALPHABET_SIZE * sizeof(uint8_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
   for (int leave_idx = 0;
@@ -291,6 +293,116 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
   compute_entry_recursive(&state, root, 0, 0);
+}
+
+// ============================================================================
+// Multi-playthrough tp=7 bitvec (flipped walk)
+//
+// For each word of length W in [RIT_MULTI_PT_TP7_MIN_WORD_LENGTH,
+// RIT_MULTI_PT_TP7_MAX_WORD_LENGTH] stored in the WMP's blankless
+// word_map_entries, enumerate every canonical RACK_SIZE-tile submultiset S
+// of the word's multiset M. For each such S, look up the RIT entry for S
+// and, for every letter L in (M - S), set bit (W - RIT_MULTI_PT_TP7_MIN_
+// WORD_LENGTH) of entry->multi_pt_tp7_bitvec[L]. The result: at consumer
+// time shadow can ask "for the actual playthrough multiset P, does any
+// letter Li in P lack a word of length tiles_played + |P| that covers
+// rack + {Li} + (|P| - 1) other letters?" via an AND across the per-letter
+// bitvec bytes, which is a necessary-only prune for the multi-playthrough
+// full-rack case (strictly cheaper than the wmp_get_word_entry fallback
+// and catches a large fraction of the 91% miss-rate cases).
+// ============================================================================
+
+typedef struct {
+  const uint8_t *rack_letter_counts; // BIT_RACK_MAX_ALPHABET_SIZE
+  uint8_t submultiset_counts[BIT_RACK_MAX_ALPHABET_SIZE];
+  int bit_pos;
+  const RackInfoTable *rit;
+  RackInfoTableEntry *entries;
+} SubmultisetEnumState;
+
+static void enumerate_7tile_submultisets_recursive(SubmultisetEnumState *state,
+                                                   int letter_idx,
+                                                   int tiles_remaining) {
+  if (tiles_remaining == 0) {
+    // Build a BitRack from submultiset_counts and look up the RIT entry.
+    BitRack subrack = bit_rack_create_empty();
+    for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+      for (int count_idx = 0; count_idx < state->submultiset_counts[ml];
+           count_idx++) {
+        bit_rack_add_letter(&subrack, (MachineLetter)ml);
+      }
+    }
+    const RackInfoTableEntry *const_entry =
+        rack_info_table_lookup(state->rit, &subrack);
+    if (const_entry == NULL) {
+      return;
+    }
+    // const_entry is a pointer into state->entries but typed const by the
+    // lookup. We need a mutable pointer to OR into the bitvec.
+    const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
+    RackInfoTableEntry *entry = &state->entries[entry_idx];
+    const uint8_t mask = (uint8_t)(1U << state->bit_pos);
+    // Set the bit for every letter in (M - S) = rack_letter_counts[i] -
+    // submultiset_counts[i] for each i. Don't set the blank slot (blank
+    // playthrough never queries this bitvec).
+    for (int ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+      if (state->rack_letter_counts[ml] > state->submultiset_counts[ml]) {
+        entry->multi_pt_tp7_bitvec[ml] |= mask;
+      }
+    }
+    return;
+  }
+
+  if (letter_idx >= BIT_RACK_MAX_ALPHABET_SIZE) {
+    return;
+  }
+
+  const int max_here = state->rack_letter_counts[letter_idx] < tiles_remaining
+                           ? state->rack_letter_counts[letter_idx]
+                           : tiles_remaining;
+  for (int take = 0; take <= max_here; take++) {
+    state->submultiset_counts[letter_idx] = (uint8_t)take;
+    enumerate_7tile_submultisets_recursive(state, letter_idx + 1,
+                                           tiles_remaining - take);
+  }
+  state->submultiset_counts[letter_idx] = 0;
+}
+
+static void populate_multi_pt_tp7_bitvec(const WMP *wmp,
+                                         const RackInfoTable *rit,
+                                         RackInfoTableEntry *entries) {
+  for (int word_length = RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
+       word_length <= RIT_MULTI_PT_TP7_MAX_WORD_LENGTH; word_length++) {
+    if (word_length > wmp->board_dim) {
+      break;
+    }
+    const WMPForLength *wfl = &wmp->wfls[word_length];
+    const uint32_t num_entries = wfl->num_word_entries;
+    for (uint32_t wmp_idx = 0; wmp_idx < num_entries; wmp_idx++) {
+      const WMPEntry *wmp_entry = &wfl->word_map_entries[wmp_idx];
+      const BitRack word_bit_rack = wmp_entry_read_bit_rack(wmp_entry);
+      // Walk the word's multiset letter counts. Blankless words (this
+      // loop) never contain BLANK_MACHINE_LETTER; skip any that do out
+      // of an abundance of caution.
+      if (bit_rack_get_letter(&word_bit_rack, BLANK_MACHINE_LETTER) != 0) {
+        continue;
+      }
+
+      SubmultisetEnumState state;
+      uint8_t rack_letter_counts[BIT_RACK_MAX_ALPHABET_SIZE];
+      for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+        rack_letter_counts[ml] =
+            (uint8_t)bit_rack_get_letter(&word_bit_rack, ml);
+      }
+      state.rack_letter_counts = rack_letter_counts;
+      memset(state.submultiset_counts, 0, sizeof(state.submultiset_counts));
+      state.bit_pos = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
+      state.rit = rit;
+      state.entries = entries;
+
+      enumerate_7tile_submultisets_recursive(&state, 0, RACK_SIZE);
+    }
+  }
 }
 
 // ============================================================================
@@ -474,6 +586,15 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   rit->bucket_starts = bucket_starts;
   rit->entries = entries;
   rit->name = NULL;
+
+  // 8. Populate the multi-playthrough tp=7 bitvec by flipping the walk:
+  // iterate WMP blankless words of length 8..15 and OR bits into the RIT
+  // entry for every canonical RACK_SIZE-tile submultiset of each word.
+  // Requires rit to be a valid lookup target, which is why this runs after
+  // step 7.
+  if (wmp != NULL) {
+    populate_multi_pt_tp7_bitvec(wmp, rit, entries);
+  }
 
   return rit;
 }

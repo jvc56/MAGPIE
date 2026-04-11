@@ -1392,6 +1392,26 @@ static inline void shadow_record(MoveGen *gen) {
         WMP_STATS_INC_BYPASS_REASON(
             gen->rit_entry, gen->wmp_move_gen.num_tiles_played_through,
             gen->tiles_played);
+        // Multi-pt tp=7 bitvec pre-filter. The RIT stores, per letter L,
+        // a bitmask of word lengths where some word exists containing
+        // this full rack + {L} + other letters. AND-ing across the
+        // actual playthrough letters gives a necessary condition at the
+        // target word length. Skips the exact wmp hash walk below on
+        // any rack whose bitvec proves no word exists. Only applies to
+        // 7-tile bingo plays (tiles_played == RACK_SIZE) with >=2
+        // playthrough tiles on blankless racks, which is where the
+        // maker's flipped walk actually populated the bitvec.
+        if (gen->rit_entry != NULL && gen->tiles_played == RACK_SIZE &&
+            gen->wmp_move_gen.num_tiles_played_through >= 2 &&
+            bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
+                                BLANK_MACHINE_LETTER) == 0) {
+          if (wmp_move_gen_multi_pt_tp7_bitvec_says_prune(&gen->wmp_move_gen,
+                                                          gen->rit_entry)) {
+            WMP_STATS_INC(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
+                          gen->tiles_played);
+            return;
+          }
+        }
         if (!wmp_move_gen_check_playthrough_full_rack_existence(
                 &gen->wmp_move_gen)) {
           return;
