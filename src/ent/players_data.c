@@ -6,10 +6,12 @@
 #include "../util/string_util.h"
 #include "klv.h"
 #include "kwg.h"
+#include "rack_info_table.h"
 #include "wmp.h"
 #include <stdlib.h>
 
-static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap"};
+static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap",
+                                                      "rack info table"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -103,6 +105,13 @@ WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
                                       player_index);
 }
 
+RackInfoTable *
+players_data_get_rack_info_table(const PlayersData *players_data,
+                                 int player_index) {
+  return (RackInfoTable *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_RIT, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -130,6 +139,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_WMP:
     data = wmp_create(data_paths, data_name, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_RIT:
+    data = rack_info_table_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -152,6 +164,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_WMP:
       wmp_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_RIT:
+      rack_info_table_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -194,6 +209,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_WMP:
       data_name = wmp_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_RIT:
+      data_name = rack_info_table_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -210,9 +228,17 @@ PlayersData *players_data_create(bool use_wmp) {
           (players_data_t)data_index, player_index);
       players_data->data_is_shared[data_index] = false;
       players_data->data[player_data_index] = NULL;
-      players_data_set_use_when_available(
-          players_data, data_index, player_index,
-          use_wmp || data_index != PLAYERS_DATA_TYPE_WMP);
+      bool default_use = true;
+      if (data_index == PLAYERS_DATA_TYPE_WMP) {
+        default_use = use_wmp;
+      } else if (data_index == PLAYERS_DATA_TYPE_RIT) {
+        // RIT files are opt-in: callers must explicitly enable them with
+        // -rit true (or -rit1/-rit2) since they are large and may not
+        // exist for every lexicon.
+        default_use = false;
+      }
+      players_data_set_use_when_available(players_data, data_index,
+                                          player_index, default_use);
     }
     players_data_set_move_sort_type(players_data, player_index,
                                     DEFAULT_MOVE_SORT_TYPE);
@@ -240,7 +266,8 @@ void players_data_destroy(PlayersData *players_data) {
 }
 
 bool players_data_type_is_nullable(players_data_t players_data_type) {
-  return players_data_type == PLAYERS_DATA_TYPE_WMP;
+  return players_data_type == PLAYERS_DATA_TYPE_WMP ||
+         players_data_type == PLAYERS_DATA_TYPE_RIT;
 }
 
 void players_data_set(PlayersData *players_data,

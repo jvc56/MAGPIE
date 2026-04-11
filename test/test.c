@@ -32,6 +32,7 @@
 #include "kwg_maker_test.h"
 #include "leave_map_test.h"
 #include "leaves_test.h"
+#include "rack_info_table_test.h"
 #include "letter_distribution_test.h"
 #include "load_gcg_test.h"
 #include "math_util_test.h"
@@ -73,6 +74,7 @@ static TestEntry test_table[] = {
     {"ld", test_ld},
     {"l", test_leaves},
     {"leavemap", test_leave_map},
+    {"rit", test_rack_info_table},
     {"kwg", test_kwg_alpha},
     {"bag", test_bag},
     {"rack", test_rack},

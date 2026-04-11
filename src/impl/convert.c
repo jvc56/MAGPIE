@@ -11,11 +11,13 @@
 #include "../ent/klv_csv.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
+#include "rack_info_table_maker.h"
 #include "wmp_maker.h"
 #include <stdio.h>
 #include <stdlib.h>
@@ -199,6 +201,34 @@ void convert_with_names(const LetterDistribution *ld,
       klv_write_to_csv(klv, ld, data_paths, output_name, NULL, error_stack);
     }
     klv_destroy(klv);
+  } else if (conversion_type == CONVERT_KLVWMP2RIT) {
+    KLV *klv = klv_create(data_paths, input_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    WMP *wmp = wmp_create(data_paths, input_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      klv_destroy(klv);
+      return;
+    }
+    char *rit_output_filename = data_filepaths_get_writable_filename(
+        data_paths, output_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+        error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads);
+      rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+            get_formatted_string(
+                "could not write rack info table to output file: %s",
+                rit_output_filename));
+      }
+      rack_info_table_destroy(rit);
+    }
+    free(rit_output_filename);
+    wmp_destroy(wmp);
+    klv_destroy(klv);
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
@@ -227,6 +257,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_TEXT2WORDMAP;
   } else if (strings_equal(conversion_type_string, "dawg2wordmap")) {
     conversion_type = CONVERT_DAWG2WORDMAP;
+  } else if (strings_equal(conversion_type_string, "klvwmp2rit")) {
+    conversion_type = CONVERT_KLVWMP2RIT;
   }
   return conversion_type;
 }

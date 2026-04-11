@@ -1,0 +1,310 @@
+#ifndef RACK_INFO_TABLE_H
+#define RACK_INFO_TABLE_H
+
+#include "../compat/endian_conv.h"
+#include "../def/bit_rack_defs.h"
+#include "../def/rack_defs.h"
+#include "../ent/bit_rack.h"
+#include "../ent/equity.h"
+#include "../util/fileproxy.h"
+#include "../util/io_util.h"
+#include "../util/string_util.h"
+#include "data_filepaths.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// A RackInfoTable maps full-rack BitRacks to per-rack data computed ahead of
+// time. The table is keyed by BitRack (the multiset of tiles forming a full
+// rack) and uses the same bucket-chaining hash table layout as the WordMap.
+//
+// Each entry currently stores the leave values for every 2^RACK_SIZE subset
+// of the rack (indexed by the LeaveMap bitmask, empty at index 0, full rack
+// at index (1 << RACK_SIZE) - 1). Additional per-rack fields (e.g. word
+// existence per length) can be added to RackInfoTableEntry in the future.
+
+enum {
+  RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
+  RACK_INFO_TABLE_BITRACK_BYTES = BIT_RACK_EXPECTED_SIZE_BYTES,
+  // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
+  RIT_VERSION = 1,
+  RIT_EARLIEST_SUPPORTED_VERSION = 1,
+};
+
+typedef struct RackInfoTableEntry {
+  Equity leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+  uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
+} RackInfoTableEntry;
+
+typedef struct RackInfoTable {
+  char *name;
+  uint8_t version;
+  uint8_t rack_size;
+  uint32_t num_buckets;
+  uint32_t num_entries;
+  uint32_t *bucket_starts;
+  RackInfoTableEntry *entries;
+} RackInfoTable;
+
+static inline const char *rack_info_table_get_name(const RackInfoTable *rit) {
+  return rit->name;
+}
+
+static inline BitRack
+rack_info_table_entry_read_bit_rack(const RackInfoTableEntry *entry) {
+#if IS_LITTLE_ENDIAN
+  BitRack bit_rack;
+  memcpy(&bit_rack, entry->bit_rack_bytes, RACK_INFO_TABLE_BITRACK_BYTES);
+  return bit_rack;
+#else
+  uint64_t low, high;
+  memcpy(&low, entry->bit_rack_bytes, 8);
+  memcpy(&high, entry->bit_rack_bytes + 8, 8);
+  low = le64toh(low);
+  high = le64toh(high);
+  return (BitRack){.low = low, .high = high};
+#endif
+}
+
+static inline void
+rack_info_table_entry_write_bit_rack(RackInfoTableEntry *entry,
+                                     const BitRack *bit_rack) {
+#if IS_LITTLE_ENDIAN
+  memcpy(entry->bit_rack_bytes, bit_rack, RACK_INFO_TABLE_BITRACK_BYTES);
+#else
+  uint64_t low = bit_rack_get_low_64(bit_rack);
+  uint64_t high = bit_rack_get_high_64(bit_rack);
+  low = htole64(low);
+  high = htole64(high);
+  memcpy(entry->bit_rack_bytes, &low, 8);
+  memcpy(entry->bit_rack_bytes + 8, &high, 8);
+#endif
+}
+
+// Look up the entry for a full rack. Returns NULL if not found.
+static inline const RackInfoTableEntry *
+rack_info_table_lookup(const RackInfoTable *rit, const BitRack *bit_rack) {
+  const uint32_t bucket_idx =
+      bit_rack_get_bucket_index(bit_rack, rit->num_buckets);
+  const uint32_t start = rit->bucket_starts[bucket_idx];
+  const uint32_t end = rit->bucket_starts[bucket_idx + 1];
+  for (uint32_t entry_idx = start; entry_idx < end; entry_idx++) {
+    const RackInfoTableEntry *entry = &rit->entries[entry_idx];
+    const BitRack entry_bit_rack = rack_info_table_entry_read_bit_rack(entry);
+    if (bit_rack_equals(&entry_bit_rack, bit_rack)) {
+      return entry;
+    }
+  }
+  return NULL;
+}
+
+// Convenience accessor: return the leaves array for a rack, or NULL.
+static inline const Equity *
+rack_info_table_lookup_leaves(const RackInfoTable *rit,
+                              const BitRack *bit_rack) {
+  const RackInfoTableEntry *entry = rack_info_table_lookup(rit, bit_rack);
+  if (entry == NULL) {
+    return NULL;
+  }
+  return entry->leaves;
+}
+
+static inline void rack_info_table_destroy(RackInfoTable *rit) {
+  if (!rit) {
+    return;
+  }
+  free(rit->name);
+  free(rit->bucket_starts);
+  free(rit->entries);
+  free(rit);
+}
+
+// ============================================================================
+// File I/O
+// ============================================================================
+//
+// On-disk layout (all integers little-endian):
+//   1 byte:  version (RIT_VERSION)
+//   1 byte:  rack_size (matches RACK_SIZE)
+//   4 bytes: num_buckets
+//   4 bytes: num_entries
+//   (num_buckets + 1) * 4 bytes: bucket_starts
+//   num_entries entries, each:
+//     (1 << RACK_SIZE) * 4 bytes: leaves (Equity, int32_t)
+//     16 bytes: bit_rack_bytes (full BitRack for collision check)
+
+static inline void rit_write_uint32_or_die(uint32_t value, FILE *stream,
+                                           const char *description) {
+  const uint32_t le = htole32(value);
+  fwrite_or_die(&le, sizeof(le), 1, stream, description);
+}
+
+static inline void rit_write_uint32s_or_die(const uint32_t *values, size_t n,
+                                            FILE *stream,
+                                            const char *description) {
+#if IS_LITTLE_ENDIAN
+  fwrite_or_die(values, sizeof(uint32_t), n, stream, description);
+#else
+  for (size_t i = 0; i < n; i++) {
+    const uint32_t le = htole32(values[i]);
+    fwrite_or_die(&le, sizeof(uint32_t), 1, stream, description);
+  }
+#endif
+}
+
+static inline void
+rit_write_entries_or_die(const RackInfoTableEntry *entries, uint32_t n,
+                         FILE *stream) {
+#if IS_LITTLE_ENDIAN
+  fwrite_or_die(entries, sizeof(RackInfoTableEntry), n, stream,
+                "rit entries");
+#else
+  for (uint32_t i = 0; i < n; i++) {
+    const RackInfoTableEntry *entry = &entries[i];
+    for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
+         leaf_idx++) {
+      const uint32_t le_leaf = htole32((uint32_t)entry->leaves[leaf_idx]);
+      fwrite_or_die(&le_leaf, sizeof(uint32_t), 1, stream, "rit leaf");
+    }
+    fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
+                  RACK_INFO_TABLE_BITRACK_BYTES, stream, "rit bit_rack_bytes");
+  }
+#endif
+}
+
+static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
+                                                 const char *filename,
+                                                 ErrorStack *error_stack) {
+  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  const uint8_t version = rit->version;
+  fwrite_or_die(&version, sizeof(version), 1, stream, "rit version");
+  const uint8_t rack_size = rit->rack_size;
+  fwrite_or_die(&rack_size, sizeof(rack_size), 1, stream, "rit rack size");
+
+  rit_write_uint32_or_die(rit->num_buckets, stream, "rit num buckets");
+  rit_write_uint32_or_die(rit->num_entries, stream, "rit num entries");
+  rit_write_uint32s_or_die(rit->bucket_starts, (size_t)rit->num_buckets + 1,
+                           stream, "rit bucket starts");
+  rit_write_entries_or_die(rit->entries, rit->num_entries, stream);
+  fclose_or_die(stream);
+}
+
+static inline void rit_read_uint32_or_die(uint32_t *out, FILE *stream) {
+  if (fread(out, sizeof(uint32_t), 1, stream) != 1) {
+    log_fatal("could not read uint32 from rit stream");
+  }
+  *out = le32toh(*out);
+}
+
+static inline void rit_read_uint32s_or_die(uint32_t *out, size_t n,
+                                           FILE *stream) {
+  if (fread(out, sizeof(uint32_t), n, stream) != n) {
+    log_fatal("could not read uint32s from rit stream");
+  }
+#if !IS_LITTLE_ENDIAN
+  for (size_t i = 0; i < n; i++) {
+    out[i] = le32toh(out[i]);
+  }
+#endif
+}
+
+static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
+                                            uint32_t n, FILE *stream) {
+  if (fread(entries, sizeof(RackInfoTableEntry), n, stream) != n) {
+    log_fatal("could not read entries from rit stream");
+  }
+#if !IS_LITTLE_ENDIAN
+  for (uint32_t i = 0; i < n; i++) {
+    for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
+         leaf_idx++) {
+      entries[i].leaves[leaf_idx] =
+          (Equity)le32toh((uint32_t)entries[i].leaves[leaf_idx]);
+    }
+    // bit_rack_bytes are already stored little-endian
+  }
+#endif
+}
+
+static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
+                                                    FILE *stream,
+                                                    const char *filename,
+                                                    ErrorStack *error_stack) {
+  uint8_t version;
+  if (fread(&version, sizeof(version), 1, stream) != 1) {
+    log_fatal("could not read rit version");
+  }
+  if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
+        get_formatted_string(
+            "detected rit version %d but only %d or greater is supported: %s\n",
+            version, RIT_EARLIEST_SUPPORTED_VERSION, filename));
+    return;
+  }
+  rit->version = version;
+
+  uint8_t rack_size;
+  if (fread(&rack_size, sizeof(rack_size), 1, stream) != 1) {
+    log_fatal("could not read rit rack size");
+  }
+  if (rack_size != RACK_SIZE) {
+    error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
+                     get_formatted_string(
+                         "rit rack size %d does not match build rack size %d: "
+                         "%s\n",
+                         rack_size, RACK_SIZE, filename));
+    return;
+  }
+  rit->rack_size = rack_size;
+
+  rit_read_uint32_or_die(&rit->num_buckets, stream);
+  rit_read_uint32_or_die(&rit->num_entries, stream);
+
+  rit->bucket_starts = (uint32_t *)malloc_or_die(
+      ((size_t)rit->num_buckets + 1) * sizeof(uint32_t));
+  rit_read_uint32s_or_die(rit->bucket_starts, (size_t)rit->num_buckets + 1,
+                          stream);
+
+  rit->entries = (RackInfoTableEntry *)malloc_or_die(
+      (size_t)rit->num_entries * sizeof(RackInfoTableEntry));
+  rit_read_entries_or_die(rit->entries, rit->num_entries, stream);
+}
+
+static inline void rack_info_table_load(RackInfoTable *rit, const char *name,
+                                        const char *filename,
+                                        ErrorStack *error_stack) {
+  FILE *stream = stream_from_filename(filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  rack_info_table_load_from_stream(rit, stream, filename, error_stack);
+  fclose_or_die(stream);
+  if (error_stack_is_empty(error_stack)) {
+    rit->name = string_duplicate(name);
+  }
+}
+
+static inline RackInfoTable *rack_info_table_create(const char *data_paths,
+                                                    const char *rit_name,
+                                                    ErrorStack *error_stack) {
+  char *rit_filename = data_filepaths_get_readable_filename(
+      data_paths, rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, error_stack);
+  RackInfoTable *rit = NULL;
+  if (error_stack_is_empty(error_stack)) {
+    rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+    rack_info_table_load(rit, rit_name, rit_filename, error_stack);
+  }
+  free(rit_filename);
+  if (!error_stack_is_empty(error_stack)) {
+    rack_info_table_destroy(rit);
+    rit = NULL;
+  }
+  return rit;
+}
+
+#endif

@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "klv.h"
 #include "kwg.h"
+#include "rack_info_table.h"
 #include "wmp.h"
 #include <stdbool.h>
 
@@ -23,6 +24,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
+RackInfoTable *
+players_data_get_rack_info_table(const PlayersData *players_data,
+                                 int player_index);
 
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,

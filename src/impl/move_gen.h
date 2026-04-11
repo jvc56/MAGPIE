@@ -15,6 +15,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/rack.h"
+#include "../ent/rack_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -130,6 +131,7 @@ typedef struct MoveGen {
   int number_of_letters_on_rack;
   const KWG *kwg;
   const KLV *klv;
+  const RackInfoTable *rack_info_table;
   const Board *board;
   LetterDistribution ld;
   MoveList *move_list;

@@ -24,6 +24,7 @@
 #include "../ent/kwg.h"
 #include "../ent/kwg_alpha.h"
 #include "../ent/leave_map.h"
+#include "../ent/rack_info_table.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -468,6 +469,49 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
                               add_exchange);
     }
 
+    rack_take_letters(leave, ml, num_this);
+    for (int i = 0; i < num_this; i++) {
+      leave_map_add_letter_and_update_complement_index(&gen->leave_map,
+                                                       &gen->player_rack, ml);
+    }
+  }
+}
+
+// Variant of generate_exchange_moves used when gen->rack_info_table is
+// populated. Enumerates the same canonical subsets as generate_exchange_moves
+// (so leave_map.current_index moves through the same sequence of values and
+// best_leaves is updated in the same way), but skips the KLV/KWG traversal
+// entirely: leave values have already been memcpy'd into
+// leave_map.leave_values from the RIT, so leave_map_get_current_value
+// returns the right value at each leaf.
+static void generate_exchange_moves_from_table(MoveGen *gen, Rack *leave,
+                                                MachineLetter ml,
+                                                bool add_exchange) {
+  const int ld_size = ld_get_size(&gen->ld);
+  while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
+    ml++;
+  }
+  if (ml == ld_size) {
+    const int number_of_letters_on_rack =
+        rack_get_total_letters(&gen->player_rack);
+    if (number_of_letters_on_rack > 0) {
+      const Equity value = leave_map_get_current_value(&gen->leave_map);
+      if (value > gen->best_leaves[rack_get_total_letters(leave)]) {
+        gen->best_leaves[rack_get_total_letters(leave)] = value;
+      }
+      if (add_exchange) {
+        record_exchange(gen);
+      }
+    }
+  } else {
+    generate_exchange_moves_from_table(gen, leave, ml + 1, add_exchange);
+    const uint16_t num_this = rack_get_letter(&gen->player_rack, ml);
+    for (uint16_t i = 0; i < num_this; i++) {
+      rack_add_letter(leave, ml);
+      leave_map_take_letter_and_update_complement_index(&gen->leave_map,
+                                                        &gen->player_rack, ml);
+      generate_exchange_moves_from_table(gen, leave, ml + 1, add_exchange);
+    }
     rack_take_letters(leave, ml, num_this);
     for (int i = 0; i < num_this; i++) {
       leave_map_add_letter_and_update_complement_index(&gen->leave_map,
@@ -2415,6 +2459,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);
+  gen->rack_info_table = player_get_rack_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -2492,34 +2537,57 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     leave_map_set_current_value(&gen->leave_map, EQUITY_INITIAL_VALUE);
   }
 
-  for (int i = 0; i < (RACK_SIZE + 1); i++) {
-    gen->best_leaves[i] = EQUITY_INITIAL_VALUE;
+  for (int leave_size_idx = 0; leave_size_idx < (RACK_SIZE + 1);
+       leave_size_idx++) {
+    gen->best_leaves[leave_size_idx] = EQUITY_INITIAL_VALUE;
   }
 
   const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                             (gen->move_sort_type != MOVE_SORT_SCORE);
-  // TODO(olaugh): This is looking up leaves even when the sort is by score.
-  // We should pass check_leaves to generate_exchange_moves because if we sort
-  // by score we should still generate all exchanges. However this is an actual
-  // waste performance-wise for endgame, unless we want to somehow incorporate
-  // something like heuristic "endgame leaves" to use in estimates for negamax.
-  //
-  // Set the best leaves and maybe add exchanges.
-  // gen->leave_map.current_index moves differently when filling
-  // leave_values than when reading from it to generate plays. Start at 0,
-  // which represents using (exchanging) gen->player_rack->number_of_letters
-  // tiles and keeping 0 tiles.
-  leave_map_set_current_index(&gen->leave_map, 0);
-  uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-  rack_reset(&gen->leave);
+
   // Assumes the player has drawn a full rack but not the opponent.
-  bool add_exchange = gen->number_of_tiles_in_bag +
-                          rack_get_total_letters(&gen->opponent_rack) >=
-                      (RACK_SIZE * 2);
-  generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
+  const bool add_exchange = gen->number_of_tiles_in_bag +
+                                rack_get_total_letters(&gen->opponent_rack) >=
+                            (RACK_SIZE * 2);
+
+  // Try to use the pre-computed rack info table for full racks.
+  const bool has_full_rack =
+      rack_get_total_letters(&gen->player_rack) == RACK_SIZE;
+  const RackInfoTable *rit = gen->rack_info_table;
+  const Equity *precomputed = NULL;
+
+  if (has_full_rack && rit != NULL) {
+    const BitRack player_bit_rack =
+        bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
+    precomputed = rack_info_table_lookup_leaves(rit, &player_bit_rack);
+  }
+
+  // gen->leave_map.current_index moves differently when filling leave_values
+  // than when reading from it to generate plays. Start at 0, which represents
+  // using (exchanging) gen->player_rack->number_of_letters tiles and keeping
+  // 0 tiles.
+  leave_map_set_current_index(&gen->leave_map, 0);
+  rack_reset(&gen->leave);
+
+  if (precomputed != NULL) {
+    // Fast path: the RIT already holds the correct leave value at every
+    // canonical subset index. Copy them into the leave map so play-time
+    // leave_map_get_current_value calls and wmp_move_gen's subrack reads
+    // return the right value, then walk the canonical subsets to update
+    // best_leaves and (optionally) record exchange moves -- without touching
+    // the KLV/KWG.
+    memcpy(gen->leave_map.leave_values, precomputed,
+           RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
+    generate_exchange_moves_from_table(gen, &gen->leave, 0, add_exchange);
+  } else {
+    const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
+    generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
+  }
+
   if (!check_leaves) {
-    for (int i = 0; i < RACK_SIZE + 1; i++) {
-      gen->best_leaves[i] = 0;
+    for (int leave_size_idx = 0; leave_size_idx < RACK_SIZE + 1;
+         leave_size_idx++) {
+      gen->best_leaves[leave_size_idx] = 0;
     }
   }
 
