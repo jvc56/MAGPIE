@@ -1,4 +1,6 @@
-#include "wmp_stats.h"
+#include "wmp_stats.h" // IWYU pragma: keep
+
+#ifdef MAGPIE_WMP_STATS
 
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -6,8 +8,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-
-#ifdef MAGPIE_WMP_STATS
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-non-const-global-variables)
 _Atomic uint64_t

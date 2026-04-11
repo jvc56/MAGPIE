@@ -96,6 +96,26 @@ static inline void wmp_stats_add_internal(int category, int bucket,
 #define WMP_STATS_ADD(category, bucket, delta)                                 \
   wmp_stats_add_internal((category), (bucket), (uint64_t)(delta))
 
+// Helper for classifying which RIT fast-path bypass reason applies when
+// shadow_record is in the playthrough branch but the fast path didn't
+// apply. Split out from move_gen.c so the three-way if/else ladder
+// doesn't trip bugprone-branch-clone when all three bodies collapse to
+// ((void)0) in non-instrumented builds.
+#define WMP_STATS_INC_BYPASS_REASON(rit_entry_ptr, num_playthrough_tiles,     \
+                                    tiles_played_value)                        \
+  do {                                                                         \
+    if ((rit_entry_ptr) == NULL) {                                             \
+      WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_RIT_ENTRY,           \
+                    (tiles_played_value));                                     \
+    } else if ((num_playthrough_tiles) != 1) {                                 \
+      WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_MULTI_PLAYTHROUGH,      \
+                    (tiles_played_value));                                     \
+    } else {                                                                   \
+      WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_COVERAGE,            \
+                    (tiles_played_value));                                     \
+    }                                                                          \
+  } while (0)
+
 void wmp_stats_init(void);
 void wmp_stats_print(void);
 
@@ -103,6 +123,9 @@ void wmp_stats_print(void);
 
 #define WMP_STATS_INC(category, bucket) ((void)0)
 #define WMP_STATS_ADD(category, bucket, delta) ((void)0)
+#define WMP_STATS_INC_BYPASS_REASON(rit_entry_ptr, num_playthrough_tiles,     \
+                                    tiles_played_value)                        \
+  ((void)0)
 
 static inline void wmp_stats_init(void) {}
 static inline void wmp_stats_print(void) {}

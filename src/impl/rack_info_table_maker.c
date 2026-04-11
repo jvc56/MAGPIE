@@ -1,7 +1,9 @@
 #include "rack_info_table_maker.h"
 
 #include "../compat/cpthread.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -148,35 +150,64 @@ static void compute_entry_recursive(EntryComputeState *state,
       }
       state->entry->leaves[state->leave_map->current_index] = value;
 
-      if (state->wmp != NULL &&
-          played_size >= (int)state->playthrough_min_played_size) {
-        const int word_length = played_size + 1;
-        if (word_length >= MINIMUM_WORD_LENGTH && word_length <= BOARD_DIM) {
-          // For each concrete letter L in the alphabet, ask the WMP
-          // whether (rack + L) forms a valid word of the target length.
-          // wmp_get_word_entry dispatches on the blank count in the query
-          // bitrack, so this handles 0-, 1-, and 2-blank racks uniformly.
-          const BitRack rack_bit_rack =
-              bit_rack_create_from_rack(state->ld, state->player_rack);
-          uint32_t bitmask = 0;
-          const int cap = state->ld_size < (int)BIT_RACK_MAX_ALPHABET_SIZE
-                              ? state->ld_size
-                              : (int)BIT_RACK_MAX_ALPHABET_SIZE;
-          for (int ml_candidate = 1; ml_candidate < cap; ml_candidate++) {
-            BitRack query = rack_bit_rack;
-            bit_rack_add_letter(&query, (MachineLetter)ml_candidate);
-            const WMPEntry *wmp_entry =
-                wmp_get_word_entry(state->wmp, &query, word_length);
-            if (wmp_entry != NULL) {
-              bitmask |= (1U << ml_candidate);
+      if (state->wmp != NULL) {
+        // Build the BitRack for the played subrack (state->player_rack
+        // holds the "would be played" side at this leaf; state->leave
+        // holds the complement "would be the leave after playing it").
+        const BitRack played_bit_rack =
+            bit_rack_create_from_rack(state->ld, state->player_rack);
+        const int leave_size = rit_maker_popcount(
+            (unsigned int)state->leave_map->current_index);
+
+        // Nonplaythrough existence cache: does this specific size-
+        // played_size subrack form a valid played_size-letter word on its
+        // own? If so, mark the corresponding bit in
+        // nonplaythrough_has_word_of_length_bitmask and track the best
+        // leave value over all subracks that satisfy this property.
+        // Replaces the per-movegen wmp_move_gen_check_nonplaythrough_
+        // existence warmup that otherwise runs C(RACK_SIZE, k) WMP
+        // lookups per size k on every movegen call.
+        if (played_size >= MINIMUM_WORD_LENGTH && played_size <= BOARD_DIM) {
+          const WMPEntry *np_wmp_entry = wmp_get_word_entry(
+              state->wmp, &played_bit_rack, played_size);
+          if (np_wmp_entry != NULL) {
+            state->entry->nonplaythrough_has_word_of_length_bitmask |=
+                (uint8_t)(1U << played_size);
+            if (value >
+                state->entry->nonplaythrough_best_leave_values[leave_size]) {
+              state->entry->nonplaythrough_best_leave_values[leave_size] =
+                  value;
             }
           }
-          // OR into the union slot for this leave_size. Multiple canonical
-          // subracks with the same popcount(leave_map->current_index) are
-          // unioned into the same slot.
-          const int leave_size =
-              rit_maker_popcount((unsigned int)state->leave_map->current_index);
-          state->entry->playthrough_union[leave_size] |= bitmask;
+        }
+
+        if (played_size >= (int)state->playthrough_min_played_size) {
+          const int word_length = played_size + 1;
+          if (word_length >= MINIMUM_WORD_LENGTH && word_length <= BOARD_DIM) {
+            // For each concrete letter L in the alphabet, ask the WMP
+            // whether (rack + L) forms a valid word of the target length.
+            // wmp_get_word_entry dispatches on the blank count in the
+            // query bitrack, so this handles 0-, 1-, and 2-blank racks
+            // uniformly.
+            uint32_t bitmask = 0;
+            const int cap = state->ld_size < (int)BIT_RACK_MAX_ALPHABET_SIZE
+                                ? state->ld_size
+                                : (int)BIT_RACK_MAX_ALPHABET_SIZE;
+            for (int ml_candidate = 1; ml_candidate < cap; ml_candidate++) {
+              BitRack query = played_bit_rack;
+              bit_rack_add_letter(&query, (MachineLetter)ml_candidate);
+              const WMPEntry *wmp_entry =
+                  wmp_get_word_entry(state->wmp, &query, word_length);
+              if (wmp_entry != NULL) {
+                bitmask |= (1U << ml_candidate);
+              }
+            }
+            // OR into the union slot for this leave_size. Multiple
+            // canonical subracks with the same
+            // popcount(leave_map->current_index) are unioned into the
+            // same slot.
+            state->entry->playthrough_union[leave_size] |= bitmask;
+          }
         }
       }
     }
@@ -238,6 +269,13 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
          RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
+  entry->nonplaythrough_has_word_of_length_bitmask = 0;
+  memset(entry->pad, 0, sizeof(entry->pad));
+  for (int leave_idx = 0;
+       leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+       leave_idx++) {
+    entry->nonplaythrough_best_leave_values[leave_idx] = EQUITY_INITIAL_VALUE;
+  }
 
   EntryComputeState state = {
       .klv = klv,

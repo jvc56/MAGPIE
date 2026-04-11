@@ -42,19 +42,40 @@
 // which leave_sizes are populated by the build. Uncovered entries stay at
 // 0; consumers must check rack_info_table_has_playthrough_coverage() before
 // trusting a zero result.
+//
+// Each entry also stores `nonplaythrough_has_word_of_length` (a uint8 bitmask
+// indexed by word_length in [0, RACK_SIZE]) and
+// `nonplaythrough_best_leave_values[leave_size]` (one Equity per leave_size
+// in [0, RACK_SIZE]). These cache the result of the per-movegen warmup
+// wmp_move_gen_check_nonplaythrough_existence used to precompute (a) which
+// word lengths have SOME canonical size-k subrack of the rack that already
+// forms a valid k-letter word and (b) the best KLV leave value among those
+// subracks, so shadow can early-exit nonplaythrough anchors without running
+// that warmup loop over all C(RACK_SIZE, k) canonical subracks per rack per
+// movegen call.
+//
+// Together these are a superset of Other Claude's proposed "best leave per
+// subset-size" field (#4 from his list) restricted to leaves reachable via
+// an actual no-playthrough word -- which is exactly the quantity shadow
+// compares against `gen->best_leaves` for nonplaythrough equity math.
 
 enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
   RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
+  RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BITRACK_BYTES = BIT_RACK_EXPECTED_SIZE_BYTES,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 3,
-  RIT_EARLIEST_SUPPORTED_VERSION = 3,
+  RIT_VERSION = 4,
+  RIT_EARLIEST_SUPPORTED_VERSION = 4,
 };
 
 typedef struct RackInfoTableEntry {
   Equity leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
   uint32_t playthrough_union[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
+  Equity nonplaythrough_best_leave_values
+      [RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY];
+  uint8_t nonplaythrough_has_word_of_length_bitmask;
+  uint8_t pad[3];
   uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
 } RackInfoTableEntry;
 
@@ -170,6 +191,32 @@ rack_info_table_entry_get_playthrough_union(const RackInfoTableEntry *entry,
   return entry->playthrough_union[leave_size];
 }
 
+// Returns true if there is at least one canonical size-`word_length` subrack
+// of this rack that forms a valid `word_length`-letter word on its own (no
+// playthrough). Shadow uses this to skip anchors whose tiles_played size
+// could never produce a nonplaythrough word for this rack.
+static inline bool rack_info_table_entry_has_nonplaythrough_word_of_length(
+    const RackInfoTableEntry *entry, int word_length) {
+  if (word_length < 0 || word_length > RACK_SIZE) {
+    return false;
+  }
+  return ((entry->nonplaythrough_has_word_of_length_bitmask >> word_length) &
+          1U) != 0U;
+}
+
+// Returns the max KLV leave value among canonical (RACK_SIZE - leave_size)-
+// tile subracks of this rack that form a valid (RACK_SIZE - leave_size)-
+// letter word on their own (no playthrough). Returns EQUITY_INITIAL_VALUE if
+// no such subrack exists for this leave_size. Shadow uses this as the best
+// possible leave for a nonplaythrough play of size (RACK_SIZE - leave_size).
+static inline Equity rack_info_table_entry_get_nonplaythrough_best_leave_value(
+    const RackInfoTableEntry *entry, int leave_size) {
+  if (leave_size < 0 || leave_size > RACK_SIZE) {
+    return EQUITY_INITIAL_VALUE;
+  }
+  return entry->nonplaythrough_best_leave_values[leave_size];
+}
+
 static inline void rack_info_table_destroy(RackInfoTable *rit) {
   if (!rit) {
     return;
@@ -192,9 +239,12 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //   4 bytes: num_buckets
 //   4 bytes: num_entries
 //   (num_buckets + 1) * 4 bytes: bucket_starts
-//   num_entries entries, each 560 bytes:
+//   num_entries entries, each sizeof(RackInfoTableEntry) bytes:
 //     (1 << RACK_SIZE) * 4 bytes: leaves (Equity, int32_t)
 //     (RACK_SIZE + 1) * 4 bytes: playthrough_union (uint32_t)
+//     (RACK_SIZE + 1) * 4 bytes: nonplaythrough_best_leave_values (Equity)
+//     1 byte: nonplaythrough_has_word_of_length_bitmask
+//     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
 static inline void rit_write_uint32_or_die(uint32_t value, FILE *stream,
@@ -237,6 +287,19 @@ rit_write_entries_or_die(const RackInfoTableEntry *entries, uint32_t n,
       fwrite_or_die(&le_union, sizeof(uint32_t), 1, stream,
                     "rit playthrough union");
     }
+    for (int leave_idx = 0;
+         leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+         leave_idx++) {
+      const uint32_t le_leave = htole32(
+          (uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
+      fwrite_or_die(&le_leave, sizeof(uint32_t), 1, stream,
+                    "rit nonplaythrough best leave value");
+    }
+    fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
+                  sizeof(uint8_t), 1, stream,
+                  "rit nonplaythrough has word of length bitmask");
+    fwrite_or_die(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream,
+                  "rit entry pad");
     fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
                   RACK_INFO_TABLE_BITRACK_BYTES, stream, "rit bit_rack_bytes");
   }
@@ -304,7 +367,15 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
       entries[i].playthrough_union[union_idx] =
           le32toh(entries[i].playthrough_union[union_idx]);
     }
+    for (int leave_idx = 0;
+         leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+         leave_idx++) {
+      entries[i].nonplaythrough_best_leave_values[leave_idx] =
+          (Equity)le32toh(
+              (uint32_t)entries[i].nonplaythrough_best_leave_values[leave_idx]);
+    }
     // bit_rack_bytes are already stored little-endian
+    // nonplaythrough_has_word_of_length_bitmask is a single byte, no swap
   }
 #endif
 }

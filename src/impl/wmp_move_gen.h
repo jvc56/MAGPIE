@@ -7,12 +7,16 @@
 #include "../ent/anchor.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/leave_map.h"
+#include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
 #include "wmp_stats.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
@@ -211,6 +215,84 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
        size++) {
     wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
                                                check_leaves);
+  }
+}
+
+// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. Skips
+// the per-size wmp_get_word_entry loop for any size where the RIT entry
+// says there is no canonical size-k subrack that forms a valid k-letter
+// word. For sizes that do have words, still runs the existing walk to
+// populate subrack_info->wmp_entry pointers needed at record time. Also
+// seeds nonplaythrough_best_leave_values from the RIT entry directly so
+// that even for the walked sizes we avoid the running-max update inside
+// the inner loop.
+//
+// Precondition: rit_entry is non-NULL and corresponds to this move_gen's
+// full player_rack.
+static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    const RackInfoTableEntry *rit_entry) {
+  leave_map_set_current_index(leave_map,
+                              (1 << wmp_move_gen->full_rack_size) - 1);
+  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+  BitRack empty = bit_rack_create_empty();
+  wmp_move_gen_enumerate_nonplaythrough_subracks(
+      wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+
+  // Seed has_word_of_length and best_leave_values from the RIT entry. The
+  // RIT's has_word_of_length_bitmask is an OR over all canonical size-k
+  // subracks of this rack, so it matches exactly what
+  // wmp_move_gen_check_nonplaythroughs_of_size would compute. Likewise the
+  // RIT's best_leave_values[leave_size] is the max leave value over those
+  // subracks.
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wmp_move_gen->nonplaythrough_has_word_of_length[size] =
+        rack_info_table_entry_has_nonplaythrough_word_of_length(rit_entry,
+                                                                size);
+  }
+  for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+    Equity rit_best =
+        rack_info_table_entry_get_nonplaythrough_best_leave_value(rit_entry,
+                                                                  leave_size);
+    // The non-RIT path writes 0 instead of EQUITY_MIN_VALUE when
+    // check_leaves is false. Match that convention so the field is always
+    // well-defined downstream.
+    if (rit_best == EQUITY_INITIAL_VALUE || !check_leaves) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          check_leaves ? EQUITY_MIN_VALUE : 0;
+    } else {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = rit_best;
+    }
+  }
+
+  // For sizes that have at least one valid nonplaythrough word we still
+  // need to populate subrack_info->wmp_entry pointers for the eventual
+  // record-time wmp_entry_write_words_to_buffer call. But we can skip the
+  // walk entirely for sizes where no canonical subrack makes a word -- the
+  // wmp_entry cache for those sizes is never read because shadow_record
+  // early-returns on wmp_move_gen_nonplaythrough_word_of_length_exists
+  // before getting to the record stage.
+  for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
+       size++) {
+    if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
+      continue;
+    }
+    const int leave_size = wmp_move_gen->full_rack_size - size;
+    // The existing wmp_move_gen_check_nonplaythroughs_of_size writes to
+    // nonplaythrough_best_leave_values[leave_size] and runs a max update
+    // across subracks. We already seeded the final value from the RIT, so
+    // stash it and restore after the walk (the walk only keeps a running
+    // max vs EQUITY_MIN_VALUE, which matches the RIT-seeded max).
+    const Equity seeded_best =
+        wmp_move_gen->nonplaythrough_best_leave_values[leave_size];
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
+                                               check_leaves);
+    // Assert the walk's max matches what RIT already stored. Cheap sanity
+    // check that catches maker/consumer drift.
+    assert(!check_leaves ||
+           wmp_move_gen->nonplaythrough_best_leave_values[leave_size] ==
+               seeded_best);
+    (void)seeded_best;
   }
 }
 

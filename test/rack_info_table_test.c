@@ -69,6 +69,14 @@ static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
       assert(ea->playthrough_union[union_idx] ==
              eb->playthrough_union[union_idx]);
     }
+    for (int leave_idx = 0;
+         leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+         leave_idx++) {
+      assert(ea->nonplaythrough_best_leave_values[leave_idx] ==
+             eb->nonplaythrough_best_leave_values[leave_idx]);
+    }
+    assert(ea->nonplaythrough_has_word_of_length_bitmask ==
+           eb->nonplaythrough_has_word_of_length_bitmask);
     for (int byte_idx = 0; byte_idx < RACK_INFO_TABLE_BITRACK_BYTES;
          byte_idx++) {
       assert(ea->bit_rack_bytes[byte_idx] == eb->bit_rack_bytes[byte_idx]);

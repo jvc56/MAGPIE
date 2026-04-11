@@ -24,11 +24,11 @@
 #include "../ent/kwg.h"
 #include "../ent/kwg_alpha.h"
 #include "../ent/leave_map.h"
-#include "../ent/rack_info_table.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
@@ -1389,16 +1389,9 @@ static inline void shadow_record(MoveGen *gen) {
         // or full rack + single-playthrough when the RIT is unavailable
         // or doesn't cover full-rack play.
         WMP_STATS_INC(WMP_STATS_SHADOW_FALLBACK_FULL_RACK, gen->tiles_played);
-        if (gen->rit_entry == NULL) {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_RIT_ENTRY,
-                        gen->tiles_played);
-        } else if (gen->wmp_move_gen.num_tiles_played_through != 1) {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_MULTI_PLAYTHROUGH,
-                        gen->tiles_played);
-        } else {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_COVERAGE,
-                        gen->tiles_played);
-        }
+        WMP_STATS_INC_BYPASS_REASON(
+            gen->rit_entry, gen->wmp_move_gen.num_tiles_played_through,
+            gen->tiles_played);
         if (!wmp_move_gen_check_playthrough_full_rack_existence(
                 &gen->wmp_move_gen)) {
           return;
@@ -1406,16 +1399,9 @@ static inline void shadow_record(MoveGen *gen) {
       } else {
         // Partial rack + multi-playthrough, or partial rack that the RIT
         // fast path didn't handle. No shadow-time word-existence check.
-        if (gen->rit_entry == NULL) {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_RIT_ENTRY,
-                        gen->tiles_played);
-        } else if (gen->wmp_move_gen.num_tiles_played_through != 1) {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_MULTI_PLAYTHROUGH,
-                        gen->tiles_played);
-        } else {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_BYPASS_NO_COVERAGE,
-                        gen->tiles_played);
-        }
+        WMP_STATS_INC_BYPASS_REASON(
+            gen->rit_entry, gen->wmp_move_gen.num_tiles_played_through,
+            gen->tiles_played);
       }
     }
     if (!wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
@@ -2879,8 +2865,18 @@ void generate_moves(const MoveGenArgs *args) {
     if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                                 (gen->move_sort_type != MOVE_SORT_SCORE);
-      wmp_move_gen_check_nonplaythrough_existence(
-          &gen->wmp_move_gen, check_leaves, &gen->leave_map);
+      if (gen->rit_entry != NULL) {
+        // RIT-backed fast path: skip the per-size wmp_get_word_entry loop
+        // for any played size where the RIT entry says no canonical
+        // k-subrack of this rack forms a k-letter word on its own. Seeds
+        // nonplaythrough_best_leave_values directly from the cached max
+        // the RIT already computed at build time.
+        wmp_move_gen_check_nonplaythrough_existence_with_rit(
+            &gen->wmp_move_gen, check_leaves, &gen->leave_map, gen->rit_entry);
+      } else {
+        wmp_move_gen_check_nonplaythrough_existence(
+            &gen->wmp_move_gen, check_leaves, &gen->leave_map);
+      }
     }
 
     if (gen->stop_on_threshold && gen->threshold_exceeded) {
