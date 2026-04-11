@@ -13,6 +13,7 @@
 #include "../util/string_util.h"
 #include "config.h"
 #include "move_gen.h"
+#include "wmp_stats.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -356,6 +357,7 @@ void process_command_internal(int argc, char *argv[],
 }
 
 void process_command_default(int argc, char *argv[]) {
+  wmp_stats_init();
   process_command_internal(argc, argv, NULL);
 }
 

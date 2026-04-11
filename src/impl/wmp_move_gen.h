@@ -9,6 +9,7 @@
 #include "../ent/board.h"
 #include "../ent/leave_map.h"
 #include "../ent/wmp.h"
+#include "wmp_stats.h"
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -161,6 +162,10 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   const int word_size = size + wmp_move_gen->num_tiles_played_through;
   playthrough_info->wmp_entry = wmp_get_word_entry(
       wmp_move_gen->wmp, &playthrough_info->subrack, word_size);
+  WMP_STATS_INC(WMP_STATS_PT_FULL_RACK_TOTAL, word_size);
+  if (playthrough_info->wmp_entry != NULL) {
+    WMP_STATS_INC(WMP_STATS_PT_FULL_RACK_FOUND, word_size);
+  }
   return playthrough_info->wmp_entry != NULL;
 }
 
@@ -177,9 +182,11 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
     subrack_info->wmp_entry =
         wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    WMP_STATS_INC(WMP_STATS_NP_CHECK_TOTAL, size);
     if (subrack_info->wmp_entry == NULL) {
       continue;
     }
+    WMP_STATS_INC(WMP_STATS_NP_CHECK_FOUND, size);
     wmp_move_gen->nonplaythrough_has_word_of_length[size] = true;
     if (!check_leaves) {
       continue;
@@ -389,6 +396,11 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   if (is_playthrough) {
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+    WMP_STATS_INC(WMP_STATS_PT_SUBRACK_WORDS_TOTAL, wmp_move_gen->word_length);
+    if (subrack_info->wmp_entry != NULL) {
+      WMP_STATS_INC(WMP_STATS_PT_SUBRACK_WORDS_FOUND,
+                    wmp_move_gen->word_length);
+    }
   }
 
   if (subrack_info->wmp_entry == NULL) {
@@ -404,6 +416,15 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   assert(result_bytes > 0);
   assert(result_bytes % wmp_move_gen->word_length == 0);
   wmp_move_gen->num_words = result_bytes / wmp_move_gen->word_length;
+  if (is_playthrough) {
+    WMP_STATS_INC(WMP_STATS_WORDS_WRITTEN_PT_CALLS, wmp_move_gen->word_length);
+    WMP_STATS_ADD(WMP_STATS_WORDS_WRITTEN_PT_SUM, wmp_move_gen->word_length,
+                  wmp_move_gen->num_words);
+  } else {
+    WMP_STATS_INC(WMP_STATS_WORDS_WRITTEN_NP_CALLS, wmp_move_gen->word_length);
+    WMP_STATS_ADD(WMP_STATS_WORDS_WRITTEN_NP_SUM, wmp_move_gen->word_length,
+                  wmp_move_gen->num_words);
+  }
   return true;
 }
 
