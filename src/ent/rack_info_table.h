@@ -20,21 +20,41 @@
 // time. The table is keyed by BitRack (the multiset of tiles forming a full
 // rack) and uses the same bucket-chaining hash table layout as the WordMap.
 //
-// Each entry currently stores the leave values for every 2^RACK_SIZE subset
-// of the rack (indexed by the LeaveMap bitmask, empty at index 0, full rack
-// at index (1 << RACK_SIZE) - 1). Additional per-rack fields (e.g. word
-// existence per length) can be added to RackInfoTableEntry in the future.
+// Each entry stores leave values for every 2^RACK_SIZE subset of the rack,
+// indexed by the LeaveMap bitmask (empty at index 0, full rack at index
+// (1 << RACK_SIZE) - 1).
+//
+// Each entry also stores a fixed-size array `playthrough_union[leave_size]`
+// indexed by leave_size in [0, RACK_SIZE]. Each uint32 is a union bitmask:
+//
+//   playthrough_union[leave_size] = bitmask of letters L such that there
+//       exists some canonical (RACK_SIZE - leave_size)-tile subrack S of
+//       the full rack for which (S + {L}) anagrams to a valid word of
+//       length (RACK_SIZE - leave_size + 1).
+//
+// This is the OR-reduction of per-canonical-subrack "can a word of this
+// length exist with one additional letter" checks. Shadow consumes it with
+// a count of tiles_played, which maps to leave_size = RACK_SIZE -
+// tiles_played, without needing to know which specific subrack is being
+// played.
+//
+// The coverage interval [playthrough_min_played_size, RACK_SIZE] controls
+// which leave_sizes are populated by the build. Uncovered entries stay at
+// 0; consumers must check rack_info_table_has_playthrough_coverage() before
+// trusting a zero result.
 
 enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
+  RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BITRACK_BYTES = BIT_RACK_EXPECTED_SIZE_BYTES,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 1,
-  RIT_EARLIEST_SUPPORTED_VERSION = 1,
+  RIT_VERSION = 3,
+  RIT_EARLIEST_SUPPORTED_VERSION = 3,
 };
 
 typedef struct RackInfoTableEntry {
   Equity leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+  uint32_t playthrough_union[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
 } RackInfoTableEntry;
 
@@ -42,6 +62,11 @@ typedef struct RackInfoTable {
   char *name;
   uint8_t version;
   uint8_t rack_size;
+  // Coverage lower bound for playthrough_union. Played sizes in
+  // [playthrough_min_played_size, RACK_SIZE] have their corresponding
+  // playthrough_union[leave_size] slot populated; other slots stay at 0.
+  // Setting min > RACK_SIZE means "no coverage at all".
+  uint8_t playthrough_min_played_size;
   uint32_t num_buckets;
   uint32_t num_entries;
   uint32_t *bucket_starts;
@@ -50,6 +75,23 @@ typedef struct RackInfoTable {
 
 static inline const char *rack_info_table_get_name(const RackInfoTable *rit) {
   return rit->name;
+}
+
+static inline uint8_t
+rack_info_table_get_playthrough_min_played_size(const RackInfoTable *rit) {
+  return rit->playthrough_min_played_size;
+}
+
+// True if the given played_size falls within the RIT's coverage interval,
+// i.e. playthrough_union[RACK_SIZE - played_size] is populated for the
+// current rack.
+static inline bool
+rack_info_table_has_playthrough_coverage(const RackInfoTable *rit,
+                                         int played_size) {
+  if (played_size < 0 || played_size > RACK_SIZE) {
+    return false;
+  }
+  return played_size >= (int)rit->playthrough_min_played_size;
 }
 
 static inline BitRack
@@ -111,6 +153,23 @@ rack_info_table_lookup_leaves(const RackInfoTable *rit,
   return entry->leaves;
 }
 
+// Bitmask of machine letters L such that, for at least one canonical
+// (RACK_SIZE - leave_size)-tile subrack S of the full rack represented by
+// `entry`, S + {L} anagrams to a valid word of length
+// (RACK_SIZE - leave_size + 1). Returns 0 if leave_size is out of range.
+// Callers should separately verify via rack_info_table_has_playthrough_coverage()
+// that the table actually has data for the corresponding played_size --
+// a 0 value here alone can't distinguish "no letter works" from "we
+// didn't build coverage for this size".
+static inline uint32_t
+rack_info_table_entry_get_playthrough_union(const RackInfoTableEntry *entry,
+                                             int leave_size) {
+  if (leave_size < 0 || leave_size > RACK_SIZE) {
+    return 0;
+  }
+  return entry->playthrough_union[leave_size];
+}
+
 static inline void rack_info_table_destroy(RackInfoTable *rit) {
   if (!rit) {
     return;
@@ -128,11 +187,14 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 // On-disk layout (all integers little-endian):
 //   1 byte:  version (RIT_VERSION)
 //   1 byte:  rack_size (matches RACK_SIZE)
+//   1 byte:  playthrough_min_played_size
+//   1 byte:  zero padding (keeps the following u32 aligned)
 //   4 bytes: num_buckets
 //   4 bytes: num_entries
 //   (num_buckets + 1) * 4 bytes: bucket_starts
-//   num_entries entries, each:
+//   num_entries entries, each 560 bytes:
 //     (1 << RACK_SIZE) * 4 bytes: leaves (Equity, int32_t)
+//     (RACK_SIZE + 1) * 4 bytes: playthrough_union (uint32_t)
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
 static inline void rit_write_uint32_or_die(uint32_t value, FILE *stream,
@@ -168,6 +230,13 @@ rit_write_entries_or_die(const RackInfoTableEntry *entries, uint32_t n,
       const uint32_t le_leaf = htole32((uint32_t)entry->leaves[leaf_idx]);
       fwrite_or_die(&le_leaf, sizeof(uint32_t), 1, stream, "rit leaf");
     }
+    for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
+         union_idx++) {
+      const uint32_t le_union =
+          htole32(entry->playthrough_union[union_idx]);
+      fwrite_or_die(&le_union, sizeof(uint32_t), 1, stream,
+                    "rit playthrough union");
+    }
     fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
                   RACK_INFO_TABLE_BITRACK_BYTES, stream, "rit bit_rack_bytes");
   }
@@ -185,6 +254,11 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
   fwrite_or_die(&version, sizeof(version), 1, stream, "rit version");
   const uint8_t rack_size = rit->rack_size;
   fwrite_or_die(&rack_size, sizeof(rack_size), 1, stream, "rit rack size");
+  const uint8_t min_played = rit->playthrough_min_played_size;
+  fwrite_or_die(&min_played, sizeof(min_played), 1, stream,
+                "rit playthrough min played size");
+  const uint8_t padding = 0;
+  fwrite_or_die(&padding, sizeof(padding), 1, stream, "rit header padding");
 
   rit_write_uint32_or_die(rit->num_buckets, stream, "rit num buckets");
   rit_write_uint32_or_die(rit->num_entries, stream, "rit num entries");
@@ -225,6 +299,11 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
       entries[i].leaves[leaf_idx] =
           (Equity)le32toh((uint32_t)entries[i].leaves[leaf_idx]);
     }
+    for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
+         union_idx++) {
+      entries[i].playthrough_union[union_idx] =
+          le32toh(entries[i].playthrough_union[union_idx]);
+    }
     // bit_rack_bytes are already stored little-endian
   }
 #endif
@@ -261,6 +340,17 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
     return;
   }
   rit->rack_size = rack_size;
+
+  uint8_t min_played;
+  if (fread(&min_played, sizeof(min_played), 1, stream) != 1) {
+    log_fatal("could not read rit playthrough min played size");
+  }
+  rit->playthrough_min_played_size = min_played;
+
+  uint8_t padding;
+  if (fread(&padding, sizeof(padding), 1, stream) != 1) {
+    log_fatal("could not read rit header padding");
+  }
 
   rit_read_uint32_or_die(&rit->num_buckets, stream);
   rit_read_uint32_or_die(&rit->num_entries, stream);

@@ -1348,12 +1348,49 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 static inline void shadow_record(MoveGen *gen) {
   const Equity *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
-        (gen->tiles_played == gen->number_of_letters_on_rack)) {
-      if (!wmp_move_gen_check_playthrough_full_rack_existence(
-              &gen->wmp_move_gen)) {
-        return;
+    if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
+      // RIT fast path for single-playthrough anchors: the RIT's
+      // playthrough_union[leave_size] holds a uint32 bitmask of letters L
+      // such that at least one canonical (tiles_played)-tile subrack of
+      // the current full rack forms a valid (tiles_played + 1)-letter
+      // word with L. Works for any tiles_played value (1..RACK_SIZE) as
+      // long as the built RIT has coverage for that played size. Replaces
+      // the KWG/WMP hash walk with one array load and one bit test.
+      //
+      // Preconditions:
+      //   - gen->rit_entry is set (implies number_of_letters_on_rack ==
+      //     RACK_SIZE, since gen_look_up_leaves_and_record_exchanges only
+      //     populates rit_entry for full racks)
+      //   - exactly one playthrough tile (the RIT's unions are built for
+      //     single-blank-equivalent queries, not multi-blank)
+      //   - played_size falls in the RIT's coverage interval
+      const bool rit_fast_path =
+          gen->rit_entry != NULL &&
+          gen->wmp_move_gen.num_tiles_played_through == 1 &&
+          rack_info_table_has_playthrough_coverage(gen->rack_info_table,
+                                                   gen->tiles_played);
+      if (rit_fast_path) {
+        const int leave_size = RACK_SIZE - gen->tiles_played;
+        const uint32_t union_bitmask =
+            rack_info_table_entry_get_playthrough_union(gen->rit_entry,
+                                                         leave_size);
+        const MachineLetter playthrough_ml =
+            wmp_move_gen_single_playthrough_letter(&gen->wmp_move_gen);
+        if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
+          return;
+        }
+      } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
+        // Fall back to the existing WMP check for full-rack cases not
+        // handled by the RIT fast path: full rack + multi-playthrough,
+        // or full rack + single-playthrough when the RIT is unavailable
+        // or doesn't cover full-rack play.
+        if (!wmp_move_gen_check_playthrough_full_rack_existence(
+                &gen->wmp_move_gen)) {
+          return;
+        }
       }
+      // Partial rack + multi-playthrough, or partial rack + no RIT
+      // coverage: no shadow-time word-existence check (same as before).
     }
     if (!wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&
         (gen->tiles_played >= MINIMUM_WORD_LENGTH)) {
@@ -2555,11 +2592,17 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
       rack_get_total_letters(&gen->player_rack) == RACK_SIZE;
   const RackInfoTable *rit = gen->rack_info_table;
   const Equity *precomputed = NULL;
+  gen->rit_entry = NULL;
 
   if (has_full_rack && rit != NULL) {
     const BitRack player_bit_rack =
         bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
-    precomputed = rack_info_table_lookup_leaves(rit, &player_bit_rack);
+    const RackInfoTableEntry *entry =
+        rack_info_table_lookup(rit, &player_bit_rack);
+    if (entry != NULL) {
+      gen->rit_entry = entry;
+      precomputed = entry->leaves;
+    }
   }
 
   // gen->leave_map.current_index moves differently when filling leave_values

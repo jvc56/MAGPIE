@@ -215,7 +215,17 @@ void convert_with_names(const LetterDistribution *ld,
         data_paths, output_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
         error_stack);
     if (error_stack_is_empty(error_stack)) {
-      RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads);
+      // Default coverage is the full interval [1, RACK_SIZE]. The rit_sweep
+      // on-demand test (test/rack_info_table_test.c) showed that widening
+      // coverage from played_size == RACK_SIZE down to played_size == 1
+      // monotonically improves CSW24 movegen user time by ~3% while the
+      // on-disk file stays flat at ~1.69 GB (entry size is fixed at 560 B
+      // regardless of min because playthrough_union is a fixed-size
+      // leave_size-indexed array, not variable-length per-slot storage).
+      // So there's no lighter variant worth shipping.
+      const uint8_t playthrough_min_played_size = 1;
+      RackInfoTable *rit = make_rack_info_table(
+          klv, wmp, ld, num_threads, playthrough_min_played_size);
       rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         error_stack_push(

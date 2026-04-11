@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../def/klv_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
 #include "../ent/bit_rack.h"
@@ -33,6 +34,19 @@ static inline uint32_t next_power_of_2(uint32_t n) {
   n |= n >> 8;
   n |= n >> 16;
   return n + 1;
+}
+
+static inline int rit_maker_popcount(unsigned int x) {
+#if defined(__has_builtin) && __has_builtin(__builtin_popcount)
+  return __builtin_popcount(x);
+#else
+  int count = 0;
+  while (x) {
+    x &= x - 1;
+    count++;
+  }
+  return count;
+#endif
 }
 
 // ============================================================================
@@ -91,61 +105,112 @@ static void enumerate_racks_recursive(const LetterDistribution *ld, int ld_size,
 }
 
 // ============================================================================
-// Leave value computation
+// Per-rack entry computation
 //
-// For a given rack, compute leave values for all 2^RACK_SIZE subsets using
-// the same recursive enumeration as generate_exchange_moves in move_gen.c.
-// The complement index maps subsets to the same bitmask positions used by
-// LeaveMap during play generation.
+// For a given rack, recursively enumerate every canonical subrack using the
+// same walk as generate_exchange_moves in move_gen.c, and at every terminal
+// fill in (a) the leave value for the leave multiset (indexed by the
+// LeaveMap canonical index) and, when the table has playthrough coverage
+// for this played size, (b) OR a bitmask of letters L such that (played
+// subrack + {L}) anagrams to a valid word of length (played_size + 1)
+// into entry->playthrough_union[leave_size]. The union collapses the
+// per-canonical-subrack data that shadow can actually consume: shadow
+// tracks tiles_played as a count, not a specific subrack, so a
+// leave_size-indexed OR is the right granularity.
 // ============================================================================
 
-static void compute_leaves_recursive(const KLV *klv, int ld_size,
-                                     Rack *player_rack, Rack *leave,
-                                     LeaveMap *leave_map, Equity *out_leaves,
-                                     uint32_t node_index, uint32_t word_index,
-                                     MachineLetter ml) {
-  while (ml < ld_size && rack_get_letter(player_rack, ml) == 0) {
+typedef struct {
+  const KLV *klv;
+  const WMP *wmp;
+  const LetterDistribution *ld;
+  int ld_size;
+  uint8_t playthrough_min_played_size;
+  // Mutable state, updated as we recurse into a single rack.
+  Rack *player_rack;
+  Rack *leave;
+  LeaveMap *leave_map;
+  RackInfoTableEntry *entry;
+} EntryComputeState;
+
+static void compute_entry_recursive(EntryComputeState *state,
+                                    uint32_t node_index, uint32_t word_index,
+                                    MachineLetter ml) {
+  const int ld_size = state->ld_size;
+  while (ml < ld_size && rack_get_letter(state->player_rack, ml) == 0) {
     ml++;
   }
   if (ml == ld_size) {
-    if (rack_get_total_letters(player_rack) > 0) {
+    const int played_size = rack_get_total_letters(state->player_rack);
+    if (played_size > 0) {
       Equity value = 0;
       if (word_index != KLV_UNFOUND_INDEX) {
-        value = klv_get_indexed_leave_value(klv, word_index - 1);
+        value = klv_get_indexed_leave_value(state->klv, word_index - 1);
       }
-      out_leaves[leave_map->current_index] = value;
+      state->entry->leaves[state->leave_map->current_index] = value;
+
+      if (state->wmp != NULL &&
+          played_size >= (int)state->playthrough_min_played_size) {
+        const int word_length = played_size + 1;
+        if (word_length >= MINIMUM_WORD_LENGTH && word_length <= BOARD_DIM) {
+          // For each concrete letter L in the alphabet, ask the WMP
+          // whether (rack + L) forms a valid word of the target length.
+          // wmp_get_word_entry dispatches on the blank count in the query
+          // bitrack, so this handles 0-, 1-, and 2-blank racks uniformly.
+          const BitRack rack_bit_rack =
+              bit_rack_create_from_rack(state->ld, state->player_rack);
+          uint32_t bitmask = 0;
+          const int cap = state->ld_size < (int)BIT_RACK_MAX_ALPHABET_SIZE
+                              ? state->ld_size
+                              : (int)BIT_RACK_MAX_ALPHABET_SIZE;
+          for (int ml_candidate = 1; ml_candidate < cap; ml_candidate++) {
+            BitRack query = rack_bit_rack;
+            bit_rack_add_letter(&query, (MachineLetter)ml_candidate);
+            const WMPEntry *wmp_entry =
+                wmp_get_word_entry(state->wmp, &query, word_length);
+            if (wmp_entry != NULL) {
+              bitmask |= (1U << ml_candidate);
+            }
+          }
+          // OR into the union slot for this leave_size. Multiple canonical
+          // subracks with the same popcount(leave_map->current_index) are
+          // unioned into the same slot.
+          const int leave_size =
+              rit_maker_popcount((unsigned int)state->leave_map->current_index);
+          state->entry->playthrough_union[leave_size] |= bitmask;
+        }
+      }
     }
     return;
   }
 
-  compute_leaves_recursive(klv, ld_size, player_rack, leave, leave_map,
-                           out_leaves, node_index, word_index, ml + 1);
+  compute_entry_recursive(state, node_index, word_index, ml + 1);
 
-  const uint16_t num_this = rack_get_letter(player_rack, ml);
+  const uint16_t num_this = rack_get_letter(state->player_rack, ml);
   for (uint16_t tile_idx = 0; tile_idx < num_this; tile_idx++) {
-    rack_add_letter(leave, ml);
-    leave_map_take_letter_and_update_complement_index(leave_map, player_rack,
-                                                      ml);
+    rack_add_letter(state->leave, ml);
+    leave_map_take_letter_and_update_complement_index(state->leave_map,
+                                                      state->player_rack, ml);
     uint32_t sibling_word_index;
-    node_index = increment_node_to_ml(klv, node_index, word_index,
+    node_index = increment_node_to_ml(state->klv, node_index, word_index,
                                       &sibling_word_index, ml);
     word_index = sibling_word_index;
     uint32_t child_word_index;
-    node_index = follow_arc(klv, node_index, word_index, &child_word_index);
+    node_index =
+        follow_arc(state->klv, node_index, word_index, &child_word_index);
     word_index = child_word_index;
-    compute_leaves_recursive(klv, ld_size, player_rack, leave, leave_map,
-                             out_leaves, node_index, word_index, ml + 1);
+    compute_entry_recursive(state, node_index, word_index, ml + 1);
   }
 
-  rack_take_letters(leave, ml, num_this);
+  rack_take_letters(state->leave, ml, num_this);
   for (int tile_idx = 0; tile_idx < num_this; tile_idx++) {
-    leave_map_add_letter_and_update_complement_index(leave_map, player_rack,
-                                                     ml);
+    leave_map_add_letter_and_update_complement_index(state->leave_map,
+                                                     state->player_rack, ml);
   }
 }
 
-static void compute_entry_for_rack(const KLV *klv,
+static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
                                    const LetterDistribution *ld,
+                                   uint8_t playthrough_min_played_size,
                                    const BitRack *bit_rack,
                                    RackInfoTableEntry *entry) {
   const int ld_size = ld_get_size(ld);
@@ -171,10 +236,23 @@ static void compute_entry_for_rack(const KLV *klv,
 
   memset(entry->leaves, 0,
          RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
+  memset(entry->playthrough_union, 0,
+         RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
+
+  EntryComputeState state = {
+      .klv = klv,
+      .wmp = wmp,
+      .ld = ld,
+      .ld_size = ld_size,
+      .playthrough_min_played_size = playthrough_min_played_size,
+      .player_rack = &player_rack,
+      .leave = &leave,
+      .leave_map = &leave_map,
+      .entry = entry,
+  };
 
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
-  compute_leaves_recursive(klv, ld_size, &player_rack, &leave, &leave_map,
-                           entry->leaves, root, 0, 0);
+  compute_entry_recursive(&state, root, 0, 0);
 }
 
 // ============================================================================
@@ -183,8 +261,9 @@ static void compute_entry_for_rack(const KLV *klv,
 
 typedef struct {
   const KLV *klv;
-  const WMP *wmp; // Reserved for future per-rack data
+  const WMP *wmp;
   const LetterDistribution *ld;
+  uint8_t playthrough_min_played_size;
   const BitRack *all_racks;
   RackInfoTableEntry *entries;
   const uint32_t *entry_indices;
@@ -194,11 +273,12 @@ typedef struct {
 
 static void *compute_entries_thread(void *arg) {
   const EntryComputeArg *a = (const EntryComputeArg *)arg;
-  (void)a->wmp; // unused for now
   for (uint32_t rack_idx = a->start; rack_idx < a->end; rack_idx++) {
     const uint32_t entry_idx = a->entry_indices[rack_idx];
     RackInfoTableEntry *entry = &a->entries[entry_idx];
-    compute_entry_for_rack(a->klv, a->ld, &a->all_racks[rack_idx], entry);
+    compute_entry_for_rack(a->klv, a->wmp, a->ld,
+                           a->playthrough_min_played_size,
+                           &a->all_racks[rack_idx], entry);
   }
   return NULL;
 }
@@ -209,9 +289,17 @@ static void *compute_entries_thread(void *arg) {
 
 RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
                                     const LetterDistribution *ld,
-                                    int num_threads) {
+                                    int num_threads,
+                                    uint8_t playthrough_min_played_size) {
   if (num_threads <= 0) {
     num_threads = 1;
+  }
+
+  // If the WMP is NULL, or the caller asked for no coverage, clamp the
+  // coverage to empty so no playthrough work runs.
+  uint8_t effective_min = playthrough_min_played_size;
+  if (wmp == NULL || effective_min > RACK_SIZE) {
+    effective_min = (uint8_t)(RACK_SIZE + 1);
   }
 
   // 1. Count total racks
@@ -221,6 +309,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
         (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
     rit->version = RIT_VERSION;
     rit->rack_size = (uint8_t)RACK_SIZE;
+    rit->playthrough_min_played_size = effective_min;
     rit->num_buckets = RIT_MIN_BUCKETS;
     rit->num_entries = 0;
     rit->bucket_starts =
@@ -286,6 +375,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
         .klv = klv,
         .wmp = wmp,
         .ld = ld,
+        .playthrough_min_played_size = effective_min,
         .all_racks = all_racks,
         .entries = entries,
         .entry_indices = entry_indices,
@@ -312,6 +402,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
           .klv = klv,
           .wmp = wmp,
           .ld = ld,
+          .playthrough_min_played_size = effective_min,
           .all_racks = all_racks,
           .entries = entries,
           .entry_indices = entry_indices,
@@ -339,6 +430,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
       (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
   rit->version = RIT_VERSION;
   rit->rack_size = (uint8_t)RACK_SIZE;
+  rit->playthrough_min_played_size = effective_min;
   rit->num_buckets = num_buckets;
   rit->num_entries = total_racks;
   rit->bucket_starts = bucket_starts;

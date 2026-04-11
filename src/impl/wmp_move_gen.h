@@ -256,6 +256,42 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_blocks = 0;
 }
 
+// Assumes num_tiles_played_through == 1; returns the single machine letter
+// that is currently set in playthrough_bit_rack. Uses count-trailing-zeros
+// so it's O(1) rather than iterating over the alphabet.
+static inline MachineLetter
+wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
+  const uint64_t low =
+      bit_rack_get_low_64(&wmp_move_gen->playthrough_bit_rack);
+  if (low != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    return (MachineLetter)(__builtin_ctzll(low) / BIT_RACK_BITS_PER_LETTER);
+#else
+    int ml = 0;
+    uint64_t v = low;
+    while ((v & 0xFU) == 0) {
+      v >>= BIT_RACK_BITS_PER_LETTER;
+      ml++;
+    }
+    return (MachineLetter)ml;
+#endif
+  }
+  const uint64_t high =
+      bit_rack_get_high_64(&wmp_move_gen->playthrough_bit_rack);
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return (MachineLetter)(16 +
+                         __builtin_ctzll(high) / BIT_RACK_BITS_PER_LETTER);
+#else
+  int ml = 16;
+  uint64_t v = high;
+  while ((v & 0xFU) == 0) {
+    v >>= BIT_RACK_BITS_PER_LETTER;
+    ml++;
+  }
+  return (MachineLetter)ml;
+#endif
+}
+
 static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
                                             int tiles_played) {
   return playthrough_blocks * (RACK_SIZE + 1) + tiles_played;

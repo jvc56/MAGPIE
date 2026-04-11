@@ -132,6 +132,11 @@ typedef struct MoveGen {
   const KWG *kwg;
   const KLV *klv;
   const RackInfoTable *rack_info_table;
+  // RIT entry for the current player_rack, looked up once in
+  // gen_look_up_leaves_and_record_exchanges and cached here for the duration
+  // of this move generation. NULL if rack_info_table is NULL, the rack isn't
+  // a full RACK_SIZE rack, or the rack wasn't found in the table.
+  const RackInfoTableEntry *rit_entry;
   const Board *board;
   LetterDistribution ld;
   MoveList *move_list;
