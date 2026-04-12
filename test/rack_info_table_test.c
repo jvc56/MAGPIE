@@ -60,9 +60,14 @@ static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
   for (uint32_t entry_idx = 0; entry_idx < a->num_entries; entry_idx++) {
     const RackInfoTableEntry *ea = &a->entries[entry_idx];
     const RackInfoTableEntry *eb = &b->entries[entry_idx];
+    // Compare packed 24-bit leaves by unpacking both.
+    Equity leaves_a[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    Equity leaves_b[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    rack_info_table_entry_unpack_leaves(ea, leaves_a);
+    rack_info_table_entry_unpack_leaves(eb, leaves_b);
     for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
          leaf_idx++) {
-      assert(ea->leaves[leaf_idx] == eb->leaves[leaf_idx]);
+      assert(leaves_a[leaf_idx] == leaves_b[leaf_idx]);
     }
     for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
@@ -304,12 +309,11 @@ void test_rack_info_table(void) {
       rack_info_table_lookup(rit, &test_bit_rack);
   assert(entry != NULL);
   // Index 0 (empty leave) must be 0.
-  assert(entry->leaves[0] == 0);
-
-  // Convenience accessor should return the same array.
-  const Equity *leaves_via_accessor =
-      rack_info_table_lookup_leaves(rit, &test_bit_rack);
-  assert(leaves_via_accessor == entry->leaves);
+  {
+    Equity unpacked[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    rack_info_table_entry_unpack_leaves(entry, unpacked);
+    assert(unpacked[0] == 0);
+  }
 
   // Verify every entry we enumerate can be looked up, and that the
   // RIT's playthrough slot 0 matches an independent WMP query for the
@@ -321,7 +325,9 @@ void test_rack_info_table(void) {
     const RackInfoTableEntry *found =
         rack_info_table_lookup(rit, &entry_bit_rack);
     assert(found == stored);
-    assert(found->leaves[0] == 0);
+    Equity unpacked_leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+    rack_info_table_entry_unpack_leaves(found, unpacked_leaves);
+    assert(unpacked_leaves[0] == 0);
   }
   verify_unions_against_wmp(rit, wmp, ld);
 

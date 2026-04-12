@@ -7,6 +7,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "sim_benchmark_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -137,6 +138,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"rit_csw24_full", test_rack_info_table_csw24_full},
     {"rit_sweep", test_rack_info_table_csw24_sweep},
+    {"simbench", test_sim_benchmark},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
