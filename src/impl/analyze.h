@@ -1,24 +1,47 @@
 #ifndef ANALYZE_H
 #define ANALYZE_H
 
-#include "../ent/game.h"
 #include "../ent/game_history.h"
-#include "../ent/thread_control.h"
-#include "../ent/win_pct.h"
+#include "../ent/sim_args.h"
+#include "../impl/endgame.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
+#include <stdint.h>
 
-// Analyzes all turns of a single GCG game for the players indicated by
-// player_mask. Internal analysis structures (Game, MoveList, SimResults, etc.)
-// are created on first call and reused across subsequent calls via static
-// storage inside analyze.c.
-void analyze_game(GameHistory *game_history, const GameArgs *game_args,
-                  WinPct *win_pcts, ThreadControl *thread_control,
-                  int player_mask, int num_threads, int num_plays,
-                  int sim_plies, int endgame_plies,
-                  double tt_fraction_of_mem, double stop_cond_pct,
-                  bool sim_with_inference, bool human_readable,
-                  int max_num_display_plays, const char *report_path,
+enum {
+  ANALYZE_NUM_TOP_ENDGAME_MOVES = 1,
+};
+
+typedef struct AnalyzeCtx AnalyzeCtx;
+
+// All inputs required by analyze_game. Config.c is responsible for filling
+// each field before calling analyze_game; analyze_with_sim and
+// analyze_with_endgame set the remaining per-turn fields (game, move_list,
+// known_opp_rack) on sim_args and endgame_args before forwarding to simulate
+// and endgame_solve.
+//
+// sim_args.num_plies == 0 selects static analysis (move generation only,
+// no simulation or endgame solving).
+typedef struct AnalyzeArgs {
+  GameHistory *game_history;
+  uint64_t player_mask;    // 0 = all players; pre-resolved by the caller
+  const char *report_path; // output file path
+
+  SimArgs sim_args;
+  EndgameArgs endgame_args;
+
+  bool human_readable;
+  int max_num_display_plays;
+} AnalyzeArgs;
+
+AnalyzeCtx *analyze_ctx_create(void);
+void analyze_ctx_destroy(AnalyzeCtx *ctx);
+
+// Analyzes all scorable turns in game_history. Creates *analyze_ctx if NULL
+// on entry; the caller is responsible for calling analyze_ctx_destroy after
+// this returns. Reusing the same ctx across multiple calls (directory mode)
+// preserves internal allocations for efficiency.
+void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                   ErrorStack *error_stack);
 
 #endif

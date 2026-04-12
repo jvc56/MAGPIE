@@ -63,9 +63,8 @@
 #include "move_gen.h"
 #include "simmer.h"
 #include <assert.h>
-#include <dirent.h>
-#include <sys/stat.h>
 #include <ctype.h>
+#include <dirent.h>
 #include <float.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -75,6 +74,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 
 enum {
   HELP_INDENT = 10,
@@ -5949,7 +5949,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_PLIES, 1, MAX_PLIES, &config->plies,
+  config_load_int(config, ARG_TOKEN_PLIES, 0, MAX_PLIES, &config->plies,
                   error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -6949,23 +6949,27 @@ static bool path_is_directory(const char *path) {
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
 }
 
-static bool path_is_file_on_disk(const char *path) {
-  struct stat path_stat;
-  return stat(path, &path_stat) == 0 && S_ISREG(path_stat.st_mode);
-}
-
-// Returns a bitmask (bit 0 = player 0, bit 1 = player 1) for the named
-// players, or 0 (all players) if player_list_str is NULL.
-// Pushes an error if any name does not match a player in game_history.
-static int resolve_player_mask(const GameHistory *game_history,
-                               const char *player_list_str,
-                               ErrorStack *error_stack) {
+// Resolves a comma-separated list of player names/nicknames to a bitmask.
+// Returns 0 if player_list_str is NULL (means all players). Limits the number
+// of names to the bit-width of uint64_t. Sets error on any unrecognised name.
+static uint64_t resolve_player_mask(const GameHistory *game_history,
+                                    const char *player_list_str,
+                                    ErrorStack *error_stack) {
   if (!player_list_str) {
     return 0;
   }
   StringSplitter *ss = split_string(player_list_str, ',', true);
-  int player_mask = 0;
+  uint64_t player_mask = 0;
   const int num_names = string_splitter_get_number_of_items(ss);
+  const int max_names = (int)(sizeof(uint64_t) * 8);
+  if (num_names > max_names) {
+    error_stack_push(error_stack,
+                     ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
+                     get_formatted_string("too many player names: %d (max %d)",
+                                          num_names, max_names));
+    string_splitter_destroy(ss);
+    return 0;
+  }
   for (int name_idx = 0; name_idx < num_names; name_idx++) {
     const char *name = string_splitter_get_item(ss, name_idx);
     bool found = false;
@@ -6975,7 +6979,7 @@ static int resolve_player_mask(const GameHistory *game_history,
       const char *pnick =
           game_history_player_get_nickname(game_history, player_idx);
       if (strings_equal(name, pname) || strings_equal(name, pnick)) {
-        player_mask |= (1 << player_idx);
+        player_mask |= (uint64_t)1 << player_idx;
         found = true;
         break;
       }
@@ -6991,44 +6995,73 @@ static int resolve_player_mask(const GameHistory *game_history,
   return player_mask;
 }
 
-static void analyze_single_gcg(Config *config, const char *gcg_path,
-                                const char *player_list_str,
-                                ErrorStack *error_stack) {
-  config_load_win_pcts(config, error_stack);
+// Fills the AnalyzeArgs fields that depend on the current Config state. Called
+// once before analyzing; the per-turn game/move_list/rack fields in sim_args
+// and endgame_args are set later inside analyze.c.
+static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
+                                     Rack *target_played_tiles,
+                                     Rack *nontarget_known_tiles,
+                                     Rack *target_known_inference_tiles) {
+  config_fill_sim_args(config, /*known_opp_rack=*/NULL, target_played_tiles,
+                       nontarget_known_tiles, target_known_inference_tiles,
+                       &analyze_args->sim_args);
+  config_fill_endgame_args(config, &analyze_args->endgame_args);
+  analyze_args->endgame_args.num_top_moves = ANALYZE_NUM_TOP_ENDGAME_MOVES;
+  analyze_args->human_readable = config->human_readable;
+  analyze_args->max_num_display_plays = config->max_num_display_plays;
+}
+
+// Analyzes a single GCG file that has already been parsed into game_history
+// and whose analyze_args has already been filled. Called from both
+// analyze_single_gcg and the analyze_directory loop.
+static void analyze_after_gcg_parsed(AnalyzeArgs *analyze_args,
+                                     AnalyzeCtx **ctx_ptr, const char *gcg_path,
+                                     const char *player_list_str,
+                                     ErrorStack *error_stack) {
+  analyze_args->player_mask = resolve_player_mask(analyze_args->game_history,
+                                                  player_list_str, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-
-  config_parse_gcg(config, gcg_path, config->game_history, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
-  const int player_mask =
-      resolve_player_mask(config->game_history, player_list_str, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   char *base = cut_off_after_last_char(gcg_path, '.');
   char *report_path = get_formatted_string("%s_report.txt", base);
   free(base);
-
-  GameArgs game_args;
-  config_fill_game_args(config, &game_args);
-
-  analyze_game(config->game_history, &game_args, config->win_pcts,
-               config->thread_control, player_mask, config->num_threads,
-               config->num_plays, config->plies, config->endgame_plies,
-               config->tt_fraction_of_mem, config->stop_cond_pct,
-               config->sim_with_inference, config->human_readable,
-               config->max_num_display_plays, report_path, error_stack);
+  analyze_args->report_path = report_path;
+  analyze_game(analyze_args, ctx_ptr, error_stack);
   free(report_path);
+  analyze_args->report_path = NULL;
 }
 
-static void analyze_directory_path(Config *config, const char *dir_path,
-                                   const char *player_list_str,
-                                   ErrorStack *error_stack) {
+// Loads a GCG from any source (game ID, URL, or local file path) and analyzes
+// it. Uses get_gcg so that non-path identifiers such as numeric game IDs are
+// handled the same way as the 'load' command. analyze_args must already be
+// filled by the caller via config_fill_analyze_args.
+static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
+                               AnalyzeCtx **ctx_ptr,
+                               const char *source_identifier,
+                               const char *player_list_str,
+                               ErrorStack *error_stack) {
+  GetGCGArgs download_args = {.source_identifier = source_identifier};
+  char *gcg_string = get_gcg(&download_args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_parse_gcg_string(config, gcg_string, analyze_args->game_history,
+                          error_stack);
+  free(gcg_string);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  analyze_after_gcg_parsed(analyze_args, ctx_ptr, source_identifier,
+                           player_list_str, error_stack);
+}
+
+// Iterates a directory and analyzes every .gcg file it contains. analyze_args
+// must already be filled by the caller via config_fill_analyze_args. The
+// AnalyzeCtx is reused across all games.
+static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
+                              const char *dir_path, const char *player_list_str,
+                              AnalyzeCtx **ctx_ptr, ErrorStack *error_stack) {
   DIR *dir = opendir(dir_path);
   if (!dir) {
     error_stack_push(
@@ -7041,9 +7074,14 @@ static void analyze_directory_path(Config *config, const char *dir_path,
     if (!has_suffix(".gcg", entry->d_name)) {
       continue;
     }
-    char *gcg_path =
-        get_formatted_string("%s/%s", dir_path, entry->d_name);
-    analyze_single_gcg(config, gcg_path, player_list_str, error_stack);
+    char *gcg_path = get_formatted_string("%s/%s", dir_path, entry->d_name);
+    config_parse_gcg(config, gcg_path, analyze_args->game_history, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(gcg_path);
+      break;
+    }
+    analyze_after_gcg_parsed(analyze_args, ctx_ptr, gcg_path, player_list_str,
+                             error_stack);
     free(gcg_path);
     if (!error_stack_is_empty(error_stack)) {
       break;
@@ -7054,31 +7092,43 @@ static void analyze_directory_path(Config *config, const char *dir_path,
 
 void impl_analyze(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate("cannot run analyze without lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run analyze without lexicon"));
     return;
   }
 
-  const char *arg0 =
-      config_get_parg_value(config, ARG_TOKEN_ANALYZE, 0);
-  const char *arg1 =
-      config_get_parg_value(config, ARG_TOKEN_ANALYZE, 1);
+  config_init_game(config);
+
+  // Lazy load win_pcts if not already loaded
+  config_load_win_pcts(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  const int ld_size = ld_get_size(game_get_ld(config->game));
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack nontarget_known_tiles;
+  rack_set_dist_size_and_reset(&nontarget_known_tiles, ld_size);
+  Rack target_known_inference_tiles;
+  rack_set_dist_size_and_reset(&target_known_inference_tiles, ld_size);
+
+  AnalyzeArgs analyze_args = {0};
+  analyze_args.game_history = config->game_history;
+  config_fill_analyze_args(config, &analyze_args, &target_played_tiles,
+                           &nontarget_known_tiles, &target_known_inference_tiles);
+
+  const char *arg0 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 0);
+  const char *arg1 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 1);
 
   if (arg0 == NULL) {
-    // 0 args: analyze current game (both players)
+    // 0 args: analyze current game (both players).
     if (game_history_get_num_events(config->game_history) == 0) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_HISTORY_ERROR,
           string_duplicate("no game loaded; use 'load' or provide a GCG path"));
       return;
     }
-    config_load_win_pcts(config, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    GameArgs game_args;
-    config_fill_game_args(config, &game_args);
     const char *gcg_filename =
         game_history_get_gcg_filename(config->game_history);
     char *report_path;
@@ -7089,74 +7139,67 @@ void impl_analyze(Config *config, ErrorStack *error_stack) {
     } else {
       report_path = string_duplicate("game_report.txt");
     }
-    analyze_game(config->game_history, &game_args, config->win_pcts,
-                 config->thread_control, 0, config->num_threads,
-                 config->num_plays, config->plies, config->endgame_plies,
-                 config->tt_fraction_of_mem, config->stop_cond_pct,
-                 config->sim_with_inference, config->human_readable,
-                 config->max_num_display_plays, report_path, error_stack);
+    analyze_args.report_path = report_path;
+    AnalyzeCtx *ctx = NULL;
+    analyze_game(&analyze_args, &ctx, error_stack);
+    analyze_ctx_destroy(ctx);
     free(report_path);
     return;
   }
 
   if (arg1 != NULL) {
-    // 2 args: arg0 = path or directory, arg1 = player list
+    // 2 args: arg0 = source (directory, file, game ID, URL), arg1 = player
+    // list.
+    AnalyzeCtx *ctx = NULL;
     if (path_is_directory(arg0)) {
-      analyze_directory_path(config, arg0, arg1, error_stack);
-    } else if (path_is_file_on_disk(arg0)) {
-      analyze_single_gcg(config, arg0, arg1, error_stack);
+      analyze_directory(config, &analyze_args, arg0, arg1, &ctx, error_stack);
     } else {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-          get_formatted_string(
-              "analyze: first argument is not a file or directory: %s", arg0));
+      analyze_single_gcg(config, &analyze_args, &ctx, arg0, arg1, error_stack);
     }
+    analyze_ctx_destroy(ctx);
     return;
   }
 
-  // 1 arg: disambiguate — directory → file → player name list
+  // 1 arg: directory → try get_gcg → player name list for loaded game.
+  AnalyzeCtx *ctx = NULL;
   if (path_is_directory(arg0)) {
-    analyze_directory_path(config, arg0, NULL, error_stack);
-  } else if (path_is_file_on_disk(arg0)) {
-    analyze_single_gcg(config, arg0, NULL, error_stack);
+    analyze_directory(config, &analyze_args, arg0, NULL, &ctx, error_stack);
   } else {
-    // Treat as player name list for the current game
-    if (game_history_get_num_events(config->game_history) == 0) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_HISTORY_ERROR,
-          string_duplicate(
-              "no game loaded and argument is not a valid path"));
-      return;
-    }
-    config_load_win_pcts(config, error_stack);
+    // Try to load arg0 as a GCG source (file, game ID, URL).
+    analyze_single_gcg(config, &analyze_args, &ctx, arg0, NULL, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      return;
+      // Fall back to treating arg0 as a player name list for the loaded game.
+      error_stack_reset(error_stack);
+      if (game_history_get_num_events(config->game_history) == 0) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_HISTORY_ERROR,
+            string_duplicate(
+                "no game loaded and argument is not a valid path"));
+        analyze_ctx_destroy(ctx);
+        return;
+      }
+      analyze_args.player_mask =
+          resolve_player_mask(config->game_history, arg0, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        analyze_ctx_destroy(ctx);
+        return;
+      }
+      const char *gcg_filename =
+          game_history_get_gcg_filename(config->game_history);
+      char *report_path;
+      if (gcg_filename) {
+        char *base = cut_off_after_last_char(gcg_filename, '.');
+        report_path = get_formatted_string("%s_report.txt", base);
+        free(base);
+      } else {
+        report_path = string_duplicate("game_report.txt");
+      }
+      analyze_args.report_path = report_path;
+      analyze_game(&analyze_args, &ctx, error_stack);
+      free(report_path);
     }
-    const int player_mask = resolve_player_mask(
-        config->game_history, arg0, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    GameArgs game_args;
-    config_fill_game_args(config, &game_args);
-    const char *gcg_filename =
-        game_history_get_gcg_filename(config->game_history);
-    char *report_path;
-    if (gcg_filename) {
-      char *base = cut_off_after_last_char(gcg_filename, '.');
-      report_path = get_formatted_string("%s_report.txt", base);
-      free(base);
-    } else {
-      report_path = string_duplicate("game_report.txt");
-    }
-    analyze_game(config->game_history, &game_args, config->win_pcts,
-                 config->thread_control, player_mask, config->num_threads,
-                 config->num_plays, config->plies, config->endgame_plies,
-                 config->tt_fraction_of_mem, config->stop_cond_pct,
-                 config->sim_with_inference, config->human_readable,
-                 config->max_num_display_plays, report_path, error_stack);
-    free(report_path);
   }
+  analyze_ctx_destroy(ctx);
 }
 
 void execute_analyze(Config *config, ErrorStack *error_stack) {

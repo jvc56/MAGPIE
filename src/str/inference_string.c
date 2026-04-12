@@ -187,11 +187,40 @@ void string_builder_add_inference_type(
     curr_row++;
   }
 
-  for (int i = 0; i < (int)ld_size; i++) {
+  // Build a sorted order of letters by decreasing inferred Pct (probability
+  // at minimum draw count 1), so the most likely letters appear first.
+  // equity_values and total_draws are already declared above.
+  int sorted_letters[MAX_ALPHABET_SIZE];
+  double letter_prct[MAX_ALPHABET_SIZE];
+  for (int letter_idx = 0; letter_idx < (int)ld_size; letter_idx++) {
+    sorted_letters[letter_idx] = letter_idx;
+    if (total_draws > 0) {
+      const uint64_t draws = inference_results_get_subtotal_sum_with_minimum(
+          inference_results, inference_stat_type, letter_idx, 1,
+          INFERENCE_SUBTOTAL_DRAW);
+      letter_prct[letter_idx] = (double)draws / (double)total_draws;
+    } else {
+      letter_prct[letter_idx] = 0.0;
+    }
+  }
+  // Simple insertion sort — ld_size is small (≤ MAX_ALPHABET_SIZE).
+  for (int outer_idx = 1; outer_idx < (int)ld_size; outer_idx++) {
+    const int letter = sorted_letters[outer_idx];
+    int inner_idx = outer_idx - 1;
+    while (inner_idx >= 0 &&
+           letter_prct[sorted_letters[inner_idx]] < letter_prct[letter]) {
+      sorted_letters[inner_idx + 1] = sorted_letters[inner_idx];
+      inner_idx--;
+    }
+    sorted_letters[inner_idx + 1] = letter;
+  }
+
+  for (int row_idx = 0; row_idx < (int)ld_size; row_idx++) {
     string_builder_add_letter_row(
         ld, inference_results, inference_stat_type, rack, bag_as_rack,
-        letter_stat, i, max_duplicate_letter_draw,
-        number_of_tiles_played_or_exchanged, sg_content, i + curr_row, tmp_sb);
+        letter_stat, sorted_letters[row_idx], max_duplicate_letter_draw,
+        number_of_tiles_played_or_exchanged, sg_content, row_idx + curr_row,
+        tmp_sb);
   }
   string_builder_add_string_grid(inference_string, sg_content, false);
   string_grid_destroy(sg_content);

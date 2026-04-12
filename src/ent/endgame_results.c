@@ -84,6 +84,21 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->max_depth = 0;
 }
 
+void endgame_results_copy(EndgameResults *dest, const EndgameResults *src) {
+  dest->best_pv_data = src->best_pv_data;
+  dest->display_pv_data = src->display_pv_data;
+  dest->valid_for_current_game_state = src->valid_for_current_game_state;
+  dest->timer = src->timer;
+  dest->seconds_elapsed = src->seconds_elapsed;
+  game_destroy(dest->start_game);
+  dest->start_game = game_duplicate(src->start_game);
+  // multi_pvs is not copied; caller must call
+  // endgame_results_ensure_pvs_capacity and copy manually if needed.
+  dest->tt = src->tt;
+  dest->solving_player = src->solving_player;
+  dest->max_depth = src->max_depth;
+}
+
 bool endgame_results_get_valid_for_current_game_state(
     const EndgameResults *endgame_results) {
   return endgame_results->valid_for_current_game_state;
@@ -122,6 +137,27 @@ int endgame_results_get_value(const EndgameResults *endgame_results,
     break;
   }
   return value;
+}
+
+int endgame_results_get_spread(const EndgameResults *endgame_results,
+                               endgame_result_t result_type, const Game *game) {
+  int value;
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    value = endgame_results->best_pv_data.value;
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    value = endgame_results->display_pv_data.value;
+    break;
+  }
+  const int p0_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int p1_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
+  const int initial_on_turn_spread = (endgame_results->solving_player == 0)
+                                         ? p0_score - p1_score
+                                         : p1_score - p0_score;
+  return initial_on_turn_spread + value;
 }
 
 // NOT THREAD SAFE: Caller must ensure synchronization

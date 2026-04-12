@@ -44,6 +44,7 @@ ValidatedMoves *game_event_get_vms(const GameEvent *event);
 void game_event_set_note(GameEvent *event, const char *note);
 const char *game_event_get_note(const GameEvent *event);
 int game_event_get_turn_value(const GameEvent *event);
+bool game_event_is_move_type(const GameEvent *event);
 
 typedef struct GameHistory GameHistory;
 

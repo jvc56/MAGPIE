@@ -53,19 +53,15 @@ static void string_builder_endgame_single_pv_with_lock(
   } else {
     // Solve complete: display the requested PV directly.
     pv = *endgame_results_get_multi_pvline(endgame_results, pv_idx);
-    // Use the PV's own negamax_depth as the exact-search depth for this line.
-    depth = pv.negamax_depth;
+    // Use the stored search depth (set by iterative deepening). negamax_depth
+    // counts only the exact-search moves in the PV, not the search ply depth.
+    depth = endgame_results_get_depth(endgame_results, ENDGAME_RESULT_DISPLAY);
     solving_player = game_get_player_on_turn_index(source_game);
     endgame_value = pv.score;
   }
 
-  const int p0_score =
-      equity_to_int(player_get_score(game_get_player(source_game, 0)));
-  const int p1_score =
-      equity_to_int(player_get_score(game_get_player(source_game, 1)));
-  const int initial_on_turn_spread =
-      (solving_player == 0) ? p0_score - p1_score : p1_score - p0_score;
-  const int final_spread = initial_on_turn_spread + endgame_value;
+  const int final_spread = endgame_results_get_spread(
+      endgame_results, ENDGAME_RESULT_DISPLAY, source_game);
 
   string_builder_add_formatted_string(
       sb, "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs)\n",

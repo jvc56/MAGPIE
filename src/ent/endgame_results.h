@@ -37,6 +37,8 @@ const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_results,
                                          endgame_result_t result_type);
 int endgame_results_get_value(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
+int endgame_results_get_spread(const EndgameResults *endgame_results,
+                               endgame_result_t result_type, const Game *game);
 int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 double

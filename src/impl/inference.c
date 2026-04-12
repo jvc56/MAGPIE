@@ -688,8 +688,19 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
     args->target_num_exch = move_get_tiles_played(move);
     rack_reset(args->target_played_tiles);
   }
-  rack_copy(args->nontarget_known_rack,
-            player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
+  // Only overwrite nontarget_known_rack from the replayed game state if the
+  // caller has not already provided one. Callers such as analyze pre-set this
+  // to the current player's actual GCG rack so that inference only considers
+  // leaves whose tiles are genuinely available in the simulation bag. If we
+  // always overwrote it here, we would copy the nontarget player's rack from
+  // the replayed game_dup, which is empty (their tiles are in the bag at the
+  // replayed state), allowing inference to enumerate racks that include tiles
+  // already held by the current player — causing fatal draw failures when
+  // simulation later tries to draw those tiles from the bag.
+  if (rack_is_empty(args->nontarget_known_rack)) {
+    rack_copy(args->nontarget_known_rack,
+              player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
+  }
   if (rack_is_empty(args->target_known_rack)) {
     for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
       GameEvent *event = game_history_get_event(game_history, i);
