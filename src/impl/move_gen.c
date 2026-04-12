@@ -2763,7 +2763,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
       }
     }
-  } else {
+  } else if (check_leaves || add_exchange) {
     const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
     generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
   }
