@@ -1780,12 +1780,14 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
                                          on_turn_spread, pv, opp_stuck_frac);
     }
+    pv->negamax_depth = 0;
     return on_turn_spread;
   }
 
   PVLine child_pv;
   child_pv.game = worker->game_copy;
   child_pv.num_moves = 0;
+  child_pv.negamax_depth = 0;
 
   int nplays;
   bool arena_alloced = false;
@@ -2342,6 +2344,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
+    pv.negamax_depth = 0;
 
     int32_t val;
 
