@@ -3,9 +3,10 @@
 # https://github.com/jvc56/MAGPIE/pull/512#issuecomment-4230988203
 #
 # Bug: Intermittent negamax_depth corruption in multi_pvs[0] with
-#      multi-threaded release builds. Reported on Apple Silicon (macOS,
-#      Apple clang, -O3 -flto). This script tests whether it reproduces
-#      on the current platform.
+#      multi-threaded release builds. Originally reported on Apple Silicon
+#      (macOS, Apple clang, -O3 -flto). Confirmed to also reproduce on
+#      x86_64 Linux with clang 18 -O3 -flto. Does NOT reproduce with GCC.
+#      This is a clang-specific issue, not ARM-specific.
 #
 # Prerequisites:
 #   - release binary: make magpie BUILD=release
@@ -26,7 +27,7 @@ ERRORS=0
 
 echo "=== negamax_depth corruption repro test ==="
 echo "Platform: $(uname -m) / $(uname -s)"
-echo "Compiler: $(gcc --version 2>&1 | head -1)"
+echo "Compiler: $(cc --version 2>&1 | head -1)"
 echo "Binary: $BINARY"
 echo "Runs: $RUNS, Threads: $THREADS"
 echo ""
