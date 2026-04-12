@@ -124,7 +124,7 @@ void players_data_set_data(PlayersData *players_data,
 
 void *players_data_create_data(players_data_t players_data_type,
                                const char *data_paths, const char *data_name,
-                               ErrorStack *error_stack) {
+                               bool use_mmap, ErrorStack *error_stack) {
   if (!data_name) {
     return NULL;
   }
@@ -140,7 +140,7 @@ void *players_data_create_data(players_data_t players_data_type,
     data = wmp_create(data_paths, data_name, error_stack);
     break;
   case PLAYERS_DATA_TYPE_RIT:
-    data = rack_info_table_create(data_paths, data_name, error_stack);
+    data = rack_info_table_create(data_paths, data_name, use_mmap, error_stack);
     break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
@@ -273,7 +273,7 @@ bool players_data_type_is_nullable(players_data_t players_data_type) {
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,
-                      ErrorStack *error_stack) {
+                      bool use_mmap_for_rit, ErrorStack *error_stack) {
   // WMP is optional, KWG and KLV are required for every player.
   if (!players_data_type_is_nullable(players_data_type)) {
     if (is_string_empty_or_null(p1_data_name)) {
@@ -312,9 +312,11 @@ void players_data_set(PlayersData *players_data,
       if (player_index == 1 && new_data_is_shared) {
         data_pointers[1] = data_pointers[0];
       } else {
+        bool use_mmap = use_mmap_for_rit &&
+                        players_data_type == PLAYERS_DATA_TYPE_RIT;
         void *generic_players_data = players_data_create_data(
             players_data_type, data_paths, input_data_names[player_index],
-            error_stack);
+            use_mmap, error_stack);
         if (!error_stack_is_empty(error_stack)) {
           return;
         }
@@ -352,11 +354,21 @@ void players_data_reload(PlayersData *players_data,
   void *recreated_data[2];
   for (int player_index = 0; player_index < 2; player_index++) {
     if (player_index == 0 || !data_is_shared) {
+      // When reloading, check if the existing RIT was mmapped and
+      // preserve that choice.
+      bool reload_mmap = false;
+      if (players_data_type == PLAYERS_DATA_TYPE_RIT) {
+        const RackInfoTable *existing_rit =
+            players_data_get_rack_info_table(players_data, player_index);
+        if (existing_rit) {
+          reload_mmap = existing_rit->is_mmapped;
+        }
+      }
       recreated_data[player_index] = players_data_create_data(
           players_data_type, data_paths,
           players_data_get_data_name(players_data, players_data_type,
                                      player_index),
-          error_stack);
+          reload_mmap, error_stack);
     }
   }
 

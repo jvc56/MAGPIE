@@ -48,7 +48,7 @@ void players_data_set_use_when_available(PlayersData *players_data,
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,
-                      ErrorStack *error_stack);
+                      bool use_mmap_for_rit, ErrorStack *error_stack);
 // Directly sets the data pointer for a slot, without taking it through the
 // filename-based load path. The caller owns `data`; use NULL to clear the
 // slot. Ownership is not transferred to PlayersData, so callers must clear

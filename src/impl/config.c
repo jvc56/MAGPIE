@@ -106,6 +106,7 @@ typedef enum {
   ARG_TOKEN_LEXICON,
   ARG_TOKEN_USE_WMP,
   ARG_TOKEN_USE_RIT,
+  ARG_TOKEN_USE_MMAP_FOR_RIT,
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
@@ -256,6 +257,7 @@ struct Config {
   bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
+  bool use_mmap_for_rit;
   bool autosave_gcg;
   bool loaded_settings;
   char *record_filepath;
@@ -1324,6 +1326,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "Off by default because .rit files are large and must be built "
              "with the klvwmp2rit convert command.";
       break;
+    case ARG_TOKEN_USE_MMAP_FOR_RIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "When true, the rack info table is memory-mapped instead of read "
+             "into allocated memory. This eliminates the startup cost of "
+             "loading the file but pages are faulted on demand during play. "
+             "Only supported on little-endian architectures.";
+      break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
       examples[0] = "CSW21";
@@ -1892,6 +1903,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_USE_RIT,             /* rit */
         ARG_TOKEN_P1_USE_RIT,          /* rit1 */
         ARG_TOKEN_P2_USE_RIT,          /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
         ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
         ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
         ARG_TOKEN_GAME_VARIANT,        /* var */
@@ -5729,6 +5741,14 @@ void config_load_lexicon_dependent_data(Config *config,
                                       PLAYERS_DATA_TYPE_RIT, 1,
                                       p2_rit_use_when_available);
 
+  if (config_get_parg_value(config, ARG_TOKEN_USE_MMAP_FOR_RIT, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_MMAP_FOR_RIT,
+                     &config->use_mmap_for_rit, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
@@ -5771,7 +5791,7 @@ void config_load_lexicon_dependent_data(Config *config,
   // Load lexica
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
                    config->data_paths, updated_p1_lexicon_name,
-                   updated_p2_lexicon_name, error_stack);
+                   updated_p2_lexicon_name, false, error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -5792,7 +5812,8 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
-                   config->data_paths, p1_wmp_name, p2_wmp_name, error_stack);
+                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
+                   error_stack);
 
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -5837,7 +5858,7 @@ void config_load_lexicon_dependent_data(Config *config,
     } else {
       players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
                        config->data_paths, updated_p1_leaves_name,
-                       updated_p2_leaves_name, error_stack);
+                       updated_p2_leaves_name, false, error_stack);
       autoplay_results_set_klv(config->autoplay_results,
                                players_data_get_data(config->players_data,
                                                      PLAYERS_DATA_TYPE_KLV, 0));
@@ -5862,7 +5883,8 @@ void config_load_lexicon_dependent_data(Config *config,
     p2_rit_name = updated_p2_lexicon_name;
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
-                   config->data_paths, p1_rit_name, p2_rit_name, error_stack);
+                   config->data_paths, p1_rit_name, p2_rit_name,
+                   config->use_mmap_for_rit, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -7042,6 +7064,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_LEXICON, "lex", 1, 1);
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
+  arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
@@ -7385,6 +7408,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_RIT:
     case ARG_TOKEN_LEAVES:
       // Set these values on a per-player basis
+      break;
+    case ARG_TOKEN_USE_MMAP_FOR_RIT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_mmap_for_rit);
       break;
     case ARG_TOKEN_P1_LEXICON:
       config_add_string_setting_to_string_builder(

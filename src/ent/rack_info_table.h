@@ -10,11 +10,15 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 // A RackInfoTable maps full-rack BitRacks to per-rack data computed ahead of
 // time. The table is keyed by BitRack (the multiset of tiles forming a full
@@ -138,6 +142,11 @@ typedef struct RackInfoTable {
   uint32_t num_entries;
   uint32_t *bucket_starts;
   RackInfoTableEntry *entries;
+  // mmap state: when is_mmapped is true, bucket_starts and entries point
+  // into the mapped region and must not be free'd individually.
+  bool is_mmapped;
+  void *mmap_base;
+  size_t mmap_size;
 } RackInfoTable;
 
 static inline const char *rack_info_table_get_name(const RackInfoTable *rit) {
@@ -297,8 +306,12 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
     return;
   }
   free(rit->name);
-  free(rit->bucket_starts);
-  free(rit->entries);
+  if (rit->is_mmapped) {
+    munmap(rit->mmap_base, rit->mmap_size);
+  } else {
+    free(rit->bucket_starts);
+    free(rit->entries);
+  }
   free(rit);
 }
 
@@ -546,15 +559,112 @@ static inline void rack_info_table_load(RackInfoTable *rit, const char *name,
   }
 }
 
+// mmap-based load (little-endian only). Points bucket_starts and entries
+// directly into the mapped file, eliminating the fread startup cost.
+static inline void rack_info_table_load_mmap(RackInfoTable *rit,
+                                             const char *name,
+                                             const char *filename,
+                                             ErrorStack *error_stack) {
+#if !IS_LITTLE_ENDIAN
+  (void)rit;
+  (void)name;
+  error_stack_push(
+      error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
+      get_formatted_string(
+          "mmap mode is not supported on big-endian architectures: %s",
+          filename));
+  return;
+#else
+  int fd = open(filename, O_RDONLY);
+  if (fd < 0) {
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+                     get_formatted_string("could not open rit file: %s",
+                                          filename));
+    return;
+  }
+  struct stat st;
+  if (fstat(fd, &st) < 0) {
+    close(fd);
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+                     get_formatted_string("could not stat rit file: %s",
+                                          filename));
+    return;
+  }
+  size_t file_size = (size_t)st.st_size;
+  void *mapped = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
+  close(fd);
+  if (mapped == MAP_FAILED) {
+    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+                     get_formatted_string("could not mmap rit file: %s",
+                                          filename));
+    return;
+  }
+
+  const uint8_t *data = (const uint8_t *)mapped;
+
+  // Parse the 12-byte header.
+  uint8_t version = data[0];
+  if (version < RIT_EARLIEST_SUPPORTED_VERSION) {
+    munmap(mapped, file_size);
+    error_stack_push(
+        error_stack, ERROR_STATUS_WMP_UNSUPPORTED_VERSION,
+        get_formatted_string(
+            "detected rit version %d but only %d or greater is supported: %s\n",
+            version, RIT_EARLIEST_SUPPORTED_VERSION, filename));
+    return;
+  }
+  rit->version = version;
+
+  uint8_t rack_size = data[1];
+  if (rack_size != RACK_SIZE) {
+    munmap(mapped, file_size);
+    error_stack_push(error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
+                     get_formatted_string(
+                         "rit rack size %d does not match build rack size %d: "
+                         "%s\n",
+                         rack_size, RACK_SIZE, filename));
+    return;
+  }
+  rit->rack_size = rack_size;
+  rit->playthrough_min_played_size = data[2];
+  // data[3] is padding
+
+  memcpy(&rit->num_buckets, data + 4, sizeof(uint32_t));
+  memcpy(&rit->num_entries, data + 8, sizeof(uint32_t));
+
+  size_t bucket_starts_offset = 12;
+  size_t bucket_starts_size =
+      ((size_t)rit->num_buckets + 1) * sizeof(uint32_t);
+  size_t entries_offset = bucket_starts_offset + bucket_starts_size;
+
+  rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
+  rit->entries = (RackInfoTableEntry *)(data + entries_offset);
+
+  // Suppress readahead: lookups are hash-indexed (random), so the default
+  // 16-page readahead wastes I/O on every access.
+  madvise(mapped, file_size, MADV_RANDOM);
+
+  rit->is_mmapped = true;
+  rit->mmap_base = mapped;
+  rit->mmap_size = file_size;
+  rit->name = string_duplicate(name);
+#endif
+}
+
 static inline RackInfoTable *rack_info_table_create(const char *data_paths,
                                                     const char *rit_name,
+                                                    bool use_mmap,
                                                     ErrorStack *error_stack) {
   char *rit_filename = data_filepaths_get_readable_filename(
       data_paths, rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, error_stack);
   RackInfoTable *rit = NULL;
   if (error_stack_is_empty(error_stack)) {
     rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
-    rack_info_table_load(rit, rit_name, rit_filename, error_stack);
+    if (use_mmap) {
+      rack_info_table_load_mmap(rit, rit_name, rit_filename, error_stack);
+    } else {
+      rack_info_table_load(rit, rit_name, rit_filename, error_stack);
+    }
   }
   free(rit_filename);
   if (!error_stack_is_empty(error_stack)) {

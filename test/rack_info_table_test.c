@@ -337,7 +337,7 @@ void test_rack_info_table(void) {
   assert(error_stack_is_empty(error_stack));
 
   RackInfoTable *rit_loaded =
-      rack_info_table_create(data_paths, rit_name, error_stack);
+      rack_info_table_create(data_paths, rit_name, false, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(rit_loaded != NULL);
   assert_rits_equal(rit, rit_loaded);
