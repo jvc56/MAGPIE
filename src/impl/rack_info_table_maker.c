@@ -335,6 +335,8 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
          RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * sizeof(uint32_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
+  entry->num_bingo_words = 0;
+  memset(entry->bingo_words, 0, sizeof(entry->bingo_words));
   memset(entry->best_exchange_strip, 0, sizeof(entry->best_exchange_strip));
   entry->best_exchange_tiles_exchanged = 0;
   for (int leave_idx = 0;
@@ -363,6 +365,21 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
   compute_entry_recursive(&state, root, 0, 0);
+
+  // Populate inline bingo words (nonplaythrough full-rack anagrams).
+  if (wmp != NULL &&
+      (entry->nonplaythrough_has_word_of_length_bitmask &
+       (1U << RACK_SIZE)) != 0) {
+    BitRack full_bit_rack = bit_rack_create_from_rack(ld, &player_rack);
+    MachineLetter buf[WMP_RESULT_BUFFER_SIZE];
+    const int bytes =
+        wmp_write_words_to_buffer(wmp, &full_bit_rack, RACK_SIZE, buf);
+    const int num_words = bytes / RACK_SIZE;
+    if (num_words > 0 && num_words <= RIT_MAX_INLINE_BINGO_WORDS) {
+      entry->num_bingo_words = (uint8_t)num_words;
+      memcpy(entry->bingo_words, buf, num_words * RACK_SIZE);
+    }
+  }
 
   // Copy the overall best exchange into the entry.
   if (state.best_exchange_tiles_exchanged > 0) {

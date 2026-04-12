@@ -114,8 +114,9 @@ enum {
   RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 10,
-  RIT_EARLIEST_SUPPORTED_VERSION = 10,
+  RIT_VERSION = 11,
+  RIT_EARLIEST_SUPPORTED_VERSION = 11,
+  RIT_MAX_INLINE_BINGO_WORDS = 1,
 };
 
 typedef struct RackInfoTableEntry {
@@ -132,12 +133,15 @@ typedef struct RackInfoTableEntry {
   uint32_t multi_pt_tp7_bitvec[RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS];
   uint32_t multi_pt_tp6_bitvec[RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS];
   uint8_t nonplaythrough_has_word_of_length_bitmask;
+  // Inline bingo words (nonplaythrough, blankless only). Up to 4 words
+  // of RACK_SIZE letters stored directly. num_bingo_words = 0 means no
+  // inline bingos (blank rack or >4 anagrams — fall back to WMP).
+  uint8_t num_bingo_words;
+  MachineLetter bingo_words[1][RACK_SIZE];
   // Best exchange move across all leave sizes, tiebroken by compare_moves.
-  // best_exchange_strip holds the tiles exchanged in machine letter order;
-  // best_exchange_tiles_exchanged is the strip length.
   MachineLetter best_exchange_strip[RACK_SIZE];
   uint8_t best_exchange_tiles_exchanged;
-  uint8_t pad[2];
+  uint8_t pad[3];
   uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
 } RackInfoTableEntry;
 
@@ -291,6 +295,15 @@ static inline Equity rack_info_table_entry_get_nonplaythrough_best_leave_value(
 static inline const Equity *
 rack_info_table_entry_get_best_leaves(const RackInfoTableEntry *entry) {
   return entry->best_leaves;
+}
+
+// Returns the inline bingo words and count. Returns 0 if not available
+// (blank rack, >4 words, or no bingo exists).
+static inline int
+rack_info_table_entry_get_bingo_words(const RackInfoTableEntry *entry,
+                                      const MachineLetter **words_out) {
+  *words_out = entry->bingo_words[0];
+  return entry->num_bingo_words;
 }
 
 // Returns the precomputed best exchange strip and its length.

@@ -802,6 +802,39 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   gen->max_tiles_to_play = anchor->tiles_to_play;
   assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
   WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  // Inline bingo fast path: for nonplaythrough full-rack plays with
+  // precomputed bingo words, skip subrack enumeration and WMP lookup.
+  if (gen->rit_entry != NULL && anchor->tiles_to_play == RACK_SIZE &&
+      anchor->playthrough_blocks == 0) {
+    const int num_bingos = gen->rit_entry->num_bingo_words;
+    if (num_bingos > 0) {
+      wgen->word_length = RACK_SIZE;
+      wgen->tiles_to_play = RACK_SIZE;
+      // Leave value is 0 for bingo (all tiles played), leave is empty.
+      wgen->leave_value = 0;
+      if (gen->number_of_tiles_in_bag == 0) {
+        rack_reset(&gen->leave);
+      }
+      for (int bingo_idx = 0; bingo_idx < num_bingos; bingo_idx++) {
+        // Point the WMP buffer at the inline word.
+        memcpy(wgen->buffer, gen->rit_entry->bingo_words[bingo_idx],
+               RACK_SIZE);
+        wgen->num_words = 1;
+        for (int start_col = anchor->leftmost_start_col;
+             start_col <= anchor->rightmost_start_col; start_col++) {
+          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col)) {
+            record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
+            if (gen->threshold_exceeded) {
+              return;
+            }
+          }
+        }
+      }
+      return;
+    }
+  }
+
   wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_cache);
   wmp_move_gen_playthrough_subracks_init(wgen, anchor);
 
