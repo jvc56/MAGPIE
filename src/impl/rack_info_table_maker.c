@@ -156,8 +156,8 @@ static void compute_entry_recursive(EntryComputeState *state,
         // holds the complement "would be the leave after playing it").
         const BitRack played_bit_rack =
             bit_rack_create_from_rack(state->ld, state->player_rack);
-        const int leave_size = rit_maker_popcount(
-            (unsigned int)state->leave_map->current_index);
+        const int leave_size =
+            rit_maker_popcount((unsigned int)state->leave_map->current_index);
 
         // Nonplaythrough existence cache: does this specific size-
         // played_size subrack form a valid played_size-letter word on its
@@ -168,8 +168,8 @@ static void compute_entry_recursive(EntryComputeState *state,
         // existence warmup that otherwise runs C(RACK_SIZE, k) WMP
         // lookups per size k on every movegen call.
         if (played_size >= MINIMUM_WORD_LENGTH && played_size <= BOARD_DIM) {
-          const WMPEntry *np_wmp_entry = wmp_get_word_entry(
-              state->wmp, &played_bit_rack, played_size);
+          const WMPEntry *np_wmp_entry =
+              wmp_get_word_entry(state->wmp, &played_bit_rack, played_size);
           if (np_wmp_entry != NULL) {
             state->entry->nonplaythrough_has_word_of_length_bitmask |=
                 (uint8_t)(1U << played_size);
@@ -265,12 +265,15 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   rack_set_dist_size(&leave, ld_size);
   rack_reset(&leave);
 
-  memset(entry->leaves, 0,
-         RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
+  memset(entry->leaves, 0, RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
   memset(entry->multi_pt_tp7_bitvec, 0,
          RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS * sizeof(uint32_t));
+  memset(entry->multi_pt_tp6_bitvec, 0,
+         RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * sizeof(uint32_t));
+  memset(entry->multi_pt_tp5_bitvec, 0,
+         RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS * sizeof(uint32_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
   for (int leave_idx = 0;
@@ -296,84 +299,234 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 }
 
 // ============================================================================
-// Multi-playthrough tp=7 bitvec (flipped walk)
+// Multi-playthrough bitvec flipped walk (tp=5, tp=6, tp=7)
 //
-// For each word of length W in [RIT_MULTI_PT_TP7_MIN_WORD_LENGTH,
-// RIT_MULTI_PT_TP7_MAX_WORD_LENGTH] stored in the WMP's blankless
-// word_map_entries, enumerate every canonical RACK_SIZE-tile submultiset S
-// of the word's multiset M. For each such S, look up the RIT entry for S
-// and, for every letter L in (M - S), set bit (W - RIT_MULTI_PT_TP7_MIN_
-// WORD_LENGTH) of entry->multi_pt_tp7_bitvec[L]. The result: at consumer
-// time shadow can ask "for the actual playthrough multiset P, does any
-// letter Li in P lack a word of length tiles_played + |P| that covers
-// rack + {Li} + (|P| - 1) other letters?" via an AND across the per-letter
-// bitvec bytes, which is a necessary-only prune for the multi-playthrough
-// full-rack case (strictly cheaper than the wmp_get_word_entry fallback
-// and catches a large fraction of the 91% miss-rate cases).
+// For each tp value N in {5, 6, 7} we want, per 7-tile rack R, a
+// length-indexed bitvec where bit L in slot k is set iff there exists a
+// word M of length (N + 1 + k) such that some N-tile subrack S of R
+// satisfies S ⊆ M and L ∈ (M - S).
+//
+// Phase 1 (build per-N temp tables, deduped by canonical N-tile S):
+//   Enumerate every canonical N-tile multiset S allowed by the LD into a
+//   temporary hash table TempSubrackTable[N], one entry per S with a
+//   `result[NUM_LENGTHS]` slot. Then walk the WMP's blankless
+//   word_map_entries: for each word M of length W and each canonical
+//   N-tile submultiset S of M's multiset, OR (M - S)'s letter mask into
+//   TempSubrackTable[N][S].result[W - (N + 1)].
+//
+//   This deduplicates the per-(word, S) work: many words share the same
+//   canonical N-tile submultiset, so we only process each unique S once
+//   for all (W, letter) bits at the end. (Suggested by jvc56 in PR
+//   review thread.)
+//
+// Phase 2 (distribute to main RIT entries via supersets of each unique S):
+//   For each entry (S, result) in TempSubrackTable[N], enumerate every
+//   7-tile rack R such that S ⊆ R (R = S + (RACK_SIZE - N) more tiles
+//   drawn from the alphabet, respecting the LD's letter caps). For each
+//   such R, look up the main RIT entry and OR result[k] into
+//   entry->multi_pt_tpN_bitvec[k] for every k.
+//
+//   The superset enumeration is per-unique-S, so the cost is bounded by
+//   (# canonical N-tile multisets) × (# (RACK_SIZE - N)-tile alphabet
+//   additions) × (1 RIT lookup + NUM_LENGTHS ORs). Compared to running
+//   it per (word, S) pair (which is what a naive single-pass flipped
+//   walk would do), this is roughly the same as `# unique S / # (word,
+//   S) pairs` cheaper -- a factor of 100-1000x in practice.
+//
+// Note that for N == RACK_SIZE the superset enumeration is degenerate
+// (zero tiles to add, S is already a 7-tile rack), so the same machinery
+// handles tp=7 with no special-casing.
 // ============================================================================
 
-typedef struct {
-  const uint8_t *rack_letter_counts; // BIT_RACK_MAX_ALPHABET_SIZE
-  uint8_t submultiset_counts[BIT_RACK_MAX_ALPHABET_SIZE];
-  int len_idx; // Index into multi_pt_tp7_bitvec[] for the current word length
-  const RackInfoTable *rit;
-  RackInfoTableEntry *entries;
-} SubmultisetEnumState;
+typedef struct TempSubrackEntry {
+  BitRack subrack;
+  // Per-length bitvec slots, sized for the largest tp range (tp=5).
+  // For tp=6/tp=7 the unused tail slots stay at 0.
+  uint32_t result[RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS];
+} TempSubrackEntry;
 
-static void enumerate_7tile_submultisets_recursive(SubmultisetEnumState *state,
-                                                   int letter_idx,
-                                                   int tiles_remaining) {
-  if (tiles_remaining == 0) {
-    // Build a BitRack from submultiset_counts and look up the RIT entry.
-    BitRack subrack = bit_rack_create_empty();
-    for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-      for (int count_idx = 0; count_idx < state->submultiset_counts[ml];
-           count_idx++) {
-        bit_rack_add_letter(&subrack, (MachineLetter)ml);
-      }
-    }
-    const RackInfoTableEntry *const_entry =
-        rack_info_table_lookup(state->rit, &subrack);
-    if (const_entry == NULL) {
-      return;
-    }
-    // const_entry is a pointer into state->entries but typed const by the
-    // lookup. We need a mutable pointer to OR into the bitvec.
-    const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
-    RackInfoTableEntry *entry = &state->entries[entry_idx];
-    // The bitvec is indexed by word length: build one uint32 mask per
-    // length where bit L is set iff letter L appears in (M - S). OR it
-    // into the entry's slot for this word length.
-    uint32_t letter_mask = 0;
-    for (int ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-      if (state->rack_letter_counts[ml] > state->submultiset_counts[ml]) {
-        letter_mask |= (1U << ml);
-      }
-    }
-    entry->multi_pt_tp7_bitvec[state->len_idx] |= letter_mask;
+typedef struct TempSubrackTable {
+  TempSubrackEntry *entries;
+  uint32_t num_entries;
+  uint32_t num_buckets;
+  uint32_t *bucket_starts;
+} TempSubrackTable;
+
+static uint32_t temp_subrack_table_next_pow2(uint32_t n) {
+  if (n == 0) {
+    return 1;
+  }
+  n--;
+  n |= n >> 1;
+  n |= n >> 2;
+  n |= n >> 4;
+  n |= n >> 8;
+  n |= n >> 16;
+  return n + 1;
+}
+
+// Build a hash table of every canonical N-tile multiset allowed by the
+// LD. Each entry has a zero-initialised `result[NUM_LENGTHS]` slot ready
+// for the per-word OR pass.
+static TempSubrackTable *temp_subrack_table_create(const LetterDistribution *ld,
+                                                   int subrack_size) {
+  TempSubrackTable *table =
+      (TempSubrackTable *)calloc_or_die(1, sizeof(TempSubrackTable));
+  uint32_t total = 0;
+  count_racks_recursive(ld, ld_get_size(ld), 0, subrack_size, &total);
+  table->num_entries = total;
+  table->entries = (TempSubrackEntry *)calloc_or_die((size_t)total,
+                                                     sizeof(TempSubrackEntry));
+
+  BitRack *all_subracks = malloc_or_die((size_t)total * sizeof(BitRack));
+  BitRack current = bit_rack_create_empty();
+  uint32_t fill_index = 0;
+  enumerate_racks_recursive(ld, ld_get_size(ld), 0, subrack_size, &current,
+                            all_subracks, &fill_index);
+
+  uint32_t num_buckets = temp_subrack_table_next_pow2(total);
+  if (num_buckets < 16) {
+    num_buckets = 16;
+  }
+  table->num_buckets = num_buckets;
+  table->bucket_starts =
+      (uint32_t *)calloc_or_die((size_t)num_buckets + 1, sizeof(uint32_t));
+
+  uint32_t *bucket_counts =
+      (uint32_t *)calloc_or_die((size_t)num_buckets, sizeof(uint32_t));
+  for (uint32_t i = 0; i < total; i++) {
+    const uint32_t bucket =
+        bit_rack_get_bucket_index(&all_subracks[i], num_buckets);
+    bucket_counts[bucket]++;
+  }
+  uint32_t offset = 0;
+  for (uint32_t b = 0; b < num_buckets; b++) {
+    table->bucket_starts[b] = offset;
+    offset += bucket_counts[b];
+  }
+  table->bucket_starts[num_buckets] = offset;
+
+  uint32_t *bucket_fill =
+      (uint32_t *)calloc_or_die((size_t)num_buckets, sizeof(uint32_t));
+  for (uint32_t i = 0; i < total; i++) {
+    const uint32_t bucket =
+        bit_rack_get_bucket_index(&all_subracks[i], num_buckets);
+    const uint32_t entry_idx =
+        table->bucket_starts[bucket] + bucket_fill[bucket]++;
+    table->entries[entry_idx].subrack = all_subracks[i];
+    // result[] already zeroed by calloc.
+  }
+  free(bucket_fill);
+  free(bucket_counts);
+  free(all_subracks);
+  return table;
+}
+
+static void temp_subrack_table_destroy(TempSubrackTable *table) {
+  if (table == NULL) {
     return;
   }
+  free(table->bucket_starts);
+  free(table->entries);
+  free(table);
+}
 
+// Look up the entry for `subrack` in `table`, or NULL if not present.
+static inline TempSubrackEntry *
+temp_subrack_table_lookup(const TempSubrackTable *table,
+                          const BitRack *subrack) {
+  const uint32_t bucket =
+      bit_rack_get_bucket_index(subrack, table->num_buckets);
+  const uint32_t start = table->bucket_starts[bucket];
+  const uint32_t end = table->bucket_starts[bucket + 1];
+  for (uint32_t i = start; i < end; i++) {
+    if (bit_rack_equals(&table->entries[i].subrack, subrack)) {
+      return &table->entries[i];
+    }
+  }
+  return NULL;
+}
+
+// Configuration for one tp level. Encapsulates everything that varies
+// between tp=5, tp=6, and tp=7 so the OR + distribute machinery below
+// can be written once.
+typedef struct {
+  int subrack_size; // 5, 6, or 7
+  int min_word_length;
+  int num_word_lengths;
+  int max_word_length;
+} MultiPtTpConfig;
+
+static const MultiPtTpConfig MULTI_PT_TP_CONFIGS[3] = {
+    {RACK_SIZE - 2, RIT_MULTI_PT_TP5_MIN_WORD_LENGTH,
+     RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP5_MAX_WORD_LENGTH},
+    {RACK_SIZE - 1, RIT_MULTI_PT_TP6_MIN_WORD_LENGTH,
+     RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP6_MAX_WORD_LENGTH},
+    {RACK_SIZE, RIT_MULTI_PT_TP7_MIN_WORD_LENGTH,
+     RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP7_MAX_WORD_LENGTH},
+};
+enum { NUM_MULTI_PT_TP_CONFIGS = 3 };
+
+typedef struct {
+  const uint8_t *word_letter_counts; // BIT_RACK_MAX_ALPHABET_SIZE
+  uint8_t submultiset_counts[BIT_RACK_MAX_ALPHABET_SIZE];
+  int len_idx;
+  TempSubrackTable *temp_table;
+} SubmultisetWalkState;
+
+// Phase 1 leaf action: build the k-tile BitRack S from submultiset_counts,
+// look up the temp table entry for S, and OR (M - S)'s letter mask into
+// the entry's slot for this word length. Repeated lookups for the same S
+// across different (M, len_idx) pairs OR into the same uint32 slot.
+static void submultiset_walk_leaf(const SubmultisetWalkState *state) {
+  BitRack subrack = bit_rack_create_empty();
+  for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    for (int count_idx = 0; count_idx < state->submultiset_counts[ml];
+         count_idx++) {
+      bit_rack_add_letter(&subrack, (MachineLetter)ml);
+    }
+  }
+  TempSubrackEntry *entry =
+      temp_subrack_table_lookup(state->temp_table, &subrack);
+  if (entry == NULL) {
+    return;
+  }
+  uint32_t letter_mask = 0;
+  for (int ml = 1; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    if (state->word_letter_counts[ml] > state->submultiset_counts[ml]) {
+      letter_mask |= (1U << ml);
+    }
+  }
+  entry->result[state->len_idx] |= letter_mask;
+}
+
+static void submultiset_walk_recursive(SubmultisetWalkState *state,
+                                       int letter_idx, int tiles_remaining) {
+  if (tiles_remaining == 0) {
+    submultiset_walk_leaf(state);
+    return;
+  }
   if (letter_idx >= BIT_RACK_MAX_ALPHABET_SIZE) {
     return;
   }
-
-  const int max_here = state->rack_letter_counts[letter_idx] < tiles_remaining
-                           ? state->rack_letter_counts[letter_idx]
+  const int max_here = state->word_letter_counts[letter_idx] < tiles_remaining
+                           ? state->word_letter_counts[letter_idx]
                            : tiles_remaining;
   for (int take = 0; take <= max_here; take++) {
     state->submultiset_counts[letter_idx] = (uint8_t)take;
-    enumerate_7tile_submultisets_recursive(state, letter_idx + 1,
-                                           tiles_remaining - take);
+    submultiset_walk_recursive(state, letter_idx + 1, tiles_remaining - take);
   }
   state->submultiset_counts[letter_idx] = 0;
 }
 
-static void populate_multi_pt_tp7_bitvec(const WMP *wmp,
-                                         const RackInfoTable *rit,
-                                         RackInfoTableEntry *entries) {
-  for (int word_length = RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
-       word_length <= RIT_MULTI_PT_TP7_MAX_WORD_LENGTH; word_length++) {
+// Phase 1: walk every word in the WMP and accumulate per-canonical-S
+// results into the temporary tables for tp=5, tp=6, tp=7.
+static void phase1_accumulate_temp_tables(
+    const WMP *wmp, TempSubrackTable *temp_tables[NUM_MULTI_PT_TP_CONFIGS]) {
+  const int min_word_length = RIT_MULTI_PT_TP5_MIN_WORD_LENGTH;
+  const int max_word_length = RIT_MULTI_PT_TP5_MAX_WORD_LENGTH;
+  for (int word_length = min_word_length; word_length <= max_word_length;
+       word_length++) {
     if (word_length > wmp->board_dim) {
       break;
     }
@@ -382,27 +535,149 @@ static void populate_multi_pt_tp7_bitvec(const WMP *wmp,
     for (uint32_t wmp_idx = 0; wmp_idx < num_entries; wmp_idx++) {
       const WMPEntry *wmp_entry = &wfl->word_map_entries[wmp_idx];
       const BitRack word_bit_rack = wmp_entry_read_bit_rack(wmp_entry);
-      // Walk the word's multiset letter counts. Blankless words (this
-      // loop) never contain BLANK_MACHINE_LETTER; skip any that do out
-      // of an abundance of caution.
       if (bit_rack_get_letter(&word_bit_rack, BLANK_MACHINE_LETTER) != 0) {
         continue;
       }
-
-      SubmultisetEnumState state;
-      uint8_t rack_letter_counts[BIT_RACK_MAX_ALPHABET_SIZE];
+      uint8_t word_letter_counts[BIT_RACK_MAX_ALPHABET_SIZE];
       for (int ml = 0; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
-        rack_letter_counts[ml] =
+        word_letter_counts[ml] =
             (uint8_t)bit_rack_get_letter(&word_bit_rack, ml);
       }
-      state.rack_letter_counts = rack_letter_counts;
-      memset(state.submultiset_counts, 0, sizeof(state.submultiset_counts));
-      state.len_idx = word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH;
-      state.rit = rit;
-      state.entries = entries;
 
-      enumerate_7tile_submultisets_recursive(&state, 0, RACK_SIZE);
+      for (int cfg_idx = 0; cfg_idx < NUM_MULTI_PT_TP_CONFIGS; cfg_idx++) {
+        const MultiPtTpConfig *cfg = &MULTI_PT_TP_CONFIGS[cfg_idx];
+        if (word_length < cfg->min_word_length ||
+            word_length > cfg->max_word_length) {
+          continue;
+        }
+        SubmultisetWalkState state;
+        state.word_letter_counts = word_letter_counts;
+        memset(state.submultiset_counts, 0, sizeof(state.submultiset_counts));
+        state.len_idx = word_length - cfg->min_word_length;
+        state.temp_table = temp_tables[cfg_idx];
+        submultiset_walk_recursive(&state, 0, cfg->subrack_size);
+      }
     }
+  }
+}
+
+typedef struct {
+  const LetterDistribution *ld;
+  int ld_size;
+  const uint32_t *result; // size = num_word_lengths for this tp
+  int num_word_lengths;
+  int target_cfg_idx;
+  const RackInfoTable *rit;
+  RackInfoTableEntry *entries;
+} SupersetWalkState;
+
+// Phase 2 leaf action: we have a 7-tile rack `current_rack` (S +
+// extra letters). Look it up in the main RIT and OR `result[k]` into
+// the corresponding per-tp bitvec slot for every k.
+static void superset_walk_leaf(const SupersetWalkState *state,
+                               const BitRack *current_rack) {
+  const RackInfoTableEntry *const_entry =
+      rack_info_table_lookup(state->rit, current_rack);
+  if (const_entry == NULL) {
+    return;
+  }
+  const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
+  RackInfoTableEntry *entry = &state->entries[entry_idx];
+  switch (state->target_cfg_idx) {
+  case 0: // tp=5
+    for (int k = 0; k < state->num_word_lengths; k++) {
+      entry->multi_pt_tp5_bitvec[k] |= state->result[k];
+    }
+    break;
+  case 1: // tp=6
+    for (int k = 0; k < state->num_word_lengths; k++) {
+      entry->multi_pt_tp6_bitvec[k] |= state->result[k];
+    }
+    break;
+  case 2: // tp=7
+    for (int k = 0; k < state->num_word_lengths; k++) {
+      entry->multi_pt_tp7_bitvec[k] |= state->result[k];
+    }
+    break;
+  default:
+    break;
+  }
+}
+
+// Recursively add `letters_to_add` letters from the alphabet to
+// `current_rack` (which starts at the canonical k-tile S) to form 7-tile
+// supersets, calling the leaf action at each completed 7-tile rack.
+// Iterates letters in canonical (non-decreasing) order starting from
+// `next_ml` to avoid double-counting unordered multisets. Respects the
+// LD's per-letter cap.
+static void superset_walk_recursive(const SupersetWalkState *state,
+                                    BitRack *current_rack, int letters_to_add,
+                                    int next_ml) {
+  if (letters_to_add == 0) {
+    superset_walk_leaf(state, current_rack);
+    return;
+  }
+  // Skip the blank slot: the bitvec is only populated for blankless
+  // racks.
+  const int start = next_ml < 1 ? 1 : next_ml;
+  for (int ml = start; ml < state->ld_size; ml++) {
+    if ((int)bit_rack_get_letter(current_rack, ml) >=
+        ld_get_dist(state->ld, ml)) {
+      continue;
+    }
+    bit_rack_add_letter(current_rack, (MachineLetter)ml);
+    superset_walk_recursive(state, current_rack, letters_to_add - 1, ml);
+    bit_rack_take_letter(current_rack, (MachineLetter)ml);
+  }
+}
+
+// Phase 2: walk one temp table and distribute its accumulated results
+// to the main RIT entries via the (RACK_SIZE - subrack_size)-letter
+// superset enumeration.
+static void phase2_distribute_temp_table(const TempSubrackTable *temp_table,
+                                         int cfg_idx,
+                                         const LetterDistribution *ld,
+                                         const RackInfoTable *rit,
+                                         RackInfoTableEntry *entries) {
+  const MultiPtTpConfig *cfg = &MULTI_PT_TP_CONFIGS[cfg_idx];
+  const int letters_to_add = RACK_SIZE - cfg->subrack_size;
+  for (uint32_t i = 0; i < temp_table->num_entries; i++) {
+    const TempSubrackEntry *temp_entry = &temp_table->entries[i];
+    // Skip entries with no bits set in any slot -- nothing to distribute.
+    uint32_t any = 0;
+    for (int k = 0; k < cfg->num_word_lengths; k++) {
+      any |= temp_entry->result[k];
+    }
+    if (any == 0) {
+      continue;
+    }
+    SupersetWalkState state;
+    state.ld = ld;
+    state.ld_size = ld_get_size(ld);
+    state.result = temp_entry->result;
+    state.num_word_lengths = cfg->num_word_lengths;
+    state.target_cfg_idx = cfg_idx;
+    state.rit = rit;
+    state.entries = entries;
+    BitRack current = temp_entry->subrack;
+    superset_walk_recursive(&state, &current, letters_to_add, 0);
+  }
+}
+
+static void populate_multi_pt_bitvecs(const WMP *wmp,
+                                      const LetterDistribution *ld,
+                                      const RackInfoTable *rit,
+                                      RackInfoTableEntry *entries) {
+  TempSubrackTable *temp_tables[NUM_MULTI_PT_TP_CONFIGS];
+  for (int cfg_idx = 0; cfg_idx < NUM_MULTI_PT_TP_CONFIGS; cfg_idx++) {
+    const MultiPtTpConfig *cfg = &MULTI_PT_TP_CONFIGS[cfg_idx];
+    temp_tables[cfg_idx] = temp_subrack_table_create(ld, cfg->subrack_size);
+  }
+  phase1_accumulate_temp_tables(wmp, temp_tables);
+  for (int cfg_idx = 0; cfg_idx < NUM_MULTI_PT_TP_CONFIGS; cfg_idx++) {
+    phase2_distribute_temp_table(temp_tables[cfg_idx], cfg_idx, ld, rit,
+                                 entries);
+    temp_subrack_table_destroy(temp_tables[cfg_idx]);
   }
 }
 
@@ -491,8 +766,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   }
 
   // 4. Build bucket_starts via prefix sum
-  uint32_t *bucket_starts =
-      malloc_or_die((num_buckets + 1) * sizeof(uint32_t));
+  uint32_t *bucket_starts = malloc_or_die((num_buckets + 1) * sizeof(uint32_t));
   uint32_t offset = 0;
   for (uint32_t bucket_idx = 0; bucket_idx < num_buckets; bucket_idx++) {
     bucket_starts[bucket_idx] = offset;
@@ -504,15 +778,13 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   RackInfoTableEntry *entries =
       malloc_or_die((size_t)total_racks * sizeof(RackInfoTableEntry));
 
-  uint32_t *entry_indices =
-      malloc_or_die(total_racks * sizeof(uint32_t));
+  uint32_t *entry_indices = malloc_or_die(total_racks * sizeof(uint32_t));
   memset(bucket_counts, 0, num_buckets * sizeof(uint32_t));
 
   for (uint32_t rack_idx = 0; rack_idx < total_racks; rack_idx++) {
     const uint32_t bucket =
         bit_rack_get_bucket_index(&all_racks[rack_idx], num_buckets);
-    const uint32_t entry_idx =
-        bucket_starts[bucket] + bucket_counts[bucket]++;
+    const uint32_t entry_idx = bucket_starts[bucket] + bucket_counts[bucket]++;
     entry_indices[rack_idx] = entry_idx;
     rack_info_table_entry_write_bit_rack(&entries[entry_idx],
                                          &all_racks[rack_idx]);
@@ -577,8 +849,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   free(all_racks);
 
   // 7. Build the RackInfoTable
-  RackInfoTable *rit =
-      (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
+  RackInfoTable *rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
   rit->version = RIT_VERSION;
   rit->rack_size = (uint8_t)RACK_SIZE;
   rit->playthrough_min_played_size = effective_min;
@@ -588,13 +859,13 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   rit->entries = entries;
   rit->name = NULL;
 
-  // 8. Populate the multi-playthrough tp=7 bitvec by flipping the walk:
-  // iterate WMP blankless words of length 8..15 and OR bits into the RIT
-  // entry for every canonical RACK_SIZE-tile submultiset of each word.
-  // Requires rit to be a valid lookup target, which is why this runs after
-  // step 7.
+  // 8. Populate the multi-playthrough bitvecs by flipping the walk:
+  // iterate WMP blankless words of length 6..15 and OR bits into the RIT
+  // entry for every canonical 5-, 6-, and 7-tile submultiset of each
+  // word. Requires rit to be a valid lookup target, which is why this
+  // runs after step 7.
   if (wmp != NULL) {
-    populate_multi_pt_tp7_bitvec(wmp, rit, entries);
+    populate_multi_pt_bitvecs(wmp, ld, rit, entries);
   }
 
   return rit;

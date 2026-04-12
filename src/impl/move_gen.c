@@ -486,8 +486,8 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
 // leave_map.leave_values from the RIT, so leave_map_get_current_value
 // returns the right value at each leaf.
 static void generate_exchange_moves_from_table(MoveGen *gen, Rack *leave,
-                                                MachineLetter ml,
-                                                bool add_exchange) {
+                                               MachineLetter ml,
+                                               bool add_exchange) {
   const int ld_size = ld_get_size(&gen->ld);
   while (ml < ld_size && rack_get_letter(&gen->player_rack, ml) == 0) {
     ml++;
@@ -1376,7 +1376,7 @@ static inline void shadow_record(MoveGen *gen) {
         const int leave_size = RACK_SIZE - gen->tiles_played;
         const uint32_t union_bitmask =
             rack_info_table_entry_get_playthrough_union(gen->rit_entry,
-                                                         leave_size);
+                                                        leave_size);
         const MachineLetter playthrough_ml =
             wmp_move_gen_single_playthrough_letter(&gen->wmp_move_gen);
         if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
@@ -1389,24 +1389,28 @@ static inline void shadow_record(MoveGen *gen) {
         // or full rack + single-playthrough when the RIT is unavailable
         // or doesn't cover full-rack play.
         WMP_STATS_INC(WMP_STATS_SHADOW_FALLBACK_FULL_RACK, gen->tiles_played);
-        WMP_STATS_INC_BYPASS_REASON(
-            gen->rit_entry, gen->wmp_move_gen.num_tiles_played_through,
-            gen->tiles_played);
-        // Multi-pt tp=7 bitvec pre-filter. The RIT stores, per letter L,
-        // a bitmask of word lengths where some word exists containing
-        // this full rack + {L} + other letters. AND-ing across the
-        // actual playthrough letters gives a necessary condition at the
-        // target word length. Skips the exact wmp hash walk below on
-        // any rack whose bitvec proves no word exists. Only applies to
-        // 7-tile bingo plays (tiles_played == RACK_SIZE) with >=2
-        // playthrough tiles on blankless racks, which is where the
-        // maker's flipped walk actually populated the bitvec.
+        WMP_STATS_INC_BYPASS_REASON(gen->rit_entry,
+                                    gen->wmp_move_gen.num_tiles_played_through,
+                                    gen->tiles_played);
+        // Multi-pt tp=7 bitvec pre-filter ahead of the exact wmp walk.
+        // The RIT stores per word length a uint32 with bit L set iff
+        // some 7-tile subrack of this rack + {L} + (other letters) makes
+        // a word of that length. Tests each playthrough letter against
+        // that single load. Only applies to 7-tile bingo plays
+        // (tiles_played == RACK_SIZE) with >=2 playthrough tiles on
+        // blankless racks.
         if (gen->rit_entry != NULL && gen->tiles_played == RACK_SIZE &&
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
             bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
                                 BLANK_MACHINE_LETTER) == 0) {
-          if (wmp_move_gen_multi_pt_tp7_bitvec_says_prune(&gen->wmp_move_gen,
-                                                          gen->rit_entry)) {
+          const int word_length =
+              gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
+          uint32_t length_bitvec = 0;
+          if (wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
+                  gen->rit_entry, gen->tiles_played, word_length,
+                  &length_bitvec) &&
+              wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
+                                                      length_bitvec)) {
             WMP_STATS_INC(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
                           gen->tiles_played);
             return;
@@ -1417,11 +1421,35 @@ static inline void shadow_record(MoveGen *gen) {
           return;
         }
       } else {
-        // Partial rack + multi-playthrough, or partial rack that the RIT
-        // fast path didn't handle. No shadow-time word-existence check.
-        WMP_STATS_INC_BYPASS_REASON(
-            gen->rit_entry, gen->wmp_move_gen.num_tiles_played_through,
-            gen->tiles_played);
+        // Partial rack + multi-playthrough. Previously had no shadow-
+        // time word-existence check at all. The tp=5 and tp=6 bitvecs
+        // populated by the maker fill that gap for the
+        // tiles_played in {5, 6} case: load the per-(tp, length) uint32
+        // and AND across the actual playthrough letters as a necessary
+        // condition. Other tiles_played values still fall through with
+        // no check.
+        WMP_STATS_INC_BYPASS_REASON(gen->rit_entry,
+                                    gen->wmp_move_gen.num_tiles_played_through,
+                                    gen->tiles_played);
+        if (gen->rit_entry != NULL &&
+            gen->wmp_move_gen.num_tiles_played_through >= 2 &&
+            bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
+                                BLANK_MACHINE_LETTER) == 0 &&
+            (gen->tiles_played == RACK_SIZE - 1 ||
+             gen->tiles_played == RACK_SIZE - 2)) {
+          const int word_length =
+              gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
+          uint32_t length_bitvec = 0;
+          if (wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
+                  gen->rit_entry, gen->tiles_played, word_length,
+                  &length_bitvec) &&
+              wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
+                                                      length_bitvec)) {
+            WMP_STATS_INC(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
+                          gen->tiles_played);
+            return;
+          }
+        }
       }
     }
     if (!wmp_move_gen_has_playthrough(&gen->wmp_move_gen) &&

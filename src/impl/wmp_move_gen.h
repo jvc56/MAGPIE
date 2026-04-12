@@ -153,46 +153,26 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
   }
 }
 
-// Necessary-only prune for the tp=7 multi-playthrough full-rack case. Loads
-// the single uint32 length-indexed bitvec for the target word length and
-// tests, for each playthrough letter L, whether bit L is set. If any
-// playthrough letter's bit is clear there can be no valid word, so the
-// anchor is pruned. This is strictly a pre-filter: the caller still runs
-// the exact wmp_get_word_entry fallback on anchors the bitvec lets
-// through.
+// Necessary-only prune for a multi-playthrough case. Tests each
+// playthrough letter L against `length_bitvec` (a uint32 with bit L set
+// iff some N-tile subrack of this rack + {L} + (other letters) forms a
+// word of the target word length, where N is whichever tp the caller
+// loaded the bitvec for). If any playthrough letter's bit is clear there
+// can be no valid word, so the anchor is pruned.
 //
 // Returns true if the bitvec proves no word exists (caller should prune).
-// Returns false if the bitvec can't prove it (fall through to exact check).
+// Returns false if the bitvec can't prove it.
 //
-// Preconditions:
-//   - rit_entry is non-NULL (caller verified)
-//   - num_tiles_played_through >= 2 (single-pt handled by playthrough_union)
-//   - player_rack_size == RACK_SIZE (i.e. not endgame partial)
-//   - player_bit_rack has no blanks (bitvec only populated for blankless
-//     racks; caller must check)
-//
-// Returns false if the word length is outside the bitvec's covered range
-// [RIT_MULTI_PT_TP7_MIN_WORD_LENGTH, RIT_MULTI_PT_TP7_MAX_WORD_LENGTH]; the
-// caller should treat that as "can't prune here" and fall through.
-//
-// Iteration walks only the letters actually set in playthrough_bit_rack via
-// __builtin_ctzll on each 64-bit half. After the single bitvec load each
-// per-letter test is a register-only `(length_bitvec >> ml) & 1` -- no
-// further memory traffic, no per-letter byte loads, and the dependency
-// chain is short enough that out-of-order execution can overlap the
-// per-letter checks with whatever else shadow_record is doing.
-static inline bool wmp_move_gen_multi_pt_tp7_bitvec_says_prune(
-    const WMPMoveGen *wmp_move_gen,
-    const RackInfoTableEntry *rit_entry) {
-  const int word_length =
-      RACK_SIZE + wmp_move_gen->num_tiles_played_through;
-  if (word_length < RIT_MULTI_PT_TP7_MIN_WORD_LENGTH ||
-      word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
-    return false;
-  }
-  const uint32_t length_bitvec =
-      rit_entry->multi_pt_tp7_bitvec[word_length -
-                                     RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
+// Iteration walks only the letters actually set in playthrough_bit_rack
+// via __builtin_ctzll on each 64-bit half. After the caller-supplied
+// length_bitvec load each per-letter test is a register-only
+// `(length_bitvec >> ml) & 1` -- no further memory traffic, no per-letter
+// byte loads, and the dependency chain is short enough that out-of-order
+// execution can overlap the per-letter checks with whatever else
+// shadow_record is doing.
+static inline bool
+wmp_move_gen_multi_pt_bitvec_says_prune(const WMPMoveGen *wmp_move_gen,
+                                        uint32_t length_bitvec) {
   const BitRack *pt_br = &wmp_move_gen->playthrough_bit_rack;
   uint64_t low = bit_rack_get_low_64(pt_br);
   while (low != 0) {
@@ -234,6 +214,51 @@ static inline bool wmp_move_gen_multi_pt_tp7_bitvec_says_prune(
     high &= ~((uint64_t)0xFU << (ml_offset * BIT_RACK_BITS_PER_LETTER));
   }
   return false;
+}
+
+// Returns true and writes the per-(tp, length) bitvec slot to *out_bitvec
+// if the (tiles_played, word_length) pair has a populated bitvec slot.
+// Returns false otherwise (caller should treat that as "no shadow check
+// here" rather than "all letters fail"). Wraps the per-tp
+// `rack_info_table_entry_get_multi_pt_tpN_bitvec` accessors so
+// shadow_record doesn't have to switch on tiles_played itself, and
+// distinguishes the out-of-range case from the genuine all-zeros case
+// (which IS a valid prune signal -- "no letter is compatible with this
+// rack at this length").
+static inline bool wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
+    const RackInfoTableEntry *rit_entry, int tiles_played, int word_length,
+    uint32_t *out_bitvec) {
+  switch (tiles_played) {
+  case RACK_SIZE:
+    if (word_length < RIT_MULTI_PT_TP7_MIN_WORD_LENGTH ||
+        word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
+      return false;
+    }
+    *out_bitvec =
+        rit_entry->multi_pt_tp7_bitvec[word_length -
+                                       RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
+    return true;
+  case RACK_SIZE - 1:
+    if (word_length < RIT_MULTI_PT_TP6_MIN_WORD_LENGTH ||
+        word_length > RIT_MULTI_PT_TP6_MAX_WORD_LENGTH) {
+      return false;
+    }
+    *out_bitvec =
+        rit_entry->multi_pt_tp6_bitvec[word_length -
+                                       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH];
+    return true;
+  case RACK_SIZE - 2:
+    if (word_length < RIT_MULTI_PT_TP5_MIN_WORD_LENGTH ||
+        word_length > RIT_MULTI_PT_TP5_MAX_WORD_LENGTH) {
+      return false;
+    }
+    *out_bitvec =
+        rit_entry->multi_pt_tp5_bitvec[word_length -
+                                       RIT_MULTI_PT_TP5_MIN_WORD_LENGTH];
+    return true;
+  default:
+    return false;
+  }
 }
 
 static inline bool
@@ -334,9 +359,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
                                                                 size);
   }
   for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
-    Equity rit_best =
-        rack_info_table_entry_get_nonplaythrough_best_leave_value(rit_entry,
-                                                                  leave_size);
+    Equity rit_best = rack_info_table_entry_get_nonplaythrough_best_leave_value(
+        rit_entry, leave_size);
     // The non-RIT path writes 0 instead of EQUITY_MIN_VALUE when
     // check_leaves is false. Match that convention so the field is always
     // well-defined downstream.
@@ -433,8 +457,7 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
 // so it's O(1) rather than iterating over the alphabet.
 static inline MachineLetter
 wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
-  const uint64_t low =
-      bit_rack_get_low_64(&wmp_move_gen->playthrough_bit_rack);
+  const uint64_t low = bit_rack_get_low_64(&wmp_move_gen->playthrough_bit_rack);
   if (low != 0) {
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
     return (MachineLetter)(__builtin_ctzll(low) / BIT_RACK_BITS_PER_LETTER);
@@ -451,8 +474,7 @@ wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
   const uint64_t high =
       bit_rack_get_high_64(&wmp_move_gen->playthrough_bit_rack);
 #if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
-  return (MachineLetter)(16 +
-                         __builtin_ctzll(high) / BIT_RACK_BITS_PER_LETTER);
+  return (MachineLetter)(16 + __builtin_ctzll(high) / BIT_RACK_BITS_PER_LETTER);
 #else
   int ml = 16;
   uint64_t v = high;

@@ -59,39 +59,63 @@
 // an actual no-playthrough word -- which is exactly the quantity shadow
 // compares against `gen->best_leaves` for nonplaythrough equity math.
 //
-// Finally each entry also stores `multi_pt_tp7_bitvec[length_idx]`, a per-
-// word-length uint32 whose bit L is set iff there exists some word of
-// length (RIT_MULTI_PT_TP7_MIN_WORD_LENGTH + length_idx) whose multiset
-// contains this full rack + {L} + ((MIN_WORD_LENGTH + length_idx) -
-// RACK_SIZE - 1) other letters. Shadow uses it to prune the multi-
-// playthrough full-rack case (tiles_played == RACK_SIZE with two or more
-// playthrough tiles) by loading the single uint32 for the target word
-// length and testing each playthrough letter's bit -- a necessary-only
-// check (cheap, single-cache-line lookup vs the existing
-// wmp_get_word_entry-based fallback). The bitvec is only populated for
-// racks with zero blanks; blank racks leave it at 0 and the consumer
-// falls through to the existing wmp hash-walk fallback, which handles
-// blanks natively via wmp_get_word_entry's blank-count dispatch.
+// Finally each entry also stores three multi-playthrough bitvecs, one for
+// each tiles_played value in {5, 6, 7}, indexed by word length and bit-
+// per-letter:
+//
+//   multi_pt_tp{5,6,7}_bitvec[length_idx]
+//
+// The bitvec for tp=N covers word lengths [N+1, BOARD_DIM]. Bit L of slot
+// k is set iff there exists some word of length (N+1+k) whose multiset
+// equals (some N-tile subrack of this rack) + {L} + (word_length - N - 1)
+// other letters.
+//
+// Shadow uses these to prune multi-playthrough anchors before the existing
+// wmp hash-walk fallback (or, for partial-rack cases that previously had
+// no check at all, as the only word-existence check). Loading the single
+// uint32 for the target word length and testing each playthrough letter's
+// bit is much cheaper than the wmp_get_word_entry-based fallback.
+//
+// The tp=7 bitvec is consumed in the full-rack bingo case (tiles_played
+// == RACK_SIZE) as a pre-filter ahead of the existing wmp walk. The tp=5
+// and tp=6 bitvecs are consumed in the partial-rack multi-playthrough
+// case (tiles_played < RACK_SIZE) which had no shadow-time check at all
+// before this. Together they cover all multi-playthrough plays where
+// tiles_played is in {5, 6, 7}, which is the bulk of the multi-pt
+// shadow_record bypass volume.
+//
+// All three bitvecs are only populated for racks with zero blanks; blank
+// racks leave them at 0 and the consumer skips the check for them,
+// falling through to whatever the prior path was.
 //
 // Indexing the array by word length (rather than by letter) keeps the
 // inner check loop O(num_playthrough_tiles) of register-only
-// `(length_bitvec >> ml) & 1` tests after a single uint32 load. The
-// earlier per-letter byte-array layout needed `num_playthrough_tiles`
-// independent byte loads, which scaled linearly with the playthrough
-// size and grew with longer word lengths.
+// `(length_bitvec >> ml) & 1` tests after a single uint32 load.
 
 enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
   RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BITRACK_BYTES = BIT_RACK_EXPECTED_SIZE_BYTES,
+  // Multi-playthrough bitvec ranges. For tp=N, the bitvec covers word
+  // lengths [N + 1, BOARD_DIM] (slot 0 = single-pt, slot 1+ = multi-pt).
+  // Slot 0 is technically redundant with playthrough_union for the
+  // num_pt=1 case but we keep it for layout uniformity.
   RIT_MULTI_PT_TP7_MIN_WORD_LENGTH = RACK_SIZE + 1,
   RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS = 8,
   RIT_MULTI_PT_TP7_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP7_MIN_WORD_LENGTH + RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS - 1,
+  RIT_MULTI_PT_TP6_MIN_WORD_LENGTH = (RACK_SIZE - 1) + 1,
+  RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS = 9,
+  RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
+      RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
+  RIT_MULTI_PT_TP5_MIN_WORD_LENGTH = (RACK_SIZE - 2) + 1,
+  RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS = 10,
+  RIT_MULTI_PT_TP5_MAX_WORD_LENGTH =
+      RIT_MULTI_PT_TP5_MIN_WORD_LENGTH + RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 6,
-  RIT_EARLIEST_SUPPORTED_VERSION = 6,
+  RIT_VERSION = 7,
+  RIT_EARLIEST_SUPPORTED_VERSION = 7,
 };
 
 typedef struct RackInfoTableEntry {
@@ -100,6 +124,8 @@ typedef struct RackInfoTableEntry {
   Equity nonplaythrough_best_leave_values
       [RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY];
   uint32_t multi_pt_tp7_bitvec[RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS];
+  uint32_t multi_pt_tp6_bitvec[RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS];
+  uint32_t multi_pt_tp5_bitvec[RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS];
   uint8_t nonplaythrough_has_word_of_length_bitmask;
   uint8_t pad[3];
   uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
@@ -204,13 +230,13 @@ rack_info_table_lookup_leaves(const RackInfoTable *rit,
 // (RACK_SIZE - leave_size)-tile subrack S of the full rack represented by
 // `entry`, S + {L} anagrams to a valid word of length
 // (RACK_SIZE - leave_size + 1). Returns 0 if leave_size is out of range.
-// Callers should separately verify via rack_info_table_has_playthrough_coverage()
-// that the table actually has data for the corresponding played_size --
-// a 0 value here alone can't distinguish "no letter works" from "we
-// didn't build coverage for this size".
+// Callers should separately verify via
+// rack_info_table_has_playthrough_coverage() that the table actually has data
+// for the corresponding played_size -- a 0 value here alone can't distinguish
+// "no letter works" from "we didn't build coverage for this size".
 static inline uint32_t
 rack_info_table_entry_get_playthrough_union(const RackInfoTableEntry *entry,
-                                             int leave_size) {
+                                            int leave_size) {
   if (leave_size < 0 || leave_size > RACK_SIZE) {
     return 0;
   }
@@ -243,13 +269,13 @@ static inline Equity rack_info_table_entry_get_nonplaythrough_best_leave_value(
   return entry->nonplaythrough_best_leave_values[leave_size];
 }
 
-// Returns the tp=7 multi-playthrough bitvec uint32 for `word_length`. Bit
+// Returns the tp=N multi-playthrough bitvec uint32 for `word_length`. Bit
 // L of the returned value is set iff there exists some word of `word_length`
-// letters whose multiset equals this full rack + {L} + (word_length -
-// RACK_SIZE - 1) other letters. Returns 0 for out-of-range word_length
-// (which reads as "no letter works" but the caller should not prune on 0
-// without first checking that the rack is blankless -- see the header
-// comment on RackInfoTableEntry).
+// letters whose multiset equals (some N-tile subrack of this rack) + {L} +
+// (word_length - N - 1) other letters. Returns 0 for out-of-range
+// word_length (which reads as "no letter works" but the caller should not
+// prune on 0 without first checking that the rack is blankless -- see the
+// header comment on RackInfoTableEntry).
 static inline uint32_t
 rack_info_table_entry_get_multi_pt_tp7_bitvec(const RackInfoTableEntry *entry,
                                               int word_length) {
@@ -257,8 +283,30 @@ rack_info_table_entry_get_multi_pt_tp7_bitvec(const RackInfoTableEntry *entry,
       word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
     return 0;
   }
-  return entry->multi_pt_tp7_bitvec[word_length -
-                                    RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
+  return entry
+      ->multi_pt_tp7_bitvec[word_length - RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
+}
+
+static inline uint32_t
+rack_info_table_entry_get_multi_pt_tp6_bitvec(const RackInfoTableEntry *entry,
+                                              int word_length) {
+  if (word_length < RIT_MULTI_PT_TP6_MIN_WORD_LENGTH ||
+      word_length > RIT_MULTI_PT_TP6_MAX_WORD_LENGTH) {
+    return 0;
+  }
+  return entry
+      ->multi_pt_tp6_bitvec[word_length - RIT_MULTI_PT_TP6_MIN_WORD_LENGTH];
+}
+
+static inline uint32_t
+rack_info_table_entry_get_multi_pt_tp5_bitvec(const RackInfoTableEntry *entry,
+                                              int word_length) {
+  if (word_length < RIT_MULTI_PT_TP5_MIN_WORD_LENGTH ||
+      word_length > RIT_MULTI_PT_TP5_MAX_WORD_LENGTH) {
+    return 0;
+  }
+  return entry
+      ->multi_pt_tp5_bitvec[word_length - RIT_MULTI_PT_TP5_MIN_WORD_LENGTH];
 }
 
 static inline void rack_info_table_destroy(RackInfoTable *rit) {
@@ -289,6 +337,8 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //     (RACK_SIZE + 1) * 4 bytes: nonplaythrough_best_leave_values (Equity)
 //     RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp7_bitvec
 //                                                  (uint32 per word length)
+//     RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp6_bitvec
+//     RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp5_bitvec
 //     1 byte: nonplaythrough_has_word_of_length_bitmask
 //     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
@@ -312,12 +362,10 @@ static inline void rit_write_uint32s_or_die(const uint32_t *values, size_t n,
 #endif
 }
 
-static inline void
-rit_write_entries_or_die(const RackInfoTableEntry *entries, uint32_t n,
-                         FILE *stream) {
+static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
+                                            uint32_t n, FILE *stream) {
 #if IS_LITTLE_ENDIAN
-  fwrite_or_die(entries, sizeof(RackInfoTableEntry), n, stream,
-                "rit entries");
+  fwrite_or_die(entries, sizeof(RackInfoTableEntry), n, stream, "rit entries");
 #else
   for (uint32_t i = 0; i < n; i++) {
     const RackInfoTableEntry *entry = &entries[i];
@@ -328,25 +376,35 @@ rit_write_entries_or_die(const RackInfoTableEntry *entries, uint32_t n,
     }
     for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
-      const uint32_t le_union =
-          htole32(entry->playthrough_union[union_idx]);
+      const uint32_t le_union = htole32(entry->playthrough_union[union_idx]);
       fwrite_or_die(&le_union, sizeof(uint32_t), 1, stream,
                     "rit playthrough union");
     }
     for (int leave_idx = 0;
          leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
          leave_idx++) {
-      const uint32_t le_leave = htole32(
-          (uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
+      const uint32_t le_leave =
+          htole32((uint32_t)entry->nonplaythrough_best_leave_values[leave_idx]);
       fwrite_or_die(&le_leave, sizeof(uint32_t), 1, stream,
                     "rit nonplaythrough best leave value");
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
-      const uint32_t le_bitvec =
-          htole32(entry->multi_pt_tp7_bitvec[len_idx]);
+      const uint32_t le_bitvec = htole32(entry->multi_pt_tp7_bitvec[len_idx]);
       fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
                     "rit multi pt tp7 bitvec");
+    }
+    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
+         len_idx++) {
+      const uint32_t le_bitvec = htole32(entry->multi_pt_tp6_bitvec[len_idx]);
+      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
+                    "rit multi pt tp6 bitvec");
+    }
+    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS;
+         len_idx++) {
+      const uint32_t le_bitvec = htole32(entry->multi_pt_tp5_bitvec[len_idx]);
+      fwrite_or_die(&le_bitvec, sizeof(uint32_t), 1, stream,
+                    "rit multi pt tp5 bitvec");
     }
     fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
                   sizeof(uint8_t), 1, stream,
@@ -404,7 +462,7 @@ static inline void rit_read_uint32s_or_die(uint32_t *out, size_t n,
 }
 
 static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
-                                            uint32_t n, FILE *stream) {
+                                           uint32_t n, FILE *stream) {
   if (fread(entries, sizeof(RackInfoTableEntry), n, stream) != n) {
     log_fatal("could not read entries from rit stream");
   }
@@ -423,14 +481,23 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
     for (int leave_idx = 0;
          leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
          leave_idx++) {
-      entries[i].nonplaythrough_best_leave_values[leave_idx] =
-          (Equity)le32toh(
-              (uint32_t)entries[i].nonplaythrough_best_leave_values[leave_idx]);
+      entries[i].nonplaythrough_best_leave_values[leave_idx] = (Equity)le32toh(
+          (uint32_t)entries[i].nonplaythrough_best_leave_values[leave_idx]);
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
       entries[i].multi_pt_tp7_bitvec[len_idx] =
           le32toh(entries[i].multi_pt_tp7_bitvec[len_idx]);
+    }
+    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS;
+         len_idx++) {
+      entries[i].multi_pt_tp6_bitvec[len_idx] =
+          le32toh(entries[i].multi_pt_tp6_bitvec[len_idx]);
+    }
+    for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS;
+         len_idx++) {
+      entries[i].multi_pt_tp5_bitvec[len_idx] =
+          le32toh(entries[i].multi_pt_tp5_bitvec[len_idx]);
     }
     // bit_rack_bytes are already stored little-endian
     // nonplaythrough_has_word_of_length_bitmask is a single byte, no swap
