@@ -247,15 +247,6 @@ static inline bool wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
         rit_entry->multi_pt_tp6_bitvec[word_length -
                                        RIT_MULTI_PT_TP6_MIN_WORD_LENGTH];
     return true;
-  case RACK_SIZE - 2:
-    if (word_length < RIT_MULTI_PT_TP5_MIN_WORD_LENGTH ||
-        word_length > RIT_MULTI_PT_TP5_MAX_WORD_LENGTH) {
-      return false;
-    }
-    *out_bitvec =
-        rit_entry->multi_pt_tp5_bitvec[word_length -
-                                       RIT_MULTI_PT_TP5_MIN_WORD_LENGTH];
-    return true;
   default:
     return false;
   }

@@ -272,8 +272,6 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
          RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS * sizeof(uint32_t));
   memset(entry->multi_pt_tp6_bitvec, 0,
          RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * sizeof(uint32_t));
-  memset(entry->multi_pt_tp5_bitvec, 0,
-         RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS * sizeof(uint32_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
   for (int leave_idx = 0;
@@ -299,12 +297,12 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 }
 
 // ============================================================================
-// Multi-playthrough bitvec flipped walk (tp=5, tp=6, tp=7)
+// Multi-playthrough bitvec flipped walk (tp=6, tp=7)
 //
-// For each tp value N in {5, 6, 7} we want, per 7-tile rack R, a
-// length-indexed bitvec where bit L in slot k is set iff there exists a
-// word M of length (N + 1 + k) such that some N-tile subrack S of R
-// satisfies S ⊆ M and L ∈ (M - S).
+// For each tp value N in {6, 7} we want, per 7-tile rack R, a length-
+// indexed bitvec where bit L in slot k is set iff there exists a word M
+// of length (N + 1 + k) such that some N-tile subrack S of R satisfies
+// S ⊆ M and L ∈ (M - S).
 //
 // Phase 1 (build per-N temp tables, deduped by canonical N-tile S):
 //   Enumerate every canonical N-tile multiset S allowed by the LD into a
@@ -340,9 +338,9 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 
 typedef struct TempSubrackEntry {
   BitRack subrack;
-  // Per-length bitvec slots, sized for the largest tp range (tp=5).
-  // For tp=6/tp=7 the unused tail slots stay at 0.
-  uint32_t result[RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS];
+  // Per-length bitvec slots, sized for the largest tp range (tp=6). For
+  // tp=7 the unused tail slots stay at 0.
+  uint32_t result[RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS];
 } TempSubrackEntry;
 
 typedef struct TempSubrackTable {
@@ -448,8 +446,8 @@ temp_subrack_table_lookup(const TempSubrackTable *table,
 }
 
 // Configuration for one tp level. Encapsulates everything that varies
-// between tp=5, tp=6, and tp=7 so the OR + distribute machinery below
-// can be written once.
+// between tp=6 and tp=7 so the OR + distribute machinery below can be
+// written once.
 typedef struct {
   int subrack_size; // 5, 6, or 7
   int min_word_length;
@@ -457,15 +455,13 @@ typedef struct {
   int max_word_length;
 } MultiPtTpConfig;
 
-static const MultiPtTpConfig MULTI_PT_TP_CONFIGS[3] = {
-    {RACK_SIZE - 2, RIT_MULTI_PT_TP5_MIN_WORD_LENGTH,
-     RIT_MULTI_PT_TP5_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP5_MAX_WORD_LENGTH},
+static const MultiPtTpConfig MULTI_PT_TP_CONFIGS[2] = {
     {RACK_SIZE - 1, RIT_MULTI_PT_TP6_MIN_WORD_LENGTH,
      RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP6_MAX_WORD_LENGTH},
     {RACK_SIZE, RIT_MULTI_PT_TP7_MIN_WORD_LENGTH,
      RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS, RIT_MULTI_PT_TP7_MAX_WORD_LENGTH},
 };
-enum { NUM_MULTI_PT_TP_CONFIGS = 3 };
+enum { NUM_MULTI_PT_TP_CONFIGS = 2 };
 
 typedef struct {
   const uint8_t *word_letter_counts; // BIT_RACK_MAX_ALPHABET_SIZE
@@ -520,11 +516,11 @@ static void submultiset_walk_recursive(SubmultisetWalkState *state,
 }
 
 // Phase 1: walk every word in the WMP and accumulate per-canonical-S
-// results into the temporary tables for tp=5, tp=6, tp=7.
+// results into the temporary tables for tp=6 and tp=7.
 static void phase1_accumulate_temp_tables(
     const WMP *wmp, TempSubrackTable *temp_tables[NUM_MULTI_PT_TP_CONFIGS]) {
-  const int min_word_length = RIT_MULTI_PT_TP5_MIN_WORD_LENGTH;
-  const int max_word_length = RIT_MULTI_PT_TP5_MAX_WORD_LENGTH;
+  const int min_word_length = RIT_MULTI_PT_TP6_MIN_WORD_LENGTH;
+  const int max_word_length = RIT_MULTI_PT_TP7_MAX_WORD_LENGTH;
   for (int word_length = min_word_length; word_length <= max_word_length;
        word_length++) {
     if (word_length > wmp->board_dim) {
@@ -584,17 +580,12 @@ static void superset_walk_leaf(const SupersetWalkState *state,
   const size_t entry_idx = (size_t)(const_entry - state->rit->entries);
   RackInfoTableEntry *entry = &state->entries[entry_idx];
   switch (state->target_cfg_idx) {
-  case 0: // tp=5
-    for (int k = 0; k < state->num_word_lengths; k++) {
-      entry->multi_pt_tp5_bitvec[k] |= state->result[k];
-    }
-    break;
-  case 1: // tp=6
+  case 0: // tp=6
     for (int k = 0; k < state->num_word_lengths; k++) {
       entry->multi_pt_tp6_bitvec[k] |= state->result[k];
     }
     break;
-  case 2: // tp=7
+  case 1: // tp=7
     for (int k = 0; k < state->num_word_lengths; k++) {
       entry->multi_pt_tp7_bitvec[k] |= state->result[k];
     }

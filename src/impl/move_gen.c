@@ -1422,12 +1422,13 @@ static inline void shadow_record(MoveGen *gen) {
         }
       } else {
         // Partial rack + multi-playthrough. Previously had no shadow-
-        // time word-existence check at all. The tp=5 and tp=6 bitvecs
-        // populated by the maker fill that gap for the
-        // tiles_played in {5, 6} case: load the per-(tp, length) uint32
-        // and AND across the actual playthrough letters as a necessary
-        // condition. Other tiles_played values still fall through with
-        // no check.
+        // time word-existence check at all. The tp=6 bitvec populated
+        // by the maker fills that gap for the tiles_played == RACK_SIZE
+        // - 1 case: load the per-length uint32 and AND across the
+        // actual playthrough letters as a necessary condition. tp=5
+        // was measured and dropped (4.7% prune rate didn't cover the
+        // file-size cost); other tiles_played values still fall through
+        // with no check.
         WMP_STATS_INC_BYPASS_REASON(gen->rit_entry,
                                     gen->wmp_move_gen.num_tiles_played_through,
                                     gen->tiles_played);
@@ -1435,8 +1436,7 @@ static inline void shadow_record(MoveGen *gen) {
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
             bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
                                 BLANK_MACHINE_LETTER) == 0 &&
-            (gen->tiles_played == RACK_SIZE - 1 ||
-             gen->tiles_played == RACK_SIZE - 2)) {
+            gen->tiles_played == RACK_SIZE - 1) {
           const int word_length =
               gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
           uint32_t length_bitvec = 0;
