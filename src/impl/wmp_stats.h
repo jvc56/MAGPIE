@@ -75,6 +75,15 @@ enum {
   // fires, but bucketed for uniformity with the other shadow counters).
   WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
 
+  // Anchor heap extraction counters. Bucket = word_existence level
+  // (0=UNKNOWN, 1=LIKELY, 2=DEFINITE).
+  WMP_STATS_ANCHORS_EXTRACTED,
+  WMP_STATS_ANCHORS_PRUNED,
+
+  // wordmap_gen_check_playthrough_and_crosses calls. Bucket = word_length.
+  WMP_STATS_CHECK_PT_AND_CROSSES_TOTAL,
+  WMP_STATS_CHECK_PT_AND_CROSSES_PASSED,
+
   WMP_STATS_NUM_CATEGORIES,
 };
 

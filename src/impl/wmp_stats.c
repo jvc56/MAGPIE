@@ -32,6 +32,10 @@ static const char *const category_names[WMP_STATS_NUM_CATEGORIES] = {
     "SHADOW_FAST_PATH_PRUNED",
     "SHADOW_FALLBACK_FULL_RACK",
     "SHADOW_MULTI_PT_BITVEC_PRUNED",
+    "ANCHORS_EXTRACTED",
+    "ANCHORS_PRUNED",
+    "CHECK_PT_AND_CROSSES_TOTAL",
+    "CHECK_PT_AND_CROSSES_PASSED",
 };
 
 static uint64_t load_counter(int category, int bucket) {
@@ -163,6 +167,36 @@ void wmp_stats_print(void) {
     fprintf(stderr, "  PT_SUBRACK:     %llu/%llu = %.1f%%\n",
             (unsigned long long)ptsw_f, (unsigned long long)ptsw_t,
             100.0 * (double)ptsw_f / (double)ptsw_t);
+  }
+  fprintf(stderr, "\n");
+
+  const uint64_t anchors_extracted = row_total(WMP_STATS_ANCHORS_EXTRACTED);
+  const uint64_t anchors_pruned = row_total(WMP_STATS_ANCHORS_PRUNED);
+  fprintf(stderr, "Anchor heap:\n");
+  fprintf(stderr, "  extracted:                          %llu\n",
+          (unsigned long long)anchors_extracted);
+  fprintf(stderr, "  pruned (better_play_has_been_found): %llu\n",
+          (unsigned long long)anchors_pruned);
+  if (anchors_extracted > 0) {
+    fprintf(stderr, "  processed:                          %llu (%.1f%% of extracted)\n",
+            (unsigned long long)(anchors_extracted - anchors_pruned),
+            100.0 * (double)(anchors_extracted - anchors_pruned) /
+                (double)anchors_extracted);
+  }
+  fprintf(stderr, "\n");
+
+  const uint64_t crosses_total =
+      row_total(WMP_STATS_CHECK_PT_AND_CROSSES_TOTAL);
+  const uint64_t crosses_passed =
+      row_total(WMP_STATS_CHECK_PT_AND_CROSSES_PASSED);
+  fprintf(stderr, "check_playthrough_and_crosses:\n");
+  fprintf(stderr, "  total:                              %llu\n",
+          (unsigned long long)crosses_total);
+  fprintf(stderr, "  passed:                             %llu\n",
+          (unsigned long long)crosses_passed);
+  if (crosses_total > 0) {
+    fprintf(stderr, "  pass rate:                          %.1f%%\n",
+            100.0 * (double)crosses_passed / (double)crosses_total);
   }
   fprintf(stderr, "\n");
 

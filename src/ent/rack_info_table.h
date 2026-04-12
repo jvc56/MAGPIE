@@ -99,6 +99,7 @@ enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
   RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
+  RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BITRACK_BYTES = BIT_RACK_EXPECTED_SIZE_BYTES,
   // Multi-playthrough bitvec ranges. For tp=N, the bitvec covers word
   // lengths [N + 1, BOARD_DIM] (slot 0 = single-pt, slot 1+ = multi-pt).
@@ -113,8 +114,8 @@ enum {
   RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 8,
-  RIT_EARLIEST_SUPPORTED_VERSION = 8,
+  RIT_VERSION = 10,
+  RIT_EARLIEST_SUPPORTED_VERSION = 10,
 };
 
 typedef struct RackInfoTableEntry {
@@ -122,10 +123,21 @@ typedef struct RackInfoTableEntry {
   uint32_t playthrough_union[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   Equity nonplaythrough_best_leave_values
       [RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY];
+  // Per-leave-size maximum leave value across all canonical subsets.
+  // best_leaves[leave_size] = max over all C(RACK_SIZE, leave_size)
+  // canonical subsets of the leave value for that subset. Used to skip
+  // the 2^RACK_SIZE exchange enumeration walk when only best_leaves
+  // bounds are needed (no exchange recording).
+  Equity best_leaves[RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY];
   uint32_t multi_pt_tp7_bitvec[RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS];
   uint32_t multi_pt_tp6_bitvec[RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS];
   uint8_t nonplaythrough_has_word_of_length_bitmask;
-  uint8_t pad[3];
+  // Best exchange move across all leave sizes, tiebroken by compare_moves.
+  // best_exchange_strip holds the tiles exchanged in machine letter order;
+  // best_exchange_tiles_exchanged is the strip length.
+  MachineLetter best_exchange_strip[RACK_SIZE];
+  uint8_t best_exchange_tiles_exchanged;
+  uint8_t pad[2];
   uint8_t bit_rack_bytes[RACK_INFO_TABLE_BITRACK_BYTES];
 } RackInfoTableEntry;
 
@@ -272,6 +284,23 @@ static inline Equity rack_info_table_entry_get_nonplaythrough_best_leave_value(
   return entry->nonplaythrough_best_leave_values[leave_size];
 }
 
+// Returns the precomputed best_leaves array for this rack entry. Each
+// best_leaves[leave_size] is the maximum leave value across all canonical
+// C(RACK_SIZE, leave_size) subsets of the rack. Returns NULL if leave_size
+// is out of range.
+static inline const Equity *
+rack_info_table_entry_get_best_leaves(const RackInfoTableEntry *entry) {
+  return entry->best_leaves;
+}
+
+// Returns the precomputed best exchange strip and its length.
+static inline const MachineLetter *
+rack_info_table_entry_get_best_exchange_strip(const RackInfoTableEntry *entry,
+                                              int *tiles_exchanged) {
+  *tiles_exchanged = entry->best_exchange_tiles_exchanged;
+  return entry->best_exchange_strip;
+}
+
 // Returns the tp=N multi-playthrough bitvec uint32 for `word_length`. Bit
 // L of the returned value is set iff there exists some word of `word_length`
 // letters whose multiset equals (some N-tile subrack of this rack) + {L} +
@@ -331,10 +360,14 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //     (1 << RACK_SIZE) * 4 bytes: leaves (Equity, int32_t)
 //     (RACK_SIZE + 1) * 4 bytes: playthrough_union (uint32_t)
 //     (RACK_SIZE + 1) * 4 bytes: nonplaythrough_best_leave_values (Equity)
+//     (RACK_SIZE + 1) * 4 bytes: best_leaves (Equity, per-leave-size max)
 //     RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp7_bitvec
 //                                                  (uint32 per word length)
 //     RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp6_bitvec
 //     1 byte: nonplaythrough_has_word_of_length_bitmask
+//     RACK_SIZE bytes: best_exchange_strip (MachineLetter per tile)
+//     1 byte: best_exchange_tiles_exchanged
+//     2 bytes: pad
 //     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
@@ -383,6 +416,12 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
       fwrite_or_die(&le_leave, sizeof(uint32_t), 1, stream,
                     "rit nonplaythrough best leave value");
     }
+    for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+         bl_idx++) {
+      const uint32_t le_bl =
+          htole32((uint32_t)entry->best_leaves[bl_idx]);
+      fwrite_or_die(&le_bl, sizeof(uint32_t), 1, stream, "rit best leave");
+    }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {
       const uint32_t le_bitvec = htole32(entry->multi_pt_tp7_bitvec[len_idx]);
@@ -398,6 +437,10 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
     fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
                   sizeof(uint8_t), 1, stream,
                   "rit nonplaythrough has word of length bitmask");
+    fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter),
+                  RACK_SIZE, stream, "rit best exchange strip");
+    fwrite_or_die(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
+                  stream, "rit best exchange tiles exchanged");
     fwrite_or_die(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream,
                   "rit entry pad");
     fwrite_or_die(entry->bit_rack_bytes, sizeof(uint8_t),
@@ -472,6 +515,11 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
          leave_idx++) {
       entries[i].nonplaythrough_best_leave_values[leave_idx] = (Equity)le32toh(
           (uint32_t)entries[i].nonplaythrough_best_leave_values[leave_idx]);
+    }
+    for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+         bl_idx++) {
+      entries[i].best_leaves[bl_idx] =
+          (Equity)le32toh((uint32_t)entries[i].best_leaves[bl_idx]);
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
          len_idx++) {

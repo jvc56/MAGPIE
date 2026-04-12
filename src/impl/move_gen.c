@@ -424,6 +424,38 @@ static inline void record_exchange(MoveGen *gen) {
       BOARD_HORIZONTAL_DIRECTION, gen->exchange_strip);
 }
 
+// Record the single best exchange from the precomputed RIT strip.
+// Sets up leave_map so gen_get_static_equity reads the correct leave value.
+static void record_best_exchange_from_table(MoveGen *gen) {
+  int tiles_exchanged = 0;
+  const MachineLetter *strip =
+      rack_info_table_entry_get_best_exchange_strip(gen->rit_entry,
+                                                    &tiles_exchanged);
+  if (tiles_exchanged == 0) {
+    return;
+  }
+  const int leave_size = RACK_SIZE - tiles_exchanged;
+  const Equity leave_value = gen->best_leaves[leave_size];
+  if (better_play_has_been_found(gen, leave_value)) {
+    return;
+  }
+  // Temporarily set leave_map so gen_get_static_equity reads the correct
+  // leave value. Save and restore index 0's value.
+  const int saved_index = leave_map_get_current_index(&gen->leave_map);
+  const Equity saved_value = gen->leave_map.leave_values[0];
+  leave_map_set_current_index(&gen->leave_map, 0);
+  gen->leave_map.leave_values[0] = leave_value;
+
+  memcpy(gen->exchange_strip, strip, tiles_exchanged * sizeof(MachineLetter));
+  update_best_move_or_insert_into_movelist(
+      gen, 0, tiles_exchanged, GAME_EVENT_EXCHANGE, 0, 0, 0, tiles_exchanged,
+      BOARD_HORIZONTAL_DIRECTION, gen->exchange_strip);
+
+  // Restore leave_map state.
+  gen->leave_map.leave_values[0] = saved_value;
+  leave_map_set_current_index(&gen->leave_map, saved_index);
+}
+
 // Look up leave values for all subsets of the player's rack and if add_exchange
 // is true, record exchange moves for them. KLV indices are retained to speed up
 // lookup of leaves with common lexicographical "prefixes".
@@ -736,6 +768,7 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
                                                int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  WMP_STATS_INC(WMP_STATS_CHECK_PT_AND_CROSSES_TOTAL, wgen->word_length);
   const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = start_col + letter_idx;
@@ -759,6 +792,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
     }
     gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
   }
+  WMP_STATS_INC(WMP_STATS_CHECK_PT_AND_CROSSES_PASSED, wgen->word_length);
   return true;
 }
 
@@ -1349,6 +1383,7 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 static inline void shadow_record(MoveGen *gen) {
   WMP_STATS_INC(WMP_STATS_SHADOW_RECORD_CALLS, gen->tiles_played);
   const Equity *best_leaves = gen->best_leaves;
+  word_existence_t existence = WORD_EXISTENCE_UNKNOWN;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
@@ -1383,6 +1418,7 @@ static inline void shadow_record(MoveGen *gen) {
           WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_PRUNED, gen->tiles_played);
           return;
         }
+        existence = WORD_EXISTENCE_DEFINITE;
       } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
         // Fall back to the existing WMP check for full-rack cases not
         // handled by the RIT fast path: full rack + multi-playthrough,
@@ -1415,11 +1451,15 @@ static inline void shadow_record(MoveGen *gen) {
                           gen->tiles_played);
             return;
           }
+          // Bitvec passed but is only a necessary condition.
+          existence = WORD_EXISTENCE_LIKELY;
         }
         if (!wmp_move_gen_check_playthrough_full_rack_existence(
                 &gen->wmp_move_gen)) {
           return;
         }
+        // Exact WMP lookup confirmed word exists.
+        existence = WORD_EXISTENCE_DEFINITE;
       } else {
         // Partial rack + multi-playthrough. Previously had no shadow-
         // time word-existence check at all. The tp=6 bitvec populated
@@ -1449,6 +1489,8 @@ static inline void shadow_record(MoveGen *gen) {
                           gen->tiles_played);
             return;
           }
+          // Bitvec passed but is only a necessary condition.
+          existence = WORD_EXISTENCE_LIKELY;
         }
       }
     }
@@ -1458,6 +1500,8 @@ static inline void shadow_record(MoveGen *gen) {
               &gen->wmp_move_gen, gen->tiles_played)) {
         return;
       }
+      // Nonplaythrough existence confirmed by WMP lookup.
+      existence = WORD_EXISTENCE_DEFINITE;
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
@@ -1501,7 +1545,7 @@ static inline void shadow_record(MoveGen *gen) {
     if (word_length >= MINIMUM_WORD_LENGTH) {
       wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
                                        word_length, gen->current_left_col,
-                                       score, equity);
+                                       score, equity, existence);
     }
   }
   if (equity > gen->highest_shadow_equity) {
@@ -2676,12 +2720,25 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     // Fast path: the RIT already holds the correct leave value at every
     // canonical subset index. Copy them into the leave map so play-time
     // leave_map_get_current_value calls and wmp_move_gen's subrack reads
-    // return the right value, then walk the canonical subsets to update
-    // best_leaves and (optionally) record exchange moves -- without touching
-    // the KLV/KWG.
+    // return the right value.
     memcpy(gen->leave_map.leave_values, precomputed,
            RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
-    generate_exchange_moves_from_table(gen, &gen->leave, 0, add_exchange);
+    // Load best_leaves directly from the RIT entry, avoiding the
+    // 2^RACK_SIZE canonical subset walk. Only fall back to the walk
+    // when we actually need to record exchange moves.
+    const Equity *rit_best_leaves =
+        rack_info_table_entry_get_best_leaves(gen->rit_entry);
+    memcpy(gen->best_leaves, rit_best_leaves,
+           RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY * sizeof(Equity));
+    if (add_exchange) {
+      if (gen->move_record_type == MOVE_RECORD_BEST) {
+        // For MOVE_RECORD_BEST, record the single precomputed best
+        // exchange from the RIT — O(1) instead of 2^RACK_SIZE walk.
+        record_best_exchange_from_table(gen);
+      } else {
+        generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
+      }
+    }
   } else {
     const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
     generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
@@ -2798,7 +2855,9 @@ void gen_record_scoring_plays(MoveGen *gen) {
       break;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    WMP_STATS_INC(WMP_STATS_ANCHORS_EXTRACTED, anchor.word_existence);
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+      WMP_STATS_INC(WMP_STATS_ANCHORS_PRUNED, anchor.word_existence);
       break;
     }
     gen->current_anchor_col = anchor.col;

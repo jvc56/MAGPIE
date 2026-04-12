@@ -132,6 +132,10 @@ typedef struct {
   Rack *leave;
   LeaveMap *leave_map;
   RackInfoTableEntry *entry;
+  // Track the overall best exchange across all leave sizes.
+  Equity best_exchange_equity;
+  int best_exchange_tiles_exchanged;
+  MachineLetter best_exchange_strip[RACK_SIZE];
 } EntryComputeState;
 
 static void compute_entry_recursive(EntryComputeState *state,
@@ -149,6 +153,63 @@ static void compute_entry_recursive(EntryComputeState *state,
         value = klv_get_indexed_leave_value(state->klv, word_index - 1);
       }
       state->entry->leaves[state->leave_map->current_index] = value;
+
+      // Update best_leaves per leave_size.
+      const int leave_size_for_best =
+          rit_maker_popcount((unsigned int)state->leave_map->current_index);
+      if (value > state->entry->best_leaves[leave_size_for_best]) {
+        state->entry->best_leaves[leave_size_for_best] = value;
+      }
+
+      // Track the overall best exchange across all leave sizes.
+      // Tiebreaker matches compare_moves for exchanges: highest equity
+      // (= leave value since score is 0), then fewer tiles exchanged,
+      // then lexicographically earlier exchange strip.
+      const int tiles_exchanged = RACK_SIZE - leave_size_for_best;
+      if (tiles_exchanged > 0) {
+        bool update_best_exchange = false;
+        if (value > state->best_exchange_equity) {
+          update_best_exchange = true;
+        } else if (value == state->best_exchange_equity) {
+          if (tiles_exchanged < state->best_exchange_tiles_exchanged) {
+            update_best_exchange = true;
+          } else if (tiles_exchanged == state->best_exchange_tiles_exchanged) {
+            // Build the exchange strip and compare lexicographically.
+            MachineLetter current_strip[RACK_SIZE];
+            int strip_idx = 0;
+            for (int strip_ml = 0; strip_ml < state->ld_size; strip_ml++) {
+              const int count =
+                  rack_get_letter(state->player_rack, strip_ml);
+              for (int copy_idx = 0; copy_idx < count; copy_idx++) {
+                current_strip[strip_idx++] = (MachineLetter)strip_ml;
+              }
+            }
+            for (int cmp_idx = 0; cmp_idx < tiles_exchanged; cmp_idx++) {
+              if (current_strip[cmp_idx] <
+                  state->best_exchange_strip[cmp_idx]) {
+                update_best_exchange = true;
+                break;
+              }
+              if (current_strip[cmp_idx] >
+                  state->best_exchange_strip[cmp_idx]) {
+                break;
+              }
+            }
+          }
+        }
+        if (update_best_exchange) {
+          state->best_exchange_equity = value;
+          state->best_exchange_tiles_exchanged = tiles_exchanged;
+          int strip_idx = 0;
+          for (int strip_ml = 0; strip_ml < state->ld_size; strip_ml++) {
+            const int count = rack_get_letter(state->player_rack, strip_ml);
+            for (int copy_idx = 0; copy_idx < count; copy_idx++) {
+              state->best_exchange_strip[strip_idx++] =
+                  (MachineLetter)strip_ml;
+            }
+          }
+        }
+      }
 
       if (state->wmp != NULL) {
         // Build the BitRack for the played subrack (state->player_rack
@@ -274,10 +335,16 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
          RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * sizeof(uint32_t));
   entry->nonplaythrough_has_word_of_length_bitmask = 0;
   memset(entry->pad, 0, sizeof(entry->pad));
+  memset(entry->best_exchange_strip, 0, sizeof(entry->best_exchange_strip));
+  entry->best_exchange_tiles_exchanged = 0;
   for (int leave_idx = 0;
        leave_idx < RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
        leave_idx++) {
     entry->nonplaythrough_best_leave_values[leave_idx] = EQUITY_INITIAL_VALUE;
+  }
+  for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+       bl_idx++) {
+    entry->best_leaves[bl_idx] = EQUITY_INITIAL_VALUE;
   }
 
   EntryComputeState state = {
@@ -290,10 +357,20 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
       .leave = &leave,
       .leave_map = &leave_map,
       .entry = entry,
+      .best_exchange_equity = EQUITY_INITIAL_VALUE,
+      .best_exchange_tiles_exchanged = 0,
   };
 
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
   compute_entry_recursive(&state, root, 0, 0);
+
+  // Copy the overall best exchange into the entry.
+  if (state.best_exchange_tiles_exchanged > 0) {
+    memcpy(entry->best_exchange_strip, state.best_exchange_strip,
+           state.best_exchange_tiles_exchanged * sizeof(MachineLetter));
+    entry->best_exchange_tiles_exchanged =
+        (uint8_t)state.best_exchange_tiles_exchanged;
+  }
 }
 
 // ============================================================================
