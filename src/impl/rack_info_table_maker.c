@@ -132,6 +132,9 @@ typedef struct {
   Rack *leave;
   LeaveMap *leave_map;
   RackInfoTableEntry *entry;
+  // 32-bit leave values computed during recursion, packed to 24-bit at end.
+  Equity leaves_temp[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+  bool leave_out_of_range;
   // Track the overall best exchange across all leave sizes.
   Equity best_exchange_equity;
   int best_exchange_tiles_exchanged;
@@ -152,7 +155,11 @@ static void compute_entry_recursive(EntryComputeState *state,
       if (word_index != KLV_UNFOUND_INDEX) {
         value = klv_get_indexed_leave_value(state->klv, word_index - 1);
       }
-      state->entry->leaves[state->leave_map->current_index] = value;
+      state->leaves_temp[state->leave_map->current_index] = value;
+      if (value < RACK_INFO_TABLE_LEAVE_MIN ||
+          value > RACK_INFO_TABLE_LEAVE_MAX) {
+        state->leave_out_of_range = true;
+      }
 
       // Update best_leaves per leave_size.
       const int leave_size_for_best =
@@ -326,7 +333,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   rack_set_dist_size(&leave, ld_size);
   rack_reset(&leave);
 
-  memset(entry->leaves, 0, RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
+  memset(entry->leaves_packed, 0, RACK_INFO_TABLE_LEAVES_PACKED_BYTES);
   memset(entry->playthrough_union, 0,
          RACK_INFO_TABLE_UNIONS_PER_ENTRY * sizeof(uint32_t));
   memset(entry->multi_pt_tp7_bitvec, 0,
@@ -365,6 +372,16 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
 
   const uint32_t root = kwg_get_dawg_root_node_index(klv_get_kwg(klv));
   compute_entry_recursive(&state, root, 0, 0);
+
+  // Pack 32-bit leave values to 24-bit in the entry.
+  if (state.leave_out_of_range) {
+    log_fatal("leave value out of 24-bit range during RIT construction");
+  }
+  for (int leave_idx = 0; leave_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
+       leave_idx++) {
+    rack_info_table_entry_pack_leave(entry, leave_idx,
+                                     state.leaves_temp[leave_idx]);
+  }
 
   // Populate inline bingo words (nonplaythrough full-rack anagrams).
   if (wmp != NULL &&

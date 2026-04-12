@@ -2719,7 +2719,6 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   const bool has_full_rack =
       rack_get_total_letters(&gen->player_rack) == RACK_SIZE;
   const RackInfoTable *rit = gen->rack_info_table;
-  const Equity *precomputed = NULL;
   gen->rit_entry = NULL;
 
   if (has_full_rack && rit != NULL) {
@@ -2729,7 +2728,6 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         rack_info_table_lookup(rit, &player_bit_rack);
     if (entry != NULL) {
       gen->rit_entry = entry;
-      precomputed = entry->leaves;
     }
   }
 
@@ -2740,13 +2738,12 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_set_current_index(&gen->leave_map, 0);
   rack_reset(&gen->leave);
 
-  if (precomputed != NULL) {
-    // Fast path: the RIT already holds the correct leave value at every
-    // canonical subset index. Copy them into the leave map so play-time
-    // leave_map_get_current_value calls and wmp_move_gen's subrack reads
-    // return the right value.
-    memcpy(gen->leave_map.leave_values, precomputed,
-           RACK_INFO_TABLE_LEAVES_PER_ENTRY * sizeof(Equity));
+  if (gen->rit_entry != NULL) {
+    // Fast path: unpack the RIT's 24-bit packed leave values to 32-bit
+    // in the leave map so play-time leave_map_get_current_value calls
+    // and wmp_move_gen's subrack reads return the right value.
+    rack_info_table_entry_unpack_leaves(gen->rit_entry,
+                                        gen->leave_map.leave_values);
     // Load best_leaves directly from the RIT entry, avoiding the
     // 2^RACK_SIZE canonical subset walk. Only fall back to the walk
     // when we actually need to record exchange moves.

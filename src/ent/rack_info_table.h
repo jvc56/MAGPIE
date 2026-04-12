@@ -97,6 +97,10 @@
 
 enum {
   RACK_INFO_TABLE_LEAVES_PER_ENTRY = (1 << RACK_SIZE),
+  RACK_INFO_TABLE_LEAVES_PACKED_BYTES = (RACK_INFO_TABLE_LEAVES_PER_ENTRY * 3),
+  RACK_INFO_TABLE_LEAVE_SIGN_BIT = (1 << 23),
+  RACK_INFO_TABLE_LEAVE_MIN = -(1 << 23),
+  RACK_INFO_TABLE_LEAVE_MAX = (1 << 23) - 1,
   RACK_INFO_TABLE_UNIONS_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
   RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY = (RACK_SIZE + 1),
@@ -114,13 +118,15 @@ enum {
   RIT_MULTI_PT_TP6_MAX_WORD_LENGTH =
       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH + RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS - 1,
   // Bump RIT_VERSION whenever the on-disk layout changes incompatibly.
-  RIT_VERSION = 11,
+  RIT_VERSION = 12,
   RIT_EARLIEST_SUPPORTED_VERSION = 11,
   RIT_MAX_INLINE_BINGO_WORDS = 1,
 };
 
 typedef struct RackInfoTableEntry {
-  Equity leaves[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
+  // Leave values packed as 24-bit signed little-endian integers.
+  // Unpacked to 32-bit Equity in a batch at load time.
+  uint8_t leaves_packed[RACK_INFO_TABLE_LEAVES_PACKED_BYTES];
   uint32_t playthrough_union[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   Equity nonplaythrough_best_leave_values
       [RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY];
@@ -164,6 +170,34 @@ typedef struct RackInfoTable {
   void *mmap_base;
   size_t mmap_size;
 } RackInfoTable;
+
+// Unpack all 128 packed 24-bit leave values to 32-bit Equity in a batch.
+// Sign-extends from bit 23. Designed to be auto-vectorized.
+static inline void
+rack_info_table_entry_unpack_leaves(const RackInfoTableEntry *entry,
+                                    Equity *dest) {
+  const uint8_t *src = entry->leaves_packed;
+  for (int i = 0; i < RACK_INFO_TABLE_LEAVES_PER_ENTRY; i++) {
+    const int offset = i * 3;
+    int32_t val = (int32_t)src[offset] | ((int32_t)src[offset + 1] << 8) |
+                  ((int32_t)src[offset + 2] << 16);
+    // Sign extend from bit 23 (branchless).
+    val = (val ^ RACK_INFO_TABLE_LEAVE_SIGN_BIT) -
+          RACK_INFO_TABLE_LEAVE_SIGN_BIT;
+    dest[i] = (Equity)val;
+  }
+}
+
+// Pack a single 32-bit Equity to 3 bytes in the packed leaves array.
+static inline void
+rack_info_table_entry_pack_leave(RackInfoTableEntry *entry, int index,
+                                 Equity value) {
+  const int offset = index * 3;
+  const uint32_t uval = (uint32_t)value;
+  entry->leaves_packed[offset] = (uint8_t)(uval & 0xFF);
+  entry->leaves_packed[offset + 1] = (uint8_t)((uval >> 8) & 0xFF);
+  entry->leaves_packed[offset + 2] = (uint8_t)((uval >> 16) & 0xFF);
+}
 
 static inline const char *rack_info_table_get_name(const RackInfoTable *rit) {
   return rit->name;
@@ -234,16 +268,6 @@ rack_info_table_lookup(const RackInfoTable *rit, const BitRack *bit_rack) {
   return NULL;
 }
 
-// Convenience accessor: return the leaves array for a rack, or NULL.
-static inline const Equity *
-rack_info_table_lookup_leaves(const RackInfoTable *rit,
-                              const BitRack *bit_rack) {
-  const RackInfoTableEntry *entry = rack_info_table_lookup(rit, bit_rack);
-  if (entry == NULL) {
-    return NULL;
-  }
-  return entry->leaves;
-}
 
 // Bitmask of machine letters L such that, for at least one canonical
 // (RACK_SIZE - leave_size)-tile subrack S of the full rack represented by
@@ -370,7 +394,7 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //   4 bytes: num_entries
 //   (num_buckets + 1) * 4 bytes: bucket_starts
 //   num_entries entries, each sizeof(RackInfoTableEntry) bytes:
-//     (1 << RACK_SIZE) * 4 bytes: leaves (Equity, int32_t)
+//     (1 << RACK_SIZE) * 3 bytes: leaves_packed (24-bit signed LE)
 //     (RACK_SIZE + 1) * 4 bytes: playthrough_union (uint32_t)
 //     (RACK_SIZE + 1) * 4 bytes: nonplaythrough_best_leave_values (Equity)
 //     (RACK_SIZE + 1) * 4 bytes: best_leaves (Equity, per-leave-size max)
@@ -410,11 +434,10 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
 #else
   for (uint32_t i = 0; i < n; i++) {
     const RackInfoTableEntry *entry = &entries[i];
-    for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
-         leaf_idx++) {
-      const uint32_t le_leaf = htole32((uint32_t)entry->leaves[leaf_idx]);
-      fwrite_or_die(&le_leaf, sizeof(uint32_t), 1, stream, "rit leaf");
-    }
+    // Packed 24-bit leaves are stored as raw bytes — no endian swap.
+    fwrite_or_die(entry->leaves_packed, sizeof(uint8_t),
+                  RACK_INFO_TABLE_LEAVES_PACKED_BYTES, stream,
+                  "rit leaves packed");
     for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
       const uint32_t le_union = htole32(entry->playthrough_union[union_idx]);
@@ -513,11 +536,7 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
   }
 #if !IS_LITTLE_ENDIAN
   for (uint32_t i = 0; i < n; i++) {
-    for (int leaf_idx = 0; leaf_idx < RACK_INFO_TABLE_LEAVES_PER_ENTRY;
-         leaf_idx++) {
-      entries[i].leaves[leaf_idx] =
-          (Equity)le32toh((uint32_t)entries[i].leaves[leaf_idx]);
-    }
+    // leaves_packed are raw bytes — no endian swap needed.
     for (int union_idx = 0; union_idx < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
          union_idx++) {
       entries[i].playthrough_union[union_idx] =
