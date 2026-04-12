@@ -1383,7 +1383,6 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 static inline void shadow_record(MoveGen *gen) {
   WMP_STATS_INC(WMP_STATS_SHADOW_RECORD_CALLS, gen->tiles_played);
   const Equity *best_leaves = gen->best_leaves;
-  word_existence_t existence = WORD_EXISTENCE_UNKNOWN;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
@@ -1418,7 +1417,6 @@ static inline void shadow_record(MoveGen *gen) {
           WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_PRUNED, gen->tiles_played);
           return;
         }
-        existence = WORD_EXISTENCE_DEFINITE;
       } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
         // Fall back to the existing WMP check for full-rack cases not
         // handled by the RIT fast path: full rack + multi-playthrough,
@@ -1451,15 +1449,12 @@ static inline void shadow_record(MoveGen *gen) {
                           gen->tiles_played);
             return;
           }
-          // Bitvec passed but is only a necessary condition.
-          existence = WORD_EXISTENCE_LIKELY;
         }
         if (!wmp_move_gen_check_playthrough_full_rack_existence(
                 &gen->wmp_move_gen)) {
           return;
         }
         // Exact WMP lookup confirmed word exists.
-        existence = WORD_EXISTENCE_DEFINITE;
       } else {
         // Partial rack + multi-playthrough. Previously had no shadow-
         // time word-existence check at all. The tp=6 bitvec populated
@@ -1489,8 +1484,6 @@ static inline void shadow_record(MoveGen *gen) {
                           gen->tiles_played);
             return;
           }
-          // Bitvec passed but is only a necessary condition.
-          existence = WORD_EXISTENCE_LIKELY;
         }
       }
     }
@@ -1500,8 +1493,6 @@ static inline void shadow_record(MoveGen *gen) {
               &gen->wmp_move_gen, gen->tiles_played)) {
         return;
       }
-      // Nonplaythrough existence confirmed by WMP lookup.
-      existence = WORD_EXISTENCE_DEFINITE;
       if (gen->number_of_tiles_in_bag > 0) {
         best_leaves = wmp_move_gen_get_nonplaythrough_best_leave_values(
             &gen->wmp_move_gen);
@@ -1545,7 +1536,7 @@ static inline void shadow_record(MoveGen *gen) {
     if (word_length >= MINIMUM_WORD_LENGTH) {
       wmp_move_gen_maybe_update_anchor(&gen->wmp_move_gen, gen->tiles_played,
                                        word_length, gen->current_left_col,
-                                       score, equity, existence);
+                                       score, equity);
     }
   }
   if (equity > gen->highest_shadow_equity) {
@@ -2855,9 +2846,9 @@ void gen_record_scoring_plays(MoveGen *gen) {
       break;
     }
     const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    WMP_STATS_INC(WMP_STATS_ANCHORS_EXTRACTED, anchor.word_existence);
+    WMP_STATS_INC(WMP_STATS_ANCHORS_EXTRACTED, 0);
     if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
-      WMP_STATS_INC(WMP_STATS_ANCHORS_PRUNED, anchor.word_existence);
+      WMP_STATS_INC(WMP_STATS_ANCHORS_PRUNED, 0);
       break;
     }
     gen->current_anchor_col = anchor.col;

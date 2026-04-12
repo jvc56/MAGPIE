@@ -7,17 +7,6 @@
 #include "../util/string_util.h"
 #include <stdlib.h>
 
-// Word existence confidence for anchor ordering tiebreakers.
-// Higher values = more confidence that a word can actually be formed.
-typedef enum {
-  // No word-existence check was performed for this anchor.
-  WORD_EXISTENCE_UNKNOWN = 0,
-  // A necessary-but-not-sufficient check passed (e.g., multi-pt bitvec).
-  WORD_EXISTENCE_LIKELY = 1,
-  // An exact WMP/RIT lookup confirmed a word exists for this subrack.
-  WORD_EXISTENCE_DEFINITE = 2,
-} word_existence_t;
-
 typedef struct Anchor {
   // The highest possible equity that can be achieved from this anchor column
   Equity highest_possible_equity;
@@ -43,10 +32,6 @@ typedef struct Anchor {
   // The direction of the board for
   // this anchor column.
   unsigned dir : 1;
-
-  // Best word-existence confidence seen across all shadow_record calls
-  // contributing to this anchor.
-  unsigned word_existence : 2;
 } Anchor;
 
 typedef struct AnchorHeap {
@@ -67,7 +52,6 @@ anchor_heap_add_unheaped_anchor(AnchorHeap *ah, uint8_t row, uint8_t col,
   ah->anchors[i].dir = dir;
   ah->anchors[i].highest_possible_equity = highest_possible_equity;
   ah->anchors[i].highest_possible_score = highest_possible_score;
-  ah->anchors[i].word_existence = WORD_EXISTENCE_UNKNOWN;
   ah->count++;
 }
 
@@ -76,8 +60,7 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
     AnchorHeap *ah, uint8_t row, uint8_t col, uint8_t last_anchor_col,
     uint8_t leftmost_start_col, uint8_t rightmost_start_col, uint8_t dir,
     Equity highest_possible_equity, Equity highest_possible_score,
-    int tiles_to_play, int playthrough_blocks, int word_length,
-    word_existence_t word_existence) {
+    int tiles_to_play, int playthrough_blocks, int word_length) {
   const int i = ah->count;
   ah->anchors[i].row = row;
   ah->anchors[i].col = col;
@@ -90,7 +73,6 @@ static inline void anchor_heap_add_unheaped_wmp_anchor(
   ah->anchors[i].tiles_to_play = tiles_to_play;
   ah->anchors[i].playthrough_blocks = playthrough_blocks;
   ah->anchors[i].word_length = word_length;
-  ah->anchors[i].word_existence = word_existence;
   ah->count++;
 }
 

@@ -67,7 +67,6 @@ static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
     wmp_move_gen->anchors[i].rightmost_start_col = 0;
     wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
     wmp_move_gen->anchors[i].tiles_to_play = 0;
-    wmp_move_gen->anchors[i].word_existence = WORD_EXISTENCE_UNKNOWN;
   }
 }
 
@@ -495,8 +494,7 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int tiles_played,
                                                     int word_length,
                                                     int start_col, Equity score,
-                                                    Equity equity,
-                                                    word_existence_t existence) {
+                                                    Equity equity) {
   assert(start_col >= 0 && start_col < BOARD_DIM);
   Anchor *anchor = wmp_move_gen_get_anchor(
       wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
@@ -514,9 +512,6 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
   }
   if (score > anchor->highest_possible_score) {
     anchor->highest_possible_score = score;
-  }
-  if (existence > anchor->word_existence) {
-    anchor->word_existence = existence;
   }
 }
 
@@ -636,8 +631,7 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
         anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
         anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
         anchor->highest_possible_score, anchor->tiles_to_play,
-        anchor->playthrough_blocks, anchor->word_length,
-        anchor->word_existence);
+        anchor->playthrough_blocks, anchor->word_length);
   }
 }
 
