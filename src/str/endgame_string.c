@@ -308,7 +308,6 @@ char *endgame_results_get_string(EndgameResults *endgame_results,
 
   // Lock the display mutex so endgame prints cannot overwrite each other
   endgame_results_lock(endgame_results, ENDGAME_RESULT_DISPLAY);
-
   endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
 
   // Copy current endgame_results to display endgame_results

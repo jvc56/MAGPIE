@@ -49,6 +49,7 @@ EndgameResults *endgame_results_create(void) {
   cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
+  endgame_results->seconds_elapsed = 0;
   endgame_results->start_game = NULL;
   endgame_results->multi_pvs = NULL;
   endgame_results->num_pvs = 0;
@@ -214,7 +215,7 @@ void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
   }
 }
 
-PVLine *endgame_results_get_multi_pvs(const EndgameResults *endgame_results) {
+PVLine *endgame_results_get_multi_pvs(EndgameResults *endgame_results) {
   return endgame_results->multi_pvs;
 }
 
