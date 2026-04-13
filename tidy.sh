@@ -77,6 +77,7 @@ find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | \
         if [ $TIDY_EXIT -ne 0 ]; then
             echo "ERROR: clang-tidy command failed for $C_FILE (exit code $TIDY_EXIT)." >> "$OUTPUT_FILE"
         fi
+        exit "$TIDY_EXIT"
     ' _ {} "$RESULT_DIR"
 
 XARGS_EXIT=$?

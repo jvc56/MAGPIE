@@ -43,7 +43,7 @@ jobs:
 
       - name: Run clang-tidy static analysis
         run: |
-          sudo apt-get install -y clang-tidy-18 && ./tidy.sh
+          sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
 
   unit-tests-release:
     runs-on: ubuntu-latest

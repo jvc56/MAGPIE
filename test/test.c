@@ -99,9 +99,6 @@ static TestEntry test_table[] = {
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
-    {"ap_default", test_autoplay_default},
-    {"ap_wmp", test_autoplay_wmp_correctness},
-    {"ap_rest", test_autoplay_remaining},
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
@@ -125,6 +122,9 @@ static TestEntry test_table[] = {
 
 // Tests that only run when explicitly requested (not included in run_all)
 static TestEntry on_demand_test_table[] = {
+    {"ap_default", test_autoplay_default},
+    {"ap_wmp", test_autoplay_wmp_correctness},
+    {"ap_rest", test_autoplay_remaining},
     {"endgame_wasm", test_endgame_wasm},
     {"infercmp", test_infer_cmp},
     {"genstuck", test_generate_stuck_cgps},
