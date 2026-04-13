@@ -82,12 +82,18 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: autoplay
-            tests: "autoplay"
+          - shard: ap_default
+            tests: "ap_default"
+          - shard: ap_wmp
+            tests: "ap_wmp"
+          - shard: ap_rest
+            tests: "ap_rest"
           - shard: sim
             tests: "sim endgame klv"
-          - shard: rest
-            tests: "config eldar_v movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
+          - shard: rest1
+            tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
+          - shard: rest2
+            tests: "eldar_v hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
     steps:
       - uses: actions/checkout@v3
 
