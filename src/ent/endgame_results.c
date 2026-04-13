@@ -215,7 +215,7 @@ void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,
   }
 }
 
-PVLine *endgame_results_get_multi_pvs(EndgameResults *endgame_results) {
+PVLine *endgame_results_get_multi_pvs(const EndgameResults *endgame_results) {
   return endgame_results->multi_pvs;
 }
 
