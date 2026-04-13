@@ -82,10 +82,12 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - shard: heavy
-            tests: "endgame autoplay kwgmaker wmpmaker config command sim infer movegen gameplay"
-          - shard: light
-            tests: "players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats rv am hm math bai gcg words wordprune cgp rl ch klv cv cd wmp wmg winpct eldar_v zobrist tt load"
+          - shard: autoplay
+            tests: "autoplay"
+          - shard: sim
+            tests: "sim endgame klv"
+          - shard: rest
+            tests: "config eldar_v movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
     steps:
       - uses: actions/checkout@v3
 
