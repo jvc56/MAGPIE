@@ -122,15 +122,16 @@ typedef struct {
 
 static void *timeout_thread_function(void *arg) {
   const TimeoutThreadArgs *args = (TimeoutThreadArgs *)arg;
-  char *endgame_string =
-      endgame_results_get_string(config_get_endgame_results(args->config),
-                                 config_get_game(args->config), NULL, true);
+  char *endgame_string = endgame_results_get_string(
+      config_get_endgame_results(args->config), config_get_game(args->config),
+      config_get_game_history(args->config));
   free(endgame_string);
   for (int i = 0; i < args->timeout; i++) {
     ctime_nap(1);
-    endgame_string =
-        endgame_results_get_string(config_get_endgame_results(args->config),
-                                   config_get_game(args->config), NULL, true);
+    endgame_string = endgame_results_get_string(
+        config_get_endgame_results(args->config), config_get_game(args->config),
+        config_get_game_history(args->config));
+    printf("%s\n", endgame_string);
     free(endgame_string);
   }
   thread_control_set_status(config_get_thread_control(args->config),
@@ -163,9 +164,15 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.seed = 42;
+
+  if (timeout > 0) {
+    endgame_args.num_top_moves = 10;
+  }
 
   // Create results
   EndgameResults *endgame_results = config_get_endgame_results(config);
@@ -212,7 +219,15 @@ void test_single_endgame(const char *config_settings, const char *cgp,
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
     assert(pv_line->score == expected_score);
     assert(small_move_is_pass(&pv_line->moves[0]) == is_pass);
+    printf(
+        "Endgame solved successfully with expected score %d and is_pass=%d\n",
+        expected_score, is_pass);
   }
+
+  char *endgame_string =
+      endgame_results_get_string(endgame_results, game, NULL);
+  printf("\nFinal Endgame Outputs:\n%s\n", endgame_string);
+  free(endgame_string);
 
   endgame_ctx_destroy(endgame_ctx);
   error_stack_destroy(error_stack);
@@ -268,6 +283,111 @@ void test_nonempty_bag(void) {
                       ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY, 0, false, 0);
 }
 
+void test_single_pv_display(void) {
+  // Solve a multi-PV endgame, then verify that shendgame <n> produces output
+  // via string_builder_endgame_single_pv for each valid PV index .
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -eplies 4 -etopk 5");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
+  endgame_args.num_top_moves = 5;
+  endgame_args.seed = 42;
+
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const int num_pvs = endgame_results_get_num_pvs(endgame_results);
+  assert(num_pvs > 1);
+
+  const Game *source_game = endgame_results_get_start_game(endgame_results);
+
+  // Each valid 0-indexed PV should produce non-empty output.
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    StringBuilder *sb = string_builder_create();
+    string_builder_endgame_single_pv(sb, endgame_results, source_game, NULL,
+                                     pv_idx);
+    const char *output = string_builder_peek(sb);
+    assert(output && output[0] != '\0');
+    printf("single_pv display %d/%d:\n%s\n", pv_idx + 1, num_pvs, output);
+    string_builder_destroy(sb);
+  }
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_ctx_reuse(void) {
+  // Solve the same position multiple times with the same EndgameCtx, varying
+  // the thread count each solve to exercise worker-pool growth/reuse and
+  // the thread_capacity / worker_ids allocation paths.
+  const char *cgp =
+      "cgp "
+      "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 4");
+  load_and_exec_config_or_die(config, cgp);
+
+  Game *game = config_get_game(config);
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *endgame_ctx = NULL;
+
+  const int thread_counts[] = {1, 3, 6, 2, 1, 4};
+  const int num_solves = 6;
+  for (int solve_idx = 0; solve_idx < num_solves; solve_idx++) {
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = config_get_endgame_plies(config);
+    endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = thread_counts[solve_idx];
+    endgame_args.use_heuristics = true;
+    endgame_args.forced_pass_bypass = true;
+    endgame_args.enable_pv_display = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.seed = 42;
+
+    printf("ctx reuse solve %d/%d: %d thread(s)\n", solve_idx + 1, num_solves,
+           endgame_args.num_threads);
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv_line =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    assert(pv_line->score == 11);
+    assert(!small_move_is_pass(&pv_line->moves[0]));
+  }
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_solve_standard(void) {
   // A standard out-in-two endgame.
   test_single_endgame(
@@ -315,7 +435,7 @@ void test_small_arena_realloc(void) {
 
 void test_endgame_interrupt(void) {
   test_single_endgame(
-      "set -s1 score -s2 score -threads 1 -eplies 25",
+      "set -s1 score -s2 score -threads 1 -eplies 25 -etopk 10",
       "cgp "
       "4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/4RHINO1e3V/"
       "2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/2L2A1GENII3/"
@@ -350,6 +470,7 @@ void test_kue(void) {
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.seed = 42;
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -411,6 +532,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
+      .seed = 42,
   };
 
   endgame_solve(&solver, &args, results, error_stack);
@@ -433,6 +555,8 @@ void test_2lex_informed(void) {
 }
 
 void test_endgame(void) {
+  test_single_pv_display();
+  test_ctx_reuse();
   test_solve_standard();
   test_very_deep();
   test_small_arena_realloc();
@@ -473,9 +597,11 @@ void test_monster_q(void) {
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
   endgame_args.per_ply_callback = print_pv_callback;
   endgame_args.per_ply_callback_data = &timer;
+  endgame_args.seed = 42;
 
   EndgameResults *endgame_results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
@@ -525,6 +651,7 @@ void test_multi_pv(void) {
   endgame_args.use_heuristics = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
+  endgame_args.seed = 42;
 
   EndgameResults *endgame_results = endgame_results_create();
   ErrorStack *error_stack = error_stack_create();
@@ -571,8 +698,7 @@ void test_multi_pv(void) {
   assert(best_pv->num_moves >= 1);
 
   // Test string output
-  char *result_str =
-      endgame_results_get_string(multi_results, game, NULL, false);
+  char *result_str = endgame_results_get_string(multi_results, game, NULL);
   printf("Multi-PV output:\n%s\n", result_str);
   free(result_str);
 
