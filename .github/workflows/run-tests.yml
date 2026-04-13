@@ -91,9 +91,9 @@ jobs:
           - shard: sim
             tests: "sim endgame klv"
           - shard: rest1
-            tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
+            tests: "eldar_v config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move"
           - shard: rest2
-            tests: "eldar_v hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
+            tests: "game vm shadow eq eqadj stats infer rv am hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
     steps:
       - uses: actions/checkout@v3
 
