@@ -34,20 +34,20 @@ CLANG_TIDY_CHECKS="*,
                   -cppcoreguidelines-avoid-non-const-global-variables"
 CLANG_TIDY_EXCLUDE_HEADER_FILTER="^(?!.*linenoise\.(c|h)).*"
 C_COMPILER_FLAGS="-std=c99 -Wno-trigraphs -D_GNU_SOURCE -D_POSIX_C_SOURCE=200809L -D__linux__ -U_WIN32 -U__APPLE__ "
+
+MAX_CORES=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
 LOG_FILE=$(mktemp)
-# Ensure the temporary log file is removed when the script exits,
-# regardless of how it exits (success, failure, or interruption).
-trap 'rm -f "$LOG_FILE"' EXIT
-# Set 'pipefail' option: If any command in a pipeline fails, the exit status
-# of the pipeline will be the exit status of the last command that failed.
+RESULT_DIR=$(mktemp -d)
+trap 'rm -f "$LOG_FILE"; rm -rf "$RESULT_DIR"' EXIT
 set -o pipefail
 
+# Export variables for use in parallel subprocesses
+export CLANG_TIDY_EXEC CLANG_TIDY_EXCLUDE_HEADER_FILTER CLANG_TIDY_CHECKS C_COMPILER_FLAGS
+
 echo "Starting clang-tidy static analysis for C files in: $SEARCH_DIRECTORIES"
+echo "Using $MAX_CORES parallel workers"
 echo "Enabled checks: $CLANG_TIDY_CHECKS"
 echo "---------------------------------------------------"
-
-ANY_CLANG_TIDY_ISSUES=0
-CLANG_TIDY_COMMAND_FAILED=0
 
 # Build grep pattern for excluding files from analysis
 EXCLUDE_PATTERN=""
@@ -59,40 +59,43 @@ for file in $EXCLUDED_FILES; do
     fi
 done
 
-# Find all C source files and process them
-# 'find $SEARCH_DIRECTORIES -name "*.c"': Finds all files ending with .c
-#                                        within the specified directories.
-# '-print0': Prints file names separated by a null character,
-#            which handles spaces or special characters in filenames correctly.
-# 'while IFS= read -r -d $'\0' C_FILE; do ... done': Reads null-separated filenames
-#                                                into the C_FILE variable.
-find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | while IFS= read -r -d $'\0' C_FILE; do
-    echo "Analyzing: $C_FILE"
+# Run clang-tidy on each file in parallel.
+# Each file's output is written to a separate temp file to avoid interleaving.
+# Progress lines ("Analyzing: ...") go to stdout for real-time feedback.
+find $SEARCH_DIRECTORIES -name "*.c" -print0 | grep -zv "$EXCLUDE_PATTERN" | \
+    xargs -0 -P "$MAX_CORES" -I{} bash -c '
+        C_FILE="$1"
+        RESULT_DIR="$2"
+        SAFE_NAME=$(echo "$C_FILE" | tr "/" "_")
+        OUTPUT_FILE="$RESULT_DIR/$SAFE_NAME"
+        echo "Analyzing: $C_FILE"
+        $CLANG_TIDY_EXEC "$C_FILE" \
+            --header-filter="$CLANG_TIDY_EXCLUDE_HEADER_FILTER" \
+            -checks="$CLANG_TIDY_CHECKS" \
+            -- $C_COMPILER_FLAGS > "$OUTPUT_FILE" 2>&1
+        TIDY_EXIT=$?
+        if [ $TIDY_EXIT -ne 0 ]; then
+            echo "ERROR: clang-tidy command failed for $C_FILE (exit code $TIDY_EXIT)." >> "$OUTPUT_FILE"
+        fi
+        exit "$TIDY_EXIT"
+    ' _ {} "$RESULT_DIR"
 
-    CLANG_TIDY_CMD="$CLANG_TIDY_EXEC \"$C_FILE\" \
-        --header-filter=\"$CLANG_TIDY_EXCLUDE_HEADER_FILTER\" \
-        -checks=\"$CLANG_TIDY_CHECKS\" \
-        -- $C_COMPILER_FLAGS"
+XARGS_EXIT=$?
 
-    # Execute clang-tidy for the current file
-    # Redirect stderr to stdout (2>&1) and pipe to tee.
-    # tee outputs to console and appends to LOG_FILE.
-    # The 'if ! eval ...' block captures the exit status of clang-tidy.
-    if ! eval "$CLANG_TIDY_CMD 2>&1 | tee -a \"$LOG_FILE\""; then
-        CLANG_TIDY_COMMAND_FAILED=1 # Set flag if clang-tidy command failed
-        echo "ERROR: clang-tidy command failed for $C_FILE." >&2
-    fi
-    echo "---------------------------------------------------"
-done
+echo "---------------------------------------------------"
+echo "All files analyzed. Combined output:"
+echo "---------------------------------------------------"
+
+# Combine per-file results in sorted order for readable output
+for f in $(ls "$RESULT_DIR" 2>/dev/null | sort); do
+    cat "$RESULT_DIR/$f"
+done | tee "$LOG_FILE"
 
 # Final check of the collected log file for "warning:" or "error:" strings.
-# 'grep -q': Quiet mode; grep prints nothing to standard output,
-#            it only sets its exit status (0 if found, 1 if not found).
-# 'grep -E': Enables extended regular expressions, allowing '|' for OR.
 if grep -q -E "warning:|error:" "$LOG_FILE"; then
     echo "ANALYSIS FAILED: Build output contains 'warning:' or 'error:' from clang-tidy." >&2
     exit 1
-elif [ "$CLANG_TIDY_COMMAND_FAILED" -eq 1 ]; then
+elif [ "$XARGS_EXIT" -ne 0 ]; then
     echo "ANALYSIS FAILED: One or more clang-tidy commands failed to execute properly." >&2
     exit 1
 else

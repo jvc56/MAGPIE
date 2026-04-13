@@ -340,13 +340,17 @@ void test_autoplay_sim(void) {
   config_destroy(config);
 }
 
-void test_autoplay(void) {
+void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
-  test_autoplay_default();
   test_autoplay_leavegen();
   test_autoplay_divergent_games();
-  test_autoplay_wmp_correctness();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
   test_autoplay_sim();
+}
+
+void test_autoplay(void) {
+  test_autoplay_remaining();
+  test_autoplay_default();
+  test_autoplay_wmp_correctness();
 }
