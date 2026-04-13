@@ -2624,7 +2624,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   gen->klv = player_get_klv(player);
-  gen->rack_info_table = player_get_rack_info_table(player);
+  const RackInfoTable *new_rit = player_get_rack_info_table(player);
+  if (new_rit != gen->rack_info_table) {
+    memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
+  }
+  gen->rack_info_table = new_rit;
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -2724,10 +2728,21 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   if (has_full_rack && rit != NULL) {
     const BitRack player_bit_rack =
         bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
-    const RackInfoTableEntry *entry =
-        rack_info_table_lookup(rit, &player_bit_rack);
-    if (entry != NULL) {
-      gen->rit_entry = entry;
+    // Check per-thread direct-mapped cache before the full hash lookup.
+    const uint32_t cache_idx =
+        bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
+    if (gen->rit_cache_valid[cache_idx] &&
+        bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
+      gen->rit_entry = gen->rit_cache_entries[cache_idx];
+    } else {
+      const RackInfoTableEntry *entry =
+          rack_info_table_lookup(rit, &player_bit_rack);
+      gen->rit_cache_keys[cache_idx] = player_bit_rack;
+      gen->rit_cache_entries[cache_idx] = entry;
+      gen->rit_cache_valid[cache_idx] = true;
+      if (entry != NULL) {
+        gen->rit_entry = entry;
+      }
     }
   }
 

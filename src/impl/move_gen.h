@@ -20,6 +20,8 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+#define MOVEGEN_RIT_CACHE_SIZE 64
+
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
   uint8_t column;
@@ -137,6 +139,12 @@ typedef struct MoveGen {
   // of this move generation. NULL if rack_info_table is NULL, the rack isn't
   // a full RACK_SIZE rack, or the rack wasn't found in the table.
   const RackInfoTableEntry *rit_entry;
+  // Small per-thread RIT lookup cache. In sim rollouts, the same racks
+  // recur across iterations within a turn (limited bag composition).
+  // Direct-mapped by low bits of BitRack hash.
+  BitRack rit_cache_keys[MOVEGEN_RIT_CACHE_SIZE];
+  const RackInfoTableEntry *rit_cache_entries[MOVEGEN_RIT_CACHE_SIZE];
+  bool rit_cache_valid[MOVEGEN_RIT_CACHE_SIZE];
   const Board *board;
   LetterDistribution ld;
   MoveList *move_list;
