@@ -766,7 +766,8 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
 
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
                                                int start_col) {
-  const WMPMoveGen *wgen = &gen->wmp_move_gen;  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = start_col + letter_idx;
     assert(board_col < BOARD_DIM);
@@ -2866,7 +2867,9 @@ void gen_record_scoring_plays(MoveGen *gen) {
     if (gen->threshold_exceeded) {
       break;
     }
-    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {      break;
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
+    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
+      break;
     }
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane

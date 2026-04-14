@@ -336,7 +336,7 @@ void test_autoplay_rit_correctness(void) {
   //   echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
   printf("Running %d game pairs with RIT correctness check for %s...\n",
          num_pairs, lex);
-  fflush(stdout);
+  (void)fflush(stdout);
 
   // Run game pairs: player 1 uses RIT, player 2 does not.
   Config *c = config_create_or_die(
@@ -362,7 +362,7 @@ void test_autoplay_rit_correctness(void) {
   // Clean up the RIT file.
   char *rit_path =
       get_formatted_string("%s/lexica/%s.rit", DEFAULT_TEST_DATA_PATH, lex);
-  remove(rit_path);
+  (void)remove(rit_path);
   free(rit_path);
 
   printf("RIT correctness: PASSED (%d game pairs, 0 divergent)\n", num_pairs);

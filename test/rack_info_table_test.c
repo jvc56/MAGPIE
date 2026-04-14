@@ -506,7 +506,7 @@ void test_rack_info_table_csw24_sweep(void) {
     const RitSweepConfig *cfg = &sweep_configs[cfg_idx];
     printf("[rit_sweep] ==== iteration %d/%d: %s ====\n", cfg_idx + 1,
            num_configs, cfg->label);
-    fflush(stdout);
+    (void)fflush(stdout);
 
     // Mark the RIT slot empty before building, so no stale pointer lingers
     // if the build aborts.
@@ -516,7 +516,7 @@ void test_rack_info_table_csw24_sweep(void) {
     RackInfoTable *rit = NULL;
     if (cfg->min_played_size >= 0) {
       printf("[rit_sweep] building %s...\n", cfg->label);
-      fflush(stdout);
+      (void)fflush(stdout);
       rit = make_rack_info_table(klv, wmp, ld, 8,
                                  (uint8_t)cfg->min_played_size);
       assert(rit != NULL);
@@ -555,7 +555,7 @@ void test_rack_info_table_csw24_sweep(void) {
     }
 
     printf("[rit_sweep] running autoplay for %s...\n", cfg->label);
-    fflush(stdout);
+    (void)fflush(stdout);
     timings[cfg_idx] = rit_sweep_run_once(config, autoplay_cmd);
     result_strs[cfg_idx] = autoplay_results_to_string(
         config_get_autoplay_results(config), false, false);

@@ -263,7 +263,7 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
                         &wmp_move_gen->playthrough_bit_rack);
   const int word_size = size + wmp_move_gen->num_tiles_played_through;
   playthrough_info->wmp_entry = wmp_get_word_entry(
-      wmp_move_gen->wmp, &playthrough_info->subrack, word_size);  if (playthrough_info->wmp_entry != NULL) {  }
+      wmp_move_gen->wmp, &playthrough_info->subrack, word_size);
   return playthrough_info->wmp_entry != NULL;
 }
 
@@ -279,9 +279,11 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     SubrackInfo *subrack_info =
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
     subrack_info->wmp_entry =
-        wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);    if (subrack_info->wmp_entry == NULL) {
+        wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    if (subrack_info->wmp_entry == NULL) {
       continue;
-    }    wmp_move_gen->nonplaythrough_has_word_of_length[size] = true;
+    }
+    wmp_move_gen->nonplaythrough_has_word_of_length[size] = true;
     if (!check_leaves) {
       continue;
     }
@@ -564,7 +566,7 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   // shadow.
   if (is_playthrough) {
     subrack_info->wmp_entry = wmp_get_word_entry(
-        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);    if (subrack_info->wmp_entry != NULL) {    }
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
   }
 
   if (subrack_info->wmp_entry == NULL) {
