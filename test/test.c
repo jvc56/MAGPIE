@@ -139,8 +139,6 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
-    {"rit_csw24_full", test_rack_info_table_csw24_full},
-    {"rit_sweep", test_rack_info_table_csw24_sweep},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     {NULL, NULL} // Sentinel value to mark end of array

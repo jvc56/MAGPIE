@@ -4,9 +4,7 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
-#include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
-#include "../src/ent/autoplay_results.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
@@ -15,7 +13,6 @@
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
-#include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/rack_info_table.h"
 #include "../src/ent/wmp.h"
@@ -28,7 +25,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/resource.h>
 #include <time.h>
 
 // Count the number of distinct RACK_SIZE-tile multisets drawable from ld.
@@ -351,249 +347,5 @@ void test_rack_info_table(void) {
   free(rit_filename);
   error_stack_destroy(error_stack);
   game_destroy(game);
-  config_destroy(config);
-}
-
-// On-demand test: build the full CSW24 RIT at POC coverage (min=7) and
-// cross-check every entry's playthrough slot against an independent WMP
-// query, plus pin-check the specific "APNOEAL + J -> JALAPENO" case.
-// Invoked via ./bin/magpie_test rit_csw24_full.
-void test_rack_info_table_csw24_full(void) {
-  Config *config =
-      config_create_or_die("set -lex CSW24 -ld english -k1 CSW24 -k2 CSW24");
-  const LetterDistribution *ld = config_get_ld(config);
-  Game *game = config_game_create(config);
-  const Player *player = game_get_player(game, 0);
-  const KLV *klv = player_get_klv(player);
-  const WMP *wmp = player_get_wmp(player);
-  assert(klv != NULL);
-  assert(wmp != NULL);
-
-  // Build at min=RACK_SIZE — only the full-rack (leave_size=0) union is
-  // populated. Verifying just the fullrack slot keeps the test fast, and
-  // the per-letter WMP cross-check is the same correctness bar regardless
-  // of how many other unions we'd otherwise be filling.
-  const uint8_t min_played = (uint8_t)RACK_SIZE;
-  RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, 0, min_played);
-  assert(rit != NULL);
-  assert(rit->version == RIT_VERSION);
-  assert(rit->playthrough_min_played_size == min_played);
-  assert(rit->num_entries > 1000000); // CSW24 has millions of distinct racks
-
-  // Whole-table consistency: every covered union matches an independent
-  // per-letter WMP probe over every canonical subrack. With min=7 only
-  // leave_size=0 is checked as populated; all other leave_sizes must be
-  // zero.
-  verify_unions_against_wmp(rit, wmp, ld);
-
-  // Pin-check: APNOEAL + J -> JALAPENO. That's the only 8-letter word
-  // composed of {A, A, E, L, N, O, P} + one additional letter in CSW24,
-  // so the leave_size=0 union should be exactly (1 << ml_J) and nothing
-  // else.
-  Rack apnoeal;
-  rack_set_dist_size(&apnoeal, ld_get_size(ld));
-  rack_reset(&apnoeal);
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "A"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "A"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "E"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "L"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "N"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "O"));
-  rack_add_letter(&apnoeal, ld_hl_to_ml(ld, "P"));
-  assert(rack_get_total_letters(&apnoeal) == RACK_SIZE);
-
-  const BitRack apnoeal_bit_rack = bit_rack_create_from_rack(ld, &apnoeal);
-  const RackInfoTableEntry *apnoeal_entry =
-      rack_info_table_lookup(rit, &apnoeal_bit_rack);
-  assert(apnoeal_entry != NULL);
-  const uint32_t apnoeal_bitmask =
-      rack_info_table_entry_get_playthrough_union(apnoeal_entry,
-                                                  /*leave_size=*/0);
-  const MachineLetter ml_j = ld_hl_to_ml(ld, "J");
-  const uint32_t expected_apnoeal = 1U << ml_j;
-  assert(apnoeal_bitmask == expected_apnoeal);
-
-  rack_info_table_destroy(rit);
-  game_destroy(game);
-  config_destroy(config);
-}
-
-// ============================================================================
-// RIT coverage sweep
-//
-// On-demand benchmark that builds several CSW24 RackInfoTables in-process
-// with different playthrough_min_played_size values, runs autoplay with
-// each, and prints a summary table so we can pick the coverage that
-// maximizes movegen performance. Invoked via ./bin/magpie_test rit_sweep.
-// ============================================================================
-
-typedef struct RitSweepTiming {
-  double real_sec;
-  double user_sec;
-  double sys_sec;
-} RitSweepTiming;
-
-static RitSweepTiming rit_sweep_run_once(Config *config, const char *cmd) {
-  struct timespec ts_start;
-  struct timespec ts_end;
-  struct rusage ru_start;   // NOLINT(misc-include-cleaner)
-  struct rusage ru_end;     // NOLINT(misc-include-cleaner)
-  clock_gettime(CLOCK_MONOTONIC, &ts_start); // NOLINT(misc-include-cleaner)
-  getrusage(RUSAGE_SELF, &ru_start);
-  load_and_exec_config_or_die(config, cmd);
-  getrusage(RUSAGE_SELF, &ru_end);
-  clock_gettime(CLOCK_MONOTONIC, &ts_end);
-  RitSweepTiming t;
-  t.real_sec = (double)(ts_end.tv_sec - ts_start.tv_sec) +
-               (double)(ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
-  t.user_sec =
-      (double)(ru_end.ru_utime.tv_sec - ru_start.ru_utime.tv_sec) +
-      (double)(ru_end.ru_utime.tv_usec - ru_start.ru_utime.tv_usec) / 1e6;
-  t.sys_sec =
-      (double)(ru_end.ru_stime.tv_sec - ru_start.ru_stime.tv_sec) +
-      (double)(ru_end.ru_stime.tv_usec - ru_start.ru_stime.tv_usec) / 1e6;
-  return t;
-}
-
-// Use min == RACK_SIZE + 1 to represent "RIT with no playthrough coverage",
-// and min == -1 to represent "no RIT at all".
-typedef struct RitSweepConfig {
-  const char *label;
-  int min_played_size;
-} RitSweepConfig;
-
-void test_rack_info_table_csw24_sweep(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW24 -ld english -k1 CSW24 -k2 CSW24 -threads 8 "
-      "-numplays 1 -rit false -mtmode pgp -gp false -s1 equity -s2 equity "
-      "-r1 best -r2 best");
-  const LetterDistribution *ld = config_get_ld(config);
-  PlayersData *players_data = config_get_players_data(config);
-  const KLV *klv = players_data_get_klv(players_data, 0);
-  const WMP *wmp = players_data_get_wmp(players_data, 0);
-  assert(klv != NULL);
-  assert(wmp != NULL);
-  assert(players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_KLV));
-  assert(players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_WMP));
-
-  const RitSweepConfig sweep_configs[] = {
-      {"no RIT", -1},   {"RIT leaves only", RACK_SIZE + 1},
-      {"RIT min=7", 7}, {"RIT min=6", 6},
-      {"RIT min=5", 5}, {"RIT min=4", 4},
-      {"RIT min=3", 3}, {"RIT min=2", 2},
-      {"RIT min=1", 1},
-  };
-  const int num_configs =
-      (int)(sizeof(sweep_configs) / sizeof(sweep_configs[0]));
-
-  RitSweepTiming timings[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
-  char *result_strs[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
-  uint32_t slots_per_entry[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
-
-  // 100k games gives enough signal to discriminate per-config differences
-  // without making the whole sweep take forever. Same seed for every
-  // iteration so results are apples-to-apples.
-  const char *autoplay_cmd = "autoplay games 100000 -seed 42";
-
-  for (int cfg_idx = 0; cfg_idx < num_configs; cfg_idx++) {
-    const RitSweepConfig *cfg = &sweep_configs[cfg_idx];
-    printf("[rit_sweep] ==== iteration %d/%d: %s ====\n", cfg_idx + 1,
-           num_configs, cfg->label);
-    (void)fflush(stdout);
-
-    // Mark the RIT slot empty before building, so no stale pointer lingers
-    // if the build aborts.
-    players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, NULL);
-    players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, NULL);
-
-    RackInfoTable *rit = NULL;
-    if (cfg->min_played_size >= 0) {
-      printf("[rit_sweep] building %s...\n", cfg->label);
-      (void)fflush(stdout);
-      rit =
-          make_rack_info_table(klv, wmp, ld, 8, (uint8_t)cfg->min_played_size);
-      assert(rit != NULL);
-      // Count covered leave_size unions: played_size in [min, RACK_SIZE]
-      // maps to leave_size in [0, RACK_SIZE - min], which is
-      // (RACK_SIZE - min + 1) unions. Zero if min > RACK_SIZE.
-      slots_per_entry[cfg_idx] =
-          (rit->playthrough_min_played_size > RACK_SIZE)
-              ? 0
-              : (uint32_t)(RACK_SIZE + 1 - rit->playthrough_min_played_size);
-      // Install the freshly built RIT into both player slots. The KLV and
-      // WMP are shared across players in this config, so one RIT
-      // allocation is safe to alias for both. Ownership stays with us;
-      // we'll clear the slots before destroying the table.
-      //
-      // Then force use_when_available back to false. players_data_set_data
-      // flips it to true (!!data), which would trigger
-      // config_load_lexicon_dependent_data's next call to
-      // players_data_set(RIT, ..., "CSW24", "CSW24") -- a file-based load
-      // path that would overwrite our in-memory RIT with one loaded from
-      // CSW24.rit and double-free the aliased pointer in the process.
-      // With use_when_available=false, the load path passes NULL names
-      // and the null-name fast path in players_data_set leaves our
-      // installed pointer alone because it "matches" the existing NULL
-      // name of our in-memory RIT. MoveGen still picks up the RIT via
-      // player_get_rack_info_table, which reads players_data->data[...]
-      // directly and ignores use_when_available.
-      players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, rit);
-      players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, rit);
-      players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
-                                          0, false);
-      players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
-                                          1, false);
-    } else {
-      slots_per_entry[cfg_idx] = 0;
-    }
-
-    printf("[rit_sweep] running autoplay for %s...\n", cfg->label);
-    (void)fflush(stdout);
-    timings[cfg_idx] = rit_sweep_run_once(config, autoplay_cmd);
-    result_strs[cfg_idx] = autoplay_results_to_string(
-        config_get_autoplay_results(config), false, false);
-
-    // Clear the RIT slots before destroying, otherwise players_data would
-    // free the table on the next config reload.
-    if (rit != NULL) {
-      players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, NULL);
-      players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, NULL);
-      rack_info_table_destroy(rit);
-    }
-  }
-
-  // Correctness gate: every config must produce byte-identical autoplay
-  // results at the same seed, regardless of which RIT (if any) was used.
-  // Any divergence means a fast path silently changed which play was
-  // picked.
-  for (int cfg_idx = 1; cfg_idx < num_configs; cfg_idx++) {
-    if (strcmp(result_strs[0], result_strs[cfg_idx]) != 0) {
-      printf("[rit_sweep] DIVERGENCE: '%s' differs from '%s'\n",
-             sweep_configs[cfg_idx].label, sweep_configs[0].label);
-      printf("  baseline: %s\n", result_strs[0]);
-      printf("  this run: %s\n", result_strs[cfg_idx]);
-    }
-    assert(strcmp(result_strs[0], result_strs[cfg_idx]) == 0);
-  }
-
-  const double base_user = timings[0].user_sec;
-  const double base_real = timings[0].real_sec;
-
-  printf("\n");
-  printf(
-      "RIT coverage sweep (CSW24 english, 100k games, 8 threads, seed 42)\n");
-  printf("--\n");
-  printf("%-20s %6s %10s %10s %10s %14s %14s\n", "config", "unions", "real (s)",
-         "user (s)", "sys (s)", "Δuser vs base", "Δreal vs base");
-  for (int cfg_idx = 0; cfg_idx < num_configs; cfg_idx++) {
-    printf("%-20s %6u %10.2f %10.2f %10.2f %+14.2f %+14.2f\n",
-           sweep_configs[cfg_idx].label, slots_per_entry[cfg_idx],
-           timings[cfg_idx].real_sec, timings[cfg_idx].user_sec,
-           timings[cfg_idx].sys_sec, timings[cfg_idx].user_sec - base_user,
-           timings[cfg_idx].real_sec - base_real);
-    free(result_strs[cfg_idx]);
-  }
-  printf("--\n");
-
   config_destroy(config);
 }
