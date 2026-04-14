@@ -1,5 +1,9 @@
 #include "rack_info_table_test.h"
 
+#include "../src/def/bit_rack_defs.h"
+#include "../src/def/board_defs.h"
+#include "../src/def/kwg_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/autoplay_results.h"
@@ -18,7 +22,6 @@
 #include "../src/impl/config.h"
 #include "../src/impl/rack_info_table_maker.h"
 #include "../src/util/io_util.h"
-#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
@@ -199,9 +202,8 @@ static void compute_expected_unions(
       .wmp = wmp,
       .ld = ld,
       .ld_size = ld_size,
-      .cap = ld_size < (int)BIT_RACK_MAX_ALPHABET_SIZE
-                 ? ld_size
-                 : (int)BIT_RACK_MAX_ALPHABET_SIZE,
+      .cap = ld_size < BIT_RACK_MAX_ALPHABET_SIZE ? ld_size
+                                                  : BIT_RACK_MAX_ALPHABET_SIZE,
       .player_rack = &player_rack,
       .leave = &leave,
       .leave_map = &leave_map,

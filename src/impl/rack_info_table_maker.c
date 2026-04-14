@@ -2,12 +2,14 @@
 
 #include "../compat/cpthread.h"
 #include "../def/bit_rack_defs.h"
+#include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/klv_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../ent/equity.h"
 #include "../ent/klv.h"
@@ -182,7 +184,7 @@ static void compute_entry_recursive(EntryComputeState *state,
             update_best_exchange = true;
           } else if (tiles_exchanged == state->best_exchange_tiles_exchanged) {
             // Build the exchange strip and compare lexicographically.
-            MachineLetter current_strip[RACK_SIZE];
+            MachineLetter current_strip[RACK_SIZE] = {0};
             int strip_idx = 0;
             for (int strip_ml = 0; strip_ml < state->ld_size; strip_ml++) {
               const int count = rack_get_letter(state->player_rack, strip_ml);
@@ -391,7 +393,7 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
     const int num_words = bytes / RACK_SIZE;
     if (num_words > 0 && num_words <= RIT_MAX_INLINE_BINGO_WORDS) {
       entry->num_bingo_words = (uint8_t)num_words;
-      memcpy(entry->bingo_words, buf, num_words * RACK_SIZE);
+      memcpy(entry->bingo_words, buf, (size_t)num_words * RACK_SIZE);
     }
   }
 

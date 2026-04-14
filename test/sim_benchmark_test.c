@@ -11,7 +11,8 @@
 #include <time.h>
 
 void test_sim_benchmark(void) {
-  struct timespec start, end;
+  struct timespec start;
+  struct timespec end;
   clock_gettime(CLOCK_MONOTONIC, &start);
 
   Config *config = config_create_or_die(

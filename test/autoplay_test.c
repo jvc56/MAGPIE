@@ -352,8 +352,6 @@ void test_autoplay_rit_correctness(void) {
   if (!has_substring(res, expected_zero)) {
     (void)fprintf(stderr, "RIT autoplay divergence detected for %s:\n%s\n", lex,
                   res ? res : "(no output)");
-    free(res);
-    config_destroy(c);
     assert(false);
   }
   free(res);

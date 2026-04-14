@@ -19,6 +19,7 @@
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
 #include "wmp_maker.h"
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 
