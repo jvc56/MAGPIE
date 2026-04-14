@@ -117,8 +117,8 @@ static int rit_test_popcount(unsigned int x) {
 #endif
 }
 
-static void
-verify_canonical_subracks_recursive(RitRefState *state, MachineLetter ml) {
+static void verify_canonical_subracks_recursive(RitRefState *state,
+                                                MachineLetter ml) {
   const int ld_size = state->ld_size;
   while (ml < ld_size && rack_get_letter(state->player_rack, ml) == 0) {
     ml++;
@@ -168,10 +168,9 @@ verify_canonical_subracks_recursive(RitRefState *state, MachineLetter ml) {
 // Compute the expected per-leave-size union bitmasks for a single rack by
 // replaying the same canonical enumeration the maker does and running
 // per-letter WMP probes as the ground truth at each terminal.
-static void
-compute_expected_unions(const WMP *wmp, const LetterDistribution *ld,
-                        const BitRack *rack_bit_rack,
-                        uint32_t expected_unions[RACK_INFO_TABLE_UNIONS_PER_ENTRY]) {
+static void compute_expected_unions(
+    const WMP *wmp, const LetterDistribution *ld, const BitRack *rack_bit_rack,
+    uint32_t expected_unions[RACK_INFO_TABLE_UNIONS_PER_ENTRY]) {
   const int ld_size = ld_get_size(ld);
 
   Rack player_rack;
@@ -232,8 +231,7 @@ static void verify_unions_against_wmp(const RackInfoTable *rit, const WMP *wmp,
   uint32_t expected_unions[RACK_INFO_TABLE_UNIONS_PER_ENTRY];
   for (uint32_t entry_idx = 0; entry_idx < rit->num_entries; entry_idx++) {
     const RackInfoTableEntry *entry = &rit->entries[entry_idx];
-    const BitRack rack_bit_rack =
-        rack_info_table_entry_read_bit_rack(entry);
+    const BitRack rack_bit_rack = rack_info_table_entry_read_bit_rack(entry);
     compute_expected_unions(wmp, ld, &rack_bit_rack, expected_unions);
 
     for (int leave_size = 0; leave_size < RACK_INFO_TABLE_UNIONS_PER_ENTRY;
@@ -252,8 +250,8 @@ void test_rack_info_table(void) {
   // Use CSW21 with the english_ab distribution (50 A, 50 B, 0 blank).
   // This keeps the number of full racks small (8, for 0A+7B through 7A+0B)
   // while still exercising the full build path with a real KLV and WMP.
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21");
+  Config *config =
+      config_create_or_die("set -lex CSW21 -ld english_ab -k1 CSW21 -k2 CSW21");
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -305,8 +303,7 @@ void test_rack_info_table(void) {
 
   // Look up the rack in the rack info table; it must exist.
   const BitRack test_bit_rack = bit_rack_create_from_rack(ld, &test_rack);
-  const RackInfoTableEntry *entry =
-      rack_info_table_lookup(rit, &test_bit_rack);
+  const RackInfoTableEntry *entry = rack_info_table_lookup(rit, &test_bit_rack);
   assert(entry != NULL);
   // Index 0 (empty leave) must be 0.
   {
@@ -320,8 +317,7 @@ void test_rack_info_table(void) {
   // full rack.
   for (uint32_t entry_idx = 0; entry_idx < rit->num_entries; entry_idx++) {
     const RackInfoTableEntry *stored = &rit->entries[entry_idx];
-    const BitRack entry_bit_rack =
-        rack_info_table_entry_read_bit_rack(stored);
+    const BitRack entry_bit_rack = rack_info_table_entry_read_bit_rack(stored);
     const RackInfoTableEntry *found =
         rack_info_table_lookup(rit, &entry_bit_rack);
     assert(found == stored);
@@ -361,8 +357,8 @@ void test_rack_info_table(void) {
 // query, plus pin-check the specific "APNOEAL + J -> JALAPENO" case.
 // Invoked via ./bin/magpie_test rit_csw24_full.
 void test_rack_info_table_csw24_full(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW24 -ld english -k1 CSW24 -k2 CSW24");
+  Config *config =
+      config_create_or_die("set -lex CSW24 -ld english -k1 CSW24 -k2 CSW24");
   const LetterDistribution *ld = config_get_ld(config);
   Game *game = config_game_create(config);
   const Player *player = game_get_player(game, 0);
@@ -410,7 +406,7 @@ void test_rack_info_table_csw24_full(void) {
   assert(apnoeal_entry != NULL);
   const uint32_t apnoeal_bitmask =
       rack_info_table_entry_get_playthrough_union(apnoeal_entry,
-                                                   /*leave_size=*/0);
+                                                  /*leave_size=*/0);
   const MachineLetter ml_j = ld_hl_to_ml(ld, "J");
   const uint32_t expected_apnoeal = 1U << ml_j;
   assert(apnoeal_bitmask == expected_apnoeal);
@@ -448,12 +444,12 @@ static RitSweepTiming rit_sweep_run_once(Config *config, const char *cmd) {
   RitSweepTiming t;
   t.real_sec = (double)(ts_end.tv_sec - ts_start.tv_sec) +
                (double)(ts_end.tv_nsec - ts_start.tv_nsec) / 1e9;
-  t.user_sec = (double)(ru_end.ru_utime.tv_sec - ru_start.ru_utime.tv_sec) +
-               (double)(ru_end.ru_utime.tv_usec - ru_start.ru_utime.tv_usec) /
-                   1e6;
-  t.sys_sec = (double)(ru_end.ru_stime.tv_sec - ru_start.ru_stime.tv_sec) +
-              (double)(ru_end.ru_stime.tv_usec - ru_start.ru_stime.tv_usec) /
-                  1e6;
+  t.user_sec =
+      (double)(ru_end.ru_utime.tv_sec - ru_start.ru_utime.tv_sec) +
+      (double)(ru_end.ru_utime.tv_usec - ru_start.ru_utime.tv_usec) / 1e6;
+  t.sys_sec =
+      (double)(ru_end.ru_stime.tv_sec - ru_start.ru_stime.tv_sec) +
+      (double)(ru_end.ru_stime.tv_usec - ru_start.ru_stime.tv_usec) / 1e6;
   return t;
 }
 
@@ -479,14 +475,10 @@ void test_rack_info_table_csw24_sweep(void) {
   assert(players_data_get_is_shared(players_data, PLAYERS_DATA_TYPE_WMP));
 
   const RitSweepConfig sweep_configs[] = {
-      {"no RIT", -1},
-      {"RIT leaves only", RACK_SIZE + 1},
-      {"RIT min=7", 7},
-      {"RIT min=6", 6},
-      {"RIT min=5", 5},
-      {"RIT min=4", 4},
-      {"RIT min=3", 3},
-      {"RIT min=2", 2},
+      {"no RIT", -1},   {"RIT leaves only", RACK_SIZE + 1},
+      {"RIT min=7", 7}, {"RIT min=6", 6},
+      {"RIT min=5", 5}, {"RIT min=4", 4},
+      {"RIT min=3", 3}, {"RIT min=2", 2},
       {"RIT min=1", 1},
   };
   const int num_configs =
@@ -494,8 +486,7 @@ void test_rack_info_table_csw24_sweep(void) {
 
   RitSweepTiming timings[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
   char *result_strs[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
-  uint32_t slots_per_entry[sizeof(sweep_configs) /
-                           sizeof(sweep_configs[0])];
+  uint32_t slots_per_entry[sizeof(sweep_configs) / sizeof(sweep_configs[0])];
 
   // 100k games gives enough signal to discriminate per-config differences
   // without making the whole sweep take forever. Same seed for every
@@ -517,8 +508,8 @@ void test_rack_info_table_csw24_sweep(void) {
     if (cfg->min_played_size >= 0) {
       printf("[rit_sweep] building %s...\n", cfg->label);
       (void)fflush(stdout);
-      rit = make_rack_info_table(klv, wmp, ld, 8,
-                                 (uint8_t)cfg->min_played_size);
+      rit =
+          make_rack_info_table(klv, wmp, ld, 8, (uint8_t)cfg->min_played_size);
       assert(rit != NULL);
       // Count covered leave_size unions: played_size in [min, RACK_SIZE]
       // maps to leave_size in [0, RACK_SIZE - min], which is
@@ -546,10 +537,10 @@ void test_rack_info_table_csw24_sweep(void) {
       // directly and ignores use_when_available.
       players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 0, rit);
       players_data_set_data(players_data, PLAYERS_DATA_TYPE_RIT, 1, rit);
-      players_data_set_use_when_available(players_data,
-                                          PLAYERS_DATA_TYPE_RIT, 0, false);
-      players_data_set_use_when_available(players_data,
-                                          PLAYERS_DATA_TYPE_RIT, 1, false);
+      players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
+                                          0, false);
+      players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT,
+                                          1, false);
     } else {
       slots_per_entry[cfg_idx] = 0;
     }
@@ -587,10 +578,11 @@ void test_rack_info_table_csw24_sweep(void) {
   const double base_real = timings[0].real_sec;
 
   printf("\n");
-  printf("RIT coverage sweep (CSW24 english, 100k games, 8 threads, seed 42)\n");
+  printf(
+      "RIT coverage sweep (CSW24 english, 100k games, 8 threads, seed 42)\n");
   printf("--\n");
-  printf("%-20s %6s %10s %10s %10s %14s %14s\n", "config", "unions",
-         "real (s)", "user (s)", "sys (s)", "Δuser vs base", "Δreal vs base");
+  printf("%-20s %6s %10s %10s %10s %14s %14s\n", "config", "unions", "real (s)",
+         "user (s)", "sys (s)", "Δuser vs base", "Δreal vs base");
   for (int cfg_idx = 0; cfg_idx < num_configs; cfg_idx++) {
     printf("%-20s %6u %10.2f %10.2f %10.2f %+14.2f %+14.2f\n",
            sweep_configs[cfg_idx].label, slots_per_entry[cfg_idx],

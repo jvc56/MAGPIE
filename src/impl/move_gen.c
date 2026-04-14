@@ -427,9 +427,8 @@ static inline void record_exchange(MoveGen *gen) {
 // Sets up leave_map so gen_get_static_equity reads the correct leave value.
 static void record_best_exchange_from_table(MoveGen *gen) {
   int tiles_exchanged = 0;
-  const MachineLetter *strip =
-      rack_info_table_entry_get_best_exchange_strip(gen->rit_entry,
-                                                    &tiles_exchanged);
+  const MachineLetter *strip = rack_info_table_entry_get_best_exchange_strip(
+      gen->rit_entry, &tiles_exchanged);
   if (tiles_exchanged == 0) {
     return;
   }
@@ -789,7 +788,8 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
       return false;
     }
     gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
-  }  return true;
+  }
+  return true;
 }
 
 void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
@@ -814,8 +814,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
       }
       for (int bingo_idx = 0; bingo_idx < num_bingos; bingo_idx++) {
         // Point the WMP buffer at the inline word.
-        memcpy(wgen->buffer, gen->rit_entry->bingo_words[bingo_idx],
-               RACK_SIZE);
+        memcpy(wgen->buffer, gen->rit_entry->bingo_words[bingo_idx], RACK_SIZE);
         wgen->num_words = 1;
         for (int start_col = anchor->leftmost_start_col;
              start_col <= anchor->rightmost_start_col; start_col++) {
@@ -1409,7 +1408,8 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
   }
 }
 
-static inline void shadow_record(MoveGen *gen) {  const Equity *best_leaves = gen->best_leaves;
+static inline void shadow_record(MoveGen *gen) {
+  const Equity *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
@@ -1432,24 +1432,26 @@ static inline void shadow_record(MoveGen *gen) {  const Equity *best_leaves = ge
           gen->wmp_move_gen.num_tiles_played_through == 1 &&
           rack_info_table_has_playthrough_coverage(gen->rack_info_table,
                                                    gen->tiles_played);
-      if (rit_fast_path) {        const int leave_size = RACK_SIZE - gen->tiles_played;
+      if (rit_fast_path) {
+        const int leave_size = RACK_SIZE - gen->tiles_played;
         const uint32_t union_bitmask =
             rack_info_table_entry_get_playthrough_union(gen->rit_entry,
                                                         leave_size);
         const MachineLetter playthrough_ml =
             wmp_move_gen_single_playthrough_letter(&gen->wmp_move_gen);
-        if (((union_bitmask >> playthrough_ml) & 1U) == 0) {          return;
+        if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
+          return;
         }
       } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
         // Fall back to the existing WMP check for full-rack cases not
         // handled by the RIT fast path: full rack + multi-playthrough,
         // or full rack + single-playthrough when the RIT is unavailable
-        // or doesn't cover full-rack play.        // Multi-pt tp=7 bitvec pre-filter ahead of the exact wmp walk.
-        // The RIT stores per word length a uint32 with bit L set iff
-        // some 7-tile subrack of this rack + {L} + (other letters) makes
-        // a word of that length. Tests each playthrough letter against
-        // that single load. Only applies to 7-tile bingo plays
-        // (tiles_played == RACK_SIZE) with >=2 playthrough tiles on
+        // or doesn't cover full-rack play.        // Multi-pt tp=7 bitvec
+        // pre-filter ahead of the exact wmp walk. The RIT stores per word
+        // length a uint32 with bit L set iff some 7-tile subrack of this rack +
+        // {L} + (other letters) makes a word of that length. Tests each
+        // playthrough letter against that single load. Only applies to 7-tile
+        // bingo plays (tiles_played == RACK_SIZE) with >=2 playthrough tiles on
         // blankless racks.
         if (gen->rit_entry != NULL && gen->tiles_played == RACK_SIZE &&
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
@@ -1462,7 +1464,8 @@ static inline void shadow_record(MoveGen *gen) {  const Equity *best_leaves = ge
                   gen->rit_entry, gen->tiles_played, word_length,
                   &length_bitvec) &&
               wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
-                                                      length_bitvec)) {            return;
+                                                      length_bitvec)) {
+            return;
           }
         }
         if (!wmp_move_gen_check_playthrough_full_rack_existence(

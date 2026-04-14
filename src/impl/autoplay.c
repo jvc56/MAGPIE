@@ -664,7 +664,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     string_builder_destroy(output);
   }
 
-
   play_move(move, game, NULL);
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
     play_move(&game_runner->previous_move, game_runner->game_one_move_behind,

@@ -224,8 +224,8 @@ void convert_with_names(const LetterDistribution *ld,
       // leave_size-indexed array, not variable-length per-slot storage).
       // So there's no lighter variant worth shipping.
       const uint8_t playthrough_min_played_size = 1;
-      RackInfoTable *rit = make_rack_info_table(
-          klv, wmp, ld, num_threads, playthrough_min_played_size);
+      RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads,
+                                                playthrough_min_played_size);
       rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
       if (!error_stack_is_empty(error_stack)) {
         error_stack_push(

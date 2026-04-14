@@ -182,16 +182,15 @@ rack_info_table_entry_unpack_leaves(const RackInfoTableEntry *entry,
     int32_t val = (int32_t)src[offset] | ((int32_t)src[offset + 1] << 8) |
                   ((int32_t)src[offset + 2] << 16);
     // Sign extend from bit 23 (branchless).
-    val = (val ^ RACK_INFO_TABLE_LEAVE_SIGN_BIT) -
-          RACK_INFO_TABLE_LEAVE_SIGN_BIT;
+    val =
+        (val ^ RACK_INFO_TABLE_LEAVE_SIGN_BIT) - RACK_INFO_TABLE_LEAVE_SIGN_BIT;
     dest[i] = (Equity)val;
   }
 }
 
 // Pack a single 32-bit Equity to 3 bytes in the packed leaves array.
-static inline void
-rack_info_table_entry_pack_leave(RackInfoTableEntry *entry, int index,
-                                 Equity value) {
+static inline void rack_info_table_entry_pack_leave(RackInfoTableEntry *entry,
+                                                    int index, Equity value) {
   const int offset = index * 3;
   const uint32_t uval = (uint32_t)value;
   entry->leaves_packed[offset] = (uint8_t)(uval & 0xFF);
@@ -267,7 +266,6 @@ rack_info_table_lookup(const RackInfoTable *rit, const BitRack *bit_rack) {
   }
   return NULL;
 }
-
 
 // Bitmask of machine letters L such that, for at least one canonical
 // (RACK_SIZE - leave_size)-tile subrack S of the full rack represented by
@@ -454,8 +452,7 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
     }
     for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
          bl_idx++) {
-      const uint32_t le_bl =
-          htole32((uint32_t)entry->best_leaves[bl_idx]);
+      const uint32_t le_bl = htole32((uint32_t)entry->best_leaves[bl_idx]);
       fwrite_or_die(&le_bl, sizeof(uint32_t), 1, stream, "rit best leave");
     }
     for (int len_idx = 0; len_idx < RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS;
@@ -473,8 +470,8 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
     fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
                   sizeof(uint8_t), 1, stream,
                   "rit nonplaythrough has word of length bitmask");
-    fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter),
-                  RACK_SIZE, stream, "rit best exchange strip");
+    fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter), RACK_SIZE,
+                  stream, "rit best exchange strip");
     fwrite_or_die(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
                   stream, "rit best exchange tiles exchanged");
     fwrite_or_die(entry->pad, sizeof(uint8_t), sizeof(entry->pad), stream,
@@ -713,8 +710,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   memcpy(&rit->num_entries, data + 8, sizeof(uint32_t));
 
   size_t bucket_starts_offset = 12;
-  size_t bucket_starts_size =
-      ((size_t)rit->num_buckets + 1) * sizeof(uint32_t);
+  size_t bucket_starts_size = ((size_t)rit->num_buckets + 1) * sizeof(uint32_t);
   size_t entries_offset = bucket_starts_offset + bucket_starts_size;
 
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);

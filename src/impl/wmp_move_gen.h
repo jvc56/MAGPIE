@@ -582,7 +582,6 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   assert(result_bytes > 0);
   assert(result_bytes % wmp_move_gen->word_length == 0);
   wmp_move_gen->num_words = result_bytes / wmp_move_gen->word_length;
-  if (is_playthrough) {  } else {  }
   return true;
 }
 

@@ -8,9 +8,8 @@
 #include <unistd.h>
 
 static const char *const filepath_type_names[] = {
-    "kwg",     "klv",     "board layout",    "win percentage",
-    "letter distribution", "gcg",     "leaves",  "lexicon",
-    "wordmap", "rack info table"};
+    "kwg", "klv",    "board layout", "win percentage", "letter distribution",
+    "gcg", "leaves", "lexicon",      "wordmap",        "rack info table"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,

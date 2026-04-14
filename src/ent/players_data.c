@@ -105,9 +105,8 @@ WMP *players_data_get_wmp(const PlayersData *players_data, int player_index) {
                                       player_index);
 }
 
-RackInfoTable *
-players_data_get_rack_info_table(const PlayersData *players_data,
-                                 int player_index) {
+RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
+                                                int player_index) {
   return (RackInfoTable *)players_data_get_data(
       players_data, PLAYERS_DATA_TYPE_RIT, player_index);
 }
@@ -312,8 +311,8 @@ void players_data_set(PlayersData *players_data,
       if (player_index == 1 && new_data_is_shared) {
         data_pointers[1] = data_pointers[0];
       } else {
-        bool use_mmap = use_mmap_for_rit &&
-                        players_data_type == PLAYERS_DATA_TYPE_RIT;
+        bool use_mmap =
+            use_mmap_for_rit && players_data_type == PLAYERS_DATA_TYPE_RIT;
         void *generic_players_data = players_data_create_data(
             players_data_type, data_paths, input_data_names[player_index],
             use_mmap, error_stack);

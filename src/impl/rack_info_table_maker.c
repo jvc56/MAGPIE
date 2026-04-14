@@ -185,8 +185,7 @@ static void compute_entry_recursive(EntryComputeState *state,
             MachineLetter current_strip[RACK_SIZE];
             int strip_idx = 0;
             for (int strip_ml = 0; strip_ml < state->ld_size; strip_ml++) {
-              const int count =
-                  rack_get_letter(state->player_rack, strip_ml);
+              const int count = rack_get_letter(state->player_rack, strip_ml);
               for (int copy_idx = 0; copy_idx < count; copy_idx++) {
                 current_strip[strip_idx++] = (MachineLetter)strip_ml;
               }
@@ -211,8 +210,7 @@ static void compute_entry_recursive(EntryComputeState *state,
           for (int strip_ml = 0; strip_ml < state->ld_size; strip_ml++) {
             const int count = rack_get_letter(state->player_rack, strip_ml);
             for (int copy_idx = 0; copy_idx < count; copy_idx++) {
-              state->best_exchange_strip[strip_idx++] =
-                  (MachineLetter)strip_ml;
+              state->best_exchange_strip[strip_idx++] = (MachineLetter)strip_ml;
             }
           }
         }
@@ -384,9 +382,8 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   }
 
   // Populate inline bingo words (nonplaythrough full-rack anagrams).
-  if (wmp != NULL &&
-      (entry->nonplaythrough_has_word_of_length_bitmask &
-       (1U << RACK_SIZE)) != 0) {
+  if (wmp != NULL && (entry->nonplaythrough_has_word_of_length_bitmask &
+                      (1U << RACK_SIZE)) != 0) {
     BitRack full_bit_rack = bit_rack_create_from_rack(ld, &player_rack);
     MachineLetter buf[WMP_RESULT_BUFFER_SIZE];
     const int bytes =

@@ -333,7 +333,8 @@ void test_autoplay_rit_correctness(void) {
 
   // The RIT must be pre-built before running this test. On CI, the
   // release binary builds it. Locally: run
-  //   echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
+  //   echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true
+  //   -rit false"
   printf("Running %d game pairs with RIT correctness check for %s...\n",
          num_pairs, lex);
   (void)fflush(stdout);
@@ -349,8 +350,7 @@ void test_autoplay_rit_correctness(void) {
       autoplay_results_to_string(config_get_autoplay_results(c), false, true);
   const char *expected_zero = "autoplay games 0";
   if (!has_substring(res, expected_zero)) {
-    (void)fprintf(stderr,
-                  "RIT autoplay divergence detected for %s:\n%s\n", lex,
+    (void)fprintf(stderr, "RIT autoplay divergence detected for %s:\n%s\n", lex,
                   res ? res : "(no output)");
     free(res);
     config_destroy(c);
