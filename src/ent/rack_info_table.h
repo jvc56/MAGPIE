@@ -657,26 +657,26 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
 #else
   int fd = open(filename, O_RDONLY);
   if (fd < 0) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                     get_formatted_string("could not open rit file: %s",
-                                          filename));
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("could not open rit file: %s", filename));
     return;
   }
   struct stat st;
   if (fstat(fd, &st) < 0) {
     close(fd);
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                     get_formatted_string("could not stat rit file: %s",
-                                          filename));
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("could not stat rit file: %s", filename));
     return;
   }
   size_t file_size = (size_t)st.st_size;
   void *mapped = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
   close(fd);
   if (mapped == MAP_FAILED) {
-    error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
-                     get_formatted_string("could not mmap rit file: %s",
-                                          filename));
+    error_stack_push(
+        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        get_formatted_string("could not mmap rit file: %s", filename));
     return;
   }
 
