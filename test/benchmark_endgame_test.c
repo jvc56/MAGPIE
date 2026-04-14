@@ -389,7 +389,9 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
                         .use_heuristics = true,
                         .per_ply_callback = NULL,
                         .per_ply_callback_data = NULL,
-                        .forced_pass_bypass = false};
+                        .forced_pass_bypass = false,
+                        .enable_pv_display = false,
+                        .seed = 42};
 
     // --- OLD (no bypass) ---
     Timer t;

@@ -2351,6 +2351,22 @@ void test_config_note_move_interpolation(void) {
   config_destroy(config);
 }
 
+void test_config_fg_required(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+
+  // fgrequired defaults to false in test config, so newgame without a
+  // filename should succeed.
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+
+  // Enable fgrequired; newgame without a filename should now fail.
+  assert_config_exec_status(config, "set -fgrequired true",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame",
+                            ERROR_STATUS_CONFIG_LOAD_MISSING_ARG);
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2366,4 +2382,5 @@ void test_config(void) {
   test_config_lexical_data();
   test_config_wmp();
   test_config_note_move_interpolation();
+  test_config_fg_required();
 }

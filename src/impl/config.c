@@ -180,6 +180,7 @@ typedef enum {
   ARG_TOKEN_SHOW_PROMPT,
   ARG_TOKEN_SAVE_SETTINGS,
   ARG_TOKEN_AUTOSAVE_GCG,
+  ARG_TOKEN_FG_REQUIRED,
   ARG_TOKEN_SHOW_GAME_WITH_MOVES,
   ARG_TOKEN_P1_SIM_PLIES,
   ARG_TOKEN_P2_SIM_PLIES,
@@ -259,6 +260,7 @@ struct Config {
   bool save_settings;
   bool use_mmap_for_rit;
   bool autosave_gcg;
+  bool fg_required;
   bool loaded_settings;
   char *record_filepath;
   char *settings_filename;
@@ -473,6 +475,10 @@ bool config_get_show_prompt(const Config *config) {
 
 bool config_get_save_settings(const Config *config) {
   return config->save_settings;
+}
+
+bool config_get_fg_required(const Config *config) {
+  return config->fg_required;
 }
 
 bool config_get_loaded_settings(const Config *config) {
@@ -1091,7 +1097,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "alice_vs_bob";
       examples[2] = "alice_vs_bob.gcg";
       text = "Starts a new game, resetting the previous game and game history. "
-             "The GCG filename can be optionally specified.";
+             "The GCG filename must be specified if fgrequired is enabled.";
       break;
     case ARG_TOKEN_EXPORT:
       usages[0] = "[<output_gcg_filename>]";
@@ -1201,8 +1207,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Shows the inference result.";
       break;
     case ARG_TOKEN_SHOW_ENDGAME:
-      usages[0] = "";
-      text = "Shows the endgame solver result.";
+      usages[0] = "[<pv_index>]";
+      text = "Shows the endgame solver result. If a PV index is given, "
+             "displays only that PV line (1-indexed) in full move-by-move "
+             "detail.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -1216,7 +1224,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[7] = "10 4 b";
       text = "Shows the heat map for the given play, ply, and type. If no ply "
              "is given, a default of 1 will be used. If no type is given, a "
-             "default of 'all' will be used.";
+             "default of 'all' will be used. Heat maps are not recorded by "
+             "default during the simulation. To enable heat maps, set the "
+             "'useheatmap' option to true.";
       break;
     case ARG_TOKEN_NEXT:
       usages[0] = "";
@@ -1704,6 +1714,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to automatically save the game history "
              "as a GCG after every change.";
       break;
+    case ARG_TOKEN_FG_REQUIRED:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not a filename is required for the newgame "
+             "command.";
+      break;
     case ARG_TOKEN_P1_SIM_PLIES:
     case ARG_TOKEN_P2_SIM_PLIES:
       usages[0] = "<plies>";
@@ -1975,6 +1992,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
         ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
+        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
         ARG_TOKEN_EXEC_MODE,         /* mode */
         ARG_TOKEN_DATA_PATH,         /* path */
         ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
@@ -2799,10 +2817,12 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->num_threads = config->num_threads;
   endgame_args->num_top_moves = config->endgame_top_k;
   endgame_args->use_heuristics = true;
+  endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
   endgame_args->soft_time_limit = 0;
   endgame_args->hard_time_limit = 0;
+  endgame_args->seed = config->seed;
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -2836,7 +2856,7 @@ char *status_endgame(Config *config) {
                                 "the current game state.\n");
   }
   return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history, true);
+                                    config->game_history);
 }
 
 // Autoplay
@@ -3362,9 +3382,38 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
-  return endgame_results_get_string(config->endgame_results, config->game,
-                                    config->game_history,
-                                    config->human_readable);
+
+  const char *pv_index_str =
+      config_get_parg_value(config, ARG_TOKEN_SHOW_ENDGAME, 0);
+  if (!pv_index_str) {
+    return endgame_results_get_string(config->endgame_results, config->game,
+                                      config->game_history);
+  }
+
+  // Optional pv_index: show a single PV line in full move-by-move detail.
+  const int num_pvs = endgame_results_get_num_pvs(config->endgame_results);
+  int pv_index;
+  string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
+                              ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,
+                              &pv_index, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  // Convert from 1-indexed user input to 0-indexed internal.
+  pv_index--;
+
+  const Game *source_game =
+      endgame_results_get_start_game(config->endgame_results);
+  if (!source_game) {
+    source_game = config->game;
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
+                                   config->game_history, pv_index);
+  char *result = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  return result;
 }
 
 void execute_show_endgame(Config *config, ErrorStack *error_stack) {
@@ -3607,12 +3656,19 @@ char *impl_new_game(Config *config, ErrorStack *error_stack) {
         string_duplicate("cannot create new game without lexicon"));
     return empty_string();
   }
+  const char *user_provided_filename =
+      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
+  if (config->fg_required && !user_provided_filename) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
+        string_duplicate("cannot create a new game without a filename while "
+                         "the fgrequired option is enabled"));
+    return empty_string();
+  }
   config_init_game(config);
   game_reset(config->game);
   game_history_reset(config->game_history);
   update_game_history_with_config(config);
-  const char *user_provided_filename =
-      config_get_parg_value(config, ARG_TOKEN_NEW_GAME, 0);
   if (user_provided_filename) {
     game_history_set_gcg_filename(config->game_history, user_provided_filename);
   }
@@ -6001,7 +6057,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_VARIANT_LENGTH,
+  config_load_int(config, ARG_TOKEN_ENDGAME_TOP_K, 1, MAX_ENDGAME_DISPLAY_PVS,
                   &config->endgame_top_k, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -6191,6 +6247,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
 
   // Autosave GCG
   config_load_bool(config, ARG_TOKEN_AUTOSAVE_GCG, &config->autosave_gcg,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // FG required
+  config_load_bool(config, ARG_TOKEN_FG_REQUIRED, &config->fg_required,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -7030,7 +7093,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       false);
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
-  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 0, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
@@ -7140,6 +7203,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
+  arg(ARG_TOKEN_FG_REQUIRED, "fgrequired", 1, 1);
   arg(ARG_TOKEN_SHOW_GAME_WITH_MOVES, "shwithmoves", 1, 1);
 
 #undef cmd
@@ -7223,6 +7287,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->show_prompt = true;
   config->save_settings = true;
   config->autosave_gcg = true;
+  config->fg_required = true;
   config->loaded_settings = true;
   config->game_variant = DEFAULT_GAME_VARIANT;
   config->ld = NULL;
@@ -7777,6 +7842,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOSAVE_GCG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->autosave_gcg);
+      break;
+    case ARG_TOKEN_FG_REQUIRED:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->fg_required);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token when saving settings");
