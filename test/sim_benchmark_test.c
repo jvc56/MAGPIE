@@ -13,7 +13,7 @@
 void test_sim_benchmark(void) {
   struct timespec start;
   struct timespec end;
-  clock_gettime(CLOCK_MONOTONIC, &start);
+  clock_gettime(CLOCK_MONOTONIC, &start); // NOLINT(misc-include-cleaner)
 
   Config *config = config_create_or_die(
       "set -lex CSW24 -wmp true -s1 equity -s2 equity -r1 all -r2 all "

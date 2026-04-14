@@ -436,9 +436,9 @@ typedef struct RitSweepTiming {
 static RitSweepTiming rit_sweep_run_once(Config *config, const char *cmd) {
   struct timespec ts_start;
   struct timespec ts_end;
-  struct rusage ru_start;
-  struct rusage ru_end;
-  clock_gettime(CLOCK_MONOTONIC, &ts_start);
+  struct rusage ru_start;   // NOLINT(misc-include-cleaner)
+  struct rusage ru_end;     // NOLINT(misc-include-cleaner)
+  clock_gettime(CLOCK_MONOTONIC, &ts_start); // NOLINT(misc-include-cleaner)
   getrusage(RUSAGE_SELF, &ru_start);
   load_and_exec_config_or_die(config, cmd);
   getrusage(RUSAGE_SELF, &ru_end);
