@@ -32,7 +32,6 @@
 #include "../ent/static_eval.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
-#include "wmp_stats.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -767,9 +766,7 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
 
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
                                                int start_col) {
-  const WMPMoveGen *wgen = &gen->wmp_move_gen;
-  WMP_STATS_INC(WMP_STATS_CHECK_PT_AND_CROSSES_TOTAL, wgen->word_length);
-  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;  const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = start_col + letter_idx;
     assert(board_col < BOARD_DIM);
@@ -791,9 +788,7 @@ bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
       return false;
     }
     gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
-  }
-  WMP_STATS_INC(WMP_STATS_CHECK_PT_AND_CROSSES_PASSED, wgen->word_length);
-  return true;
+  }  return true;
 }
 
 void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
@@ -1413,9 +1408,7 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
   }
 }
 
-static inline void shadow_record(MoveGen *gen) {
-  WMP_STATS_INC(WMP_STATS_SHADOW_RECORD_CALLS, gen->tiles_played);
-  const Equity *best_leaves = gen->best_leaves;
+static inline void shadow_record(MoveGen *gen) {  const Equity *best_leaves = gen->best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
@@ -1438,28 +1431,19 @@ static inline void shadow_record(MoveGen *gen) {
           gen->wmp_move_gen.num_tiles_played_through == 1 &&
           rack_info_table_has_playthrough_coverage(gen->rack_info_table,
                                                    gen->tiles_played);
-      if (rit_fast_path) {
-        WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_TAKEN, gen->tiles_played);
-        const int leave_size = RACK_SIZE - gen->tiles_played;
+      if (rit_fast_path) {        const int leave_size = RACK_SIZE - gen->tiles_played;
         const uint32_t union_bitmask =
             rack_info_table_entry_get_playthrough_union(gen->rit_entry,
                                                         leave_size);
         const MachineLetter playthrough_ml =
             wmp_move_gen_single_playthrough_letter(&gen->wmp_move_gen);
-        if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
-          WMP_STATS_INC(WMP_STATS_SHADOW_FAST_PATH_PRUNED, gen->tiles_played);
-          return;
+        if (((union_bitmask >> playthrough_ml) & 1U) == 0) {          return;
         }
       } else if (gen->tiles_played == gen->number_of_letters_on_rack) {
         // Fall back to the existing WMP check for full-rack cases not
         // handled by the RIT fast path: full rack + multi-playthrough,
         // or full rack + single-playthrough when the RIT is unavailable
-        // or doesn't cover full-rack play.
-        WMP_STATS_INC(WMP_STATS_SHADOW_FALLBACK_FULL_RACK, gen->tiles_played);
-        WMP_STATS_INC_BYPASS_REASON(gen->rit_entry,
-                                    gen->wmp_move_gen.num_tiles_played_through,
-                                    gen->tiles_played);
-        // Multi-pt tp=7 bitvec pre-filter ahead of the exact wmp walk.
+        // or doesn't cover full-rack play.        // Multi-pt tp=7 bitvec pre-filter ahead of the exact wmp walk.
         // The RIT stores per word length a uint32 with bit L set iff
         // some 7-tile subrack of this rack + {L} + (other letters) makes
         // a word of that length. Tests each playthrough letter against
@@ -1477,10 +1461,7 @@ static inline void shadow_record(MoveGen *gen) {
                   gen->rit_entry, gen->tiles_played, word_length,
                   &length_bitvec) &&
               wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
-                                                      length_bitvec)) {
-            WMP_STATS_INC(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
-                          gen->tiles_played);
-            return;
+                                                      length_bitvec)) {            return;
           }
         }
         if (!wmp_move_gen_check_playthrough_full_rack_existence(
@@ -1497,9 +1478,6 @@ static inline void shadow_record(MoveGen *gen) {
         // was measured and dropped (4.7% prune rate didn't cover the
         // file-size cost); other tiles_played values still fall through
         // with no check.
-        WMP_STATS_INC_BYPASS_REASON(gen->rit_entry,
-                                    gen->wmp_move_gen.num_tiles_played_through,
-                                    gen->tiles_played);
         if (gen->rit_entry != NULL &&
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
             bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
@@ -1513,8 +1491,6 @@ static inline void shadow_record(MoveGen *gen) {
                   &length_bitvec) &&
               wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
                                                       length_bitvec)) {
-            WMP_STATS_INC(WMP_STATS_SHADOW_MULTI_PT_BITVEC_PRUNED,
-                          gen->tiles_played);
             return;
           }
         }
@@ -2890,11 +2866,7 @@ void gen_record_scoring_plays(MoveGen *gen) {
     if (gen->threshold_exceeded) {
       break;
     }
-    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);
-    WMP_STATS_INC(WMP_STATS_ANCHORS_EXTRACTED, 0);
-    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {
-      WMP_STATS_INC(WMP_STATS_ANCHORS_PRUNED, 0);
-      break;
+    const Anchor anchor = anchor_heap_extract_max(&gen->anchor_heap);    if (better_play_has_been_found(gen, anchor.highest_possible_equity)) {      break;
     }
     gen->current_anchor_col = anchor.col;
     // Don't recopy the row cache if we're working on the same board lane

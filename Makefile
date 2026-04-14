@@ -72,12 +72,6 @@ endif
 
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 
-# Optional diagnostic instrumentation for WMP hash-walk hotspots in movegen.
-# Enable with WMP_STATS=1. Only meaningful on single-threaded runs; results
-# get noisy under thread contention.
-ifdef WMP_STATS
-CFLAGS += -DMAGPIE_WMP_STATS
-endif
 
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}

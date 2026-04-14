@@ -3,12 +3,12 @@
 //
 // Usage: ./bin/magpie_test simbench
 
+#include "sim_benchmark_test.h"
+
 #include "../src/impl/config.h"
 #include "test_util.h"
 #include <stdio.h>
 #include <time.h>
-
-#include "sim_benchmark_test.h"
 
 void test_sim_benchmark(void) {
   struct timespec start, end;

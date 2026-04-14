@@ -26,7 +26,6 @@
 #include "../ent/players_data.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
@@ -665,36 +664,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     string_builder_destroy(output);
   }
 
-#ifdef MAGPIE_WMP_STATS
-  {
-    const SimArgs *sa = (player_on_turn_index == 0)
-                            ? &autoplay_worker->args.p1_sim_args
-                            : &autoplay_worker->args.p2_sim_args;
-    if (sa->num_plies > 0 && autoplay_worker->sim_results != NULL) {
-      const SimmedPlay *sp = sim_results_get_simmed_play(
-          autoplay_worker->sim_results, 0);
-      if (sp != NULL) {
-        const uint64_t iters =
-            stat_get_num_samples(simmed_play_get_equity_stat(sp));
-        static _Atomic uint64_t total_sim_iters;
-        static _Atomic uint64_t total_sim_turns;
-        uint64_t new_iters =
-            atomic_fetch_add_explicit(&total_sim_iters, iters,
-                                      memory_order_relaxed) +
-            iters;
-        uint64_t new_turns =
-            atomic_fetch_add_explicit(&total_sim_turns, 1,
-                                      memory_order_relaxed) +
-            1;
-        fprintf(stderr,
-                "SIM_ITERS: turn=%llu total_iters=%llu avg=%llu/turn\n",
-                (unsigned long long)new_turns,
-                (unsigned long long)new_iters,
-                (unsigned long long)(new_iters / new_turns));
-      }
-    }
-  }
-#endif
 
   play_move(move, game, NULL);
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
