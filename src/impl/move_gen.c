@@ -801,6 +801,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 
   // Inline bingo fast path: for nonplaythrough full-rack plays with
   // precomputed bingo words, skip subrack enumeration and WMP lookup.
+  // Uses record_wmp_plays_for_word with subrack_idx=0 (the only subrack
+  // for a full-rack play) so blank assignment is handled correctly.
   if (gen->rit_entry != NULL && anchor->tiles_to_play == RACK_SIZE &&
       anchor->playthrough_blocks == 0) {
     const int num_bingos = gen->rit_entry->num_bingo_words;
