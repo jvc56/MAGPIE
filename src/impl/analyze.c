@@ -185,7 +185,8 @@ static void write_per_turn_human_readable(
   char *actual_str = analyze_format_move(&turn_result->actual_move, board, ld);
 
   // Header: "--- Turn N: <play> <rack> (<player>) ---"
-  fprintf(report_file, "\n--- Turn %d: %s %s (%s) ---\n\n",
+  // FIXME: call this and all other turns 'events' probably
+  fprintf(report_file, "--- Turn %d: %s %s (%s) ---\n\n",
           turn_result->turn_number, actual_str, rack_str, player_name);
   free(rack_str);
   free(actual_str);
@@ -331,13 +332,11 @@ static void write_per_turn_human_readable(
   const int score_diff =
       equity_to_int(move_get_score(best_move_ptr)) -
       equity_to_int(move_get_score(&turn_result->actual_move));
-  string_grid_set_cell(move_sg, 3, 3,
-                       get_formatted_string("%d", score_diff));
+  string_grid_set_cell(move_sg, 3, 3, get_formatted_string("%d", score_diff));
   if (is_endgame) {
     const int spr_diff =
         turn_result->best_endgame_spread - turn_result->actual_endgame_spread;
-    string_grid_set_cell(move_sg, 3, 4,
-                         get_formatted_string("%d", spr_diff));
+    string_grid_set_cell(move_sg, 3, 4, get_formatted_string("%d", spr_diff));
   }
   string_grid_set_cell(move_sg, 3, wp_col,
                        get_formatted_string("%.2f", turn_result->win_pct_lost));
@@ -466,8 +465,8 @@ static void write_analysis_summary(GameHistory *game_history,
   string_grid_set_cell(sg, 0, 3, string_duplicate("Rack"));
   string_grid_set_cell(sg, 0, 4, string_duplicate("Actual"));
   string_grid_set_cell(sg, 0, 5, string_duplicate("Best"));
-  string_grid_set_cell(sg, 0, 6, string_duplicate("WPD"));
-  string_grid_set_cell(sg, 0, 7, string_duplicate("EqD"));
+  string_grid_set_cell(sg, 0, 6, string_duplicate("WPL"));
+  string_grid_set_cell(sg, 0, 7, string_duplicate("EqL"));
   string_grid_set_cell(sg, 0, 8, string_duplicate("Note"));
 
   Equity total_equity_lost = 0;
@@ -555,18 +554,19 @@ static void write_analysis_summary(GameHistory *game_history,
   const double avg_win_pct = total_win_pct_lost / (double)matching_count;
 
   StringGrid *totals_sg = string_grid_create(3, 3, ANALYZE_SUMMARY_COL_PADDING);
+  // FIXME: add this to the game summary table
   string_grid_set_cell(totals_sg, 0, 0, string_duplicate(""));
   string_grid_set_cell(totals_sg, 0, 1, string_duplicate("Total"));
   string_grid_set_cell(totals_sg, 0, 2, string_duplicate("Avg"));
-  string_grid_set_cell(totals_sg, 1, 0, string_duplicate("WP"));
+  string_grid_set_cell(totals_sg, 1, 0, string_duplicate("WP Loss"));
   string_grid_set_cell(totals_sg, 1, 1,
                        get_formatted_string("%.2f", total_win_pct_lost));
   string_grid_set_cell(totals_sg, 1, 2,
                        get_formatted_string("%.2f", avg_win_pct));
-  string_grid_set_cell(totals_sg, 2, 0, string_duplicate("Eq"));
-  string_grid_set_cell(totals_sg, 2, 1,
-                       get_formatted_string("%.2f",
-                                            equity_to_double(total_equity_lost)));
+  string_grid_set_cell(totals_sg, 2, 0, string_duplicate("Eq Loss"));
+  string_grid_set_cell(
+      totals_sg, 2, 1,
+      get_formatted_string("%.2f", equity_to_double(total_equity_lost)));
   string_grid_set_cell(totals_sg, 2, 2,
                        get_formatted_string("%.2f", avg_equity));
   StringBuilder *totals_sb = string_builder_create();
@@ -727,6 +727,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   Rack *known_opp_rack =
       player_get_rack(game_get_player(ctx->game, 1 - player_on_turn_index));
 
+  // FIXME: figure out my infer args have 0 for margin
   // Set per-turn fields then simulate.
   args->sim_args.game = ctx->game;
   args->sim_args.move_list = ctx->move_list;
@@ -990,6 +991,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     // detect an endgame, look ahead in game_history for
     // the opponent's next move event; their rack at that event equals their
     // current rack, letting us compute: remaining tiles = bag - opp_rack_tiles.
+    // FIXME: figure out why we can't use bag size directly
     int opp_rack_tiles = 0;
     for (int next_idx = event_idx + 1; next_idx < num_events; next_idx++) {
       const GameEvent *next_event =

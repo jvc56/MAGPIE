@@ -7484,7 +7484,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_game_pairs = false;
   config->use_small_plays = false;
   config->human_readable = true;
-  config->sim_with_inference = false;
+  config->sim_with_inference = true;
   config->p1_sim_plies = 0;
   config->p2_sim_plies = 0;
   config->p1_num_plays = config->num_plays;

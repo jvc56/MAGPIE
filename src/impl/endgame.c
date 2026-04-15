@@ -2598,6 +2598,13 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 
   endgame_results_stop_ctimer(results);
 
+  if (thread_control_get_status(endgame_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
+  }
+
   if (endgame_args->enable_pv_display) {
     // Extract top-K root moves from best thread's arena
     endgame_results_ensure_pvs_capacity(results, solver->num_top_moves);

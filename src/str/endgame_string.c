@@ -18,6 +18,19 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+static const char *
+endgame_result_status_to_string(endgame_result_status_t status) {
+  switch (status) {
+  case ENDGAME_RESULT_STATUS_FINISHED:
+    return "finished";
+  case ENDGAME_RESULT_STATUS_INTERRUPTED:
+    return "interrupted";
+  case ENDGAME_RESULT_STATUS_NONE:
+    return "none";
+  }
+  return "none";
+}
+
 // Formats a single PVLine into sb as a per-move table with columns:
 // Player, Move, Score, Value, Spread. A "---" separator row is inserted
 // between the exact (negamax) moves and the greedy continuation moves.
@@ -64,9 +77,13 @@ static void string_builder_endgame_single_pv_with_lock(
       endgame_results, ENDGAME_RESULT_DISPLAY, source_game);
 
   string_builder_add_formatted_string(
-      sb, "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs)\n",
+      sb,
+      "PV %d (spread: %d, value: %d, depth: %d, length: %d, time: %.3fs,"
+      " status: %s)\n",
       pv_idx + 1, final_spread, endgame_value, depth, pv.num_moves,
-      endgame_results_get_seconds_elapsed(endgame_results));
+      endgame_results_get_seconds_elapsed(endgame_results),
+      endgame_result_status_to_string(
+          endgame_results_get_status(endgame_results)));
 
   if (pv.num_moves == 0) {
     return;
@@ -210,8 +227,10 @@ static void string_builder_endgame_results(StringBuilder *pv_description,
   // endgame_solve, so display them directly in a StringGrid without
   // re-extending.
   string_builder_add_formatted_string(
-      pv_description, "Endgame (depth: %d, time: %.3fs)\n", depth,
-      endgame_results_get_seconds_elapsed(endgame_results));
+      pv_description, "Endgame (depth: %d, time: %.3fs, status: %s)\n", depth,
+      endgame_results_get_seconds_elapsed(endgame_results),
+      endgame_result_status_to_string(
+          endgame_results_get_status(endgame_results)));
 
   const int p1_score =
       equity_to_int(player_get_score(game_get_player(source_game, 0)));

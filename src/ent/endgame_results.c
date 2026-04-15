@@ -36,6 +36,7 @@ struct EndgameResults {
   int max_depth;
   // Reusable game copy for PV extension (avoid repeated game_duplicate).
   Game *ext_game;
+  endgame_result_status_t status;
 };
 
 EndgameResults *endgame_results_create(void) {
@@ -57,6 +58,7 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
   endgame_results->ext_game = NULL;
+  endgame_results->status = ENDGAME_RESULT_STATUS_NONE;
   return endgame_results;
 }
 
@@ -85,6 +87,7 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->tt = NULL;
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
+  endgame_results->status = ENDGAME_RESULT_STATUS_NONE;
 }
 
 void endgame_results_copy(EndgameResults *dest, const EndgameResults *src) {
@@ -294,6 +297,16 @@ int endgame_results_get_solving_player(const EndgameResults *endgame_results) {
 
 int endgame_results_get_max_depth(const EndgameResults *endgame_results) {
   return endgame_results->max_depth;
+}
+
+endgame_result_status_t
+endgame_results_get_status(const EndgameResults *endgame_results) {
+  return endgame_results->status;
+}
+
+void endgame_results_set_status(EndgameResults *endgame_results,
+                                endgame_result_status_t status) {
+  endgame_results->status = status;
 }
 
 Game *endgame_results_prepare_ext_game(EndgameResults *endgame_results,
