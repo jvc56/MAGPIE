@@ -68,19 +68,35 @@ static void test_analyze_no_game(void) {
   config_destroy(config);
 }
 
-void test_analyze(void) {
+// Verifies that a vertical opening play is treated as equivalent to the
+// horizontal movegen-generated transposition. With QIRESIT and H7 QI
+// (vertical), movegen only generates 8G QI (horizontal). The analysis should
+// replace 8G QI with H7 QI so that the player's actual play shows as best.
+static void test_analyze_vertical_opening_transposable(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 0");
 
-  Config *config =
-      config_create_or_die("set -lex CSW21 -plies 2 -minp 10 -iter 2000 "
-                           "-numplays 15 -hr true -sinfer true");
+  const char *gcg_header = "#character-encoding UTF-8\n"
+                           "#player1 Tim Tim\n"
+                           "#player2 Josh Josh\n";
+  load_game_history_with_gcg_string(config, gcg_header,
+                                    ">Tim: QIRESIT H7 QI +22 22\n");
 
-  // Remove any leftover report from a previous run
-  remove(SINGLE_REPORT_PATH);
+  remove(ZERO_ARG_REPORT_PATH);
+  assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
 
-  assert_config_exec_status(config, "analyze 58916 Josh", ERROR_STATUS_SUCCESS);
+  char *report = get_string_from_file_or_die(ZERO_ARG_REPORT_PATH);
+  // H7 QI is the actual play; after transposability replacement, the generated
+  // 8G QI is replaced by H7 QI with the same equity, so H7 QI ranks as best
+  // and equity_lost is 0.
+  assert(has_substring(report, "H7 QI,-,0.00"));
+  free(report);
+
+  remove_or_die(ZERO_ARG_REPORT_PATH);
   config_destroy(config);
-  return;
+}
 
+void test_analyze(void) {
+  test_analyze_vertical_opening_transposable();
   test_analyze_single_file();
   test_analyze_zero_args();
   test_analyze_no_lexicon();

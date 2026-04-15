@@ -61,6 +61,9 @@ EndgameResults *endgame_results_create(void) {
 }
 
 void endgame_results_destroy(EndgameResults *endgame_results) {
+  if (!endgame_results) {
+    return;
+  }
   game_destroy(endgame_results->start_game);
   game_destroy(endgame_results->ext_game);
   free(endgame_results->multi_pvs);
@@ -150,13 +153,17 @@ int endgame_results_get_spread(const EndgameResults *endgame_results,
     value = endgame_results->display_pv_data.value;
     break;
   }
+  // Use the game's current on-turn player to determine spread direction.
+  // endgame_results->solving_player is zeroed out at the end of a completed
+  // solve (endgame_results_set_pvline_extend_args(results, NULL, 0, 0)), so
+  // it cannot be used reliably here.
+  const int on_turn_idx = game_get_player_on_turn_index(game);
   const int p0_score =
       equity_to_int(player_get_score(game_get_player(game, 0)));
   const int p1_score =
       equity_to_int(player_get_score(game_get_player(game, 1)));
-  const int initial_on_turn_spread = (endgame_results->solving_player == 0)
-                                         ? p0_score - p1_score
-                                         : p1_score - p0_score;
+  const int initial_on_turn_spread =
+      (on_turn_idx == 0) ? p0_score - p1_score : p1_score - p0_score;
   return initial_on_turn_spread + value;
 }
 

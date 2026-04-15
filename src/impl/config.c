@@ -7052,13 +7052,19 @@ static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  game_history_set_gcg_filename(config->game_history, source_identifier);
   analyze_after_gcg_parsed(analyze_args, ctx_ptr, source_identifier,
                            player_list_str, error_stack);
 }
 
 // Iterates a directory and analyzes every .gcg file it contains. analyze_args
+static int compare_string_ptrs(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
 // must already be filled by the caller via config_fill_analyze_args. The
-// AnalyzeCtx is reused across all games.
+// AnalyzeCtx is reused across all games. Files are processed in alphabetical
+// order and the loop checks for user interrupts between files.
 static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
                               const char *dir_path, const char *player_list_str,
                               AnalyzeCtx **ctx_ptr, ErrorStack *error_stack) {
@@ -7069,12 +7075,30 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
         get_formatted_string("cannot open directory: %s", dir_path));
     return;
   }
+
+  // Collect all .gcg filenames into a sorted list.
+  int num_gcg_files = 0;
+  int gcg_files_capacity = 16;
+  char **gcg_files = malloc_or_die(sizeof(char *) * gcg_files_capacity);
   const struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
     if (!has_suffix(".gcg", entry->d_name)) {
       continue;
     }
-    char *gcg_path = get_formatted_string("%s/%s", dir_path, entry->d_name);
+    if (num_gcg_files == gcg_files_capacity) {
+      gcg_files_capacity *= 2;
+      gcg_files =
+          realloc_or_die(gcg_files, sizeof(char *) * gcg_files_capacity);
+    }
+    gcg_files[num_gcg_files++] = string_duplicate(entry->d_name);
+  }
+  closedir(dir);
+  qsort(gcg_files, (size_t)num_gcg_files, sizeof(char *), compare_string_ptrs);
+
+  ThreadControl *thread_control = analyze_args->sim_args.thread_control;
+  for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
+    char *gcg_path =
+        get_formatted_string("%s/%s", dir_path, gcg_files[file_idx]);
     config_parse_gcg(config, gcg_path, analyze_args->game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       free(gcg_path);
@@ -7084,10 +7108,27 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
                              error_stack);
     free(gcg_path);
     if (!error_stack_is_empty(error_stack)) {
+      if (error_stack_top(error_stack) ==
+          ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME) {
+        char *err_str = error_stack_get_string_and_reset(error_stack);
+        char *msg = get_formatted_string("%s\n", err_str);
+        free(err_str);
+        thread_control_print(thread_control, msg);
+        free(msg);
+      } else {
+        break;
+      }
+    }
+    if (thread_control_get_status(thread_control) ==
+        THREAD_CONTROL_STATUS_USER_INTERRUPT) {
       break;
     }
   }
-  closedir(dir);
+
+  for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
+    free(gcg_files[file_idx]);
+  }
+  free(gcg_files);
 }
 
 void impl_analyze(Config *config, ErrorStack *error_stack) {
@@ -7116,7 +7157,8 @@ void impl_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeArgs analyze_args = {0};
   analyze_args.game_history = config->game_history;
   config_fill_analyze_args(config, &analyze_args, &target_played_tiles,
-                           &nontarget_known_tiles, &target_known_inference_tiles);
+                           &nontarget_known_tiles,
+                           &target_known_inference_tiles);
 
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 0);
   const char *arg1 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 1);
@@ -7433,7 +7475,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
-  config->time_limit_seconds = 0;
+  config->time_limit_seconds = 60;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();

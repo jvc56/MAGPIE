@@ -39,7 +39,7 @@
 
 enum {
   ANALYZE_NOTE_TRUNCATE_LEN = 30,
-  ANALYZE_SUMMARY_COLS = 8,
+  ANALYZE_SUMMARY_COLS = 9,
   ANALYZE_SUMMARY_COL_PADDING = 2,
 };
 
@@ -323,13 +323,21 @@ static void write_per_turn_human_readable(
                        is_endgame ? string_duplicate("-")
                                   : get_formatted_string("%.2f", actual_st_eq));
 
-  // Diff row (row 3): dashes for Mv/Lv/S[/Spr]; differences for Wp/Eq/StEq.
+  // Diff row (row 3): dashes for Mv/Lv; score diff for S[/Spr]; diffs for
+  // Wp/Eq/StEq.
   string_grid_set_cell(move_sg, 3, 0, string_duplicate("Diff"));
   string_grid_set_cell(move_sg, 3, 1, string_duplicate("-"));
   string_grid_set_cell(move_sg, 3, 2, string_duplicate("-"));
-  string_grid_set_cell(move_sg, 3, 3, string_duplicate("-"));
+  const int score_diff =
+      equity_to_int(move_get_score(best_move_ptr)) -
+      equity_to_int(move_get_score(&turn_result->actual_move));
+  string_grid_set_cell(move_sg, 3, 3,
+                       get_formatted_string("%d", score_diff));
   if (is_endgame) {
-    string_grid_set_cell(move_sg, 3, 4, string_duplicate("-"));
+    const int spr_diff =
+        turn_result->best_endgame_spread - turn_result->actual_endgame_spread;
+    string_grid_set_cell(move_sg, 3, 4,
+                         get_formatted_string("%d", spr_diff));
   }
   string_grid_set_cell(move_sg, 3, wp_col,
                        get_formatted_string("%.2f", turn_result->win_pct_lost));
@@ -441,32 +449,35 @@ static void write_analysis_summary(GameHistory *game_history,
   }
 
   if (player_filter == -1) {
-    fprintf(report_file, "\n=== Combined Game Summary ===\n");
+    fprintf(report_file, "\n=== Combined Game Summary ===\n\n");
   } else {
     const char *player_name =
         game_history_player_get_nickname(game_history, player_filter);
-    fprintf(report_file, "\n=== Game Summary: %s ===\n", player_name);
+    fprintf(report_file, "\n=== Game Summary: %s ===\n\n", player_name);
   }
 
   const int num_rows = matching_count + 1;
   StringGrid *sg = string_grid_create(num_rows, ANALYZE_SUMMARY_COLS,
                                       ANALYZE_SUMMARY_COL_PADDING);
 
-  string_grid_set_cell(sg, 0, 0, string_duplicate("Turn"));
-  string_grid_set_cell(sg, 0, 1, string_duplicate("Player"));
-  string_grid_set_cell(sg, 0, 2, string_duplicate("Rack"));
-  string_grid_set_cell(sg, 0, 3, string_duplicate("Actual"));
-  string_grid_set_cell(sg, 0, 4, string_duplicate("Best"));
-  string_grid_set_cell(sg, 0, 5, string_duplicate("Win%Diff"));
-  string_grid_set_cell(sg, 0, 6, string_duplicate("EqDiff"));
-  string_grid_set_cell(sg, 0, 7, string_duplicate("Note"));
+  string_grid_set_cell(sg, 0, 0, string_duplicate("T"));
+  string_grid_set_cell(sg, 0, 1, string_duplicate("PT"));
+  string_grid_set_cell(sg, 0, 2, string_duplicate("P"));
+  string_grid_set_cell(sg, 0, 3, string_duplicate("Rack"));
+  string_grid_set_cell(sg, 0, 4, string_duplicate("Actual"));
+  string_grid_set_cell(sg, 0, 5, string_duplicate("Best"));
+  string_grid_set_cell(sg, 0, 6, string_duplicate("WPD"));
+  string_grid_set_cell(sg, 0, 7, string_duplicate("EqD"));
+  string_grid_set_cell(sg, 0, 8, string_duplicate("Note"));
 
   Equity total_equity_lost = 0;
   double total_win_pct_lost = 0.0;
   int grid_row = 1;
+  int player_turn_counts[2] = {0, 0};
 
   for (int result_idx = 0; result_idx < num_turn_results; result_idx++) {
     const TurnResult *tr = &turn_results[result_idx];
+    player_turn_counts[tr->player_index]++;
     if (player_filter != -1 && tr->player_index != player_filter) {
       continue;
     }
@@ -489,18 +500,21 @@ static void write_analysis_summary(GameHistory *game_history,
 
     string_grid_set_cell(sg, grid_row, 0,
                          get_formatted_string("%d", tr->turn_number));
-    string_grid_set_cell(sg, grid_row, 1, string_duplicate(player_name));
-    string_grid_set_cell(sg, grid_row, 2, analyze_format_rack(&tr->rack, ld));
-    string_grid_set_cell(sg, grid_row, 3,
-                         analyze_format_move(&tr->actual_move, board, ld));
+    string_grid_set_cell(
+        sg, grid_row, 1,
+        get_formatted_string("%d", player_turn_counts[tr->player_index]));
+    string_grid_set_cell(sg, grid_row, 2, string_duplicate(player_name));
+    string_grid_set_cell(sg, grid_row, 3, analyze_format_rack(&tr->rack, ld));
     string_grid_set_cell(sg, grid_row, 4,
+                         analyze_format_move(&tr->actual_move, board, ld));
+    string_grid_set_cell(sg, grid_row, 5,
                          tr->has_best_move
                              ? analyze_format_move(&tr->best_move, board, ld)
                              : string_duplicate("-"));
-    string_grid_set_cell(sg, grid_row, 5,
+    string_grid_set_cell(sg, grid_row, 6,
                          get_formatted_string("%.2f", tr->win_pct_lost));
     string_grid_set_cell(
-        sg, grid_row, 6,
+        sg, grid_row, 7,
         get_formatted_string("%.2f", equity_to_double(tr->equity_lost)));
 
     if (tr->note_str) {
@@ -513,12 +527,12 @@ static void write_analysis_summary(GameHistory *game_history,
         char *with_ellipsis = get_formatted_string("%s...", truncated);
         free(truncated);
         free(trimmed_note);
-        string_grid_set_cell(sg, grid_row, 7, with_ellipsis);
+        string_grid_set_cell(sg, grid_row, 8, with_ellipsis);
       } else {
-        string_grid_set_cell(sg, grid_row, 7, trimmed_note);
+        string_grid_set_cell(sg, grid_row, 8, trimmed_note);
       }
     } else {
-      string_grid_set_cell(sg, grid_row, 7, string_duplicate(""));
+      string_grid_set_cell(sg, grid_row, 8, string_duplicate(""));
     }
 
     total_equity_lost += tr->equity_lost;
@@ -540,23 +554,36 @@ static void write_analysis_summary(GameHistory *game_history,
       equity_to_double(total_equity_lost) / (double)matching_count;
   const double avg_win_pct = total_win_pct_lost / (double)matching_count;
 
-  fprintf(report_file,
-          "Total equity lost: %.2f\n"
-          "Average equity lost/turn: %.2f\n"
-          "Total win%% lost: %.2f\n"
-          "Average win%% lost/turn: %.2f\n",
-          equity_to_double(total_equity_lost), avg_equity, total_win_pct_lost,
-          avg_win_pct);
+  StringGrid *totals_sg = string_grid_create(3, 3, ANALYZE_SUMMARY_COL_PADDING);
+  string_grid_set_cell(totals_sg, 0, 0, string_duplicate(""));
+  string_grid_set_cell(totals_sg, 0, 1, string_duplicate("Total"));
+  string_grid_set_cell(totals_sg, 0, 2, string_duplicate("Avg"));
+  string_grid_set_cell(totals_sg, 1, 0, string_duplicate("WP"));
+  string_grid_set_cell(totals_sg, 1, 1,
+                       get_formatted_string("%.2f", total_win_pct_lost));
+  string_grid_set_cell(totals_sg, 1, 2,
+                       get_formatted_string("%.2f", avg_win_pct));
+  string_grid_set_cell(totals_sg, 2, 0, string_duplicate("Eq"));
+  string_grid_set_cell(totals_sg, 2, 1,
+                       get_formatted_string("%.2f",
+                                            equity_to_double(total_equity_lost)));
+  string_grid_set_cell(totals_sg, 2, 2,
+                       get_formatted_string("%.2f", avg_equity));
+  StringBuilder *totals_sb = string_builder_create();
+  string_builder_add_string_grid(totals_sb, totals_sg, false);
+  fprintf(report_file, "%s\n", string_builder_peek(totals_sb));
+  string_builder_destroy(totals_sb);
+  string_grid_destroy(totals_sg);
 }
 
-// Analyzes a single turn statically (sim_plies == 0): generates moves, finds
-// the best, and records equity lost against the actual play.
-static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
-                                const GameHistory *game_history,
-                                const LetterDistribution *ld, FILE *report_file,
-                                AnalyzeCtx *ctx, int max_num_display_plays,
-                                bool human_readable,
-                                bool is_first_analyzed_turn) {
+// Generates moves for the current game state, then ensures the actual move
+// appears in the heap. On an opening move of a transposable board, replaces
+// the movegen-generated horizontal equivalent with the actual vertical play
+// while preserving the computed equity for accurate ranking. Returns the heap
+// index of the actual move (valid until the next heap-mutating operation).
+static int
+analyze_gen_moves_with_actual(AnalyzeCtx *ctx, const Move *actual_move,
+                              bool vertical_opening_is_transposable) {
   move_list_reset(ctx->move_list);
   const MoveGenArgs gen_args = {
       .game = ctx->game,
@@ -571,34 +598,78 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
   };
   generate_moves(&gen_args);
 
-  const ValidatedMoves *vms = game_event_get_vms(event);
-  const Move *actual_move = validated_moves_get_move(vms, 0);
-
   // Check whether the actual move is already in the generated heap.
+  // On the opening move of a transposable board, also accept the horizontal
+  // equivalent of a vertical play: replace it in-place so the player's actual
+  // move (with its position and direction) is used for display while keeping
+  // the movegen-computed equity intact for accurate ranking.
   const int move_count = move_list_get_count(ctx->move_list);
-  bool actual_in_heap = false;
+  int actual_heap_idx = -1;
   for (int move_idx = 0; move_idx < move_count; move_idx++) {
     if (compare_moves_without_equity(
             move_list_get_move(ctx->move_list, move_idx), actual_move, true) ==
         -1) {
-      actual_in_heap = true;
+      actual_heap_idx = move_idx;
+      break;
+    }
+    if (vertical_opening_is_transposable &&
+        board_get_tiles_played(game_get_board(ctx->game)) == 0 &&
+        moves_are_transposed(move_list_get_move(ctx->move_list, move_idx),
+                             actual_move)) {
+      Move *gen_move = move_list_get_move(ctx->move_list, move_idx);
+      const Equity gen_equity = move_get_equity(gen_move);
+      move_copy(gen_move, actual_move);
+      move_set_equity(gen_move, gen_equity);
+      actual_heap_idx = move_idx;
       break;
     }
   }
-  if (!actual_in_heap) {
+  if (actual_heap_idx < 0) {
     if (move_list_get_count(ctx->move_list) ==
         move_list_get_capacity(ctx->move_list)) {
       move_list_pop_move(ctx->move_list);
     }
     move_list_add_move(ctx->move_list, actual_move);
+    // The move was inserted into the heap; search to find its new position.
+    const int new_count = move_list_get_count(ctx->move_list);
+    for (int move_idx = 0; move_idx < new_count; move_idx++) {
+      if (compare_moves_without_equity(
+              move_list_get_move(ctx->move_list, move_idx), actual_move,
+              true) == -1) {
+        actual_heap_idx = move_idx;
+        break;
+      }
+    }
   }
+  if (actual_heap_idx < 0) {
+    log_fatal(
+        "Failed to find actual move in heap after generation and insertion");
+  }
+  return actual_heap_idx;
+}
+
+// Analyzes a single turn statically (sim_plies == 0): generates moves, finds
+// the best, and records equity lost against the actual play.
+static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
+                                const GameHistory *game_history,
+                                const LetterDistribution *ld, FILE *report_file,
+                                AnalyzeCtx *ctx, int max_num_display_plays,
+                                bool human_readable,
+                                bool is_first_analyzed_turn,
+                                bool vertical_opening_is_transposable) {
+  const ValidatedMoves *vms = game_event_get_vms(event);
+  const Move *actual_move = validated_moves_get_move(vms, 0);
+
+  analyze_gen_moves_with_actual(ctx, actual_move,
+                                vertical_opening_is_transposable);
 
   // Sort into descending equity order: index 0 is the best move.
   move_list_sort_moves(ctx->move_list);
 
   // Find the actual move in the sorted list.
+  const int sorted_count = move_list_get_count(ctx->move_list);
   int actual_idx = -1;
-  for (int move_idx = 0; move_idx < move_count; move_idx++) {
+  for (int move_idx = 0; move_idx < sorted_count; move_idx++) {
     if (compare_moves_without_equity(
             move_list_get_move(ctx->move_list, move_idx), actual_move, true) ==
         -1) {
@@ -607,7 +678,7 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
     }
   }
 
-  if (move_count > 0 && actual_idx != 0) {
+  if (sorted_count > 0 && actual_idx != 0) {
     const Equity best_equity =
         move_get_equity(move_list_get_move(ctx->move_list, 0));
     const Equity actual_equity =
@@ -643,41 +714,15 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
                              const LetterDistribution *ld, FILE *report_file,
                              AnalyzeCtx *ctx, AnalyzeArgs *args,
                              bool is_first_analyzed_turn,
+                             bool vertical_opening_is_transposable,
                              ErrorStack *error_stack) {
-  move_list_reset(ctx->move_list);
-  const MoveGenArgs gen_args = {
-      .game = ctx->game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .thread_index = 0,
-      .move_list = ctx->move_list,
-  };
-  generate_moves(&gen_args);
-
   const ValidatedMoves *vms = game_event_get_vms(event);
   const Move *actual_move = validated_moves_get_move(vms, 0);
 
-  bool actual_found = false;
-  const int num_moves = move_list_get_count(ctx->move_list);
-  for (int sp_idx = 0; sp_idx < num_moves; sp_idx++) {
-    if (compare_moves_without_equity(move_list_get_move(ctx->move_list, sp_idx),
-                                     actual_move, true) == -1) {
-      actual_found = true;
-      break;
-    }
-  }
-  if (!actual_found) {
-    if (move_list_get_count(ctx->move_list) ==
-        move_list_get_capacity(ctx->move_list)) {
-      move_list_pop_move(ctx->move_list);
-    }
-    move_list_add_move(ctx->move_list, actual_move);
-  }
+  int actual_heap_idx = analyze_gen_moves_with_actual(
+      ctx, actual_move, vertical_opening_is_transposable);
 
+  const int num_moves = move_list_get_count(ctx->move_list);
   const int player_on_turn_index = game_get_player_on_turn_index(ctx->game);
   Rack *known_opp_rack =
       player_get_rack(game_get_player(ctx->game, 1 - player_on_turn_index));
@@ -707,12 +752,21 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
               &turn_result->rack);
   }
 
+  // Designate the player's actual move as not prunable so BAI always fully
+  // simulates it.
+  args->sim_args.bai_options.arm_avoid_prune = &actual_heap_idx;
+  args->sim_args.bai_options.num_arm_avoid_prune = 1;
+
   simulate(&args->sim_args, &ctx->sim_ctx, ctx->sim_results, error_stack);
+
+  args->sim_args.bai_options.arm_avoid_prune = NULL;
+  args->sim_args.bai_options.num_arm_avoid_prune = 0;
   args->sim_args.use_inference = original_infer_arg;
 
-  // Reset nontarget_known_rack so it does not carry over to the next turn.
+  // Reset inference racks so they do not carry over to the next turn.
   if (use_inference_for_this_turn) {
     rack_reset(args->sim_args.inference_args.nontarget_known_rack);
+    rack_reset(args->sim_args.inference_args.target_known_rack);
   }
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -835,21 +889,29 @@ static void analyze_with_endgame(const GameEvent *event,
         actual_play_endgame_results, ENDGAME_RESULT_BEST, actual_game_copy);
     const int spread_diff =
         turn_result->best_endgame_spread - turn_result->actual_endgame_spread;
-    turn_result->equity_lost = int_to_equity(spread_diff);
-    turn_result->actual_endgame_value =
-        turn_result->best_endgame_value - spread_diff;
-    turn_result->win_pct_lost = 0.0;
-    if ((turn_result->best_endgame_spread >= 0 &&
-         turn_result->actual_endgame_spread < 0) ||
-        (turn_result->best_endgame_spread > 0 &&
-         turn_result->actual_endgame_spread == 0)) {
-      turn_result->win_pct_lost = 50.0;
-    } else if (turn_result->best_endgame_spread > 0 &&
-               turn_result->actual_endgame_spread < 0) {
-      turn_result->win_pct_lost = 100.0;
+    if (spread_diff == 0) {
+      // Actual move achieves the same spread as the best; treat as optimal.
+      turn_result->actual_endgame_value = turn_result->best_endgame_value;
+      turn_result->equity_lost = 0;
+      turn_result->win_pct_lost = 0.0;
+      turn_result->has_best_move = false;
+    } else {
+      turn_result->equity_lost = int_to_equity(spread_diff);
+      turn_result->actual_endgame_value =
+          turn_result->best_endgame_value - spread_diff;
+      turn_result->win_pct_lost = 0.0;
+      if ((turn_result->best_endgame_spread >= 0 &&
+           turn_result->actual_endgame_spread < 0) ||
+          (turn_result->best_endgame_spread > 0 &&
+           turn_result->actual_endgame_spread == 0)) {
+        turn_result->win_pct_lost = 50.0;
+      } else if (turn_result->best_endgame_spread > 0 &&
+                 turn_result->actual_endgame_spread < 0) {
+        turn_result->win_pct_lost = 100.0;
+      }
+      turn_result->best_move = best_first_move;
+      turn_result->has_best_move = true;
     }
-    turn_result->best_move = best_first_move;
-    turn_result->has_best_move = true;
   }
 
   turn_result->was_endgame = true;
@@ -891,6 +953,8 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
   int num_turn_results = 0;
   int turn_counter = 0;
   bool is_first_analyzed_turn = true;
+  const bool vertical_opening_is_transposable =
+      board_is_vertical_opening_transposable(game_get_board(ctx->game));
 
   for (int event_idx = 0; event_idx < num_events; event_idx++) {
     const GameEvent *event = game_history_get_event(game_history, event_idx);
@@ -923,9 +987,9 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     // are in the bag because after_event_player_off_turn_rack is empty for
     // normal plays (only set from phonied tiles). So the bag holds both the
     // real draw pile and the opponent's unknown rack tiles. To correctly
-    // detect an endgame (draw pile empty), look ahead in game_history for
+    // detect an endgame, look ahead in game_history for
     // the opponent's next move event; their rack at that event equals their
-    // current rack, letting us compute: draw_pile = bag - opp_rack_tiles.
+    // current rack, letting us compute: remaining tiles = bag - opp_rack_tiles.
     int opp_rack_tiles = 0;
     for (int next_idx = event_idx + 1; next_idx < num_events; next_idx++) {
       const GameEvent *next_event =
@@ -937,7 +1001,7 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
         break;
       }
     }
-    const int draw_pile_tiles =
+    const int next_event_bag_letters_remaining =
         bag_get_letters(game_get_bag(ctx->game)) - opp_rack_tiles;
 
     const ValidatedMoves *vms = game_event_get_vms(event);
@@ -952,13 +1016,27 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     rack_copy(&turn_result.rack, event_rack);
     turn_result.note_str = game_event_get_note(event);
 
+    const char *gcg_filename = game_history_get_gcg_filename(game_history);
+    char *move_str =
+        analyze_format_move(actual_move, game_get_board(ctx->game), ld);
+    char *rack_str = analyze_format_rack(event_rack, ld);
+    char *status_str = get_formatted_string(
+        "%s turn %d: %s %s\n", gcg_filename ? gcg_filename : "(Current Game)",
+        turn_counter, move_str, rack_str);
+    thread_control_print(analyze_args->sim_args.thread_control, status_str);
+    free(move_str);
+    free(rack_str);
+    free(status_str);
+
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_file,
                           ctx, analyze_args->max_num_display_plays,
-                          analyze_args->human_readable, is_first_analyzed_turn);
-    } else if (draw_pile_tiles > 0) {
+                          analyze_args->human_readable, is_first_analyzed_turn,
+                          vertical_opening_is_transposable);
+    } else if (next_event_bag_letters_remaining > 0) {
       analyze_with_sim(event, &turn_result, game_history, ld, report_file, ctx,
-                       analyze_args, is_first_analyzed_turn, error_stack);
+                       analyze_args, is_first_analyzed_turn,
+                       vertical_opening_is_transposable, error_stack);
     } else {
       analyze_with_endgame(event, &turn_result, game_history, ld, report_file,
                            ctx, analyze_args, is_first_analyzed_turn,
@@ -972,6 +1050,11 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     }
 
     turn_results[num_turn_results++] = turn_result;
+
+    if (thread_control_get_status(analyze_args->sim_args.thread_control) ==
+        THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+      break;
+    }
   }
 
   if (error_stack_is_empty(error_stack) && analyze_args->human_readable) {

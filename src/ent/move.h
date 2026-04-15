@@ -403,6 +403,37 @@ static inline int compare_moves_without_equity(const Move *move_1,
   return -1;
 }
 
+static inline bool moves_are_transposed(const Move *move_1,
+                                        const Move *move_2) {
+  if (move_1->move_type != move_2->move_type) {
+    return false;
+  }
+  if (move_1->row_start != move_2->col_start) {
+    return false;
+  }
+  if (move_1->col_start != move_2->row_start) {
+    return false;
+  }
+  if (move_1->dir == move_2->dir) {
+    return false;
+  }
+  if (move_1->score != move_2->score) {
+    return false;
+  }
+  if (move_1->tiles_played != move_2->tiles_played) {
+    return false;
+  }
+  if (move_1->tiles_length != move_2->tiles_length) {
+    return false;
+  }
+  for (int i = 0; i < move_1->tiles_length; i++) {
+    if (move_1->tiles[i] != move_2->tiles[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static inline void move_key_set_field(uint64_t *key, int *bit_index,
                                       uint64_t value, int bits_per_value) {
   uint64_t masked_value = value & (((uint64_t)1 << bits_per_value) - 1);

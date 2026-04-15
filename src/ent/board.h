@@ -658,6 +658,11 @@ board_are_bonus_squares_symmetric_by_transposition(const Board *board) {
   return true;
 }
 
+static inline bool board_is_vertical_opening_transposable(const Board *board) {
+  return board->start_coords[0] == board->start_coords[1] &&
+         board_are_bonus_squares_symmetric_by_transposition(board);
+}
+
 static inline void board_update_all_anchors(Board *board) {
   if (board->tiles_played > 0) {
     for (int i = 0; i < BOARD_DIM; i++) {

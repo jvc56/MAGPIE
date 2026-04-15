@@ -698,8 +698,9 @@ void populate_inference_args_with_game_history(InferenceArgs *args,
   // already held by the current player — causing fatal draw failures when
   // simulation later tries to draw those tiles from the bag.
   if (rack_is_empty(args->nontarget_known_rack)) {
-    rack_copy(args->nontarget_known_rack,
-              player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
+    rack_copy(
+        args->nontarget_known_rack,
+        player_get_rack(game_get_player(game_dup, 1 - args->target_index)));
   }
   if (rack_is_empty(args->target_known_rack)) {
     for (int i = most_recent_move_event_index - 1; i >= 0; i--) {
