@@ -2435,10 +2435,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
                           SimArgs *sim_args) {
   InferenceArgs inference_args;
   if (config->sim_with_inference) {
-    // FIXME: enable sim inferences using data from the last play instead of
-    // the whole history so that autoplay does not have to keep a whole
-    // history and play to turn for each inference which will probably incur
-    // more overhead than we would like.
     config_fill_infer_args(config, true, 0, 0, 0, target_played_tiles, false,
                            target_known_inference_tiles, nontarget_known_tiles,
                            &inference_args);
@@ -7013,8 +7009,11 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
 
 // Analyzes a single GCG file that has already been parsed into game_history
 // and whose analyze_args has already been filled. Called from both
-// analyze_single_gcg and the analyze_directory loop.
-static void analyze_after_gcg_parsed(AnalyzeArgs *analyze_args,
+// analyze_single_gcg and the analyze_directory loop. config must reflect the
+// post-parse state so the settings string captures any updates made by
+// config_parse_gcg_string / config_parse_gcg.
+static void analyze_after_gcg_parsed(const Config *config,
+                                     AnalyzeArgs *analyze_args,
                                      AnalyzeCtx **ctx_ptr, const char *gcg_path,
                                      const char *player_list_str,
                                      ErrorStack *error_stack) {
@@ -7027,7 +7026,14 @@ static void analyze_after_gcg_parsed(AnalyzeArgs *analyze_args,
   char *report_path = get_formatted_string("%s_report.txt", base);
   free(base);
   analyze_args->report_path = report_path;
+  StringBuilder *settings_sb = string_builder_create();
+  config_add_settings_to_string_builder(config, settings_sb);
+  char *settings_str = string_builder_dump(settings_sb, NULL);
+  string_builder_destroy(settings_sb);
+  analyze_args->config_settings_str = settings_str;
   analyze_game(analyze_args, ctx_ptr, error_stack);
+  free(settings_str);
+  analyze_args->config_settings_str = NULL;
   free(report_path);
   analyze_args->report_path = NULL;
 }
@@ -7053,7 +7059,7 @@ static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
     return;
   }
   game_history_set_gcg_filename(config->game_history, source_identifier);
-  analyze_after_gcg_parsed(analyze_args, ctx_ptr, source_identifier,
+  analyze_after_gcg_parsed(config, analyze_args, ctx_ptr, source_identifier,
                            player_list_str, error_stack);
 }
 
@@ -7104,8 +7110,8 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
       free(gcg_path);
       break;
     }
-    analyze_after_gcg_parsed(analyze_args, ctx_ptr, gcg_path, player_list_str,
-                             error_stack);
+    analyze_after_gcg_parsed(config, analyze_args, ctx_ptr, gcg_path,
+                             player_list_str, error_stack);
     free(gcg_path);
     if (!error_stack_is_empty(error_stack)) {
       if (error_stack_top(error_stack) ==
@@ -7182,8 +7188,15 @@ void impl_analyze(Config *config, ErrorStack *error_stack) {
       report_path = string_duplicate("game_report.txt");
     }
     analyze_args.report_path = report_path;
+    StringBuilder *settings_sb_0arg = string_builder_create();
+    config_add_settings_to_string_builder(config, settings_sb_0arg);
+    char *settings_str_0arg = string_builder_dump(settings_sb_0arg, NULL);
+    string_builder_destroy(settings_sb_0arg);
+    analyze_args.config_settings_str = settings_str_0arg;
     AnalyzeCtx *ctx = NULL;
     analyze_game(&analyze_args, &ctx, error_stack);
+    free(settings_str_0arg);
+    analyze_args.config_settings_str = NULL;
     analyze_ctx_destroy(ctx);
     free(report_path);
     return;
@@ -7237,7 +7250,14 @@ void impl_analyze(Config *config, ErrorStack *error_stack) {
         report_path = string_duplicate("game_report.txt");
       }
       analyze_args.report_path = report_path;
+      StringBuilder *settings_sb_1arg = string_builder_create();
+      config_add_settings_to_string_builder(config, settings_sb_1arg);
+      char *settings_str_1arg = string_builder_dump(settings_sb_1arg, NULL);
+      string_builder_destroy(settings_sb_1arg);
+      analyze_args.config_settings_str = settings_str_1arg;
       analyze_game(&analyze_args, &ctx, error_stack);
+      free(settings_str_1arg);
+      analyze_args.config_settings_str = NULL;
       free(report_path);
     }
   }

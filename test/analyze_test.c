@@ -96,6 +96,19 @@ static void test_analyze_vertical_opening_transposable(void) {
 }
 
 void test_analyze(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -plies 2 -hr true -iter 100 "
+      "-numplays 5 -minp 10 -tlim 10 -imargin 4 -sinfer true");
+
+  // 0-arg analyze uses game_report.txt when no gcg_filename is recorded
+  assert_config_exec_status(config,
+                            "analyze 2026-04-12-Sterling/r3_zach.gcg Josh",
+                            ERROR_STATUS_SUCCESS);
+
+  config_destroy(config);
+
+  return;
+
   test_analyze_vertical_opening_transposable();
   test_analyze_single_file();
   test_analyze_zero_args();

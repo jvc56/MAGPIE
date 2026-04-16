@@ -32,6 +32,7 @@ typedef struct AnalyzeArgs {
 
   bool human_readable;
   int max_num_display_plays;
+  const char *config_settings_str; // non-owning; set by caller, freed by caller
 } AnalyzeArgs;
 
 AnalyzeCtx *analyze_ctx_create(void);
