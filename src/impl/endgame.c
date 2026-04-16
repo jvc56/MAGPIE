@@ -623,12 +623,14 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   }
   es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
   es->results = results;
+  endgame_results_lock(es->results, ENDGAME_RESULT_DISPLAY);
   endgame_results_reset(es->results);
-  endgame_results_set_valid_for_current_game_state(es->results, true);
   endgame_results_set_start_game(es->results, endgame_args->game);
   endgame_results_set_pvline_extend_args(es->results, es->transposition_table,
                                          es->solving_player,
                                          es->requested_plies);
+  endgame_results_set_valid_for_current_game_state(es->results, true);
+  endgame_results_unlock(es->results, ENDGAME_RESULT_DISPLAY);
   // Compute initial stuck-tile fraction for root move ordering.
   // Per-node detection in abdada_negamax recomputes this dynamically.
   es->initial_opp_stuck_frac = 0.0F;
@@ -1780,12 +1782,14 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
                                          on_turn_spread, pv, opp_stuck_frac);
     }
+    pv->negamax_depth = 0;
     return on_turn_spread;
   }
 
   PVLine child_pv;
   child_pv.game = worker->game_copy;
   child_pv.num_moves = 0;
+  child_pv.negamax_depth = 0;
 
   int nplays;
   bool arena_alloced = false;
@@ -2342,6 +2346,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     PVLine pv;
     pv.game = worker->game_copy;
     pv.num_moves = 0;
+    pv.negamax_depth = 0;
 
     int32_t val;
 
@@ -2605,6 +2610,10 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
   }
 
+  // Hold the DISPLAY lock because concurrent status/shendgame calls read these
+  // fields under it.
+  endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
+
   if (endgame_args->enable_pv_display) {
     // Extract top-K root moves from best thread's arena
     endgame_results_ensure_pvs_capacity(results, solver->num_top_moves);
@@ -2640,4 +2649,5 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // so post-solve calls to string_builder_endgame_results don't touch a
   // potentially freed pointer after endgame_ctx_destroy.
   endgame_results_set_pvline_extend_args(results, NULL, 0, 0);
+  endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
 }

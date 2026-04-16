@@ -18,6 +18,7 @@
 
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
+  MAX_ENDGAME_DISPLAY_PVS = 100,
 };
 
 typedef struct EndgameCtx EndgameCtx;

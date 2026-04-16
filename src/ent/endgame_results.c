@@ -50,6 +50,7 @@ EndgameResults *endgame_results_create(void) {
   cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
+  endgame_results->seconds_elapsed = 0;
   endgame_results->start_game = NULL;
   endgame_results->multi_pvs = NULL;
   endgame_results->num_pvs = 0;

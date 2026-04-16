@@ -285,8 +285,7 @@ void test_nonempty_bag(void) {
 
 void test_single_pv_display(void) {
   // Solve a multi-PV endgame, then verify that shendgame <n> produces output
-  // via string_builder_endgame_single_pv for each valid PV index and returns
-  // an error for an out-of-range index.
+  // via string_builder_endgame_single_pv for each valid PV index .
   Config *config =
       config_create_or_die("set -s1 score -s2 score -eplies 4 -etopk 5");
   load_and_exec_config_or_die(
