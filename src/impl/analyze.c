@@ -1063,16 +1063,15 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     rack_copy(&turn_result.rack, event_rack);
     turn_result.note_str = game_event_get_note(event);
 
-    const char *gcg_filename = game_history_get_gcg_filename(game_history);
     char *move_str =
         analyze_format_move(actual_move, game_get_board(ctx->game), ld);
-    char *rack_str = analyze_format_rack(event_rack, ld);
-    char *status_str = get_formatted_string(
-        "%s turn %d: %s %s\n", gcg_filename ? gcg_filename : "(Current Game)",
-        turn_counter, move_str, rack_str);
-    thread_control_print(analyze_args->sim_args.thread_control, status_str);
+    StringBuilder *status_sb = string_builder_create();
+    string_builder_add_formatted_string(status_sb, "Event %d: %s\n",
+                                        turn_counter, move_str);
     free(move_str);
-    free(rack_str);
+    char *status_str = string_builder_dump(status_sb, NULL);
+    string_builder_destroy(status_sb);
+    thread_control_print(analyze_args->sim_args.thread_control, status_str);
     free(status_str);
 
     if (analyze_args->sim_args.num_plies == 0) {
