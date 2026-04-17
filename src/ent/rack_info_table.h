@@ -139,11 +139,11 @@ typedef struct RackInfoTableEntry {
   uint32_t multi_pt_tp7_bitvec[RIT_MULTI_PT_TP7_NUM_WORD_LENGTHS];
   uint32_t multi_pt_tp6_bitvec[RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS];
   uint8_t nonplaythrough_has_word_of_length_bitmask;
-  // Inline bingo words (nonplaythrough, blankless only). Up to 4 words
-  // of RACK_SIZE letters stored directly. num_bingo_words = 0 means no
-  // inline bingos (blank rack or >4 anagrams — fall back to WMP).
+  // Inline bingo words (nonplaythrough only). Up to RIT_MAX_INLINE_BINGO_WORDS
+  // words of RACK_SIZE letters stored directly. num_bingo_words = 0 means no
+  // inline bingos (>RIT_MAX_INLINE_BINGO_WORDS anagrams — fall back to WMP).
   uint8_t num_bingo_words;
-  MachineLetter bingo_words[1][RACK_SIZE];
+  MachineLetter bingo_words[RIT_MAX_INLINE_BINGO_WORDS][RACK_SIZE];
   // Best exchange move across all leave sizes, tiebroken by compare_moves.
   MachineLetter best_exchange_strip[RACK_SIZE];
   uint8_t best_exchange_tiles_exchanged;
@@ -312,15 +312,15 @@ static inline Equity rack_info_table_entry_get_nonplaythrough_best_leave_value(
 
 // Returns the precomputed best_leaves array for this rack entry. Each
 // best_leaves[leave_size] is the maximum leave value across all canonical
-// C(RACK_SIZE, leave_size) subsets of the rack. Returns NULL if leave_size
-// is out of range.
+// C(RACK_SIZE, leave_size) subsets of the rack, for leave_size in
+// [0, RACK_SIZE].
 static inline const Equity *
 rack_info_table_entry_get_best_leaves(const RackInfoTableEntry *entry) {
   return entry->best_leaves;
 }
 
 // Returns the inline bingo words and count. Returns 0 if not available
-// (blank rack, >4 words, or no bingo exists).
+// (>RIT_MAX_INLINE_BINGO_WORDS anagrams, or no bingo exists).
 static inline int
 rack_info_table_entry_get_bingo_words(const RackInfoTableEntry *entry,
                                       const MachineLetter **words_out) {
@@ -400,9 +400,10 @@ static inline void rack_info_table_destroy(RackInfoTable *rit) {
 //                                                  (uint32 per word length)
 //     RIT_MULTI_PT_TP6_NUM_WORD_LENGTHS * 4 bytes: multi_pt_tp6_bitvec
 //     1 byte: nonplaythrough_has_word_of_length_bitmask
+//     1 byte: num_bingo_words
+//     RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE bytes: bingo_words
 //     RACK_SIZE bytes: best_exchange_strip (MachineLetter per tile)
 //     1 byte: best_exchange_tiles_exchanged
-//     2 bytes: pad
 //     3 bytes: pad
 //     16 bytes: bit_rack_bytes (full BitRack for collision check)
 
@@ -470,6 +471,11 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
     fwrite_or_die(&entry->nonplaythrough_has_word_of_length_bitmask,
                   sizeof(uint8_t), 1, stream,
                   "rit nonplaythrough has word of length bitmask");
+    fwrite_or_die(&entry->num_bingo_words, sizeof(uint8_t), 1, stream,
+                  "rit num bingo words");
+    fwrite_or_die(entry->bingo_words, sizeof(MachineLetter),
+                  RIT_MAX_INLINE_BINGO_WORDS * RACK_SIZE, stream,
+                  "rit bingo words");
     fwrite_or_die(entry->best_exchange_strip, sizeof(MachineLetter), RACK_SIZE,
                   stream, "rit best exchange strip");
     fwrite_or_die(&entry->best_exchange_tiles_exchanged, sizeof(uint8_t), 1,
@@ -646,7 +652,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   (void)rit;
   (void)name;
   error_stack_push(
-      error_stack, ERROR_STATUS_WMP_INCOMPATIBLE_BOARD_DIM,
+      error_stack, ERROR_STATUS_RW_READ_ERROR,
       get_formatted_string(
           "mmap mode is not supported on big-endian architectures: %s",
           filename));
@@ -663,7 +669,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   if (fstat(fd, &st) < 0) {
     close(fd);
     error_stack_push(
-        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("could not stat rit file: %s", filename));
     return;
   }
@@ -672,8 +678,16 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   close(fd);
   if (mapped == MAP_FAILED) {
     error_stack_push(
-        error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
         get_formatted_string("could not mmap rit file: %s", filename));
+    return;
+  }
+
+  if (file_size < 12) {
+    munmap(mapped, file_size);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit file too small for header: %s", filename));
     return;
   }
 
@@ -709,9 +723,29 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   memcpy(&rit->num_buckets, data + 4, sizeof(uint32_t));
   memcpy(&rit->num_entries, data + 8, sizeof(uint32_t));
 
-  size_t bucket_starts_offset = 12;
-  size_t bucket_starts_size = ((size_t)rit->num_buckets + 1) * sizeof(uint32_t);
-  size_t entries_offset = bucket_starts_offset + bucket_starts_size;
+  // Bounds-check each section against the remaining mapped region. Use
+  // division against the available space so corrupt num_buckets/num_entries
+  // values cannot overflow the size_t multiplication.
+  const size_t bucket_starts_offset = 12;
+  const size_t num_bucket_start_slots = (size_t)rit->num_buckets + 1;
+  if (num_bucket_start_slots >
+      (file_size - bucket_starts_offset) / sizeof(uint32_t)) {
+    munmap(mapped, file_size);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit file truncated or corrupt: %s", filename));
+    return;
+  }
+  const size_t bucket_starts_size = num_bucket_start_slots * sizeof(uint32_t);
+  const size_t entries_offset = bucket_starts_offset + bucket_starts_size;
+  if ((size_t)rit->num_entries >
+      (file_size - entries_offset) / sizeof(RackInfoTableEntry)) {
+    munmap(mapped, file_size);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_READ_ERROR,
+        get_formatted_string("rit file truncated or corrupt: %s", filename));
+    return;
+  }
 
   rit->bucket_starts = (uint32_t *)(data + bucket_starts_offset);
   rit->entries = (RackInfoTableEntry *)(data + entries_offset);
