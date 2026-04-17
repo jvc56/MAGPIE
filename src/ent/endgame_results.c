@@ -92,8 +92,12 @@ void endgame_results_reset(EndgameResults *endgame_results) {
 }
 
 void endgame_results_copy(EndgameResults *dest, const EndgameResults *src) {
-  dest->best_pv_data = src->best_pv_data;
-  dest->display_pv_data = src->display_pv_data;
+  dest->best_pv_data.pv_line = src->best_pv_data.pv_line;
+  dest->best_pv_data.value = src->best_pv_data.value;
+  dest->best_pv_data.depth = src->best_pv_data.depth;
+  dest->display_pv_data.pv_line = src->display_pv_data.pv_line;
+  dest->display_pv_data.value = src->display_pv_data.value;
+  dest->display_pv_data.depth = src->display_pv_data.depth;
   dest->valid_for_current_game_state = src->valid_for_current_game_state;
   dest->timer = src->timer;
   dest->seconds_elapsed = src->seconds_elapsed;
@@ -104,6 +108,7 @@ void endgame_results_copy(EndgameResults *dest, const EndgameResults *src) {
   dest->tt = src->tt;
   dest->solving_player = src->solving_player;
   dest->max_depth = src->max_depth;
+  dest->status = src->status;
 }
 
 bool endgame_results_get_valid_for_current_game_state(

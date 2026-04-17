@@ -522,11 +522,15 @@ static void write_analysis_summary(GameHistory *game_history,
     // played-through tiles when formatting moves.
     game_play_n_events(game_history, game, tr->event_idx, false, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      break;
+      log_fatal("Unexpected error replaying game history events for summary "
+                "table: %s",
+                error_stack_top(error_stack));
     }
     game_history_goto(game_history, tr->event_idx, error_stack);
     if (!error_stack_is_empty(error_stack)) {
-      break;
+      log_fatal("Unexpected error updating game history current event for "
+                "summary table: %s",
+                error_stack_top(error_stack));
     }
 
     const Board *board = game_get_board(game);

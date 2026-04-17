@@ -14,7 +14,7 @@
 #include <unistd.h>
 
 enum {
-  MAX_GCG_FILENAME_ATTEMPTS = 10000,
+  MAX_GCG_FILENAME_ATTEMPTS = 1000000,
 };
 
 struct GameEvent {
