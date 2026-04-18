@@ -7040,7 +7040,7 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        nontarget_known_tiles, target_known_inference_tiles,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
-  analyze_args->endgame_args.num_top_moves = ANALYZE_NUM_TOP_ENDGAME_MOVES;
+  analyze_args->endgame_args.num_top_moves = 1;
   analyze_args->human_readable = config->human_readable;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
@@ -7083,22 +7083,38 @@ typedef struct {
   bool interrupted;
 } AnalyzeSummary;
 
-// Counts the number of .gcg files in dir_path. Returns 0 if the directory
-// cannot be opened.
-static int count_gcg_files_in_directory(const char *dir_path) {
-  DIR *dir = opendir(dir_path);
-  if (!dir) {
-    return 0;
+static int compare_string_ptrs(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+// Returns a sorted, heap-allocated array of .gcg filenames found in dir_path.
+// *num_files is set to the number of entries. The array and each string must
+// be freed by the caller. On error, pushes to error_stack and returns NULL.
+static char **get_gcg_files_in_directory(const char *dir_path, int *num_files,
+                                         ErrorStack *error_stack) {
+  DIR *dir = opendir_safe(dir_path, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    *num_files = 0;
+    return NULL;
   }
+  int capacity = 16;
+  char **gcg_files = malloc_or_die(sizeof(char *) * (size_t)capacity);
   int count = 0;
   const struct dirent *entry;
   while ((entry = readdir(dir)) != NULL) {
-    if (has_suffix(".gcg", entry->d_name)) {
-      count++;
+    if (!has_suffix(".gcg", entry->d_name)) {
+      continue;
     }
+    if (count == capacity) {
+      capacity *= 2;
+      gcg_files = realloc_or_die(gcg_files, sizeof(char *) * (size_t)capacity);
+    }
+    gcg_files[count++] = string_duplicate(entry->d_name);
   }
   closedir(dir);
-  return count;
+  qsort(gcg_files, (size_t)count, sizeof(char *), compare_string_ptrs);
+  *num_files = count;
+  return gcg_files;
 }
 
 // Loads a GCG from any source (game ID, URL, or local file path) and analyzes
@@ -7114,9 +7130,7 @@ static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
   GetGCGArgs download_args = {.source_identifier = source_identifier};
   get_gcg(&download_args, &config->gcg_result, error_stack);
   if (!error_stack_is_empty(error_stack)) {
-    if (summary) {
-      summary->error_count++;
-    }
+    summary->error_count++;
     return;
   }
   config_parse_gcg_string(config, config->gcg_result.gcg_string,
@@ -7125,9 +7139,7 @@ static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
     config_set_gcg_filename_and_save(config, &config->gcg_result, error_stack);
   }
   if (!error_stack_is_empty(error_stack)) {
-    if (summary) {
-      summary->error_count++;
-    }
+    summary->error_count++;
     return;
   }
   const char *gcg_display =
@@ -7144,20 +7156,14 @@ static void analyze_single_gcg(Config *config, AnalyzeArgs *analyze_args,
   free(analyzing_str);
   analyze_after_gcg_parsed(config, analyze_args, ctx_ptr, source_identifier,
                            player_list_str, error_stack);
-  if (summary) {
-    if (error_stack_is_empty(error_stack)) {
-      summary->success_count++;
-    } else {
-      summary->error_count++;
-    }
+  if (error_stack_is_empty(error_stack)) {
+    summary->success_count++;
+  } else {
+    summary->error_count++;
   }
 }
 
 // Iterates a directory and analyzes every .gcg file it contains. analyze_args
-static int compare_string_ptrs(const void *a, const void *b) {
-  return strcmp(*(const char *const *)a, *(const char *const *)b);
-}
-
 // must already be filled by the caller via config_fill_analyze_args. The
 // AnalyzeCtx is reused across all games. Files are processed in alphabetical
 // order and the loop checks for user interrupts between files.
@@ -7165,32 +7171,20 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
                               const char *dir_path, const char *player_list_str,
                               AnalyzeCtx **ctx_ptr, AnalyzeSummary *summary,
                               ErrorStack *error_stack) {
-  DIR *dir = opendir(dir_path);
-  if (!dir) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_MISSING_ARG,
-        get_formatted_string("cannot open directory: %s", dir_path));
+  int num_gcg_files = 0;
+  char **gcg_files =
+      get_gcg_files_in_directory(dir_path, &num_gcg_files, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
-  // Collect all .gcg filenames into a sorted list.
-  int num_gcg_files = 0;
-  int gcg_files_capacity = 16;
-  char **gcg_files = malloc_or_die(sizeof(char *) * gcg_files_capacity);
-  const struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    if (!has_suffix(".gcg", entry->d_name)) {
-      continue;
-    }
-    if (num_gcg_files == gcg_files_capacity) {
-      gcg_files_capacity *= 2;
-      gcg_files =
-          realloc_or_die(gcg_files, sizeof(char *) * gcg_files_capacity);
-    }
-    gcg_files[num_gcg_files++] = string_duplicate(entry->d_name);
-  }
-  closedir(dir);
-  qsort(gcg_files, (size_t)num_gcg_files, sizeof(char *), compare_string_ptrs);
+  StringBuilder *count_sb = string_builder_create();
+  string_builder_add_formatted_string(count_sb, "Analyzing %d game(s)\n",
+                                      num_gcg_files);
+  char *count_str = string_builder_dump(count_sb, NULL);
+  string_builder_destroy(count_sb);
+  thread_control_print(analyze_args->sim_args.thread_control, count_str);
+  free(count_str);
 
   ThreadControl *thread_control = analyze_args->sim_args.thread_control;
   for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
@@ -7206,9 +7200,7 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
     config_parse_gcg(config, gcg_path, analyze_args->game_history, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       free(gcg_path);
-      if (summary) {
-        summary->error_count++;
-      }
+      summary->error_count++;
       break;
     }
     analyze_after_gcg_parsed(config, analyze_args, ctx_ptr, gcg_path,
@@ -7222,26 +7214,18 @@ static void analyze_directory(Config *config, AnalyzeArgs *analyze_args,
         free(err_str);
         thread_control_print(thread_control, msg);
         free(msg);
-        if (summary) {
-          summary->error_count++;
-        }
+        summary->error_count++;
       } else {
-        if (summary) {
-          summary->error_count++;
-        }
+        summary->error_count++;
         break;
       }
     } else {
-      if (summary) {
-        summary->success_count++;
-      }
+      summary->success_count++;
     }
     if (thread_control_get_status(thread_control) ==
         THREAD_CONTROL_STATUS_USER_INTERRUPT) {
-      if (summary) {
-        summary->interrupted = true;
-        summary->not_started_count += num_gcg_files - file_idx - 1;
-      }
+      summary->interrupted = true;
+      summary->not_started_count += num_gcg_files - file_idx - 1;
       break;
     }
   }
@@ -7285,19 +7269,6 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 0);
   const char *arg1 = config_get_parg_value(config, ARG_TOKEN_ANALYZE, 1);
 
-  int total_games = 1;
-  if (arg0 != NULL && path_is_directory(arg0)) {
-    total_games = count_gcg_files_in_directory(arg0);
-  }
-
-  StringBuilder *count_sb = string_builder_create();
-  string_builder_add_formatted_string(count_sb, "Analyzing %d game(s)\n",
-                                      total_games);
-  char *count_str = string_builder_dump(count_sb, NULL);
-  string_builder_destroy(count_sb);
-  thread_control_print(config->thread_control, count_str);
-  free(count_str);
-
   if (arg0 == NULL) {
     // 0 args: analyze current game (both players).
     if (game_history_get_num_events(config->game_history) == 0) {
@@ -7336,12 +7307,10 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
     analyze_args.config_settings_str = NULL;
     analyze_ctx_destroy(ctx);
     free(report_path);
-    if (summary) {
-      if (error_stack_is_empty(error_stack)) {
-        summary->success_count++;
-      } else {
-        summary->error_count++;
-      }
+    if (error_stack_is_empty(error_stack)) {
+      summary->success_count++;
+    } else {
+      summary->error_count++;
     }
     return;
   }
@@ -7374,9 +7343,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       // Fall back to treating arg0 as a player name list for the loaded game.
       error_stack_reset(error_stack);
       // Undo the error count from the failed GCG attempt.
-      if (summary) {
-        summary->error_count--;
-      }
+      summary->error_count--;
       if (game_history_get_num_events(config->game_history) == 0) {
         error_stack_push(
             error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_HISTORY_ERROR,
@@ -7419,12 +7386,10 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       free(settings_str_1arg);
       analyze_args.config_settings_str = NULL;
       free(report_path);
-      if (summary) {
-        if (error_stack_is_empty(error_stack)) {
-          summary->success_count++;
-        } else {
-          summary->error_count++;
-        }
+      if (error_stack_is_empty(error_stack)) {
+        summary->success_count++;
+      } else {
+        summary->error_count++;
       }
     }
   }
@@ -7462,7 +7427,8 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
 }
 
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
-  impl_analyze(config, NULL, error_stack);
+  AnalyzeSummary summary = {0};
+  impl_analyze(config, &summary, error_stack);
   return empty_string();
 }
 

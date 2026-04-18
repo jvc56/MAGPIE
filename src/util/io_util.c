@@ -2,6 +2,7 @@
 
 #include "../def/cpthread_defs.h"
 #include <assert.h>
+#include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
 #include <stdarg.h>
@@ -504,6 +505,24 @@ FILE *fopen_safe(const char *filename, const char *mode,
                          filename, mode, system_error_message, error_number));
   }
   return stream;
+}
+
+void append_string_to_file(const char *filename, const char *string,
+                           ErrorStack *error_stack) {
+  write_string_to_file(filename, "a", string, error_stack);
+}
+
+DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack) {
+  DIR *dir = opendir(dir_path);
+  if (!dir) {
+    int error_number = errno;
+    const char *system_error_message = strerror(error_number);
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM,
+        get_formatted_string("failed to open directory '%s': %s (%d)", dir_path,
+                             system_error_message, error_number));
+  }
+  return dir;
 }
 
 void fclose_or_die(FILE *stream) {

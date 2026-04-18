@@ -1,6 +1,7 @@
 #ifndef IO_UTIL_H
 #define IO_UTIL_H
 
+#include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -324,9 +325,12 @@ char *get_string_from_file_handle(FILE *file_handle, const char *filename,
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);
+void append_string_to_file(const char *filename, const char *string,
+                           ErrorStack *error_stack);
 FILE *fopen_or_die(const char *filename, const char *mode);
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack);
+DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);

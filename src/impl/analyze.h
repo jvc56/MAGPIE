@@ -8,10 +8,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-enum {
-  ANALYZE_NUM_TOP_ENDGAME_MOVES = 1,
-};
-
 typedef struct AnalyzeCtx AnalyzeCtx;
 
 // All inputs required by analyze_game. Config.c is responsible for filling
