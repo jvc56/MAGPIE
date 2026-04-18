@@ -109,6 +109,16 @@ typedef struct BAISampleArgs {
   bai_sampling_rule_t sampling_rule;
   bai_threshold_t threshold;
   double cutoff;
+  // Per-thread batch state for the initial phase. When batch_remaining == 0
+  // the worker atomically reserves num_arms consecutive sample indices from
+  // the global counter, forming a batch of (iter N, arms 0..num_arms-1)
+  // processed contiguously on this thread. Each arm in iter N draws its
+  // pre-candidate opp rack from the same iter-local PRNG state, so racks
+  // repeat across arms within a batch and the RIT cache hits. This matters
+  // in the all-initial-phase regime (short MCTS-style sims with no BAI
+  // pruning); it's neutral in normal BAI-phase-dominated sims.
+  uint64_t initial_batch_next_total_index;
+  int initial_batch_remaining;
 } BAISampleArgs;
 
 static inline double bai_alt_lambda(const double mu1, const double sigma21,
@@ -201,12 +211,25 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
 
 static inline int
 bai_sync_data_get_next_initial_sample_index_while_locked(BAISampleArgs *args) {
-  if (args->bai_sync_data->num_total_samples_requested >=
-      args->bai_sync_data->num_arms * args->sample_minimum) {
+  const int num_arms = args->bai_sync_data->num_arms;
+  const uint64_t initial_limit =
+      (uint64_t)num_arms * args->sample_minimum;
+  if (args->initial_batch_remaining == 0) {
+    if (args->bai_sync_data->num_total_samples_requested >= initial_limit) {
+      return -1;
+    }
+    args->initial_batch_next_total_index =
+        args->bai_sync_data->num_total_samples_requested;
+    args->bai_sync_data->num_total_samples_requested += (uint64_t)num_arms;
+    args->initial_batch_remaining = num_arms;
+  }
+  const uint64_t total_index = args->initial_batch_next_total_index++;
+  args->initial_batch_remaining--;
+  if (total_index >= initial_limit) {
+    args->initial_batch_remaining = 0;
     return -1;
   }
-  return args->bai_sync_data->num_total_samples_requested++ /
-         args->sample_minimum;
+  return (int)(total_index % (uint64_t)num_arms);
 }
 
 static inline int
@@ -481,6 +504,8 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
       .sampling_rule = bai_options->sampling_rule,
       .threshold = bai_options->threshold,
       .cutoff = bai_options->cutoff,
+      .initial_batch_next_total_index = 0,
+      .initial_batch_remaining = 0,
   };
 
   while (!bai_should_stop(sync_data->bai_result, thread_control)) {

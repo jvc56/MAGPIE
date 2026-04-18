@@ -22,6 +22,11 @@
 
 #define MOVEGEN_RIT_CACHE_SIZE 64
 
+#ifdef RIT_CACHE_INSTRUMENT
+uint64_t rit_cache_stat_hits(void);
+uint64_t rit_cache_stat_misses(void);
+#endif
+
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
   uint8_t column;

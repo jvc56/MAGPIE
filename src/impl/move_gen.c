@@ -50,6 +50,18 @@
 static MoveGen *cached_gens[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
+#ifdef RIT_CACHE_INSTRUMENT
+#include <stdatomic.h>
+static _Atomic uint64_t rit_cache_hit_ctr;
+static _Atomic uint64_t rit_cache_miss_ctr;
+uint64_t rit_cache_stat_hits(void) {
+  return atomic_load_explicit(&rit_cache_hit_ctr, memory_order_relaxed);
+}
+uint64_t rit_cache_stat_misses(void) {
+  return atomic_load_explicit(&rit_cache_miss_ctr, memory_order_relaxed);
+}
+#endif
+
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
@@ -2716,7 +2728,13 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     if (gen->rit_cache_valid[cache_idx] &&
         bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
       gen->rit_entry = gen->rit_cache_entries[cache_idx];
+#ifdef RIT_CACHE_INSTRUMENT
+      atomic_fetch_add_explicit(&rit_cache_hit_ctr, 1, memory_order_relaxed);
+#endif
     } else {
+#ifdef RIT_CACHE_INSTRUMENT
+      atomic_fetch_add_explicit(&rit_cache_miss_ctr, 1, memory_order_relaxed);
+#endif
       const RackInfoTableEntry *entry =
           rack_info_table_lookup(rit, &player_bit_rack);
       gen->rit_cache_keys[cache_idx] = player_bit_rack;
