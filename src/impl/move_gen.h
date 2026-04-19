@@ -40,6 +40,10 @@ typedef struct SubrackEnumCacheEntry {
   // Flat array indexed by subracks_get_combination_offset(size) + idx_for_size.
   BitRack subracks[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   Equity leave_values[MOVEGEN_SUBRACK_CACHE_ENTRIES];
+  // wmp_entry pointers per subrack, also rack-determined. Storing them
+  // lets us skip the per-subrack wmp_get_word_entry hash lookups on
+  // cache hit. Invalidated when the WMP pointer changes.
+  const WMPEntry *wmp_entries[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   uint8_t count_by_size[RACK_SIZE + 1];
 } SubrackEnumCacheEntry;
 

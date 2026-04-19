@@ -64,9 +64,10 @@ void test_nonplaythrough_existence(void) {
   // when not checking leaves.
   set_dummy_leave_values(&leave_map);
 
-  wmp_move_gen_check_nonplaythrough_existence(&wmg, /*check_leaves=*/false,
-                                              &leave_map,
-                                              /*subracks_precomputed=*/false);
+  wmp_move_gen_check_nonplaythrough_existence(
+      &wmg, /*check_leaves=*/false, &leave_map,
+      /*subracks_precomputed=*/false,
+      /*wmp_entries_precomputed=*/false);
 
   // IF
   assert(wmp_move_gen_nonplaythrough_word_of_length_exists(&wmg, 2));
@@ -84,9 +85,10 @@ void test_nonplaythrough_existence(void) {
     assert(best_leaves[leave_size] == 0);
   }
 
-  wmp_move_gen_check_nonplaythrough_existence(&wmg, /*check_leaves=*/true,
-                                              &leave_map,
-                                              /*subracks_precomputed=*/false);
+  wmp_move_gen_check_nonplaythrough_existence(
+      &wmg, /*check_leaves=*/true, &leave_map,
+      /*subracks_precomputed=*/false,
+      /*wmp_entries_precomputed=*/false);
   // IF
   assert(wmp_move_gen_nonplaythrough_word_of_length_exists(&wmg, 2));
   // no 3, 4, 5, or 6 letter words

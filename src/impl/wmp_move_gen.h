@@ -267,9 +267,15 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   return playthrough_info->wmp_entry != NULL;
 }
 
+// When wmp_entries_precomputed is true the caller has already populated
+// subrack_info->wmp_entry for each canonical subrack of this size, so the
+// wmp_get_word_entry hash lookup is skipped. The per-subrack NULL check,
+// has_word_of_length update, and leave-max update still run against the
+// cached pointers and cached leave values.
 static inline void
 wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
-                                           bool check_leaves) {
+                                           bool check_leaves,
+                                           bool wmp_entries_precomputed) {
   const int leave_size = wmp_move_gen->full_rack_size - size;
   wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
       check_leaves ? EQUITY_MIN_VALUE : 0;
@@ -278,8 +284,10 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
   for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
     SubrackInfo *subrack_info =
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
-    subrack_info->wmp_entry =
-        wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    if (!wmp_entries_precomputed) {
+      subrack_info->wmp_entry =
+          wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    }
     if (subrack_info->wmp_entry == NULL) {
       continue;
     }
@@ -297,11 +305,13 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
 
 // If subracks_precomputed is true the caller has already populated
 // nonplaythrough_infos and count_by_size (e.g. from a per-thread rack
-// cache), so we skip the enumerate_nonplaythrough_subracks step and only
-// do the per-size wmp_entry walk.
+// cache), so we skip the enumerate_nonplaythrough_subracks step.
+// If wmp_entries_precomputed is true the caller has also restored
+// subrack_info->wmp_entry values, so the per-subrack wmp_get_word_entry
+// hash lookup is skipped inside the size walk.
 static inline void wmp_move_gen_check_nonplaythrough_existence(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    bool subracks_precomputed) {
+    bool subracks_precomputed, bool wmp_entries_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
@@ -312,8 +322,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   }
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
-                                               check_leaves);
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
+                                               wmp_entries_precomputed);
   }
 }
 
@@ -333,7 +343,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
 // cache), so we skip the enumerate_nonplaythrough_subracks step.
 static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    const RackInfoTableEntry *rit_entry, bool subracks_precomputed) {
+    const RackInfoTableEntry *rit_entry, bool subracks_precomputed,
+    bool wmp_entries_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
@@ -388,8 +399,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     // max vs EQUITY_MIN_VALUE, which matches the RIT-seeded max).
     const Equity seeded_best =
         wmp_move_gen->nonplaythrough_best_leave_values[leave_size];
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
-                                               check_leaves);
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
+                                               wmp_entries_precomputed);
     // Assert the walk's max matches what RIT already stored. Cheap sanity
     // check that catches maker/consumer drift.
     assert(!check_leaves ||

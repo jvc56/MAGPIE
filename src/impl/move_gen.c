@@ -2990,6 +2990,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   rack_copy(&gen->player_rack, player_get_rack(player));
   move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
+  const WMP *previous_wmp = gen->wmp_move_gen.wmp;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
                     player_get_wmp(player));
 
@@ -3000,6 +3001,13 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // override_kwg is set (WMP data corresponds to the original KWG, not
     // the override).
     gen->wmp_move_gen.wmp = NULL;
+  }
+  // The subrack cache holds wmp_entry pointers derived from the WMP; a
+  // WMP swap (e.g., different player's lexicon) would make those stale.
+  if (gen->wmp_move_gen.wmp != previous_wmp) {
+    for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
+      gen->subrack_cache[i].valid = false;
+    }
   }
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
@@ -3404,13 +3412,20 @@ void generate_moves(const MoveGenArgs *args) {
       }
 #endif
       if (subrack_cache_hit) {
-        // Restore enumerate_nonplaythrough_subracks output from cache.
+        // Restore enumerate_nonplaythrough_subracks output AND the
+        // per-subrack wmp_entry pointers from cache. Both pieces are
+        // rack-determined (subracks via combinatoric walk, wmp_entries
+        // via WMP hash), so on hit we skip both the enumeration and the
+        // per-subrack wmp_get_word_entry calls that the size walk would
+        // otherwise run.
         memcpy(wgen->count_by_size, subrack_entry->count_by_size,
                sizeof(wgen->count_by_size));
         for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
           wgen->nonplaythrough_infos[i].subrack = subrack_entry->subracks[i];
           wgen->nonplaythrough_infos[i].leave_value =
               subrack_entry->leave_values[i];
+          wgen->nonplaythrough_infos[i].wmp_entry =
+              subrack_entry->wmp_entries[i];
         }
       }
       if (gen->rit_entry != NULL) {
@@ -3421,16 +3436,18 @@ void generate_moves(const MoveGenArgs *args) {
         // the RIT already computed at build time.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
             wgen, check_leaves, &gen->leave_map, gen->rit_entry,
-            /*subracks_precomputed=*/subrack_cache_hit);
+            /*subracks_precomputed=*/subrack_cache_hit,
+            /*wmp_entries_precomputed=*/subrack_cache_hit);
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
             wgen, check_leaves, &gen->leave_map,
-            /*subracks_precomputed=*/subrack_cache_hit);
+            /*subracks_precomputed=*/subrack_cache_hit,
+            /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
       if (!subrack_cache_hit && leaves_are_populated) {
-        // Store the newly-computed enumeration into the cache. Only cache
-        // when leaves_are_populated so we don't stash garbage leave_values
-        // from an uninitialized leave_map.
+        // Store the newly-computed enumeration and wmp_entry pointers
+        // into the cache. Only cache when leaves_are_populated so we
+        // don't stash garbage leave_values from an uninitialized leave_map.
         subrack_entry->key = wgen->player_bit_rack;
         subrack_entry->valid = true;
         memcpy(subrack_entry->count_by_size, wgen->count_by_size,
@@ -3439,6 +3456,8 @@ void generate_moves(const MoveGenArgs *args) {
           subrack_entry->subracks[i] = wgen->nonplaythrough_infos[i].subrack;
           subrack_entry->leave_values[i] =
               wgen->nonplaythrough_infos[i].leave_value;
+          subrack_entry->wmp_entries[i] =
+              wgen->nonplaythrough_infos[i].wmp_entry;
         }
       }
     }
