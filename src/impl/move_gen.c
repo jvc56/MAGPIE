@@ -74,6 +74,184 @@ uint64_t subrack_cache_stat_hits(void) {
 }
 #endif
 
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+#include <stdatomic.h>
+static _Atomic uint64_t best_move_cache_checks_ctr;
+static _Atomic uint64_t best_move_cache_key_hits_ctr;
+static _Atomic uint64_t best_move_cache_playable_hits_ctr;
+static _Atomic uint64_t best_move_cache_stores_ctr;
+uint64_t best_move_cache_stat_checks(void) {
+  return atomic_load_explicit(&best_move_cache_checks_ctr,
+                              memory_order_relaxed);
+}
+uint64_t best_move_cache_stat_key_hits(void) {
+  return atomic_load_explicit(&best_move_cache_key_hits_ctr,
+                              memory_order_relaxed);
+}
+uint64_t best_move_cache_stat_playable_hits(void) {
+  return atomic_load_explicit(&best_move_cache_playable_hits_ctr,
+                              memory_order_relaxed);
+}
+uint64_t best_move_cache_stat_stores(void) {
+  return atomic_load_explicit(&best_move_cache_stores_ctr,
+                              memory_order_relaxed);
+}
+#endif
+
+// Forward declaration; defined further down with move-record semantics.
+static inline void gen_update_cutoff_equity_or_score(MoveGen *gen);
+
+// Hash the local board state that affects a move's validity and score
+// over [col_start, col_start + span) in the gen's currently-loaded
+// row_cache. Combines cross_set, cross_score, letter, and is_cross_word
+// per square into a single 64-bit fingerprint; if the fingerprint
+// matches a cached value the move is still playable with identical
+// score/leave on the current board.
+static inline uint64_t
+best_move_fingerprint(const MoveGen *gen, int col_start, int span) {
+  uint64_t h = 0x9e3779b97f4a7c15ULL;
+  for (int i = 0; i < span; i++) {
+    const int col = col_start + i;
+    if (col < 0 || col >= BOARD_DIM) {
+      continue;
+    }
+    const Square *sq = &gen->row_cache[col];
+    uint64_t x = (uint64_t)square_get_cross_set(sq);
+    x ^= (uint64_t)(uint32_t)square_get_cross_score(sq) << 32;
+    x += ((uint64_t)square_get_letter(sq) << 56);
+    x += ((uint64_t)(square_get_is_cross_word(sq) ? 1U : 0U) << 55);
+    // splitmix64 mix combined with position
+    x ^= (uint64_t)col * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
+    h ^= x ^ (x >> 31);
+  }
+  return h;
+}
+
+// Load gen->row_cache for the given (row, dir), preserving consistency
+// with gen->current_row_index / gen->dir so the downstream anchor loop
+// does not redundantly reload if it next processes this row.
+static inline void best_move_ensure_row_cache(MoveGen *gen, int row, int dir) {
+  if (gen->current_row_index != row || gen->dir != dir) {
+    gen->current_row_index = row;
+    gen->dir = dir;
+    board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+  }
+}
+
+// Probe the best-move cache for this rack. If any slot's move is still
+// playable (footprint_hash matches current board) AND its equity beats
+// the current best_move_equity_or_score, seed gen->best_move_equity_or_score
+// with that equity so anchor processing prunes more aggressively. Does
+// not record the actual Move yet -- the anchor loop will re-derive it
+// (or a better one) on its own, and we only need a tight lower bound.
+// Returns a pointer to the cache entry (always non-NULL) so the caller
+// can update it later when the final best move is known.
+static inline BestMoveCacheEntry *
+best_move_cache_probe(MoveGen *gen) {
+  const uint32_t slot = bit_rack_get_bucket_index(
+      &gen->wmp_move_gen.player_bit_rack, MOVEGEN_BEST_MOVE_CACHE_SIZE);
+  BestMoveCacheEntry *entry = &gen->best_move_cache[slot];
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+  atomic_fetch_add_explicit(&best_move_cache_checks_ctr, 1,
+                            memory_order_relaxed);
+#endif
+  if (!entry->valid ||
+      !bit_rack_equals(&entry->key, &gen->wmp_move_gen.player_bit_rack)) {
+    return entry;
+  }
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+  atomic_fetch_add_explicit(&best_move_cache_key_hits_ctr, 1,
+                            memory_order_relaxed);
+#endif
+  // Walk slots in stored order (typically by count desc or equity desc).
+  for (int i = 0; i < MOVEGEN_BEST_MOVE_CACHE_K; i++) {
+    const BestMoveCacheSlot *s = &entry->slots[i];
+    if (s->count == 0) {
+      break;
+    }
+    const Equity cached_equity = move_get_equity(&s->move);
+    // Only bother validating slots that could actually raise the bound.
+    if (cached_equity <= gen->best_move_equity_or_score) {
+      continue;
+    }
+    best_move_ensure_row_cache(gen, move_get_row_start(&s->move),
+                               move_get_dir(&s->move));
+    const int span = move_get_tiles_length(&s->move);
+    const uint64_t fp =
+        best_move_fingerprint(gen, move_get_col_start(&s->move), span);
+    if (fp != s->footprint_hash) {
+      continue;
+    }
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+    atomic_fetch_add_explicit(&best_move_cache_playable_hits_ctr, 1,
+                              memory_order_relaxed);
+#endif
+    // Use cached equity as a lower bound on the anchor-loop cutoff.
+    gen->best_move_equity_or_score = cached_equity;
+    gen_update_cutoff_equity_or_score(gen);
+    // Stop after the first playable slot whose equity we've now seeded.
+    break;
+  }
+  return entry;
+}
+
+// Insert a freshly-found best move into the cache entry for this rack.
+// If the same move is already in a slot, increment its count; otherwise
+// pick the slot with the lowest count to displace.
+static inline void best_move_cache_insert(MoveGen *gen,
+                                          BestMoveCacheEntry *entry,
+                                          const Move *best,
+                                          uint64_t footprint_hash) {
+  entry->valid = true;
+  entry->key = gen->wmp_move_gen.player_bit_rack;
+  entry->total_seen++;
+  // Look for a slot that already holds this exact move (same row/col/
+  // dir/tiles_length/tiles) and increment its count.
+  int best_existing = -1;
+  int lowest_count_idx = 0;
+  uint16_t lowest_count = entry->slots[0].count;
+  for (int i = 0; i < MOVEGEN_BEST_MOVE_CACHE_K; i++) {
+    const Move *m = &entry->slots[i].move;
+    if (entry->slots[i].count > 0 &&
+        move_get_row_start(m) == move_get_row_start(best) &&
+        move_get_col_start(m) == move_get_col_start(best) &&
+        move_get_dir(m) == move_get_dir(best) &&
+        move_get_tiles_length(m) == move_get_tiles_length(best)) {
+      bool same_tiles = true;
+      for (int j = 0; j < move_get_tiles_length(best); j++) {
+        if (m->tiles[j] != best->tiles[j]) {
+          same_tiles = false;
+          break;
+        }
+      }
+      if (same_tiles) {
+        best_existing = i;
+        break;
+      }
+    }
+    if (entry->slots[i].count < lowest_count) {
+      lowest_count = entry->slots[i].count;
+      lowest_count_idx = i;
+    }
+  }
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+  atomic_fetch_add_explicit(&best_move_cache_stores_ctr, 1,
+                            memory_order_relaxed);
+#endif
+  if (best_existing >= 0) {
+    entry->slots[best_existing].count++;
+    // Update footprint in case cross-sets around the move have shifted.
+    entry->slots[best_existing].footprint_hash = footprint_hash;
+    return;
+  }
+  BestMoveCacheSlot *slot = &entry->slots[lowest_count_idx];
+  move_copy(&slot->move, best);
+  slot->footprint_hash = footprint_hash;
+  slot->count = 1;
+}
+
 #ifdef ANCHOR_CACHE_INSTRUMENT
 #include <stdatomic.h>
 static _Atomic uint64_t anchor_cache_checks_ctr;
@@ -3004,9 +3182,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   // The subrack cache holds wmp_entry pointers derived from the WMP; a
   // WMP swap (e.g., different player's lexicon) would make those stale.
+  // The best-move cache stores equities derived from KWG + KLV, so any
+  // scoring-data change invalidates it too.
   if (gen->wmp_move_gen.wmp != previous_wmp) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
+    }
+    for (int i = 0; i < MOVEGEN_BEST_MOVE_CACHE_SIZE; i++) {
+      gen->best_move_cache[i].valid = false;
     }
   }
 
@@ -3467,12 +3650,37 @@ void generate_moves(const MoveGenArgs *args) {
       return;
     }
 
+    // Probe the top-K best-move cache for this rack before shadow so
+    // that a playable cached move can tighten gen->best_move_equity_or_score
+    // up-front, pruning more anchors inside shadow and the anchor loop.
+    // Only safe for MOVE_RECORD_BEST where the exact best is what we'll
+    // retain; for MOVE_RECORD_ALL we need to materialize every play.
+    BestMoveCacheEntry *best_move_entry = NULL;
+    if (gen->move_record_type == MOVE_RECORD_BEST) {
+      best_move_entry = best_move_cache_probe(gen);
+    }
+
     gen_shadow(gen);
     if (gen->threshold_exceeded) {
       gen_record_pass(gen);
       return;
     }
     gen_record_scoring_plays(gen);
+
+    // After the anchor loop the final best move (if any) is in
+    // gen_get_best_move. Store it back into the cache for future hits.
+    if (best_move_entry != NULL) {
+      const Move *best = gen_get_readonly_best_move(gen);
+      if (move_get_equity(best) > EQUITY_INITIAL_VALUE &&
+          move_get_type(best) != GAME_EVENT_PASS &&
+          move_get_tiles_length(best) > 0) {
+        best_move_ensure_row_cache(gen, move_get_row_start(best),
+                                   move_get_dir(best));
+        const uint64_t fp = best_move_fingerprint(
+            gen, move_get_col_start(best), move_get_tiles_length(best));
+        best_move_cache_insert(gen, best_move_entry, best, fp);
+      }
+    }
   }
   gen_record_pass(gen);
 }

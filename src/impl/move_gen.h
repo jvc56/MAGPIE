@@ -34,6 +34,40 @@
 // is the total number of multi-subset combinations of a RACK_SIZE-tile rack.
 #define MOVEGEN_SUBRACK_CACHE_ENTRIES (1 << RACK_SIZE)
 
+// Per-rack cache of the top K moves seen for that rack plus a fingerprint
+// of the board state at each move's footprint. On cache hit we validate
+// each slot: if the fingerprint matches the current board at the move's
+// span the move is still playable with the same score and leave, and we
+// use its equity as a lower bound on the current best to prune more
+// aggressively.  When a slot's fingerprint mismatches we fall through to
+// the next slot -- so if the top move is blocked by a newer play, a
+// slightly worse backup can still provide a useful bound.
+#ifndef MOVEGEN_BEST_MOVE_CACHE_K
+#define MOVEGEN_BEST_MOVE_CACHE_K 4
+#endif
+
+#ifndef MOVEGEN_BEST_MOVE_CACHE_SIZE
+#define MOVEGEN_BEST_MOVE_CACHE_SIZE 64
+#endif
+
+typedef struct BestMoveCacheSlot {
+  Move move;
+  // 64-bit fingerprint of the board row_cache over the move's column
+  // span. Includes cross_set, cross_score, letter, is_cross_word at each
+  // square. Used to validate the cached move still plays with the same
+  // score on the current board.
+  uint64_t footprint_hash;
+  // How often this move was the final best move for this rack.
+  uint16_t count;
+} BestMoveCacheSlot;
+
+typedef struct BestMoveCacheEntry {
+  BitRack key;
+  bool valid;
+  uint16_t total_seen;
+  BestMoveCacheSlot slots[MOVEGEN_BEST_MOVE_CACHE_K];
+} BestMoveCacheEntry;
+
 typedef struct SubrackEnumCacheEntry {
   BitRack key;
   bool valid;
@@ -113,6 +147,13 @@ uint64_t anchor_cache_stat_skips_for_length(int length);
 #ifdef SUBRACK_CACHE_INSTRUMENT
 uint64_t subrack_cache_stat_checks(void);
 uint64_t subrack_cache_stat_hits(void);
+#endif
+
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+uint64_t best_move_cache_stat_checks(void);
+uint64_t best_move_cache_stat_key_hits(void);
+uint64_t best_move_cache_stat_playable_hits(void);
+uint64_t best_move_cache_stat_stores(void);
 #endif
 
 typedef struct RackAnchorCacheEntry {
@@ -253,6 +294,10 @@ typedef struct MoveGen {
   // Cache of wmp_move_gen_enumerate_nonplaythrough_subracks output
   // (purely rack-determined). Hit rate tracks rack-repeat rate in sims.
   SubrackEnumCacheEntry subrack_cache[MOVEGEN_SUBRACK_CACHE_SIZE];
+  // Per-rack cache of top-K best moves; used to seed a lower bound on
+  // gen->best_move_equity_or_score when the cached move is still
+  // playable on the current board.
+  BestMoveCacheEntry best_move_cache[MOVEGEN_BEST_MOVE_CACHE_SIZE];
 #ifdef ANCHOR_CACHE_ENABLE
   // Anchor-level pruning cache. Updated per wordmap_gen call and checked
   // at the top to skip anchors whose best_equity bound is already

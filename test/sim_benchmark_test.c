@@ -60,6 +60,22 @@ void test_sim_benchmark(void) {
 #endif
   printf("\n");
 
+#ifdef BEST_MOVE_CACHE_INSTRUMENT
+  const uint64_t bm_checks = best_move_cache_stat_checks();
+  const uint64_t bm_key_hits = best_move_cache_stat_key_hits();
+  const uint64_t bm_playable = best_move_cache_stat_playable_hits();
+  const uint64_t bm_stores = best_move_cache_stat_stores();
+  if (bm_checks > 0) {
+    printf("Best-move cache: checks=%llu key_hits=%llu (%.2f%%) "
+           "playable=%llu (%.2f%%) stores=%llu\n",
+           (unsigned long long)bm_checks, (unsigned long long)bm_key_hits,
+           100.0 * (double)bm_key_hits / (double)bm_checks,
+           (unsigned long long)bm_playable,
+           100.0 * (double)bm_playable / (double)bm_checks,
+           (unsigned long long)bm_stores);
+  }
+#endif
+
 #ifdef SUBRACK_CACHE_INSTRUMENT
   const uint64_t sr_checks = subrack_cache_stat_checks();
   const uint64_t sr_hits = subrack_cache_stat_hits();
