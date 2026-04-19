@@ -60,6 +60,16 @@ void test_sim_benchmark(void) {
 #endif
   printf("\n");
 
+#ifdef SUBRACK_CACHE_INSTRUMENT
+  const uint64_t sr_checks = subrack_cache_stat_checks();
+  const uint64_t sr_hits = subrack_cache_stat_hits();
+  if (sr_checks > 0) {
+    printf("Subrack cache: checks=%llu hits=%llu (%.2f%%)\n",
+           (unsigned long long)sr_checks, (unsigned long long)sr_hits,
+           100.0 * (double)sr_hits / (double)sr_checks);
+  }
+#endif
+
 #ifdef ANCHOR_CACHE_INSTRUMENT
   const uint64_t ac_checks = anchor_cache_stat_checks();
   const uint64_t ac_hits = anchor_cache_stat_hits();

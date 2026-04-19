@@ -295,14 +295,21 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
   }
 }
 
+// If subracks_precomputed is true the caller has already populated
+// nonplaythrough_infos and count_by_size (e.g. from a per-thread rack
+// cache), so we skip the enumerate_nonplaythrough_subracks step and only
+// do the per-size wmp_entry walk.
 static inline void wmp_move_gen_check_nonplaythrough_existence(
-    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map) {
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    bool subracks_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
-  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-  BitRack empty = bit_rack_create_empty();
-  wmp_move_gen_enumerate_nonplaythrough_subracks(
-      wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  if (!subracks_precomputed) {
+    memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+    BitRack empty = bit_rack_create_empty();
+    wmp_move_gen_enumerate_nonplaythrough_subracks(
+        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  }
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
     wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
@@ -321,15 +328,20 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
 //
 // Precondition: rit_entry is non-NULL and corresponds to this move_gen's
 // full player_rack.
+// If subracks_precomputed is true the caller has already populated
+// nonplaythrough_infos and count_by_size (e.g. from a per-thread rack
+// cache), so we skip the enumerate_nonplaythrough_subracks step.
 static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    const RackInfoTableEntry *rit_entry) {
+    const RackInfoTableEntry *rit_entry, bool subracks_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
-  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-  BitRack empty = bit_rack_create_empty();
-  wmp_move_gen_enumerate_nonplaythrough_subracks(
-      wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  if (!subracks_precomputed) {
+    memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+    BitRack empty = bit_rack_create_empty();
+    wmp_move_gen_enumerate_nonplaythrough_subracks(
+        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  }
 
   // Seed has_word_of_length and best_leave_values from the RIT entry. The
   // RIT's has_word_of_length_bitmask is an OR over all canonical size-k

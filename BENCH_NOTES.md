@@ -242,6 +242,30 @@ Short-to-mid lengths (3-7) are ~77% of wordmap_gen time.
 128k is the sweet spot (broad plateau with 256k). Memory: 128k × 16 B
 = 2 MB per thread (20 MB for 10 threads).
 
+### Subrack enumeration cache
+
+Profiling showed `wmp_move_gen_enumerate_nonplaythrough_subracks` as the
+single biggest hot function (~23% of sampled thread time). The
+enumeration output (the subrack bit-racks and leave values for every
+canonical multi-subset of the rack) is purely a function of the rack.
+Caching it per-thread trades ~2 MB per thread for ~7% fewer CPU cycles
+in that function at 65% hit rate in MCTS-regime sims.
+
+Correctness caveat: the leave values populated in `leave_map.leave_values`
+come from either the RIT unpack or the KLV walk in
+`generate_exchange_moves`, and only the latter runs when
+`check_leaves || add_exchange`. If neither condition holds the leave_map
+holds stale values from a prior call, so the enumeration reads garbage
+for leave_value. The cache therefore only writes and reads entries
+when `(rit_entry != NULL) || check_leaves || add_exchange` -- which is
+also the condition under which the downstream code reads
+leave_value. Gated by `-DANCHOR_CACHE_ENABLE` together with the anchor
+cache.
+
+Measured gain on top of anchor cache at plies=2:
+- mi=30 (normal): 18,160 -> 18,455 iters/sec (+1.6%)
+- mi=100k (MCTS): 19,138 -> 19,912 iters/sec (+4.0%)
+
 ### Per-ply speedup vs. no-RIT (RIT + batched BAI + 128k cache)
 
 | plies | no-RIT iters/s | current iters/s | speedup |

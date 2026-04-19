@@ -62,6 +62,18 @@ uint64_t rit_cache_stat_misses(void) {
 }
 #endif
 
+#ifdef SUBRACK_CACHE_INSTRUMENT
+#include <stdatomic.h>
+static _Atomic uint64_t subrack_cache_checks_ctr;
+static _Atomic uint64_t subrack_cache_hits_ctr;
+uint64_t subrack_cache_stat_checks(void) {
+  return atomic_load_explicit(&subrack_cache_checks_ctr, memory_order_relaxed);
+}
+uint64_t subrack_cache_stat_hits(void) {
+  return atomic_load_explicit(&subrack_cache_hits_ctr, memory_order_relaxed);
+}
+#endif
+
 #ifdef ANCHOR_CACHE_INSTRUMENT
 #include <stdatomic.h>
 static _Atomic uint64_t anchor_cache_checks_ctr;
@@ -97,6 +109,7 @@ uint64_t anchor_cache_stat_skips_for_length(int length) {
 }
 #endif
 
+#ifdef ANCHOR_CACHE_ENABLE
 // Store an upper bound for this wordmap_gen call into the anchor cache.
 // For fully-searched anchors upper_bound is the max observed equity; for
 // partially-searched anchors it is max(max_observed, cutoff_at_exit),
@@ -158,6 +171,7 @@ anchor_cache_compute_key(const MoveGen *gen, const Anchor *anchor) {
   // Ensure the stored hash is never 0 (used as the empty-slot sentinel).
   return h == 0 ? 1 : h;
 }
+#endif  // ANCHOR_CACHE_ENABLE
 
 #ifdef WMP_ANCHOR_INSTRUMENT
 #include <stdatomic.h>
@@ -1020,7 +1034,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   const Equity anchor_cache_entry_cutoff = gen->cutoff_equity_or_score;
 #endif
   gen->current_anchor_max_equity = EQUITY_MIN_VALUE;
+#ifdef ANCHOR_CACHE_ENABLE
   bool anchor_subrack_skipped = false;
+#endif
 
 #ifdef WMP_ANCHOR_INSTRUMENT
   const int instr_word_length = anchor->word_length;
@@ -1143,7 +1159,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
+#ifdef ANCHOR_CACHE_ENABLE
         anchor_subrack_skipped = true;
+#endif
 #ifdef WMP_ANCHOR_INSTRUMENT
         instr_subrack_skipped++;
 #endif
@@ -2938,10 +2956,23 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
-  gen->klv = player_get_klv(player);
+  const KLV *new_klv = player_get_klv(player);
+  if (new_klv != gen->klv) {
+    // Subrack cache stores leave values from the KLV; invalidate when KLV
+    // changes (player swap, lexicon change).
+    for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
+      gen->subrack_cache[i].valid = false;
+    }
+  }
+  gen->klv = new_klv;
   const RackInfoTable *new_rit = player_get_rack_info_table(player);
   if (new_rit != gen->rack_info_table) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
+    // Leave values are stored in the subrack cache; they depend on the
+    // RIT (via the leave_map), so invalidate when the RIT changes.
+    for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
+      gen->subrack_cache[i].valid = false;
+    }
   }
   gen->rack_info_table = new_rit;
   // The anchor cache is NOT reset at movegen boundaries. Its key hashes in
@@ -3337,6 +3368,51 @@ void generate_moves(const MoveGenArgs *args) {
     if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                                 (gen->move_sort_type != MOVE_SORT_SCORE);
+      // Per-thread subrack enumeration cache. The enumeration output is
+      // rack-determined, so we hit on repeat racks (common in sims).
+      // IMPORTANT: leave_values written by the enumeration read from
+      // leave_map.leave_values, which is only populated when
+      // gen_look_up_leaves_and_record_exchanges actually walked the leave
+      // space -- i.e. when rit_entry != NULL (RIT unpacked leaves) or when
+      // (check_leaves || add_exchange) (KLV walk ran generate_exchange_moves).
+      // Otherwise leave_map.leave_values retains stale values from a prior
+      // rack and enumerating reads garbage. We only use the cache when
+      // those values are known-fresh, on both write and read.
+      WMPMoveGen *wgen = &gen->wmp_move_gen;
+      // Mirror the condition in gen_look_up_leaves_and_record_exchanges:
+      // add_exchange=true iff there are enough unseen tiles for the
+      // exchange walk to make sense.
+      const bool add_exchange =
+          gen->number_of_tiles_in_bag +
+              rack_get_total_letters(&gen->opponent_rack) >=
+          (RACK_SIZE * 2);
+      const bool leaves_are_populated = (gen->rit_entry != NULL) ||
+                                        check_leaves || add_exchange;
+      const uint32_t subrack_slot = bit_rack_get_bucket_index(
+          &wgen->player_bit_rack, MOVEGEN_SUBRACK_CACHE_SIZE);
+      SubrackEnumCacheEntry *subrack_entry =
+          &gen->subrack_cache[subrack_slot];
+      const bool subrack_cache_hit =
+          leaves_are_populated && subrack_entry->valid &&
+          bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
+#ifdef SUBRACK_CACHE_INSTRUMENT
+      atomic_fetch_add_explicit(&subrack_cache_checks_ctr, 1,
+                                memory_order_relaxed);
+      if (subrack_cache_hit) {
+        atomic_fetch_add_explicit(&subrack_cache_hits_ctr, 1,
+                                  memory_order_relaxed);
+      }
+#endif
+      if (subrack_cache_hit) {
+        // Restore enumerate_nonplaythrough_subracks output from cache.
+        memcpy(wgen->count_by_size, subrack_entry->count_by_size,
+               sizeof(wgen->count_by_size));
+        for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
+          wgen->nonplaythrough_infos[i].subrack = subrack_entry->subracks[i];
+          wgen->nonplaythrough_infos[i].leave_value =
+              subrack_entry->leave_values[i];
+        }
+      }
       if (gen->rit_entry != NULL) {
         // RIT-backed fast path: skip the per-size wmp_get_word_entry loop
         // for any played size where the RIT entry says no canonical
@@ -3344,10 +3420,26 @@ void generate_moves(const MoveGenArgs *args) {
         // nonplaythrough_best_leave_values directly from the cached max
         // the RIT already computed at build time.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
-            &gen->wmp_move_gen, check_leaves, &gen->leave_map, gen->rit_entry);
+            wgen, check_leaves, &gen->leave_map, gen->rit_entry,
+            /*subracks_precomputed=*/subrack_cache_hit);
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
-            &gen->wmp_move_gen, check_leaves, &gen->leave_map);
+            wgen, check_leaves, &gen->leave_map,
+            /*subracks_precomputed=*/subrack_cache_hit);
+      }
+      if (!subrack_cache_hit && leaves_are_populated) {
+        // Store the newly-computed enumeration into the cache. Only cache
+        // when leaves_are_populated so we don't stash garbage leave_values
+        // from an uninitialized leave_map.
+        subrack_entry->key = wgen->player_bit_rack;
+        subrack_entry->valid = true;
+        memcpy(subrack_entry->count_by_size, wgen->count_by_size,
+               sizeof(wgen->count_by_size));
+        for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_ENTRIES; i++) {
+          subrack_entry->subracks[i] = wgen->nonplaythrough_infos[i].subrack;
+          subrack_entry->leave_values[i] =
+              wgen->nonplaythrough_infos[i].leave_value;
+        }
       }
     }
 
