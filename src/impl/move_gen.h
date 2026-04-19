@@ -29,17 +29,19 @@
 // cached bound, the anchor is skipped entirely. Sized as a direct-mapped
 // table indexed by low bits of the key hash.
 //
-// The 256k default was tuned on simbench (normal sim, plies=2, mi=30):
+// The 128k default was tuned on simbench (normal sim, plies=2, mi=30):
 //   size     hit%    skip%    iters/sec change
 //   256      1.5%    0.8%    -3.5%
 //   1024     4.7%    2.5%    -3.0%
 //   4096    11.2%    6.2%    -0.5%
 //   16384   17.7%    9.6%     0%
 //   65536   24.3%    13.0%   +1.0%
-//   262144  32.3%    17.2%   +4.4%  <- current default
-//   1048576 39.4%    21.2%   +0.6%  (cache too large, more L3 pressure)
+//   131072  28.2%    15.0%   +5.6%  <- current default
+//   262144  32.3%    17.2%   +4.4%  (+0.1% more hits, +1.5% more memory)
+//   524288  36.3%    19.5%   +4.3%  (L3 pressure starts)
+//   1048576 39.4%    21.2%   +0.6%
 #ifndef MOVEGEN_ANCHOR_CACHE_SIZE
-#define MOVEGEN_ANCHOR_CACHE_SIZE 262144
+#define MOVEGEN_ANCHOR_CACHE_SIZE 131072
 #endif
 
 // Optional: only cache anchors whose word_length is in [MIN, MAX].

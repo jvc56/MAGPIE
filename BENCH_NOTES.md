@@ -234,11 +234,30 @@ Short-to-mid lengths (3-7) are ~77% of wordmap_gen time.
 | 4,096   | 11.2% |  6.2% | −0.5%                 |
 | 16,384  | 17.7% |  9.6% |  0%                   |
 | 65,536  | 24.3% | 13.0% | +1.0%                 |
-| **262,144** | **32.3%** | **17.2%** | **+4.4%**     |
-| 1,048,576 | 39.4% | 21.2% | +0.6% (L3 pressure) |
+| **131,072** | **28.2%** | **15.0%** | **+5.6%** ← default |
+| 262,144 | 32.3% | 17.2% | +4.4% (+0.1% more hits, 2× memory) |
+| 524,288 | 36.3% | 19.5% | +4.3% (L3 pressure starts)     |
+| 1,048,576 | 39.4% | 21.2% | +0.6%                 |
 
-256k is the sweet spot. Memory: 256k × 16 B = 4 MB per thread (40 MB
-for 10 threads).
+128k is the sweet spot (broad plateau with 256k). Memory: 128k × 16 B
+= 2 MB per thread (20 MB for 10 threads).
+
+### Per-ply speedup vs. no-RIT (RIT + batched BAI + 128k cache)
+
+| plies | no-RIT iters/s | current iters/s | speedup |
+|------:|---------------:|----------------:|--------:|
+| 1     | 27,766         | 31,990          | +15.2%  |
+| 2     | 15,643         | 18,776          | **+20.0%** ← peak |
+| 3     |  9,918         | 11,550          | +16.5%  |
+| 4     |  7,333         |  8,225          | +12.2%  |
+| 5     |  5,880         |  6,502          | +10.6%  |
+| 6     |  5,025         |  5,478          |  +9.0%  |
+| 7     |  4,089         |  4,417          |  +8.0%  |
+
+Speedup declines with ply depth because both RIT's per-rack cache and
+the anchor cache's per-(rack, anchor, board) cache see their hit rates
+erode as deeper plies produce more-varied racks and board states per
+rollout.
 
 ### Per-length hit/skip (size=256, for reference)
 
