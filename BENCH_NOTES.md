@@ -266,6 +266,46 @@ Measured gain on top of anchor cache at plies=2:
 - mi=30 (normal): 18,160 -> 18,455 iters/sec (+1.6%)
 - mi=100k (MCTS): 19,138 -> 19,912 iters/sec (+4.0%)
 
+### Top-K best-move-per-rack cache (opt-in, neutral on simbench)
+
+Idea: cache up to K best moves ever found for a rack, plus a 64-bit
+fingerprint of the board at each move's column span (**only the
+`[col_start, col_start + tiles_length)` slice of the move's row_cache
+is hashed — not the whole board**; the anchor can only produce words
+from its own span, so anything outside is irrelevant to playability).
+On the next movegen for the same rack, validate each cached move
+(fingerprint matches current board) and, on first playable hit, seed
+`gen->best_move_equity_or_score` with its equity so anchor-heap
+processing prunes more aggressively.
+
+Measured at plies=2 mi=100k, K=4, various cache sizes:
+
+| size  | key_hit% | playable% | iters/sec |
+|------:|---------:|----------:|----------:|
+|     8 |   54.32% |    53.33% |    20,126 |
+|    16 |   59.66% |    57.23% |    19,795 |
+|    32 |   62.82% |    60.00% |    19,692 |
+|    64 |   64.95% |    61.40% |    19,699 |
+|   256 |   68.52% |    62.92% |    19,549 |
+| 1,024 |   72.85% |    65.18% |    19,468 |
+| 4,096 |   78.00% |    67.40% |    19,454 |
+| 16,384 |  82.47% |    70.28% |    19,453 |
+
+Baseline (no best-move cache, same build settings): 19,961 iters/sec
+avg — so even the fastest row (size=8, +0.8%) is within run-to-run
+noise.
+
+Verdict: **neutral at best**. Bigger caches give higher hit rates but
+lower throughput because the validation work (row_cache load +
+fingerprint hash per probe) scales with hits while the savings do not.
+Shadow -- which consumes ~44% of sim time at plies=2 -- doesn't use
+`best_move_equity_or_score` directly, so seeding the bound before
+shadow runs only tightens the post-shadow anchor loop, which the
+anchor-cache skip already does well. The probe+insert path is gated
+behind `-DBEST_MOVE_CACHE_ENABLE` so it's off by default; the stats
+(`-DBEST_MOVE_CACHE_INSTRUMENT`) remain useful for MCTS research
+(per-rack move frequency for prior-distribution heuristics).
+
 ### Per-ply speedup vs. no-RIT (RIT + batched BAI + 128k cache)
 
 | plies | no-RIT iters/s | current iters/s | speedup |

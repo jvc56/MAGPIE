@@ -294,10 +294,12 @@ typedef struct MoveGen {
   // Cache of wmp_move_gen_enumerate_nonplaythrough_subracks output
   // (purely rack-determined). Hit rate tracks rack-repeat rate in sims.
   SubrackEnumCacheEntry subrack_cache[MOVEGEN_SUBRACK_CACHE_SIZE];
+#ifdef BEST_MOVE_CACHE_ENABLE
   // Per-rack cache of top-K best moves; used to seed a lower bound on
   // gen->best_move_equity_or_score when the cached move is still
   // playable on the current board.
   BestMoveCacheEntry best_move_cache[MOVEGEN_BEST_MOVE_CACHE_SIZE];
+#endif
 #ifdef ANCHOR_CACHE_ENABLE
   // Anchor-level pruning cache. Updated per wordmap_gen call and checked
   // at the top to skip anchors whose best_equity bound is already

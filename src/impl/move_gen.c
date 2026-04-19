@@ -101,6 +101,7 @@ uint64_t best_move_cache_stat_stores(void) {
 // Forward declaration; defined further down with move-record semantics.
 static inline void gen_update_cutoff_equity_or_score(MoveGen *gen);
 
+#ifdef BEST_MOVE_CACHE_ENABLE
 // Hash the local board state that affects a move's validity and score
 // over [col_start, col_start + span) in the gen's currently-loaded
 // row_cache. Combines cross_set, cross_score, letter, and is_cross_word
@@ -251,6 +252,7 @@ static inline void best_move_cache_insert(MoveGen *gen,
   slot->footprint_hash = footprint_hash;
   slot->count = 1;
 }
+#endif  // BEST_MOVE_CACHE_ENABLE
 
 #ifdef ANCHOR_CACHE_INSTRUMENT
 #include <stdatomic.h>
@@ -3188,9 +3190,11 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+#ifdef BEST_MOVE_CACHE_ENABLE
     for (int i = 0; i < MOVEGEN_BEST_MOVE_CACHE_SIZE; i++) {
       gen->best_move_cache[i].valid = false;
     }
+#endif
   }
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
@@ -3650,15 +3654,21 @@ void generate_moves(const MoveGenArgs *args) {
       return;
     }
 
+#ifdef BEST_MOVE_CACHE_ENABLE
     // Probe the top-K best-move cache for this rack before shadow so
     // that a playable cached move can tighten gen->best_move_equity_or_score
     // up-front, pruning more anchors inside shadow and the anchor loop.
     // Only safe for MOVE_RECORD_BEST where the exact best is what we'll
     // retain; for MOVE_RECORD_ALL we need to materialize every play.
+    // Empirically neutral on simbench (~65% key hit, 61% playable, but
+    // +0.7% throughput at 64 slots and slightly negative at larger
+    // sizes due to L-cache pressure). Kept as opt-in infrastructure
+    // for experiments and for collecting best-move frequency stats.
     BestMoveCacheEntry *best_move_entry = NULL;
     if (gen->move_record_type == MOVE_RECORD_BEST) {
       best_move_entry = best_move_cache_probe(gen);
     }
+#endif
 
     gen_shadow(gen);
     if (gen->threshold_exceeded) {
@@ -3667,6 +3677,7 @@ void generate_moves(const MoveGenArgs *args) {
     }
     gen_record_scoring_plays(gen);
 
+#ifdef BEST_MOVE_CACHE_ENABLE
     // After the anchor loop the final best move (if any) is in
     // gen_get_best_move. Store it back into the cache for future hits.
     if (best_move_entry != NULL) {
@@ -3681,6 +3692,7 @@ void generate_moves(const MoveGenArgs *args) {
         best_move_cache_insert(gen, best_move_entry, best, fp);
       }
     }
+#endif
   }
   gen_record_pass(gen);
 }
