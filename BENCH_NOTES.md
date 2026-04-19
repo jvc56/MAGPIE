@@ -10,7 +10,14 @@ Working notes from the session after PR review. **Delete before merge.**
    before going back for another batch. Replaces the previous block-mode
    scheduling where thread T processed `sample_minimum` consecutive
    samples of arm 0, then of arm 1, etc.
-2. **Benchmark infrastructure** in `src/impl/autoplay.{c,h}` and
+2. **Rack+Anchor pruning cache** (`src/impl/move_gen.{c,h}`, opt-in via
+   `-DANCHOR_CACHE_ENABLE`). A per-thread direct-mapped hash table that
+   memoizes the max-equity upper bound from each `wordmap_gen` call keyed
+   on (player_rack, anchor descriptor, local row_cache). On hit, if the
+   current best equity already dominates the cached bound, the anchor is
+   skipped entirely — both fully-searched and partially-searched (cutoff-
+   aware) bounds are stored.
+3. **Benchmark infrastructure** in `src/impl/autoplay.{c,h}` and
    `test/sim_benchmark_test.c`:
    - `autoplay_{get,reset}_total_sim_iterations()` — global atomic
      counter accumulating sim iterations across every turn of every
@@ -21,9 +28,10 @@ Working notes from the session after PR review. **Delete before merge.**
      like-for-like positions. Without this, iters/sec varies by ±5%
      because sim quality influences which move is played, which
      influences game length.
-   - `simbench` accepts `SIMBENCH_PLIES` env var to sweep ply depth.
-   - `-DRIT_CACHE_INSTRUMENT` compile flag wires up hit/miss counters
-     in `move_gen.c` (zero-cost when undefined).
+   - `simbench` accepts `SIMBENCH_PLIES` and `SIMBENCH_MI` env vars.
+   - `-DRIT_CACHE_INSTRUMENT`, `-DWMP_ANCHOR_INSTRUMENT`, and
+     `-DANCHOR_CACHE_INSTRUMENT` compile flags wire up counters in
+     `move_gen.c` (zero-cost when undefined).
 
 ## Headline result: batched BAI in all-initial-phase regime (MCTS target)
 
@@ -159,9 +167,30 @@ make clean && \
     'cflags.test_release=-O3 -flto -march=native -Wall -Wno-trigraphs -DRIT_CACHE_INSTRUMENT'
 ```
 
+Build with anchor cache:
+```
+make clean && \
+  make magpie_test BUILD=release -j8 \
+    'cflags.release=-O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -DANCHOR_CACHE_ENABLE' \
+    'cflags.test_release=-O3 -flto -march=native -Wall -Wno-trigraphs -DANCHOR_CACHE_ENABLE'
+```
+
 Sweep plies:
 ```
 for p in 1 2 3 4 5 6 7; do SIMBENCH_PLIES=$p ./bin/magpie_test simbench; done
+```
+
+Sweep anchor cache size:
+```
+for s in 256 1024 4096 16384 65536 262144 1048576; do
+  make clean > /dev/null && \
+  make magpie_test BUILD=release -j8 \
+    "cflags.release=-O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -DANCHOR_CACHE_ENABLE -DANCHOR_CACHE_INSTRUMENT -DMOVEGEN_ANCHOR_CACHE_SIZE=$s" \
+    "cflags.test_release=-O3 -flto -march=native -Wall -Wno-trigraphs -DANCHOR_CACHE_ENABLE -DANCHOR_CACHE_INSTRUMENT -DMOVEGEN_ANCHOR_CACHE_SIZE=$s" \
+    2>/dev/null | tail -1
+  echo "=== size=$s ==="
+  SIMBENCH_MI=30 ./bin/magpie_test simbench
+done
 ```
 
 Toggling off `autoplay_set_bench_static_move(true)` in
@@ -171,3 +200,75 @@ useful for end-to-end regressions but not for clean A/B comparisons.
 Toggling `minplayiterations` in the `simbench` config string lets you
 pick between MCTS-like (large value, all initial phase) and normal sim
 (small / omitted, TT-phase-dominated) regimes.
+
+## Rack+Anchor pruning cache results
+
+Measured on simbench, CSW24, 10 threads, 15 candidates, plies=2, fixed
+trajectory (static-move bench mode), seed=42.
+
+### wordmap_gen time distribution (normal sim, mi=30)
+
+wordmap_gen accounts for ~46% of total sim time. Breakdown by
+`anchor.word_length`:
+
+| length | % wordmap_gen time | calls (M) | fully-searched% | playthrough% |
+|-------:|-------------------:|----------:|----------------:|-------------:|
+| 2      |  3.4%              | 2.1       | 31.7%           | 35.5%        |
+| 3      | 12.9%              | 4.8       | 23.0%           | 52.5%        |
+| **4**  | **20.8%**          | 6.5       | 29.4%           | 65.2%        |
+| **5**  | **20.9%**          | 6.8       | 38.6%           | 77.5%        |
+| 6      | 13.5%              | 5.5       | 42.0%           | 90.1%        |
+| 7      |  9.5%              | 4.4       | 51.0%           | 90.3%        |
+| 8      |  7.7%              | 3.6       | 58.0%           | 100%         |
+| 9      |  4.8%              | 2.2       | 57.9%           | 100%         |
+| 10-15  | ≤12%               | decreasing | rising          | 100%         |
+
+Short-to-mid lengths (3-7) are ~77% of wordmap_gen time.
+
+### Cache size sweep (normal sim, plies=2, mi=30)
+
+| size    | hit%  | skip% | iters/sec vs no-cache |
+|--------:|------:|------:|----------------------:|
+| 256     |  1.5% |  0.8% | −3.5%                 |
+| 1,024   |  4.7% |  2.5% | −3.0%                 |
+| 4,096   | 11.2% |  6.2% | −0.5%                 |
+| 16,384  | 17.7% |  9.6% |  0%                   |
+| 65,536  | 24.3% | 13.0% | +1.0%                 |
+| **262,144** | **32.3%** | **17.2%** | **+4.4%**     |
+| 1,048,576 | 39.4% | 21.2% | +0.6% (L3 pressure) |
+
+256k is the sweet spot. Memory: 256k × 16 B = 4 MB per thread (40 MB
+for 10 threads).
+
+### Per-length hit/skip (size=256, for reference)
+
+At the original 256-entry size, hit-rate was only 1.0–2.6% for lengths
+2–11 and rose to 4-8% for lengths 12-15. At size=256k every length has
+a much higher hit rate, so length-gating was not needed.
+
+### Key simplifications that mattered
+
+- **Dropped `bonus_square` from the hash.** Bonus values are static per
+  (row, col); since the hash already includes row, direction, and the
+  column span, the bonus configuration is implicit. One fewer mix per
+  square.
+- **Partial-search bound storage.** Pruned subracks had plays bounded
+  above by `cutoff_at_exit` (the prune fires when `leave + highest_score
+  < cutoff`). Storing `max(observed_max, cutoff_at_exit)` upper-bounds
+  the full anchor output safely and roughly doubles the pool of hits
+  that can produce a skip.
+- **Persistent across movegen calls.** The cache is NOT reset at
+  `gen_load_position`; the key's row_cache portion includes dynamic
+  state (cross sets, cross scores, letters) so stale entries naturally
+  mismatch on changed boards.
+
+### What didn't work
+
+- **Per-length gating** at large cache size: hurt throughput because
+  short-length anchors are many and their hit rate is still meaningful
+  at 256k.
+- **Very large cache (1M)**: hit rate climbed but L3 pressure wiped out
+  the extra savings.
+- **Small caches (≤16k)**: hashing cost dominates. Key-compute per call
+  is ~30-100 ns depending on span; savings require high skip rate to
+  offset.

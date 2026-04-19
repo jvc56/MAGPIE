@@ -22,10 +22,78 @@
 
 #define MOVEGEN_RIT_CACHE_SIZE 64
 
+// Per-thread cache of wordmap_gen results keyed on
+// (player_rack, anchor descriptor, local row_cache state). Stores an
+// upper bound on the equity the anchor can produce for this rack+board
+// neighborhood. On hit, if the current best equity is already >= the
+// cached bound, the anchor is skipped entirely. Sized as a direct-mapped
+// table indexed by low bits of the key hash.
+//
+// The 256k default was tuned on simbench (normal sim, plies=2, mi=30):
+//   size     hit%    skip%    iters/sec change
+//   256      1.5%    0.8%    -3.5%
+//   1024     4.7%    2.5%    -3.0%
+//   4096    11.2%    6.2%    -0.5%
+//   16384   17.7%    9.6%     0%
+//   65536   24.3%    13.0%   +1.0%
+//   262144  32.3%    17.2%   +4.4%  <- current default
+//   1048576 39.4%    21.2%   +0.6%  (cache too large, more L3 pressure)
+#ifndef MOVEGEN_ANCHOR_CACHE_SIZE
+#define MOVEGEN_ANCHOR_CACHE_SIZE 262144
+#endif
+
+// Optional: only cache anchors whose word_length is in [MIN, MAX].
+// At MOVEGEN_ANCHOR_CACHE_SIZE=262144 every length pays its hash cost
+// back so gating hurts; left configurable for smaller-cache experiments
+// or workloads where short-anchor overhead dominates.
+#ifndef MOVEGEN_ANCHOR_CACHE_MIN_LENGTH
+#define MOVEGEN_ANCHOR_CACHE_MIN_LENGTH 2
+#endif
+#ifndef MOVEGEN_ANCHOR_CACHE_MAX_LENGTH
+#define MOVEGEN_ANCHOR_CACHE_MAX_LENGTH 15
+#endif
+
 #ifdef RIT_CACHE_INSTRUMENT
 uint64_t rit_cache_stat_hits(void);
 uint64_t rit_cache_stat_misses(void);
 #endif
+
+#ifdef WMP_ANCHOR_INSTRUMENT
+// Per-word_length wordmap_gen counters. Use to profile where wmp_move_gen
+// time goes by anchor length. Lengths valid in [MINIMUM_WORD_LENGTH,
+// BOARD_DIM]; out-of-range lookups return 0.
+uint64_t wmp_anchor_stat_calls(int length);
+uint64_t wmp_anchor_stat_fully_searched(int length);
+uint64_t wmp_anchor_stat_subrack_iters(int length);
+uint64_t wmp_anchor_stat_subrack_skipped(int length);
+uint64_t wmp_anchor_stat_subrack_no_words(int length);
+uint64_t wmp_anchor_stat_words_produced(int length);
+uint64_t wmp_anchor_stat_record_calls(int length);
+uint64_t wmp_anchor_stat_playthrough_calls(int length);
+uint64_t wmp_anchor_stat_time_ns(int length);
+#endif
+
+#ifdef ANCHOR_CACHE_INSTRUMENT
+uint64_t anchor_cache_stat_checks(void);
+uint64_t anchor_cache_stat_hits(void);
+uint64_t anchor_cache_stat_skips(void);
+uint64_t anchor_cache_stat_stores(void);
+uint64_t anchor_cache_stat_checks_for_length(int length);
+uint64_t anchor_cache_stat_hits_for_length(int length);
+uint64_t anchor_cache_stat_skips_for_length(int length);
+#endif
+
+typedef struct RackAnchorCacheEntry {
+  uint64_t key_hash;   // 0 if empty
+  // Upper bound on the equity this rack+anchor can produce. For fully-
+  // searched entries it is the max equity actually observed. For
+  // partially-searched entries it is max(max_observed, cutoff_at_exit),
+  // which bounds plays from pruned subracks since the prune check fires
+  // only when cutoff >= leave + highest_possible_score (an upper bound
+  // on the pruned subracks' plays). Either way, a caller whose current
+  // best equity meets or exceeds this can skip the anchor.
+  Equity upper_bound;
+} RackAnchorCacheEntry;
 
 typedef struct UnrestrictedMultiplier {
   uint8_t multiplier;
@@ -150,6 +218,16 @@ typedef struct MoveGen {
   BitRack rit_cache_keys[MOVEGEN_RIT_CACHE_SIZE];
   const RackInfoTableEntry *rit_cache_entries[MOVEGEN_RIT_CACHE_SIZE];
   bool rit_cache_valid[MOVEGEN_RIT_CACHE_SIZE];
+#ifdef ANCHOR_CACHE_ENABLE
+  // Anchor-level pruning cache. Updated per wordmap_gen call and checked
+  // at the top to skip anchors whose best_equity bound is already
+  // dominated by gen->best_move_equity_or_score.
+  RackAnchorCacheEntry anchor_cache[MOVEGEN_ANCHOR_CACHE_SIZE];
+#endif
+  // Scratch slot: the max equity recorded by the currently-executing
+  // wordmap_gen call, observed via update_best_move_or_insert_into_movelist_wmp.
+  // Reset at start of each wordmap_gen and folded into the cache on exit.
+  Equity current_anchor_max_equity;
   const Board *board;
   LetterDistribution ld;
   MoveList *move_list;
