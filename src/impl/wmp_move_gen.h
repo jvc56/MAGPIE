@@ -49,6 +49,15 @@ typedef struct WMPMoveGen {
   uint8_t count_by_size[RACK_SIZE + 1];
 
   Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
+  // Sparse list of anchor slot indices that have been touched since the
+  // last wmp_move_gen_reset_anchors call. wmp_move_gen_maybe_update_anchor
+  // pushes a slot index here on its first touch (detected via the
+  // tiles_to_play==0 sentinel left by the previous reset); reset only
+  // clears these slots instead of iterating all MAX_WMP_MOVE_GEN_ANCHORS.
+  // Typical shadow_play_for_anchor touches <=8 slots, so this is ~8x
+  // cheaper than the full-array reset on realistic workloads.
+  uint8_t touched_anchor_slots[MAX_WMP_MOVE_GEN_ANCHORS];
+  int num_touched_anchor_slots;
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
@@ -60,13 +69,15 @@ typedef struct WMPMoveGen {
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].rightmost_start_col = 0;
-    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  for (int i = 0; i < wmp_move_gen->num_touched_anchor_slots; i++) {
+    const int slot_idx = wmp_move_gen->touched_anchor_slots[i];
+    wmp_move_gen->anchors[slot_idx].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
+    wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
+    wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
   }
+  wmp_move_gen->num_touched_anchor_slots = 0;
 }
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
@@ -80,6 +91,21 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
+  // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
+  // is a sparse reset keyed on the touched_anchor_slots list; untouched
+  // slots retain their prior default values rather than being reset. The
+  // calloc-zero defaults for highest_possible_equity and leftmost_start_col
+  // differ from the expected-on-first-touch sentinels (EQUITY_MIN_VALUE and
+  // BOARD_DIM-1 respectively), so we must seed them once here before the
+  // sparse-reset protocol takes over.
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].rightmost_start_col = 0;
+    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
+    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  }
+  wmp_move_gen->num_touched_anchor_slots = 0;
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
@@ -512,8 +538,18 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int start_col, Equity score,
                                                     Equity equity) {
   assert(start_col >= 0 && start_col < BOARD_DIM);
-  Anchor *anchor = wmp_move_gen_get_anchor(
-      wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
+  const int slot_idx =
+      wmp_move_gen_anchor_index(wmp_move_gen->playthrough_blocks, tiles_played);
+  Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
+  // First touch detection: tiles_to_play == 0 means this slot has been
+  // reset (or is initial-state) and isn't already on the touched list.
+  // We set tiles_to_play to a nonzero value below, so subsequent calls
+  // in the same shadow pass won't double-push.
+  if (anchor->tiles_to_play == 0) {
+    wmp_move_gen
+        ->touched_anchor_slots[wmp_move_gen->num_touched_anchor_slots++] =
+        (uint8_t)slot_idx;
+  }
   anchor->tiles_to_play = tiles_played;
   anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
   anchor->word_length = word_length;
