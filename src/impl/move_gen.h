@@ -279,6 +279,12 @@ typedef struct MoveGen {
   int number_of_letters_on_rack;
   const KWG *kwg;
   const KLV *klv;
+  // Snapshot of klv->mutation_counter captured at the last gen_load_position
+  // call. If the KLV's leave_values have been mutated in place since then
+  // (test-only set_klv_leave_value path), leave-derived caches (subrack
+  // cache, anchor cache upper bounds) must be invalidated even though the
+  // KLV pointer is unchanged.
+  uint64_t klv_mutation_counter_at_load;
   const RackInfoTable *rack_info_table;
   // RIT entry for the current player_rack, looked up once in
   // gen_look_up_leaves_and_record_exchanges and cached here for the duration

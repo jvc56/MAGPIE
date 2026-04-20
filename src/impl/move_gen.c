@@ -30,14 +30,17 @@
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/static_eval.h"
+#include "../ent/wmp.h"
 #include "../util/io_util.h"
 #include "wmp_move_gen.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define INITIAL_LAST_ANCHOR_COL (BOARD_DIM)
 
@@ -51,7 +54,6 @@ static MoveGen *cached_gens[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 #ifdef RIT_CACHE_INSTRUMENT
-#include <stdatomic.h>
 static _Atomic uint64_t rit_cache_hit_ctr;
 static _Atomic uint64_t rit_cache_miss_ctr;
 uint64_t rit_cache_stat_hits(void) {
@@ -63,7 +65,6 @@ uint64_t rit_cache_stat_misses(void) {
 #endif
 
 #ifdef SUBRACK_CACHE_INSTRUMENT
-#include <stdatomic.h>
 static _Atomic uint64_t subrack_cache_checks_ctr;
 static _Atomic uint64_t subrack_cache_hits_ctr;
 uint64_t subrack_cache_stat_checks(void) {
@@ -75,7 +76,6 @@ uint64_t subrack_cache_stat_hits(void) {
 #endif
 
 #ifdef BEST_MOVE_CACHE_INSTRUMENT
-#include <stdatomic.h>
 static _Atomic uint64_t best_move_cache_checks_ctr;
 static _Atomic uint64_t best_move_cache_key_hits_ctr;
 static _Atomic uint64_t best_move_cache_playable_hits_ctr;
@@ -255,7 +255,6 @@ static inline void best_move_cache_insert(MoveGen *gen,
 #endif  // BEST_MOVE_CACHE_ENABLE
 
 #ifdef ANCHOR_CACHE_INSTRUMENT
-#include <stdatomic.h>
 static _Atomic uint64_t anchor_cache_checks_ctr;
 static _Atomic uint64_t anchor_cache_hits_ctr;
 static _Atomic uint64_t anchor_cache_skips_ctr;
@@ -354,8 +353,6 @@ anchor_cache_compute_key(const MoveGen *gen, const Anchor *anchor) {
 #endif  // ANCHOR_CACHE_ENABLE
 
 #ifdef WMP_ANCHOR_INSTRUMENT
-#include <stdatomic.h>
-#include <time.h>
 // Per-word_length buckets for wordmap_gen analysis. Tracks call volume,
 // how often each anchor is fully searched (no early-exit), subrack-level
 // work, word-level work, and wall-clock time. Zero-cost when undefined.
@@ -3137,14 +3134,32 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
-  if (new_klv != gen->klv) {
-    // Subrack cache stores leave values from the KLV; invalidate when KLV
-    // changes (player swap, lexicon change).
+  const uint64_t new_klv_mutation_counter =
+      (new_klv != NULL) ? klv_get_mutation_counter(new_klv) : 0;
+  // Invalidate when the KLV pointer changes (player swap, lexicon change)
+  // OR the same KLV's leave_values have been mutated in place. The
+  // mutation-counter path catches test-only set_klv_leave_value calls
+  // between generate_moves invocations, which would otherwise leave stale
+  // leave_values cached in the subrack cache and anchor-cache upper-bound
+  // entries.
+  const bool klv_changed = (new_klv != gen->klv) ||
+                           (new_klv_mutation_counter !=
+                            gen->klv_mutation_counter_at_load);
+  if (klv_changed) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+#ifdef ANCHOR_CACHE_ENABLE
+    // Anchor-cache entries cache upper-bound equities computed from the
+    // current KLV's leave values; they become stale when leave_values are
+    // mutated.
+    for (int i = 0; i < MOVEGEN_ANCHOR_CACHE_SIZE; i++) {
+      gen->anchor_cache[i].key_hash = 0;
+    }
+#endif
   }
   gen->klv = new_klv;
+  gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
   const RackInfoTable *new_rit = player_get_rack_info_table(player);
   if (new_rit != gen->rack_info_table) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
