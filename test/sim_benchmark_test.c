@@ -27,8 +27,8 @@ void test_sim_benchmark(void) {
   // on an INSTRUMENT flag compiles cleanly without header churn. Anchor
   // each include with a trivial always-live reference that the optimizer
   // discards but that satisfies clang-tidy misc-include-cleaner.
-  (void)(uintptr_t)BOARD_DIM;
-  (void)(uintptr_t)(void *)&gen_destroy_cache;
+  (void)BOARD_DIM;
+  (void)&gen_destroy_cache;
 
   autoplay_reset_total_sim_iterations();
   // Fix the game trajectory by playing the top-equity static move at every
