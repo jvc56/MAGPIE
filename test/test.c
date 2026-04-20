@@ -37,6 +37,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "opening_racks_test.h"
 #include "players_data_test.h"
 #include "rack_list_test.h"
 #include "rack_test.h"
@@ -136,6 +137,7 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"openracks", test_opening_racks_static_eval},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
