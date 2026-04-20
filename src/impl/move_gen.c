@@ -108,8 +108,8 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen);
 // per square into a single 64-bit fingerprint; if the fingerprint
 // matches a cached value the move is still playable with identical
 // score/leave on the current board.
-static inline uint64_t
-best_move_fingerprint(const MoveGen *gen, int col_start, int span) {
+static inline uint64_t best_move_fingerprint(const MoveGen *gen, int col_start,
+                                             int span) {
   uint64_t h = 0x9e3779b97f4a7c15ULL;
   for (int i = 0; i < span; i++) {
     const int col = col_start + i;
@@ -149,8 +149,7 @@ static inline void best_move_ensure_row_cache(MoveGen *gen, int row, int dir) {
 // (or a better one) on its own, and we only need a tight lower bound.
 // Returns a pointer to the cache entry (always non-NULL) so the caller
 // can update it later when the final best move is known.
-static inline BestMoveCacheEntry *
-best_move_cache_probe(MoveGen *gen) {
+static inline BestMoveCacheEntry *best_move_cache_probe(MoveGen *gen) {
   const uint32_t slot = bit_rack_get_bucket_index(
       &gen->wmp_move_gen.player_bit_rack, MOVEGEN_BEST_MOVE_CACHE_SIZE);
   BestMoveCacheEntry *entry = &gen->best_move_cache[slot];
@@ -252,7 +251,7 @@ static inline void best_move_cache_insert(MoveGen *gen,
   slot->footprint_hash = footprint_hash;
   slot->count = 1;
 }
-#endif  // BEST_MOVE_CACHE_ENABLE
+#endif // BEST_MOVE_CACHE_ENABLE
 
 #ifdef ANCHOR_CACHE_INSTRUMENT
 static _Atomic uint64_t anchor_cache_checks_ctr;
@@ -293,8 +292,8 @@ uint64_t anchor_cache_stat_skips_for_length(int length) {
 // For fully-searched anchors upper_bound is the max observed equity; for
 // partially-searched anchors it is max(max_observed, cutoff_at_exit),
 // which safely upper-bounds plays from any pruned subrack.
-static inline void anchor_cache_store(RackAnchorCacheEntry *entry,
-                                      uint64_t key, Equity upper_bound) {
+static inline void anchor_cache_store(RackAnchorCacheEntry *entry, uint64_t key,
+                                      Equity upper_bound) {
   entry->key_hash = key;
   entry->upper_bound = upper_bound;
 #ifdef ANCHOR_CACHE_INSTRUMENT
@@ -318,19 +317,17 @@ static inline uint64_t anchor_cache_mix(uint64_t x) {
 // Dynamic per-square state that wordmap_gen reads -- cross_set,
 // cross_score, letter, is_cross_word -- is folded in for every square
 // in the anchor's span.
-static inline uint64_t
-anchor_cache_compute_key(const MoveGen *gen, const Anchor *anchor) {
+static inline uint64_t anchor_cache_compute_key(const MoveGen *gen,
+                                                const Anchor *anchor) {
   const BitRack *rack = &gen->wmp_move_gen.player_bit_rack;
   uint64_t h = anchor_cache_mix(bit_rack_get_low_64(rack));
   h ^= anchor_cache_mix(bit_rack_get_high_64(rack));
   const uint64_t anchor_desc =
-      ((uint64_t)anchor->word_length) |
-      ((uint64_t)anchor->tiles_to_play << 8) |
+      ((uint64_t)anchor->word_length) | ((uint64_t)anchor->tiles_to_play << 8) |
       ((uint64_t)anchor->playthrough_blocks << 16) |
       ((uint64_t)anchor->leftmost_start_col << 24) |
       ((uint64_t)anchor->rightmost_start_col << 32) |
-      ((uint64_t)gen->current_row_index << 40) |
-      ((uint64_t)gen->dir << 48);
+      ((uint64_t)gen->current_row_index << 40) | ((uint64_t)gen->dir << 48);
   h ^= anchor_cache_mix(anchor_desc);
   const int end_col = anchor->rightmost_start_col + anchor->word_length;
   for (int col = anchor->leftmost_start_col; col < end_col && col < BOARD_DIM;
@@ -350,7 +347,7 @@ anchor_cache_compute_key(const MoveGen *gen, const Anchor *anchor) {
   // Ensure the stored hash is never 0 (used as the empty-slot sentinel).
   return h == 0 ? 1 : h;
 }
-#endif  // ANCHOR_CACHE_ENABLE
+#endif // ANCHOR_CACHE_ENABLE
 
 #ifdef WMP_ANCHOR_INSTRUMENT
 // Per-word_length buckets for wordmap_gen analysis. Tracks call volume,
@@ -358,12 +355,12 @@ anchor_cache_compute_key(const MoveGen *gen, const Anchor *anchor) {
 // work, word-level work, and wall-clock time. Zero-cost when undefined.
 typedef struct WmpAnchorBucket {
   _Atomic uint64_t calls;
-  _Atomic uint64_t fully_searched; // no subrack was skipped by leave cutoff
-  _Atomic uint64_t subrack_iters;  // count of subrack loop bodies entered
-  _Atomic uint64_t subrack_skipped; // subracks skipped by leave cutoff
+  _Atomic uint64_t fully_searched;   // no subrack was skipped by leave cutoff
+  _Atomic uint64_t subrack_iters;    // count of subrack loop bodies entered
+  _Atomic uint64_t subrack_skipped;  // subracks skipped by leave cutoff
   _Atomic uint64_t subrack_no_words; // wmp lookup returned empty
-  _Atomic uint64_t words_produced;  // total words pulled from WMP
-  _Atomic uint64_t record_calls;    // wordmap_gen_check_playthrough invocations
+  _Atomic uint64_t words_produced;   // total words pulled from WMP
+  _Atomic uint64_t record_calls; // wordmap_gen_check_playthrough invocations
   _Atomic uint64_t playthrough_calls; // subset of calls with playthrough
   _Atomic uint64_t time_ns;
 } WmpAnchorBucket;
@@ -3142,9 +3139,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // between generate_moves invocations, which would otherwise leave stale
   // leave_values cached in the subrack cache and anchor-cache upper-bound
   // entries.
-  const bool klv_changed = (new_klv != gen->klv) ||
-                           (new_klv_mutation_counter !=
-                            gen->klv_mutation_counter_at_load);
+  const bool klv_changed =
+      (new_klv != gen->klv) ||
+      (new_klv_mutation_counter != gen->klv_mutation_counter_at_load);
   if (klv_changed) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
@@ -3596,12 +3593,11 @@ void generate_moves(const MoveGenArgs *args) {
           gen->number_of_tiles_in_bag +
               rack_get_total_letters(&gen->opponent_rack) >=
           (RACK_SIZE * 2);
-      const bool leaves_are_populated = (gen->rit_entry != NULL) ||
-                                        check_leaves || add_exchange;
+      const bool leaves_are_populated =
+          (gen->rit_entry != NULL) || check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
           &wgen->player_bit_rack, MOVEGEN_SUBRACK_CACHE_SIZE);
-      SubrackEnumCacheEntry *subrack_entry =
-          &gen->subrack_cache[subrack_slot];
+      SubrackEnumCacheEntry *subrack_entry = &gen->subrack_cache[subrack_slot];
       const bool subrack_cache_hit =
           leaves_are_populated && subrack_entry->valid &&
           bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
@@ -3702,8 +3698,8 @@ void generate_moves(const MoveGenArgs *args) {
           move_get_tiles_length(best) > 0) {
         best_move_ensure_row_cache(gen, move_get_row_start(best),
                                    move_get_dir(best));
-        const uint64_t fp = best_move_fingerprint(
-            gen, move_get_col_start(best), move_get_tiles_length(best));
+        const uint64_t fp = best_move_fingerprint(gen, move_get_col_start(best),
+                                                  move_get_tiles_length(best));
         best_move_cache_insert(gen, best_move_entry, best, fp);
       }
     }

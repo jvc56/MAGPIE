@@ -212,8 +212,7 @@ bai_sync_data_get_next_bai_sample_index_while_locked(BAISampleArgs *args) {
 static inline int
 bai_sync_data_get_next_initial_sample_index_while_locked(BAISampleArgs *args) {
   const int num_arms = args->bai_sync_data->num_arms;
-  const uint64_t initial_limit =
-      (uint64_t)num_arms * args->sample_minimum;
+  const uint64_t initial_limit = (uint64_t)num_arms * args->sample_minimum;
   if (args->initial_batch_remaining == 0) {
     if (args->bai_sync_data->num_total_samples_requested >= initial_limit) {
       return -1;

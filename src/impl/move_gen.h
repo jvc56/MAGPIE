@@ -22,10 +22,11 @@
 
 #define MOVEGEN_RIT_CACHE_SIZE 64
 
-// Size of the per-thread cache of wmp_move_gen_enumerate_nonplaythrough_subracks
-// results. Keyed by player_bit_rack. The enumeration output is a function
-// of the rack alone, so caching it saves 5-20% of sim time when the same
-// rack recurs across rollouts (typical in MCTS-style sims). Direct-mapped.
+// Size of the per-thread cache of
+// wmp_move_gen_enumerate_nonplaythrough_subracks results. Keyed by
+// player_bit_rack. The enumeration output is a function of the rack alone, so
+// caching it saves 5-20% of sim time when the same rack recurs across rollouts
+// (typical in MCTS-style sims). Direct-mapped.
 #ifndef MOVEGEN_SUBRACK_CACHE_SIZE
 #define MOVEGEN_SUBRACK_CACHE_SIZE 64
 #endif
@@ -157,7 +158,7 @@ uint64_t best_move_cache_stat_stores(void);
 #endif
 
 typedef struct RackAnchorCacheEntry {
-  uint64_t key_hash;   // 0 if empty
+  uint64_t key_hash; // 0 if empty
   // Upper bound on the equity this rack+anchor can produce. For fully-
   // searched entries it is the max equity actually observed. For
   // partially-searched entries it is max(max_observed, cutoff_at_exit),
@@ -313,8 +314,9 @@ typedef struct MoveGen {
   RackAnchorCacheEntry anchor_cache[MOVEGEN_ANCHOR_CACHE_SIZE];
 #endif
   // Scratch slot: the max equity recorded by the currently-executing
-  // wordmap_gen call, observed via update_best_move_or_insert_into_movelist_wmp.
-  // Reset at start of each wordmap_gen and folded into the cache on exit.
+  // wordmap_gen call, observed via
+  // update_best_move_or_insert_into_movelist_wmp. Reset at start of each
+  // wordmap_gen and folded into the cache on exit.
   Equity current_anchor_max_equity;
   const Board *board;
   LetterDistribution ld;
