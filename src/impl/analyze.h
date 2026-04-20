@@ -6,7 +6,6 @@
 #include "../impl/endgame.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
-#include <stdint.h>
 
 typedef struct AnalyzeCtx AnalyzeCtx;
 
@@ -20,7 +19,7 @@ typedef struct AnalyzeCtx AnalyzeCtx;
 // no simulation or endgame solving).
 typedef struct AnalyzeArgs {
   GameHistory *game_history;
-  uint64_t player_mask;    // 0 = all players; pre-resolved by the caller
+  bool analyze_players[2]; // true = analyze that player; pre-resolved by caller
   const char *report_path; // output file path
 
   SimArgs sim_args;

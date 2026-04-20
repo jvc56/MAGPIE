@@ -100,13 +100,13 @@ static void get_xt_gcg(const char *identifier, GetGCGResult *result,
     return;
   }
   result->gcg_string = gcg_content;
-  result->basename = string_duplicate(game_id_str);
+  result->basename_or_filepath = string_duplicate(game_id_str);
   result->source = GCG_SOURCE_XT;
 }
 
-// Populates result for a Woogles game. basename is set to the alphanumeric
-// game ID. Does nothing (without error) if identifier does not match Woogles
-// format.
+// Populates result for a Woogles game. basename_or_filepath is set to the
+// alphanumeric game ID. Does nothing (without error) if identifier does not
+// match Woogles format.
 static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
                             ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
@@ -194,13 +194,13 @@ static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
   result->gcg_string = json_unescape_string(raw_gcg);
   free(raw_gcg);
   free(response);
-  result->basename = string_duplicate(game_id_str);
+  result->basename_or_filepath = string_duplicate(game_id_str);
   result->source = GCG_SOURCE_WOOGLES;
 }
 
-// Populates result for a generic URL. basename is set to everything after the
-// last '/' with .gcg stripped. Does nothing (without error) if identifier is
-// not a URL.
+// Populates result for a generic URL. basename_or_filepath is set to everything
+// after the last '/' with .gcg stripped. Does nothing (without error) if
+// identifier is not a URL.
 static void get_url_gcg(const char *identifier, GetGCGResult *result,
                         ErrorStack *error_stack) {
   if (!is_url(identifier)) {
@@ -219,12 +219,13 @@ static void get_url_gcg(const char *identifier, GetGCGResult *result,
   }
 
   result->gcg_string = gcg_content;
-  result->basename = get_file_id(identifier);
+  result->basename_or_filepath = get_file_id(identifier);
   result->source = GCG_SOURCE_URL;
 }
 
-// Populates result for a local file. basename is set to the filename with
-// .gcg stripped. Does nothing (without error) if the file cannot be found.
+// Populates result for a local file. basename_or_filepath is set to the
+// filename with .gcg stripped. Does nothing (without error) if the file cannot
+// be found.
 static void get_local_gcg(const char *identifier, GetGCGResult *result,
                           ErrorStack *error_stack) {
   char *identifier_with_possible_ext = NULL;
@@ -252,10 +253,19 @@ static void get_local_gcg(const char *identifier, GetGCGResult *result,
 
   if (error_stack_is_empty(error_stack)) {
     result->gcg_string = gcg_content;
-    result->basename = get_file_id(identifier_with_possible_ext);
+    result->basename_or_filepath =
+        string_duplicate(identifier_with_possible_ext);
     result->source = GCG_SOURCE_LOCAL;
   }
   free(identifier_with_possible_ext);
+}
+
+void get_gcg_reset_result(GetGCGResult *result) {
+  result->source = GCG_SOURCE_NONE;
+  free(result->gcg_string);
+  result->gcg_string = NULL;
+  free(result->basename_or_filepath);
+  result->basename_or_filepath = NULL;
 }
 
 // Assumes the GetGCGResult is either zero-initialized or was populated
@@ -264,11 +274,7 @@ void get_gcg(const GetGCGArgs *get_args, GetGCGResult *result,
              ErrorStack *error_stack) {
   const char *identifier = get_args->source_identifier;
 
-  result->source = GCG_SOURCE_NONE;
-  free(result->gcg_string);
-  result->gcg_string = NULL;
-  free(result->basename);
-  result->basename = NULL;
+  get_gcg_reset_result(result);
 
   get_xt_gcg(identifier, result, error_stack);
   if (!error_stack_is_empty(error_stack) || result->source != GCG_SOURCE_NONE) {

@@ -315,8 +315,6 @@ char *error_stack_get_string_and_reset(ErrorStack *error_stack);
 void error_stack_print_and_reset(ErrorStack *error_stack);
 bool error_stack_is_empty(const ErrorStack *error_stack);
 
-// WARNING: for testing only, production code should only reset the stack after
-// printing or retrieving the error string
 void error_stack_reset(ErrorStack *error_stack);
 
 void fseek_or_die(FILE *stream, long offset, int whence);

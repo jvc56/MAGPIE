@@ -18,5 +18,8 @@ bool thread_control_set_status(ThreadControl *thread_control,
                                thread_control_status_t exit_status);
 void thread_control_wait_for_status_change(ThreadControl *thread_control);
 void thread_control_print(ThreadControl *thread_control, const char *content);
+void thread_control_print_formatted(ThreadControl *thread_control,
+                                    const char *fmt, ...)
+    __attribute__((format(printf, 2, 3)));
 
 #endif

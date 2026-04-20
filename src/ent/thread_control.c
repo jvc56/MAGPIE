@@ -4,6 +4,7 @@
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
+#include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -79,4 +80,14 @@ void thread_control_print(ThreadControl *thread_control, const char *content) {
   cpthread_mutex_lock(&thread_control->print_mutex);
   write_to_stream_out("%s", content);
   cpthread_mutex_unlock(&thread_control->print_mutex);
+}
+
+void thread_control_print_formatted(ThreadControl *thread_control,
+                                    const char *fmt, ...) {
+  va_list args;
+  va_start(args, fmt);
+  char *content = format_string_with_va_list(fmt, &args);
+  va_end(args);
+  thread_control_print(thread_control, content);
+  free(content);
 }
