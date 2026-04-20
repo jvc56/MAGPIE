@@ -764,12 +764,9 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
   turn_result->actual.equity = move_equity_to_double(actual_in_list);
 
   const Move *best_in_list = move_list_get_move(ctx->move_list, 0);
-  if (move_get_equity(best_in_list) ==
-      move_get_equity(actual_in_list)) {
+  if (move_get_equity(best_in_list) == move_get_equity(actual_in_list)) {
     // Actual is the best move; best is a copy of actual.
     turn_result->best = turn_result->actual;
-    turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
-    turn_result->best.move = gmr.actual_move_or_pass_if_phony;
   } else {
     turn_result->best.win_pct = -1.0;
     turn_result->best.rank_idx = 0;
