@@ -3,6 +3,8 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../ent/equity.h"
+#include "../ent/player.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "game.h"

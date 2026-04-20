@@ -2489,7 +2489,7 @@ void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
                        &args);
   args.bai_options.arm_avoid_prune = arm_avoid_prune;
   args.bai_options.num_arm_avoid_prune = num_arm_avoid_prune;
-  if (game_history_get_num_events(config->game_history) == 0) {
+  if (game_history_get_most_recent_move_event_index(config->game_history) < 0) {
     args.use_inference = false;
   }
   if (sim_ctx) {
@@ -2538,6 +2538,11 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
             config->game, 1 - game_get_player_on_turn_index(config->game))));
   }
 
+  // Save inference validity: sim may run inference internally but should not
+  // change what the user sees from a prior explicit infer command.
+  const bool prev_inference_valid =
+      inference_results_get_valid_for_current_game_state(
+          config->inference_results);
   config_simulate(config, NULL, &known_opp_rack, config->sim_results, NULL, 0,
                   error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -2548,12 +2553,14 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
       game_history_get_num_events(config->game_history) > 0;
   bool sim_results_valid = true;
   if (use_inference_for_this_run) {
-    // This will always set the state to false if it was interrupted
+    // Inference ran as a sim side effect; check interruption without touching
+    // the user-visible inference validity flag (only explicit infer sets that).
+    sim_results_valid =
+        !inference_results_get_interrupted(config->inference_results);
+    // Restore the user-visible flag (if inference was interrupted it stays
+    // false; otherwise the prior explicit-infer state is preserved).
     inference_results_set_valid_for_current_game_state(
-        config->inference_results, true);
-    // If the inference was interrupted, the sim results will be invalid
-    sim_results_valid = inference_results_get_valid_for_current_game_state(
-        config->inference_results);
+        config->inference_results, prev_inference_valid);
   }
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
@@ -2706,6 +2713,9 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  const bool prev_inference_valid_snoprune =
+      inference_results_get_valid_for_current_game_state(
+          config->inference_results);
   config_simulate(config, NULL, &known_opp_rack, config->sim_results,
                   unpruned_move_idxs, num_unpruned_moves, error_stack);
   free(unpruned_move_idxs);
@@ -2717,12 +2727,10 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
       game_history_get_num_events(config->game_history) > 0;
   bool sim_results_valid = true;
   if (use_inference_for_this_run) {
-    // This will always set the state to false if it was interrupted
+    sim_results_valid =
+        !inference_results_get_interrupted(config->inference_results);
     inference_results_set_valid_for_current_game_state(
-        config->inference_results, true);
-    // If the inference was interrupted, the sim results will be invalid
-    sim_results_valid = inference_results_get_valid_for_current_game_state(
-        config->inference_results);
+        config->inference_results, prev_inference_valid_snoprune);
   }
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
@@ -5480,7 +5488,7 @@ void config_parse_gcg_string(Config *config, const char *gcg_string,
     config_parse_gcg_string_with_parser(config, gcg_parser, game_history,
                                         error_stack);
     if (error_stack_is_empty(error_stack)) {
-      config_invalidate_everything(config, true);
+      config_reset_move_list_and_invalidate_sim_results(config);
     }
   }
   gcg_parser_destroy(gcg_parser);

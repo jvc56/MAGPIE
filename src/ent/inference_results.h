@@ -29,6 +29,7 @@ void inference_results_set_valid_for_current_game_state(
     InferenceResults *results, bool valid);
 bool inference_results_get_valid_for_current_game_state(
     const InferenceResults *results);
+bool inference_results_get_interrupted(const InferenceResults *results);
 const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results);
 const Rack *inference_results_get_target_known_unplayed_tiles(

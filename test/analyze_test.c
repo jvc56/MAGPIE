@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 static const char *SINGLE_GCG_PATH = "testdata/gcgs/success.gcg";
 static const char *SINGLE_REPORT_PATH = "testdata/gcgs/success_report.txt";
@@ -26,14 +27,13 @@ static const char *MINIMAL_GCG_HEADER = "#character-encoding UTF-8\n"
 // the caller.
 static char *make_temp_gcg_dir(void) {
   const char *tmp_dir = "/tmp/magpie_analyze_test_dir";
-  mkdir(tmp_dir, 0755);
+  (void)mkdir(tmp_dir, 0755);
 
-  const char *gcg_content =
-      "#character-encoding UTF-8\n"
-      "#player1 Tim Tim\n"
-      "#player2 Josh Josh\n"
-      ">Tim: AEITW 8D WAITE +24 24\n"
-      ">Josh: DEEFINO 7C DEFO +22 22\n";
+  const char *gcg_content = "#character-encoding UTF-8\n"
+                            "#player1 Tim Tim\n"
+                            "#player2 Josh Josh\n"
+                            ">Tim: AEITW 8D WAITE +24 24\n"
+                            ">Josh: DEEFINO 7C DEFO +22 22\n";
   char *gcg_path = get_formatted_string("%s/test_game.gcg", tmp_dir);
   ErrorStack *es = error_stack_create();
   write_string_to_file(gcg_path, "w", gcg_content, es);
@@ -46,17 +46,17 @@ static char *make_temp_gcg_dir(void) {
 static void remove_temp_gcg_dir(const char *dir_path) {
   char *gcg_path = get_formatted_string("%s/test_game.gcg", dir_path);
   char *report_path = get_formatted_string("%s/test_game_report.txt", dir_path);
-  remove(gcg_path);
-  remove(report_path);
+  (void)remove(gcg_path);
+  (void)remove(report_path);
   free(gcg_path);
   free(report_path);
-  rmdir(dir_path);
+  (void)rmdir(dir_path);
 }
 
 // PATH D1: single GCG file as argument (CSV output, plies=0).
 static void test_analyze_single_file(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 0");
-  remove(SINGLE_REPORT_PATH);
+  (void)remove(SINGLE_REPORT_PATH);
   char *cmd = get_formatted_string("analyze %s", SINGLE_GCG_PATH);
   assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
   free(cmd);
@@ -72,9 +72,9 @@ static void test_analyze_single_file(void) {
 static void test_analyze_zero_args(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 0");
   load_game_history_with_gcg(config, "success");
-  remove(PLAYER_NAMES_REPORT_PATH);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
-  remove(PLAYER_NAMES_REPORT_PATH);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   config_destroy(config);
 }
 
@@ -84,7 +84,7 @@ static void test_analyze_zero_args_human_readable(void) {
   load_game_history_with_gcg_string(config, MINIMAL_GCG_HEADER,
                                     ">Tim: AEITW 8D WAITE +24 24\n"
                                     ">Josh: DEEFINO 7C DEFO +22 22\n");
-  remove(PLAYER_NAMES_REPORT_PATH);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
   char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
   assert(has_substring(report, "=== Game Summary: Tim ==="));
@@ -100,9 +100,8 @@ static void test_analyze_player_filter_loaded_game(void) {
   load_game_history_with_gcg(config, "success");
   // "Josh" is a player nickname in success.gcg; with new logic, only Josh is
   // analyzed. "UnknownExtra" is silently ignored (at least one name matched).
-  assert_config_exec_status(config, "analyze Josh",
-                             ERROR_STATUS_SUCCESS);
-  remove(PLAYER_NAMES_REPORT_PATH);
+  assert_config_exec_status(config, "analyze Josh", ERROR_STATUS_SUCCESS);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   config_destroy(config);
 }
 
@@ -112,19 +111,19 @@ static void test_analyze_player_filter_partial_match(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 0");
   load_game_history_with_gcg(config, "success");
   assert_config_exec_status(config, "analyze Tim,UnknownExtra",
-                             ERROR_STATUS_SUCCESS);
-  remove(PLAYER_NAMES_REPORT_PATH);
+                            ERROR_STATUS_SUCCESS);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   config_destroy(config);
 }
 
 // PATH C: 2-arg — explicit GCG source + player filter.
 static void test_analyze_gcg_and_player(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 0");
-  remove(SINGLE_REPORT_PATH);
+  (void)remove(SINGLE_REPORT_PATH);
   char *cmd = get_formatted_string("analyze %s Tim", SINGLE_GCG_PATH);
   assert_config_exec_status(config, cmd, ERROR_STATUS_SUCCESS);
   free(cmd);
-  remove(SINGLE_REPORT_PATH);
+  (void)remove(SINGLE_REPORT_PATH);
   config_destroy(config);
 }
 
@@ -183,7 +182,7 @@ static void test_analyze_vertical_opening_transposable(void) {
   Config *config = config_create_or_die("set -lex CSW21 -plies 0");
   load_game_history_with_gcg_string(config, MINIMAL_GCG_HEADER,
                                     ">Tim: QIRESIT H7 QI +22 22\n");
-  remove(PLAYER_NAMES_REPORT_PATH);
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
   assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
   char *report = get_string_from_file_or_die(PLAYER_NAMES_REPORT_PATH);
   assert(has_substring(report, "H7 QI,-,0.00"));

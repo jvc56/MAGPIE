@@ -1,8 +1,11 @@
 #include "analyze.h"
 
 #include "../def/bai_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
+#include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/endgame_results.h"
@@ -19,7 +22,6 @@
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/validated_move.h"
-#include "../ent/win_pct.h"
 #include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -32,6 +34,7 @@
 #include "gameplay.h"
 #include "move_gen.h"
 #include "simmer.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
@@ -541,7 +544,7 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
     string_grid_set_cell(sg, row, curr_col, string_duplicate(""));
   }
 
-  *total_equity_lost += equity_lost;
+  *total_equity_lost += double_to_equity(equity_lost);
   *total_win_pct_lost += win_pct_lost;
 }
 
@@ -903,6 +906,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   const SimmedPlay *best_sp =
       sim_results_get_display_simmed_play(ctx->sim_results, 0);
+  assert(best_sp != NULL);
   const SimmedPlay *actual_sp = NULL;
 
   int actual_display_idx = -1;
@@ -921,6 +925,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   if (actual_sp == NULL) {
     log_fatal("failed to find actual move in simmed plays after simulation");
   }
+  assert(actual_sp != NULL);
 
   turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
   turn_result->actual.win_pct =

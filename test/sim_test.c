@@ -352,11 +352,11 @@ void perf_test_multithread_sim(void) {
 void test_sim_with_and_without_inference_helper(
     const char *gcg_file, const char *known_opp_rack_str,
     const char **moves_to_add, const char *winner_without_inference,
-    const char *winner_with_inference) {
+    const char *winner_with_inference, const uint64_t sim_seed) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
       "-threads 10 -plies 2 -it 2000 -minp 50 -numplays 2 "
-      "-scond none -ima 0 -seed 10");
+      "-scond none -ima 0 -seed 10 -sinfer false");
   // Load an empty CGP to create a new game.
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -388,6 +388,12 @@ void test_sim_with_and_without_inference_helper(
   rack_set_to_string(config_get_ld(config), &known_opp_rack,
                      known_opp_rack_str);
   SimResults *sim_results = config_get_sim_results(config);
+
+  // Set an explicit seed so results are independent of the auto-increment chain
+  // in the code path above.
+  char *seed_cmd = get_formatted_string("set -seed %llu", sim_seed);
+  load_and_exec_config_or_die(config, seed_cmd);
+  free(seed_cmd);
 
   // Without inference
   error_code_t status = config_simulate_and_return_status(
@@ -430,7 +436,7 @@ void test_sim_with_inference(void) {
   test_sim_with_and_without_inference_helper(
       "muzaks_empyrean", "",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
-      empyrean_move_str, napery_move_string);
+      empyrean_move_str, napery_move_string, 14);
 
   // N6 ERE infers a leave of RE, so playing SYNCHRONIZE/D will sim worse with
   // inference because of the RESYNCHRONIZE/D extension.
@@ -440,12 +446,12 @@ void test_sim_with_inference(void) {
   test_sim_with_and_without_inference_helper(
       "resynchronized", "",
       (const char *[]){synced_move_str, sync_move_string, ze_move_string, NULL},
-      sync_move_string, ze_move_string);
+      sync_move_string, ze_move_string, 15);
 
   test_sim_with_and_without_inference_helper(
       "muzaks_empyrean", "IIIIIII",
       (const char *[]){empyrean_move_str, napery_move_string, NULL},
-      empyrean_move_str, empyrean_move_str);
+      empyrean_move_str, empyrean_move_str, 14);
 
   // Test that the inferences fall back to simming
   // with random racks if the inference determines that there were
