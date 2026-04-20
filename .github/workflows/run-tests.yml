@@ -92,6 +92,8 @@ jobs:
             tests: "sim endgame klv"
           - shard: eldar_v
             tests: "eldar_v"
+          - shard: analyze_sim
+            tests: "analyze_sim"
           - shard: config
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest

@@ -88,6 +88,8 @@ void thread_control_print_formatted(ThreadControl *thread_control,
   va_start(args, fmt);
   char *content = format_string_with_va_list(fmt, &args);
   va_end(args);
-  thread_control_print(thread_control, content);
-  free(content);
+  if (content) {
+    thread_control_print(thread_control, content);
+    free(content);
+  }
 }

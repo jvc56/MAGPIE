@@ -19,7 +19,7 @@ typedef struct GetGCGArgs {
 typedef struct GetGCGResult {
   char *gcg_string;
   // If the source is an xtables or woogles game, this is the game ID.
-  // If the source is a URL, this is the everything after the last slash with
+  // If the source is a URL, this is everything after the last slash with
   // .gcg stripped if present. If the source is a local file, this is the file
   // path.
   char *basename_or_filepath;

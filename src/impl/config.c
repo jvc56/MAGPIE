@@ -64,7 +64,6 @@
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
-#include <dirent.h>
 #include <float.h>
 #include <inttypes.h>
 #include <limits.h>
@@ -74,7 +73,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/stat.h>
 
 enum {
   HELP_INDENT = 10,
@@ -5378,6 +5376,10 @@ void config_load_lexicon_dependent_data(
   free(updated_ld_name);
 }
 
+// Loads a new board layout by name. If the layout name changes and the load
+// succeeds, invalidates all derived results (sim, inference, endgame) and
+// resets the game history, since board geometry affects move generation and
+// scoring.
 void config_load_board_layout(Config *config, const char *new_board_layout_name,
                               ErrorStack *error_stack) {
   if (new_board_layout_name &&
@@ -5391,9 +5393,13 @@ void config_load_board_layout(Config *config, const char *new_board_layout_name,
           string_duplicate("encountered an error loading the board layout"));
       return;
     }
+    config_invalidate_everything(config, false);
   }
 }
 
+// Sets a new game variant. If the variant changes successfully, invalidates all
+// derived results (sim, inference, endgame) and resets the game history, since
+// game variant affects move generation and scoring rules.
 void config_load_game_variant(Config *config, const char *new_game_variant_str,
                               ErrorStack *error_stack) {
   if (new_game_variant_str) {
@@ -5406,7 +5412,10 @@ void config_load_game_variant(Config *config, const char *new_game_variant_str,
                                             new_game_variant_str));
       return;
     }
-    config->game_variant = new_game_variant;
+    if (config->game_variant != new_game_variant) {
+      config->game_variant = new_game_variant;
+      config_invalidate_everything(config, false);
+    }
   }
 }
 
@@ -5508,10 +5517,16 @@ static void config_set_gcg_filename_and_save(Config *config,
     game_history_set_gcg_filename(config->game_history, source_identifier);
     return;
   }
-  const char *p1_name = game_history_player_get_name(config->game_history, 0);
-  const char *p2_name = game_history_player_get_name(config->game_history, 1);
-  char *gcg_filename = get_formatted_string(
-      "%s-%s-vs-%s.gcg", gcg_result->basename_or_filepath, p1_name, p2_name);
+  // Build the filename as "<basename>-<nick1>-vs-<nick2>.gcg" using the same
+  // nickname-based convention as the no-source case. The basename (e.g. a
+  // tournament ID) is prepended so that the file is distinguishable from a
+  // game saved locally without a source.
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(sb, "%s-",
+                                      gcg_result->basename_or_filepath);
+  string_builder_add_gcg_filename(sb, config->game_history, 0);
+  char *gcg_filename = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
   game_history_set_gcg_filename(config->game_history, gcg_filename);
   write_string_to_file(gcg_filename, "w", gcg_result->gcg_string, error_stack);
   free(gcg_filename);
@@ -6992,17 +7007,10 @@ char *str_api_create_data(Config *config, ErrorStack *error_stack) {
 
 // Analyze command helpers
 
-static bool path_is_directory(const char *path) {
-  if (!path) {
-    return false;
-  }
-  struct stat path_stat;
-  return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
-}
-
 // Resolves a comma-separated list of player names/nicknames into a per-player
-// boolean array. When player_list_str is NULL, all players are enabled. Sets
-// error on any unrecognized name.
+// boolean array. When player_list_str is NULL, all players are enabled. At
+// least one name in the list must match a player; unrecognized names are
+// silently ignored. Sets error only if no name matches any player.
 static void resolve_analyze_players(const GameHistory *game_history,
                                     const char *player_list_str,
                                     bool analyze_players[2],
@@ -7018,7 +7026,6 @@ static void resolve_analyze_players(const GameHistory *game_history,
   const int num_names = string_splitter_get_number_of_items(ss);
   for (int name_idx = 0; name_idx < num_names; name_idx++) {
     const char *name = string_splitter_get_item(ss, name_idx);
-    bool found = false;
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       const char *pname =
           game_history_player_get_name(game_history, player_idx);
@@ -7026,20 +7033,17 @@ static void resolve_analyze_players(const GameHistory *game_history,
           game_history_player_get_nickname(game_history, player_idx);
       if (strings_equal(name, pname) || strings_equal(name, pnick)) {
         analyze_players[player_idx] = true;
-        found = true;
         break;
       }
     }
-    if (!found) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
-          get_formatted_string(
-              "argument not recognized as a GCG source or a player name: '%s'",
-              name));
-      break;
-    }
   }
   string_splitter_destroy(ss);
+  if (!analyze_players[0] && !analyze_players[1]) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_PLAYER_NAME,
+        get_formatted_string("no player matched any name in list: '%s'",
+                             player_list_str));
+  }
 }
 
 // Fills the AnalyzeArgs fields that depend on the current Config state. Called
@@ -7065,51 +7069,22 @@ typedef struct AnalyzeSummary {
   bool interrupted;
 } AnalyzeSummary;
 
-// FIXME: move this to string util
-static int compare_string_ptrs(const void *a, const void *b) {
-  return strcmp(*(const char *const *)a, *(const char *const *)b);
-}
-
-// Returns a sorted, heap-allocated array of .gcg filenames found in dir_path.
-// *num_files is set to the number of entries. The array and each string must
-// be freed by the caller. On error, pushes to error_stack and returns NULL.
-static char **get_gcg_files_in_directory(const char *dir_path, int *num_files,
-                                         ErrorStack *error_stack) {
-  DIR *dir = opendir_safe(dir_path, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    *num_files = 0;
-    return NULL;
-  }
-  int capacity = 16;
-  char **gcg_files = malloc_or_die(sizeof(char *) * (size_t)capacity);
-  int count = 0;
-  const struct dirent *entry;
-  while ((entry = readdir(dir)) != NULL) {
-    if (!has_suffix(".gcg", entry->d_name)) {
-      continue;
-    }
-    if (count == capacity) {
-      capacity *= 2;
-      gcg_files = realloc_or_die(gcg_files, sizeof(char *) * (size_t)capacity);
-    }
-    gcg_files[count++] = string_duplicate(entry->d_name);
-  }
-  closedir(dir);
-  qsort(gcg_files, (size_t)count, sizeof(char *), compare_string_ptrs);
-  *num_files = count;
-  return gcg_files;
-}
-
-// If gcg_source is null, the game history is already loaded
+// If gcg_source is NULL the game history is already loaded and parsing is
+// skipped. When gcg_source is non-NULL the GCG must be parsed from
+// config->gcg_result; if the caller (impl_analyze's 1-arg probe path) already
+// downloaded the GCG into config->gcg_result, that download is reused and
+// get_gcg is not called again.
 static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
                                 AnalyzeCtx **ctx, const char *gcg_source,
                                 const char *player_list_str,
                                 ErrorStack *error_stack) {
   if (gcg_source) {
-    GetGCGArgs download_args = {.source_identifier = gcg_source};
-    get_gcg(&download_args, &config->gcg_result, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
+    if (!config->gcg_result.gcg_string) {
+      GetGCGArgs download_args = {.source_identifier = gcg_source};
+      get_gcg(&download_args, &config->gcg_result, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
     config_parse_gcg_string(config, config->gcg_result.gcg_string,
                             config->game_history, error_stack);
@@ -7128,10 +7103,11 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
                                    error_stack);
   get_gcg_reset_result(&config->gcg_result);
 
-  bool analyze_players[2] = {true, true};
+  analyze_args->analyze_players[0] = true;
+  analyze_args->analyze_players[1] = true;
   if (player_list_str) {
     resolve_analyze_players(config->game_history, player_list_str,
-                            analyze_players, error_stack);
+                            analyze_args->analyze_players, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -7144,12 +7120,15 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
   }
 
   config_init_game(config);
+  analyze_args->sim_args.game = config->game;
+  analyze_args->sim_args.inference_args.game = config->game;
 
   // Lazy load win_pcts if not already loaded
   config_load_win_pcts(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  analyze_args->sim_args.win_pcts = config->win_pcts;
 
   const char *gcg_filename =
       game_history_get_gcg_filename(config->game_history);
@@ -7186,6 +7165,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   const char *gcg_source = NULL;
   const char *player_list_str = NULL;
   ErrorStack *analyze_error_stack = error_stack_create();
+  get_gcg_reset_result(&config->gcg_result);
 
   if (path_is_directory(arg0)) {
     arg0_is_directory = true;
@@ -7205,12 +7185,20 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       if (!get_gcg_succeeded) {
         player_list_str = arg0;
       } else {
+        // The probe call succeeded: arg0 is a GCG source identifier and the
+        // downloaded GCG string is already sitting in config->gcg_result.
+        // Set gcg_source so that analyze_single_game knows it must parse the
+        // GCG (it would otherwise treat a NULL gcg_source as "game already
+        // loaded"). analyze_single_game skips the get_gcg download when
+        // config->gcg_result.gcg_string is already populated, so no
+        // double-download occurs.
+        gcg_source = arg0;
         player_list_str = arg1;
       }
     }
   }
 
-  const int ld_size = ld_get_size(game_get_ld(config->game));
+  const int ld_size = config->ld ? ld_get_size(config->ld) : 0;
   Rack target_played_tiles;
   rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
   Rack nontarget_known_tiles;
@@ -7227,8 +7215,9 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   if (arg0_is_directory) {
     int num_gcg_files = 0;
     char **gcg_files =
-        get_gcg_files_in_directory(arg0, &num_gcg_files, error_stack);
+        get_files_in_directory(arg0, ".gcg", &num_gcg_files, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      error_stack_destroy(analyze_error_stack);
       return;
     }
     thread_control_print_formatted(analyze_args.sim_args.thread_control,
@@ -7262,9 +7251,10 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
     free(gcg_files);
   } else {
     analyze_single_game(config, &analyze_args, &ctx, gcg_source,
-                        player_list_str, analyze_error_stack);
+                        player_list_str, error_stack);
   }
   analyze_ctx_destroy(ctx);
+  error_stack_destroy(analyze_error_stack);
 }
 
 void execute_analyze(Config *config, ErrorStack *error_stack) {

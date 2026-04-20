@@ -336,4 +336,12 @@ void fprintf_or_die(FILE *stream, const char *format, ...);
 
 FILE *popen_or_die(const char *command, const char *mode);
 
+bool path_is_directory(const char *path);
+
+// Returns a sorted, heap-allocated array of filenames ending with suffix found
+// in dir_path. *num_files is set to the count. Caller frees each string and
+// the array. On error, pushes to error_stack and returns NULL.
+char **get_files_in_directory(const char *dir_path, const char *suffix,
+                              int *num_files, ErrorStack *error_stack);
+
 #endif

@@ -10,6 +10,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
 
 enum { ERROR_STACK_CAPACITY = 100 };
@@ -553,4 +554,49 @@ FILE *popen_or_die(const char *command, const char *mode) {
     exit(EXIT_FAILURE);
   }
   return pipe;
+}
+
+bool path_is_directory(const char *path) {
+  if (!path) {
+    return false;
+  }
+  struct stat path_stat;
+  return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
+}
+
+static int compare_filenames_for_sort(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
+char **get_files_in_directory(const char *dir_path, const char *suffix,
+                              int *num_files, ErrorStack *error_stack) {
+  DIR *dir = opendir_safe(dir_path, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    *num_files = 0;
+    return NULL;
+  }
+  int capacity = 16;
+  char **files = malloc_or_die(sizeof(char *) * (size_t)capacity);
+  int count = 0;
+  const size_t suffix_len = strlen(suffix);
+  const struct dirent *entry;
+  while ((entry = readdir(dir)) != NULL) {
+    const size_t name_len = strlen(entry->d_name);
+    if (name_len < suffix_len ||
+        strcmp(entry->d_name + name_len - suffix_len, suffix) != 0) {
+      continue;
+    }
+    if (count == capacity) {
+      capacity *= 2;
+      files = realloc_or_die(files, sizeof(char *) * (size_t)capacity);
+    }
+    const size_t copy_size = name_len + 1;
+    char *name_copy = malloc_or_die(copy_size);
+    memcpy(name_copy, entry->d_name, copy_size);
+    files[count++] = name_copy;
+  }
+  closedir(dir);
+  qsort(files, (size_t)count, sizeof(char *), compare_filenames_for_sort);
+  *num_files = count;
+  return files;
 }

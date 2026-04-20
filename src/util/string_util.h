@@ -112,6 +112,9 @@ void string_grid_set_cell(StringGrid *string_grid, int row, int col,
 void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
                                     bool add_border);
 
+// Compares two string pointers for use with qsort.
+int compare_string_ptrs(const void *a, const void *b);
+
 // Returns the number of terminal columns a string occupies, correctly handling
 // ANSI escape sequences (0 columns) and Unicode wide characters (2 columns).
 size_t visual_string_length(const char *str);

@@ -1057,6 +1057,10 @@ void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
   }
 }
 
+int compare_string_ptrs(const void *a, const void *b) {
+  return strcmp(*(const char *const *)a, *(const char *const *)b);
+}
+
 size_t visual_string_length(const char *str) {
   if (!str) {
     log_fatal("cannot get visual length of a null string");

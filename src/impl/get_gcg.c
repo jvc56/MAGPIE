@@ -224,8 +224,8 @@ static void get_url_gcg(const char *identifier, GetGCGResult *result,
 }
 
 // Populates result for a local file. basename_or_filepath is set to the
-// filename with .gcg stripped. Does nothing (without error) if the file cannot
-// be found.
+// full filepath (including .gcg extension if present). Does nothing (without
+// error) if the file cannot be found.
 static void get_local_gcg(const char *identifier, GetGCGResult *result,
                           ErrorStack *error_stack) {
   char *identifier_with_possible_ext = NULL;
