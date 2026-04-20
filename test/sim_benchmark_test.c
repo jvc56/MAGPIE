@@ -38,8 +38,7 @@ void test_sim_benchmark(void) {
   autoplay_set_bench_static_move(true);
 
   const char *plies_env = getenv("SIMBENCH_PLIES");
-  const int plies =
-      (plies_env != NULL) ? (int)strtol(plies_env, NULL, 10) : 2;
+  const int plies = (plies_env != NULL) ? (int)strtol(plies_env, NULL, 10) : 2;
   const char *mi_env = getenv("SIMBENCH_MI");
   const char *mi = (mi_env != NULL) ? mi_env : "100000";
   const char *rit_env = getenv("SIMBENCH_RIT");
@@ -57,15 +56,13 @@ void test_sim_benchmark(void) {
   double elapsed = (double)(end.tv_sec - start.tv_sec) +
                    (double)(end.tv_nsec - start.tv_nsec) / 1e9;
   const uint64_t iters = autoplay_get_total_sim_iterations();
-  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)",
-         plies, elapsed, (unsigned long long)iters,
-         (double)iters / elapsed);
+  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)", plies, elapsed,
+         (unsigned long long)iters, (double)iters / elapsed);
 #ifdef RIT_CACHE_INSTRUMENT
   const uint64_t h = rit_cache_stat_hits();
   const uint64_t m = rit_cache_stat_misses();
   if (h + m > 0) {
-    printf(", hit_rate=%.2f%%",
-           100.0 * (double)h / (double)(h + m));
+    printf(", hit_rate=%.2f%%", 100.0 * (double)h / (double)(h + m));
   }
 #endif
   printf("\n");
@@ -118,8 +115,7 @@ void test_sim_benchmark(void) {
       const uint64_t lh = anchor_cache_stat_hits_for_length(l);
       const uint64_t ls = anchor_cache_stat_skips_for_length(l);
       printf("  %2d  | %9llu | %5.2f%% | %5.2f%% |\n", l,
-             (unsigned long long)lc,
-             100.0 * (double)lh / (double)lc,
+             (unsigned long long)lc, 100.0 * (double)lh / (double)lc,
              100.0 * (double)ls / (double)lc);
     }
   }
@@ -151,9 +147,8 @@ void test_sim_benchmark(void) {
     printf("  %2d  | %9llu | %5.1f%% | %4.1f%% | %9.3f | %10.3f | %9.3f | "
            "%7.2f | %5.2f%%\n",
            l, (unsigned long long)c, 100.0 * (double)full / (double)c,
-           100.0 * (double)pt / (double)c,
-           (double)ss / (double)c, (double)wp / (double)c,
-           (double)rc / (double)c, (double)tn / 1e6,
+           100.0 * (double)pt / (double)c, (double)ss / (double)c,
+           (double)wp / (double)c, (double)rc / (double)c, (double)tn / 1e6,
            100.0 * (double)tn / (double)total_time_ns);
   }
 #endif
