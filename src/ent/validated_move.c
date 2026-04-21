@@ -146,11 +146,21 @@ void validate_tiles_played_with_mls(const Board *board,
                                     bool allow_playthrough,
                                     ErrorStack *error_stack) {
   // Set all the tiles and later overwrite them with
-  // playthrough markers if it was a tile placement move
+  // playthrough markers if it was a tile placement move.
+  // For exchanges, PLAYED_THROUGH_MARKER never appears, but
+  // BLANK_MACHINE_LETTER == PLAYED_THROUGH_MARKER == 0, so we must not skip
+  // ml == 0 in the exchange case. Also unblank any blanked letter (e.g.
+  // lowercase 'u') to its uppercase counterpart, since only '?' may denote the
+  // blank tile in an exchange (matching the rack_set_to_string_unblanked
+  // convention used by impl_set_rack).
+  const bool is_exchange = move_get_type(move) == GAME_EVENT_EXCHANGE;
   for (int i = 0; i < number_of_machine_letters; i++) {
     MachineLetter ml = machine_letters[i];
+    if (is_exchange && get_is_blanked(ml)) {
+      ml = get_unblanked_machine_letter(ml);
+    }
     move_set_tile(move, ml, i);
-    if (ml != PLAYED_THROUGH_MARKER) {
+    if (is_exchange || ml != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(ml)) {
         rack_add_letter(tiles_played_rack, BLANK_MACHINE_LETTER);
       } else {
