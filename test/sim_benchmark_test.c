@@ -5,10 +5,8 @@
 
 #include "sim_benchmark_test.h"
 
-#include "../src/def/board_defs.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
-#include "../src/impl/move_gen.h"
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -20,15 +18,6 @@ void test_sim_benchmark(void) {
   struct timespec start;
   struct timespec end;
   clock_gettime(CLOCK_MONOTONIC, &start); // NOLINT(misc-include-cleaner)
-  // board_defs.h and move_gen.h expose symbols (BOARD_DIM, stat getters)
-  // that are only referenced from instrumentation #ifdef blocks below.
-  // When those flags are off the preprocessed file no longer uses these
-  // headers directly, but we still want to include them so that turning
-  // on an INSTRUMENT flag compiles cleanly without header churn. Anchor
-  // each include with a trivial always-live reference that the optimizer
-  // discards but that satisfies clang-tidy misc-include-cleaner.
-  (void)BOARD_DIM;
-  (void)&gen_destroy_cache;
 
   autoplay_reset_total_sim_iterations();
   // Fix the game trajectory by playing the top-equity static move at every
@@ -56,112 +45,8 @@ void test_sim_benchmark(void) {
   double elapsed = (double)(end.tv_sec - start.tv_sec) +
                    (double)(end.tv_nsec - start.tv_nsec) / 1e9;
   const uint64_t iters = autoplay_get_total_sim_iterations();
-  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)", plies, elapsed,
+  printf("plies=%d: %.1fs, iters=%llu (%.0f iters/sec)\n", plies, elapsed,
          (unsigned long long)iters, (double)iters / elapsed);
-#ifdef RIT_CACHE_INSTRUMENT
-  const uint64_t h = rit_cache_stat_hits();
-  const uint64_t m = rit_cache_stat_misses();
-  if (h + m > 0) {
-    printf(", hit_rate=%.2f%%", 100.0 * (double)h / (double)(h + m));
-  }
-#endif
-  printf("\n");
-
-#ifdef KLV_LEAVES_CACHE_INSTRUMENT
-  const uint64_t kle_checks = klv_leaves_cache_stat_checks();
-  const uint64_t kle_hits = klv_leaves_cache_stat_hits();
-  if (kle_checks > 0) {
-    printf("KLV leaves cache: checks=%llu hits=%llu (%.2f%%)\n",
-           (unsigned long long)kle_checks, (unsigned long long)kle_hits,
-           100.0 * (double)kle_hits / (double)kle_checks);
-  }
-#endif
-
-#ifdef BEST_MOVE_CACHE_INSTRUMENT
-  const uint64_t bm_checks = best_move_cache_stat_checks();
-  const uint64_t bm_key_hits = best_move_cache_stat_key_hits();
-  const uint64_t bm_playable = best_move_cache_stat_playable_hits();
-  const uint64_t bm_stores = best_move_cache_stat_stores();
-  if (bm_checks > 0) {
-    printf("Best-move cache: checks=%llu key_hits=%llu (%.2f%%) "
-           "playable=%llu (%.2f%%) stores=%llu\n",
-           (unsigned long long)bm_checks, (unsigned long long)bm_key_hits,
-           100.0 * (double)bm_key_hits / (double)bm_checks,
-           (unsigned long long)bm_playable,
-           100.0 * (double)bm_playable / (double)bm_checks,
-           (unsigned long long)bm_stores);
-  }
-#endif
-
-#ifdef SUBRACK_CACHE_INSTRUMENT
-  const uint64_t sr_checks = subrack_cache_stat_checks();
-  const uint64_t sr_hits = subrack_cache_stat_hits();
-  if (sr_checks > 0) {
-    printf("Subrack cache: checks=%llu hits=%llu (%.2f%%)\n",
-           (unsigned long long)sr_checks, (unsigned long long)sr_hits,
-           100.0 * (double)sr_hits / (double)sr_checks);
-  }
-#endif
-
-#ifdef ANCHOR_CACHE_INSTRUMENT
-  const uint64_t ac_checks = anchor_cache_stat_checks();
-  const uint64_t ac_hits = anchor_cache_stat_hits();
-  const uint64_t ac_skips = anchor_cache_stat_skips();
-  const uint64_t ac_stores = anchor_cache_stat_stores();
-  if (ac_checks > 0) {
-    printf("Anchor cache: checks=%llu hits=%llu (%.2f%%) skips=%llu (%.2f%%) "
-           "stores=%llu\n",
-           (unsigned long long)ac_checks, (unsigned long long)ac_hits,
-           100.0 * (double)ac_hits / (double)ac_checks,
-           (unsigned long long)ac_skips,
-           100.0 * (double)ac_skips / (double)ac_checks,
-           (unsigned long long)ac_stores);
-    printf("  len | checks    | hit%%   | skip%%  |\n");
-    for (int l = 2; l <= BOARD_DIM; l++) {
-      const uint64_t lc = anchor_cache_stat_checks_for_length(l);
-      if (lc == 0) {
-        continue;
-      }
-      const uint64_t lh = anchor_cache_stat_hits_for_length(l);
-      const uint64_t ls = anchor_cache_stat_skips_for_length(l);
-      printf("  %2d  | %9llu | %5.2f%% | %5.2f%% |\n", l,
-             (unsigned long long)lc, 100.0 * (double)lh / (double)lc,
-             100.0 * (double)ls / (double)lc);
-    }
-  }
-#endif
-
-#ifdef WMP_ANCHOR_INSTRUMENT
-  uint64_t total_time_ns = 0;
-  uint64_t total_calls = 0;
-  for (int l = 0; l <= BOARD_DIM; l++) {
-    total_time_ns += wmp_anchor_stat_time_ns(l);
-    total_calls += wmp_anchor_stat_calls(l);
-  }
-  printf("wordmap_gen per-length (total calls=%llu, total time=%.3fs):\n",
-         (unsigned long long)total_calls, (double)total_time_ns / 1e9);
-  printf("  len | calls     | full%%  | pt%% | skip/iter | words/iter | "
-         "recs/iter | time_ms | time%%\n");
-  for (int l = 2; l <= BOARD_DIM; l++) {
-    const uint64_t c = wmp_anchor_stat_calls(l);
-    if (c == 0) {
-      continue;
-    }
-    const uint64_t full = wmp_anchor_stat_fully_searched(l);
-    const uint64_t si = wmp_anchor_stat_subrack_iters(l);
-    const uint64_t ss = wmp_anchor_stat_subrack_skipped(l);
-    const uint64_t wp = wmp_anchor_stat_words_produced(l);
-    const uint64_t rc = wmp_anchor_stat_record_calls(l);
-    const uint64_t pt = wmp_anchor_stat_playthrough_calls(l);
-    const uint64_t tn = wmp_anchor_stat_time_ns(l);
-    printf("  %2d  | %9llu | %5.1f%% | %4.1f%% | %9.3f | %10.3f | %9.3f | "
-           "%7.2f | %5.2f%%\n",
-           l, (unsigned long long)c, 100.0 * (double)full / (double)c,
-           100.0 * (double)pt / (double)c, (double)ss / (double)c,
-           (double)wp / (double)c, (double)rc / (double)c, (double)tn / 1e6,
-           100.0 * (double)tn / (double)total_time_ns);
-  }
-#endif
 
   config_destroy(config);
 }

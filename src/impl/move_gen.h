@@ -55,40 +55,6 @@ typedef struct KlvLeavesCacheEntry {
 // is the total number of multi-subset combinations of a RACK_SIZE-tile rack.
 #define MOVEGEN_SUBRACK_CACHE_ENTRIES (1 << RACK_SIZE)
 
-// Per-rack cache of the top K moves seen for that rack plus a fingerprint
-// of the board state at each move's footprint. On cache hit we validate
-// each slot: if the fingerprint matches the current board at the move's
-// span the move is still playable with the same score and leave, and we
-// use its equity as a lower bound on the current best to prune more
-// aggressively.  When a slot's fingerprint mismatches we fall through to
-// the next slot -- so if the top move is blocked by a newer play, a
-// slightly worse backup can still provide a useful bound.
-#ifndef MOVEGEN_BEST_MOVE_CACHE_K
-#define MOVEGEN_BEST_MOVE_CACHE_K 4
-#endif
-
-#ifndef MOVEGEN_BEST_MOVE_CACHE_SIZE
-#define MOVEGEN_BEST_MOVE_CACHE_SIZE 64
-#endif
-
-typedef struct BestMoveCacheSlot {
-  Move move;
-  // 64-bit fingerprint of the board row_cache over the move's column
-  // span. Includes cross_set, cross_score, letter, is_cross_word at each
-  // square. Used to validate the cached move still plays with the same
-  // score on the current board.
-  uint64_t footprint_hash;
-  // How often this move was the final best move for this rack.
-  uint16_t count;
-} BestMoveCacheSlot;
-
-typedef struct BestMoveCacheEntry {
-  BitRack key;
-  bool valid;
-  uint16_t total_seen;
-  BestMoveCacheSlot slots[MOVEGEN_BEST_MOVE_CACHE_K];
-} BestMoveCacheEntry;
-
 typedef struct SubrackEnumCacheEntry {
   BitRack key;
   bool valid;
@@ -133,53 +99,6 @@ typedef struct SubrackEnumCacheEntry {
 #endif
 #ifndef MOVEGEN_ANCHOR_CACHE_MAX_LENGTH
 #define MOVEGEN_ANCHOR_CACHE_MAX_LENGTH 15
-#endif
-
-#ifdef RIT_CACHE_INSTRUMENT
-uint64_t rit_cache_stat_hits(void);
-uint64_t rit_cache_stat_misses(void);
-#endif
-
-#ifdef WMP_ANCHOR_INSTRUMENT
-// Per-word_length wordmap_gen counters. Use to profile where wmp_move_gen
-// time goes by anchor length. Lengths valid in [MINIMUM_WORD_LENGTH,
-// BOARD_DIM]; out-of-range lookups return 0.
-uint64_t wmp_anchor_stat_calls(int length);
-uint64_t wmp_anchor_stat_fully_searched(int length);
-uint64_t wmp_anchor_stat_subrack_iters(int length);
-uint64_t wmp_anchor_stat_subrack_skipped(int length);
-uint64_t wmp_anchor_stat_subrack_no_words(int length);
-uint64_t wmp_anchor_stat_words_produced(int length);
-uint64_t wmp_anchor_stat_record_calls(int length);
-uint64_t wmp_anchor_stat_playthrough_calls(int length);
-uint64_t wmp_anchor_stat_time_ns(int length);
-#endif
-
-#ifdef ANCHOR_CACHE_INSTRUMENT
-uint64_t anchor_cache_stat_checks(void);
-uint64_t anchor_cache_stat_hits(void);
-uint64_t anchor_cache_stat_skips(void);
-uint64_t anchor_cache_stat_stores(void);
-uint64_t anchor_cache_stat_checks_for_length(int length);
-uint64_t anchor_cache_stat_hits_for_length(int length);
-uint64_t anchor_cache_stat_skips_for_length(int length);
-#endif
-
-#ifdef SUBRACK_CACHE_INSTRUMENT
-uint64_t subrack_cache_stat_checks(void);
-uint64_t subrack_cache_stat_hits(void);
-#endif
-
-#ifdef BEST_MOVE_CACHE_INSTRUMENT
-uint64_t best_move_cache_stat_checks(void);
-uint64_t best_move_cache_stat_key_hits(void);
-uint64_t best_move_cache_stat_playable_hits(void);
-uint64_t best_move_cache_stat_stores(void);
-#endif
-
-#ifdef KLV_LEAVES_CACHE_INSTRUMENT
-uint64_t klv_leaves_cache_stat_checks(void);
-uint64_t klv_leaves_cache_stat_hits(void);
 #endif
 
 typedef struct RackAnchorCacheEntry {
@@ -333,12 +252,6 @@ typedef struct MoveGen {
   // amortize the KLV descent cost across the rollout. Invalidated when
   // the KLV pointer or its mutation_counter changes.
   KlvLeavesCacheEntry klv_leaves_cache[MOVEGEN_KLV_LEAVES_CACHE_SIZE];
-#ifdef BEST_MOVE_CACHE_ENABLE
-  // Per-rack cache of top-K best moves; used to seed a lower bound on
-  // gen->best_move_equity_or_score when the cached move is still
-  // playable on the current board.
-  BestMoveCacheEntry best_move_cache[MOVEGEN_BEST_MOVE_CACHE_SIZE];
-#endif
 #ifdef ANCHOR_CACHE_ENABLE
   // Anchor-level pruning cache. Updated per wordmap_gen call and checked
   // at the top to skip anchors whose best_equity bound is already
