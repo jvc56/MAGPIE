@@ -906,7 +906,6 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   const SimmedPlay *best_sp =
       sim_results_get_display_simmed_play(ctx->sim_results, 0);
-  assert(best_sp != NULL);
   const SimmedPlay *actual_sp = NULL;
 
   int actual_display_idx = -1;
@@ -925,7 +924,6 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   if (actual_sp == NULL) {
     log_fatal("failed to find actual move in simmed plays after simulation");
   }
-  assert(actual_sp != NULL);
 
   turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
   turn_result->actual.win_pct =
