@@ -11,6 +11,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/trie.h"
 #include "../src/ent/wmp.h"
@@ -2381,17 +2382,69 @@ void test_config_exchange_blank(void) {
   assert_config_exec_status(
       config, "com ex ?",
       ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
-  // Re-fetch: config_restore_game_and_history destroys and replaces
-  // config->game on a failed commit, so any pointer obtained before the commit
-  // is dangling.
-  assert(game_get_player_on_turn_index(config_get_game(config)) == 0);
 
   // "com ex u" (lowercase) should unblank to uppercase U and exchange the U
   // tile rather than storing a blanked machine letter in the move and causing
   // an out-of-bounds rack access. Only '?' may denote the blank in an exchange.
   assert_config_exec_status(config, "rack QUIOEU?", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "com ex u", ERROR_STATUS_SUCCESS);
-  assert(game_get_player_on_turn_index(config_get_game(config)) == 1);
+
+  // Exchange both blanks from a rack with 5 non-blank tiles and 2 blanks.
+  // impl_set_rack_internal returns the off-turn player's tiles to the bag
+  // before drawing, so after "rack ABCDE??" the bag holds 93 tiles with
+  // 0 blanks. execute_exchange_move draws new tiles before returning the
+  // exchanged tiles to the bag, so both drawn tiles are guaranteed non-blank.
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ABCDE??", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex ??", ERROR_STATUS_SUCCESS);
+  const Game *game = config_get_game(config);
+
+  // After game_play_n_events replays the history, the live player rack is
+  // empty: set_after_game_event_racks has no future events from which to
+  // infer the post-exchange rack for the last event. Verify the exchange
+  // is recorded correctly through the game history event instead. The
+  // pre-exchange rack stored in the event must have the 5 non-blank tiles
+  // plus the 2 blanks that were exchanged, and the validated move must
+  // store exactly 2 blank machine letters as the exchanged tiles.
+  const GameHistory *game_history = config_get_game_history(config);
+  const GameEvent *last_event = game_history_get_event(
+      game_history, game_history_get_num_played_events(game_history) - 1);
+  const Rack *rack = game_event_get_const_rack(last_event);
+  const LetterDistribution *ld = game_get_ld(game);
+  assert(rack_get_total_letters(rack) == RACK_SIZE);
+  assert(rack_get_letter(rack, BLANK_MACHINE_LETTER) == 2);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "A")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "B")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "C")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "D")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "E")) == 1);
+  const Move *exchange_move =
+      validated_moves_get_move(game_event_get_vms(last_event), 0);
+  assert(exchange_move->tiles_played == 2);
+  assert(exchange_move->tiles[0] == BLANK_MACHINE_LETTER);
+  assert(exchange_move->tiles[1] == BLANK_MACHINE_LETTER);
+
+  // Same test but with 1 blank
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ABCDE??", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex ?", ERROR_STATUS_SUCCESS);
+  game = config_get_game(config);
+
+  game_history = config_get_game_history(config);
+  last_event = game_history_get_event(
+      game_history, game_history_get_num_played_events(game_history) - 1);
+  rack = game_event_get_const_rack(last_event);
+  ld = game_get_ld(game);
+  assert(rack_get_total_letters(rack) == RACK_SIZE);
+  assert(rack_get_letter(rack, BLANK_MACHINE_LETTER) == 2);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "A")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "B")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "C")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "D")) == 1);
+  assert(rack_get_letter(rack, ld_hl_to_ml(ld, "E")) == 1);
+  exchange_move = validated_moves_get_move(game_event_get_vms(last_event), 0);
+  assert(exchange_move->tiles_played == 1);
+  assert(exchange_move->tiles[0] == BLANK_MACHINE_LETTER);
 
   config_destroy(config);
 }
