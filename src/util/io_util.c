@@ -128,6 +128,17 @@ void fprintf_or_die(FILE *stream, const char *format, ...) {
   }
 }
 
+void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...) {
+  va_list args;
+  va_start(args, format);
+  int result = vsnprintf(buf, buf_size, format, args);
+  va_end(args);
+  if (result < 0 || (size_t)result >= buf_size) {
+    log_fatal("snprintf failed for format: %s with buffer size: %zu", format,
+              buf_size);
+  }
+}
+
 void log_with_info(log_level_t log_level, const char *caller_filename,
                    int caller_line, const char *format, ...) {
   if (log_level < current_log_level) {

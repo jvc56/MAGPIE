@@ -1,6 +1,7 @@
 #include "analyze.h"
 
 #include "../def/bai_defs.h"
+#include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/move_defs.h"
@@ -230,7 +231,7 @@ static void analyze_format_move(char *buf, size_t buf_size, const Move *move,
     string_builder_add_move_description(sb, move, ld);
   }
   char *result = string_builder_dump(sb, NULL);
-  snprintf(buf, buf_size, "%s", result);
+  snprintf_or_die(buf, buf_size, "%s", result);
   free(result);
   string_builder_destroy(sb);
 }

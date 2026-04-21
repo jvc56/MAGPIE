@@ -300,6 +300,7 @@ void io_reset_stream_in(void);
 char *format_string_with_va_list(const char *format, va_list *args);
 char *get_formatted_string(const char *format, ...);
 void fflush_or_die(FILE *stream);
+void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
