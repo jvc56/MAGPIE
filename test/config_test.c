@@ -2367,6 +2367,35 @@ void test_config_fg_required(void) {
   config_destroy(config);
 }
 
+void test_config_exchange_blank(void) {
+  Config *config = config_create_default_test();
+  assert_config_exec_status(config, "set -lex CSW21", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "newgame", ERROR_STATUS_SUCCESS);
+
+  // "com ex ?" when the rack has no blank should return a validation
+  // error rather than crashing. BLANK_MACHINE_LETTER == PLAYED_THROUGH_MARKER
+  // == 0, so the blank was previously skipped when building tiles_played_rack,
+  // causing the rack-subtract check to pass silently and later triggering an
+  // assert in rack_take_letter.
+  assert_config_exec_status(config, "rack RETINAS", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(
+      config, "com ex ?",
+      ERROR_STATUS_MOVE_VALIDATION_TILES_PLAYED_NOT_IN_RACK);
+  // Re-fetch: config_restore_game_and_history destroys and replaces
+  // config->game on a failed commit, so any pointer obtained before the commit
+  // is dangling.
+  assert(game_get_player_on_turn_index(config_get_game(config)) == 0);
+
+  // "com ex u" (lowercase) should unblanke to uppercase U and exchange the U
+  // tile rather than storing a blanked machine letter in the move and causing
+  // an out-of-bounds rack access. Only '?' may denote the blank in an exchange.
+  assert_config_exec_status(config, "rack QUIOEU?", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "com ex u", ERROR_STATUS_SUCCESS);
+  assert(game_get_player_on_turn_index(config_get_game(config)) == 1);
+
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2383,4 +2412,5 @@ void test_config(void) {
   test_config_wmp();
   test_config_note_move_interpolation();
   test_config_fg_required();
+  test_config_exchange_blank();
 }
