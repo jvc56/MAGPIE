@@ -96,10 +96,6 @@ static double move_equity_to_double(const Move *move) {
   return equity_to_double(move_get_equity(move));
 }
 
-static Equity compute_equity_lost(const TurnResult *tr) {
-  return double_to_equity(tr->best.equity - tr->actual.equity);
-}
-
 static double compute_win_pct_lost(const TurnResult *tr) {
   if (tr->was_endgame) {
     const int best_spread = tr->best.endgame_spread;
@@ -276,7 +272,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
   const double best_st_eq = move_equity_to_double(&best_trm->move);
   const double actual_st_eq = move_equity_to_double(&actual_trm->move);
 
-  const Equity equity_lost = compute_equity_lost(tr);
+  const double equity_lost = tr->best.equity - tr->actual.equity;
   const double win_pct_lost = compute_win_pct_lost(tr);
 
   StringBuilder *sb = string_builder_create();
@@ -339,7 +335,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                                   actual_trm->endgame_spread)
                  : NULL,
       get_formatted_string("%.2f", win_pct_lost),
-      get_formatted_string("%.2f", equity_to_double(equity_lost)),
+      get_formatted_string("%.2f", equity_lost),
       is_endgame ? string_duplicate("-")
                  : get_formatted_string("%.2f", best_st_eq - actual_st_eq),
       wp_col, is_endgame);
@@ -465,7 +461,7 @@ static void write_per_turn_csv(const TurnResult *turn_result,
   string_builder_add_formatted_string(
       sb, "%d,%s,%s,%s,%s,%.2f,%.2f\n", turn_result->turn_number, player_name,
       rack_str, actual_str, best_str,
-      equity_to_double(compute_equity_lost(turn_result)),
+      turn_result->best.equity - turn_result->actual.equity,
       compute_win_pct_lost(turn_result));
 
   free(rack_str);
@@ -485,7 +481,7 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
                                   GameHistory *game_history, Game *game,
                                   const LetterDistribution *ld,
                                   int player_turn_number,
-                                  Equity *total_equity_lost,
+                                  double *total_equity_lost,
                                   double *total_win_pct_lost,
                                   ErrorStack *error_stack) {
   game_play_n_events(game_history, game, tr->event_idx, false, error_stack);
@@ -506,7 +502,7 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
       game_history_player_get_nickname(game_history, tr->player_index);
 
   const double win_pct_lost = compute_win_pct_lost(tr);
-  const double equity_lost = equity_to_double(compute_equity_lost(tr));
+  const double equity_lost = tr->best.equity - tr->actual.equity;
 
   int curr_col = 0;
   string_grid_set_cell(sg, row, curr_col++,
@@ -544,7 +540,7 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
     string_grid_set_cell(sg, row, curr_col, string_duplicate(""));
   }
 
-  *total_equity_lost += double_to_equity(equity_lost);
+  *total_equity_lost += equity_lost;
   *total_win_pct_lost += win_pct_lost;
 }
 
@@ -595,7 +591,7 @@ static void write_analysis_summary(GameHistory *game_history,
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("EqL"));
   string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("Note"));
 
-  Equity total_equity_lost = 0;
+  double total_equity_lost = 0;
   double total_win_pct_lost = 0.0;
   int grid_row = 1;
   int player_turn_counts[2] = {0, 0};
@@ -616,8 +612,7 @@ static void write_analysis_summary(GameHistory *game_history,
     grid_row++;
   }
 
-  const double avg_equity =
-      equity_to_double(total_equity_lost) / (double)matching_count;
+  const double avg_equity = total_equity_lost / (double)matching_count;
   const double avg_win_pct = total_win_pct_lost / (double)matching_count;
 
   // Total row: label in Best column, values in WPL and EqL columns.
@@ -626,9 +621,8 @@ static void write_analysis_summary(GameHistory *game_history,
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Total"));
   string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", total_win_pct_lost));
-  string_grid_set_cell(
-      sg, curr_row, curr_col,
-      get_formatted_string("%.2f", equity_to_double(total_equity_lost)));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%.2f", total_equity_lost));
   // Avg row: label in Best column, values in WPL and EqL columns.
   curr_row++;
   curr_col = 5;
@@ -906,6 +900,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   const SimmedPlay *best_sp =
       sim_results_get_display_simmed_play(ctx->sim_results, 0);
+  assert(best_sp != NULL);
   const SimmedPlay *actual_sp = NULL;
 
   int actual_display_idx = -1;
@@ -923,6 +918,8 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   if (actual_sp == NULL) {
     log_fatal("failed to find actual move in simmed plays after simulation");
+    // This assertion is unreachable be silences static analyzer warnings
+    assert(0);
   }
 
   turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
