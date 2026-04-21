@@ -1,7 +1,14 @@
-// Sim benchmark: plays one full game with timed sim per turn via autoplay.
-// Compares iteration throughput with and without RIT.
+// Sim benchmark: plays one full game with a timed sim per turn via
+// autoplay and reports total sim iterations and iters/sec. The game
+// trajectory is fixed via autoplay_set_bench_static_move so different
+// RIT/BAI/cache variants traverse identical positions and the numbers
+// are directly comparable.
 //
 // Usage: ./bin/magpie_test simbench
+// Env vars:
+//   SIMBENCH_PLIES  sim depth (default 2)
+//   SIMBENCH_MI     -minplayiterations (default 100000)
+//   SIMBENCH_RIT    "true" / "false" — toggles the RIT file (default true)
 
 #include "sim_benchmark_test.h"
 

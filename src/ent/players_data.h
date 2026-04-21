@@ -49,9 +49,13 @@ void players_data_set(PlayersData *players_data,
                       const char *p1_data_name, const char *p2_data_name,
                       bool use_mmap_for_rit, ErrorStack *error_stack);
 // Directly sets the data pointer for a slot, without taking it through the
-// filename-based load path. The caller owns `data`; use NULL to clear the
-// slot. Ownership is not transferred to PlayersData, so callers must clear
-// the slot before destroying PlayersData to avoid a double-free.
+// filename-based load path. Ownership of `data` is transferred to
+// PlayersData: when the slot is replaced (via another set_data or
+// set/reload) or when PlayersData is destroyed, `data` will be freed via
+// the type-appropriate destroy function. Callers must not free or destroy
+// `data` after passing it here. Use NULL to clear the slot; the previous
+// value is NOT freed by set_data itself, so call players_data_destroy_data
+// first if you need to release the old pointer before overwriting.
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data);

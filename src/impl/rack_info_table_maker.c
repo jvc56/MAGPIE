@@ -327,6 +327,13 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   LeaveMap leave_map;
   leave_map.rack_array_size = ld_size;
   leave_map_init(&player_rack, &leave_map);
+  // The non-RIT path seeds leaves[full_mask] (keep full rack, play 0
+  // tiles) with EQUITY_INITIAL_VALUE = INT32_MIN + 1 as a sentinel; that
+  // value doesn't fit in the 24-bit packed representation, so the RIT
+  // leaves that slot at 0 instead. No consumer reads leaves[full_mask]
+  // on the RIT-enabled path (shadow_record and exchange enumeration both
+  // require tiles_played >= 1), and ap_rit CI verifies RIT vs no-RIT
+  // games are byte-identical across 5000 game pairs.
   leave_map_set_current_index(&leave_map, 0);
 
   Rack leave;
