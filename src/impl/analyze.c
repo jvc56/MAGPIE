@@ -900,6 +900,8 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   const SimmedPlay *best_sp =
       sim_results_get_display_simmed_play(ctx->sim_results, 0);
+  // To silence static warnings about best_sp potentially being NULL, even
+  // though it should never be if simulation succeeded and returned no errors.
   assert(best_sp != NULL);
   const SimmedPlay *actual_sp = NULL;
 
@@ -918,9 +920,10 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
 
   if (actual_sp == NULL) {
     log_fatal("failed to find actual move in simmed plays after simulation");
-    // This assertion is unreachable be silences static analyzer warnings
-    assert(0);
   }
+  // To silence static warnings about actual_sp potentially being NULL, even
+  // though this is impossible due to the above check and fatal log.
+  assert(actual_sp != NULL);
 
   turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
   turn_result->actual.win_pct =

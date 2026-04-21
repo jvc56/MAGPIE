@@ -7219,6 +7219,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   config_fill_analyze_args(config, &analyze_args, &target_played_tiles,
                            &nontarget_known_tiles,
                            &target_known_inference_tiles);
+  ThreadControl *thread_control = analyze_args.sim_args.thread_control;
   AnalyzeCtx *ctx = NULL;
   if (arg0_is_directory) {
     int num_gcg_files = 0;
@@ -7230,7 +7231,6 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
     }
     thread_control_print_formatted(analyze_args.sim_args.thread_control,
                                    "Analyzing %d game(s)\n", num_gcg_files);
-    ThreadControl *thread_control = analyze_args.sim_args.thread_control;
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       char *gcg_path = get_formatted_string("%s/%s", arg0, gcg_files[file_idx]);
       thread_control_print_formatted(thread_control, "Analyzing %s\n",
@@ -7260,6 +7260,11 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   } else {
     analyze_single_game(config, &analyze_args, &ctx, gcg_source,
                         player_list_str, error_stack);
+    if (!error_stack_is_empty(analyze_error_stack)) {
+      summary->error_count++;
+    } else {
+      summary->success_count++;
+    }
   }
   analyze_ctx_destroy(ctx);
   error_stack_destroy(analyze_error_stack);
@@ -7273,10 +7278,7 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   }
   int curr_row = 0;
   int curr_col = 0;
-  StringGrid *sg = string_grid_create(4, 2, 1);
-  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Status"));
-  curr_row++;
-  curr_col = 0;
+  StringGrid *sg = string_grid_create(3, 2, 1);
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
   string_grid_set_cell(sg, curr_row, curr_col,
                        get_formatted_string("%d", summary.success_count));
@@ -7287,8 +7289,7 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
                        get_formatted_string("%d", summary.error_count));
   curr_row++;
   curr_col = 0;
-  string_grid_set_cell(sg, curr_row, curr_col++,
-                       string_duplicate("Not Started"));
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Unstarted"));
   string_grid_set_cell(sg, curr_row, curr_col,
                        get_formatted_string("%d", summary.not_started_count));
   StringBuilder *summary_sb = string_builder_create();
