@@ -40,7 +40,7 @@
 #include <string.h>
 
 enum {
-  ANALYZE_NOTE_TRUNCATE_LEN = 30,
+  ANALYZE_NOTE_TRUNCATE_LEN = 40,
   ANALYZE_SUMMARY_COLS = 9,
   ANALYZE_SUMMARY_COL_PADDING = 2,
 };
@@ -61,6 +61,7 @@ typedef struct TurnResultMove {
   int endgame_spread;
   int endgame_value;
   int rank_idx;
+  char display_move[BOARD_DIM * 2];
 } TurnResultMove;
 
 // TurnResult stores typed values (Rack, Move) rather than pre-formatted
@@ -216,12 +217,12 @@ static char *analyze_format_rack(const Rack *rack,
   return result;
 }
 
-// Builds a heap-allocated string for move; caller must free.
-// If board is non-NULL, uses string_builder_add_move (shows played-through
-// tiles from the board). If board is NULL, falls back to
-// string_builder_add_move_description.
-static char *analyze_format_move(const Move *move, const Board *board,
-                                 const LetterDistribution *ld) {
+// Writes a move string into buf. If board is non-NULL, uses
+// string_builder_add_move (shows played-through tiles from the board).
+// If board is NULL, falls back to string_builder_add_move_description.
+static void analyze_format_move(char *buf, size_t buf_size, const Move *move,
+                                const Board *board,
+                                const LetterDistribution *ld) {
   StringBuilder *sb = string_builder_create();
   if (board != NULL) {
     string_builder_add_move(sb, board, move, ld, false);
@@ -229,8 +230,19 @@ static char *analyze_format_move(const Move *move, const Board *board,
     string_builder_add_move_description(sb, move, ld);
   }
   char *result = string_builder_dump(sb, NULL);
+  snprintf(buf, buf_size, "%s", result);
+  free(result);
   string_builder_destroy(sb);
-  return result;
+}
+
+// Populates best.display_move from best.move with board context.
+// actual.display_move is pre-computed in the main loop before analysis starts.
+static void populate_best_display_move(TurnResult *turn_result,
+                                       const Board *board,
+                                       const LetterDistribution *ld) {
+  analyze_format_move(turn_result->best.display_move,
+                      sizeof(turn_result->best.display_move),
+                      &turn_result->best.move, board, ld);
 }
 
 // Fills one row of the move comparison grid. All char* parameters transfer
@@ -298,9 +310,6 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       wp_col, is_endgame);
 
   // Actual row (row 2).
-  string_builder_add_move(sb, board, &actual_trm->move, ld, false);
-  char *actual_move_str = string_builder_dump(sb, NULL);
-  string_builder_clear(sb);
   string_builder_add_move_leave(sb, rack, &actual_trm->move, ld);
   char *actual_leave_str = string_builder_dump(sb, NULL);
   string_builder_clear(sb);
@@ -309,7 +318,7 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
       actual_trm->rank_idx >= 0
           ? get_formatted_string("%d", actual_trm->rank_idx + 1)
           : string_duplicate("-"),
-      actual_move_str, actual_leave_str,
+      string_duplicate(tr->actual.display_move), actual_leave_str,
       get_formatted_string("%d",
                            equity_to_int(move_get_score(&actual_trm->move))),
       is_endgame ? get_formatted_string("%d", actual_trm->endgame_spread)
@@ -352,16 +361,14 @@ static void write_per_turn_human_readable(
 
   const Board *board = game_get_board(ctx->game);
   char *rack_str = analyze_format_rack(&turn_result->rack, ld);
-  char *actual_str = analyze_format_move(&turn_result->actual.move, board, ld);
 
   StringBuilder *sb = string_builder_create();
 
   // Header: "--- Event N: <play> <rack> (<player>) ---"
-  string_builder_add_formatted_string(sb, "--- Event %d: %s %s (%s) ---\n\n",
-                                      turn_result->turn_number, actual_str,
-                                      rack_str, player_name);
+  string_builder_add_formatted_string(
+      sb, "--- Event %d: %s %s (%s) ---\n\n", turn_result->turn_number,
+      turn_result->actual.display_move, rack_str, player_name);
   free(rack_str);
-  free(actual_str);
 
   const bool is_endgame = turn_result->was_endgame;
   const bool is_sim = !is_endgame && turn_result->actual.win_pct >= 0.0;
@@ -453,20 +460,15 @@ static void write_per_turn_csv(const TurnResult *turn_result,
       game_history_player_get_nickname(game_history, turn_result->player_index);
 
   char *rack_str = analyze_format_rack(&turn_result->rack, ld);
-  char *actual_str = analyze_format_move(&turn_result->actual.move, NULL, ld);
-  char *best_str = turn_result->actual.rank_idx != 0
-                       ? analyze_format_move(&turn_result->best.move, NULL, ld)
-                       : string_duplicate("-");
 
   string_builder_add_formatted_string(
       sb, "%d,%s,%s,%s,%s,%.2f,%.2f\n", turn_result->turn_number, player_name,
-      rack_str, actual_str, best_str,
+      rack_str, turn_result->actual.display_move,
+      turn_result->actual.rank_idx != 0 ? turn_result->best.display_move : "-",
       turn_result->best.equity - turn_result->actual.equity,
       compute_win_pct_lost(turn_result));
 
   free(rack_str);
-  free(actual_str);
-  free(best_str);
 
   char *section = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -497,7 +499,6 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
               error_stack_top(error_stack));
   }
 
-  const Board *board = game_get_board(game);
   const char *player_name =
       game_history_player_get_nickname(game_history, tr->player_index);
 
@@ -512,10 +513,10 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
   string_grid_set_cell(sg, row, curr_col++, string_duplicate(player_name));
   string_grid_set_cell(sg, row, curr_col++, analyze_format_rack(&tr->rack, ld));
   string_grid_set_cell(sg, row, curr_col++,
-                       analyze_format_move(&tr->actual.move, board, ld));
+                       string_duplicate(tr->actual.display_move));
   string_grid_set_cell(sg, row, curr_col++,
                        tr->actual.rank_idx != 0
-                           ? analyze_format_move(&tr->best.move, board, ld)
+                           ? string_duplicate(tr->best.display_move)
                            : string_duplicate("-"));
   string_grid_set_cell(sg, row, curr_col++,
                        get_formatted_string("%.2f", win_pct_lost));
@@ -753,22 +754,23 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
         "sorting");
   }
 
-  const Move *actual_in_list =
+  const Move *actual_move =
       move_list_get_move(ctx->move_list, actual_move_rank_idx);
   turn_result->actual.move = gmr.actual_move_or_pass_if_phony;
   turn_result->actual.win_pct = -1.0;
   turn_result->actual.rank_idx = actual_move_rank_idx;
-  turn_result->actual.equity = move_equity_to_double(actual_in_list);
+  turn_result->actual.equity = move_equity_to_double(actual_move);
 
-  const Move *best_in_list = move_list_get_move(ctx->move_list, 0);
-  if (move_get_equity(best_in_list) == move_get_equity(actual_in_list)) {
+  const Move *best_move = move_list_get_move(ctx->move_list, 0);
+  if (move_get_equity(best_move) == move_get_equity(actual_move)) {
     // Actual is the best move; best is a copy of actual.
     turn_result->best = turn_result->actual;
   } else {
+    turn_result->best.move = *best_move;
     turn_result->best.win_pct = -1.0;
     turn_result->best.rank_idx = 0;
-    turn_result->best.move = *best_in_list;
-    turn_result->best.equity = move_equity_to_double(best_in_list);
+    turn_result->best.equity = move_equity_to_double(best_move);
+    populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
   turn_result->was_endgame = false;
   turn_result->used_inference = false;
@@ -943,6 +945,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
     turn_result->best.equity =
         stat_get_mean(simmed_play_get_equity_stat(best_sp));
     turn_result->best.rank_idx = 0;
+    populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
   turn_result->was_endgame = false;
   turn_result->used_inference = use_inference_for_this_turn;
@@ -1018,7 +1021,14 @@ static void analyze_with_endgame(const GameEvent *event,
 
   if (actual_is_best) {
     // Actual move is optimal; best is a copy of actual.
-    turn_result->actual = turn_result->best;
+    turn_result->actual.move = turn_result->best.move;
+    turn_result->actual.endgame_value = turn_result->best.endgame_value;
+    turn_result->actual.endgame_spread = turn_result->best.endgame_spread;
+    turn_result->actual.win_pct = turn_result->best.win_pct;
+    turn_result->actual.equity = turn_result->best.equity;
+    turn_result->actual.rank_idx = turn_result->best.rank_idx;
+    memcpy(turn_result->best.display_move, turn_result->actual.display_move,
+           sizeof(turn_result->best.display_move));
   } else {
     // Solve from the position after the actual move to evaluate it. The
     // endgame solver runs from the opponent's perspective after the actual
@@ -1046,7 +1056,11 @@ static void analyze_with_endgame(const GameEvent *event,
         turn_result->best.endgame_spread - actual_endgame_spread;
     if (spread_diff == 0) {
       // Actual move achieves the same spread as the best; treat as optimal.
-      turn_result->actual = turn_result->best;
+      turn_result->actual.endgame_value = turn_result->best.endgame_value;
+      turn_result->actual.endgame_spread = turn_result->best.endgame_spread;
+      turn_result->actual.win_pct = turn_result->best.win_pct;
+      turn_result->actual.equity = turn_result->best.equity;
+      turn_result->actual.rank_idx = turn_result->best.rank_idx;
       turn_result->actual.move = actual_move_or_pass_if_phony;
       turn_result->best.move = actual_move_or_pass_if_phony;
     } else {
@@ -1055,6 +1069,7 @@ static void analyze_with_endgame(const GameEvent *event,
           turn_result->best.endgame_value - spread_diff, actual_endgame_spread,
           -1);
     }
+    populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
 
   turn_result->was_endgame = true;
@@ -1147,11 +1162,19 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
     rack_copy(&turn_result.rack, event_rack);
     turn_result.note_str = game_event_get_note(event);
 
-    char *move_str =
-        analyze_format_move(actual_move, game_get_board(ctx->game), ld);
+    analyze_format_move(turn_result.actual.display_move,
+                        sizeof(turn_result.actual.display_move), actual_move,
+                        game_get_board(ctx->game), ld);
+    if (validated_moves_is_phony(vms, 0)) {
+      const size_t actual_len = strlen(turn_result.actual.display_move);
+      if (actual_len + 1 < sizeof(turn_result.actual.display_move)) {
+        turn_result.actual.display_move[actual_len] = '*';
+        turn_result.actual.display_move[actual_len + 1] = '\0';
+      }
+    }
     thread_control_print_formatted(analyze_args->sim_args.thread_control,
-                                   "Event %d: %s\n", turn_counter, move_str);
-    free(move_str);
+                                   "Event %d: %s\n", turn_counter,
+                                   turn_result.actual.display_move);
 
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,

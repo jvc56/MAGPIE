@@ -7142,7 +7142,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
       game_history_get_gcg_filename(config->game_history);
 
   thread_control_print_formatted(analyze_args->sim_args.thread_control,
-                                 "Analyzing %s\n", gcg_filename);
+                                 "Analyzing %s\n\n", gcg_filename);
 
   // Build the report filepath
   char *base = cut_off_after_last_char(gcg_filename, '.');
@@ -7230,11 +7230,9 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       return;
     }
     thread_control_print_formatted(analyze_args.sim_args.thread_control,
-                                   "Analyzing %d game(s)\n", num_gcg_files);
+                                   "Analyzing %d game(s)\n\n", num_gcg_files);
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       char *gcg_path = get_formatted_string("%s/%s", arg0, gcg_files[file_idx]);
-      thread_control_print_formatted(thread_control, "Analyzing %s\n",
-                                     gcg_path);
       analyze_single_game(config, &analyze_args, &ctx, gcg_path,
                           player_list_str, analyze_error_stack);
       free(gcg_path);
