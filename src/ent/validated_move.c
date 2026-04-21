@@ -149,7 +149,7 @@ void validate_tiles_played_with_mls(const Board *board,
   // playthrough markers if it was a tile placement move.
   // For exchanges, PLAYED_THROUGH_MARKER never appears, but
   // BLANK_MACHINE_LETTER == PLAYED_THROUGH_MARKER == 0, so we must not skip
-  // ml == 0 in the exchange case. Also unblanke any blanked letter (e.g.
+  // ml == 0 in the exchange case. Also unblank any blanked letter (e.g.
   // lowercase 'u') to its uppercase counterpart, since only '?' may denote the
   // blank tile in an exchange (matching the rack_set_to_string_unblanked
   // convention used by impl_set_rack).

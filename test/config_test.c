@@ -2386,7 +2386,7 @@ void test_config_exchange_blank(void) {
   // is dangling.
   assert(game_get_player_on_turn_index(config_get_game(config)) == 0);
 
-  // "com ex u" (lowercase) should unblanke to uppercase U and exchange the U
+  // "com ex u" (lowercase) should unblank to uppercase U and exchange the U
   // tile rather than storing a blanked machine letter in the move and causing
   // an out-of-bounds rack access. Only '?' may denote the blank in an exchange.
   assert_config_exec_status(config, "rack QUIOEU?", ERROR_STATUS_SUCCESS);
