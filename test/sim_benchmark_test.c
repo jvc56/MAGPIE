@@ -67,6 +67,16 @@ void test_sim_benchmark(void) {
 #endif
   printf("\n");
 
+#ifdef KLV_LEAVES_CACHE_INSTRUMENT
+  const uint64_t kle_checks = klv_leaves_cache_stat_checks();
+  const uint64_t kle_hits = klv_leaves_cache_stat_hits();
+  if (kle_checks > 0) {
+    printf("KLV leaves cache: checks=%llu hits=%llu (%.2f%%)\n",
+           (unsigned long long)kle_checks, (unsigned long long)kle_hits,
+           100.0 * (double)kle_hits / (double)kle_checks);
+  }
+#endif
+
 #ifdef BEST_MOVE_CACHE_INSTRUMENT
   const uint64_t bm_checks = best_move_cache_stat_checks();
   const uint64_t bm_key_hits = best_move_cache_stat_key_hits();

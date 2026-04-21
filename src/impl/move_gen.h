@@ -22,6 +22,26 @@
 
 #define MOVEGEN_RIT_CACHE_SIZE 64
 
+// Per-thread cache of KLV walk results (leave_values[128] and
+// best_leaves[8]) keyed by player_bit_rack. This is the "mini-RIT":
+// the same data a loaded RackInfoTable would have supplied, computed
+// on demand on cache miss and reused on recurring racks in the sim
+// rollouts. Lets WMP-enabled runs without a .rit file still skip the
+// per-rack KLV/KWG descent once the rack has been seen. Direct-mapped.
+#ifndef MOVEGEN_KLV_LEAVES_CACHE_SIZE
+#define MOVEGEN_KLV_LEAVES_CACHE_SIZE 256
+#endif
+
+typedef struct KlvLeavesCacheEntry {
+  BitRack key;
+  bool valid;
+  // Per-subset (128-slot) leave_values, same layout as leave_map.leave_values.
+  Equity leave_values[1 << RACK_SIZE];
+  // Per-leave-size max leave across canonical subsets, same as
+  // RackInfoTableEntry.best_leaves.
+  Equity best_leaves[RACK_SIZE + 1];
+} KlvLeavesCacheEntry;
+
 // Size of the per-thread cache of
 // wmp_move_gen_enumerate_nonplaythrough_subracks results. Keyed by
 // player_bit_rack. The enumeration output is a function of the rack alone, so
@@ -155,6 +175,11 @@ uint64_t best_move_cache_stat_checks(void);
 uint64_t best_move_cache_stat_key_hits(void);
 uint64_t best_move_cache_stat_playable_hits(void);
 uint64_t best_move_cache_stat_stores(void);
+#endif
+
+#ifdef KLV_LEAVES_CACHE_INSTRUMENT
+uint64_t klv_leaves_cache_stat_checks(void);
+uint64_t klv_leaves_cache_stat_hits(void);
 #endif
 
 typedef struct RackAnchorCacheEntry {
@@ -301,6 +326,13 @@ typedef struct MoveGen {
   // Cache of wmp_move_gen_enumerate_nonplaythrough_subracks output
   // (purely rack-determined). Hit rate tracks rack-repeat rate in sims.
   SubrackEnumCacheEntry subrack_cache[MOVEGEN_SUBRACK_CACHE_SIZE];
+  // Per-thread mini-RIT: cached leave_values and best_leaves per full rack.
+  // Populated from the KLV walk (generate_exchange_moves) on first touch
+  // for each rack; reused on subsequent movegen calls when the same rack
+  // recurs. Lets WMP-enabled runs without a loaded RackInfoTable still
+  // amortize the KLV descent cost across the rollout. Invalidated when
+  // the KLV pointer or its mutation_counter changes.
+  KlvLeavesCacheEntry klv_leaves_cache[MOVEGEN_KLV_LEAVES_CACHE_SIZE];
 #ifdef BEST_MOVE_CACHE_ENABLE
   // Per-rack cache of top-K best moves; used to seed a lower bound on
   // gen->best_move_equity_or_score when the cached move is still

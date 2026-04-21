@@ -75,6 +75,18 @@ uint64_t subrack_cache_stat_hits(void) {
 }
 #endif
 
+#ifdef KLV_LEAVES_CACHE_INSTRUMENT
+static _Atomic uint64_t klv_leaves_cache_checks_ctr;
+static _Atomic uint64_t klv_leaves_cache_hits_ctr;
+uint64_t klv_leaves_cache_stat_checks(void) {
+  return atomic_load_explicit(&klv_leaves_cache_checks_ctr,
+                              memory_order_relaxed);
+}
+uint64_t klv_leaves_cache_stat_hits(void) {
+  return atomic_load_explicit(&klv_leaves_cache_hits_ctr, memory_order_relaxed);
+}
+#endif
+
 #ifdef BEST_MOVE_CACHE_INSTRUMENT
 static _Atomic uint64_t best_move_cache_checks_ctr;
 static _Atomic uint64_t best_move_cache_key_hits_ctr;
@@ -3146,6 +3158,9 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
+    for (int i = 0; i < MOVEGEN_KLV_LEAVES_CACHE_SIZE; i++) {
+      gen->klv_leaves_cache[i].valid = false;
+    }
 #ifdef ANCHOR_CACHE_ENABLE
     // Anchor-cache entries cache upper-bound equities computed from the
     // current KLV's leave values; they become stale when leave_values are
@@ -3345,8 +3360,53 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
       }
     }
   } else if (check_leaves || add_exchange) {
-    const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
-    generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
+    // Mini-RIT fast path: when the leave_values and best_leaves for this
+    // rack have been computed by a previous KLV walk on this thread,
+    // memcpy them in and only walk the KLV tree again when add_exchange
+    // requires recording the actual exchange moves (which goes through
+    // the RIT-alike generate_exchange_moves_from_table, skipping the
+    // KLV descent either way).
+    const bool kle_eligible = has_full_rack;
+    const BitRack kle_bit_rack =
+        kle_eligible ? bit_rack_create_from_rack(&gen->ld, &gen->player_rack)
+                     : bit_rack_create_empty();
+    const uint32_t kle_slot =
+        kle_eligible ? bit_rack_get_bucket_index(&kle_bit_rack,
+                                                 MOVEGEN_KLV_LEAVES_CACHE_SIZE)
+                     : 0;
+    KlvLeavesCacheEntry *kle =
+        kle_eligible ? &gen->klv_leaves_cache[kle_slot] : NULL;
+#ifdef KLV_LEAVES_CACHE_INSTRUMENT
+    if (kle_eligible) {
+      atomic_fetch_add_explicit(&klv_leaves_cache_checks_ctr, 1,
+                                memory_order_relaxed);
+    }
+#endif
+    if (kle_eligible && kle->valid &&
+        bit_rack_equals(&kle_bit_rack, &kle->key)) {
+#ifdef KLV_LEAVES_CACHE_INSTRUMENT
+      atomic_fetch_add_explicit(&klv_leaves_cache_hits_ctr, 1,
+                                memory_order_relaxed);
+#endif
+      memcpy(gen->leave_map.leave_values, kle->leave_values,
+             sizeof(kle->leave_values));
+      memcpy(gen->best_leaves, kle->best_leaves, sizeof(kle->best_leaves));
+      if (add_exchange) {
+        // Leaves are already in the leave map, so the RIT-style variant
+        // (no KLV descent) can record exchanges straight from memory.
+        generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
+      }
+    } else {
+      const uint32_t node_index = kwg_get_dawg_root_node_index(gen->klv->kwg);
+      generate_exchange_moves(gen, &gen->leave, node_index, 0, 0, add_exchange);
+      if (kle_eligible) {
+        kle->key = kle_bit_rack;
+        memcpy(kle->leave_values, gen->leave_map.leave_values,
+               sizeof(kle->leave_values));
+        memcpy(kle->best_leaves, gen->best_leaves, sizeof(kle->best_leaves));
+        kle->valid = true;
+      }
+    }
   }
 
   if (!check_leaves) {
