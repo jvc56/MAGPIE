@@ -37,10 +37,42 @@
 #include "gameplay.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+// Benchmark instrumentation: accumulates total sim iterations across all
+// turns in all games. Read/reset via autoplay_get_total_sim_iterations().
+static _Atomic uint64_t autoplay_total_sim_iterations;
+
+uint64_t autoplay_get_total_sim_iterations(void) {
+  return atomic_load_explicit(&autoplay_total_sim_iterations,
+                              memory_order_relaxed);
+}
+
+void autoplay_reset_total_sim_iterations(void) {
+  atomic_store_explicit(&autoplay_total_sim_iterations, 0,
+                        memory_order_relaxed);
+}
+
+// Benchmark mode: when true, get_top_simming_move still runs the sim (so
+// iteration counts and per-turn timing are measured) but the turn's played
+// move is the top-equity move instead of the sim's chosen move. This makes
+// the game trajectory independent of sim throughput, so different RIT/BAI
+// variants run through the same sequence of positions.
+static _Atomic bool autoplay_bench_static_move_enabled;
+
+void autoplay_set_bench_static_move(bool enabled) {
+  atomic_store_explicit(&autoplay_bench_static_move_enabled, enabled,
+                        memory_order_relaxed);
+}
+
+bool autoplay_get_bench_static_move(void) {
+  return atomic_load_explicit(&autoplay_bench_static_move_enabled,
+                              memory_order_relaxed);
+}
 
 typedef struct LeavegenSharedData {
   int num_gens;
@@ -548,6 +580,18 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   const Move *move = get_top_simming_move(
       game, autoplay_worker->worker_index, move_list, sim_args,
       &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
+  if (autoplay_worker->sim_results != NULL) {
+    atomic_fetch_add_explicit(
+        &autoplay_total_sim_iterations,
+        sim_results_get_iteration_count(autoplay_worker->sim_results),
+        memory_order_relaxed);
+  }
+  // In benchmark mode the sim still runs (above) but we play the top-equity
+  // static move to pin the game trajectory so different variants compare
+  // like-for-like positions.
+  if (autoplay_get_bench_static_move() && move_list_get_count(move_list) > 0) {
+    move = move_list_get_move(move_list, 0);
+  }
   if (!error_stack_is_empty(error_stack)) {
     error_stack_print_and_reset(error_stack);
     log_fatal("autoplay worker %d failed to get top simming move for player %d "

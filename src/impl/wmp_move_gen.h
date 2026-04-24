@@ -7,11 +7,15 @@
 #include "../ent/anchor.h"
 #include "../ent/bit_rack.h"
 #include "../ent/board.h"
+#include "../ent/equity.h"
 #include "../ent/leave_map.h"
+#include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
@@ -45,6 +49,15 @@ typedef struct WMPMoveGen {
   uint8_t count_by_size[RACK_SIZE + 1];
 
   Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
+  // Sparse list of anchor slot indices that have been touched since the
+  // last wmp_move_gen_reset_anchors call. wmp_move_gen_maybe_update_anchor
+  // pushes a slot index here on its first touch (detected via the
+  // tiles_to_play==0 sentinel left by the previous reset); reset only
+  // clears these slots instead of iterating all MAX_WMP_MOVE_GEN_ANCHORS.
+  // Typical shadow_play_for_anchor touches <=8 slots, so this is ~8x
+  // cheaper than the full-array reset on realistic workloads.
+  uint8_t touched_anchor_slots[MAX_WMP_MOVE_GEN_ANCHORS];
+  int num_touched_anchor_slots;
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
@@ -56,13 +69,15 @@ typedef struct WMPMoveGen {
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].rightmost_start_col = 0;
-    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  for (int i = 0; i < wmp_move_gen->num_touched_anchor_slots; i++) {
+    const int slot_idx = wmp_move_gen->touched_anchor_slots[i];
+    wmp_move_gen->anchors[slot_idx].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
+    wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
+    wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
   }
+  wmp_move_gen->num_touched_anchor_slots = 0;
 }
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
@@ -76,6 +91,21 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
+  // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
+  // is a sparse reset keyed on the touched_anchor_slots list; untouched
+  // slots retain their prior default values rather than being reset. The
+  // calloc-zero defaults for highest_possible_equity and leftmost_start_col
+  // differ from the expected-on-first-touch sentinels (EQUITY_MIN_VALUE and
+  // BOARD_DIM-1 respectively), so we must seed them once here before the
+  // sparse-reset protocol takes over.
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+    wmp_move_gen->anchors[i].rightmost_start_col = 0;
+    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
+    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  }
+  wmp_move_gen->num_touched_anchor_slots = 0;
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
@@ -148,6 +178,105 @@ wmp_move_gen_playthrough_subracks_init(WMPMoveGen *wmp_move_gen,
   }
 }
 
+// Necessary-only prune for a multi-playthrough case. Tests each
+// playthrough letter L against `length_bitvec` (a uint32 with bit L set
+// iff some N-tile subrack of this rack + {L} + (other letters) forms a
+// word of the target word length, where N is whichever tp the caller
+// loaded the bitvec for). If any playthrough letter's bit is clear there
+// can be no valid word, so the anchor is pruned.
+//
+// Returns true if the bitvec proves no word exists (caller should prune).
+// Returns false if the bitvec can't prove it.
+//
+// Iteration walks only the letters actually set in playthrough_bit_rack
+// via __builtin_ctzll on each 64-bit half. After the caller-supplied
+// length_bitvec load each per-letter test is a register-only
+// `(length_bitvec >> ml) & 1` -- no further memory traffic, no per-letter
+// byte loads, and the dependency chain is short enough that out-of-order
+// execution can overlap the per-letter checks with whatever else
+// shadow_record is doing.
+static inline bool
+wmp_move_gen_multi_pt_bitvec_says_prune(const WMPMoveGen *wmp_move_gen,
+                                        uint32_t length_bitvec) {
+  const BitRack *pt_br = &wmp_move_gen->playthrough_bit_rack;
+  uint64_t low = bit_rack_get_low_64(pt_br);
+  while (low != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    const int bit_idx = __builtin_ctzll(low);
+#else
+    int bit_idx = 0;
+    uint64_t scan = low;
+    while ((scan & 1U) == 0) {
+      scan >>= 1;
+      bit_idx++;
+    }
+#endif
+    const int ml = bit_idx / BIT_RACK_BITS_PER_LETTER;
+    if (((length_bitvec >> ml) & 1U) == 0) {
+      return true;
+    }
+    // Clear the entire 4-bit slot for this letter so the next ctz steps
+    // to the next set letter.
+    low &= ~((uint64_t)0xFU << (ml * BIT_RACK_BITS_PER_LETTER));
+  }
+  uint64_t high = bit_rack_get_high_64(pt_br);
+  while (high != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    const int bit_idx = __builtin_ctzll(high);
+#else
+    int bit_idx = 0;
+    uint64_t scan = high;
+    while ((scan & 1U) == 0) {
+      scan >>= 1;
+      bit_idx++;
+    }
+#endif
+    const int ml_offset = bit_idx / BIT_RACK_BITS_PER_LETTER;
+    const int ml = 16 + ml_offset;
+    if (((length_bitvec >> ml) & 1U) == 0) {
+      return true;
+    }
+    high &= ~((uint64_t)0xFU << (ml_offset * BIT_RACK_BITS_PER_LETTER));
+  }
+  return false;
+}
+
+// Returns true and writes the per-(tp, length) bitvec slot to *out_bitvec
+// if the (tiles_played, word_length) pair has a populated bitvec slot.
+// Returns false otherwise (caller should treat that as "no shadow check
+// here" rather than "all letters fail"). Wraps the per-tp
+// `rack_info_table_entry_get_multi_pt_tpN_bitvec` accessors so
+// shadow_record doesn't have to switch on tiles_played itself, and
+// distinguishes the out-of-range case from the genuine all-zeros case
+// (which IS a valid prune signal -- "no letter is compatible with this
+// rack at this length").
+static inline bool wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
+    const RackInfoTableEntry *rit_entry, int tiles_played, int word_length,
+    uint32_t *out_bitvec) {
+  switch (tiles_played) {
+  case RACK_SIZE:
+    if (word_length < RIT_MULTI_PT_TP7_MIN_WORD_LENGTH ||
+        word_length > RIT_MULTI_PT_TP7_MAX_WORD_LENGTH) {
+      return false;
+    }
+    *out_bitvec =
+        rit_entry->multi_pt_tp7_bitvec[word_length -
+                                       RIT_MULTI_PT_TP7_MIN_WORD_LENGTH];
+    return true;
+  case RACK_SIZE - 1:
+    if (word_length < RIT_MULTI_PT_TP6_MIN_WORD_LENGTH ||
+        word_length > RIT_MULTI_PT_TP6_MAX_WORD_LENGTH) {
+      return false;
+    }
+    *out_bitvec =
+        rit_entry->multi_pt_tp6_bitvec[word_length -
+                                       RIT_MULTI_PT_TP6_MIN_WORD_LENGTH];
+    return true;
+  default:
+    return false;
+  }
+}
+
 static inline bool
 wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   // Not necessarily a bingo (RACK_SIZE) as this could be in an endgame
@@ -164,9 +293,15 @@ wmp_move_gen_check_playthrough_full_rack_existence(WMPMoveGen *wmp_move_gen) {
   return playthrough_info->wmp_entry != NULL;
 }
 
+// When wmp_entries_precomputed is true the caller has already populated
+// subrack_info->wmp_entry for each canonical subrack of this size, so the
+// wmp_get_word_entry hash lookup is skipped. The per-subrack NULL check,
+// has_word_of_length update, and leave-max update still run against the
+// cached pointers and cached leave values.
 static inline void
 wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
-                                           bool check_leaves) {
+                                           bool check_leaves,
+                                           bool wmp_entries_precomputed) {
   const int leave_size = wmp_move_gen->full_rack_size - size;
   wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
       check_leaves ? EQUITY_MIN_VALUE : 0;
@@ -175,8 +310,10 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
   for (int idx_for_size = 0; idx_for_size < count; idx_for_size++) {
     SubrackInfo *subrack_info =
         &wmp_move_gen->nonplaythrough_infos[offset + idx_for_size];
-    subrack_info->wmp_entry =
-        wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    if (!wmp_entries_precomputed) {
+      subrack_info->wmp_entry =
+          wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+    }
     if (subrack_info->wmp_entry == NULL) {
       continue;
     }
@@ -192,18 +329,110 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
   }
 }
 
+// If subracks_precomputed is true the caller has already populated
+// nonplaythrough_infos and count_by_size (e.g. from a per-thread rack
+// cache), so we skip the enumerate_nonplaythrough_subracks step.
+// If wmp_entries_precomputed is true the caller has also restored
+// subrack_info->wmp_entry values, so the per-subrack wmp_get_word_entry
+// hash lookup is skipped inside the size walk.
 static inline void wmp_move_gen_check_nonplaythrough_existence(
-    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map) {
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    bool subracks_precomputed, bool wmp_entries_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
-  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-  BitRack empty = bit_rack_create_empty();
-  wmp_move_gen_enumerate_nonplaythrough_subracks(
-      wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  if (!subracks_precomputed) {
+    memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+    BitRack empty = bit_rack_create_empty();
+    wmp_move_gen_enumerate_nonplaythrough_subracks(
+        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  }
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size,
-                                               check_leaves);
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
+                                               wmp_entries_precomputed);
+  }
+}
+
+// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. Skips
+// the per-size wmp_get_word_entry loop for any size where the RIT entry
+// says there is no canonical size-k subrack that forms a valid k-letter
+// word. For sizes that do have words, still runs the existing walk to
+// populate subrack_info->wmp_entry pointers needed at record time. Also
+// seeds nonplaythrough_best_leave_values from the RIT entry directly so
+// that even for the walked sizes we avoid the running-max update inside
+// the inner loop.
+//
+// Precondition: rit_entry is non-NULL and corresponds to this move_gen's
+// full player_rack.
+// If subracks_precomputed is true the caller has already populated
+// nonplaythrough_infos and count_by_size (e.g. from a per-thread rack
+// cache), so we skip the enumerate_nonplaythrough_subracks step.
+static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    const RackInfoTableEntry *rit_entry, bool subracks_precomputed,
+    bool wmp_entries_precomputed) {
+  leave_map_set_current_index(leave_map,
+                              (1 << wmp_move_gen->full_rack_size) - 1);
+  if (!subracks_precomputed) {
+    memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+    BitRack empty = bit_rack_create_empty();
+    wmp_move_gen_enumerate_nonplaythrough_subracks(
+        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+  }
+
+  // Seed has_word_of_length and best_leave_values from the RIT entry. The
+  // RIT's has_word_of_length_bitmask is an OR over all canonical size-k
+  // subracks of this rack, so it matches exactly what
+  // wmp_move_gen_check_nonplaythroughs_of_size would compute. Likewise the
+  // RIT's best_leave_values[leave_size] is the max leave value over those
+  // subracks.
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wmp_move_gen->nonplaythrough_has_word_of_length[size] =
+        rack_info_table_entry_has_nonplaythrough_word_of_length(rit_entry,
+                                                                size);
+  }
+  for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+    Equity rit_best = rack_info_table_entry_get_nonplaythrough_best_leave_value(
+        rit_entry, leave_size);
+    // The non-RIT path writes 0 instead of EQUITY_MIN_VALUE when
+    // check_leaves is false. Match that convention so the field is always
+    // well-defined downstream.
+    if (rit_best == EQUITY_INITIAL_VALUE || !check_leaves) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          check_leaves ? EQUITY_MIN_VALUE : 0;
+    } else {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = rit_best;
+    }
+  }
+
+  // For sizes that have at least one valid nonplaythrough word we still
+  // need to populate subrack_info->wmp_entry pointers for the eventual
+  // record-time wmp_entry_write_words_to_buffer call. But we can skip the
+  // walk entirely for sizes where no canonical subrack makes a word -- the
+  // wmp_entry cache for those sizes is never read because shadow_record
+  // early-returns on wmp_move_gen_nonplaythrough_word_of_length_exists
+  // before getting to the record stage.
+  for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
+       size++) {
+    if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
+      continue;
+    }
+    const int leave_size = wmp_move_gen->full_rack_size - size;
+    // The existing wmp_move_gen_check_nonplaythroughs_of_size writes to
+    // nonplaythrough_best_leave_values[leave_size] and runs a max update
+    // across subracks. We already seeded the final value from the RIT, so
+    // stash it and restore after the walk (the walk only keeps a running
+    // max vs EQUITY_MIN_VALUE, which matches the RIT-seeded max).
+    const Equity seeded_best =
+        wmp_move_gen->nonplaythrough_best_leave_values[leave_size];
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
+                                               wmp_entries_precomputed);
+    // Assert the walk's max matches what RIT already stored. Cheap sanity
+    // check that catches maker/consumer drift.
+    assert(!check_leaves ||
+           wmp_move_gen->nonplaythrough_best_leave_values[leave_size] ==
+               seeded_best);
+    (void)seeded_best;
   }
 }
 
@@ -256,6 +485,40 @@ static inline void wmp_move_gen_reset_playthrough(WMPMoveGen *wmp_move_gen) {
   wmp_move_gen->playthrough_blocks = 0;
 }
 
+// Assumes num_tiles_played_through == 1; returns the single machine letter
+// that is currently set in playthrough_bit_rack. Uses count-trailing-zeros
+// so it's O(1) rather than iterating over the alphabet.
+static inline MachineLetter
+wmp_move_gen_single_playthrough_letter(const WMPMoveGen *wmp_move_gen) {
+  const uint64_t low = bit_rack_get_low_64(&wmp_move_gen->playthrough_bit_rack);
+  if (low != 0) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+    return (MachineLetter)(__builtin_ctzll(low) / BIT_RACK_BITS_PER_LETTER);
+#else
+    int ml = 0;
+    uint64_t v = low;
+    while ((v & 0xFU) == 0) {
+      v >>= BIT_RACK_BITS_PER_LETTER;
+      ml++;
+    }
+    return (MachineLetter)ml;
+#endif
+  }
+  const uint64_t high =
+      bit_rack_get_high_64(&wmp_move_gen->playthrough_bit_rack);
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return (MachineLetter)(16 + __builtin_ctzll(high) / BIT_RACK_BITS_PER_LETTER);
+#else
+  int ml = 16;
+  uint64_t v = high;
+  while ((v & 0xFU) == 0) {
+    v >>= BIT_RACK_BITS_PER_LETTER;
+    ml++;
+  }
+  return (MachineLetter)ml;
+#endif
+}
+
 static inline int wmp_move_gen_anchor_index(int playthrough_blocks,
                                             int tiles_played) {
   return playthrough_blocks * (RACK_SIZE + 1) + tiles_played;
@@ -275,8 +538,18 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
                                                     int start_col, Equity score,
                                                     Equity equity) {
   assert(start_col >= 0 && start_col < BOARD_DIM);
-  Anchor *anchor = wmp_move_gen_get_anchor(
-      wmp_move_gen, wmp_move_gen->playthrough_blocks, tiles_played);
+  const int slot_idx =
+      wmp_move_gen_anchor_index(wmp_move_gen->playthrough_blocks, tiles_played);
+  Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
+  // First touch detection: tiles_to_play == 0 means this slot has been
+  // reset (or is initial-state) and isn't already on the touched list.
+  // We set tiles_to_play to a nonzero value below, so subsequent calls
+  // in the same shadow pass won't double-push.
+  if (anchor->tiles_to_play == 0) {
+    wmp_move_gen
+        ->touched_anchor_slots[wmp_move_gen->num_touched_anchor_slots++] =
+        (uint8_t)slot_idx;
+  }
   anchor->tiles_to_play = tiles_played;
   anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
   anchor->word_length = word_length;

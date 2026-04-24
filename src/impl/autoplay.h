@@ -34,4 +34,16 @@ typedef struct AutoplayArgs {
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack);
 
+// Benchmark instrumentation: returns accumulated sim iteration count across
+// all autoplay sims since process start (or last reset). Used by simbench.
+uint64_t autoplay_get_total_sim_iterations(void);
+void autoplay_reset_total_sim_iterations(void);
+
+// Benchmark mode: when enabled, the sim still runs at every turn (for timing
+// and iteration counts) but autoplay plays the top-equity static move
+// instead of the sim's selection. This produces a deterministic game
+// trajectory so RIT/BAI variants can be compared over identical positions.
+void autoplay_set_bench_static_move(bool enabled);
+bool autoplay_get_bench_static_move(void);
+
 #endif

@@ -324,6 +324,48 @@ void test_autoplay_wmp_correctness(void) {
   error_stack_destroy(error_stack);
 }
 
+void test_autoplay_rit_correctness(void) {
+  // Build a RIT for TWL98 using the release binary (fast), then run
+  // game pairs under ASAN where player 1 uses RIT and player 2 does not.
+  // Any divergence means the RIT changed move selection.
+  const char *lex = "TWL98";
+  const int num_pairs = 5000;
+
+  // The RIT must be pre-built before running this test. On CI, the
+  // release binary builds it. Locally: run
+  //   echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true
+  //   -rit false"
+  printf("Running %d game pairs with RIT correctness check for %s...\n",
+         num_pairs, lex);
+  (void)fflush(stdout);
+
+  // Run game pairs: player 1 uses RIT, player 2 does not.
+  Config *c = config_create_or_die(
+      "set -lex TWL98 -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -gp true -w1 true -w2 true "
+      "-rit1 true -rit2 false -threads 4");
+  load_and_exec_config_or_die(c, "autoplay games 5000 -seed 42 -gp true");
+
+  char *res =
+      autoplay_results_to_string(config_get_autoplay_results(c), false, true);
+  const char *expected_zero = "autoplay games 0";
+  if (!has_substring(res, expected_zero)) {
+    (void)fprintf(stderr, "RIT autoplay divergence detected for %s:\n%s\n", lex,
+                  res ? res : "(no output)");
+    assert(false);
+  }
+  free(res);
+  config_destroy(c);
+
+  // Clean up the RIT file.
+  char *rit_path =
+      get_formatted_string("%s/lexica/%s.rit", DEFAULT_TEST_DATA_PATH, lex);
+  (void)remove(rit_path);
+  free(rit_path);
+
+  printf("RIT correctness: PASSED (%d game pairs, 0 divergent)\n", num_pairs);
+}
+
 void test_autoplay_sim(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all "
