@@ -340,11 +340,11 @@ For example, on an empty board with `SATINE` as our leave:
 magpie> set -lex CSW21 -wmp true -threads 8
 magpie> bingoprobs 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 SATINE/ 0/0 0
 opp_bingo (drawn from bag + opp rack (unseen to us), 7 of 94 tiles drawn):
-  raw racks: 145644 bingo, 3050892 no-bingo (3196536 distinct)
+  raw racks: 145644 bingo, 3050892 nonbingo (3196536 distinct)
   weighted: 1500082267/10235867928 = 14.655%
 
 self_bingo (after opp pass, replenish from bag, 1 of 94 tiles drawn):
-  raw racks: 25 bingo, 2 no-bingo (27 distinct)
+  raw racks: 25 bingo, 2 nonbingo (27 distinct)
   weighted: 91/94 = 96.809%
 ```
 
