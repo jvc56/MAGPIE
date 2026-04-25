@@ -97,18 +97,19 @@ static void test_bingo_probs_msuuuu_exhaustive(void) {
 // A constrained board: HOX at 8G horizontally, with H(O)x at H7
 // (vertical, blank x) and (X)U at I8 (vertical) hooked off it. HOX
 // has essentially no useful cross-hooks (no HOXY/HOXA equivalents),
-// so almost no rack can bingo here. With a SLANTY leave, the only
-// completing draws are Z and ?, both of which yield ZANTHOXYLS
-// played through HOX. 2 of 88 unseen tiles -> 2/88 = 2.273%.
+// so the only bingo on this board takes a specific 10-letter word:
+// ZANTHOXYLS played through HOX. With LNSTYZ on rack, drawing any
+// of the 9 A's or the 1 remaining blank completes that word — 10
+// winning draws of 88 unseen tiles -> 10/88 = 5/44 = 11.364%.
 static void test_bingo_probs_constrained_board(void) {
   Config *config = config_create_default_test();
   const char *cgp =
-      "15/15/15/15/15/15/7H7/6HOX6/7xU6/15/15/15/15/15/15 SLANTY/ 12/0 0";
+      "15/15/15/15/15/15/7H7/6HOX6/7xU6/15/15/15/15/15/15 LNSTYZ/ 22/0 0";
   char *output = run_bingo_probs_for_cgp(config, cgp, 0);
   const double opp_pct = extract_percent_after(output, "opp_bingo");
   const double self_pct = extract_percent_after(output, "self_bingo");
-  assert(opp_pct > 0.3 && opp_pct < 0.5);
-  assert(self_pct > 2.0 && self_pct < 2.5);
+  assert(opp_pct > 0.3 && opp_pct < 0.6);
+  assert(self_pct > 11.0 && self_pct < 11.7);
   free(output);
   config_destroy(config);
 }
