@@ -420,10 +420,9 @@ void test_single_tile_play(void) {
 
 // Throughput benchmark for single_tile_scan + single_tile_features
 // (closed-form). One call = scan + features for "us" + features for
-// "opp".
-static const char *EMPTY_CGP =
-    "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AILORRV/ 0/0 0";
-
+// "opp". Empty board is excluded — no single-tile play can ever be
+// legal there (no 1-letter words), so the scan does no work and the
+// timing isn't meaningful for this feature.
 void test_single_tile_bench(void) {
   const char *iters_env = getenv("STBENCH_ITERS");
   const int iters =
@@ -431,17 +430,12 @@ void test_single_tile_bench(void) {
   const char *seed_env = getenv("STBENCH_SEED");
   const uint64_t seed =
       (seed_env != NULL) ? (uint64_t)strtoull(seed_env, NULL, 10) : 42ULL;
-  const char *cgp_env = getenv("STBENCH_CGP");
-  const char *cgp_label = (cgp_env != NULL) ? cgp_env : "midgame";
-  const char *cgp_string = (cgp_env != NULL && strcmp(cgp_env, "empty") == 0)
-                               ? EMPTY_CGP
-                               : MIDGAME_CGP;
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
       "-numplays 1");
   Game *game = config_game_create(config);
-  load_cgp_or_die(game, cgp_string);
+  load_cgp_or_die(game, MIDGAME_CGP);
   bag_seed(game_get_bag(game), seed);
 
   const LetterDistribution *ld = game_get_ld(game);
@@ -520,9 +514,9 @@ void test_single_tile_bench(void) {
   const double calls_per_sec = (double)iters / elapsed;
   const double us_per_call = elapsed * 1e6 / (double)iters;
 
-  printf("singletile bench cgp=%s iters=%d: %.3fs  %.0f calls/sec  "
+  printf("singletile bench iters=%d: %.3fs  %.0f calls/sec  "
          "%.3f us/call  (sink=%.6f)\n",
-         cgp_label, iters, elapsed, calls_per_sec, us_per_call, sink);
+         iters, elapsed, calls_per_sec, us_per_call, sink);
 
   game_destroy(game);
   config_destroy(config);
