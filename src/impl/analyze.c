@@ -63,6 +63,9 @@ typedef struct TurnResultMove {
   int endgame_value;
   int rank_idx;
   char display_move[BOARD_DIM * 2];
+  double ply_score[MAX_PLIES];
+  double ply_bingo_pct[MAX_PLIES];
+  int num_plies;
 } TurnResultMove;
 
 // TurnResult stores typed values (Rack, Move) rather than pre-formatted
@@ -276,7 +279,7 @@ static void add_move_comparison_row(StringGrid *move_sg, int row,
 static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                                      const Board *board,
                                      const LetterDistribution *ld,
-                                     bool is_endgame) {
+                                     bool is_endgame, int num_display_plies) {
   const TurnResultMove *best_trm = &tr->best;
   const TurnResultMove *actual_trm = &tr->actual;
   const Rack *rack = &tr->rack;
@@ -350,13 +353,42 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
                  : get_formatted_string("%.2f", best_st_eq - actual_st_eq),
       wp_col, is_endgame);
 
+  // Ply columns: P1-S, P1-BP, P2-S, P2-BP, ...
+  const int ply_start_col = wp_col + 3; // after Wp, Eq, StEq
+  for (int ply_idx = 0; ply_idx < num_display_plies; ply_idx++) {
+    const int score_col = ply_start_col + ply_idx * 2;
+    const int bingo_col = score_col + 1;
+    string_grid_set_cell(
+        move_sg, 1, score_col,
+        get_formatted_string("%.2f", best_trm->ply_score[ply_idx]));
+    string_grid_set_cell(
+        move_sg, 1, bingo_col,
+        get_formatted_string("%.2f", best_trm->ply_bingo_pct[ply_idx]));
+    string_grid_set_cell(
+        move_sg, 2, score_col,
+        get_formatted_string("%.2f", actual_trm->ply_score[ply_idx]));
+    string_grid_set_cell(
+        move_sg, 2, bingo_col,
+        get_formatted_string("%.2f", actual_trm->ply_bingo_pct[ply_idx]));
+    string_grid_set_cell(
+        move_sg, 3, score_col,
+        get_formatted_string(
+            "%.2f",
+            best_trm->ply_score[ply_idx] - actual_trm->ply_score[ply_idx]));
+    string_grid_set_cell(
+        move_sg, 3, bingo_col,
+        get_formatted_string("%.2f", best_trm->ply_bingo_pct[ply_idx] -
+                                         actual_trm->ply_bingo_pct[ply_idx]));
+  }
+
   string_builder_destroy(sb);
 }
 
 static void write_per_turn_human_readable(
     const TurnResult *turn_result, const GameHistory *game_history,
     const LetterDistribution *ld, const char *report_path,
-    const AnalyzeCtx *ctx, int max_num_display_plays, ErrorStack *error_stack) {
+    const AnalyzeCtx *ctx, int max_num_display_plays, int max_num_display_plies,
+    ErrorStack *error_stack) {
   const char *player_name =
       game_history_player_get_nickname(game_history, turn_result->player_index);
 
@@ -375,9 +407,15 @@ static void write_per_turn_human_readable(
   const bool is_sim = !is_endgame && turn_result->actual.win_pct >= 0.0;
 
   // Per-turn move grid: label, R, Mv, Lv, S, [Spr (endgame only),] Wp, Eq,
-  // StEq. 4 rows: header + best + actual + diff.
-  // For endgames: 9 cols with 'Spr' at col 5 (final spread); StEq shows '-'.
-  const int num_grid_cols = is_endgame ? 9 : 8;
+  // StEq, [P1-S, P1-BP, P2-S, P2-BP, ... (sim only, up to max_num_display_plies)].
+  // 4 rows: header + best + actual + diff.
+  // For endgames: Spr at col 5 (final spread); StEq shows '-'; no ply cols.
+  const int num_plies = turn_result->best.num_plies;
+  const int num_display_plies =
+      is_sim ? (max_num_display_plies < num_plies ? max_num_display_plies
+                                                  : num_plies)
+             : 0;
+  const int num_grid_cols = (is_endgame ? 9 : 8) + num_display_plies * 2;
   StringGrid *move_sg = string_grid_create(4, num_grid_cols, 2);
 
   // Header row.
@@ -394,9 +432,16 @@ static void write_per_turn_human_readable(
   }
   string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("Wp"));
   string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("Eq"));
-  string_grid_set_cell(move_sg, curr_row, curr_col, string_duplicate("StEq"));
+  string_grid_set_cell(move_sg, curr_row, curr_col++, string_duplicate("StEq"));
+  for (int ply_idx = 0; ply_idx < num_display_plies; ply_idx++) {
+    string_grid_set_cell(move_sg, curr_row, curr_col++,
+                         get_formatted_string("P%d-S", ply_idx + 1));
+    string_grid_set_cell(move_sg, curr_row, curr_col++,
+                         get_formatted_string("P%d-BP", ply_idx + 1));
+  }
 
-  add_move_comparison_rows(move_sg, turn_result, board, ld, is_endgame);
+  add_move_comparison_rows(move_sg, turn_result, board, ld, is_endgame,
+                           num_display_plies);
 
   string_builder_add_string_grid(sb, move_sg, false);
   string_builder_add_string(sb, "\n");
@@ -408,7 +453,8 @@ static void write_per_turn_human_readable(
   // Sim results, endgame results, or static move list.
   if (is_sim) {
     char *sim_str = sim_results_get_string(ctx->game, ctx->sim_results,
-                                           max_num_display_plays, 2, -1, -1,
+                                           max_num_display_plays,
+                                           max_num_display_plies, -1, -1,
                                            NULL, 0, false, false, NULL);
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
@@ -778,7 +824,7 @@ static void analyze_with_static(const GameEvent *event, TurnResult *turn_result,
 
   if (human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
-                                  ctx, max_num_display_plays, error_stack);
+                                  ctx, max_num_display_plays, 0, error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
                        is_first_analyzed_turn, error_stack);
@@ -935,6 +981,15 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
       stat_get_mean(simmed_play_get_equity_stat(actual_sp));
   turn_result->actual.rank_idx = actual_display_idx;
 
+  const int num_plies = sim_results_get_num_plies(ctx->sim_results);
+  turn_result->actual.num_plies = num_plies;
+  for (int ply_idx = 0; ply_idx < num_plies; ply_idx++) {
+    turn_result->actual.ply_score[ply_idx] =
+        stat_get_mean(simmed_play_get_score_stat(actual_sp, ply_idx));
+    turn_result->actual.ply_bingo_pct[ply_idx] =
+        stat_get_mean(simmed_play_get_bingo_stat(actual_sp, ply_idx)) * 100.0;
+  }
+
   turn_result->best.rank_idx = 0;
   if (best_sp == actual_sp) {
     // Actual is the best move; best is a copy of actual.
@@ -946,6 +1001,13 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
     turn_result->best.equity =
         stat_get_mean(simmed_play_get_equity_stat(best_sp));
     turn_result->best.rank_idx = 0;
+    turn_result->best.num_plies = num_plies;
+    for (int ply_idx = 0; ply_idx < num_plies; ply_idx++) {
+      turn_result->best.ply_score[ply_idx] =
+          stat_get_mean(simmed_play_get_score_stat(best_sp, ply_idx));
+      turn_result->best.ply_bingo_pct[ply_idx] =
+          stat_get_mean(simmed_play_get_bingo_stat(best_sp, ply_idx)) * 100.0;
+    }
     populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
   turn_result->was_endgame = false;
@@ -954,6 +1016,7 @@ static void analyze_with_sim(const GameEvent *event, TurnResult *turn_result,
   if (args->human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
                                   ctx, args->max_num_display_plays,
+                                  args->sim_args.max_num_display_plies,
                                   error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
@@ -1078,7 +1141,7 @@ static void analyze_with_endgame(const GameEvent *event,
 
   if (args->human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
-                                  ctx, 0, error_stack);
+                                  ctx, 0, 0, error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
                        is_first_analyzed_turn, error_stack);
