@@ -106,14 +106,18 @@ typedef enum {
   ARG_TOKEN_LETTER_DISTRIBUTION,
   ARG_TOKEN_LEXICON,
   ARG_TOKEN_USE_WMP,
+  ARG_TOKEN_USE_RIT,
+  ARG_TOKEN_USE_MMAP_FOR_RIT,
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
+  ARG_TOKEN_P1_USE_RIT,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
+  ARG_TOKEN_P2_USE_RIT,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
@@ -255,6 +259,7 @@ struct Config {
   bool show_game_with_moves;
   bool show_prompt;
   bool save_settings;
+  bool use_mmap_for_rit;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -838,6 +843,12 @@ arg_token_t get_token_from_string(Config *config, const char *arg_name,
         arg_name[0] == config->pargs[k]->name[0]) {
       return k;
     }
+    // Exact matches always win, even when the name is a prefix of another
+    // (e.g. "rit" is a prefix of "rit1"/"rit2", but typing "rit" should
+    // resolve to the rit token itself).
+    if (strings_equal(arg_name, config->pargs[k]->name)) {
+      return k;
+    }
     if (has_prefix(arg_name, config->pargs[k]->name)) {
       parg_has_prefix[k] = true;
       if (current_arg_token != NUMBER_OF_ARG_TOKENS) {
@@ -1330,6 +1341,26 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "generating moves. Word maps are much faster but use more memory "
              "and are on by default.";
       break;
+    case ARG_TOKEN_USE_RIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed rack info table when "
+             "generating moves. The table stores leave values (and, in the "
+             "future, other per-rack data) for every possible full rack, "
+             "enabling a single hash lookup to replace repeated KLV traversal. "
+             "Off by default because .rit files are large and must be built "
+             "with the klvwmp2rit convert command.";
+      break;
+    case ARG_TOKEN_USE_MMAP_FOR_RIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "When true, the rack info table is memory-mapped instead of read "
+             "into allocated memory. This eliminates the startup cost of "
+             "loading the file but pages are faulted on demand during play. "
+             "Only supported on little-endian architectures.";
+      break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
       examples[0] = "CSW21";
@@ -1352,6 +1383,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether to use word maps as opposed to KWGs when "
+             "generating moves for the given player.";
+      break;
+    case ARG_TOKEN_P1_USE_RIT:
+    case ARG_TOKEN_P2_USE_RIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed rack info table when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_LEAVES:
@@ -1895,6 +1934,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_LEXICON,             /* lex */
         ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
         ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
+        ARG_TOKEN_USE_RIT,             /* rit */
+        ARG_TOKEN_P1_USE_RIT,          /* rit1 */
+        ARG_TOKEN_P2_USE_RIT,          /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
         ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
         ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
         ARG_TOKEN_GAME_VARIANT,        /* var */
@@ -5955,6 +5998,363 @@ exec_mode_t get_exec_mode_type_from_name(const char *exec_mode_str) {
   return exec_mode;
 }
 
+void config_load_lexicon_dependent_data(Config *config,
+                                        ErrorStack *error_stack) {
+  // Lexical player data
+
+  // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
+  // Once the kwg and klv are set for both players, they can change to new
+  // lexica or leave values, but they can never change to NULL. Therefore, if
+  // new names are NULL, it means they weren't specified for this command and
+  // the existing kwg and klv types should persist.
+  const char *new_lexicon_name =
+      config_get_parg_value(config, ARG_TOKEN_LEXICON, 0);
+
+  const char *new_p1_lexicon_name = new_lexicon_name;
+  const char *new_p2_lexicon_name = new_lexicon_name;
+
+  // The "l1" and "l2" args override the "lex" arg
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_LEXICON) > 0) {
+    new_p1_lexicon_name =
+        config_get_parg_value(config, ARG_TOKEN_P1_LEXICON, 0);
+  }
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_LEXICON) > 0) {
+    new_p2_lexicon_name =
+        config_get_parg_value(config, ARG_TOKEN_P2_LEXICON, 0);
+  }
+
+  const char *new_leaves_name =
+      config_get_parg_value(config, ARG_TOKEN_LEAVES, 0);
+
+  const char *new_p1_leaves_name = new_leaves_name;
+  const char *new_p2_leaves_name = new_leaves_name;
+
+  // The "k1" and "k2" args override the "leaves" arg
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_LEAVES) > 0) {
+    new_p1_leaves_name = config_get_parg_value(config, ARG_TOKEN_P1_LEAVES, 0);
+  }
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_LEAVES) > 0) {
+    new_p2_leaves_name = config_get_parg_value(config, ARG_TOKEN_P2_LEAVES, 0);
+  }
+
+  const char *new_ld_name =
+      config_get_parg_value(config, ARG_TOKEN_LETTER_DISTRIBUTION, 0);
+
+  // Load the lexicons
+  const char *existing_p1_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 0);
+  const char *existing_p2_lexicon_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KWG, 1);
+
+  const char *updated_p1_lexicon_name = new_p1_lexicon_name;
+  if (!updated_p1_lexicon_name) {
+    updated_p1_lexicon_name = existing_p1_lexicon_name;
+  }
+
+  const char *updated_p2_lexicon_name = new_p2_lexicon_name;
+  if (!updated_p2_lexicon_name) {
+    updated_p2_lexicon_name = existing_p2_lexicon_name;
+  }
+
+  // Both or neither players must have lexical data
+  if (!updated_p1_lexicon_name && updated_p2_lexicon_name) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 1"));
+    return;
+  }
+  if (updated_p1_lexicon_name && !updated_p2_lexicon_name) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+                     string_duplicate("missing lexicon for player 2"));
+    return;
+  }
+
+  // Determine the status of the wmp for both players
+  // Start by assuming we are just using whatever the existing wmp settings
+  // are
+  bool p1_wmp_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, 0);
+  bool p2_wmp_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WMP, 1);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_WMP, &p1_wmp_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_wmp_use_when_available = p1_wmp_use_when_available;
+  }
+
+  // The "w1" and "w2" args override the "use_wmp" arg
+  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WMP, &p1_wmp_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_WMP, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WMP, &p2_wmp_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WMP, 0,
+                                      p1_wmp_use_when_available);
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WMP, 1,
+                                      p2_wmp_use_when_available);
+
+  // Determine the status of the rack info table for both players, mirroring
+  // the WMP arg pattern (rit / rit1 / rit2).
+  bool p1_rit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_RIT, 0);
+  bool p2_rit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_RIT, 1);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_RIT, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_RIT, &p1_rit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_rit_use_when_available = p1_rit_use_when_available;
+  }
+
+  // The "rit1" and "rit2" args override the "rit" arg.
+  if (config_get_parg_value(config, ARG_TOKEN_P1_USE_RIT, 0)) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_RIT, &p1_rit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (config_get_parg_value(config, ARG_TOKEN_P2_USE_RIT, 0)) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_RIT, &p2_rit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_RIT, 0,
+                                      p1_rit_use_when_available);
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_RIT, 1,
+                                      p2_rit_use_when_available);
+
+  if (config_get_parg_value(config, ARG_TOKEN_USE_MMAP_FOR_RIT, 0)) {
+    config_load_bool(config, ARG_TOKEN_USE_MMAP_FOR_RIT,
+                     &config->use_mmap_for_rit, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  // Both lexicons are not specified, so we don't
+  // load any of the lexicon dependent data
+  if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
+    // We can use the new_* variables here since if lexicons
+    // are null, it is guaranteed that there are no leaves or ld
+    // since they are all set after this if check.
+    if (new_p1_leaves_name || new_p2_leaves_name || new_ld_name) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_LEXICON_MISSING,
+          string_duplicate(
+              "cannot set leaves or letter distribution without a lexicon"));
+    }
+    return;
+  }
+
+  const bool lex_lex_is_compat = lex_lex_compat(
+      updated_p1_lexicon_name, updated_p2_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (!lex_lex_is_compat) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+        get_formatted_string("lexicons are incompatible: %s, %s",
+                             updated_p1_lexicon_name, updated_p2_lexicon_name));
+    return;
+  }
+
+  // Set the use_default bool here because the 'existing_p1_lexicon_name'
+  // variable might be free'd in players_data_set.
+  const bool use_default = !lex_lex_compat(
+      updated_p1_lexicon_name, existing_p1_lexicon_name, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load lexica
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_KWG,
+                   config->data_paths, updated_p1_lexicon_name,
+                   updated_p2_lexicon_name, false, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load lexica (in WMP format)
+
+  // For the wmp, we allow non-NULL -> NULL transitions.
+
+  const char *p1_wmp_name = NULL;
+  if (p1_wmp_use_when_available) {
+    p1_wmp_name = updated_p1_lexicon_name;
+  }
+
+  const char *p2_wmp_name = NULL;
+  if (p2_wmp_use_when_available) {
+    p2_wmp_name = updated_p2_lexicon_name;
+  }
+
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WMP,
+                   config->data_paths, p1_wmp_name, p2_wmp_name, false,
+                   error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load the leaves
+
+  const char *existing_p1_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 0);
+  char *updated_p1_leaves_name = NULL;
+  if (new_p1_leaves_name) {
+    updated_p1_leaves_name = string_duplicate(new_p1_leaves_name);
+  } else if (use_default || !existing_p1_leaves_name) {
+    updated_p1_leaves_name = get_default_klv_name(updated_p1_lexicon_name);
+  } else {
+    updated_p1_leaves_name = string_duplicate(existing_p1_leaves_name);
+  }
+
+  const char *existing_p2_leaves_name = players_data_get_data_name(
+      config->players_data, PLAYERS_DATA_TYPE_KLV, 1);
+  char *updated_p2_leaves_name = NULL;
+  if (new_p2_leaves_name) {
+    updated_p2_leaves_name = string_duplicate(new_p2_leaves_name);
+  } else if (use_default || !existing_p2_leaves_name) {
+    updated_p2_leaves_name = get_default_klv_name(updated_p2_lexicon_name);
+  } else {
+    updated_p2_leaves_name = string_duplicate(existing_p2_leaves_name);
+  }
+
+  const bool leaves_and_lexicons_are_compatible = lexicons_and_leaves_compat(
+      updated_p1_lexicon_name, updated_p1_leaves_name, updated_p2_lexicon_name,
+      updated_p2_leaves_name, error_stack);
+
+  if (error_stack_is_empty(error_stack)) {
+    if (!leaves_and_lexicons_are_compatible) {
+      error_stack_push(error_stack,
+                       ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LEXICONS,
+                       get_formatted_string(
+                           "one or more of the leaves are incompatible with "
+                           "the current lexicons or each other: %s, %s",
+                           updated_p1_leaves_name, updated_p2_leaves_name));
+    } else {
+      players_data_set(config->players_data, PLAYERS_DATA_TYPE_KLV,
+                       config->data_paths, updated_p1_leaves_name,
+                       updated_p2_leaves_name, false, error_stack);
+      autoplay_results_set_klv(config->autoplay_results,
+                               players_data_get_data(config->players_data,
+                                                     PLAYERS_DATA_TYPE_KLV, 0));
+    }
+  }
+
+  free(updated_p1_leaves_name);
+  free(updated_p2_leaves_name);
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load rack info tables (if enabled). Like the WMP, the .rit file shares
+  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  const char *p1_rit_name = NULL;
+  if (p1_rit_use_when_available) {
+    p1_rit_name = updated_p1_lexicon_name;
+  }
+  const char *p2_rit_name = NULL;
+  if (p2_rit_use_when_available) {
+    p2_rit_name = updated_p2_lexicon_name;
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
+                   config->data_paths, p1_rit_name, p2_rit_name,
+                   config->use_mmap_for_rit, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load letter distribution
+
+  const char *existing_ld_name = NULL;
+  if (config->ld) {
+    existing_ld_name = ld_get_name(config->ld);
+  }
+  char *updated_ld_name = NULL;
+  if (new_ld_name) {
+    updated_ld_name = string_duplicate(new_ld_name);
+  } else if (use_default || !existing_ld_name) {
+    updated_ld_name = ld_get_default_name_from_lexicon_name(
+        updated_p1_lexicon_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  } else {
+    updated_ld_name = string_duplicate(existing_ld_name);
+  }
+
+  const bool lex_ld_is_compat =
+      lex_ld_compat(updated_p1_lexicon_name, updated_ld_name, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    if (!lex_ld_is_compat) {
+      error_stack_push(
+          error_stack,
+          ERROR_STATUS_CONFIG_LOAD_INCOMPATIBLE_LETTER_DISTRIBUTION,
+          get_formatted_string(
+              "lexicon %s is incompatible with letter distribution %s",
+              updated_p1_lexicon_name, updated_ld_name));
+    } else {
+      // If the letter distribution name has changed, update it
+      config->ld_changed = false;
+      if (!strings_equal(updated_ld_name, existing_ld_name)) {
+        ld_destroy(config->ld);
+        config->ld =
+            ld_create(config->data_paths, updated_ld_name, error_stack);
+        if (error_stack_is_empty(error_stack)) {
+          config->ld_changed = true;
+          config_reset_move_list_and_invalidate_sim_results(config);
+          inference_results_set_valid_for_current_game_state(
+              config->inference_results, false);
+          endgame_results_set_valid_for_current_game_state(
+              config->endgame_results, false);
+          if (!config->is_loading_game_history) {
+            game_history_reset(config->game_history);
+          }
+        }
+      }
+      if (error_stack_is_empty(error_stack)) {
+        autoplay_results_set_ld(config->autoplay_results, config->ld);
+      }
+    }
+  }
+  free(updated_ld_name);
+}
+
 // Assumes all args are parsed and correctly set in pargs.
 void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *new_path = config_get_parg_value(config, ARG_TOKEN_DATA_PATH, 0);
@@ -7403,14 +7803,18 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_LETTER_DISTRIBUTION, "ld", 1, 1);
   arg(ARG_TOKEN_LEXICON, "lex", 1, 1);
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
+  arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
+  arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
+  arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
+  arg(ARG_TOKEN_P2_USE_RIT, "rit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
@@ -7490,9 +7894,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
     config->pargs[i]->shortest_unambiguous_name = string_duplicate(name);
   }
   for (size_t i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
-    const int su_index =
-        trie_get_shortest_unambiguous_index(trie, config->pargs[i]->name);
-    config->pargs[i]->shortest_unambiguous_name[su_index] = '\0';
+    const char *name = config->pargs[i]->name;
+    const size_t name_len = string_length(name);
+    const int su_index = trie_get_shortest_unambiguous_index(trie, name);
+    // When a name is a prefix of another (e.g. "rit" vs "rit1"/"rit2"),
+    // the trie walks all the way to the end of the name and returns
+    // name_len + 1. Capping keeps the full name as the unambiguous form
+    // and avoids writing past the string's null terminator.
+    if ((size_t)su_index < name_len) {
+      config->pargs[i]->shortest_unambiguous_name[su_index] = '\0';
+    }
   }
   trie_destroy(trie);
 
@@ -7739,8 +8150,13 @@ void config_add_settings_to_string_builder(const Config *config,
       break;
     case ARG_TOKEN_LEXICON:
     case ARG_TOKEN_USE_WMP:
+    case ARG_TOKEN_USE_RIT:
     case ARG_TOKEN_LEAVES:
       // Set these values on a per-player basis
+      break;
+    case ARG_TOKEN_USE_MMAP_FOR_RIT:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->use_mmap_for_rit);
       break;
     case ARG_TOKEN_P1_LEXICON:
       config_add_string_setting_to_string_builder(
@@ -7753,6 +8169,12 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_WMP, 0));
+      break;
+    case ARG_TOKEN_P1_USE_RIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 0));
       break;
     case ARG_TOKEN_P1_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -7783,6 +8205,12 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_WMP, 1));
+      break;
+    case ARG_TOKEN_P2_USE_RIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 1));
       break;
     case ARG_TOKEN_P2_LEAVES:
       config_add_string_setting_to_string_builder(

@@ -98,6 +98,8 @@ jobs:
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
             tests: "hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
+          - shard: ap_rit
+            tests: "ap_rit"
     steps:
       - uses: actions/checkout@v3
 
@@ -119,6 +121,14 @@ jobs:
       - name: Download data files and convert lexica
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Build release binary for RIT construction
+        if: matrix.shard == 'ap_rit'
+        run: make magpie BUILD=release
+
+      - name: Build RIT for TWL98
+        if: matrix.shard == 'ap_rit'
+        run: echo "convert klvwmp2rit TWL98" | ./bin/magpie "set -lex TWL98 -wmp true -rit false"
 
       - name: Build dev test binary
         run: make magpie_test

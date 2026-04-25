@@ -25,6 +25,13 @@ typedef struct KLV {
   char *name;
   uint32_t *word_counts;
   Equity *leave_values;
+  // Bumped on every mutation of leave_values. MoveGen caches that store
+  // leave-derived data (subrack cache, anchor cache upper bounds, etc.)
+  // compare this counter to the value captured at the last gen_load_position
+  // and invalidate when it has changed, even when the KLV pointer itself
+  // hasn't moved. Only test code currently mutates leave_values in-place;
+  // production KLVs are loaded once and treated as immutable.
+  uint64_t mutation_counter;
 } KLV;
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
@@ -38,6 +45,11 @@ static inline uint32_t klv_get_number_of_leaves(const KLV *klv) {
 static inline void klv_set_all_leave_values_to_zero(KLV *klv) {
   memset(klv->leave_values, int_to_equity(0),
          klv->number_of_leaves * sizeof(Equity));
+  klv->mutation_counter++;
+}
+
+static inline uint64_t klv_get_mutation_counter(const KLV *klv) {
+  return klv->mutation_counter;
 }
 
 static inline Equity klv_get_indexed_leave_value(const KLV *klv,
@@ -51,6 +63,10 @@ static inline Equity klv_get_indexed_leave_value(const KLV *klv,
 // Assumes the index is valid
 static inline Equity klv_set_indexed_leave_value(const KLV *klv, uint32_t index,
                                                  Equity value) {
+  // Bumping the mutation counter requires a non-const KLV, but the public
+  // API historically accepts const to avoid churn at call sites that treat
+  // the KLV as mostly-immutable. Cast away const for the counter bump only.
+  ((KLV *)klv)->mutation_counter++;
   return klv->leave_values[index] = value;
 }
 

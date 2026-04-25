@@ -5,6 +5,7 @@
 #include "../def/players_data_defs.h"
 #include "klv.h"
 #include "kwg.h"
+#include "rack_info_table.h"
 #include "wmp.h"
 #include <stdbool.h>
 
@@ -23,6 +24,8 @@ const char *players_data_get_data_name(const PlayersData *players_data,
 KWG *players_data_get_kwg(const PlayersData *players_data, int player_index);
 KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
+RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
+                                                int player_index);
 
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,
@@ -44,7 +47,18 @@ void players_data_set_use_when_available(PlayersData *players_data,
 void players_data_set(PlayersData *players_data,
                       players_data_t players_data_type, const char *data_paths,
                       const char *p1_data_name, const char *p2_data_name,
-                      ErrorStack *error_stack);
+                      bool use_mmap_for_rit, ErrorStack *error_stack);
+// Directly sets the data pointer for a slot, without taking it through the
+// filename-based load path. Ownership of `data` is transferred to
+// PlayersData: when the slot is replaced (via another set_data or
+// set/reload) or when PlayersData is destroyed, `data` will be freed via
+// the type-appropriate destroy function. Callers must not free or destroy
+// `data` after passing it here. Use NULL to clear the slot; the previous
+// value is NOT freed by set_data itself, so call players_data_destroy_data
+// first if you need to release the old pointer before overwriting.
+void players_data_set_data(PlayersData *players_data,
+                           players_data_t players_data_type, int player_index,
+                           void *data);
 void players_data_reload(PlayersData *players_data,
                          players_data_t players_data_type,
                          const char *data_paths, ErrorStack *error_stack);

@@ -45,7 +45,7 @@ void test_for_data_type(const char **data_names, const char *data_paths,
   const char *previous_data_name_2 = NULL;
   for (int i = 0; i < number_of_data_names; i += 2) {
     players_data_set(players_data, players_data_type, data_paths, data_names[i],
-                     data_names[i + 1], error_stack);
+                     data_names[i + 1], false, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
       assert(false);
@@ -108,7 +108,7 @@ void test_reloaded_data(void) {
   players_data_set_move_record_type(players_data, 1, MOVE_RECORD_ALL);
 
   players_data_set(players_data, PLAYERS_DATA_TYPE_KLV, DEFAULT_TEST_DATA_PATH,
-                   "CSW21", "CSW21", error_stack);
+                   "CSW21", "CSW21", false, error_stack);
   assert(error_stack_is_empty(error_stack));
 
   const KLV *klv1 = players_data_get_klv(players_data, 0);
@@ -142,17 +142,17 @@ void test_null_data(void) {
   // Confirm that WMP can be set to NULL without errors.
 
   players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
-                   "CSW21", "CSW21", error_stack);
+                   "CSW21", "CSW21", false, error_stack);
   assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, "CSW21", "CSW21");
   players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
-                   NULL, NULL, error_stack);
+                   NULL, NULL, false, error_stack);
   assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, NULL, NULL);
 
   players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
-                   "CSW21", "CSW21", error_stack);
+                   "CSW21", "CSW21", false, error_stack);
   assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, "CSW21", "CSW21");
   players_data_set(players_data, PLAYERS_DATA_TYPE_WMP, DEFAULT_TEST_DATA_PATH,
-                   NULL, NULL, error_stack);
+                   NULL, NULL, false, error_stack);
   assert_players_data(players_data, PLAYERS_DATA_TYPE_WMP, NULL, NULL);
 
   if (!error_stack_is_empty(error_stack)) {
