@@ -180,8 +180,8 @@ typedef struct {
   const RackList *list;
   size_t start_idx;
   size_t end_idx;
-  Game *game; // per-thread game copy
-  MoveList *move_list; // per-thread scratch
+  Game *game;            // per-thread game copy
+  MoveList *move_list;   // per-thread scratch
   const Rack *base_rack; // tiles already in our rack (NULL = empty)
   int player_on_turn_index;
   int thread_index;
@@ -474,30 +474,30 @@ static void run_sampled(const Game *base_game, const TilePool *pool,
 static void format_scenario(StringBuilder *sb, const char *label,
                             const char *desc, int pool_size, int draw_size,
                             const ScenarioResult *r) {
-  string_builder_add_formatted_string(
-      sb, "%s (%s, %d of %d tiles drawn):\n", label, desc, draw_size,
-      pool_size);
+  string_builder_add_formatted_string(sb, "%s (%s, %d of %d tiles drawn):\n",
+                                      label, desc, draw_size, pool_size);
   if (r->sampled) {
-    const double pct =
-        r->sample_total == 0
-            ? 0.0
-            : 100.0 * (double)r->sample_bingo / (double)r->sample_total;
+    const double pct = r->sample_total == 0 ? 0.0
+                                            : 100.0 * (double)r->sample_bingo /
+                                                  (double)r->sample_total;
     const double p = pct / 100.0;
     const double se =
         r->sample_total == 0
             ? 0.0
             : 100.0 * sqrt(p * (1.0 - p) / (double)r->sample_total);
     string_builder_add_formatted_string(
-        sb, "  sampled: %" PRIu64 " bingo / %" PRIu64
-            " samples = %.3f%%  (SE %.3f%%)\n",
+        sb,
+        "  sampled: %" PRIu64 " bingo / %" PRIu64
+        " samples = %.3f%%  (SE %.3f%%)\n",
         r->sample_bingo, r->sample_total, pct, se);
     return;
   }
   const uint64_t no_bingo = r->total_distinct - r->bingo_distinct;
-  string_builder_add_formatted_string(
-      sb, "  raw racks: %" PRIu64 " bingo, %" PRIu64 " no-bingo (%" PRIu64
-          " distinct)\n",
-      r->bingo_distinct, no_bingo, r->total_distinct);
+  string_builder_add_formatted_string(sb,
+                                      "  raw racks: %" PRIu64 " bingo, %" PRIu64
+                                      " no-bingo (%" PRIu64 " distinct)\n",
+                                      r->bingo_distinct, no_bingo,
+                                      r->total_distinct);
   uint64_t num = r->bingo_weight;
   uint64_t den = r->total_weight;
   if (den == 0) {
@@ -599,20 +599,17 @@ char *bingo_probs_run(const Game *game, int num_threads, uint64_t sample_count,
 
   // Format report.
   StringBuilder *sb = string_builder_create();
-  format_scenario(sb, "opp_bingo",
-                  "drawn from bag + opp rack (unseen to us)", opp_pool.total,
-                  opp_draw_size, &opp_result);
+  format_scenario(sb, "opp_bingo", "drawn from bag + opp rack (unseen to us)",
+                  opp_pool.total, opp_draw_size, &opp_result);
   string_builder_add_char(sb, '\n');
   if (self_draw_size == 0) {
     string_builder_add_formatted_string(
         sb, "self_bingo (rack already full, no replenish needed):\n");
     string_builder_add_formatted_string(
-        sb, "  bingo: %s\n",
-        self_result.bingo_distinct > 0 ? "yes" : "no");
+        sb, "  bingo: %s\n", self_result.bingo_distinct > 0 ? "yes" : "no");
   } else {
-    format_scenario(sb, "self_bingo",
-                    "after opp pass, replenish from bag", self_pool.total,
-                    self_draw_size, &self_result);
+    format_scenario(sb, "self_bingo", "after opp pass, replenish from bag",
+                    self_pool.total, self_draw_size, &self_result);
   }
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);

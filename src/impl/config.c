@@ -1897,6 +1897,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Game Analysis Commands (alphabetical by name)
     static const arg_token_t game_analysis_cmds[] = {
         ARG_TOKEN_MOVES,                /* addmoves */
+        ARG_TOKEN_BINGOPROBS,           /* bingoprobs */
         ARG_TOKEN_ENDGAME,              /* endgame */
         ARG_TOKEN_GEN,                  /* generate */
         ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
@@ -2144,9 +2145,8 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
 
 static char *impl_bingoprobs(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
-        string_duplicate("cannot run bingoprobs without lexicon"));
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run bingoprobs without lexicon"));
     return NULL;
   }
   config_init_game(config);
@@ -2187,11 +2187,11 @@ static char *impl_bingoprobs(Config *config, ErrorStack *error_stack) {
     char *endptr = NULL;
     const unsigned long long parsed = strtoull(samples_str, &endptr, 10);
     if (endptr == samples_str || *endptr != '\0') {
-      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
-                       get_formatted_string(
-                           "bingoprobs <samples> must be a non-negative "
-                           "integer, got '%s'",
-                           samples_str));
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+          get_formatted_string("bingoprobs <samples> must be a non-negative "
+                               "integer, got '%s'",
+                               samples_str));
       return NULL;
     }
     sample_count = (uint64_t)parsed;

@@ -1,7 +1,8 @@
 // Tests for bingo_probs_run.
 //
-// All tests use an empty board so the result depends only on the
-// lexicon (CSW21) and rack composition, not on board state.
+// Empty-board tests isolate the rack composition; the BOX/x/U test
+// exercises a constrained mid-game where the board itself is the
+// dominant factor in both opp and self bingo probabilities.
 
 #include "bingo_probs_test.h"
 
@@ -57,7 +58,7 @@ static char *run_bingo_probs_for_cgp(Config *config, const char *cgp,
 static void test_bingo_probs_satine_exhaustive(void) {
   Config *config = config_create_default_test();
   char cgp[256];
-  snprintf(cgp, sizeof(cgp), "%s SATINE/ 0/0 0", EMPTY_BOARD_15X15);
+  (void)snprintf(cgp, sizeof(cgp), "%s SATINE/ 0/0 0", EMPTY_BOARD_15X15);
   char *output = run_bingo_probs_for_cgp(config, cgp, 0);
   const double self_pct = extract_percent_after(output, "self_bingo");
   assert(self_pct > 96.5 && self_pct < 97.0);
@@ -71,7 +72,7 @@ static void test_bingo_probs_satine_exhaustive(void) {
 static void test_bingo_probs_satine_sampled(void) {
   Config *config = config_create_default_test();
   char cgp[256];
-  snprintf(cgp, sizeof(cgp), "%s SATINE/ 0/0 0", EMPTY_BOARD_15X15);
+  (void)snprintf(cgp, sizeof(cgp), "%s SATINE/ 0/0 0", EMPTY_BOARD_15X15);
   char *output = run_bingo_probs_for_cgp(config, cgp, 50000);
   const double self_pct = extract_percent_after(output, "self_bingo");
   assert(self_pct > 96.3 && self_pct < 97.3);
@@ -85,10 +86,29 @@ static void test_bingo_probs_satine_sampled(void) {
 static void test_bingo_probs_msuuuu_exhaustive(void) {
   Config *config = config_create_default_test();
   char cgp[256];
-  snprintf(cgp, sizeof(cgp), "%s MSUUUU/ 0/0 0", EMPTY_BOARD_15X15);
+  (void)snprintf(cgp, sizeof(cgp), "%s MSUUUU/ 0/0 0", EMPTY_BOARD_15X15);
   char *output = run_bingo_probs_for_cgp(config, cgp, 0);
   const double self_pct = extract_percent_after(output, "self_bingo");
   assert(self_pct < 10.0);
+  free(output);
+  config_destroy(config);
+}
+
+// A constrained board: BOX at 8G horizontally, with B(O)x at H7
+// (vertical, blank x) and (X)U at I8 (vertical) hooked off it. So
+// few hooks remain that even a SATINE leave has < 4% chance of
+// drawing into a bingo, and even an opp drawing 7 fresh tiles bingoes
+// less than 1% of the time. Contrast with the empty-board case where
+// SATINE is ~97% / drawing 7 is ~14.7%.
+static void test_bingo_probs_constrained_board(void) {
+  Config *config = config_create_default_test();
+  const char *cgp =
+      "15/15/15/15/15/15/7B7/6BOX6/7xU6/15/15/15/15/15/15 SATINE/ 12/0 0";
+  char *output = run_bingo_probs_for_cgp(config, cgp, 0);
+  const double opp_pct = extract_percent_after(output, "opp_bingo");
+  const double self_pct = extract_percent_after(output, "self_bingo");
+  assert(opp_pct > 0.7 && opp_pct < 1.0);
+  assert(self_pct > 3.2 && self_pct < 3.6);
   free(output);
   config_destroy(config);
 }
@@ -97,4 +117,5 @@ void test_bingo_probs(void) {
   test_bingo_probs_satine_exhaustive();
   test_bingo_probs_satine_sampled();
   test_bingo_probs_msuuuu_exhaustive();
+  test_bingo_probs_constrained_board();
 }

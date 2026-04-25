@@ -3347,9 +3347,9 @@ void generate_moves(const MoveGenArgs *args) {
   gen_record_pass(gen);
 }
 
-// Try a bingo placement at (anchor_col, leftmost_start_col, rightmost_start_col,
-// word_length, playthrough_blocks). Returns true if any valid placement
-// found (sets gen->bingo_found).
+// Try a bingo placement at (anchor_col, leftmost_start_col,
+// rightmost_start_col, word_length, playthrough_blocks). Returns true if any
+// valid placement found (sets gen->bingo_found).
 static inline void try_bingo_placement(MoveGen *gen, int row, int dir,
                                        int anchor_col, int last_anchor_col,
                                        int leftmost_start_col,
@@ -3436,8 +3436,7 @@ static void bingo_eager_scan(MoveGen *gen, bool approx) {
           int playthrough_blocks = 0;
           bool in_block = false;
           for (int end = start;
-               end < BOARD_DIM && (end - start + 1) <= max_word_length;
-               end++) {
+               end < BOARD_DIM && (end - start + 1) <= max_word_length; end++) {
             if (gen_cache_is_empty(gen, end)) {
               empty_count++;
               in_block = false;

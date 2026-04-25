@@ -57,9 +57,9 @@ void test_bingo_exists_bench(void) {
       (seed_env != NULL) ? (uint64_t)strtoull(seed_env, NULL, 10) : 42ULL;
   const char *cgp_env = getenv("BBOB_CGP");
   const char *cgp_label = (cgp_env != NULL) ? cgp_env : "midgame";
-  const char *cgp_string =
-      (cgp_env != NULL && strcmp(cgp_env, "empty") == 0) ? EMPTY_CGP
-                                                          : MIDGAME_CGP;
+  const char *cgp_string = (cgp_env != NULL && strcmp(cgp_env, "empty") == 0)
+                               ? EMPTY_CGP
+                               : MIDGAME_CGP;
 
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
@@ -138,9 +138,9 @@ void test_bingo_exists_correctness(void) {
       (seed_env != NULL) ? (uint64_t)strtoull(seed_env, NULL, 10) : 42ULL;
   const char *cgp_env = getenv("BBOC_CGP");
   const char *cgp_label = (cgp_env != NULL) ? cgp_env : "midgame";
-  const char *cgp_string =
-      (cgp_env != NULL && strcmp(cgp_env, "empty") == 0) ? EMPTY_CGP
-                                                          : MIDGAME_CGP;
+  const char *cgp_string = (cgp_env != NULL && strcmp(cgp_env, "empty") == 0)
+                               ? EMPTY_CGP
+                               : MIDGAME_CGP;
 
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -rit true -s1 score -s2 score "
@@ -203,8 +203,8 @@ void test_bingo_exists_correctness(void) {
     if (bingo_exists_says_yes != all_says_yes) {
       divergences++;
       if (divergences <= 5) {
-        printf("DIVERGENCE iter=%d: BINGO_EXISTS=%s, ALL_filtered_count=%d\n", i,
-               bingo_exists_says_yes ? "yes" : "no", all_bingo_count);
+        printf("DIVERGENCE iter=%d: BINGO_EXISTS=%s, ALL_filtered_count=%d\n",
+               i, bingo_exists_says_yes ? "yes" : "no", all_bingo_count);
       }
     }
   }
@@ -235,7 +235,8 @@ void test_bingo_exists_correctness(void) {
 //   BVS_RIT     "true" / "false" (default true)
 void test_bingo_exists_vs_static_bench(void) {
   const char *games_env = getenv("BVS_GAMES");
-  const int games = (games_env != NULL) ? (int)strtol(games_env, NULL, 10) : 200;
+  const int games =
+      (games_env != NULL) ? (int)strtol(games_env, NULL, 10) : 200;
   const char *seed_env = getenv("BVS_SEED");
   const uint64_t seed =
       (seed_env != NULL) ? (uint64_t)strtoull(seed_env, NULL, 10) : 42ULL;
@@ -281,8 +282,7 @@ void test_bingo_exists_vs_static_bench(void) {
 
     while (!game_over(game)) {
       const int player_idx = game_get_player_on_turn_index(game);
-      rack_set_dist_size(
-          &leave, ld_get_size(game_get_ld(game)));
+      rack_set_dist_size(&leave, ld_get_size(game_get_ld(game)));
 
       // Time the full static-eval movegen (best move via equity sort).
       struct timespec t0;
@@ -319,8 +319,8 @@ void test_bingo_exists_vs_static_bench(void) {
       (double)total_bingo_ns / (double)total_positions / 1000.0;
   const double ratio = (double)total_static_ns / (double)total_bingo_ns;
 
-  printf("rit=%s games=%d positions=%llu bingo_yes=%llu (%.1f%%)\n", rit,
-         games, (unsigned long long)total_positions,
+  printf("rit=%s games=%d positions=%llu bingo_yes=%llu (%.1f%%)\n", rit, games,
+         (unsigned long long)total_positions,
          (unsigned long long)bingo_yes_count,
          100.0 * (double)bingo_yes_count / (double)total_positions);
   printf("  static_eval: total=%.1fms  per_position=%.2fus\n", static_ms,
@@ -349,7 +349,8 @@ void test_bingo_exists_vs_static_bench(void) {
 //   BAM_RIT     "true" / "false" (default true)
 void test_bingo_exists_approx_miss_rate(void) {
   const char *games_env = getenv("BAM_GAMES");
-  const int games = (games_env != NULL) ? (int)strtol(games_env, NULL, 10) : 200;
+  const int games =
+      (games_env != NULL) ? (int)strtol(games_env, NULL, 10) : 200;
   const char *seed_env = getenv("BAM_SEED");
   const uint64_t seed =
       (seed_env != NULL) ? (uint64_t)strtoull(seed_env, NULL, 10) : 42ULL;
@@ -383,7 +384,7 @@ void test_bingo_exists_approx_miss_rate(void) {
   uint64_t total_positions = 0;
   uint64_t exact_yes = 0;
   uint64_t approx_yes = 0;
-  uint64_t misses = 0;        // exact=yes, approx=no
+  uint64_t misses = 0;          // exact=yes, approx=no
   uint64_t false_positives = 0; // approx=yes, exact=no (should always be 0)
 
   for (int g = 0; g < games; g++) {
@@ -431,7 +432,8 @@ void test_bingo_exists_approx_miss_rate(void) {
     }
   }
 
-  const double exact_us = (double)total_exact_ns / (double)total_positions / 1000.0;
+  const double exact_us =
+      (double)total_exact_ns / (double)total_positions / 1000.0;
   const double approx_us =
       (double)total_approx_ns / (double)total_positions / 1000.0;
   const double speedup = (double)total_exact_ns / (double)total_approx_ns;
@@ -460,4 +462,3 @@ void test_bingo_exists_approx_miss_rate(void) {
   game_destroy(game);
   config_destroy(config);
 }
-
