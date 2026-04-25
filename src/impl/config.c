@@ -5512,12 +5512,11 @@ static void config_set_gcg_filename_and_save(Config *config,
                                              ErrorStack *error_stack) {
   if (gcg_result->source == GCG_SOURCE_NONE) {
     // In this case we are analyzing the currently loaded game and there is no
-    // GCG source, so just save the currently loaded GCG. The
-    // game_history_set_gcg_filename will give the current game history a
-    // filename if it does not have one.
-    game_history_set_gcg_filename(
-        config->game_history,
-        game_history_get_gcg_filename(config->game_history));
+    // GCG source, so give the game history a filename if it does not have
+    // one. Passing NULL preserves a user-specified filename (if any) and
+    // generates an auto-filename otherwise, without marking an auto-generated
+    // name as user-specified.
+    game_history_set_gcg_filename(config->game_history, NULL);
     return;
   }
   if (gcg_result->source == GCG_SOURCE_LOCAL) {
@@ -7258,7 +7257,7 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   } else {
     analyze_single_game(config, &analyze_args, &ctx, gcg_source,
                         player_list_str, error_stack);
-    if (!error_stack_is_empty(analyze_error_stack)) {
+    if (!error_stack_is_empty(error_stack)) {
       summary->error_count++;
     } else {
       summary->success_count++;

@@ -7,7 +7,6 @@
 #include <assert.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/stat.h>
 #include <unistd.h>
 
 static const char *SINGLE_GCG_PATH = "testdata/gcgs/success.gcg";
@@ -26,8 +25,9 @@ static const char *MINIMAL_GCG_HEADER = "#character-encoding UTF-8\n"
 // tests. Returns the directory path (caller must free). The file is removed by
 // the caller.
 static char *make_temp_gcg_dir(void) {
-  const char *tmp_dir = "/tmp/magpie_analyze_test_dir";
-  (void)mkdir(tmp_dir, 0755);
+  char tmp_template[] = "/tmp/magpie_analyze_XXXXXX";
+  char *tmp_dir = mkdtemp(tmp_template);
+  assert(tmp_dir != NULL);
 
   const char *gcg_content = "#character-encoding UTF-8\n"
                             "#player1 Tim Tim\n"

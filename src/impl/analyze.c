@@ -62,7 +62,7 @@ typedef struct TurnResultMove {
   int endgame_spread;
   int endgame_value;
   int rank_idx;
-  char display_move[BOARD_DIM * 2];
+  char display_move[BOARD_DIM * MAX_LETTER_BYTE_LENGTH * 3];
   double ply_score[MAX_PLIES];
   double ply_bingo_pct[MAX_PLIES];
   int num_plies;
@@ -372,9 +372,8 @@ static void add_move_comparison_rows(StringGrid *move_sg, const TurnResult *tr,
         get_formatted_string("%.2f", actual_trm->ply_bingo_pct[ply_idx]));
     string_grid_set_cell(
         move_sg, 3, score_col,
-        get_formatted_string(
-            "%.2f",
-            best_trm->ply_score[ply_idx] - actual_trm->ply_score[ply_idx]));
+        get_formatted_string("%.2f", best_trm->ply_score[ply_idx] -
+                                         actual_trm->ply_score[ply_idx]));
     string_grid_set_cell(
         move_sg, 3, bingo_col,
         get_formatted_string("%.2f", best_trm->ply_bingo_pct[ply_idx] -
@@ -407,9 +406,9 @@ static void write_per_turn_human_readable(
   const bool is_sim = !is_endgame && turn_result->actual.win_pct >= 0.0;
 
   // Per-turn move grid: label, R, Mv, Lv, S, [Spr (endgame only),] Wp, Eq,
-  // StEq, [P1-S, P1-BP, P2-S, P2-BP, ... (sim only, up to max_num_display_plies)].
-  // 4 rows: header + best + actual + diff.
-  // For endgames: Spr at col 5 (final spread); StEq shows '-'; no ply cols.
+  // StEq, [P1-S, P1-BP, P2-S, P2-BP, ... (sim only, up to
+  // max_num_display_plies)]. 4 rows: header + best + actual + diff. For
+  // endgames: Spr at col 5 (final spread); StEq shows '-'; no ply cols.
   const int num_plies = turn_result->best.num_plies;
   const int num_display_plies =
       is_sim ? (max_num_display_plies < num_plies ? max_num_display_plies
@@ -452,10 +451,9 @@ static void write_per_turn_human_readable(
 
   // Sim results, endgame results, or static move list.
   if (is_sim) {
-    char *sim_str = sim_results_get_string(ctx->game, ctx->sim_results,
-                                           max_num_display_plays,
-                                           max_num_display_plies, -1, -1,
-                                           NULL, 0, false, false, NULL);
+    char *sim_str = sim_results_get_string(
+        ctx->game, ctx->sim_results, max_num_display_plays,
+        max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
   } else if (is_endgame) {
