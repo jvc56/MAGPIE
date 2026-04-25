@@ -495,7 +495,7 @@ static void format_scenario(StringBuilder *sb, const char *label,
   }
   const uint64_t no_bingo = r->total_distinct - r->bingo_distinct;
   string_builder_add_formatted_string(
-      sb, "  raw racks: %" PRIu64 " bingo / %" PRIu64 " no-bingo (%" PRIu64
+      sb, "  raw racks: %" PRIu64 " bingo, %" PRIu64 " no-bingo (%" PRIu64
           " distinct)\n",
       r->bingo_distinct, no_bingo, r->total_distinct);
   uint64_t num = r->bingo_weight;
