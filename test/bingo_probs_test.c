@@ -96,14 +96,15 @@ static void test_bingo_probs_msuuuu_exhaustive(void) {
 
 // A constrained board: HOX at 7F horizontally, with H(O)x vertical
 // at G6 (blank x) and (X)U vertical at H7 (U on the center square).
-// HOX has essentially no useful cross-hooks (no HOXY/HOXA), and the
-// shifted position leaves only 5 rows above the standalone H — not
-// enough for a 7-letter vertical bingo to hook off it. So the only
-// bingo on this board is ZANTHOXYLS played through HOX. With LNSYZ?
-// on rack (Z and a blank pre-loaded), drawing any of the 9 A's or
-// 6 T's completes that word — the blank fills whichever of A/T
-// wasn't drawn. 15 winning draws of 88 unseen tiles -> 15/88 =
-// 17.045%.
+// HOX has no hooks, so any bingo through HOX must be a 10-letter
+// word with HOX in the middle — the only such word is ZANTHOXYLS.
+// The shifted position leaves only 5 rows above the standalone H,
+// which is short of the 6 needed to play a 7-letter bingo ending
+// in H. So the opponent's bingoes can only come through XU, e.g.
+// E(XU)BERANT. For us with LNSYZ? on rack (Z and a blank pre-
+// loaded), drawing any of the 9 A's or 6 T's completes ZANTHOXYLS
+// — the blank fills whichever of A/T wasn't drawn. 15 winning
+// draws of 88 unseen tiles -> 15/88 = 17.045%.
 static void test_bingo_probs_constrained_board(void) {
   Config *config = config_create_default_test();
   const char *cgp =
