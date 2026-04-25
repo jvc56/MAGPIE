@@ -1,56 +1,86 @@
 #ifndef SINGLE_TILE_PLAY_H
 #define SINGLE_TILE_PLAY_H
 
-#include "../def/letter_distribution_defs.h"
+#include "../def/board_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/letter_distribution.h"
 #include <stdint.h>
 
-// Per-letter best single-tile play data, computed once per board state by
-// scanning the precomputed cross_sets and cross_scores. No KWG/WMP walks.
+// Per-square data: playable letters and score parameters such that
+// score(square, letter L) = base + face_value(L) * coef.
 //
-// best_score[L] is the maximum score achievable by placing letter L on any
-// single empty square, considering both the main and cross words formed.
-// 0 means L cannot be played as a single tile anywhere on the board.
+// base = (h_run_score * has_h_word + v_run_score * has_v_word) * word_mult
+// coef = letter_mult * word_mult * (has_h_word + has_v_word)
 //
-// playable_set is the union over the board of letters that have any
-// single-tile play available. Bit 0 (the blank) is set whenever any other
-// letter is set (since the blank can stand for any letter).
+// playable_letters is cross_set[H] & cross_set[V] for the square (with
+// the blank bit set whenever any non-blank bit is set, per MAGPIE's
+// cross-set-with-blank convention).
 typedef struct {
+  uint64_t playable_letters;
+  Equity base;
+  Equity coef;
+} SingleTileSquare;
+
+// Result of one pass over the board. Caller-allocated (no heap).
+typedef struct {
+  uint64_t playable_set; // OR of playable_letters across all squares
+  // best_score[L] = max over all squares of score(square, L). Used for
+  // the closed-form E[top1] computation (which is exact via per-letter
+  // order statistics on this array).
   Equity best_score[MAX_ALPHABET_SIZE];
-  uint64_t playable_set;
+  int num_squares;
+  SingleTileSquare squares[BOARD_DIM * BOARD_DIM];
 } SingleTileScan;
 
-// Scans every empty, non-stranded square once and updates scan->best_score
-// and scan->playable_set. Caller must ensure cross_sets are valid (true
-// after every move in classic gameplay).
+// Scans every empty, non-stranded square once. Caller must ensure
+// cross_sets are valid (true after every move in classic gameplay).
 void single_tile_scan(const Game *game, SingleTileScan *scan);
 
-// Features describing the distribution of a 7-tile rack composed of a known
-// leave plus a random draw without replacement from a pool, restricted to
-// single-tile plays:
+// Features describing the distribution of single-tile-play scores for a
+// rack of the form (known leave) + (random hypergeometric draw of size
+// draw_size from a pool of size pool_size).
 //
-//   E[fraction of rack tiles playable as single tiles]
-//   E[max single-tile play score across the rack]
-//   E[2nd-highest single-tile play score across the rack]
+//   frac_playable: E[# tiles in rack that have ANY single-tile play
+//                    available somewhere on the board] / rack_size
+//   e_top1:        E[max single-tile play score over the whole rack]
+//   e_top2:        E[2nd-largest single-tile play score across DISTINCT
+//                    squares, where each square's contribution is the
+//                    best score achievable with any rack tile at that
+//                    square]
 //
-// Reduces to deterministic max/2nd-max when draw_size == 0 (full leave) and
-// to a pure 7-tile draw when leave is empty and draw_size == rack_size.
+// e_top2 is the "what's the next best play if my top play is blocked?"
+// notion — distinct from "2nd-best tile in my rack", which would
+// double-count tile copies playing the same square.
 typedef struct {
   double frac_playable;
-  double e_max_score;     // equity units (millipoints)
-  double e_2nd_max_score; // equity units (millipoints)
+  double e_top1;
+  double e_top2;
 } SingleTileFeatures;
 
-// leave_counts and pool_counts are length-MAX_ALPHABET_SIZE arrays of
-// per-letter counts. pool_size = sum of pool_counts; rack_size is the total
-// rack size (leave_size + draw_size; typically RACK_SIZE = 7).
-//
-// If pool_size < draw_size the result is undefined (caller bug).
+// Closed-form computation. Per square, computes E[max over rack of
+// score(s,L)] via the same hypergeometric order-stat machinery, then
+// takes top-2 across squares. Note: top-2 of the per-square E[max]
+// values is *not* identical to E[top-2 across squares] for random
+// racks (Jensen-biased upward); use single_tile_features_mc to
+// quantify the bias.
 void single_tile_features(const SingleTileScan *scan,
+                          const LetterDistribution *ld,
                           const uint8_t *leave_counts,
                           const uint8_t *pool_counts, int pool_size,
                           int draw_size, int rack_size,
                           SingleTileFeatures *out);
+
+// Monte Carlo: draws `samples` random racks (leave + draw_size random
+// tiles without replacement from pool), for each rack computes per-
+// square max and the per-rack top-2 across distinct squares, averages.
+// Slow (~hundreds of microseconds for thousands of samples) but exact
+// in the limit.
+void single_tile_features_mc(const SingleTileScan *scan,
+                             const LetterDistribution *ld,
+                             const uint8_t *leave_counts,
+                             const uint8_t *pool_counts, int pool_size,
+                             int draw_size, int rack_size, uint64_t samples,
+                             uint64_t seed, SingleTileFeatures *out);
 
 #endif

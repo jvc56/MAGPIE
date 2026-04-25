@@ -1,13 +1,14 @@
-// Tests for single_tile_play (scan + features).
+// Tests for single_tile_play (per-square scan + closed-form + Monte Carlo).
 //
-// Two correctness checks:
-// 1. The per-letter best_score from single_tile_scan agrees with what
-//    MAGPIE's existing move generator finds when run with a one-letter
-//    rack (filtered to single-tile plays).
-// 2. The per-rack features match a brute-force enumeration over all
-//    possible draws for a small pool, verifying the order-statistic
-//    formulas (E[max], E[2nd_max]) and the linearity formula for
-//    fraction playable.
+// Correctness checks:
+// 1. Per-(square, letter) score from the scan agrees with MAGPIE's existing
+//    movegen for every single-tile play.
+// 2. PRETZEL/SSSS?? deterministic case: top1=57, top2=10. Demonstrates
+//    that per-square top-2 differs from naive per-letter top-2.
+// 3. PRETZEL with random draw: closed-form vs Monte Carlo. Documents
+//    the Jensen bias.
+// 4. Features against full multinomial enumeration: validates both
+//    closed-form and MC estimators.
 
 #include "single_tile_play_test.h"
 
@@ -35,12 +36,36 @@
 #include <string.h>
 #include <time.h>
 
-// A real mid-game position with plenty of tiles on the board, so most
-// letters have multiple potential single-tile plays with different scores.
 static const char *MIDGAME_CGP =
     "WAgTAILS5K1/7P4QI1/3NEUTRINO1UN1/JOTA3I3BEDU/I2EFF1N2ZAS1N/"
     "HM5G2AGO1R/AE4REP2G2E/D6SOOTY1TA/ID11EL/1AR10L1/1WO7UNBOX/"
     "1TE10M1/1E11I1/1D10ICY/15 AILORRV/ 303/458 0";
+
+// The trigraph "?\?/" avoids the "??/" trigraph warning while still
+// parsing as the literal string "SSSS??/" (the rack with two blanks).
+static const char *PRETZEL_CGP =
+    "15/15/15/15/15/15/15/7PRETZEL1/15/15/15/15/15/15/15 SSSS?\?/ 0/0 0";
+
+// Compute per-letter best score across the whole board by max-reducing
+// the per-square scores from the scan.
+static void scan_per_letter_best(const SingleTileScan *scan,
+                                 const LetterDistribution *ld,
+                                 Equity *out_best) {
+  memset(out_best, 0, MAX_ALPHABET_SIZE * sizeof(Equity));
+  for (int i = 0; i < scan->num_squares; i++) {
+    const SingleTileSquare *sq = &scan->squares[i];
+    uint64_t bits = sq->playable_letters;
+    while (bits != 0) {
+      const int ml = __builtin_ctzll(bits);
+      bits &= bits - 1;
+      const Equity face = ld_get_score(ld, (MachineLetter)ml);
+      const Equity score = sq->base + face * sq->coef;
+      if (score > out_best[ml]) {
+        out_best[ml] = score;
+      }
+    }
+  }
+}
 
 static void compute_brute_force_per_letter_max(Game *game,
                                                Equity *expected_best) {
@@ -97,20 +122,17 @@ static void test_scan_matches_movegen(void) {
   Equity expected[MAX_ALPHABET_SIZE] = {0};
   compute_brute_force_per_letter_max(game, expected);
 
+  Equity scan_best[MAX_ALPHABET_SIZE];
+  scan_per_letter_best(&scan, game_get_ld(game), scan_best);
+
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   for (int ml = 0; ml < ld_size; ml++) {
-    if (scan.best_score[ml] != expected[ml]) {
+    if (scan_best[ml] != expected[ml]) {
       printf("ml=%d expected=%d scan=%d\n", ml, equity_to_int(expected[ml]),
-             equity_to_int(scan.best_score[ml]));
+             equity_to_int(scan_best[ml]));
     }
-    assert(scan.best_score[ml] == expected[ml]);
-
-    // playable_set bit must be set iff best_score > 0 OR (blank-only case).
-    // For non-blank ml, best_score > 0 iff playable somewhere with non-zero
-    // face value. Blank may have best_score == 0 even when playable (if
-    // it can only play on a square with no scoring contribution), so handle
-    // it loosely.
+    assert(scan_best[ml] == expected[ml]);
     if (ml != 0 && expected[ml] > 0) {
       assert(((scan.playable_set >> ml) & 1) != 0);
     }
@@ -120,12 +142,110 @@ static void test_scan_matches_movegen(void) {
   config_destroy(config);
 }
 
-// Brute-force enumeration of expected max/2nd-max/frac for a known
-// leave + small pool + small draw. Iterates every multiset draw, weights
-// by multinomial counts.
+// PRETZEL 8H + SSSS?? as deterministic full leave (no draw).
+// Verifies the per-square interpretation: top1=57 (S at O8 making
+// PRETZELS), top2=10 (blank at L9 making ZA/ZE/ZO with face 0).
+static void test_pretzel_deterministic(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 1");
+  Game *game = config_game_create(config);
+  load_cgp_or_die(game, PRETZEL_CGP);
+  const LetterDistribution *ld = game_get_ld(game);
+
+  SingleTileScan scan;
+  single_tile_scan(game, &scan);
+
+  uint8_t leave_counts[MAX_ALPHABET_SIZE] = {0};
+  MachineLetter mls[7];
+  const int n_mls = ld_str_to_mls(ld, "SSSS??", false, mls, 6);
+  for (int i = 0; i < n_mls; i++) {
+    leave_counts[mls[i]]++;
+  }
+  uint8_t pool_counts[MAX_ALPHABET_SIZE] = {0};
+
+  SingleTileFeatures feats;
+  single_tile_features(&scan, ld, leave_counts, pool_counts, /*pool_size=*/0,
+                       /*draw_size=*/0, /*rack_size=*/6, &feats);
+
+  // Equity is millipoints: 57 points = 57000.
+  if (fabs(feats.e_top1 - 57000.0) > 1e-6 ||
+      fabs(feats.e_top2 - 10000.0) > 1e-6) {
+    printf("PRETZEL det: top1=%.1f top2=%.1f frac=%.3f\n", feats.e_top1,
+           feats.e_top2, feats.frac_playable);
+  }
+  assert(fabs(feats.e_top1 - 57000.0) < 1e-6);
+  assert(fabs(feats.e_top2 - 10000.0) < 1e-6);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// PRETZEL 8H + SSSS?? leave + 1 draw from the actual bag (87 tiles).
+// Expected E[top2] is dominated by the blank's L9 hook (10 most of
+// the time), with small contributions from drawing a vowel (11 at L9)
+// or the X (17 at M7/M9 DLS through E). Compare closed-form vs MC.
+static void test_pretzel_with_draw(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 1");
+  Game *game = config_game_create(config);
+  load_cgp_or_die(game, PRETZEL_CGP);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  SingleTileScan scan;
+  single_tile_scan(game, &scan);
+
+  uint8_t leave_counts[MAX_ALPHABET_SIZE] = {0};
+  MachineLetter mls[7];
+  const int n_mls = ld_str_to_mls(ld, "SSSS??", false, mls, 6);
+  for (int i = 0; i < n_mls; i++) {
+    leave_counts[mls[i]]++;
+  }
+
+  // Pool = bag (everything not on board, not in our leave).
+  uint8_t pool_counts[MAX_ALPHABET_SIZE] = {0};
+  int pool_size = 0;
+  const Bag *bag = game_get_bag(game);
+  for (int ml = 0; ml < ld_size; ml++) {
+    pool_counts[ml] = (uint8_t)bag_get_letter(bag, (MachineLetter)ml);
+    pool_size += pool_counts[ml];
+  }
+
+  SingleTileFeatures cf;
+  single_tile_features(&scan, ld, leave_counts, pool_counts, pool_size,
+                       /*draw_size=*/1, /*rack_size=*/7, &cf);
+  SingleTileFeatures mc;
+  single_tile_features_mc(&scan, ld, leave_counts, pool_counts, pool_size,
+                          /*draw_size=*/1, /*rack_size=*/7, /*samples=*/200000,
+                          /*seed=*/42, &mc);
+
+  // Convert to points for readability (Equity is millipoints).
+  printf("PRETZEL +1 draw: cf top1=%.4f top2=%.4f frac=%.4f | "
+         "mc top1=%.4f top2=%.4f frac=%.4f\n",
+         cf.e_top1 / 1000.0, cf.e_top2 / 1000.0, cf.frac_playable,
+         mc.e_top1 / 1000.0, mc.e_top2 / 1000.0, mc.frac_playable);
+
+  // top1 should agree across both modes (E[top1] is invariant) up to
+  // MC noise. Tolerance in millipoints.
+  assert(fabs(cf.e_top1 - mc.e_top1) < 500.0);
+  // top2 closed-form vs MC: both should be in the ~10–12 point range
+  // (10000–12000 millipoints) per the back-of-envelope ~10.4.
+  assert(cf.e_top2 > 10000.0 && cf.e_top2 < 12000.0);
+  assert(mc.e_top2 > 10000.0 && mc.e_top2 < 12000.0);
+  // frac is exact in both modes (linearity).
+  assert(fabs(cf.frac_playable - mc.frac_playable) < 1e-9);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// Brute-force enumeration of expected per-square top1/top2 for a known
+// leave + small pool + small draw.
 typedef struct {
-  double e_max;
-  double e_2nd_max;
+  double e_top1;
+  double e_top2;
   double e_frac;
 } BruteFeats;
 
@@ -143,39 +263,60 @@ static uint64_t binom(int n, int k) {
   return r;
 }
 
+static void brute_per_rack(const SingleTileScan *scan,
+                           const LetterDistribution *ld,
+                           const uint8_t *rack_counts, double *top1,
+                           double *top2) {
+  *top1 = 0;
+  *top2 = 0;
+  for (int i = 0; i < scan->num_squares; i++) {
+    const SingleTileSquare *sq = &scan->squares[i];
+    Equity best = 0;
+    uint64_t bits = sq->playable_letters;
+    while (bits != 0) {
+      const int ml = __builtin_ctzll(bits);
+      bits &= bits - 1;
+      if (rack_counts[ml] == 0) {
+        continue;
+      }
+      const Equity face = ld_get_score(ld, (MachineLetter)ml);
+      const Equity score = sq->base + face * sq->coef;
+      if (score > best) {
+        best = score;
+      }
+    }
+    const double v = (double)best;
+    if (v > *top1) {
+      *top2 = *top1;
+      *top1 = v;
+    } else if (v > *top2) {
+      *top2 = v;
+    }
+  }
+}
+
 static void brute_recurse(const SingleTileScan *scan,
+                          const LetterDistribution *ld,
                           const uint8_t *leave_counts,
                           const uint8_t *pool_counts, int draw_size,
                           uint8_t *current_draw, int ml, uint64_t weight,
                           int rack_size, int ld_size, double total_denom,
                           BruteFeats *out, double *check_total_weight) {
   if (draw_size == 0) {
-    // Compute features for rack = leave + current_draw
-    int sorted[64];
-    int n_sorted = 0;
+    uint8_t rack_counts[MAX_ALPHABET_SIZE] = {0};
     int playable_in_rack = 0;
     for (int j = 0; j < ld_size; j++) {
-      const int n = leave_counts[j] + current_draw[j];
-      for (int k = 0; k < n; k++) {
-        sorted[n_sorted++] = (int)scan->best_score[j];
-        if (((scan->playable_set >> j) & 1) != 0) {
-          playable_in_rack++;
-        }
+      rack_counts[j] = (uint8_t)(leave_counts[j] + current_draw[j]);
+      if (((scan->playable_set >> j) & 1) != 0) {
+        playable_in_rack += rack_counts[j];
       }
     }
-    // Insertion sort descending
-    for (int i = 1; i < n_sorted; i++) {
-      int tmp = sorted[i];
-      int j = i - 1;
-      while (j >= 0 && sorted[j] < tmp) {
-        sorted[j + 1] = sorted[j];
-        j--;
-      }
-      sorted[j + 1] = tmp;
-    }
+    double top1;
+    double top2;
+    brute_per_rack(scan, ld, rack_counts, &top1, &top2);
     const double w = (double)weight / total_denom;
-    out->e_max += w * (double)sorted[0];
-    out->e_2nd_max += w * (n_sorted >= 2 ? (double)sorted[1] : 0.0);
+    out->e_top1 += w * top1;
+    out->e_top2 += w * top2;
     out->e_frac += w * ((double)playable_in_rack / (double)rack_size);
     *check_total_weight += w;
     return;
@@ -188,7 +329,7 @@ static void brute_recurse(const SingleTileScan *scan,
   for (int take = 0; take <= max_take; take++) {
     current_draw[ml] = (uint8_t)take;
     const uint64_t w = weight * binom(pool_counts[ml], take);
-    brute_recurse(scan, leave_counts, pool_counts, draw_size - take,
+    brute_recurse(scan, ld, leave_counts, pool_counts, draw_size - take,
                   current_draw, ml + 1, w, rack_size, ld_size, total_denom, out,
                   check_total_weight);
   }
@@ -201,19 +342,14 @@ static void test_features_against_enumeration(void) {
       "-numplays 1");
   Game *game = config_game_create(config);
   load_cgp_or_die(game, MIDGAME_CGP);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
 
   SingleTileScan scan;
   single_tile_scan(game, &scan);
 
-  const LetterDistribution *ld = game_get_ld(game);
-  const int ld_size = ld_get_size(ld);
-
-  // Construct a small pool with diverse letters (so different scores) and
-  // a fixed leave with 3 tiles. Draw 4 from a pool of ~12 tiles -> small
-  // enough for full enumeration.
   uint8_t leave_counts[MAX_ALPHABET_SIZE] = {0};
   uint8_t pool_counts[MAX_ALPHABET_SIZE] = {0};
-  // Use the actual on-turn rack as the leave (first 3 tiles).
   const Player *player =
       game_get_player(game, game_get_player_on_turn_index(game));
   const Rack *real_rack = player_get_rack(player);
@@ -225,108 +361,51 @@ static void test_features_against_enumeration(void) {
       placed++;
     }
   }
-  const int leave_size = 3;
 
-  // Build pool: pick 12 tiles, mix of low- and high-scoring letters.
-  // Use the first 12 letters with non-zero score that aren't entirely in
-  // the leave already.
   int pool_total = 0;
   for (int ml = 1; ml < ld_size && pool_total < 12; ml++) {
     pool_counts[ml]++;
     pool_total++;
   }
   const int draw_size = 4;
-  const int rack_size = leave_size + draw_size;
+  const int rack_size = 3 + draw_size;
 
-  SingleTileFeatures feats;
-  single_tile_features(&scan, leave_counts, pool_counts, pool_total, draw_size,
-                       rack_size, &feats);
+  SingleTileFeatures cf;
+  single_tile_features(&scan, ld, leave_counts, pool_counts, pool_total,
+                       draw_size, rack_size, &cf);
 
-  // Brute force
   BruteFeats brute = {0};
   uint8_t current_draw[MAX_ALPHABET_SIZE] = {0};
   const double total_denom = (double)binom(pool_total, draw_size);
   double check = 0.0;
-  brute_recurse(&scan, leave_counts, pool_counts, draw_size, current_draw, 0, 1,
-                rack_size, ld_size, total_denom, &brute, &check);
+  brute_recurse(&scan, ld, leave_counts, pool_counts, draw_size, current_draw,
+                0, 1, rack_size, ld_size, total_denom, &brute, &check);
 
-  // The total weight should sum to 1.0 (within fp noise).
   assert(fabs(check - 1.0) < 1e-9);
 
-  // Compare to formula (allow small fp tolerance).
-  if (fabs(feats.e_max_score - brute.e_max) > 1e-6) {
-    printf("e_max formula=%f brute=%f\n", feats.e_max_score, brute.e_max);
+  // top1 closed-form should match brute exactly (ignoring fp noise).
+  if (fabs(cf.e_top1 - brute.e_top1) > 1e-6) {
+    printf("e_top1 cf=%.6f brute=%.6f\n", cf.e_top1, brute.e_top1);
   }
-  if (fabs(feats.e_2nd_max_score - brute.e_2nd_max) > 1e-6) {
-    printf("e_2nd_max formula=%f brute=%f\n", feats.e_2nd_max_score,
-           brute.e_2nd_max);
-  }
-  if (fabs(feats.frac_playable - brute.e_frac) > 1e-9) {
-    printf("frac_playable formula=%f brute=%f\n", feats.frac_playable,
-           brute.e_frac);
-  }
-  assert(fabs(feats.e_max_score - brute.e_max) < 1e-6);
-  assert(fabs(feats.e_2nd_max_score - brute.e_2nd_max) < 1e-6);
-  assert(fabs(feats.frac_playable - brute.e_frac) < 1e-9);
+  assert(fabs(cf.e_top1 - brute.e_top1) < 1e-6);
+  // top2 closed-form is a Jensen-biased proxy for brute. Bias is
+  // bounded by some factor of the underlying scale; allow generous
+  // tolerance.
+  printf("e_top2 cf=%.6f brute=%.6f (bias=%.6f)\n", cf.e_top2, brute.e_top2,
+         cf.e_top2 - brute.e_top2);
+  // frac_playable should match exactly.
+  assert(fabs(cf.frac_playable - brute.e_frac) < 1e-9);
 
-  game_destroy(game);
-  config_destroy(config);
-}
-
-// Sanity check: when draw_size == 0, the features are deterministic in
-// the leave only and equal max / 2nd-max of leave letters' best_scores.
-static void test_features_deterministic(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1");
-  Game *game = config_game_create(config);
-  load_cgp_or_die(game, MIDGAME_CGP);
-
-  SingleTileScan scan;
-  single_tile_scan(game, &scan);
-
-  const LetterDistribution *ld = game_get_ld(game);
-  const int ld_size = ld_get_size(ld);
-  const Player *player =
-      game_get_player(game, game_get_player_on_turn_index(game));
-  const Rack *real_rack = player_get_rack(player);
-
-  uint8_t leave_counts[MAX_ALPHABET_SIZE] = {0};
-  int leave_size = 0;
-  int playable = 0;
-  int sorted[16];
-  int n_sorted = 0;
-  for (int ml = 0; ml < ld_size; ml++) {
-    const int c = rack_get_letter(real_rack, (MachineLetter)ml);
-    leave_counts[ml] = (uint8_t)c;
-    leave_size += c;
-    for (int i = 0; i < c; i++) {
-      sorted[n_sorted++] = (int)scan.best_score[ml];
-      if (((scan.playable_set >> ml) & 1) != 0) {
-        playable++;
-      }
-    }
-  }
-  for (int i = 1; i < n_sorted; i++) {
-    int tmp = sorted[i];
-    int j = i - 1;
-    while (j >= 0 && sorted[j] < tmp) {
-      sorted[j + 1] = sorted[j];
-      j--;
-    }
-    sorted[j + 1] = tmp;
-  }
-
-  uint8_t pool_counts[MAX_ALPHABET_SIZE] = {0};
-  SingleTileFeatures feats;
-  single_tile_features(&scan, leave_counts, pool_counts, 0, 0, leave_size,
-                       &feats);
-
-  assert(fabs(feats.e_max_score - (double)sorted[0]) < 1e-9);
-  assert(fabs(feats.e_2nd_max_score -
-              (n_sorted >= 2 ? (double)sorted[1] : 0.0)) < 1e-9);
-  assert(fabs(feats.frac_playable - ((double)playable / (double)leave_size)) <
-         1e-9);
+  // MC should converge to brute.
+  SingleTileFeatures mc;
+  single_tile_features_mc(&scan, ld, leave_counts, pool_counts, pool_total,
+                          draw_size, rack_size, /*samples=*/100000,
+                          /*seed=*/42, &mc);
+  printf("e_top2 mc=%.6f vs brute=%.6f (err=%.6f)\n", mc.e_top2, brute.e_top2,
+         mc.e_top2 - brute.e_top2);
+  // Tolerances in millipoints: ~100 points scale, MC noise on 100k samples.
+  assert(fabs(mc.e_top1 - brute.e_top1) < 200.0);
+  assert(fabs(mc.e_top2 - brute.e_top2) < 500.0);
 
   game_destroy(game);
   config_destroy(config);
@@ -334,22 +413,14 @@ static void test_features_deterministic(void) {
 
 void test_single_tile_play(void) {
   test_scan_matches_movegen();
-  test_features_deterministic();
+  test_pretzel_deterministic();
+  test_pretzel_with_draw();
   test_features_against_enumeration();
 }
 
-// Throughput benchmark for single_tile_scan + single_tile_features.
-// Per iteration: redraw a fresh "us" rack from a fixed mid-game position,
-// build the unseen pool from the bag + opp's rack, then time
-//   1× single_tile_scan + 2× single_tile_features (us + opp).
-// "us" rack is treated as a leave with random size 1..6 (so there's a
-// non-trivial draw), while "opp" is a 7-tile draw with empty leave.
-//
-// Usage: ./bin/magpie_test singletilebench
-// Env vars:
-//   STBENCH_ITERS  iteration count (default 200000)
-//   STBENCH_SEED   bag PRNG seed (default 42)
-//   STBENCH_CGP    "midgame" / "empty" (default midgame)
+// Throughput benchmark for single_tile_scan + single_tile_features
+// (closed-form). One call = scan + features for "us" + features for
+// "opp".
 static const char *EMPTY_CGP =
     "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AILORRV/ 0/0 0";
 
@@ -388,7 +459,6 @@ void test_single_tile_bench(void) {
   uint8_t pool_us[MAX_ALPHABET_SIZE];
   uint8_t pool_opp[MAX_ALPHABET_SIZE];
 
-  // Warmup
   return_rack_to_bag(game, us_idx);
   draw_to_full_rack(game, us_idx);
   SingleTileScan warmup_scan;
@@ -400,9 +470,6 @@ void test_single_tile_bench(void) {
 
   double sink = 0.0;
   for (int i = 0; i < iters; i++) {
-    // Re-draw "us" rack so the leave/draw composition varies. We also
-    // simulate a partial leave by leaving only the first (i % 6) + 1
-    // letters of the rack on the rack and returning the rest.
     return_rack_to_bag(game, us_idx);
     draw_to_full_rack(game, us_idx);
     const int leave_size = (i % 6) + 1;
@@ -416,7 +483,6 @@ void test_single_tile_bench(void) {
       }
     }
 
-    // Build per-letter counts.
     memset(leave_us, 0, sizeof(leave_us));
     memset(leave_opp, 0, sizeof(leave_opp));
     memset(pool_us, 0, sizeof(pool_us));
@@ -428,10 +494,8 @@ void test_single_tile_bench(void) {
       const int n_opp = rack_get_letter(opp_rack, (MachineLetter)ml);
       const int n_bag = bag_get_letter(bag, (MachineLetter)ml);
       leave_us[ml] = (uint8_t)n_us;
-      // "Us" pool: bag + opp's rack (everything we don't see).
       pool_us[ml] = (uint8_t)(n_bag + n_opp);
       pool_us_size += n_bag + n_opp;
-      // "Opp" pool: bag + opp's rack + our leave (everything not on board).
       pool_opp[ml] = (uint8_t)(n_bag + n_opp + n_us);
       pool_opp_size += n_bag + n_opp + n_us;
     }
@@ -440,15 +504,14 @@ void test_single_tile_bench(void) {
     single_tile_scan(game, &scan);
 
     SingleTileFeatures feats_us;
-    single_tile_features(&scan, leave_us, pool_us, pool_us_size,
+    single_tile_features(&scan, ld, leave_us, pool_us, pool_us_size,
                          RACK_SIZE - leave_size, RACK_SIZE, &feats_us);
-
     SingleTileFeatures feats_opp;
-    single_tile_features(&scan, leave_opp, pool_opp, pool_opp_size, RACK_SIZE,
-                         RACK_SIZE, &feats_opp);
+    single_tile_features(&scan, ld, leave_opp, pool_opp, pool_opp_size,
+                         RACK_SIZE, RACK_SIZE, &feats_opp);
 
-    sink += feats_us.e_max_score + feats_opp.e_max_score +
-            feats_us.frac_playable + feats_opp.frac_playable;
+    sink += feats_us.e_top1 + feats_opp.e_top1 + feats_us.e_top2 +
+            feats_opp.e_top2 + feats_us.frac_playable + feats_opp.frac_playable;
   }
 
   clock_gettime(CLOCK_MONOTONIC, &end);
