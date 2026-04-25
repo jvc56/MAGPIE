@@ -98,13 +98,12 @@ static void test_bingo_probs_msuuuu_exhaustive(void) {
 // at G6 (blank x) and (X)U vertical at H7 (U on the center square).
 // HOX and XU each have no hooks, so seven-letter bingos do not
 // play. Possible bingos are 9-letter words through XU, e.g.
-// E(XU)BERANT, or ZANTHOXYLS through HOX. (The shifted position
-// also leaves only 5 rows above the standalone H, short of the 6
-// needed to play a 7-tile bingo ending in H.) For us with LNSYZ?
-// on rack (Z and a blank pre-loaded), drawing any of the 9 A's or
-// 6 T's completes ZANTHOXYLS — the blank fills whichever of A/T
-// wasn't drawn. 15 winning draws of 88 unseen tiles -> 15/88 =
-// 17.045%.
+// E(XU)BERANT, or ZANTHOXYLS through HOX. (Only 6 rows/columns
+// precede the standalone H, short of the 7 needed to play a 7-tile
+// bingo ending in H.) For us with LNSYZ? on rack (Z and a blank
+// pre-loaded), drawing any of the 9 A's or 6 T's completes
+// ZANTHOXYLS — the blank fills whichever of A/T wasn't drawn.
+// 15 winning draws of 88 unseen tiles -> 15/88 = 17.045%.
 static void test_bingo_probs_constrained_board(void) {
   Config *config = config_create_default_test();
   const char *cgp =
