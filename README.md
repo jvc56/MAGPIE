@@ -325,6 +325,40 @@ magpie> goto 3
 magpie> infer
 ```
 
+### Computing bingo probabilities
+
+The `bingoprobs` command reports two probabilities for a given position:
+
+1. **Opponent bingo**: probability the opponent (not on turn) holds a bingo-able rack, given that their actual rack is unknown to us and was drawn from the unseen pool (bag + opponent's rack).
+2. **Self bingo after opp pass + replenish**: if the opponent passes and we draw from the bag to refill our rack to 7, probability that the resulting rack can bingo.
+
+It requires a WMP-enabled lexicon. The first four arguments form a CGP; an optional fifth argument is a Monte Carlo sample count (`0` or omitted = exhaustive enumeration over every distinct multiset, weighted by the multinomial coefficient).
+
+For example, on an empty board with `SATINE` as our leave:
+
+```
+magpie> set -lex CSW21 -wmp true -threads 8
+magpie> bingoprobs 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 SATINE/ 0/0 0
+opp_bingo (drawn from bag + opp rack (unseen to us), 7 of 94 tiles drawn):
+  raw racks: 145644 bingo / 3050892 no-bingo (3196536 distinct)
+  weighted: 1500082267/10235867928 = 14.655%
+
+self_bingo (after opp pass, replenish from bag, 1 of 94 tiles drawn):
+  raw racks: 25 bingo / 2 no-bingo (27 distinct)
+  weighted: 91/94 = 96.809%
+```
+
+The same position with 50,000 Monte Carlo samples per scenario:
+
+```
+magpie> bingoprobs 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 SATINE/ 0/0 0 50000
+opp_bingo (drawn from bag + opp rack (unseen to us), 7 of 94 tiles drawn):
+  sampled: 7318 bingo / 50000 samples = 14.636%  (SE 0.158%)
+
+self_bingo (after opp pass, replenish from bag, 1 of 94 tiles drawn):
+  sampled: 48393 bingo / 50000 samples = 96.786%  (SE 0.079%)
+```
+
 ### Comparing lexica
 
 To play two lexica against each other to see which is stronger, you can create the required lexical data from text files and run the autoplay command. First, set the letter distribution:

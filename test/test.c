@@ -38,6 +38,7 @@
 #include "move_gen_test.h"
 #include "move_test.h"
 #include "bingo_exists_test.h"
+#include "bingo_probs_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -121,6 +122,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"bingoprobs", test_bingo_probs},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
