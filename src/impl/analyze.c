@@ -4,8 +4,10 @@
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
@@ -410,10 +412,11 @@ static void write_per_turn_human_readable(
   // max_num_display_plies)]. 4 rows: header + best + actual + diff. For
   // endgames: Spr at col 5 (final spread); StEq shows '-'; no ply cols.
   const int num_plies = turn_result->best.num_plies;
-  const int num_display_plies =
-      is_sim ? (max_num_display_plies < num_plies ? max_num_display_plies
-                                                  : num_plies)
-             : 0;
+  int num_display_plies = 0;
+  if (is_sim) {
+    num_display_plies =
+        max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
+  }
   const int num_grid_cols = (is_endgame ? 9 : 8) + num_display_plies * 2;
   StringGrid *move_sg = string_grid_create(4, num_grid_cols, 2);
 
