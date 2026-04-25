@@ -52,6 +52,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "autoplay.h"
+#include "bingo_probs.h"
 #include "cgp.h"
 #include "convert.h"
 #include "endgame.h"
@@ -92,6 +93,7 @@ typedef enum {
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
   ARG_TOKEN_AUTOPLAY,
+  ARG_TOKEN_BINGOPROBS,
   ARG_TOKEN_CONVERT,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
@@ -1031,6 +1033,22 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "game pairs option is set to true, autoplay will run <num_games> "
              "game pairs resulting in a total of 2 * <num_games> games.";
       break;
+    case ARG_TOKEN_BINGOPROBS:
+      usages[0] = "<board> <racks> <scores> <consecutive_zeros> [<samples>]";
+      examples[0] = "15/15/15/15/14V/14A/14N/6GUM5N/7PEW4E/9EF3R/9BEVELS/15/"
+                    "15/15/15 AEEIILZ/CDGKNOR 56/117 0";
+      examples[1] = "15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 AILORRV/ "
+                    "0/0 0 100000";
+      text =
+          "Reports two bingo probabilities for the given CGP: opponent-bingo "
+          "(unseen rack drawn from bag + opp's tiles) and self-bingo (after "
+          "opponent passes and we replenish from the bag). With no <samples> "
+          "argument, enumerates all distinct multisets exactly and reports "
+          "the weighted probability as a reduced fraction. With <samples> > "
+          "0, runs Monte Carlo with that many samples per scenario and "
+          "reports the empirical estimate plus standard error. Uses "
+          "-threads workers in parallel. Requires -wmp true.";
+      break;
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <input_name_without_extension> "
                   "[<output_name_without_extension>]";
@@ -1879,6 +1897,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Game Analysis Commands (alphabetical by name)
     static const arg_token_t game_analysis_cmds[] = {
         ARG_TOKEN_MOVES,                /* addmoves */
+        ARG_TOKEN_BINGOPROBS,           /* bingoprobs */
         ARG_TOKEN_ENDGAME,              /* endgame */
         ARG_TOKEN_GEN,                  /* generate */
         ARG_TOKEN_GEN_AND_SIM,          /* gsimulate */
@@ -2120,6 +2139,66 @@ void impl_load_cgp(Config *config, ErrorStack *error_stack) {
     config_reset_move_list_and_invalidate_sim_results(config);
   }
   string_builder_destroy(cgp_builder);
+}
+
+// Bingoprobs
+
+static char *impl_bingoprobs(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run bingoprobs without lexicon"));
+    return NULL;
+  }
+  config_init_game(config);
+
+  // Concatenate the four CGP components into a single string and load.
+  StringBuilder *cgp_builder = string_builder_create();
+  for (int i = 0; i < 4; i++) {
+    const char *cgp_component =
+        config_get_parg_value(config, ARG_TOKEN_BINGOPROBS, i);
+    if (!cgp_component) {
+      log_fatal("missing cgp component: %d", i);
+    }
+    string_builder_add_string(cgp_builder, cgp_component);
+    string_builder_add_char(cgp_builder, ' ');
+  }
+  const char *cgp = string_builder_peek(cgp_builder);
+  Game *game_dupe = game_duplicate(config->game);
+  game_load_cgp(game_dupe, cgp, error_stack);
+  game_destroy(game_dupe);
+  if (!error_stack_is_empty(error_stack)) {
+    string_builder_destroy(cgp_builder);
+    return NULL;
+  }
+  game_load_cgp(config->game, cgp, error_stack);
+  string_builder_destroy(cgp_builder);
+  if (!error_stack_is_empty(error_stack)) {
+    return NULL;
+  }
+  config_reset_move_list_and_invalidate_sim_results(config);
+
+  // Optional fifth argument: sample count (Monte Carlo). 0 means exact.
+  uint64_t sample_count = 0;
+  const int n_set =
+      config_get_parg_num_set_values(config, ARG_TOKEN_BINGOPROBS);
+  if (n_set >= 5) {
+    const char *samples_str =
+        config_get_parg_value(config, ARG_TOKEN_BINGOPROBS, 4);
+    char *endptr = NULL;
+    const unsigned long long parsed = strtoull(samples_str, &endptr, 10);
+    if (endptr == samples_str || *endptr != '\0') {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+          get_formatted_string("bingoprobs <samples> must be a non-negative "
+                               "integer, got '%s'",
+                               samples_str));
+      return NULL;
+    }
+    sample_count = (uint64_t)parsed;
+  }
+
+  return bingo_probs_run(config->game, config_get_num_threads(config),
+                         sample_count, error_stack);
 }
 
 // Adding moves
@@ -5392,6 +5471,8 @@ void string_builder_add_move_record_type(StringBuilder *sb,
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
   case MOVE_RECORD_BEST_SMALL:
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
     log_fatal("cannot serialize internal move record type: %d", record_type);
   }
 }
@@ -7032,6 +7113,22 @@ char *str_api_create_data(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_bingoprobs(Config *config, ErrorStack *error_stack) {
+  char *result = impl_bingoprobs(config, error_stack);
+  if (error_stack_is_empty(error_stack) && result != NULL) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_bingoprobs(Config *config, ErrorStack *error_stack) {
+  char *result = impl_bingoprobs(config, error_stack);
+  if (result == NULL) {
+    return empty_string();
+  }
+  return result;
+}
+
 Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   Config *config = calloc_or_die(1, sizeof(Config));
   // Set the values specified by the args first
@@ -7108,6 +7205,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
+  cmd(ARG_TOKEN_BINGOPROBS, "bingoprobs", 4, 5, bingoprobs, generic, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
@@ -7403,6 +7501,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_AUTOPLAY:
+    case ARG_TOKEN_BINGOPROBS:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
     case ARG_TOKEN_CREATE_DATA:

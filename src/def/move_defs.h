@@ -23,6 +23,21 @@ typedef enum {
   MOVE_RECORD_ALL_SMALL,
   MOVE_RECORD_TILES_PLAYED,
   MOVE_RECORD_BEST_SMALL,
+  // Boolean "any bingo exists" check. Sets gen->bingo_found and
+  // short-circuits all further generation on the first valid bingo
+  // placement (no more anchors visited, no exchanges, no pass recording).
+  // The movelist is not used. Used by the outcome_model bingo-probability
+  // feature, which evaluates many random rack draws per position.
+  // Requires a WMP-enabled lexicon. Read the result via bingo_exists().
+  MOVE_RECORD_BINGO_EXISTS,
+  // Like MOVE_RECORD_BINGO_EXISTS but only considers 7- and 8-letter
+  // bingos (anchors with word_length <= 8). 7-letter bingos with no
+  // playthrough are the inline-RIT fast path; 8-letter bingos use one
+  // playthrough tile via the WMP subrack path. Skipping word_length > 8
+  // drops the rare multi-playthrough bingos and gives an approximate
+  // answer that may miss some real bingos. Used as a faster alternative
+  // when the outcome_model can tolerate some false negatives.
+  MOVE_RECORD_BINGO_EXISTS_APPROX,
 } move_record_t;
 
 #define MOVE_SORT_EQUITY_STRING "equity"

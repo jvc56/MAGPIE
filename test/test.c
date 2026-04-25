@@ -7,6 +7,8 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "bingo_exists_test.h"
+#include "bingo_probs_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -120,6 +122,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"bingoprobs", test_bingo_probs},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -141,6 +144,10 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"bingosbench", test_bingo_exists_bench},
+    {"bingoscorrect", test_bingo_exists_correctness},
+    {"bingosvsstatic", test_bingo_exists_vs_static_bench},
+    {"bingosapprox", test_bingo_exists_approx_miss_rate},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
