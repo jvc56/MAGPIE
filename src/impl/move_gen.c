@@ -474,8 +474,8 @@ static inline void record_exchange(MoveGen *gen) {
     break;
   case MOVE_RECORD_BINGO_EXISTS:
   case MOVE_RECORD_BINGO_EXISTS_APPROX:
-    // gen_look_up_leaves_and_record_exchanges gates add_exchange to false
-    // for the bingo-exists modes, so this should not be reachable.
+    // BINGO_EXISTS modes bypass generate_moves entirely (see bingo_exists)
+    // — this case is here only to satisfy -Wswitch.
     return;
   }
 
@@ -737,6 +737,14 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
 }
 
 void record_wmp_play(MoveGen *gen, int start_col, Equity leave_value) {
+  // BINGO_EXISTS modes ignore score — the recording function just sets
+  // gen->bingo_found and short-circuits. Skip the per-tile score loop.
+  if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+      gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
+    update_best_move_or_insert_into_movelist_wmp(gen, start_col, /*score=*/0,
+                                                 /*leave_value=*/0);
+    return;
+  }
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const Equity bingo_bonus =
       gen->max_tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
@@ -2885,38 +2893,37 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->stop_on_threshold = args->target_equity != EQUITY_MAX_VALUE;
 }
 
-void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
-  // Bingo-exists modes never compute equity, never read leave values, and
-  // never record exchanges. Skip leave_map_init, best_leaves init, the
-  // RIT leaves unpack, the KLV walk, and the exchange recording — only
-  // the RIT entry lookup is needed (for the inline-bingo fast path in
-  // wordmap_gen).
-  if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
-      gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
-    gen->rit_entry = NULL;
-    if (rack_get_total_letters(&gen->player_rack) == RACK_SIZE &&
-        gen->rack_info_table != NULL) {
-      const BitRack player_bit_rack =
-          bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
-      const uint32_t cache_idx =
-          bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
-      if (gen->rit_cache_valid[cache_idx] &&
-          bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
-        gen->rit_entry = gen->rit_cache_entries[cache_idx];
-      } else {
-        const RackInfoTableEntry *entry =
-            rack_info_table_lookup(gen->rack_info_table, &player_bit_rack);
-        gen->rit_cache_keys[cache_idx] = player_bit_rack;
-        gen->rit_cache_entries[cache_idx] = entry;
-        gen->rit_cache_valid[cache_idx] = true;
-        if (entry != NULL) {
-          gen->rit_entry = entry;
-        }
-      }
-    }
+// Look up gen->rit_entry for the current full rack and cache the result.
+// Used both by gen_look_up_leaves_and_record_exchanges (drives the RIT
+// leaves-unpack fast path) and by bingo_exists_internal (drives the
+// inline-bingo fast path inside wordmap_gen). Sets gen->rit_entry to
+// NULL when the rack isn't full or no RackInfoTable is loaded.
+static void gen_set_rit_entry(MoveGen *gen) {
+  gen->rit_entry = NULL;
+  if (rack_get_total_letters(&gen->player_rack) != RACK_SIZE ||
+      gen->rack_info_table == NULL) {
     return;
   }
+  const BitRack player_bit_rack =
+      bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
+  const uint32_t cache_idx =
+      bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
+  if (gen->rit_cache_valid[cache_idx] &&
+      bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
+    gen->rit_entry = gen->rit_cache_entries[cache_idx];
+    return;
+  }
+  const RackInfoTableEntry *entry =
+      rack_info_table_lookup(gen->rack_info_table, &player_bit_rack);
+  gen->rit_cache_keys[cache_idx] = player_bit_rack;
+  gen->rit_cache_entries[cache_idx] = entry;
+  gen->rit_cache_valid[cache_idx] = true;
+  if (entry != NULL) {
+    gen->rit_entry = entry;
+  }
+}
 
+void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
@@ -2933,42 +2940,15 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                             (gen->move_sort_type != MOVE_SORT_SCORE);
 
-  // Assumes the player has drawn a full rack but not the opponent. The
-  // bingo-exists modes only signal yes/no, so exchanges are skipped — they
-  // would just waste cycles since the caller never reads the movelist.
-  const bool add_exchange =
-      (gen->move_record_type != MOVE_RECORD_BINGO_EXISTS) &&
-      (gen->move_record_type != MOVE_RECORD_BINGO_EXISTS_APPROX) &&
-      gen->number_of_tiles_in_bag +
-              rack_get_total_letters(&gen->opponent_rack) >=
-          (RACK_SIZE * 2);
+  // Assumes the player has drawn a full rack but not the opponent.
+  const bool add_exchange = gen->number_of_tiles_in_bag +
+                                rack_get_total_letters(&gen->opponent_rack) >=
+                            (RACK_SIZE * 2);
 
   // Try to use the pre-computed rack info table for full racks.
+  gen_set_rit_entry(gen);
   const bool has_full_rack =
       rack_get_total_letters(&gen->player_rack) == RACK_SIZE;
-  const RackInfoTable *rit = gen->rack_info_table;
-  gen->rit_entry = NULL;
-
-  if (has_full_rack && rit != NULL) {
-    const BitRack player_bit_rack =
-        bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
-    // Check per-thread direct-mapped cache before the full hash lookup.
-    const uint32_t cache_idx =
-        bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
-    if (gen->rit_cache_valid[cache_idx] &&
-        bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
-      gen->rit_entry = gen->rit_cache_entries[cache_idx];
-    } else {
-      const RackInfoTableEntry *entry =
-          rack_info_table_lookup(rit, &player_bit_rack);
-      gen->rit_cache_keys[cache_idx] = player_bit_rack;
-      gen->rit_cache_entries[cache_idx] = entry;
-      gen->rit_cache_valid[cache_idx] = true;
-      if (entry != NULL) {
-        gen->rit_entry = entry;
-      }
-    }
-  }
 
   // gen->leave_map.current_index moves differently when filling leave_values
   // than when reading from it to generate plays. Start at 0, which represents
@@ -3073,11 +3053,8 @@ void gen_shadow(MoveGen *gen) {
   }
 
   // Also unnecessary for MOVE_RECORD_ALL, but our tests might care about the
-  // ordering of output. Bingo-exists modes iterate the anchor list in
-  // insertion order — no need to pay for the heap build either.
-  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
-      gen->move_record_type != MOVE_RECORD_BINGO_EXISTS &&
-      gen->move_record_type != MOVE_RECORD_BINGO_EXISTS_APPROX) {
+  // ordering of output.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
     anchor_heapify_all(&gen->anchor_heap);
   }
 }
@@ -3105,7 +3082,7 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
       if (gen->threshold_exceeded) {
         return;
       }
-      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+      if (gen->row_number_of_anchors_cache[(BOARD_DIM * dir) + row] == 0) {
         continue;
       }
       gen->current_row_index = row;
@@ -3147,44 +3124,6 @@ void gen_record_scoring_plays(MoveGen *gen) {
   const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
-  }
-
-  // Bingo-exists fast path: iterate anchors in insertion order (no heap),
-  // skip non-bingo anchors, drop word_length > 8 in approx mode, and
-  // short-circuit on first bingo via threshold_exceeded. WMP is required
-  // and validated in generate_moves, so we always go through wordmap_gen.
-  if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
-      gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
-    const bool approx =
-        gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX;
-    for (int idx = 0; idx < gen->anchor_heap.count; idx++) {
-      if (gen->threshold_exceeded) {
-        break;
-      }
-      const Anchor *anchor = &gen->anchor_heap.anchors[idx];
-      if (anchor->tiles_to_play != RACK_SIZE) {
-        continue;
-      }
-      if (approx && anchor->word_length > 8) {
-        continue;
-      }
-      gen->current_anchor_col = anchor->col;
-      if ((gen->current_row_index != anchor->row) ||
-          (gen->dir != anchor->dir)) {
-        gen->current_row_index = anchor->row;
-        gen->dir = anchor->dir;
-        board_copy_row_cache(gen->lanes_cache, gen->row_cache, anchor->row,
-                             anchor->dir);
-      }
-      gen->last_anchor_col = anchor->last_anchor_col;
-      gen->anchor_right_extension_set =
-          gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
-      gen->current_anchor_highest_possible_score =
-          anchor->highest_possible_score;
-      wordmap_gen(gen, anchor);
-    }
-    (void)kwg_root_node_index;
-    return;
   }
 
   while (gen->anchor_heap.count > 0) {
@@ -3273,13 +3212,12 @@ void gen_record_pass(MoveGen *gen) {
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
-  gen_load_position(gen, args);
-  if ((gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
-       gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) &&
-      !wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    log_fatal("MOVE_RECORD_BINGO_EXISTS{,_APPROX} requires a WMP-enabled "
-              "lexicon");
+  if (args->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+      args->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
+    log_fatal("MOVE_RECORD_BINGO_EXISTS{,_APPROX} must be invoked via "
+              "bingo_exists() / bingo_exists_approx(), not generate_moves()");
   }
+  gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
@@ -3335,13 +3273,6 @@ void generate_moves(const MoveGenArgs *args) {
           gen->number_of_tiles_in_bag +
               rack_get_total_letters(&gen->opponent_rack) >=
           (RACK_SIZE * 2);
-      const bool is_bingo_exists_mode =
-          gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
-          gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX;
-      // Whether existing cache entries are safe to READ from. Cached
-      // leave_values were written by an earlier regular call that
-      // actually populated leave_map, so reading them is fine even when
-      // this call is BINGO_EXISTS-mode.
       const bool leaves_are_populated =
           (gen->rit_entry != NULL) || check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
@@ -3383,10 +3314,7 @@ void generate_moves(const MoveGenArgs *args) {
             /*subracks_precomputed=*/subrack_cache_hit,
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
-      // BINGO_EXISTS enumeration writes garbage leave_values (since
-      // leave_map.leave_values isn't populated for these modes), so
-      // skip the cache write to avoid poisoning later regular calls.
-      if (!subrack_cache_hit && leaves_are_populated && !is_bingo_exists_mode) {
+      if (!subrack_cache_hit && leaves_are_populated) {
         // Store the newly-computed enumeration and wmp_entry pointers
         // into the cache. Only cache when leaves_are_populated so we
         // don't stash garbage leave_values from an uninitialized leave_map.
@@ -3419,17 +3347,229 @@ void generate_moves(const MoveGenArgs *args) {
   gen_record_pass(gen);
 }
 
+// Try a bingo placement at (anchor_col, leftmost_start_col, rightmost_start_col,
+// word_length, playthrough_blocks). Returns true if any valid placement
+// found (sets gen->bingo_found).
+static inline void try_bingo_placement(MoveGen *gen, int row, int dir,
+                                       int anchor_col, int last_anchor_col,
+                                       int leftmost_start_col,
+                                       int rightmost_start_col, int word_length,
+                                       int playthrough_blocks) {
+  Anchor anchor;
+  memset(&anchor, 0, sizeof(anchor));
+  anchor.row = (unsigned)row;
+  anchor.col = (unsigned)anchor_col;
+  anchor.last_anchor_col = (unsigned)last_anchor_col;
+  anchor.dir = (unsigned)dir;
+  anchor.leftmost_start_col = (unsigned)leftmost_start_col;
+  anchor.rightmost_start_col = (unsigned)rightmost_start_col;
+  anchor.tiles_to_play = RACK_SIZE;
+  anchor.word_length = (unsigned)word_length;
+  anchor.playthrough_blocks = (unsigned)playthrough_blocks;
+  anchor.highest_possible_equity = 0;
+  anchor.highest_possible_score = 0;
+  wordmap_gen(gen, &anchor);
+}
+
+// Eager bingo scanner. For each anchor on the board, enumerate the set of
+// (start_col, word_length, playthrough_blocks) tuples that can host a
+// RACK_SIZE-tile play, and immediately call wordmap_gen on each. Short-
+// circuits on the first valid bingo. Skips shadow entirely — no score,
+// no equity, no leave math, no anchor heap.
+//
+// Boundary semantics: if cell start-1 is filled (tile), the play would
+// actually extend left to include that tile, so this `start` is wrong.
+// Same for end+1 on the right.
+static void bingo_eager_scan(MoveGen *gen, bool approx) {
+  const int max_word_length = approx ? 8 : BOARD_DIM;
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->row_number_of_anchors_cache[(BOARD_DIM * dir) + row] == 0) {
+        continue;
+      }
+      gen->current_row_index = row;
+      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+
+      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+      for (int anchor_col = 0; anchor_col < BOARD_DIM; anchor_col++) {
+        if (!gen_cache_get_is_anchor(gen, anchor_col)) {
+          continue;
+        }
+        gen->current_anchor_col = anchor_col;
+        gen->last_anchor_col = last_anchor_col;
+        gen->anchor_left_extension_set =
+            gen_cache_get_left_extension_set(gen, anchor_col);
+        gen->anchor_right_extension_set =
+            gen_cache_get_right_extension_set(gen, anchor_col);
+
+        // Track the non-playthrough (length=RACK_SIZE, pb=0) start range
+        // and emit a single wordmap_gen call covering all such starts.
+        // This is the common case (most bingos), and it's safe to group
+        // because there are no playthrough cells that depend on which
+        // start_col is being tried. Playthrough configurations are
+        // emitted per-(start, length, pb) since wordmap_gen's
+        // set_playthrough_bit_rack uses rightmost_start_col and gives
+        // wrong results for other starts in a range.
+        int npt_min_start = -1;
+        int npt_max_start = -1;
+
+        // Walk start leftward from anchor_col. Dedupe across anchors:
+        // any (start, end) tuple with start <= last_anchor_col was
+        // already enumerated by an earlier anchor's walk.
+        for (int start = anchor_col; start >= 0; start--) {
+          if (last_anchor_col != INITIAL_LAST_ANCHOR_COL &&
+              start <= last_anchor_col) {
+            break;
+          }
+          // start-1 must be empty-on-board or off-board. If start-1 has a
+          // tile, the play would extend left to include it, so this start
+          // is not a valid leftmost. Use `continue` (not break) — there
+          // can be more valid starts further left, e.g., on the leftmost
+          // cell of a tile block.
+          if (start - 1 >= 0 && !gen_cache_is_empty(gen, start - 1)) {
+            continue;
+          }
+
+          int empty_count = 0;
+          int playthrough_blocks = 0;
+          bool in_block = false;
+          for (int end = start;
+               end < BOARD_DIM && (end - start + 1) <= max_word_length;
+               end++) {
+            if (gen_cache_is_empty(gen, end)) {
+              empty_count++;
+              in_block = false;
+            } else {
+              if (!in_block) {
+                playthrough_blocks++;
+                in_block = true;
+              }
+            }
+            if (empty_count > RACK_SIZE) {
+              break;
+            }
+            if (empty_count != RACK_SIZE) {
+              continue;
+            }
+            if (end < anchor_col) {
+              continue;
+            }
+            // end+1 must be empty-on-board or off-board. If end+1 has a
+            // tile, the play would extend right to include it.
+            if (end + 1 < BOARD_DIM && !gen_cache_is_empty(gen, end + 1)) {
+              continue;
+            }
+            const int word_length = end - start + 1;
+            if (playthrough_blocks == 0 && word_length == RACK_SIZE) {
+              if (npt_min_start < 0 || start < npt_min_start) {
+                npt_min_start = start;
+              }
+              if (start > npt_max_start) {
+                npt_max_start = start;
+              }
+              continue;
+            }
+            try_bingo_placement(gen, row, dir, anchor_col, last_anchor_col,
+                                start, start, word_length, playthrough_blocks);
+            if (gen->bingo_found) {
+              return;
+            }
+          }
+        }
+
+        if (npt_min_start >= 0) {
+          try_bingo_placement(gen, row, dir, anchor_col, last_anchor_col,
+                              npt_min_start, npt_max_start,
+                              /*word_length=*/RACK_SIZE,
+                              /*playthrough_blocks=*/0);
+          if (gen->bingo_found) {
+            return;
+          }
+        }
+
+        last_anchor_col = anchor_col;
+        if (!gen_cache_is_empty(gen, anchor_col)) {
+          last_anchor_col++;
+        }
+      }
+    }
+  }
+}
+
+// Empty-board opening: the only valid anchor is the center star and the
+// only valid bingos are 7-letter words covering it. We synthesize one
+// anchor per direction with the full leftmost/rightmost range, letting
+// wordmap_gen iterate all 7 valid start_col positions internally.
+static void bingo_eager_scan_empty_board(MoveGen *gen) {
+  const int center = BOARD_DIM / 2;
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    gen->current_row_index = center;
+    board_copy_row_cache(gen->lanes_cache, gen->row_cache, center, dir);
+    gen->current_anchor_col = center;
+    gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+    gen->anchor_left_extension_set = TRIVIAL_CROSS_SET;
+    gen->anchor_right_extension_set = TRIVIAL_CROSS_SET;
+    try_bingo_placement(gen, center, dir, center, INITIAL_LAST_ANCHOR_COL,
+                        /*leftmost_start_col=*/center - RACK_SIZE + 1,
+                        /*rightmost_start_col=*/center,
+                        /*word_length=*/RACK_SIZE,
+                        /*playthrough_blocks=*/0);
+    if (gen->bingo_found) {
+      return;
+    }
+  }
+}
+
+static bool bingo_exists_internal(const MoveGenArgs *args, bool approx) {
+  MoveGenArgs local = *args;
+  local.move_record_type =
+      approx ? MOVE_RECORD_BINGO_EXISTS_APPROX : MOVE_RECORD_BINGO_EXISTS;
+  MoveGen *gen = get_movegen(args->thread_index);
+  gen_load_position(gen, &local);
+  if (!wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    log_fatal("bingo_exists{,_approx} requires a WMP-enabled lexicon");
+  }
+
+  // Look up the RIT entry for the current rack (drives the inline-bingo
+  // fast path inside wordmap_gen). Skips leave_map / best_leaves / KLV
+  // walk / exchange-recording, all of which would be wasted for
+  // BINGO_EXISTS.
+  gen_set_rit_entry(gen);
+
+  // Single full-rack subrack setup so wordmap_gen's WMP fallback path
+  // (used for playthrough bingos and when RIT is absent) finds the words
+  // for the rack without paying for a full subrack enumeration.
+  WMPMoveGen *wgen = &gen->wmp_move_gen;
+  memset(wgen->count_by_size, 0, sizeof(wgen->count_by_size));
+  memset(wgen->nonplaythrough_has_word_of_length, false,
+         sizeof(wgen->nonplaythrough_has_word_of_length));
+  if (wgen->full_rack_size == RACK_SIZE) {
+    const int offset = subracks_get_combination_offset(RACK_SIZE);
+    wgen->count_by_size[RACK_SIZE] = 1;
+    SubrackInfo *info = &wgen->nonplaythrough_infos[offset];
+    info->subrack = wgen->player_bit_rack;
+    info->leave_value = 0;
+    const WMPEntry *entry =
+        wmp_get_word_entry(wgen->wmp, &wgen->player_bit_rack, RACK_SIZE);
+    info->wmp_entry = entry;
+    wgen->nonplaythrough_has_word_of_length[RACK_SIZE] = (entry != NULL);
+  }
+
+  if (gen->board_number_of_tiles_played == 0) {
+    bingo_eager_scan_empty_board(gen);
+  } else {
+    bingo_eager_scan(gen, approx);
+  }
+  return gen->bingo_found;
+}
+
 bool bingo_exists(const MoveGenArgs *args) {
-  // Override the caller's record type so the wrapper is foolproof.
-  MoveGenArgs args_for_bingos = *args;
-  args_for_bingos.move_record_type = MOVE_RECORD_BINGO_EXISTS;
-  generate_moves(&args_for_bingos);
-  return get_movegen(args->thread_index)->bingo_found;
+  return bingo_exists_internal(args, /*approx=*/false);
 }
 
 bool bingo_exists_approx(const MoveGenArgs *args) {
-  MoveGenArgs args_for_bingos = *args;
-  args_for_bingos.move_record_type = MOVE_RECORD_BINGO_EXISTS_APPROX;
-  generate_moves(&args_for_bingos);
-  return get_movegen(args->thread_index)->bingo_found;
+  return bingo_exists_internal(args, /*approx=*/true);
 }
