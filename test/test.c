@@ -47,6 +47,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
+#include "single_tile_play_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "transposition_table_test.h"
@@ -123,6 +124,7 @@ static TestEntry test_table[] = {
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
     {"bingoprobs", test_bingo_probs},
+    {"singletile", test_single_tile_play},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -148,6 +150,7 @@ static TestEntry on_demand_test_table[] = {
     {"bingoscorrect", test_bingo_exists_correctness},
     {"bingosvsstatic", test_bingo_exists_vs_static_bench},
     {"bingosapprox", test_bingo_exists_approx_miss_rate},
+    {"singletilebench", test_single_tile_bench},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
