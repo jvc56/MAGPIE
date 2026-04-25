@@ -2603,6 +2603,13 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 
   endgame_results_stop_ctimer(results);
 
+  if (thread_control_get_status(endgame_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
+  }
+
   // Hold the DISPLAY lock because concurrent status/shendgame calls read these
   // fields under it.
   endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
@@ -2641,6 +2648,8 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // The stored multi_pvs are already fully extended; null out the TT reference
   // so post-solve calls to string_builder_endgame_results don't touch a
   // potentially freed pointer after endgame_ctx_destroy.
-  endgame_results_set_pvline_extend_args(results, NULL, 0, 0);
+  endgame_results_set_pvline_extend_args(
+      results, NULL, endgame_results_get_solving_player(results),
+      endgame_results_get_max_depth(results));
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
 }

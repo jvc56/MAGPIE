@@ -52,6 +52,8 @@ C99 with two C11 exceptions: `_Atomic`/`<stdatomic.h>` and `static_assert`. Do n
 
 Always use `{}` braces for `if`, `else if`, and `else` blocks, even when the body is a single statement. No exceptions.
 
+**No forward declarations** — Never forward-declare a struct that is already defined in another module's header. Use `#include` to bring in that header instead. Forward declarations are only acceptable when the struct or function is defined in the same file.
+
 ## Naming
 
 Avoid single-character or terse variable names.

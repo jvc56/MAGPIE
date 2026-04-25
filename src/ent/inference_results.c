@@ -139,6 +139,10 @@ bool inference_results_get_valid_for_current_game_state(
   return results->valid_for_current_game_state;
 }
 
+bool inference_results_get_interrupted(const InferenceResults *results) {
+  return results->interrupted;
+}
+
 const Rack *
 inference_results_get_target_played_tiles(const InferenceResults *results) {
   return &results->target_played_tiles;

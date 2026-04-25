@@ -136,9 +136,9 @@ bool string_builder_add_sim_stats_with_display_lock(
     string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("It"));
     for (int j = 0; j < num_display_plies; j++) {
       string_grid_set_cell(sg, curr_row, curr_col++,
-                           get_formatted_string("Ply%d-S", j + 1));
+                           get_formatted_string("P%d-S", j + 1));
       string_grid_set_cell(sg, curr_row, curr_col++,
-                           get_formatted_string("Ply%d-BP", j + 1));
+                           get_formatted_string("P%d-BP", j + 1));
     }
     curr_row++;
   }

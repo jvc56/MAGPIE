@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "letter_distribution.h"
 #include "rack.h"
 #include "validated_move.h"
@@ -129,6 +130,8 @@ void game_history_insert_challenge_bonus_game_event(GameHistory *game_history,
 void game_history_remove_challenge_bonus_game_event(GameHistory *game_history);
 void game_history_trim_trailing_overtime_penalties(GameHistory *game_history);
 
+void string_builder_add_gcg_filename(StringBuilder *sb,
+                                     const GameHistory *game_history, int i);
 void game_history_set_gcg_filename(GameHistory *game_history,
                                    const char *new_gcg_filename);
 const char *game_history_get_gcg_filename(const GameHistory *game_history);

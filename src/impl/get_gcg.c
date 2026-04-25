@@ -20,7 +20,23 @@ enum {
   MAX_GAME_ID_LENGTH = 30,
 };
 
-char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
+// Returns the basename of path with the .gcg extension stripped if present.
+static char *get_file_id(const char *path) {
+  const char *slash = strrchr(path, '/');
+  const char *basename_start = slash ? slash + 1 : path;
+  const size_t basename_len = string_length(basename_start);
+  const size_t gcg_ext_len = string_length(GCG_EXTENSION);
+  if (has_suffix(GCG_EXTENSION, basename_start)) {
+    return get_substring(basename_start, 0, (int)(basename_len - gcg_ext_len));
+  }
+  return string_duplicate(basename_start);
+}
+
+// Populates result for a cross-tables game. basename is set to the numeric
+// game ID. Does nothing (without error) if identifier does not match
+// cross-tables format.
+static void get_xt_gcg(const char *identifier, GetGCGResult *result,
+                       ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
   // Check if this is a Cross-tables URL first
   char *xt_url_start = strstr(identifier, XTABLES_URL);
@@ -36,7 +52,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
               get_formatted_string(
                   "xtables game id cannot be longer than %d characters",
                   MAX_GAME_ID_LENGTH));
-          return NULL;
+          return;
         }
         game_id_str[game_id_str_len++] = url_char;
       } else {
@@ -47,7 +63,7 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
   } else {
     // Check if it's a numeric game id
     if (!is_all_digits_or_empty(identifier)) {
-      return NULL;
+      return;
     }
     const size_t game_id_str_len = string_length(identifier);
     if (game_id_str_len > MAX_GAME_ID_LENGTH) {
@@ -56,13 +72,11 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
           get_formatted_string(
               "xtables game id cannot be longer than %d characters",
               MAX_GAME_ID_LENGTH));
-      return NULL;
+      return;
     }
     strncpy(game_id_str, identifier, MAX_GAME_ID_LENGTH);
     game_id_str[game_id_str_len] = '\0';
   }
-
-  char *gcg_content = NULL;
 
   // Get first 3 digits for the path
   char first_three[4] = {0};
@@ -75,14 +89,26 @@ char *get_xt_gcg_string(const char *identifier, ErrorStack *error_stack) {
       "curl -s -L \"https://cross-tables.com/annotated/selfgcg/%s/anno%s.gcg\"",
       first_three, game_id_str);
 
-  gcg_content = get_process_output(curl_cmd);
-
+  char *gcg_content = get_process_output(curl_cmd);
   free(curl_cmd);
 
-  return gcg_content;
+  if (!gcg_content) {
+    error_stack_push(error_stack, ERROR_STATUS_INVALID_GCG_URL,
+                     get_formatted_string(
+                         "failed to download GCG from cross-tables for ID: %s",
+                         game_id_str));
+    return;
+  }
+  result->gcg_string = gcg_content;
+  result->basename_or_filepath = string_duplicate(game_id_str);
+  result->source = GCG_SOURCE_XT;
 }
 
-char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
+// Populates result for a Woogles game. basename_or_filepath is set to the
+// alphanumeric game ID. Does nothing (without error) if identifier does not
+// match Woogles format.
+static void get_woogles_gcg(const char *identifier, GetGCGResult *result,
+                            ErrorStack *error_stack) {
   char game_id_str[MAX_GAME_ID_LENGTH + 1] = {0};
 
   char *woogles_url_start = strstr(identifier, WOOGLES_URL);
@@ -98,7 +124,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
               get_formatted_string(
                   "woogles game id cannot be longer than %d characters",
                   MAX_GAME_ID_LENGTH));
-          return NULL;
+          return;
         }
         game_id_str[game_id_str_len++] = url_char;
       } else {
@@ -110,7 +136,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
     // Check if it's a standalone woogles game ID (alphanumeric, not all digits)
     for (int i = 0; identifier[i]; i++) {
       if (!isalnum(identifier[i])) {
-        return NULL;
+        return;
       }
     }
     const size_t game_id_str_len = string_length(identifier);
@@ -120,13 +146,11 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
           get_formatted_string(
               "woogles game id cannot be longer than %d characters",
               MAX_GAME_ID_LENGTH));
-      return NULL;
+      return;
     }
     strncpy(game_id_str, identifier, MAX_GAME_ID_LENGTH);
     game_id_str[game_id_str_len] = '\0';
   }
-
-  char *gcg_content = NULL;
 
   // Use woogles API to get GCG content
   char *curl_cmd = get_formatted_string(
@@ -143,7 +167,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_WOOGLES_URL_MALFORMED,
         get_formatted_string(
             "failed to get response from woogles API for ID: %s", identifier));
-    return NULL;
+    return;
   }
 
   // Parse JSON response to extract GCG content
@@ -154,7 +178,7 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_INVALID_WOOGLES_GCG_RESPONSE,
         get_formatted_string(
             "invalid or missing GCG content from woogles URL: %s", identifier));
-    return NULL;
+    return;
   }
   gcg_start += string_length(WOOGLES_GCG_START);
   const char *gcg_end = gcg_start;
@@ -167,18 +191,22 @@ char *get_woogles_gcg_string(const char *identifier, ErrorStack *error_stack) {
   raw_gcg[gcg_len] = '\0';
 
   // Unescape JSON string using utility function
-  gcg_content = json_unescape_string(raw_gcg);
+  result->gcg_string = json_unescape_string(raw_gcg);
   free(raw_gcg);
   free(response);
-  return gcg_content;
+  result->basename_or_filepath = string_duplicate(game_id_str);
+  result->source = GCG_SOURCE_WOOGLES;
 }
 
-char *get_url_gcg_string(const char *identifier, ErrorStack *error_stack) {
+// Populates result for a generic URL. basename_or_filepath is set to everything
+// after the last '/' with .gcg stripped. Does nothing (without error) if
+// identifier is not a URL.
+static void get_url_gcg(const char *identifier, GetGCGResult *result,
+                        ErrorStack *error_stack) {
   if (!is_url(identifier)) {
-    return NULL;
+    return;
   }
 
-  // It's a URL - try to download directly
   char *curl_cmd = get_formatted_string("curl -s -L \"%s\"", identifier);
   char *gcg_content = get_process_output(curl_cmd);
   free(curl_cmd);
@@ -187,13 +215,19 @@ char *get_url_gcg_string(const char *identifier, ErrorStack *error_stack) {
     error_stack_push(error_stack, ERROR_STATUS_INVALID_GCG_URL,
                      get_formatted_string("failed to get response from URL: %s",
                                           identifier));
-    return NULL;
+    return;
   }
-  return gcg_content;
+
+  result->gcg_string = gcg_content;
+  result->basename_or_filepath = get_file_id(identifier);
+  result->source = GCG_SOURCE_URL;
 }
 
-char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
-  // Check if file exists and is readable
+// Populates result for a local file. basename_or_filepath is set to the
+// full filepath (including .gcg extension if present). Does nothing (without
+// error) if the file cannot be found.
+static void get_local_gcg(const char *identifier, GetGCGResult *result,
+                          ErrorStack *error_stack) {
   char *identifier_with_possible_ext = NULL;
   if (access(identifier, R_OK) != 0) {
     if (!has_suffix(GCG_EXTENSION, identifier)) {
@@ -211,64 +245,59 @@ char *get_local_gcg_string(const char *identifier, ErrorStack *error_stack) {
   }
 
   if (!identifier_with_possible_ext) {
-    return NULL;
+    return;
   }
 
-  // Read file content directly
   char *gcg_content =
       get_string_from_file(identifier_with_possible_ext, error_stack);
 
-  free(identifier_with_possible_ext);
-
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
+  if (error_stack_is_empty(error_stack)) {
+    result->gcg_string = gcg_content;
+    result->basename_or_filepath =
+        string_duplicate(identifier_with_possible_ext);
+    result->source = GCG_SOURCE_LOCAL;
   }
-
-  return gcg_content;
+  free(identifier_with_possible_ext);
 }
 
-char *get_gcg(const GetGCGArgs *get_args, ErrorStack *error_stack) {
+void get_gcg_reset_result(GetGCGResult *result) {
+  result->source = GCG_SOURCE_NONE;
+  free(result->gcg_string);
+  result->gcg_string = NULL;
+  free(result->basename_or_filepath);
+  result->basename_or_filepath = NULL;
+}
+
+// Assumes the GetGCGResult is either zero-initialized or was populated
+// from a previous call to get_gcg.
+void get_gcg(const GetGCGArgs *get_args, GetGCGResult *result,
+             ErrorStack *error_stack) {
   const char *identifier = get_args->source_identifier;
 
-  // Try cross-tables first
-  char *gcg_string = get_xt_gcg_string(identifier, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  if (gcg_string) {
-    return gcg_string;
+  get_gcg_reset_result(result);
+
+  get_xt_gcg(identifier, result, error_stack);
+  if (!error_stack_is_empty(error_stack) || result->source != GCG_SOURCE_NONE) {
+    return;
   }
 
-  // Try Woogles
-  gcg_string = get_woogles_gcg_string(identifier, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  if (gcg_string) {
-    return gcg_string;
+  get_woogles_gcg(identifier, result, error_stack);
+  if (!error_stack_is_empty(error_stack) || result->source != GCG_SOURCE_NONE) {
+    return;
   }
 
-  // Try local file
-  gcg_string = get_local_gcg_string(identifier, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
-  }
-  if (gcg_string) {
-    return gcg_string;
+  get_local_gcg(identifier, result, error_stack);
+  if (!error_stack_is_empty(error_stack) || result->source != GCG_SOURCE_NONE) {
+    return;
   }
 
-  // Try generic URL download
-  gcg_string = get_url_gcg_string(identifier, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return NULL;
+  get_url_gcg(identifier, result, error_stack);
+  if (!error_stack_is_empty(error_stack) || result->source != GCG_SOURCE_NONE) {
+    return;
   }
-  if (gcg_string) {
-    return gcg_string;
-  }
-  // If we get here, nothing worked
+
   error_stack_push(
       error_stack, ERROR_STATUS_INVALID_GCG_SOURCE,
       get_formatted_string("could not load GCG from any source: %s",
                            get_args->source_identifier));
-  return NULL;
 }

@@ -16,6 +16,12 @@ typedef enum {
   ENDGAME_RESULT_DISPLAY,
 } endgame_result_t;
 
+typedef enum {
+  ENDGAME_RESULT_STATUS_NONE,
+  ENDGAME_RESULT_STATUS_FINISHED,
+  ENDGAME_RESULT_STATUS_INTERRUPTED,
+} endgame_result_status_t;
+
 typedef struct PVLine {
   SmallMove moves[MAX_VARIANT_LENGTH];
   Game *game;
@@ -37,6 +43,8 @@ const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_results,
                                          endgame_result_t result_type);
 int endgame_results_get_value(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
+int endgame_results_get_spread(const EndgameResults *endgame_results,
+                               endgame_result_t result_type, const Game *game);
 int endgame_results_get_depth(const EndgameResults *endgame_results,
                               endgame_result_t result_type);
 double
@@ -54,6 +62,10 @@ void endgame_results_set_start_game(EndgameResults *endgame_results,
 const Game *
 endgame_results_get_start_game(const EndgameResults *endgame_results);
 void endgame_results_stop_ctimer(EndgameResults *endgame_results);
+endgame_result_status_t
+endgame_results_get_status(const EndgameResults *endgame_results);
+void endgame_results_set_status(EndgameResults *endgame_results,
+                                endgame_result_status_t status);
 // Ensure the multi-PV array has room for at least n entries (reallocs if
 // needed). Callers write directly via endgame_results_get_multi_pvs.
 void endgame_results_ensure_pvs_capacity(EndgameResults *endgame_results,

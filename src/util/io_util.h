@@ -1,6 +1,7 @@
 #ifndef IO_UTIL_H
 #define IO_UTIL_H
 
+#include <dirent.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -299,6 +300,7 @@ void io_reset_stream_in(void);
 char *format_string_with_va_list(const char *format, va_list *args);
 char *get_formatted_string(const char *format, ...);
 void fflush_or_die(FILE *stream);
+void snprintf_or_die(char *buf, size_t buf_size, const char *format, ...);
 void *malloc_or_die(size_t size);
 void *calloc_or_die(size_t num, size_t size);
 void *realloc_or_die(void *realloc_target, size_t size);
@@ -314,8 +316,6 @@ char *error_stack_get_string_and_reset(ErrorStack *error_stack);
 void error_stack_print_and_reset(ErrorStack *error_stack);
 bool error_stack_is_empty(const ErrorStack *error_stack);
 
-// WARNING: for testing only, production code should only reset the stack after
-// printing or retrieving the error string
 void error_stack_reset(ErrorStack *error_stack);
 
 void fseek_or_die(FILE *stream, long offset, int whence);
@@ -324,14 +324,25 @@ char *get_string_from_file_handle(FILE *file_handle, const char *filename,
 char *get_string_from_file(const char *filename, ErrorStack *error_stack);
 void write_string_to_file(const char *filename, const char *mode,
                           const char *string, ErrorStack *error_stack);
+void append_string_to_file(const char *filename, const char *string,
+                           ErrorStack *error_stack);
 FILE *fopen_or_die(const char *filename, const char *mode);
 FILE *fopen_safe(const char *filename, const char *mode,
                  ErrorStack *error_stack);
+DIR *opendir_safe(const char *dir_path, ErrorStack *error_stack);
 void fclose_or_die(FILE *stream);
 void fwrite_or_die(const void *ptr, size_t size, size_t nmemb, FILE *stream,
                    const char *description);
 void fprintf_or_die(FILE *stream, const char *format, ...);
 
 FILE *popen_or_die(const char *command, const char *mode);
+
+bool path_is_directory(const char *path);
+
+// Returns a sorted, heap-allocated array of filenames ending with suffix found
+// in dir_path. *num_files is set to the count. Caller frees each string and
+// the array. On error, pushes to error_stack and returns NULL.
+char **get_files_in_directory(const char *dir_path, const char *suffix,
+                              int *num_files, ErrorStack *error_stack);
 
 #endif

@@ -1139,6 +1139,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
              "%d\n>%s<\n",
              expected_error_code, load_status, cmd);
       error_stack_print_and_reset(error_stack);
+      (void)fflush(stdout);
       abort();
     }
     error_stack_destroy(error_stack);
@@ -1152,6 +1153,7 @@ void assert_config_exec_status(Config *config, const char *cmd,
            "%d\n>%s<\n",
            expected_error_code, actual_error_code, cmd);
     error_stack_print_and_reset(error_stack);
+    (void)fflush(stdout);
     abort();
   }
   error_stack_destroy(error_stack);

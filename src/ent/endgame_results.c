@@ -3,6 +3,8 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../ent/equity.h"
+#include "../ent/player.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "game.h"
@@ -36,6 +38,7 @@ struct EndgameResults {
   int max_depth;
   // Reusable game copy for PV extension (avoid repeated game_duplicate).
   Game *ext_game;
+  endgame_result_status_t status;
 };
 
 EndgameResults *endgame_results_create(void) {
@@ -58,10 +61,14 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
   endgame_results->ext_game = NULL;
+  endgame_results->status = ENDGAME_RESULT_STATUS_NONE;
   return endgame_results;
 }
 
 void endgame_results_destroy(EndgameResults *endgame_results) {
+  if (!endgame_results) {
+    return;
+  }
   game_destroy(endgame_results->start_game);
   game_destroy(endgame_results->ext_game);
   free(endgame_results->multi_pvs);
@@ -83,6 +90,7 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->tt = NULL;
   endgame_results->solving_player = 0;
   endgame_results->max_depth = 0;
+  endgame_results->status = ENDGAME_RESULT_STATUS_NONE;
 }
 
 bool endgame_results_get_valid_for_current_game_state(
@@ -123,6 +131,27 @@ int endgame_results_get_value(const EndgameResults *endgame_results,
     break;
   }
   return value;
+}
+
+int endgame_results_get_spread(const EndgameResults *endgame_results,
+                               endgame_result_t result_type, const Game *game) {
+  int value;
+  switch (result_type) {
+  case ENDGAME_RESULT_BEST:
+    value = endgame_results->best_pv_data.value;
+    break;
+  case ENDGAME_RESULT_DISPLAY:
+    value = endgame_results->display_pv_data.value;
+    break;
+  }
+  const int p0_score =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int p1_score =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
+  const int initial_on_turn_spread = (endgame_results->solving_player == 0)
+                                         ? p0_score - p1_score
+                                         : p1_score - p0_score;
+  return initial_on_turn_spread + value;
 }
 
 // NOT THREAD SAFE: Caller must ensure synchronization
@@ -252,6 +281,16 @@ int endgame_results_get_solving_player(const EndgameResults *endgame_results) {
 
 int endgame_results_get_max_depth(const EndgameResults *endgame_results) {
   return endgame_results->max_depth;
+}
+
+endgame_result_status_t
+endgame_results_get_status(const EndgameResults *endgame_results) {
+  return endgame_results->status;
+}
+
+void endgame_results_set_status(EndgameResults *endgame_results,
+                                endgame_result_status_t status) {
+  endgame_results->status = status;
 }
 
 Game *endgame_results_prepare_ext_game(EndgameResults *endgame_results,
