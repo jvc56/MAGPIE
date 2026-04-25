@@ -37,6 +37,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "bingo_exists_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -141,6 +142,10 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"bingosbench", test_bingo_exists_bench},
+    {"bingoscorrect", test_bingo_exists_correctness},
+    {"bingosvsstatic", test_bingo_exists_vs_static_bench},
+    {"bingosapprox", test_bingo_exists_approx_miss_rate},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

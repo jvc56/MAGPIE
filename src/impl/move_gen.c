@@ -253,6 +253,8 @@ static inline void gen_update_cutoff_equity_or_score(MoveGen *gen) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
     log_fatal("gen_get_cutoff_equity_or_score called with "
               "MOVE_RECORD_ALL or "
               "MOVE_RECORD_ALL_SMALL");
@@ -378,6 +380,10 @@ static inline void update_best_move_or_insert_into_movelist(
       gen->move_list->count = 1;
     }
     break;
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
+    log_fatal("MOVE_RECORD_BINGO_EXISTS{,_APPROX} requires a WMP-enabled "
+              "lexicon");
   }
 
   // In exchange cutoff mode, exchanges are recorded first and then
@@ -428,6 +434,8 @@ static inline bool better_play_has_been_found(const MoveGen *gen,
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_ALL_SMALL:
   case MOVE_RECORD_TILES_PLAYED:
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
     return false;
     break;
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST:
@@ -464,6 +472,11 @@ static inline void record_exchange(MoveGen *gen) {
   case MOVE_RECORD_BEST_SMALL:
     // BEST_SMALL only supports MOVE_SORT_SCORE; no exchange pruning needed.
     break;
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
+    // gen_look_up_leaves_and_record_exchanges gates add_exchange to false
+    // for the bingo-exists modes, so this should not be reachable.
+    return;
   }
 
   int tiles_exchanged = 0;
@@ -667,6 +680,18 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     }
     break;
   }
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
+    // Set the boolean and short-circuit the rest of generation.
+    // threshold_exceeded breaks the wordmap_gen inner loops and the
+    // anchor-heap walk in gen_record_scoring_plays. No move is recorded
+    // because the caller only needs the yes/no answer (read via
+    // bingo_exists / bingo_exists_approx), and skipping the move
+    // construction avoids the cost of set_play_for_record_wmp /
+    // equity-for-sort / movelist insert.
+    gen->bingo_found = true;
+    gen->threshold_exceeded = true;
+    break;
   case MOVE_RECORD_BEST: {
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
@@ -2833,6 +2858,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_set_equity(gen_get_best_move(gen), EQUITY_INITIAL_VALUE);
   gen->best_move_equity_or_score = EQUITY_INITIAL_VALUE;
   gen->cutoff_equity_or_score = EQUITY_INITIAL_VALUE;
+  gen->bingo_found = false;
 
   // Set rack cross set and cache ld's tile scores
   gen->rack_cross_set = 0;
@@ -2860,6 +2886,37 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 }
 
 void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
+  // Bingo-exists modes never compute equity, never read leave values, and
+  // never record exchanges. Skip leave_map_init, best_leaves init, the
+  // RIT leaves unpack, the KLV walk, and the exchange recording — only
+  // the RIT entry lookup is needed (for the inline-bingo fast path in
+  // wordmap_gen).
+  if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+      gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
+    gen->rit_entry = NULL;
+    if (rack_get_total_letters(&gen->player_rack) == RACK_SIZE &&
+        gen->rack_info_table != NULL) {
+      const BitRack player_bit_rack =
+          bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
+      const uint32_t cache_idx =
+          bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
+      if (gen->rit_cache_valid[cache_idx] &&
+          bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
+        gen->rit_entry = gen->rit_cache_entries[cache_idx];
+      } else {
+        const RackInfoTableEntry *entry =
+            rack_info_table_lookup(gen->rack_info_table, &player_bit_rack);
+        gen->rit_cache_keys[cache_idx] = player_bit_rack;
+        gen->rit_cache_entries[cache_idx] = entry;
+        gen->rit_cache_valid[cache_idx] = true;
+        if (entry != NULL) {
+          gen->rit_entry = entry;
+        }
+      }
+    }
+    return;
+  }
+
   leave_map_init(&gen->player_rack, &gen->leave_map);
   if (rack_get_total_letters(&gen->player_rack) < RACK_SIZE) {
     leave_map_set_current_value(
@@ -2876,10 +2933,15 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
                             (gen->move_sort_type != MOVE_SORT_SCORE);
 
-  // Assumes the player has drawn a full rack but not the opponent.
-  const bool add_exchange = gen->number_of_tiles_in_bag +
-                                rack_get_total_letters(&gen->opponent_rack) >=
-                            (RACK_SIZE * 2);
+  // Assumes the player has drawn a full rack but not the opponent. The
+  // bingo-exists modes only signal yes/no, so exchanges are skipped — they
+  // would just waste cycles since the caller never reads the movelist.
+  const bool add_exchange =
+      (gen->move_record_type != MOVE_RECORD_BINGO_EXISTS) &&
+      (gen->move_record_type != MOVE_RECORD_BINGO_EXISTS_APPROX) &&
+      gen->number_of_tiles_in_bag +
+              rack_get_total_letters(&gen->opponent_rack) >=
+          (RACK_SIZE * 2);
 
   // Try to use the pre-computed rack info table for full racks.
   const bool has_full_rack =
@@ -3011,8 +3073,11 @@ void gen_shadow(MoveGen *gen) {
   }
 
   // Also unnecessary for MOVE_RECORD_ALL, but our tests might care about the
-  // ordering of output.
-  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
+  // ordering of output. Bingo-exists modes iterate the anchor list in
+  // insertion order — no need to pay for the heap build either.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
+      gen->move_record_type != MOVE_RECORD_BINGO_EXISTS &&
+      gen->move_record_type != MOVE_RECORD_BINGO_EXISTS_APPROX) {
     anchor_heapify_all(&gen->anchor_heap);
   }
 }
@@ -3083,6 +3148,45 @@ void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->is_wordsmog) {
     rack_reset(&gen->full_player_rack);
   }
+
+  // Bingo-exists fast path: iterate anchors in insertion order (no heap),
+  // skip non-bingo anchors, drop word_length > 8 in approx mode, and
+  // short-circuit on first bingo via threshold_exceeded. WMP is required
+  // and validated in generate_moves, so we always go through wordmap_gen.
+  if (gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+      gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) {
+    const bool approx =
+        gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX;
+    for (int idx = 0; idx < gen->anchor_heap.count; idx++) {
+      if (gen->threshold_exceeded) {
+        break;
+      }
+      const Anchor *anchor = &gen->anchor_heap.anchors[idx];
+      if (anchor->tiles_to_play != RACK_SIZE) {
+        continue;
+      }
+      if (approx && anchor->word_length > 8) {
+        continue;
+      }
+      gen->current_anchor_col = anchor->col;
+      if ((gen->current_row_index != anchor->row) ||
+          (gen->dir != anchor->dir)) {
+        gen->current_row_index = anchor->row;
+        gen->dir = anchor->dir;
+        board_copy_row_cache(gen->lanes_cache, gen->row_cache, anchor->row,
+                             anchor->dir);
+      }
+      gen->last_anchor_col = anchor->last_anchor_col;
+      gen->anchor_right_extension_set =
+          gen_cache_get_right_extension_set(gen, gen->current_anchor_col);
+      gen->current_anchor_highest_possible_score =
+          anchor->highest_possible_score;
+      wordmap_gen(gen, anchor);
+    }
+    (void)kwg_root_node_index;
+    return;
+  }
+
   while (gen->anchor_heap.count > 0) {
     if (gen->threshold_exceeded) {
       break;
@@ -3160,12 +3264,22 @@ void gen_record_pass(MoveGen *gen) {
     }
     // Otherwise small_moves[0] already holds the best scoring play.
     break;
+  case MOVE_RECORD_BINGO_EXISTS:
+  case MOVE_RECORD_BINGO_EXISTS_APPROX:
+    // No pass is recorded; the bingo_found field is the signal.
+    break;
   }
 }
 
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen(args->thread_index);
   gen_load_position(gen, args);
+  if ((gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+       gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX) &&
+      !wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    log_fatal("MOVE_RECORD_BINGO_EXISTS{,_APPROX} requires a WMP-enabled "
+              "lexicon");
+  }
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
     if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
@@ -3221,6 +3335,13 @@ void generate_moves(const MoveGenArgs *args) {
           gen->number_of_tiles_in_bag +
               rack_get_total_letters(&gen->opponent_rack) >=
           (RACK_SIZE * 2);
+      const bool is_bingo_exists_mode =
+          gen->move_record_type == MOVE_RECORD_BINGO_EXISTS ||
+          gen->move_record_type == MOVE_RECORD_BINGO_EXISTS_APPROX;
+      // Whether existing cache entries are safe to READ from. Cached
+      // leave_values were written by an earlier regular call that
+      // actually populated leave_map, so reading them is fine even when
+      // this call is BINGO_EXISTS-mode.
       const bool leaves_are_populated =
           (gen->rit_entry != NULL) || check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
@@ -3262,7 +3383,10 @@ void generate_moves(const MoveGenArgs *args) {
             /*subracks_precomputed=*/subrack_cache_hit,
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
-      if (!subrack_cache_hit && leaves_are_populated) {
+      // BINGO_EXISTS enumeration writes garbage leave_values (since
+      // leave_map.leave_values isn't populated for these modes), so
+      // skip the cache write to avoid poisoning later regular calls.
+      if (!subrack_cache_hit && leaves_are_populated && !is_bingo_exists_mode) {
         // Store the newly-computed enumeration and wmp_entry pointers
         // into the cache. Only cache when leaves_are_populated so we
         // don't stash garbage leave_values from an uninitialized leave_map.
@@ -3293,4 +3417,19 @@ void generate_moves(const MoveGenArgs *args) {
     gen_record_scoring_plays(gen);
   }
   gen_record_pass(gen);
+}
+
+bool bingo_exists(const MoveGenArgs *args) {
+  // Override the caller's record type so the wrapper is foolproof.
+  MoveGenArgs args_for_bingos = *args;
+  args_for_bingos.move_record_type = MOVE_RECORD_BINGO_EXISTS;
+  generate_moves(&args_for_bingos);
+  return get_movegen(args->thread_index)->bingo_found;
+}
+
+bool bingo_exists_approx(const MoveGenArgs *args) {
+  MoveGenArgs args_for_bingos = *args;
+  args_for_bingos.move_record_type = MOVE_RECORD_BINGO_EXISTS_APPROX;
+  generate_moves(&args_for_bingos);
+  return get_movegen(args->thread_index)->bingo_found;
 }

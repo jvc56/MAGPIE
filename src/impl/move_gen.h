@@ -278,6 +278,12 @@ typedef struct MoveGen {
   Equity best_leaves[RACK_SIZE + 1];
 
   MachineLetter playthrough_marked[BOARD_DIM];
+
+  // Set to true by MOVE_RECORD_BINGO_EXISTS when the first bingo placement
+  // is found; combined with threshold_exceeded to short-circuit the rest
+  // of generation. Reset at the start of each generate_moves call by
+  // gen_load_position. Read by bingo_exists().
+  bool bingo_found;
 } MoveGen;
 
 typedef struct MoveGenArgs {
@@ -319,6 +325,21 @@ void gen_destroy_cache(void);
 // so far is using a reduced wordlist kwg (done with wordprune) for endgame
 // solving.
 void generate_moves(const MoveGenArgs *args);
+
+// Returns true iff at least one bingo (full-rack tile placement) is
+// playable from the current position with the on-turn player's rack.
+// Internally runs generate_moves with MOVE_RECORD_BINGO_EXISTS (the
+// caller's args.move_record_type is overridden) and short-circuits on
+// the first valid placement found. Requires a WMP-enabled lexicon.
+// The args.move_list field must be non-NULL but its contents are not
+// meaningful afterward.
+bool bingo_exists(const MoveGenArgs *args);
+
+// Like bingo_exists but only considers 7- and 8-letter bingos
+// (anchors with word_length <= 8). Faster than bingo_exists but may
+// return false for some positions where a longer (multi-playthrough)
+// bingo actually exists. Use bingo_exists when correctness matters.
+bool bingo_exists_approx(const MoveGenArgs *args);
 
 MoveGen *get_movegen(int thread_index);
 
