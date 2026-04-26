@@ -39,6 +39,7 @@ OutcomeRecorder *outcome_recorder_create(const char *path) {
                    "opp_st_frac_playable,opp_st_top1,opp_st_top2,"
                    "us_bingo_prob,opp_bingo_prob,"
                    "unplayed_blanks,tiles_unseen,score_diff,"
+                   "us_leave_value,"
                    "win,final_spread\n");
   return rec;
 }
@@ -101,11 +102,11 @@ void outcome_game_buffer_flush(OutcomeGameBuffer *buf, OutcomeRecorder *rec,
     const double win = (spread > 0) ? 1.0 : (spread < 0) ? 0.0 : 0.5;
     const OutcomeFeatures *f = &row->features;
     fprintf(rec->fp,
-            "%.6f,%.3f,%.3f,%.6f,%.3f,%.3f,%.6f,%.6f,%d,%d,%d,%.1f,%d\n",
+            "%.6f,%.3f,%.3f,%.6f,%.3f,%.3f,%.6f,%.6f,%d,%d,%d,%d,%.1f,%d\n",
             f->us_st_frac_playable, f->us_st_top1, f->us_st_top2,
             f->opp_st_frac_playable, f->opp_st_top1, f->opp_st_top2,
             f->us_bingo_prob, f->opp_bingo_prob, f->unplayed_blanks,
-            f->tiles_unseen, f->score_diff, win, spread);
+            f->tiles_unseen, f->score_diff, f->us_leave_value, win, spread);
   }
   cpthread_mutex_unlock(&rec->mutex);
   outcome_game_buffer_reset(buf);

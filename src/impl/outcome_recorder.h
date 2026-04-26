@@ -16,7 +16,7 @@
 //   us_st_frac_playable, us_st_top1, us_st_top2,
 //   opp_st_frac_playable, opp_st_top1, opp_st_top2,
 //   us_bingo_prob, opp_bingo_prob,
-//   unplayed_blanks, tiles_unseen, score_diff,
+//   unplayed_blanks, tiles_unseen, score_diff, us_leave_value,
 //   win, final_spread
 //
 // "win" is 0 / 0.5 / 1 from the recording-moment on-turn player's POV.

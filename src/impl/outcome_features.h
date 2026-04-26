@@ -24,6 +24,7 @@ typedef struct {
   int unplayed_blanks; // count of blanks in the unseen pool
   int tiles_unseen;    // total tiles in unseen pool (bag + opp rack)
   int score_diff;      // us_score - opp_score (signed) at this position
+  int us_leave_value;  // KLV leave value for us's leave (Equity millipoints)
 } OutcomeFeatures;
 
 // Computes all features for the recorded position.

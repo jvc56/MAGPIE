@@ -7,6 +7,7 @@
 
 #include "../def/letter_distribution_defs.h"
 #include "../def/rack_defs.h"
+#include "../ent/klv.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
@@ -75,4 +76,8 @@ void outcome_features_compute(Game *game, MoveList *mv_list, int thread_index,
   const Player *opp_player = game_get_player(game, opp_idx);
   out->score_diff =
       (int)player_get_score(us_player) - (int)player_get_score(opp_player);
+  // KLV value of us's leave (Equity millipoints). 0 if leave is empty
+  // (full bingo) or no KLV is loaded for us.
+  const KLV *us_klv = player_get_klv(us_player);
+  out->us_leave_value = (int)klv_get_leave_value(us_klv, us_leave);
 }
