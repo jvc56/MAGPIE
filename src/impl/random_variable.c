@@ -427,6 +427,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
 
   Equity leftover = 0;
+  // OutcomeModel needs initial_player's leave from their LAST move
+  // played in the rollout. The candidate counts as ply -1 (initial
+  // plays it before the rollout loop), so seed initial_last_leave
+  // from there; subsequent initial-player plies overwrite.
+  const LetterDistribution *ld_for_leave = game_get_ld(game);
+  Rack initial_last_leave;
+  rack_set_dist_size(&initial_last_leave, ld_get_size(ld_for_leave));
+  rack_reset(&initial_last_leave);
+  get_leave_for_move(simmed_play_get_move(simmed_play), game,
+                     &initial_last_leave);
+
   game_set_backup_mode(game, BACKUP_MODE_SIMULATION);
   // For one-ply sims, we need to account for the candidate move's leave value
   if (plies == 1) {
@@ -455,6 +466,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Move *best_play = get_top_equity_move(game, thread_index, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
+    if (player_on_turn_index == simmer->initial_player) {
+      get_leave_for_move(best_play, game, &initial_last_leave);
+    }
+
     play_move(best_play, game, NULL);
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
@@ -475,37 +490,51 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
                               leftover);
 
-  // If the initial player has an OutcomeModel loaded, use it to estimate
-  // the leaf's win probability. Otherwise fall back to the win_pct table.
-  // The model is evaluated from us = simmer->initial_player's POV with
-  // their *current* leaf rack as the "leave" and draw_size = 0; we don't
-  // try to reconstruct the post-move-pre-draw state at the leaf.
+  // OutcomeModel path. Eligibility:
+  //   - Model loaded for initial_player.
+  //   - Even plies (so initial_player is the last to move at the leaf,
+  //     matching the post-move-pre-draw state the model was trained on).
+  //     Odd plies were already rejected at sim setup if a model is
+  //     loaded; the % 2 check is defense in depth.
+  //   - Game still in progress (otherwise the actual outcome is exact;
+  //     we defer to the win_pct path which uses the actual result).
   double wpct;
   const OutcomeModel *model =
       player_get_outcome_model(game_get_player(game, simmer->initial_player));
-  if (model != NULL) {
+  if (model != NULL && plies % 2 == 0 &&
+      game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     const LetterDistribution *ld = game_get_ld(game);
     const int ld_size = ld_get_size(ld);
     const Player *us_player = game_get_player(game, simmer->initial_player);
     const Player *opp_player =
         game_get_player(game, 1 - simmer->initial_player);
-    const Rack *us_leaf_rack = player_get_rack(us_player);
+    const Rack *us_full_rack = player_get_rack(us_player);
     const Rack *opp_rack = player_get_rack(opp_player);
     const Bag *bag = game_get_bag(game);
 
+    // Reconstruct the post-initial-move-pre-draw unseen pool from
+    // initial_player's POV. After play_move drew tiles into us_full_rack
+    // from the bag, so:
+    //   pre-draw_bag[L] = current_bag[L] + (us_full_rack[L] - leave[L])
+    //   pool[L]         = pre-draw_bag[L] + opp_rack[L]
     uint8_t pool[MAX_ALPHABET_SIZE] = {0};
     int pool_size = 0;
     for (int ml = 0; ml < ld_size; ml++) {
       const int n_bag = bag_get_letter(bag, (MachineLetter)ml);
+      const int n_us_full = rack_get_letter(us_full_rack, (MachineLetter)ml);
+      const int n_leave =
+          rack_get_letter(&initial_last_leave, (MachineLetter)ml);
+      const int n_drawn = n_us_full - n_leave;
       const int n_opp = rack_get_letter(opp_rack, (MachineLetter)ml);
-      pool[ml] = (uint8_t)(n_bag + n_opp);
-      pool_size += n_bag + n_opp;
+      pool[ml] = (uint8_t)(n_bag + n_drawn + n_opp);
+      pool_size += n_bag + n_drawn + n_opp;
     }
 
     OutcomeFeatures features;
-    outcome_features_compute(
-        game, move_list, thread_index, simmer->initial_player, us_leaf_rack,
-        pool, pool_size, /*bingo_samples=*/14, simmer_worker->prng, &features);
+    outcome_features_compute(game, move_list, thread_index,
+                             simmer->initial_player, &initial_last_leave, pool,
+                             pool_size, /*bingo_samples=*/14,
+                             simmer_worker->prng, &features);
     OutcomePrediction pred;
     outcome_model_eval(model, &features, &pred);
     wpct = pred.win_prob;

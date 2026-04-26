@@ -6069,19 +6069,27 @@ void config_load_lexicon_dependent_data(Config *config,
   }
 
   // Load outcome models (if specified). -ocm sets both players;
-  // -ocm1 / -ocm2 override per player. NULL leaves the slot empty.
-  const char *ocm_shared_name = config_get_parg_value(config, ARG_TOKEN_OCM, 0);
-  const char *p1_ocm_name = ocm_shared_name;
-  const char *p2_ocm_name = ocm_shared_name;
+  // -ocm1 / -ocm2 override per player. If no -ocm flag is given on
+  // this load, preserve whatever is already loaded (so the model
+  // stays sticky across commands without needing settings persistence).
+  const char *new_ocm_shared = config_get_parg_value(config, ARG_TOKEN_OCM, 0);
+  const char *new_p1_ocm = new_ocm_shared;
+  const char *new_p2_ocm = new_ocm_shared;
   if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_OCM) > 0) {
-    p1_ocm_name = config_get_parg_value(config, ARG_TOKEN_P1_OCM, 0);
+    new_p1_ocm = config_get_parg_value(config, ARG_TOKEN_P1_OCM, 0);
   }
   if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_OCM) > 0) {
-    p2_ocm_name = config_get_parg_value(config, ARG_TOKEN_P2_OCM, 0);
+    new_p2_ocm = config_get_parg_value(config, ARG_TOKEN_P2_OCM, 0);
   }
-  players_data_set(config->players_data, PLAYERS_DATA_TYPE_OCM,
-                   config->data_paths, p1_ocm_name, p2_ocm_name,
-                   config->use_mmap_for_rit, error_stack);
+  const bool any_ocm_arg_present =
+      new_ocm_shared != NULL ||
+      config_get_parg_num_set_values(config, ARG_TOKEN_P1_OCM) > 0 ||
+      config_get_parg_num_set_values(config, ARG_TOKEN_P2_OCM) > 0;
+  if (any_ocm_arg_present) {
+    players_data_set(config->players_data, PLAYERS_DATA_TYPE_OCM,
+                     config->data_paths, new_p1_ocm, new_p2_ocm,
+                     config->use_mmap_for_rit, error_stack);
+  }
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
