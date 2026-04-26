@@ -10,6 +10,7 @@
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
@@ -61,6 +62,28 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
         error_stack, ERROR_STATUS_SIM_GAME_OVER,
         string_duplicate("cannot simulate when the game is already over"));
     return;
+  }
+
+  // OutcomeModel at sim leaves requires even ply counts so the leaf
+  // state matches what the model was trained on (post-move-pre-draw
+  // from the player who just played's POV — that player is
+  // initial_player when plies is even). Reject odd-ply sims when any
+  // player has a model loaded.
+  if ((sim_args->num_plies % 2) != 0) {
+    for (int p = 0; p < 2; p++) {
+      if (player_get_outcome_model(game_get_player(sim_args->game, p)) !=
+          NULL) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_SIM_GAME_OVER,
+            get_formatted_string(
+                "outcome model is loaded for player %d but num_plies=%d "
+                "is odd; the model requires even ply counts so the leaf "
+                "state matches training. Use an even -plies value or "
+                "unload the model.",
+                p + 1, sim_args->num_plies));
+        return;
+      }
+    }
   }
 
   // If the bag is empty, set sample_limit to the number of moves and
