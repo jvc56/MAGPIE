@@ -29,6 +29,11 @@ typedef struct AutoplayArgs {
   double cutoff;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
+  // outcome_model training-data dump. NULL if disabled. When non-NULL,
+  // every tile-placement move emits one CSV row of (features, eventual
+  // win/spread) at recording-moment on-turn POV. See outcome_recorder.h.
+  const char *outcome_dump_path;
+  int outcome_bingo_samples; // bingo_prob sample count per side (default 14)
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

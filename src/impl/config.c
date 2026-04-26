@@ -205,6 +205,8 @@ typedef enum {
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
+  ARG_TOKEN_OUTCOME_DUMP,          // -tdump <path>
+  ARG_TOKEN_OUTCOME_BINGO_SAMPLES, // -tbingosamples <int>
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -1809,6 +1811,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
              " runs one game at a time using all threads for simulation.";
       break;
+    case ARG_TOKEN_OUTCOME_DUMP:
+      usages[0] = "<csv_path>";
+      examples[0] = "training.csv";
+      text = "Outcome-model training dump path. When set, autoplay writes "
+             "one CSV row per tile-placement move with position features "
+             "(single-tile, bingo prob, blanks, etc.) and the eventual "
+             "win/spread for that position's on-turn player.";
+      break;
+    case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
+      usages[0] = "<n>";
+      examples[0] = "14";
+      text = "Number of random racks per side used to sample bingo "
+             "probability for outcome-model training rows. Default 14.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -2959,6 +2975,18 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  autoplay_args->outcome_dump_path =
+      config_get_parg_value(config, ARG_TOKEN_OUTCOME_DUMP, 0);
+  autoplay_args->outcome_bingo_samples = 14;
+  const char *bs_str =
+      config_get_parg_value(config, ARG_TOKEN_OUTCOME_BINGO_SAMPLES, 0);
+  if (bs_str != NULL) {
+    char *end = NULL;
+    long parsed = strtol(bs_str, &end, 10);
+    if (end != bs_str && *end == '\0' && parsed > 0 && parsed < 1000000) {
+      autoplay_args->outcome_bingo_samples = (int)parsed;
+    }
+  }
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -7288,6 +7316,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_INFERENCE_MARGIN, "im1", 1, 1);
   arg(ARG_TOKEN_P2_INFERENCE_MARGIN, "im2", 1, 1);
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
+  arg(ARG_TOKEN_OUTCOME_DUMP, "tdump", 1, 1);
+  arg(ARG_TOKEN_OUTCOME_BINGO_SAMPLES, "tbingosamples", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -7526,6 +7556,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NOTE:
     case ARG_TOKEN_P1_NAME:
     case ARG_TOKEN_P2_NAME:
+    case ARG_TOKEN_OUTCOME_DUMP:
+    case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
+      // outcome dump options are not persisted as settings; they are
+      // per-autoplay-invocation flags.
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       string_builder_add_formatted_string(sb, " -%s ",

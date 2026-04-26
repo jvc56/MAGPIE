@@ -28,8 +28,7 @@ void single_tile_scan(const Game *game, SingleTileScan *scan) {
 
   const Board *board = game_get_board(game);
   const int player_index = game_get_player_on_turn_index(game);
-  const bool kwgs_shared =
-      game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
+  const bool kwgs_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   const int csi = board_get_cross_set_index(kwgs_shared, player_index);
 
   for (int row = 0; row < BOARD_DIM; row++) {
@@ -37,8 +36,8 @@ void single_tile_scan(const Game *game, SingleTileScan *scan) {
       if (!board_is_empty(board, row, col)) {
         continue;
       }
-      const uint64_t cs_h = board_get_cross_set(
-          board, row, col, BOARD_HORIZONTAL_DIRECTION, csi);
+      const uint64_t cs_h =
+          board_get_cross_set(board, row, col, BOARD_HORIZONTAL_DIRECTION, csi);
       const uint64_t cs_v =
           board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, csi);
       const uint64_t playable = cs_h & cs_v;
@@ -51,8 +50,8 @@ void single_tile_scan(const Game *game, SingleTileScan *scan) {
       const BonusSquare bonus = board_get_bonus_square(board, row, col);
       const int letter_mult = bonus_square_get_letter_multiplier(bonus);
       const int word_mult = bonus_square_get_word_multiplier(bonus);
-      const Equity h_run = board_get_cross_score(
-          board, row, col, BOARD_VERTICAL_DIRECTION, csi);
+      const Equity h_run =
+          board_get_cross_score(board, row, col, BOARD_VERTICAL_DIRECTION, csi);
       const Equity v_run = board_get_cross_score(
           board, row, col, BOARD_HORIZONTAL_DIRECTION, csi);
       const int has_h_word = (cs_v != TRIVIAL_CROSS_SET) ? 1 : 0;
@@ -307,9 +306,8 @@ void single_tile_features(const SingleTileScan *scan,
 
   // E[top1] = E[max over rack of best_score[L]] — exact via per-letter
   // order statistics.
-  out->e_top1 =
-      e_max_per_letter(scan->best_score, leave_counts, pool_counts, pool_size,
-                       draw_size, denom_eff, effective_d);
+  out->e_top1 = e_max_per_letter(scan->best_score, leave_counts, pool_counts,
+                                 pool_size, draw_size, denom_eff, effective_d);
 
   // E[top2] proxy: per-square E[max], then 2nd-largest across squares.
   // This is a Jensen-biased approximation of E[2nd-largest per-square
