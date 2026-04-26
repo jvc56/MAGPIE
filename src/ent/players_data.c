@@ -2,6 +2,7 @@
 
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
+#include "../impl/outcome_model.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "klv.h"
@@ -10,8 +11,8 @@
 #include "wmp.h"
 #include <stdlib.h>
 
-static const char *const players_data_type_names[] = {"kwg", "klv", "wordmap",
-                                                      "rack info table"};
+static const char *const players_data_type_names[] = {
+    "kwg", "klv", "wordmap", "rack info table", "outcome model"};
 
 // The PlayersData struct holds all of the
 // information that can be set during configuration.
@@ -111,6 +112,12 @@ RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
       players_data, PLAYERS_DATA_TYPE_RIT, player_index);
 }
 
+OutcomeModel *players_data_get_outcome_model(const PlayersData *players_data,
+                                             int player_index) {
+  return (OutcomeModel *)players_data_get_data(
+      players_data, PLAYERS_DATA_TYPE_OCM, player_index);
+}
+
 void players_data_set_data(PlayersData *players_data,
                            players_data_t players_data_type, int player_index,
                            void *data) {
@@ -141,6 +148,9 @@ void *players_data_create_data(players_data_t players_data_type,
   case PLAYERS_DATA_TYPE_RIT:
     data = rack_info_table_create(data_paths, data_name, use_mmap, error_stack);
     break;
+  case PLAYERS_DATA_TYPE_OCM:
+    data = outcome_model_create(data_paths, data_name, error_stack);
+    break;
   case NUMBER_OF_DATA:
     log_fatal("cannot create invalid players data type");
     break;
@@ -166,6 +176,9 @@ void players_data_destroy_data(PlayersData *players_data,
       break;
     case PLAYERS_DATA_TYPE_RIT:
       rack_info_table_destroy(players_data->data[data_index]);
+      break;
+    case PLAYERS_DATA_TYPE_OCM:
+      outcome_model_destroy(players_data->data[data_index]);
       break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
@@ -211,6 +224,9 @@ const char *players_data_get_data_name(const PlayersData *players_data,
     case PLAYERS_DATA_TYPE_RIT:
       data_name = rack_info_table_get_name(players_data->data[data_index]);
       break;
+    case PLAYERS_DATA_TYPE_OCM:
+      data_name = outcome_model_get_name(players_data->data[data_index]);
+      break;
     case NUMBER_OF_DATA:
       log_fatal("cannot destroy invalid players data type");
       break;
@@ -234,6 +250,10 @@ PlayersData *players_data_create(bool use_wmp) {
         // RIT files are opt-in: callers must explicitly enable them with
         // -rit true (or -rit1/-rit2) since they are large and may not
         // exist for every lexicon.
+        default_use = false;
+      } else if (data_index == PLAYERS_DATA_TYPE_OCM) {
+        // Outcome models are opt-in: only loaded when -ocm/-ocm1/-ocm2
+        // is specified.
         default_use = false;
       }
       players_data_set_use_when_available(players_data, data_index,
@@ -266,7 +286,8 @@ void players_data_destroy(PlayersData *players_data) {
 
 bool players_data_type_is_nullable(players_data_t players_data_type) {
   return players_data_type == PLAYERS_DATA_TYPE_WMP ||
-         players_data_type == PLAYERS_DATA_TYPE_RIT;
+         players_data_type == PLAYERS_DATA_TYPE_RIT ||
+         players_data_type == PLAYERS_DATA_TYPE_OCM;
 }
 
 void players_data_set(PlayersData *players_data,

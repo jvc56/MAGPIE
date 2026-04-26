@@ -502,6 +502,12 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   return wpct;
 }
 
+void simmed_play_push_win_pct_value(SimmedPlay *simmed_play, double wpct) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->win_pct_stat, wpct, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid) {
   sim_results->valid_for_current_game_state = valid;

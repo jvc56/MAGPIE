@@ -2,7 +2,9 @@
 
 #include "outcome_model.h"
 
+#include "../ent/data_filepaths.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -85,6 +87,7 @@ OutcomeModel *outcome_model_create_from_file(const char *path,
   }
 
   OutcomeModel *model = malloc_or_die(sizeof(OutcomeModel));
+  model->name = NULL;
   if (fread(&model->win_bias, sizeof(double), 1, fp) != 1 ||
       fread(model->win_weights, sizeof(double), OUTCOME_MODEL_NUM_FEATURES,
             fp) != OUTCOME_MODEL_NUM_FEATURES ||
@@ -125,7 +128,34 @@ void outcome_model_write_to_file(const OutcomeModel *model, const char *path,
   fclose(fp);
 }
 
-void outcome_model_destroy(OutcomeModel *model) { free(model); }
+OutcomeModel *outcome_model_create(const char *data_paths,
+                                   const char *data_name,
+                                   ErrorStack *error_stack) {
+  char *path = data_filepaths_get_readable_filename(
+      data_paths, data_name, DATA_FILEPATH_TYPE_OUTCOME_MODEL, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(path);
+    return NULL;
+  }
+  OutcomeModel *model = outcome_model_create_from_file(path, error_stack);
+  free(path);
+  if (model != NULL) {
+    model->name = string_duplicate(data_name);
+  }
+  return model;
+}
+
+void outcome_model_destroy(OutcomeModel *model) {
+  if (model == NULL) {
+    return;
+  }
+  free(model->name);
+  free(model);
+}
+
+const char *outcome_model_get_name(const OutcomeModel *m) {
+  return m ? m->name : NULL;
+}
 
 void outcome_model_eval(const OutcomeModel *model,
                         const OutcomeFeatures *features,

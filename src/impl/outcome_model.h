@@ -29,12 +29,17 @@
 
 #define OUTCOME_MODEL_NUM_FEATURES 12
 
-typedef struct {
+typedef struct OutcomeModel {
+  char *name;
   double win_bias;
   double win_weights[OUTCOME_MODEL_NUM_FEATURES];
   double spread_bias;
   double spread_weights[OUTCOME_MODEL_NUM_FEATURES];
 } OutcomeModel;
+
+// Returns the name set at create time (NULL if unset). Static storage
+// in the OutcomeModel; do not free.
+const char *outcome_model_get_name(const OutcomeModel *m);
 
 typedef struct {
   double win_prob; // in [0, 1]
@@ -54,6 +59,13 @@ void outcome_features_to_array(const OutcomeFeatures *features, double *out);
 // NULL.
 OutcomeModel *outcome_model_create_from_file(const char *path,
                                              ErrorStack *error_stack);
+
+// Resolves data_paths/data_name to a concrete .ocm file under the
+// strategy directory and loads it. The model's name field is set to
+// data_name. On error pushes onto error_stack and returns NULL.
+OutcomeModel *outcome_model_create(const char *data_paths,
+                                   const char *data_name,
+                                   ErrorStack *error_stack);
 
 // Writes an .ocm file from the supplied weights. On error pushes onto
 // error_stack and leaves the file in an indeterminate state.
