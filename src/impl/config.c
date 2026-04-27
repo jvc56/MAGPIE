@@ -205,6 +205,8 @@ typedef enum {
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
+  ARG_TOKEN_OUTCOME_DUMP,          // -tdump <path>
+  ARG_TOKEN_OUTCOME_BINGO_SAMPLES, // -tbingosamples <int>
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -1809,6 +1811,21 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
              " runs one game at a time using all threads for simulation.";
       break;
+    case ARG_TOKEN_OUTCOME_DUMP:
+      usages[0] = "<csv_path>";
+      examples[0] = "training.csv";
+      text = "Outcome-model training dump path. When set, autoplay writes "
+             "one CSV row per tile-placement move with position features "
+             "(single-tile, bingo prob, blanks, etc.) and the eventual "
+             "win/spread for that position's on-turn player. Requires "
+             "-wmp true (the bingo-prob feature uses bingo_exists).";
+      break;
+    case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
+      usages[0] = "<n>";
+      examples[0] = "14";
+      text = "Number of random racks per side used to sample bingo "
+             "probability for outcome-model training rows. Default 14.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -2944,7 +2961,8 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args,
                                autoplay_t autoplay_type,
                                const char *num_games_or_min_rack_targets,
-                               int games_before_force_draw_start) {
+                               int games_before_force_draw_start,
+                               ErrorStack *error_stack) {
   autoplay_args->type = autoplay_type;
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
@@ -2959,6 +2977,35 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  autoplay_args->outcome_dump_path =
+      config_get_parg_value(config, ARG_TOKEN_OUTCOME_DUMP, 0);
+  if (autoplay_args->outcome_dump_path != NULL) {
+    // -tdump features include bingo_prob, which requires WMP. Fail fast
+    // here rather than crashing mid-run inside bingo_exists.
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (players_data_get_wmp(config->players_data, player_idx) == NULL) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+            get_formatted_string(
+                "the -tdump option requires WMP loaded for both players "
+                "(player %d has no WMP); pass -wmp true",
+                player_idx + 1));
+        return;
+      }
+    }
+  }
+  autoplay_args->outcome_bingo_samples = 14;
+  const char *bs_str =
+      config_get_parg_value(config, ARG_TOKEN_OUTCOME_BINGO_SAMPLES, 0);
+  if (bs_str != NULL) {
+    string_to_int_or_push_error("tbingosamples", bs_str, 1, 999999,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &autoplay_args->outcome_bingo_samples,
+                                error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -3043,7 +3090,10 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type,
                             num_games_or_min_rack_targets,
-                            games_before_force_draw_start);
+                            games_before_force_draw_start, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -7288,6 +7338,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P1_INFERENCE_MARGIN, "im1", 1, 1);
   arg(ARG_TOKEN_P2_INFERENCE_MARGIN, "im2", 1, 1);
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
+  arg(ARG_TOKEN_OUTCOME_DUMP, "tdump", 1, 1);
+  arg(ARG_TOKEN_OUTCOME_BINGO_SAMPLES, "tbingosamples", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -7526,6 +7578,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NOTE:
     case ARG_TOKEN_P1_NAME:
     case ARG_TOKEN_P2_NAME:
+    case ARG_TOKEN_OUTCOME_DUMP:
+    case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
+      // outcome dump options are not persisted as settings; they are
+      // per-autoplay-invocation flags.
       break;
     case ARG_TOKEN_MULTI_THREADING_MODE:
       string_builder_add_formatted_string(sb, " -%s ",

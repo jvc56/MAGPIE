@@ -35,6 +35,8 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "outcome_features.h"
+#include "outcome_recorder.h"
 #include "rack_list.h"
 #include "simmer.h"
 #include <stdatomic.h>
@@ -102,6 +104,8 @@ typedef struct AutoplaySharedData {
   cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
   LeavegenSharedData *leavegen_shared_data;
+  // Outcome-model training data recorder. NULL when -tdump isn't set.
+  OutcomeRecorder *outcome_recorder;
 } AutoplaySharedData;
 
 typedef struct AutoplayIterOutput {
@@ -297,6 +301,10 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Per-worker outcome buffer + PRNG. Allocated only when shared_data
+  // ->outcome_recorder is non-NULL.
+  OutcomeGameBuffer *outcome_buffer;
+  XoshiroPRNG *outcome_prng;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -335,6 +343,14 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
 
+  autoplay_worker->outcome_buffer = NULL;
+  autoplay_worker->outcome_prng = NULL;
+  if (shared_data->outcome_recorder != NULL) {
+    autoplay_worker->outcome_buffer = outcome_game_buffer_create();
+    autoplay_worker->outcome_prng = prng_create(
+        args->seed + 0x9E3779B97F4A7C15ULL * (uint64_t)worker_index);
+  }
+
   // Only allocate sim structs if at least one of the players running a sim.
   if (ap_args->p1_sim_args.num_plies > 0 ||
       ap_args->p2_sim_args.num_plies > 0) {
@@ -364,6 +380,8 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   error_stack_destroy(autoplay_worker->error_stack);
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
+  outcome_game_buffer_destroy(autoplay_worker->outcome_buffer);
+  prng_destroy(autoplay_worker->outcome_prng);
   free(autoplay_worker);
 }
 
@@ -417,6 +435,11 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
         args->data_paths, klv, num_autoplay_threads, num_gens,
         min_rack_targets);
   }
+  shared_data->outcome_recorder = NULL;
+  if (args->outcome_dump_path != NULL && args->outcome_dump_path[0] != '\0') {
+    shared_data->outcome_recorder =
+        outcome_recorder_create(args->outcome_dump_path);
+  }
   return shared_data;
 }
 
@@ -436,6 +459,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   }
   prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
+  outcome_recorder_destroy(shared_data->outcome_recorder);
   free(shared_data);
 }
 
@@ -713,6 +737,50 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     play_move(&game_runner->previous_move, game_runner->game_one_move_behind,
               NULL);
   }
+
+  // Outcome-model training-data recording. Skip non-tile-placement
+  // moves (passes/exchanges); model is trained on tile-placement
+  // positions only. Skip the second game in a game pair.
+  if (autoplay_worker->shared_data->outcome_recorder != NULL &&
+      game_runner->pair_game_number != 2 &&
+      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // Reconstruct the pre-draw unseen pool from us's POV.
+    // After play_move: us_rack = leave + drawn, bag = post-draw,
+    //   opp_rack = unchanged. So pre-draw bag = bag + drawn.
+    //   pool_pre_draw[L] = bag[L] + (us_rack[L] - leave[L]) + opp_rack[L].
+    const LetterDistribution *ld = game_get_ld(game);
+    const int ld_size = ld_get_size(ld);
+    const Player *us_player = game_get_player(game, player_on_turn_index);
+    const Player *opp_player = game_get_player(game, 1 - player_on_turn_index);
+    const Rack *us_rack_full = player_get_rack(us_player);
+    const Rack *opp_rack_full = player_get_rack(opp_player);
+    const Bag *bag = game_get_bag(game);
+
+    uint8_t pool_counts[MAX_ALPHABET_SIZE] = {0};
+    int pool_size = 0;
+    for (int ml = 0; ml < ld_size; ml++) {
+      const int n_bag = bag_get_letter(bag, (MachineLetter)ml);
+      const int n_us = rack_get_letter(us_rack_full, (MachineLetter)ml);
+      const int n_leave =
+          rack_get_letter(&rare_rack_or_move_leave, (MachineLetter)ml);
+      const int n_opp = rack_get_letter(opp_rack_full, (MachineLetter)ml);
+      pool_counts[ml] = (uint8_t)(n_bag + (n_us - n_leave) + n_opp);
+      pool_size += n_bag + (n_us - n_leave) + n_opp;
+    }
+
+    OutcomeFeatures features;
+    const int bingo_samples = autoplay_worker->args.outcome_bingo_samples > 0
+                                  ? autoplay_worker->args.outcome_bingo_samples
+                                  : 14;
+    outcome_features_compute(
+        game, autoplay_worker->move_lists[player_on_turn_index],
+        autoplay_worker->worker_index, player_on_turn_index,
+        &rare_rack_or_move_leave, pool_counts, pool_size, bingo_samples,
+        autoplay_worker->outcome_prng, &features);
+    outcome_game_buffer_add(autoplay_worker->outcome_buffer, &features,
+                            player_on_turn_index);
+  }
+
   move_copy(&game_runner->previous_move, move);
   game_runner->turn_number++;
   return move;
@@ -830,6 +898,19 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
     // does not use game pairs and therefore does not have a second
     // game runner.
     autoplay_add_game(autoplay_worker, game_runner2, games_are_divergent);
+  }
+
+  // Flush the per-worker outcome buffer with final scores. The buffer
+  // only contains rows from game_runner1 (we skip recording for the
+  // paired second game above).
+  if (autoplay_worker->shared_data->outcome_recorder != NULL) {
+    const Player *p0 = game_get_player(game_runner1->game, 0);
+    const Player *p1 = game_get_player(game_runner1->game, 1);
+    const int p0_score = equity_to_int(player_get_score(p0));
+    const int p1_score = equity_to_int(player_get_score(p1));
+    outcome_game_buffer_flush(autoplay_worker->outcome_buffer,
+                              autoplay_worker->shared_data->outcome_recorder,
+                              p0_score, p1_score);
   }
 }
 
