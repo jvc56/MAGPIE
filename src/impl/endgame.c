@@ -2200,13 +2200,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // Record how many top-K root moves were confirmed this depth (used by the
   // iterative-deepening early-stop check). Only meaningful at the root level.
   if (is_root && best_value != ABDADA_INTERRUPTED) {
-    int confirmed;
-    if (best_value > -LARGE_VALUE) {
-      confirmed = 1;
-    } else {
-      confirmed = 0;
-    }
-    worker->root_topk_n = multi_pv ? topk_n : confirmed;
+    worker->root_topk_n = multi_pv ? topk_n : best_value > -LARGE_VALUE;
   }
 
   if (worker->solver->transposition_table_optim &&
