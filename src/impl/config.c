@@ -1817,7 +1817,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Outcome-model training dump path. When set, autoplay writes "
              "one CSV row per tile-placement move with position features "
              "(single-tile, bingo prob, blanks, etc.) and the eventual "
-             "win/spread for that position's on-turn player.";
+             "win/spread for that position's on-turn player. Requires "
+             "-wmp true (the bingo-prob feature uses bingo_exists).";
       break;
     case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
       usages[0] = "<n>";
@@ -2960,7 +2961,8 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args,
                                autoplay_t autoplay_type,
                                const char *num_games_or_min_rack_targets,
-                               int games_before_force_draw_start) {
+                               int games_before_force_draw_start,
+                               ErrorStack *error_stack) {
   autoplay_args->type = autoplay_type;
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
@@ -2977,14 +2979,31 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->cutoff = config->cutoff;
   autoplay_args->outcome_dump_path =
       config_get_parg_value(config, ARG_TOKEN_OUTCOME_DUMP, 0);
+  if (autoplay_args->outcome_dump_path != NULL) {
+    // -tdump features include bingo_prob, which requires WMP. Fail fast
+    // here rather than crashing mid-run inside bingo_exists.
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (players_data_get_wmp(config->players_data, player_idx) == NULL) {
+        error_stack_push(
+            error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
+            get_formatted_string(
+                "the -tdump option requires WMP loaded for both players "
+                "(player %d has no WMP); pass -wmp true",
+                player_idx + 1));
+        return;
+      }
+    }
+  }
   autoplay_args->outcome_bingo_samples = 14;
   const char *bs_str =
       config_get_parg_value(config, ARG_TOKEN_OUTCOME_BINGO_SAMPLES, 0);
   if (bs_str != NULL) {
-    char *end = NULL;
-    long parsed = strtol(bs_str, &end, 10);
-    if (end != bs_str && *end == '\0' && parsed > 0 && parsed < 1000000) {
-      autoplay_args->outcome_bingo_samples = (int)parsed;
+    string_to_int_or_push_error("tbingosamples", bs_str, 1, 999999,
+                                ERROR_STATUS_CONFIG_LOAD_MALFORMED_INT_ARG,
+                                &autoplay_args->outcome_bingo_samples,
+                                error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
     }
   }
 
@@ -3071,7 +3090,10 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
   args.game_args = &game_args;
   config_fill_autoplay_args(config, &args, autoplay_type,
                             num_games_or_min_rack_targets,
-                            games_before_force_draw_start);
+                            games_before_force_draw_start, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   autoplay(&args, autoplay_results, error_stack);
 }
 

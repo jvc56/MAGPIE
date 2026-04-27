@@ -906,8 +906,8 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
   if (autoplay_worker->shared_data->outcome_recorder != NULL) {
     const Player *p0 = game_get_player(game_runner1->game, 0);
     const Player *p1 = game_get_player(game_runner1->game, 1);
-    const int p0_score = (int)player_get_score(p0);
-    const int p1_score = (int)player_get_score(p1);
+    const int p0_score = equity_to_int(player_get_score(p0));
+    const int p1_score = equity_to_int(player_get_score(p1));
     outcome_game_buffer_flush(autoplay_worker->outcome_buffer,
                               autoplay_worker->shared_data->outcome_recorder,
                               p0_score, p1_score);
