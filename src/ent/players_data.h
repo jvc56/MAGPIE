@@ -9,6 +9,11 @@
 #include "wmp.h"
 #include <stdbool.h>
 
+// Forward-declared to avoid circular include with outcome_model.h
+// (which transitively pulls in game.h → players_data.h).
+struct OutcomeModel;
+typedef struct OutcomeModel OutcomeModel;
+
 typedef struct PlayersData PlayersData;
 
 PlayersData *players_data_create(bool use_wmp);
@@ -26,6 +31,8 @@ KLV *players_data_get_klv(const PlayersData *players_data, int player_index);
 WMP *players_data_get_wmp(const PlayersData *players_data, int player_index);
 RackInfoTable *players_data_get_rack_info_table(const PlayersData *players_data,
                                                 int player_index);
+OutcomeModel *players_data_get_outcome_model(const PlayersData *players_data,
+                                             int player_index);
 
 void players_data_set_move_sort_type(PlayersData *players_data,
                                      int player_index,

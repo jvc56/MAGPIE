@@ -26,6 +26,7 @@ struct Player {
   const KLV *klv;
   const WMP *wmp;
   const RackInfoTable *rack_info_table;
+  const OutcomeModel *outcome_model;
 };
 
 void player_reset(Player *player) {
@@ -44,6 +45,8 @@ void player_update(const PlayersData *players_data, Player *player) {
   player->wmp = players_data_get_wmp(players_data, player->index);
   player->rack_info_table =
       players_data_get_rack_info_table(players_data, player->index);
+  player->outcome_model =
+      players_data_get_outcome_model(players_data, player->index);
 }
 
 Player *player_create(const PlayersData *players_data,
@@ -72,6 +75,7 @@ Player *player_duplicate(const Player *player) {
   new_player->klv = player->klv;
   new_player->wmp = player->wmp;
   new_player->rack_info_table = player->rack_info_table;
+  new_player->outcome_model = player->outcome_model;
   return new_player;
 }
 
@@ -86,6 +90,7 @@ void player_copy(Player *dst, const Player *src) {
   dst->klv = src->klv;
   dst->wmp = src->wmp;
   dst->rack_info_table = src->rack_info_table;
+  dst->outcome_model = src->outcome_model;
 }
 
 void player_destroy(Player *player) {
@@ -123,6 +128,10 @@ const WMP *player_get_wmp(const Player *player) { return player->wmp; }
 
 const RackInfoTable *player_get_rack_info_table(const Player *player) {
   return player->rack_info_table;
+}
+
+const OutcomeModel *player_get_outcome_model(const Player *player) {
+  return player->outcome_model;
 }
 
 void player_set_score(Player *player, Equity score) { player->score = score; }

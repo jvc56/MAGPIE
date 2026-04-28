@@ -25,6 +25,7 @@ const KWG *player_get_kwg(const Player *player);
 const KLV *player_get_klv(const Player *player);
 const WMP *player_get_wmp(const Player *player);
 const RackInfoTable *player_get_rack_info_table(const Player *player);
+const OutcomeModel *player_get_outcome_model(const Player *player);
 
 void player_set_score(Player *player, Equity score);
 void player_set_move_sort_type(Player *player, move_sort_t move_sort_type);

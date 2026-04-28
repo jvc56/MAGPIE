@@ -207,6 +207,9 @@ typedef enum {
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_OUTCOME_DUMP,          // -tdump <path>
   ARG_TOKEN_OUTCOME_BINGO_SAMPLES, // -tbingosamples <int>
+  ARG_TOKEN_OCM,                   // -ocm <name> (shared)
+  ARG_TOKEN_P1_OCM,                // -ocm1 <name>
+  ARG_TOKEN_P2_OCM,                // -ocm2 <name>
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -1825,6 +1828,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "14";
       text = "Number of random racks per side used to sample bingo "
              "probability for outcome-model training rows. Default 14.";
+      break;
+    case ARG_TOKEN_OCM:
+    case ARG_TOKEN_P1_OCM:
+    case ARG_TOKEN_P2_OCM:
+      usages[0] = "<model_name>";
+      examples[0] = "default";
+      text = "Outcome-model file name (without .ocm extension), loaded "
+             "from the strategy directory. -ocm sets both players; "
+             "-ocm1 / -ocm2 set one. When loaded, the simmer uses the "
+             "model's win/spread predictions at sim leaves instead of "
+             "win_pct.";
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
@@ -6076,6 +6090,24 @@ void config_load_lexicon_dependent_data(Config *config,
     return;
   }
 
+  // Load outcome models (if specified). -ocm sets both players;
+  // -ocm1 / -ocm2 override per player. NULL leaves the slot empty.
+  const char *ocm_shared_name = config_get_parg_value(config, ARG_TOKEN_OCM, 0);
+  const char *p1_ocm_name = ocm_shared_name;
+  const char *p2_ocm_name = ocm_shared_name;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P1_OCM) > 0) {
+    p1_ocm_name = config_get_parg_value(config, ARG_TOKEN_P1_OCM, 0);
+  }
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_P2_OCM) > 0) {
+    p2_ocm_name = config_get_parg_value(config, ARG_TOKEN_P2_OCM, 0);
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_OCM,
+                   config->data_paths, p1_ocm_name, p2_ocm_name,
+                   config->use_mmap_for_rit, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Load letter distribution
 
   const char *existing_ld_name = NULL;
@@ -7340,6 +7372,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_MULTI_THREADING_MODE, "mtmode", 1, 1);
   arg(ARG_TOKEN_OUTCOME_DUMP, "tdump", 1, 1);
   arg(ARG_TOKEN_OUTCOME_BINGO_SAMPLES, "tbingosamples", 1, 1);
+  arg(ARG_TOKEN_OCM, "ocm", 1, 1);
+  arg(ARG_TOKEN_P1_OCM, "ocm1", 1, 1);
+  arg(ARG_TOKEN_P2_OCM, "ocm2", 1, 1);
   arg(ARG_TOKEN_PRINT_BOARDS, "printboards", 1, 1);
   arg(ARG_TOKEN_BOARD_COLOR, "boardcolor", 1, 1);
   arg(ARG_TOKEN_BOARD_TILE_GLYPHS, "boardtiles", 1, 1);
@@ -7580,6 +7615,9 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_NAME:
     case ARG_TOKEN_OUTCOME_DUMP:
     case ARG_TOKEN_OUTCOME_BINGO_SAMPLES:
+    case ARG_TOKEN_OCM:
+    case ARG_TOKEN_P1_OCM:
+    case ARG_TOKEN_P2_OCM:
       // outcome dump options are not persisted as settings; they are
       // per-autoplay-invocation flags.
       break;

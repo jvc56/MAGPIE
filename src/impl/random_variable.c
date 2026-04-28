@@ -21,6 +21,8 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include "outcome_features.h"
+#include "outcome_model.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -472,14 +474,52 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
                               leftover);
-  const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover,
-      game_get_game_end_reason(game),
-      // number of tiles unseen to us: bag tiles + tiles on opp rack.
-      bag_get_letters(game_get_bag(game)) +
-          rack_get_total_letters(player_get_rack(
-              game_get_player(game, 1 - simmer->initial_player))),
-      plies % 2);
+
+  // If the initial player has an OutcomeModel loaded, use it to estimate
+  // the leaf's win probability. Otherwise fall back to the win_pct table.
+  // The model is evaluated from us = simmer->initial_player's POV with
+  // their *current* leaf rack as the "leave" and draw_size = 0; we don't
+  // try to reconstruct the post-move-pre-draw state at the leaf.
+  double wpct;
+  const OutcomeModel *model =
+      player_get_outcome_model(game_get_player(game, simmer->initial_player));
+  if (model != NULL) {
+    const LetterDistribution *ld = game_get_ld(game);
+    const int ld_size = ld_get_size(ld);
+    const Player *us_player = game_get_player(game, simmer->initial_player);
+    const Player *opp_player =
+        game_get_player(game, 1 - simmer->initial_player);
+    const Rack *us_leaf_rack = player_get_rack(us_player);
+    const Rack *opp_rack = player_get_rack(opp_player);
+    const Bag *bag = game_get_bag(game);
+
+    uint8_t pool[MAX_ALPHABET_SIZE] = {0};
+    int pool_size = 0;
+    for (int ml = 0; ml < ld_size; ml++) {
+      const int n_bag = bag_get_letter(bag, (MachineLetter)ml);
+      const int n_opp = rack_get_letter(opp_rack, (MachineLetter)ml);
+      pool[ml] = (uint8_t)(n_bag + n_opp);
+      pool_size += n_bag + n_opp;
+    }
+
+    OutcomeFeatures features;
+    outcome_features_compute(
+        game, move_list, thread_index, simmer->initial_player, us_leaf_rack,
+        pool, pool_size, /*bingo_samples=*/14, simmer_worker->prng, &features);
+    OutcomePrediction pred;
+    outcome_model_eval(model, &features, &pred);
+    wpct = pred.win_prob;
+    simmed_play_push_win_pct_value(simmed_play, wpct);
+  } else {
+    wpct = simmed_play_add_win_pct_stat(
+        simmer->win_pcts, simmed_play, spread, leftover,
+        game_get_game_end_reason(game),
+        // number of tiles unseen to us: bag tiles + tiles on opp rack.
+        bag_get_letters(game_get_bag(game)) +
+            rack_get_total_letters(player_get_rack(
+                game_get_player(game, 1 - simmer->initial_player))),
+        plies % 2);
+  }
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);

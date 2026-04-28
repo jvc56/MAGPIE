@@ -45,6 +45,11 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);
 
+// Pushes a precomputed win_pct value onto the play's win_pct stat
+// (with mutex protection). Used when the win_pct comes from somewhere
+// other than the win_pct table (e.g. an OutcomeModel prediction).
+void simmed_play_push_win_pct_value(SimmedPlay *simmed_play, double wpct);
+
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(const double cutoff);

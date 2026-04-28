@@ -8,6 +8,7 @@
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
+#define OUTCOME_MODEL_EXTENSION ".ocm"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
@@ -24,6 +25,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_LEXICON,
   DATA_FILEPATH_TYPE_WORDMAP,
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+  DATA_FILEPATH_TYPE_OUTCOME_MODEL,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,

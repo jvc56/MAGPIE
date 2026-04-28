@@ -39,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "outcome_model_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -125,6 +126,7 @@ static TestEntry test_table[] = {
     {"load", test_load_gcg},
     {"bingoprobs", test_bingo_probs},
     {"singletile", test_single_tile_play},
+    {"ocm", test_outcome_model},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
