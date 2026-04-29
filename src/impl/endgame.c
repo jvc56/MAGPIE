@@ -128,6 +128,10 @@ struct EndgameCtx {
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
+  // Set to 1 by any worker when a depth-0 leaf has the game still ongoing.
+  // Reset to 0 by thread 0 at the start of each depth. Used by the
+  // early-stop check in iterative_deepening to detect fully-solved positions.
+  atomic_int any_leaf_game_unfinished;
   // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
   // Thread 0 sets this after each completed depth (from EBF estimate).
   // All worker threads check it periodically and bail if exceeded.
@@ -189,10 +193,6 @@ struct EndgameCtxWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
-  // Set to true when a depth-0 leaf is reached with the game still ongoing.
-  // Cleared at the start of each iterative-deepening depth. Used by the
-  // single-threaded early-stop check in iterative_deepening.
-  bool any_leaf_game_unfinished;
   // Number of root moves confirmed in the top-K after the root-level search.
   // For multi-PV (num_top_moves > 1) this is topk_n; for single-PV it is 1
   // when any best move was found, else 0.
@@ -359,8 +359,13 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     play_move(move_list->spare_move, game_copy, NULL);
   }
 
-  // Extend PV from TT
+  // Extend PV from TT. Track the separator independently: only advance it for
+  // entries that are TT_EXACT at sufficient depth (remaining plies >= depth
+  // stored in entry). Bounds (TT_UPPER/TT_LOWER) and shallow entries don't
+  // prove the move is best, so they stay on the heuristic side of |.
   int num_moves = pv_line->num_moves;
+  int separator = pv_line->negamax_depth;
+  bool still_exact = true;
 
   while (num_moves < max_depth &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -381,6 +386,14 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     uint64_t tiny_move = ttentry_move(tt_entry);
     if (tiny_move == INVALID_TINY_MOVE) {
       break;
+    }
+
+    if (still_exact) {
+      int remaining_depth = max_depth - num_moves;
+      if (ttentry_flag(tt_entry) != TT_EXACT ||
+          ttentry_depth(tt_entry) < (uint8_t)remaining_depth) {
+        still_exact = false;
+      }
     }
 
     SmallMove sm = {0};
@@ -407,14 +420,15 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
            sizeof(pv_line->moves[num_moves].metadata));
     pv_line->moves[num_moves].metadata.score = move_score;
     num_moves++;
+
+    if (still_exact) {
+      separator = num_moves;
+    }
   }
 
-  // Update negamax_depth to the count of exact moves (initial PV + TT
-  // extension). The | separator in PV display marks the boundary between
-  // exact moves and heuristic greedy continuation. TT-extended moves are
-  // exact (they come from the same search that set the TT entries) and
-  // should appear before |, not after it.
-  pv_line->negamax_depth = num_moves;
+  // The | separator marks the boundary between proven-exact moves and the
+  // heuristic greedy continuation.
+  pv_line->negamax_depth = separator;
 
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
@@ -612,6 +626,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
+  atomic_store(&es->any_leaf_game_unfinished, 0);
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
@@ -727,7 +742,6 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
-  solver_worker->any_leaf_game_unfinished = false;
   solver_worker->root_topk_n = 0;
 
   return solver_worker;
@@ -750,7 +764,6 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->best_pv_value = -LARGE_VALUE;
   worker->completed_depth = 0;
   worker->nodes_since_deadline_check = 0;
-  worker->any_leaf_game_unfinished = false;
   worker->root_topk_n = 0;
 }
 
@@ -1795,8 +1808,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
       // The game has not ended at this leaf. Mark so the iterative-deepening
       // early-stop logic (which requires all leaves to be game-over) does not
-      // fire prematurely.
-      worker->any_leaf_game_unfinished = true;
+      // fire prematurely. Visible to all threads via the solver-level atomic.
+      atomic_store(&worker->solver->any_leaf_game_unfinished, 1);
       if (worker->solver->use_heuristics) {
         return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
                                            on_turn_spread, pv, opp_stuck_frac);
@@ -2359,10 +2372,10 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    worker->any_leaf_game_unfinished = false;
     worker->root_topk_n = 0;
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
+      atomic_store(&worker->solver->any_leaf_game_unfinished, 0);
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
@@ -2540,15 +2553,20 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // This allows early termination when the actual game length is shorter
     // than the requested plies.
     //
-    // In single-threaded mode this check is precise: every leaf is evaluated
-    // directly by this worker. In multi-threaded mode ABDADA defers root
-    // moves to other threads; their leaves cannot be observed here, so the
-    // flag is unreliable and we fall back to ply == plies.
-    int needed = MIN(worker->solver->num_top_moves, worker->n_initial_moves);
-    bool topk_fully_solved = (worker->solver->threads == 1) &&
-                             (!worker->any_leaf_game_unfinished) &&
-                             (worker->root_topk_n >= needed);
-    if (topk_fully_solved || ply == plies) {
+    // Thread 0 owns this check. any_leaf_game_unfinished is a solver-level
+    // atomic set by any worker that sees an ongoing game at a leaf; thread 0
+    // resets it at the start of each depth before calling abdada_negamax.
+    // In ABDADA all workers eventually process all root moves (deferred moves
+    // come back via TT on pass 2), so root_topk_n is accurate per worker.
+    if (worker->thread_index == 0) {
+      int needed = MIN(worker->solver->num_top_moves, worker->n_initial_moves);
+      bool topk_fully_solved =
+          (!atomic_load(&worker->solver->any_leaf_game_unfinished)) &&
+          (worker->root_topk_n >= needed);
+      if (topk_fully_solved || ply == plies) {
+        atomic_store(&worker->solver->search_complete, 1);
+      }
+    } else if (ply == plies) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
