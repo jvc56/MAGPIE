@@ -559,13 +559,14 @@ void test_2lex_informed(void) {
 // leaves remain. Covers single-thread, multi-thread, single-PV, and etopk.
 void test_topk_fully_solved(void) {
   // --- Case 1: game ends before eplies (early-stop must fire) ---
-  // AEEIRUW/V: 7+1=8 tiles. Every branch ends within a handful of plies.
-  // Requesting eplies=25 forces topk_fully_solved to stop the search early.
-  // Score = 72, verified by test_eldar_v_stick with eplies=3.
+  // BGIV/DEHILOR: 4+7=11 tiles. Score=11, confirmed by test_solve_standard
+  // at eplies=4. With eplies=10, early-stop fires at depth 7-8 (< 10),
+  // well before the depth limit. The search completes in seconds even
+  // single-threaded because the 11-tile game tree is small.
   const char *short_cgp =
-      "cgp 4EXODE6/1DOFF1KERATIN1U/1OHO8YEN/1POOJA1B3MEWS/5SQUINTY2A/"
-      "4RHINO1e3V/2B4C2R3E/GOAT1D1E2ZIN1d/1URACILS2E4/1PIG1S4T4/2L2R4T4/"
-      "2L2A1GENII3/2A2T1L7/5E1A7/5D1M7 AEEIRUW/V 410/409 0 -lex CSW21;";
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
 
   typedef struct {
     int threads;
@@ -584,12 +585,13 @@ void test_topk_fully_solved(void) {
     EndgameArgs args = {0};
     args.thread_control = config_get_thread_control(config);
     args.game = config_get_game(config);
-    args.plies = 25;
+    args.plies = 10;
     args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
     args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
     args.num_threads = cases[ci].threads;
     args.num_top_moves = cases[ci].topk;
-    args.use_heuristics = false;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
     args.seed = 42;
 
     EndgameResults *results = config_get_endgame_results(config);
@@ -603,12 +605,10 @@ void test_topk_fully_solved(void) {
     printf("topk_fully_solved early-stop (threads=%d topk=%d): "
            "score=%d completed_depth=%d\n",
            cases[ci].threads, cases[ci].topk, pv->score, completed_depth);
-    // Correct score: 72.
-    assert(pv->score == 72);
-    // Early-stop must have fired: completed_depth < eplies=25.
-    // With 8 tiles at most 1 tile/turn, the game ends in ≤ 8 plies.
-    assert(completed_depth > 0);
-    assert(completed_depth < 25);
+    // Correct score: 11 (matches test_solve_standard at eplies=4).
+    assert(pv->score == 11);
+    // Early-stop must have fired (completed_depth < eplies=10).
+    assert(completed_depth > 0 && completed_depth < 10);
 
     endgame_ctx_destroy(ctx);
     error_stack_destroy(error_stack);
