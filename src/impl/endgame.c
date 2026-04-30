@@ -1810,8 +1810,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // early-stop logic (which requires all leaves to be game-over) does not
       // fire prematurely. Visible to all threads via the solver-level atomic.
       int expected_unfinished = 0;
-      atomic_compare_exchange_strong(&worker->solver->any_leaf_game_unfinished,
-                                     &expected_unfinished, 1);
+      if (!atomic_compare_exchange_strong(
+              &worker->solver->any_leaf_game_unfinished, &expected_unfinished,
+              1) &&
+          expected_unfinished != 1) {
+        log_fatal("unexpected any_leaf_game_unfinished value %d when setting",
+                  expected_unfinished);
+      }
       if (worker->solver->use_heuristics) {
         return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
                                            on_turn_spread, pv, opp_stuck_frac);
@@ -2378,8 +2383,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
       int expected_finished = 1;
-      atomic_compare_exchange_strong(&worker->solver->any_leaf_game_unfinished,
-                                     &expected_finished, 0);
+      if (!atomic_compare_exchange_strong(
+              &worker->solver->any_leaf_game_unfinished, &expected_finished,
+              0) &&
+          expected_finished != 0) {
+        log_fatal("unexpected any_leaf_game_unfinished value %d when resetting",
+                  expected_finished);
+      }
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
