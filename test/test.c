@@ -22,9 +22,14 @@
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
+#include "flat_lex_maker_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
+#include "gpu_cross_test.h"
+#include "gpu_game_bench_test.h"
+#include "gpu_match_test.h"
+#include "gpu_top1_test.h"
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
@@ -38,6 +43,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "movegen_bench_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -54,6 +60,7 @@
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
+#include "wmpg_maker_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
@@ -143,6 +150,15 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"movegenbench", test_movegen_bench},
+    {"flatlex", test_flat_lex_maker},
+    {"gpumatch", test_gpu_match},
+    {"gpucross", test_gpu_cross},
+    {"gpucross_real", test_gpu_cross_real},
+    {"gpucross_validate", test_gpu_cross_validate},
+    {"gputop1", test_gpu_top1},
+    {"gpubench_game", test_gpu_game_bench},
+    {"wmpg", test_wmpg_maker},
     {"ap_rit", test_autoplay_rit_correctness},
     {NULL, NULL} // Sentinel value to mark end of array
 };

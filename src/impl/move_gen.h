@@ -310,6 +310,14 @@ typedef struct MoveGenArgs {
   // Input: initial set of known-playable tiles for MOVE_RECORD_TILES_PLAYED.
   // Movegen ORs further discoveries in. Default 0 (no known tiles).
   uint64_t initial_tiles_bv;
+  // Optional: if non-NULL, generate moves as if the on-turn player held this
+  // rack instead of the rack stored on the game's Player object. The bag is
+  // NOT modified, and consistency with the bag is NOT checked — caller is
+  // responsible for ensuring the override is sensible. Used for benchmarking
+  // and analysis where you want to ask "what would generate_moves return for
+  // arbitrary rack X at this board state?" without disturbing the game's
+  // actual player rack. Defaults to NULL (uses player's rack).
+  const Rack *override_rack;
 } MoveGenArgs;
 
 void gen_destroy_cache(void);

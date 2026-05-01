@@ -77,6 +77,12 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
+UNAME_S := $(shell uname -s)
+METAL_ENABLED := 0
+ifeq ($(UNAME_S),Darwin)
+  METAL_ENABLED := 1
+endif
+
 .PHONY: all clean iwyu
 
 all: magpie magpie_test
@@ -87,8 +93,18 @@ magpie_so: $(OBJ_SRC)
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
-magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
-	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+ifeq ($(METAL_ENABLED),1)
+MAGPIE_TEST_METAL_OBJ := obj/src/metal/movegen_impl.o
+MAGPIE_TEST_METAL_LDFLAGS := -framework Metal -framework Foundation
+MAGPIE_TEST_METAL_DEPS := bin/movegen.metallib
+else
+MAGPIE_TEST_METAL_OBJ :=
+MAGPIE_TEST_METAL_LDFLAGS :=
+MAGPIE_TEST_METAL_DEPS :=
+endif
+
+magpie_test: $(OBJ_SRC) $(OBJ_TEST) $(MAGPIE_TEST_METAL_OBJ) $(MAGPIE_TEST_METAL_DEPS) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(OBJ_TEST) $(MAGPIE_TEST_METAL_OBJ) $(LDLIBS) $(MAGPIE_TEST_METAL_LDFLAGS) -o $(BIN_DIR)/$@
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) -c $< -o $@
@@ -102,6 +118,27 @@ $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) 
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
+
+ifeq ($(METAL_ENABLED),1)
+METAL_SRC_DIR := src/metal
+METAL_OBJ_DIR := $(OBJ_DIR)/$(METAL_SRC_DIR)
+METAL_HOST_FLAGS := -fobjc-arc -O2 -Wall -Wno-trigraphs
+
+$(METAL_OBJ_DIR)/%.o: $(METAL_SRC_DIR)/%.m | $(SRC_OBJ_SUBDIRS)
+	clang -ObjC $(METAL_HOST_FLAGS) -c $< -o $@
+
+$(METAL_OBJ_DIR)/%.air: $(METAL_SRC_DIR)/%.metal | $(SRC_OBJ_SUBDIRS)
+	xcrun -sdk macosx metal -std=metal3.1 -c $< -o $@
+
+$(BIN_DIR)/%.metallib: $(METAL_OBJ_DIR)/%.air | $(BIN_DIR)
+	xcrun -sdk macosx metallib $< -o $@
+
+metal_hello: $(METAL_OBJ_DIR)/hello.o $(BIN_DIR)/hello.metallib | $(BIN_DIR)
+	clang -framework Metal -framework Foundation $(METAL_OBJ_DIR)/hello.o -o $(BIN_DIR)/$@
+
+metal_movegen: $(METAL_OBJ_DIR)/movegen.o $(METAL_OBJ_DIR)/movegen_impl.o $(BIN_DIR)/movegen.metallib | $(BIN_DIR)
+	clang -framework Metal -framework Foundation $(METAL_OBJ_DIR)/movegen.o $(METAL_OBJ_DIR)/movegen_impl.o -o $(BIN_DIR)/$@
+endif
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR)
