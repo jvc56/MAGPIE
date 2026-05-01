@@ -6,8 +6,7 @@
 // bag's tiles, then runs three independently-timed loops:
 //
 //   1. CPU MAGPIE generate_moves on each rack individually
-//   2. GPU brute-force top-1 (canonical) on the batch of all racks
-//   3. GPU WMPG top-1 (canonical) on the batch of all racks
+//   2. GPU WMPG top-1 (canonical) on the batch of all racks
 //
 // Reports per-rack µs for each loop at every ply.
 //
@@ -38,7 +37,6 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/wmp.h"
 #include "../src/impl/config.h"
-#include "../src/impl/flat_lex_maker.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/wmpg_maker.h"
@@ -304,57 +302,14 @@ void test_gpu_game_bench(void) {
   game_reset(game);
   draw_starting_racks(game);
 
-  // Flatten lexicon for the brute-force GPU kernels.
-  uint8_t *flatlex_bytes = NULL;
-  size_t flatlex_size = 0;
-  ErrorStack *es = error_stack_create();
-  flat_lex_build(kwg, ld, &flatlex_bytes, &flatlex_size, es);
-  if (!error_stack_is_empty(es)) {
-    error_stack_print_and_reset(es);
-    log_fatal("flat_lex_build failed\n");
-  }
-  error_stack_destroy(es);
-  const int max_len_plus_one = flatlex_bytes[6];
-  const uint32_t total_words =
-      (uint32_t)flatlex_bytes[8] | ((uint32_t)flatlex_bytes[9] << 8) |
-      ((uint32_t)flatlex_bytes[10] << 16) | ((uint32_t)flatlex_bytes[11] << 24);
-  uint32_t per_length_count[MAX_KWG_STRING_LENGTH] = {0};
-  size_t off = 16;
-  for (int len = 0; len < max_len_plus_one; len++) {
-    per_length_count[len] = (uint32_t)flatlex_bytes[off] |
-                            ((uint32_t)flatlex_bytes[off + 1] << 8) |
-                            ((uint32_t)flatlex_bytes[off + 2] << 16) |
-                            ((uint32_t)flatlex_bytes[off + 3] << 24);
-    off += 4;
-  }
-  const size_t bitracks_block_offset = 16 + (size_t)max_len_plus_one * 4;
-  const uint8_t *all_bitracks = flatlex_bytes + bitracks_block_offset;
-  const size_t letters_block_offset =
-      bitracks_block_offset + (size_t)total_words * BITRACK_BYTES;
-  const uint8_t *all_letters = flatlex_bytes + letters_block_offset;
-  const size_t total_letters_bytes = flatlex_size - letters_block_offset;
-  uint32_t first_word_for_length[MAX_KWG_STRING_LENGTH] = {0};
-  size_t letters_byte_offset_for[MAX_KWG_STRING_LENGTH] = {0};
-  uint32_t cum_words = 0;
-  size_t cum_letters = 0;
-  for (int len = 0; len < max_len_plus_one; len++) {
-    first_word_for_length[len] = cum_words;
-    letters_byte_offset_for[len] = cum_letters;
-    cum_words += per_length_count[len];
-    cum_letters += (size_t)per_length_count[len] * (size_t)len;
-  }
-
 #if HAVE_GPU
   if (!gpu_matcher_is_available()) {
     printf("  GPU not available, skipping\n");
-    free(flatlex_bytes);
     game_destroy(game);
     config_destroy(config);
     return;
   }
-  GpuMatcher *m =
-      gpu_matcher_create("bin/movegen.metallib", all_bitracks, total_words,
-                         all_letters, total_letters_bytes);
+  GpuMatcher *m = gpu_matcher_create("bin/movegen.metallib");
   if (m == NULL) {
     log_fatal("gpu_matcher_create failed\n");
   }
@@ -371,12 +326,9 @@ void test_gpu_game_bench(void) {
     log_fatal("gpu_matcher_load_wmpg failed\n");
   }
 #else
-  (void)all_bitracks;
-  (void)all_letters;
-  (void)total_letters_bytes;
+  (void)kwg;
   (void)wmp;
   printf("  GPU not built (non-Apple), skipping\n");
-  free(flatlex_bytes);
   game_destroy(game);
   config_destroy(config);
   return;
@@ -405,12 +357,12 @@ void test_gpu_game_bench(void) {
          "each turn — apples-to-apples diverse racks on both sides)\n");
   printf("  CPU column: generate_moves with MoveGenArgs.override_rack on "
          "each of n_rack distinct enumerated racks\n");
-  printf("  BF/WMPG columns: top-1 over n_rack DISTINCT enumerated racks "
-         "in a single batched dispatch (per-rack leave tables)\n");
-  printf("  Enumeration includes 0/1/2-blank racks; WMPG uses blank-1/blank-2 "
-         "sub-tables, BF subset-check still doesn't handle blanks\n");
-  printf("  %-3s %-5s %-7s %-7s %-9s %-13s %-13s %-13s\n", "trn", "slot",
-         "rack", "n_rack", "score", "cpu us/r", "BF us/r", "WMPG us/r");
+  printf("  WMPG column: top-1 over n_rack DISTINCT enumerated racks in a "
+         "single batched dispatch (per-rack leave tables)\n");
+  printf("  Enumeration includes 0/1/2-blank racks; WMPG uses the blank-1 "
+         "and blank-2 sub-tables for blank substitution\n");
+  printf("  %-3s %-5s %-7s %-7s %-9s %-13s %-13s\n", "trn", "slot", "rack",
+         "n_rack", "score", "cpu us/r", "WMPG us/r");
 
   const int max_turns = 30;
   // With batched dispatch (single kernel call covers all B distinct racks
@@ -423,7 +375,6 @@ void test_gpu_game_bench(void) {
 
   // Aggregates
   double cpu_total_us = 0;
-  double bf_total_us = 0;
   double wmpg_total_us = 0;
   uint64_t total_racks = 0;
   int valid_turns = 0;
@@ -607,7 +558,6 @@ void test_gpu_game_bench(void) {
         bag, rack_real, alpha, batch_racks, max_racks_per_turn);
 
     double cpu_us_per_rack = -1;
-    double bf_us_per_rack = -1;
     double wmpg_us_per_rack = -1;
     if (slot_count > 0 && n_racks > 0) {
       // 1) CPU MAGPIE per-rack loop. Use MoveGenArgs.override_rack to make
@@ -655,41 +605,8 @@ void test_gpu_game_bench(void) {
                           max_leaves_per_rack);
       }
 
-      // 2) GPU brute-force top-1 (canonical) — single batched dispatch per
-      // slot per pass, all n_racks distinct racks at once.
-      const double t_bf_0 = mono_s();
-      gpu_matcher_top1_reset(m, n_racks);
-      for (int s = 0; s < slot_count; s++) {
-        if (cache[s].length == 0) {
-          continue;
-        }
-        const SlotCache *sc = &cache[s];
-        gpu_matcher_top1_pass1(
-            m, first_word_for_length[sc->length], per_length_count[sc->length],
-            letters_byte_offset_for[sc->length], (uint32_t)sc->length,
-            batch_racks, n_racks, sc->cross_sets, sc->fixed_letters,
-            sc->fixed_bitrack, letter_scores_eq, sc->position_multipliers,
-            sc->base_score_eq, sc->bingo_eq, leave_used, leave_values,
-            max_leaves_per_rack, max_leaves_per_rack);
-      }
-      for (int s = 0; s < slot_count; s++) {
-        if (cache[s].length == 0) {
-          continue;
-        }
-        const SlotCache *sc = &cache[s];
-        gpu_matcher_top1_pass2(
-            m, first_word_for_length[sc->length], per_length_count[sc->length],
-            letters_byte_offset_for[sc->length], (uint32_t)sc->length,
-            batch_racks, n_racks, sc->cross_sets, sc->fixed_letters,
-            sc->fixed_bitrack, letter_scores_eq, sc->position_multipliers,
-            sc->base_score_eq, sc->bingo_eq, leave_used, leave_values,
-            max_leaves_per_rack, max_leaves_per_rack, (uint32_t)sc->row,
-            (uint32_t)sc->col, (uint32_t)sc->dir, GPU_TOP1_TIEBREAK_CANONICAL);
-      }
-      const double t_bf = mono_s() - t_bf_0;
-      bf_us_per_rack = 1e6 * t_bf / (double)n_racks;
-
-      // 3) GPU WMPG top-1 (canonical) — same single batched dispatch shape.
+      // 2) GPU WMPG top-1 (canonical) — single batched dispatch per slot
+      // per pass, all n_racks distinct racks at once.
       const double t_wm_0 = mono_s();
       gpu_matcher_top1_reset(m, n_racks);
       for (int s = 0; s < slot_count; s++) {
@@ -724,7 +641,6 @@ void test_gpu_game_bench(void) {
       free(leave_values);
 
       cpu_total_us += t_cpu * 1e6;
-      bf_total_us += t_bf * 1e6;
       wmpg_total_us += t_wm * 1e6;
       total_racks += n_racks;
       valid_turns++;
@@ -735,9 +651,8 @@ void test_gpu_game_bench(void) {
     char score_buf[16];
     snprintf(score_buf, sizeof(score_buf), "%d-%d", score_p0, score_p1);
     if (slot_count > 0 && n_racks > 0) {
-      printf("  %-3d %-5d %-7s %-7u %-9s %11.1f %11.1f %11.1f\n", turn,
-             slot_count, rack_str, n_racks, score_buf, cpu_us_per_rack,
-             bf_us_per_rack, wmpg_us_per_rack);
+      printf("  %-3d %-5d %-7s %-7u %-9s %11.1f %11.1f\n", turn, slot_count,
+             rack_str, n_racks, score_buf, cpu_us_per_rack, wmpg_us_per_rack);
     } else {
       printf("  %-3d %-5d %-7s %-7u %-9s         (skip: no slots or racks)\n",
              turn, slot_count, rack_str, n_racks, score_buf);
@@ -765,23 +680,16 @@ void test_gpu_game_bench(void) {
   if (valid_turns > 0 && total_racks > 0) {
     printf("    CPU MAGPIE generate_moves:    %9.1f us/rack (sum %.1f s)\n",
            cpu_total_us / (double)total_racks, cpu_total_us / 1e6);
-    printf("    GPU brute-force top-1:        %9.1f us/rack (sum %.1f s, "
-           "%.2fx vs CPU)\n",
-           bf_total_us / (double)total_racks, bf_total_us / 1e6,
-           cpu_total_us / bf_total_us);
     printf("    GPU WMPG top-1:               %9.1f us/rack (sum %.1f s, "
-           "%.2fx vs CPU, %.2fx vs BF)\n",
+           "%.2fx vs CPU)\n",
            wmpg_total_us / (double)total_racks, wmpg_total_us / 1e6,
-           cpu_total_us / wmpg_total_us, bf_total_us / wmpg_total_us);
+           cpu_total_us / wmpg_total_us);
   }
-  printf("\n  NOTE: enumeration includes 0/1/2-blank racks; WMPG kernel "
-         "uses blank-1/blank-2 sub-tables for blank substitution.\n");
 
   free(batch_racks);
   free(wmpg_bytes);
   gpu_matcher_destroy(m);
   move_list_destroy(move_list);
-  free(flatlex_bytes);
   game_destroy(game);
   config_destroy(config);
 #endif

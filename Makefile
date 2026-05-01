@@ -132,12 +132,6 @@ $(METAL_OBJ_DIR)/%.air: $(METAL_SRC_DIR)/%.metal | $(SRC_OBJ_SUBDIRS)
 
 $(BIN_DIR)/%.metallib: $(METAL_OBJ_DIR)/%.air | $(BIN_DIR)
 	xcrun -sdk macosx metallib $< -o $@
-
-metal_hello: $(METAL_OBJ_DIR)/hello.o $(BIN_DIR)/hello.metallib | $(BIN_DIR)
-	clang -framework Metal -framework Foundation $(METAL_OBJ_DIR)/hello.o -o $(BIN_DIR)/$@
-
-metal_movegen: $(METAL_OBJ_DIR)/movegen.o $(METAL_OBJ_DIR)/movegen_impl.o $(BIN_DIR)/movegen.metallib | $(BIN_DIR)
-	clang -framework Metal -framework Foundation $(METAL_OBJ_DIR)/movegen.o $(METAL_OBJ_DIR)/movegen_impl.o -o $(BIN_DIR)/$@
 endif
 
 clean:

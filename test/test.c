@@ -22,13 +22,10 @@
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
-#include "flat_lex_maker_test.h"
 #include "game_test.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
-#include "gpu_cross_test.h"
 #include "gpu_game_bench_test.h"
-#include "gpu_match_test.h"
 #include "gpu_top1_test.h"
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
@@ -151,11 +148,6 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"movegenbench", test_movegen_bench},
-    {"flatlex", test_flat_lex_maker},
-    {"gpumatch", test_gpu_match},
-    {"gpucross", test_gpu_cross},
-    {"gpucross_real", test_gpu_cross_real},
-    {"gpucross_validate", test_gpu_cross_validate},
     {"gputop1", test_gpu_top1},
     {"gpubench_game", test_gpu_game_bench},
     {"wmpg", test_wmpg_maker},

@@ -15,21 +15,14 @@
 struct GpuMatcher {
   void *device;                              // id<MTLDevice>
   void *queue;                               // id<MTLCommandQueue>
-  void *count_pipeline;                      // id<MTLComputePipelineState>
-  void *count_with_cross_pipeline;           // id<MTLComputePipelineState>
-  void *count_with_playthrough_pipeline;     // id<MTLComputePipelineState>
-  void *score_with_playthrough_pipeline;     // id<MTLComputePipelineState>
-  void *equity_with_playthrough_pipeline;    // id<MTLComputePipelineState>
-  void *top1_eqmp_pipeline;                  // id<MTLComputePipelineState>
-  void *top1_loc_pipeline;                   // id<MTLComputePipelineState>
+  void *count_wmpg_pipeline;                 // id<MTLComputePipelineState>
+  void *equity_wmpg_pipeline;                // id<MTLComputePipelineState>
+  void *top1_eqmp_wmpg_pipeline;             // id<MTLComputePipelineState>
+  void *top1_loc_wmpg_pipeline;              // id<MTLComputePipelineState>
   void *best_eq_mp_buf;                      // id<MTLBuffer>, B int32s
   void *best_loc_buf;                        // id<MTLBuffer>, B uint32s
   uint32_t top1_cap_b;
   double last_gpu_us;                        // GPU exec time of last dispatch
-  void *bitracks_buf;                        // id<MTLBuffer> lexicon bitracks
-  void *letters_buf;                         // id<MTLBuffer> letters or nil
-  uint32_t total_words;
-  size_t total_letters_bytes;
   void *racks_buf;                           // id<MTLBuffer>, grow-on-demand
   void *counts_buf;                          // id<MTLBuffer>, grow-on-demand
   uint32_t cap_b;
@@ -40,23 +33,20 @@ struct GpuMatcher {
   void *leave_values_buf;                    // id<MTLBuffer>
   size_t leave_used_cap_bytes;
   size_t leave_values_cap_bytes;
-  // WMPG (WMP-on-GPU) state
-  void *count_wmpg_pipeline;                 // id<MTLComputePipelineState>
-  void *equity_wmpg_pipeline;                // id<MTLComputePipelineState>
-  void *top1_eqmp_wmpg_pipeline;             // id<MTLComputePipelineState>
-  void *top1_loc_wmpg_pipeline;              // id<MTLComputePipelineState>
+  // WMPG (WMP-on-GPU) hash table: full WMPG file uploaded as one buffer,
+  // with per-length byte offsets recorded so dispatch can bind sub-views.
   void *wmpg_buf;                            // id<MTLBuffer>, full WMPG file
   uint32_t wmpg_max_len_plus_one;
-  // Word-table (blank-0) per-length offsets (existing).
+  // Word-table (blank-0) per-length offsets.
   uint32_t wmpg_num_buckets[16];
   uint32_t wmpg_bucket_starts_byte_offset[16];
   uint32_t wmpg_entries_byte_offset[16];
   uint32_t wmpg_uninlined_letters_byte_offset[16];
-  // Blank-1 (single-blank) table per-length offsets (v2).
+  // Blank-1 (single-blank) table per-length offsets.
   uint32_t wmpg_b1_num_buckets[16];
   uint32_t wmpg_b1_bucket_starts_byte_offset[16];
   uint32_t wmpg_b1_entries_byte_offset[16];
-  // Blank-2 (double-blank) table per-length offsets (v2).
+  // Blank-2 (double-blank) table per-length offsets.
   uint32_t wmpg_b2_num_buckets[16];
   uint32_t wmpg_b2_bucket_starts_byte_offset[16];
   uint32_t wmpg_b2_entries_byte_offset[16];
@@ -76,12 +66,8 @@ bool gpu_matcher_is_available(void) {
   }
 }
 
-GpuMatcher *gpu_matcher_create(const char *metallib_path,
-                               const uint8_t *bitracks_data,
-                               uint32_t total_words,
-                               const uint8_t *letters_data,
-                               size_t total_letters_bytes) {
-  if (metallib_path == NULL || bitracks_data == NULL || total_words == 0) {
+GpuMatcher *gpu_matcher_create(const char *metallib_path) {
+  if (metallib_path == NULL) {
     return NULL;
   }
   @autoreleasepool {
@@ -99,19 +85,6 @@ GpuMatcher *gpu_matcher_create(const char *metallib_path,
               err ? [[err localizedDescription] UTF8String] : "(no error)");
       return NULL;
     }
-    id<MTLFunction> countFn = [lib newFunctionWithName:@"count_kernel"];
-    id<MTLFunction> countCrossFn =
-        [lib newFunctionWithName:@"count_with_cross_kernel"];
-    id<MTLFunction> countPlaythroughFn =
-        [lib newFunctionWithName:@"count_with_playthrough_kernel"];
-    id<MTLFunction> scoreFn =
-        [lib newFunctionWithName:@"score_with_playthrough_kernel"];
-    id<MTLFunction> equityFn =
-        [lib newFunctionWithName:@"equity_with_playthrough_kernel"];
-    id<MTLFunction> top1EqmpFn =
-        [lib newFunctionWithName:@"top1_eqmp_kernel"];
-    id<MTLFunction> top1LocFn =
-        [lib newFunctionWithName:@"top1_loc_kernel"];
     id<MTLFunction> countWmpgFn =
         [lib newFunctionWithName:@"count_wmpg_kernel"];
     id<MTLFunction> equityWmpgFn =
@@ -120,28 +93,11 @@ GpuMatcher *gpu_matcher_create(const char *metallib_path,
         [lib newFunctionWithName:@"top1_eqmp_wmpg_kernel"];
     id<MTLFunction> top1LocWmpgFn =
         [lib newFunctionWithName:@"top1_loc_wmpg_kernel"];
-    if (countFn == nil || countCrossFn == nil ||
-        countPlaythroughFn == nil || scoreFn == nil || equityFn == nil ||
-        top1EqmpFn == nil || top1LocFn == nil || countWmpgFn == nil ||
-        equityWmpgFn == nil || top1EqmpWmpgFn == nil ||
-        top1LocWmpgFn == nil) {
+    if (countWmpgFn == nil || equityWmpgFn == nil ||
+        top1EqmpWmpgFn == nil || top1LocWmpgFn == nil) {
       fprintf(stderr, "gpu_matcher: kernel not found in metallib\n");
       return NULL;
     }
-    id<MTLComputePipelineState> ps =
-        [device newComputePipelineStateWithFunction:countFn error:&err];
-    id<MTLComputePipelineState> psCross =
-        [device newComputePipelineStateWithFunction:countCrossFn error:&err];
-    id<MTLComputePipelineState> psPlaythrough = [device
-        newComputePipelineStateWithFunction:countPlaythroughFn error:&err];
-    id<MTLComputePipelineState> psScore =
-        [device newComputePipelineStateWithFunction:scoreFn error:&err];
-    id<MTLComputePipelineState> psEquity =
-        [device newComputePipelineStateWithFunction:equityFn error:&err];
-    id<MTLComputePipelineState> psTop1Eqmp =
-        [device newComputePipelineStateWithFunction:top1EqmpFn error:&err];
-    id<MTLComputePipelineState> psTop1Loc =
-        [device newComputePipelineStateWithFunction:top1LocFn error:&err];
     id<MTLComputePipelineState> psCountWmpg =
         [device newComputePipelineStateWithFunction:countWmpgFn error:&err];
     id<MTLComputePipelineState> psEquityWmpg =
@@ -150,9 +106,7 @@ GpuMatcher *gpu_matcher_create(const char *metallib_path,
         [device newComputePipelineStateWithFunction:top1EqmpWmpgFn error:&err];
     id<MTLComputePipelineState> psTop1LocWmpg =
         [device newComputePipelineStateWithFunction:top1LocWmpgFn error:&err];
-    if (ps == nil || psCross == nil || psPlaythrough == nil ||
-        psScore == nil || psEquity == nil || psTop1Eqmp == nil ||
-        psTop1Loc == nil || psCountWmpg == nil || psEquityWmpg == nil ||
+    if (psCountWmpg == nil || psEquityWmpg == nil ||
         psTop1EqmpWmpg == nil || psTop1LocWmpg == nil) {
       fprintf(stderr, "gpu_matcher: pipeline create failed: %s\n",
               err ? [[err localizedDescription] UTF8String] : "(no error)");
@@ -160,51 +114,13 @@ GpuMatcher *gpu_matcher_create(const char *metallib_path,
     }
     id<MTLCommandQueue> queue = [device newCommandQueue];
 
-    const size_t lex_bytes = (size_t)total_words * BITRACK_BYTES;
-    id<MTLBuffer> bitracks =
-        [device newBufferWithBytes:bitracks_data
-                            length:lex_bytes
-                           options:MTLResourceStorageModeShared];
-    id<MTLBuffer> letters = nil;
-    if (letters_data != NULL && total_letters_bytes > 0) {
-      letters = [device newBufferWithBytes:letters_data
-                                    length:total_letters_bytes
-                                   options:MTLResourceStorageModeShared];
-    }
-
     GpuMatcher *m = (GpuMatcher *)calloc(1, sizeof(GpuMatcher));
     m->device = (__bridge_retained void *)device;
     m->queue = (__bridge_retained void *)queue;
-    m->count_pipeline = (__bridge_retained void *)ps;
-    m->count_with_cross_pipeline = (__bridge_retained void *)psCross;
-    m->count_with_playthrough_pipeline =
-        (__bridge_retained void *)psPlaythrough;
-    m->score_with_playthrough_pipeline = (__bridge_retained void *)psScore;
-    m->equity_with_playthrough_pipeline = (__bridge_retained void *)psEquity;
-    m->top1_eqmp_pipeline = (__bridge_retained void *)psTop1Eqmp;
-    m->top1_loc_pipeline = (__bridge_retained void *)psTop1Loc;
     m->count_wmpg_pipeline = (__bridge_retained void *)psCountWmpg;
     m->equity_wmpg_pipeline = (__bridge_retained void *)psEquityWmpg;
     m->top1_eqmp_wmpg_pipeline = (__bridge_retained void *)psTop1EqmpWmpg;
     m->top1_loc_wmpg_pipeline = (__bridge_retained void *)psTop1LocWmpg;
-    m->wmpg_buf = NULL;
-    m->wmpg_max_len_plus_one = 0;
-    m->best_eq_mp_buf = NULL;
-    m->best_loc_buf = NULL;
-    m->top1_cap_b = 0;
-    m->last_gpu_us = 0;
-    m->bitracks_buf = (__bridge_retained void *)bitracks;
-    m->letters_buf =
-        (letters != nil) ? (__bridge_retained void *)letters : NULL;
-    m->total_words = total_words;
-    m->total_letters_bytes = total_letters_bytes;
-    m->racks_buf = NULL;
-    m->counts_buf = NULL;
-    m->cap_b = 0;
-    m->leave_used_buf = NULL;
-    m->leave_values_buf = NULL;
-    m->leave_used_cap_bytes = 0;
-    m->leave_values_cap_bytes = 0;
     return m;
   }
 }
@@ -218,27 +134,6 @@ void gpu_matcher_destroy(GpuMatcher *m) {
   }
   if (m->queue) {
     CFRelease(m->queue);
-  }
-  if (m->count_pipeline) {
-    CFRelease(m->count_pipeline);
-  }
-  if (m->count_with_cross_pipeline) {
-    CFRelease(m->count_with_cross_pipeline);
-  }
-  if (m->count_with_playthrough_pipeline) {
-    CFRelease(m->count_with_playthrough_pipeline);
-  }
-  if (m->score_with_playthrough_pipeline) {
-    CFRelease(m->score_with_playthrough_pipeline);
-  }
-  if (m->equity_with_playthrough_pipeline) {
-    CFRelease(m->equity_with_playthrough_pipeline);
-  }
-  if (m->top1_eqmp_pipeline) {
-    CFRelease(m->top1_eqmp_pipeline);
-  }
-  if (m->top1_loc_pipeline) {
-    CFRelease(m->top1_loc_pipeline);
   }
   if (m->count_wmpg_pipeline) {
     CFRelease(m->count_wmpg_pipeline);
@@ -260,12 +155,6 @@ void gpu_matcher_destroy(GpuMatcher *m) {
   }
   if (m->best_loc_buf) {
     CFRelease(m->best_loc_buf);
-  }
-  if (m->bitracks_buf) {
-    CFRelease(m->bitracks_buf);
-  }
-  if (m->letters_buf) {
-    CFRelease(m->letters_buf);
   }
   if (m->racks_buf) {
     CFRelease(m->racks_buf);
@@ -337,335 +226,6 @@ static void ensure_batch_buffers(GpuMatcher *m, uint32_t B) {
   m->cap_b = B;
 }
 
-double gpu_matcher_count(GpuMatcher *m, uint32_t first_word, uint32_t n_words,
-                         const uint8_t *racks_data, uint32_t B,
-                         uint32_t *out_counts) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  @autoreleasepool {
-    ensure_batch_buffers(m, B);
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> counts = (__bridge id<MTLBuffer>)m->counts_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)m->count_pipeline;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-    memset(counts.contents, 0, (size_t)B * sizeof(uint32_t));
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:racks offset:0 atIndex:1];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:2];
-    [enc setBuffer:counts offset:0 atIndex:3];
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    const double dt = mach_seconds(mach_absolute_time() - t0);
-
-    if (out_counts != NULL) {
-      memcpy(out_counts, counts.contents, (size_t)B * sizeof(uint32_t));
-    }
-    return dt;
-  }
-}
-
-double gpu_matcher_count_with_cross(GpuMatcher *m, uint32_t first_word,
-                                    uint32_t n_words,
-                                    size_t letters_byte_offset,
-                                    uint32_t word_length,
-                                    const uint8_t *racks_data, uint32_t B,
-                                    const uint64_t *cross_sets,
-                                    uint32_t *out_counts) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || word_length == 0 || m->letters_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  @autoreleasepool {
-    ensure_batch_buffers(m, B);
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> counts = (__bridge id<MTLBuffer>)m->counts_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLBuffer> letters = (__bridge id<MTLBuffer>)m->letters_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)m->count_with_cross_pipeline;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-    memset(counts.contents, 0, (size_t)B * sizeof(uint32_t));
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:letters offset:(NSUInteger)letters_byte_offset atIndex:1];
-    [enc setBuffer:racks offset:0 atIndex:2];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:3];
-    [enc setBytes:&word_length length:sizeof(uint32_t) atIndex:4];
-    [enc setBytes:cross_sets
-           length:(NSUInteger)((size_t)word_length * sizeof(uint64_t))
-          atIndex:5];
-    [enc setBuffer:counts offset:0 atIndex:6];
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    const double dt = mach_seconds(mach_absolute_time() - t0);
-
-    if (out_counts != NULL) {
-      memcpy(out_counts, counts.contents, (size_t)B * sizeof(uint32_t));
-    }
-    return dt;
-  }
-}
-
-double gpu_matcher_count_with_playthrough(
-    GpuMatcher *m, uint32_t first_word, uint32_t n_words,
-    size_t letters_byte_offset, uint32_t word_length, const uint8_t *racks_data,
-    uint32_t B, const uint64_t *cross_sets, const uint8_t *fixed_letters,
-    const uint8_t *fixed_bitrack, uint32_t *out_counts) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || fixed_letters == NULL || fixed_bitrack == NULL ||
-      word_length == 0 || m->letters_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  @autoreleasepool {
-    ensure_batch_buffers(m, B);
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> counts = (__bridge id<MTLBuffer>)m->counts_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLBuffer> letters = (__bridge id<MTLBuffer>)m->letters_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)m->count_with_playthrough_pipeline;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-    memset(counts.contents, 0, (size_t)B * sizeof(uint32_t));
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:letters offset:(NSUInteger)letters_byte_offset atIndex:1];
-    [enc setBuffer:racks offset:0 atIndex:2];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:3];
-    [enc setBytes:&word_length length:sizeof(uint32_t) atIndex:4];
-    [enc setBytes:cross_sets
-           length:(NSUInteger)((size_t)word_length * sizeof(uint64_t))
-          atIndex:5];
-    [enc setBytes:fixed_letters length:(NSUInteger)word_length atIndex:6];
-    [enc setBytes:fixed_bitrack length:BITRACK_BYTES atIndex:7];
-    [enc setBuffer:counts offset:0 atIndex:8];
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    const double dt = mach_seconds(mach_absolute_time() - t0);
-
-    if (out_counts != NULL) {
-      memcpy(out_counts, counts.contents, (size_t)B * sizeof(uint32_t));
-    }
-    return dt;
-  }
-}
-
-double gpu_matcher_score(GpuMatcher *m, uint32_t first_word, uint32_t n_words,
-                         size_t letters_byte_offset, uint32_t word_length,
-                         const uint8_t *racks_data, uint32_t B,
-                         const uint64_t *cross_sets,
-                         const uint8_t *fixed_letters,
-                         const uint8_t *fixed_bitrack,
-                         const int32_t *letter_scores,
-                         const int32_t *position_multipliers,
-                         int32_t base_score, int32_t bingo_to_add,
-                         uint32_t *out_count_score_pairs) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || fixed_letters == NULL || fixed_bitrack == NULL ||
-      letter_scores == NULL || position_multipliers == NULL ||
-      word_length == 0 || m->letters_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  @autoreleasepool {
-    ensure_batch_buffers(m, B);
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> output = (__bridge id<MTLBuffer>)m->counts_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLBuffer> letters = (__bridge id<MTLBuffer>)m->letters_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)m->score_with_playthrough_pipeline;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-    memset(output.contents, 0, (size_t)B * 2 * sizeof(uint32_t));
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:letters offset:(NSUInteger)letters_byte_offset atIndex:1];
-    [enc setBuffer:racks offset:0 atIndex:2];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:3];
-    [enc setBytes:&word_length length:sizeof(uint32_t) atIndex:4];
-    [enc setBytes:cross_sets
-           length:(NSUInteger)((size_t)word_length * sizeof(uint64_t))
-          atIndex:5];
-    [enc setBytes:fixed_letters length:(NSUInteger)word_length atIndex:6];
-    [enc setBytes:fixed_bitrack length:BITRACK_BYTES atIndex:7];
-    [enc setBytes:letter_scores length:32 * sizeof(int32_t) atIndex:8];
-    [enc setBytes:position_multipliers
-           length:(NSUInteger)((size_t)word_length * sizeof(int32_t))
-          atIndex:9];
-    [enc setBytes:&base_score length:sizeof(int32_t) atIndex:10];
-    [enc setBytes:&bingo_to_add length:sizeof(int32_t) atIndex:11];
-    [enc setBuffer:output offset:0 atIndex:12];
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    const double dt = mach_seconds(mach_absolute_time() - t0);
-
-    if (out_count_score_pairs != NULL) {
-      memcpy(out_count_score_pairs, output.contents,
-             (size_t)B * 2 * sizeof(uint32_t));
-    }
-    return dt;
-  }
-}
-
-double gpu_matcher_equity(GpuMatcher *m, uint32_t first_word, uint32_t n_words,
-                          size_t letters_byte_offset, uint32_t word_length,
-                          const uint8_t *racks_data, uint32_t B,
-                          const uint64_t *cross_sets,
-                          const uint8_t *fixed_letters,
-                          const uint8_t *fixed_bitrack,
-                          const int32_t *letter_scores,
-                          const int32_t *position_multipliers,
-                          int32_t base_score, int32_t bingo_to_add,
-                          const uint8_t *leave_used,
-                          const int32_t *leave_values, uint32_t n_leaves,
-                          uint32_t *out_count_equity_pairs) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || fixed_letters == NULL || fixed_bitrack == NULL ||
-      letter_scores == NULL || position_multipliers == NULL ||
-      leave_used == NULL || leave_values == NULL || n_leaves == 0 ||
-      word_length == 0 || m->letters_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  @autoreleasepool {
-    ensure_batch_buffers(m, B);
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> output = (__bridge id<MTLBuffer>)m->counts_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLBuffer> letters = (__bridge id<MTLBuffer>)m->letters_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)m->equity_with_playthrough_pipeline;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-    memset(output.contents, 0, (size_t)B * 2 * sizeof(uint32_t));
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:letters offset:(NSUInteger)letters_byte_offset atIndex:1];
-    [enc setBuffer:racks offset:0 atIndex:2];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:3];
-    [enc setBytes:&word_length length:sizeof(uint32_t) atIndex:4];
-    [enc setBytes:cross_sets
-           length:(NSUInteger)((size_t)word_length * sizeof(uint64_t))
-          atIndex:5];
-    [enc setBytes:fixed_letters length:(NSUInteger)word_length atIndex:6];
-    [enc setBytes:fixed_bitrack length:BITRACK_BYTES atIndex:7];
-    [enc setBytes:letter_scores length:32 * sizeof(int32_t) atIndex:8];
-    [enc setBytes:position_multipliers
-           length:(NSUInteger)((size_t)word_length * sizeof(int32_t))
-          atIndex:9];
-    [enc setBytes:&base_score length:sizeof(int32_t) atIndex:10];
-    [enc setBytes:&bingo_to_add length:sizeof(int32_t) atIndex:11];
-    [enc setBytes:leave_used
-           length:(NSUInteger)((size_t)n_leaves * BITRACK_BYTES)
-          atIndex:12];
-    [enc setBytes:leave_values
-           length:(NSUInteger)((size_t)n_leaves * sizeof(int32_t))
-          atIndex:13];
-    [enc setBytes:&n_leaves length:sizeof(uint32_t) atIndex:14];
-    [enc setBuffer:output offset:0 atIndex:15];
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    const double dt = mach_seconds(mach_absolute_time() - t0);
-
-    if (out_count_equity_pairs != NULL) {
-      memcpy(out_count_equity_pairs, output.contents,
-             (size_t)B * 2 * sizeof(uint32_t));
-    }
-    return dt;
-  }
-}
-
 static void ensure_top1_buffers(GpuMatcher *m, uint32_t B) {
   if (B <= m->top1_cap_b) {
     return;
@@ -707,166 +267,6 @@ void gpu_matcher_top1_reset(GpuMatcher *m, uint32_t B) {
   }
 }
 
-// Common bind-and-dispatch for both passes. is_pass2 selects locator-output
-// kernel and binds the additional pass-2 args; otherwise runs pass-1 (eq_mp
-// only). `leave_stride` (in entries): 0 means shared leaves; > 0 means
-// per-rack tables of `n_leaves` entries each at stride spacing — the kernel
-// reads rack i's leaves at [i*stride, i*stride+n_leaves) and the caller
-// must size leave_used/leave_values accordingly (B * stride entries).
-static double dispatch_top1_common(
-    GpuMatcher *m, void *pipeline_ptr, uint32_t first_word, uint32_t n_words,
-    size_t letters_byte_offset, uint32_t word_length,
-    const uint8_t *racks_data, uint32_t B, const uint64_t *cross_sets,
-    const uint8_t *fixed_letters, const uint8_t *fixed_bitrack,
-    const int32_t *letter_scores, const int32_t *position_multipliers,
-    int32_t base_score, int32_t bingo_to_add, const uint8_t *leave_used,
-    const int32_t *leave_values, uint32_t n_leaves, uint32_t leave_stride,
-    bool is_pass2, uint32_t row, uint32_t col, uint32_t dir, uint32_t mode) {
-  @autoreleasepool {
-    id<MTLBuffer> racks = (__bridge id<MTLBuffer>)m->racks_buf;
-    id<MTLBuffer> bitracks = (__bridge id<MTLBuffer>)m->bitracks_buf;
-    id<MTLBuffer> letters = (__bridge id<MTLBuffer>)m->letters_buf;
-    id<MTLBuffer> eq = (__bridge id<MTLBuffer>)m->best_eq_mp_buf;
-    id<MTLBuffer> loc = (__bridge id<MTLBuffer>)m->best_loc_buf;
-    id<MTLCommandQueue> queue = (__bridge id<MTLCommandQueue>)m->queue;
-    id<MTLComputePipelineState> ps =
-        (__bridge id<MTLComputePipelineState>)pipeline_ptr;
-
-    memcpy(racks.contents, racks_data, (size_t)B * BITRACK_BYTES);
-
-    const uint64_t t0 = mach_absolute_time();
-    id<MTLCommandBuffer> cb = [queue commandBuffer];
-    id<MTLComputeCommandEncoder> enc = [cb computeCommandEncoder];
-    [enc setComputePipelineState:ps];
-    [enc setBuffer:bitracks
-            offset:(NSUInteger)((size_t)first_word * BITRACK_BYTES)
-           atIndex:0];
-    [enc setBuffer:letters offset:(NSUInteger)letters_byte_offset atIndex:1];
-    [enc setBuffer:racks offset:0 atIndex:2];
-    [enc setBytes:&n_words length:sizeof(uint32_t) atIndex:3];
-    [enc setBytes:&word_length length:sizeof(uint32_t) atIndex:4];
-    [enc setBytes:cross_sets
-           length:(NSUInteger)((size_t)word_length * sizeof(uint64_t))
-          atIndex:5];
-    [enc setBytes:fixed_letters length:(NSUInteger)word_length atIndex:6];
-    [enc setBytes:fixed_bitrack length:BITRACK_BYTES atIndex:7];
-    [enc setBytes:letter_scores length:32 * sizeof(int32_t) atIndex:8];
-    [enc setBytes:position_multipliers
-           length:(NSUInteger)((size_t)word_length * sizeof(int32_t))
-          atIndex:9];
-    [enc setBytes:&base_score length:sizeof(int32_t) atIndex:10];
-    [enc setBytes:&bingo_to_add length:sizeof(int32_t) atIndex:11];
-    // Leave buffers: stride==0 → shared (n_leaves entries via setBytes when
-    // small enough); stride>0 → per-rack (B*stride entries via managed
-    // MTLBuffer since setBytes can't carry MB-scale payloads).
-    const size_t lu_total =
-        (leave_stride == 0) ? (size_t)n_leaves : ((size_t)B * leave_stride);
-    if (leave_stride > 0) {
-      ensure_leave_buffers(m, lu_total);
-      id<MTLBuffer> lu_b = (__bridge id<MTLBuffer>)m->leave_used_buf;
-      id<MTLBuffer> lv_b = (__bridge id<MTLBuffer>)m->leave_values_buf;
-      memcpy(lu_b.contents, leave_used, lu_total * BITRACK_BYTES);
-      memcpy(lv_b.contents, leave_values, lu_total * sizeof(int32_t));
-      [enc setBuffer:lu_b offset:0 atIndex:12];
-      [enc setBuffer:lv_b offset:0 atIndex:13];
-    } else {
-      [enc setBytes:leave_used
-             length:(NSUInteger)(lu_total * BITRACK_BYTES)
-            atIndex:12];
-      [enc setBytes:leave_values
-             length:(NSUInteger)(lu_total * sizeof(int32_t))
-            atIndex:13];
-    }
-    [enc setBytes:&n_leaves length:sizeof(uint32_t) atIndex:14];
-    if (!is_pass2) {
-      [enc setBuffer:eq offset:0 atIndex:15];
-      [enc setBytes:&leave_stride length:sizeof(uint32_t) atIndex:16];
-    } else {
-      [enc setBuffer:eq offset:0 atIndex:15];
-      [enc setBytes:&row length:sizeof(uint32_t) atIndex:16];
-      [enc setBytes:&col length:sizeof(uint32_t) atIndex:17];
-      [enc setBytes:&dir length:sizeof(uint32_t) atIndex:18];
-      [enc setBytes:&mode length:sizeof(uint32_t) atIndex:19];
-      [enc setBuffer:loc offset:0 atIndex:20];
-      [enc setBytes:&leave_stride length:sizeof(uint32_t) atIndex:21];
-    }
-    [enc dispatchThreads:MTLSizeMake(n_words, B, 1)
-        threadsPerThreadgroup:MTLSizeMake(64, 1, 1)];
-    [enc endEncoding];
-    [cb commit];
-    [cb waitUntilCompleted];
-    m->last_gpu_us = (cb.GPUEndTime - cb.GPUStartTime) * 1e6;
-    return mach_seconds(mach_absolute_time() - t0);
-  }
-}
-
-double gpu_matcher_top1_pass1(GpuMatcher *m, uint32_t first_word,
-                              uint32_t n_words, size_t letters_byte_offset,
-                              uint32_t word_length, const uint8_t *racks_data,
-                              uint32_t B, const uint64_t *cross_sets,
-                              const uint8_t *fixed_letters,
-                              const uint8_t *fixed_bitrack,
-                              const int32_t *letter_scores,
-                              const int32_t *position_multipliers,
-                              int32_t base_score, int32_t bingo_to_add,
-                              const uint8_t *leave_used,
-                              const int32_t *leave_values, uint32_t n_leaves,
-                              uint32_t leave_stride) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || fixed_letters == NULL || fixed_bitrack == NULL ||
-      letter_scores == NULL || position_multipliers == NULL ||
-      leave_used == NULL || leave_values == NULL || n_leaves == 0 ||
-      word_length == 0 || m->letters_buf == NULL ||
-      m->best_eq_mp_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  return dispatch_top1_common(m, m->top1_eqmp_pipeline, first_word, n_words,
-                              letters_byte_offset, word_length, racks_data, B,
-                              cross_sets, fixed_letters, fixed_bitrack,
-                              letter_scores, position_multipliers, base_score,
-                              bingo_to_add, leave_used, leave_values, n_leaves,
-                              leave_stride, false, 0, 0, 0, 0);
-}
-
-double gpu_matcher_top1_pass2(
-    GpuMatcher *m, uint32_t first_word, uint32_t n_words,
-    size_t letters_byte_offset, uint32_t word_length,
-    const uint8_t *racks_data, uint32_t B, const uint64_t *cross_sets,
-    const uint8_t *fixed_letters, const uint8_t *fixed_bitrack,
-    const int32_t *letter_scores, const int32_t *position_multipliers,
-    int32_t base_score, int32_t bingo_to_add, const uint8_t *leave_used,
-    const int32_t *leave_values, uint32_t n_leaves, uint32_t leave_stride,
-    uint32_t row, uint32_t col, uint32_t dir, GpuTop1Tiebreak mode) {
-  if (m == NULL || racks_data == NULL || B == 0 || n_words == 0 ||
-      cross_sets == NULL || fixed_letters == NULL || fixed_bitrack == NULL ||
-      letter_scores == NULL || position_multipliers == NULL ||
-      leave_used == NULL || leave_values == NULL || n_leaves == 0 ||
-      word_length == 0 || m->letters_buf == NULL ||
-      m->best_eq_mp_buf == NULL || m->best_loc_buf == NULL) {
-    return 0.0;
-  }
-  if ((uint64_t)first_word + n_words > m->total_words) {
-    return 0.0;
-  }
-  if (letters_byte_offset + (size_t)n_words * word_length >
-      m->total_letters_bytes) {
-    return 0.0;
-  }
-  return dispatch_top1_common(m, m->top1_loc_pipeline, first_word, n_words,
-                              letters_byte_offset, word_length, racks_data, B,
-                              cross_sets, fixed_letters, fixed_bitrack,
-                              letter_scores, position_multipliers, base_score,
-                              bingo_to_add, leave_used, leave_values, n_leaves,
-                              leave_stride, true, row, col, dir,
-                              (uint32_t)mode);
-}
 
 void gpu_matcher_top1_read(GpuMatcher *m, uint32_t B, int32_t *out_best_eq_mp,
                            uint32_t *out_best_loc) {
