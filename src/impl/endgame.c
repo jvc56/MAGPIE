@@ -568,7 +568,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
   es->transposition_table_optim = true;
-  es->iterative_deepening_optim = true;
+  es->iterative_deepening_optim = endgame_args->enable_iterative_deepening;
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
@@ -1610,8 +1610,54 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
   }
   entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
   entry_to_store.tiny_move = best_tiny_move;
-  transposition_table_store(worker->solver->transposition_table, node_key,
-                            entry_to_store);
+  // Single-PV: keep the original always-replace policy to avoid adding any
+  // overhead to the hot path. Multi-PV-specific bugs (alpha widening producing
+  // bound-flag entries that get clobbered) only manifest with num_top_moves
+  // > 1.
+  if (worker->solver->num_top_moves <= 1) {
+    transposition_table_store(worker->solver->transposition_table, node_key,
+                              entry_to_store);
+    return;
+  }
+  // Multi-PV: depth-and-flag-preferred replacement with CAS. Keep the existing
+  // entry if it's for the same position AND either (a) at greater depth or
+  // (b) at equal depth but already TT_EXACT while the new entry is only a
+  // bound. The CAS loop closes the read-then-write race that lets parallel
+  // re-search overwrite a freshly-written EXACT entry with a LOWER bound —
+  // the cause of residual mid-PV "|" separators in the display.
+  TranspositionTable *tt = worker->solver->transposition_table;
+  const uint64_t idx = node_key & tt->size_mask;
+  const uint64_t stored_hash = node_key >> tt->size_power_of_2;
+  entry_to_store.top_4_bytes = (uint32_t)(stored_hash >> 8);
+  entry_to_store.fifth_byte = (uint8_t)(stored_hash & 0xFF);
+  uint64_t new_key_half;
+  memcpy(&new_key_half, &entry_to_store, 8);
+  const uint64_t new_xored = new_key_half ^ entry_to_store.tiny_move;
+  const uint64_t new_data = entry_to_store.tiny_move;
+  _Atomic uint64_t *slot = &tt->table[idx * 2];
+  for (;;) {
+    uint64_t cur_xored = atomic_load_explicit(&slot[0], memory_order_relaxed);
+    uint64_t cur_data = atomic_load_explicit(&slot[1], memory_order_relaxed);
+    const uint64_t cur_key_half = cur_xored ^ cur_data;
+    TTEntry existing;
+    memcpy(&existing, &cur_key_half, 8);
+    existing.tiny_move = cur_data;
+    if (ttentry_valid(existing) &&
+        ttentry_full_hash(existing, idx, tt->size_power_of_2) == node_key &&
+        (ttentry_depth(existing) > (uint8_t)depth ||
+         (ttentry_depth(existing) == (uint8_t)depth &&
+          ttentry_flag(existing) == TT_EXACT && flag != TT_EXACT))) {
+      return;
+    }
+    if (atomic_compare_exchange_strong_explicit(&slot[1], &cur_data, new_data,
+                                                memory_order_relaxed,
+                                                memory_order_relaxed)) {
+      atomic_store_explicit(&slot[0], new_xored, memory_order_relaxed);
+      atomic_fetch_add(&tt->created, 1);
+      return;
+    }
+    // CAS failed — slot[1] changed under us; loop and re-check.
+  }
 }
 
 // Stuck-tile detection, move generation, logging, and sorting for non-root
@@ -1971,7 +2017,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
-  int32_t topk_values[MAX_VARIANT_LENGTH];
+  int32_t topk_values[MAX_ENDGAME_DISPLAY_PVS];
   int topk_n = 0;
 
   // ABDADA: track deferred moves for second phase
@@ -2628,6 +2674,145 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
   return k;
 }
 
+// Parallel re-search task: workers grab PVs from a shared atomic counter
+// (work-stealing) so subtree-size variance doesn't leave threads idle.
+typedef struct ResearchTask {
+  EndgameCtx *solver;
+  EndgameCtxWorker *worker;
+  PVLine *multi_pvs;
+  int num_pvs;
+  atomic_int *next_pv;
+  const Game *source_game;
+} ResearchTask;
+
+static void *research_worker(void *arg) {
+  ResearchTask *t = (ResearchTask *)arg;
+  EndgameCtxWorker *rw = t->worker;
+  EndgameCtx *solver = t->solver;
+  for (;;) {
+    int pv_idx = atomic_fetch_add(t->next_pv, 1);
+    if (pv_idx >= t->num_pvs) {
+      break;
+    }
+    PVLine *pv = &t->multi_pvs[pv_idx];
+    if (pv->num_moves == 0) {
+      continue;
+    }
+    // Skip if extract_multi_pvs already extended this PV all the way through
+    // TT_EXACT entries — no "|" would show in the display, so re-search would
+    // be wasted work. Common for the strongest etopk roots whose subtrees
+    // were searched first (default alpha) during the original multi-PV solve.
+    if (pv->negamax_depth >= pv->num_moves) {
+      continue;
+    }
+    game_copy(rw->game_copy, t->source_game);
+    arena_reset(rw->small_move_arena);
+    rw->current_iterative_deepening_depth = -1;
+    Move root_full_move;
+    small_move_to_move(&root_full_move, &pv->moves[0],
+                       game_get_board(rw->game_copy));
+    play_move(&root_full_move, rw->game_copy, NULL);
+    const int on_turn = game_get_player_on_turn_index(rw->game_copy);
+    const Player *us = game_get_player(rw->game_copy, solver->solving_player);
+    const Player *them =
+        game_get_player(rw->game_copy, 1 - solver->solving_player);
+    const uint64_t key = zobrist_calculate_hash(
+        solver->transposition_table->zobrist, game_get_board(rw->game_copy),
+        player_get_rack(us), player_get_rack(them),
+        on_turn != solver->solving_player,
+        game_get_consecutive_scoreless_turns(rw->game_copy));
+    PVLine local_pv = {.game = NULL, .num_moves = 0, .negamax_depth = 0};
+    abdada_negamax(rw, key, solver->requested_plies - 1, -LARGE_VALUE,
+                   LARGE_VALUE, &local_pv, true, false, 0.0F);
+
+    // Walk down the PV one step at a time and re-search at each position
+    // whose TT entry isn't already proven EXACT. The initial call above only
+    // guarantees TT_EXACT for the root of the re-search; deeper entries can
+    // remain TT_LOWER/UPPER from internal alpha-beta tightening (the
+    // eventually-best move's child gets a narrowed window during PVS
+    // re-search). Walking down keeps each step's window full relative to its
+    // own position, which produces TT_EXACT throughout the PV.
+    uint64_t cur_key = key;
+    int cur_depth = solver->requested_plies - 1;
+    while (cur_depth > 0 &&
+           game_get_game_end_reason(rw->game_copy) == GAME_END_REASON_NONE) {
+      const TTEntry cur_e =
+          transposition_table_lookup(solver->transposition_table, cur_key);
+      if (!ttentry_valid(cur_e)) {
+        break;
+      }
+      const uint64_t tm = ttentry_move(cur_e);
+      if (tm == INVALID_TINY_MOVE) {
+        break;
+      }
+      SmallMove sm = {0};
+      sm.tiny_move = tm;
+      Move m;
+      small_move_to_move(&m, &sm, game_get_board(rw->game_copy));
+      play_move(&m, rw->game_copy, NULL);
+      cur_depth--;
+      const int wd_on_turn = game_get_player_on_turn_index(rw->game_copy);
+      const Player *wd_us =
+          game_get_player(rw->game_copy, solver->solving_player);
+      const Player *wd_them =
+          game_get_player(rw->game_copy, 1 - solver->solving_player);
+      cur_key = zobrist_calculate_hash(
+          solver->transposition_table->zobrist, game_get_board(rw->game_copy),
+          player_get_rack(wd_us), player_get_rack(wd_them),
+          wd_on_turn != solver->solving_player,
+          game_get_consecutive_scoreless_turns(rw->game_copy));
+      // Skip re-search if already proven EXACT at sufficient depth.
+      const TTEntry next_e =
+          transposition_table_lookup(solver->transposition_table, cur_key);
+      if (ttentry_valid(next_e) && ttentry_flag(next_e) == TT_EXACT &&
+          ttentry_depth(next_e) >= (uint8_t)cur_depth) {
+        continue;
+      }
+      arena_reset(rw->small_move_arena);
+      rw->current_iterative_deepening_depth = -1;
+      PVLine inner_pv = {.game = NULL, .num_moves = 0, .negamax_depth = 0};
+      abdada_negamax(rw, cur_key, cur_depth, -LARGE_VALUE, LARGE_VALUE,
+                     &inner_pv, true, false, 0.0F);
+    }
+  }
+  return NULL;
+}
+
+// Distribute PVs across worker threads (round-robin via stride). Each
+// worker re-searches its assigned PVs single-threaded (solver->threads has
+// already been set to 1 by the caller so ABDADA stays disabled).
+static void research_run_parallel(EndgameCtx *solver, PVLine *multi_pvs,
+                                  int num_pvs, const Game *source_game,
+                                  int n_workers) {
+  if (n_workers < 1) {
+    n_workers = 1;
+  }
+  if (n_workers > num_pvs) {
+    n_workers = num_pvs;
+  }
+  if (n_workers > solver->cap_workers) {
+    n_workers = solver->cap_workers;
+  }
+  ResearchTask *tasks = malloc_or_die(sizeof(ResearchTask) * (size_t)n_workers);
+  atomic_int next_pv;
+  atomic_store(&next_pv, 0);
+  for (int i = 0; i < n_workers; i++) {
+    tasks[i] = (ResearchTask){
+        .solver = solver,
+        .worker = solver->workers[i],
+        .multi_pvs = multi_pvs,
+        .num_pvs = num_pvs,
+        .next_pv = &next_pv,
+        .source_game = source_game,
+    };
+    cpthread_create(&solver->worker_ids[i], research_worker, &tasks[i]);
+  }
+  for (int i = 0; i < n_workers; i++) {
+    cpthread_join(solver->worker_ids[i]);
+  }
+  free(tasks);
+}
+
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   assert(ctx);
@@ -2702,6 +2887,35 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
           solver->num_top_moves, ENDGAME_MOVEGEN_SOLVER);
     }
     endgame_results_set_num_pvs(results, num_pvs);
+
+    // Re-search each multi-PV root move at full window so the displayed
+    // continuation comes from TT_EXACT entries rather than TT_LOWER/UPPER
+    // bounds left by multi-PV alpha widening. Distribute PVs across the
+    // existing worker threads for parallelism; each worker runs its slice
+    // single-threaded (ABDADA disabled) but the workers run concurrently.
+    // Only useful for multi-PV: single-PV searches don't widen alpha so
+    // their TT entries are already EXACT where they can be.
+    if (num_pvs > 1 && solver->transposition_table_optim &&
+        solver->requested_plies >= 1) {
+      const int saved_threads = solver->threads;
+      solver->threads = 1; // disable ABDADA inside each worker's re-search
+      atomic_store(&solver->search_complete, 0);
+      research_run_parallel(solver, multi_pvs, num_pvs, endgame_args->game,
+                            saved_threads);
+      solver->threads = saved_threads;
+      // Re-extend each display PV from TT (serial — uses solver->ext_game).
+      for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+        PVLine *pv = &multi_pvs[pv_idx];
+        if (pv->num_moves == 0) {
+          continue;
+        }
+        pv->num_moves = 1;
+        pv->negamax_depth = 1;
+        pv->game = NULL;
+        solver_pvline_extend_from_tt(pv, solver, endgame_args->game, 0,
+                                     ENDGAME_MOVEGEN_SOLVER);
+      }
+    }
   }
 
   // The stored multi_pvs are already fully extended; null out the TT reference

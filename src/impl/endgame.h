@@ -49,6 +49,13 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
+  // If true, run iterative deepening on thread 0 (depth 1, then 2, ..., up
+  // to plies). If false, thread 0 jumps directly to plies (other threads
+  // still use depth jitter regardless). Callers should normally set this to
+  // true; the EndgameArgs zero-initializer leaves it false intentionally so
+  // designated initializers don't silently enable an optimization the test
+  // wasn't designed for.
+  bool enable_iterative_deepening;
   bool enable_pv_display; // Whether to prepare PVLine data for display
                           // (default: false)
   // IDS time management (0 = no limit, rely on external timer only):
