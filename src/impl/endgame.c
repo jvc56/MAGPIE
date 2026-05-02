@@ -568,7 +568,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = false;
   es->transposition_table_optim = true;
-  es->iterative_deepening_optim = true;
+  es->iterative_deepening_optim = false;
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
@@ -1971,7 +1971,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
-  int32_t topk_values[MAX_VARIANT_LENGTH];
+  int32_t topk_values[MAX_ENDGAME_DISPLAY_PVS];
   int topk_n = 0;
 
   // ABDADA: track deferred moves for second phase

@@ -820,3 +820,17 @@ void test_endgame_wasm(void) {
   test_pass_first();
   test_nonempty_bag();
 }
+
+void test_game_59669_turn19(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW24 -s1 score -s2 score -ttfraction 0.5 "
+                           "-etopk 50 -threads 12");
+  load_and_exec_config_or_die(config, "load 59669");
+  load_and_exec_config_or_die(config, "goto 19");
+  for (int run_idx = 0; run_idx < 10; run_idx++) {
+    printf("Run %d/10\n", run_idx + 1);
+    load_and_exec_config_or_die(config, "endgame");
+    load_and_exec_config_or_die(config, "she");
+  }
+  config_destroy(config);
+}
