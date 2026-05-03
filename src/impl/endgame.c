@@ -1610,16 +1610,7 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
   }
   entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
   entry_to_store.tiny_move = best_tiny_move;
-  // Single-PV: keep the original always-replace policy to avoid adding any
-  // overhead to the hot path. Multi-PV-specific bugs (alpha widening producing
-  // bound-flag entries that get clobbered) only manifest with num_top_moves
-  // > 1.
-  if (worker->solver->num_top_moves <= 1) {
-    transposition_table_store(worker->solver->transposition_table, node_key,
-                              entry_to_store);
-    return;
-  }
-  // Multi-PV: depth-and-flag-preferred replacement with CAS. Keep the existing
+  // Depth-and-flag-preferred replacement with CAS. Keep the existing
   // entry if it's for the same position AND either (a) at greater depth or
   // (b) at equal depth but already TT_EXACT while the new entry is only a
   // bound. The CAS loop closes the read-then-write race that lets parallel
