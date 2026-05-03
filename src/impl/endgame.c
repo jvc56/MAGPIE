@@ -1628,12 +1628,18 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                               entry_to_store);
     return;
   }
-  // Multi-PV: depth-and-flag-preferred replacement with CAS. Keep the existing
-  // entry if it's for the same position AND either (a) at greater depth or
-  // (b) at equal depth but already TT_EXACT while the new entry is only a
-  // bound. The CAS loop closes the read-then-write race that lets parallel
-  // re-search overwrite a freshly-written EXACT entry with a LOWER bound —
-  // the cause of residual mid-PV "|" separators in the display.
+  // Multi-PV: depth-and-flag-preferred replacement with CAS. Keep the
+  // existing entry if it's for the same position AND either (a) at greater
+  // depth or (b) at equal depth but already TT_EXACT while the new entry is
+  // only a bound. The CAS on slot[1] narrows the common-case race where two
+  // writers both decide to overwrite an existing entry — without it, two
+  // parallel re-search workers can read the same (existing=LOWER) snapshot,
+  // both decide to write, and the LOWER write may land last and clobber a
+  // freshly-written EXACT. The slot[0] update is non-atomic with the CAS,
+  // so the existing lockless-XOR torn-write hazard remains: a torn read is
+  // detected via hash mismatch and treated as a TT miss (correctness is
+  // preserved, but a rare overlap can lose an EXACT entry until the next
+  // write to that slot).
   TranspositionTable *tt = worker->solver->transposition_table;
   const uint64_t idx = node_key & tt->size_mask;
   const uint64_t stored_hash = node_key >> tt->size_power_of_2;
@@ -2903,12 +2909,20 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     // existing worker threads for parallelism; each worker runs its slice
     // single-threaded (ABDADA disabled) but the workers run concurrently.
     // Only useful for multi-PV: single-PV searches don't widen alpha so
-    // their TT entries are already EXACT where they can be.
+    // their TT entries are already EXACT where they can be. Skip entirely
+    // when the caller has a hard time budget — the re-search runs at full
+    // depth with no time-aware interruption and would blow the budget.
     if (num_pvs > 1 && solver->transposition_table_optim &&
-        solver->requested_plies >= 1) {
+        solver->requested_plies >= 1 && endgame_args->hard_time_limit <= 0) {
       const int saved_threads = solver->threads;
       solver->threads = 1; // disable ABDADA inside each worker's re-search
+      // Reset both the global stop flag and the IDS depth-deadline that the
+      // original search may have set. Without clearing depth_deadline_ns,
+      // the first check_depth_deadline() inside the re-search would see
+      // now_ns > deadline_ns and immediately flip search_complete back to
+      // 1, aborting the re-search before it does any useful work.
       atomic_store(&solver->search_complete, 0);
+      atomic_store(&solver->depth_deadline_ns, 0);
       research_run_parallel(solver, multi_pvs, num_pvs, endgame_args->game,
                             saved_threads);
       solver->threads = saved_threads;
