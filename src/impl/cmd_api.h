@@ -27,7 +27,6 @@
 // clang-format on
 
 #include "../util/io_util.h"
-#include "config.h"
 
 // Opaque struct of magpie internal state
 typedef struct Magpie Magpie;
@@ -52,6 +51,8 @@ char *magpie_get_last_command_output(const Magpie *mp);
 
 void magpie_stop_current_command(const Magpie *mp);
 
-Config *magpie_get_config(const Magpie *mp);
+// Returns the current thread status as an int:
+//   0 = uninitialized, 1 = started, 2 = user_interrupt, 3 = finished
+int magpie_get_thread_status(const Magpie *mp);
 
 #endif
