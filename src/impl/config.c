@@ -2838,6 +2838,7 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->num_threads = config->num_threads;
   endgame_args->num_top_moves = config->endgame_top_k;
   endgame_args->use_heuristics = true;
+  endgame_args->enable_iterative_deepening = true;
   endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
