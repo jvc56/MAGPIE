@@ -207,6 +207,15 @@ struct EndgameCtxWorker {
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
 
+// Endgame search clamps consecutive_scoreless_turns to <=2 in the zobrist
+// hash because the search shouldn't be exploring states past 2 consecutive
+// passes — by then the position is essentially decided. The zobrist's
+// scoreless_turns array is sized 3 ([0,2]) and asserts on out-of-range
+// indices; this helper is the single place that enforces that invariant.
+static inline int endgame_zobrist_scoreless_turns(const Game *game) {
+  return MIN(2, game_get_consecutive_scoreless_turns(game));
+}
+
 // Insert a value into a sorted (descending) top-K array.
 // Returns the Kth-best value (or -LARGE_VALUE if fewer than K values stored).
 static inline int32_t topk_insert(int32_t *topk, int *n, int k, int32_t val) {
@@ -376,7 +385,7 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     uint64_t hash = zobrist_calculate_hash(
         tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
         player_get_rack(other), on_turn != solving_player,
-        game_get_consecutive_scoreless_turns(game_copy));
+        endgame_zobrist_scoreless_turns(game_copy));
 
     TTEntry tt_entry = transposition_table_lookup(tt, hash);
     if (!ttentry_valid(tt_entry)) {
@@ -1917,7 +1926,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       small_move_to_move(worker->move_list->spare_move, &pass_move, board);
 
       int last_consecutive_scoreless_turns =
-          game_get_consecutive_scoreless_turns(worker->game_copy);
+          endgame_zobrist_scoreless_turns(worker->game_copy);
 
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                             &worker->pass_undos[depth]);
@@ -1925,12 +1934,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
         const Rack *stm_rack = player_get_rack(player_on_turn);
-        child_key = zobrist_add_move(
-            worker->solver->transposition_table->zobrist, node_key,
-            worker->move_list->spare_move, stm_rack,
-            on_turn_idx == worker->solver->solving_player,
-            game_get_consecutive_scoreless_turns(worker->game_copy),
-            last_consecutive_scoreless_turns);
+        child_key =
+            zobrist_add_move(worker->solver->transposition_table->zobrist,
+                             node_key, worker->move_list->spare_move, stm_rack,
+                             on_turn_idx == worker->solver->solving_player,
+                             endgame_zobrist_scoreless_turns(worker->game_copy),
+                             last_consecutive_scoreless_turns);
       }
 
       // Recurse at SAME depth (forced pass doesn't consume depth)
@@ -2076,7 +2085,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
 
       int last_consecutive_scoreless_turns =
-          game_get_consecutive_scoreless_turns(worker->game_copy);
+          endgame_zobrist_scoreless_turns(worker->game_copy);
 
       // Calculate undo index for incremental backup
       int undo_index = worker->solver->requested_plies - depth;
@@ -2096,12 +2105,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
-        child_key = zobrist_add_move(
-            worker->solver->transposition_table->zobrist, node_key,
-            worker->move_list->spare_move, stm_rack,
-            on_turn_idx == worker->solver->solving_player,
-            game_get_consecutive_scoreless_turns(worker->game_copy),
-            last_consecutive_scoreless_turns);
+        child_key =
+            zobrist_add_move(worker->solver->transposition_table->zobrist,
+                             node_key, worker->move_list->spare_move, stm_rack,
+                             on_turn_idx == worker->solver->solving_player,
+                             endgame_zobrist_scoreless_turns(worker->game_copy),
+                             last_consecutive_scoreless_turns);
       }
 
       // Per-root-move aspiration: at root after depth 1, each move gets its
@@ -2374,7 +2383,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
         worker->solver->transposition_table->zobrist,
         game_get_board(worker->game_copy), player_get_rack(solving_player),
         player_get_rack(other_player), false,
-        game_get_consecutive_scoreless_turns(worker->game_copy));
+        endgame_zobrist_scoreless_turns(worker->game_copy));
   }
 
   // Half the threads use stuck-tile-aware root ordering (build chains +
@@ -2720,7 +2729,7 @@ static void *research_worker(void *arg) {
         solver->transposition_table->zobrist, game_get_board(rw->game_copy),
         player_get_rack(us), player_get_rack(them),
         on_turn != solver->solving_player,
-        game_get_consecutive_scoreless_turns(rw->game_copy));
+        endgame_zobrist_scoreless_turns(rw->game_copy));
     PVLine local_pv = {.game = NULL, .num_moves = 0, .negamax_depth = 0};
     abdada_negamax(rw, key, solver->requested_plies - 1, -LARGE_VALUE,
                    LARGE_VALUE, &local_pv, true, false, 0.0F);
@@ -2760,7 +2769,7 @@ static void *research_worker(void *arg) {
           solver->transposition_table->zobrist, game_get_board(rw->game_copy),
           player_get_rack(wd_us), player_get_rack(wd_them),
           wd_on_turn != solver->solving_player,
-          game_get_consecutive_scoreless_turns(rw->game_copy));
+          endgame_zobrist_scoreless_turns(rw->game_copy));
       // Skip re-search if already proven EXACT at sufficient depth.
       const TTEntry next_e =
           transposition_table_lookup(solver->transposition_table, cur_key);

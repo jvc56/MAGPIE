@@ -665,6 +665,59 @@ void test_topk_fully_solved(void) {
   }
 }
 
+// Asserts the post-solve re-search produces TT_EXACT entries throughout each
+// multi-PV display PV: every PV's negamax_depth covers all of its moves so
+// the display never renders a "|" mid-PV. Uses BGIV/DEHILOR (the same
+// short-game position as test_topk_fully_solved); at eplies=4 the search
+// reaches game-end on the principal lines for all top-10 root moves, so
+// the walk-down re-search has room to populate EXACT entries throughout.
+void test_topk_full_solve_no_pipe(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 4;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 6;
+  args.num_top_moves = 10;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = true;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  assert(num_pvs > 1);
+  // For each PV whose game tree fits within the eplies budget, the post-solve
+  // re-search + walk-down should populate TT_EXACT entries the whole way down,
+  // so the display would render no "|" mid-PV. PVs that extend past eplies
+  // (long pass-heavy lines etc.) get greedy moves appended past the horizon
+  // and legitimately have negamax_depth < num_moves.
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    const PVLine *pv = endgame_results_get_multi_pvline(results, pv_idx);
+    if (pv->num_moves <= args.plies) {
+      assert(pv->negamax_depth >= pv->num_moves);
+    }
+  }
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -678,6 +731,7 @@ void test_endgame(void) {
   test_2lex_informed();
   test_endgame_interrupt();
   test_topk_fully_solved();
+  test_topk_full_solve_no_pipe();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
