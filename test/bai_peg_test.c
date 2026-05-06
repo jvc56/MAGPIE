@@ -6,6 +6,8 @@
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/impl/bai_peg.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
@@ -599,10 +601,58 @@ static void test_bai_peg_rejects_non_one_in_bag(void) {
   config_destroy(config);
 }
 
+// Macondo's Test1PEGPass (FRA20). The CGP reports opp_rack=empty and
+// bag=8 — but those 8 unseen tiles will be 7 opp draw + 1 bag tile, so
+// from the mover's perspective this is the canonical 1-in-bag state.
+// bai_peg_solve should accept it (since it ignores the opp_rack
+// partition and works directly off the unseen pool).
+//
+// Row 3 of the macondo literal (`8A1E1DO`) is 14 wide; padded to 15
+// here with a trailing `1`. Mover rack: AEINRST. Pass is the winning
+// move in macondo (5W-1D-2L), but our solver doesn't yet evaluate
+// passes — for now we just assert that the CGP loads and the solver
+// completes without an error.
+#define BAI_PEG_TEST_FRENCH_PASS_CGP                                           \
+  "cgp 11ONZE/10J2O1/8A1E1DO1/7QUETEE1H/10E1F1U/8ECUMERA/8C1R1TIR/"            \
+  "7WOKS2ET/6DUR6/5G2N1M4/4HALLALiS3/1G1P1P1OM1XI3/VIVONS1BETEL3/"             \
+  "IF1N3AS1RYAL1/ETUDIAIS7 AEINRST/ 301/300 0 -lex FRA20 -ld french"
+
+static void test_bai_peg_accepts_empty_opp_rack(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, BAI_PEG_TEST_FRENCH_PASS_CGP);
+  Game *game = config_get_game(config);
+  // Exact bag size depends on the CGP's tile partition; what matters is
+  // the canonical-1-in-bag invariant from the mover's perspective.
+  assert(rack_get_total_letters(player_get_rack(game_get_player(
+             game, game_get_player_on_turn_index(game)))) == RACK_SIZE);
+
+  BaiPegArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .num_threads = 1,
+      .tt_fraction_of_mem = 0.0,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .max_depth = 1,
+      .endgame_time_per_solve = 0.05,
+      .time_budget_seconds = 1.0,
+      .max_evaluations = 8,
+      .puct_c = 1.0,
+  };
+  BaiPegResult result;
+  ErrorStack *error_stack = error_stack_create();
+  bai_peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(result.evaluations_done > 0);
+  error_stack_destroy(error_stack);
+  bai_cand_stats_free(result.cand_stats);
+  config_destroy(config);
+}
+
 void test_bai_peg(void) {
   test_bai_peg_smoke();
   test_bai_peg_progressive_widening();
   test_bai_peg_concurrent_invocations();
   test_bai_peg_returns_pass_when_no_scoring_plays();
   test_bai_peg_rejects_non_one_in_bag();
+  test_bai_peg_accepts_empty_opp_rack();
 }

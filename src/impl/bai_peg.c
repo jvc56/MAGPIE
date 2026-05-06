@@ -702,20 +702,30 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   double puct_c = args->puct_c > 0.0 ? args->puct_c : 1.0;
   const double alpha = args->utility_alpha;
 
-  if (bag_get_letters(game_get_bag(args->game)) != 1) {
-    error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
-                     get_formatted_string(
-                         "bai_peg_solve requires exactly 1 tile in the bag"));
-    return;
-  }
-
-  uint8_t unseen[MAX_ALPHABET_SIZE];
-  int total_unseen = bp_compute_unseen(args->game, mover_idx, unseen);
-  if (total_unseen < 1 || total_unseen > RACK_SIZE + 1) {
+  // Accept any CGP that, from the mover's perspective, has exactly
+  // RACK_SIZE+1 unseen tiles and a full mover rack: this is the canonical
+  // 1-in-bag PEG state regardless of how the CGP partitions the unseen
+  // tiles between opp's rack and the bag (CGPs from analyzers commonly
+  // report opp_rack as empty since the opponent's tiles aren't knowable).
+  // The inner scenario loop will redistribute the unseen pool itself.
+  const Rack *mover_rack_check =
+      player_get_rack(game_get_player(args->game, mover_idx));
+  if (rack_get_total_letters(mover_rack_check) != RACK_SIZE) {
     error_stack_push(
         error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
-        get_formatted_string("bai_peg_solve: invalid unseen count %d",
-                             total_unseen));
+        get_formatted_string(
+            "bai_peg_solve requires a full mover rack (%d tiles); got %d",
+            RACK_SIZE, (int)rack_get_total_letters(mover_rack_check)));
+    return;
+  }
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  int total_unseen = bp_compute_unseen(args->game, mover_idx, unseen);
+  if (total_unseen != RACK_SIZE + 1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
+        get_formatted_string("bai_peg_solve requires %d unseen tiles "
+                             "(mover full rack + 1 in bag); got %d",
+                             RACK_SIZE + 1, total_unseen));
     return;
   }
 
