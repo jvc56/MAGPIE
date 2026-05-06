@@ -160,8 +160,12 @@ typedef struct BaiPegArgs {
   //     candidates (by move-score order) are considered for selection;
   //     this grows over time so weak moves never get touched at short
   //     budgets.
-  //   - First visit to a candidate runs a depth-0 greedy playout (cheap
-  //     scenario-aware Q estimate). Subsequent visits do depth=1, 2, ...
+  //   - At admission, a newly-active candidate inherits Q from its
+  //     rank-up neighbor (a calibration-free seed); no playout is run.
+  //     If initial_playout is also set, every candidate additionally gets
+  //     a Phase 0 depth-0 greedy playout up front.
+  //   - First negamax visit to a candidate is at depth=1; subsequent
+  //     visits do depth=2, 3, ...
   //   - post_cand_game is created lazily on first visit, not pre-staged.
   // Solves the failure mode where k=256 + Phase 0 playout actively misleads
   // PUCT at short budgets (e.g. 3s).
