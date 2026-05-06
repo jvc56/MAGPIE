@@ -139,3 +139,5 @@ void player_set_move_record_type(Player *player,
                                  move_record_t move_record_type) {
   player->move_record_type = move_record_type;
 }
+
+void player_set_wmp(Player *player, const WMP *wmp) { player->wmp = wmp; }

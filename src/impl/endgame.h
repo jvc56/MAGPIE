@@ -58,6 +58,30 @@ typedef struct EndgameArgs {
   double soft_time_limit;
   double hard_time_limit;
   uint64_t seed;
+  // If true, skip word pruning (KWG build) during reset. Move generation will
+  // use the full KWG (or any override KWGs set by the caller on the game).
+  // Useful when the caller builds pruned KWGs once and reuses them across many
+  // endgame solves.
+  bool skip_word_pruning;
+  // If true, allow the bag to be non-empty when endgame_solve is called.
+  bool allow_nonempty_bag;
+  // If non-NULL, the solver uses this TT instead of creating/destroying its
+  // own. The caller is responsible for the lifetime of the shared TT.
+  // tt_fraction_of_mem is ignored when shared_tt is set.
+  TranspositionTable *shared_tt;
+  // Offset added to worker thread indices. When multiple endgame_solve calls
+  // run concurrently, each must use a distinct range to avoid collisions on
+  // the global per-thread MoveGen cache.
+  int thread_index_offset;
+  // First-win optimization: search a narrow [-1, +1] window so the solver
+  // returns only win/loss/draw rather than exact spread. Faster (more
+  // alpha-beta cutoffs) but exact spread is unknown when set.
+  bool first_win;
+  // Absolute monotonic-ns deadline (ctimer_monotonic_ns()-compatible). If
+  // non-zero, workers bail out mid-search once now > deadline. Lets a
+  // caller (e.g. PEG) impose a wall-clock budget that propagates through
+  // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
+  int64_t external_deadline_ns;
 } EndgameArgs;
 
 // Selects the movegen cache slot to avoid races between concurrent callers.
@@ -76,6 +100,13 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads
+// when each thread uses a distinct thread_index_offset in EndgameArgs.
+// `results` is required (must be non-NULL); the iterative-deepening loop
+// writes into it on every depth.
+void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
+                          EndgameResults *results);
 const TranspositionTable *
 endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
