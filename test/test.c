@@ -39,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "peg_command_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -102,6 +103,7 @@ static TestEntry test_table[] = {
     {"math", test_math_util},
     {"bai", test_bai},
     {"peg", test_bai_peg},
+    {"pegcmd", test_peg_command},
     {"command", test_command},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
