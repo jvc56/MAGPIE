@@ -2629,6 +2629,8 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
 // cpthread_create). Safe for use from concurrent PEG decomp threads.
 void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                           EndgameResults *results) {
+  assert(ctx);
+  assert(results);
   if (*ctx == NULL) {
     *ctx = endgame_ctx_create();
   }
@@ -2647,11 +2649,9 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // Run IDS directly in the calling thread.
   iterative_deepening(solver->workers[0], solver->requested_plies);
 
-  if (results) {
-    const PVLine *best_pv =
-        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-    solver->principal_variation = *best_pv;
-  }
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  solver->principal_variation = *best_pv;
 }
 
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,

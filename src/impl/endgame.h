@@ -103,6 +103,8 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads
 // when each thread uses a distinct thread_index_offset in EndgameArgs.
+// `results` is required (must be non-NULL); the iterative-deepening loop
+// writes into it on every depth.
 void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                           EndgameResults *results);
 const TranspositionTable *
