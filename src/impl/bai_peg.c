@@ -129,6 +129,9 @@ typedef struct BaiCand {
   double neighbor_q_win_pct;
   bool neighbor_q_set;
   bool fully_explored; // True once depth_evaluated >= max_depth.
+  double sort_utility; // Transient: populated by bp_populate_sort_utility
+                       // immediately before each qsort, read by the
+                       // qsort comparator. Stale outside that window.
 } BaiCand;
 
 // Structural prior on the cost of evaluating one (cand, depth) eval before
@@ -625,13 +628,22 @@ static int bp_compare_cands_by_score(const void *a, const void *b) {
   return cb->static_score - ca->static_score; // descending
 }
 
-// File-static utility weight read by bp_compare_cand_ptrs_by_q. qsort lacks a
-// portable context parameter, so the compare function reads this; bai_peg_solve
-// sets it at the top of every call.
-static double bp_compare_alpha = 0.0;
+// Stateless utility helper. Callers pass alpha explicitly; the qsort
+// comparator below relies on bp_populate_sort_utility caching the result
+// onto each cand's sort_utility field rather than reading a shared
+// global, so concurrent bai_peg_solve calls do not race on alpha.
+static double bp_compute_utility(const BaiCand *c, double alpha) {
+  return c->q_win_pct + (alpha * c->q_mean_spread);
+}
 
-static double bp_utility(const BaiCand *c) {
-  return c->q_win_pct + (bp_compare_alpha * c->q_mean_spread);
+// Populate cand->sort_utility for every cand in the array. Must be called
+// immediately before any qsort that uses bp_compare_cand_ptrs_by_q; the
+// comparator reads only sort_utility and never alpha.
+static void bp_populate_sort_utility(BaiCand *cands, int num_candidates,
+                                     double alpha) {
+  for (int ci = 0; ci < num_candidates; ci++) {
+    cands[ci].sort_utility = bp_compute_utility(&cands[ci], alpha);
+  }
 }
 
 static int bp_compare_cand_ptrs_by_q(const void *a, const void *b) {
@@ -650,9 +662,9 @@ static int bp_compare_cand_ptrs_by_q(const void *a, const void *b) {
     // Both unvisited: fall back to static score (matches greedy ranking).
     return (*pb)->static_score - (*pa)->static_score;
   }
-  // Both visited: utility = win_pct + alpha * mean_spread, descending.
-  double ua = bp_utility(*pa);
-  double ub = bp_utility(*pb);
+  // Both visited: cached utility (win_pct + alpha * mean_spread), descending.
+  double ua = (*pa)->sort_utility;
+  double ub = (*pb)->sort_utility;
   if (ua > ub) {
     return -1;
   }
@@ -689,9 +701,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   int initial_top_k =
       args->initial_top_k > 0 ? args->initial_top_k : BAI_PEG_DEFAULT_TOP_K;
   double puct_c = args->puct_c > 0.0 ? args->puct_c : 1.0;
-  // Set the file-static utility weight read by bp_compare_cand_ptrs_by_q
-  // (qsort doesn't take a context). Reset on every entry.
-  bp_compare_alpha = args->utility_alpha;
+  const double alpha = args->utility_alpha;
 
   if (bag_get_letters(game_get_bag(args->game)) != 1) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
@@ -1171,12 +1181,11 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       // Q is utility = win_pct + alpha * spread. With alpha == 0 this is pure
       // win-rate; alpha > 0 rewards spread on the same scale (e.g. alpha=0.01
       // makes 100 spread points equivalent to 1 win).
-      double q =
-          cands[ci].q_win_pct + (bp_compare_alpha * cands[ci].q_mean_spread);
+      double q = bp_compute_utility(&cands[ci], alpha);
       double score = q + (bonus / cost_penalty);
       // Tiny spread tiebreaker for the alpha==0 case so candidates with
       // identical win-rates still separate consistently.
-      if (bp_compare_alpha == 0.0) {
+      if (alpha == 0.0) {
         score += 1e-3 * cands[ci].q_mean_spread;
       }
       if (score > best_puct) {
@@ -1244,7 +1253,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       int li = -1;
       double l_q = -1.0e300;
       for (int ci = 0; ci < num_candidates; ci++) {
-        double q = bp_utility(&cands[ci]);
+        double q = bp_compute_utility(&cands[ci], alpha);
         if (q > l_q) {
           l_q = q;
           li = ci;
@@ -1256,7 +1265,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
         if (ci == li) {
           continue;
         }
-        double q = bp_utility(&cands[ci]);
+        double q = bp_compute_utility(&cands[ci], alpha);
         if (q > c_q) {
           c_q = q;
           ci2 = ci;
@@ -1275,6 +1284,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       for (int ci = 0; ci < num_candidates; ci++) {
         ranking[ci] = &cands[ci];
       }
+      bp_populate_sort_utility(cands, num_candidates, alpha);
       qsort(ranking, num_candidates, sizeof(BaiCand *),
             bp_compare_cand_ptrs_by_q);
       for (int i = 0; i < progress_top; i++) {
@@ -1294,6 +1304,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   for (int ci = 0; ci < num_candidates; ci++) {
     ranking[ci] = &cands[ci];
   }
+  bp_populate_sort_utility(cands, num_candidates, alpha);
   qsort(ranking, num_candidates, sizeof(BaiCand *), bp_compare_cand_ptrs_by_q);
   // Sanity: never return an unvisited candidate. If somehow the budget was
   // so tight that even cand 0 didn't get a depth-0 visit, log an error and
