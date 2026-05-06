@@ -10,6 +10,7 @@ MAGPIE is a crossword game playing and analysis program that supports the follow
 - Autoplay
 - Superleave generation
 - Exhaustive endgame
+- Pre-endgame solving (1-in-bag positions)
 
 MAGPIE started as a C rewrite of [Macondo](https://github.com/domino14/macondo) but has since incorporated a variety of new features, algorithms, and data structures. It uses several concepts originally developed in [wolges](https://github.com/andy-k/wolges), including shadow playing and the KWG and KLV data structures.
 
@@ -324,6 +325,51 @@ magpie> gsim
 magpie> goto 3
 magpie> infer
 ```
+
+### Solving a pre-endgame
+
+When exactly one tile remains in the bag, the `peg` command picks the best
+move by enumerating each unseen-tile scenario (the bag tile vs. each of the
+opponent's possible racks) and running an adaptive search that allocates
+endgame compute across (move, depth) pairs using a PUCT-like rule.
+
+First load a 1-in-bag CGP and run `peg`:
+
+```
+magpie> set -lex NWL20 -wmp true
+magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0
+magpie> peg
+PEG result: 13L ONYX 33  win%=93.8%  spread=+10.25  depth=2  evals=58  stop=time  time=10.04s
+```
+
+The summary line reports the winning move, its win percentage and mean
+spread (mover's perspective) over the bag-tile distribution, the deepest
+endgame depth the move was searched to, the number of (candidate, depth)
+evaluations performed, the stop reason (`time`, `confidence`, `max_evals`,
+or `fully_explored`), and the wall-clock cost.
+
+To also print a per-scenario PV table for each unseen tile in the bag,
+enable `-pegpv`:
+
+```
+magpie> set -pegpv true
+magpie> peg
+PEG result: 13L ONYX 33  win%=93.8%  spread=+10.25  depth=2  evals=58  stop=time  time=10.04s
+
+Scenario: bag=A (count=2)
+Player Move                  Score Value Spread
+1      O12 A(X)IS 36         36    -36   -25
+0      N7 EATS 16 (CEUY +18) 16    -2    9
+  outcome=WIN  margin=+9
+...
+```
+
+Each scenario block runs a deeper endgame to extract the principal
+variation. As in the `endgame` command, a `---` separator row marks the
+boundary between the exact (negamax) moves and the greedy continuation
+when the negamax search did not reach the end of the game.
+
+`peg` errors out on positions that are not 1-in-bag.
 
 ### Comparing lexica
 
