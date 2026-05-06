@@ -101,7 +101,7 @@ static void test_bai_peg_rejects_non_one_in_bag(void) {
   BaiPegResult result;
   ErrorStack *error_stack = error_stack_create();
   bai_peg_solve(&args, &result, error_stack);
-  assert(!error_stack_is_empty(error_stack));
+  assert(error_stack_top(error_stack) == ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
