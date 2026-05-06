@@ -79,6 +79,15 @@ typedef struct BaiPegArgs {
 
   dual_lexicon_mode_t dual_lexicon_mode;
 
+  // Base offset added to every internal thread index (for initial movegen,
+  // playout/eval workers, and EndgameArgs.thread_index_offset on each
+  // scenario solve). Move generation uses a global per-thread cache keyed
+  // by thread_index, so concurrent bai_peg_solve calls in the same process
+  // must use disjoint [thread_index_offset, thread_index_offset+num_threads)
+  // ranges to avoid corrupting each other's cache entries. 0 is fine for a
+  // single-threaded caller.
+  int thread_index_offset;
+
   // After greedy generation, keep at most this many candidates by static
   // score for the adaptive phase. 0 = use a sensible default.
   int initial_top_k;

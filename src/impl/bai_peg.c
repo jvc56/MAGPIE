@@ -767,7 +767,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = NULL,
-        .thread_index = 0,
+        .thread_index = args->thread_index_offset,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -951,11 +951,11 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   if (args->initial_playout) {
     Timer playout_timer;
     ctimer_start(&playout_timer);
-    bp_playout_batch(cands, num_candidates, 0, mover_idx, opp_idx, unseen,
-                     ld_size, tile_types, tile_counts, num_tile_types,
-                     args->thread_control, per_thread_tts, dlm,
-                     args->endgame_time_per_solve, num_threads, 0,
-                     bai_deadline_ns, args->pure_playout);
+    bp_playout_batch(
+        cands, num_candidates, 0, mover_idx, opp_idx, unseen, ld_size,
+        tile_types, tile_counts, num_tile_types, args->thread_control,
+        per_thread_tts, dlm, args->endgame_time_per_solve, num_threads,
+        args->thread_index_offset, bai_deadline_ns, args->pure_playout);
     // Snapshot the playout signal for downstream regression analysis. After
     // PUCT runs, q_* gets overwritten by deeper negamax results.
     for (int ci = 0; ci < num_candidates; ci++) {
@@ -1007,7 +1007,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       bp_evaluate_cand(&cands[ci], 1, mover_idx, opp_idx, unseen, ld_size,
                        tile_types, tile_counts, num_tile_types,
                        args->thread_control, per_thread_tts, dlm, per_solve,
-                       num_threads, 0, bai_deadline_ns);
+                       num_threads, args->thread_index_offset, bai_deadline_ns);
       double measured = ctimer_elapsed_seconds(&eval_timer);
       cands[ci].time_paid += measured;
       cands[ci].last_eval_seconds = measured;
@@ -1237,7 +1237,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     bp_evaluate_cand(&cands[chosen], next_depth, mover_idx, opp_idx, unseen,
                      ld_size, tile_types, tile_counts, num_tile_types,
                      args->thread_control, per_thread_tts, dlm, per_solve,
-                     num_threads, 0, bai_deadline_ns);
+                     num_threads, args->thread_index_offset, bai_deadline_ns);
     double measured = ctimer_elapsed_seconds(&eval_timer);
     cands[chosen].time_paid += measured;
     cands[chosen].last_eval_seconds = measured;
