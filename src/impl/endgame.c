@@ -2636,7 +2636,9 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 
   endgame_ctx_reset(solver, results, endgame_args);
 
-  uint64_t base_seed = (uint64_t)ctime_get_current_time();
+  uint64_t base_seed = endgame_args->seed != 0
+                           ? endgame_args->seed
+                           : (uint64_t)ctime_get_current_time();
   endgame_ctx_prepare_workers(solver, base_seed);
 
   // Suppress stuck-tile log to avoid localtime thread safety issues.
