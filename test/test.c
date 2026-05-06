@@ -6,6 +6,7 @@
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_peg_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
 #include "bit_rack_test.h"
@@ -100,6 +101,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
+    {"peg", test_bai_peg},
     {"command", test_command},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
