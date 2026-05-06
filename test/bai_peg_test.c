@@ -1,5 +1,6 @@
 #include "bai_peg_test.h"
 
+#include "../src/def/game_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
