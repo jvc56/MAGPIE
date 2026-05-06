@@ -1,22 +1,52 @@
 #ifndef BAI_PEG_H
 #define BAI_PEG_H
 
+/*
+ * BAI-style adaptive pre-endgame solver.
+ *
+ * Differs from peg_solve: instead of discrete pass-by-pass top-K cuts at
+ * fixed depths, allocates compute adaptively across (candidate, depth)
+ * pairs using a PUCT-like rule. Anytime: at any moment the best-so-far
+ * candidate is meaningful, and the caller can stop on time, evaluation
+ * budget, or a confidence-based early exit when the leader is
+ * statistically dominant.
+ *
+ * One-bag-tile (1-in-bag) positions only, like peg_solve.
+ *
+ * Background and further reading:
+ *
+ * PUCT selection rule. The variant here uses the AlphaZero formula
+ *     bonus = c * prior * sqrt(N_parent) / (1 + N_child)
+ * with `N` measured in cumulative wall-time spent, so cheap candidates
+ * accumulate visits faster and exploration narrows once a leader emerges:
+ *   AlphaZero (Silver et al. 2017, arXiv:1712.01815)
+ *     https://arxiv.org/abs/1712.01815
+ *   Original predictor-UCT formulation:
+ *     Rosin 2011, "Multi-armed bandits with episode context"
+ *     https://link.springer.com/article/10.1007/s10472-011-9258-6
+ *
+ * Progressive widening with `active = ceil(c * sqrt(visits))` keeps the
+ * effective candidate pool small at low budget and grows it as the
+ * search refines. New candidates inherit Q from their static-score
+ * neighbor at admission so PUCT inputs are sensible without a cold
+ * playout:
+ *   Chaslot et al. 2008, "Progressive Strategies for Monte-Carlo
+ *   Tree Search"
+ *     https://dke.maastrichtuniversity.nl/m.winands/documents/pMCTS.pdf
+ *
+ * Best-Arm Identification framing (anytime stopping, confidence-based
+ * early exit). The selection policy here is PUCT rather than a BAI
+ * sampling rule, but the stopping framework is BAI-flavored. See
+ * bai.h in this repo for Top-Two and (planned) Track-and-Stop
+ * implementations over a fixed arm set.
+ */
+
 #include "../def/game_defs.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
-
-// BAI-style adaptive pre-endgame solver.
-//
-// Differs from peg_solve: instead of discrete pass-by-pass top-K cuts at
-// fixed depths, allocates compute adaptively across (candidate, depth) pairs
-// using a PUCT-like rule. Anytime: at any moment the best-so-far candidate
-// is meaningful, and the caller can stop on time, evaluation budget, or a
-// confidence-based early-exit when the leader is statistically dominant.
-//
-// One-bag-tile (1-in-bag) positions only, like peg_solve.
 
 // Maximum endgame plies the solver will explore per candidate. Hard-capped
 // at MAX_SEARCH_DEPTH (25) by endgame_solve.
