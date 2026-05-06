@@ -50,9 +50,10 @@
 enum { BAI_PEG_MAX_DEPTH = 25 };
 
 // Caller-supplied callback fired whenever a candidate's depth advances (or
-// the solver wants to checkpoint progress). Receives the current ranking
-// (by mean spread, descending) so the caller can render an intermediate
-// answer or decide to terminate.
+// the solver wants to checkpoint progress). Ranked moves are ordered by
+// utility (win_pct + utility_alpha * mean_spread, with visited candidates
+// always above unvisited and a mean-spread tiebreak), descending; same
+// order the solver itself uses to pick the best move.
 typedef void (*BaiPegProgressCallback)(
     int evaluations_done, double seconds_elapsed, const SmallMove *ranked_moves,
     const double *ranked_win_pcts, const double *ranked_mean_spreads,

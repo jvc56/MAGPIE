@@ -67,7 +67,7 @@ void get_leave_for_move(const Move *move, const Game *game, Rack *leave) {
   }
 }
 
-void play_move_on_board(const Move *move, const Game *game) {
+static void play_move_on_board(const Move *move, const Game *game) {
   // PlaceMoveTiles
   Board *board = game_get_board(game);
   int row_start = move_get_row_start(move);

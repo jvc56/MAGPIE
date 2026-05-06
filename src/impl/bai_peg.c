@@ -45,8 +45,7 @@ enum {
 };
 
 // ---------------------------------------------------------------------------
-// Local helpers (intentionally duplicated from peg.c so this file stays
-// self-contained and the existing PEG implementation is untouched).
+// Local helpers
 // ---------------------------------------------------------------------------
 
 static int bp_compute_unseen(const Game *game, int mover_idx,
@@ -777,6 +776,8 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
 
   int num_candidates = initial_ml->count;
   if (num_candidates == 0) {
+    // movegen normally returns at least a pass; defensive fallback if it
+    // somehow doesn't. Same handling as the "no scoring plays" case below.
     small_move_list_destroy(initial_ml);
     if (pruned_kwgs[0]) {
       kwg_destroy(pruned_kwgs[0]);
@@ -785,8 +786,11 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       kwg_destroy(pruned_kwgs[1]);
     }
     game_destroy(base_game);
-    error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
-                     get_formatted_string("bai_peg_solve: no legal moves"));
+    small_move_set_as_pass(&result->best_move);
+    result->best_win_pct = 0.0;
+    result->best_mean_spread = 0.0;
+    result->best_depth_evaluated = 0;
+    result->candidates_considered = 0;
     return;
   }
 
@@ -808,6 +812,10 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   small_move_list_destroy(initial_ml);
   num_candidates = kept;
   if (num_candidates == 0) {
+    // No scoring plays from this rack. bai_peg can't search the pass branch
+    // (no recursion into the post-pass position), so fall back to pass-with-
+    // score-0 as the best move and return success. The caller decides what
+    // to do; for the CLI we simply surface the pass.
     free(cands);
     if (pruned_kwgs[0]) {
       kwg_destroy(pruned_kwgs[0]);
@@ -816,9 +824,11 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       kwg_destroy(pruned_kwgs[1]);
     }
     game_destroy(base_game);
-    error_stack_push(
-        error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
-        get_formatted_string("bai_peg_solve: no legal non-pass moves"));
+    small_move_set_as_pass(&result->best_move);
+    result->best_win_pct = 0.0;
+    result->best_mean_spread = 0.0;
+    result->best_depth_evaluated = 0;
+    result->candidates_considered = 0;
     return;
   }
 

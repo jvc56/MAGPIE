@@ -147,6 +147,7 @@ static TestEntry on_demand_test_table[] = {
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     {"pegthorough", test_bai_peg_thorough},
+    {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
