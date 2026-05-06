@@ -146,6 +146,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"pegthorough", test_bai_peg_thorough},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

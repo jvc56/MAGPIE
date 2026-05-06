@@ -16,7 +16,12 @@
 // Picking quality at low budget is not asserted (the solver may not converge
 // on the truly best move at this budget); the goal here is to catch obvious
 // regressions in the search loop, threading, or progressive widening logic.
-static void test_bai_peg_smoke(void) {
+//
+// Budget is intentionally tight (max_evaluations capped) so this test stays
+// fast and predictable on CI under ASAN/UBSAN. The deeper-search variant
+// lives in test_bai_peg_thorough on the on-demand table.
+static void run_bai_peg_smoke(int max_evaluations, double time_budget,
+                              double endgame_time_per_solve) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(
       config, "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/"
@@ -35,8 +40,9 @@ static void test_bai_peg_smoke(void) {
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .initial_top_k = 32,
       .max_depth = 2,
-      .endgame_time_per_solve = 0.5,
-      .time_budget_seconds = 30.0,
+      .endgame_time_per_solve = endgame_time_per_solve,
+      .time_budget_seconds = time_budget,
+      .max_evaluations = max_evaluations,
       .puct_c = 1.0,
   };
   BaiPegResult result;
@@ -54,6 +60,20 @@ static void test_bai_peg_smoke(void) {
   error_stack_destroy(error_stack);
   bai_cand_stats_free(result.cand_stats);
   config_destroy(config);
+}
+
+static void test_bai_peg_smoke(void) {
+  // CI-friendly: max_evaluations cap guarantees the test exits quickly even
+  // under high CI load when wall-clock is unreliable.
+  run_bai_peg_smoke(/*max_evaluations=*/16, /*time_budget=*/1.0,
+                    /*endgame_time_per_solve=*/0.05);
+}
+
+void test_bai_peg_thorough(void) {
+  // Deeper search for on-demand runs: more evaluations, longer per-scenario
+  // endgame, longer wall-clock budget.
+  run_bai_peg_smoke(/*max_evaluations=*/0, /*time_budget=*/30.0,
+                    /*endgame_time_per_solve=*/0.5);
 }
 
 // Confirms bai_peg_solve raises ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY on a
