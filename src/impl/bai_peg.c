@@ -304,8 +304,7 @@ typedef struct BpBatchThreadArgs {
 // the safety cap without natural end, apply rack penalties manually.
 static int32_t bp_greedy_playout(Game *game, int solving_player,
                                  MoveList *move_list, int thread_index) {
-  enum { MAX_PLAYOUT_TURNS = 30 };
-  for (int turn = 0; turn < MAX_PLAYOUT_TURNS; turn++) {
+  for (int turn = 0; turn < MAX_SEARCH_DEPTH; turn++) {
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
