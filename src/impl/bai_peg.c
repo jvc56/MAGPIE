@@ -710,7 +710,9 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     return;
   }
 
-  // Build base game with empty bag and WMP disabled (mirrors peg_solve).
+  // Build base game with empty bag and WMP disabled. Each scenario solve
+  // will replay the bag tile into the mover's rack and populate the
+  // opponent's rack from `unseen - bag_tile`.
   Game *base_game = game_duplicate(args->game);
   {
     Bag *base_bag = game_get_bag(base_game);

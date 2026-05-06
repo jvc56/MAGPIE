@@ -2,16 +2,14 @@
 #define BAI_PEG_H
 
 /*
- * BAI-style adaptive pre-endgame solver.
- *
- * Differs from peg_solve: instead of discrete pass-by-pass top-K cuts at
- * fixed depths, allocates compute adaptively across (candidate, depth)
- * pairs using a PUCT-like rule. Anytime: at any moment the best-so-far
- * candidate is meaningful, and the caller can stop on time, evaluation
- * budget, or a confidence-based early exit when the leader is
- * statistically dominant.
- *
- * One-bag-tile (1-in-bag) positions only, like peg_solve.
+ * BAI-style adaptive pre-endgame solver. Picks the best move on a
+ * 1-in-bag position by allocating endgame compute adaptively across
+ * (candidate, depth) pairs using a PUCT-like selection rule, evaluating
+ * each candidate against every possible bag tile to integrate over the
+ * unseen-tile distribution. Anytime: the best-so-far candidate is
+ * meaningful at every moment, and the caller can stop on wall-clock
+ * time, evaluation budget, or a confidence-based early exit when the
+ * leader is statistically dominant.
  *
  * Background and further reading:
  *
@@ -35,10 +33,9 @@
  *     https://dke.maastrichtuniversity.nl/m.winands/documents/pMCTS.pdf
  *
  * Best-Arm Identification framing (anytime stopping, confidence-based
- * early exit). The selection policy here is PUCT rather than a BAI
- * sampling rule, but the stopping framework is BAI-flavored. See
- * bai.h in this repo for Top-Two and (planned) Track-and-Stop
- * implementations over a fixed arm set.
+ * early exit). Selection here is PUCT rather than a BAI sampling rule,
+ * but the stopping framework is BAI-flavored. See bai.h for the BAI
+ * sampling rules implemented in this repo over a fixed arm set.
  */
 
 #include "../def/game_defs.h"
