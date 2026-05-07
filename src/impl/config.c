@@ -45,6 +45,7 @@
 #include "../str/endgame_string.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
+#include "../str/letter_distribution_string.h"
 #include "../str/move_string.h"
 #include "../str/rack_string.h"
 #include "../str/sim_string.h"
@@ -53,6 +54,7 @@
 #include "../util/string_util.h"
 #include "analyze.h"
 #include "autoplay.h"
+#include "bai_peg.h"
 #include "cgp.h"
 #include "convert.h"
 #include "endgame.h"
@@ -92,6 +94,7 @@ typedef enum {
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
+  ARG_TOKEN_PEG,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
   ARG_TOKEN_P1_NAME,
@@ -135,6 +138,7 @@ typedef enum {
   ARG_TOKEN_MOVEGEN_MARGIN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_PEG_SHOW_PV,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_USE_HEAT_MAP,
@@ -250,6 +254,7 @@ struct Config {
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
+  bool peg_show_pv;
   bool human_readable;
   bool use_small_plays;
   bool sim_with_inference;
@@ -1023,6 +1028,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "";
       text = "Runs the endgame solver.";
       break;
+    case ARG_TOKEN_PEG:
+      usages[0] = "";
+      text = "Runs the pre-endgame (1-in-bag) solver. Errors out if the "
+             "bag does not have exactly 1 tile.";
+      break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
       usages[1] = "<type1>,<type2>,... <num_games>";
@@ -1526,6 +1536,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "given starting seed, if both players make the exact same decision "
           "for each corresponding play, the games will be identical.";
       break;
+    case ARG_TOKEN_PEG_SHOW_PV:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether the peg command prints a per-scenario PV "
+             "table (one block per unseen tile in the bag, with outcome "
+             "and final margin) below the summary line.";
+      break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -1902,6 +1920,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
         ARG_TOKEN_INFER,                /* infer */
         ARG_TOKEN_LEAVE_GEN,            /* leavegen */
+        ARG_TOKEN_PEG,                  /* peg */
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
@@ -1951,6 +1970,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_ENDGAME_PLIES,          /* eplies */
         ARG_TOKEN_ENDGAME_TOP_K,          /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,         /* gp */
+        ARG_TOKEN_PEG_SHOW_PV,            /* pegpv */
         ARG_TOKEN_INFERENCE_MARGIN,       /* imargin */
         ARG_TOKEN_P1_INFERENCE_MARGIN,    /* im1 */
         ARG_TOKEN_P2_INFERENCE_MARGIN,    /* im2 */
@@ -2878,6 +2898,314 @@ char *status_endgame(Config *config) {
   }
   return endgame_results_get_string(config->endgame_results, config->game,
                                     config->game_history);
+}
+
+// Build a "post-best-move" base game from the original peg position:
+//   - bag drained into mover's rack, then mover's rack restored (so the
+//     bag is empty but mover still has its original leave-7 tiles)
+//   - endgame_solving_mode set, backups off
+// Caller must game_destroy the returned game. mover_idx is the player on
+// turn in the source game (the mover for the PEG decision).
+static Game *peg_build_base_game(const Game *src, int mover_idx, int ld_size) {
+  Game *base = game_duplicate(src);
+  game_set_endgame_solving_mode(base);
+  game_set_backup_mode(base, BACKUP_MODE_OFF);
+  Rack saved;
+  rack_copy(&saved, player_get_rack(game_get_player(base, mover_idx)));
+  Bag *bag = game_get_bag(base);
+  for (int ml = 0; ml < ld_size; ml++) {
+    while (bag_get_letter(bag, ml) > 0) {
+      bag_draw_letter(bag, (MachineLetter)ml, mover_idx);
+    }
+  }
+  rack_copy(player_get_rack(game_get_player(base, mover_idx)), &saved);
+  return base;
+}
+
+// Print one scenario's PV in a 5-column table with a "---" separator at the
+// negamax/greedy boundary, mirroring endgame's display.
+static void peg_print_scenario_pv(const PVLine *pv, const Game *src,
+                                  const Move *best_move, int mover_idx,
+                                  MachineLetter bag_tile, int tile_count,
+                                  const uint8_t *unseen, int ld_size) {
+  const LetterDistribution *ld = game_get_ld(src);
+  const int opp_idx = 1 - mover_idx;
+
+  // Set up the live game state at the start of the PV (post-bestmove,
+  // opp rack populated, mover drew bag_tile).
+  Game *gc = peg_build_base_game(src, mover_idx, ld_size);
+  play_move_without_drawing_tiles(best_move, gc);
+  Rack *opp_rack = player_get_rack(game_get_player(gc, opp_idx));
+  rack_reset(opp_rack);
+  for (int ml = 0; ml < ld_size; ml++) {
+    int cnt = (int)unseen[ml] - (ml == bag_tile ? 1 : 0);
+    for (int i = 0; i < cnt; i++) {
+      rack_add_letter(opp_rack, (MachineLetter)ml);
+    }
+  }
+  Rack *mover_rack = player_get_rack(game_get_player(gc, mover_idx));
+  rack_add_letter(mover_rack, bag_tile);
+  // Suppress the standard end-of-game flag set by play_move_without_drawing
+  // when the move emptied the rack (we just refilled it from the bag tile).
+  game_set_game_end_reason(gc, GAME_END_REASON_NONE);
+
+  const int p0_initial =
+      equity_to_int(player_get_score(game_get_player(gc, 0)));
+  const int p1_initial =
+      equity_to_int(player_get_score(game_get_player(gc, 1)));
+  const int initial_spread =
+      (mover_idx == 0) ? p0_initial - p1_initial : p1_initial - p0_initial;
+
+  // Header for this scenario.
+  StringBuilder *tile_sb = string_builder_create();
+  string_builder_add_user_visible_letter(tile_sb, ld, bag_tile);
+  printf("Scenario: bag=%s (count=%d)\n", string_builder_peek(tile_sb),
+         tile_count);
+  string_builder_destroy(tile_sb);
+
+  if (pv->num_moves == 0) {
+    printf("  (no moves)\n");
+    game_destroy(gc);
+    return;
+  }
+
+  const bool has_separator =
+      (pv->negamax_depth > 0 && pv->negamax_depth < pv->num_moves);
+  const int num_rows = pv->num_moves + 1 + (has_separator ? 1 : 0);
+  StringGrid *sg = string_grid_create(num_rows, 5, 1);
+  string_grid_set_cell(sg, 0, 0, string_duplicate("Player"));
+  string_grid_set_cell(sg, 0, 1, string_duplicate("Move"));
+  string_grid_set_cell(sg, 0, 2, string_duplicate("Score"));
+  string_grid_set_cell(sg, 0, 3, string_duplicate("Value"));
+  string_grid_set_cell(sg, 0, 4, string_duplicate("Spread"));
+
+  StringBuilder *tmp = string_builder_create();
+  for (int i = 0; i < pv->num_moves; i++) {
+    if (has_separator && i == pv->negamax_depth) {
+      const int sep_row = pv->negamax_depth + 1;
+      for (int col_idx = 0; col_idx < 5; col_idx++) {
+        string_grid_set_cell(sg, sep_row, col_idx, string_duplicate("---"));
+      }
+    }
+    const int grid_row =
+        (has_separator && i >= pv->negamax_depth) ? i + 2 : i + 1;
+    Move move;
+    small_move_to_move(&move, &pv->moves[i], game_get_board(gc));
+    const int player_idx = game_get_player_on_turn_index(gc);
+    string_grid_set_cell(sg, grid_row, 0,
+                         get_formatted_string("%d", player_idx));
+
+    string_builder_clear(tmp);
+    string_builder_add_move(tmp, game_get_board(gc), &move, ld, true);
+    const int move_score = (int)small_move_get_score(&pv->moves[i]);
+    play_move(&move, gc, NULL);
+
+    if (game_get_game_end_reason(gc) == GAME_END_REASON_STANDARD) {
+      const Rack *opp_now =
+          player_get_rack(game_get_player(gc, 1 - player_idx));
+      const int adj = equity_to_int(calculate_end_rack_points(opp_now, ld));
+      string_builder_add_string(tmp, " (");
+      string_builder_add_rack(tmp, opp_now, ld, false);
+      string_builder_add_formatted_string(tmp, " +%d)", adj);
+    }
+    string_grid_set_cell(sg, grid_row, 1, string_builder_dump(tmp, NULL));
+    string_grid_set_cell(sg, grid_row, 2,
+                         get_formatted_string("%d", move_score));
+
+    const int p0 = equity_to_int(player_get_score(game_get_player(gc, 0)));
+    const int p1 = equity_to_int(player_get_score(game_get_player(gc, 1)));
+    const int spread_after = (mover_idx == 0) ? p0 - p1 : p1 - p0;
+    const int value_after = spread_after - initial_spread;
+    string_grid_set_cell(sg, grid_row, 3,
+                         get_formatted_string("%d", value_after));
+    string_grid_set_cell(sg, grid_row, 4,
+                         get_formatted_string("%d", spread_after));
+  }
+  string_builder_destroy(tmp);
+
+  StringBuilder *grid_sb = string_builder_create();
+  string_builder_add_string_grid(grid_sb, sg, false);
+  printf("%s", string_builder_peek(grid_sb));
+  string_builder_destroy(grid_sb);
+  string_grid_destroy(sg);
+
+  // Final outcome from mover's perspective.
+  const int p0f = equity_to_int(player_get_score(game_get_player(gc, 0)));
+  const int p1f = equity_to_int(player_get_score(game_get_player(gc, 1)));
+  const int final_spread = (mover_idx == 0) ? p0f - p1f : p1f - p0f;
+  const char *outcome = "TIE";
+  if (final_spread > 0) {
+    outcome = "WIN";
+  } else if (final_spread < 0) {
+    outcome = "LOSS";
+  }
+  printf("  outcome=%s  margin=%+d\n", outcome, final_spread);
+  game_destroy(gc);
+}
+
+// Compute unseen-tile distribution (game tiles minus mover rack minus board).
+static void peg_compute_unseen(const Game *game, int mover_idx,
+                               uint8_t out_unseen[MAX_ALPHABET_SIZE]) {
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  memset(out_unseen, 0, sizeof(uint8_t) * MAX_ALPHABET_SIZE);
+  for (int ml = 0; ml < ld_size; ml++) {
+    out_unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    out_unseen[ml] -= (uint8_t)rack_get_letter(mover_rack, ml);
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_empty(board, row, col)) {
+        continue;
+      }
+      MachineLetter ml = board_get_letter(board, row, col);
+      if (get_is_blanked(ml)) {
+        if (out_unseen[BLANK_MACHINE_LETTER] > 0) {
+          out_unseen[BLANK_MACHINE_LETTER]--;
+        }
+      } else {
+        if (out_unseen[ml] > 0) {
+          out_unseen[ml]--;
+        }
+      }
+    }
+  }
+}
+
+// Pre-endgame (1-in-bag) solver. Errors out if the bag does not have
+// exactly 1 tile remaining. Defaults match the closing PR recommendation:
+// progressive widening + min_active=32 + widening_c=5 + max_depth=8 +
+// utility_alpha=0.01.
+void impl_peg(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run peg without lexicon"));
+    return;
+  }
+  config_init_game(config);
+  const Game *game = config->game;
+  const int bag_size = bag_get_letters(game_get_bag(game));
+  if (bag_size != 1) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
+        get_formatted_string(
+            "peg supports only 1-in-bag positions; bag has %d tiles",
+            bag_size));
+    return;
+  }
+
+  BaiPegArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .num_threads = config->num_threads,
+      .tt_fraction_of_mem = 0.25,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .max_depth = 8,
+      .endgame_time_per_solve = 5.0,
+      .time_budget_seconds = 10.0,
+      .puct_c = 1.0,
+      .utility_alpha = 0.01,
+      .progressive_widening = true,
+      .widening_c = 5.0,
+      .min_active = 32,
+  };
+  BaiPegResult result = {0};
+  bai_peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    bai_cand_stats_free(result.cand_stats);
+    return;
+  }
+
+  Move best_move;
+  small_move_to_move(&best_move, &result.best_move, game_get_board(game));
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(game), &best_move,
+                          game_get_ld(game), /*add_score=*/true);
+  const char *stop_why = "fully_explored";
+  if (result.stopped_by_confidence) {
+    stop_why = "confidence";
+  } else if (result.stopped_by_time) {
+    stop_why = "time";
+  } else if (result.stopped_by_max_evals) {
+    stop_why = "max_evals";
+  }
+  printf("PEG result: %s  win%%=%.1f%%  spread=%+.2f  depth=%d  evals=%d  "
+         "stop=%s  time=%.2fs\n",
+         string_builder_peek(sb), result.best_win_pct * 100.0,
+         result.best_mean_spread, result.best_depth_evaluated,
+         result.evaluations_done, stop_why, result.seconds_elapsed);
+  string_builder_destroy(sb);
+  bai_cand_stats_free(result.cand_stats);
+
+  if (!config->peg_show_pv) {
+    return;
+  }
+
+  // Per-scenario detail: for each unseen tile type, set up the post-best-
+  // move scenario and run a deep endgame to extract the PV. Prints a table
+  // mirroring the endgame command's output, with a "---" separator between
+  // exact (negamax) and greedy moves.
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  peg_compute_unseen(game, mover_idx, unseen);
+
+  Game *base = peg_build_base_game(game, mover_idx, ld_size);
+  EndgameCtx *eg_ctx = NULL;
+  EndgameResults *eg_results = endgame_results_create();
+
+  printf("\n");
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (unseen[ml] == 0) {
+      continue;
+    }
+    Game *scenario = game_duplicate(base);
+    play_move_without_drawing_tiles(&best_move, scenario);
+    Rack *opp_rack = player_get_rack(game_get_player(scenario, 1 - mover_idx));
+    rack_reset(opp_rack);
+    for (int j = 0; j < ld_size; j++) {
+      int cnt = (int)unseen[j] - (j == ml ? 1 : 0);
+      for (int k = 0; k < cnt; k++) {
+        rack_add_letter(opp_rack, (MachineLetter)j);
+      }
+    }
+    Rack *mover_rack = player_get_rack(game_get_player(scenario, mover_idx));
+    rack_add_letter(mover_rack, (MachineLetter)ml);
+    game_set_game_end_reason(scenario, GAME_END_REASON_NONE);
+
+    EndgameArgs ea = {
+        .thread_control = config_get_thread_control(config),
+        .game = scenario,
+        .plies = MAX_SEARCH_DEPTH,
+        .tt_fraction_of_mem = 0.05,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 1,
+        .use_heuristics = true,
+        .num_top_moves = 1,
+        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .skip_word_pruning = true,
+        .thread_index_offset = 0,
+        .soft_time_limit = 1.0,
+        .hard_time_limit = 1.0,
+    };
+    endgame_results_reset(eg_results);
+    endgame_solve_inline(&eg_ctx, &ea, eg_results);
+    const PVLine *pv =
+        endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
+    peg_print_scenario_pv(pv, game, &best_move, mover_idx, (MachineLetter)ml,
+                          (int)unseen[ml], unseen, ld_size);
+    printf("\n");
+    game_destroy(scenario);
+  }
+
+  endgame_ctx_destroy(eg_ctx);
+  endgame_results_destroy(eg_results);
+  game_destroy(base);
 }
 
 // Autoplay
@@ -6232,6 +6560,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_PEG_SHOW_PV, &config->peg_show_pv,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7097,6 +7431,15 @@ char *str_api_endgame(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_peg(Config *config, ErrorStack *error_stack) {
+  impl_peg(config, error_stack);
+}
+
+char *str_api_peg(Config *config, ErrorStack *error_stack) {
+  impl_peg(config, error_stack);
+  return empty_string();
+}
+
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
   impl_autoplay(config, error_stack);
 }
@@ -7505,6 +7848,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
+  cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, generic, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
@@ -7553,6 +7897,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
+  arg(ARG_TOKEN_PEG_SHOW_PV, "pegpv", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
@@ -7653,6 +7998,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
+  config->peg_show_pv = false;
   config->use_small_plays = false;
   config->human_readable = true;
   config->sim_with_inference = true;
@@ -7802,6 +8148,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
+    case ARG_TOKEN_PEG:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
@@ -8077,6 +8424,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_game_pairs);
+      break;
+    case ARG_TOKEN_PEG_SHOW_PV:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->peg_show_pv);
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
