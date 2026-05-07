@@ -49,6 +49,45 @@
 // at MAX_SEARCH_DEPTH (25) by endgame_solve.
 enum { BAI_PEG_MAX_DEPTH = 25 };
 
+// ---------------------------------------------------------------------------
+// Work-stealing executor
+// ---------------------------------------------------------------------------
+//
+// Persistent N-worker thread pool. When supplied via BaiPegArgs.executor,
+// all leaf endgame evals — root cands' (cand, scenario_tile) leaves AND
+// pass cand's recursive inner-cand × inner-scenario leaves — flow through
+// this single pool instead of each eval spawning its own thread team.
+//
+// Why this matters:
+//   - Eliminates over-subscription. Today, the outer solve's worker that
+//     calls bp_evaluate_pass parks for ~30s while the inner sub-solve
+//     spawns its own N threads; that's 2N threads on N cores. With a
+//     shared executor, the calling worker just submits inner work items
+//     and helps drain the queue.
+//   - Couples opp's subtree fidelity to mover's PUCT investment. With one
+//     pool, opp's (inner_cand, inner_scenario) pieces compete for compute
+//     against tile-play (cand, scenario) pieces; PUCT's cost-per-visit
+//     estimator can price pass cand at the same granularity as everything
+//     else.
+//   - Lets the pass cand's inner state persist across mover's pass-revisits
+//     (coupled subtree, lazy iterative deepening as PUCT investment grows).
+//
+// Workers handle re-entry via help-while-waiting: a worker that submits a
+// batch of items and waits for completion drains the shared queue while
+// waiting, so deeply nested submissions don't deadlock as long as queue
+// items make forward progress without waiting on the same worker.
+typedef struct BaiPegExecutor BaiPegExecutor;
+
+// Create an executor with `num_workers` persistent worker threads. Movegen
+// and endgame caches keyed by thread index will use indices in
+// [thread_index_offset, thread_index_offset + num_workers).
+BaiPegExecutor *bai_peg_executor_create(int num_workers,
+                                        int thread_index_offset);
+
+// Drain in-flight work, join workers, free. It is an error to destroy an
+// executor while a bai_peg_solve / session step is still running on it.
+void bai_peg_executor_destroy(BaiPegExecutor *executor);
+
 // Caller-supplied callback fired whenever a candidate's depth advances (or
 // the solver wants to checkpoint progress). Ranked moves are ordered by
 // utility (win_pct + utility_alpha * mean_spread, with visited candidates
@@ -64,7 +103,16 @@ typedef struct BaiPegArgs {
   // Game must have exactly 1 tile in the bag.
   const Game *game;
   ThreadControl *thread_control;
+
+  // Number of worker threads. Ignored when `executor` is non-NULL (the
+  // executor's worker count rules). Must be >= 1 in legacy mode.
   int num_threads;
+
+  // Optional shared work-stealing pool. When non-NULL, all leaf endgame
+  // evals (including those produced by pass cand's recursive inner sub-
+  // solves) are submitted to this pool. NULL = legacy per-eval thread
+  // spawn. Caller owns lifetime.
+  BaiPegExecutor *executor;
 
   // Memory fraction for the shared transposition table used by inner
   // endgame solves. 0 = no TT (each scenario solves cold).
@@ -181,6 +229,43 @@ typedef struct BaiPegArgs {
   // accumulate. Combines a reliable narrow-baseline (k=32 d=1 warmup)
   // with the option to widen if budget permits.
   int min_active;
+
+  // If true, the mover's pass move is added to the candidate pool with an
+  // artificial prior (mean KLV value over the 7 possible 6-tile leaves)
+  // and evaluated via a one-level-deep recursive bai_peg_solve from
+  // opp's perspective on the post-pass position. The recursion sets
+  // disallow_pass=true so the inner call's cand pool excludes pass —
+  // we treat 2-pass-in-a-row as a fold and do not recurse further. Off
+  // by default while the recursion architecture is exploratory.
+  bool include_pass;
+
+  // If true, do NOT add a pass candidate even when include_pass is set.
+  // The recursive bai_peg_solve invoked by pass evaluation passes this
+  // flag so opp's sub-search doesn't re-introduce pass and recurse.
+  bool disallow_pass;
+
+  // Override for opp's PEG max_depth inside pass evaluation. When > 0,
+  // bp_evaluate_pass uses pass_opp_max_depth as the depth cap on the inner
+  // sub-solve (PUCT iterative-deepens up to it). When 0, the inner solve
+  // inherits the outer cand's evaluation depth.
+  int pass_opp_max_depth;
+
+  // Per-scenario wall-clock cap (seconds) for opp's inner PEG sub-solve
+  // inside bp_evaluate_pass. Only consulted when pass_opp_max_depth > 0.
+  // 0 = no cap (depth alone gates). With a time cap, opp iterative-deepens
+  // up to pass_opp_max_depth or until time runs out, whichever comes first.
+  double pass_opp_time_per_scenario;
+
+  // If true, log per-step diagnostic info to stderr (which cand picked,
+  // depth, time, q_win_pct, q_mean_spread, recursion).
+  bool log_solve_details;
+
+  // Diagnostic mode: when > 0, skip the PUCT loop entirely. After cand
+  // setup, evaluate every candidate (including pass if include_pass) at
+  // depths 1, 2, ..., sweep_max_depth in turn, logging each result.
+  // Designed for ground-truth-at-depth measurements, not normal play.
+  // 0 = disabled, normal PUCT behavior.
+  int sweep_max_depth;
 
   // Optional progress callback invoked after every depth advancement.
   // num_top is how many ranked candidates to surface to the callback.

@@ -648,6 +648,105 @@ static void test_bai_peg_accepts_empty_opp_rack(void) {
   config_destroy(config);
 }
 
+// On-demand: ground-truth-at-depth measurement on the French
+// Test1PEGPass position. Skips PUCT — sweeps every cand (top 32 +
+// pass) at depths 1..sweep_max_depth and logs each (cand, depth, q,
+// time) tuple. Used for the depth->value regression dataset.
+void test_bai_peg_french_pass_solve(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, BAI_PEG_TEST_FRENCH_PASS_CGP);
+  Game *game = config_get_game(config);
+  assert(rack_get_total_letters(player_get_rack(game_get_player(
+             game, game_get_player_on_turn_index(game)))) == RACK_SIZE);
+
+  // Sweep depth comes from env so smoke (1) and full (5) share code.
+  const char *env_d = getenv("PEG_SWEEP_DEPTH");
+  int sweep_d = env_d && *env_d ? atoi(env_d) : 1;
+  if (sweep_d < 1) {
+    sweep_d = 1;
+  }
+  // Opp's inner PEG depth cap (iterative deepening to this depth).
+  const char *opp_d_env = getenv("PEG_OPP_DEPTH");
+  int opp_d = opp_d_env && *opp_d_env ? atoi(opp_d_env) : 4;
+  if (opp_d < 1) {
+    opp_d = 1;
+  }
+  // Trim cand pool size for quick threshold-finding runs.
+  const char *topk_env = getenv("PEG_TOP_K");
+  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
+  if (top_k < 1) {
+    top_k = 1;
+  }
+  // Number of executor workers (0 = no executor, run sequentially).
+  const char *exec_env = getenv("PEG_EXEC_WORKERS");
+  int exec_workers = exec_env && *exec_env ? atoi(exec_env) : 0;
+  if (exec_workers < 0) {
+    exec_workers = 0;
+  }
+  BaiPegExecutor *executor =
+      exec_workers > 0 ? bai_peg_executor_create(exec_workers, 100) : NULL;
+
+  BaiPegArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .num_threads = 1,
+      .tt_fraction_of_mem = 0.0,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .initial_top_k = top_k,
+      .max_depth = sweep_d,
+      .endgame_time_per_solve = 5.0, // generous per-eval cap
+      .time_budget_seconds = 0.0,    // no global budget; let depth gate
+      .puct_c = 1.0,
+      .utility_alpha = 1e-4, // pure-win-pct ranking, tiny spread tiebreak
+      .progressive_widening = false, // we want all 32 in the active set
+      .min_active = 0,
+      .sweep_max_depth = sweep_d,
+      .include_pass = true,
+      .pass_opp_max_depth = opp_d,
+      .executor = executor,
+      .log_solve_details = true,
+      .request_cand_stats = true,
+  };
+  BaiPegResult result;
+  ErrorStack *error_stack = error_stack_create();
+  bai_peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  printf("\n=== French Test1PEGPass result ===\n");
+  printf("evals_done=%d  cands_considered=%d  time=%.2fs\n",
+         result.evaluations_done, result.candidates_considered,
+         result.seconds_elapsed);
+  printf("best move: %s  (small_move_is_pass=%d)\n",
+         small_move_is_pass(&result.best_move) ? "(Pass)" : "<non-pass>",
+         (int)small_move_is_pass(&result.best_move));
+  printf("best win%%=%.4f  spread=%+0.4f  depth=%d\n", result.best_win_pct,
+         result.best_mean_spread, result.best_depth_evaluated);
+
+  // Dump full per-cand ranking so we can compare pass against the top
+  // tile-play options at the chosen depth.
+  if (result.cand_stats) {
+    printf("Per-cand stats (rank by final utility):\n");
+    int show =
+        result.candidates_considered < 20 ? result.candidates_considered : 20;
+    for (int i = 0; i < show; i++) {
+      const BaiCandStats *s = &result.cand_stats[i];
+      printf("  [%2d] static_score=%-3d depth=%-2d visits=%-3d "
+             "final_q_win%%=%.3f final_q_spread=%+0.2f%s\n",
+             i, s->static_score, s->depth_evaluated, s->visits,
+             s->final_q_win_pct, s->final_q_mean_spread,
+             s->is_best ? "  <-- BEST" : "");
+    }
+  }
+  printf("==============================\n");
+
+  error_stack_destroy(error_stack);
+  bai_cand_stats_free(result.cand_stats);
+  if (executor) {
+    bai_peg_executor_destroy(executor);
+  }
+  config_destroy(config);
+}
+
 void test_bai_peg(void) {
   test_bai_peg_smoke();
   test_bai_peg_progressive_widening();

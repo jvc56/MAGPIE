@@ -148,6 +148,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_rit", test_autoplay_rit_correctness},
     {"pegthorough", test_bai_peg_thorough},
     {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
+    {"pegfrenchpass", test_bai_peg_french_pass_solve},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

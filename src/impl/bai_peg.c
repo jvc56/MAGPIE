@@ -18,6 +18,7 @@
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/klv.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -25,7 +26,9 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../str/move_string.h"
 #include "../util/io_util.h"
+#include "../util/string_util.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "kwg_maker.h"
@@ -42,7 +45,217 @@ enum {
   BAI_PEG_DEFAULT_TOP_K = 64,
   BAI_PEG_MOVELIST_CAPACITY = 250000,
   BAI_PEG_DEFAULT_PROGRESS_TOP = 5,
+  BP_EXEC_QUEUE_INIT_CAP = 1024,
 };
+
+// ---------------------------------------------------------------------------
+// Work-stealing executor
+// ---------------------------------------------------------------------------
+//
+// Persistent N-worker pool. Workers loop on a shared FIFO queue protected
+// by a mutex + condition variable. Callers submit a "batch" of work items
+// (each is a function pointer + opaque arg) and then call _wait_batch to
+// block until every item in the batch has run. While blocked, the waiter
+// drains queue items itself (help-while-waiting) so deeply nested
+// submissions can't deadlock.
+//
+// Queue grows on demand (push doubles capacity if full). Items carry a
+// pointer back to their batch's pending counter + completion CV.
+
+typedef struct BpExecBatch {
+  atomic_int pending; // remaining items in this batch
+  cpthread_mutex_t mutex;
+  cpthread_cond_t cv; // signaled when pending hits 0
+} BpExecBatch;
+
+typedef void (*BpExecFn)(void *arg, int worker_idx);
+
+typedef struct BpExecItem {
+  BpExecFn fn;
+  void *arg;
+  BpExecBatch *batch; // may be NULL for fire-and-forget items (unused today)
+} BpExecItem;
+
+typedef struct BpExecWorkerCtx {
+  struct BaiPegExecutor *executor;
+  int worker_idx;
+} BpExecWorkerCtx;
+
+struct BaiPegExecutor {
+  int num_workers;
+  int thread_index_offset;
+  cpthread_t *threads;
+  BpExecWorkerCtx *worker_ctxs;
+  // Ring-ish queue. Simpler: linear buffer with head/tail; grow on overflow.
+  BpExecItem *queue;
+  int q_head;  // next pop index
+  int q_count; // items currently queued
+  int q_cap;   // allocated capacity
+  cpthread_mutex_t q_mutex;
+  cpthread_cond_t q_cv_nonempty;
+  bool shutdown;
+};
+
+static void bp_exec_batch_init(BpExecBatch *b, int n) {
+  atomic_init(&b->pending, n);
+  cpthread_mutex_init(&b->mutex);
+  cpthread_cond_init(&b->cv);
+}
+
+// Push one item onto the queue. Caller must NOT hold q_mutex.
+static void bp_exec_push(BaiPegExecutor *e, BpExecItem item) {
+  cpthread_mutex_lock(&e->q_mutex);
+  if (e->q_count == e->q_cap) {
+    // Grow: copy items into a new linearized buffer.
+    int new_cap = e->q_cap * 2;
+    BpExecItem *new_q = malloc_or_die((size_t)new_cap * sizeof(BpExecItem));
+    for (int i = 0; i < e->q_count; i++) {
+      new_q[i] = e->queue[(e->q_head + i) % e->q_cap];
+    }
+    free(e->queue);
+    e->queue = new_q;
+    e->q_cap = new_cap;
+    e->q_head = 0;
+  }
+  int tail = (e->q_head + e->q_count) % e->q_cap;
+  e->queue[tail] = item;
+  e->q_count++;
+  cpthread_cond_signal(&e->q_cv_nonempty);
+  cpthread_mutex_unlock(&e->q_mutex);
+}
+
+// Try to pop one item without blocking. Returns true if popped.
+static bool bp_exec_try_pop(BaiPegExecutor *e, BpExecItem *out) {
+  cpthread_mutex_lock(&e->q_mutex);
+  if (e->q_count == 0) {
+    cpthread_mutex_unlock(&e->q_mutex);
+    return false;
+  }
+  *out = e->queue[e->q_head];
+  e->q_head = (e->q_head + 1) % e->q_cap;
+  e->q_count--;
+  cpthread_mutex_unlock(&e->q_mutex);
+  return true;
+}
+
+// Block until an item is available or shutdown is set. Returns false on
+// shutdown with no item.
+static bool bp_exec_pop_or_shutdown(BaiPegExecutor *e, BpExecItem *out) {
+  cpthread_mutex_lock(&e->q_mutex);
+  while (e->q_count == 0 && !e->shutdown) {
+    cpthread_cond_wait(&e->q_cv_nonempty, &e->q_mutex);
+  }
+  if (e->q_count == 0) {
+    cpthread_mutex_unlock(&e->q_mutex);
+    return false;
+  }
+  *out = e->queue[e->q_head];
+  e->q_head = (e->q_head + 1) % e->q_cap;
+  e->q_count--;
+  cpthread_mutex_unlock(&e->q_mutex);
+  return true;
+}
+
+// Run an item and decrement its batch's pending counter, signaling the
+// batch's CV when the last one drains.
+static void bp_exec_run_item(BpExecItem *item, int worker_idx) {
+  item->fn(item->arg, worker_idx);
+  if (item->batch) {
+    int prev = atomic_fetch_sub(&item->batch->pending, 1);
+    if (prev == 1) {
+      cpthread_mutex_lock(&item->batch->mutex);
+      cpthread_cond_broadcast(&item->batch->cv);
+      cpthread_mutex_unlock(&item->batch->mutex);
+    }
+  }
+}
+
+static void *bp_exec_worker_main(void *arg) {
+  BpExecWorkerCtx *ctx = (BpExecWorkerCtx *)arg;
+  while (true) {
+    BpExecItem item;
+    if (!bp_exec_pop_or_shutdown(ctx->executor, &item)) {
+      break;
+    }
+    bp_exec_run_item(&item, ctx->worker_idx);
+  }
+  return NULL;
+}
+
+// Submit a contiguous array of items as one batch and wait for all to
+// complete. The calling thread helps drain the queue while waiting so
+// nested submissions (e.g. pass-cand inner work submitted from a worker
+// already running outer work) don't deadlock. `helper_worker_idx` is the
+// thread index used for cache keying when the helper runs items; pass
+// the calling worker's idx if you're inside a worker, else any idx in
+// [thread_index_offset, thread_index_offset + num_workers) range that
+// won't collide with concurrent activity.
+static void bp_exec_submit_and_wait(BaiPegExecutor *e, BpExecItem *items, int n,
+                                    int helper_worker_idx) {
+  BpExecBatch batch;
+  bp_exec_batch_init(&batch, n);
+  for (int i = 0; i < n; i++) {
+    items[i].batch = &batch;
+    bp_exec_push(e, items[i]);
+  }
+  // Help-while-waiting.
+  while (atomic_load(&batch.pending) > 0) {
+    BpExecItem item;
+    if (bp_exec_try_pop(e, &item)) {
+      bp_exec_run_item(&item, helper_worker_idx);
+    } else {
+      cpthread_mutex_lock(&batch.mutex);
+      // Re-check under lock: another helper may have completed it
+      // between try_pop returning false and us acquiring the lock.
+      if (atomic_load(&batch.pending) > 0) {
+        cpthread_cond_wait(&batch.cv, &batch.mutex);
+      }
+      cpthread_mutex_unlock(&batch.mutex);
+    }
+  }
+}
+
+BaiPegExecutor *bai_peg_executor_create(int num_workers,
+                                        int thread_index_offset) {
+  if (num_workers < 1) {
+    num_workers = 1;
+  }
+  BaiPegExecutor *e = malloc_or_die(sizeof(*e));
+  e->num_workers = num_workers;
+  e->thread_index_offset = thread_index_offset;
+  e->q_cap = BP_EXEC_QUEUE_INIT_CAP;
+  e->queue = malloc_or_die((size_t)e->q_cap * sizeof(BpExecItem));
+  e->q_head = 0;
+  e->q_count = 0;
+  e->shutdown = false;
+  cpthread_mutex_init(&e->q_mutex);
+  cpthread_cond_init(&e->q_cv_nonempty);
+  e->threads = malloc_or_die((size_t)num_workers * sizeof(cpthread_t));
+  e->worker_ctxs = malloc_or_die((size_t)num_workers * sizeof(BpExecWorkerCtx));
+  for (int i = 0; i < num_workers; i++) {
+    e->worker_ctxs[i].executor = e;
+    e->worker_ctxs[i].worker_idx = thread_index_offset + i;
+    cpthread_create(&e->threads[i], bp_exec_worker_main, &e->worker_ctxs[i]);
+  }
+  return e;
+}
+
+void bai_peg_executor_destroy(BaiPegExecutor *e) {
+  if (!e) {
+    return;
+  }
+  cpthread_mutex_lock(&e->q_mutex);
+  e->shutdown = true;
+  cpthread_cond_broadcast(&e->q_cv_nonempty);
+  cpthread_mutex_unlock(&e->q_mutex);
+  for (int i = 0; i < e->num_workers; i++) {
+    cpthread_join(e->threads[i]);
+  }
+  free(e->threads);
+  free(e->worker_ctxs);
+  free(e->queue);
+  free(e);
+}
 
 // ---------------------------------------------------------------------------
 // Local helpers
@@ -130,10 +343,47 @@ typedef struct BaiCand {
   double neighbor_q_win_pct;
   bool neighbor_q_set;
   bool fully_explored; // True once depth_evaluated >= max_depth.
+  bool is_pass;        // Pass candidate; evaluated via recursive
+                       // bai_peg_solve on the post-pass game from opp's
+                       // perspective (one level of recursion only).
   double sort_utility; // Transient: populated by bp_populate_sort_utility
                        // immediately before each qsort, read by the
                        // qsort comparator. Stale outside that window.
 } BaiCand;
+
+// Artificial prior basis for the pass candidate. The mover's rack has 7
+// tiles; for each of the 7 possible 6-tile leaves (one per dropped tile,
+// counting duplicates with their multiplicity), look up KLV's value of
+// keeping that 6-leave. Average over the 7 slots. Returns the average
+// in Equity units (millipoints) so it composes with movegen's equity
+// field for the rest of the prior pipeline. Returns 0 if klv is NULL.
+static Equity bp_pass_artificial_prior(const KLV *klv, const Rack *full_rack,
+                                       int ld_size) {
+  if (klv == NULL) {
+    return 0;
+  }
+  double total_eq = 0.0;
+  int count = 0;
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ld_size);
+  for (int ml = 0; ml < ld_size; ml++) {
+    int n = (int)rack_get_letter(full_rack, ml);
+    if (n == 0) {
+      continue;
+    }
+    rack_copy(&leave, full_rack);
+    rack_take_letter(&leave, (MachineLetter)ml);
+    Equity lv = klv_get_leave_value(klv, &leave);
+    // The same 6-leave is reused for each duplicate of this letter; weight
+    // by multiplicity so the average is over rack slots, not distinct types.
+    total_eq += equity_to_double(lv) * (double)n;
+    count += n;
+  }
+  if (count == 0) {
+    return 0;
+  }
+  return double_to_equity(total_eq / (double)count);
+}
 
 // Structural prior on the cost of evaluating one (cand, depth) eval before
 // any measurements exist. After the first eval the running measurement
@@ -539,16 +789,140 @@ static void bp_playout_batch(
   free(all_weight);
 }
 
+// Per (cand, scenario_tile) work item for executor-driven evaluation.
+typedef struct BpCandTileWork {
+  // Inputs.
+  BaiCand *cand;
+  int depth;
+  int mover_idx;
+  int opp_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  MachineLetter tile;
+  int tcnt;
+  ThreadControl *thread_control;
+  TranspositionTable *shared_tt;
+  dual_lexicon_mode_t dlm;
+  double endgame_time_per_solve;
+  int64_t external_deadline_ns;
+  // Outputs.
+  int64_t spread_contrib;
+  int64_t wins_x2_contrib;
+  int64_t weight_contrib;
+} BpCandTileWork;
+
+static void bp_cand_tile_eval(BpCandTileWork *w, int worker_idx) {
+  Game *scenario = game_duplicate(w->cand->post_cand_game);
+  Rack *opp_rack = player_get_rack(game_get_player(scenario, w->opp_idx));
+  bp_set_opp_rack(opp_rack, w->unseen, w->ld_size, w->tile);
+  Rack *mover_rack = player_get_rack(game_get_player(scenario, w->mover_idx));
+  rack_add_letter(mover_rack, w->tile);
+
+  int32_t mover_lead =
+      equity_to_int(player_get_score(game_get_player(scenario, w->mover_idx))) -
+      equity_to_int(player_get_score(game_get_player(scenario, w->opp_idx)));
+
+  EndgameCtx *eg_ctx = NULL;
+  EndgameResults *eg_results = endgame_results_create();
+  EndgameArgs ea = {
+      .thread_control = w->thread_control,
+      .game = scenario,
+      .plies = w->depth,
+      .shared_tt = w->shared_tt,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .use_heuristics = true,
+      .num_top_moves = 1,
+      .dual_lexicon_mode = w->dlm,
+      .skip_word_pruning = true,
+      .thread_index_offset = worker_idx,
+      .soft_time_limit = w->endgame_time_per_solve,
+      .hard_time_limit = w->endgame_time_per_solve,
+      .external_deadline_ns = w->external_deadline_ns,
+  };
+  endgame_solve_inline(&eg_ctx, &ea, eg_results);
+  int eg_val = endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+  int32_t mover_total = mover_lead - eg_val;
+
+  w->spread_contrib = (int64_t)mover_total * w->tcnt;
+  if (mover_total > 0) {
+    w->wins_x2_contrib = 2 * (int64_t)w->tcnt;
+  } else if (mover_total == 0) {
+    w->wins_x2_contrib = w->tcnt;
+  } else {
+    w->wins_x2_contrib = 0;
+  }
+  w->weight_contrib = w->tcnt;
+
+  endgame_ctx_destroy(eg_ctx);
+  endgame_results_destroy(eg_results);
+  game_destroy(scenario);
+}
+
+static void bp_cand_tile_work_fn(void *arg, int worker_idx) {
+  bp_cand_tile_eval((BpCandTileWork *)arg, worker_idx);
+}
+
 // Evaluate one candidate at a given depth across all bag-tile scenarios in
 // parallel. Updates cand->q_mean_spread, q_win_pct, depth_evaluated, visits.
-static void
-bp_evaluate_cand(BaiCand *cand, int depth, int mover_idx, int opp_idx,
-                 const uint8_t *unseen, int ld_size,
-                 const MachineLetter *tile_types, const int *tile_counts,
-                 int num_tile_types, ThreadControl *thread_control,
-                 TranspositionTable **per_thread_tts, dual_lexicon_mode_t dlm,
-                 double endgame_time_per_solve, int num_threads,
-                 int thread_index_offset, int64_t external_deadline_ns) {
+static void bp_evaluate_cand(
+    BaiCand *cand, int depth, int mover_idx, int opp_idx, const uint8_t *unseen,
+    int ld_size, const MachineLetter *tile_types, const int *tile_counts,
+    int num_tile_types, ThreadControl *thread_control,
+    TranspositionTable **per_thread_tts, dual_lexicon_mode_t dlm,
+    double endgame_time_per_solve, int num_threads, int thread_index_offset,
+    int64_t external_deadline_ns, BaiPegExecutor *executor) {
+  if (executor) {
+    BpCandTileWork *works =
+        calloc_or_die((size_t)num_tile_types, sizeof(BpCandTileWork));
+    BpExecItem *items =
+        malloc_or_die((size_t)num_tile_types * sizeof(BpExecItem));
+    for (int ti = 0; ti < num_tile_types; ti++) {
+      works[ti].cand = cand;
+      works[ti].depth = depth;
+      works[ti].mover_idx = mover_idx;
+      works[ti].opp_idx = opp_idx;
+      works[ti].unseen = unseen;
+      works[ti].ld_size = ld_size;
+      works[ti].tile = tile_types[ti];
+      works[ti].tcnt = tile_counts[ti];
+      works[ti].thread_control = thread_control;
+      // Per-thread TTs aren't naturally addressable by an executor worker
+      // (the worker pool's ids are independent of the parent solve's
+      // num_threads). Skip TT in executor mode for now — endgame_solve will
+      // create an ephemeral one per item. Future: per-worker TTs in the
+      // executor itself.
+      works[ti].shared_tt = NULL;
+      works[ti].dlm = dlm;
+      works[ti].endgame_time_per_solve = endgame_time_per_solve;
+      works[ti].external_deadline_ns = external_deadline_ns;
+      items[ti].fn = bp_cand_tile_work_fn;
+      items[ti].arg = &works[ti];
+      items[ti].batch = NULL;
+    }
+    bp_exec_submit_and_wait(executor, items, num_tile_types,
+                            thread_index_offset);
+
+    int64_t spread_sum = 0;
+    int64_t wins_x2 = 0;
+    int64_t weight_sum = 0;
+    for (int ti = 0; ti < num_tile_types; ti++) {
+      spread_sum += works[ti].spread_contrib;
+      wins_x2 += works[ti].wins_x2_contrib;
+      weight_sum += works[ti].weight_contrib;
+    }
+    free(works);
+    free(items);
+    if (weight_sum > 0) {
+      cand->q_mean_spread = (double)spread_sum / (double)weight_sum;
+      cand->q_win_pct = (double)wins_x2 / (2.0 * (double)weight_sum);
+    }
+    cand->depth_evaluated = depth;
+    cand->visits++;
+    (void)per_thread_tts;
+    (void)num_threads;
+    return;
+  }
   atomic_int next_tile;
   atomic_init(&next_tile, 0);
 
@@ -693,6 +1067,349 @@ static int bp_compare_cand_ptrs_by_q(const void *a, const void *b) {
 }
 
 // ---------------------------------------------------------------------------
+// Pass evaluation
+// ---------------------------------------------------------------------------
+
+// One per-scenario unit of work: build the sub-game, run opp's recursive
+// PEG, decide opt-A vs opt-B, optionally apply M_opp + run mover's endgame,
+// and store the resulting mover_total along with logging fields.
+//
+// Designed to be self-contained so a pool of executor workers can run them
+// concurrently — each scenario allocates its own EndgameCtx / Game on
+// demand and frees them before returning.
+typedef struct BpPassScenario {
+  // Inputs.
+  const BaiPegArgs *args;
+  int mover_idx;
+  int opp_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  MachineLetter bag_tile;
+  int weight;
+  int depth;
+  bool use_pinned_opp_depth;
+  int pinned_opp_depth;
+  double per_scenario_time;
+  const LetterDistribution *ld;
+  // Outputs.
+  bool sub_ok;
+  bool found_tile_play;
+  bool opp_chose_pass;
+  int32_t opp_pass_spread;
+  double opp_pass_win;
+  double opp_play_win;
+  double opp_play_spread;
+  int32_t mover_total;
+  int opp_tiles_played;
+  int opp_evals;
+  double opp_seconds;
+  char move_str[64]; // formatted opp move text for logging
+} BpPassScenario;
+
+static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
+  const BaiPegArgs *args = s->args;
+  // Build sub-game: opp_rack = unseen - {bag_tile}, bag = {bag_tile},
+  // opp on turn.
+  Game *sub_game = game_duplicate(args->game);
+  {
+    Bag *sub_bag = game_get_bag(sub_game);
+    Rack *sub_opp_rack = player_get_rack(game_get_player(sub_game, s->opp_idx));
+    for (int ml = 0; ml < s->ld_size; ml++) {
+      while (bag_get_letter(sub_bag, (MachineLetter)ml) > 0) {
+        (void)bag_draw_letter(sub_bag, (MachineLetter)ml, 0);
+      }
+    }
+    rack_reset(sub_opp_rack);
+    for (int ml = 0; ml < s->ld_size; ml++) {
+      int n = (int)s->unseen[ml];
+      if (ml == s->bag_tile) {
+        n -= 1;
+      }
+      for (int i = 0; i < n; i++) {
+        rack_add_letter(sub_opp_rack, (MachineLetter)ml);
+      }
+    }
+    bag_add_letter(sub_bag, s->bag_tile, 0);
+    game_set_player_on_turn_index(sub_game, s->opp_idx);
+    bp_clear_false_game_end(sub_game);
+  }
+
+  BaiPegArgs sub = *args;
+  sub.game = sub_game;
+  sub.include_pass = false;
+  sub.disallow_pass = true;
+  sub.max_depth = s->use_pinned_opp_depth ? s->pinned_opp_depth : s->depth;
+  sub.time_budget_seconds = s->use_pinned_opp_depth
+                                ? args->pass_opp_time_per_scenario
+                                : s->per_scenario_time;
+  sub.log_solve_details = false;
+  // Each worker key is unique and stable for the duration of one item.
+  sub.thread_index_offset = worker_idx;
+  sub.shared_tt = NULL;
+  sub.shared_tt_per_thread = NULL;
+  sub.tt_fraction_of_mem = 0.0;
+  sub.request_cand_stats = false;
+  sub.progress_callback = NULL;
+  sub.progress_callback_data = NULL;
+  sub.sweep_max_depth = 0;
+  sub.pass_opp_max_depth = 0;
+  // Inner sub-solve dispatches its own (cand, scenario_tile) leaves into
+  // the shared executor when set, so the inner cand × inner scenario tile
+  // work pieces compete for compute alongside other outer work.
+  sub.num_threads = 1; // unused when executor is set; legacy fallback only
+  sub.executor = args->executor;
+
+  BaiPegResult sub_result;
+  ErrorStack *sub_es = error_stack_create();
+  bai_peg_solve(&sub, &sub_result, sub_es);
+
+  s->sub_ok = error_stack_is_empty(sub_es);
+  s->opp_evals = s->sub_ok ? sub_result.evaluations_done : 0;
+  s->opp_seconds = s->sub_ok ? sub_result.seconds_elapsed : 0.0;
+
+  // Option A: both pass → 2-pass terminal with rack penalties.
+  int32_t cur_spread =
+      equity_to_int(player_get_score(game_get_player(sub_game, s->mover_idx))) -
+      equity_to_int(player_get_score(game_get_player(sub_game, s->opp_idx)));
+  int32_t mover_rack_pts = (int32_t)equity_to_int(rack_get_score(
+      s->ld, player_get_rack(game_get_player(sub_game, s->mover_idx))));
+  int32_t opp_rack_pts = (int32_t)equity_to_int(rack_get_score(
+      s->ld, player_get_rack(game_get_player(sub_game, s->opp_idx))));
+  int32_t mover_total_if_both_pass = cur_spread - mover_rack_pts + opp_rack_pts;
+  s->opp_pass_spread = -mover_total_if_both_pass;
+  if (s->opp_pass_spread > 0) {
+    s->opp_pass_win = 1.0;
+  } else if (s->opp_pass_spread == 0) {
+    s->opp_pass_win = 0.5;
+  } else {
+    s->opp_pass_win = 0.0;
+  }
+
+  // Option B: opp plays best tile move from inner sub-solve.
+  s->found_tile_play = s->sub_ok && !small_move_is_pass(&sub_result.best_move);
+  s->opp_play_win = s->sub_ok ? sub_result.best_win_pct : 0.0;
+  s->opp_play_spread = s->sub_ok ? sub_result.best_mean_spread : 0.0;
+
+  Move m_opp_full;
+  small_move_to_move(&m_opp_full, &sub_result.best_move,
+                     game_get_board(sub_game));
+
+  // Format move text for the log line — capture now while sub_game is alive.
+  s->move_str[0] = '\0';
+  if (args->log_solve_details) {
+    StringBuilder *sb = string_builder_create();
+    if (s->found_tile_play) {
+      string_builder_add_move(sb, game_get_board(sub_game), &m_opp_full, s->ld,
+                              /*add_score=*/true);
+    } else {
+      string_builder_add_string(sb, s->sub_ok ? "(Pass)" : "(error)");
+    }
+    const char *peek = string_builder_peek(sb);
+    size_t len = strlen(peek);
+    if (len >= sizeof(s->move_str)) {
+      len = sizeof(s->move_str) - 1;
+    }
+    memcpy(s->move_str, peek, len);
+    s->move_str[len] = '\0';
+    string_builder_destroy(sb);
+  }
+
+  // Mirror old peg.c's tiebreaker: prefer higher win%, then higher spread.
+  s->opp_chose_pass = !s->found_tile_play ||
+                      s->opp_pass_win > s->opp_play_win + 1e-9 ||
+                      (s->opp_pass_win >= s->opp_play_win - 1e-9 &&
+                       (double)s->opp_pass_spread > s->opp_play_spread);
+
+  s->opp_tiles_played = 0;
+  if (s->opp_chose_pass) {
+    s->mover_total = mover_total_if_both_pass;
+  } else {
+    Game *post_opp = game_duplicate(sub_game);
+    game_set_endgame_solving_mode(post_opp);
+    game_set_backup_mode(post_opp, BACKUP_MODE_OFF);
+    s->opp_tiles_played = move_get_tiles_played(&m_opp_full);
+    play_move(&m_opp_full, post_opp, NULL);
+    bp_clear_false_game_end(post_opp);
+
+    int32_t mover_lead =
+        equity_to_int(
+            player_get_score(game_get_player(post_opp, s->mover_idx))) -
+        equity_to_int(player_get_score(game_get_player(post_opp, s->opp_idx)));
+
+    if (game_get_game_end_reason(post_opp) != GAME_END_REASON_NONE) {
+      s->mover_total = mover_lead;
+    } else {
+      double mover_eg_cap = args->endgame_time_per_solve > 0.0
+                                ? args->endgame_time_per_solve
+                                : 0.0;
+      EndgameCtx *eg_ctx = NULL;
+      EndgameResults *eg_results = endgame_results_create();
+      EndgameArgs ea = {
+          .thread_control = args->thread_control,
+          .game = post_opp,
+          .plies = BAI_PEG_MAX_DEPTH,
+          .initial_small_move_arena_size =
+              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+          .num_threads = 1,
+          .use_heuristics = true,
+          .num_top_moves = 1,
+          .dual_lexicon_mode = args->dual_lexicon_mode,
+          .skip_word_pruning = true,
+          .thread_index_offset = worker_idx,
+          .soft_time_limit = mover_eg_cap,
+          .hard_time_limit = mover_eg_cap,
+      };
+      endgame_solve_inline(&eg_ctx, &ea, eg_results);
+      int eg_val = endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+      s->mover_total = mover_lead + eg_val;
+      endgame_results_destroy(eg_results);
+      endgame_ctx_destroy(eg_ctx);
+    }
+    game_destroy(post_opp);
+  }
+
+  if (!s->sub_ok) {
+    error_stack_reset(sub_es);
+  }
+  bai_cand_stats_free(sub_result.cand_stats);
+  error_stack_destroy(sub_es);
+  game_destroy(sub_game);
+}
+
+static void bp_pass_scenario_work_fn(void *arg, int worker_idx) {
+  bp_pass_scenario_eval((BpPassScenario *)arg, worker_idx);
+}
+
+// Evaluate the pass candidate at depth N. For each scenario (one per
+// unseen tile type, weighted by multiplicity) we model the world as we
+// know it: bag = {bag_tile}, opp_rack = unseen - {bag_tile}, mover keeps
+// its actual rack. We then:
+//
+//   1. Run a one-level-deep recursive bai_peg_solve from opp's POV
+//      (opp's perceived 1peg under their bag-tile uncertainty) to pick
+//      M_opp. The sub-call has disallow_pass=true so opp's pool excludes
+//      pass and we never recurse further.
+//   2. Apply M_opp in OUR scenario (with the known bag tile). If M_opp
+//      is pass, both sides have passed in a row → standard 2-pass
+//      terminal with rack penalties on both. Otherwise opp plays K≥1
+//      tiles, draws the lone bag tile, and the position becomes a
+//      true endgame on mover's turn.
+//   3. Solve mover's endgame to convergence (plies = MAX_SEARCH_DEPTH)
+//      and read the actual outcome.
+//
+// The result is the average of these actual outcomes, weighted by tile
+// multiplicity — NOT the negation of opp's perceived expected value.
+static void bp_evaluate_pass(BaiCand *cand, int depth, const BaiPegArgs *args,
+                             int mover_idx, int opp_idx, const uint8_t *unseen,
+                             int ld_size, const MachineLetter *tile_types,
+                             const int *tile_counts, int num_tile_types,
+                             double per_solve_time) {
+  int total_weight = 0;
+  for (int ti = 0; ti < num_tile_types; ti++) {
+    total_weight += tile_counts[ti];
+  }
+  if (total_weight == 0) {
+    return;
+  }
+
+  int64_t spread_sum = 0;
+  int64_t wins_x2 = 0;
+  int64_t weight_sum = 0;
+  // When pass_opp_max_depth is set, depth gates the inner sub-solve and
+  // there is no time cap (opp gets to actually reach the requested depth).
+  // Otherwise we slice per_solve_time across scenarios as a cheap warmup.
+  bool use_pinned_opp_depth = args->pass_opp_max_depth > 0;
+  int pinned_opp_depth = args->pass_opp_max_depth;
+  double per_scenario_time = 0.0;
+  if (!use_pinned_opp_depth) {
+    per_scenario_time =
+        per_solve_time > 0.0 ? per_solve_time / num_tile_types : 0.0;
+  }
+
+  const LetterDistribution *ld = game_get_ld(args->game);
+
+  // Per-scenario work (one entry per distinct unseen tile type). Either
+  // run sequentially (legacy / no executor) or submitted as a batch to the
+  // executor. Aggregation happens after all entries are filled.
+  BpPassScenario *scenarios =
+      calloc_or_die((size_t)num_tile_types, sizeof(BpPassScenario));
+  for (int ti = 0; ti < num_tile_types; ti++) {
+    BpPassScenario *s = &scenarios[ti];
+    s->args = args;
+    s->mover_idx = mover_idx;
+    s->opp_idx = opp_idx;
+    s->unseen = unseen;
+    s->ld_size = ld_size;
+    s->bag_tile = tile_types[ti];
+    s->weight = tile_counts[ti];
+    s->depth = depth;
+    s->use_pinned_opp_depth = use_pinned_opp_depth;
+    s->pinned_opp_depth = pinned_opp_depth;
+    s->per_scenario_time = per_scenario_time;
+    s->ld = ld;
+  }
+
+  if (args->executor) {
+    BpExecItem *items =
+        malloc_or_die((size_t)num_tile_types * sizeof(BpExecItem));
+    for (int ti = 0; ti < num_tile_types; ti++) {
+      items[ti].fn = bp_pass_scenario_work_fn;
+      items[ti].arg = &scenarios[ti];
+      items[ti].batch = NULL; // bp_exec_submit_and_wait sets this.
+    }
+    bp_exec_submit_and_wait(args->executor, items, num_tile_types,
+                            args->thread_index_offset);
+    free(items);
+  } else {
+    for (int ti = 0; ti < num_tile_types; ti++) {
+      bp_pass_scenario_eval(&scenarios[ti], args->thread_index_offset);
+    }
+  }
+
+  // Aggregate results and log.
+  for (int ti = 0; ti < num_tile_types; ti++) {
+    const BpPassScenario *s = &scenarios[ti];
+    spread_sum += (int64_t)s->mover_total * s->weight;
+    int win_contrib;
+    if (s->mover_total > 0) {
+      win_contrib = 2 * s->weight;
+    } else if (s->mover_total == 0) {
+      win_contrib = s->weight;
+    } else {
+      win_contrib = 0;
+    }
+    wins_x2 += win_contrib;
+    weight_sum += s->weight;
+
+    if (args->log_solve_details) {
+      fprintf(stderr,
+              "    [bp.pass] bag=%s w=%d depth=%d "
+              "optA(both_pass): opp_spread=%+d opp_win=%.2f | "
+              "optB(play): %s opp_win=%.4f opp_spread=%+0.2f K=%d "
+              "[opp_evals=%d t=%.2fs] | "
+              "opp_chose=%s -> mover_total=%+d mover_win=%s\n",
+              ld->ld_ml_to_hl[s->bag_tile], s->weight, s->depth,
+              (int)s->opp_pass_spread, s->opp_pass_win, s->move_str,
+              s->opp_play_win, s->opp_play_spread, s->opp_tiles_played,
+              s->opp_evals, s->opp_seconds, s->opp_chose_pass ? "PASS" : "PLAY",
+              (int)s->mover_total,
+              s->mover_total > 0 ? "yes"
+                                 : (s->mover_total == 0 ? "tie" : "no"));
+      fflush(stderr);
+    }
+  }
+
+  free(scenarios);
+
+  if (weight_sum > 0) {
+    cand->q_mean_spread = (double)spread_sum / (double)weight_sum;
+    cand->q_win_pct = (double)wins_x2 / (2.0 * (double)weight_sum);
+  }
+  cand->depth_evaluated = depth;
+  cand->visits++;
+}
+
+// ---------------------------------------------------------------------------
 // Main solver
 // ---------------------------------------------------------------------------
 
@@ -821,14 +1538,39 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     return;
   }
 
-  // Build candidate array. Skip pass candidates until PEG recursion is
-  // wired in — bai_peg has no way to evaluate the pass branch correctly
-  // without recursing into the post-pass position.
-  BaiCand *cands = calloc_or_die(num_candidates, sizeof(BaiCand));
+  // Build candidate array. Pass is added (with an artificial prior basis)
+  // when args->include_pass is set and args->disallow_pass is not — pass
+  // is then evaluated via a one-level recursive bai_peg_solve from opp's
+  // perspective. Without include_pass, pass is filtered out and the
+  // solver picks among the tile-play moves only.
+  // Reserve one extra slot for pass.
+  BaiCand *cands = calloc_or_die(num_candidates + 1, sizeof(BaiCand));
   int kept = 0;
+  bool pass_added = false;
   for (int ci = 0; ci < num_candidates; ci++) {
     const Move *m = initial_ml->moves[ci];
     if (move_get_type(m) == GAME_EVENT_PASS) {
+      if (args->include_pass && !args->disallow_pass && !pass_added) {
+        // Add pass as a real candidate with the artificial prior basis.
+        const KLV *klv = player_get_klv(game_get_player(args->game, mover_idx));
+        const Rack *mover_rack_full =
+            player_get_rack(game_get_player(args->game, mover_idx));
+        Equity pass_basis =
+            bp_pass_artificial_prior(klv, mover_rack_full, ld_size);
+        cands[kept].move_full = *m;
+        small_move_set_as_pass(&cands[kept].move);
+        cands[kept].static_score = 0;
+        cands[kept].equity_for_prior = pass_basis;
+        cands[kept].is_pass = true;
+        if (args->log_solve_details) {
+          fprintf(stderr,
+                  "  [bp] pass cand prior basis (avg 6-leave KLV): %.4f\n",
+                  equity_to_double(pass_basis));
+          fflush(stderr);
+        }
+        pass_added = true;
+        kept++;
+      }
       continue;
     }
     cands[kept].move_full = *m;
@@ -1056,10 +1798,24 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       }
       Timer eval_timer;
       ctimer_start(&eval_timer);
-      bp_evaluate_cand(&cands[ci], 1, mover_idx, opp_idx, unseen, ld_size,
-                       tile_types, tile_counts, num_tile_types,
-                       args->thread_control, per_thread_tts, dlm, per_solve,
-                       num_threads, args->thread_index_offset, bai_deadline_ns);
+      if (cands[ci].is_pass) {
+        if (args->log_solve_details) {
+          fprintf(stderr,
+                  "  [bp] warmup pass cand depth=1 (recursive opp PEG, %d "
+                  "scenarios)\n",
+                  num_tile_types);
+          fflush(stderr);
+        }
+        bp_evaluate_pass(&cands[ci], 1, args, mover_idx, opp_idx, unseen,
+                         ld_size, tile_types, tile_counts, num_tile_types,
+                         per_solve);
+      } else {
+        bp_evaluate_cand(&cands[ci], 1, mover_idx, opp_idx, unseen, ld_size,
+                         tile_types, tile_counts, num_tile_types,
+                         args->thread_control, per_thread_tts, dlm, per_solve,
+                         num_threads, args->thread_index_offset,
+                         bai_deadline_ns, args->executor);
+      }
       double measured = ctimer_elapsed_seconds(&eval_timer);
       cands[ci].time_paid += measured;
       cands[ci].last_eval_seconds = measured;
@@ -1085,6 +1841,56 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   double *cb_sp = malloc_or_die(progress_top * sizeof(double));
   int *cb_depths = malloc_or_die(progress_top * sizeof(int));
   BaiCand **ranking = malloc_or_die(num_candidates * sizeof(BaiCand *));
+
+  // Diagnostic sweep mode: skip PUCT, just evaluate every cand at every
+  // depth 1..sweep_max_depth and log every (cand, depth, q, time) tuple.
+  // Used to gather ground truth for the depth -> value curve.
+  if (args->sweep_max_depth > 0) {
+    int sweep_d_max = args->sweep_max_depth;
+    if (sweep_d_max > max_depth) {
+      sweep_d_max = max_depth;
+    }
+    fprintf(stderr, "[bp.sweep] mode: %d cands x %d depths = %d evaluations\n",
+            num_candidates, sweep_d_max, num_candidates * sweep_d_max);
+    fflush(stderr);
+    for (int d = 1; d <= sweep_d_max; d++) {
+      for (int ci = 0; ci < num_candidates; ci++) {
+        Timer eval_timer;
+        ctimer_start(&eval_timer);
+        if (cands[ci].is_pass) {
+          bp_evaluate_pass(&cands[ci], d, args, mover_idx, opp_idx, unseen,
+                           ld_size, tile_types, tile_counts, num_tile_types,
+                           args->endgame_time_per_solve);
+        } else {
+          if (cands[ci].post_cand_game == NULL) {
+            Game *g = game_duplicate(base_game);
+            game_set_endgame_solving_mode(g);
+            game_set_backup_mode(g, BACKUP_MODE_OFF);
+            play_move_without_drawing_tiles(&cands[ci].move_full, g);
+            bp_clear_false_game_end(g);
+            cands[ci].post_cand_game = g;
+          }
+          bp_evaluate_cand(
+              &cands[ci], d, mover_idx, opp_idx, unseen, ld_size, tile_types,
+              tile_counts, num_tile_types, args->thread_control, per_thread_tts,
+              dlm, args->endgame_time_per_solve, num_threads,
+              args->thread_index_offset, bai_deadline_ns, args->executor);
+        }
+        double measured = ctimer_elapsed_seconds(&eval_timer);
+        cands[ci].time_paid += measured;
+        cands[ci].last_eval_seconds = measured;
+        cands[ci].cost_estimate = measured * 2.0;
+        result->evaluations_done++;
+        fprintf(stderr,
+                "[bp.sweep] cand[%d] %s static=%d depth=%d "
+                "q_win%%=%.4f q_spread=%+0.3f time=%.3fs\n",
+                ci, cands[ci].is_pass ? "PASS" : "play", cands[ci].static_score,
+                d, cands[ci].q_win_pct, cands[ci].q_mean_spread, measured);
+        fflush(stderr);
+      }
+    }
+    goto sweep_finish;
+  }
 
   // Tracks how many candidates were active in the previous PUCT iteration.
   // When widening expands the active set, each newly-admitted candidate
@@ -1261,8 +2067,10 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
       continue;
     }
     // Lazy post_cand_game creation: with widening, most cands never get
-    // touched, so we don't pre-stage. Build it now if needed.
-    if (cands[chosen].post_cand_game == NULL) {
+    // touched, so we don't pre-stage. Build it now if needed. (Skipped for
+    // pass cands — pass evaluation rebuilds the post-pass game per
+    // scenario inside bp_evaluate_pass.)
+    if (!cands[chosen].is_pass && cands[chosen].post_cand_game == NULL) {
       Game *g = game_duplicate(base_game);
       game_set_endgame_solving_mode(g);
       game_set_backup_mode(g, BACKUP_MODE_OFF);
@@ -1284,12 +2092,46 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
         per_solve = remaining;
       }
     }
+    if (args->log_solve_details) {
+      fprintf(stderr,
+              "  [bp] step %d: chose %s (rank=%d static_score=%d "
+              "is_pass=%d) at depth=%d  prev_q_win%%=%.3f prev_q_spread="
+              "%+0.2f\n",
+              result->evaluations_done, cands[chosen].is_pass ? "PASS" : "play",
+              chosen, cands[chosen].static_score, (int)cands[chosen].is_pass,
+              next_depth, cands[chosen].q_win_pct, cands[chosen].q_mean_spread);
+      fflush(stderr);
+    }
     Timer eval_timer;
     ctimer_start(&eval_timer);
-    bp_evaluate_cand(&cands[chosen], next_depth, mover_idx, opp_idx, unseen,
-                     ld_size, tile_types, tile_counts, num_tile_types,
-                     args->thread_control, per_thread_tts, dlm, per_solve,
-                     num_threads, args->thread_index_offset, bai_deadline_ns);
+    if (cands[chosen].is_pass) {
+      if (args->log_solve_details) {
+        fprintf(stderr,
+                "  [bp] visit pass cand depth=%d (recursive opp PEG, %d "
+                "scenarios)\n",
+                next_depth, num_tile_types);
+        fflush(stderr);
+      }
+      // Pass eval: budget per call = per_solve seconds total (split across
+      // scenarios inside bp_evaluate_pass).
+      bp_evaluate_pass(&cands[chosen], next_depth, args, mover_idx, opp_idx,
+                       unseen, ld_size, tile_types, tile_counts, num_tile_types,
+                       per_solve);
+      if (args->log_solve_details) {
+        fprintf(stderr,
+                "  [bp] pass cand updated: q_win%%=%.3f q_spread=%+0.2f "
+                "depth=%d\n",
+                cands[chosen].q_win_pct, cands[chosen].q_mean_spread,
+                cands[chosen].depth_evaluated);
+        fflush(stderr);
+      }
+    } else {
+      bp_evaluate_cand(&cands[chosen], next_depth, mover_idx, opp_idx, unseen,
+                       ld_size, tile_types, tile_counts, num_tile_types,
+                       args->thread_control, per_thread_tts, dlm, per_solve,
+                       num_threads, args->thread_index_offset, bai_deadline_ns,
+                       args->executor);
+    }
     double measured = ctimer_elapsed_seconds(&eval_timer);
     cands[chosen].time_paid += measured;
     cands[chosen].last_eval_seconds = measured;
@@ -1352,6 +2194,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     }
   }
 
+sweep_finish:
   // Final ranking and result fill.
   for (int ci = 0; ci < num_candidates; ci++) {
     ranking[ci] = &cands[ci];
