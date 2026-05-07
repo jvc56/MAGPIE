@@ -349,6 +349,13 @@ typedef struct BaiCand {
   double sort_utility; // Transient: populated by bp_populate_sort_utility
                        // immediately before each qsort, read by the
                        // qsort comparator. Stale outside that window.
+  // For pass cand only: per-scenario coupled inner sessions, lazily
+  // initialized on first pass-eval, deepened incrementally on each
+  // mover-pass-revisit so opp's PUCT state persists. Length matches the
+  // outer solver's num_tile_types and is stored in coupled_count.
+  // NULL on non-pass cands.
+  struct BpInnerSession *coupled_inner_sessions;
+  int coupled_count;
 } BaiCand;
 
 // Artificial prior basis for the pass candidate. The mover's rack has 7
@@ -1067,6 +1074,253 @@ static int bp_compare_cand_ptrs_by_q(const void *a, const void *b) {
 }
 
 // ---------------------------------------------------------------------------
+// Coupled inner session: one BpInnerSession per (pass-cand, scenario_tile).
+// Holds a long-lived inner sub-solve state that persists across mover's
+// pass-revisits. On each visit we deepen each cand from its current
+// depth_evaluated to the requested target_depth, skipping work already done.
+// ---------------------------------------------------------------------------
+
+typedef struct BpInnerSession {
+  bool initialized;
+  // Inner mover/opp indices match the OUTER solver's: opp_idx is who owns
+  // the scenario rack (= outer opp_idx), mover_idx is who plays endgame
+  // after the pre-endgame move (= outer mover_idx).
+  int inner_mover_idx; // outer's opp_idx (the player we model picking M_opp)
+  int inner_opp_idx;   // outer's mover_idx
+  int ld_size;
+  Game *base_game; // post-staging (mover-on-turn flipped, override_kwgs set)
+  bool kwgs_owned;
+  KWG *pruned_kwgs[2];
+  dual_lexicon_mode_t dlm;
+  // Inner-cand pool. Each cand has its own post_cand_game; depth_evaluated
+  // is updated by bp_evaluate_cand and persists across advance() calls.
+  BaiCand *cands;
+  int num_cands;
+  // Inner scenario distribution (= unseen as seen from inner mover).
+  uint8_t inner_unseen[MAX_ALPHABET_SIZE];
+  MachineLetter inner_tile_types[MAX_ALPHABET_SIZE];
+  int inner_tile_counts[MAX_ALPHABET_SIZE];
+  int inner_num_tile_types;
+} BpInnerSession;
+
+// Build the persistent state once. After this returns, the session is ready
+// for repeated advance() calls. Mirrors the relevant subset of
+// bai_peg_solve's setup (movegen, KWG prune, cand build, post-cand-game
+// pre-staging) — without TT, progressive widening, or pass cands.
+static void bp_inner_session_init(BpInnerSession *s, const BaiPegArgs *outer,
+                                  const Game *outer_game, int outer_mover_idx,
+                                  const uint8_t outer_unseen[MAX_ALPHABET_SIZE],
+                                  MachineLetter scenario_bag_tile, int ld_size,
+                                  int initial_top_k, int worker_idx) {
+  s->inner_mover_idx = 1 - outer_mover_idx; // outer opp == inner mover
+  s->inner_opp_idx = outer_mover_idx;
+  s->ld_size = ld_size;
+  s->dlm = outer->dual_lexicon_mode;
+
+  // Build base sub-game: opp_rack (= inner mover's rack) = unseen - {bag_tile},
+  // bag = {bag_tile}, inner mover on turn.
+  s->base_game = game_duplicate(outer_game);
+  {
+    Bag *sub_bag = game_get_bag(s->base_game);
+    Rack *inner_mover_rack =
+        player_get_rack(game_get_player(s->base_game, s->inner_mover_idx));
+    for (int ml = 0; ml < ld_size; ml++) {
+      while (bag_get_letter(sub_bag, (MachineLetter)ml) > 0) {
+        (void)bag_draw_letter(sub_bag, (MachineLetter)ml, 0);
+      }
+    }
+    rack_reset(inner_mover_rack);
+    for (int ml = 0; ml < ld_size; ml++) {
+      int n = (int)outer_unseen[ml];
+      if (ml == scenario_bag_tile) {
+        n -= 1;
+      }
+      for (int i = 0; i < n; i++) {
+        rack_add_letter(inner_mover_rack, (MachineLetter)ml);
+      }
+    }
+    bag_add_letter(sub_bag, scenario_bag_tile, 0);
+    game_set_player_on_turn_index(s->base_game, s->inner_mover_idx);
+    bp_clear_false_game_end(s->base_game);
+  }
+  // Drop WMP on both players (inner solve uses pruned KWG path).
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    player_set_wmp(game_get_player(s->base_game, player_idx), NULL);
+  }
+
+  // Build pruned KWGs (single-ignorant copy, like bai_peg_solve does).
+  bool shared_kwg =
+      game_get_data_is_shared(s->base_game, PLAYERS_DATA_TYPE_KWG);
+  if (s->dlm == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
+    s->dlm = DUAL_LEXICON_MODE_IGNORANT;
+  }
+  bool create_separate_kwgs =
+      (s->dlm == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
+  s->pruned_kwgs[0] = NULL;
+  s->pruned_kwgs[1] = NULL;
+  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+       player_idx++) {
+    const KWG *full_kwg =
+        player_get_kwg(game_get_player(s->base_game, player_idx));
+    DictionaryWordList *word_list = dictionary_word_list_create();
+    generate_possible_words(s->base_game, full_kwg, word_list);
+    s->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+    dictionary_word_list_destroy(word_list);
+  }
+  s->kwgs_owned = true;
+  game_set_override_kwgs(s->base_game, s->pruned_kwgs[0], s->pruned_kwgs[1],
+                         s->dlm);
+  game_gen_all_cross_sets(s->base_game);
+
+  // Inner scenario distribution: from inner mover's perspective, the unseen
+  // tiles are the inner opp's full rack (= outer mover's rack) plus the bag
+  // tile — same total pool as outer_unseen, but interpreted from the other
+  // side. The distribution is structurally the same.
+  for (int ml = 0; ml < ld_size; ml++) {
+    s->inner_unseen[ml] = outer_unseen[ml];
+  }
+  s->inner_num_tile_types = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (s->inner_unseen[ml] > 0) {
+      s->inner_tile_types[s->inner_num_tile_types] = (MachineLetter)ml;
+      s->inner_tile_counts[s->inner_num_tile_types] = (int)s->inner_unseen[ml];
+      s->inner_num_tile_types++;
+    }
+  }
+
+  // Root movegen. Use the calling worker's idx for the per-thread movegen
+  // cache key — concurrent workers must not share it.
+  MoveList *initial_ml = move_list_create(BAI_PEG_MOVELIST_CAPACITY);
+  const MoveGenArgs gen_args = {
+      .game = s->base_game,
+      .move_list = initial_ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = worker_idx,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+
+  // Build cands: skip pass (disallow_pass behavior baked in).
+  int n = initial_ml->count;
+  s->cands = calloc_or_die((size_t)n, sizeof(BaiCand));
+  int kept = 0;
+  for (int ci = 0; ci < n; ci++) {
+    const Move *m = initial_ml->moves[ci];
+    if (move_get_type(m) == GAME_EVENT_PASS) {
+      continue;
+    }
+    s->cands[kept].move_full = *m;
+    const bool is_vert = (m->dir == BOARD_VERTICAL_DIRECTION);
+    const int orig_row = is_vert ? m->col_start : m->row_start;
+    const int orig_col = is_vert ? m->row_start : m->col_start;
+    small_move_set_all(&s->cands[kept].move, m->tiles, 0, m->tiles_length - 1,
+                       m->score, orig_row, orig_col, m->tiles_played, is_vert,
+                       m->move_type);
+    s->cands[kept].static_score = (int)equity_to_int(m->score);
+    s->cands[kept].equity_for_prior = m->equity;
+    kept++;
+  }
+  move_list_destroy(initial_ml);
+
+  // Sort by prior, take top_k.
+  qsort(s->cands, kept, sizeof(BaiCand), bp_compare_cands_by_prior);
+  if (initial_top_k > 0 && kept > initial_top_k) {
+    kept = initial_top_k;
+  }
+  s->num_cands = kept;
+
+  // Pre-stage post_cand_game for each retained cand.
+  for (int ci = 0; ci < s->num_cands; ci++) {
+    Game *g = game_duplicate(s->base_game);
+    game_set_endgame_solving_mode(g);
+    game_set_backup_mode(g, BACKUP_MODE_OFF);
+    play_move_without_drawing_tiles(&s->cands[ci].move_full, g);
+    bp_clear_false_game_end(g);
+    s->cands[ci].post_cand_game = g;
+  }
+
+  s->initialized = true;
+}
+
+// Deepen every retained cand to depth >= target_depth, skipping work done in
+// prior advance() calls. Each step calls bp_evaluate_cand at the next depth,
+// which itself uses args->executor when set (recursive work-stealing).
+static void bp_inner_session_advance(BpInnerSession *s, int target_depth,
+                                     ThreadControl *thread_control,
+                                     double endgame_time_per_solve,
+                                     int worker_idx, BaiPegExecutor *executor,
+                                     int64_t external_deadline_ns) {
+  if (!s->initialized) {
+    return;
+  }
+  if (target_depth > BAI_PEG_MAX_DEPTH) {
+    target_depth = BAI_PEG_MAX_DEPTH;
+  }
+  for (int ci = 0; ci < s->num_cands; ci++) {
+    while (s->cands[ci].depth_evaluated < target_depth) {
+      int next_d = s->cands[ci].depth_evaluated + 1;
+      bp_evaluate_cand(
+          &s->cands[ci], next_d, s->inner_mover_idx, s->inner_opp_idx,
+          s->inner_unseen, s->ld_size, s->inner_tile_types,
+          s->inner_tile_counts, s->inner_num_tile_types, thread_control,
+          /*per_thread_tts=*/NULL, s->dlm, endgame_time_per_solve,
+          /*num_threads=*/1, worker_idx, external_deadline_ns, executor);
+    }
+  }
+}
+
+// Pick the inner cand with the highest utility. utility_alpha follows
+// outer's preference for tiebreaking (small alpha = pure win% with spread
+// tiebreak).
+static int bp_inner_session_pick_best(const BpInnerSession *s,
+                                      double utility_alpha) {
+  int best = -1;
+  double best_u = 0.0;
+  int best_d = -1;
+  for (int ci = 0; ci < s->num_cands; ci++) {
+    if (s->cands[ci].depth_evaluated == 0) {
+      continue;
+    }
+    double u =
+        s->cands[ci].q_win_pct + utility_alpha * s->cands[ci].q_mean_spread;
+    int d = s->cands[ci].depth_evaluated;
+    if (best < 0 || d > best_d || (d == best_d && u > best_u)) {
+      best = ci;
+      best_u = u;
+      best_d = d;
+    }
+  }
+  return best;
+}
+
+static void bp_inner_session_destroy(BpInnerSession *s) {
+  if (!s->initialized) {
+    return;
+  }
+  for (int ci = 0; ci < s->num_cands; ci++) {
+    if (s->cands[ci].post_cand_game) {
+      game_destroy(s->cands[ci].post_cand_game);
+    }
+  }
+  free(s->cands);
+  if (s->kwgs_owned) {
+    if (s->pruned_kwgs[0]) {
+      kwg_destroy(s->pruned_kwgs[0]);
+    }
+    if (s->pruned_kwgs[1]) {
+      kwg_destroy(s->pruned_kwgs[1]);
+    }
+  }
+  game_destroy(s->base_game);
+  s->initialized = false;
+}
+
+// ---------------------------------------------------------------------------
 // Pass evaluation
 // ---------------------------------------------------------------------------
 
@@ -1091,6 +1345,11 @@ typedef struct BpPassScenario {
   int pinned_opp_depth;
   double per_scenario_time;
   const LetterDistribution *ld;
+  // Coupled inner session for THIS scenario_tile (lifetime owned by the
+  // outer pass cand). NULL = no coupling (legacy path: build + tear down a
+  // fresh inner sub-solve every visit). When set, deepen incrementally.
+  BpInnerSession *inner_session;
+  int initial_top_k; // Used when initializing the coupled session.
   // Outputs.
   bool sub_ok;
   bool found_tile_play;
@@ -1106,10 +1365,63 @@ typedef struct BpPassScenario {
   char move_str[64]; // formatted opp move text for logging
 } BpPassScenario;
 
-static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
+// Resolve M_opp + opp's perceived stats either via a coupled inner session
+// (incremental deepening, persistent across mover-pass-revisits) or by
+// running a fresh bai_peg_solve sub-call (legacy path). On return:
+//   *sub_game_out   — points to a Game* the caller MAY own (see
+//                     *owns_sub_game_out). Always valid for reads.
+//   *m_opp_small_out — opp's chosen small move (set as pass on no result).
+// Other s->* output fields are populated.
+static void bp_pass_scenario_resolve_m_opp(BpPassScenario *s, int worker_idx,
+                                           Game **sub_game_out,
+                                           bool *owns_sub_game_out,
+                                           SmallMove *m_opp_small_out) {
   const BaiPegArgs *args = s->args;
-  // Build sub-game: opp_rack = unseen - {bag_tile}, bag = {bag_tile},
-  // opp on turn.
+  if (s->inner_session) {
+    BpInnerSession *isess = s->inner_session;
+    if (!isess->initialized) {
+      int top_k =
+          s->initial_top_k > 0 ? s->initial_top_k : BAI_PEG_DEFAULT_TOP_K;
+      bp_inner_session_init(isess, args, args->game, s->mover_idx, s->unseen,
+                            s->bag_tile, s->ld_size, top_k, worker_idx);
+    }
+    // In coupled mode opp's depth tracks mover's PUCT eval depth — the
+    // pinned diagnostic knob is intentionally ignored here so each
+    // mover-pass-visit deepens opp's tree exactly one ply at a time.
+    int target_depth = s->depth;
+    if (target_depth > BAI_PEG_MAX_DEPTH) {
+      target_depth = BAI_PEG_MAX_DEPTH;
+    }
+    Timer t;
+    ctimer_start(&t);
+    bp_inner_session_advance(isess, target_depth, args->thread_control,
+                             args->endgame_time_per_solve, worker_idx,
+                             args->executor,
+                             /*external_deadline_ns=*/0);
+    s->opp_seconds = ctimer_elapsed_seconds(&t);
+    int evals = 0;
+    for (int ci = 0; ci < isess->num_cands; ci++) {
+      evals += isess->cands[ci].depth_evaluated;
+    }
+    s->opp_evals = evals;
+    s->sub_ok = isess->num_cands > 0;
+    int best_idx = bp_inner_session_pick_best(isess, args->utility_alpha);
+    if (best_idx >= 0) {
+      *m_opp_small_out = isess->cands[best_idx].move;
+      s->opp_play_win = isess->cands[best_idx].q_win_pct;
+      s->opp_play_spread = isess->cands[best_idx].q_mean_spread;
+    } else {
+      small_move_set_as_pass(m_opp_small_out);
+      s->opp_play_win = 0.0;
+      s->opp_play_spread = 0.0;
+    }
+    s->found_tile_play = !small_move_is_pass(m_opp_small_out);
+    *sub_game_out = isess->base_game;
+    *owns_sub_game_out = false;
+    return;
+  }
+
+  // Legacy path: build sub-game + run bai_peg_solve to completion.
   Game *sub_game = game_duplicate(args->game);
   {
     Bag *sub_bag = game_get_bag(sub_game);
@@ -1143,7 +1455,6 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
                                 ? args->pass_opp_time_per_scenario
                                 : s->per_scenario_time;
   sub.log_solve_details = false;
-  // Each worker key is unique and stable for the duration of one item.
   sub.thread_index_offset = worker_idx;
   sub.shared_tt = NULL;
   sub.shared_tt_per_thread = NULL;
@@ -1153,21 +1464,45 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
   sub.progress_callback_data = NULL;
   sub.sweep_max_depth = 0;
   sub.pass_opp_max_depth = 0;
-  // Inner sub-solve dispatches its own (cand, scenario_tile) leaves into
-  // the shared executor when set, so the inner cand × inner scenario tile
-  // work pieces compete for compute alongside other outer work.
-  sub.num_threads = 1; // unused when executor is set; legacy fallback only
+  sub.num_threads = 1;
   sub.executor = args->executor;
 
   BaiPegResult sub_result;
   ErrorStack *sub_es = error_stack_create();
   bai_peg_solve(&sub, &sub_result, sub_es);
-
   s->sub_ok = error_stack_is_empty(sub_es);
   s->opp_evals = s->sub_ok ? sub_result.evaluations_done : 0;
   s->opp_seconds = s->sub_ok ? sub_result.seconds_elapsed : 0.0;
+  if (s->sub_ok) {
+    *m_opp_small_out = sub_result.best_move;
+    s->opp_play_win = sub_result.best_win_pct;
+    s->opp_play_spread = sub_result.best_mean_spread;
+  } else {
+    small_move_set_as_pass(m_opp_small_out);
+    s->opp_play_win = 0.0;
+    s->opp_play_spread = 0.0;
+    error_stack_reset(sub_es);
+  }
+  s->found_tile_play = !small_move_is_pass(m_opp_small_out);
+  bai_cand_stats_free(sub_result.cand_stats);
+  error_stack_destroy(sub_es);
+  *sub_game_out = sub_game;
+  *owns_sub_game_out = true;
+}
 
-  // Option A: both pass → 2-pass terminal with rack penalties.
+static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
+  const BaiPegArgs *args = s->args;
+
+  Game *sub_game = NULL;
+  bool owns_sub_game = false;
+  SmallMove m_opp_small;
+  bp_pass_scenario_resolve_m_opp(s, worker_idx, &sub_game, &owns_sub_game,
+                                 &m_opp_small);
+
+  // Option A: both pass → 2-pass terminal with rack penalties. Computed
+  // from sub_game (which has racks/scores in the right state regardless of
+  // path: both legacy build and inner-session base_game keep mover's rack
+  // and opp's rack as 7 each, opp on turn).
   int32_t cur_spread =
       equity_to_int(player_get_score(game_get_player(sub_game, s->mover_idx))) -
       equity_to_int(player_get_score(game_get_player(sub_game, s->opp_idx)));
@@ -1185,16 +1520,10 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
     s->opp_pass_win = 0.0;
   }
 
-  // Option B: opp plays best tile move from inner sub-solve.
-  s->found_tile_play = s->sub_ok && !small_move_is_pass(&sub_result.best_move);
-  s->opp_play_win = s->sub_ok ? sub_result.best_win_pct : 0.0;
-  s->opp_play_spread = s->sub_ok ? sub_result.best_mean_spread : 0.0;
-
   Move m_opp_full;
-  small_move_to_move(&m_opp_full, &sub_result.best_move,
-                     game_get_board(sub_game));
+  small_move_to_move(&m_opp_full, &m_opp_small, game_get_board(sub_game));
 
-  // Format move text for the log line — capture now while sub_game is alive.
+  // Format move text for the log line — capture now while sub_game is live.
   s->move_str[0] = '\0';
   if (args->log_solve_details) {
     StringBuilder *sb = string_builder_create();
@@ -1268,12 +1597,9 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
     game_destroy(post_opp);
   }
 
-  if (!s->sub_ok) {
-    error_stack_reset(sub_es);
+  if (owns_sub_game) {
+    game_destroy(sub_game);
   }
-  bai_cand_stats_free(sub_result.cand_stats);
-  error_stack_destroy(sub_es);
-  game_destroy(sub_game);
 }
 
 static void bp_pass_scenario_work_fn(void *arg, int worker_idx) {
@@ -1328,6 +1654,16 @@ static void bp_evaluate_pass(BaiCand *cand, int depth, const BaiPegArgs *args,
 
   const LetterDistribution *ld = game_get_ld(args->game);
 
+  // Lazy-allocate the cand's coupled inner sessions array on first visit.
+  // The array length matches num_tile_types and indexes match `tile_types`.
+  // Caller (bai_peg_solve cleanup at end) frees them when the cand is torn
+  // down.
+  if (!cand->coupled_inner_sessions) {
+    cand->coupled_inner_sessions =
+        calloc_or_die((size_t)num_tile_types, sizeof(BpInnerSession));
+    cand->coupled_count = num_tile_types;
+  }
+
   // Per-scenario work (one entry per distinct unseen tile type). Either
   // run sequentially (legacy / no executor) or submitted as a batch to the
   // executor. Aggregation happens after all entries are filled.
@@ -1347,6 +1683,8 @@ static void bp_evaluate_pass(BaiCand *cand, int depth, const BaiPegArgs *args,
     s->pinned_opp_depth = pinned_opp_depth;
     s->per_scenario_time = per_scenario_time;
     s->ld = ld;
+    s->inner_session = &cand->coupled_inner_sessions[ti];
+    s->initial_top_k = args->initial_top_k;
   }
 
   if (args->executor) {
@@ -2272,6 +2610,12 @@ sweep_finish:
   for (int ci = 0; ci < num_candidates; ci++) {
     if (cands[ci].post_cand_game) {
       game_destroy(cands[ci].post_cand_game);
+    }
+    if (cands[ci].coupled_inner_sessions) {
+      for (int si = 0; si < cands[ci].coupled_count; si++) {
+        bp_inner_session_destroy(&cands[ci].coupled_inner_sessions[si]);
+      }
+      free(cands[ci].coupled_inner_sessions);
     }
   }
   free(cands);
