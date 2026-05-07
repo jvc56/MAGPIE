@@ -108,12 +108,14 @@ static void bp_clear_false_game_end(Game *game) {
 typedef struct BaiCand {
   SmallMove move;
   Move move_full;
-  int static_score;     // Move score (used to derive prior).
-  Game *post_cand_game; // Post-move game state (board + cross-sets), shared.
-  double prior;         // Softmax-normalized prior in [0, 1].
-  int depth_evaluated;  // 0 = no endgame eval yet; N = N-ply endgame done.
-  int visits;           // Number of (depth) evaluations performed.
-  double time_paid;     // Cumulative wall time spent evaluating this cand.
+  int static_score;        // Move score (used for sort + display).
+  Equity equity_for_prior; // Prior softmax basis = score + KLV leave value
+                           // (movegen's pre-computed equity field).
+  Game *post_cand_game;    // Post-move game state (board + cross-sets), shared.
+  double prior;            // Softmax-normalized prior in [0, 1].
+  int depth_evaluated;     // 0 = no endgame eval yet; N = N-ply endgame done.
+  int visits;              // Number of (depth) evaluations performed.
+  double time_paid;        // Cumulative wall time spent evaluating this cand.
   double last_eval_seconds; // Wall time of the most recent evaluation.
   double cost_estimate;     // Predicted seconds for the next evaluation.
   double q_mean_spread;     // Mean spread at deepest evaluated depth (0 init).
@@ -621,10 +623,20 @@ bp_evaluate_cand(BaiCand *cand, int depth, int mover_idx, int opp_idx,
 // Ranking helpers
 // ---------------------------------------------------------------------------
 
-static int bp_compare_cands_by_score(const void *a, const void *b) {
+// Sort cands by their prior basis (descending). Movegen already produces
+// moves in equity-descending order; this comparator exists as a safety
+// net after the pass filter so the cands array's basis ordering is an
+// invariant the rest of the file can rely on.
+static int bp_compare_cands_by_prior(const void *a, const void *b) {
   const BaiCand *ca = (const BaiCand *)a;
   const BaiCand *cb = (const BaiCand *)b;
-  return cb->static_score - ca->static_score; // descending
+  if (cb->equity_for_prior > ca->equity_for_prior) {
+    return 1;
+  }
+  if (cb->equity_for_prior < ca->equity_for_prior) {
+    return -1;
+  }
+  return 0;
 }
 
 // Stateless utility helper. Callers pass alpha explicitly; the qsort
@@ -767,14 +779,19 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   game_set_override_kwgs(base_game, pruned_kwgs[0], pruned_kwgs[1], dlm);
   game_gen_all_cross_sets(base_game);
 
-  // Generate candidate moves.
-  MoveList *initial_ml = move_list_create_small(BAI_PEG_MOVELIST_CAPACITY);
+  // Root movegen uses full Move records (not SmallMove) and MOVE_SORT_EQUITY
+  // so each cand carries movegen's pre-computed equity (= score + KLV leave
+  // value). We use that equity as the prior softmax basis, which empirically
+  // beats score-only by ~0.4pp EmpW% / +0.37 spread on a 1000-position 1s
+  // benchmark (95 vs 73 H2H wins among 174 differing picks; see commit
+  // message for sweep details).
+  MoveList *initial_ml = move_list_create(BAI_PEG_MOVELIST_CAPACITY);
   {
     const MoveGenArgs gen_args = {
         .game = base_game,
         .move_list = initial_ml,
-        .move_record_type = MOVE_RECORD_ALL_SMALL,
-        .move_sort_type = MOVE_SORT_SCORE,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
         .override_kwg = NULL,
         .thread_index = args->thread_index_offset,
         .eq_margin_movegen = 0,
@@ -788,7 +805,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
   if (num_candidates == 0) {
     // movegen normally returns at least a pass; defensive fallback if it
     // somehow doesn't. Same handling as the "no scoring plays" case below.
-    small_move_list_destroy(initial_ml);
+    move_list_destroy(initial_ml);
     if (pruned_kwgs[0]) {
       kwg_destroy(pruned_kwgs[0]);
     }
@@ -804,22 +821,34 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     return;
   }
 
-  // Build candidate array, top-K by static score. Skip pass candidates
-  // until PEG recursion is wired in — bai_peg has no way to evaluate the
-  // pass branch correctly without recursing into the post-pass position.
+  // Build candidate array. Skip pass candidates until PEG recursion is
+  // wired in — bai_peg has no way to evaluate the pass branch correctly
+  // without recursing into the post-pass position.
   BaiCand *cands = calloc_or_die(num_candidates, sizeof(BaiCand));
   int kept = 0;
   for (int ci = 0; ci < num_candidates; ci++) {
-    if (small_move_is_pass(initial_ml->small_moves[ci])) {
+    const Move *m = initial_ml->moves[ci];
+    if (move_get_type(m) == GAME_EVENT_PASS) {
       continue;
     }
-    cands[kept].move = *initial_ml->small_moves[ci];
-    small_move_to_move(&cands[kept].move_full, &cands[kept].move,
-                       game_get_board(base_game));
-    cands[kept].static_score = (int)small_move_get_score(&cands[kept].move);
+    cands[kept].move_full = *m;
+    // Build SmallMove from the full Move so callers (result.best_move,
+    // progress callback, cand_stats) get the compact form. Movegen
+    // pre-swaps row_start/col_start for vertical moves to match the
+    // SmallMove encoding's own swap (set_play_for_record at
+    // move_gen.c:210-213); we have to undo that swap before calling
+    // small_move_set_all (which will re-apply it).
+    const bool is_vert = (m->dir == BOARD_VERTICAL_DIRECTION);
+    const int orig_row = is_vert ? m->col_start : m->row_start;
+    const int orig_col = is_vert ? m->row_start : m->col_start;
+    small_move_set_all(&cands[kept].move, m->tiles, 0, m->tiles_length - 1,
+                       m->score, orig_row, orig_col, m->tiles_played, is_vert,
+                       m->move_type);
+    cands[kept].static_score = (int)equity_to_int(m->score);
+    cands[kept].equity_for_prior = m->equity;
     kept++;
   }
-  small_move_list_destroy(initial_ml);
+  move_list_destroy(initial_ml);
   num_candidates = kept;
   if (num_candidates == 0) {
     // No scoring plays from this rack. bai_peg can't search the pass branch
@@ -842,7 +871,7 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     return;
   }
 
-  qsort(cands, num_candidates, sizeof(BaiCand), bp_compare_cands_by_score);
+  qsort(cands, num_candidates, sizeof(BaiCand), bp_compare_cands_by_prior);
   // Progressive widening keeps ALL generated moves in the pool — the active
   // subset grows from a small seed as PUCT accumulates visits, so weak moves
   // don't get touched at short budgets.
@@ -850,14 +879,17 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     num_candidates = initial_top_k;
   }
 
-  // Compute softmax priors over the top-K static scores. Use a scaled
-  // temperature so the gap between top moves doesn't fully starve the rest.
+  // Compute softmax priors over each cand's equity_for_prior (= score +
+  // KLV leave value). Cands are already sorted in basis-descending order
+  // by qsort above. Temperature scaled so the gap between top moves
+  // doesn't fully starve the rest.
   {
-    int max_score = cands[0].static_score;
     double T = 25.0; // points per "natural" temperature unit
+    double max_basis = equity_to_double(cands[0].equity_for_prior);
     double sum = 0.0;
     for (int ci = 0; ci < num_candidates; ci++) {
-      double s = exp((double)(cands[ci].static_score - max_score) / T);
+      double basis = equity_to_double(cands[ci].equity_for_prior);
+      double s = exp((basis - max_basis) / T);
       cands[ci].prior = s; // store unnormalized for now
       sum += s;
     }
