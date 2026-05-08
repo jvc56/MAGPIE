@@ -932,13 +932,24 @@ void test_bai_peg_english_pass_solve(void) {
     printf("Top-15 cand stats:\n");
     int show =
         result.candidates_considered < 15 ? result.candidates_considered : 15;
+    const LetterDistribution *ld_print = game_get_ld(game);
     for (int i = 0; i < show; i++) {
       const BaiCandStats *s = &result.cand_stats[i];
-      printf("  [%2d] is_pass=%d static_score=%-3d depth=%d "
-             "final_q_win%%=%.4f final_q_spread=%+0.2f%s\n",
-             i, (int)small_move_is_pass(&s->move), s->static_score,
-             s->depth_evaluated, s->final_q_win_pct, s->final_q_mean_spread,
+      StringBuilder *sb = string_builder_create();
+      if (small_move_is_pass(&s->move)) {
+        string_builder_add_string(sb, "(Pass)");
+      } else {
+        Move m;
+        small_move_to_move(&m, &s->move, game_get_board(game));
+        string_builder_add_move(sb, game_get_board(game), &m, ld_print,
+                                /*add_score=*/true);
+      }
+      printf("  [%2d] %-30s static=%-3d depth=%d "
+             "win%%=%.4f spread=%+0.2f%s\n",
+             i, string_builder_peek(sb), s->static_score, s->depth_evaluated,
+             s->final_q_win_pct, s->final_q_mean_spread,
              s->is_best ? "  <-- BEST" : "");
+      string_builder_destroy(sb);
     }
   }
   printf("==========================================\n");

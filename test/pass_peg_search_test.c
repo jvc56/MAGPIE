@@ -565,52 +565,59 @@ static void play_until_natural_end(Game *game, MoveList *move_list) {
   }
 }
 
-// Returns true if no playable move on the current board uses Q. We test
-// by temporarily setting mover's rack to 7 blanks (so movegen will try
-// every legal letter combination, capped by max_nonplaythrough), then
-// asking whether any generated move's tiles include Q.
-static bool condition_q_unplayable(Game *game, MoveList *ml, int mover_idx,
-                                   MachineLetter q_ml) {
+// Returns true iff Q has no playable move on the current board across
+// every rack opp could actually hold in this scenario set. With
+// mover_rack=R and unseen = R+Q, opp's actual scenario rack is
+// always Q + 6-from-R (mover's bingo-tile is whatever opp doesn't
+// see). For R with 7 unique letters that's 7 racks (each with one
+// letter of R dropped). For R with duplicates, dropping each rack
+// slot can produce equivalent multisets — we redundantly try all 7
+// drops and rely on movegen being cheap.
+static bool condition_q_unplayable(Game *game, int mover_idx,
+                                   MachineLetter q_ml,
+                                   const MachineLetter rack_ml[7]) {
   Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
   Rack saved_rack;
   rack_copy(&saved_rack, mover_rack);
-  rack_reset(mover_rack);
-  for (int i = 0; i < 7; i++) {
-    rack_add_letter(mover_rack, BLANK_MACHINE_LETTER);
-  }
-  const MoveGenArgs args = {
-      .game = game,
-      .move_list = ml,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = NULL,
-      .thread_index = 0,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&args);
-  bool q_seen = false;
-  int n = move_list_get_count(ml);
-  for (int i = 0; i < n && !q_seen; i++) {
-    const Move *m = move_list_get_move(ml, i);
-    int tp = move_get_tiles_played(m);
-    for (int t = 0; t < tp; t++) {
-      MachineLetter ml_tile = m->tiles[t];
-      if (ml_tile == 0) {
-        continue; // playthrough cell, no rack tile
+
+  uint64_t q_bit = (uint64_t)1 << q_ml;
+  bool q_playable = false;
+  // movegen still needs a valid MoveList in TILES_PLAYED mode (it builds
+  // small-move records internally even though we don't read them).
+  MoveList *probe_ml = move_list_create(64);
+
+  for (int drop = 0; drop < 7 && !q_playable; drop++) {
+    rack_reset(mover_rack);
+    rack_add_letter(mover_rack, q_ml);
+    for (int i = 0; i < 7; i++) {
+      if (i == drop) {
+        continue;
       }
-      MachineLetter unblanked = get_is_blanked(ml_tile)
-                                    ? get_unblanked_machine_letter(ml_tile)
-                                    : ml_tile;
-      if (unblanked == q_ml) {
-        q_seen = true;
-        break;
-      }
+      rack_add_letter(mover_rack, rack_ml[i]);
+    }
+    uint64_t tiles_played_bv = 0;
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = probe_ml,
+        .move_record_type = MOVE_RECORD_TILES_PLAYED,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .tiles_played_bv = &tiles_played_bv,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves(&args);
+    if (tiles_played_bv & q_bit) {
+      q_playable = true;
     }
   }
+
+  move_list_destroy(probe_ml);
   rack_copy(mover_rack, &saved_rack);
-  return !q_seen;
+  return !q_playable;
 }
 
 // Generate moves for the player on turn (using their actual rack) and
@@ -951,7 +958,7 @@ void test_pass_peg_search_forced(void) {
     }
 
     // Condition 2: Q is unplayable on the current board.
-    if (!condition_q_unplayable(game, ml, mover_idx, q_ml)) {
+    if (!condition_q_unplayable(game, mover_idx, q_ml, rack_ml)) {
       continue;
     }
     n_q_unplayable++;

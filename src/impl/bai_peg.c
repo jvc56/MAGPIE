@@ -1379,11 +1379,22 @@ static void bp_pass_scenario_resolve_m_opp(BpPassScenario *s, int worker_idx,
   const BaiPegArgs *args = s->args;
   if (s->inner_session) {
     BpInnerSession *isess = s->inner_session;
+    Timer t;
+    ctimer_start(&t);
     if (!isess->initialized) {
+      Timer init_t;
+      ctimer_start(&init_t);
       int top_k =
           s->initial_top_k > 0 ? s->initial_top_k : BAI_PEG_DEFAULT_TOP_K;
       bp_inner_session_init(isess, args, args->game, s->mover_idx, s->unseen,
                             s->bag_tile, s->ld_size, top_k, worker_idx);
+      double init_secs = ctimer_elapsed_seconds(&init_t);
+      if (args->log_solve_details) {
+        fprintf(stderr,
+                "      [bp.scen.init] tile=%d cands=%d worker=%d %.2fs\n",
+                (int)s->bag_tile, isess->num_cands, worker_idx, init_secs);
+        fflush(stderr);
+      }
     }
     // In coupled mode opp's depth tracks mover's PUCT eval depth — the
     // pinned diagnostic knob is intentionally ignored here so each
@@ -1392,12 +1403,18 @@ static void bp_pass_scenario_resolve_m_opp(BpPassScenario *s, int worker_idx,
     if (target_depth > BAI_PEG_MAX_DEPTH) {
       target_depth = BAI_PEG_MAX_DEPTH;
     }
-    Timer t;
-    ctimer_start(&t);
+    Timer adv_t;
+    ctimer_start(&adv_t);
     bp_inner_session_advance(isess, target_depth, args->thread_control,
                              args->endgame_time_per_solve, worker_idx,
                              args->executor,
                              /*external_deadline_ns=*/0);
+    if (args->log_solve_details) {
+      double adv_secs = ctimer_elapsed_seconds(&adv_t);
+      fprintf(stderr, "      [bp.scen.advance] tile=%d depth=%d %.2fs\n",
+              (int)s->bag_tile, target_depth, adv_secs);
+      fflush(stderr);
+    }
     s->opp_seconds = ctimer_elapsed_seconds(&t);
     int evals = 0;
     for (int ci = 0; ci < isess->num_cands; ci++) {
@@ -1571,8 +1588,21 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
       double mover_eg_cap = args->endgame_time_per_solve > 0.0
                                 ? args->endgame_time_per_solve
                                 : 0.0;
+      // endgame_solve_inline runs in the calling thread and does not
+      // spawn the external timer thread, so soft/hard time limits go
+      // unenforced mid-search. external_deadline_ns is checked by
+      // abdada_negamax's depth-deadline path and gives us a real
+      // wall-clock cap. Without this, post-bingo "stuck" endgames
+      // (mover with 1 tile vs opp with 7 + unplayable letters) can
+      // run for many minutes per scenario.
+      int64_t deadline_ns =
+          mover_eg_cap > 0.0
+              ? ctimer_monotonic_ns() + (int64_t)(mover_eg_cap * 1.0e9)
+              : 0;
       EndgameCtx *eg_ctx = NULL;
       EndgameResults *eg_results = endgame_results_create();
+      Timer eg_t;
+      ctimer_start(&eg_t);
       EndgameArgs ea = {
           .thread_control = args->thread_control,
           .game = post_opp,
@@ -1587,10 +1617,20 @@ static void bp_pass_scenario_eval(BpPassScenario *s, int worker_idx) {
           .thread_index_offset = worker_idx,
           .soft_time_limit = mover_eg_cap,
           .hard_time_limit = mover_eg_cap,
+          .external_deadline_ns = deadline_ns,
       };
       endgame_solve_inline(&eg_ctx, &ea, eg_results);
       int eg_val = endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+      int eg_depth = endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
       s->mover_total = mover_lead + eg_val;
+      double eg_secs = ctimer_elapsed_seconds(&eg_t);
+      if (args->log_solve_details) {
+        fprintf(stderr,
+                "      [bp.scen.eg] tile=%d eg_depth=%d eg_secs=%.2fs "
+                "mover_total=%+d\n",
+                (int)s->bag_tile, eg_depth, eg_secs, (int)s->mover_total);
+        fflush(stderr);
+      }
       endgame_results_destroy(eg_results);
       endgame_ctx_destroy(eg_ctx);
     }
