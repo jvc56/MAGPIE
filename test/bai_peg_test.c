@@ -801,6 +801,31 @@ void test_bai_peg_french_pass_solve(void) {
              best_other_idx, o->static_score, o->final_q_win_pct,
              o->final_q_mean_spread, o->depth_evaluated, dwin, dspread,
              verdict);
+      // Macondo's Test1PEGPass on the same CGP at plies=4..8 asserts pass is
+      // the unique best move with Points=5.5/8 = 0.6875. Once the solver and
+      // the scenario sweep depth are deep enough, we should match. Only
+      // assert when both env knobs leave defaults large enough to converge:
+      // PEG_OPP_DEPTH unset (or >=2) AND PEG_TOP_K unset (or >=8) AND
+      // PEG_INCLUDE_PASS unset (i.e. include_pass=true). We deliberately
+      // skip the assertion when callers tweak those knobs for diagnostics.
+      if (include_pass && top_k >= 8 && opp_d >= 2 && sweep_d >= 1) {
+        if (dwin <= 1e-9) {
+          fprintf(stderr,
+                  "FAIL: pass should be best on French CGP (5.5/8 = "
+                  "0.6875). Got pass=%.4f best-other=%.4f.\n",
+                  p->final_q_win_pct, o->final_q_win_pct);
+        }
+        assert(dwin > 1e-9 &&
+               "pass must beat the best non-pass cand on French CGP");
+        if (p->final_q_win_pct < 0.685 || p->final_q_win_pct > 0.69) {
+          fprintf(stderr,
+                  "FAIL: pass win%% should be ~0.6875 (matches macondo). "
+                  "Got %.4f.\n",
+                  p->final_q_win_pct);
+        }
+        assert(p->final_q_win_pct > 0.685 && p->final_q_win_pct < 0.69 &&
+               "pass win%% must be the macondo 5.5/8 = 0.6875");
+      }
     } else {
       printf("Pass-vs-best-other: pass cand %s; best-other cand %s\n",
              pass_idx >= 0 ? "found" : "MISSING",
