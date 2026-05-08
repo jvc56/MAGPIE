@@ -39,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pass_peg_search_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -150,6 +151,8 @@ static TestEntry on_demand_test_table[] = {
     {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
     {"pegfrenchpass", test_bai_peg_french_pass_solve},
     {"pegfrenchoracle", test_bai_peg_french_oracle},
+    {"passpegracks", test_pass_peg_enumerate_bingo_racks},
+    {"passpegsearch", test_pass_peg_search},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
