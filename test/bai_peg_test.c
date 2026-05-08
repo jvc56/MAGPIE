@@ -851,6 +851,106 @@ void test_bai_peg(void) {
   test_bai_peg_accepts_empty_opp_rack();
 }
 
+// English (TWL98) seed=9973 candidate from the pass-PEG search: mover
+// has AEINRST, opp has AEINRST, bag has Q. Mover lead +19. Q unplayable
+// at the root, single bingo lane, all bingos answerable. Engineered to
+// be a position where pass should be the best move for verification
+// against macondo.
+#define BAI_PEG_TEST_ENGLISH_PASS_CGP                                          \
+  "cgp 3P3B5AG/3R1ELOIN3XI/2DIGLOT6M/3C2PFUI2AWE/3E3L1FRUGAL/3Y3Y5V1/"         \
+  "8JO2HE1/5E1IODIZED1/3UNBATED1OW2/5O5O3/5N5S3/5I5p3/5T2COVET2/"              \
+  "5E1AAH1R3/1UNmASKER2M3 AEINRST/AEINRST 398/379 0 -lex TWL98"
+
+void test_bai_peg_english_pass_solve(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, BAI_PEG_TEST_ENGLISH_PASS_CGP);
+  Game *game = config_get_game(config);
+  assert(rack_get_total_letters(player_get_rack(game_get_player(
+             game, game_get_player_on_turn_index(game)))) == RACK_SIZE);
+
+  const char *env_d = getenv("PEG_SWEEP_DEPTH");
+  int sweep_d = env_d && *env_d ? atoi(env_d) : 1;
+  if (sweep_d < 1) {
+    sweep_d = 1;
+  }
+  const char *opp_d_env = getenv("PEG_OPP_DEPTH");
+  int opp_d = opp_d_env && *opp_d_env ? atoi(opp_d_env) : 4;
+  if (opp_d < 1) {
+    opp_d = 1;
+  }
+  const char *topk_env = getenv("PEG_TOP_K");
+  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
+  if (top_k < 1) {
+    top_k = 1;
+  }
+  const char *exec_env = getenv("PEG_EXEC_WORKERS");
+  int exec_workers = exec_env && *exec_env ? atoi(exec_env) : 8;
+  if (exec_workers < 0) {
+    exec_workers = 0;
+  }
+  BaiPegExecutor *executor =
+      exec_workers > 0 ? bai_peg_executor_create(exec_workers, 100) : NULL;
+  const char *inc_pass_env = getenv("PEG_INCLUDE_PASS");
+  bool include_pass =
+      !(inc_pass_env && *inc_pass_env && atoi(inc_pass_env) == 0);
+
+  BaiPegArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .num_threads = 1,
+      .tt_fraction_of_mem = 0.0,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .initial_top_k = top_k,
+      .max_depth = sweep_d,
+      .endgame_time_per_solve = 5.0,
+      .time_budget_seconds = 0.0,
+      .puct_c = 1.0,
+      .utility_alpha = 1e-4,
+      .progressive_widening = false,
+      .min_active = 0,
+      .sweep_max_depth = sweep_d,
+      .include_pass = include_pass,
+      .pass_opp_max_depth = opp_d,
+      .executor = executor,
+      .log_solve_details = true,
+      .request_cand_stats = true,
+  };
+  BaiPegResult result;
+  ErrorStack *error_stack = error_stack_create();
+  bai_peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  printf("\n=== English seed=9973 pass-PEG result ===\n");
+  printf("evals_done=%d  cands=%d  time=%.2fs\n", result.evaluations_done,
+         result.candidates_considered, result.seconds_elapsed);
+  printf("best move: %s  win%%=%.4f  spread=%+0.4f  depth=%d\n",
+         small_move_is_pass(&result.best_move) ? "(Pass)" : "<non-pass>",
+         result.best_win_pct, result.best_mean_spread,
+         result.best_depth_evaluated);
+
+  if (result.cand_stats) {
+    printf("Top-15 cand stats:\n");
+    int show =
+        result.candidates_considered < 15 ? result.candidates_considered : 15;
+    for (int i = 0; i < show; i++) {
+      const BaiCandStats *s = &result.cand_stats[i];
+      printf("  [%2d] is_pass=%d static_score=%-3d depth=%d "
+             "final_q_win%%=%.4f final_q_spread=%+0.2f%s\n",
+             i, (int)small_move_is_pass(&s->move), s->static_score,
+             s->depth_evaluated, s->final_q_win_pct, s->final_q_mean_spread,
+             s->is_best ? "  <-- BEST" : "");
+    }
+  }
+  printf("==========================================\n");
+
+  error_stack_destroy(error_stack);
+  bai_cand_stats_free(result.cand_stats);
+  if (executor) {
+    bai_peg_executor_destroy(executor);
+  }
+  config_destroy(config);
+}
+
 // ---------------------------------------------------------------------------
 // Oracle eval: deep-plies endgame_solve evaluation of a single tile-placement
 // move across all bag-tile scenarios. Ported (and trimmed) from peg-solver's

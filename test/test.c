@@ -151,6 +151,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
     {"pegfrenchpass", test_bai_peg_french_pass_solve},
     {"pegfrenchoracle", test_bai_peg_french_oracle},
+    {"pegenglishpass", test_bai_peg_english_pass_solve},
     {"passpegracks", test_pass_peg_enumerate_bingo_racks},
     {"passpegsearch", test_pass_peg_search},
     {"passpegforce", test_pass_peg_search_forced},
