@@ -149,6 +149,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegthorough", test_bai_peg_thorough},
     {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
     {"pegfrenchpass", test_bai_peg_french_pass_solve},
+    {"pegfrenchoracle", test_bai_peg_french_oracle},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

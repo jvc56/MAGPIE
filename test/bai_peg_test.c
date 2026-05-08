@@ -1,18 +1,30 @@
 #include "bai_peg_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/compat/ctime.h"
+#include "../src/def/board_defs.h"
 #include "../src/def/cpthread_defs.h"
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
+#include "../src/ent/endgame_results.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/impl/bai_peg.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <pthread.h>
@@ -685,6 +697,11 @@ void test_bai_peg_french_pass_solve(void) {
   }
   BaiPegExecutor *executor =
       exec_workers > 0 ? bai_peg_executor_create(exec_workers, 100) : NULL;
+  // Toggle to drop the pass cand entirely — useful for re-evaluating the
+  // top tile-play(s) at deeper plies without paying for pass eval.
+  const char *inc_pass_env = getenv("PEG_INCLUDE_PASS");
+  bool include_pass =
+      !(inc_pass_env && *inc_pass_env && atoi(inc_pass_env) == 0);
 
   BaiPegArgs args = {
       .game = game,
@@ -701,7 +718,7 @@ void test_bai_peg_french_pass_solve(void) {
       .progressive_widening = false, // we want all 32 in the active set
       .min_active = 0,
       .sweep_max_depth = sweep_d,
-      .include_pass = true,
+      .include_pass = include_pass,
       .pass_opp_max_depth = opp_d,
       .executor = executor,
       .log_solve_details = true,
@@ -736,6 +753,59 @@ void test_bai_peg_french_pass_solve(void) {
              s->final_q_win_pct, s->final_q_mean_spread,
              s->is_best ? "  <-- BEST" : "");
     }
+
+    // Pass-vs-best-other comparison: macondo + old peg.c claim pass is the
+    // best move on this position (5.5/8 = 0.6875). Surface whether our
+    // solver agrees by comparing pass cand's final win% against the best
+    // non-pass cand's.
+    int pass_idx = -1;
+    int best_other_idx = -1;
+    for (int i = 0; i < result.candidates_considered; i++) {
+      const BaiCandStats *s = &result.cand_stats[i];
+      bool is_pass = small_move_is_pass(&s->move);
+      if (is_pass) {
+        pass_idx = i;
+      } else {
+        if (best_other_idx < 0 ||
+            s->final_q_win_pct >
+                result.cand_stats[best_other_idx].final_q_win_pct ||
+            (s->final_q_win_pct ==
+                 result.cand_stats[best_other_idx].final_q_win_pct &&
+             s->final_q_mean_spread >
+                 result.cand_stats[best_other_idx].final_q_mean_spread)) {
+          best_other_idx = i;
+        }
+      }
+    }
+    if (pass_idx >= 0 && best_other_idx >= 0) {
+      const BaiCandStats *p = &result.cand_stats[pass_idx];
+      const BaiCandStats *o = &result.cand_stats[best_other_idx];
+      double dwin = p->final_q_win_pct - o->final_q_win_pct;
+      double dspread = p->final_q_mean_spread - o->final_q_mean_spread;
+      const char *verdict;
+      if (dwin > 1e-9) {
+        verdict = "PASS BEST (strict win%)";
+      } else if (dwin < -1e-9) {
+        verdict = "TILE-PLAY BEST (strict win%)";
+      } else if (dspread > 1e-9) {
+        verdict = "PASS BEST (win% tied, higher spread)";
+      } else if (dspread < -1e-9) {
+        verdict = "TILE-PLAY BEST (win% tied, higher spread)";
+      } else {
+        verdict = "TIE (identical win% and spread)";
+      }
+      printf("Pass-vs-best-other: pass win%%=%.4f spread=%+0.4f depth=%d | "
+             "best-other (rank %d) static_score=%d win%%=%.4f "
+             "spread=%+0.4f depth=%d | dwin=%+.4f dspread=%+.4f -> %s\n",
+             p->final_q_win_pct, p->final_q_mean_spread, p->depth_evaluated,
+             best_other_idx, o->static_score, o->final_q_win_pct,
+             o->final_q_mean_spread, o->depth_evaluated, dwin, dspread,
+             verdict);
+    } else {
+      printf("Pass-vs-best-other: pass cand %s; best-other cand %s\n",
+             pass_idx >= 0 ? "found" : "MISSING",
+             best_other_idx >= 0 ? "found" : "MISSING");
+    }
   }
   printf("==============================\n");
 
@@ -754,4 +824,251 @@ void test_bai_peg(void) {
   test_bai_peg_returns_pass_when_no_scoring_plays();
   test_bai_peg_rejects_non_one_in_bag();
   test_bai_peg_accepts_empty_opp_rack();
+}
+
+// ---------------------------------------------------------------------------
+// Oracle eval: deep-plies endgame_solve evaluation of a single tile-placement
+// move across all bag-tile scenarios. Ported (and trimmed) from peg-solver's
+// benchmark_peg_test.c. Not safe for pass moves (which need a 1peg sub-solve
+// to model opp's response — use bp_evaluate_pass for that).
+// ---------------------------------------------------------------------------
+
+static void oracle_compute_unseen(const Game *game, int mover_idx,
+                                  uint8_t unseen[MAX_ALPHABET_SIZE]) {
+  const LetterDistribution *ld = game_get_ld(game);
+  int ld_size = ld_get_size(ld);
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] -= (uint8_t)rack_get_letter(mover_rack, ml);
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_empty(board, row, col)) {
+        continue;
+      }
+      MachineLetter ml = board_get_letter(board, row, col);
+      if (get_is_blanked(ml)) {
+        if (unseen[BLANK_MACHINE_LETTER] > 0) {
+          unseen[BLANK_MACHINE_LETTER]--;
+        }
+      } else {
+        if (unseen[ml] > 0) {
+          unseen[ml]--;
+        }
+      }
+    }
+  }
+}
+
+static void oracle_set_opp_rack(Rack *opp_rack,
+                                const uint8_t unseen[MAX_ALPHABET_SIZE],
+                                int ld_size, MachineLetter bag_tile) {
+  rack_reset(opp_rack);
+  for (int ml = 0; ml < ld_size; ml++) {
+    int cnt = (int)unseen[ml] - (ml == bag_tile ? 1 : 0);
+    for (int i = 0; i < cnt; i++) {
+      rack_add_letter(opp_rack, (MachineLetter)ml);
+    }
+  }
+}
+
+static void oracle_eval_tile_play(const Game *base_game_empty, const Move *move,
+                                  int mover_idx, int opp_idx,
+                                  const uint8_t unseen[MAX_ALPHABET_SIZE],
+                                  int ld_size, int plies, double time_budget,
+                                  ThreadControl *tc, FILE *log,
+                                  double *win_pct_out, double *spread_out) {
+  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  int tile_counts[MAX_ALPHABET_SIZE];
+  int num_tile_types = 0;
+  for (int t = 0; t < ld_size; t++) {
+    if (unseen[t] > 0) {
+      tile_types[num_tile_types] = (MachineLetter)t;
+      tile_counts[num_tile_types] = (int)unseen[t];
+      num_tile_types++;
+    }
+  }
+
+  double total_spread = 0.0;
+  double total_wins = 0.0;
+  int weight = 0;
+  const LetterDistribution *ld = game_get_ld(base_game_empty);
+
+  EndgameCtx *eg_ctx = NULL;
+  EndgameResults *eg_results = endgame_results_create();
+
+  for (int ti = 0; ti < num_tile_types; ti++) {
+    MachineLetter tile = tile_types[ti];
+    int cnt = tile_counts[ti];
+
+    Game *g = game_duplicate(base_game_empty);
+    game_set_endgame_solving_mode(g);
+    game_set_backup_mode(g, BACKUP_MODE_OFF);
+
+    Move scenario_move = *move;
+    play_move_without_drawing_tiles(&scenario_move, g);
+    game_set_game_end_reason(g, GAME_END_REASON_NONE);
+    game_set_consecutive_scoreless_turns(g, 0);
+
+    Rack *opp_rack = player_get_rack(game_get_player(g, opp_idx));
+    oracle_set_opp_rack(opp_rack, unseen, ld_size, tile);
+    Rack *mover_rack = player_get_rack(game_get_player(g, mover_idx));
+    rack_add_letter(mover_rack, tile);
+
+    int32_t mover_lead =
+        equity_to_int(player_get_score(game_get_player(g, mover_idx))) -
+        equity_to_int(player_get_score(game_get_player(g, opp_idx)));
+
+    int64_t deadline_ns =
+        ctimer_monotonic_ns() + (int64_t)(time_budget * 1.0e9);
+    EndgameArgs ea = {
+        .thread_control = tc,
+        .game = g,
+        .plies = plies,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 1,
+        .use_heuristics = true,
+        .num_top_moves = 1,
+        .skip_word_pruning = true,
+        .soft_time_limit = time_budget,
+        .hard_time_limit = time_budget,
+        .external_deadline_ns = deadline_ns,
+        .thread_index_offset = 200, // far from PEG/BAI cache slots
+    };
+
+    Timer eg_timer;
+    ctimer_start(&eg_timer);
+    endgame_results_reset(eg_results);
+    endgame_solve_inline(&eg_ctx, &ea, eg_results);
+    double eg_secs = ctimer_elapsed_seconds(&eg_timer);
+
+    int eg_val = endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+    int eg_depth = endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+    int32_t mover_total = (int32_t)mover_lead - eg_val;
+
+    total_spread += (double)mover_total * cnt;
+    double scenario_win;
+    if (mover_total > 0) {
+      scenario_win = 1.0;
+    } else if (mover_total == 0) {
+      scenario_win = 0.5;
+    } else {
+      scenario_win = 0.0;
+    }
+    total_wins += scenario_win * cnt;
+    weight += cnt;
+
+    if (log) {
+      const char *outcome = mover_total > 0    ? "WIN"
+                            : mover_total == 0 ? "TIE"
+                                               : "LOSS";
+      fprintf(log,
+              "      bag=%s (cnt=%d): final_spread=%+d  %s  depth=%d  "
+              "time=%.2fs\n",
+              ld->ld_ml_to_hl[tile], cnt, mover_total, outcome, eg_depth,
+              eg_secs);
+      fflush(log);
+    }
+
+    game_destroy(g);
+  }
+
+  endgame_results_destroy(eg_results);
+  endgame_ctx_destroy(eg_ctx);
+
+  *win_pct_out = (weight > 0) ? total_wins / weight : 0.0;
+  *spread_out = (weight > 0) ? total_spread / weight : 0.0;
+}
+
+void test_bai_peg_french_oracle(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, BAI_PEG_TEST_FRENCH_PASS_CGP);
+  Game *game = config_get_game(config);
+
+  int mover_idx = game_get_player_on_turn_index(game);
+  int opp_idx = 1 - mover_idx;
+  const LetterDistribution *ld = game_get_ld(game);
+  int ld_size = ld_get_size(ld);
+
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  oracle_compute_unseen(game, mover_idx, unseen);
+
+  // Build base_game_empty: bag drained, opp rack still empty (CGP form),
+  // mover rack preserved. Each scenario rebuilds opp's rack from `unseen -
+  // {bag_tile}` and adds the bag_tile to mover's rack before solving.
+  Game *base_game_empty = game_duplicate(game);
+  game_set_endgame_solving_mode(base_game_empty);
+  game_set_backup_mode(base_game_empty, BACKUP_MODE_OFF);
+  {
+    Rack saved_rack;
+    rack_copy(&saved_rack,
+              player_get_rack(game_get_player(base_game_empty, mover_idx)));
+    Bag *bag = game_get_bag(base_game_empty);
+    for (int ml = 0; ml < ld_size; ml++) {
+      while (bag_get_letter(bag, ml) > 0) {
+        bag_draw_letter(bag, (MachineLetter)ml, mover_idx);
+      }
+    }
+    rack_copy(player_get_rack(game_get_player(base_game_empty, mover_idx)),
+              &saved_rack);
+  }
+
+  // Get the top-equity move (should be the score=62 bingo we've been
+  // investigating).
+  MoveList *top_ml = move_list_create(1);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = top_ml,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  assert(move_list_get_count(top_ml) > 0);
+  const Move *bingo_move = move_list_get_move(top_ml, 0);
+  Move bingo_copy = *bingo_move;
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(game), &bingo_copy, ld,
+                          /*add_score=*/true);
+  printf("\n=== French oracle eval — TILE PLAY only ===\n");
+  printf("Move: %s  (score=%d, tiles_played=%d)\n", string_builder_peek(sb),
+         (int)equity_to_int(move_get_score(&bingo_copy)),
+         move_get_tiles_played(&bingo_copy));
+  string_builder_destroy(sb);
+
+  // Plies and per-scenario time cap from env.
+  const char *plies_env = getenv("ORACLE_PLIES");
+  int plies = plies_env && *plies_env ? atoi(plies_env) : 8;
+  if (plies < 1) {
+    plies = 1;
+  }
+  if (plies > MAX_SEARCH_DEPTH) {
+    plies = MAX_SEARCH_DEPTH;
+  }
+  const char *time_env = getenv("ORACLE_TIME");
+  double time_budget = time_env && *time_env ? atof(time_env) : 60.0;
+
+  printf("plies=%d  time_budget=%.1fs per scenario\n\n", plies, time_budget);
+
+  double win_pct = 0.0;
+  double spread = 0.0;
+  oracle_eval_tile_play(base_game_empty, &bingo_copy, mover_idx, opp_idx,
+                        unseen, ld_size, plies, time_budget,
+                        config_get_thread_control(config), stdout, &win_pct,
+                        &spread);
+
+  printf("\nResult: win%%=%.4f  spread=%+0.4f\n", win_pct, spread);
+
+  move_list_destroy(top_ml);
+  game_destroy(base_game_empty);
+  config_destroy(config);
 }

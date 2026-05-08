@@ -1796,17 +1796,22 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     return;
   }
 
-  // Build base game with empty bag and WMP disabled. Each scenario solve
-  // will replay the bag tile into the mover's rack and populate the
-  // opponent's rack from `unseen - bag_tile`.
+  // Build base game with empty bag and WMP disabled. generate_possible_words
+  // derives its unplayed pool from the board alone, so we don't need to
+  // pre-stage racks or the bag in any particular way before pruning. We
+  // do drain the bag here (transferring tiles to a side that we'll
+  // immediately reset) so the post-cand endgame search runs on a true
+  // bag-empty position.
   Game *base_game = game_duplicate(args->game);
   {
     Bag *base_bag = game_get_bag(base_game);
     for (int ml = 0; ml < ld_size; ml++) {
       while (bag_get_letter(base_bag, ml) > 0) {
-        bag_draw_letter(base_bag, (MachineLetter)ml, mover_idx);
+        bag_draw_letter(base_bag, (MachineLetter)ml, opp_idx);
       }
     }
+    Rack *opp_rack = player_get_rack(game_get_player(base_game, opp_idx));
+    rack_reset(opp_rack);
   }
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     player_set_wmp(game_get_player(base_game, player_idx), NULL);
