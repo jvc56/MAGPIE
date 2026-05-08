@@ -851,15 +851,15 @@ void test_bai_peg(void) {
   test_bai_peg_accepts_empty_opp_rack();
 }
 
-// English (TWL98) seed=9973 candidate from the pass-PEG search: mover
-// has AEINRST, opp has AEINRST, bag has Q. Mover lead +19. Q unplayable
-// at the root, single bingo lane, all bingos answerable. Engineered to
-// be a position where pass should be the best move for verification
-// against macondo.
+// English (TWL98) seed=62 candidate from the pass-PEG search with the
+// fixed exhaustive Q check: mover has AEINRST, opp has AEINRST, bag has
+// Q. Mover lead +3, 1 bingo, Q proven unplayable across all 7 (Q + 6
+// of R) racks opp could hold. Engineered to be a position where pass
+// has a real shot at being best.
 #define BAI_PEG_TEST_ENGLISH_PASS_CGP                                          \
-  "cgp 3P3B5AG/3R1ELOIN3XI/2DIGLOT6M/3C2PFUI2AWE/3E3L1FRUGAL/3Y3Y5V1/"         \
-  "8JO2HE1/5E1IODIZED1/3UNBATED1OW2/5O5O3/5N5S3/5I5p3/5T2COVET2/"              \
-  "5E1AAH1R3/1UNmASKER2M3 AEINRST/AEINRST 398/379 0 -lex TWL98"
+  "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"              \
+  "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"          \
+  "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex TWL98"
 
 void test_bai_peg_english_pass_solve(void) {
   Config *config = config_create_or_die("set -s1 score -s2 score");
