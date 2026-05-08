@@ -153,6 +153,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegfrenchoracle", test_bai_peg_french_oracle},
     {"passpegracks", test_pass_peg_enumerate_bingo_racks},
     {"passpegsearch", test_pass_peg_search},
+    {"passpegforce", test_pass_peg_search_forced},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

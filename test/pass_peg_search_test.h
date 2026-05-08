@@ -24,4 +24,19 @@ void test_pass_peg_enumerate_bingo_racks(void);
 // Stops on first match (controlled by env var PASSPEG_TARGET_COUNT).
 void test_pass_peg_search(void);
 
+// Engineered position search: pre-stack the bag by removing 2*R + Q tiles
+// at game start, run random autoplay until the board has all 85 remaining
+// tiles played (both racks and bag empty at game end), then overwrite the
+// racks and bag with R, R, {Q} to produce a 100-tile-LD-consistent 1peg
+// state where mover has the bingo R and unseen = R + Q.
+//
+// Env knobs:
+//   PASSPEG_FORCE_RACK     — sorted-letter signature to use (default
+//                            "AEINRST"). Overrides the iterate-all-racks
+//                            behavior when set.
+//   PASSPEG_TARGET_COUNT   — how many positions to find (default 1).
+//   PASSPEG_MAX_ATTEMPTS   — random-seed budget (default 200000).
+//   PASSPEG_SEED_OFFSET    — first seed (default 1).
+void test_pass_peg_search_forced(void);
+
 #endif

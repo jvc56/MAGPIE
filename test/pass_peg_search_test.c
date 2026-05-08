@@ -510,3 +510,498 @@ void test_pass_peg_search(void) {
   move_list_destroy(ml);
   config_destroy(config);
 }
+
+// ---------------------------------------------------------------------------
+// FORCED-rack search: pre-stack the bag, play to natural end-of-game,
+// require both racks AND bag to be empty at end (so all 85 non-reserved
+// tiles are on the board), then overwrite racks+bag with R, R, {Q}.
+// ---------------------------------------------------------------------------
+
+// Convert a 7-char rack signature like "AEINRST" into a per-letter count
+// array and the matching MachineLetter sequence.
+static int parse_rack_sig(const char *sig, const LetterDistribution *ld,
+                          int letter_counts_out[26], MachineLetter ml_seq[7]) {
+  for (int i = 0; i < 26; i++) {
+    letter_counts_out[i] = 0;
+  }
+  int n = 0;
+  for (int i = 0; i < 7 && sig[i] != '\0'; i++) {
+    char c = sig[i];
+    if (c < 'A' || c > 'Z') {
+      return -1;
+    }
+    letter_counts_out[c - 'A']++;
+    char hl[2] = {c, '\0'};
+    MachineLetter mls[1];
+    int m = ld_str_to_mls(ld, hl, false, mls, 1);
+    if (m != 1) {
+      return -1;
+    }
+    ml_seq[n++] = mls[0];
+  }
+  return n;
+}
+
+// Plays best-by-equity until the bag is empty, both racks are empty, or
+// the consecutive-zero-turns end condition fires.
+static void play_until_natural_end(Game *game, MoveList *move_list) {
+  while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = move_list,
+        .move_record_type = MOVE_RECORD_BEST,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+    if (move_list_get_count(move_list) == 0) {
+      break;
+    }
+    play_move(move_list_get_move(move_list, 0), game, NULL);
+  }
+}
+
+// Returns true if no playable move on the current board uses Q. We test
+// by temporarily setting mover's rack to 7 blanks (so movegen will try
+// every legal letter combination, capped by max_nonplaythrough), then
+// asking whether any generated move's tiles include Q.
+static bool condition_q_unplayable(Game *game, MoveList *ml, int mover_idx,
+                                   MachineLetter q_ml) {
+  Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  Rack saved_rack;
+  rack_copy(&saved_rack, mover_rack);
+  rack_reset(mover_rack);
+  for (int i = 0; i < 7; i++) {
+    rack_add_letter(mover_rack, BLANK_MACHINE_LETTER);
+  }
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args);
+  bool q_seen = false;
+  int n = move_list_get_count(ml);
+  for (int i = 0; i < n && !q_seen; i++) {
+    const Move *m = move_list_get_move(ml, i);
+    int tp = move_get_tiles_played(m);
+    for (int t = 0; t < tp; t++) {
+      MachineLetter ml_tile = m->tiles[t];
+      if (ml_tile == 0) {
+        continue; // playthrough cell, no rack tile
+      }
+      MachineLetter unblanked = get_is_blanked(ml_tile)
+                                    ? get_unblanked_machine_letter(ml_tile)
+                                    : ml_tile;
+      if (unblanked == q_ml) {
+        q_seen = true;
+        break;
+      }
+    }
+  }
+  rack_copy(mover_rack, &saved_rack);
+  return !q_seen;
+}
+
+// Generate moves for the player on turn (using their actual rack) and
+// return all 7-tile bingos. Caller owns the move list and just iterates
+// it.
+static int gen_bingos_for_current_rack(Game *game, MoveList *ml) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args);
+  return move_list_get_count(ml);
+}
+
+// Returns true if every 7-tile bingo in `ml` shares the same (row_start,
+// col_start, dir). The bingo count is also written to *out_bingo_count.
+static bool condition_single_bingo_lane(MoveList *ml, int *out_bingo_count) {
+  int n = move_list_get_count(ml);
+  int row0 = -1;
+  int col0 = -1;
+  int dir0 = -1;
+  int bingo_count = 0;
+  for (int i = 0; i < n; i++) {
+    const Move *m = move_list_get_move(ml, i);
+    if (move_get_tiles_played(m) != 7) {
+      continue;
+    }
+    bingo_count++;
+    if (row0 < 0) {
+      row0 = m->row_start;
+      col0 = m->col_start;
+      dir0 = m->dir;
+    } else if (m->row_start != row0 || m->col_start != col0 || m->dir != dir0) {
+      *out_bingo_count = bingo_count;
+      return false;
+    }
+  }
+  *out_bingo_count = bingo_count;
+  return bingo_count > 0;
+}
+
+// For each mover bingo, check that opp (with rack already set to R) can
+// also play a 7-tile bingo on the resulting board. Returns true iff every
+// mover bingo has at least one opp bingo response.
+static bool condition_all_bingos_answerable(const Game *game, MoveList *ml,
+                                            int opp_idx) {
+  // Snapshot mover bingos.
+  int n = move_list_get_count(ml);
+  Move bingos[64];
+  int bingo_count = 0;
+  for (int i = 0; i < n && bingo_count < 64; i++) {
+    const Move *m = move_list_get_move(ml, i);
+    if (move_get_tiles_played(m) == 7) {
+      bingos[bingo_count++] = *m;
+    }
+  }
+  if (bingo_count == 0) {
+    return false;
+  }
+  MoveList *resp_ml = move_list_create(20);
+  bool all_answerable = true;
+  for (int b = 0; b < bingo_count && all_answerable; b++) {
+    Game *post = game_duplicate(game);
+    game_set_endgame_solving_mode(post);
+    game_set_backup_mode(post, BACKUP_MODE_OFF);
+    play_move_without_drawing_tiles(&bingos[b], post);
+    game_set_game_end_reason(post, GAME_END_REASON_NONE);
+    // Opp is now on turn (play_move_without_drawing flipped it).
+    const MoveGenArgs args = {
+        .game = post,
+        .move_list = resp_ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+    int rn = move_list_get_count(resp_ml);
+    bool found_resp = false;
+    for (int j = 0; j < rn; j++) {
+      const Move *rm = move_list_get_move(resp_ml, j);
+      if (move_get_tiles_played(rm) == 7) {
+        found_resp = true;
+        break;
+      }
+    }
+    if (!found_resp) {
+      all_answerable = false;
+    }
+    (void)opp_idx;
+    game_destroy(post);
+  }
+  move_list_destroy(resp_ml);
+  return all_answerable;
+}
+
+// Play through the 85-tile-system game while suppressing end-of-game,
+// until both racks AND the bag are empty (= all 85 reserved-removed
+// tiles are on the board). Returns true on success. Bails out if a
+// player has tiles but no legal move (rare; e.g. an unplayable rack
+// like five Vs).
+static bool play_85_system_to_drain(Game *game, MoveList *ml) {
+  // Cap iterations to avoid infinite loops if both players have only
+  // unplayable racks.
+  const int max_iters = 200;
+  for (int iter = 0; iter < max_iters; iter++) {
+    Rack *r0 = player_get_rack(game_get_player(game, 0));
+    Rack *r1 = player_get_rack(game_get_player(game, 1));
+    int bag_n = bag_get_letters(game_get_bag(game));
+    if (rack_get_total_letters(r0) == 0 && rack_get_total_letters(r1) == 0 &&
+        bag_n == 0) {
+      return true;
+    }
+    int turn = game_get_player_on_turn_index(game);
+    Rack *cur_rack = player_get_rack(game_get_player(game, turn));
+
+    const MoveGenArgs args = {
+        .game = game,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_BEST,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&args);
+    if (move_list_get_count(ml) == 0) {
+      // Player can't move. If they also have tiles, we're stuck — abort.
+      if (rack_get_total_letters(cur_rack) > 0) {
+        return false;
+      }
+      // Empty rack and no moves: just advance the turn.
+      game_start_next_player_turn(game);
+      continue;
+    }
+    play_move(move_list_get_move(ml, 0), game, NULL);
+    // Suppress whatever end-of-game state the play may have triggered.
+    game_set_game_end_reason(game, GAME_END_REASON_NONE);
+    game_set_consecutive_scoreless_turns(game, 0);
+  }
+  return false;
+}
+
+void test_pass_peg_search_forced(void) {
+  fprintf(stderr, "[passpegforce] starting\n");
+  fflush(stderr);
+
+  const char *rack_env = getenv("PASSPEG_FORCE_RACK");
+  const char *target_rack = rack_env && *rack_env ? rack_env : "AEINRST";
+  if (strlen(target_rack) != 7) {
+    log_fatal("PASSPEG_FORCE_RACK must be a 7-letter sorted signature");
+  }
+  const char *target_env = getenv("PASSPEG_TARGET_COUNT");
+  int target_count = target_env && *target_env ? atoi(target_env) : 1;
+  if (target_count < 1) {
+    target_count = 1;
+  }
+  const char *max_attempts_env = getenv("PASSPEG_MAX_ATTEMPTS");
+  int max_attempts =
+      max_attempts_env && *max_attempts_env ? atoi(max_attempts_env) : 200000;
+  const char *seed_offset_env = getenv("PASSPEG_SEED_OFFSET");
+  uint64_t seed_offset = seed_offset_env && *seed_offset_env
+                             ? strtoull(seed_offset_env, NULL, 10)
+                             : 1ULL;
+
+  fprintf(stderr,
+          "[passpegforce] R=%s target_count=%d max_attempts=%d "
+          "seed_offset=%llu\n",
+          target_rack, target_count, max_attempts,
+          (unsigned long long)seed_offset);
+  fflush(stderr);
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex TWL98");
+  Game *game = config_get_game(config);
+  MoveList *ml = move_list_create(20);
+  const LetterDistribution *ld = game_get_ld(game);
+  int ld_size = ld_get_size(ld);
+
+  // Parse rack signature into MLs and per-letter counts.
+  int rack_counts[26];
+  MachineLetter rack_ml[7];
+  int n_rack_letters = parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
+  if (n_rack_letters != 7) {
+    log_fatal("could not parse target rack '%s'", target_rack);
+  }
+  // The Q ML.
+  MachineLetter q_ml = (MachineLetter)0;
+  {
+    char hl[2] = {'Q', '\0'};
+    MachineLetter mls[1];
+    int m = ld_str_to_mls(ld, hl, false, mls, 1);
+    if (m != 1) {
+      log_fatal("could not find Q in TWL98 LD");
+    }
+    q_ml = mls[0];
+  }
+
+  // Filter funnel counters.
+  int n_attempts = 0;
+  int n_drained = 0;   // 85-tile autoplay reached both-racks-empty
+  int n_lead_band = 0; // mover lead in [1, 25]
+  int n_q_unplayable = 0;
+  int n_single_lane = 0;
+  int n_all_answerable = 0;
+  int found = 0;
+  // Lead distribution buckets.
+  int n_lead_neg = 0;
+  int n_lead_zero = 0;
+  int n_lead_high = 0;
+
+  for (int attempt = 0; attempt < max_attempts && found < target_count;
+       attempt++) {
+    n_attempts++;
+    if (attempt > 0 && attempt % 1000 == 0) {
+      fprintf(stderr,
+              "[passpegforce] attempt=%d drained=%d band=%d "
+              "found=%d\n",
+              attempt, n_drained, n_lead_band, found);
+      fflush(stderr);
+    }
+    game_reset(game);
+    game_seed(game, seed_offset + (uint64_t)attempt);
+
+    // Drain 2*R + Q from the bag (leaving 85 tiles).
+    Bag *bag = game_get_bag(game);
+    bool drain_ok = true;
+    for (int li = 0; li < 26 && drain_ok; li++) {
+      int n_to_drain = rack_counts[li] * 2;
+      if (n_to_drain == 0) {
+        continue;
+      }
+      char hl[2] = {(char)('A' + li), '\0'};
+      MachineLetter mls[1];
+      if (ld_str_to_mls(ld, hl, false, mls, 1) != 1) {
+        drain_ok = false;
+        break;
+      }
+      for (int j = 0; j < n_to_drain; j++) {
+        if (!bag_draw_letter(bag, mls[0], 0)) {
+          drain_ok = false;
+          break;
+        }
+      }
+    }
+    if (drain_ok) {
+      if (!bag_draw_letter(bag, q_ml, 0)) {
+        drain_ok = false;
+      }
+    }
+    if (!drain_ok) {
+      continue;
+    }
+
+    // Now bag has 85 tiles. Draw starting racks + run the 85-tile-system
+    // autoplay with end-of-game suppressed, until both racks AND bag are
+    // empty (= all 85 reserved-removed tiles played onto the board).
+    draw_starting_racks(game);
+    if (!play_85_system_to_drain(game, ml)) {
+      // Got stuck (e.g. unplayable rack). Skip.
+      continue;
+    }
+    n_drained++;
+
+    // Read the reserved tiles back into the bag (= 14 + 1 = 15 tiles).
+    for (int i = 0; i < 7; i++) {
+      bag_add_letter(bag, rack_ml[i], 0); // R copy 1
+    }
+    for (int i = 0; i < 7; i++) {
+      bag_add_letter(bag, rack_ml[i], 1); // R copy 2 (opposite end for variety)
+    }
+    bag_add_letter(bag, q_ml, 0);
+
+    // Override racks: mover = R, opp = R, bag = {Q}. We just placed
+    // R+R+Q in the bag; manually pull them into the assigned slots so
+    // the bag ends with exactly one Q.
+    int mover_idx = game_get_player_on_turn_index(game);
+    int opp_idx = 1 - mover_idx;
+    Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+    Rack *opp_rack = player_get_rack(game_get_player(game, opp_idx));
+    bool deal_ok = true;
+    for (int i = 0; i < 7 && deal_ok; i++) {
+      if (!bag_draw_letter(bag, rack_ml[i], 0)) {
+        deal_ok = false;
+        break;
+      }
+      rack_add_letter(mover_rack, rack_ml[i]);
+    }
+    for (int i = 0; i < 7 && deal_ok; i++) {
+      if (!bag_draw_letter(bag, rack_ml[i], 1)) {
+        deal_ok = false;
+        break;
+      }
+      rack_add_letter(opp_rack, rack_ml[i]);
+    }
+    if (!deal_ok) {
+      continue;
+    }
+    // Bag should now have just the Q.
+    if (bag_get_letters(bag) != 1) {
+      continue;
+    }
+    // Clear any lingering end-of-game signals from the drain phase.
+    game_set_game_end_reason(game, GAME_END_REASON_NONE);
+    game_set_consecutive_scoreless_turns(game, 0);
+
+    int mover_score =
+        equity_to_int(player_get_score(game_get_player(game, mover_idx)));
+    int opp_score =
+        equity_to_int(player_get_score(game_get_player(game, opp_idx)));
+    int lead = mover_score - opp_score;
+    if (lead < 0) {
+      n_lead_neg++;
+    } else if (lead == 0) {
+      n_lead_zero++;
+    } else if (lead > 25) {
+      n_lead_high++;
+    } else {
+      n_lead_band++;
+    }
+    if (lead < 1 || lead > 25) {
+      // Out of band — keep counting for the funnel, but skip emit.
+      continue;
+    }
+
+    // Condition 2: Q is unplayable on the current board.
+    if (!condition_q_unplayable(game, ml, mover_idx, q_ml)) {
+      continue;
+    }
+    n_q_unplayable++;
+
+    // Generate mover bingos. Required for conditions 3 and 4.
+    int n_moves = gen_bingos_for_current_rack(game, ml);
+    if (n_moves == 0) {
+      continue;
+    }
+    int bingo_count = 0;
+    if (!condition_single_bingo_lane(ml, &bingo_count)) {
+      continue;
+    }
+    n_single_lane++;
+    if (!condition_all_bingos_answerable(game, ml, opp_idx)) {
+      continue;
+    }
+    n_all_answerable++;
+
+    char *cgp = game_get_cgp(game, true);
+    fprintf(stderr,
+            "[passpegforce] HIT seed=%llu R=%s lead=%+d bingos=%d "
+            "(mover=%d opp=%d)\n",
+            (unsigned long long)(seed_offset + (uint64_t)attempt), target_rack,
+            lead, bingo_count, mover_score, opp_score);
+    fprintf(stderr, "  CGP: %s\n", cgp);
+    fflush(stderr);
+    free(cgp);
+    found++;
+  }
+
+  printf("\n=== Pass-PEG forced search filter funnel (R=%s) ===\n",
+         target_rack);
+  printf("  attempts                                      : %d\n", n_attempts);
+  printf("  85-system drained (both racks + bag empty)    : %d\n", n_drained);
+  printf("  lead distribution within drained:\n");
+  printf("    < 0                                         : %d\n", n_lead_neg);
+  printf("    == 0                                        : %d\n", n_lead_zero);
+  printf("    1..25 (target band)                         : %d\n", n_lead_band);
+  printf("    > 25                                        : %d\n", n_lead_high);
+  printf("  cond 2: Q unplayable                          : %d\n",
+         n_q_unplayable);
+  printf("  cond 3: single bingo lane                     : %d\n",
+         n_single_lane);
+  printf("  cond 4: all bingos answerable                 : %d\n",
+         n_all_answerable);
+  printf("  positions emitted (passes 1..4)               : %d\n", found);
+  printf("====================================================\n");
+
+  (void)ld_size;
+  move_list_destroy(ml);
+  config_destroy(config);
+}
