@@ -857,8 +857,8 @@ void test_bai_peg(void) {
 // of R) racks opp could hold. Engineered to be a position where pass
 // has a real shot at being best.
 #define BAI_PEG_TEST_ENGLISH_PASS_CGP                                          \
-  "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"              \
-  "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"          \
+  "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"             \
+  "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"         \
   "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex TWL98"
 
 void test_bai_peg_english_pass_solve(void) {

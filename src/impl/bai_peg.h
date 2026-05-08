@@ -267,6 +267,15 @@ typedef struct BaiPegArgs {
   // 0 = disabled, normal PUCT behavior.
   int sweep_max_depth;
 
+  // If true, use a Sequential-Halving-style allocation rule instead of
+  // PUCT after the warmup phase. Each round: deepen every surviving cand
+  // by one ply, then drop the bottom half of the field by current
+  // utility. Continues until one cand survives or the wall budget /
+  // max_depth is exhausted. Mathematically near-optimal for fixed-budget
+  // best-arm identification (Karnin–Koren–Somekh 2013), and naturally
+  // forces the leader to be re-interrogated at each successive depth.
+  bool sequential_halving;
+
   // Optional progress callback invoked after every depth advancement.
   // num_top is how many ranked candidates to surface to the callback.
   BaiPegProgressCallback progress_callback;

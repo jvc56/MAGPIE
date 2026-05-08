@@ -155,6 +155,9 @@ static TestEntry on_demand_test_table[] = {
     {"passpegracks", test_pass_peg_enumerate_bingo_racks},
     {"passpegsearch", test_pass_peg_search},
     {"passpegforce", test_pass_peg_search_forced},
+    {"passpegsample", test_pass_peg_sample_solve},
+    {"passpegrand", test_pass_peg_generate_random_1pegs},
+    {"passpegbench", test_pass_peg_bench},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

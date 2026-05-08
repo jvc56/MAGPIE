@@ -2275,6 +2275,92 @@ void bai_peg_solve(const BaiPegArgs *args, BaiPegResult *result,
     goto sweep_finish;
   }
 
+  // Sequential Halving (Karnin–Koren–Somekh 2013) alternative to PUCT:
+  // each round, deepen every surviving cand by one ply, then drop the
+  // bottom half of the surviving set by current utility. Continues until
+  // one cand survives, or wall-clock / max_depth runs out. Uses the
+  // existing bp_evaluate_cand path so all the executor / coupled-pass
+  // plumbing applies unchanged.
+  if (args->sequential_halving) {
+    int *surviving = malloc_or_die(num_candidates * sizeof(int));
+    int n_surv = num_candidates;
+    for (int i = 0; i < num_candidates; i++) {
+      surviving[i] = i;
+    }
+    int round_depth = 2; // warmup already evaluated at d=1
+    while (n_surv > 1 && round_depth <= max_depth && !result->stopped_by_time &&
+           !result->stopped_by_max_evals) {
+      // Deepen every surviving cand to round_depth.
+      for (int s_i = 0; s_i < n_surv; s_i++) {
+        if (args->time_budget_seconds > 0.0 &&
+            ctimer_elapsed_seconds(&wall_timer) >= args->time_budget_seconds) {
+          result->stopped_by_time = true;
+          break;
+        }
+        if (args->max_evaluations > 0 &&
+            result->evaluations_done >= args->max_evaluations) {
+          result->stopped_by_max_evals = true;
+          break;
+        }
+        int ci = surviving[s_i];
+        if (cands[ci].depth_evaluated >= round_depth) {
+          continue;
+        }
+        if (!cands[ci].is_pass && cands[ci].post_cand_game == NULL) {
+          Game *g = game_duplicate(base_game);
+          game_set_endgame_solving_mode(g);
+          game_set_backup_mode(g, BACKUP_MODE_OFF);
+          play_move_without_drawing_tiles(&cands[ci].move_full, g);
+          bp_clear_false_game_end(g);
+          cands[ci].post_cand_game = g;
+        }
+        Timer eval_t;
+        ctimer_start(&eval_t);
+        if (cands[ci].is_pass) {
+          bp_evaluate_pass(&cands[ci], round_depth, args, mover_idx, opp_idx,
+                           unseen, ld_size, tile_types, tile_counts,
+                           num_tile_types, args->endgame_time_per_solve);
+        } else {
+          bp_evaluate_cand(
+              &cands[ci], round_depth, mover_idx, opp_idx, unseen, ld_size,
+              tile_types, tile_counts, num_tile_types, args->thread_control,
+              per_thread_tts, dlm, args->endgame_time_per_solve, num_threads,
+              args->thread_index_offset, bai_deadline_ns, args->executor);
+        }
+        double measured = ctimer_elapsed_seconds(&eval_t);
+        cands[ci].time_paid += measured;
+        cands[ci].last_eval_seconds = measured;
+        cands[ci].cost_estimate = measured * 2.0;
+        result->evaluations_done++;
+      }
+      if (result->stopped_by_time || result->stopped_by_max_evals) {
+        break;
+      }
+      // Halve the surviving set by current utility. Use the same
+      // utility function as the final pick so behavior is consistent.
+      bp_populate_sort_utility(cands, num_candidates, alpha);
+      // Sort surviving[] indices by utility descending.
+      for (int i = 0; i < n_surv; i++) {
+        for (int j = i + 1; j < n_surv; j++) {
+          if (cands[surviving[j]].sort_utility >
+              cands[surviving[i]].sort_utility) {
+            int t = surviving[i];
+            surviving[i] = surviving[j];
+            surviving[j] = t;
+          }
+        }
+      }
+      int next_n = n_surv / 2;
+      if (next_n < 1) {
+        next_n = 1;
+      }
+      n_surv = next_n;
+      round_depth++;
+    }
+    free(surviving);
+    goto sweep_finish;
+  }
+
   // Tracks how many candidates were active in the previous PUCT iteration.
   // When widening expands the active set, each newly-admitted candidate
   // inherits Q from its rank-up neighbor (the cand just above it by static

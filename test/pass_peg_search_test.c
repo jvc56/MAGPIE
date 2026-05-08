@@ -10,11 +10,14 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/impl/bai_peg.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -834,8 +837,7 @@ void test_pass_peg_search_forced(void) {
   int rack_counts[26];
   MachineLetter rack_ml[7];
   if (!multi_rack) {
-    int n_rack_letters =
-        parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
+    int n_rack_letters = parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
     if (n_rack_letters != 7) {
       log_fatal("could not parse target rack '%s'", target_rack);
     }
@@ -1038,6 +1040,7 @@ void test_pass_peg_search_forced(void) {
     }
     free(valid_sigs);
   }
+  (void)ld_size;
 
   printf("\n=== Pass-PEG forced search filter funnel (%s) ===\n",
          multi_rack ? "multi-rack" : target_rack);
@@ -1059,5 +1062,474 @@ void test_pass_peg_search_forced(void) {
 
   (void)ld_size;
   move_list_destroy(ml);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// Sample solve: run bai_peg_solve on the first N CGPs from
+// /tmp/passpeg_candidates.txt (one row per candidate from passpegforce),
+// dumping per-cand visit/depth_evaluated stats so we can see how PUCT
+// allocates compute on these engineered pass-PEG positions.
+// ---------------------------------------------------------------------------
+
+void test_pass_peg_sample_solve(void) {
+  const char *n_env = getenv("PASSPEG_SAMPLE_N");
+  int sample_n = n_env && *n_env ? atoi(n_env) : 10;
+  if (sample_n < 1) {
+    sample_n = 1;
+  }
+  const char *time_env = getenv("PASSPEG_SAMPLE_TIME");
+  double time_budget = time_env && *time_env ? atof(time_env) : 15.0;
+  const char *workers_env = getenv("PASSPEG_SAMPLE_WORKERS");
+  int workers = workers_env && *workers_env ? atoi(workers_env) : 8;
+  const char *topk_env = getenv("PASSPEG_SAMPLE_TOP_K");
+  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
+
+  const char *cgps_path = "/tmp/passpeg_candidates.txt";
+  FILE *f = fopen(cgps_path, "re");
+  if (!f) {
+    log_fatal("could not open %s", cgps_path);
+  }
+
+  fprintf(stderr, "[passpegsample] n=%d time/pos=%.1fs workers=%d top_k=%d\n",
+          sample_n, time_budget, workers, top_k);
+  fflush(stderr);
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  BaiPegExecutor *executor =
+      workers > 0 ? bai_peg_executor_create(workers, 100) : NULL;
+
+  printf("\n%-3s %-12s %5s %5s %3s %4s %5s %4s %s\n", "Pos", "R", "lead",
+         "evals", "B?", "best", "win%", "dpth", "best_move");
+  printf("--- ------------ ----- ----- --- ---- ----- ---- "
+         "------------------------------\n");
+
+  // Per-cand visit/depth aggregate stats across all sampled positions.
+  long total_visits = 0;
+  long total_evals = 0;
+  int total_cands = 0;
+  int max_depth_seen = 0;
+  int min_depth_seen = 1000;
+  long sum_depth = 0;
+  int pass_best_count = 0;
+
+  char line[8192];
+  int processed = 0;
+  while (processed < sample_n && fgets(line, sizeof(line), f)) {
+    int len = (int)strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+      line[--len] = '\0';
+    }
+    if (len == 0) {
+      continue;
+    }
+    // Split on tab: CGP\tR=...\tlead=...\tbingos=...
+    char *tab = strchr(line, '\t');
+    char rack_letter[16] = "?";
+    int lead = 0;
+    if (tab) {
+      *tab = '\0';
+      const char *meta = tab + 1;
+      // R=XXXX
+      const char *r_eq = strstr(meta, "R=");
+      if (r_eq) {
+        sscanf(r_eq + 2, "%15s", rack_letter);
+      }
+      const char *lead_eq = strstr(meta, "lead=");
+      if (lead_eq) {
+        sscanf(lead_eq + 5, "%d", &lead);
+      }
+    }
+
+    char load_cmd[10240];
+    snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", line);
+    load_and_exec_config_or_die(config, load_cmd);
+    Game *game = config_get_game(config);
+
+    BaiPegArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .num_threads = 1,
+        .tt_fraction_of_mem = 0.0,
+        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .initial_top_k = top_k,
+        .max_depth = BAI_PEG_MAX_DEPTH,
+        .endgame_time_per_solve = 5.0,
+        .time_budget_seconds = time_budget,
+        .puct_c = 1.0,
+        .utility_alpha = 1e-4,
+        .progressive_widening = false,
+        .min_active = 0,
+        .sweep_max_depth = 0, // normal PUCT, not sweep
+        .include_pass = true,
+        .pass_opp_max_depth = 0, // coupled mode tracks mover PUCT depth
+        .executor = executor,
+        .log_solve_details = false,
+        .request_cand_stats = true,
+    };
+    BaiPegResult result;
+    ErrorStack *err = error_stack_create();
+    bai_peg_solve(&args, &result, err);
+    assert(error_stack_is_empty(err));
+
+    bool best_is_pass = small_move_is_pass(&result.best_move);
+    if (best_is_pass) {
+      pass_best_count++;
+    }
+
+    // Format best move text.
+    char best_text[64];
+    if (best_is_pass) {
+      snprintf(best_text, sizeof(best_text), "(Pass)");
+    } else {
+      Move m;
+      small_move_to_move(&m, &result.best_move, game_get_board(game));
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game), &m, game_get_ld(game),
+                              /*add_score=*/true);
+      const char *peek = string_builder_peek(sb);
+      size_t pn = strlen(peek);
+      if (pn >= sizeof(best_text)) {
+        pn = sizeof(best_text) - 1;
+      }
+      memcpy(best_text, peek, pn);
+      best_text[pn] = '\0';
+      string_builder_destroy(sb);
+    }
+
+    printf("%-3d %-12s %+5d %5d %3s %s %5.3f %4d %-30s\n", processed + 1,
+           rack_letter, lead, result.evaluations_done, best_is_pass ? "Y" : "N",
+           best_is_pass ? "PASS" : "play", result.best_win_pct,
+           result.best_depth_evaluated, best_text);
+
+    // Aggregate across cands.
+    if (result.cand_stats) {
+      for (int i = 0; i < result.candidates_considered; i++) {
+        const BaiCandStats *s = &result.cand_stats[i];
+        total_visits += s->visits;
+        if (s->depth_evaluated > 0) {
+          if (s->depth_evaluated > max_depth_seen) {
+            max_depth_seen = s->depth_evaluated;
+          }
+          if (s->depth_evaluated < min_depth_seen) {
+            min_depth_seen = s->depth_evaluated;
+          }
+        }
+        sum_depth += s->depth_evaluated;
+        total_cands++;
+      }
+    }
+    total_evals += result.evaluations_done;
+
+    error_stack_destroy(err);
+    bai_cand_stats_free(result.cand_stats);
+    processed++;
+  }
+  (void)fclose(f);
+
+  printf("\n=== Sample solve aggregate (%d positions) ===\n", processed);
+  printf("  pass_best_count        : %d / %d\n", pass_best_count, processed);
+  printf("  total cand evaluations : %ld\n", total_evals);
+  printf("  total cand visits      : %ld\n", total_visits);
+  printf("  total cands seen       : %d\n", total_cands);
+  if (total_cands > 0) {
+    printf("  avg visits per cand    : %.2f\n",
+           (double)total_visits / total_cands);
+    printf("  avg depth per cand     : %.2f\n",
+           (double)sum_depth / total_cands);
+  }
+  printf("  min/max depth seen     : %d / %d\n", min_depth_seen,
+         max_depth_seen);
+  printf("============================================\n");
+
+  if (executor) {
+    bai_peg_executor_destroy(executor);
+  }
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// Random 1-peg generator (no engineering): autoplay-to-1peg starting from
+// random seeds, output CGPs that PASS the basic 1-peg shape (bag=1, both
+// racks full).
+// ---------------------------------------------------------------------------
+
+void test_pass_peg_generate_random_1pegs(void) {
+  const char *n_env = getenv("PASSPEG_RAND_N");
+  int target_n = n_env && *n_env ? atoi(n_env) : 100;
+  if (target_n < 1) {
+    target_n = 1;
+  }
+  const char *seed_env = getenv("PASSPEG_RAND_SEED");
+  uint64_t seed_offset =
+      seed_env && *seed_env ? strtoull(seed_env, NULL, 10) : 100001ULL;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex TWL98");
+  Game *game = config_get_game(config);
+  MoveList *ml = move_list_create(20);
+
+  const char *out_path = "/tmp/random_1pegs.txt";
+  FILE *f = fopen(out_path, "we");
+  if (!f) {
+    log_fatal("cannot open %s", out_path);
+  }
+  int found = 0;
+  int attempt = 0;
+  fprintf(stderr, "[passpegrand] generating %d random 1-pegs\n", target_n);
+  fflush(stderr);
+  while (found < target_n && attempt < 1000000) {
+    game_reset(game);
+    game_seed(game, seed_offset + (uint64_t)attempt);
+    draw_starting_racks(game);
+    play_until_1_in_bag(game, ml);
+    attempt++;
+    if (bag_get_letters(game_get_bag(game)) != 1) {
+      continue;
+    }
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      continue;
+    }
+    int mover_idx = game_get_player_on_turn_index(game);
+    const Rack *mr = player_get_rack(game_get_player(game, mover_idx));
+    const Rack *opp_r = player_get_rack(game_get_player(game, 1 - mover_idx));
+    if (rack_get_total_letters(mr) != RACK_SIZE) {
+      continue;
+    }
+    if (rack_is_empty(opp_r)) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game, true);
+    fprintf(f, "%s\n", cgp);
+    free(cgp);
+    found++;
+    if (found % 10 == 0) {
+      fprintf(stderr, "[passpegrand] %d/%d (after %d attempts)\n", found,
+              target_n, attempt);
+      fflush(stderr);
+    }
+  }
+  (void)fclose(f);
+  fprintf(stderr, "[passpegrand] DONE: %d positions in %d attempts -> %s\n",
+          found, attempt, out_path);
+  fflush(stderr);
+  move_list_destroy(ml);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// Bench: run bai_peg_solve in 4 variants × 3 wall budgets across the
+// 100 engineered + 100 random 1-pegs.
+// Variants: {include_pass=true, include_pass=false} × {algo=PUCT, algo=SH}.
+// Budgets: 10, 20, 30 seconds.
+// CSV out: /tmp/passpeg_bench.csv
+// ---------------------------------------------------------------------------
+
+static int load_cgp_lines(const char *path, char ***out, int max_n) {
+  FILE *f = fopen(path, "re");
+  if (!f) {
+    return 0;
+  }
+  char **arr = malloc_or_die((size_t)max_n * sizeof(char *));
+  int n = 0;
+  char line[8192];
+  while (n < max_n && fgets(line, sizeof(line), f)) {
+    int len = (int)strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
+      line[--len] = '\0';
+    }
+    if (len == 0) {
+      continue;
+    }
+    char *tab = strchr(line, '\t');
+    if (tab) {
+      *tab = '\0';
+    }
+    arr[n] = string_duplicate(line);
+    n++;
+  }
+  (void)fclose(f);
+  *out = arr;
+  return n;
+}
+
+void test_pass_peg_bench(void) {
+  const char *n_pass_env = getenv("PASSPEG_BENCH_N_PASS");
+  const char *n_rand_env = getenv("PASSPEG_BENCH_N_RAND");
+  int n_pass = n_pass_env && *n_pass_env ? atoi(n_pass_env) : 100;
+  int n_rand = n_rand_env && *n_rand_env ? atoi(n_rand_env) : 100;
+
+  // Comma-separated budgets; default 10,20,30.
+  const char *budgets_env = getenv("PASSPEG_BENCH_BUDGETS");
+  const char *budgets_str =
+      budgets_env && *budgets_env ? budgets_env : "10,20,30";
+  double budgets[8] = {0};
+  int num_budgets = 0;
+  {
+    const char *p = budgets_str;
+    while (*p && num_budgets < 8) {
+      char *end;
+      double v = strtod(p, &end);
+      if (end == p) {
+        break;
+      }
+      budgets[num_budgets++] = v;
+      p = (*end == ',') ? end + 1 : end;
+    }
+  }
+  if (num_budgets == 0) {
+    log_fatal("no budgets parsed");
+  }
+
+  const char *workers_env = getenv("PASSPEG_BENCH_WORKERS");
+  int workers = workers_env && *workers_env ? atoi(workers_env) : 8;
+  const char *topk_env = getenv("PASSPEG_BENCH_TOP_K");
+  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
+
+  // Optional: skip variants for partial reruns.
+  const char *skip_sh_env = getenv("PASSPEG_BENCH_SKIP_SH");
+  bool skip_sh = skip_sh_env && *skip_sh_env && atoi(skip_sh_env) != 0;
+  const char *skip_puct_env = getenv("PASSPEG_BENCH_SKIP_PUCT");
+  bool skip_puct = skip_puct_env && *skip_puct_env && atoi(skip_puct_env) != 0;
+
+  char **pass_cgps = NULL;
+  int loaded_pass =
+      load_cgp_lines("/tmp/passpeg_candidates.txt", &pass_cgps, n_pass);
+  char **rand_cgps = NULL;
+  int loaded_rand = load_cgp_lines("/tmp/random_1pegs.txt", &rand_cgps, n_rand);
+  if (loaded_pass < n_pass || loaded_rand < n_rand) {
+    fprintf(stderr,
+            "[passpegbench] WARN loaded pass=%d/%d rand=%d/%d (continuing)\n",
+            loaded_pass, n_pass, loaded_rand, n_rand);
+    if (loaded_pass < n_pass) {
+      n_pass = loaded_pass;
+    }
+    if (loaded_rand < n_rand) {
+      n_rand = loaded_rand;
+    }
+  }
+  fprintf(stderr,
+          "[passpegbench] pass=%d rand=%d budgets=%d workers=%d top_k=%d\n",
+          n_pass, n_rand, num_budgets, workers, top_k);
+  fflush(stderr);
+
+  const char *csv_path = "/tmp/passpeg_bench.csv";
+  FILE *csv = fopen(csv_path, "we");
+  if (!csv) {
+    log_fatal("cannot open %s", csv_path);
+  }
+  fprintf(csv, "pos_id,source,algo,include_pass,budget_secs,wall_secs,"
+               "evals_done,best_is_pass,best_win_pct,best_spread,"
+               "best_depth,cands_considered\n");
+  fflush(csv);
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  BaiPegExecutor *executor =
+      workers > 0 ? bai_peg_executor_create(workers, 100) : NULL;
+
+  // Variant matrix: (include_pass, algo) × budgets.
+  // algo: 0 = PUCT, 1 = Sequential Halving.
+  int total_variants = 0;
+  if (!skip_puct) {
+    total_variants += 2; // PUCT × {pass, no-pass}
+  }
+  if (!skip_sh) {
+    total_variants += 2;
+  }
+  int total_runs = (n_pass + n_rand) * total_variants * num_budgets;
+  int run_idx = 0;
+  fprintf(stderr, "[passpegbench] total_runs=%d\n", total_runs);
+  fflush(stderr);
+
+  for (int src = 0; src < 2; src++) {
+    int n_total = (src == 0) ? n_pass : n_rand;
+    char **arr = (src == 0) ? pass_cgps : rand_cgps;
+    const char *src_label = (src == 0) ? "passpeg" : "random";
+    for (int p = 0; p < n_total; p++) {
+      const char *cgp = arr[p];
+      char load_cmd[10240];
+      snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
+      // (variant configs)
+      for (int algo = 0; algo < 2; algo++) {
+        if (algo == 0 && skip_puct) {
+          continue;
+        }
+        if (algo == 1 && skip_sh) {
+          continue;
+        }
+        for (int incp = 0; incp < 2; incp++) {
+          for (int b = 0; b < num_budgets; b++) {
+            double budget = budgets[b];
+            // Reload CGP fresh for each run.
+            load_and_exec_config_or_die(config, load_cmd);
+            Game *game = config_get_game(config);
+            BaiPegArgs args = {
+                .game = game,
+                .thread_control = config_get_thread_control(config),
+                .num_threads = 1,
+                .tt_fraction_of_mem = 0.0,
+                .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+                .initial_top_k = top_k,
+                .max_depth = BAI_PEG_MAX_DEPTH,
+                .endgame_time_per_solve = 5.0,
+                .time_budget_seconds = budget,
+                .puct_c = 1.0,
+                .utility_alpha = 1e-4,
+                .progressive_widening = false,
+                .min_active = 0,
+                .sweep_max_depth = 0,
+                .include_pass = (incp == 1),
+                .pass_opp_max_depth = 0,
+                .executor = executor,
+                .log_solve_details = false,
+                .request_cand_stats = false,
+                .sequential_halving = (algo == 1),
+            };
+            BaiPegResult result;
+            ErrorStack *err = error_stack_create();
+            bai_peg_solve(&args, &result, err);
+            assert(error_stack_is_empty(err));
+            bool best_is_pass = small_move_is_pass(&result.best_move);
+            fprintf(csv, "%d,%s,%s,%d,%.0f,%.3f,%d,%d,%.4f,%.4f,%d,%d\n", p,
+                    src_label, algo == 0 ? "PUCT" : "SH", incp, budget,
+                    result.seconds_elapsed, result.evaluations_done,
+                    best_is_pass ? 1 : 0, result.best_win_pct,
+                    result.best_mean_spread, result.best_depth_evaluated,
+                    result.candidates_considered);
+            fflush(csv);
+            error_stack_destroy(err);
+            bai_cand_stats_free(result.cand_stats);
+            run_idx++;
+            if (run_idx % 20 == 0) {
+              fprintf(stderr,
+                      "[passpegbench] progress %d / %d (src=%s p=%d "
+                      "algo=%s pass=%d budget=%.0f)\n",
+                      run_idx, total_runs, src_label, p,
+                      algo == 0 ? "PUCT" : "SH", incp, budget);
+              fflush(stderr);
+            }
+          }
+        }
+      }
+    }
+  }
+
+  (void)fclose(csv);
+  fprintf(stderr, "[passpegbench] DONE: %d runs -> %s\n", run_idx, csv_path);
+  fflush(stderr);
+
+  if (executor) {
+    bai_peg_executor_destroy(executor);
+  }
+  for (int i = 0; i < n_pass; i++) {
+    free(pass_cgps[i]);
+  }
+  free(pass_cgps);
+  for (int i = 0; i < n_rand; i++) {
+    free(rand_cgps[i]);
+  }
+  free(rand_cgps);
   config_destroy(config);
 }

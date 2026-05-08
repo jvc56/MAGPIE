@@ -39,4 +39,26 @@ void test_pass_peg_search(void);
 //   PASSPEG_SEED_OFFSET    — first seed (default 1).
 void test_pass_peg_search_forced(void);
 
+// Runs bai_peg_solve on the first N CGPs from
+// /tmp/passpeg_candidates.txt (one row per candidate from
+// passpegforce), with a 15-second wall budget per position by default,
+// and dumps per-candidate visit / depth_evaluated stats. Env knobs:
+//   PASSPEG_SAMPLE_N        — how many positions to evaluate (default 10)
+//   PASSPEG_SAMPLE_TIME     — wall-clock per position (default 15 secs)
+//   PASSPEG_SAMPLE_WORKERS  — executor workers (default 8)
+//   PASSPEG_SAMPLE_TOP_K    — initial_top_k (default 32)
+void test_pass_peg_sample_solve(void);
+
+// Generate N random 1-in-bag positions (no engineering — straight TWL98
+// autoplay) and append CGPs to /tmp/random_1pegs.txt. Env knobs:
+//   PASSPEG_RAND_N      — count to generate (default 100)
+//   PASSPEG_RAND_SEED   — first seed (default 100001 to avoid clashing
+//                         with the engineered candidates' seed range)
+void test_pass_peg_generate_random_1pegs(void);
+
+// Bench: run 4 algo×include-pass variants × 3 wall-clock budgets across
+// /tmp/passpeg_candidates.txt + /tmp/random_1pegs.txt. Writes per-run
+// rows to /tmp/passpeg_bench.csv. See env knobs in the impl.
+void test_pass_peg_bench(void);
+
 #endif
