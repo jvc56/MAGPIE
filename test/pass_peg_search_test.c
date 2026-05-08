@@ -802,6 +802,24 @@ void test_pass_peg_search_forced(void) {
           (unsigned long long)seed_offset);
   fflush(stderr);
 
+  // Multi-rack mode: cycle through every valid bingo rack signature
+  // (one per attempt) so candidates come from varied racks rather than a
+  // fixed R. Triggered when PASSPEG_FORCE_RACK is unset / empty.
+  bool multi_rack = (rack_env == NULL || *rack_env == '\0');
+  char **valid_sigs = NULL;
+  int n_sigs = 0;
+  if (multi_rack) {
+    const char *racks_path = "/tmp/pass_peg_bingo_racks.txt";
+    n_sigs = load_valid_rack_sigs(racks_path, &valid_sigs);
+    if (n_sigs == 0) {
+      log_fatal("could not load %s; run pegracks first", racks_path);
+    }
+    fprintf(stderr,
+            "[passpegforce] multi-rack mode: cycling through %d racks\n",
+            n_sigs);
+    fflush(stderr);
+  }
+
   Config *config = config_create_or_die("set -s1 score -s2 score");
   load_and_exec_config_or_die(
       config,
@@ -811,12 +829,16 @@ void test_pass_peg_search_forced(void) {
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = ld_get_size(ld);
 
-  // Parse rack signature into MLs and per-letter counts.
+  // Parse the seed rack signature (only the static fixed-R mode uses this
+  // up front — multi-rack reparses on every attempt).
   int rack_counts[26];
   MachineLetter rack_ml[7];
-  int n_rack_letters = parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
-  if (n_rack_letters != 7) {
-    log_fatal("could not parse target rack '%s'", target_rack);
+  if (!multi_rack) {
+    int n_rack_letters =
+        parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
+    if (n_rack_letters != 7) {
+      log_fatal("could not parse target rack '%s'", target_rack);
+    }
   }
   // The Q ML.
   MachineLetter q_ml = (MachineLetter)0;
@@ -852,6 +874,14 @@ void test_pass_peg_search_forced(void) {
               "found=%d\n",
               attempt, n_drained, n_lead_band, found);
       fflush(stderr);
+    }
+    if (multi_rack) {
+      target_rack = valid_sigs[attempt % n_sigs];
+      int n_rack_letters =
+          parse_rack_sig(target_rack, ld, rack_counts, rack_ml);
+      if (n_rack_letters != 7) {
+        continue;
+      }
     }
     game_reset(game);
     game_seed(game, seed_offset + (uint64_t)attempt);
@@ -986,12 +1016,31 @@ void test_pass_peg_search_forced(void) {
             lead, bingo_count, mover_score, opp_score);
     fprintf(stderr, "  CGP: %s\n", cgp);
     fflush(stderr);
+    // Append candidate to /tmp/passpeg_candidates.txt (one row each).
+    {
+      static FILE *out_file = NULL;
+      if (out_file == NULL) {
+        out_file = fopen("/tmp/passpeg_candidates.txt", "we");
+      }
+      if (out_file) {
+        fprintf(out_file, "%s\tR=%s\tlead=%+d\tbingos=%d\n", cgp, target_rack,
+                lead, bingo_count);
+        fflush(out_file);
+      }
+    }
     free(cgp);
     found++;
   }
 
-  printf("\n=== Pass-PEG forced search filter funnel (R=%s) ===\n",
-         target_rack);
+  if (valid_sigs) {
+    for (int i = 0; i < n_sigs; i++) {
+      free(valid_sigs[i]);
+    }
+    free(valid_sigs);
+  }
+
+  printf("\n=== Pass-PEG forced search filter funnel (%s) ===\n",
+         multi_rack ? "multi-rack" : target_rack);
   printf("  attempts                                      : %d\n", n_attempts);
   printf("  85-system drained (both racks + bag empty)    : %d\n", n_drained);
   printf("  lead distribution within drained:\n");
