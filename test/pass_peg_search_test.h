@@ -61,4 +61,23 @@ void test_pass_peg_generate_random_1pegs(void);
 // rows to /tmp/passpeg_bench.csv. See env knobs in the impl.
 void test_pass_peg_bench(void);
 
+// Generate a human-readable text report of all bench positions
+// (passpeg_candidates.txt + random_1pegs.txt) using
+// string_builder_add_game's pretty board view. Annotates each position
+// with the bench results from /tmp/passpeg_bench.csv. Writes to
+// /tmp/passpeg_report.txt.
+void test_pass_peg_print_report(void);
+
+// Oracle-evaluate a fixed candidate move on a 1-in-bag PEG position by
+// directly simulating each scenario and running endgame_solve. Useful
+// for cross-checking macondo's PEG against MAGPIE on a specific play.
+// Configure via env vars:
+//   PASSPEG_ORACLE_CGP    — CGP string (default: passpeg position 1).
+//   PASSPEG_ORACLE_MOVE   — move string in MAGPIE format, e.g.
+//                            "C6.REEST" (default).
+//   PASSPEG_ORACLE_PLIES  — endgame plies for the per-scenario solve
+//                            (default: 12 for full convergence).
+//   PASSPEG_ORACLE_TIME   — soft seconds-per-scenario cap (default: 30).
+void test_pass_peg_oracle_eval_move(void);
+
 #endif

@@ -141,6 +141,14 @@ typedef struct BaiPegArgs {
   // score for the adaptive phase. 0 = use a sensible default.
   int initial_top_k;
 
+  // Inner sub-PEG candidate cap (used by pass-cand evaluation). Each
+  // pass-scenario inner session prunes its top moves by greedy playout
+  // (one playout per cand × inner-tile) and retains the top
+  // `inner_initial_top_k` for negamax depth-1 onward. 0 falls back to
+  // `initial_top_k`. The greedy rerank lets us keep this small (e.g. 8)
+  // without sacrificing pick quality the way a movegen-equity prior would.
+  int inner_initial_top_k;
+
   // Maximum depth (plies) any candidate is searched to. Capped to
   // BAI_PEG_MAX_DEPTH internally. 0 = use BAI_PEG_MAX_DEPTH.
   int max_depth;
