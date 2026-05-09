@@ -13,12 +13,12 @@ typedef struct {
 } TimePreset;
 
 static const TimePreset presets[] = {
-    {60, "1 minute", "blitz"},
-    {180, "3 minutes", "speed"},
-    {300, "5 minutes", "quick"},
-    {600, "10 minutes", "casual"},
-    {900, "15 minutes", "club"},
-    {1500, "25 minutes", "tournament"},
+    {60, "1 minute", "ultra"},
+    {180, "3 minutes", "blitz"},
+    {300, "5 minutes", "rapid"},
+    {600, "10 minutes", "club"},
+    {900, "15 minutes", "long"},
+    {1500, "25 minutes", "classical"},
 };
 
 enum {
