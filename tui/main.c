@@ -6,8 +6,10 @@
 #include <time.h>
 #include <notcurses/notcurses.h>
 #include "config.h"
+#include "lexicon_picker.h"
 #include "onboarding.h"
 #include "theme.h"
+#include "time_picker.h"
 
 enum {
   TARGET_FPS = 60,
@@ -30,15 +32,14 @@ static void print_usage(void) {
       "Options:\n"
       "  --theme <name>   one-shot theme override; one of:\n"
       "                     dark, light, dim, high_contrast\n"
-      "  --reconfigure    force the theme picker even when a saved choice "
-      "exists\n"
-      "  --no-config      skip reading and writing the saved theme\n"
+      "  --reconfigure    re-run all setup pickers (theme, lexicon, time)\n"
+      "  --no-config      skip reading and writing the saved settings\n"
       "  --help, -h       show this help and exit\n"
       "\n"
-      "On first run an interactive theme picker is shown and the choice is\n"
-      "saved to $XDG_CONFIG_HOME/magpie/tui.toml (default "
-      "~/.config/magpie/tui.toml).\n"
-      "Subsequent runs use that saved theme unless overridden.\n",
+      "On first run interactive pickers ask for theme, lexicon, and time\n"
+      "control. Settings are saved to $XDG_CONFIG_HOME/magpie/tui.toml\n"
+      "(default ~/.config/magpie/tui.toml). Subsequent runs reuse those\n"
+      "settings unless --reconfigure is passed.\n",
       stderr);
 }
 
@@ -83,41 +84,18 @@ static CliArgs parse_args(int argc, char *argv[]) {
   return args;
 }
 
-static ThemeName resolve_theme(struct notcurses *nc, const CliArgs *args,
-                               TuiConfig *config_out, bool *should_save) {
-  *should_save = false;
-
-  if (args->theme_arg != NULL) {
-    // parse_args already validated the id, so this lookup must succeed.
-    const Theme *override = theme_get_by_id(args->theme_arg);
-    return override->name;
+static void format_time_label(int seconds, char *buf, size_t buf_size) {
+  if (seconds >= 60 && seconds % 60 == 0) {
+    snprintf(buf, buf_size, "%d min", seconds / 60);
+  } else if (seconds >= 60) {
+    snprintf(buf, buf_size, "%d:%02d", seconds / 60, seconds % 60);
+  } else {
+    snprintf(buf, buf_size, "%d sec", seconds);
   }
-
-  const ThemeName auto_default = theme_auto_detect(nc);
-
-  if (args->no_config) {
-    return auto_default;
-  }
-
-  TuiConfig loaded = {.theme = THEME_DARK, .theme_set = false};
-  const bool config_existed = tui_config_load(&loaded);
-
-  const bool need_picker =
-      args->reconfigure || !config_existed || !loaded.theme_set;
-  if (need_picker) {
-    const ThemeName initial =
-        (config_existed && loaded.theme_set) ? loaded.theme : auto_default;
-    const ThemeName chosen = tui_onboarding_run(nc, initial);
-    config_out->theme = chosen;
-    config_out->theme_set = true;
-    *should_save = true;
-    return chosen;
-  }
-
-  return loaded.theme;
 }
 
 static void render_frame(struct ncplane *plane, const Theme *theme,
+                         const char *lexicon, int time_seconds,
                          uint64_t frame_idx) {
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
@@ -138,16 +116,32 @@ static void render_frame(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, 2, 4,
                     "Phase 1 skeleton — board renderer comes next.");
 
+  // Settings summary.
+  const int summary_top = 4;
   theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, 4, 4, "Theme: ");
+  ncplane_putstr_yx(plane, summary_top, 4, "Theme:   ");
   theme_apply_fg(plane, theme->accent_fg);
   ncplane_putstr(plane, theme->label);
+
+  theme_apply_fg(plane, theme->dim_fg);
+  ncplane_putstr_yx(plane, summary_top + 1, 4, "Lexicon: ");
+  theme_apply_fg(plane, theme->accent_fg);
+  ncplane_putstr(plane, lexicon != NULL ? lexicon : "(none)");
+
+  theme_apply_fg(plane, theme->dim_fg);
+  ncplane_putstr_yx(plane, summary_top + 2, 4, "Time:    ");
+  theme_apply_fg(plane, theme->accent_fg);
+  char time_label[32];
+  format_time_label(time_seconds, time_label, sizeof(time_label));
+  ncplane_putstr(plane, time_label);
+  theme_apply_fg(plane, theme->dim_fg);
+  ncplane_putstr(plane, " per side");
 
   theme_apply_fg(plane, theme->dim_fg);
   char counter[64];
   if (snprintf(counter, sizeof(counter), "frame %llu",
                (unsigned long long)frame_idx) > 0) {
-    ncplane_putstr_yx(plane, 5, 4, counter);
+    ncplane_putstr_yx(plane, summary_top + 4, 4, counter);
   }
 
   theme_apply_fg(plane, theme->status_fg);
@@ -177,21 +171,76 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
-  TuiConfig config = {.theme = THEME_DARK, .theme_set = false};
+  // Load saved settings (if any), then resolve each in order: theme first
+  // (it controls the picker palette for the others), then lexicon, then
+  // time. Any picker may be skipped if the value is already known and
+  // --reconfigure was not passed.
+  TuiConfig loaded = {0};
+  const bool config_existed = !args.no_config && tui_config_load(&loaded);
+  TuiConfig to_save = loaded;
   bool should_save = false;
-  const ThemeName chosen_theme =
-      resolve_theme(nc, &args, &config, &should_save);
+
+  // THEME ---------------------------------------------------------------
+  ThemeName chosen_theme = THEME_DARK;
+  if (args.theme_arg != NULL) {
+    chosen_theme = theme_get_by_id(args.theme_arg)->name;
+  } else if (config_existed && loaded.theme_set && !args.reconfigure) {
+    chosen_theme = loaded.theme;
+  } else {
+    const ThemeName initial =
+        loaded.theme_set ? loaded.theme : theme_auto_detect(nc);
+    chosen_theme = tui_onboarding_run(nc, initial);
+    to_save.theme = chosen_theme;
+    to_save.theme_set = true;
+    should_save = true;
+  }
+  const Theme *theme = theme_get(chosen_theme);
+
+  // LEXICON -------------------------------------------------------------
+  char chosen_lexicon[TUI_LEXICON_NAME_MAX];
+  chosen_lexicon[0] = '\0';
+  if (config_existed && loaded.lexicon_set && !args.reconfigure) {
+    strncpy(chosen_lexicon, loaded.lexicon, sizeof(chosen_lexicon) - 1);
+    chosen_lexicon[sizeof(chosen_lexicon) - 1] = '\0';
+  } else {
+    const char *initial = loaded.lexicon_set ? loaded.lexicon : NULL;
+    if (!tui_lexicon_picker_run(nc, theme, initial, chosen_lexicon,
+                                sizeof(chosen_lexicon))) {
+      notcurses_stop(nc);
+      return 0;
+    }
+    strncpy(to_save.lexicon, chosen_lexicon, sizeof(to_save.lexicon) - 1);
+    to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
+    to_save.lexicon_set = true;
+    should_save = true;
+  }
+
+  // TIME ----------------------------------------------------------------
+  int chosen_time = 0;
+  if (config_existed && loaded.time_per_side_set && !args.reconfigure) {
+    chosen_time = loaded.time_per_side_seconds;
+  } else {
+    const int initial =
+        loaded.time_per_side_set ? loaded.time_per_side_seconds : 0;
+    chosen_time = tui_time_picker_run(nc, theme, initial);
+    if (chosen_time < 0) {
+      notcurses_stop(nc);
+      return 0;
+    }
+    to_save.time_per_side_seconds = chosen_time;
+    to_save.time_per_side_set = true;
+    should_save = true;
+  }
+
   if (should_save && !args.no_config) {
-    tui_config_save(&config);
+    tui_config_save(&to_save);
   }
 
   struct ncplane *std_plane = notcurses_stdplane(nc);
-  const Theme *theme = theme_get(chosen_theme);
-
   uint64_t frame_idx = 0;
   bool running = true;
   while (running) {
-    render_frame(std_plane, theme, frame_idx);
+    render_frame(std_plane, theme, chosen_lexicon, chosen_time, frame_idx);
     notcurses_render(nc);
     frame_idx++;
 

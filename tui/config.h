@@ -7,11 +7,16 @@
 
 enum {
   TUI_CONFIG_PATH_MAX = 4096,
+  TUI_LEXICON_NAME_MAX = 32,
 };
 
 typedef struct {
   ThemeName theme;
   bool theme_set;
+  char lexicon[TUI_LEXICON_NAME_MAX];
+  bool lexicon_set;
+  int time_per_side_seconds;
+  bool time_per_side_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

@@ -80,6 +80,10 @@ bool tui_config_load(TuiConfig *config) {
   }
   config->theme = THEME_DARK;
   config->theme_set = false;
+  config->lexicon[0] = '\0';
+  config->lexicon_set = false;
+  config->time_per_side_seconds = 0;
+  config->time_per_side_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -123,6 +127,23 @@ bool tui_config_load(TuiConfig *config) {
         config->theme = theme->name;
         config->theme_set = true;
       }
+    } else if (strcmp(trimmed, "lexicon") == 0) {
+      if (value[0] != '\0') {
+        size_t len = strlen(value);
+        if (len >= sizeof(config->lexicon)) {
+          len = sizeof(config->lexicon) - 1;
+        }
+        memcpy(config->lexicon, value, len);
+        config->lexicon[len] = '\0';
+        config->lexicon_set = true;
+      }
+    } else if (strcmp(trimmed, "time_per_side_seconds") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && parsed > 0 && parsed <= 24 * 60 * 60) {
+        config->time_per_side_seconds = (int)parsed;
+        config->time_per_side_set = true;
+      }
     }
   }
 
@@ -150,6 +171,13 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->theme_set) {
     const Theme *theme = theme_get(config->theme);
     fprintf(file, "theme = \"%s\"\n", theme->id);
+  }
+  if (config->lexicon_set && config->lexicon[0] != '\0') {
+    fprintf(file, "lexicon = \"%s\"\n", config->lexicon);
+  }
+  if (config->time_per_side_set && config->time_per_side_seconds > 0) {
+    fprintf(file, "time_per_side_seconds = %d\n",
+            config->time_per_side_seconds);
   }
 
   if (fclose(file) != 0) {
