@@ -3,7 +3,6 @@
 #include "../def/board_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/letter_distribution_defs.h"
-#include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/game.h"
@@ -338,20 +337,33 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   // possible_word_list, this is destroyed.
   DictionaryWordList *temp_list = dictionary_word_list_create();
 
-  const int ld_size = ld_get_size(game_get_ld(game));
+  // Compute the unplayed pool from the board alone: full lex distribution
+  // minus tiles currently on the board. This is invariant under how the
+  // off-board tiles are partitioned between the two racks and the bag —
+  // the caller does not need to fabricate or balance racks/bag to get a
+  // correct pruned word set. (The previous implementation summed
+  // bag + mover_rack + opp_rack, which silently under-reports the
+  // unplayed pool when any of those is empty in a CGP load that put
+  // unseen tiles elsewhere.)
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
   Rack unplayed_as_rack;
   rack_set_dist_size_and_reset(&unplayed_as_rack, ld_size);
-  const Bag *bag = game_get_bag(game);
-  for (int i = 0; i < ld_size; i++) {
-    for (int j = 0; j < bag_get_letter(bag, i); j++) {
-      rack_add_letter(&unplayed_as_rack, i);
-    }
-    // Add tiles from players' racks
-    for (int player_index = 0; player_index < 2; player_index++) {
-      const Player *player = game_get_player(game, player_index);
-      const Rack *rack = player_get_rack(player);
-      for (int j = 0; j < rack_get_letter(rack, i); j++) {
-        rack_add_letter(&unplayed_as_rack, i);
+  for (int ml = 0; ml < ld_size; ml++) {
+    rack_add_letters(&unplayed_as_rack, (MachineLetter)ml,
+                     (int)ld_get_dist(ld, ml));
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter on_board = board_get_letter(board, row, col);
+      if (on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      if (get_is_blanked(on_board)) {
+        rack_take_letter(&unplayed_as_rack, BLANK_MACHINE_LETTER);
+      } else {
+        rack_take_letter(&unplayed_as_rack, on_board);
       }
     }
   }

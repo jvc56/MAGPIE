@@ -6,6 +6,7 @@
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
+#include "bai_peg_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
 #include "bit_rack_test.h"
@@ -38,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pass_peg_search_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -100,6 +102,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
+    {"peg", test_bai_peg},
     {"command", test_command},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
@@ -144,6 +147,19 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"pegthorough", test_bai_peg_thorough},
+    {"pegfindnoscore", test_bai_peg_find_no_scoring_position},
+    {"pegfrenchpass", test_bai_peg_french_pass_solve},
+    {"pegfrenchoracle", test_bai_peg_french_oracle},
+    {"pegenglishpass", test_bai_peg_english_pass_solve},
+    {"passpegracks", test_pass_peg_enumerate_bingo_racks},
+    {"passpegsearch", test_pass_peg_search},
+    {"passpegforce", test_pass_peg_search_forced},
+    {"passpegsample", test_pass_peg_sample_solve},
+    {"passpegrand", test_pass_peg_generate_random_1pegs},
+    {"passpegbench", test_pass_peg_bench},
+    {"passpegreport", test_pass_peg_print_report},
+    {"passpegoracle", test_pass_peg_oracle_eval_move},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
