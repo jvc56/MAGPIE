@@ -101,7 +101,53 @@ static LexLang classify_lexicon(const char *name) {
 typedef struct {
   char name[LEXICON_NAME_MAX];
   LexLang lang;
+  int word_count;  // -1 if the .txt sibling could not be read
 } LexiconEntry;
+
+static int count_lines_in_file(const char *path) {
+  FILE *file = fopen(path, "r");
+  if (file == NULL) {
+    return -1;
+  }
+  int count = 0;
+  char buf[8192];
+  size_t bytes_read;
+  while ((bytes_read = fread(buf, 1, sizeof(buf), file)) > 0) {
+    for (size_t i = 0; i < bytes_read; i++) {
+      if (buf[i] == '\n') {
+        count++;
+      }
+    }
+  }
+  fclose(file);
+  return count;
+}
+
+static void format_with_commas(int value, char *out, size_t out_size) {
+  if (out_size == 0) {
+    return;
+  }
+  char raw[16];
+  const int raw_len = snprintf(raw, sizeof(raw), "%d", value);
+  if (raw_len <= 0 || raw_len >= (int)sizeof(raw)) {
+    out[0] = '\0';
+    return;
+  }
+  size_t out_idx = 0;
+  for (int idx = 0; idx < raw_len; idx++) {
+    if (idx > 0 && (raw_len - idx) % 3 == 0) {
+      if (out_idx + 1 >= out_size) {
+        break;
+      }
+      out[out_idx++] = ',';
+    }
+    if (out_idx + 1 >= out_size) {
+      break;
+    }
+    out[out_idx++] = raw[idx];
+  }
+  out[out_idx < out_size ? out_idx : out_size - 1] = '\0';
+}
 
 typedef struct {
   LexiconEntry entries[LEXICON_LIST_MAX];
@@ -148,6 +194,14 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
     memcpy(out->name, entry->d_name, name_len);
     out->name[name_len] = '\0';
     out->lang = classify_lexicon(out->name);
+    char txt_path[512];
+    const int path_written =
+        snprintf(txt_path, sizeof(txt_path), "%s/%s.txt", dir_path, out->name);
+    if (path_written > 0 && (size_t)path_written < sizeof(txt_path)) {
+      out->word_count = count_lines_in_file(txt_path);
+    } else {
+      out->word_count = -1;
+    }
     list->count++;
   }
   closedir(dir);
@@ -243,6 +297,17 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
       } else {
         theme_apply_fg(plane, theme->dim_fg);
         ncplane_putstr_yx(plane, screen_row, 6, list->entries[idx].name);
+      }
+      if (list->entries[idx].word_count >= 0) {
+        // Right-align the count column so digits line up.
+        char count_str[16];
+        format_with_commas(list->entries[idx].word_count, count_str,
+                           sizeof(count_str));
+        char count_line[32];
+        snprintf(count_line, sizeof(count_line), "%9s words", count_str);
+        const int count_col = 18;
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, screen_row, count_col, count_line);
       }
     }
     display_row++;
