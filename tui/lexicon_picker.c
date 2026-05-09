@@ -1,5 +1,6 @@
 #include "lexicon_picker.h"
 
+#include <ctype.h>
 #include <dirent.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -16,14 +17,109 @@ enum {
   LEXICON_DIR_PATHS = 3,
 };
 
+// Mirrors ld_get_type_from_lex_name in src/ent/letter_distribution.h. Update
+// this table when the engine adds new lexicon-prefix → language mappings.
+typedef enum {
+  LEX_LANG_ENGLISH,
+  LEX_LANG_FRENCH,
+  LEX_LANG_GERMAN,
+  LEX_LANG_CATALAN,
+  LEX_LANG_DUTCH,
+  LEX_LANG_NORWEGIAN,
+  LEX_LANG_POLISH,
+  LEX_LANG_OTHER,
+  LEX_LANG_COUNT,
+} LexLang;
+
+static const char *lang_label(LexLang lang) {
+  switch (lang) {
+  case LEX_LANG_ENGLISH:
+    return "English";
+  case LEX_LANG_FRENCH:
+    return "French";
+  case LEX_LANG_GERMAN:
+    return "German";
+  case LEX_LANG_CATALAN:
+    return "Catalan";
+  case LEX_LANG_DUTCH:
+    return "Dutch";
+  case LEX_LANG_NORWEGIAN:
+    return "Norwegian";
+  case LEX_LANG_POLISH:
+    return "Polish";
+  case LEX_LANG_OTHER:
+  case LEX_LANG_COUNT:
+    return "Other";
+  }
+  return "Other";
+}
+
+static bool has_iprefix(const char *str, const char *prefix) {
+  while (*prefix != '\0') {
+    if (*str == '\0') {
+      return false;
+    }
+    if (tolower((unsigned char)*str) != tolower((unsigned char)*prefix)) {
+      return false;
+    }
+    str++;
+    prefix++;
+  }
+  return true;
+}
+
+static LexLang classify_lexicon(const char *name) {
+  if (has_iprefix(name, "CSW") || has_iprefix(name, "NWL") ||
+      has_iprefix(name, "OSPD") || has_iprefix(name, "OSW") ||
+      has_iprefix(name, "TWL") || has_iprefix(name, "America") ||
+      has_iprefix(name, "CEL")) {
+    return LEX_LANG_ENGLISH;
+  }
+  if (has_iprefix(name, "FRA")) {
+    return LEX_LANG_FRENCH;
+  }
+  // Note: must check OSPS before NSF/RD/DSW/DISC because other prefixes
+  // share initial letters; ordering here mirrors the engine.
+  if (has_iprefix(name, "OSPS")) {
+    return LEX_LANG_POLISH;
+  }
+  if (has_iprefix(name, "DISC")) {
+    return LEX_LANG_CATALAN;
+  }
+  if (has_iprefix(name, "DSW")) {
+    return LEX_LANG_DUTCH;
+  }
+  if (has_iprefix(name, "NSF")) {
+    return LEX_LANG_NORWEGIAN;
+  }
+  if (has_iprefix(name, "RD")) {
+    return LEX_LANG_GERMAN;
+  }
+  return LEX_LANG_OTHER;
+}
+
 typedef struct {
-  char names[LEXICON_LIST_MAX][LEXICON_NAME_MAX];
+  char name[LEXICON_NAME_MAX];
+  LexLang lang;
+} LexiconEntry;
+
+typedef struct {
+  LexiconEntry entries[LEXICON_LIST_MAX];
   int count;
   const char *source_dir;
+  // For each entry, the display row it occupies once language headers are
+  // inserted before each group.
+  int entry_display_row[LEXICON_LIST_MAX];
+  int total_display_rows;
 } LexiconList;
 
-static int compare_names(const void *lhs, const void *rhs) {
-  return strcmp((const char *)lhs, (const char *)rhs);
+static int compare_entries(const void *lhs, const void *rhs) {
+  const LexiconEntry *left = (const LexiconEntry *)lhs;
+  const LexiconEntry *right = (const LexiconEntry *)rhs;
+  if (left->lang != right->lang) {
+    return (int)left->lang - (int)right->lang;
+  }
+  return strcmp(left->name, right->name);
 }
 
 static bool ends_with_kwg(const char *name) {
@@ -48,23 +144,40 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
     if (name_len == 0 || name_len >= LEXICON_NAME_MAX) {
       continue;
     }
-    memcpy(list->names[list->count], entry->d_name, name_len);
-    list->names[list->count][name_len] = '\0';
+    LexiconEntry *out = &list->entries[list->count];
+    memcpy(out->name, entry->d_name, name_len);
+    out->name[name_len] = '\0';
+    out->lang = classify_lexicon(out->name);
     list->count++;
   }
   closedir(dir);
-  if (list->count > 0) {
-    qsort(list->names, (size_t)list->count, sizeof(list->names[0]),
-          compare_names);
-    list->source_dir = dir_path;
-    return true;
+  if (list->count == 0) {
+    return false;
   }
-  return false;
+
+  qsort(list->entries, (size_t)list->count, sizeof(list->entries[0]),
+        compare_entries);
+  // Compute display rows: a header precedes each language group.
+  LexLang prev_lang = LEX_LANG_COUNT;
+  int display_row = 0;
+  for (int idx = 0; idx < list->count; idx++) {
+    if (list->entries[idx].lang != prev_lang) {
+      // Reserve a row for the language header.
+      display_row++;
+      prev_lang = list->entries[idx].lang;
+    }
+    list->entry_display_row[idx] = display_row;
+    display_row++;
+  }
+  list->total_display_rows = display_row;
+  list->source_dir = dir_path;
+  return true;
 }
 
 static bool load_lexicon_list(LexiconList *list) {
   list->count = 0;
   list->source_dir = NULL;
+  list->total_display_rows = 0;
   static const char *candidate_dirs[LEXICON_DIR_PATHS] = {
       "data/lexica",
       "../data/lexica",
@@ -103,34 +216,48 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
 
   const int list_top = 3;
   const int last_visible = scroll_offset + visible_rows;
-  for (int row_idx = 0; row_idx < visible_rows; row_idx++) {
-    const int item_idx = scroll_offset + row_idx;
-    if (item_idx >= list->count) {
-      break;
+
+  // Walk display rows (headers + entries) in order, emitting only the
+  // ones inside the visible window.
+  LexLang prev_lang = LEX_LANG_COUNT;
+  int display_row = 0;
+  for (int idx = 0; idx < list->count; idx++) {
+    if (list->entries[idx].lang != prev_lang) {
+      if (display_row >= scroll_offset && display_row < last_visible) {
+        const int screen_row = list_top + (display_row - scroll_offset);
+        theme_apply_fg(plane, theme->status_fg);
+        ncplane_putstr_yx(plane, screen_row, 2, "── ");
+        ncplane_putstr(plane, lang_label(list->entries[idx].lang));
+        ncplane_putstr(plane, " ──");
+      }
+      prev_lang = list->entries[idx].lang;
+      display_row++;
     }
-    const int row = list_top + row_idx;
-    if (item_idx == focus) {
-      theme_apply_fg(plane, theme->accent_fg);
-      ncplane_putstr_yx(plane, row, 4, "▶ ");
-      theme_apply_fg(plane, theme->fg);
-      ncplane_putstr(plane, list->names[item_idx]);
-    } else {
-      theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row, 6, list->names[item_idx]);
+    if (display_row >= scroll_offset && display_row < last_visible) {
+      const int screen_row = list_top + (display_row - scroll_offset);
+      if (idx == focus) {
+        theme_apply_fg(plane, theme->accent_fg);
+        ncplane_putstr_yx(plane, screen_row, 4, "▶ ");
+        theme_apply_fg(plane, theme->fg);
+        ncplane_putstr(plane, list->entries[idx].name);
+      } else {
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, screen_row, 6, list->entries[idx].name);
+      }
     }
+    display_row++;
   }
 
-  // Scroll indicator if there's more above/below.
+  // Scroll indicators.
   theme_apply_fg(plane, theme->dim_fg);
   if (scroll_offset > 0) {
     ncplane_putstr_yx(plane, list_top - 1, 4, "  ↑ more above");
   }
-  if (last_visible < list->count) {
+  if (last_visible < list->total_display_rows) {
     ncplane_putstr_yx(plane, list_top + visible_rows, 4, "  ↓ more below");
   }
 
-  // Hints + count.
-  char count_line[64];
+  char count_line[80];
   if (snprintf(count_line, sizeof(count_line), "%d lexica from %s",
                list->count,
                list->source_dir != NULL ? list->source_dir : "data/lexica") >
@@ -170,6 +297,40 @@ static void render_empty(struct ncplane *plane, const Theme *theme) {
                     "Press any key to dismiss.");
 }
 
+// Adjust scroll_offset so the entry's display row is visible. When the
+// entry is the first of its language group, also try to keep its header
+// row in view.
+static int clamp_scroll(const LexiconList *list, int focus, int scroll_offset,
+                        int visible_rows) {
+  const int focus_row = list->entry_display_row[focus];
+  // If this entry is the first of its language, the header sits one row
+  // above. Aim to keep that header visible too.
+  int target_top = focus_row;
+  const bool first_of_lang =
+      focus == 0 || list->entries[focus].lang != list->entries[focus - 1].lang;
+  if (first_of_lang && focus_row > 0) {
+    target_top = focus_row - 1;
+  }
+
+  if (target_top < scroll_offset) {
+    scroll_offset = target_top;
+  }
+  if (focus_row >= scroll_offset + visible_rows) {
+    scroll_offset = focus_row - visible_rows + 1;
+  }
+  if (scroll_offset < 0) {
+    scroll_offset = 0;
+  }
+  const int max_scroll = list->total_display_rows - visible_rows;
+  if (scroll_offset > max_scroll) {
+    scroll_offset = max_scroll;
+  }
+  if (scroll_offset < 0) {
+    scroll_offset = 0;
+  }
+  return scroll_offset;
+}
+
 bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
                             const char *initial, char *out_buf,
                             size_t out_buf_size) {
@@ -183,8 +344,7 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
     notcurses_render(nc);
     ncinput input;
     while (notcurses_get(nc, NULL, &input) == 0) {
-      // Drain spurious zero returns; should not normally happen with
-      // blocking get. Safety net only.
+      // Defensive drain; blocking get should not return zero in practice.
     }
     return false;
   }
@@ -192,7 +352,7 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
   int focus = 0;
   if (initial != NULL && initial[0] != '\0') {
     for (int item_idx = 0; item_idx < list.count; item_idx++) {
-      if (strcmp(list.names[item_idx], initial) == 0) {
+      if (strcmp(list.entries[item_idx].name, initial) == 0) {
         focus = item_idx;
         break;
       }
@@ -208,21 +368,13 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
   if (visible_rows < 1) {
     visible_rows = 1;
   }
-  if (visible_rows > list.count) {
-    visible_rows = list.count;
+  if (visible_rows > list.total_display_rows) {
+    visible_rows = list.total_display_rows;
   }
   int scroll_offset = 0;
 
   while (true) {
-    if (focus < scroll_offset) {
-      scroll_offset = focus;
-    } else if (focus >= scroll_offset + visible_rows) {
-      scroll_offset = focus - visible_rows + 1;
-    }
-    if (scroll_offset < 0) {
-      scroll_offset = 0;
-    }
-
+    scroll_offset = clamp_scroll(&list, focus, scroll_offset, visible_rows);
     render_picker(std_plane, theme, &list, focus, scroll_offset,
                   visible_rows);
     notcurses_render(nc);
@@ -241,6 +393,8 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
     } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
       focus = (focus + 1) % list.count;
     } else if (key == NCKEY_PGUP) {
+      // Move up by visible_rows entries (approx; we navigate by entries
+      // rather than display rows).
       focus -= visible_rows;
       if (focus < 0) {
         focus = 0;
@@ -255,7 +409,7 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
     } else if (key == NCKEY_END || key == 'G') {
       focus = list.count - 1;
     } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-      const char *chosen = list.names[focus];
+      const char *chosen = list.entries[focus].name;
       const size_t chosen_len = strlen(chosen);
       if (chosen_len + 1 > out_buf_size) {
         return false;
