@@ -165,6 +165,18 @@ static int compare_entries(const void *lhs, const void *rhs) {
   if (left->lang != right->lang) {
     return (int)left->lang - (int)right->lang;
   }
+  // Within a language, sort by word count descending. Entries with an
+  // unknown count (-1) fall to the bottom of the group.
+  if (left->word_count != right->word_count) {
+    if (left->word_count < 0) {
+      return 1;
+    }
+    if (right->word_count < 0) {
+      return -1;
+    }
+    return left->word_count > right->word_count ? -1 : 1;
+  }
+  // Stable tie-break.
   return strcmp(left->name, right->name);
 }
 
