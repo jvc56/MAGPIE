@@ -6,6 +6,8 @@
 #include <time.h>
 #include <notcurses/notcurses.h>
 #include "config.h"
+#include "game_render.h"
+#include "game_state.h"
 #include "lexicon_picker.h"
 #include "onboarding.h"
 #include "theme.h"
@@ -84,19 +86,8 @@ static CliArgs parse_args(int argc, char *argv[]) {
   return args;
 }
 
-static void format_time_label(int seconds, char *buf, size_t buf_size) {
-  if (seconds >= 60 && seconds % 60 == 0) {
-    snprintf(buf, buf_size, "%d min", seconds / 60);
-  } else if (seconds >= 60) {
-    snprintf(buf, buf_size, "%d:%02d", seconds / 60, seconds % 60);
-  } else {
-    snprintf(buf, buf_size, "%d sec", seconds);
-  }
-}
-
-static void render_frame(struct ncplane *plane, const Theme *theme,
-                         const char *lexicon, int time_seconds,
-                         uint64_t frame_idx) {
+static void render_init_error(struct ncplane *plane, const Theme *theme,
+                              const char *lexicon, const char *message) {
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
@@ -109,47 +100,20 @@ static void render_frame(struct ncplane *plane, const Theme *theme,
   for (unsigned col = 0; col < plane_cols; col++) {
     ncplane_putstr_yx(plane, 0, (int)col, " ");
   }
-  ncplane_putstr_yx(plane, 0, 2, " MAGPIE TUI ");
+  ncplane_putstr_yx(plane, 0, 2, " MAGPIE TUI — could not start game ");
+
+  theme_apply_fg(plane, theme->error_fg);
+  theme_apply_bg(plane, theme->bg);
+  ncplane_putstr_yx(plane, 3, 4, "Failed to load ");
+  ncplane_putstr(plane, lexicon != NULL ? lexicon : "(unknown)");
+  ncplane_putstr(plane, ":");
 
   theme_apply_fg(plane, theme->fg);
-  theme_apply_bg(plane, theme->bg);
-  ncplane_putstr_yx(plane, 2, 4,
-                    "Phase 1 skeleton — board renderer comes next.");
-
-  // Settings summary.
-  const int summary_top = 4;
-  theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, summary_top, 4, "Theme:   ");
-  theme_apply_fg(plane, theme->accent_fg);
-  ncplane_putstr(plane, theme->label);
+  ncplane_putstr_yx(plane, 5, 4, message != NULL ? message : "(no detail)");
 
   theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, summary_top + 1, 4, "Lexicon: ");
-  theme_apply_fg(plane, theme->accent_fg);
-  ncplane_putstr(plane, lexicon != NULL ? lexicon : "(none)");
-
-  theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, summary_top + 2, 4, "Time:    ");
-  theme_apply_fg(plane, theme->accent_fg);
-  char time_label[32];
-  format_time_label(time_seconds, time_label, sizeof(time_label));
-  ncplane_putstr(plane, time_label);
-  theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr(plane, " per side");
-
-  theme_apply_fg(plane, theme->dim_fg);
-  char counter[64];
-  if (snprintf(counter, sizeof(counter), "frame %llu",
-               (unsigned long long)frame_idx) > 0) {
-    ncplane_putstr_yx(plane, summary_top + 4, 4, counter);
-  }
-
-  theme_apply_fg(plane, theme->status_fg);
-  if (plane_rows >= 2) {
-    ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "● ready  ");
-  }
-  theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr(plane, "(q or Esc to quit)");
+  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4,
+                    "Press any key to exit.");
 }
 
 int main(int argc, char *argv[]) {
@@ -237,12 +201,25 @@ int main(int argc, char *argv[]) {
   }
 
   struct ncplane *std_plane = notcurses_stdplane(nc);
-  uint64_t frame_idx = 0;
+
+  // Initialize the game with the chosen lexicon.
+  TuiGameState game_state = {0};
+  char init_error[256] = {0};
+  const uint64_t seed = (uint64_t)time(NULL);
+  if (!tui_game_state_init(chosen_lexicon, seed, &game_state, init_error,
+                           sizeof(init_error))) {
+    render_init_error(std_plane, theme, chosen_lexicon, init_error);
+    notcurses_render(nc);
+    ncinput input;
+    notcurses_get(nc, NULL, &input);
+    notcurses_stop(nc);
+    return 1;
+  }
+
   bool running = true;
   while (running) {
-    render_frame(std_plane, theme, chosen_lexicon, chosen_time, frame_idx);
+    tui_game_render(std_plane, theme, &game_state, chosen_time);
     notcurses_render(nc);
-    frame_idx++;
 
     const struct timespec wait = {.tv_sec = 0, .tv_nsec = FRAME_NS};
     ncinput input;
@@ -262,6 +239,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  tui_game_state_destroy(&game_state);
   notcurses_stop(nc);
   return 0;
 }
