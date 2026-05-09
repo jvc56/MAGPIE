@@ -149,3 +149,10 @@ void theme_apply_fg(struct ncplane *plane, ThemeRgb color) {
 void theme_apply_bg(struct ncplane *plane, ThemeRgb color) {
   ncplane_set_bg_rgb8(plane, color.r, color.g, color.b);
 }
+
+void theme_apply_base(struct ncplane *plane, const Theme *theme) {
+  uint64_t channels = 0;
+  ncchannels_set_fg_rgb8(&channels, theme->fg.r, theme->fg.g, theme->fg.b);
+  ncchannels_set_bg_rgb8(&channels, theme->bg.r, theme->bg.g, theme->bg.b);
+  ncplane_set_base(plane, " ", 0, channels);
+}

@@ -119,8 +119,7 @@ static ThemeName resolve_theme(struct notcurses *nc, const CliArgs *args,
 
 static void render_frame(struct ncplane *plane, const Theme *theme,
                          uint64_t frame_idx) {
-  theme_apply_fg(plane, theme->fg);
-  theme_apply_bg(plane, theme->bg);
+  theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
   unsigned plane_rows = 0;

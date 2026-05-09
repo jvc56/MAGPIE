@@ -56,4 +56,9 @@ ThemeName theme_auto_detect(const struct notcurses *nc);
 void theme_apply_fg(struct ncplane *plane, ThemeRgb color);
 void theme_apply_bg(struct ncplane *plane, ThemeRgb color);
 
+// Sets the plane's base cell to the theme's body fg/bg so that
+// ncplane_erase fills with the theme background instead of the terminal
+// default. Call before drawing each frame.
+void theme_apply_base(struct ncplane *plane, const Theme *theme);
+
 #endif

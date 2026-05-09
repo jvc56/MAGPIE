@@ -14,8 +14,7 @@ static void fill_row(struct ncplane *plane, int row, unsigned cols) {
 static void render_picker(struct ncplane *plane, ThemeName focus) {
   const Theme *theme = theme_get(focus);
 
-  theme_apply_fg(plane, theme->fg);
-  theme_apply_bg(plane, theme->bg);
+  theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
   unsigned plane_rows = 0;
