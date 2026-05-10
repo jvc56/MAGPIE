@@ -84,6 +84,8 @@ bool tui_config_load(TuiConfig *config) {
   config->lexicon_set = false;
   config->time_per_side_seconds = 0;
   config->time_per_side_set = false;
+  config->border_thickness = 2;
+  config->border_thickness_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -144,6 +146,13 @@ bool tui_config_load(TuiConfig *config) {
         config->time_per_side_seconds = (int)parsed;
         config->time_per_side_set = true;
       }
+    } else if (strcmp(trimmed, "border_thickness") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && parsed >= 0 && parsed <= 8) {
+        config->border_thickness = (int)parsed;
+        config->border_thickness_set = true;
+      }
     }
   }
 
@@ -178,6 +187,9 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->time_per_side_set && config->time_per_side_seconds > 0) {
     fprintf(file, "time_per_side_seconds = %d\n",
             config->time_per_side_seconds);
+  }
+  if (config->border_thickness_set) {
+    fprintf(file, "border_thickness = %d\n", config->border_thickness);
   }
 
   if (fclose(file) != 0) {

@@ -262,106 +262,164 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
 // ── Pixel-graphics grid overlay ───────────────────────────────────────────
 //
 // On terminals that support pixel graphics (Kitty graphics protocol or
-// Sixel — ghostty/iTerm2/kitty/foot/modern xterm), render an RGBA bitmap
-// of 1-pixel borders in theme->bg over a child plane positioned at the
-// board cells. Pixels with alpha=0 composite through to the std plane,
-// so the cell content (premium markers, fullwidth tile letters) stays
-// readable underneath. On Terminal.app and any terminal without pixel
-// support, this is a no-op — the board renders without grid lines.
-static void render_grid_overlay_pixel(struct ncplane *parent,
-                                      const Theme *theme) {
-  struct notcurses *nc = ncplane_notcurses(parent);
-  if (nc == NULL || !notcurses_canpixel(nc)) {
-    return;
-  }
+// Sixel — ghostty/iTerm2/kitty/foot/modern xterm), draw an RGBA bitmap
+// of N-pixel borders in theme->bg over a child plane positioned at a
+// region of cells. Pixels with alpha=0 composite through to the std plane,
+// so the cells' glyph content stays readable underneath. On terminals
+// without pixel support, the calls are no-ops via notcurses_canpixel.
 
-  static struct ncplane *grid = NULL;
-  if (grid == NULL) {
+// Acquire (or move/resize) a cached child plane. The slot is a static
+// struct ncplane * variable; on first call we allocate and set the base
+// cell to fully transparent, on subsequent calls we just reposition/
+// resize as needed.
+static struct ncplane *acquire_grid_plane(struct ncplane **slot,
+                                          struct ncplane *parent,
+                                          const char *name, int y, int x,
+                                          int rows, int cols) {
+  if (rows <= 0 || cols <= 0) {
+    return NULL;
+  }
+  if (*slot == NULL) {
     ncplane_options opts = {0};
-    opts.y = CELL_ROW_BASE;
-    opts.x = CELL_COL_BASE;
-    opts.rows = BOARD_DIM;
-    opts.cols = BOARD_DIM * CELL_WIDTH;
-    opts.name = "grid_pixel";
-    grid = ncplane_create(parent, &opts);
-    if (grid == NULL) {
-      return;
+    opts.y = y;
+    opts.x = x;
+    opts.rows = (unsigned)rows;
+    opts.cols = (unsigned)cols;
+    opts.name = name;
+    *slot = ncplane_create(parent, &opts);
+    if (*slot == NULL) {
+      return NULL;
     }
     uint64_t base_ch = 0;
     ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
     ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);
-    ncplane_set_base(grid, " ", 0, base_ch);
+    ncplane_set_base(*slot, " ", 0, base_ch);
+    return *slot;
   }
+  unsigned cur_rows = 0;
+  unsigned cur_cols = 0;
+  ncplane_dim_yx(*slot, &cur_rows, &cur_cols);
+  if ((int)cur_rows != rows || (int)cur_cols != cols) {
+    ncplane_resize_simple(*slot, (unsigned)rows, (unsigned)cols);
+  }
+  ncplane_move_yx(*slot, y, x);
+  return *slot;
+}
 
+// Draw an h × w grid onto grid_plane, where each tile is tile_cells_h ×
+// tile_cells_w terminal cells. Lines are `thickness` pixels thick in
+// theme->bg. Caller is responsible for sizing the plane appropriately.
+static void draw_pixel_grid(struct ncplane *grid_plane, const Theme *theme,
+                            int tiles_y, int tiles_x, int tile_cells_h,
+                            int tile_cells_w, int thickness) {
+  if (grid_plane == NULL || thickness <= 0 || tiles_y <= 0 || tiles_x <= 0) {
+    return;
+  }
   unsigned pxy = 0;
   unsigned pxx = 0;
   unsigned cdy = 0;
   unsigned cdx = 0;
   unsigned mby = 0;
   unsigned mbx = 0;
-  ncplane_pixel_geom(grid, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  ncplane_pixel_geom(grid_plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
   if (cdy == 0 || cdx == 0) {
     return;
   }
 
-  const unsigned buf_h = (unsigned)BOARD_DIM * cdy;
-  const unsigned buf_w = (unsigned)BOARD_DIM * (unsigned)CELL_WIDTH * cdx;
-  const size_t buf_bytes = (size_t)buf_h * buf_w * 4;
-  uint8_t *buf = (uint8_t *)calloc(1, buf_bytes);
-  if (buf == NULL) {
+  const unsigned tile_h_px = (unsigned)tile_cells_h * cdy;
+  const unsigned tile_w_px = (unsigned)tile_cells_w * cdx;
+  const unsigned buf_h = (unsigned)tiles_y * tile_h_px;
+  const unsigned buf_w = (unsigned)tiles_x * tile_w_px;
+  if (buf_h == 0 || buf_w == 0) {
     return;
   }
 
+  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_h * buf_w * 4);
+  if (buf == NULL) {
+    return;
+  }
   const uint8_t r = theme->bg.r;
   const uint8_t g = theme->bg.g;
   const uint8_t b = theme->bg.b;
-  const uint8_t a = 255;
 
-  // Horizontal lines: top of every cell row + a closing line on the last
-  // pixel row of the bitmap (so the bottom border isn't clipped).
-  for (int i = 0; i <= BOARD_DIM; i++) {
-    const unsigned row =
-        (i == BOARD_DIM) ? (buf_h - 1) : (unsigned)i * cdy;
-    if (row >= buf_h) {
-      continue;
+  // Horizontal lines: tile row borders + closing line at the bottom edge.
+  for (int i = 0; i <= tiles_y; i++) {
+    int line_top = (i == tiles_y) ? (int)buf_h - thickness : i * (int)tile_h_px;
+    if (line_top < 0) {
+      line_top = 0;
     }
-    uint8_t *p = buf + (size_t)row * buf_w * 4;
-    for (unsigned col = 0; col < buf_w; col++) {
-      p[0] = r;
-      p[1] = g;
-      p[2] = b;
-      p[3] = a;
-      p += 4;
+    for (int t = 0; t < thickness; t++) {
+      const int row = line_top + t;
+      if (row < 0 || row >= (int)buf_h) {
+        continue;
+      }
+      uint8_t *p = buf + (size_t)row * buf_w * 4;
+      for (unsigned col = 0; col < buf_w; col++) {
+        p[0] = r;
+        p[1] = g;
+        p[2] = b;
+        p[3] = 255;
+        p += 4;
+      }
     }
   }
-
-  // Vertical lines: left of every cell + a closing line on the last pixel
-  // col. Each board cell is CELL_WIDTH terminal cols wide, so the column
-  // stride between grid lines is CELL_WIDTH * cdx pixels.
-  const unsigned cell_px = (unsigned)CELL_WIDTH * cdx;
-  for (int i = 0; i <= BOARD_DIM; i++) {
-    const unsigned col =
-        (i == BOARD_DIM) ? (buf_w - 1) : (unsigned)i * cell_px;
-    if (col >= buf_w) {
-      continue;
+  // Vertical lines.
+  for (int i = 0; i <= tiles_x; i++) {
+    int line_left =
+        (i == tiles_x) ? (int)buf_w - thickness : i * (int)tile_w_px;
+    if (line_left < 0) {
+      line_left = 0;
     }
-    for (unsigned row = 0; row < buf_h; row++) {
-      uint8_t *p = buf + ((size_t)row * buf_w + col) * 4;
-      p[0] = r;
-      p[1] = g;
-      p[2] = b;
-      p[3] = a;
+    for (int t = 0; t < thickness; t++) {
+      const int col = line_left + t;
+      if (col < 0 || col >= (int)buf_w) {
+        continue;
+      }
+      for (unsigned row = 0; row < buf_h; row++) {
+        uint8_t *p = buf + ((size_t)row * buf_w + col) * 4;
+        p[0] = r;
+        p[1] = g;
+        p[2] = b;
+        p[3] = 255;
+      }
     }
   }
 
   struct ncvisual_options vopts = {0};
-  vopts.n = grid;
+  vopts.n = grid_plane;
   vopts.blitter = NCBLIT_PIXEL;
   vopts.leny = buf_h;
   vopts.lenx = buf_w;
   ncblit_rgba(buf, (int)(buf_w * 4), &vopts);
-
   free(buf);
+}
+
+// Per-region helpers. Each owns a static plane-slot.
+static void render_board_grid(struct ncplane *parent, const Theme *theme,
+                              int thickness) {
+  struct notcurses *nc = ncplane_notcurses(parent);
+  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
+    return;
+  }
+  static struct ncplane *slot = NULL;
+  struct ncplane *p = acquire_grid_plane(&slot, parent, "grid_board",
+                                         CELL_ROW_BASE, CELL_COL_BASE,
+                                         BOARD_DIM, BOARD_DIM * CELL_WIDTH);
+  draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, 1, CELL_WIDTH, thickness);
+}
+
+static void render_tile_strip_grid(struct ncplane **slot,
+                                   struct ncplane *parent, const Theme *theme,
+                                   const char *name, int thickness, int y,
+                                   int x, int tile_count) {
+  struct notcurses *nc = ncplane_notcurses(parent);
+  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0 ||
+      tile_count <= 0) {
+    return;
+  }
+  struct ncplane *p = acquire_grid_plane(slot, parent, name, y, x, 1,
+                                         tile_count * CELL_WIDTH);
+  draw_pixel_grid(p, theme, 1, tile_count, 1, CELL_WIDTH, thickness);
 }
 
 // ── Board ─────────────────────────────────────────────────────────────────
@@ -445,6 +503,13 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
       col_offset += CELL_WIDTH;
     }
   }
+
+  // Pixel-grid overlay around the rack tiles (no-op on terminals without
+  // pixel support).
+  static struct ncplane *strip_slot = NULL;
+  render_tile_strip_grid(&strip_slot, plane, theme, "grid_rack_panel",
+                         state->border_thickness, L->rack_top + 1, start_col,
+                         total_letters);
 }
 
 // ── Bag panel ─────────────────────────────────────────────────────────────
@@ -624,6 +689,7 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
+  int tiles_drawn = 0;
   if (rack_right_max >= rack_left + 1) {
     int rcol = rack_left;
     theme_apply_fg(plane, theme->rack_tile_fg);
@@ -635,14 +701,23 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
         if (fullwidth[0] != '\0') {
           ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
         } else {
-          // ASCII fallback for LDs without a fullwidth column.
           const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
           ncplane_putstr_yx(plane, content_row, rcol, " ");
           ncplane_putstr(plane, ascii);
         }
         rcol += 2;
+        tiles_drawn++;
       }
     }
+  }
+
+  // Pixel-grid overlay around the pill's rack tiles. Per-pill plane slot.
+  static struct ncplane *pill_slots[2] = {NULL, NULL};
+  static const char *pill_names[2] = {"grid_pill1", "grid_pill2"};
+  if (player_idx == 0 || player_idx == 1) {
+    render_tile_strip_grid(&pill_slots[player_idx], plane, theme,
+                           pill_names[player_idx], state->border_thickness,
+                           content_row, rack_left, tiles_drawn);
   }
 }
 
@@ -952,7 +1027,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state);
-  render_grid_overlay_pixel(plane, theme);
+  render_board_grid(plane, theme, state->border_thickness);
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
@@ -967,8 +1042,8 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 }
 
 // ── Menu modal ────────────────────────────────────────────────────────────
-void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
-                          int focus) {
+void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus,
+                          int border_thickness, bool pixel_supported) {
   if (plane == NULL || theme == NULL) {
     return;
   }
@@ -976,17 +1051,32 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
   unsigned plane_cols = 0;
   ncplane_dim_yx(plane, &plane_rows, &plane_cols);
 
-  static const char *const items[] = {"Resume", "Quit"};
-  const int item_count = (int)(sizeof(items) / sizeof(items[0]));
-  const int width = 24;
-  const int height = 3 + item_count;  // top + title gap + items + bottom
+  // Build per-item label. The middle row varies with current settings.
+  char border_label[64];
+  if (!pixel_supported) {
+    snprintf(border_label, sizeof(border_label),
+             "Border: unsupported here");
+  } else if (border_thickness <= 0) {
+    snprintf(border_label, sizeof(border_label), "Border: off");
+  } else {
+    snprintf(border_label, sizeof(border_label), "Border: %dpx",
+             border_thickness);
+  }
+
+  const char *items[TUI_MENU_ITEM_COUNT];
+  items[TUI_MENU_RESUME] = "Resume";
+  items[TUI_MENU_BORDER] = border_label;
+  items[TUI_MENU_QUIT] = "Quit";
+  const int item_count = TUI_MENU_ITEM_COUNT;
+
+  const int width = 30;
+  const int height = 3 + item_count;
   if ((unsigned)width >= plane_cols || (unsigned)height >= plane_rows) {
     return;
   }
   const int top = (int)(plane_rows - height) / 2;
   const int left = (int)(plane_cols - width) / 2;
 
-  // Solid panel: paint interior with bg first, then box on top.
   theme_apply_fg(plane, theme->fg);
   theme_apply_bg(plane, theme->bg);
   for (int r = top; r < top + height; r++) {
@@ -1006,7 +1096,7 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
       theme_apply_fg(plane, theme->fg);
       theme_apply_bg(plane, theme->bg);
     }
-    char line[32];
+    char line[64];
     snprintf(line, sizeof(line), "  %-*s", width - 4, items[i]);
     ncplane_putstr_yx(plane, item_row, left + 1, line);
   }

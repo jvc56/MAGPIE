@@ -11,11 +11,16 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 // Menu modal — rendered on top of the game frame when the user presses Esc.
 typedef enum {
   TUI_MENU_RESUME = 0,
-  TUI_MENU_QUIT = 1,
-  TUI_MENU_ITEM_COUNT = 2,
+  TUI_MENU_BORDER = 1,
+  TUI_MENU_QUIT = 2,
+  TUI_MENU_ITEM_COUNT = 3,
 } TuiMenuItem;
 
-void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
-                          int focus);
+// `border_thickness` is the current pixel-grid thickness (0 = off).
+// `pixel_supported` is true when the host terminal supports pixel
+// graphics; when false the Border row is rendered as "(unsupported on
+// this terminal)" rather than a numeric value.
+void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus,
+                          int border_thickness, bool pixel_supported);
 
 #endif

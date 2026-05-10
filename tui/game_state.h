@@ -49,6 +49,9 @@ typedef struct {
   TuiHistoryEntry history[TUI_HISTORY_MAX];
   int history_count;
 
+  // Visual settings.
+  int border_thickness;  // pixel-grid line thickness; 0 = off
+
   // Clock state.
   int time_per_side_seconds;
   double seconds_used[2];          // accumulated time used by each side

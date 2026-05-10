@@ -223,11 +223,15 @@ int main(int argc, char *argv[]) {
   }
 
   tui_game_state_set_time_per_side(&game_state, chosen_time);
+  // Pixel-grid border thickness: from config when present, else default 2.
+  game_state.border_thickness =
+      loaded.border_thickness_set ? loaded.border_thickness : 2;
+  const bool pixel_supported = notcurses_canpixel(nc);
   tui_bot_worker_start(&game_state);
 
   // Modal state: when menu_open is true, key handling routes to the menu
   // (Up/Down/Enter/Esc), and the renderer overlays the menu on top of the
-  // game frame. The only menu item right now is Quit.
+  // game frame.
   bool running = true;
   bool menu_open = false;
   int menu_focus = 0;
@@ -236,7 +240,8 @@ int main(int argc, char *argv[]) {
     tui_game_render(std_plane, theme, &game_state, chosen_time);
     pthread_mutex_unlock(&game_state.mutex);
     if (menu_open) {
-      tui_game_render_menu(std_plane, theme, menu_focus);
+      tui_game_render_menu(std_plane, theme, menu_focus,
+                           game_state.border_thickness, pixel_supported);
     }
     notcurses_render(nc);
 
@@ -275,6 +280,21 @@ int main(int argc, char *argv[]) {
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         if (menu_focus == TUI_MENU_QUIT) {
           running = false;
+        } else if (menu_focus == TUI_MENU_BORDER) {
+          // Cycle 0 → 1 → 2 → 3 → 4 → 0 when pixel graphics work; on
+          // unsupported terminals leave the value alone.
+          if (pixel_supported) {
+            pthread_mutex_lock(&game_state.mutex);
+            game_state.border_thickness =
+                (game_state.border_thickness + 1) % 5;
+            const int new_thickness = game_state.border_thickness;
+            pthread_mutex_unlock(&game_state.mutex);
+            if (!args.no_config) {
+              to_save.border_thickness = new_thickness;
+              to_save.border_thickness_set = true;
+              tui_config_save(&to_save);
+            }
+          }
         } else {
           menu_open = false;
         }
