@@ -235,9 +235,17 @@ int main(int argc, char *argv[]) {
       continue;
     }
     if (key == NCKEY_RESIZE) {
-      // Sync the std plane to the new terminal size; the next frame will
-      // redraw from the top-left.
-      notcurses_refresh(nc, NULL, NULL);
+      // notcurses_refresh re-pushes the last rendered frame and reports the
+      // new terminal geometry, but it does not resize the std plane. We
+      // also need to re-set the base cell after resize because the new
+      // cells extend beyond what theme_apply_base last covered. Render
+      // immediately so the stale content from refresh is overwritten.
+      unsigned new_rows = 0;
+      unsigned new_cols = 0;
+      notcurses_refresh(nc, &new_rows, &new_cols);
+      ncplane_resize_simple(std_plane, new_rows, new_cols);
+      tui_game_render(std_plane, theme, &game_state, chosen_time);
+      notcurses_render(nc);
       continue;
     }
     if (key == 'q' || key == 'Q' || key == NCKEY_ESC) {

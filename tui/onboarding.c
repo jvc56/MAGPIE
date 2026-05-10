@@ -95,6 +95,13 @@ ThemeName tui_onboarding_run(struct notcurses *nc, ThemeName initial) {
     if (input.evtype == NCTYPE_RELEASE) {
       continue;
     }
+    if (key == NCKEY_RESIZE) {
+      unsigned new_rows = 0;
+      unsigned new_cols = 0;
+      notcurses_refresh(nc, &new_rows, &new_cols);
+      ncplane_resize_simple(std_plane, new_rows, new_cols);
+      continue;
+    }
 
     if (key == NCKEY_UP || key == 'k' || key == 'K') {
       focus = (ThemeName)((focus + THEME_COUNT - 1) % THEME_COUNT);

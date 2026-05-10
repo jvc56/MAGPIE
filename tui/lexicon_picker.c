@@ -464,6 +464,20 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
     if (input.evtype == NCTYPE_RELEASE) {
       continue;
     }
+    if (key == NCKEY_RESIZE) {
+      unsigned new_rows = 0;
+      unsigned new_cols = 0;
+      notcurses_refresh(nc, &new_rows, &new_cols);
+      ncplane_resize_simple(std_plane, new_rows, new_cols);
+      visible_rows = (int)new_rows - 8;
+      if (visible_rows < 1) {
+        visible_rows = 1;
+      }
+      if (visible_rows > list.total_display_rows) {
+        visible_rows = list.total_display_rows;
+      }
+      continue;
+    }
 
     if (key == NCKEY_UP || key == 'k' || key == 'K') {
       focus = (focus + list.count - 1) % list.count;

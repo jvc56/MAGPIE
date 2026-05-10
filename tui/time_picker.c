@@ -116,6 +116,13 @@ int tui_time_picker_run(struct notcurses *nc, const Theme *theme,
     if (input.evtype == NCTYPE_RELEASE) {
       continue;
     }
+    if (key == NCKEY_RESIZE) {
+      unsigned new_rows = 0;
+      unsigned new_cols = 0;
+      notcurses_refresh(nc, &new_rows, &new_cols);
+      ncplane_resize_simple(std_plane, new_rows, new_cols);
+      continue;
+    }
 
     if (key == NCKEY_UP || key == 'k' || key == 'K') {
       focus = (focus + PRESET_COUNT - 1) % PRESET_COUNT;
