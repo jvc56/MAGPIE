@@ -42,12 +42,13 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
   dst[len] = '\0';
 }
 
-// Caller must hold state->mutex.
+// Caller must hold state->mutex. Snapshots the player's full rack BEFORE
+// play_move (i.e., the tiles they had at the start of their turn) plus
+// the move and metadata.
 static void append_history(TuiGameState *state, int player_idx,
-                           const Move *move, int score, int total_after,
-                           int clock_at_start) {
+                           const Move *move, const Rack *rack_at_start,
+                           int score, int total_after, int clock_at_start) {
   if (state->history_count >= TUI_HISTORY_MAX) {
-    // Drop oldest.
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
     state->history_count = TUI_HISTORY_MAX - 1;
@@ -69,26 +70,17 @@ static void append_history(TuiGameState *state, int player_idx,
   free(move_dump);
   string_builder_destroy(sb);
 
-  entry->leave_str[0] = '\0';
-}
-
-// Caller must hold state->mutex. Sets entry's leave_str.
-static void set_history_leave(TuiGameState *state, const Rack *leave_rack) {
-  if (state->history_count == 0) {
-    return;
+  if (rack_at_start != NULL) {
+    StringBuilder *rsb = string_builder_create();
+    string_builder_add_rack(rsb, rack_at_start, state->ld, false);
+    size_t rack_len = 0;
+    char *rack_dump = string_builder_dump(rsb, &rack_len);
+    copy_str(entry->rack_str, sizeof(entry->rack_str), rack_dump);
+    free(rack_dump);
+    string_builder_destroy(rsb);
+  } else {
+    entry->rack_str[0] = '\0';
   }
-  TuiHistoryEntry *entry = &state->history[state->history_count - 1];
-  if (leave_rack == NULL) {
-    entry->leave_str[0] = '\0';
-    return;
-  }
-  StringBuilder *sb = string_builder_create();
-  string_builder_add_rack(sb, leave_rack, state->ld, false);
-  size_t leave_len = 0;
-  char *leave_dump = string_builder_dump(sb, &leave_len);
-  copy_str(entry->leave_str, sizeof(entry->leave_str), leave_dump);
-  free(leave_dump);
-  string_builder_destroy(sb);
 }
 
 // Sleep up to TURN_DELAY_NS, polling stop every POLL_NS so we exit
@@ -140,14 +132,21 @@ static void *bot_thread_main(void *arg) {
       if (move_list_get_count(move_list) > 0) {
         const Move *best = move_list_get_move(move_list, 0);
         const int score = equity_to_int(move_get_score(best));
+
+        // Snapshot the full rack BEFORE play_move modifies the player's
+        // rack — this is what they had at the start of their turn.
+        Rack rack_at_start;
+        rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
+        rack_copy(&rack_at_start, player_get_rack(game_get_player(
+                                       state->game, player_idx)));
+
         Rack leave;
         rack_set_dist_size(&leave, ld_get_size(state->ld));
         play_move(best, state->game, &leave);
         const int total_after = equity_to_int(player_get_score(
             game_get_player(state->game, player_idx)));
-        append_history(state, player_idx, best, score, total_after,
-                       clock_at_start);
-        set_history_leave(state, &leave);
+        append_history(state, player_idx, best, &rack_at_start, score,
+                       total_after, clock_at_start);
 
         // Charge this turn's elapsed time to the player who just moved,
         // and reset turn_started so the next player's clock begins now.

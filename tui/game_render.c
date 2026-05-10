@@ -52,11 +52,11 @@ enum {
   CELL_BOTTOM_ROW = CELL_ROW_BASE + BOARD_DIM - 1,  // = 15
   RACK_HEIGHT = 3,
   PILL_HEIGHT = 3,
-  RIGHT_COL_LEFT_OFFSET = 3,    // gap from board's right edge
+  RIGHT_COL_LEFT_OFFSET = 1,    // gap from board's right edge
   RIGHT_COL_MIN_WIDTH = 32,     // narrowest the right column can be
+  // History switches to two columns once the panel is at least this wide.
+  HISTORY_TWO_COL_THRESHOLD = 60,
   STATUS_BAR_HEIGHT = 1,
-  // Minimum: pills (6) + history (4) covers right; board (16) + rack (3) +
-  // bag (4) = 23 + status (1) covers left. Take the larger.
   MIN_ROWS_REQUIRED = 24,
   MIN_COLS_REQUIRED = BOARD_WIDTH + RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH,
 };
@@ -439,7 +439,7 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
   return (double)state->time_per_side_seconds - used;
 }
 
-// ── Player pill ───────────────────────────────────────────────────────────
+// Spectator-style pill: name, halfwidth rack inline, score, clock.
 static void render_player_pill(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, int player_idx,
                                int top_row, const Layout *L) {
@@ -460,17 +460,37 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   snprintf(name, sizeof(name), "Player %d", player_idx + 1);
   ncplane_putstr(plane, name);
 
+  // Halfwidth rack inline, two cols after the name. Use ld_ml_to_hl for
+  // each tile (ASCII letters), '?' for blanks. We render it character by
+  // character on tile_bg so each tile reads as a small chip.
+  const Rack *rack = player_get_rack(player);
+  const LetterDistribution *ld = state->ld;
+  const int rack_col = content_left + 12;  // after "▶ Player N"
+  int rcol = rack_col;
+  theme_apply_fg(plane, theme->rack_tile_fg);
+  theme_apply_bg(plane, theme->rack_tile_bg);
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    const int count = rack_get_letter(rack, (MachineLetter)ml);
+    for (int copy = 0; copy < count; copy++) {
+      const char *letter_str = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+      ncplane_putstr_yx(plane, content_row, rcol, letter_str);
+      rcol++;
+    }
+  }
+
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
            equity_to_int(player_get_score(player)));
   const double remaining = seconds_remaining(state, player_idx);
   char clock_str[16];
-  format_clock(remaining < 0 ? 0 : (int)remaining, clock_str, sizeof(clock_str));
+  format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
+               sizeof(clock_str));
 
   const int right = L->right_col_right - 1;
   const int clock_len = (int)strlen(clock_str);
   const int clock_col = right - clock_len + 1;
   theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
 
   const int score_len = (int)strlen(score_str);
@@ -481,10 +501,69 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 
 // ── History panel ─────────────────────────────────────────────────────────
 //
-// Each history entry takes 2 rows:
-//   "  N. 8H POND               +14 / 67"   (label · move · score / total)
-//   "      AEINRT"                          (leave)
-// Player 1 entries get accent_fg on the label; player 2 stays dim_fg.
+// Each entry takes 2 rows:
+//   "  N. 8H POND              +14 / 67"   (label · move · score / total)
+//   "      AEINRT                   5:00"  (full rack at turn start · clock)
+// Player 1 entries get accent_fg on the move; player 2 stays dim_fg.
+// When the panel is wide enough (>= HISTORY_TWO_COL_THRESHOLD), entries
+// are tiled into two side-by-side columns chronologically.
+
+static void render_history_entry(struct ncplane *plane, const Theme *theme,
+                                 const TuiHistoryEntry *e, int idx,
+                                 int row, int interior_left,
+                                 int interior_right, int row_bottom_inclusive) {
+  const ThemeRgb label_fg =
+      e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
+
+  // Row 1: prefix + move (with selective bold) + right-aligned score.
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, theme->dim_fg);
+  char prefix[8];
+  snprintf(prefix, sizeof(prefix), "%3d. ", idx + 1);
+  ncplane_putstr_yx(plane, row, interior_left, prefix);
+
+  theme_apply_fg(plane, label_fg);
+  bool inside_paren = false;
+  for (const char *p = e->move_str; *p != '\0'; p++) {
+    if (*p == '(') {
+      inside_paren = true;
+    }
+    ncplane_set_styles(plane, inside_paren ? 0 : NCSTYLE_BOLD);
+    const char buf[2] = {*p, '\0'};
+    ncplane_putstr(plane, buf);
+    if (*p == ')') {
+      inside_paren = false;
+    }
+  }
+  ncplane_set_styles(plane, 0);
+
+  char score_str[24];
+  snprintf(score_str, sizeof(score_str), "+%d / %d", e->score, e->total_after);
+  const int score_len = (int)strlen(score_str);
+  const int score_col = interior_right - score_len + 1;
+  if (score_col > interior_left + (int)strlen(prefix)) {
+    theme_apply_fg(plane, theme->fg);
+    ncplane_putstr_yx(plane, row, score_col, score_str);
+  }
+
+  // Row 2: indented full rack + right-aligned clock.
+  if (row + 1 > row_bottom_inclusive) {
+    return;
+  }
+  theme_apply_fg(plane, theme->dim_fg);
+  char rack_line[64];
+  snprintf(rack_line, sizeof(rack_line), "    %s",
+           e->rack_str[0] ? e->rack_str : "—");
+  ncplane_putstr_yx(plane, row + 1, interior_left, rack_line);
+
+  char clock_str[16];
+  format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
+               sizeof(clock_str));
+  const int clock_len = (int)strlen(clock_str);
+  const int clock_col = interior_right - clock_len + 1;
+  ncplane_putstr_yx(plane, row + 1, clock_col, clock_str);
+}
 
 static void render_history_panel(struct ncplane *plane, const Theme *theme,
                                  const TuiGameState *state, const Layout *L) {
@@ -494,7 +573,7 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
   draw_box(plane, theme, L->history_top, L->right_col_left, height, width,
-           "History");
+           NULL);
 
   if (state->history_count == 0) {
     theme_apply_fg(plane, theme->dim_fg);
@@ -508,82 +587,65 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  const int interior_left = L->right_col_left + 2;
-  const int interior_right = L->right_col_right - 1;
-  const int interior_width = interior_right - interior_left + 1;
   const int rows_per_entry = 2;
-  const int max_visible = (height - 2) / rows_per_entry;
+  const int top = L->history_top + 1;             // first interior row
+  const int bottom = L->history_bottom - 1;       // last interior row (inclusive)
+  const int rows_avail = bottom - top + 1;
+  const bool two_col = width >= HISTORY_TWO_COL_THRESHOLD;
 
-  // Show the most recent entries that fit.
+  if (!two_col) {
+    const int interior_left = L->right_col_left + 2;
+    const int interior_right = L->right_col_right - 2;
+    const int max_visible = rows_avail / rows_per_entry;
+    int first = state->history_count - max_visible;
+    if (first < 0) {
+      first = 0;
+    }
+    int row = top;
+    for (int idx = first; idx < state->history_count; idx++) {
+      render_history_entry(plane, theme, &state->history[idx], idx, row,
+                           interior_left, interior_right, bottom);
+      row += rows_per_entry;
+      if (row > bottom) {
+        break;
+      }
+    }
+    return;
+  }
+
+  // Two-column layout. Split the panel interior in half.
+  const int gutter = 2;
+  const int half_width = (width - 2 - gutter) / 2;
+  const int left_l = L->right_col_left + 2;
+  const int left_r = left_l + half_width - 1;
+  const int right_l = left_r + 1 + gutter;
+  const int right_r = L->right_col_right - 2;
+
+  const int max_visible = (rows_avail / rows_per_entry) * 2;  // both columns
   int first = state->history_count - max_visible;
   if (first < 0) {
     first = 0;
   }
-  int row = L->history_top + 1;
+  int row_left = top;
+  int row_right = top;
   for (int idx = first; idx < state->history_count; idx++) {
-    const TuiHistoryEntry *e = &state->history[idx];
-    const ThemeRgb label_fg =
-        e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
-
-    // Row 1: " N. POS WORD            +score / total"
-    // The position prefix and played-tile letters render bold; parens
-    // and playthrough letters stay non-bold.
-    theme_apply_bg(plane, theme->bg);
-    ncplane_set_styles(plane, 0);
-    theme_apply_fg(plane, theme->dim_fg);
-    char prefix[8];
-    snprintf(prefix, sizeof(prefix), "%3d. ", idx + 1);
-    ncplane_putstr_yx(plane, row, interior_left, prefix);
-
-    // Move string with selective bold.
-    theme_apply_fg(plane, label_fg);
-    bool inside_paren = false;
-    for (const char *p = e->move_str; *p != '\0'; p++) {
-      if (*p == '(') {
-        inside_paren = true;
+    const bool to_left = ((idx - first) % 2) == 0;
+    if (to_left) {
+      if (row_left > bottom) {
+        break;
       }
-      ncplane_set_styles(plane, inside_paren ? 0 : NCSTYLE_BOLD);
-      const char buf[2] = {*p, '\0'};
-      ncplane_putstr(plane, buf);
-      if (*p == ')') {
-        inside_paren = false;
+      render_history_entry(plane, theme, &state->history[idx], idx, row_left,
+                           left_l, left_r, bottom);
+      row_left += rows_per_entry;
+    } else {
+      if (row_right > bottom) {
+        break;
       }
-    }
-    ncplane_set_styles(plane, 0);
-
-    // Score / total, right-aligned at the row's right edge.
-    char score_str[24];
-    snprintf(score_str, sizeof(score_str), "+%d / %d", e->score,
-             e->total_after);
-    const int score_len = (int)strlen(score_str);
-    const int score_col = interior_right - score_len + 1;
-    if (score_col > interior_left + (int)strlen(prefix) + 6) {
-      theme_apply_fg(plane, theme->fg);
-      ncplane_putstr_yx(plane, row, score_col, score_str);
-    }
-
-    // Row 2: "    leave AEINRT     5:00"
-    if (row + 1 < L->history_bottom) {
-      theme_apply_fg(plane, theme->dim_fg);
-      char leave_line[64];
-      snprintf(leave_line, sizeof(leave_line), "    leave %s",
-               e->leave_str[0] ? e->leave_str : "—");
-      ncplane_putstr_yx(plane, row + 1, interior_left, leave_line);
-
-      char clock_str[16];
-      format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
-                   sizeof(clock_str));
-      const int clock_len = (int)strlen(clock_str);
-      const int clock_col = interior_right - clock_len + 1;
-      ncplane_putstr_yx(plane, row + 1, clock_col, clock_str);
-    }
-
-    row += rows_per_entry;
-    if (row + 1 > L->history_bottom) {
-      break;
+      render_history_entry(plane, theme, &state->history[idx], idx, row_right,
+                           right_l, right_r, bottom);
+      row_right += rows_per_entry;
     }
   }
-  (void)interior_width;
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
@@ -607,8 +669,8 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
            language_for_lexicon(state->lexicon), state->lexicon);
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
-  // Right side: shortcuts.
-  const char *right_buf = "Esc menu ";
+  // Right side: shortcut hint.
+  const char *right_buf = "esc for menu ";
   const int right_len = (int)strlen(right_buf);
   const int right_col = (int)L->plane_cols - right_len;
   if (right_col > 0) {

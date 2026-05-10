@@ -26,7 +26,7 @@ typedef struct {
   int total_after;       // running total after this play
   int clock_at_start;    // seconds remaining when this player's turn began
   char move_str[48];     // "8H POND" or "exch DEFG" or "pass" (no score)
-  char leave_str[16];    // tiles left in rack after the play
+  char rack_str[16];     // full rack the player had at the start of the turn
 } TuiHistoryEntry;
 
 typedef struct {
