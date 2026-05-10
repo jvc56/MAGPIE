@@ -259,41 +259,24 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
 }
 
 // ── Board ─────────────────────────────────────────────────────────────────
-//
-// All cells in the board area (column-label row + 15 cell rows) are written
-// with NCSTYLE_UNDERLINE, so each row gets a thin line at its bottom edge.
-// The line under row N visually serves as the top edge of row N+1, giving
-// a one-cell-tall horizontal grid between every pair of cell rows. The
-// underline takes the fg color, which means premium squares get colored
-// borders (red under TWS, blue under TLS, etc.) and played tiles get a
-// dark border on cream. Row labels stay non-underlined so the left margin
-// reads as labels rather than grid.
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state) {
-  // Column labels with underline so there's a line just under "Ａ Ｂ ..."
-  // == the top edge of board row 1.
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
-  ncplane_set_styles(plane, NCSTYLE_UNDERLINE);
   for (int col = 0; col < BOARD_DIM; col++) {
     ncplane_putstr_yx(plane, COL_LABELS_ROW,
                       CELL_COL_BASE + col * CELL_WIDTH,
                       fullwidth_col_labels[col]);
   }
-  ncplane_set_styles(plane, 0);
 
   const Board *board = game_get_board(state->game);
   for (int row = 0; row < BOARD_DIM; row++) {
-    // Row label, no underline — it's a label, not part of the grid.
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
-    ncplane_set_styles(plane, 0);
     char label[4];
     snprintf(label, sizeof(label), "%2d", row + 1);
     ncplane_putstr_yx(plane, CELL_ROW_BASE + row, ROW_LABEL_COL, label);
 
-    // Cells — underline on every cell to give the row a bottom edge.
-    ncplane_set_styles(plane, NCSTYLE_UNDERLINE);
     for (int col = 0; col < BOARD_DIM; col++) {
       const int screen_row = CELL_ROW_BASE + row;
       const int screen_col = CELL_COL_BASE + col * CELL_WIDTH;
@@ -317,7 +300,6 @@ static void render_board(struct ncplane *plane, const Theme *theme,
         ncplane_putstr(plane, state->ld->ld_ml_to_hl[ml]);
       }
     }
-    ncplane_set_styles(plane, 0);
   }
 }
 
