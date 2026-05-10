@@ -812,7 +812,30 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  tui_sync_plane_to_terminal(plane);
+  const bool resized = tui_sync_plane_to_terminal(plane);
+  if (resized) {
+    // After a resize, notcurses' diff cache and Terminal.app's actual
+    // screen state can disagree, leaving stale content (missing borders,
+    // labels, premium markers) on the visible terminal. Force every cell
+    // dirty by painting it with a sentinel color and rendering, so the
+    // next normal render writes out *every* cell that differs from the
+    // sentinel — i.e., everything.
+    unsigned dim_y = 0;
+    unsigned dim_x = 0;
+    ncplane_dim_yx(plane, &dim_y, &dim_x);
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, theme->bg);
+    for (unsigned r = 0; r < dim_y; r++) {
+      for (unsigned c = 0; c < dim_x; c++) {
+        ncplane_putstr_yx(plane, (int)r, (int)c, " ");
+      }
+    }
+    struct notcurses *nc = ncplane_notcurses(plane);
+    if (nc != NULL) {
+      notcurses_render(nc);
+    }
+  }
+
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
