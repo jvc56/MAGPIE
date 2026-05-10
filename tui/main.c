@@ -234,6 +234,12 @@ int main(int argc, char *argv[]) {
     if (input.evtype == NCTYPE_RELEASE) {
       continue;
     }
+    if (key == NCKEY_RESIZE) {
+      // Sync the std plane to the new terminal size; the next frame will
+      // redraw from the top-left.
+      notcurses_refresh(nc, NULL, NULL);
+      continue;
+    }
     if (key == 'q' || key == 'Q' || key == NCKEY_ESC) {
       running = false;
     }
