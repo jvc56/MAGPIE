@@ -634,16 +634,38 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
 // Live clock: how many seconds remain for player_idx, accounting for the
 // time elapsed in the current on-turn player's turn so the display ticks
 // in real time. Caller must hold state->mutex.
+//
+// Defensive clamping: a stray bad turn_started or seconds_used should
+// produce a flat 0:00 / time_per_side display, never multi-million-minute
+// nonsense. Negative `used` becomes 0; remaining is clamped to
+// [0, time_per_side] so the visible clock always lives in the player's
+// budget.
 static double seconds_remaining(const TuiGameState *state, int player_idx) {
   double used = state->seconds_used[player_idx];
+  if (used < 0.0) {
+    used = 0.0;
+  }
   if (game_get_player_on_turn_index(state->game) == player_idx &&
       !game_over(state->game)) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
-    used += (double)(now.tv_sec - state->turn_started.tv_sec) +
-            (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+    double elapsed =
+        (double)(now.tv_sec - state->turn_started.tv_sec) +
+        (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+    if (elapsed < 0.0) {
+      elapsed = 0.0;
+    }
+    used += elapsed;
   }
-  return (double)state->time_per_side_seconds - used;
+  const double total = (double)state->time_per_side_seconds;
+  double remaining = total - used;
+  if (remaining < 0.0) {
+    remaining = 0.0;
+  }
+  if (remaining > total) {
+    remaining = total;
+  }
+  return remaining;
 }
 
 // Spectator-style pill: name, halfwidth rack inline, score, clock.

@@ -176,11 +176,18 @@ static void *bot_thread_main(void *arg) {
 
         // Charge this turn's elapsed time to the player who just moved,
         // and reset turn_started so the next player's clock begins now.
+        // Clamp `elapsed` to non-negative so a stray bad turn_started
+        // (e.g. clock skew, uninitialized memory) can't poison the
+        // running total — the worst case is the move appears to have
+        // taken zero time, not negative billions.
         struct timespec now;
         clock_gettime(CLOCK_MONOTONIC, &now);
-        const double elapsed =
+        double elapsed =
             (double)(now.tv_sec - state->turn_started.tv_sec) +
             (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+        if (elapsed < 0.0) {
+          elapsed = 0.0;
+        }
         state->seconds_used[player_idx] += elapsed;
         state->turn_started = now;
 
