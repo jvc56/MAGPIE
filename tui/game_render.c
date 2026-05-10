@@ -65,18 +65,21 @@ typedef struct {
   unsigned plane_rows;
   unsigned plane_cols;
 
-  // Status bar at the very bottom of the plane.
   int status_row;
 
-  // Left column.
   int board_right_col;  // = BOARD_WIDTH - 1
   int rack_top, rack_bottom;
   int bag_top, bag_bottom;
 
-  // Right column.
   int right_col_left, right_col_right;
-  int pill1_top, pill1_bottom;
-  int pill2_top, pill2_bottom;
+  int right_col_width;
+  bool two_col;
+
+  // Pills. In two-col mode they sit side-by-side on the same row; in
+  // one-col mode they stack vertically.
+  int pill1_top, pill1_bottom, pill1_left, pill1_right;
+  int pill2_top, pill2_bottom, pill2_left, pill2_right;
+
   int history_top, history_bottom;
 } Layout;
 
@@ -87,23 +90,41 @@ static Layout compute_layout(struct ncplane *plane) {
   L.status_row = (int)L.plane_rows - 1;
 
   L.board_right_col = BOARD_WIDTH - 1;
-
-  L.rack_top = CELL_BOTTOM_ROW + 2;  // = 17 (1-row gap below board)
-  L.rack_bottom = L.rack_top + RACK_HEIGHT - 1;  // = 19
-
-  L.bag_top = L.rack_bottom + 1;  // = 20
-  L.bag_bottom = L.status_row - 1;  // expands to fill
+  L.rack_top = CELL_BOTTOM_ROW + 2;
+  L.rack_bottom = L.rack_top + RACK_HEIGHT - 1;
+  L.bag_top = L.rack_bottom + 1;
+  L.bag_bottom = L.status_row - 1;
 
   L.right_col_left = BOARD_WIDTH + RIGHT_COL_LEFT_OFFSET;
   L.right_col_right = (int)L.plane_cols - 1;
+  L.right_col_width = L.right_col_right - L.right_col_left + 1;
+  L.two_col = L.right_col_width >= HISTORY_TWO_COL_THRESHOLD;
 
-  L.pill1_top = 0;
-  L.pill1_bottom = PILL_HEIGHT - 1;  // 2
-  L.pill2_top = L.pill1_bottom + 1;  // 3
-  L.pill2_bottom = L.pill2_top + PILL_HEIGHT - 1;  // 5
-
-  L.history_top = L.pill2_bottom + 1;  // 6
-  L.history_bottom = L.status_row - 1;  // expands to fill
+  if (L.two_col) {
+    // Pills act as column headers — one above each history subcolumn.
+    const int gutter = 2;
+    const int half = (L.right_col_width - gutter) / 2;
+    L.pill1_top = 0;
+    L.pill1_bottom = PILL_HEIGHT - 1;
+    L.pill1_left = L.right_col_left;
+    L.pill1_right = L.pill1_left + half - 1;
+    L.pill2_top = L.pill1_top;
+    L.pill2_bottom = L.pill1_bottom;
+    L.pill2_left = L.pill1_right + 1 + gutter;
+    L.pill2_right = L.right_col_right;
+    L.history_top = L.pill1_bottom + 1;
+  } else {
+    L.pill1_top = 0;
+    L.pill1_bottom = PILL_HEIGHT - 1;
+    L.pill1_left = L.right_col_left;
+    L.pill1_right = L.right_col_right;
+    L.pill2_top = L.pill1_bottom + 1;
+    L.pill2_bottom = L.pill2_top + PILL_HEIGHT - 1;
+    L.pill2_left = L.right_col_left;
+    L.pill2_right = L.right_col_right;
+    L.history_top = L.pill2_bottom + 1;
+  }
+  L.history_bottom = L.status_row - 1;
 
   return L;
 }
@@ -440,16 +461,19 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
 }
 
 // Spectator-style pill: name, halfwidth rack inline, score, clock.
+// Bounds (top, left, right) are taken from the Layout so pills can sit
+// side-by-side as column headers in two-col mode or stack in one-col mode.
 static void render_player_pill(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, int player_idx,
-                               int top_row, const Layout *L) {
-  const int width = L->right_col_right - L->right_col_left + 1;
-  draw_box(plane, theme, top_row, L->right_col_left, PILL_HEIGHT, width, NULL);
+                               int top, int left, int right) {
+  const int width = right - left + 1;
+  draw_box(plane, theme, top, left, PILL_HEIGHT, width, NULL);
 
   const Player *player = game_get_player(state->game, player_idx);
   const bool on_turn = game_get_player_on_turn_index(state->game) == player_idx;
-  const int content_row = top_row + 1;
-  const int content_left = L->right_col_left + 2;
+  const int content_row = top + 1;
+  const int content_left = left + 2;
+  const int content_right = right - 1;
 
   theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
@@ -460,24 +484,7 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   snprintf(name, sizeof(name), "Player %d", player_idx + 1);
   ncplane_putstr(plane, name);
 
-  // Halfwidth rack inline, two cols after the name. Use ld_ml_to_hl for
-  // each tile (ASCII letters), '?' for blanks. We render it character by
-  // character on tile_bg so each tile reads as a small chip.
-  const Rack *rack = player_get_rack(player);
-  const LetterDistribution *ld = state->ld;
-  const int rack_col = content_left + 12;  // after "▶ Player N"
-  int rcol = rack_col;
-  theme_apply_fg(plane, theme->rack_tile_fg);
-  theme_apply_bg(plane, theme->rack_tile_bg);
-  for (int ml = 0; ml < ld_get_size(ld); ml++) {
-    const int count = rack_get_letter(rack, (MachineLetter)ml);
-    for (int copy = 0; copy < count; copy++) {
-      const char *letter_str = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-      ncplane_putstr_yx(plane, content_row, rcol, letter_str);
-      rcol++;
-    }
-  }
-
+  // Right side: clock and score.
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
            equity_to_int(player_get_score(player)));
@@ -486,17 +493,37 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
                sizeof(clock_str));
 
-  const int right = L->right_col_right - 1;
   const int clock_len = (int)strlen(clock_str);
-  const int clock_col = right - clock_len + 1;
+  const int clock_col = content_right - clock_len + 1;
   theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
 
   const int score_len = (int)strlen(score_str);
-  const int score_col = clock_col - 4 - score_len;
+  const int score_col = clock_col - 3 - score_len;
   theme_apply_fg(plane, theme->fg);
   ncplane_putstr_yx(plane, content_row, score_col, score_str);
+
+  // Halfwidth rack between the name and the score, on tile_bg. The
+  // available space is from after "▶ Player N " (12 cols) to one cell
+  // before the score.
+  const Rack *rack = player_get_rack(player);
+  const LetterDistribution *ld = state->ld;
+  const int rack_left = content_left + 12;
+  const int rack_right_max = score_col - 2;
+  if (rack_right_max >= rack_left) {
+    int rcol = rack_left;
+    theme_apply_fg(plane, theme->rack_tile_fg);
+    theme_apply_bg(plane, theme->rack_tile_bg);
+    for (int ml = 0; ml < ld_get_size(ld) && rcol <= rack_right_max; ml++) {
+      const int count = rack_get_letter(rack, (MachineLetter)ml);
+      for (int copy = 0; copy < count && rcol <= rack_right_max; copy++) {
+        const char *letter_str = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+        ncplane_putstr_yx(plane, content_row, rcol, letter_str);
+        rcol++;
+      }
+    }
+  }
 }
 
 // ── History panel ─────────────────────────────────────────────────────────
@@ -520,7 +547,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   ncplane_set_styles(plane, 0);
   theme_apply_fg(plane, theme->dim_fg);
   char prefix[8];
-  snprintf(prefix, sizeof(prefix), "%3d. ", idx + 1);
+  snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
   ncplane_putstr_yx(plane, row, interior_left, prefix);
 
   theme_apply_fg(plane, label_fg);
@@ -553,6 +580,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   theme_apply_fg(plane, theme->dim_fg);
   char rack_line[64];
+  // Indent matches the move text (4 cols past the "%2d. " prefix).
   snprintf(rack_line, sizeof(rack_line), "    %s",
            e->rack_str[0] ? e->rack_str : "—");
   ncplane_putstr_yx(plane, row + 1, interior_left, rack_line);
@@ -591,9 +619,7 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   const int top = L->history_top + 1;             // first interior row
   const int bottom = L->history_bottom - 1;       // last interior row (inclusive)
   const int rows_avail = bottom - top + 1;
-  const bool two_col = width >= HISTORY_TWO_COL_THRESHOLD;
-
-  if (!two_col) {
+  if (!L->two_col) {
     const int interior_left = L->right_col_left + 2;
     const int interior_right = L->right_col_right - 2;
     const int max_visible = rows_avail / rows_per_entry;
@@ -706,8 +732,10 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_bag_panel(plane, theme, state, &L);
 
   (void)time_per_side_seconds;  // now read from state->time_per_side_seconds
-  render_player_pill(plane, theme, state, 0, L.pill1_top, &L);
-  render_player_pill(plane, theme, state, 1, L.pill2_top, &L);
+  render_player_pill(plane, theme, state, 0, L.pill1_top, L.pill1_left,
+                     L.pill1_right);
+  render_player_pill(plane, theme, state, 1, L.pill2_top, L.pill2_left,
+                     L.pill2_right);
   render_history_panel(plane, theme, state, &L);
 
   render_status_bar(plane, theme, state, &L);
