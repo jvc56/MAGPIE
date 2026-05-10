@@ -1,11 +1,14 @@
 #include "game_state.h"
 
+#include <pthread.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include "../src/def/game_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/game.h"
@@ -89,6 +92,22 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
     copy_error(err, error_message, error_message_size);
     goto fail;
   }
+  // Load KLV for static-eval leave valuation. Same name as the lexicon.
+  players_data_set(out_state->players_data, PLAYERS_DATA_TYPE_KLV, data_paths,
+                   lexicon, lexicon, false, err);
+  if (!error_stack_is_empty(err)) {
+    copy_error(err, error_message, error_message_size);
+    goto fail;
+  }
+  // Both players: pick the best move by static-eval equity.
+  players_data_set_move_sort_type(out_state->players_data, 0,
+                                  MOVE_SORT_EQUITY);
+  players_data_set_move_sort_type(out_state->players_data, 1,
+                                  MOVE_SORT_EQUITY);
+  players_data_set_move_record_type(out_state->players_data, 0,
+                                    MOVE_RECORD_BEST);
+  players_data_set_move_record_type(out_state->players_data, 1,
+                                    MOVE_RECORD_BEST);
 
   out_state->board_layout = board_layout_create_default(data_paths, err);
   if (!error_stack_is_empty(err)) {
@@ -115,6 +134,11 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   strncpy(out_state->lexicon, lexicon, sizeof(out_state->lexicon) - 1);
   out_state->lexicon[sizeof(out_state->lexicon) - 1] = '\0';
 
+  pthread_mutex_init(&out_state->mutex, NULL);
+  atomic_store(&out_state->bot_stop, false);
+  out_state->bot_started = false;
+  out_state->history_count = 0;
+
   error_stack_destroy(err);
   return true;
 
@@ -127,6 +151,11 @@ fail:
 void tui_game_state_destroy(TuiGameState *state) {
   if (state == NULL) {
     return;
+  }
+  if (state->bot_started) {
+    atomic_store(&state->bot_stop, true);
+    pthread_join(state->bot_thread, NULL);
+    state->bot_started = false;
   }
   if (state->game != NULL) {
     game_destroy(state->game);

@@ -465,8 +465,14 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 }
 
 // ── History panel ─────────────────────────────────────────────────────────
+//
+// Each history entry takes 2 rows:
+//   "  N. 8H POND               +14 / 67"   (label · move · score / total)
+//   "      AEINRT"                          (leave)
+// Player 1 entries get accent_fg on the label; player 2 stays dim_fg.
+
 static void render_history_panel(struct ncplane *plane, const Theme *theme,
-                                 const Layout *L) {
+                                 const TuiGameState *state, const Layout *L) {
   const int width = L->right_col_right - L->right_col_left + 1;
   const int height = L->history_bottom - L->history_top + 1;
   if (height < 3) {
@@ -475,15 +481,58 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   draw_box(plane, theme, L->history_top, L->right_col_left, height, width,
            "History");
 
-  // Empty placeholder until the bot worker lands.
-  theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
-  const int center_row = L->history_top + height / 2;
-  const int interior_width = width - 2;
-  const char *msg = "No moves yet.";
-  const int msg_col =
-      L->right_col_left + 1 + (interior_width - (int)strlen(msg)) / 2;
-  ncplane_putstr_yx(plane, center_row, msg_col, msg);
+  if (state->history_count == 0) {
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    const int center_row = L->history_top + height / 2;
+    const char *msg = "No moves yet.";
+    const int interior_width = width - 2;
+    const int msg_col =
+        L->right_col_left + 1 + (interior_width - (int)strlen(msg)) / 2;
+    ncplane_putstr_yx(plane, center_row, msg_col, msg);
+    return;
+  }
+
+  const int interior_left = L->right_col_left + 2;
+  const int interior_right = L->right_col_right - 1;
+  const int interior_width = interior_right - interior_left + 1;
+  const int rows_per_entry = 2;
+  const int max_visible = (height - 2) / rows_per_entry;
+
+  // Show the most recent entries that fit.
+  int first = state->history_count - max_visible;
+  if (first < 0) {
+    first = 0;
+  }
+  int row = L->history_top + 1;
+  for (int idx = first; idx < state->history_count; idx++) {
+    const TuiHistoryEntry *e = &state->history[idx];
+    const ThemeRgb label_fg =
+        e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
+    char header[96];
+    snprintf(header, sizeof(header), "%2d. %-14s +%d / %d", idx + 1,
+             e->move_str, e->score, e->total_after);
+    if ((int)strlen(header) > interior_width) {
+      header[interior_width] = '\0';
+    }
+    theme_apply_fg(plane, label_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_putstr_yx(plane, row, interior_left, header);
+
+    if (e->leave_str[0] != '\0' && row + 1 < L->history_bottom) {
+      char leave_line[64];
+      snprintf(leave_line, sizeof(leave_line), "    leave %s", e->leave_str);
+      if ((int)strlen(leave_line) > interior_width) {
+        leave_line[interior_width] = '\0';
+      }
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row + 1, interior_left, leave_line);
+    }
+    row += rows_per_entry;
+    if (row + 1 > L->history_bottom) {
+      break;
+    }
+  }
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
@@ -508,7 +557,7 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
   // Right side: shortcuts.
-  const char *right_buf = "q/Esc quit ";
+  const char *right_buf = "Esc menu ";
   const int right_len = (int)strlen(right_buf);
   const int right_col = (int)L->plane_cols - right_len;
   if (right_col > 0) {
@@ -547,7 +596,53 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
                      time_per_side_seconds, &L);
   render_player_pill(plane, theme, state, 1, L.pill2_top,
                      time_per_side_seconds, &L);
-  render_history_panel(plane, theme, &L);
+  render_history_panel(plane, theme, state, &L);
 
   render_status_bar(plane, theme, state, &L);
+}
+
+// ── Menu modal ────────────────────────────────────────────────────────────
+void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
+                          int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  unsigned plane_rows = 0;
+  unsigned plane_cols = 0;
+  ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+
+  static const char *const items[] = {"Resume", "Quit"};
+  const int item_count = (int)(sizeof(items) / sizeof(items[0]));
+  const int width = 24;
+  const int height = 3 + item_count;  // top + title gap + items + bottom
+  if ((unsigned)width >= plane_cols || (unsigned)height >= plane_rows) {
+    return;
+  }
+  const int top = (int)(plane_rows - height) / 2;
+  const int left = (int)(plane_cols - width) / 2;
+
+  // Solid panel: paint interior with bg first, then box on top.
+  theme_apply_fg(plane, theme->fg);
+  theme_apply_bg(plane, theme->bg);
+  for (int r = top; r < top + height; r++) {
+    for (int c = left; c < left + width; c++) {
+      ncplane_putstr_yx(plane, r, c, " ");
+    }
+  }
+  draw_box(plane, theme, top, left, height, width, "Menu");
+
+  for (int i = 0; i < item_count; i++) {
+    const int item_row = top + 2 + i;
+    const bool focused = (i == focus);
+    if (focused) {
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->accent_fg);
+    } else {
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, theme->bg);
+    }
+    char line[32];
+    snprintf(line, sizeof(line), "  %-*s", width - 4, items[i]);
+    ncplane_putstr_yx(plane, item_row, left + 1, line);
+  }
 }

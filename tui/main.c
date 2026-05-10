@@ -1,10 +1,12 @@
 #include <locale.h>
+#include <pthread.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
 #include <notcurses/notcurses.h>
+#include "bot_worker.h"
 #include "config.h"
 #include "game_render.h"
 #include "game_state.h"
@@ -220,9 +222,21 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  tui_bot_worker_start(&game_state);
+
+  // Modal state: when menu_open is true, key handling routes to the menu
+  // (Up/Down/Enter/Esc), and the renderer overlays the menu on top of the
+  // game frame. The only menu item right now is Quit.
   bool running = true;
+  bool menu_open = false;
+  int menu_focus = 0;
   while (running) {
+    pthread_mutex_lock(&game_state.mutex);
     tui_game_render(std_plane, theme, &game_state, chosen_time);
+    pthread_mutex_unlock(&game_state.mutex);
+    if (menu_open) {
+      tui_game_render_menu(std_plane, theme, menu_focus);
+    }
     notcurses_render(nc);
 
     const struct timespec wait = {.tv_sec = 0, .tv_nsec = FRAME_NS};
@@ -239,22 +253,40 @@ int main(int argc, char *argv[]) {
       continue;
     }
     if (key == NCKEY_RESIZE) {
-      // notcurses_refresh re-pushes the last rendered frame and reports the
-      // new terminal geometry, but it does not resize the std plane. We
-      // also need to re-set the base cell after resize because the new
-      // cells extend beyond what theme_apply_base last covered. Render
-      // immediately so the stale content from refresh is overwritten.
       unsigned new_rows = 0;
       unsigned new_cols = 0;
       notcurses_refresh(nc, &new_rows, &new_cols);
       ncplane_resize_simple(std_plane, new_rows, new_cols);
-      tui_game_render(std_plane, theme, &game_state, chosen_time);
-      notcurses_render(nc);
       continue;
     }
-    if (key == 'q' || key == 'Q' || key == NCKEY_ESC) {
-      running = false;
+
+    if (menu_open) {
+      if (key == NCKEY_ESC) {
+        menu_open = false;
+      } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+        if (menu_focus > 0) {
+          menu_focus--;
+        }
+      } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (menu_focus < TUI_MENU_ITEM_COUNT - 1) {
+          menu_focus++;
+        }
+      } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+        if (menu_focus == TUI_MENU_QUIT) {
+          running = false;
+        } else {
+          menu_open = false;
+        }
+      }
+      continue;
     }
+
+    if (key == NCKEY_ESC) {
+      menu_open = true;
+      menu_focus = 0;
+    }
+    // q/Q intentionally unbound — the user will be typing tiles. Quit
+    // through Esc → Quit (or Ctrl-C signal).
   }
 
   tui_game_state_destroy(&game_state);
