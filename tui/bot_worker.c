@@ -1,12 +1,5 @@
 #include "bot_worker.h"
 
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <time.h>
 #include "../src/def/move_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -20,10 +13,17 @@
 #include "../src/str/rack_string.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
 
 enum {
-  TURN_DELAY_NS = 3 * 1000 * 1000 * 1000L,  // 3 s
-  POLL_NS = 100 * 1000 * 1000L,             // 100 ms
+  TURN_DELAY_NS = 3 * 1000 * 1000 * 1000L, // 3 s
+  POLL_NS = 100 * 1000 * 1000L,            // 100 ms
 };
 
 static void copy_str(char *dst, size_t dst_size, const char *src) {
@@ -122,8 +122,8 @@ static void *bot_thread_main(void *arg) {
       // Snapshot the clock at the moment this turn started — that is, the
       // value at the end of the previous play, before any of this turn's
       // think time has been counted against the player.
-      const int clock_at_start = state->time_per_side_seconds -
-                                 (int)state->seconds_used[player_idx];
+      const int clock_at_start =
+          state->time_per_side_seconds - (int)state->seconds_used[player_idx];
 
       const MoveGenArgs args = {
           .game = state->game,
@@ -148,14 +148,14 @@ static void *bot_thread_main(void *arg) {
         // rack — this is what they had at the start of their turn.
         Rack rack_at_start;
         rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
-        rack_copy(&rack_at_start, player_get_rack(game_get_player(
-                                       state->game, player_idx)));
+        rack_copy(&rack_at_start,
+                  player_get_rack(game_get_player(state->game, player_idx)));
 
         Rack leave;
         rack_set_dist_size(&leave, ld_get_size(state->ld));
         play_move(best, state->game, &leave);
-        const int post_play_score = equity_to_int(player_get_score(
-            game_get_player(state->game, player_idx)));
+        const int post_play_score = equity_to_int(
+            player_get_score(game_get_player(state->game, player_idx)));
 
         // If play_move just applied an end-of-game bonus to this player
         // (they went out and the opponent has tiles left), pull that out
@@ -163,11 +163,11 @@ static void *bot_thread_main(void *arg) {
         int bonus = 0;
         const Rack *opp_rack = NULL;
         if (game_over(state->game)) {
-          opp_rack = player_get_rack(
-              game_get_player(state->game, 1 - player_idx));
+          opp_rack =
+              player_get_rack(game_get_player(state->game, 1 - player_idx));
           if (!rack_is_empty(opp_rack)) {
-            bonus = equity_to_int(
-                calculate_end_rack_points(opp_rack, state->ld));
+            bonus =
+                equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
           }
         }
         const int total_after_move = post_play_score - bonus;
@@ -196,8 +196,7 @@ static void *bot_thread_main(void *arg) {
         // opponent's leftover into the just-appended history row.
         if (game_over(state->game)) {
           if (bonus != 0 && opp_rack != NULL && state->history_count > 0) {
-            TuiHistoryEntry *entry =
-                &state->history[state->history_count - 1];
+            TuiHistoryEntry *entry = &state->history[state->history_count - 1];
             entry->end_bonus = bonus;
             StringBuilder *rsb = string_builder_create();
             string_builder_add_rack(rsb, opp_rack, state->ld, false);

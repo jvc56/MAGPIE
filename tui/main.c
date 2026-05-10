@@ -1,11 +1,3 @@
-#include <locale.h>
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <string.h>
-#include <time.h>
-#include <notcurses/notcurses.h>
 #include "bot_worker.h"
 #include "config.h"
 #include "game_render.h"
@@ -14,6 +6,14 @@
 #include "onboarding.h"
 #include "theme.h"
 #include "time_picker.h"
+#include <locale.h>
+#include <notcurses/notcurses.h>
+#include <pthread.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <string.h>
+#include <time.h>
 
 enum {
   TARGET_FPS = 60,
@@ -30,21 +30,20 @@ typedef struct {
 } CliArgs;
 
 static void print_usage(void) {
-  fputs(
-      "Usage: magpie_tui [options]\n"
-      "\n"
-      "Options:\n"
-      "  --theme <name>   one-shot theme override; one of:\n"
-      "                     dark, light, dim, high_contrast\n"
-      "  --reconfigure    re-run all setup pickers (theme, lexicon, time)\n"
-      "  --no-config      skip reading and writing the saved settings\n"
-      "  --help, -h       show this help and exit\n"
-      "\n"
-      "On first run interactive pickers ask for theme, lexicon, and time\n"
-      "control. Settings are saved to $XDG_CONFIG_HOME/magpie/tui.toml\n"
-      "(default ~/.config/magpie/tui.toml). Subsequent runs reuse those\n"
-      "settings unless --reconfigure is passed.\n",
-      stderr);
+  fputs("Usage: magpie_tui [options]\n"
+        "\n"
+        "Options:\n"
+        "  --theme <name>   one-shot theme override; one of:\n"
+        "                     dark, light, dim, high_contrast\n"
+        "  --reconfigure    re-run all setup pickers (theme, lexicon, time)\n"
+        "  --no-config      skip reading and writing the saved settings\n"
+        "  --help, -h       show this help and exit\n"
+        "\n"
+        "On first run interactive pickers ask for theme, lexicon, and time\n"
+        "control. Settings are saved to $XDG_CONFIG_HOME/magpie/tui.toml\n"
+        "(default ~/.config/magpie/tui.toml). Subsequent runs reuse those\n"
+        "settings unless --reconfigure is passed.\n",
+        stderr);
 }
 
 static CliArgs parse_args(int argc, char *argv[]) {
@@ -114,8 +113,7 @@ static void render_init_error(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, 5, 4, message != NULL ? message : "(no detail)");
 
   theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4,
-                    "Press any key to exit.");
+  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "Press any key to exit.");
 }
 
 int main(int argc, char *argv[]) {
@@ -227,7 +225,10 @@ int main(int argc, char *argv[]) {
   game_state.border_thickness =
       loaded.border_thickness_set ? loaded.border_thickness : 2;
   game_state.blank_uppercase =
-      loaded.blank_uppercase_set ? loaded.blank_uppercase : false;
+      loaded.blank_uppercase_set ? loaded.blank_uppercase : true;
+  game_state.premium_labels = loaded.premium_labels_set
+                                  ? loaded.premium_labels
+                                  : TUI_PREMIUM_LABELS_UPPERCASE;
   const bool pixel_supported = notcurses_canpixel(nc);
   tui_bot_worker_start(&game_state);
 
@@ -246,6 +247,7 @@ int main(int argc, char *argv[]) {
     } else if (modal == TUI_MODAL_SETTINGS) {
       tui_game_render_settings(std_plane, theme, settings_focus,
                                game_state.border_thickness, pixel_supported,
+                               game_state.premium_labels,
                                game_state.blank_uppercase);
     }
     notcurses_render(nc);
@@ -321,6 +323,19 @@ int main(int argc, char *argv[]) {
             to_save.border_thickness_set = true;
             tui_config_save(&to_save);
           }
+        } else if (settings_focus == TUI_SETTINGS_PREMIUM) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.premium_labels =
+              (TuiPremiumLabels)((game_state.premium_labels +
+                                  TUI_PREMIUM_LABELS_COUNT - 1) %
+                                 TUI_PREMIUM_LABELS_COUNT);
+          const TuiPremiumLabels v = game_state.premium_labels;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.premium_labels = v;
+            to_save.premium_labels_set = true;
+            tui_config_save(&to_save);
+          }
         } else if (settings_focus == TUI_SETTINGS_BLANKS) {
           // Blanks is a two-state toggle, so left and right both flip it.
           pthread_mutex_lock(&game_state.mutex);
@@ -344,6 +359,18 @@ int main(int argc, char *argv[]) {
           if (!args.no_config) {
             to_save.border_thickness = v;
             to_save.border_thickness_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_PREMIUM) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.premium_labels =
+              (TuiPremiumLabels)((game_state.premium_labels + 1) %
+                                 TUI_PREMIUM_LABELS_COUNT);
+          const TuiPremiumLabels v = game_state.premium_labels;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.premium_labels = v;
+            to_save.premium_labels_set = true;
             tui_config_save(&to_save);
           }
         } else if (settings_focus == TUI_SETTINGS_BLANKS) {

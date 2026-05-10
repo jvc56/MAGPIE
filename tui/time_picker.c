@@ -1,11 +1,11 @@
 #include "time_picker.h"
 
+#include "theme.h"
+#include "tui_resize.h"
+#include <notcurses/notcurses.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
-#include <notcurses/notcurses.h>
-#include "theme.h"
-#include "tui_resize.h"
 
 typedef struct {
   int seconds;
@@ -14,17 +14,14 @@ typedef struct {
 } TimePreset;
 
 static const TimePreset presets[] = {
-    {60, "1 minute", "ultra"},
-    {180, "3 minutes", "blitz"},
-    {300, "5 minutes", "rapid"},
-    {600, "10 minutes", "club"},
-    {900, "15 minutes", "long"},
-    {1500, "25 minutes", "classical"},
+    {60, "1 minute", "ultra"},   {180, "3 minutes", "blitz"},
+    {300, "5 minutes", "rapid"}, {600, "10 minutes", "club"},
+    {900, "15 minutes", "long"}, {1500, "25 minutes", "classical"},
 };
 
 enum {
   PRESET_COUNT = sizeof(presets) / sizeof(presets[0]),
-  DEFAULT_PRESET_INDEX = 2,  // 5 minutes
+  DEFAULT_PRESET_INDEX = 2, // 5 minutes
 };
 
 static void fill_row(struct ncplane *plane, int row, unsigned cols) {

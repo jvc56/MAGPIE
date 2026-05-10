@@ -1,8 +1,8 @@
 #ifndef TUI_ONBOARDING_H
 #define TUI_ONBOARDING_H
 
-#include <notcurses/notcurses.h>
 #include "theme.h"
+#include <notcurses/notcurses.h>
 
 // Runs the interactive theme picker. Up/Down (or j/k, or 1-4) to navigate,
 // Enter to confirm, Esc to cancel. The whole picker re-renders in the

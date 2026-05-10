@@ -1,9 +1,13 @@
 #ifndef TUI_GAME_RENDER_H
 #define TUI_GAME_RENDER_H
 
-#include <notcurses/notcurses.h>
 #include "game_state.h"
 #include "theme.h"
+#include <notcurses/notcurses.h>
+#include <stdbool.h>
+
+struct Game;
+struct LetterDistribution;
 
 // Which modal (if any) is currently open. Drives both rendering of the
 // modal itself and what control hints the status bar advertises.
@@ -32,17 +36,38 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 // focused row adjust that setting's value.
 typedef enum {
   TUI_SETTINGS_BORDER = 0,
-  TUI_SETTINGS_BLANKS = 1,
-  TUI_SETTINGS_BACK = 2,
-  TUI_SETTINGS_ITEM_COUNT = 3,
+  TUI_SETTINGS_PREMIUM = 1,
+  TUI_SETTINGS_BLANKS = 2,
+  TUI_SETTINGS_BACK = 3,
+  TUI_SETTINGS_ITEM_COUNT = 4,
 } TuiSettingsItem;
 
 // `border_thickness` is the current pixel-grid thickness (0..6).
 // `pixel_supported` is true when the host terminal can render pixel
-// graphics. `blank_uppercase` controls whether played blanks render
-// uppercase (with blank_tile_fg) or lowercase (with the regular tile_fg).
+// graphics. `premium_labels` selects the TW/tw/none labeling style for
+// premium squares. `blank_uppercase` controls whether played blanks
+// render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int border_thickness,
-                              bool pixel_supported, bool blank_uppercase);
+                              bool pixel_supported,
+                              TuiPremiumLabels premium_labels,
+                              bool blank_uppercase);
+
+// Render just the board cells (no row/col labels) at (top, left). Each
+// cell is 2 columns wide; the rendered region is BOARD_DIM rows tall and
+// BOARD_DIM*2 columns wide. When the host terminal supports pixel
+// graphics and `border_thickness` is positive, a grid overlay is drawn
+// on top using a private cached child plane.
+void tui_render_board_at(struct ncplane *plane, int top, int left,
+                         const Theme *theme, const struct Game *game,
+                         const struct LetterDistribution *ld,
+                         bool blank_uppercase, TuiPremiumLabels premium_labels,
+                         int border_thickness);
+
+// Destroy any cached pixel-grid child planes (board, rack, both pills,
+// preview). Call after the theme picker exits so the preview's grid
+// doesn't linger under the in-game UI, and on resize so a font-size
+// change rebuilds them at the new cell-to-pixel ratio.
+void tui_game_render_reset_grids(void);
 
 #endif

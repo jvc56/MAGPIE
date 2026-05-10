@@ -1,16 +1,16 @@
 #include "lexicon_picker.h"
 
+#include "theme.h"
+#include "tui_resize.h"
 #include <ctype.h>
 #include <dirent.h>
+#include <notcurses/notcurses.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <notcurses/notcurses.h>
-#include "theme.h"
-#include "tui_resize.h"
 
 enum {
   LEXICON_NAME_MAX = 64,
@@ -102,7 +102,7 @@ static LexLang classify_lexicon(const char *name) {
 typedef struct {
   char name[LEXICON_NAME_MAX];
   LexLang lang;
-  int word_count;  // -1 if the .txt sibling could not be read
+  int word_count; // -1 if the .txt sibling could not be read
 } LexiconEntry;
 
 static int count_lines_in_file(const char *path) {
@@ -265,8 +265,8 @@ static void fill_row(struct ncplane *plane, int row, unsigned cols) {
 }
 
 static void render_picker(struct ncplane *plane, const Theme *theme,
-                          const LexiconList *list, int focus,
-                          int scroll_offset, int visible_rows) {
+                          const LexiconList *list, int focus, int scroll_offset,
+                          int visible_rows) {
   tui_sync_plane_to_terminal(plane);
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
@@ -337,8 +337,7 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
   }
 
   char count_line[80];
-  if (snprintf(count_line, sizeof(count_line), "%d lexica from %s",
-               list->count,
+  if (snprintf(count_line, sizeof(count_line), "%d lexica from %s", list->count,
                list->source_dir != NULL ? list->source_dir : "data/lexica") >
       0) {
     ncplane_putstr_yx(plane, (int)plane_rows - 4, 4, count_line);
@@ -372,8 +371,7 @@ static void render_empty(struct ncplane *plane, const Theme *theme) {
                     "try again.");
 
   theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4,
-                    "Press any key to dismiss.");
+  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "Press any key to dismiss.");
 }
 
 // Adjust scroll_offset so the entry's display row is visible. When the
@@ -454,8 +452,7 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
 
   while (true) {
     scroll_offset = clamp_scroll(&list, focus, scroll_offset, visible_rows);
-    render_picker(std_plane, theme, &list, focus, scroll_offset,
-                  visible_rows);
+    render_picker(std_plane, theme, &list, focus, scroll_offset, visible_rows);
     notcurses_render(nc);
 
     ncinput input;

@@ -1,5 +1,6 @@
 #include "config.h"
 
+#include "theme.h"
 #include <errno.h>
 #include <stdbool.h>
 #include <stddef.h>
@@ -7,7 +8,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include "theme.h"
 
 static bool ensure_parent_dirs(const char *file_path) {
   char path_copy[TUI_CONFIG_PATH_MAX];
@@ -66,9 +66,8 @@ static char *trim_inplace(char *line) {
     line++;
   }
   size_t len = strlen(line);
-  while (len > 0 &&
-         (line[len - 1] == ' ' || line[len - 1] == '\t' ||
-          line[len - 1] == '\r' || line[len - 1] == '\n')) {
+  while (len > 0 && (line[len - 1] == ' ' || line[len - 1] == '\t' ||
+                     line[len - 1] == '\r' || line[len - 1] == '\n')) {
     line[--len] = '\0';
   }
   return line;
@@ -86,8 +85,10 @@ bool tui_config_load(TuiConfig *config) {
   config->time_per_side_set = false;
   config->border_thickness = 2;
   config->border_thickness_set = false;
-  config->blank_uppercase = false;
+  config->blank_uppercase = true;
   config->blank_uppercase_set = false;
+  config->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
+  config->premium_labels_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -111,8 +112,7 @@ bool tui_config_load(TuiConfig *config) {
     // Split into key/value, trimming each side.
     char *key_end = equals;
     *key_end = '\0';
-    while (key_end > trimmed &&
-           (key_end[-1] == ' ' || key_end[-1] == '\t')) {
+    while (key_end > trimmed && (key_end[-1] == ' ' || key_end[-1] == '\t')) {
       key_end--;
       *key_end = '\0';
     }
@@ -163,6 +163,17 @@ bool tui_config_load(TuiConfig *config) {
         config->blank_uppercase = false;
         config->blank_uppercase_set = true;
       }
+    } else if (strcmp(trimmed, "premium_labels") == 0) {
+      if (strcmp(value, "uppercase") == 0) {
+        config->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
+        config->premium_labels_set = true;
+      } else if (strcmp(value, "lowercase") == 0) {
+        config->premium_labels = TUI_PREMIUM_LABELS_LOWERCASE;
+        config->premium_labels_set = true;
+      } else if (strcmp(value, "none") == 0) {
+        config->premium_labels = TUI_PREMIUM_LABELS_NONE;
+        config->premium_labels_set = true;
+      }
     }
   }
 
@@ -204,6 +215,23 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->blank_uppercase_set) {
     fprintf(file, "blank_uppercase = %s\n",
             config->blank_uppercase ? "true" : "false");
+  }
+  if (config->premium_labels_set) {
+    const char *value = "uppercase";
+    switch (config->premium_labels) {
+    case TUI_PREMIUM_LABELS_LOWERCASE:
+      value = "lowercase";
+      break;
+    case TUI_PREMIUM_LABELS_NONE:
+      value = "none";
+      break;
+    case TUI_PREMIUM_LABELS_UPPERCASE:
+    case TUI_PREMIUM_LABELS_COUNT:
+    default:
+      value = "uppercase";
+      break;
+    }
+    fprintf(file, "premium_labels = \"%s\"\n", value);
   }
 
   if (fclose(file) != 0) {

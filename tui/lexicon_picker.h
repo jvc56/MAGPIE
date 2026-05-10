@@ -1,10 +1,10 @@
 #ifndef TUI_LEXICON_PICKER_H
 #define TUI_LEXICON_PICKER_H
 
+#include "theme.h"
+#include <notcurses/notcurses.h>
 #include <stdbool.h>
 #include <stddef.h>
-#include <notcurses/notcurses.h>
-#include "theme.h"
 
 // Renders a lexicon picker by scanning data/lexica/*.kwg in the current
 // working directory. The chosen lexicon basename (e.g. "CSW21") is written

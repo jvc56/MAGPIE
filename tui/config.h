@@ -1,14 +1,25 @@
 #ifndef TUI_CONFIG_H
 #define TUI_CONFIG_H
 
+#include "theme.h"
 #include <stdbool.h>
 #include <stddef.h>
-#include "theme.h"
 
 enum {
   TUI_CONFIG_PATH_MAX = 4096,
   TUI_LEXICON_NAME_MAX = 32,
 };
+
+// How the premium squares (TW/DW/TL/DL/center) are labeled on the board.
+// `NONE` paints only the tinted background — the user evaluates premiums
+// by color alone. Lowercase is identical to UPPERCASE in cell width and
+// in color tokens; only the glyphs differ.
+typedef enum {
+  TUI_PREMIUM_LABELS_UPPERCASE = 0,
+  TUI_PREMIUM_LABELS_LOWERCASE = 1,
+  TUI_PREMIUM_LABELS_NONE = 2,
+  TUI_PREMIUM_LABELS_COUNT,
+} TuiPremiumLabels;
 
 typedef struct {
   ThemeName theme;
@@ -24,6 +35,8 @@ typedef struct {
   // of the engine's lowercase rendering in tile_fg.
   bool blank_uppercase;
   bool blank_uppercase_set;
+  TuiPremiumLabels premium_labels;
+  bool premium_labels_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

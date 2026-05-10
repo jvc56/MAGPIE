@@ -1,8 +1,8 @@
 #ifndef TUI_RESIZE_H
 #define TUI_RESIZE_H
 
-#include <stdbool.h>
 #include <notcurses/notcurses.h>
+#include <stdbool.h>
 
 // Resize 'plane' to match the kernel-reported terminal size if they
 // disagree. Use this at the top of every render function: notcurses'

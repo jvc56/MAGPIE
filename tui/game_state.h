@@ -1,6 +1,7 @@
 #ifndef TUI_GAME_STATE_H
 #define TUI_GAME_STATE_H
 
+#include "config.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -22,16 +23,16 @@ enum {
 
 typedef struct {
   int player_idx;
-  int score;             // points earned on this play
-  int total_after;       // running total after this play (excluding bonus)
-  int clock_at_start;    // seconds remaining when this player's turn began
-  char move_str[48];     // "8H POND" or "exch DEFG" or "pass" (no score)
-  char rack_str[16];     // full rack the player had at the start of the turn
+  int score;          // points earned on this play
+  int total_after;    // running total after this play (excluding bonus)
+  int clock_at_start; // seconds remaining when this player's turn began
+  char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
+  char rack_str[16];  // full rack the player had at the start of the turn
   // Going-out bonus, attached to the going-out player's last move so it
   // renders as a third line of that entry instead of its own row. Zero
   // when this entry has no end-of-game adjustment.
   int end_bonus;
-  char end_rack_str[16];  // opponent's leftover tiles (e.g. "EE")
+  char end_rack_str[16]; // opponent's leftover tiles (e.g. "EE")
 } TuiHistoryEntry;
 
 typedef struct {
@@ -39,7 +40,7 @@ typedef struct {
   struct LetterDistribution *ld;
   struct PlayersData *players_data;
   struct BoardLayout *board_layout;
-  const char *data_paths;  // non-owning; points at a static candidate path
+  const char *data_paths; // non-owning; points at a static candidate path
   char lexicon[64];
 
   // Mutex protects every read of *game, racks, scores, bag, and the
@@ -50,14 +51,15 @@ typedef struct {
   int history_count;
 
   // Visual settings.
-  int border_thickness;  // pixel-grid line thickness; 0 = off
-  bool blank_uppercase;  // played blanks render uppercase + blank_tile_fg
+  int border_thickness; // pixel-grid line thickness; 0 = off
+  bool blank_uppercase; // played blanks render uppercase + blank_tile_fg
+  TuiPremiumLabels premium_labels; // TW/tw/none label style
 
   // Clock state.
   int time_per_side_seconds;
-  double seconds_used[2];          // accumulated time used by each side
-  struct timespec turn_started;    // CLOCK_MONOTONIC; when the on-turn
-                                   // player's current turn started ticking
+  double seconds_used[2];       // accumulated time used by each side
+  struct timespec turn_started; // CLOCK_MONOTONIC; when the on-turn
+                                // player's current turn started ticking
 
   // Bot worker.
   pthread_t bot_thread;

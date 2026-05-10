@@ -1,12 +1,5 @@
 #include "game_state.h"
 
-#include <pthread.h>
-#include <stdatomic.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <unistd.h>
 #include "../src/def/game_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
@@ -16,6 +9,13 @@
 #include "../src/ent/players_data.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
+#include <pthread.h>
+#include <stdatomic.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
 
 enum {
   DATA_PATH_CANDIDATES = 3,
@@ -100,10 +100,8 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
     goto fail;
   }
   // Both players: pick the best move by static-eval equity.
-  players_data_set_move_sort_type(out_state->players_data, 0,
-                                  MOVE_SORT_EQUITY);
-  players_data_set_move_sort_type(out_state->players_data, 1,
-                                  MOVE_SORT_EQUITY);
+  players_data_set_move_sort_type(out_state->players_data, 0, MOVE_SORT_EQUITY);
+  players_data_set_move_sort_type(out_state->players_data, 1, MOVE_SORT_EQUITY);
   players_data_set_move_record_type(out_state->players_data, 0,
                                     MOVE_RECORD_BEST);
   players_data_set_move_record_type(out_state->players_data, 1,
@@ -141,8 +139,9 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;
   out_state->seconds_used[1] = 0.0;
-  out_state->border_thickness = 2;  // default; overridden by config
-  out_state->blank_uppercase = false;
+  out_state->border_thickness = 2; // default; overridden by config
+  out_state->blank_uppercase = true;
+  out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
   clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
   error_stack_destroy(err);

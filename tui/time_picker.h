@@ -1,8 +1,8 @@
 #ifndef TUI_TIME_PICKER_H
 #define TUI_TIME_PICKER_H
 
-#include <notcurses/notcurses.h>
 #include "theme.h"
+#include <notcurses/notcurses.h>
 
 // Renders a time-control picker with fixed presets (per-side total).
 // Returns the chosen seconds-per-side, or -1 if the user cancels.

@@ -1,8 +1,8 @@
 #include "tui_resize.h"
 
+#include <notcurses/notcurses.h>
 #include <sys/ioctl.h>
 #include <unistd.h>
-#include <notcurses/notcurses.h>
 
 bool tui_sync_plane_to_terminal(struct ncplane *plane) {
   if (plane == NULL) {

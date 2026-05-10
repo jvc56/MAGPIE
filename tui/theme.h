@@ -1,8 +1,8 @@
 #ifndef TUI_THEME_H
 #define TUI_THEME_H
 
-#include <stdint.h>
 #include <notcurses/notcurses.h>
+#include <stdint.h>
 
 typedef enum {
   THEME_DARK,
@@ -38,15 +38,24 @@ typedef struct {
   ThemeRgb board_bg;
   ThemeRgb tile_fg;
   ThemeRgb tile_bg;
-  ThemeRgb blank_tile_fg;  // fg for played-blank tiles, distinct from tile_fg
+  ThemeRgb blank_tile_fg; // fg for played-blank tiles, distinct from tile_fg
   ThemeRgb rack_tile_fg;
   ThemeRgb rack_tile_bg;
   ThemeRgb on_turn_fg;
+  // Premium squares carry both a tinted background that fills the cell
+  // and a foreground color used for the punctuation marker that lives in
+  // it (＝ －  ＂ ＇ ＊). Themes that want flat premium squares can set
+  // *_bg equal to board_bg.
   ThemeRgb premium_tws_bg;
+  ThemeRgb premium_tws_fg;
   ThemeRgb premium_dws_bg;
+  ThemeRgb premium_dws_fg;
   ThemeRgb premium_tls_bg;
+  ThemeRgb premium_tls_fg;
   ThemeRgb premium_dls_bg;
+  ThemeRgb premium_dls_fg;
   ThemeRgb premium_center_bg;
+  ThemeRgb premium_center_fg;
 } Theme;
 
 const Theme *theme_get(ThemeName name);
