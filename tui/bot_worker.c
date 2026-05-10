@@ -158,7 +158,39 @@ static void *bot_thread_main(void *arg) {
         state->seconds_used[player_idx] += elapsed;
         state->turn_started = now;
 
+        // End-of-game adjustment: when the player who just moved goes
+        // out (their rack is empty after drawing replacements), the
+        // engine adds 2× the opponent's leftover face value to their
+        // score inside play_move. Surface that as its own history row
+        // showing the opponent's leftover tiles and the +N bonus.
         if (game_over(state->game)) {
+          const int opp_idx = 1 - player_idx;
+          const Rack *opp_rack =
+              player_get_rack(game_get_player(state->game, opp_idx));
+          if (!rack_is_empty(opp_rack)) {
+            const Equity bonus_eq =
+                calculate_end_rack_points(opp_rack, state->ld);
+            const int bonus = equity_to_int(bonus_eq);
+            if (bonus != 0) {
+              if (state->history_count < TUI_HISTORY_MAX) {
+                TuiHistoryEntry *entry =
+                    &state->history[state->history_count++];
+                entry->player_idx = player_idx;
+                entry->score = bonus;
+                entry->total_after = total_after;
+                entry->clock_at_start = -1;  // sentinel: render no clock
+                copy_str(entry->move_str, sizeof(entry->move_str),
+                         "end of game");
+                StringBuilder *rsb = string_builder_create();
+                string_builder_add_rack(rsb, opp_rack, state->ld, false);
+                size_t rlen = 0;
+                char *rdump = string_builder_dump(rsb, &rlen);
+                copy_str(entry->rack_str, sizeof(entry->rack_str), rdump);
+                free(rdump);
+                string_builder_destroy(rsb);
+              }
+            }
+          }
           finished = true;
         }
       } else {

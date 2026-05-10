@@ -592,12 +592,19 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const int row2 = row + 1;
 
   theme_apply_fg(plane, theme->dim_fg);
-  char clock_str[16];
-  format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
-               sizeof(clock_str));
   char left_line[48];
-  snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
-           e->rack_str[0] ? e->rack_str : "—");
+  if (e->clock_at_start < 0) {
+    // Synthetic entry (end-of-game adjustment): no clock, just the rack
+    // (or whatever's stashed in rack_str — typically the opponent's
+    // leftover tiles).
+    snprintf(left_line, sizeof(left_line), "    %s",
+             e->rack_str[0] ? e->rack_str : "—");
+  } else {
+    char clock_str[16];
+    format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
+    snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
+             e->rack_str[0] ? e->rack_str : "—");
+  }
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
   char total_str[16];
