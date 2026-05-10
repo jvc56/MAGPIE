@@ -20,36 +20,46 @@
 
 // Layout (row, col) on the std plane:
 //
-//   0   header bar (full width)
-//   1   blank
-//   2   column labels       Ａ Ｂ Ｃ ... Ｏ
-//   3   top border          ┏━━━━━━━...━━┓
+//   0   blank (theme->bg)
+//   1   board_bg padding (top of board area)
+//   2   column labels        Ａ Ｂ Ｃ ... Ｏ
+//   3   top border           ┏━━━━━━━...━━┓
 //   4   row 1 cells         1 ┃＝　　＇　 ...┃
 //   ...
 //  18   row 15 cells       15 ┃＝　　＇　 ...┃
-//  19   bottom border       ┗━━━━━━━...━━┛
+//  19   bottom border        ┗━━━━━━━...━━┛
+//  20   board_bg padding (bottom of board area)
 //
-// Col 0 is left margin (kept at theme->bg as a dark surround). Each
-// board cell is 2 cols wide and renders as a single fullwidth glyph:
+// Col 0 is theme->bg (dark surround). The board_bg rectangle extends
+// from col 1 (left padding) through col 37 (right padding); row labels,
+// border, and cells sit inside that. Each board cell is 2 cols wide and
+// renders as a single fullwidth glyph:
 //   premium-square mark  (＝－＂＇＊) for empty premium cells
 //   ideographic space 　              for empty non-premium cells
 //   fullwidth letter Ａ–Ｚ            for played tiles (LD-provided)
 enum {
-  HEADER_ROW = 0,
   COL_LABELS_ROW = 2,
   BORDER_TOP_ROW = 3,
   CELL_ROW_BASE = 4,
-  LEFT_MARGIN = 1,
-  ROW_LABEL_COL = LEFT_MARGIN,
-  // Two-char row label, one-char gap, then left border.
-  BORDER_LEFT_COL = LEFT_MARGIN + 3,
-  CELL_COL_BASE = BORDER_LEFT_COL + 1,
   CELL_WIDTH = 2,
+
+  // The board area is the lighter-grey rectangle that extends one row
+  // above the column labels and one row below the bottom border, with
+  // matching one-col padding on the left and right of the content.
+  BOARD_AREA_TOP_ROW = COL_LABELS_ROW - 1,
+  BOARD_AREA_LEFT_COL = 1,
+  ROW_LABEL_COL = BOARD_AREA_LEFT_COL + 1,
+  // 1-col padding, 2-char row label, 1-col gap, then left border.
+  BORDER_LEFT_COL = ROW_LABEL_COL + 3,
+  CELL_COL_BASE = BORDER_LEFT_COL + 1,
   BORDER_RIGHT_COL = CELL_COL_BASE + BOARD_DIM * CELL_WIDTH,
+  BOARD_AREA_RIGHT_COL = BORDER_RIGHT_COL + 1,
   BORDER_BOTTOM_ROW = CELL_ROW_BASE + BOARD_DIM,
-  SIDEBAR_LEFT = BORDER_RIGHT_COL + 4,
-  // Footer occupies BORDER_BOTTOM_ROW + 2 (info line) and + 4 (quit hint).
-  MIN_ROWS = BORDER_BOTTOM_ROW + 5,
+  BOARD_AREA_BOTTOM_ROW = BORDER_BOTTOM_ROW + 1,
+
+  SIDEBAR_LEFT = BOARD_AREA_RIGHT_COL + 3,
+  // Footer info at BOARD_AREA_BOTTOM_ROW + 2, quit hint at + 4.
+  MIN_ROWS = BOARD_AREA_BOTTOM_ROW + 5,
   // Sidebar's longest line is "rack  X X X X X X X X" (~30 cols).
   MIN_COLS = SIDEBAR_LEFT + 32,
 };
@@ -101,31 +111,15 @@ static bool plane_can_fit_board(struct ncplane *plane) {
   return plane_rows >= MIN_ROWS && plane_cols >= MIN_COLS;
 }
 
-static void render_header(struct ncplane *plane, const Theme *theme) {
-  unsigned plane_rows = 0;
-  unsigned plane_cols = 0;
-  ncplane_dim_yx(plane, &plane_rows, &plane_cols);
-  if (plane_rows == 0 || plane_cols == 0) {
-    return;
-  }
-  theme_apply_fg(plane, theme->header_fg);
-  theme_apply_bg(plane, theme->header_bg);
-  for (unsigned col = 0; col < plane_cols; col++) {
-    ncplane_putstr_yx(plane, HEADER_ROW, (int)col, " ");
-  }
-  ncplane_putstr_yx(plane, HEADER_ROW, 2, " MAGPIE TUI ");
-}
-
-// Fill the rectangle that holds the column labels, row labels, border, and
-// cells with a single uniform background. Without this, the labels and the
-// gap col between them and the border would inherit theme->bg, leaving a
-// visible seam against the board's board_bg. Col 0 is intentionally left
-// at theme->bg as a darker margin.
+// Fill the board-area rectangle with a single uniform background. The
+// rectangle includes a 1-cell board_bg padding around the column labels,
+// row labels, and box border, so the board reads as a clearly lighter
+// panel against the darker theme->bg surround.
 static void render_board_area_bg(struct ncplane *plane, const Theme *theme) {
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->board_bg);
-  for (int row = COL_LABELS_ROW; row <= BORDER_BOTTOM_ROW; row++) {
-    for (int col = LEFT_MARGIN; col <= BORDER_RIGHT_COL; col++) {
+  for (int row = BOARD_AREA_TOP_ROW; row <= BOARD_AREA_BOTTOM_ROW; row++) {
+    for (int col = BOARD_AREA_LEFT_COL; col <= BOARD_AREA_RIGHT_COL; col++) {
       ncplane_putstr_yx(plane, row, col, " ");
     }
   }
@@ -334,12 +328,11 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  render_header(plane, theme);
   render_board(plane, theme, state);
 
-  render_player_panel(plane, theme, state, 0, CELL_ROW_BASE);
-  render_player_panel(plane, theme, state, 1, CELL_ROW_BASE + 5);
+  render_player_panel(plane, theme, state, 0, COL_LABELS_ROW);
+  render_player_panel(plane, theme, state, 1, COL_LABELS_ROW + 6);
 
   render_footer(plane, theme, state, time_per_side_seconds,
-                BORDER_BOTTOM_ROW + 2);
+                BOARD_AREA_BOTTOM_ROW + 2);
 }
