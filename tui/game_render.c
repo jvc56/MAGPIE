@@ -258,6 +258,54 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
   snprintf(buf, buf_size, "%d:%02d", minutes, secs);
 }
 
+// ── Grid overlay ──────────────────────────────────────────────────────────
+//
+// A child plane sized (BOARD_DIM + 1) rows × (BOARD_DIM × CELL_WIDTH) cols,
+// positioned over the board cells, painted with ▔ (UPPER ONE EIGHTH BLOCK,
+// U+2594) on every cell. The glyph fills the top 1/8 of its cell with the
+// fg color (theme->bg here, the dark surround); the rest of the cell is
+// transparent so the std plane shows through. The +1 row past the bottom
+// of the board draws a line just below the last cell row, giving a closed
+// 16-line horizontal grid.
+//
+// Created lazily once and cached statically. Position never moves on
+// resize because the board cell area sits at fixed coords on the std plane.
+static struct ncplane *grid_overlay_plane(struct ncplane *parent) {
+  static struct ncplane *grid = NULL;
+  if (grid != NULL) {
+    return grid;
+  }
+  ncplane_options opts = {0};
+  opts.y = CELL_ROW_BASE;
+  opts.x = CELL_COL_BASE;
+  opts.rows = BOARD_DIM + 1;
+  opts.cols = BOARD_DIM * CELL_WIDTH;
+  opts.name = "grid";
+  grid = ncplane_create(parent, &opts);
+  if (grid != NULL) {
+    uint64_t base_channels = 0;
+    ncchannels_set_fg_alpha(&base_channels, NCALPHA_TRANSPARENT);
+    ncchannels_set_bg_alpha(&base_channels, NCALPHA_TRANSPARENT);
+    ncplane_set_base(grid, " ", 0, base_channels);
+  }
+  return grid;
+}
+
+static void render_grid_overlay(struct ncplane *parent, const Theme *theme) {
+  struct ncplane *grid = grid_overlay_plane(parent);
+  if (grid == NULL) {
+    return;
+  }
+  ncplane_set_fg_rgb8(grid, theme->bg.r, theme->bg.g, theme->bg.b);
+  ncplane_set_bg_alpha(grid, NCALPHA_TRANSPARENT);
+  ncplane_set_styles(grid, 0);
+  for (int r = 0; r < BOARD_DIM + 1; r++) {
+    for (int c = 0; c < BOARD_DIM * CELL_WIDTH; c++) {
+      ncplane_putstr_yx(grid, r, c, "\xe2\x96\x94");  // ▔
+    }
+  }
+}
+
 // ── Board ─────────────────────────────────────────────────────────────────
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state) {
@@ -846,6 +894,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state);
+  render_grid_overlay(plane, theme);
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
