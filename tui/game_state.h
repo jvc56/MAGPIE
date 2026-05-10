@@ -23,10 +23,15 @@ enum {
 typedef struct {
   int player_idx;
   int score;             // points earned on this play
-  int total_after;       // running total after this play
+  int total_after;       // running total after this play (excluding bonus)
   int clock_at_start;    // seconds remaining when this player's turn began
   char move_str[48];     // "8H POND" or "exch DEFG" or "pass" (no score)
   char rack_str[16];     // full rack the player had at the start of the turn
+  // Going-out bonus, attached to the going-out player's last move so it
+  // renders as a third line of that entry instead of its own row. Zero
+  // when this entry has no end-of-game adjustment.
+  int end_bonus;
+  char end_rack_str[16];  // opponent's leftover tiles (e.g. "EE")
 } TuiHistoryEntry;
 
 typedef struct {

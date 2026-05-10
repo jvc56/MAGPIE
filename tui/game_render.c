@@ -546,10 +546,18 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 //   " 18. L1 RE(W)I(N)                  +38"
 //   "     4:42 AEINRT                    91"
 //
+// When the going-out bonus is attached, a third line is added showing the
+// opponent's leftover tiles and the bonus → new total:
+//   "     + EE                       +4   95"
+//
 // Both players use the same color scheme — a lighter gray (theme->fg) for
-// the top row, a darker gray (theme->dim_fg) for the bottom. Selective
+// the top row, a darker gray (theme->dim_fg) for the lower rows. Selective
 // bold marks the position and played-tile letters in the move, plus the
-// running total on the bottom row.
+// running totals on the right.
+
+static int history_entry_rows(const TuiHistoryEntry *e) {
+  return e->end_bonus != 0 ? 3 : 2;
+}
 
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx,
@@ -592,19 +600,12 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const int row2 = row + 1;
 
   theme_apply_fg(plane, theme->dim_fg);
+  char clock_str[16];
+  format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
+               sizeof(clock_str));
   char left_line[48];
-  if (e->clock_at_start < 0) {
-    // Synthetic entry (end-of-game adjustment): no clock, just the rack
-    // (or whatever's stashed in rack_str — typically the opponent's
-    // leftover tiles).
-    snprintf(left_line, sizeof(left_line), "    %s",
-             e->rack_str[0] ? e->rack_str : "—");
-  } else {
-    char clock_str[16];
-    format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
-    snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
-             e->rack_str[0] ? e->rack_str : "—");
-  }
+  snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
+           e->rack_str[0] ? e->rack_str : "—");
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
   char total_str[16];
@@ -616,6 +617,35 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row2, total_col, total_str);
     ncplane_set_styles(plane, 0);
   }
+
+  // ── Row 3 (going-out bonus): "    + EE                  +4   95" ─────
+  if (e->end_bonus == 0 || row + 2 > row_bottom_inclusive) {
+    return;
+  }
+  const int row3 = row + 2;
+  theme_apply_fg(plane, theme->dim_fg);
+  char bonus_left[48];
+  snprintf(bonus_left, sizeof(bonus_left), "    + %s",
+           e->end_rack_str[0] ? e->end_rack_str : "");
+  ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
+
+  // Right side: "+N  Total" — bonus delta non-bold, new total bold.
+  char delta3_str[16];
+  snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
+  char total3_str[16];
+  snprintf(total3_str, sizeof(total3_str), "%d",
+           e->total_after + e->end_bonus);
+  const int total3_len = (int)strlen(total3_str);
+  const int total3_col = interior_right - total3_len + 1;
+  const int delta3_len = (int)strlen(delta3_str);
+  const int delta3_col = total3_col - 2 - delta3_len;
+
+  if (delta3_col > interior_left + (int)strlen(bonus_left)) {
+    ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
+  }
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  ncplane_putstr_yx(plane, row3, total3_col, total3_str);
+  ncplane_set_styles(plane, 0);
 }
 
 static void render_history_panel(struct ncplane *plane, const Theme *theme,
@@ -640,31 +670,39 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  const int rows_per_entry = 2;
-  const int top = L->history_top + 1;             // first interior row
-  const int bottom = L->history_bottom - 1;       // last interior row (inclusive)
+  const int top = L->history_top + 1;        // first interior row
+  const int bottom = L->history_bottom - 1;  // last interior row (inclusive)
   const int rows_avail = bottom - top + 1;
+
   if (!L->two_col) {
     const int interior_left = L->right_col_left + 2;
     const int interior_right = L->right_col_right - 2;
-    const int max_visible = rows_avail / rows_per_entry;
-    int first = state->history_count - max_visible;
-    if (first < 0) {
-      first = 0;
+
+    // Walk backwards to find the oldest entry that still fits, so the
+    // most recent entries always show.
+    int first = state->history_count;
+    int rows_used = 0;
+    while (first > 0) {
+      const int rows = history_entry_rows(&state->history[first - 1]);
+      if (rows_used + rows > rows_avail) {
+        break;
+      }
+      rows_used += rows;
+      first--;
     }
     int row = top;
     for (int idx = first; idx < state->history_count; idx++) {
-      render_history_entry(plane, theme, &state->history[idx], idx, row,
-                           interior_left, interior_right, bottom);
-      row += rows_per_entry;
-      if (row > bottom) {
-        break;
-      }
+      const TuiHistoryEntry *e = &state->history[idx];
+      render_history_entry(plane, theme, e, idx, row, interior_left,
+                           interior_right, bottom);
+      row += history_entry_rows(e);
     }
     return;
   }
 
-  // Two-column layout. Split the panel interior in half.
+  // Two-column layout. Entries are assigned to columns by absolute index
+  // parity (even → left, odd → right) so the going-out player's row
+  // stays in whichever column they happened to land on.
   const int gutter = 2;
   const int half_width = (width - 2 - gutter) / 2;
   const int left_l = L->right_col_left + 2;
@@ -672,29 +710,35 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   const int right_l = left_r + 1 + gutter;
   const int right_r = L->right_col_right - 2;
 
-  const int max_visible = (rows_avail / rows_per_entry) * 2;  // both columns
-  int first = state->history_count - max_visible;
-  if (first < 0) {
-    first = 0;
+  // Walk backwards, tracking per-column row usage, to find the oldest
+  // entry that still fits in its target column.
+  int left_used = 0;
+  int right_used = 0;
+  int first = state->history_count;
+  while (first > 0) {
+    const int idx = first - 1;
+    const int rows = history_entry_rows(&state->history[idx]);
+    int *used = (idx % 2 == 0) ? &left_used : &right_used;
+    if (*used + rows > rows_avail) {
+      break;
+    }
+    *used += rows;
+    first--;
   }
+
   int row_left = top;
   int row_right = top;
   for (int idx = first; idx < state->history_count; idx++) {
-    const bool to_left = ((idx - first) % 2) == 0;
-    if (to_left) {
-      if (row_left > bottom) {
-        break;
-      }
-      render_history_entry(plane, theme, &state->history[idx], idx, row_left,
-                           left_l, left_r, bottom);
-      row_left += rows_per_entry;
+    const TuiHistoryEntry *e = &state->history[idx];
+    const int rows = history_entry_rows(e);
+    if ((idx % 2) == 0) {
+      render_history_entry(plane, theme, e, idx, row_left, left_l, left_r,
+                           bottom);
+      row_left += rows;
     } else {
-      if (row_right > bottom) {
-        break;
-      }
-      render_history_entry(plane, theme, &state->history[idx], idx, row_right,
-                           right_l, right_r, bottom);
-      row_right += rows_per_entry;
+      render_history_entry(plane, theme, e, idx, row_right, right_l, right_r,
+                           bottom);
+      row_right += rows;
     }
   }
 }

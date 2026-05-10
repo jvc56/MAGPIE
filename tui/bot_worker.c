@@ -59,6 +59,8 @@ static void append_history(TuiGameState *state, int player_idx,
   entry->score = score;
   entry->total_after = total_after;
   entry->clock_at_start = clock_at_start;
+  entry->end_bonus = 0;
+  entry->end_rack_str[0] = '\0';
 
   StringBuilder *sb = string_builder_create();
   // add_score=false: we render the score in our own column.
@@ -143,10 +145,25 @@ static void *bot_thread_main(void *arg) {
         Rack leave;
         rack_set_dist_size(&leave, ld_get_size(state->ld));
         play_move(best, state->game, &leave);
-        const int total_after = equity_to_int(player_get_score(
+        const int post_play_score = equity_to_int(player_get_score(
             game_get_player(state->game, player_idx)));
+
+        // If play_move just applied an end-of-game bonus to this player
+        // (they went out and the opponent has tiles left), pull that out
+        // so the move's own entry shows the score from this play alone.
+        int bonus = 0;
+        const Rack *opp_rack = NULL;
+        if (game_over(state->game)) {
+          opp_rack = player_get_rack(
+              game_get_player(state->game, 1 - player_idx));
+          if (!rack_is_empty(opp_rack)) {
+            bonus = equity_to_int(
+                calculate_end_rack_points(opp_rack, state->ld));
+          }
+        }
+        const int total_after_move = post_play_score - bonus;
         append_history(state, player_idx, best, &rack_at_start, score,
-                       total_after, clock_at_start);
+                       total_after_move, clock_at_start);
 
         // Charge this turn's elapsed time to the player who just moved,
         // and reset turn_started so the next player's clock begins now.
@@ -158,38 +175,21 @@ static void *bot_thread_main(void *arg) {
         state->seconds_used[player_idx] += elapsed;
         state->turn_started = now;
 
-        // End-of-game adjustment: when the player who just moved goes
-        // out (their rack is empty after drawing replacements), the
-        // engine adds 2× the opponent's leftover face value to their
-        // score inside play_move. Surface that as its own history row
-        // showing the opponent's leftover tiles and the +N bonus.
+        // Surface the going-out bonus as a third line on this entry —
+        // not as a separate entry — by stashing the bonus and the
+        // opponent's leftover into the just-appended history row.
         if (game_over(state->game)) {
-          const int opp_idx = 1 - player_idx;
-          const Rack *opp_rack =
-              player_get_rack(game_get_player(state->game, opp_idx));
-          if (!rack_is_empty(opp_rack)) {
-            const Equity bonus_eq =
-                calculate_end_rack_points(opp_rack, state->ld);
-            const int bonus = equity_to_int(bonus_eq);
-            if (bonus != 0) {
-              if (state->history_count < TUI_HISTORY_MAX) {
-                TuiHistoryEntry *entry =
-                    &state->history[state->history_count++];
-                entry->player_idx = player_idx;
-                entry->score = bonus;
-                entry->total_after = total_after;
-                entry->clock_at_start = -1;  // sentinel: render no clock
-                copy_str(entry->move_str, sizeof(entry->move_str),
-                         "end of game");
-                StringBuilder *rsb = string_builder_create();
-                string_builder_add_rack(rsb, opp_rack, state->ld, false);
-                size_t rlen = 0;
-                char *rdump = string_builder_dump(rsb, &rlen);
-                copy_str(entry->rack_str, sizeof(entry->rack_str), rdump);
-                free(rdump);
-                string_builder_destroy(rsb);
-              }
-            }
+          if (bonus != 0 && opp_rack != NULL && state->history_count > 0) {
+            TuiHistoryEntry *entry =
+                &state->history[state->history_count - 1];
+            entry->end_bonus = bonus;
+            StringBuilder *rsb = string_builder_create();
+            string_builder_add_rack(rsb, opp_rack, state->ld, false);
+            size_t rlen = 0;
+            char *rdump = string_builder_dump(rsb, &rlen);
+            copy_str(entry->end_rack_str, sizeof(entry->end_rack_str), rdump);
+            free(rdump);
+            string_builder_destroy(rsb);
           }
           finished = true;
         }
