@@ -504,23 +504,30 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   theme_apply_fg(plane, theme->fg);
   ncplane_putstr_yx(plane, content_row, score_col, score_str);
 
-  // Halfwidth rack between the name and the score, on tile_bg. The
-  // available space is from after "▶ Player N " (12 cols) to one cell
-  // before the score.
+  // Fullwidth rack between the name and the score, on tile_bg. Each tile
+  // is 2 cols wide (fullwidth glyph from the LD; ASCII fallback for LDs
+  // with no fullwidth column).
   const Rack *rack = player_get_rack(player);
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 12;
   const int rack_right_max = score_col - 2;
-  if (rack_right_max >= rack_left) {
+  if (rack_right_max >= rack_left + 1) {
     int rcol = rack_left;
     theme_apply_fg(plane, theme->rack_tile_fg);
     theme_apply_bg(plane, theme->rack_tile_bg);
-    for (int ml = 0; ml < ld_get_size(ld) && rcol <= rack_right_max; ml++) {
+    for (int ml = 0; ml < ld_get_size(ld) && rcol + 1 <= rack_right_max; ml++) {
       const int count = rack_get_letter(rack, (MachineLetter)ml);
-      for (int copy = 0; copy < count && rcol <= rack_right_max; copy++) {
-        const char *letter_str = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-        ncplane_putstr_yx(plane, content_row, rcol, letter_str);
-        rcol++;
+      for (int copy = 0; copy < count && rcol + 1 <= rack_right_max; copy++) {
+        const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
+        if (fullwidth[0] != '\0') {
+          ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
+        } else {
+          // ASCII fallback for LDs without a fullwidth column.
+          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+          ncplane_putstr_yx(plane, content_row, rcol, " ");
+          ncplane_putstr(plane, ascii);
+        }
+        rcol += 2;
       }
     }
   }
@@ -532,28 +539,23 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 //   " 18. L1 RE(W)I(N)                  +38"
 //   "     4:42 AEINRT                    91"
 //
-// Row 1: number, move (bold for position + played tiles, regular for
-// playthrough), and the points scored on this play (non-bold), right-
-// aligned. Row 2: indented start-of-turn clock, the player's full rack at
-// turn start, and the running total in bold, right-aligned. Player 1
-// entries get accent_fg on the move; player 2 stays dim_fg.
+// Both players use the same color scheme — a lighter gray (theme->fg) for
+// the top row, a darker gray (theme->dim_fg) for the bottom. Selective
+// bold marks the position and played-tile letters in the move, plus the
+// running total on the bottom row.
 
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx,
                                  int row, int interior_left,
                                  int interior_right, int row_bottom_inclusive) {
-  const ThemeRgb label_fg =
-      e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
-
-  // ── Row 1: " 18. L1 RE(W)I(N)              +38" ─────────────────────────
+  // ── Row 1 (lighter): " 18. L1 RE(W)I(N)              +38" ──────────────
   theme_apply_bg(plane, theme->bg);
   ncplane_set_styles(plane, 0);
-  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_fg(plane, theme->fg);
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
   ncplane_putstr_yx(plane, row, interior_left, prefix);
 
-  theme_apply_fg(plane, label_fg);
   bool inside_paren = false;
   for (const char *p = e->move_str; *p != '\0'; p++) {
     if (*p == '(') {
@@ -568,23 +570,20 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   ncplane_set_styles(plane, 0);
 
-  // Right-aligned delta — non-bold, default fg.
   char delta_str[16];
   snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
   const int delta_len = (int)strlen(delta_str);
   const int delta_col = interior_right - delta_len + 1;
   if (delta_col > interior_left + (int)strlen(prefix)) {
-    theme_apply_fg(plane, theme->fg);
     ncplane_putstr_yx(plane, row, delta_col, delta_str);
   }
 
-  // ── Row 2: "     4:42 AEINRT                91" ─────────────────────────
+  // ── Row 2 (darker): "     4:42 AEINRT                91" ───────────────
   if (row + 1 > row_bottom_inclusive) {
     return;
   }
   const int row2 = row + 1;
 
-  // Clock on the left, then rack — both dim, non-bold.
   theme_apply_fg(plane, theme->dim_fg);
   char clock_str[16];
   format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
@@ -594,13 +593,11 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
            e->rack_str[0] ? e->rack_str : "—");
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
-  // Right-aligned running total — bold, default fg.
   char total_str[16];
   snprintf(total_str, sizeof(total_str), "%d", e->total_after);
   const int total_len = (int)strlen(total_str);
   const int total_col = interior_right - total_len + 1;
   if (total_col > interior_left + (int)strlen(left_line)) {
-    theme_apply_fg(plane, theme->fg);
     ncplane_set_styles(plane, NCSTYLE_BOLD);
     ncplane_putstr_yx(plane, row2, total_col, total_str);
     ncplane_set_styles(plane, 0);
