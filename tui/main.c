@@ -283,13 +283,13 @@ int main(int argc, char *argv[]) {
           main_menu_focus++;
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-        if (main_menu_focus == TUI_MENU_RESUME) {
-          modal = TUI_MODAL_NONE;
-        } else if (main_menu_focus == TUI_MENU_SETTINGS) {
+        if (main_menu_focus == TUI_MENU_SETTINGS) {
           modal = TUI_MODAL_SETTINGS;
           settings_focus = 0;
         } else if (main_menu_focus == TUI_MENU_QUIT) {
           running = false;
+        } else if (main_menu_focus == TUI_MENU_BACK) {
+          modal = TUI_MODAL_NONE;
         }
       }
       continue;

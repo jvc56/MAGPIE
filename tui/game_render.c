@@ -989,7 +989,7 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   switch (modal) {
   case TUI_MODAL_MAIN_MENU:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 enter confirm \xc2"
-           "\xb7 esc close ";
+           "\xb7 esc back ";
     break;
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
@@ -1128,9 +1128,9 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
     return;
   }
   const char *items[TUI_MENU_ITEM_COUNT];
-  items[TUI_MENU_RESUME] = "Resume";
   items[TUI_MENU_SETTINGS] = "Settings";
   items[TUI_MENU_QUIT] = "Quit";
+  items[TUI_MENU_BACK] = "Back";
   render_modal(plane, theme, "Menu", items, TUI_MENU_ITEM_COUNT, focus, 28);
 }
 

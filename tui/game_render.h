@@ -20,9 +20,9 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 // Main menu modal — rendered on top of the game frame when the user
 // presses Esc.
 typedef enum {
-  TUI_MENU_RESUME = 0,
-  TUI_MENU_SETTINGS = 1,
-  TUI_MENU_QUIT = 2,
+  TUI_MENU_SETTINGS = 0,
+  TUI_MENU_QUIT = 1,
+  TUI_MENU_BACK = 2,
   TUI_MENU_ITEM_COUNT = 3,
 } TuiMenuItem;
 
