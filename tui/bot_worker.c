@@ -104,6 +104,15 @@ static void *bot_thread_main(void *arg) {
   MoveList *move_list = move_list_create(1);
 
   while (!atomic_load(&state->bot_stop)) {
+    // Sleep up front so the very first move also gets a 3-second pause
+    // (matching the gap between subsequent moves). The corresponding
+    // wall time is charged to the on-turn player by the elapsed-time
+    // accounting after their move plays.
+    interruptible_sleep(&state->bot_stop);
+    if (atomic_load(&state->bot_stop)) {
+      break;
+    }
+
     bool finished = false;
     pthread_mutex_lock(&state->mutex);
     if (game_over(state->game)) {
@@ -203,7 +212,6 @@ static void *bot_thread_main(void *arg) {
     if (finished) {
       break;
     }
-    interruptible_sleep(&state->bot_stop);
   }
 
   moves_for_move_list_destroy(move_list);
