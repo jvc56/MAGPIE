@@ -55,7 +55,10 @@ enum {
   RIGHT_COL_LEFT_OFFSET = 1,    // gap from board's right edge
   RIGHT_COL_MIN_WIDTH = 32,     // narrowest the right column can be
   // History switches to two columns once the panel is at least this wide.
-  HISTORY_TWO_COL_THRESHOLD = 60,
+  // At 68 cols the panel splits into two ~33-col halves, which is just
+  // wide enough to fit a fullwidth 7-tile rack inside each player pill
+  // alongside the name, score, and clock.
+  HISTORY_TWO_COL_THRESHOLD = 68,
   STATUS_BAR_HEIGHT = 1,
   MIN_ROWS_REQUIRED = 24,
   MIN_COLS_REQUIRED = BOARD_WIDTH + RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH,
@@ -472,7 +475,9 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   const Player *player = game_get_player(state->game, player_idx);
   const bool on_turn = game_get_player_on_turn_index(state->game) == player_idx;
   const int content_row = top + 1;
-  const int content_left = left + 2;
+  // One col of padding inside the box (was 2). The on-turn arrow lives
+  // in the very first interior col so the rack has more room.
+  const int content_left = left + 1;
   const int content_right = right - 1;
 
   theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
@@ -480,11 +485,13 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, content_row, content_left,
                     on_turn ? "\xe2\x96\xb6 " : "  ");
   theme_apply_fg(plane, theme->fg);
-  char name[32];
-  snprintf(name, sizeof(name), "Player %d", player_idx + 1);
+  // Short names — "P1" / "P2" — leave more space for the rack.
+  char name[8];
+  snprintf(name, sizeof(name), "P%d", player_idx + 1);
   ncplane_putstr(plane, name);
 
-  // Right side: clock and score.
+  // Right side: clock and score, separated by a single col gap. Clock
+  // tops out at "99:59" (5 chars).
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
            equity_to_int(player_get_score(player)));
@@ -500,16 +507,16 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
 
   const int score_len = (int)strlen(score_str);
-  const int score_col = clock_col - 3 - score_len;
+  const int score_col = clock_col - 1 - score_len;
   theme_apply_fg(plane, theme->fg);
   ncplane_putstr_yx(plane, content_row, score_col, score_str);
 
   // Fullwidth rack between the name and the score, on tile_bg. Each tile
-  // is 2 cols wide (fullwidth glyph from the LD; ASCII fallback for LDs
-  // with no fullwidth column).
+  // is 2 cols wide. After "▶ P1 " (4 chars + 1 gap) the rack starts at
+  // content_left + 5.
   const Rack *rack = player_get_rack(player);
   const LetterDistribution *ld = state->ld;
-  const int rack_left = content_left + 12;
+  const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
   if (rack_right_max >= rack_left + 1) {
     int rcol = rack_left;
