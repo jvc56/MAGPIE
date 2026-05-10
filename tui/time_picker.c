@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <notcurses/notcurses.h>
 #include "theme.h"
+#include "tui_resize.h"
 
 typedef struct {
   int seconds;
@@ -34,6 +35,7 @@ static void fill_row(struct ncplane *plane, int row, unsigned cols) {
 
 static void render_picker(struct ncplane *plane, const Theme *theme,
                           int focus) {
+  tui_sync_plane_to_terminal(plane);
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 

@@ -16,6 +16,7 @@
 #include "../src/ent/rack.h"
 #include "game_state.h"
 #include "theme.h"
+#include "tui_resize.h"
 
 // Layout (row, col) on the std plane:
 //
@@ -285,24 +286,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  // Sync the plane to the current terminal dim every frame. SIGWINCH-driven
-  // resize handling is fundamentally racy with the render path: macOS
-  // Terminal can shrink the visible area before notcurses delivers the
-  // NCKEY_RESIZE event, and once we render rows past the new bottom the
-  // alt-screen scrolls — eating our top rows irreversibly. Resizing here
-  // makes every render robust regardless of when the resize event arrives.
-  struct notcurses *nc = ncplane_notcurses(plane);
-  if (nc != NULL) {
-    unsigned term_rows = 0;
-    unsigned term_cols = 0;
-    notcurses_term_dim_yx(nc, &term_rows, &term_cols);
-    unsigned plane_rows = 0;
-    unsigned plane_cols = 0;
-    ncplane_dim_yx(plane, &plane_rows, &plane_cols);
-    if (plane_rows != term_rows || plane_cols != term_cols) {
-      ncplane_resize_simple(plane, term_rows, term_cols);
-    }
-  }
+  tui_sync_plane_to_terminal(plane);
 
   theme_apply_base(plane, theme);
   ncplane_erase(plane);

@@ -10,6 +10,7 @@
 #include <string.h>
 #include <notcurses/notcurses.h>
 #include "theme.h"
+#include "tui_resize.h"
 
 enum {
   LEXICON_NAME_MAX = 64,
@@ -266,6 +267,7 @@ static void fill_row(struct ncplane *plane, int row, unsigned cols) {
 static void render_picker(struct ncplane *plane, const Theme *theme,
                           const LexiconList *list, int focus,
                           int scroll_offset, int visible_rows) {
+  tui_sync_plane_to_terminal(plane);
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 

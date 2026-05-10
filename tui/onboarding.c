@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <notcurses/notcurses.h>
 #include "theme.h"
+#include "tui_resize.h"
 
 static void fill_row(struct ncplane *plane, int row, unsigned cols) {
   for (unsigned col = 0; col < cols; col++) {
@@ -14,6 +15,7 @@ static void fill_row(struct ncplane *plane, int row, unsigned cols) {
 static void render_picker(struct ncplane *plane, ThemeName focus) {
   const Theme *theme = theme_get(focus);
 
+  tui_sync_plane_to_terminal(plane);
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
