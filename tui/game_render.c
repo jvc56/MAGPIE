@@ -22,23 +22,27 @@
 //
 //   0   header bar (full width)
 //   1   blank
-//   2   column labels       A B C ... O
+//   2   column labels       Ａ Ｂ Ｃ ... Ｏ
 //   3   top border          ┏━━━━━━━...━━┓
-//   4   row 1 cells         1 ┃= . . ' . ...┃
+//   4   row 1 cells         1 ┃＝　　＇　 ...┃
 //   ...
-//  18   row 15 cells       15 ┃= . . ' . ...┃
+//  18   row 15 cells       15 ┃＝　　＇　 ...┃
 //  19   bottom border       ┗━━━━━━━...━━┛
 //
-// Cells are 2 chars wide. Each cell renders as either
-//   <premium-glyph> <space>      for empty premium squares
-//   <space> <space>              for empty non-premium squares
-//   <space> <letter>             for played tiles (right-aligned)
+// Col 0 is left margin (kept at theme->bg as a dark surround). Each
+// board cell is 2 cols wide and renders as a single fullwidth glyph:
+//   premium-square mark  (＝－＂＇＊) for empty premium cells
+//   ideographic space 　              for empty non-premium cells
+//   fullwidth letter Ａ–Ｚ            for played tiles (LD-provided)
 enum {
   HEADER_ROW = 0,
   COL_LABELS_ROW = 2,
   BORDER_TOP_ROW = 3,
   CELL_ROW_BASE = 4,
-  BORDER_LEFT_COL = 3,
+  LEFT_MARGIN = 1,
+  ROW_LABEL_COL = LEFT_MARGIN,
+  // Two-char row label, one-char gap, then left border.
+  BORDER_LEFT_COL = LEFT_MARGIN + 3,
   CELL_COL_BASE = BORDER_LEFT_COL + 1,
   CELL_WIDTH = 2,
   BORDER_RIGHT_COL = CELL_COL_BASE + BOARD_DIM * CELL_WIDTH,
@@ -50,8 +54,20 @@ enum {
   MIN_COLS = SIDEBAR_LEFT + 32,
 };
 
+// Fullwidth column labels Ａ..Ｚ. Each is a single fullwidth glyph that
+// occupies CELL_WIDTH terminal cells, so it lines up with the cells below.
+static const char *const fullwidth_col_labels[] = {
+    "\xef\xbc\xa1", "\xef\xbc\xa2", "\xef\xbc\xa3", "\xef\xbc\xa4",
+    "\xef\xbc\xa5", "\xef\xbc\xa6", "\xef\xbc\xa7", "\xef\xbc\xa8",
+    "\xef\xbc\xa9", "\xef\xbc\xaa", "\xef\xbc\xab", "\xef\xbc\xac",
+    "\xef\xbc\xad", "\xef\xbc\xae", "\xef\xbc\xaf", "\xef\xbc\xb0",
+    "\xef\xbc\xb1", "\xef\xbc\xb2", "\xef\xbc\xb3", "\xef\xbc\xb4",
+    "\xef\xbc\xb5", "\xef\xbc\xb6", "\xef\xbc\xb7", "\xef\xbc\xb8",
+    "\xef\xbc\xb9", "\xef\xbc\xba",
+};
+
 typedef struct {
-  const char *glyph;  // single-cell-wide string
+  const char *glyph;  // fullwidth (2-cell-wide) UTF-8 string
   ThemeRgb fg;
 } PremiumMarker;
 
@@ -59,23 +75,23 @@ static PremiumMarker premium_marker_for_cell(const Theme *theme, BonusSquare bs,
                                              int row, int col) {
   const int center = BOARD_DIM / 2;
   if (row == center && col == center) {
-    return (PremiumMarker){"*", theme->premium_center_bg};
+    return (PremiumMarker){"\xef\xbc\x8a", theme->premium_center_bg};  // ＊
   }
   const uint8_t word_mult = bonus_square_get_word_multiplier(bs);
   const uint8_t letter_mult = bonus_square_get_letter_multiplier(bs);
   if (word_mult == 3) {
-    return (PremiumMarker){"=", theme->premium_tws_bg};
+    return (PremiumMarker){"\xef\xbc\x9d", theme->premium_tws_bg};  // ＝
   }
   if (word_mult == 2) {
-    return (PremiumMarker){"-", theme->premium_dws_bg};
+    return (PremiumMarker){"\xef\xbc\x8d", theme->premium_dws_bg};  // －
   }
   if (letter_mult == 3) {
-    return (PremiumMarker){"\"", theme->premium_tls_bg};
+    return (PremiumMarker){"\xef\xbc\x82", theme->premium_tls_bg};  // ＂
   }
   if (letter_mult == 2) {
-    return (PremiumMarker){"'", theme->premium_dls_bg};
+    return (PremiumMarker){"\xef\xbc\x87", theme->premium_dls_bg};  // ＇
   }
-  return (PremiumMarker){" ", theme->dim_fg};
+  return (PremiumMarker){"\xe3\x80\x80", theme->dim_fg};  // 　 ideographic space
 }
 
 static bool plane_can_fit_board(struct ncplane *plane) {
@@ -103,12 +119,13 @@ static void render_header(struct ncplane *plane, const Theme *theme) {
 // Fill the rectangle that holds the column labels, row labels, border, and
 // cells with a single uniform background. Without this, the labels and the
 // gap col between them and the border would inherit theme->bg, leaving a
-// visible seam against the board's board_bg.
+// visible seam against the board's board_bg. Col 0 is intentionally left
+// at theme->bg as a darker margin.
 static void render_board_area_bg(struct ncplane *plane, const Theme *theme) {
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->board_bg);
   for (int row = COL_LABELS_ROW; row <= BORDER_BOTTOM_ROW; row++) {
-    for (int col = 0; col <= BORDER_RIGHT_COL; col++) {
+    for (int col = LEFT_MARGIN; col <= BORDER_RIGHT_COL; col++) {
       ncplane_putstr_yx(plane, row, col, " ");
     }
   }
@@ -118,9 +135,9 @@ static void render_col_labels(struct ncplane *plane, const Theme *theme) {
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->board_bg);
   for (int col = 0; col < BOARD_DIM; col++) {
-    char label[2] = {(char)('A' + col), '\0'};
     ncplane_putstr_yx(plane, COL_LABELS_ROW,
-                      CELL_COL_BASE + col * CELL_WIDTH, label);
+                      CELL_COL_BASE + col * CELL_WIDTH,
+                      fullwidth_col_labels[col]);
   }
 }
 
@@ -130,7 +147,7 @@ static void render_row_label(struct ncplane *plane, const Theme *theme,
   theme_apply_bg(plane, theme->board_bg);
   char label[4];
   snprintf(label, sizeof(label), "%2d", row + 1);
-  ncplane_putstr_yx(plane, CELL_ROW_BASE + row, 0, label);
+  ncplane_putstr_yx(plane, CELL_ROW_BASE + row, ROW_LABEL_COL, label);
 }
 
 static void render_border(struct ncplane *plane, const Theme *theme) {
@@ -178,15 +195,21 @@ static void render_cell(struct ncplane *plane, const Theme *theme,
     theme_apply_fg(plane, marker.fg);
     theme_apply_bg(plane, theme->board_bg);
     ncplane_putstr_yx(plane, screen_row, screen_col, marker.glyph);
-    ncplane_putstr(plane, " ");
     return;
   }
 
-  // Played tile: " X" right-aligned in the 2-char cell.
   theme_apply_fg(plane, theme->tile_fg);
   theme_apply_bg(plane, theme->tile_bg);
-  ncplane_putstr_yx(plane, screen_row, screen_col, " ");
-  ncplane_putstr(plane, ld->ld_ml_to_hl[ml]);
+  // LDs without a fullwidth column (catalan, german, polish) leave
+  // ld_ml_to_alt_hl empty; fall back to a space + ASCII letter so the
+  // cell still fills its 2-cell width.
+  const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
+  if (fullwidth[0] != '\0') {
+    ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
+  } else {
+    ncplane_putstr_yx(plane, screen_row, screen_col, " ");
+    ncplane_putstr(plane, ld->ld_ml_to_hl[ml]);
+  }
 }
 
 static void render_board(struct ncplane *plane, const Theme *theme,
