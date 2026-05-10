@@ -342,9 +342,14 @@ static void draw_pixel_grid(struct ncplane *grid_plane, const Theme *theme,
   const uint8_t g = theme->bg.g;
   const uint8_t b = theme->bg.b;
 
-  // Horizontal lines: tile row borders + closing line at the bottom edge.
+  // Horizontal lines: top edge sits at row 0 (opening line), then every
+  // boundary line is drawn in the BOTTOM `thickness` pixels of the tile
+  // above it. This biases the line away from the top of each cell so
+  // letters render with empty space above them, which centers the glyph
+  // visually inside its cell.
   for (int i = 0; i <= tiles_y; i++) {
-    int line_top = (i == tiles_y) ? (int)buf_h - thickness : i * (int)tile_h_px;
+    int line_top =
+        (i == 0) ? 0 : i * (int)tile_h_px - thickness;
     if (line_top < 0) {
       line_top = 0;
     }
@@ -363,10 +368,11 @@ static void draw_pixel_grid(struct ncplane *grid_plane, const Theme *theme,
       }
     }
   }
-  // Vertical lines.
+  // Vertical lines: same idea — left edge at col 0, then every boundary
+  // line lives in the RIGHT `thickness` cols of the tile to its left.
   for (int i = 0; i <= tiles_x; i++) {
     int line_left =
-        (i == tiles_x) ? (int)buf_w - thickness : i * (int)tile_w_px;
+        (i == 0) ? 0 : i * (int)tile_w_px - thickness;
     if (line_left < 0) {
       line_left = 0;
     }
