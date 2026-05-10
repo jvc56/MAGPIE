@@ -528,12 +528,15 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 
 // ── History panel ─────────────────────────────────────────────────────────
 //
-// Each entry takes 2 rows:
-//   "  N. 8H POND              +14 / 67"   (label · move · score / total)
-//   "      AEINRT                   5:00"  (full rack at turn start · clock)
-// Player 1 entries get accent_fg on the move; player 2 stays dim_fg.
-// When the panel is wide enough (>= HISTORY_TWO_COL_THRESHOLD), entries
-// are tiled into two side-by-side columns chronologically.
+// Each entry takes 2 rows, woogles-style:
+//   " 18. L1 RE(W)I(N)                  +38"
+//   "     4:42 AEINRT                    91"
+//
+// Row 1: number, move (bold for position + played tiles, regular for
+// playthrough), and the points scored on this play (non-bold), right-
+// aligned. Row 2: indented start-of-turn clock, the player's full rack at
+// turn start, and the running total in bold, right-aligned. Player 1
+// entries get accent_fg on the move; player 2 stays dim_fg.
 
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx,
@@ -542,7 +545,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const ThemeRgb label_fg =
       e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
 
-  // Row 1: prefix + move (with selective bold) + right-aligned score.
+  // ── Row 1: " 18. L1 RE(W)I(N)              +38" ─────────────────────────
   theme_apply_bg(plane, theme->bg);
   ncplane_set_styles(plane, 0);
   theme_apply_fg(plane, theme->dim_fg);
@@ -565,32 +568,43 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   ncplane_set_styles(plane, 0);
 
-  char score_str[24];
-  snprintf(score_str, sizeof(score_str), "+%d / %d", e->score, e->total_after);
-  const int score_len = (int)strlen(score_str);
-  const int score_col = interior_right - score_len + 1;
-  if (score_col > interior_left + (int)strlen(prefix)) {
+  // Right-aligned delta — non-bold, default fg.
+  char delta_str[16];
+  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+  const int delta_len = (int)strlen(delta_str);
+  const int delta_col = interior_right - delta_len + 1;
+  if (delta_col > interior_left + (int)strlen(prefix)) {
     theme_apply_fg(plane, theme->fg);
-    ncplane_putstr_yx(plane, row, score_col, score_str);
+    ncplane_putstr_yx(plane, row, delta_col, delta_str);
   }
 
-  // Row 2: indented full rack + right-aligned clock.
+  // ── Row 2: "     4:42 AEINRT                91" ─────────────────────────
   if (row + 1 > row_bottom_inclusive) {
     return;
   }
-  theme_apply_fg(plane, theme->dim_fg);
-  char rack_line[64];
-  // Indent matches the move text (4 cols past the "%2d. " prefix).
-  snprintf(rack_line, sizeof(rack_line), "    %s",
-           e->rack_str[0] ? e->rack_str : "—");
-  ncplane_putstr_yx(plane, row + 1, interior_left, rack_line);
+  const int row2 = row + 1;
 
+  // Clock on the left, then rack — both dim, non-bold.
+  theme_apply_fg(plane, theme->dim_fg);
   char clock_str[16];
   format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
                sizeof(clock_str));
-  const int clock_len = (int)strlen(clock_str);
-  const int clock_col = interior_right - clock_len + 1;
-  ncplane_putstr_yx(plane, row + 1, clock_col, clock_str);
+  char left_line[48];
+  snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
+           e->rack_str[0] ? e->rack_str : "—");
+  ncplane_putstr_yx(plane, row2, interior_left, left_line);
+
+  // Right-aligned running total — bold, default fg.
+  char total_str[16];
+  snprintf(total_str, sizeof(total_str), "%d", e->total_after);
+  const int total_len = (int)strlen(total_str);
+  const int total_col = interior_right - total_len + 1;
+  if (total_col > interior_left + (int)strlen(left_line)) {
+    theme_apply_fg(plane, theme->fg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row2, total_col, total_str);
+    ncplane_set_styles(plane, 0);
+  }
 }
 
 static void render_history_panel(struct ncplane *plane, const Theme *theme,
