@@ -571,16 +571,42 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
   ncplane_putstr_yx(plane, row, interior_left, prefix);
 
-  bool inside_paren = false;
-  for (const char *p = e->move_str; *p != '\0'; p++) {
-    if (*p == '(') {
-      inside_paren = true;
-    }
-    ncplane_set_styles(plane, inside_paren ? 0 : NCSTYLE_BOLD);
-    const char buf[2] = {*p, '\0'};
-    ncplane_putstr(plane, buf);
-    if (*p == ')') {
-      inside_paren = false;
+  // Batch the move string into bold-runs (outside parens) and non-bold-
+  // runs (parens + their content). Terminal.app mis-renders when we emit
+  // an SGR escape between every character, so we set styles once per run
+  // and write the whole run with a single putstr.
+  {
+    const char *p = e->move_str;
+    const char *end = p + strlen(e->move_str);
+    while (p < end) {
+      const char *seg_end;
+      bool seg_bold;
+      if (*p == '(') {
+        seg_bold = false;
+        seg_end = p;
+        while (seg_end < end && *seg_end != ')') {
+          seg_end++;
+        }
+        if (seg_end < end) {
+          seg_end++;  // include the close paren
+        }
+      } else {
+        seg_bold = true;
+        seg_end = p;
+        while (seg_end < end && *seg_end != '(') {
+          seg_end++;
+        }
+      }
+      ncplane_set_styles(plane, seg_bold ? NCSTYLE_BOLD : 0);
+      char buf[64];
+      size_t len = (size_t)(seg_end - p);
+      if (len >= sizeof(buf)) {
+        len = sizeof(buf) - 1;
+      }
+      memcpy(buf, p, len);
+      buf[len] = '\0';
+      ncplane_putstr(plane, buf);
+      p = seg_end;
     }
   }
   ncplane_set_styles(plane, 0);
