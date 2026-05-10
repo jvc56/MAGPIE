@@ -229,19 +229,21 @@ int main(int argc, char *argv[]) {
   const bool pixel_supported = notcurses_canpixel(nc);
   tui_bot_worker_start(&game_state);
 
-  // Modal state: when menu_open is true, key handling routes to the menu
-  // (Up/Down/Enter/Esc), and the renderer overlays the menu on top of the
-  // game frame.
+  // Modal state: which (if any) modal is open. Drives keyboard routing
+  // and the status-bar control hints.
   bool running = true;
-  bool menu_open = false;
-  int menu_focus = 0;
+  TuiModalState modal = TUI_MODAL_NONE;
+  int main_menu_focus = 0;
+  int settings_focus = 0;
   while (running) {
     pthread_mutex_lock(&game_state.mutex);
-    tui_game_render(std_plane, theme, &game_state, chosen_time);
+    tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
     pthread_mutex_unlock(&game_state.mutex);
-    if (menu_open) {
-      tui_game_render_menu(std_plane, theme, menu_focus,
-                           game_state.border_thickness, pixel_supported);
+    if (modal == TUI_MODAL_MAIN_MENU) {
+      tui_game_render_menu(std_plane, theme, main_menu_focus);
+    } else if (modal == TUI_MODAL_SETTINGS) {
+      tui_game_render_settings(std_plane, theme, settings_focus,
+                               game_state.border_thickness, pixel_supported);
     }
     notcurses_render(nc);
 
@@ -266,45 +268,82 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
-    if (menu_open) {
+    if (modal == TUI_MODAL_MAIN_MENU) {
       if (key == NCKEY_ESC) {
-        menu_open = false;
+        modal = TUI_MODAL_NONE;
       } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-        if (menu_focus > 0) {
-          menu_focus--;
+        if (main_menu_focus > 0) {
+          main_menu_focus--;
         }
       } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-        if (menu_focus < TUI_MENU_ITEM_COUNT - 1) {
-          menu_focus++;
+        if (main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
+          main_menu_focus++;
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-        if (menu_focus == TUI_MENU_QUIT) {
+        if (main_menu_focus == TUI_MENU_RESUME) {
+          modal = TUI_MODAL_NONE;
+        } else if (main_menu_focus == TUI_MENU_SETTINGS) {
+          modal = TUI_MODAL_SETTINGS;
+          settings_focus = 0;
+        } else if (main_menu_focus == TUI_MENU_QUIT) {
           running = false;
-        } else if (menu_focus == TUI_MENU_BORDER) {
-          // Cycle 0 → 1 → 2 → 3 → 4 → 0 when pixel graphics work; on
-          // unsupported terminals leave the value alone.
-          if (pixel_supported) {
-            pthread_mutex_lock(&game_state.mutex);
-            game_state.border_thickness =
-                (game_state.border_thickness + 1) % 5;
-            const int new_thickness = game_state.border_thickness;
-            pthread_mutex_unlock(&game_state.mutex);
-            if (!args.no_config) {
-              to_save.border_thickness = new_thickness;
-              to_save.border_thickness_set = true;
-              tui_config_save(&to_save);
-            }
+        }
+      }
+      continue;
+    }
+
+    if (modal == TUI_MODAL_SETTINGS) {
+      if (key == NCKEY_ESC) {
+        // Esc returns to the main menu so the user can pick another
+        // entry without re-opening from scratch.
+        modal = TUI_MODAL_MAIN_MENU;
+      } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+        if (settings_focus > 0) {
+          settings_focus--;
+        }
+      } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (settings_focus < TUI_SETTINGS_ITEM_COUNT - 1) {
+          settings_focus++;
+        }
+      } else if (key == NCKEY_LEFT || key == 'h' || key == 'H') {
+        if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.border_thickness > 0) {
+            game_state.border_thickness--;
           }
-        } else {
-          menu_open = false;
+          const int v = game_state.border_thickness;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.border_thickness = v;
+            to_save.border_thickness_set = true;
+            tui_config_save(&to_save);
+          }
+        }
+      } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
+        if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.border_thickness < 4) {
+            game_state.border_thickness++;
+          }
+          const int v = game_state.border_thickness;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.border_thickness = v;
+            to_save.border_thickness_set = true;
+            tui_config_save(&to_save);
+          }
+        }
+      } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+        if (settings_focus == TUI_SETTINGS_BACK) {
+          modal = TUI_MODAL_MAIN_MENU;
         }
       }
       continue;
     }
 
     if (key == NCKEY_ESC) {
-      menu_open = true;
-      menu_focus = 0;
+      modal = TUI_MODAL_MAIN_MENU;
+      main_menu_focus = 0;
     }
     // q/Q intentionally unbound — the user will be typing tiles. Quit
     // through Esc → Quit (or Ctrl-C signal).

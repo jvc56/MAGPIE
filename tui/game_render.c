@@ -958,7 +958,8 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 
 // ── Status bar ────────────────────────────────────────────────────────────
 static void render_status_bar(struct ncplane *plane, const Theme *theme,
-                              const TuiGameState *state, const Layout *L) {
+                              const TuiGameState *state, const Layout *L,
+                              TuiModalState modal) {
   const int row = L->status_row;
   if (row < 0) {
     return;
@@ -977,12 +978,36 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
            language_for_lexicon(state->lexicon), state->lexicon);
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
-  // Right side: shortcut hint.
-  const char *right_buf = "esc for menu ";
-  const int right_len = (int)strlen(right_buf);
-  const int right_col = (int)L->plane_cols - right_len;
+  // Right side: dynamic shortcut hint depending on what modal is open.
+  const char *hint = " esc for menu ";
+  switch (modal) {
+  case TUI_MODAL_MAIN_MENU:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 enter confirm \xc2"
+           "\xb7 esc close ";
+    break;
+  case TUI_MODAL_SETTINGS:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
+           "\x86\x92 adjust \xc2\xb7 esc back ";
+    break;
+  case TUI_MODAL_NONE:
+  default:
+    break;
+  }
+  const int hint_len = (int)strlen(hint);
+  // Strlen counts bytes; UTF-8 multibyte chars need to be counted as
+  // single columns. Approximate by subtracting an estimated byte-overhead.
+  // Each ↑/↓/←/→ is 3 bytes (E2 86 9X) but 1 col; · is 2 bytes (C2 B7)
+  // but 1 col. Compute visual width by walking.
+  int hint_cols = 0;
+  for (const unsigned char *p = (const unsigned char *)hint; *p != '\0'; p++) {
+    if ((*p & 0xC0) != 0x80) {  // not a UTF-8 continuation byte
+      hint_cols++;
+    }
+  }
+  (void)hint_len;
+  const int right_col = (int)L->plane_cols - hint_cols;
   if (right_col > 0) {
-    ncplane_putstr_yx(plane, row, right_col, right_buf);
+    ncplane_putstr_yx(plane, row, right_col, hint);
   }
 }
 
@@ -994,7 +1019,8 @@ static void render_too_small(struct ncplane *plane, const Theme *theme) {
 }
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
-                     const TuiGameState *state, int time_per_side_seconds) {
+                     const TuiGameState *state, int time_per_side_seconds,
+                     TuiModalState modal) {
   if (plane == NULL || theme == NULL || state == NULL || state->game == NULL) {
     return;
   }
@@ -1044,38 +1070,20 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
                      L.pill2_right);
   render_history_panel(plane, theme, state, &L);
 
-  render_status_bar(plane, theme, state, &L);
+  render_status_bar(plane, theme, state, &L, modal);
 }
 
-// ── Menu modal ────────────────────────────────────────────────────────────
-void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus,
-                          int border_thickness, bool pixel_supported) {
-  if (plane == NULL || theme == NULL) {
-    return;
-  }
+// ── Modal helpers ─────────────────────────────────────────────────────────
+//
+// A modal is a centered box on top of the game frame. We render the items
+// vertically with the focused row using accent_fg as a highlight stripe.
+
+static void render_modal(struct ncplane *plane, const Theme *theme,
+                         const char *title, const char *const *items,
+                         int item_count, int focus, int width) {
   unsigned plane_rows = 0;
   unsigned plane_cols = 0;
   ncplane_dim_yx(plane, &plane_rows, &plane_cols);
-
-  // Build per-item label. The middle row varies with current settings.
-  char border_label[64];
-  if (!pixel_supported) {
-    snprintf(border_label, sizeof(border_label),
-             "Border: unsupported here");
-  } else if (border_thickness <= 0) {
-    snprintf(border_label, sizeof(border_label), "Border: off");
-  } else {
-    snprintf(border_label, sizeof(border_label), "Border: %dpx",
-             border_thickness);
-  }
-
-  const char *items[TUI_MENU_ITEM_COUNT];
-  items[TUI_MENU_RESUME] = "Resume";
-  items[TUI_MENU_BORDER] = border_label;
-  items[TUI_MENU_QUIT] = "Quit";
-  const int item_count = TUI_MENU_ITEM_COUNT;
-
-  const int width = 30;
   const int height = 3 + item_count;
   if ((unsigned)width >= plane_cols || (unsigned)height >= plane_rows) {
     return;
@@ -1090,7 +1098,7 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus,
       ncplane_putstr_yx(plane, r, c, " ");
     }
   }
-  draw_box(plane, theme, top, left, height, width, "Menu");
+  draw_box(plane, theme, top, left, height, width, title);
 
   for (int i = 0; i < item_count; i++) {
     const int item_row = top + 2 + i;
@@ -1102,8 +1110,55 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus,
       theme_apply_fg(plane, theme->fg);
       theme_apply_bg(plane, theme->bg);
     }
-    char line[64];
+    char line[96];
     snprintf(line, sizeof(line), "  %-*s", width - 4, items[i]);
     ncplane_putstr_yx(plane, item_row, left + 1, line);
   }
+}
+
+void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
+                          int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  const char *items[TUI_MENU_ITEM_COUNT];
+  items[TUI_MENU_RESUME] = "Resume";
+  items[TUI_MENU_SETTINGS] = "Settings";
+  items[TUI_MENU_QUIT] = "Quit";
+  render_modal(plane, theme, "Menu", items, TUI_MENU_ITEM_COUNT, focus, 28);
+}
+
+void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
+                              int focus, int border_thickness,
+                              bool pixel_supported) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  // Border row shows arrow indicators when focused so it's obvious the
+  // value is adjustable with ◀ / ▶.
+  char border_label[96];
+  if (!pixel_supported) {
+    snprintf(border_label, sizeof(border_label),
+             "Border         unsupported here");
+  } else {
+    char value_buf[16];
+    if (border_thickness <= 0) {
+      snprintf(value_buf, sizeof(value_buf), "off");
+    } else {
+      snprintf(value_buf, sizeof(value_buf), "%dpx", border_thickness);
+    }
+    if (focus == TUI_SETTINGS_BORDER) {
+      snprintf(border_label, sizeof(border_label),
+               "Border         \xe2\x97\x80 %s \xe2\x96\xb6", value_buf);
+    } else {
+      snprintf(border_label, sizeof(border_label), "Border         %s",
+               value_buf);
+    }
+  }
+
+  const char *items[TUI_SETTINGS_ITEM_COUNT];
+  items[TUI_SETTINGS_BORDER] = border_label;
+  items[TUI_SETTINGS_BACK] = "Back";
+  render_modal(plane, theme, "Settings", items, TUI_SETTINGS_ITEM_COUNT, focus,
+               36);
 }
