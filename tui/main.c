@@ -134,6 +134,10 @@ int main(int argc, char *argv[]) {
   if (nc == NULL) {
     return 1;
   }
+  // Hard-disable scrolling on the std plane: macOS Terminal can otherwise
+  // scroll the alt screen when render coords overflow the visible area
+  // mid-resize, and that scroll is irreversible.
+  ncplane_set_scrolling(notcurses_stdplane(nc), false);
 
   // Load saved settings (if any), then resolve each in order: theme first
   // (it controls the picker palette for the others), then lexicon, then
