@@ -100,9 +100,23 @@ static void render_header(struct ncplane *plane, const Theme *theme) {
   ncplane_putstr_yx(plane, HEADER_ROW, 2, " MAGPIE TUI ");
 }
 
+// Fill the rectangle that holds the column labels, row labels, border, and
+// cells with a single uniform background. Without this, the labels and the
+// gap col between them and the border would inherit theme->bg, leaving a
+// visible seam against the board's board_bg.
+static void render_board_area_bg(struct ncplane *plane, const Theme *theme) {
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->board_bg);
+  for (int row = COL_LABELS_ROW; row <= BORDER_BOTTOM_ROW; row++) {
+    for (int col = 0; col <= BORDER_RIGHT_COL; col++) {
+      ncplane_putstr_yx(plane, row, col, " ");
+    }
+  }
+}
+
 static void render_col_labels(struct ncplane *plane, const Theme *theme) {
   theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+  theme_apply_bg(plane, theme->board_bg);
   for (int col = 0; col < BOARD_DIM; col++) {
     char label[2] = {(char)('A' + col), '\0'};
     ncplane_putstr_yx(plane, COL_LABELS_ROW,
@@ -113,7 +127,7 @@ static void render_col_labels(struct ncplane *plane, const Theme *theme) {
 static void render_row_label(struct ncplane *plane, const Theme *theme,
                              int row) {
   theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+  theme_apply_bg(plane, theme->board_bg);
   char label[4];
   snprintf(label, sizeof(label), "%2d", row + 1);
   ncplane_putstr_yx(plane, CELL_ROW_BASE + row, 0, label);
@@ -121,7 +135,7 @@ static void render_row_label(struct ncplane *plane, const Theme *theme,
 
 static void render_border(struct ncplane *plane, const Theme *theme) {
   theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+  theme_apply_bg(plane, theme->board_bg);
 
   // Top border.
   ncplane_putstr_yx(plane, BORDER_TOP_ROW, BORDER_LEFT_COL, "\xe2\x94\x8f");
@@ -177,6 +191,7 @@ static void render_cell(struct ncplane *plane, const Theme *theme,
 
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state) {
+  render_board_area_bg(plane, theme);
   render_col_labels(plane, theme);
   render_border(plane, theme);
   const Board *board = game_get_board(state->game);
