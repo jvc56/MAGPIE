@@ -17,10 +17,13 @@ typedef struct {
   bool lexicon_set;
   int time_per_side_seconds;
   bool time_per_side_set;
-  // Pixel-grid border thickness. 0 = off; 1..4 supported. -1 in
-  // _set-form (i.e., border_thickness_set=false) means "use default".
+  // Pixel-grid border thickness. 0 = off; 1..6 supported.
   int border_thickness;
   bool border_thickness_set;
+  // Render played blanks as uppercase letters in blank_tile_fg, instead
+  // of the engine's lowercase rendering in tile_fg.
+  bool blank_uppercase;
+  bool blank_uppercase_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

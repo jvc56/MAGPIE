@@ -32,15 +32,17 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 // focused row adjust that setting's value.
 typedef enum {
   TUI_SETTINGS_BORDER = 0,
-  TUI_SETTINGS_BACK = 1,
-  TUI_SETTINGS_ITEM_COUNT = 2,
+  TUI_SETTINGS_BLANKS = 1,
+  TUI_SETTINGS_BACK = 2,
+  TUI_SETTINGS_ITEM_COUNT = 3,
 } TuiSettingsItem;
 
-// `border_thickness` is the current value (0 = off, 1..4 supported).
-// `pixel_supported` toggles between numeric/off display and the
-// "unsupported here" notice.
+// `border_thickness` is the current pixel-grid thickness (0..6).
+// `pixel_supported` is true when the host terminal can render pixel
+// graphics. `blank_uppercase` controls whether played blanks render
+// uppercase (with blank_tile_fg) or lowercase (with the regular tile_fg).
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int border_thickness,
-                              bool pixel_supported);
+                              bool pixel_supported, bool blank_uppercase);
 
 #endif

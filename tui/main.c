@@ -226,6 +226,8 @@ int main(int argc, char *argv[]) {
   // Pixel-grid border thickness: from config when present, else default 2.
   game_state.border_thickness =
       loaded.border_thickness_set ? loaded.border_thickness : 2;
+  game_state.blank_uppercase =
+      loaded.blank_uppercase_set ? loaded.blank_uppercase : false;
   const bool pixel_supported = notcurses_canpixel(nc);
   tui_bot_worker_start(&game_state);
 
@@ -243,7 +245,8 @@ int main(int argc, char *argv[]) {
       tui_game_render_menu(std_plane, theme, main_menu_focus);
     } else if (modal == TUI_MODAL_SETTINGS) {
       tui_game_render_settings(std_plane, theme, settings_focus,
-                               game_state.border_thickness, pixel_supported);
+                               game_state.border_thickness, pixel_supported,
+                               game_state.blank_uppercase);
     }
     notcurses_render(nc);
 
@@ -318,6 +321,17 @@ int main(int argc, char *argv[]) {
             to_save.border_thickness_set = true;
             tui_config_save(&to_save);
           }
+        } else if (settings_focus == TUI_SETTINGS_BLANKS) {
+          // Blanks is a two-state toggle, so left and right both flip it.
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.blank_uppercase = !game_state.blank_uppercase;
+          const bool v = game_state.blank_uppercase;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.blank_uppercase = v;
+            to_save.blank_uppercase_set = true;
+            tui_config_save(&to_save);
+          }
         }
       } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
         if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
@@ -330,6 +344,16 @@ int main(int argc, char *argv[]) {
           if (!args.no_config) {
             to_save.border_thickness = v;
             to_save.border_thickness_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_BLANKS) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.blank_uppercase = !game_state.blank_uppercase;
+          const bool v = game_state.blank_uppercase;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.blank_uppercase = v;
+            to_save.blank_uppercase_set = true;
             tui_config_save(&to_save);
           }
         }

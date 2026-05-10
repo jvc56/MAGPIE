@@ -142,6 +142,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   out_state->seconds_used[0] = 0.0;
   out_state->seconds_used[1] = 0.0;
   out_state->border_thickness = 2;  // default; overridden by config
+  out_state->blank_uppercase = false;
   clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
   error_stack_destroy(err);

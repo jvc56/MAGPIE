@@ -51,6 +51,7 @@ typedef struct {
 
   // Visual settings.
   int border_thickness;  // pixel-grid line thickness; 0 = off
+  bool blank_uppercase;  // played blanks render uppercase + blank_tile_fg
 
   // Clock state.
   int time_per_side_seconds;

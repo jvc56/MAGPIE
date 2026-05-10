@@ -38,6 +38,7 @@ typedef struct {
   ThemeRgb board_bg;
   ThemeRgb tile_fg;
   ThemeRgb tile_bg;
+  ThemeRgb blank_tile_fg;  // fg for played-blank tiles, distinct from tile_fg
   ThemeRgb rack_tile_fg;
   ThemeRgb rack_tile_bg;
   ThemeRgb on_turn_fg;

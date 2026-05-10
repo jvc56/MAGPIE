@@ -86,6 +86,8 @@ bool tui_config_load(TuiConfig *config) {
   config->time_per_side_set = false;
   config->border_thickness = 2;
   config->border_thickness_set = false;
+  config->blank_uppercase = false;
+  config->blank_uppercase_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -153,6 +155,14 @@ bool tui_config_load(TuiConfig *config) {
         config->border_thickness = (int)parsed;
         config->border_thickness_set = true;
       }
+    } else if (strcmp(trimmed, "blank_uppercase") == 0) {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
+        config->blank_uppercase = true;
+        config->blank_uppercase_set = true;
+      } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
+        config->blank_uppercase = false;
+        config->blank_uppercase_set = true;
+      }
     }
   }
 
@@ -190,6 +200,10 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->border_thickness_set) {
     fprintf(file, "border_thickness = %d\n", config->border_thickness);
+  }
+  if (config->blank_uppercase_set) {
+    fprintf(file, "blank_uppercase = %s\n",
+            config->blank_uppercase ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

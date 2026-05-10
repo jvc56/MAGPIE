@@ -461,14 +461,19 @@ static void render_board(struct ncplane *plane, const Theme *theme,
         ncplane_putstr_yx(plane, screen_row, screen_col, marker.glyph);
         continue;
       }
-      theme_apply_fg(plane, theme->tile_fg);
+      const bool is_blank = get_is_blanked(ml);
+      const bool render_uppercase = is_blank && state->blank_uppercase;
+      const MachineLetter glyph_ml =
+          render_uppercase ? get_unblanked_machine_letter(ml) : ml;
+      theme_apply_fg(plane,
+                     is_blank ? theme->blank_tile_fg : theme->tile_fg);
       theme_apply_bg(plane, theme->tile_bg);
-      const char *fullwidth = state->ld->ld_ml_to_alt_hl[ml];
+      const char *fullwidth = state->ld->ld_ml_to_alt_hl[glyph_ml];
       if (fullwidth[0] != '\0') {
         ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
       } else {
         ncplane_putstr_yx(plane, screen_row, screen_col, " ");
-        ncplane_putstr(plane, state->ld->ld_ml_to_hl[ml]);
+        ncplane_putstr(plane, state->ld->ld_ml_to_hl[glyph_ml]);
       }
     }
   }
@@ -1129,18 +1134,31 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
   render_modal(plane, theme, "Menu", items, TUI_MENU_ITEM_COUNT, focus, 28);
 }
 
+// Helper for an arrow-adjusted Settings row. Renders
+//   "<label>   ◀ <value> ▶"   when focused
+//   "<label>   <value>"       when not focused
+// `value` may be a fixed string (e.g., "lowercase") or numeric.
+static void format_setting_row(char *out, size_t out_size, const char *label,
+                               const char *value, bool focused) {
+  if (focused) {
+    snprintf(out, out_size, "%-13s\xe2\x97\x80 %s \xe2\x96\xb6", label, value);
+  } else {
+    snprintf(out, out_size, "%-13s%s", label, value);
+  }
+}
+
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int border_thickness,
-                              bool pixel_supported) {
+                              bool pixel_supported, bool blank_uppercase) {
   if (plane == NULL || theme == NULL) {
     return;
   }
-  // Border row shows arrow indicators when focused so it's obvious the
-  // value is adjustable with ◀ / ▶.
+
+  // Border row.
   char border_label[96];
   if (!pixel_supported) {
     snprintf(border_label, sizeof(border_label),
-             "Border         unsupported here");
+             "Border       unsupported here");
   } else {
     char value_buf[16];
     if (border_thickness <= 0) {
@@ -1148,18 +1166,20 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
     } else {
       snprintf(value_buf, sizeof(value_buf), "%dpx", border_thickness);
     }
-    if (focus == TUI_SETTINGS_BORDER) {
-      snprintf(border_label, sizeof(border_label),
-               "Border         \xe2\x97\x80 %s \xe2\x96\xb6", value_buf);
-    } else {
-      snprintf(border_label, sizeof(border_label), "Border         %s",
-               value_buf);
-    }
+    format_setting_row(border_label, sizeof(border_label), "Border", value_buf,
+                       focus == TUI_SETTINGS_BORDER);
   }
+
+  // Blanks row.
+  char blanks_label[96];
+  format_setting_row(blanks_label, sizeof(blanks_label), "Blanks",
+                     blank_uppercase ? "uppercase" : "lowercase",
+                     focus == TUI_SETTINGS_BLANKS);
 
   const char *items[TUI_SETTINGS_ITEM_COUNT];
   items[TUI_SETTINGS_BORDER] = border_label;
+  items[TUI_SETTINGS_BLANKS] = blanks_label;
   items[TUI_SETTINGS_BACK] = "Back";
   render_modal(plane, theme, "Settings", items, TUI_SETTINGS_ITEM_COUNT, focus,
-               36);
+               40);
 }
