@@ -3,6 +3,7 @@
 #include <ctype.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <notcurses/notcurses.h>
 #include "../src/def/board_defs.h"
@@ -256,6 +257,111 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
   const int minutes = seconds / 60;
   const int secs = seconds % 60;
   snprintf(buf, buf_size, "%d:%02d", minutes, secs);
+}
+
+// ── Pixel-graphics grid overlay ───────────────────────────────────────────
+//
+// On terminals that support pixel graphics (Kitty graphics protocol or
+// Sixel — ghostty/iTerm2/kitty/foot/modern xterm), render an RGBA bitmap
+// of 1-pixel borders in theme->bg over a child plane positioned at the
+// board cells. Pixels with alpha=0 composite through to the std plane,
+// so the cell content (premium markers, fullwidth tile letters) stays
+// readable underneath. On Terminal.app and any terminal without pixel
+// support, this is a no-op — the board renders without grid lines.
+static void render_grid_overlay_pixel(struct ncplane *parent,
+                                      const Theme *theme) {
+  struct notcurses *nc = ncplane_notcurses(parent);
+  if (nc == NULL || !notcurses_canpixel(nc)) {
+    return;
+  }
+
+  static struct ncplane *grid = NULL;
+  if (grid == NULL) {
+    ncplane_options opts = {0};
+    opts.y = CELL_ROW_BASE;
+    opts.x = CELL_COL_BASE;
+    opts.rows = BOARD_DIM;
+    opts.cols = BOARD_DIM * CELL_WIDTH;
+    opts.name = "grid_pixel";
+    grid = ncplane_create(parent, &opts);
+    if (grid == NULL) {
+      return;
+    }
+    uint64_t base_ch = 0;
+    ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+    ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+    ncplane_set_base(grid, " ", 0, base_ch);
+  }
+
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
+  ncplane_pixel_geom(grid, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+
+  const unsigned buf_h = (unsigned)BOARD_DIM * cdy;
+  const unsigned buf_w = (unsigned)BOARD_DIM * (unsigned)CELL_WIDTH * cdx;
+  const size_t buf_bytes = (size_t)buf_h * buf_w * 4;
+  uint8_t *buf = (uint8_t *)calloc(1, buf_bytes);
+  if (buf == NULL) {
+    return;
+  }
+
+  const uint8_t r = theme->bg.r;
+  const uint8_t g = theme->bg.g;
+  const uint8_t b = theme->bg.b;
+  const uint8_t a = 255;
+
+  // Horizontal lines: top of every cell row + a closing line on the last
+  // pixel row of the bitmap (so the bottom border isn't clipped).
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    const unsigned row =
+        (i == BOARD_DIM) ? (buf_h - 1) : (unsigned)i * cdy;
+    if (row >= buf_h) {
+      continue;
+    }
+    uint8_t *p = buf + (size_t)row * buf_w * 4;
+    for (unsigned col = 0; col < buf_w; col++) {
+      p[0] = r;
+      p[1] = g;
+      p[2] = b;
+      p[3] = a;
+      p += 4;
+    }
+  }
+
+  // Vertical lines: left of every cell + a closing line on the last pixel
+  // col. Each board cell is CELL_WIDTH terminal cols wide, so the column
+  // stride between grid lines is CELL_WIDTH * cdx pixels.
+  const unsigned cell_px = (unsigned)CELL_WIDTH * cdx;
+  for (int i = 0; i <= BOARD_DIM; i++) {
+    const unsigned col =
+        (i == BOARD_DIM) ? (buf_w - 1) : (unsigned)i * cell_px;
+    if (col >= buf_w) {
+      continue;
+    }
+    for (unsigned row = 0; row < buf_h; row++) {
+      uint8_t *p = buf + ((size_t)row * buf_w + col) * 4;
+      p[0] = r;
+      p[1] = g;
+      p[2] = b;
+      p[3] = a;
+    }
+  }
+
+  struct ncvisual_options vopts = {0};
+  vopts.n = grid;
+  vopts.blitter = NCBLIT_PIXEL;
+  vopts.leny = buf_h;
+  vopts.lenx = buf_w;
+  ncblit_rgba(buf, (int)(buf_w * 4), &vopts);
+
+  free(buf);
 }
 
 // ── Board ─────────────────────────────────────────────────────────────────
@@ -846,6 +952,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state);
+  render_grid_overlay_pixel(plane, theme);
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
