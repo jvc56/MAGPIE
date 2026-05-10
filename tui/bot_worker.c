@@ -44,7 +44,8 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
 
 // Caller must hold state->mutex.
 static void append_history(TuiGameState *state, int player_idx,
-                           const Move *move, int score, int total_after) {
+                           const Move *move, int score, int total_after,
+                           int clock_at_start) {
   if (state->history_count >= TUI_HISTORY_MAX) {
     // Drop oldest.
     memmove(&state->history[0], &state->history[1],
@@ -56,21 +57,18 @@ static void append_history(TuiGameState *state, int player_idx,
   entry->player_idx = player_idx;
   entry->score = score;
   entry->total_after = total_after;
+  entry->clock_at_start = clock_at_start;
 
   StringBuilder *sb = string_builder_create();
+  // add_score=false: we render the score in our own column.
   string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
-                          true);
+                          false);
   size_t move_len = 0;
   char *move_dump = string_builder_dump(sb, &move_len);
   copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
   free(move_dump);
   string_builder_destroy(sb);
 
-  // Leave: rack contents AFTER playing (the player's current rack now that
-  // play_move has drawn replacements? No — we want the leave from the move,
-  // i.e., the tiles that were not played). Compute via get_leave_for_move
-  // before the play, OR just dump the player's rack after — but the player
-  // already drew replacements. So caller passes a pre-computed leave string.
   entry->leave_str[0] = '\0';
 }
 
@@ -118,6 +116,12 @@ static void *bot_thread_main(void *arg) {
       finished = true;
     } else {
       const int player_idx = game_get_player_on_turn_index(state->game);
+      // Snapshot the clock at the moment this turn started — that is, the
+      // value at the end of the previous play, before any of this turn's
+      // think time has been counted against the player.
+      const int clock_at_start = state->time_per_side_seconds -
+                                 (int)state->seconds_used[player_idx];
+
       const MoveGenArgs args = {
           .game = state->game,
           .move_record_type = MOVE_RECORD_BEST,
@@ -141,8 +145,20 @@ static void *bot_thread_main(void *arg) {
         play_move(best, state->game, &leave);
         const int total_after = equity_to_int(player_get_score(
             game_get_player(state->game, player_idx)));
-        append_history(state, player_idx, best, score, total_after);
+        append_history(state, player_idx, best, score, total_after,
+                       clock_at_start);
         set_history_leave(state, &leave);
+
+        // Charge this turn's elapsed time to the player who just moved,
+        // and reset turn_started so the next player's clock begins now.
+        struct timespec now;
+        clock_gettime(CLOCK_MONOTONIC, &now);
+        const double elapsed =
+            (double)(now.tv_sec - state->turn_started.tv_sec) +
+            (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+        state->seconds_used[player_idx] += elapsed;
+        state->turn_started = now;
+
         if (game_over(state->game)) {
           finished = true;
         }

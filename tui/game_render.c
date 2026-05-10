@@ -424,11 +424,25 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, L->bag_bottom - 1, interior_left, tally);
 }
 
+// Live clock: how many seconds remain for player_idx, accounting for the
+// time elapsed in the current on-turn player's turn so the display ticks
+// in real time. Caller must hold state->mutex.
+static double seconds_remaining(const TuiGameState *state, int player_idx) {
+  double used = state->seconds_used[player_idx];
+  if (game_get_player_on_turn_index(state->game) == player_idx &&
+      !game_over(state->game)) {
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    used += (double)(now.tv_sec - state->turn_started.tv_sec) +
+            (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+  }
+  return (double)state->time_per_side_seconds - used;
+}
+
 // ── Player pill ───────────────────────────────────────────────────────────
 static void render_player_pill(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, int player_idx,
-                               int top_row, int time_per_side_seconds,
-                               const Layout *L) {
+                               int top_row, const Layout *L) {
   const int width = L->right_col_right - L->right_col_left + 1;
   draw_box(plane, theme, top_row, L->right_col_left, PILL_HEIGHT, width, NULL);
 
@@ -449,8 +463,9 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
            equity_to_int(player_get_score(player)));
+  const double remaining = seconds_remaining(state, player_idx);
   char clock_str[16];
-  format_clock(time_per_side_seconds, clock_str, sizeof(clock_str));
+  format_clock(remaining < 0 ? 0 : (int)remaining, clock_str, sizeof(clock_str));
 
   const int right = L->right_col_right - 1;
   const int clock_len = (int)strlen(clock_str);
@@ -509,30 +524,66 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     const TuiHistoryEntry *e = &state->history[idx];
     const ThemeRgb label_fg =
         e->player_idx == 0 ? theme->accent_fg : theme->dim_fg;
-    char header[96];
-    snprintf(header, sizeof(header), "%2d. %-14s +%d / %d", idx + 1,
-             e->move_str, e->score, e->total_after);
-    if ((int)strlen(header) > interior_width) {
-      header[interior_width] = '\0';
-    }
-    theme_apply_fg(plane, label_fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_putstr_yx(plane, row, interior_left, header);
 
-    if (e->leave_str[0] != '\0' && row + 1 < L->history_bottom) {
-      char leave_line[64];
-      snprintf(leave_line, sizeof(leave_line), "    leave %s", e->leave_str);
-      if ((int)strlen(leave_line) > interior_width) {
-        leave_line[interior_width] = '\0';
+    // Row 1: " N. POS WORD            +score / total"
+    // The position prefix and played-tile letters render bold; parens
+    // and playthrough letters stay non-bold.
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, theme->dim_fg);
+    char prefix[8];
+    snprintf(prefix, sizeof(prefix), "%3d. ", idx + 1);
+    ncplane_putstr_yx(plane, row, interior_left, prefix);
+
+    // Move string with selective bold.
+    theme_apply_fg(plane, label_fg);
+    bool inside_paren = false;
+    for (const char *p = e->move_str; *p != '\0'; p++) {
+      if (*p == '(') {
+        inside_paren = true;
       }
-      theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row + 1, interior_left, leave_line);
+      ncplane_set_styles(plane, inside_paren ? 0 : NCSTYLE_BOLD);
+      const char buf[2] = {*p, '\0'};
+      ncplane_putstr(plane, buf);
+      if (*p == ')') {
+        inside_paren = false;
+      }
     }
+    ncplane_set_styles(plane, 0);
+
+    // Score / total, right-aligned at the row's right edge.
+    char score_str[24];
+    snprintf(score_str, sizeof(score_str), "+%d / %d", e->score,
+             e->total_after);
+    const int score_len = (int)strlen(score_str);
+    const int score_col = interior_right - score_len + 1;
+    if (score_col > interior_left + (int)strlen(prefix) + 6) {
+      theme_apply_fg(plane, theme->fg);
+      ncplane_putstr_yx(plane, row, score_col, score_str);
+    }
+
+    // Row 2: "    leave AEINRT     5:00"
+    if (row + 1 < L->history_bottom) {
+      theme_apply_fg(plane, theme->dim_fg);
+      char leave_line[64];
+      snprintf(leave_line, sizeof(leave_line), "    leave %s",
+               e->leave_str[0] ? e->leave_str : "—");
+      ncplane_putstr_yx(plane, row + 1, interior_left, leave_line);
+
+      char clock_str[16];
+      format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
+                   sizeof(clock_str));
+      const int clock_len = (int)strlen(clock_str);
+      const int clock_col = interior_right - clock_len + 1;
+      ncplane_putstr_yx(plane, row + 1, clock_col, clock_str);
+    }
+
     row += rows_per_entry;
     if (row + 1 > L->history_bottom) {
       break;
     }
   }
+  (void)interior_width;
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
@@ -592,10 +643,9 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
-  render_player_pill(plane, theme, state, 0, L.pill1_top,
-                     time_per_side_seconds, &L);
-  render_player_pill(plane, theme, state, 1, L.pill2_top,
-                     time_per_side_seconds, &L);
+  (void)time_per_side_seconds;  // now read from state->time_per_side_seconds
+  render_player_pill(plane, theme, state, 0, L.pill1_top, &L);
+  render_player_pill(plane, theme, state, 1, L.pill2_top, &L);
   render_history_panel(plane, theme, state, &L);
 
   render_status_bar(plane, theme, state, &L);

@@ -6,6 +6,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 // Forward declarations keep this header light. Implementation pulls in
 // the engine types directly.
@@ -21,10 +22,11 @@ enum {
 
 typedef struct {
   int player_idx;
-  int score;        // points earned on this play
-  int total_after;  // running total after this play
-  char move_str[48];   // "8H POND" or "exch DEFG" or "pass"
-  char leave_str[16];  // tiles left in rack after the play
+  int score;             // points earned on this play
+  int total_after;       // running total after this play
+  int clock_at_start;    // seconds remaining when this player's turn began
+  char move_str[48];     // "8H POND" or "exch DEFG" or "pass" (no score)
+  char leave_str[16];    // tiles left in rack after the play
 } TuiHistoryEntry;
 
 typedef struct {
@@ -41,6 +43,12 @@ typedef struct {
 
   TuiHistoryEntry history[TUI_HISTORY_MAX];
   int history_count;
+
+  // Clock state.
+  int time_per_side_seconds;
+  double seconds_used[2];          // accumulated time used by each side
+  struct timespec turn_started;    // CLOCK_MONOTONIC; when the on-turn
+                                   // player's current turn started ticking
 
   // Bot worker.
   pthread_t bot_thread;
@@ -61,5 +69,9 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
                          size_t error_message_size);
 
 void tui_game_state_destroy(TuiGameState *state);
+
+// Set the per-side time budget. Call once after init, before the bot
+// worker starts. Resets the on-turn player's turn_started to "now".
+void tui_game_state_set_time_per_side(TuiGameState *state, int seconds);
 
 #endif

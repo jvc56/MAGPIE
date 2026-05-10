@@ -222,6 +222,7 @@ int main(int argc, char *argv[]) {
     return 1;
   }
 
+  tui_game_state_set_time_per_side(&game_state, chosen_time);
   tui_bot_worker_start(&game_state);
 
   // Modal state: when menu_open is true, key handling routes to the menu

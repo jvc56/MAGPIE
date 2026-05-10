@@ -138,6 +138,10 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   atomic_store(&out_state->bot_stop, false);
   out_state->bot_started = false;
   out_state->history_count = 0;
+  out_state->time_per_side_seconds = 0;
+  out_state->seconds_used[0] = 0.0;
+  out_state->seconds_used[1] = 0.0;
+  clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
   error_stack_destroy(err);
   return true;
@@ -146,6 +150,16 @@ fail:
   error_stack_destroy(err);
   tui_game_state_destroy(out_state);
   return false;
+}
+
+void tui_game_state_set_time_per_side(TuiGameState *state, int seconds) {
+  if (state == NULL) {
+    return;
+  }
+  state->time_per_side_seconds = seconds;
+  state->seconds_used[0] = 0.0;
+  state->seconds_used[1] = 0.0;
+  clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
 }
 
 void tui_game_state_destroy(TuiGameState *state) {
