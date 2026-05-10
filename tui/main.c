@@ -322,7 +322,7 @@ int main(int argc, char *argv[]) {
       } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
         if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
           pthread_mutex_lock(&game_state.mutex);
-          if (game_state.border_thickness < 4) {
+          if (game_state.border_thickness < 6) {
             game_state.border_thickness++;
           }
           const int v = game_state.border_thickness;
