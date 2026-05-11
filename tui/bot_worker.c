@@ -154,6 +154,11 @@ static void *bot_thread_main(void *arg) {
         Rack leave;
         rack_set_dist_size(&leave, ld_get_size(state->ld));
         play_move(best, state->game, &leave);
+        // Bump render_version so the cached board pixel composite
+        // knows to rebuild on the next frame; without this the
+        // renderer would skip the blit and the new tile wouldn't
+        // appear until the user nudged a setting.
+        atomic_fetch_add(&state->render_version, 1);
         const int post_play_score = equity_to_int(
             player_get_score(game_get_player(state->game, player_idx)));
 

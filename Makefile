@@ -121,9 +121,15 @@ endif
 # Engine sources use the project's release-style flags (no -Werror) since
 # they are already linted under BUILD=dev for magpie/magpie_test. TUI
 # sources use stricter flags so new code stays in project style.
-TUI_ENGINE_CFLAGS := -O2 -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
-TUI_CFLAGS := -O2 -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
-TUI_LDFLAGS := -pthread
+# Use release-grade optimization for both engine and TUI sources. The
+# 2x pixel composite + per-cell fill loops are tight per-pixel work
+# that vectorizes well at -O3 -march=native, and the engine's move gen
+# is the same code path the release magpie binary uses. -flto lets the
+# linker inline across translation units (notably the engine's small
+# accessor helpers called from the renderer).
+TUI_ENGINE_CFLAGS := -O3 -flto -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+TUI_CFLAGS := -O3 -flto -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+TUI_LDFLAGS := -pthread -flto
 
 .PHONY: all clean iwyu
 

@@ -145,6 +145,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
   out_state->board_scale = 1;
   out_state->antialias = true;
+  atomic_store(&out_state->render_version, (uint64_t)1);
   // Load the bundled TTF for 2x mode. Failure here just leaves
   // glyph_cache NULL — the renderer treats that as "scale=2 unavailable"
   // and silently falls back to 1x.

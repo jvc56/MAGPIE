@@ -337,6 +337,28 @@ static struct {
   struct ncplane *preview_board;
 } grid_planes;
 
+// Per-plane blit caches. ncblit_rgba is the FPS bottleneck — even on
+// identical content, notcurses re-encodes the Kitty graphics bytes and
+// pushes them through the PTY. Tracking a signature per plane lets us
+// skip the work entirely when state (size, scale, render_version)
+// hasn't changed since the last successful blit. signature=0 means
+// "no valid cache yet"; bump on every successful blit so the next
+// matching call returns early.
+typedef struct {
+  uint64_t version;     // game_state.render_version at last blit
+  unsigned cdy, cdx;    // notcurses cell-pixel dims at last blit
+  int param_a, param_b; // plane-specific extras (thickness, scale, etc.)
+  bool valid;
+} BlitCache;
+
+static BlitCache board_grid_cache;
+static BlitCache board_pixel_cache;
+
+static void invalidate_blit_caches(void) {
+  board_grid_cache.valid = false;
+  board_pixel_cache.valid = false;
+}
+
 static void invalidate_grid_planes(void) {
   if (grid_planes.board != NULL) {
     ncplane_destroy(grid_planes.board);
@@ -356,6 +378,7 @@ static void invalidate_grid_planes(void) {
     ncplane_destroy(grid_planes.preview_board);
     grid_planes.preview_board = NULL;
   }
+  invalidate_blit_caches();
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
@@ -503,8 +526,29 @@ static void render_board_grid(struct ncplane *parent, const Theme *theme,
   struct ncplane *p = acquire_grid_plane(
       &grid_planes.board, parent, "grid_board", CELL_ROW_BASE, CELL_COL_BASE,
       BOARD_DIM * L->board_cell_h, BOARD_DIM * L->board_cell_w);
+  if (p == NULL) {
+    return;
+  }
+  // Cache check: grid content depends only on (thickness, cdy, cdx,
+  // scale) plus the theme's bg color, which doesn't change at runtime.
+  // If all match the last blit, skip — notcurses keeps the plane's
+  // pixel content between renders, so re-encoding the same image every
+  // frame is pure cost. This is what brings 1x mode to 60fps.
+  unsigned pxy, pxx, cdy, cdx, mby, mbx;
+  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (board_grid_cache.valid && board_grid_cache.cdy == cdy &&
+      board_grid_cache.cdx == cdx &&
+      board_grid_cache.param_a == thickness &&
+      board_grid_cache.param_b == L->scale) {
+    return;
+  }
   draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, L->board_cell_h,
                   L->board_cell_w, thickness);
+  board_grid_cache.valid = true;
+  board_grid_cache.cdy = cdy;
+  board_grid_cache.cdx = cdx;
+  board_grid_cache.param_a = thickness;
+  board_grid_cache.param_b = L->scale;
 }
 
 static void render_tile_strip_grid(struct ncplane **slot,
@@ -659,6 +703,22 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   if (cdy == 0 || cdx == 0) {
     return;
   }
+  // Cache short-circuit. Re-encoding a 4.5MB Kitty graphics image
+  // through the PTY 60 times a second on identical content is the
+  // primary FPS killer; bail out if nothing's changed since the last
+  // successful blit. `render_version` is bumped by the bot worker on
+  // each play and by main.c on every settings flip, so the only state
+  // we still need to track per-frame is the cell-pixel ratio (font
+  // size) which the resize path already handles via
+  // invalidate_blit_caches().
+  const uint64_t cur_version =
+      atomic_load(&((TuiGameState *)state)->render_version);
+  if (board_pixel_cache.valid && board_pixel_cache.version == cur_version &&
+      board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
+      board_pixel_cache.param_a == L->scale &&
+      board_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
+    return;
+  }
   const int tile_w = (int)cdx * L->board_cell_w;
   const int tile_h = (int)cdy * L->board_cell_h;
   const int buf_w = tile_w * BOARD_DIM;
@@ -746,6 +806,15 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   vopts.lenx = (unsigned)buf_w;
   ncblit_rgba(buf, buf_w * 4, &vopts);
   free(buf);
+
+  // Record the parameters of the blit we just completed so the next
+  // frame can short-circuit if nothing's changed.
+  board_pixel_cache.valid = true;
+  board_pixel_cache.version = cur_version;
+  board_pixel_cache.cdy = cdy;
+  board_pixel_cache.cdx = cdx;
+  board_pixel_cache.param_a = L->scale;
+  board_pixel_cache.param_b = state->antialias ? 1 : 0;
 }
 
 static void render_board(struct ncplane *plane, const Theme *theme,
@@ -1499,6 +1568,19 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_history_panel(plane, theme, state, &L);
 
   render_status_bar(plane, theme, state, &L, modal);
+
+  // Modal z-order: a modal renders to the std plane, but the pixel
+  // composite plane sits above std and would occlude the modal box
+  // (most visibly at 2x where the pixel plane is fully opaque). Push
+  // the pixel plane below std while a modal is open so the menu shows;
+  // raise it back when the modal closes.
+  if (grid_planes.board != NULL) {
+    if (modal != TUI_MODAL_NONE) {
+      ncplane_move_below(grid_planes.board, plane);
+    } else {
+      ncplane_move_above(grid_planes.board, plane);
+    }
+  }
 }
 
 // ── Modal helpers ─────────────────────────────────────────────────────────

@@ -308,6 +308,16 @@ int main(int argc, char *argv[]) {
     }
 
     if (modal == TUI_MODAL_SETTINGS) {
+      // Any left/right keystroke at this modal might mutate visual
+      // state (scale, AA, border, premium labels, blanks). Bumping
+      // render_version once at the top invalidates the pixel-blit
+      // caches that key off it, regardless of which branch below
+      // actually toggled something — cheap and avoids scattering
+      // atomic_fetch_add through every handler.
+      if (key == NCKEY_LEFT || key == 'h' || key == 'H' ||
+          key == NCKEY_RIGHT || key == 'l' || key == 'L') {
+        atomic_fetch_add(&game_state.render_version, 1);
+      }
       if (key == NCKEY_ESC) {
         // Esc returns to the main menu so the user can pick another
         // entry without re-opening from scratch.

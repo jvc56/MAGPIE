@@ -69,6 +69,13 @@ TuiGlyphCache *tui_glyph_cache_create(const char *font_path) {
     free(cache);
     return NULL;
   }
+  // FT defaults to a Unicode charmap when one is present, but Nerd Font
+  // variants ship multiple cmaps and the autoselect occasionally lands
+  // on a non-Unicode one — every ASCII FT_Load_Char then resolves to
+  // glyph 0 (.notdef), which renders as an empty bitmap and the tile
+  // letters silently vanish. Force Unicode explicitly so the lookup
+  // always works regardless of cmap order in the file.
+  FT_Select_Charmap(cache->face, FT_ENCODING_UNICODE);
   cache->pixel_size = 0;
   cache->antialias = true;
   return cache;

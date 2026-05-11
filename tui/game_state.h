@@ -61,6 +61,13 @@ typedef struct {
   // could not be loaded or freetype init failed — that disables 2x
   // regardless of the user's saved board_scale.
   TuiGlyphCache *glyph_cache;
+  // Monotonically bumped whenever something that affects pixel-plane
+  // content changes (move played by the bot, theme switch, setting
+  // toggle). The renderer caches its last successful blit signature
+  // and short-circuits ncblit_rgba when this counter is unchanged —
+  // that's what keeps 2x mode at 60fps instead of constantly
+  // re-serializing 4.5MB of Kitty graphics per frame.
+  _Atomic uint64_t render_version;
 
   // Clock state.
   int time_per_side_seconds;
