@@ -335,6 +335,13 @@ static struct {
   struct ncplane *rack;
   struct ncplane *pills[2];
   struct ncplane *preview_board;
+  // Modal box renders to its own child plane so it sits *above* the
+  // pixel composite at 2x. Rendering the modal directly to std plane
+  // worked at 1x but the 2x board lives in a pixel plane that's above
+  // std — moving the pixel plane below std to expose the modal also
+  // hid the board entirely. A dedicated top-most modal plane keeps
+  // both visible at once.
+  struct ncplane *modal;
 } grid_planes;
 
 // Per-plane blit caches. ncblit_rgba is the FPS bottleneck — even on
@@ -377,6 +384,10 @@ static void invalidate_grid_planes(void) {
   if (grid_planes.preview_board != NULL) {
     ncplane_destroy(grid_planes.preview_board);
     grid_planes.preview_board = NULL;
+  }
+  if (grid_planes.modal != NULL) {
+    ncplane_destroy(grid_planes.modal);
+    grid_planes.modal = NULL;
   }
   invalidate_blit_caches();
 }
@@ -1250,8 +1261,15 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const int row3 = row + 2;
   theme_apply_fg(plane, theme->dim_fg);
   char bonus_left[48];
-  snprintf(bonus_left, sizeof(bonus_left), "    + %s",
-           e->end_rack_str[0] ? e->end_rack_str : "");
+  // Render the opponent's leftover tiles as "(LNRU)" — matching the
+  // standard GCG notation used in tournament scoresheets — instead of
+  // a "+ LNRU" prefix that read as another column rather than the
+  // running rack at game end.
+  if (e->end_rack_str[0] != '\0') {
+    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", e->end_rack_str);
+  } else {
+    snprintf(bonus_left, sizeof(bonus_left), "    ");
+  }
   ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
 
   // Right side: "+N  Total" — bonus delta non-bold, new total bold.
@@ -1569,17 +1587,12 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 
   render_status_bar(plane, theme, state, &L, modal);
 
-  // Modal z-order: a modal renders to the std plane, but the pixel
-  // composite plane sits above std and would occlude the modal box
-  // (most visibly at 2x where the pixel plane is fully opaque). Push
-  // the pixel plane below std while a modal is open so the menu shows;
-  // raise it back when the modal closes.
-  if (grid_planes.board != NULL) {
-    if (modal != TUI_MODAL_NONE) {
-      ncplane_move_below(grid_planes.board, plane);
-    } else {
-      ncplane_move_above(grid_planes.board, plane);
-    }
+  // When a modal closes, drop its plane so the next open recreates it
+  // at the right size and z-position. Cheap (one destroy) and keeps
+  // the modal-open path's plane setup simple.
+  if (modal == TUI_MODAL_NONE && grid_planes.modal != NULL) {
+    ncplane_destroy(grid_planes.modal);
+    grid_planes.modal = NULL;
   }
 }
 
@@ -1601,28 +1614,64 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
   const int top = (int)(plane_rows - height) / 2;
   const int left = (int)(plane_cols - width) / 2;
 
-  theme_apply_fg(plane, theme->fg);
-  theme_apply_bg(plane, theme->bg);
-  for (int r = top; r < top + height; r++) {
-    for (int c = left; c < left + width; c++) {
-      ncplane_putstr_yx(plane, r, c, " ");
+  // Modal lives on its own child plane that always sits on top of the
+  // z-stack. Otherwise the 2x pixel composite (also a child of std)
+  // sits above the modal, occluding it. Box-local coords run (0,0) to
+  // (height-1, width-1); the plane itself is positioned at (top, left)
+  // relative to std.
+  if (grid_planes.modal == NULL) {
+    ncplane_options opts = {0};
+    opts.y = top;
+    opts.x = left;
+    opts.rows = (unsigned)height;
+    opts.cols = (unsigned)width;
+    opts.name = "modal";
+    grid_planes.modal = ncplane_create(plane, &opts);
+    if (grid_planes.modal == NULL) {
+      return;
+    }
+  } else {
+    unsigned cur_rows = 0;
+    unsigned cur_cols = 0;
+    ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
+    if ((int)cur_rows != height || (int)cur_cols != width) {
+      ncplane_resize_simple(grid_planes.modal, (unsigned)height,
+                            (unsigned)width);
+    }
+    ncplane_move_yx(grid_planes.modal, top, left);
+  }
+  struct ncplane *mp = grid_planes.modal;
+  // Opaque background so whatever's behind the modal box doesn't bleed
+  // through. (theme.bg with default alpha = solid.)
+  uint64_t base_ch = 0;
+  ncchannels_set_fg_rgb8(&base_ch, theme->fg.r, theme->fg.g, theme->fg.b);
+  ncchannels_set_bg_rgb8(&base_ch, theme->bg.r, theme->bg.g, theme->bg.b);
+  ncplane_set_base(mp, " ", 0, base_ch);
+  ncplane_erase(mp);
+  ncplane_move_top(mp);
+
+  theme_apply_fg(mp, theme->fg);
+  theme_apply_bg(mp, theme->bg);
+  for (int r = 0; r < height; r++) {
+    for (int c = 0; c < width; c++) {
+      ncplane_putstr_yx(mp, r, c, " ");
     }
   }
-  draw_box(plane, theme, top, left, height, width, title);
+  draw_box(mp, theme, 0, 0, height, width, title);
 
   for (int i = 0; i < item_count; i++) {
-    const int item_row = top + 2 + i;
+    const int item_row = 2 + i;
     const bool focused = (i == focus);
     if (focused) {
-      theme_apply_fg(plane, theme->bg);
-      theme_apply_bg(plane, theme->accent_fg);
+      theme_apply_fg(mp, theme->bg);
+      theme_apply_bg(mp, theme->accent_fg);
     } else {
-      theme_apply_fg(plane, theme->fg);
-      theme_apply_bg(plane, theme->bg);
+      theme_apply_fg(mp, theme->fg);
+      theme_apply_bg(mp, theme->bg);
     }
     char line[96];
     snprintf(line, sizeof(line), "  %-*s", width - 4, items[i]);
-    ncplane_putstr_yx(plane, item_row, left + 1, line);
+    ncplane_putstr_yx(mp, item_row, 1, line);
   }
 }
 
