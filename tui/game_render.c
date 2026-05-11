@@ -331,59 +331,34 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
 // offset and the terminal can show ghost lines smearing into nearby
 // rows — most visibly cutting the player-pill box borders.
 static struct {
+  // 2x board pixel composite. The 1x/rack/pill borders now ride
+  // NCSTYLE_UNDERLINE on the cells themselves — no extra planes.
   struct ncplane *board;
-  struct ncplane *rack;
-  struct ncplane *pills[2];
-  struct ncplane *preview_board;
-  // Modal box renders to its own child plane so it sits *above* the
-  // pixel composite at 2x. Rendering the modal directly to std plane
-  // worked at 1x but the 2x board lives in a pixel plane that's above
-  // std — moving the pixel plane below std to expose the modal also
-  // hid the board entirely. A dedicated top-most modal plane keeps
-  // both visible at once.
+  // Modal box renders to its own child plane so it sits above the 2x
+  // pixel composite. A dedicated top-most modal plane keeps both the
+  // board and the menu visible at once.
   struct ncplane *modal;
 } grid_planes;
 
-// Per-plane blit caches. ncblit_rgba is the FPS bottleneck — even on
-// identical content, notcurses re-encodes the Kitty graphics bytes and
-// pushes them through the PTY. Tracking a signature per plane lets us
-// skip the work entirely when state (size, scale, render_version)
-// hasn't changed since the last successful blit. signature=0 means
-// "no valid cache yet"; bump on every successful blit so the next
-// matching call returns early.
+// Cache for the 2x board pixel composite. ncblit_rgba is the FPS
+// bottleneck even when the buffer hasn't changed; tracking a signature
+// lets us skip the work and rely on notcurses keeping the plane's
+// previous pixel content.
 typedef struct {
   uint64_t version;     // game_state.render_version at last blit
   unsigned cdy, cdx;    // notcurses cell-pixel dims at last blit
-  int param_a, param_b; // plane-specific extras (thickness, scale, etc.)
+  int param_a, param_b; // scale, antialias
   bool valid;
 } BlitCache;
 
-static BlitCache board_grid_cache;
 static BlitCache board_pixel_cache;
 
-static void invalidate_blit_caches(void) {
-  board_grid_cache.valid = false;
-  board_pixel_cache.valid = false;
-}
+static void invalidate_blit_caches(void) { board_pixel_cache.valid = false; }
 
 static void invalidate_grid_planes(void) {
   if (grid_planes.board != NULL) {
     ncplane_destroy(grid_planes.board);
     grid_planes.board = NULL;
-  }
-  if (grid_planes.rack != NULL) {
-    ncplane_destroy(grid_planes.rack);
-    grid_planes.rack = NULL;
-  }
-  for (int idx = 0; idx < 2; idx++) {
-    if (grid_planes.pills[idx] != NULL) {
-      ncplane_destroy(grid_planes.pills[idx]);
-      grid_planes.pills[idx] = NULL;
-    }
-  }
-  if (grid_planes.preview_board != NULL) {
-    ncplane_destroy(grid_planes.preview_board);
-    grid_planes.preview_board = NULL;
   }
   if (grid_planes.modal != NULL) {
     ncplane_destroy(grid_planes.modal);
@@ -431,160 +406,6 @@ static struct ncplane *acquire_grid_plane(struct ncplane **slot,
   return *slot;
 }
 
-// Draw an h × w grid onto grid_plane, where each tile is tile_cells_h ×
-// tile_cells_w terminal cells. Lines are `thickness` pixels thick in
-// theme->bg. Caller is responsible for sizing the plane appropriately.
-static void draw_pixel_grid(struct ncplane *grid_plane, const Theme *theme,
-                            int tiles_y, int tiles_x, int tile_cells_h,
-                            int tile_cells_w, int thickness) {
-  if (grid_plane == NULL || thickness <= 0 || tiles_y <= 0 || tiles_x <= 0) {
-    return;
-  }
-  unsigned pxy = 0;
-  unsigned pxx = 0;
-  unsigned cdy = 0;
-  unsigned cdx = 0;
-  unsigned mby = 0;
-  unsigned mbx = 0;
-  ncplane_pixel_geom(grid_plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
-  if (cdy == 0 || cdx == 0) {
-    return;
-  }
-
-  const unsigned tile_h_px = (unsigned)tile_cells_h * cdy;
-  const unsigned tile_w_px = (unsigned)tile_cells_w * cdx;
-  const unsigned buf_h = (unsigned)tiles_y * tile_h_px;
-  const unsigned buf_w = (unsigned)tiles_x * tile_w_px;
-  if (buf_h == 0 || buf_w == 0) {
-    return;
-  }
-
-  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_h * buf_w * 4);
-  if (buf == NULL) {
-    return;
-  }
-  const uint8_t r = theme->bg.r;
-  const uint8_t g = theme->bg.g;
-  const uint8_t b = theme->bg.b;
-
-  // Each tile gets a border on its BOTTOM and RIGHT only — no top or
-  // left edges. Lines live in the last `thickness` pixels of the tile
-  // they belong to. The opening top and left edges of the buffer are
-  // intentionally left clean: that gives each cell its full top/left
-  // margin back so wide glyphs (W, M, …) breathe properly, and the
-  // adjacent tile's bottom/right border still serves as the visual
-  // boundary between cells.
-
-  // Horizontal lines (one per tile row, at its bottom edge).
-  for (int i = 1; i <= tiles_y; i++) {
-    int line_top = i * (int)tile_h_px - thickness;
-    if (line_top < 0) {
-      line_top = 0;
-    }
-    for (int t = 0; t < thickness; t++) {
-      const int row = line_top + t;
-      if (row < 0 || row >= (int)buf_h) {
-        continue;
-      }
-      uint8_t *p = buf + (size_t)row * buf_w * 4;
-      for (unsigned col = 0; col < buf_w; col++) {
-        p[0] = r;
-        p[1] = g;
-        p[2] = b;
-        p[3] = 255;
-        p += 4;
-      }
-    }
-  }
-  // Vertical lines (one per tile col, at its right edge).
-  for (int i = 1; i <= tiles_x; i++) {
-    int line_left = i * (int)tile_w_px - thickness;
-    if (line_left < 0) {
-      line_left = 0;
-    }
-    for (int t = 0; t < thickness; t++) {
-      const int col = line_left + t;
-      if (col < 0 || col >= (int)buf_w) {
-        continue;
-      }
-      for (unsigned row = 0; row < buf_h; row++) {
-        uint8_t *p = buf + ((size_t)row * buf_w + col) * 4;
-        p[0] = r;
-        p[1] = g;
-        p[2] = b;
-        p[3] = 255;
-      }
-    }
-  }
-
-  struct ncvisual_options vopts = {0};
-  vopts.n = grid_plane;
-  vopts.blitter = NCBLIT_PIXEL;
-  vopts.leny = buf_h;
-  vopts.lenx = buf_w;
-  ncblit_rgba(buf, (int)(buf_w * 4), &vopts);
-  free(buf);
-}
-
-// Per-region helpers. All grid plane slots live in `grid_planes` so a
-// single invalidate call can flush them on resize / picker exit.
-static void render_board_grid(struct ncplane *parent, const Theme *theme,
-                              const Layout *L, int thickness) {
-  struct notcurses *nc = ncplane_notcurses(parent);
-  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
-    return;
-  }
-  struct ncplane *p = acquire_grid_plane(
-      &grid_planes.board, parent, "grid_board", CELL_ROW_BASE, CELL_COL_BASE,
-      BOARD_DIM * L->board_cell_h, BOARD_DIM * L->board_cell_w);
-  if (p == NULL) {
-    return;
-  }
-  // Cache check: grid content depends only on (thickness, cdy, cdx,
-  // scale) plus the theme's bg color, which doesn't change at runtime.
-  // If all match the last blit, skip — notcurses keeps the plane's
-  // pixel content between renders, so re-encoding the same image every
-  // frame is pure cost. This is what brings 1x mode to 60fps.
-  unsigned pxy, pxx, cdy, cdx, mby, mbx;
-  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
-  if (board_grid_cache.valid && board_grid_cache.cdy == cdy &&
-      board_grid_cache.cdx == cdx &&
-      board_grid_cache.param_a == thickness &&
-      board_grid_cache.param_b == L->scale) {
-    return;
-  }
-  draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, L->board_cell_h,
-                  L->board_cell_w, thickness);
-  board_grid_cache.valid = true;
-  board_grid_cache.cdy = cdy;
-  board_grid_cache.cdx = cdx;
-  board_grid_cache.param_a = thickness;
-  board_grid_cache.param_b = L->scale;
-}
-
-static void render_tile_strip_grid(struct ncplane **slot,
-                                   struct ncplane *parent, const Theme *theme,
-                                   const char *name, int thickness, int y,
-                                   int x, int tile_count) {
-  struct notcurses *nc = ncplane_notcurses(parent);
-  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0 ||
-      tile_count <= 0) {
-    // When the strip vanishes (e.g., a player's rack drains to empty)
-    // we still need to remove its lingering pixel image — otherwise the
-    // last drawn grid persists at its old position. Destroying the
-    // cached plane is what actually clears the image; just bailing out
-    // leaves the previous frame's pixels on the terminal.
-    if (slot != NULL && *slot != NULL) {
-      ncplane_destroy(*slot);
-      *slot = NULL;
-    }
-    return;
-  }
-  struct ncplane *p =
-      acquire_grid_plane(slot, parent, name, y, x, 1, tile_count * CELL_WIDTH);
-  draw_pixel_grid(p, theme, 1, tile_count, 1, CELL_WIDTH, thickness);
-}
-
 // ── Board ─────────────────────────────────────────────────────────────────
 //
 // Cell rendering is offset-parameterized so the same routine drives the
@@ -593,15 +414,24 @@ static void render_tile_strip_grid(struct ncplane **slot,
 static void render_board_cells(struct ncplane *plane, const Theme *theme,
                                const Game *game, const LetterDistribution *ld,
                                bool blank_uppercase,
-                               TuiPremiumLabels premium_labels, int top,
-                               int left) {
+                               TuiPremiumLabels premium_labels,
+                               int border_thickness, int top, int left) {
   const Board *board = game_get_board(game);
+  // Bake the tile border into each cell via NCSTYLE_UNDERLINE instead
+  // of a separate pixel-graphics overlay plane. The pixel plane cost
+  // ~3-4ms per notcurses_render (the kitty-graphics image gets re-
+  // emitted each frame even with the buffer cached), capping 1x mode
+  // around 250fps; cell styling is part of the cell-diff that
+  // notcurses already does and is effectively free.
+  const uint16_t border_style =
+      border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       const int screen_row = top + row;
       const int screen_col = left + col * CELL_WIDTH;
       const MachineLetter ml = board_get_letter(board, row, col);
       const BonusSquare bs = board_get_bonus_square(board, row, col);
+      ncplane_set_styles(plane, border_style);
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         const PremiumMarker marker =
             premium_marker_for_cell(theme, bs, row, col, premium_labels);
@@ -625,6 +455,7 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       }
     }
   }
+  ncplane_set_styles(plane, 0);
 }
 
 // 2x pixel-composite render. Builds one RGBA image covering the whole
@@ -905,7 +736,7 @@ static void render_board(struct ncplane *plane, const Theme *theme,
   }
   render_board_cells(plane, theme, state->game, state->ld,
                      state->blank_uppercase, state->premium_labels,
-                     CELL_ROW_BASE, CELL_COL_BASE);
+                     state->border_thickness, CELL_ROW_BASE, CELL_COL_BASE);
 }
 
 void tui_render_board_at(struct ncplane *plane, int top, int left,
@@ -917,20 +748,7 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
     return;
   }
   render_board_cells(plane, theme, game, ld, blank_uppercase, premium_labels,
-                     top, left);
-
-  struct notcurses *nc = ncplane_notcurses(plane);
-  if (nc == NULL || !notcurses_canpixel(nc) || border_thickness <= 0) {
-    return;
-  }
-  // Dedicated slot for the picker's board so it doesn't fight the in-game
-  // board's grid. Lives in grid_planes so onboarding's exit path can flush
-  // it before the in-game render reuses the same area.
-  struct ncplane *p = acquire_grid_plane(&grid_planes.preview_board, plane,
-                                         "grid_preview_board", top, left,
-                                         BOARD_DIM, BOARD_DIM * CELL_WIDTH);
-  draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, 1, CELL_WIDTH,
-                  border_thickness);
+                     border_thickness, top, left);
 }
 
 // ── Rack panel ────────────────────────────────────────────────────────────
@@ -951,11 +769,14 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
     start_col = 1;
   }
 
+  const uint16_t border_style =
+      state->border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   int col_offset = 0;
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     const int count = rack_get_letter(rack, (MachineLetter)ml);
     for (int copy = 0; copy < count; copy++) {
       const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
+      ncplane_set_styles(plane, border_style);
       theme_apply_fg(plane, theme->rack_tile_fg);
       theme_apply_bg(plane, theme->rack_tile_bg);
       if (fullwidth[0] != '\0') {
@@ -969,12 +790,7 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
       col_offset += CELL_WIDTH;
     }
   }
-
-  // Pixel-grid overlay around the rack tiles (no-op on terminals without
-  // pixel support).
-  render_tile_strip_grid(&grid_planes.rack, plane, theme, "grid_rack_panel",
-                         state->border_thickness, L->rack_top + 1, start_col,
-                         total_letters);
+  ncplane_set_styles(plane, 0);
 }
 
 // ── Bag panel ─────────────────────────────────────────────────────────────
@@ -1175,9 +991,11 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
-  int tiles_drawn = 0;
+  const uint16_t border_style =
+      state->border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   if (rack_right_max >= rack_left + 1) {
     int rcol = rack_left;
+    ncplane_set_styles(plane, border_style);
     theme_apply_fg(plane, theme->rack_tile_fg);
     theme_apply_bg(plane, theme->rack_tile_bg);
     for (int ml = 0; ml < ld_get_size(ld) && rcol + 1 <= rack_right_max; ml++) {
@@ -1192,17 +1010,9 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
           ncplane_putstr(plane, ascii);
         }
         rcol += 2;
-        tiles_drawn++;
       }
     }
-  }
-
-  // Pixel-grid overlay around the pill's rack tiles. Per-pill plane slot.
-  static const char *pill_names[2] = {"grid_pill1", "grid_pill2"};
-  if (player_idx == 0 || player_idx == 1) {
-    render_tile_strip_grid(&grid_planes.pills[player_idx], plane, theme,
-                           pill_names[player_idx], state->border_thickness,
-                           content_row, rack_left, tiles_drawn);
+    ncplane_set_styles(plane, 0);
   }
 }
 
@@ -1635,13 +1445,13 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state, &L);
-  // At 2x the pixel composite already owns grid_planes.board — calling
-  // render_board_grid here would acquire the same slot and ncblit_rgba
-  // a transparent grid bitmap over the tiles we just drew, leaving the
-  // board area blank. The 1x text path needs the separate overlay.
-  if (L.scale < 2) {
-    render_board_grid(plane, theme, &L, state->border_thickness);
-  }
+  // Borders are now baked into the rendering itself:
+  //   - 1x cells use NCSTYLE_UNDERLINE in render_board_cells / rack /
+  //     pill so notcurses' cell-diff cache handles them for free.
+  //   - 2x composite paints lines into the RGBA buffer in
+  //     render_board_pixel before the single ncblit_rgba.
+  // No separate pixel-graphics overlay plane in either path — the old
+  // one cost ~3-4ms per notcurses_render even with the buffer cached.
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
