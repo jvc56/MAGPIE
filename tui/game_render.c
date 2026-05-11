@@ -690,6 +690,55 @@ static void fill_tile_rect(uint8_t *buf, int buf_w, int tx, int ty, int tile_w,
   }
 }
 
+// Paint grid lines into the buffer using the same "bottom + right edge
+// of each tile" geometry as draw_pixel_grid (which the 1x text path
+// uses against a separate overlay plane). At 2x the pixel composite
+// owns the only plane covering the board, so we draw the lines inline
+// here instead of stacking another plane that would just collide.
+static void overlay_grid_lines(uint8_t *buf, int buf_w, int buf_h, int tiles_y,
+                               int tiles_x, int tile_h_px, int tile_w_px,
+                               int thickness, ThemeRgb color) {
+  if (thickness <= 0) {
+    return;
+  }
+  // Horizontal: one band per tile row, sitting in the last `thickness`
+  // pixels of that row's vertical extent.
+  for (int i = 1; i <= tiles_y; i++) {
+    const int line_top = i * tile_h_px - thickness;
+    for (int t = 0; t < thickness; t++) {
+      const int row = line_top + t;
+      if (row < 0 || row >= buf_h) {
+        continue;
+      }
+      uint8_t *p = buf + (size_t)row * buf_w * 4;
+      for (int col = 0; col < buf_w; col++, p += 4) {
+        p[0] = color.r;
+        p[1] = color.g;
+        p[2] = color.b;
+        p[3] = 255;
+      }
+    }
+  }
+  // Vertical: one band per tile column, sitting in the last `thickness`
+  // pixels of that column's horizontal extent.
+  for (int i = 1; i <= tiles_x; i++) {
+    const int line_left = i * tile_w_px - thickness;
+    for (int t = 0; t < thickness; t++) {
+      const int col = line_left + t;
+      if (col < 0 || col >= buf_w) {
+        continue;
+      }
+      for (int row = 0; row < buf_h; row++) {
+        uint8_t *p = buf + ((size_t)row * buf_w + col) * 4;
+        p[0] = color.r;
+        p[1] = color.g;
+        p[2] = color.b;
+        p[3] = 255;
+      }
+    }
+  }
+}
+
 static void render_board_pixel(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, const Layout *L) {
   struct notcurses *nc = ncplane_notcurses(plane);
@@ -809,6 +858,13 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       }
     }
   }
+
+  // Tile borders. The 1x text path uses render_board_grid + a separate
+  // overlay plane; at 2x the composite owns the only plane that covers
+  // the board, so paint the lines directly into the same RGBA buffer
+  // before we ship it.
+  overlay_grid_lines(buf, buf_w, buf_h, BOARD_DIM, BOARD_DIM, tile_h, tile_w,
+                     state->border_thickness, theme->bg);
 
   struct ncvisual_options vopts = {0};
   vopts.n = p;
