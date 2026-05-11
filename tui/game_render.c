@@ -590,22 +590,28 @@ static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
   const int glyph_top = baseline - g->bearing_y;
   const int glyph_left = tx + (tile_w - g->width) / 2;
 
+  // Compute the destination pointer per pixel using validated coords.
+  // The previous version precomputed dst from glyph_left and stepped
+  // forward, which is undefined when glyph_left is negative — the "TW"
+  // / "DW" labels share a half-tile, so wide-ish FreeType glyphs can
+  // overshoot 20px. dst would wrap to a wild address, then the first
+  // in-range write at the row's left edge segfaulted.
   for (int row = 0; row < g->height; row++) {
     const int dst_y = glyph_top + row;
     if (dst_y < 0 || dst_y >= buf_h) {
       continue;
     }
     const unsigned char *src = g->alpha + (size_t)row * g->width;
-    uint8_t *dst = buf + ((size_t)dst_y * buf_w + glyph_left) * 4;
-    int span_left = glyph_left;
-    for (int col = 0; col < g->width; col++, span_left++, dst += 4) {
-      if (span_left < 0 || span_left >= buf_w) {
+    for (int col = 0; col < g->width; col++) {
+      const int dst_x = glyph_left + col;
+      if (dst_x < 0 || dst_x >= buf_w) {
         continue;
       }
       const unsigned int a = src[col];
       if (a == 0) {
         continue;
       }
+      uint8_t *dst = buf + ((size_t)dst_y * buf_w + (size_t)dst_x) * 4;
       // Linear-space blend between bg and fg; close enough at the
       // contrast levels we ship.
       dst[0] = (uint8_t)((bg.r * (255 - a) + fg.r * a) / 255);
@@ -1292,6 +1298,39 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   }
 }
 
+// EMA-smoothed FPS based on the interval between status-bar renders.
+// Status-bar render happens once per top-level render call, which is
+// what we actually care about — terminal frame rate after all the
+// game/grid/composite work. alpha=0.1 gives a stable readout that
+// still responds within a second or so when the rate genuinely shifts.
+static double measure_fps(void) {
+  static double ema = 0.0;
+  static struct timespec last;
+  static bool inited = false;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (!inited) {
+    last = now;
+    inited = true;
+    return 0.0;
+  }
+  const double dt = (double)(now.tv_sec - last.tv_sec) +
+                    (double)(now.tv_nsec - last.tv_nsec) / 1e9;
+  last = now;
+  if (dt <= 0.0 || dt > 5.0) {
+    // Skip pathological intervals (clock jumps, long pauses) so they
+    // can't poison the running average with a one-frame spike.
+    return ema;
+  }
+  const double instant = 1.0 / dt;
+  if (ema <= 0.0) {
+    ema = instant;
+  } else {
+    ema = ema * 0.9 + instant * 0.1;
+  }
+  return ema;
+}
+
 // ── Status bar ────────────────────────────────────────────────────────────
 static void render_status_bar(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L,
@@ -1308,10 +1347,20 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row, (int)col, " ");
   }
 
-  // Left side: "Language · Lexicon"
+  // Left side: "Language · Lexicon · 60 fps". FPS is tacked onto the
+  // left so it sits next to the other engine-state readouts; the right
+  // side is reserved for transient control hints. We show an integer to
+  // avoid the last digit twitching every frame.
+  const double fps = measure_fps();
   char left_buf[128];
-  snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
-           language_for_lexicon(state->lexicon), state->lexicon);
+  if (fps > 0.0) {
+    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s \xc2\xb7 %d fps",
+             language_for_lexicon(state->lexicon), state->lexicon,
+             (int)(fps + 0.5));
+  } else {
+    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
+             language_for_lexicon(state->lexicon), state->lexicon);
+  }
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
   // Right side: dynamic shortcut hint depending on what modal is open.
@@ -1432,7 +1481,13 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state, &L);
-  render_board_grid(plane, theme, &L, state->border_thickness);
+  // At 2x the pixel composite already owns grid_planes.board — calling
+  // render_board_grid here would acquire the same slot and ncblit_rgba
+  // a transparent grid bitmap over the tiles we just drew, leaving the
+  // board area blank. The 1x text path needs the separate overlay.
+  if (L.scale < 2) {
+    render_board_grid(plane, theme, &L, state->border_thickness);
+  }
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
