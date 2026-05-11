@@ -12,6 +12,7 @@
 #include "../src/ent/rack.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
+#include "glyph_cache.h"
 #include "theme.h"
 #include "tui_resize.h"
 #include <ctype.h>
@@ -46,13 +47,11 @@
 // history row, render that one halfwidth too.
 
 enum {
-  CELL_WIDTH = 2,
+  CELL_WIDTH = 2, // 1x board tile width in cols (and rack tile width always)
   ROW_LABEL_COL = 0,
   CELL_COL_BASE = ROW_LABEL_COL + 3,
-  BOARD_WIDTH = CELL_COL_BASE + BOARD_DIM * CELL_WIDTH, // = 33
   COL_LABELS_ROW = 0,
   CELL_ROW_BASE = 1,
-  CELL_BOTTOM_ROW = CELL_ROW_BASE + BOARD_DIM - 1, // = 15
   RACK_HEIGHT = 3,
   PILL_HEIGHT = 3,
   RIGHT_COL_LEFT_OFFSET = 1, // gap from board's right edge
@@ -63,8 +62,11 @@ enum {
   // alongside the name, score, and clock.
   HISTORY_TWO_COL_THRESHOLD = 68,
   STATUS_BAR_HEIGHT = 1,
-  MIN_ROWS_REQUIRED = 24,
-  MIN_COLS_REQUIRED = BOARD_WIDTH + RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH,
+  MIN_ROWS_REQUIRED_1X = 24,
+  // 1x layout: 33 cols for the board area + 1 gutter + 32 cols right column.
+  // 2x bumps the board to 63 cols, so the floor rises to 96.
+  MIN_COLS_REQUIRED_1X = CELL_COL_BASE + BOARD_DIM * CELL_WIDTH +
+                         RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH,
 };
 
 typedef struct {
@@ -73,7 +75,16 @@ typedef struct {
 
   int status_row;
 
-  int board_right_col; // = BOARD_WIDTH - 1
+  // Scale-dependent board geometry. At scale=1: cell_w=2, cell_h=1, the
+  // 33-col / 16-row classic layout. At scale=2: cell_w=4, cell_h=2 →
+  // 63-col / 31-row board area driven by the FreeType composite path.
+  int scale;
+  int board_cell_w;
+  int board_cell_h;
+  int board_width; // total cols claimed by the board area (incl. row labels)
+  int board_bottom_row; // last row occupied by the board's bottommost cells
+
+  int board_right_col; // = board_width - 1
   int rack_top, rack_bottom;
   int bag_top, bag_bottom;
 
@@ -89,19 +100,25 @@ typedef struct {
   int history_top, history_bottom;
 } Layout;
 
-static Layout compute_layout(struct ncplane *plane) {
+static Layout compute_layout(struct ncplane *plane, int scale) {
   Layout L = {0};
   ncplane_dim_yx(plane, &L.plane_rows, &L.plane_cols);
 
   L.status_row = (int)L.plane_rows - 1;
 
-  L.board_right_col = BOARD_WIDTH - 1;
-  L.rack_top = CELL_BOTTOM_ROW + 2;
+  L.scale = (scale >= 1) ? scale : 1;
+  L.board_cell_w = CELL_WIDTH * L.scale; // 2 or 4
+  L.board_cell_h = L.scale;              // 1 or 2
+  L.board_width = CELL_COL_BASE + BOARD_DIM * L.board_cell_w;
+  L.board_bottom_row = CELL_ROW_BASE + BOARD_DIM * L.board_cell_h - 1;
+
+  L.board_right_col = L.board_width - 1;
+  L.rack_top = L.board_bottom_row + 2;
   L.rack_bottom = L.rack_top + RACK_HEIGHT - 1;
   L.bag_top = L.rack_bottom + 1;
   L.bag_bottom = L.status_row - 1;
 
-  L.right_col_left = BOARD_WIDTH + RIGHT_COL_LEFT_OFFSET;
+  L.right_col_left = L.board_width + RIGHT_COL_LEFT_OFFSET;
   L.right_col_right = (int)L.plane_cols - 1;
   L.right_col_width = L.right_col_right - L.right_col_left + 1;
   L.two_col = L.right_col_width >= HISTORY_TWO_COL_THRESHOLD;
@@ -478,15 +495,16 @@ static void draw_pixel_grid(struct ncplane *grid_plane, const Theme *theme,
 // Per-region helpers. All grid plane slots live in `grid_planes` so a
 // single invalidate call can flush them on resize / picker exit.
 static void render_board_grid(struct ncplane *parent, const Theme *theme,
-                              int thickness) {
+                              const Layout *L, int thickness) {
   struct notcurses *nc = ncplane_notcurses(parent);
   if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
     return;
   }
   struct ncplane *p = acquire_grid_plane(
       &grid_planes.board, parent, "grid_board", CELL_ROW_BASE, CELL_COL_BASE,
-      BOARD_DIM, BOARD_DIM * CELL_WIDTH);
-  draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, 1, CELL_WIDTH, thickness);
+      BOARD_DIM * L->board_cell_h, BOARD_DIM * L->board_cell_w);
+  draw_pixel_grid(p, theme, BOARD_DIM, BOARD_DIM, L->board_cell_h,
+                  L->board_cell_w, thickness);
 }
 
 static void render_tile_strip_grid(struct ncplane **slot,
@@ -554,8 +572,182 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
   }
 }
 
+// 2x pixel-composite render. Builds one RGBA image covering the whole
+// board area in a single child plane and ncblit_rgba's it. Each tile is
+// (4 * cdx) × (2 * cdy) pixels: filled with the cell's bg, then the
+// cached glyph alpha-blended on top using the cell's fg.
+static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
+                                int ty, int tile_w, int tile_h,
+                                const TuiGlyph *g, ThemeRgb fg, ThemeRgb bg) {
+  if (g == NULL || g->width <= 0 || g->height <= 0) {
+    return;
+  }
+  // Center the glyph inside the tile, biasing slightly lower to mimic the
+  // typical baseline-to-tile-center offset that looks right for boxed
+  // letters. bearing_y is positive above the baseline; we treat the
+  // baseline as 70% down the tile.
+  const int baseline = ty + (int)(tile_h * 0.72);
+  const int glyph_top = baseline - g->bearing_y;
+  const int glyph_left = tx + (tile_w - g->width) / 2;
+
+  for (int row = 0; row < g->height; row++) {
+    const int dst_y = glyph_top + row;
+    if (dst_y < 0 || dst_y >= buf_h) {
+      continue;
+    }
+    const unsigned char *src = g->alpha + (size_t)row * g->width;
+    uint8_t *dst = buf + ((size_t)dst_y * buf_w + glyph_left) * 4;
+    int span_left = glyph_left;
+    for (int col = 0; col < g->width; col++, span_left++, dst += 4) {
+      if (span_left < 0 || span_left >= buf_w) {
+        continue;
+      }
+      const unsigned int a = src[col];
+      if (a == 0) {
+        continue;
+      }
+      // Linear-space blend between bg and fg; close enough at the
+      // contrast levels we ship.
+      dst[0] = (uint8_t)((bg.r * (255 - a) + fg.r * a) / 255);
+      dst[1] = (uint8_t)((bg.g * (255 - a) + fg.g * a) / 255);
+      dst[2] = (uint8_t)((bg.b * (255 - a) + fg.b * a) / 255);
+      dst[3] = 255;
+    }
+  }
+}
+
+static void fill_tile_rect(uint8_t *buf, int buf_w, int tx, int ty, int tile_w,
+                           int tile_h, ThemeRgb color) {
+  for (int row = 0; row < tile_h; row++) {
+    uint8_t *p = buf + ((size_t)(ty + row) * buf_w + tx) * 4;
+    for (int col = 0; col < tile_w; col++, p += 4) {
+      p[0] = color.r;
+      p[1] = color.g;
+      p[2] = color.b;
+      p[3] = 255;
+    }
+  }
+}
+
+static void render_board_pixel(struct ncplane *plane, const Theme *theme,
+                               const TuiGameState *state, const Layout *L) {
+  struct notcurses *nc = ncplane_notcurses(plane);
+  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
+    return;
+  }
+  const int rows = BOARD_DIM * L->board_cell_h;
+  const int cols = BOARD_DIM * L->board_cell_w;
+  struct ncplane *p =
+      acquire_grid_plane(&grid_planes.board, plane, "board_pixel",
+                         CELL_ROW_BASE, CELL_COL_BASE, rows, cols);
+  if (p == NULL) {
+    return;
+  }
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
+  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+  const int tile_w = (int)cdx * L->board_cell_w;
+  const int tile_h = (int)cdy * L->board_cell_h;
+  const int buf_w = tile_w * BOARD_DIM;
+  const int buf_h = tile_h * BOARD_DIM;
+  if (buf_w <= 0 || buf_h <= 0) {
+    return;
+  }
+  // Target glyph height: leaves ~13% margin top + bottom inside each
+  // tile, which is comfortable for both AA and mono rendering at the
+  // typical cell-pixel sizes terminals produce.
+  const int target_glyph_px = (int)((double)tile_h * 0.74);
+  tui_glyph_cache_set_size(state->glyph_cache, target_glyph_px,
+                           state->antialias);
+
+  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
+  if (buf == NULL) {
+    return;
+  }
+
+  const Board *board = game_get_board(state->game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const int tx = col * tile_w;
+      const int ty = row * tile_h;
+      const MachineLetter ml = board_get_letter(board, row, col);
+      const BonusSquare bs = board_get_bonus_square(board, row, col);
+      ThemeRgb bg;
+      ThemeRgb fg;
+      uint32_t glyph_codepoint = 0;
+      uint32_t glyph_second = 0; // second char of "TW"-style premium labels
+
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        const PremiumMarker marker =
+            premium_marker_for_cell(theme, bs, row, col, state->premium_labels);
+        bg = marker.bg;
+        fg = marker.fg;
+        // marker.glyph is either an ideographic space (non-premium /
+        // labels=NONE) or a 2-char ASCII label like "TW". Pull the
+        // ASCII characters out when present.
+        if ((unsigned char)marker.glyph[0] < 0x80 &&
+            (unsigned char)marker.glyph[1] < 0x80 && marker.glyph[0] != ' ') {
+          glyph_codepoint = (uint32_t)marker.glyph[0];
+          glyph_second = (uint32_t)marker.glyph[1];
+        }
+      } else {
+        const bool is_blank = get_is_blanked(ml);
+        const bool render_uppercase = is_blank && state->blank_uppercase;
+        const MachineLetter glyph_ml =
+            render_uppercase ? get_unblanked_machine_letter(ml) : ml;
+        bg = theme->tile_bg;
+        fg = is_blank ? theme->blank_tile_fg : theme->tile_fg;
+        const char *ascii = state->ld->ld_ml_to_hl[glyph_ml];
+        if (ascii != NULL && ascii[0] != '\0' &&
+            (unsigned char)ascii[0] < 0x80) {
+          glyph_codepoint = (uint32_t)ascii[0];
+        }
+      }
+
+      fill_tile_rect(buf, buf_w, tx, ty, tile_w, tile_h, bg);
+
+      if (glyph_codepoint != 0 && glyph_second == 0) {
+        const TuiGlyph *g =
+            tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
+        blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w, tile_h, g, fg,
+                            bg);
+      } else if (glyph_codepoint != 0 && glyph_second != 0) {
+        // Two-char label ("TW" etc.) — render side by side, splitting
+        // the tile's horizontal real estate in half.
+        const TuiGlyph *g1 =
+            tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
+        const TuiGlyph *g2 =
+            tui_glyph_cache_get(state->glyph_cache, glyph_second);
+        blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w / 2, tile_h, g1,
+                            fg, bg);
+        blit_glyph_into_buf(buf, buf_w, buf_h, tx + tile_w / 2, ty, tile_w / 2,
+                            tile_h, g2, fg, bg);
+      }
+    }
+  }
+
+  struct ncvisual_options vopts = {0};
+  vopts.n = p;
+  vopts.blitter = NCBLIT_PIXEL;
+  vopts.leny = (unsigned)buf_h;
+  vopts.lenx = (unsigned)buf_w;
+  ncblit_rgba(buf, buf_w * 4, &vopts);
+  free(buf);
+}
+
 static void render_board(struct ncplane *plane, const Theme *theme,
-                         const TuiGameState *state) {
+                         const TuiGameState *state, const Layout *L) {
+  if (L->scale >= 2 && state->glyph_cache != NULL) {
+    render_board_pixel(plane, theme, state, L);
+    return;
+  }
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
   for (int col = 0; col < BOARD_DIM; col++) {
@@ -602,14 +794,14 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
 // ── Rack panel ────────────────────────────────────────────────────────────
 static void render_rack_panel(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L) {
-  draw_box(plane, theme, L->rack_top, 0, RACK_HEIGHT, BOARD_WIDTH, "Rack");
+  draw_box(plane, theme, L->rack_top, 0, RACK_HEIGHT, L->board_width, "Rack");
 
   const int player_idx = game_get_player_on_turn_index(state->game);
   const Player *player = game_get_player(state->game, player_idx);
   const Rack *rack = player_get_rack(player);
   const LetterDistribution *ld = state->ld;
 
-  const int interior_width = BOARD_WIDTH - 2;
+  const int interior_width = L->board_width - 2;
   const int total_letters = rack_get_total_letters(rack);
   const int rack_width = total_letters * CELL_WIDTH;
   int start_col = 1 + (interior_width - rack_width) / 2;
@@ -655,7 +847,7 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3) {
     return;
   }
-  draw_box(plane, theme, L->bag_top, 0, height, BOARD_WIDTH, title);
+  draw_box(plane, theme, L->bag_top, 0, height, L->board_width, title);
 
   // Tally bag + off-turn rack into a per-ml count array (the on-turn rack
   // is "seen", so it doesn't count as unseen).
@@ -697,7 +889,7 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   // Wrap across all available interior rows except the last (reserved for
   // the vowel/consonant tally).
   const int interior_left = 2;
-  const int interior_width = BOARD_WIDTH - 4;
+  const int interior_width = L->board_width - 4;
   const int content_top = L->bag_top + 1;
   const int content_bottom = L->bag_bottom - 2; // last row before tally
   theme_apply_fg(plane, theme->fg);
@@ -1195,6 +1387,10 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     // Destroying the cached planes forces them rebuilt from scratch in
     // this frame, which clears the stale image from the terminal.
     invalidate_grid_planes();
+    // The glyph cache is keyed by target pixel height, which derives
+    // from cdy — a font-size change makes every cached bitmap the wrong
+    // size. Flush so render_board_pixel rerasterizes at the new ratio.
+    tui_glyph_cache_reset(state->glyph_cache);
     // After a resize, notcurses' diff cache and the terminal's actual
     // screen state can disagree, leaving stale content (missing borders,
     // labels, premium markers, history entries) on the visible terminal.
@@ -1218,14 +1414,25 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   theme_apply_base(plane, theme);
   ncplane_erase(plane);
 
-  const Layout L = compute_layout(plane);
-  if (L.plane_rows < MIN_ROWS_REQUIRED || L.plane_cols < MIN_COLS_REQUIRED) {
+  // 2x mode is only honored when the host terminal supports pixel
+  // graphics AND the bundled TTF actually loaded; otherwise we silently
+  // run the 1x cell-text path even if the user's saved setting is 2.
+  struct notcurses *render_nc = ncplane_notcurses(plane);
+  const bool pixel_ok = render_nc != NULL && notcurses_canpixel(render_nc);
+  const int effective_scale =
+      (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
+                                                                          : 1;
+  const Layout L = compute_layout(plane, effective_scale);
+  const int min_rows = MIN_ROWS_REQUIRED_1X + (effective_scale - 1) * BOARD_DIM;
+  const int min_cols =
+      MIN_COLS_REQUIRED_1X + (effective_scale - 1) * BOARD_DIM * CELL_WIDTH;
+  if (L.plane_rows < (unsigned)min_rows || L.plane_cols < (unsigned)min_cols) {
     render_too_small(plane, theme);
     return;
   }
 
-  render_board(plane, theme, state);
-  render_board_grid(plane, theme, state->border_thickness);
+  render_board(plane, theme, state, &L);
+  render_board_grid(plane, theme, &L, state->border_thickness);
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
@@ -1321,12 +1528,36 @@ static const char *premium_labels_value(TuiPremiumLabels labels) {
 }
 
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int border_thickness,
-                              bool pixel_supported,
+                              int focus, int board_scale, bool antialias,
+                              int border_thickness, bool pixel_supported,
+                              bool font_available,
                               TuiPremiumLabels premium_labels,
                               bool blank_uppercase) {
   if (plane == NULL || theme == NULL) {
     return;
+  }
+
+  // Scale row. 2x needs both pixel graphics and a loaded font; if
+  // either is missing, the row reports unavailable and arrow keys
+  // become no-ops at this focus.
+  char scale_label[96];
+  const bool scale_available = pixel_supported && font_available;
+  if (!scale_available) {
+    snprintf(scale_label, sizeof(scale_label), "Scale        unsupported here");
+  } else {
+    char value_buf[8];
+    snprintf(value_buf, sizeof(value_buf), "%dx", board_scale);
+    format_setting_row(scale_label, sizeof(scale_label), "Scale", value_buf,
+                       focus == TUI_SETTINGS_SCALE);
+  }
+
+  // Antialiasing row — only meaningful when 2x is engaged.
+  char aa_label[96];
+  if (!scale_available || board_scale < 2) {
+    snprintf(aa_label, sizeof(aa_label), "Antialias    n/a at 1x");
+  } else {
+    format_setting_row(aa_label, sizeof(aa_label), "Antialias",
+                       antialias ? "on" : "off", focus == TUI_SETTINGS_AA);
   }
 
   // Border row.
@@ -1358,6 +1589,8 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                      focus == TUI_SETTINGS_BLANKS);
 
   const char *items[TUI_SETTINGS_ITEM_COUNT];
+  items[TUI_SETTINGS_SCALE] = scale_label;
+  items[TUI_SETTINGS_AA] = aa_label;
   items[TUI_SETTINGS_BORDER] = border_label;
   items[TUI_SETTINGS_PREMIUM] = premium_label;
   items[TUI_SETTINGS_BLANKS] = blanks_label;

@@ -89,6 +89,10 @@ bool tui_config_load(TuiConfig *config) {
   config->blank_uppercase_set = false;
   config->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
   config->premium_labels_set = false;
+  config->board_scale = 1;
+  config->board_scale_set = false;
+  config->antialias = true;
+  config->antialias_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -174,6 +178,21 @@ bool tui_config_load(TuiConfig *config) {
         config->premium_labels = TUI_PREMIUM_LABELS_NONE;
         config->premium_labels_set = true;
       }
+    } else if (strcmp(trimmed, "board_scale") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && (parsed == 1 || parsed == 2)) {
+        config->board_scale = (int)parsed;
+        config->board_scale_set = true;
+      }
+    } else if (strcmp(trimmed, "antialias") == 0) {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
+        config->antialias = true;
+        config->antialias_set = true;
+      } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
+        config->antialias = false;
+        config->antialias_set = true;
+      }
     }
   }
 
@@ -232,6 +251,12 @@ bool tui_config_save(const TuiConfig *config) {
       break;
     }
     fprintf(file, "premium_labels = \"%s\"\n", value);
+  }
+  if (config->board_scale_set) {
+    fprintf(file, "board_scale = %d\n", config->board_scale);
+  }
+  if (config->antialias_set) {
+    fprintf(file, "antialias = %s\n", config->antialias ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

@@ -16,6 +16,7 @@ struct LetterDistribution;
 struct PlayersData;
 struct BoardLayout;
 struct MoveList;
+typedef struct TuiGlyphCache TuiGlyphCache;
 
 enum {
   TUI_HISTORY_MAX = 200,
@@ -54,6 +55,12 @@ typedef struct {
   int border_thickness; // pixel-grid line thickness; 0 = off
   bool blank_uppercase; // played blanks render uppercase + blank_tile_fg
   TuiPremiumLabels premium_labels; // TW/tw/none label style
+  int board_scale; // 1 = classic cell tiles, 2 = 4×2 pixel tiles
+  bool antialias;  // FT_RENDER_MODE_NORMAL vs MONO at 2x
+  // Glyph cache used by the 2x render path. NULL when the bundled font
+  // could not be loaded or freetype init failed — that disables 2x
+  // regardless of the user's saved board_scale.
+  TuiGlyphCache *glyph_cache;
 
   // Clock state.
   int time_per_side_seconds;

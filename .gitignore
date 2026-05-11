@@ -9,6 +9,7 @@ covhtml
 *.info
 *.out
 magpie*
+!tui/assets/magpie.ttf
 dev/*.txt
 perf*
 .env

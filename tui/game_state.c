@@ -9,6 +9,7 @@
 #include "../src/ent/players_data.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
+#include "glyph_cache.h"
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -142,6 +143,17 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   out_state->border_thickness = 2; // default; overridden by config
   out_state->blank_uppercase = true;
   out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
+  out_state->board_scale = 1;
+  out_state->antialias = true;
+  // Load the bundled TTF for 2x mode. Failure here just leaves
+  // glyph_cache NULL — the renderer treats that as "scale=2 unavailable"
+  // and silently falls back to 1x.
+  char font_path[512];
+  if (tui_glyph_cache_resolve_font_path(font_path, sizeof(font_path))) {
+    out_state->glyph_cache = tui_glyph_cache_create(font_path);
+  } else {
+    out_state->glyph_cache = NULL;
+  }
   clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
   error_stack_destroy(err);
@@ -183,6 +195,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->ld != NULL) {
     ld_destroy(state->ld);
+  }
+  if (state->glyph_cache != NULL) {
+    tui_glyph_cache_destroy(state->glyph_cache);
   }
   memset(state, 0, sizeof(*state));
 }

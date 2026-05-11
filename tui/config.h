@@ -37,6 +37,14 @@ typedef struct {
   bool blank_uppercase_set;
   TuiPremiumLabels premium_labels;
   bool premium_labels_set;
+  // Board scale: 1 keeps the classic 2-col × 1-row tiles; 2 switches to
+  // FreeType-rasterized 4-col × 2-row tiles via Kitty pixel graphics.
+  // Only honored when notcurses_canpixel is true and a TTF was loaded.
+  int board_scale;
+  bool board_scale_set;
+  // Antialiasing toggle for the 2x render path. No effect at 1x.
+  bool antialias;
+  bool antialias_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

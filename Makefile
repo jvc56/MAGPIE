@@ -96,6 +96,22 @@ else
     endif
 endif
 
+# FreeType is required for magpie_tui: the 2x board-tile mode rasterizes
+# TTF glyphs through it, and the renderer links the library unconditionally
+# so the same binary works at both 1x and 2x. Same detection pattern as
+# notcurses — pkg-config preferred, Homebrew prefix as macOS fallback.
+FREETYPE_HAS_PKGCONFIG := $(shell command -v pkg-config >/dev/null 2>&1 && pkg-config --exists freetype2 2>/dev/null && echo yes)
+ifeq ($(FREETYPE_HAS_PKGCONFIG),yes)
+    FREETYPE_CFLAGS := $(shell pkg-config --cflags freetype2)
+    FREETYPE_LDLIBS := $(shell pkg-config --libs freetype2)
+else
+    FREETYPE_BREW_PREFIX := $(shell command -v brew >/dev/null 2>&1 && brew --prefix freetype 2>/dev/null)
+    ifneq ($(wildcard $(FREETYPE_BREW_PREFIX)/include/freetype2/ft2build.h),)
+        FREETYPE_CFLAGS := -I$(FREETYPE_BREW_PREFIX)/include/freetype2
+        FREETYPE_LDLIBS := -L$(FREETYPE_BREW_PREFIX)/lib -lfreetype
+    endif
+endif
+
 # magpie_tui builds engine and tui sources into a separate object tree
 # without sanitizers. AddressSanitizer's munmap interception conflicts with
 # notcurses/terminfo cleanup on macOS Darwin >= 25 and aborts on exit. The
@@ -126,8 +142,11 @@ magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
 ifeq ($(strip $(NOTCURSES_CFLAGS)),)
 	@echo "magpie_tui: notcurses not found. Install via 'brew install notcurses' (macOS) or 'apt install libnotcurses-dev' (Debian/Ubuntu)."
 	@exit 1
+else ifeq ($(strip $(FREETYPE_CFLAGS)),)
+	@echo "magpie_tui: freetype not found. Install via 'brew install freetype' (macOS) or 'apt install libfreetype-dev' (Debian/Ubuntu)."
+	@exit 1
 else
-	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) -o $(BIN_DIR)/$@
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -o $(BIN_DIR)/$@
 endif
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
@@ -140,7 +159,7 @@ $(TUI_OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(
 	$(CC) $(TUI_ENGINE_CFLAGS) -c $< -o $@
 
 $(TUI_OBJ_DIR)/$(TUI_DIR)/%.o: $(TUI_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR)
-	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) -c $< -o $@
+	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
 
 # Test files: use test_release flags if BUILD=release, otherwise use dev flags
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)

@@ -35,21 +35,28 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 // Settings modal — opened from the main menu. Left/Right arrows on the
 // focused row adjust that setting's value.
 typedef enum {
-  TUI_SETTINGS_BORDER = 0,
-  TUI_SETTINGS_PREMIUM = 1,
-  TUI_SETTINGS_BLANKS = 2,
-  TUI_SETTINGS_BACK = 3,
-  TUI_SETTINGS_ITEM_COUNT = 4,
+  TUI_SETTINGS_SCALE = 0,
+  TUI_SETTINGS_AA = 1,
+  TUI_SETTINGS_BORDER = 2,
+  TUI_SETTINGS_PREMIUM = 3,
+  TUI_SETTINGS_BLANKS = 4,
+  TUI_SETTINGS_BACK = 5,
+  TUI_SETTINGS_ITEM_COUNT = 6,
 } TuiSettingsItem;
 
-// `border_thickness` is the current pixel-grid thickness (0..6).
-// `pixel_supported` is true when the host terminal can render pixel
-// graphics. `premium_labels` selects the TW/tw/none labeling style for
-// premium squares. `blank_uppercase` controls whether played blanks
-// render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
+// `board_scale` is 1 or 2; the scale row is grayed out when 2x is
+// unavailable (no pixel support or font load failed). `antialias`
+// applies to the 2x render only and is grayed at 1x. `border_thickness`
+// is the current pixel-grid thickness (0..6). `pixel_supported` is true
+// when the host terminal can render pixel graphics. `font_available` is
+// true when the bundled TTF loaded. `premium_labels` selects the
+// TW/tw/none labeling style for premium squares. `blank_uppercase`
+// controls whether played blanks render uppercase (with blank_tile_fg)
+// or lowercase (with tile_fg).
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int border_thickness,
-                              bool pixel_supported,
+                              int focus, int board_scale, bool antialias,
+                              int border_thickness, bool pixel_supported,
+                              bool font_available,
                               TuiPremiumLabels premium_labels,
                               bool blank_uppercase);
 

@@ -229,7 +229,16 @@ int main(int argc, char *argv[]) {
   game_state.premium_labels = loaded.premium_labels_set
                                   ? loaded.premium_labels
                                   : TUI_PREMIUM_LABELS_UPPERCASE;
+  game_state.board_scale = loaded.board_scale_set ? loaded.board_scale : 1;
+  game_state.antialias = loaded.antialias_set ? loaded.antialias : true;
   const bool pixel_supported = notcurses_canpixel(nc);
+  const bool font_available = game_state.glyph_cache != NULL;
+  // If the user's saved scale=2 can't be honored on this machine, fall
+  // back transparently rather than show a broken board. The user's
+  // saved preference stays in tui.toml for next time.
+  if (game_state.board_scale >= 2 && (!pixel_supported || !font_available)) {
+    game_state.board_scale = 1;
+  }
   tui_bot_worker_start(&game_state);
 
   // Modal state: which (if any) modal is open. Drives keyboard routing
@@ -246,8 +255,9 @@ int main(int argc, char *argv[]) {
       tui_game_render_menu(std_plane, theme, main_menu_focus);
     } else if (modal == TUI_MODAL_SETTINGS) {
       tui_game_render_settings(std_plane, theme, settings_focus,
+                               game_state.board_scale, game_state.antialias,
                                game_state.border_thickness, pixel_supported,
-                               game_state.premium_labels,
+                               font_available, game_state.premium_labels,
                                game_state.blank_uppercase);
     }
     notcurses_render(nc);
@@ -311,7 +321,30 @@ int main(int argc, char *argv[]) {
           settings_focus++;
         }
       } else if (key == NCKEY_LEFT || key == 'h' || key == 'H') {
-        if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+        if (settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
+            font_available) {
+          // Scale is a 2-state toggle (1, 2). Both arrows flip it.
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.board_scale = game_state.board_scale == 2 ? 1 : 2;
+          const int v = game_state.board_scale;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.board_scale = v;
+            to_save.board_scale_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_AA && pixel_supported &&
+                   font_available && game_state.board_scale >= 2) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.antialias = !game_state.antialias;
+          const bool v = game_state.antialias;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.antialias = v;
+            to_save.antialias_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
           pthread_mutex_lock(&game_state.mutex);
           if (game_state.border_thickness > 0) {
             game_state.border_thickness--;
@@ -349,7 +382,29 @@ int main(int argc, char *argv[]) {
           }
         }
       } else if (key == NCKEY_RIGHT || key == 'l' || key == 'L') {
-        if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
+        if (settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
+            font_available) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.board_scale = game_state.board_scale == 2 ? 1 : 2;
+          const int v = game_state.board_scale;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.board_scale = v;
+            to_save.board_scale_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_AA && pixel_supported &&
+                   font_available && game_state.board_scale >= 2) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.antialias = !game_state.antialias;
+          const bool v = game_state.antialias;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.antialias = v;
+            to_save.antialias_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
           pthread_mutex_lock(&game_state.mutex);
           if (game_state.border_thickness < 6) {
             game_state.border_thickness++;
