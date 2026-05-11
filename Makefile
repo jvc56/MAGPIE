@@ -127,9 +127,27 @@ endif
 # is the same code path the release magpie binary uses. -flto lets the
 # linker inline across translation units (notably the engine's small
 # accessor helpers called from the renderer).
-TUI_ENGINE_CFLAGS := -O3 -flto -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
-TUI_CFLAGS := -O3 -flto -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
-TUI_LDFLAGS := -pthread -flto
+# magpie_tui has its own build flags independent of the top-level BUILD
+# variable used for `magpie`. Default is release-grade (-O3 -flto
+# -march=native) for the 60fps-on-pixel-blits hot path. Pass
+# BUILD=debug to swap in -O1 + AddressSanitizer + UBSan for crash
+# troubleshooting; that build is slower, larger, and on macOS aborts on
+# exit due to ASAN's munmap interception conflicting with notcurses/
+# terminfo cleanup, but it prints a stack trace on SIGSEGV which is
+# what makes it worth the noise.
+ifeq ($(BUILD),debug)
+    TUI_OPT := -O1
+    TUI_LTO :=
+    TUI_SAN := -fsanitize=address,undefined -fno-omit-frame-pointer
+else
+    TUI_OPT := -O3
+    TUI_LTO := -flto
+    TUI_SAN :=
+endif
+
+TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN)
+TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN)
+TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
 
 .PHONY: all clean iwyu
 
