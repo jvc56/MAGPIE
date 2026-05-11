@@ -108,16 +108,23 @@ static Layout compute_layout(struct ncplane *plane) {
 
   if (L.two_col) {
     // Pills act as column headers — one above each history subcolumn.
-    const int gutter = 2;
-    const int half = (L.right_col_width - gutter) / 2;
+    // Force equal pill widths so right-aligned content (score + clock)
+    // sits the same number of cells from the leftmost "P" marker in
+    // both pills; otherwise on odd-width right-column space, pill2 was
+    // a column wider than pill1 and the ones-digit of P2's score drifted
+    // one cell further from its "P" than P1's did. Pill1 stays anchored
+    // to the panel's left edge, pill2 stays anchored to the right edge,
+    // and any slack ends up as a slightly wider gutter between them.
+    const int min_gutter = 2;
+    const int half = (L.right_col_width - min_gutter) / 2;
     L.pill1_top = 0;
     L.pill1_bottom = PILL_HEIGHT - 1;
     L.pill1_left = L.right_col_left;
     L.pill1_right = L.pill1_left + half - 1;
     L.pill2_top = L.pill1_top;
     L.pill2_bottom = L.pill1_bottom;
-    L.pill2_left = L.pill1_right + 1 + gutter;
     L.pill2_right = L.right_col_right;
+    L.pill2_left = L.pill2_right - half + 1;
     L.history_top = L.pill1_bottom + 1;
   } else {
     L.pill1_top = 0;
