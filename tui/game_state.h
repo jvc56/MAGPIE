@@ -57,10 +57,15 @@ typedef struct {
   TuiPremiumLabels premium_labels; // TW/tw/none label style
   int board_scale; // 1 = classic cell tiles, 2 = 4×2 pixel tiles
   bool antialias;  // FT_RENDER_MODE_NORMAL vs MONO at 2x
+  TuiScoreSubscripts score_subscripts; // off / nonzero / all (2x only)
   // Glyph cache used by the 2x render path. NULL when the bundled font
   // could not be loaded or freetype init failed — that disables 2x
-  // regardless of the user's saved board_scale.
+  // regardless of the user's saved board_scale. `glyph_cache_sub` is a
+  // second instance of the same font sized for the score subscript so
+  // we can hold both pixel sizes alive at once without thrashing
+  // FT_Set_Pixel_Sizes per cell.
   TuiGlyphCache *glyph_cache;
+  TuiGlyphCache *glyph_cache_sub;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature

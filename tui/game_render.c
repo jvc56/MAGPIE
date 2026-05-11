@@ -463,26 +463,16 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
 // board area in a single child plane and ncblit_rgba's it. Each tile is
 // (4 * cdx) × (2 * cdy) pixels: filled with the cell's bg, then the
 // cached glyph alpha-blended on top using the cell's fg.
-static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
-                                int ty, int tile_w, int tile_h,
-                                const TuiGlyph *g, ThemeRgb fg, ThemeRgb bg) {
+// Primitive: blit a glyph alpha-mask into `buf`, with the glyph's top-
+// left pixel anchored at (glyph_left, glyph_top). Per-pixel bounds-check
+// — necessary because callers position glyphs near tile edges where
+// negative starts are routine.
+static void blit_glyph_at(uint8_t *buf, int buf_w, int buf_h, int glyph_left,
+                          int glyph_top, const TuiGlyph *g, ThemeRgb fg,
+                          ThemeRgb bg) {
   if (g == NULL || g->width <= 0 || g->height <= 0) {
     return;
   }
-  // Center the glyph inside the tile, biasing slightly lower to mimic the
-  // typical baseline-to-tile-center offset that looks right for boxed
-  // letters. bearing_y is positive above the baseline; we treat the
-  // baseline as 70% down the tile.
-  const int baseline = ty + (int)(tile_h * 0.72);
-  const int glyph_top = baseline - g->bearing_y;
-  const int glyph_left = tx + (tile_w - g->width) / 2;
-
-  // Compute the destination pointer per pixel using validated coords.
-  // The previous version precomputed dst from glyph_left and stepped
-  // forward, which is undefined when glyph_left is negative — the "TW"
-  // / "DW" labels share a half-tile, so wide-ish FreeType glyphs can
-  // overshoot 20px. dst would wrap to a wild address, then the first
-  // in-range write at the row's left edge segfaulted.
   for (int row = 0; row < g->height; row++) {
     const int dst_y = glyph_top + row;
     if (dst_y < 0 || dst_y >= buf_h) {
@@ -507,6 +497,22 @@ static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
       dst[3] = 255;
     }
   }
+}
+
+// Centered-in-tile placement (the historical default). Used for
+// premium-square labels and for tile letters when score subscripts
+// are off. Baseline biased to 72% down the tile so the glyph optical-
+// centers about right for cap-only Latin letters.
+static void blit_glyph_into_buf(uint8_t *buf, int buf_w, int buf_h, int tx,
+                                int ty, int tile_w, int tile_h,
+                                const TuiGlyph *g, ThemeRgb fg, ThemeRgb bg) {
+  if (g == NULL || g->width <= 0 || g->height <= 0) {
+    return;
+  }
+  const int baseline = ty + (int)(tile_h * 0.72);
+  const int glyph_top = baseline - g->bearing_y;
+  const int glyph_left = tx + (tile_w - g->width) / 2;
+  blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
 }
 
 static void fill_tile_rect(uint8_t *buf, int buf_w, int tx, int ty, int tile_w,
@@ -605,10 +611,12 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   // invalidate_blit_caches().
   const uint64_t cur_version =
       atomic_load(&((TuiGameState *)state)->render_version);
+  const int sub_mode = (int)state->score_subscripts;
   if (board_pixel_cache.valid && board_pixel_cache.version == cur_version &&
       board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
       board_pixel_cache.param_a == L->scale &&
-      board_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
+      board_pixel_cache.param_b ==
+          ((state->antialias ? 1 : 0) | (sub_mode << 1))) {
     return;
   }
   const int tile_w = (int)cdx * L->board_cell_w;
@@ -618,12 +626,21 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   if (buf_w <= 0 || buf_h <= 0) {
     return;
   }
-  // Target glyph height: leaves ~13% margin top + bottom inside each
-  // tile, which is comfortable for both AA and mono rendering at the
-  // typical cell-pixel sizes terminals produce.
-  const int target_glyph_px = (int)((double)tile_h * 0.74);
-  tui_glyph_cache_set_size(state->glyph_cache, target_glyph_px,
-                           state->antialias);
+  // Glyph sizes. Without subscripts: the historical 74% target leaves
+  // ~13% margin top + bottom and reads well at every cell-pixel ratio.
+  // With subscripts: shrink the letter to 80% of that (~59%) and pin
+  // it to the upper-left so the digit fits in the bottom-right at
+  // ~42%. Both caches use the same font, just different sizes — set
+  // them once per render, not per cell.
+  const bool subs_on = sub_mode != TUI_SCORE_SUBSCRIPTS_OFF &&
+                       state->glyph_cache_sub != NULL;
+  const int letter_px =
+      (int)((double)tile_h * (subs_on ? 0.59 : 0.74));
+  const int sub_px = (int)((double)tile_h * 0.42);
+  tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
+  if (subs_on) {
+    tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
+  }
 
   uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
   if (buf == NULL) {
@@ -641,6 +658,8 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       ThemeRgb fg;
       uint32_t glyph_codepoint = 0;
       uint32_t glyph_second = 0; // second char of "TW"-style premium labels
+      bool is_placed_tile = false;
+      int tile_score = 0;
 
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         const PremiumMarker marker =
@@ -656,6 +675,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
           glyph_second = (uint32_t)marker.glyph[1];
         }
       } else {
+        is_placed_tile = true;
         const bool is_blank = get_is_blanked(ml);
         const bool render_uppercase = is_blank && state->blank_uppercase;
         const MachineLetter glyph_ml =
@@ -667,15 +687,35 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
             (unsigned char)ascii[0] < 0x80) {
           glyph_codepoint = (uint32_t)ascii[0];
         }
+        // ld_get_score returns Equity (millipoints). For blanks the
+        // backing array is zero unless the LD overrode it, which is
+        // exactly the behavior we want — blank scores naturally drop
+        // out under the "nonzero" mode.
+        tile_score = equity_to_int(ld_get_score(state->ld, ml));
       }
 
       fill_tile_rect(buf, buf_w, tx, ty, tile_w, tile_h, bg);
 
+      // Layout the letter. Subscript mode pins it upper-left so the
+      // bottom-right corner is free for the score digits; otherwise
+      // the historical centered placement.
+      const bool show_subscript = is_placed_tile && subs_on &&
+                                  (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL ||
+                                   tile_score != 0);
       if (glyph_codepoint != 0 && glyph_second == 0) {
         const TuiGlyph *g =
             tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
-        blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w, tile_h, g, fg,
-                            bg);
+        if (is_placed_tile && subs_on) {
+          // Pin to the top-left corner with a small inset so the
+          // glyph doesn't kiss the tile edge. tile_h / 12 is roughly
+          // 8% of the tile height — enough margin to read distinctly
+          // from the border line / adjacent tile.
+          const int inset = tile_h / 12;
+          blit_glyph_at(buf, buf_w, buf_h, tx + inset, ty + inset, g, fg, bg);
+        } else {
+          blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w, tile_h, g, fg,
+                              bg);
+        }
       } else if (glyph_codepoint != 0 && glyph_second != 0) {
         // Two-char label ("TW" etc.) — render side by side, splitting
         // the tile's horizontal real estate in half.
@@ -687,6 +727,28 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
                             fg, bg);
         blit_glyph_into_buf(buf, buf_w, buf_h, tx + tile_w / 2, ty, tile_w / 2,
                             tile_h, g2, fg, bg);
+      }
+
+      // Score subscript: right-aligned bottom-right of the tile. Each
+      // digit lands via its own blit_glyph_at, walking right-to-left
+      // so multi-digit scores (10) end on the same baseline.
+      if (show_subscript) {
+        char digits[8];
+        snprintf(digits, sizeof(digits), "%d", tile_score);
+        const int inset = tile_h / 12;
+        const int baseline = ty + tile_h - inset;
+        int pen_right = tx + tile_w - inset;
+        for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
+          const TuiGlyph *gd =
+              tui_glyph_cache_get(state->glyph_cache_sub, (uint32_t)digits[i]);
+          if (gd == NULL || gd->width <= 0) {
+            continue;
+          }
+          const int gleft = pen_right - gd->width;
+          const int gtop = baseline - gd->bearing_y;
+          blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd, fg, bg);
+          pen_right = gleft - 1; // small kerning gap between digits
+        }
       }
     }
   }
@@ -707,13 +769,15 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   free(buf);
 
   // Record the parameters of the blit we just completed so the next
-  // frame can short-circuit if nothing's changed.
+  // frame can short-circuit if nothing's changed. param_b packs
+  // antialias (bit 0) and the score_subscripts tri-state (bits 1-2)
+  // so a flip of either invalidates the cache.
   board_pixel_cache.valid = true;
   board_pixel_cache.version = cur_version;
   board_pixel_cache.cdy = cdy;
   board_pixel_cache.cdx = cdx;
   board_pixel_cache.param_a = L->scale;
-  board_pixel_cache.param_b = state->antialias ? 1 : 0;
+  board_pixel_cache.param_b = (state->antialias ? 1 : 0) | (sub_mode << 1);
 }
 
 static void render_board(struct ncplane *plane, const Theme *theme,
@@ -1583,8 +1647,22 @@ static const char *premium_labels_value(TuiPremiumLabels labels) {
   }
 }
 
+static const char *score_subscripts_value(TuiScoreSubscripts mode) {
+  switch (mode) {
+  case TUI_SCORE_SUBSCRIPTS_NONZERO:
+    return "nonzero";
+  case TUI_SCORE_SUBSCRIPTS_ALL:
+    return "all";
+  case TUI_SCORE_SUBSCRIPTS_OFF:
+  case TUI_SCORE_SUBSCRIPTS_COUNT:
+  default:
+    return "off";
+  }
+}
+
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int board_scale, bool antialias,
+                              TuiScoreSubscripts score_subscripts,
                               int border_thickness, bool pixel_supported,
                               bool font_available,
                               TuiPremiumLabels premium_labels,
@@ -1614,6 +1692,16 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   } else {
     format_setting_row(aa_label, sizeof(aa_label), "Antialias",
                        antialias ? "on" : "off", focus == TUI_SETTINGS_AA);
+  }
+
+  // Score subscripts row — also 2x-only.
+  char sub_label[96];
+  if (!scale_available || board_scale < 2) {
+    snprintf(sub_label, sizeof(sub_label), "Subscript    n/a at 1x");
+  } else {
+    format_setting_row(sub_label, sizeof(sub_label), "Subscript",
+                       score_subscripts_value(score_subscripts),
+                       focus == TUI_SETTINGS_SUBSCRIPTS);
   }
 
   // Border row.
@@ -1647,6 +1735,7 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
   const char *items[TUI_SETTINGS_ITEM_COUNT];
   items[TUI_SETTINGS_SCALE] = scale_label;
   items[TUI_SETTINGS_AA] = aa_label;
+  items[TUI_SETTINGS_SUBSCRIPTS] = sub_label;
   items[TUI_SETTINGS_BORDER] = border_label;
   items[TUI_SETTINGS_PREMIUM] = premium_label;
   items[TUI_SETTINGS_BLANKS] = blanks_label;

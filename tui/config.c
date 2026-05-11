@@ -93,6 +93,8 @@ bool tui_config_load(TuiConfig *config) {
   config->board_scale_set = false;
   config->antialias = true;
   config->antialias_set = false;
+  config->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
+  config->score_subscripts_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -193,6 +195,17 @@ bool tui_config_load(TuiConfig *config) {
         config->antialias = false;
         config->antialias_set = true;
       }
+    } else if (strcmp(trimmed, "score_subscripts") == 0) {
+      if (strcmp(value, "off") == 0) {
+        config->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
+        config->score_subscripts_set = true;
+      } else if (strcmp(value, "nonzero") == 0) {
+        config->score_subscripts = TUI_SCORE_SUBSCRIPTS_NONZERO;
+        config->score_subscripts_set = true;
+      } else if (strcmp(value, "all") == 0) {
+        config->score_subscripts = TUI_SCORE_SUBSCRIPTS_ALL;
+        config->score_subscripts_set = true;
+      }
     }
   }
 
@@ -257,6 +270,23 @@ bool tui_config_save(const TuiConfig *config) {
   }
   if (config->antialias_set) {
     fprintf(file, "antialias = %s\n", config->antialias ? "true" : "false");
+  }
+  if (config->score_subscripts_set) {
+    const char *value = "off";
+    switch (config->score_subscripts) {
+    case TUI_SCORE_SUBSCRIPTS_NONZERO:
+      value = "nonzero";
+      break;
+    case TUI_SCORE_SUBSCRIPTS_ALL:
+      value = "all";
+      break;
+    case TUI_SCORE_SUBSCRIPTS_OFF:
+    case TUI_SCORE_SUBSCRIPTS_COUNT:
+    default:
+      value = "off";
+      break;
+    }
+    fprintf(file, "score_subscripts = \"%s\"\n", value);
   }
 
   if (fclose(file) != 0) {

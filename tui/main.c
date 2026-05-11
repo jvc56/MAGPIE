@@ -231,6 +231,9 @@ int main(int argc, char *argv[]) {
                                   : TUI_PREMIUM_LABELS_UPPERCASE;
   game_state.board_scale = loaded.board_scale_set ? loaded.board_scale : 1;
   game_state.antialias = loaded.antialias_set ? loaded.antialias : true;
+  game_state.score_subscripts = loaded.score_subscripts_set
+                                    ? loaded.score_subscripts
+                                    : TUI_SCORE_SUBSCRIPTS_OFF;
   const bool pixel_supported = notcurses_canpixel(nc);
   const bool font_available = game_state.glyph_cache != NULL;
   // If the user's saved scale=2 can't be honored on this machine, fall
@@ -256,6 +259,7 @@ int main(int argc, char *argv[]) {
     } else if (modal == TUI_MODAL_SETTINGS) {
       tui_game_render_settings(std_plane, theme, settings_focus,
                                game_state.board_scale, game_state.antialias,
+                               game_state.score_subscripts,
                                game_state.border_thickness, pixel_supported,
                                font_available, game_state.premium_labels,
                                game_state.blank_uppercase);
@@ -354,6 +358,21 @@ int main(int argc, char *argv[]) {
             to_save.antialias_set = true;
             tui_config_save(&to_save);
           }
+        } else if (settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
+                   pixel_supported && font_available &&
+                   game_state.board_scale >= 2) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.score_subscripts =
+              (TuiScoreSubscripts)((game_state.score_subscripts +
+                                    TUI_SCORE_SUBSCRIPTS_COUNT - 1) %
+                                   TUI_SCORE_SUBSCRIPTS_COUNT);
+          const TuiScoreSubscripts v = game_state.score_subscripts;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.score_subscripts = v;
+            to_save.score_subscripts_set = true;
+            tui_config_save(&to_save);
+          }
         } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {
           pthread_mutex_lock(&game_state.mutex);
           if (game_state.border_thickness > 0) {
@@ -412,6 +431,20 @@ int main(int argc, char *argv[]) {
           if (!args.no_config) {
             to_save.antialias = v;
             to_save.antialias_set = true;
+            tui_config_save(&to_save);
+          }
+        } else if (settings_focus == TUI_SETTINGS_SUBSCRIPTS &&
+                   pixel_supported && font_available &&
+                   game_state.board_scale >= 2) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.score_subscripts =
+              (TuiScoreSubscripts)((game_state.score_subscripts + 1) %
+                                   TUI_SCORE_SUBSCRIPTS_COUNT);
+          const TuiScoreSubscripts v = game_state.score_subscripts;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.score_subscripts = v;
+            to_save.score_subscripts_set = true;
             tui_config_save(&to_save);
           }
         } else if (settings_focus == TUI_SETTINGS_BORDER && pixel_supported) {

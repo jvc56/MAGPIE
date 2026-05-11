@@ -21,6 +21,19 @@ typedef enum {
   TUI_PREMIUM_LABELS_COUNT,
 } TuiPremiumLabels;
 
+// Tri-state for score subscripts on placed 2x board tiles. NONZERO
+// skips the subscript when the tile's point value is 0 — the default
+// because in standard letter distributions only blanks score 0 and a
+// "0" subscript on a blank is noise. ALL renders the subscript even
+// for zero-scored tiles (useful for variant LDs that give blanks a
+// nonzero value, or for users who want every tile labeled).
+typedef enum {
+  TUI_SCORE_SUBSCRIPTS_OFF = 0,
+  TUI_SCORE_SUBSCRIPTS_NONZERO = 1,
+  TUI_SCORE_SUBSCRIPTS_ALL = 2,
+  TUI_SCORE_SUBSCRIPTS_COUNT,
+} TuiScoreSubscripts;
+
 typedef struct {
   ThemeName theme;
   bool theme_set;
@@ -45,6 +58,12 @@ typedef struct {
   // Antialiasing toggle for the 2x render path. No effect at 1x.
   bool antialias;
   bool antialias_set;
+  // Score subscripts on placed 2x board tiles. No effect at 1x (no
+  // room in a 2-col × 1-row cell). When non-OFF, the letter glyph
+  // shrinks to 80% and pins to the top-left, freeing the bottom-right
+  // for the tile's point value.
+  TuiScoreSubscripts score_subscripts;
+  bool score_subscripts_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

@@ -145,15 +145,19 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
   out_state->board_scale = 1;
   out_state->antialias = true;
+  out_state->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
   atomic_store(&out_state->render_version, (uint64_t)1);
   // Load the bundled TTF for 2x mode. Failure here just leaves
   // glyph_cache NULL — the renderer treats that as "scale=2 unavailable"
-  // and silently falls back to 1x.
+  // and silently falls back to 1x. The secondary cache holds digit
+  // glyphs at the smaller pixel size used for score subscripts.
   char font_path[512];
   if (tui_glyph_cache_resolve_font_path(font_path, sizeof(font_path))) {
     out_state->glyph_cache = tui_glyph_cache_create(font_path);
+    out_state->glyph_cache_sub = tui_glyph_cache_create(font_path);
   } else {
     out_state->glyph_cache = NULL;
+    out_state->glyph_cache_sub = NULL;
   }
   clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
@@ -199,6 +203,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->glyph_cache != NULL) {
     tui_glyph_cache_destroy(state->glyph_cache);
+  }
+  if (state->glyph_cache_sub != NULL) {
+    tui_glyph_cache_destroy(state->glyph_cache_sub);
   }
   memset(state, 0, sizeof(*state));
 }
