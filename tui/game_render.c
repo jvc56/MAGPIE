@@ -1156,17 +1156,20 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 //   " 18. L1 RE(W)I(N)                  +38"
 //   "     4:42 AEINRT                    91"
 //
-// When the going-out bonus is attached, a third line is added showing the
-// opponent's leftover tiles and the bonus → new total:
-//   "     + EE                       +4   95"
+// When the going-out bonus is attached, two more rows are appended —
+// rendered with the same delta-on-top / total-on-bottom shape as a
+// scoring play so it reads as the closing adjustment rather than a
+// crammed third column:
+//   "     (EE)                          +4"
+//   "                                    95"
 //
 // Both players use the same color scheme — a lighter gray (theme->fg) for
-// the top row, a darker gray (theme->dim_fg) for the lower rows. Selective
-// bold marks the position and played-tile letters in the move, plus the
-// running totals on the right.
+// the top rows of each row-pair, a darker gray (theme->dim_fg) for the
+// lower rows. Selective bold marks the position and played-tile letters
+// in the move, plus the running totals on the right.
 
 static int history_entry_rows(const TuiHistoryEntry *e) {
-  return e->end_bonus != 0 ? 3 : 2;
+  return e->end_bonus != 0 ? 4 : 2;
 }
 
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
@@ -1254,17 +1257,18 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_set_styles(plane, 0);
   }
 
-  // ── Row 3 (going-out bonus): "    + EE                  +4   95" ─────
+  // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
+  // Rendered with the same shape as a scoring play — opponent's leftover
+  // rack on the left in standard GCG (LNRU) notation, bonus delta
+  // right-aligned. Color matches the move row (theme->fg) so the bonus
+  // visually parses as "another play."
   if (e->end_bonus == 0 || row + 2 > row_bottom_inclusive) {
     return;
   }
   const int row3 = row + 2;
-  theme_apply_fg(plane, theme->dim_fg);
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, theme->fg);
   char bonus_left[48];
-  // Render the opponent's leftover tiles as "(LNRU)" — matching the
-  // standard GCG notation used in tournament scoresheets — instead of
-  // a "+ LNRU" prefix that read as another column rather than the
-  // running rack at game end.
   if (e->end_rack_str[0] != '\0') {
     snprintf(bonus_left, sizeof(bonus_left), "    (%s)", e->end_rack_str);
   } else {
@@ -1272,21 +1276,28 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
 
-  // Right side: "+N  Total" — bonus delta non-bold, new total bold.
   char delta3_str[16];
   snprintf(delta3_str, sizeof(delta3_str), "+%d", e->end_bonus);
-  char total3_str[16];
-  snprintf(total3_str, sizeof(total3_str), "%d", e->total_after + e->end_bonus);
-  const int total3_len = (int)strlen(total3_str);
-  const int total3_col = interior_right - total3_len + 1;
   const int delta3_len = (int)strlen(delta3_str);
-  const int delta3_col = total3_col - 2 - delta3_len;
-
+  const int delta3_col = interior_right - delta3_len + 1;
   if (delta3_col > interior_left + (int)strlen(bonus_left)) {
     ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
   }
+
+  // ── Row 4 (final score): "                                    489" ────
+  // Bold, right-aligned in the dim color — mirrors the total row of a
+  // scoring play and represents the final game total for this player.
+  if (row + 3 > row_bottom_inclusive) {
+    return;
+  }
+  const int row4 = row + 3;
+  theme_apply_fg(plane, theme->dim_fg);
+  char total4_str[16];
+  snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
+  const int total4_len = (int)strlen(total4_str);
+  const int total4_col = interior_right - total4_len + 1;
   ncplane_set_styles(plane, NCSTYLE_BOLD);
-  ncplane_putstr_yx(plane, row3, total3_col, total3_str);
+  ncplane_putstr_yx(plane, row4, total4_col, total4_str);
   ncplane_set_styles(plane, 0);
 }
 
