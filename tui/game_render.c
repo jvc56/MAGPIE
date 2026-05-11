@@ -417,12 +417,12 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
                                TuiPremiumLabels premium_labels,
                                int border_thickness, int top, int left) {
   const Board *board = game_get_board(game);
-  // Bake the tile border into each cell via NCSTYLE_UNDERLINE instead
-  // of a separate pixel-graphics overlay plane. The pixel plane cost
-  // ~3-4ms per notcurses_render (the kitty-graphics image gets re-
-  // emitted each frame even with the buffer cached), capping 1x mode
-  // around 250fps; cell styling is part of the cell-diff that
-  // notcurses already does and is effectively free.
+  // Bake the tile border into the grid via NCSTYLE_UNDERLINE on empty
+  // cells only — placed tiles are fullwidth glyphs and an underline
+  // under the letter reads as part of the typography, not a grid
+  // line. Empty cells (premium-square labels and ideographic-space
+  // non-premium cells) carry the line, which is enough to see the
+  // grid against the played tiles.
   const uint16_t border_style =
       border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   for (int row = 0; row < BOARD_DIM; row++) {
@@ -431,15 +431,16 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       const int screen_col = left + col * CELL_WIDTH;
       const MachineLetter ml = board_get_letter(board, row, col);
       const BonusSquare bs = board_get_bonus_square(board, row, col);
-      ncplane_set_styles(plane, border_style);
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         const PremiumMarker marker =
             premium_marker_for_cell(theme, bs, row, col, premium_labels);
+        ncplane_set_styles(plane, border_style);
         theme_apply_fg(plane, marker.fg);
         theme_apply_bg(plane, marker.bg);
         ncplane_putstr_yx(plane, screen_row, screen_col, marker.glyph);
         continue;
       }
+      ncplane_set_styles(plane, 0);
       const bool is_blank = get_is_blanked(ml);
       const bool render_uppercase = is_blank && blank_uppercase;
       const MachineLetter glyph_ml =
@@ -769,14 +770,11 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
     start_col = 1;
   }
 
-  const uint16_t border_style =
-      state->border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   int col_offset = 0;
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     const int count = rack_get_letter(rack, (MachineLetter)ml);
     for (int copy = 0; copy < count; copy++) {
       const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
-      ncplane_set_styles(plane, border_style);
       theme_apply_fg(plane, theme->rack_tile_fg);
       theme_apply_bg(plane, theme->rack_tile_bg);
       if (fullwidth[0] != '\0') {
@@ -790,7 +788,6 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
       col_offset += CELL_WIDTH;
     }
   }
-  ncplane_set_styles(plane, 0);
 }
 
 // ── Bag panel ─────────────────────────────────────────────────────────────
@@ -991,11 +988,8 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
-  const uint16_t border_style =
-      state->border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   if (rack_right_max >= rack_left + 1) {
     int rcol = rack_left;
-    ncplane_set_styles(plane, border_style);
     theme_apply_fg(plane, theme->rack_tile_fg);
     theme_apply_bg(plane, theme->rack_tile_bg);
     for (int ml = 0; ml < ld_get_size(ld) && rcol + 1 <= rack_right_max; ml++) {
@@ -1012,7 +1006,6 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
         rcol += 2;
       }
     }
-    ncplane_set_styles(plane, 0);
   }
 }
 
