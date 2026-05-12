@@ -1441,9 +1441,12 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   line[pos] = '\0';
 
   // Wrap across all available interior rows except the last (reserved for
-  // the vowel/consonant tally).
-  const int interior_left = 2;
-  const int interior_width = L->board_width - 4;
+  // the vowel/consonant tally). Content butts up against the 1-col
+  // border on each side; the extra column on each side previously
+  // wasted made e.g. "30 vows/34 cons" overflow the right border at
+  // halfwidth.
+  const int interior_left = 1;
+  const int interior_width = L->board_width - 2;
   const int content_top = L->bag_top + 1;
   const int content_bottom = L->bag_bottom - 2; // last row before tally
   theme_apply_fg(plane, theme->fg);
