@@ -48,13 +48,19 @@
 
 enum {
   CELL_WIDTH = 2, // 1x board tile width in cols (and rack tile width always)
-  ROW_LABEL_COL = 0,
+  // The board widget gets its own 1-col border on all four sides, so
+  // everything inside (labels + cells) shifts 1 col right and 1 row
+  // down from where it'd sit without a border. The title "Board (N)"
+  // lives on the top border row.
+  ROW_LABEL_COL = 1,
   // Row labels are 2 cols wide ("%2d"); the board sits flush against
   // them so the column-label letters land directly above the cells they
   // describe instead of being floated one extra column off.
   CELL_COL_BASE = ROW_LABEL_COL + 2,
-  COL_LABELS_ROW = 0,
-  CELL_ROW_BASE = 1,
+  COL_LABELS_ROW = 1,
+  CELL_ROW_BASE = 2,
+  // 1 col on the right edge of the board widget for the box border.
+  BOARD_RIGHT_BORDER = 1,
   RACK_HEIGHT = 3,
   PILL_HEIGHT = 3,
   RIGHT_COL_LEFT_OFFSET = 0, // right column sits flush against the board
@@ -79,7 +85,8 @@ enum {
   // 1x layout: 33 cols for the board area + 1 gutter + 32 cols right column.
   // 2x bumps the board to 63 cols, so the floor rises to 96.
   MIN_COLS_REQUIRED_1X = CELL_COL_BASE + BOARD_DIM * CELL_WIDTH +
-                         RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH,
+                         BOARD_RIGHT_BORDER + RIGHT_COL_LEFT_OFFSET +
+                         RIGHT_COL_MIN_WIDTH,
 };
 
 typedef struct {
@@ -152,12 +159,14 @@ static int compute_effective_scale(int user_pref, unsigned plane_cols,
   }
   for (int s = user_pref; s >= 0; s--) {
     const int cols = CELL_COL_BASE + BOARD_DIM * cell_w_for[s] +
-                     RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH;
-    // Board rows + 1 col-label row + rack box (3 normally, 4 at
-    // double) + bag min 3 rows + status 1. Rack sits flush under the
-    // board with no gap.
+                     BOARD_RIGHT_BORDER + RIGHT_COL_LEFT_OFFSET +
+                     RIGHT_COL_MIN_WIDTH;
+    // Board widget = top border (1) + col-label row (1) + cells + bottom
+    // border (1). Then rack box, bag min 3 rows, status 1. Rack sits
+    // flush under the board's bottom border, no gap.
     const int rack_box_rows = (s == 2) ? 4 : 3;
-    const int rows = BOARD_DIM * cell_h_for[s] + 1 + rack_box_rows + 3 + 1;
+    const int rows =
+        BOARD_DIM * cell_h_for[s] + 3 + rack_box_rows + 3 + 1;
     if (plane_cols >= (unsigned)cols && plane_rows >= (unsigned)rows) {
       return s;
     }
@@ -243,11 +252,16 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   }
   L.board_cell_w = (L.scale == 2) ? 4 : (L.scale == 1) ? 2 : 1;
   L.board_cell_h = (L.scale == 2) ? 2 : 1;
-  L.board_width = CELL_COL_BASE + BOARD_DIM * L.board_cell_w;
+  // board_width spans cols [0, board_width-1], with col 0 the left
+  // border and col board_width-1 the right border.
+  L.board_width =
+      CELL_COL_BASE + BOARD_DIM * L.board_cell_w + BOARD_RIGHT_BORDER;
   L.board_bottom_row = CELL_ROW_BASE + BOARD_DIM * L.board_cell_h - 1;
 
   L.board_right_col = L.board_width - 1;
-  L.rack_top = L.board_bottom_row + 1;
+  // Skip the bottom-border row of the board widget; rack starts on the
+  // row after that.
+  L.rack_top = L.board_bottom_row + 2;
   // Rack box gains a row when the board is double-size so the rack
   // tiles (also rendered at 4×2 cells) get the vertical room they need.
   const int rack_box_rows = (L.scale == 2) ? 4 : 3;
@@ -1308,8 +1322,34 @@ static void render_board_labels_pixel(struct ncplane *plane,
   label_pixel_cache.param_b = state->antialias ? 1 : 0;
 }
 
+// Count of letters currently on the board (regular + blanks).
+static int board_tile_count(const Game *game) {
+  const Board *board = game_get_board(game);
+  int count = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_get_letter(board, row, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+// Draw the board widget's surrounding box. Title is "Board (N)" where
+// N is the current tile count. The box spans rows 0..board_bottom+1
+// (top border to bottom border) and cols 0..board_width-1.
+static void render_board_box(struct ncplane *plane, const Theme *theme,
+                             const TuiGameState *state, const Layout *L) {
+  const int height = L->board_bottom_row + 2; // top border .. bottom border
+  char title[32];
+  snprintf(title, sizeof(title), "Board (%d)", board_tile_count(state->game));
+  draw_box(plane, theme, 0, 0, height, L->board_width, title);
+}
+
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state, const Layout *L) {
+  render_board_box(plane, theme, state, L);
   if (L->scale >= 2 && state->glyph_cache != NULL) {
     render_board_labels_pixel(plane, theme, state, L);
     render_board_pixel(plane, theme, state, L);
@@ -1528,11 +1568,12 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
 static void render_rack_panel(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L) {
   const int box_height = L->rack_bottom - L->rack_top + 1;
-  draw_box(plane, theme, L->rack_top, 0, box_height, L->board_width, "Rack");
-
   const int player_idx = game_get_player_on_turn_index(state->game);
   const Player *player = game_get_player(state->game, player_idx);
   const Rack *rack = player_get_rack(player);
+  char title[32];
+  snprintf(title, sizeof(title), "Rack (%d)", rack_get_total_letters(rack));
+  draw_box(plane, theme, L->rack_top, 0, box_height, L->board_width, title);
   const LetterDistribution *ld = state->ld;
 
   const int cell_w = L->board_cell_w;
