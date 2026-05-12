@@ -778,11 +778,11 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
             tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
         if (is_placed_tile && subs_on && g != NULL && g->width > 0 &&
             g->height > 0) {
-          // Centered, but the center is biased up-and-left by 0.06 of
-          // tile dims so the letter clears the subscript corner (and
-          // descenders like Q's tail get room to breathe). Mirrors the
-          // baseline math in blit_glyph_into_buf with that offset.
-          const int shift_x = (int)((double)tile_w * 0.08);
+          // Centered, but biased up-and-left to clear the subscript
+          // corner. A 1-digit subscript only needs a small horizontal
+          // shift; a 2-digit subscript needs more room.
+          const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
+          const int shift_x = (int)((double)tile_w * shift_x_frac);
           const int shift_y = (int)((double)tile_h * 0.08);
           const int baseline = ty + (int)(tile_h * 0.72) - shift_y;
           const int glyph_top = baseline - g->bearing_y;
@@ -1056,10 +1056,16 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
            (unsigned char)ascii[0] < 0x80)
               ? tui_glyph_cache_get(state->glyph_cache, (uint32_t)ascii[0])
               : NULL;
+      // Score for shift sizing + subscript. An undesignated blank reads
+      // as "?" but we always subscript it "0", so it's a 1-digit score.
+      const int tile_score =
+          (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, (MachineLetter)ml));
       if (g != NULL && g->width > 0 && g->height > 0) {
         if (subs_on) {
-          // Same centered-with-bias placement as placed board tiles.
-          const int shift_x = (int)((double)tile_w * 0.08);
+          // Same centered-with-bias placement as placed board tiles —
+          // digit-aware horizontal shift.
+          const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
+          const int shift_x = (int)((double)tile_w * shift_x_frac);
           const int shift_y = (int)((double)tile_h * 0.08);
           const int baseline = 0 + (int)(tile_h * 0.72) - shift_y;
           const int glyph_top = baseline - g->bearing_y;
@@ -1077,8 +1083,6 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
       // explicit). Regular letters use ld_get_score and follow the
       // configured mode.
       if (subs_on) {
-        const int tile_score =
-            (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, (MachineLetter)ml));
         const bool show_subscript =
             (ml == 0) || (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
             (tile_score != 0);
