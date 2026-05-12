@@ -265,20 +265,18 @@ int main(int argc, char *argv[]) {
     }
     notcurses_render(nc);
 
-    // notcurses_get's `ts` is an absolute CLOCK_MONOTONIC deadline, not
-    // a relative timeout. Passing {0, FRAME_NS} reads as "deadline at
-    // 16ms past epoch" — long in the past — and the call returns
-    // immediately, busy-looping the render at thousands of fps. Set the
-    // deadline to now + FRAME_NS to actually cap at TARGET_FPS.
-    struct timespec deadline;
-    clock_gettime(CLOCK_MONOTONIC, &deadline);
-    deadline.tv_nsec += FRAME_NS;
-    if (deadline.tv_nsec >= 1000000000L) {
-      deadline.tv_sec += 1;
-      deadline.tv_nsec -= 1000000000L;
-    }
+    // Frame cap: notcurses_get's `ts` semantics are murky enough that
+    // both absolute and relative interpretations have failed to throttle
+    // the loop in testing. Poll non-blocking instead, then nanosleep
+    // for the remainder of the frame budget — guaranteed cap regardless
+    // of what notcurses thinks `ts` means. Input latency rises to one
+    // frame at worst (~16ms at 60fps), which is fine for a turn-based
+    // board game.
+    struct timespec frame_start;
+    clock_gettime(CLOCK_MONOTONIC, &frame_start);
+    const struct timespec nonblocking = {0, 0};
     ncinput input;
-    const uint32_t key = notcurses_get(nc, &deadline, &input);
+    const uint32_t key = notcurses_get(nc, &nonblocking, &input);
     if (key == (uint32_t)-1) {
       running = false;
       break;
@@ -506,6 +504,20 @@ int main(int argc, char *argv[]) {
     }
     // q/Q intentionally unbound — the user will be typing tiles. Quit
     // through Esc → Quit (or Ctrl-C signal).
+
+    // Sleep for whatever's left of the frame budget so we cap at
+    // TARGET_FPS instead of spinning. clock_gettime + subtract gives
+    // the elapsed time since frame_start; nanosleep eats the remainder.
+    struct timespec frame_end;
+    clock_gettime(CLOCK_MONOTONIC, &frame_end);
+    const long elapsed_ns =
+        (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000000L +
+        (long)(frame_end.tv_nsec - frame_start.tv_nsec);
+    const long remaining_ns = FRAME_NS - elapsed_ns;
+    if (remaining_ns > 0) {
+      const struct timespec sleep_ts = {.tv_sec = 0, .tv_nsec = remaining_ns};
+      nanosleep(&sleep_ts, NULL);
+    }
   }
 
   tui_game_state_destroy(&game_state);
