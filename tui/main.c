@@ -264,22 +264,26 @@ int main(int argc, char *argv[]) {
           (long)(next_frame_deadline.tv_sec - now.tv_sec) * 1000000000L +
           (long)(next_frame_deadline.tv_nsec - now.tv_nsec);
       if (remaining_ns > 0) {
+        // On schedule — sleep the rest of the budget and advance the
+        // deadline from where it was, so we hit a consistent 60fps.
         struct timespec sleep_ts = {.tv_sec = remaining_ns / 1000000000L,
                                     .tv_nsec = remaining_ns % 1000000000L};
         nanosleep(&sleep_ts, NULL);
+        next_frame_deadline.tv_nsec += FRAME_NS;
+      } else {
+        // Last render exceeded FRAME_NS (typical when a bot play
+        // invalidates the pixel-composite cache). Don't try to catch up
+        // — re-anchor the deadline at now + FRAME_NS so subsequent
+        // frames are paced from this late-but-current point. Otherwise
+        // we'd sprint a few unthrottled frames until we caught up,
+        // showing up as 200+fps spikes in the EMA on every move.
+        next_frame_deadline = now;
+        next_frame_deadline.tv_nsec += FRAME_NS;
       }
-      // Always advance from the previous deadline (not from `now`) so a
-      // slow frame doesn't lower the average rate; if we fell badly
-      // behind, snap the deadline forward to avoid burning CPU trying
-      // to catch up.
-      next_frame_deadline.tv_nsec += FRAME_NS;
       if (next_frame_deadline.tv_nsec >= 1000000000L) {
         next_frame_deadline.tv_sec +=
             next_frame_deadline.tv_nsec / 1000000000L;
         next_frame_deadline.tv_nsec %= 1000000000L;
-      }
-      if (remaining_ns < -2 * FRAME_NS) {
-        clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
       }
     }
     pthread_mutex_lock(&game_state.mutex);
