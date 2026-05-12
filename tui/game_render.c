@@ -321,11 +321,12 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   L.bag_top = L.rack_bottom + 1;
   L.bag_bottom = L.status_row - 1;
 
-  // Three-column: analysis fills the right strip across the full
-  // history vertical range.
+  // Three-column: analysis fills the right strip from the very top of
+  // the plane down to the status bar. There's nothing else over there,
+  // so there's no reason to align with the pills row.
   if (L.analysis_placement == ANALYSIS_RIGHT_OF_HISTORY) {
-    L.analysis_top = L.history_top;
-    L.analysis_bottom = L.history_bottom;
+    L.analysis_top = 0;
+    L.analysis_bottom = L.status_row - 1;
     L.has_analysis = (L.analysis_bottom - L.analysis_top + 1) >= 3;
   }
 
