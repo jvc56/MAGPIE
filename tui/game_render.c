@@ -703,11 +703,11 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && state->glyph_cache_sub != NULL;
   // Subscript-less tiles keep the 0.74 target (centered, generous).
   // Subscript-on tiles shrink the letter to 0.50 of tile height; the
-  // subscript sits in the bottom-right at 0.26 with a 0.12 right /
+  // subscript sits in the bottom-right at 0.24 with a 0.12 right /
   // 0.16 bottom margin. The letter's center shifts up-and-left by
-  // 0.06 of tile dims so descenders (Q's tail) clear the subscript.
+  // 0.08 of tile dims so descenders (Q's tail) clear the subscript.
   const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
-  const int sub_px = (int)((double)tile_h * 0.26);
+  const int sub_px = (int)((double)tile_h * 0.24);
   tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
   if (subs_on) {
     tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
@@ -782,8 +782,8 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
           // tile dims so the letter clears the subscript corner (and
           // descenders like Q's tail get room to breathe). Mirrors the
           // baseline math in blit_glyph_into_buf with that offset.
-          const int shift_x = (int)((double)tile_w * 0.06);
-          const int shift_y = (int)((double)tile_h * 0.06);
+          const int shift_x = (int)((double)tile_w * 0.08);
+          const int shift_y = (int)((double)tile_h * 0.08);
           const int baseline = ty + (int)(tile_h * 0.72) - shift_y;
           const int glyph_top = baseline - g->bearing_y;
           const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
@@ -1022,8 +1022,17 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   const int tile_h = (int)cdy * cell_h;
   const int buf_w = tile_w * tile_count;
   const int buf_h = tile_h;
-  const int letter_px = (int)((double)tile_h * 0.74);
+  // Match the board's subscript-mode sizing so rack tiles look the
+  // same as placed tiles at the same scale.
+  const int sub_mode = (int)state->score_subscripts;
+  const bool subs_on = sub_mode != TUI_SCORE_SUBSCRIPTS_OFF &&
+                       state->glyph_cache_sub != NULL;
+  const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
+  const int sub_px = (int)((double)tile_h * 0.24);
   tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
+  if (subs_on) {
+    tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
+  }
 
   uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
   if (buf == NULL) {
@@ -1042,11 +1051,56 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
       const int tx = tile_idx * tile_w;
       fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, theme->rack_tile_bg);
       const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-      if (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80) {
-        const TuiGlyph *g =
-            tui_glyph_cache_get(state->glyph_cache, (uint32_t)ascii[0]);
-        blit_glyph_into_buf(buf, buf_w, buf_h, tx, 0, tile_w, tile_h, g,
-                            theme->rack_tile_fg, theme->rack_tile_bg);
+      const TuiGlyph *g =
+          (ascii != NULL && ascii[0] != '\0' &&
+           (unsigned char)ascii[0] < 0x80)
+              ? tui_glyph_cache_get(state->glyph_cache, (uint32_t)ascii[0])
+              : NULL;
+      if (g != NULL && g->width > 0 && g->height > 0) {
+        if (subs_on) {
+          // Same centered-with-bias placement as placed board tiles.
+          const int shift_x = (int)((double)tile_w * 0.08);
+          const int shift_y = (int)((double)tile_h * 0.08);
+          const int baseline = 0 + (int)(tile_h * 0.72) - shift_y;
+          const int glyph_top = baseline - g->bearing_y;
+          const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
+          blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g,
+                        theme->rack_tile_fg, theme->rack_tile_bg);
+        } else {
+          blit_glyph_into_buf(buf, buf_w, buf_h, tx, 0, tile_w, tile_h, g,
+                              theme->rack_tile_fg, theme->rack_tile_bg);
+        }
+      }
+
+      // Subscript: blanks score 0 (and read as "?" in the rack — an
+      // undesignated blank), so under NONZERO mode they get no
+      // subscript and under ALL mode they show "0". Regular letters
+      // use ld_get_score.
+      if (subs_on) {
+        const int tile_score =
+            (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, (MachineLetter)ml));
+        const bool show_subscript =
+            (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
+        if (show_subscript) {
+          char digits[8];
+          snprintf(digits, sizeof(digits), "%d", tile_score);
+          const int margin_x = (int)((double)tile_w * 0.12);
+          const int margin_y = (int)((double)tile_h * 0.16);
+          const int digit_bottom = 0 + tile_h - margin_y;
+          int pen_right = tx + tile_w - margin_x;
+          for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
+            const TuiGlyph *gd = tui_glyph_cache_get(state->glyph_cache_sub,
+                                                    (uint32_t)digits[i]);
+            if (gd == NULL || gd->width <= 0) {
+              continue;
+            }
+            const int gleft = pen_right - gd->width;
+            const int gtop = digit_bottom - gd->height;
+            blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd,
+                          theme->rack_tile_fg, theme->rack_tile_bg);
+            pen_right = gleft - 1;
+          }
+        }
       }
     }
   }
