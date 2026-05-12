@@ -702,12 +702,12 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   const bool subs_on =
       sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && state->glyph_cache_sub != NULL;
   // Subscript-less tiles keep the 0.74 target (centered, generous).
-  // Subscript-on tiles shrink the letter to 0.50 of tile height so the
-  // subscript at 0.20 fits comfortably in the bottom-right corner with
-  // 0.10 margins. Letter stays exactly centered — the subscript sits in
-  // its own corner rather than crowding the letter into one.
+  // Subscript-on tiles shrink the letter to 0.50 of tile height; the
+  // subscript sits in the bottom-right at 0.32 with a 0.12 margin from
+  // the right/bottom edges. The letter's center shifts up-and-left by
+  // 0.06 of tile dims so descenders (Q's tail) clear the subscript.
   const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
-  const int sub_px = (int)((double)tile_h * 0.20);
+  const int sub_px = (int)((double)tile_h * 0.32);
   tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
   if (subs_on) {
     tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
@@ -776,11 +776,22 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       if (glyph_codepoint != 0 && glyph_second == 0) {
         const TuiGlyph *g =
             tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
-        // Letter stays centered in both modes. With subscripts on it's
-        // sized at 0.5 of tile height so the bottom-right corner is
-        // free for the subscript at 0.2 height + 0.1 margin.
-        blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w, tile_h, g, fg,
-                            bg);
+        if (is_placed_tile && subs_on && g != NULL && g->width > 0 &&
+            g->height > 0) {
+          // Centered, but the center is biased up-and-left by 0.06 of
+          // tile dims so the letter clears the subscript corner (and
+          // descenders like Q's tail get room to breathe). Mirrors the
+          // baseline math in blit_glyph_into_buf with that offset.
+          const int shift_x = (int)((double)tile_w * 0.06);
+          const int shift_y = (int)((double)tile_h * 0.06);
+          const int baseline = ty + (int)(tile_h * 0.72) - shift_y;
+          const int glyph_top = baseline - g->bearing_y;
+          const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
+          blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
+        } else {
+          blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w, tile_h, g, fg,
+                              bg);
+        }
       } else if (glyph_codepoint != 0 && glyph_second != 0) {
         // Two-char label ("TW" etc.) — render side by side, splitting
         // the tile's horizontal real estate in half.
@@ -794,16 +805,19 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
                             tile_h, g2, fg, bg);
       }
 
-      // Score subscript: right-aligned bottom-right of the tile, with
-      // a 0.1-tile margin on the right and bottom edges. Each digit
-      // lands via its own blit_glyph_at, walking right-to-left so
-      // multi-digit scores (10) end on the same baseline.
+      // Score subscript: right-aligned bottom-right with a 0.12 margin
+      // on the right and bottom edges. We anchor on the digit's
+      // BITMAP BOTTOM (gtop + height) rather than the font baseline so
+      // the visible bottom of the digit lands exactly at margin_y from
+      // the tile floor — baseline-anchoring gave the appearance of no
+      // margin because the user reads the digit's actual pixels, not
+      // its baseline.
       if (show_subscript) {
         char digits[8];
         snprintf(digits, sizeof(digits), "%d", tile_score);
-        const int margin_x = (int)((double)tile_w * 0.1);
-        const int margin_y = (int)((double)tile_h * 0.1);
-        const int baseline = ty + tile_h - margin_y;
+        const int margin_x = (int)((double)tile_w * 0.12);
+        const int margin_y = (int)((double)tile_h * 0.12);
+        const int digit_bottom = ty + tile_h - margin_y;
         int pen_right = tx + tile_w - margin_x;
         for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
           const TuiGlyph *gd =
@@ -812,7 +826,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
             continue;
           }
           const int gleft = pen_right - gd->width;
-          const int gtop = baseline - gd->bearing_y;
+          const int gtop = digit_bottom - gd->height;
           blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd, fg, bg);
           pen_right = gleft - 1; // small kerning gap between digits
         }
