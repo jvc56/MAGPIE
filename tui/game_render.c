@@ -1072,15 +1072,16 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
         }
       }
 
-      // Subscript: blanks score 0 (and read as "?" in the rack — an
-      // undesignated blank), so under NONZERO mode they get no
-      // subscript and under ALL mode they show "0". Regular letters
-      // use ld_get_score.
+      // Subscript: an undesignated blank in the rack always gets a "0"
+      // when subscripts are enabled (it makes the "?" tile's worth
+      // explicit). Regular letters use ld_get_score and follow the
+      // configured mode.
       if (subs_on) {
         const int tile_score =
             (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, (MachineLetter)ml));
         const bool show_subscript =
-            (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
+            (ml == 0) || (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
+            (tile_score != 0);
         if (show_subscript) {
           char digits[8];
           snprintf(digits, sizeof(digits), "%d", tile_score);
