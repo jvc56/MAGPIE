@@ -265,9 +265,20 @@ int main(int argc, char *argv[]) {
     }
     notcurses_render(nc);
 
-    const struct timespec wait = {.tv_sec = 0, .tv_nsec = FRAME_NS};
+    // notcurses_get's `ts` is an absolute CLOCK_MONOTONIC deadline, not
+    // a relative timeout. Passing {0, FRAME_NS} reads as "deadline at
+    // 16ms past epoch" — long in the past — and the call returns
+    // immediately, busy-looping the render at thousands of fps. Set the
+    // deadline to now + FRAME_NS to actually cap at TARGET_FPS.
+    struct timespec deadline;
+    clock_gettime(CLOCK_MONOTONIC, &deadline);
+    deadline.tv_nsec += FRAME_NS;
+    if (deadline.tv_nsec >= 1000000000L) {
+      deadline.tv_sec += 1;
+      deadline.tv_nsec -= 1000000000L;
+    }
     ncinput input;
-    const uint32_t key = notcurses_get(nc, &wait, &input);
+    const uint32_t key = notcurses_get(nc, &deadline, &input);
     if (key == (uint32_t)-1) {
       running = false;
       break;
