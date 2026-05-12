@@ -257,12 +257,11 @@ int main(int argc, char *argv[]) {
     if (modal == TUI_MODAL_MAIN_MENU) {
       tui_game_render_menu(std_plane, theme, main_menu_focus);
     } else if (modal == TUI_MODAL_SETTINGS) {
-      tui_game_render_settings(std_plane, theme, settings_focus,
-                               game_state.board_scale, game_state.antialias,
-                               game_state.score_subscripts,
-                               game_state.border_thickness, pixel_supported,
-                               font_available, game_state.premium_labels,
-                               game_state.blank_uppercase);
+      tui_game_render_settings(
+          std_plane, theme, settings_focus, game_state.board_scale,
+          game_state.antialias, game_state.score_subscripts,
+          game_state.border_thickness, pixel_supported, font_available,
+          game_state.premium_labels, game_state.blank_uppercase);
     }
     notcurses_render(nc);
 
@@ -318,8 +317,8 @@ int main(int argc, char *argv[]) {
       // caches that key off it, regardless of which branch below
       // actually toggled something — cheap and avoids scattering
       // atomic_fetch_add through every handler.
-      if (key == NCKEY_LEFT || key == 'h' || key == 'H' ||
-          key == NCKEY_RIGHT || key == 'l' || key == 'L') {
+      if (key == NCKEY_LEFT || key == 'h' || key == 'H' || key == NCKEY_RIGHT ||
+          key == 'l' || key == 'L') {
         atomic_fetch_add(&game_state.render_version, 1);
       }
       if (key == NCKEY_ESC) {
