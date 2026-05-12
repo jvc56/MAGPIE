@@ -904,12 +904,16 @@ static void render_board_grid_overlay(struct ncplane *parent,
   if (cdy == 0 || cdx == 0) {
     return;
   }
-  // Cache: key off render_version + cell dims + scale + thickness.
+  // Cache: key off cell dims + scale + thickness. The grid overlay's
+  // pixels are a pure function of those, NOT of render_version — so a
+  // bot move shouldn't force a re-blit. Kitty graphics treats each
+  // blit as delete+create, and the brief gap can flash on screen.
   // Shared board_pixel_cache because grid_planes.board is reused for
-  // either the 2x composite or this 1x/0x overlay — they can't be
-  // valid at the same time anyway.
-  if (board_pixel_cache.valid && board_pixel_cache.version == render_version &&
-      board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
+  // either the 2x composite or this 1x/0x overlay; the scale field
+  // (param_a) discriminates between modes when switching back.
+  (void)render_version;
+  if (board_pixel_cache.valid && board_pixel_cache.cdy == cdy &&
+      board_pixel_cache.cdx == cdx &&
       board_pixel_cache.param_a == L->scale &&
       board_pixel_cache.param_b == thickness) {
     return;
@@ -940,7 +944,7 @@ static void render_board_grid_overlay(struct ncplane *parent,
   free(buf);
 
   board_pixel_cache.valid = true;
-  board_pixel_cache.version = render_version;
+  board_pixel_cache.version = 0; // unused for the overlay path
   board_pixel_cache.cdy = cdy;
   board_pixel_cache.cdx = cdx;
   board_pixel_cache.param_a = L->scale;
@@ -986,10 +990,12 @@ static void render_board_labels_pixel(struct ncplane *plane,
     return;
   }
 
-  const uint64_t cur_version =
-      atomic_load(&((TuiGameState *)state)->render_version);
-  if (label_pixel_cache.valid && label_pixel_cache.version == cur_version &&
-      label_pixel_cache.cdy == cdy && label_pixel_cache.cdx == cdx &&
+  // Labels are static text (Ａ-Ｏ + 1-15) — they don't depend on the
+  // game state, only on cell dims + scale + antialias. Drop the version
+  // dependency to avoid the kitty-graphics flash that comes with each
+  // re-blit.
+  if (label_pixel_cache.valid && label_pixel_cache.cdy == cdy &&
+      label_pixel_cache.cdx == cdx &&
       label_pixel_cache.param_a == L->scale &&
       label_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
     return;
@@ -1096,7 +1102,7 @@ static void render_board_labels_pixel(struct ncplane *plane,
   }
 
   label_pixel_cache.valid = true;
-  label_pixel_cache.version = cur_version;
+  label_pixel_cache.version = 0; // unused for the labels path
   label_pixel_cache.cdy = cdy;
   label_pixel_cache.cdx = cdx;
   label_pixel_cache.param_a = L->scale;
