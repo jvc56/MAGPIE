@@ -49,7 +49,10 @@
 enum {
   CELL_WIDTH = 2, // 1x board tile width in cols (and rack tile width always)
   ROW_LABEL_COL = 0,
-  CELL_COL_BASE = ROW_LABEL_COL + 3,
+  // Row labels are 2 cols wide ("%2d"); the board sits flush against
+  // them so the column-label letters land directly above the cells they
+  // describe instead of being floated one extra column off.
+  CELL_COL_BASE = ROW_LABEL_COL + 2,
   COL_LABELS_ROW = 0,
   CELL_ROW_BASE = 1,
   RACK_HEIGHT = 3,
