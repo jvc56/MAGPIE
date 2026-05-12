@@ -145,8 +145,8 @@ else
     TUI_SAN :=
 endif
 
-TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN)
-TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN)
+TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
+TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
 TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
 
 .PHONY: all clean iwyu
