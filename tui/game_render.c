@@ -387,6 +387,11 @@ static void format_clock(int seconds, char *buf, size_t buf_size) {
 static struct {
   // 2x board pixel composite.
   struct ncplane *board;
+  // 2x board row + column coordinate labels. Drawn as pixels so a
+  // 1-cell-tall glyph can be centered against the 2-cell-tall board
+  // rows (which is impossible with text mode).
+  struct ncplane *labels_col;
+  struct ncplane *labels_row;
   // 2x rack pixel composite. Tiles in the rack scale alongside the
   // board so they don't read as tiny next to a giant board.
   struct ncplane *rack;
@@ -409,10 +414,12 @@ typedef struct {
 
 static BlitCache board_pixel_cache;
 static BlitCache rack_pixel_cache;
+static BlitCache label_pixel_cache;
 
 static void invalidate_blit_caches(void) {
   board_pixel_cache.valid = false;
   rack_pixel_cache.valid = false;
+  label_pixel_cache.valid = false;
 }
 
 static void invalidate_grid_planes(void) {
@@ -423,6 +430,14 @@ static void invalidate_grid_planes(void) {
   if (grid_planes.rack != NULL) {
     ncplane_destroy(grid_planes.rack);
     grid_planes.rack = NULL;
+  }
+  if (grid_planes.labels_col != NULL) {
+    ncplane_destroy(grid_planes.labels_col);
+    grid_planes.labels_col = NULL;
+  }
+  if (grid_planes.labels_row != NULL) {
+    ncplane_destroy(grid_planes.labels_row);
+    grid_planes.labels_row = NULL;
   }
   if (grid_planes.modal != NULL) {
     ncplane_destroy(grid_planes.modal);
@@ -928,9 +943,166 @@ static void render_board_grid_overlay(struct ncplane *parent,
   board_pixel_cache.param_b = thickness;
 }
 
+// 2x mode coordinate labels (Ａ-Ｏ above the board, 1-15 to its left).
+// Drawn as pixels so a single-cell-tall glyph can be vertically
+// centered against the two-cell-tall board rows. Each label lives in a
+// 2×1 cell box (squarish in pixels, same footprint as a fullwidth letter
+// or a two-digit ASCII number).
+static void render_board_labels_pixel(struct ncplane *plane,
+                                      const Theme *theme,
+                                      const TuiGameState *state,
+                                      const Layout *L) {
+  struct notcurses *nc = ncplane_notcurses(plane);
+  if (nc == NULL || !notcurses_canpixel(nc) ||
+      state->glyph_cache_sub == NULL) {
+    return;
+  }
+  const int col_rows = 1;
+  const int col_cols = BOARD_DIM * L->board_cell_w;
+  const int row_rows = BOARD_DIM * L->board_cell_h;
+  const int row_cols = CELL_COL_BASE;
+
+  struct ncplane *col_p =
+      acquire_grid_plane(&grid_planes.labels_col, plane, "board_col_labels", 0,
+                         CELL_COL_BASE, col_rows, col_cols);
+  struct ncplane *row_p =
+      acquire_grid_plane(&grid_planes.labels_row, plane, "board_row_labels",
+                         CELL_ROW_BASE, 0, row_rows, row_cols);
+  if (col_p == NULL || row_p == NULL) {
+    return;
+  }
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
+  ncplane_pixel_geom(col_p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+
+  const uint64_t cur_version =
+      atomic_load(&((TuiGameState *)state)->render_version);
+  if (label_pixel_cache.valid && label_pixel_cache.version == cur_version &&
+      label_pixel_cache.cdy == cdy && label_pixel_cache.cdx == cdx &&
+      label_pixel_cache.param_a == L->scale &&
+      label_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
+    return;
+  }
+
+  // Pick glyph pixel size to nearly fill the cell-tall box, but cap by
+  // width so a 2-digit number ("15") still fits inside the 2×cdx-wide
+  // box. Monospace glyph advance is roughly 0.6× the em size at the
+  // fonts we ship.
+  int label_px = (int)((double)cdy * 0.80);
+  const int max_by_width = (int)((double)cdx * 1.5);
+  if (label_px > max_by_width) {
+    label_px = max_by_width;
+  }
+  if (label_px < 1) {
+    label_px = 1;
+  }
+  tui_glyph_cache_set_size(state->glyph_cache_sub, label_px, state->antialias);
+
+  const ThemeRgb fg = theme->dim_fg;
+  const ThemeRgb bg = theme->bg;
+  const int icdy = (int)cdy;
+  const int icdx = (int)cdx;
+
+  // Column labels: each letter centered in a 2×cdx box, which itself
+  // is centered in the cell's L->board_cell_w columns.
+  {
+    const int buf_w = col_cols * icdx;
+    const int buf_h = col_rows * icdy;
+    uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
+    if (buf == NULL) {
+      return;
+    }
+    fill_tile_rect(buf, buf_w, 0, 0, buf_w, buf_h, bg);
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const char ch = (char)('A' + col);
+      const TuiGlyph *g =
+          tui_glyph_cache_get(state->glyph_cache_sub, (uint32_t)ch);
+      if (g == NULL || g->width <= 0 || g->height <= 0) {
+        continue;
+      }
+      const int cell_left = col * L->board_cell_w * icdx;
+      const int cell_w_px = L->board_cell_w * icdx;
+      const int glyph_left = cell_left + (cell_w_px - g->width) / 2;
+      // Baseline ~78% of the way down a 1-cell box leaves enough room
+      // for the cap-height of Latin letters.
+      const int baseline = (int)(cdy * 0.78);
+      const int glyph_top = baseline - g->bearing_y;
+      blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
+    }
+    struct ncvisual_options vopts = {0};
+    vopts.n = col_p;
+    vopts.blitter = NCBLIT_PIXEL;
+    vopts.leny = (unsigned)buf_h;
+    vopts.lenx = (unsigned)buf_w;
+    ncblit_rgba(buf, buf_w * 4, &vopts);
+    free(buf);
+  }
+
+  // Row labels: "%2d" right-aligned in a 2×cdx box, vertically centered
+  // in the cell's 2-row tall space. The third label column (col index 2)
+  // is the gutter between labels and the board.
+  {
+    const int buf_w = row_cols * icdx;
+    const int buf_h = row_rows * icdy;
+    uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
+    if (buf == NULL) {
+      return;
+    }
+    fill_tile_rect(buf, buf_w, 0, 0, buf_w, buf_h, bg);
+    for (int row = 0; row < BOARD_DIM; row++) {
+      char label[4];
+      snprintf(label, sizeof(label), "%2d", row + 1);
+      const int cell_top = row * L->board_cell_h * icdy;
+      const int cell_h_px = L->board_cell_h * icdy;
+      // Center a 1-row-tall label box vertically in the 2-row cell.
+      const int box_top = cell_top + (cell_h_px - icdy) / 2;
+      const int baseline = box_top + (int)(cdy * 0.78);
+      // Two monospace slots, each cdx wide; render each character
+      // centered in its slot.
+      for (int i = 0; i < 2; i++) {
+        const char ch = label[i];
+        if (ch == '\0' || ch == ' ') {
+          continue;
+        }
+        const TuiGlyph *g =
+            tui_glyph_cache_get(state->glyph_cache_sub, (uint32_t)ch);
+        if (g == NULL || g->width <= 0 || g->height <= 0) {
+          continue;
+        }
+        const int slot_left = i * icdx;
+        const int glyph_left = slot_left + (icdx - g->width) / 2;
+        const int glyph_top = baseline - g->bearing_y;
+        blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
+      }
+    }
+    struct ncvisual_options vopts = {0};
+    vopts.n = row_p;
+    vopts.blitter = NCBLIT_PIXEL;
+    vopts.leny = (unsigned)buf_h;
+    vopts.lenx = (unsigned)buf_w;
+    ncblit_rgba(buf, buf_w * 4, &vopts);
+    free(buf);
+  }
+
+  label_pixel_cache.valid = true;
+  label_pixel_cache.version = cur_version;
+  label_pixel_cache.cdy = cdy;
+  label_pixel_cache.cdx = cdx;
+  label_pixel_cache.param_a = L->scale;
+  label_pixel_cache.param_b = state->antialias ? 1 : 0;
+}
+
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state, const Layout *L) {
   if (L->scale >= 2 && state->glyph_cache != NULL) {
+    render_board_labels_pixel(plane, theme, state, L);
     render_board_pixel(plane, theme, state, L);
     return;
   }
