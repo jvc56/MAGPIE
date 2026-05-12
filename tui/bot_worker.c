@@ -221,6 +221,11 @@ static bool find_equity_best(const Game *game, MoveList *scratch,
 // Generate up to N top candidates by equity into a fresh capacity-N
 // MoveList. Returns the list (caller must destroy via
 // moves_for_move_list_destroy + free) or NULL when no moves exist.
+//
+// We call generate_moves() directly rather than
+// generate_moves_for_game(): the latter overrides move_record_type
+// with the player's configured record type (MOVE_RECORD_BEST in our
+// case), which collapses the candidate list to a single move.
 static MoveList *generate_top_candidates(const Game *game, int n) {
   MoveList *list = move_list_create(n);
   const MoveGenArgs args = {
@@ -236,7 +241,7 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
   };
-  generate_moves_for_game(&args);
+  generate_moves(&args);
   if (move_list_get_count(list) == 0) {
     moves_for_move_list_destroy(list);
     free(list);
@@ -250,14 +255,6 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
 // Falls back to equity-best on any internal failure.
 static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   MoveList *candidates = generate_top_candidates(state->game, SIM_CANDIDATES);
-  {
-    FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
-    if (dbg != NULL) {
-      fprintf(dbg, "  run_sim: candidates=%p count=%d\n", (void *)candidates,
-              candidates != NULL ? move_list_get_count(candidates) : -1);
-      fclose(dbg);
-    }
-  }
   if (candidates == NULL) {
     return false;
   }
@@ -311,13 +308,7 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
 
   SimResults *results = sim_results_create(args.bai_options.cutoff);
   ErrorStack *err = error_stack_create();
-  struct timespec t0, t1;
-  clock_gettime(CLOCK_MONOTONIC, &t0);
   simulate_without_ctx(&args, results, err);
-  clock_gettime(CLOCK_MONOTONIC, &t1);
-  const double sim_elapsed =
-      (double)(t1.tv_sec - t0.tv_sec) +
-      (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
 
   atomic_store(&wd.finished, true);
   if (wd_started) {
@@ -334,24 +325,6 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
     // from the candidate list we already generated.
     move_copy(out_move, move_list_get_move(candidates, 0));
     got_move = true;
-  }
-
-  {
-    FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
-    if (dbg != NULL) {
-      char *errmsg = NULL;
-      if (!error_stack_is_empty(err)) {
-        errmsg = error_stack_get_string_and_reset(err);
-      }
-      fprintf(dbg,
-              "  sim: elapsed=%.3fs candidates=%d best=%s iters=%llu nodes=%llu err=%s\n",
-              sim_elapsed, args.num_plays, best != NULL ? "OK" : "NULL",
-              (unsigned long long)sim_results_get_iteration_count(results),
-              (unsigned long long)sim_results_get_node_count(results),
-              errmsg != NULL ? errmsg : "(none)");
-      free(errmsg);
-      fclose(dbg);
-    }
   }
 
   error_stack_destroy(err);
@@ -457,16 +430,6 @@ static void *bot_thread_main(void *arg) {
 
     // ── Run the engine with the mutex released ───────────────────────
     bool got_move = false;
-    {
-      FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
-      if (dbg != NULL) {
-        fprintf(dbg,
-                "turn: player=%d bag_empty=%d win_pcts=%p budget=%.2fs\n",
-                player_idx, (int)empty_bag, (void *)state->win_pcts,
-                budget_sec);
-        fclose(dbg);
-      }
-    }
     if (empty_bag) {
       got_move = run_endgame(state, budget_sec, chosen);
     } else if (state->win_pcts != NULL) {

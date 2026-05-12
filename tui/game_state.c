@@ -119,22 +119,6 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   // non-fatal: the bot worker falls back to equity-best moves in that
   // case (no sim, no endgame). "winpct" is MAGPIE's bundled default.
   out_state->win_pcts = win_pct_create(data_paths, "winpct", err);
-  {
-    FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
-    if (dbg != NULL) {
-      fprintf(dbg, "tui_game_state_init: data_paths=%s win_pcts=%s err_empty=%d\n",
-              data_paths, out_state->win_pcts != NULL ? "OK" : "NULL",
-              (int)error_stack_is_empty(err));
-      if (!error_stack_is_empty(err)) {
-        char *msg = error_stack_get_string_and_reset(err);
-        if (msg != NULL) {
-          fprintf(dbg, "  err msg: %s\n", msg);
-          free(msg);
-        }
-      }
-      fclose(dbg);
-    }
-  }
   if (!error_stack_is_empty(err)) {
     error_stack_reset(err);
     out_state->win_pcts = NULL;
