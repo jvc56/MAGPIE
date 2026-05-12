@@ -250,6 +250,14 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
 // Falls back to equity-best on any internal failure.
 static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   MoveList *candidates = generate_top_candidates(state->game, SIM_CANDIDATES);
+  {
+    FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
+    if (dbg != NULL) {
+      fprintf(dbg, "  run_sim: candidates=%p count=%d\n", (void *)candidates,
+              candidates != NULL ? move_list_get_count(candidates) : -1);
+      fclose(dbg);
+    }
+  }
   if (candidates == NULL) {
     return false;
   }
