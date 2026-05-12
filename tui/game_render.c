@@ -481,11 +481,13 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
                                TuiPremiumLabels premium_labels,
                                int border_thickness, int cell_w, int top,
                                int left) {
+  // Borders are delivered separately by a pixel-graphics overlay plane
+  // at scale < 2 (render_board_grid_overlay, called from
+  // tui_game_render). Don't approximate them with NCSTYLE_UNDERLINE —
+  // the underline reads as part of the glyph on fullwidth tiles and
+  // the user vetoed that look.
+  (void)border_thickness;
   const Board *board = game_get_board(game);
-  // Underline on empty cells gives the grid look without touching the
-  // tile typography. Halfwidth uses ASCII glyphs (1 col) and fullwidth
-  // uses ld_ml_to_alt_hl (2 col).
-  const uint16_t border_style = border_thickness > 0 ? NCSTYLE_UNDERLINE : 0;
   const bool halfwidth = (cell_w == 1);
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -496,13 +498,11 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         const PremiumMarker marker = premium_marker_for_cell(
             theme, bs, row, col, premium_labels, cell_w);
-        ncplane_set_styles(plane, border_style);
         theme_apply_fg(plane, marker.fg);
         theme_apply_bg(plane, marker.bg);
         ncplane_putstr_yx(plane, screen_row, screen_col, marker.glyph);
         continue;
       }
-      ncplane_set_styles(plane, 0);
       const bool is_blank = get_is_blanked(ml);
       const bool render_uppercase = is_blank && blank_uppercase;
       const MachineLetter glyph_ml =
@@ -510,8 +510,6 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : theme->tile_fg);
       theme_apply_bg(plane, theme->tile_bg);
       if (halfwidth) {
-        // Single-char ASCII letter. ld_ml_to_hl already gives us the
-        // halfwidth form ("A".."Z" / "a".."z" for blanks).
         const char *ascii = ld->ld_ml_to_hl[glyph_ml];
         ncplane_putstr_yx(plane, screen_row, screen_col,
                           ascii[0] != '\0' ? ascii : " ");
@@ -526,7 +524,6 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       }
     }
   }
-  ncplane_set_styles(plane, 0);
 }
 
 // 2x pixel-composite render. Builds one RGBA image covering the whole
@@ -849,6 +846,73 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   board_pixel_cache.param_b = (state->antialias ? 1 : 0) | (sub_mode << 1);
 }
 
+// Pixel-graphics grid overlay for the cell-text modes (scale 0 / 1).
+// 2x bakes its grid into the same RGBA buffer that holds the tiles;
+// 0x and 1x have their tiles in std plane cells, so the grid lives in
+// a separate transparent-base pixel plane stacked on top — same look
+// the 2x composite delivers, just delivered through a child plane.
+static void render_board_grid_overlay(struct ncplane *parent,
+                                      const Theme *theme, const Layout *L,
+                                      int thickness, uint64_t render_version) {
+  struct notcurses *nc = ncplane_notcurses(parent);
+  if (nc == NULL || !notcurses_canpixel(nc) || thickness <= 0) {
+    return;
+  }
+  struct ncplane *p = acquire_grid_plane(
+      &grid_planes.board, parent, "board_grid_overlay", CELL_ROW_BASE,
+      CELL_COL_BASE, BOARD_DIM * L->board_cell_h,
+      BOARD_DIM * L->board_cell_w);
+  if (p == NULL) {
+    return;
+  }
+  unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
+  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+  // Cache: key off render_version + cell dims + scale + thickness.
+  // Shared board_pixel_cache because grid_planes.board is reused for
+  // either the 2x composite or this 1x/0x overlay — they can't be
+  // valid at the same time anyway.
+  if (board_pixel_cache.valid && board_pixel_cache.version == render_version &&
+      board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
+      board_pixel_cache.param_a == L->scale &&
+      board_pixel_cache.param_b == thickness) {
+    return;
+  }
+  const int tile_w = (int)cdx * L->board_cell_w;
+  const int tile_h = (int)cdy * L->board_cell_h;
+  const int buf_w = tile_w * BOARD_DIM;
+  const int buf_h = tile_h * BOARD_DIM;
+  if (buf_w <= 0 || buf_h <= 0) {
+    return;
+  }
+  // calloc gives us alpha=0 everywhere by default; overlay_grid_lines
+  // only writes opaque theme->bg pixels along the bottom + right edges
+  // of each tile. Cells underneath show through the alpha=0 regions.
+  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
+  if (buf == NULL) {
+    return;
+  }
+  overlay_grid_lines(buf, buf_w, buf_h, BOARD_DIM, BOARD_DIM, tile_h, tile_w,
+                    thickness, theme->bg);
+
+  struct ncvisual_options vopts = {0};
+  vopts.n = p;
+  vopts.blitter = NCBLIT_PIXEL;
+  vopts.leny = (unsigned)buf_h;
+  vopts.lenx = (unsigned)buf_w;
+  ncblit_rgba(buf, buf_w * 4, &vopts);
+  free(buf);
+
+  board_pixel_cache.valid = true;
+  board_pixel_cache.version = render_version;
+  board_pixel_cache.cdy = cdy;
+  board_pixel_cache.cdx = cdx;
+  board_pixel_cache.param_a = L->scale;
+  board_pixel_cache.param_b = thickness;
+}
+
 static void render_board(struct ncplane *plane, const Theme *theme,
                          const TuiGameState *state, const Layout *L) {
   if (L->scale >= 2 && state->glyph_cache != NULL) {
@@ -1004,10 +1068,17 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   const LetterDistribution *ld = state->ld;
 
   const int cell_w = L->board_cell_w;
-  const int interior_width = L->board_width - 2;
   const int total_letters = rack_get_total_letters(rack);
   const int rack_width = total_letters * cell_w;
-  int start_col = 1 + (interior_width - rack_width) / 2;
+  // Align the rack's center column with the board's middle column
+  // (H8 in standard 15×15), not the rack panel's interior center.
+  // Board cells span [CELL_COL_BASE, CELL_COL_BASE + BOARD_DIM*cell_w),
+  // so the midpoint is CELL_COL_BASE + (BOARD_DIM*cell_w)/2. Centering
+  // on the panel made the rack drift relative to the board because the
+  // panel box starts at col 0 (not CELL_COL_BASE) — visibly off by 2
+  // cols at fullwidth.
+  const int board_center = CELL_COL_BASE + (BOARD_DIM * cell_w) / 2;
+  int start_col = board_center - rack_width / 2;
   if (start_col < 1) {
     start_col = 1;
   }
@@ -1694,13 +1765,17 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state, &L);
-  // Borders are now baked into the rendering itself:
-  //   - 1x cells use NCSTYLE_UNDERLINE in render_board_cells / rack /
-  //     pill so notcurses' cell-diff cache handles them for free.
-  //   - 2x composite paints lines into the RGBA buffer in
-  //     render_board_pixel before the single ncblit_rgba.
-  // No separate pixel-graphics overlay plane in either path — the old
-  // one cost ~3-4ms per notcurses_render even with the buffer cached.
+  // 2x bakes the grid into its RGBA composite. At 0x/1x the tiles are
+  // std-plane cell text, so the grid rides a separate transparent-base
+  // pixel plane on top — same look the user wants, just delivered via
+  // an overlay instead of in-buffer. Notcurses re-emits a pixel plane
+  // every render, so this caps the FPS around 250 with borders on;
+  // accepted trade-off for the visual.
+  if (L.scale < 2 && state->border_thickness > 0) {
+    render_board_grid_overlay(
+        plane, theme, &L, state->border_thickness,
+        atomic_load(&((TuiGameState *)state)->render_version));
+  }
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
