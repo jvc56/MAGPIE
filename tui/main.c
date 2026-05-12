@@ -250,7 +250,38 @@ int main(int argc, char *argv[]) {
   TuiModalState modal = TUI_MODAL_NONE;
   int main_menu_focus = 0;
   int settings_focus = 0;
+  // Frame-pacing anchor: at the top of every iteration we sleep until
+  // next_frame_deadline, then advance the deadline by FRAME_NS. Sitting
+  // at the top means the various `continue` paths below can't bypass
+  // the throttle the way they did with a bottom-of-loop sleep.
+  struct timespec next_frame_deadline;
+  clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
   while (running) {
+    {
+      struct timespec now;
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      const long remaining_ns =
+          (long)(next_frame_deadline.tv_sec - now.tv_sec) * 1000000000L +
+          (long)(next_frame_deadline.tv_nsec - now.tv_nsec);
+      if (remaining_ns > 0) {
+        struct timespec sleep_ts = {.tv_sec = remaining_ns / 1000000000L,
+                                    .tv_nsec = remaining_ns % 1000000000L};
+        nanosleep(&sleep_ts, NULL);
+      }
+      // Always advance from the previous deadline (not from `now`) so a
+      // slow frame doesn't lower the average rate; if we fell badly
+      // behind, snap the deadline forward to avoid burning CPU trying
+      // to catch up.
+      next_frame_deadline.tv_nsec += FRAME_NS;
+      if (next_frame_deadline.tv_nsec >= 1000000000L) {
+        next_frame_deadline.tv_sec +=
+            next_frame_deadline.tv_nsec / 1000000000L;
+        next_frame_deadline.tv_nsec %= 1000000000L;
+      }
+      if (remaining_ns < -2 * FRAME_NS) {
+        clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
+      }
+    }
     pthread_mutex_lock(&game_state.mutex);
     tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
     pthread_mutex_unlock(&game_state.mutex);
@@ -265,15 +296,8 @@ int main(int argc, char *argv[]) {
     }
     notcurses_render(nc);
 
-    // Frame cap: notcurses_get's `ts` semantics are murky enough that
-    // both absolute and relative interpretations have failed to throttle
-    // the loop in testing. Poll non-blocking instead, then nanosleep
-    // for the remainder of the frame budget — guaranteed cap regardless
-    // of what notcurses thinks `ts` means. Input latency rises to one
-    // frame at worst (~16ms at 60fps), which is fine for a turn-based
-    // board game.
-    struct timespec frame_start;
-    clock_gettime(CLOCK_MONOTONIC, &frame_start);
+    // Input is polled non-blocking; the throttle lives at the top of
+    // the loop so `continue` paths can't bypass it.
     const struct timespec nonblocking = {0, 0};
     ncinput input;
     const uint32_t key = notcurses_get(nc, &nonblocking, &input);
@@ -504,20 +528,6 @@ int main(int argc, char *argv[]) {
     }
     // q/Q intentionally unbound — the user will be typing tiles. Quit
     // through Esc → Quit (or Ctrl-C signal).
-
-    // Sleep for whatever's left of the frame budget so we cap at
-    // TARGET_FPS instead of spinning. clock_gettime + subtract gives
-    // the elapsed time since frame_start; nanosleep eats the remainder.
-    struct timespec frame_end;
-    clock_gettime(CLOCK_MONOTONIC, &frame_end);
-    const long elapsed_ns =
-        (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000000L +
-        (long)(frame_end.tv_nsec - frame_start.tv_nsec);
-    const long remaining_ns = FRAME_NS - elapsed_ns;
-    if (remaining_ns > 0) {
-      const struct timespec sleep_ts = {.tv_sec = 0, .tv_nsec = remaining_ns};
-      nanosleep(&sleep_ts, NULL);
-    }
   }
 
   tui_game_state_destroy(&game_state);
