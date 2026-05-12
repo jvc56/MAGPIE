@@ -57,7 +57,7 @@ enum {
   CELL_ROW_BASE = 1,
   RACK_HEIGHT = 3,
   PILL_HEIGHT = 3,
-  RIGHT_COL_LEFT_OFFSET = 1, // gap from board's right edge
+  RIGHT_COL_LEFT_OFFSET = 0, // right column sits flush against the board
   RIGHT_COL_MIN_WIDTH = 32,  // narrowest the right column can be
   // History switches to two columns once the panel is at least this wide.
   // At 68 cols the panel splits into two ~33-col halves, which is just
@@ -121,10 +121,11 @@ static int compute_effective_scale(int user_pref, unsigned plane_cols,
   for (int s = user_pref; s >= 0; s--) {
     const int cols = CELL_COL_BASE + BOARD_DIM * cell_w_for[s] +
                      RIGHT_COL_LEFT_OFFSET + RIGHT_COL_MIN_WIDTH;
-    // Board rows + 1 col-label row + 2-row gap + rack box
-    // (3 normally, 4 at double) + bag min 3 rows + status 1.
+    // Board rows + 1 col-label row + rack box (3 normally, 4 at
+    // double) + bag min 3 rows + status 1. Rack sits flush under the
+    // board with no gap.
     const int rack_box_rows = (s == 2) ? 4 : 3;
-    const int rows = BOARD_DIM * cell_h_for[s] + 1 + 2 + rack_box_rows + 3 + 1;
+    const int rows = BOARD_DIM * cell_h_for[s] + 1 + rack_box_rows + 3 + 1;
     if (plane_cols >= (unsigned)cols && plane_rows >= (unsigned)rows) {
       return s;
     }
@@ -150,7 +151,7 @@ static Layout compute_layout(struct ncplane *plane, int user_scale) {
   L.board_bottom_row = CELL_ROW_BASE + BOARD_DIM * L.board_cell_h - 1;
 
   L.board_right_col = L.board_width - 1;
-  L.rack_top = L.board_bottom_row + 2;
+  L.rack_top = L.board_bottom_row + 1;
   // Rack box gains a row when the board is double-size so the rack
   // tiles (also rendered at 4×2 cells) get the vertical room they need.
   const int rack_box_rows = (L.scale == 2) ? 4 : 3;
@@ -1488,9 +1489,18 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
       consonants += counts[ml];
     }
   }
-  char tally[64];
-  snprintf(tally, sizeof(tally), "%d vowels \xc2\xb7 %d consonants", vowels,
+  char tally_long[64];
+  char tally_short[64];
+  // U+00B7 is two bytes UTF-8 but one display column, so the display
+  // width is the byte count minus one.
+  const int long_bytes = snprintf(tally_long, sizeof(tally_long),
+                                  "%d vowels \xc2\xb7 %d consonants", vowels,
+                                  consonants);
+  const int long_cols = long_bytes - 1;
+  snprintf(tally_short, sizeof(tally_short), "%d vows/%d cons", vowels,
            consonants);
+  const char *tally =
+      (long_cols <= interior_width) ? tally_long : tally_short;
   theme_apply_fg(plane, theme->dim_fg);
   ncplane_putstr_yx(plane, L->bag_bottom - 1, interior_left, tally);
 }
