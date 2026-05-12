@@ -64,6 +64,16 @@ enum {
   // wide enough to fit a fullwidth 7-tile rack inside each player pill
   // alongside the name, score, and clock.
   HISTORY_TWO_COL_THRESHOLD = 68,
+  // Analysis panel sizing.
+  ANALYSIS_MIN_WIDTH = 30,        // narrower than this and we skip the panel
+  ANALYSIS_DEFAULT_ROWS = 20,     // height used in "below history" mode when
+                                  // history overflows
+  ANALYSIS_GUTTER = 1,            // gap between history and right-side analysis
+  // Right column has to hold a 2-col history AND an analysis panel
+  // alongside it before we switch to the three-column layout. The
+  // gutter sits between them.
+  ANALYSIS_THREE_COL_THRESHOLD =
+      HISTORY_TWO_COL_THRESHOLD + ANALYSIS_GUTTER + ANALYSIS_MIN_WIDTH,
   STATUS_BAR_HEIGHT = 1,
   MIN_ROWS_REQUIRED_1X = 24,
   // 1x layout: 33 cols for the board area + 1 gutter + 32 cols right column.
@@ -101,6 +111,28 @@ typedef struct {
   int pill2_top, pill2_bottom, pill2_left, pill2_right;
 
   int history_top, history_bottom;
+
+  // Analysis panel. Placement varies with available space:
+  //   ANALYSIS_RIGHT_OF_HISTORY — extra-wide terminals split the right
+  //     column into history (left) + analysis (right), both spanning
+  //     the full history vertical range.
+  //   ANALYSIS_BELOW_HISTORY    — right column is wide enough for the
+  //     two-column history layout. Analysis sits below the history
+  //     box: if history fits without scrolling, analysis grabs all
+  //     remaining vertical space; otherwise it takes a fixed 20 rows.
+  //   ANALYSIS_BELOW_BAG        — narrow right column (history is
+  //     single-column). Analysis lives in the left column under the
+  //     bag; the bag itself is sized just tall enough for its content
+  //     and the rest of the column goes to analysis.
+  //   ANALYSIS_NONE             — there's no room.
+  enum {
+    ANALYSIS_NONE,
+    ANALYSIS_BELOW_BAG,
+    ANALYSIS_BELOW_HISTORY,
+    ANALYSIS_RIGHT_OF_HISTORY,
+  } analysis_placement;
+  bool has_analysis;
+  int analysis_top, analysis_bottom, analysis_left, analysis_right;
 } Layout;
 
 // Three tile scales:
@@ -133,7 +165,71 @@ static int compute_effective_scale(int user_pref, unsigned plane_cols,
   return -1;
 }
 
-static Layout compute_layout(struct ncplane *plane, int user_scale) {
+// Display-column count of the dense bag/unseen-tile string the bag
+// panel renders. Mirrors render_bag_panel's content building; used by
+// compute_layout to size the bag tightly when the analysis panel is
+// taking its overflow.
+static int bag_unseen_chars(const TuiGameState *state) {
+  if (state == NULL || state->game == NULL) {
+    return 0;
+  }
+  const Bag *bag = game_get_bag(state->game);
+  const LetterDistribution *ld = state->ld;
+  const int ld_size = ld_get_size(ld);
+  int counts[64] = {0};
+  for (int ml = 0; ml < ld_size && ml < (int)(sizeof(counts) / sizeof(int));
+       ml++) {
+    counts[ml] = bag_get_letter(bag, (MachineLetter)ml);
+  }
+  const int off_turn = 1 - game_get_player_on_turn_index(state->game);
+  const Rack *off_rack =
+      player_get_rack(game_get_player(state->game, off_turn));
+  for (int ml = 0; ml < ld_size && ml < (int)(sizeof(counts) / sizeof(int));
+       ml++) {
+    counts[ml] += rack_get_letter(off_rack, (MachineLetter)ml);
+  }
+  // Each grouping is "<n copies of letter>"; groupings are separated
+  // by a single space. Letters are ASCII (1 col each) for the lexica
+  // we ship; non-ASCII would over-count visual width slightly but the
+  // bag would just end up a row taller, which is fine.
+  int total = 0;
+  bool first = true;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (counts[ml] == 0) {
+      continue;
+    }
+    if (!first) {
+      total += 1; // separator space
+    }
+    first = false;
+    total += counts[ml];
+  }
+  return total;
+}
+
+// Maximum row usage across the two history columns. Used to decide
+// whether history fits without scrolling so we can give the surplus
+// space to the analysis panel.
+static int history_two_col_rows_needed(const TuiGameState *state) {
+  if (state == NULL) {
+    return 0;
+  }
+  int left = 0;
+  int right = 0;
+  for (int idx = 0; idx < state->history_count; idx++) {
+    const int rows =
+        state->history[idx].end_bonus != 0 ? 4 : 2; // mirrors history_entry_rows
+    if (idx % 2 == 0) {
+      left += rows;
+    } else {
+      right += rows;
+    }
+  }
+  return left > right ? left : right;
+}
+
+static Layout compute_layout(struct ncplane *plane, int user_scale,
+                             const TuiGameState *state) {
   Layout L = {0};
   ncplane_dim_yx(plane, &L.plane_rows, &L.plane_cols);
 
@@ -156,12 +252,35 @@ static Layout compute_layout(struct ncplane *plane, int user_scale) {
   // tiles (also rendered at 4×2 cells) get the vertical room they need.
   const int rack_box_rows = (L.scale == 2) ? 4 : 3;
   L.rack_bottom = L.rack_top + rack_box_rows - 1;
-  L.bag_top = L.rack_bottom + 1;
-  L.bag_bottom = L.status_row - 1;
 
   L.right_col_left = L.board_width + RIGHT_COL_LEFT_OFFSET;
   L.right_col_right = (int)L.plane_cols - 1;
   L.right_col_width = L.right_col_right - L.right_col_left + 1;
+
+  // Decide where the analysis panel lives based on right-column width.
+  L.analysis_placement = ANALYSIS_NONE;
+  if (state != NULL) {
+    if (L.right_col_width >= ANALYSIS_THREE_COL_THRESHOLD) {
+      L.analysis_placement = ANALYSIS_RIGHT_OF_HISTORY;
+    } else if (L.right_col_width >= HISTORY_TWO_COL_THRESHOLD) {
+      L.analysis_placement = ANALYSIS_BELOW_HISTORY;
+    } else {
+      L.analysis_placement = ANALYSIS_BELOW_BAG;
+    }
+  }
+
+  // Three-column case: peel the analysis strip off the right of the
+  // right column BEFORE computing pill geometry so pills stay
+  // centered/sized to the history slice only.
+  if (L.analysis_placement == ANALYSIS_RIGHT_OF_HISTORY) {
+    const int analysis_width =
+        L.right_col_width - HISTORY_TWO_COL_THRESHOLD - ANALYSIS_GUTTER;
+    L.analysis_right = L.right_col_right;
+    L.analysis_left = L.right_col_right - analysis_width + 1;
+    L.right_col_right = L.analysis_left - 1 - ANALYSIS_GUTTER;
+    L.right_col_width = L.right_col_right - L.right_col_left + 1;
+  }
+
   L.two_col = L.right_col_width >= HISTORY_TWO_COL_THRESHOLD;
 
   if (L.two_col) {
@@ -196,6 +315,74 @@ static Layout compute_layout(struct ncplane *plane, int user_scale) {
     L.history_top = L.pill2_bottom + 1;
   }
   L.history_bottom = L.status_row - 1;
+
+  // Default bag region: rack_bottom+1 to status_row-1. Tightened below
+  // in the BELOW_BAG case so analysis can sit beneath the bag.
+  L.bag_top = L.rack_bottom + 1;
+  L.bag_bottom = L.status_row - 1;
+
+  // Three-column: analysis fills the right strip across the full
+  // history vertical range.
+  if (L.analysis_placement == ANALYSIS_RIGHT_OF_HISTORY) {
+    L.analysis_top = L.history_top;
+    L.analysis_bottom = L.history_bottom;
+    L.has_analysis = (L.analysis_bottom - L.analysis_top + 1) >= 3;
+  }
+
+  // Two-column: carve rows off the bottom of history for analysis.
+  // If history fits without scrolling, hand all the surplus to
+  // analysis; otherwise reserve a fixed slab.
+  if (L.analysis_placement == ANALYSIS_BELOW_HISTORY) {
+    const int interior_rows = L.history_bottom - L.history_top - 1;
+    const int needed = history_two_col_rows_needed(state);
+    int analysis_rows;
+    if (needed <= interior_rows) {
+      analysis_rows = interior_rows - needed;
+    } else {
+      analysis_rows = ANALYSIS_DEFAULT_ROWS;
+    }
+    if (analysis_rows >= 3 && L.history_bottom - analysis_rows > L.history_top) {
+      L.analysis_top = L.history_bottom - analysis_rows + 1;
+      L.analysis_bottom = L.history_bottom;
+      L.analysis_left = L.right_col_left;
+      L.analysis_right = L.right_col_right;
+      L.history_bottom = L.analysis_top - 1;
+      L.has_analysis = true;
+    }
+  }
+
+  // Single-column history: analysis sits below the bag in the LEFT
+  // column. Bag shrinks to its content height (plus borders + tally),
+  // and analysis claims everything else above the status bar.
+  if (L.analysis_placement == ANALYSIS_BELOW_BAG) {
+    const int interior_width = L.board_width - 2;
+    const int chars = bag_unseen_chars(state);
+    int content_lines =
+        interior_width > 0 ? (chars + interior_width - 1) / interior_width : 1;
+    if (content_lines < 1) {
+      content_lines = 1;
+    }
+    // 2 borders + content rows + 1 tally row.
+    int bag_height = 2 + content_lines + 1;
+    const int total = L.bag_bottom - L.bag_top + 1;
+    // Leave room for an analysis box of at least 3 rows + 1 gap.
+    const int analysis_floor = 3 + 1;
+    if (bag_height > total - analysis_floor) {
+      bag_height = total - analysis_floor;
+    }
+    if (bag_height >= 3) {
+      L.bag_bottom = L.bag_top + bag_height - 1;
+      const int analysis_top = L.bag_bottom + 1;
+      if (analysis_top <= L.status_row - 1 &&
+          L.status_row - 1 - analysis_top + 1 >= 3) {
+        L.analysis_top = analysis_top;
+        L.analysis_bottom = L.status_row - 1;
+        L.analysis_left = 0;
+        L.analysis_right = L.board_width - 1;
+        L.has_analysis = true;
+      }
+    }
+  }
 
   return L;
 }
@@ -1904,6 +2091,41 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   }
 }
 
+// ── Analysis panel ────────────────────────────────────────────────────────
+//
+// Shows whatever the bot worker last produced — sim leaderboard while
+// the bag has tiles, endgame PV when it's empty. For now the panel is
+// a labeled box with a placeholder; engine data plumbing follows in a
+// later commit.
+static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
+                                  const TuiGameState *state,
+                                  const Layout *L) {
+  (void)state;
+  if (!L->has_analysis) {
+    return;
+  }
+  const int height = L->analysis_bottom - L->analysis_top + 1;
+  const int width = L->analysis_right - L->analysis_left + 1;
+  if (height < 3 || width < 6) {
+    return;
+  }
+  draw_box(plane, theme, L->analysis_top, L->analysis_left, height, width,
+           "Analysis");
+
+  // Placeholder: a single dim line until sim/endgame results are plumbed
+  // through.
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  const char *msg = "(no analysis yet)";
+  const int interior_width = width - 2;
+  const int row = L->analysis_top + 1;
+  if (row <= L->analysis_bottom - 1) {
+    const int col =
+        L->analysis_left + 1 + (interior_width - (int)strlen(msg)) / 2;
+    ncplane_putstr_yx(plane, row, col, msg);
+  }
+}
+
 // EMA-smoothed FPS based on the interval between status-bar renders.
 // Status-bar render happens once per top-level render call, which is
 // what we actually care about — terminal frame rate after all the
@@ -2079,7 +2301,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   const int user_pref =
       (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
                                                                           : 1;
-  const Layout L = compute_layout(plane, user_pref);
+  const Layout L = compute_layout(plane, user_pref, state);
   if (L.scale < 0) {
     render_too_small(plane, theme);
     return;
@@ -2106,6 +2328,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_player_pill(plane, theme, state, 1, L.pill2_top, L.pill2_left,
                      L.pill2_right);
   render_history_panel(plane, theme, state, &L);
+  render_analysis_panel(plane, theme, state, &L);
 
   render_status_bar(plane, theme, state, &L, modal);
 
