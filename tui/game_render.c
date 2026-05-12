@@ -703,11 +703,11 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && state->glyph_cache_sub != NULL;
   // Subscript-less tiles keep the 0.74 target (centered, generous).
   // Subscript-on tiles shrink the letter to 0.50 of tile height; the
-  // subscript sits in the bottom-right at 0.32 with a 0.12 margin from
-  // the right/bottom edges. The letter's center shifts up-and-left by
+  // subscript sits in the bottom-right at 0.26 with a 0.12 right /
+  // 0.16 bottom margin. The letter's center shifts up-and-left by
   // 0.06 of tile dims so descenders (Q's tail) clear the subscript.
   const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
-  const int sub_px = (int)((double)tile_h * 0.32);
+  const int sub_px = (int)((double)tile_h * 0.26);
   tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
   if (subs_on) {
     tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
@@ -816,7 +816,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         char digits[8];
         snprintf(digits, sizeof(digits), "%d", tile_score);
         const int margin_x = (int)((double)tile_w * 0.12);
-        const int margin_y = (int)((double)tile_h * 0.12);
+        const int margin_y = (int)((double)tile_h * 0.16);
         const int digit_bottom = ty + tile_h - margin_y;
         int pen_right = tx + tile_w - margin_x;
         for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
