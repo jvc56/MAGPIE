@@ -303,7 +303,13 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
 
   SimResults *results = sim_results_create(args.bai_options.cutoff);
   ErrorStack *err = error_stack_create();
+  struct timespec t0, t1;
+  clock_gettime(CLOCK_MONOTONIC, &t0);
   simulate_without_ctx(&args, results, err);
+  clock_gettime(CLOCK_MONOTONIC, &t1);
+  const double sim_elapsed =
+      (double)(t1.tv_sec - t0.tv_sec) +
+      (double)(t1.tv_nsec - t0.tv_nsec) / 1e9;
 
   atomic_store(&wd.finished, true);
   if (wd_started) {
@@ -320,6 +326,24 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
     // from the candidate list we already generated.
     move_copy(out_move, move_list_get_move(candidates, 0));
     got_move = true;
+  }
+
+  {
+    FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
+    if (dbg != NULL) {
+      char *errmsg = NULL;
+      if (!error_stack_is_empty(err)) {
+        errmsg = error_stack_get_string_and_reset(err);
+      }
+      fprintf(dbg,
+              "  sim: elapsed=%.3fs candidates=%d best=%s iters=%llu nodes=%llu err=%s\n",
+              sim_elapsed, args.num_plays, best != NULL ? "OK" : "NULL",
+              (unsigned long long)sim_results_get_iteration_count(results),
+              (unsigned long long)sim_results_get_node_count(results),
+              errmsg != NULL ? errmsg : "(none)");
+      free(errmsg);
+      fclose(dbg);
+    }
   }
 
   error_stack_destroy(err);
