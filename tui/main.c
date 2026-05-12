@@ -320,6 +320,10 @@ int main(int argc, char *argv[]) {
       unsigned new_cols = 0;
       notcurses_refresh(nc, &new_rows, &new_cols);
       ncplane_resize_simple(std_plane, new_rows, new_cols);
+      // A font-size change is delivered as a resize and shifts every
+      // cached pixel composite to the wrong size. Drop all child planes
+      // so the next render rebuilds them at the new cell-pixel ratio.
+      tui_game_render_reset_grids();
       continue;
     }
 

@@ -1106,6 +1106,19 @@ static void render_board(struct ncplane *plane, const Theme *theme,
     render_board_pixel(plane, theme, state, L);
     return;
   }
+  // 2x-only pixel label planes are no-ops at scale < 2 but their stale
+  // image data would otherwise sit on top of the text-mode layout. Drop
+  // them; they'll be reacquired on the next 2x render.
+  if (grid_planes.labels_col != NULL) {
+    ncplane_destroy(grid_planes.labels_col);
+    grid_planes.labels_col = NULL;
+    label_pixel_cache.valid = false;
+  }
+  if (grid_planes.labels_row != NULL) {
+    ncplane_destroy(grid_planes.labels_row);
+    grid_planes.labels_row = NULL;
+    label_pixel_cache.valid = false;
+  }
   // Column labels: fullwidth Ａ-Ｏ at scale 1, halfwidth A-O at scale 0.
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
@@ -1332,6 +1345,14 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   if (L->scale >= 2 && state->glyph_cache != NULL) {
     render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters);
     return;
+  }
+
+  // Drop the 2x-only rack pixel plane if we're not using it — stale
+  // pixel content otherwise sits on top of the text-mode rack.
+  if (grid_planes.rack != NULL) {
+    ncplane_destroy(grid_planes.rack);
+    grid_planes.rack = NULL;
+    rack_pixel_cache.valid = false;
   }
 
   // Cell-text rack: row sits one below the box top. Halfwidth uses
