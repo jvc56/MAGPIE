@@ -1,16 +1,27 @@
 #include "bot_worker.h"
 
+#include "../src/compat/memory_info.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/ent/bag.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/thread_control.h"
+#include "../src/ent/win_pct.h"
+#include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
+#include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
 #include <pthread.h>
@@ -22,8 +33,19 @@
 #include <time.h>
 
 enum {
-  TURN_DELAY_NS = 3 * 1000 * 1000 * 1000L, // 3 s
-  POLL_NS = 100 * 1000 * 1000L,            // 100 ms
+  SIM_CANDIDATES = 15,
+  SIM_PLIES = 5,
+  ENDGAME_PLIES = 25,
+  // Untimed games still want a noticeable pause per turn so the player
+  // can read the previous move; 5s gives the engine real work to do
+  // without dragging.
+  UNTIMED_BUDGET_SEC = 5,
+  // Minimum effective budget so degenerate clock states don't make the
+  // engine do almost-no-work and pick a near-random move.
+  MIN_BUDGET_MS = 250,
+  // The watchdog polls bot_stop while the engine is running and signals
+  // the thread_control if a quit is requested.
+  WATCHDOG_POLL_NS = 50 * 1000 * 1000L,
 };
 
 static void copy_str(char *dst, size_t dst_size, const char *src) {
@@ -42,35 +64,24 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
   dst[len] = '\0';
 }
 
-// Caller must hold state->mutex. Snapshots the player's full rack BEFORE
-// play_move (i.e., the tiles they had at the start of their turn) plus
-// the move and metadata.
-static void append_history(TuiGameState *state, int player_idx,
-                           const Move *move, const Rack *rack_at_start,
-                           int score, int total_after, int clock_at_start) {
+// Snapshot the on-turn player's rack into entry->rack_str before the
+// engine has computed the move. The clock value reflects what the
+// player had when the turn began.
+//
+// Caller must hold state->mutex.
+static int append_pending_history(TuiGameState *state, int player_idx,
+                                  const Rack *rack_at_start,
+                                  int clock_at_start) {
   if (state->history_count >= TUI_HISTORY_MAX) {
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
     state->history_count = TUI_HISTORY_MAX - 1;
   }
-
   TuiHistoryEntry *entry = &state->history[state->history_count++];
+  memset(entry, 0, sizeof(*entry));
   entry->player_idx = player_idx;
-  entry->score = score;
-  entry->total_after = total_after;
   entry->clock_at_start = clock_at_start;
-  entry->end_bonus = 0;
-  entry->end_rack_str[0] = '\0';
-
-  StringBuilder *sb = string_builder_create();
-  // add_score=false: we render the score in our own column.
-  string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
-                          false);
-  size_t move_len = 0;
-  char *move_dump = string_builder_dump(sb, &move_len);
-  copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
-  free(move_dump);
-  string_builder_destroy(sb);
+  entry->pending = true;
 
   if (rack_at_start != NULL) {
     StringBuilder *rsb = string_builder_create();
@@ -80,144 +91,413 @@ static void append_history(TuiGameState *state, int player_idx,
     copy_str(entry->rack_str, sizeof(entry->rack_str), rack_dump);
     free(rack_dump);
     string_builder_destroy(rsb);
-  } else {
-    entry->rack_str[0] = '\0';
+  }
+  return state->history_count - 1;
+}
+
+// Fill in move_str, score, total_after on an entry that was created
+// pending. Clears the pending flag.
+//
+// Caller must hold state->mutex.
+static void finalize_history(TuiGameState *state, int idx, const Move *move,
+                             int score, int total_after) {
+  if (idx < 0 || idx >= state->history_count) {
+    return;
+  }
+  TuiHistoryEntry *entry = &state->history[idx];
+  entry->score = score;
+  entry->total_after = total_after;
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
+                          false);
+  size_t move_len = 0;
+  char *move_dump = string_builder_dump(sb, &move_len);
+  copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
+  free(move_dump);
+  string_builder_destroy(sb);
+
+  entry->pending = false;
+}
+
+// Drop the most recent history entry (used when computation is aborted
+// before a move is selected).
+//
+// Caller must hold state->mutex.
+static void pop_history(TuiGameState *state) {
+  if (state->history_count > 0) {
+    state->history_count--;
   }
 }
 
-// Sleep up to TURN_DELAY_NS, polling stop every POLL_NS so we exit
-// promptly when the main thread asks us to.
-static void interruptible_sleep(_Atomic bool *stop) {
-  long remaining = TURN_DELAY_NS;
-  while (remaining > 0 && !atomic_load(stop)) {
-    long step = remaining < POLL_NS ? remaining : POLL_NS;
-    struct timespec ts = {.tv_sec = step / 1000000000L,
-                          .tv_nsec = step % 1000000000L};
-    nanosleep(&ts, NULL);
-    remaining -= step;
+// Budget for the on-turn player's current move. Strategy: estimate
+// remaining plays in the game (assuming ~4 tiles per play, averaged
+// across both players) and split the player's remaining clock evenly
+// across them. For untimed games the budget collapses to a flat
+// UNTIMED_BUDGET_SEC.
+//
+// Caller must hold state->mutex.
+static double compute_budget_sec(const TuiGameState *state, int player_idx) {
+  if (state->time_per_side_seconds <= 0) {
+    return (double)UNTIMED_BUDGET_SEC;
   }
+  const Bag *bag = game_get_bag(state->game);
+  const int bag_tiles = bag_get_letters(bag);
+  const int p1_rack =
+      rack_get_total_letters(player_get_rack(game_get_player(state->game, 0)));
+  const int p2_rack =
+      rack_get_total_letters(player_get_rack(game_get_player(state->game, 1)));
+  const int total_tiles = bag_tiles + p1_rack + p2_rack;
+  // ~4 tiles per play means total_plays_remaining = total_tiles / 4
+  // and the current player has roughly half of those. Round up so a
+  // sparse remaining-tile count doesn't push n to 0.
+  int plays_for_this_player = (total_tiles + 7) / 8;
+  if (plays_for_this_player < 1) {
+    plays_for_this_player = 1;
+  }
+  double remaining_clock =
+      (double)state->time_per_side_seconds - state->seconds_used[player_idx];
+  if (remaining_clock < 0.0) {
+    remaining_clock = 0.0;
+  }
+  double budget = remaining_clock / (double)plays_for_this_player;
+  if (budget < (double)MIN_BUDGET_MS / 1000.0) {
+    budget = (double)MIN_BUDGET_MS / 1000.0;
+  }
+  return budget;
+}
+
+// Watchdog: spins while the engine is running and translates a
+// bot_stop request into a thread_control USER_INTERRUPT so the engine
+// can bail out early.
+typedef struct {
+  ThreadControl *tc;
+  _Atomic bool *bot_stop;
+  _Atomic bool finished;
+} Watchdog;
+
+static void *watchdog_main(void *arg) {
+  Watchdog *w = (Watchdog *)arg;
+  while (!atomic_load(&w->finished)) {
+    if (atomic_load(w->bot_stop)) {
+      thread_control_set_status(w->tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
+      break;
+    }
+    struct timespec ts = {0, WATCHDOG_POLL_NS};
+    nanosleep(&ts, NULL);
+  }
+  return NULL;
+}
+
+// Plain equity-best generation (the original behaviour). Used as a
+// fallback when sim/endgame fail to return a move, or when WinPct
+// wasn't loaded and bag still has tiles.
+//
+// `scratch` should be a MoveList created with capacity 1 (the standard
+// MOVE_RECORD_BEST recorder).
+static bool find_equity_best(const Game *game, MoveList *scratch,
+                             Move *out_move) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .thread_index = 0,
+      .move_list = scratch,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves_for_game(&args);
+  if (move_list_get_count(scratch) == 0) {
+    return false;
+  }
+  move_copy(out_move, move_list_get_move(scratch, 0));
+  return true;
+}
+
+// Generate up to N top candidates by equity into a fresh capacity-N
+// MoveList. Returns the list (caller must destroy via
+// moves_for_move_list_destroy + free) or NULL when no moves exist.
+static MoveList *generate_top_candidates(const Game *game, int n) {
+  MoveList *list = move_list_create(n);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .thread_index = 0,
+      .move_list = list,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves_for_game(&args);
+  if (move_list_get_count(list) == 0) {
+    moves_for_move_list_destroy(list);
+    free(list);
+    return NULL;
+  }
+  return list;
+}
+
+// Run a Monte Carlo simulation against the current position with a
+// time budget. Returns true and writes the chosen move on success.
+// Falls back to equity-best on any internal failure.
+static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
+  MoveList *candidates = generate_top_candidates(state->game, SIM_CANDIDATES);
+  if (candidates == NULL) {
+    return false;
+  }
+  // Single-candidate position: no point simming a one-horse race.
+  if (move_list_get_count(candidates) <= 1) {
+    move_copy(out_move, move_list_get_move(candidates, 0));
+    moves_for_move_list_destroy(candidates);
+    free(candidates);
+    return true;
+  }
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = &state->bot_stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  const int num_threads = get_num_cores();
+  SimArgs args = {0};
+  args.num_plies = SIM_PLIES;
+  args.move_list = candidates;
+  args.num_plays = move_list_get_count(candidates);
+  args.known_opp_rack = NULL;
+  args.win_pcts = state->win_pcts;
+  args.use_inference = false;
+  args.use_heat_map = false;
+  args.inference_results = NULL;
+  args.num_threads = num_threads;
+  args.print_interval = 0;
+  args.max_num_display_plays = SIM_CANDIDATES;
+  args.max_num_display_plies = SIM_PLIES;
+  args.seed = (uint64_t)time(NULL);
+  args.thread_control = tc;
+  args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  args.bai_options.sample_limit = (uint64_t)1e15;
+  args.bai_options.sample_minimum = 1;
+  args.bai_options.time_limit_seconds = (uint64_t)budget_sec;
+  args.bai_options.num_threads = num_threads;
+  args.bai_options.cutoff = 0.005;
+  args.bai_options.parent_worker_thread_index = 0;
+  args.bai_options.arm_avoid_prune = NULL;
+  args.bai_options.num_arm_avoid_prune = 0;
+  args.bai_options.delta = 1.0;
+  // Game pointer must be a Game* (not const) when passed through the
+  // SimArgs.game field; the sim doesn't mutate it but the struct's
+  // declaration is `const Game *`.
+  args.game = state->game;
+
+  SimResults *results = sim_results_create(args.bai_options.cutoff);
+  ErrorStack *err = error_stack_create();
+  simulate_without_ctx(&args, results, err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  const Move *best = sim_results_get_best_move(results);
+  if (best != NULL) {
+    move_copy(out_move, best);
+    got_move = true;
+  } else {
+    // Sim couldn't pick a winner — fall back to the top equity move
+    // from the candidate list we already generated.
+    move_copy(out_move, move_list_get_move(candidates, 0));
+    got_move = true;
+  }
+
+  error_stack_destroy(err);
+  sim_results_destroy(results);
+  thread_control_destroy(tc);
+  moves_for_move_list_destroy(candidates);
+  free(candidates);
+  return got_move;
+}
+
+// Run the endgame solver against the current position with a time
+// budget. Returns true and writes the chosen move on success.
+static bool run_endgame(TuiGameState *state, double budget_sec,
+                        Move *out_move) {
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = &state->bot_stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  EndgameArgs args = {0};
+  args.thread_control = tc;
+  args.game = state->game;
+  args.tt_fraction_of_mem = 0.10;
+  args.plies = ENDGAME_PLIES;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = get_num_cores();
+  args.use_heuristics = true;
+  args.num_top_moves = 1;
+  args.enable_pv_display = false;
+  args.per_ply_callback = NULL;
+  args.per_ply_callback_data = NULL;
+  args.forced_pass_bypass = false;
+  args.soft_time_limit = budget_sec * 0.9;
+  args.hard_time_limit = budget_sec;
+  args.seed = (uint64_t)time(NULL);
+
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *ctx = NULL;
+  ErrorStack *err = error_stack_create();
+  endgame_solve(&ctx, &args, results, err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  const PVLine *pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  if (pv != NULL && pv->num_moves > 0) {
+    small_move_to_move(out_move, &pv->moves[0], game_get_board(state->game));
+    got_move = true;
+  }
+
+  if (ctx != NULL) {
+    endgame_ctx_destroy(ctx);
+  }
+  error_stack_destroy(err);
+  endgame_results_destroy(results);
+  thread_control_destroy(tc);
+  return got_move;
 }
 
 static void *bot_thread_main(void *arg) {
   TuiGameState *state = (TuiGameState *)arg;
-  // Persistent move list: capacity 1 since we use MOVE_RECORD_BEST.
-  MoveList *move_list = move_list_create(1);
+  // Scratch list for the equity-best fallback path.
+  MoveList *fallback_list = move_list_create(1);
+  // Scratch move buffer that engine routines write into. Lives across
+  // turns so we don't churn the small-move arena on every turn.
+  Move *chosen = move_create();
 
   while (!atomic_load(&state->bot_stop)) {
-    // Sleep up front so the very first move also gets a 3-second pause
-    // (matching the gap between subsequent moves). The corresponding
-    // wall time is charged to the on-turn player by the elapsed-time
-    // accounting after their move plays.
-    interruptible_sleep(&state->bot_stop);
-    if (atomic_load(&state->bot_stop)) {
+    // ── Snapshot turn state, append pending history ──────────────────
+    int pending_idx = -1;
+    bool empty_bag = false;
+    double budget_sec = 0.0;
+    int player_idx = -1;
+
+    pthread_mutex_lock(&state->mutex);
+    if (game_over(state->game)) {
+      pthread_mutex_unlock(&state->mutex);
+      break;
+    }
+    player_idx = game_get_player_on_turn_index(state->game);
+    const int clock_at_start =
+        state->time_per_side_seconds - (int)state->seconds_used[player_idx];
+
+    Rack rack_at_start;
+    rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
+    rack_copy(&rack_at_start,
+              player_get_rack(game_get_player(state->game, player_idx)));
+
+    pending_idx = append_pending_history(state, player_idx, &rack_at_start,
+                                         clock_at_start);
+    budget_sec = compute_budget_sec(state, player_idx);
+    empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
+    // Render the pending entry's spinner immediately.
+    atomic_fetch_add(&state->render_version, 1);
+    pthread_mutex_unlock(&state->mutex);
+
+    // ── Run the engine with the mutex released ───────────────────────
+    bool got_move = false;
+    if (empty_bag) {
+      got_move = run_endgame(state, budget_sec, chosen);
+    } else if (state->win_pcts != NULL) {
+      got_move = run_sim(state, budget_sec, chosen);
+    }
+    if (!got_move) {
+      // Either we don't have win_pcts (no sim possible) or the engine
+      // failed. Fall back to plain best-equity generation.
+      pthread_mutex_lock(&state->mutex);
+      got_move = find_equity_best(state->game, fallback_list, chosen);
+      pthread_mutex_unlock(&state->mutex);
+    }
+
+    // ── Apply the move and finalize history ──────────────────────────
+    pthread_mutex_lock(&state->mutex);
+    if (atomic_load(&state->bot_stop) || game_over(state->game) || !got_move) {
+      pop_history(state);
+      atomic_fetch_add(&state->render_version, 1);
+      pthread_mutex_unlock(&state->mutex);
       break;
     }
 
-    bool finished = false;
-    pthread_mutex_lock(&state->mutex);
+    const int move_score = equity_to_int(move_get_score(chosen));
+    Rack leave;
+    rack_set_dist_size(&leave, ld_get_size(state->ld));
+    play_move(chosen, state->game, &leave);
+
+    const int post_play_score = equity_to_int(
+        player_get_score(game_get_player(state->game, player_idx)));
+    int bonus = 0;
+    const Rack *opp_rack = NULL;
     if (game_over(state->game)) {
-      finished = true;
-    } else {
-      const int player_idx = game_get_player_on_turn_index(state->game);
-      // Snapshot the clock at the moment this turn started — that is, the
-      // value at the end of the previous play, before any of this turn's
-      // think time has been counted against the player.
-      const int clock_at_start =
-          state->time_per_side_seconds - (int)state->seconds_used[player_idx];
-
-      const MoveGenArgs args = {
-          .game = state->game,
-          .move_record_type = MOVE_RECORD_BEST,
-          .move_sort_type = MOVE_SORT_EQUITY,
-          .override_kwg = NULL,
-          .eq_margin_movegen = 0,
-          .target_equity = EQUITY_MAX_VALUE,
-          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-          .thread_index = 0,
-          .move_list = move_list,
-          .tiles_played_bv = NULL,
-          .initial_tiles_bv = 0,
-      };
-      generate_moves_for_game(&args);
-
-      if (move_list_get_count(move_list) > 0) {
-        const Move *best = move_list_get_move(move_list, 0);
-        const int score = equity_to_int(move_get_score(best));
-
-        // Snapshot the full rack BEFORE play_move modifies the player's
-        // rack — this is what they had at the start of their turn.
-        Rack rack_at_start;
-        rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
-        rack_copy(&rack_at_start,
-                  player_get_rack(game_get_player(state->game, player_idx)));
-
-        Rack leave;
-        rack_set_dist_size(&leave, ld_get_size(state->ld));
-        play_move(best, state->game, &leave);
-        // Bump render_version so the cached board pixel composite
-        // knows to rebuild on the next frame; without this the
-        // renderer would skip the blit and the new tile wouldn't
-        // appear until the user nudged a setting.
-        atomic_fetch_add(&state->render_version, 1);
-        const int post_play_score = equity_to_int(
-            player_get_score(game_get_player(state->game, player_idx)));
-
-        // If play_move just applied an end-of-game bonus to this player
-        // (they went out and the opponent has tiles left), pull that out
-        // so the move's own entry shows the score from this play alone.
-        int bonus = 0;
-        const Rack *opp_rack = NULL;
-        if (game_over(state->game)) {
-          opp_rack =
-              player_get_rack(game_get_player(state->game, 1 - player_idx));
-          if (!rack_is_empty(opp_rack)) {
-            bonus =
-                equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
-          }
-        }
-        const int total_after_move = post_play_score - bonus;
-        append_history(state, player_idx, best, &rack_at_start, score,
-                       total_after_move, clock_at_start);
-
-        // Charge this turn's elapsed time to the player who just moved,
-        // and reset turn_started so the next player's clock begins now.
-        // Clamp `elapsed` to non-negative so a stray bad turn_started
-        // (e.g. clock skew, uninitialized memory) can't poison the
-        // running total — the worst case is the move appears to have
-        // taken zero time, not negative billions.
-        struct timespec now;
-        clock_gettime(CLOCK_MONOTONIC, &now);
-        double elapsed =
-            (double)(now.tv_sec - state->turn_started.tv_sec) +
-            (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
-        if (elapsed < 0.0) {
-          elapsed = 0.0;
-        }
-        state->seconds_used[player_idx] += elapsed;
-        state->turn_started = now;
-
-        // Surface the going-out bonus as a third line on this entry —
-        // not as a separate entry — by stashing the bonus and the
-        // opponent's leftover into the just-appended history row.
-        if (game_over(state->game)) {
-          if (bonus != 0 && opp_rack != NULL && state->history_count > 0) {
-            TuiHistoryEntry *entry = &state->history[state->history_count - 1];
-            entry->end_bonus = bonus;
-            StringBuilder *rsb = string_builder_create();
-            string_builder_add_rack(rsb, opp_rack, state->ld, false);
-            size_t rlen = 0;
-            char *rdump = string_builder_dump(rsb, &rlen);
-            copy_str(entry->end_rack_str, sizeof(entry->end_rack_str), rdump);
-            free(rdump);
-            string_builder_destroy(rsb);
-          }
-          finished = true;
-        }
-      } else {
-        // No legal moves — shouldn't happen, but bail to avoid spinning.
-        finished = true;
+      opp_rack = player_get_rack(game_get_player(state->game, 1 - player_idx));
+      if (!rack_is_empty(opp_rack)) {
+        bonus =
+            equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
       }
     }
+    const int total_after_move = post_play_score - bonus;
+    finalize_history(state, pending_idx, chosen, move_score, total_after_move);
+
+    // Charge wall time used to the on-turn player. Clamp negative
+    // deltas (clock skew / bad turn_started) to 0 so a single bad
+    // reading can't poison the running total.
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    double elapsed = (double)(now.tv_sec - state->turn_started.tv_sec) +
+                     (double)(now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+    if (elapsed < 0.0) {
+      elapsed = 0.0;
+    }
+    state->seconds_used[player_idx] += elapsed;
+    state->turn_started = now;
+
+    // Surface end-of-game bonus on the same entry that just went out.
+    bool finished = false;
+    if (game_over(state->game)) {
+      if (bonus != 0 && opp_rack != NULL && pending_idx >= 0 &&
+          pending_idx < state->history_count) {
+        TuiHistoryEntry *entry = &state->history[pending_idx];
+        entry->end_bonus = bonus;
+        StringBuilder *rsb = string_builder_create();
+        string_builder_add_rack(rsb, opp_rack, state->ld, false);
+        size_t rlen = 0;
+        char *rdump = string_builder_dump(rsb, &rlen);
+        copy_str(entry->end_rack_str, sizeof(entry->end_rack_str), rdump);
+        free(rdump);
+        string_builder_destroy(rsb);
+      }
+      finished = true;
+    }
+
+    atomic_fetch_add(&state->render_version, 1);
     pthread_mutex_unlock(&state->mutex);
 
     if (finished) {
@@ -225,8 +505,9 @@ static void *bot_thread_main(void *arg) {
     }
   }
 
-  moves_for_move_list_destroy(move_list);
-  free(move_list);
+  move_destroy(chosen);
+  moves_for_move_list_destroy(fallback_list);
+  free(fallback_list);
   return NULL;
 }
 

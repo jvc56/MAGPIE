@@ -16,6 +16,7 @@ struct LetterDistribution;
 struct PlayersData;
 struct BoardLayout;
 struct MoveList;
+struct WinPct;
 typedef struct TuiGlyphCache TuiGlyphCache;
 
 enum {
@@ -34,6 +35,11 @@ typedef struct {
   // when this entry has no end-of-game adjustment.
   int end_bonus;
   char end_rack_str[16]; // opponent's leftover tiles (e.g. "EE")
+  // True while the bot is still computing this turn's move. The
+  // renderer shows a braille spinner in place of move_str / +score
+  // and the bot worker flips it back to false once the move is
+  // finalized.
+  bool pending;
 } TuiHistoryEntry;
 
 typedef struct {
@@ -66,6 +72,12 @@ typedef struct {
   // FT_Set_Pixel_Sizes per cell.
   TuiGlyphCache *glyph_cache;
   TuiGlyphCache *glyph_cache_sub;
+
+  // Win-percentage table used by the simulator. Loaded once at init,
+  // owned by the state, destroyed in tui_game_state_destroy. NULL when
+  // the file couldn't be loaded — in that case the bot worker falls
+  // back to plain equity-best moves.
+  struct WinPct *win_pcts;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature

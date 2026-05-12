@@ -7,6 +7,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "glyph_cache.h"
@@ -114,6 +115,15 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
     goto fail;
   }
 
+  // Win-percentage file is needed by the simulator. Failure to load is
+  // non-fatal: the bot worker falls back to equity-best moves in that
+  // case (no sim, no endgame). "winpct" is MAGPIE's bundled default.
+  out_state->win_pcts = win_pct_create(data_paths, "winpct", err);
+  if (!error_stack_is_empty(err)) {
+    error_stack_reset(err);
+    out_state->win_pcts = NULL;
+  }
+
   const GameArgs args = {
       .players_data = out_state->players_data,
       .board_layout = out_state->board_layout,
@@ -206,6 +216,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->glyph_cache_sub != NULL) {
     tui_glyph_cache_destroy(state->glyph_cache_sub);
+  }
+  if (state->win_pcts != NULL) {
+    win_pct_destroy(state->win_pcts);
   }
   memset(state, 0, sizeof(*state));
 }

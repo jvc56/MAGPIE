@@ -1671,11 +1671,29 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
   ncplane_putstr_yx(plane, row, interior_left, prefix);
 
-  // Batch the move string into bold-runs (outside parens) and non-bold-
-  // runs (parens + their content). Terminal.app mis-renders when we emit
-  // an SGR escape between every character, so we set styles once per run
-  // and write the whole run with a single putstr.
-  {
+  if (e->pending) {
+    // Bot is still computing this turn — show a braille spinner where
+    // the move notation will go and leave the +score column blank.
+    // 10-frame cycle at ~80ms per frame derives from CLOCK_MONOTONIC
+    // so the animation runs even when the renderer is otherwise idle.
+    static const char *const spinner_frames[] = {
+        "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
+        "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
+        "\xe2\xa0\x87", "\xe2\xa0\x8f",
+    };
+    enum { SPINNER_FRAMES = 10 };
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    const uint64_t ms =
+        (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+    const int frame = (int)((ms / 80) % SPINNER_FRAMES);
+    ncplane_putstr(plane, spinner_frames[frame]);
+  } else {
+    // Batch the move string into bold-runs (outside parens) and
+    // non-bold-runs (parens + their content). Terminal.app mis-renders
+    // when we emit an SGR escape between every character, so we set
+    // styles once per run and write the whole run with a single
+    // putstr.
     const char *p = e->move_str;
     const char *end = p + strlen(e->move_str);
     while (p < end) {
@@ -1708,16 +1726,17 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
       ncplane_putstr(plane, buf);
       p = seg_end;
     }
+    ncplane_set_styles(plane, 0);
+
+    char delta_str[16];
+    snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+    const int delta_len = (int)strlen(delta_str);
+    const int delta_col = interior_right - delta_len + 1;
+    if (delta_col > interior_left + (int)strlen(prefix)) {
+      ncplane_putstr_yx(plane, row, delta_col, delta_str);
+    }
   }
   ncplane_set_styles(plane, 0);
-
-  char delta_str[16];
-  snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
-  const int delta_len = (int)strlen(delta_str);
-  const int delta_col = interior_right - delta_len + 1;
-  if (delta_col > interior_left + (int)strlen(prefix)) {
-    ncplane_putstr_yx(plane, row, delta_col, delta_str);
-  }
 
   // ── Row 2 (darker): "     4:42 AEINRT                91" ───────────────
   if (row + 1 > row_bottom_inclusive) {
@@ -1734,14 +1753,16 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
            e->rack_str[0] ? e->rack_str : "—");
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
-  char total_str[16];
-  snprintf(total_str, sizeof(total_str), "%d", e->total_after);
-  const int total_len = (int)strlen(total_str);
-  const int total_col = interior_right - total_len + 1;
-  if (total_col > interior_left + (int)strlen(left_line)) {
-    ncplane_set_styles(plane, NCSTYLE_BOLD);
-    ncplane_putstr_yx(plane, row2, total_col, total_str);
-    ncplane_set_styles(plane, 0);
+  if (!e->pending) {
+    char total_str[16];
+    snprintf(total_str, sizeof(total_str), "%d", e->total_after);
+    const int total_len = (int)strlen(total_str);
+    const int total_col = interior_right - total_len + 1;
+    if (total_col > interior_left + (int)strlen(left_line)) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row2, total_col, total_str);
+      ncplane_set_styles(plane, 0);
+    }
   }
 
   // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
