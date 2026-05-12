@@ -1055,9 +1055,15 @@ static void render_board_labels_pixel(struct ncplane *plane,
     free(buf);
   }
 
-  // Row labels: "%2d" right-aligned in a 2×cdx box, vertically centered
-  // in the cell's 2-row tall space. The third label column (col index 2)
-  // is the gutter between labels and the board.
+  // Row labels: "%2d" right-anchored against the board, with a margin
+  // matching the col labels' bottom margin (the gap between an "A" and
+  // the tile beneath). Both margins are a fixed fraction of cdy so they
+  // scale with the board. Digits render slightly smaller than the col
+  // labels so they leave room for that right margin.
+  const int row_label_px = (int)((double)cdy * 0.65);
+  tui_glyph_cache_set_size(state->glyph_cache_sub,
+                           row_label_px > 0 ? row_label_px : 1,
+                           state->antialias);
   {
     const int buf_w = row_cols * icdx;
     const int buf_h = row_rows * icdy;
@@ -1066,6 +1072,10 @@ static void render_board_labels_pixel(struct ncplane *plane,
       return;
     }
     fill_tile_rect(buf, buf_w, 0, 0, buf_w, buf_h, bg);
+    const int right_margin = (int)((double)cdy * 0.22);
+    const int content_right = buf_w - right_margin;
+    const int slot_w =
+        content_right > 0 ? content_right / 2 : 0; // per-digit slot
     for (int row = 0; row < BOARD_DIM; row++) {
       char label[4];
       snprintf(label, sizeof(label), "%2d", row + 1);
@@ -1074,8 +1084,6 @@ static void render_board_labels_pixel(struct ncplane *plane,
       // Center a 1-row-tall label box vertically in the 2-row cell.
       const int box_top = cell_top + (cell_h_px - icdy) / 2;
       const int baseline = box_top + (int)(cdy * 0.78);
-      // Two monospace slots, each cdx wide; render each character
-      // centered in its slot.
       for (int i = 0; i < 2; i++) {
         const char ch = label[i];
         if (ch == '\0' || ch == ' ') {
@@ -1086,8 +1094,11 @@ static void render_board_labels_pixel(struct ncplane *plane,
         if (g == NULL || g->width <= 0 || g->height <= 0) {
           continue;
         }
-        const int slot_left = i * icdx;
-        const int glyph_left = slot_left + (icdx - g->width) / 2;
+        // Pack the two slots flush against content_right so the
+        // rightmost digit lines up just inside right_margin from the
+        // board's left edge.
+        const int slot_left = content_right - (2 - i) * slot_w;
+        const int glyph_left = slot_left + (slot_w - g->width) / 2;
         const int glyph_top = baseline - g->bearing_y;
         blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
       }
