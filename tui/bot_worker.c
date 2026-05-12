@@ -425,6 +425,16 @@ static void *bot_thread_main(void *arg) {
 
     // ── Run the engine with the mutex released ───────────────────────
     bool got_move = false;
+    {
+      FILE *dbg = fopen("/tmp/magpie_bot.log", "a");
+      if (dbg != NULL) {
+        fprintf(dbg,
+                "turn: player=%d bag_empty=%d win_pcts=%p budget=%.2fs\n",
+                player_idx, (int)empty_bag, (void *)state->win_pcts,
+                budget_sec);
+        fclose(dbg);
+      }
+    }
     if (empty_bag) {
       got_move = run_endgame(state, budget_sec, chosen);
     } else if (state->win_pcts != NULL) {
