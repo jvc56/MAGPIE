@@ -33,7 +33,7 @@
 #include <time.h>
 
 enum {
-  SIM_CANDIDATES = 15,
+  SIM_CANDIDATES = 50,
   SIM_PLIES = 4,
   ENDGAME_PLIES = 25,
   // Untimed games still want a noticeable pause per turn so the player
