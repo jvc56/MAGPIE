@@ -2551,7 +2551,9 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   char title[64];
   if (use_endgame) {
     const int depth = state->endgame_snapshot.depth;
-    if (depth > 0) {
+    if (state->endgame_snapshot.exhaustive) {
+      snprintf(title, sizeof(title), "Analysis (exhaustive)");
+    } else if (depth > 0) {
       snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", depth);
     } else {
       snprintf(title, sizeof(title), "Analysis (negamax)");

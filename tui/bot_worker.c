@@ -356,6 +356,76 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
 
 // Run the endgame solver against the current position with a time
 // budget. Returns true and writes the chosen move on success.
+// Build a TuiEndgameSnapshot from a freshly-computed PV array. Holds
+// state->mutex for the duration and bumps render_version so the
+// analysis panel picks up the change on the next frame. Called both
+// per-ply (incremental from the engine's callback, ranked_pvs path)
+// and post-solve (full multi_pvs leaderboard).
+static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
+                                      int num_pvs, int depth,
+                                      int initial_spread, int solving_player,
+                                      const Game *game, bool exhaustive) {
+  pthread_mutex_lock(&state->mutex);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  TuiEndgameSnapshot *snap = &state->endgame_snapshot;
+  snap->board = board_duplicate(game_get_board(game));
+  snap->solve_rack =
+      rack_duplicate(player_get_rack(game_get_player(game, solving_player)));
+  snap->initial_spread = initial_spread;
+  snap->depth = depth;
+  snap->solving_player = solving_player;
+  snap->exhaustive = exhaustive;
+  if (num_pvs > 0 && pvs != NULL) {
+    snap->moves = (Move **)calloc((size_t)num_pvs, sizeof(Move *));
+    snap->values = (int *)calloc((size_t)num_pvs, sizeof(int));
+    if (snap->moves != NULL && snap->values != NULL) {
+      int filled = 0;
+      for (int i = 0; i < num_pvs; i++) {
+        const PVLine *pvi = &pvs[i];
+        if (pvi->num_moves <= 0) {
+          continue;
+        }
+        snap->moves[filled] = move_create();
+        small_move_to_move(snap->moves[filled], &pvi->moves[0], snap->board);
+        snap->values[filled] = (int)pvi->score;
+        filled++;
+      }
+      snap->num_entries = filled;
+      snap->valid = filled > 0;
+    }
+  }
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+}
+
+// Engine callback fired by the endgame solver after each iterative-
+// deepening pass completes. user_data is the TuiGameState pointer set
+// in EndgameArgs. The engine guarantees this only fires from worker
+// thread index 0, so we can mutate the snapshot under state->mutex
+// without worrying about concurrent calls.
+static void endgame_per_ply_cb(int depth, int32_t value,
+                               const PVLine *pv_line, const Game *game,
+                               const PVLine *ranked_pvs, int num_ranked_pvs,
+                               void *user_data) {
+  (void)value;
+  (void)pv_line;
+  TuiGameState *state = (TuiGameState *)user_data;
+  if (state == NULL) {
+    return;
+  }
+  const int solving_player = atomic_load(&state->endgame_results_turn_idx) >= 0
+                                 ? game_get_player_on_turn_index(game)
+                                 : 0;
+  const int initial_spread =
+      atomic_load(&state->endgame_initial_spread);
+  // Partial snapshot — search is still running, so not exhaustive
+  // yet. Final snapshot in run_endgame may flip exhaustive=true once
+  // endgame_solve returns with status FINISHED.
+  endgame_snapshot_from_pvs(state, ranked_pvs, num_ranked_pvs, depth,
+                            initial_spread, solving_player, game,
+                            /*exhaustive=*/false);
+}
+
 static bool run_endgame(TuiGameState *state, double budget_sec,
                         Move *out_move) {
   ThreadControl *tc = thread_control_create();
@@ -383,8 +453,11 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   }
   args.num_top_moves = top_k;
   args.enable_pv_display = true;
-  args.per_ply_callback = NULL;
-  args.per_ply_callback_data = NULL;
+  // Live updates: the engine invokes this once per completed
+  // iterative-deepening pass so the analysis panel can show progress
+  // before the full solve finishes.
+  args.per_ply_callback = endgame_per_ply_cb;
+  args.per_ply_callback_data = state;
   args.forced_pass_bypass = false;
   args.soft_time_limit = budget_sec * 0.9;
   args.hard_time_limit = budget_sec;
@@ -427,45 +500,21 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
     got_move = true;
   }
 
-  // Snapshot the leaderboard before we release control to play_move.
-  // The board, rack, and converted Moves all need to be captured
-  // against the pre-play state because small_move_to_move walks the
-  // live board to reconstruct played-through letters.
-  pthread_mutex_lock(&state->mutex);
-  tui_endgame_snapshot_clear(&state->endgame_snapshot);
-  TuiEndgameSnapshot *snap = &state->endgame_snapshot;
-  snap->board = board_duplicate(game_get_board(state->game));
-  snap->solve_rack =
-      rack_duplicate(player_get_rack(game_get_player(state->game, solving_player)));
-  snap->initial_spread = initial_spread;
-  snap->depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
-  snap->solving_player = solving_player;
-  // Iterate the multi-PV array under the display lock so concurrent
-  // solver updates can't tear num_moves while we copy.
+  // Finalize the snapshot with all multi-PVs from the completed
+  // solve, and mark exhaustive when the search ran to completion
+  // (no time interrupt). Per-ply callback updates above only see
+  // ranked_pvs (capped at 10); this is the full leaderboard.
+  const bool exhaustive =
+      endgame_results_get_status(results) == ENDGAME_RESULT_STATUS_FINISHED;
   endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
   const int num_pvs = endgame_results_get_num_pvs(results);
-  if (num_pvs > 0) {
-    snap->moves = (Move **)calloc((size_t)num_pvs, sizeof(Move *));
-    snap->values = (int *)calloc((size_t)num_pvs, sizeof(int));
-    if (snap->moves != NULL && snap->values != NULL) {
-      int filled = 0;
-      for (int i = 0; i < num_pvs; i++) {
-        const PVLine *pvi = endgame_results_get_multi_pvline(results, i);
-        if (pvi == NULL || pvi->num_moves <= 0) {
-          continue;
-        }
-        snap->moves[filled] = move_create();
-        small_move_to_move(snap->moves[filled], &pvi->moves[0], snap->board);
-        snap->values[filled] = (int)pvi->score;
-        filled++;
-      }
-      snap->num_entries = filled;
-      snap->valid = filled > 0;
-    }
-  }
+  PVLine *multi = endgame_results_get_multi_pvs(results);
+  endgame_snapshot_from_pvs(state, multi, num_pvs,
+                            endgame_results_get_depth(results,
+                                                       ENDGAME_RESULT_BEST),
+                            initial_spread, solving_player, state->game,
+                            exhaustive);
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
-  atomic_fetch_add(&state->render_version, 1);
-  pthread_mutex_unlock(&state->mutex);
 
   atomic_store(&state->endgame_results_active, false);
 

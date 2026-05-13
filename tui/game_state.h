@@ -29,6 +29,8 @@ typedef struct TuiGlyphCache TuiGlyphCache;
 // + Move array so the renderer can keep displaying the leaderboard
 // after the bot has played and the live board has moved on. Move
 // strings render against `board`; leaves render against `solve_rack`.
+// Updated incrementally via the engine's per-ply callback during a
+// solve, then finalized when endgame_solve returns.
 typedef struct {
   struct Board *board;     // owned; board_duplicate at solve time
   struct Rack *solve_rack; // owned; rack_duplicate at solve time
@@ -39,6 +41,10 @@ typedef struct {
   int depth;
   int solving_player;
   bool valid;
+  // True when the snapshot was produced after a fully-completed
+  // search (status FINISHED, no time interrupt). The analysis title
+  // shows "(exhaustive)" instead of "(N-ply negamax)" in that case.
+  bool exhaustive;
 } TuiEndgameSnapshot;
 
 enum {
