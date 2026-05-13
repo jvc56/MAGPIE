@@ -2201,8 +2201,25 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3 || width < 6) {
     return;
   }
+  // Title includes the sim's plies depth and total sample count when
+  // those are available — the getters are atomic so we can read them
+  // without locking the display.
+  char title[64];
+  if (state->sim_results != NULL) {
+    const int plies = sim_results_get_num_plies(state->sim_results);
+    const uint64_t iters =
+        sim_results_get_iteration_count(state->sim_results);
+    if (plies > 0 && iters > 0) {
+      snprintf(title, sizeof(title), "Analysis (%d-ply, %llu samples)", plies,
+               (unsigned long long)iters);
+    } else {
+      snprintf(title, sizeof(title), "Analysis");
+    }
+  } else {
+    snprintf(title, sizeof(title), "Analysis");
+  }
   draw_box(plane, theme, L->analysis_top, L->analysis_left, height, width,
-           "Analysis");
+           title);
 
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
