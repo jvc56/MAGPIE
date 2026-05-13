@@ -718,6 +718,95 @@ void test_topk_full_solve_no_pipe(void) {
   config_destroy(config);
 }
 
+// Returns true if two PVLines describe the same first move in terms of
+// what hits the board (anchor + direction + tile sequence). Ignores
+// SmallMove.metadata.score because the engine's walk-down re-search
+// can update one PV's score while leaving an identical sibling PV's
+// score stale.
+static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
+  if (a->num_moves <= 0 || b->num_moves <= 0) {
+    return false;
+  }
+  const SmallMove *sa = &a->moves[0];
+  const SmallMove *sb = &b->moves[0];
+  // tiny_move encodes anchor + direction + tile placement; metadata
+  // holds the cached score and is what diverges between near-duplicate
+  // re-search outputs.
+  return sa->tiny_move == sb->tiny_move;
+}
+
+// Repro for the etopk duplicate-PV bug surfaced by the TUI analysis
+// panel: extract_multi_pvs (plus the post-solve walk-down re-search
+// from #530) can land with two PVLines whose moves[0] is the same
+// SmallMove. Tries several known short-endgame positions until one
+// reproduces, then asserts uniqueness.
+void test_topk_no_duplicates(void) {
+  // Same position as test_topk_full_solve_no_pipe. With eplies=4,
+  // threads=6, etopk=10, NWL20 lex, PV[0] and PV[2] come back with
+  // moves[0].tiny_move = 0x20018d, score=11, num_moves=3 — the
+  // walk-down re-search lands on two distinct PVLines that both
+  // claim the same first move. Reproduces reliably with seed=42.
+  struct {
+    const char *cgp;
+    int eplies;
+    int threads;
+    int etopk;
+  } positions[] = {
+      {"9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0",
+       4, 6, 10},
+  };
+  const int npos = (int)(sizeof(positions) / sizeof(positions[0]));
+
+  for (int p = 0; p < npos; p++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "cgp %s -lex NWL20", positions[p].cgp);
+    load_and_exec_config_or_die(config, cmd);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = positions[p].eplies;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = positions[p].threads;
+    args.num_top_moves = positions[p].etopk;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.enable_iterative_deepening = true;
+    args.enable_pv_display = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const int num_pvs = endgame_results_get_num_pvs(results);
+    for (int i = 0; i < num_pvs; i++) {
+      const PVLine *pi = endgame_results_get_multi_pvline(results, i);
+      for (int j = i + 1; j < num_pvs; j++) {
+        const PVLine *pj = endgame_results_get_multi_pvline(results, j);
+        if (pvline_first_move_equivalent(pi, pj)) {
+          printf("position[%d] PV[%d] and PV[%d] share moves[0].tiny_move "
+                 "(0x%llx)\n",
+                 p, i, j, (unsigned long long)pi->moves[0].tiny_move);
+          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score, pi->num_moves);
+          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score, pj->num_moves);
+          assert(0 && "duplicate first move in multi_pvs");
+        }
+      }
+    }
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -732,6 +821,8 @@ void test_endgame(void) {
   test_endgame_interrupt();
   test_topk_fully_solved();
   test_topk_full_solve_no_pipe();
+  // test_topk_no_duplicates is an on-demand test (registered in
+  // on_demand_test_table as "topk_dup_repro"); not run here.
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
