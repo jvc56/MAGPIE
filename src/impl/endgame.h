@@ -141,4 +141,23 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed, int *ply2_moves_total);
 
+// Sum of nodes searched across all worker threads, lagging by up to
+// DEPTH_DEADLINE_CHECK_INTERVAL nodes per thread (the period at which
+// each worker flushes its non-atomic local counter to the shared
+// atomic). Cheap to call from any thread; intended for "is the engine
+// alive / nodes per second" UI heartbeats during long single-root
+// subtree evaluations.
+uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
+
+// Snapshot of the line currently being explored by worker thread
+// `thread_index`. Writes up to `max_len` `tiny_move` entries into
+// `out_line` and returns the number written (0..max_len). The line
+// reads thread-local state without locking; the reader uses
+// release/acquire on the length so the prefix length is always
+// consistent, but individual entries past the length may still be
+// torn if the worker is concurrently swapping into a sibling subtree.
+// For display only; never used to drive search decisions.
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
+                                 uint64_t *out_line, int max_len);
+
 #endif

@@ -10,5 +10,6 @@ void test_monster_q(void);
 void test_topk50_overflow_repro(void);
 void test_topk_no_duplicates(void);
 void test_endgame_progress_stream(void);
+void test_endgame_bench_kue(void);
 
 #endif

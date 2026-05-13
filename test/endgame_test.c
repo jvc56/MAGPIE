@@ -1024,6 +1024,8 @@ static void stream_per_root_cb(int depth, int root_index,
 
 static void *stream_reader_thread(void *arg) {
   ProgressStream *s = (ProgressStream *)arg;
+  uint64_t prev_nodes = 0;
+  int64_t prev_nodes_ns = 0;
   while (!atomic_load(&s->should_stop)) {
     const EndgameCtx *ctx = *s->ctx_pp;
     cpthread_mutex_lock(&s->mutex);
@@ -1044,10 +1046,23 @@ static void *stream_reader_thread(void *arg) {
     int total = 0;
     int ply2_done = 0;
     int ply2_total = 0;
+    uint64_t nodes = 0;
+    uint64_t line[MAX_SEARCH_DEPTH];
+    int line_len = 0;
     if (ctx != NULL) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
+      nodes = endgame_ctx_get_nodes_searched(ctx);
+      line_len = endgame_ctx_get_current_line(ctx, 0, line, MAX_SEARCH_DEPTH);
     }
+    const int64_t now_ns = ctimer_monotonic_ns();
+    double knodes_per_sec = 0.0;
+    if (prev_nodes_ns > 0 && now_ns > prev_nodes_ns && nodes >= prev_nodes) {
+      knodes_per_sec = (double)(nodes - prev_nodes) /
+                       ((double)(now_ns - prev_nodes_ns) / 1.0e6);
+    }
+    prev_nodes = nodes;
+    prev_nodes_ns = now_ns;
 
     // Common prefix: timing + d=0 status + last completed depth + root
     // counter. Mode-specific suffix appended below.  Pre-d=0 frames have
@@ -1058,8 +1073,7 @@ static void *stream_reader_thread(void *arg) {
       snprintf(prefix, sizeof(prefix),
                "  [    --ms] (waiting for d=0 callback)");
     } else {
-      const double elapsed_ms =
-          (double)(ctimer_monotonic_ns() - solve_start_ns) / 1.0e6;
+      const double elapsed_ms = (double)(now_ns - solve_start_ns) / 1.0e6;
       if (last_depth == 0) {
         snprintf(
             prefix, sizeof(prefix),
@@ -1073,21 +1087,35 @@ static void *stream_reader_thread(void *arg) {
       }
     }
 
+    // Format the live current-line as comma-separated tiny_moves.
+    char line_str[256];
+    int written = 0;
+    written += snprintf(line_str + written, sizeof(line_str) - written, "[");
+    for (int i = 0; i < line_len && written < (int)sizeof(line_str) - 32; i++) {
+      written +=
+          snprintf(line_str + written, sizeof(line_str) - written, "%s0x%llx",
+                   i == 0 ? "" : ",", (unsigned long long)line[i]);
+    }
+    snprintf(line_str + written, sizeof(line_str) - written, "]");
+
+    // Always-on signals appended to every frame: nodes/sec (smoothed
+    // across the last poll interval) and the live current-line snapshot
+    // from worker thread 0. Either alone is enough to prove the engine
+    // is alive during a long single-root subtree where no other signal
+    // updates.
     if (s->mode == STREAM_MODE_POLL_PLY2) {
-      // Sub-progress under root #1: child A out of L children.
-      // Reset by the engine each time root #1's depth begins.
-      printf("%s | ply2 %d/%d\n", prefix, ply2_done, ply2_total);
+      printf("%s | ply2 %d/%d | %.0fk nps | t0_line %s\n", prefix, ply2_done,
+             ply2_total, knodes_per_sec, line_str);
     } else {
-      // Per-root callback: cumulative count + last root completion seen.
-      // last_root_idx is the position in the *currently sorted* root_moves
-      // array at the time of completion, which can swap as values come in.
       if (per_root_calls == 0) {
-        printf("%s | per_root: 0 calls\n", prefix);
+        printf("%s | per_root: 0 calls | %.0fk nps | t0_line %s\n", prefix,
+               knodes_per_sec, line_str);
       } else {
-        printf("%s | per_root: %d calls, last d%d idx=%d val=%d "
-               "tiny=0x%llx\n",
+        printf("%s | per_root: %d calls, last d%d idx=%d val=%d tiny=0x%llx | "
+               "%.0fk nps | t0_line %s\n",
                prefix, per_root_calls, last_root_depth, last_root_idx,
-               last_root_value, (unsigned long long)last_root_tiny);
+               last_root_value, (unsigned long long)last_root_tiny,
+               knodes_per_sec, line_str);
       }
     }
     (void)fflush(stdout);
@@ -1257,6 +1285,60 @@ void test_endgame_progress_stream(void) {
   }
   endgame_ctx_destroy(ctx);
   prng_destroy(prng);
+}
+
+// Tight, search-bound benchmark: run the kue position at depth 4 N
+// times in a row on a single warmed EndgameCtx.  Prints wall-clock and
+// nodes/sec.  Used to measure the cost of always-on engine
+// instrumentation (node counter + current-line) by comparing builds
+// with and without it.
+void test_endgame_bench_kue(void) {
+  static const int kIterations = 5;
+  static const int kPlies = 4;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+              "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+              "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+              "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = kPlies;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 4;
+  args.num_top_moves = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = false;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Warmup so the TT is allocated outside the timed iterations.
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  for (int i = 0; i < kIterations; i++) {
+    endgame_ctx_clear_transposition_table(ctx);
+    const int64_t t0 = ctimer_monotonic_ns();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const int64_t t1 = ctimer_monotonic_ns();
+    const double elapsed_s = (double)(t1 - t0) / 1.0e9;
+    printf("BENCH iter=%d plies=%d threads=%d elapsed=%.3fs\n", i, kPlies,
+           args.num_threads, elapsed_s);
+  }
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
 
 void test_endgame(void) {

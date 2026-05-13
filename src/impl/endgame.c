@@ -206,6 +206,25 @@ struct EndgameCtxWorker {
   // For multi-PV (num_top_moves > 1) this is topk_n; for single-PV it is 1
   // when any best move was found, else 0.
   int root_topk_n;
+
+  // Per-thread node counter for the live-progress getter. Plain uint64
+  // (no atomics on the writer side); flushed periodically to the
+  // shared atomic via the deadline-check rhythm. The reader sums per-
+  // thread atomics, so a brief lag (up to DEPTH_DEADLINE_CHECK_INTERVAL
+  // nodes) is acceptable.
+  uint64_t local_nodes_searched;
+  _Atomic uint64_t published_nodes_searched;
+
+  // Per-thread "current line being explored" for the live-progress
+  // getter. current_line[i] is the tiny_move played at the i-th ply
+  // from the root; current_line_len is the number of valid entries.
+  // Worker writes the move slot, then atomic_store_release the length;
+  // reader does atomic_load_acquire on the length, then reads the
+  // line. Reader may see torn entries if the worker is concurrently
+  // ascending into a sibling subtree, but the result remains
+  // structurally consistent (length matches what's been written).
+  uint64_t current_line[MAX_SEARCH_DEPTH];
+  _Atomic int current_line_len;
 };
 
 #ifndef MAX
@@ -703,6 +722,38 @@ void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
   }
 }
 
+uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
+  uint64_t total = 0;
+  for (int i = 0; i < ctx->cap_workers; i++) {
+    total += atomic_load_explicit(&ctx->workers[i]->published_nodes_searched,
+                                  memory_order_relaxed);
+  }
+  return total;
+}
+
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
+                                 uint64_t *out_line, int max_len) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  // Acquire on length pairs with release on writer side: by the time we
+  // observe length L, all writes to current_line[0..L-1] up to that
+  // store are visible. The worker may have moved on since then; entries
+  // beyond what we read may correspond to a different sibling subtree.
+  int len = atomic_load_explicit(&w->current_line_len, memory_order_acquire);
+  if (len > max_len) {
+    len = max_len;
+  }
+  if (len > MAX_SEARCH_DEPTH) {
+    len = MAX_SEARCH_DEPTH;
+  }
+  for (int i = 0; i < len; i++) {
+    out_line[i] = w->current_line[i];
+  }
+  return len;
+}
+
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed,
@@ -771,6 +822,11 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
   solver_worker->root_topk_n = 0;
+  solver_worker->local_nodes_searched = 0;
+  atomic_store_explicit(&solver_worker->published_nodes_searched, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->current_line_len, 0,
+                        memory_order_relaxed);
 
   return solver_worker;
 }
@@ -793,6 +849,10 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->completed_depth = 0;
   worker->nodes_since_deadline_check = 0;
   worker->root_topk_n = 0;
+  worker->local_nodes_searched = 0;
+  atomic_store_explicit(&worker->published_nodes_searched, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&worker->current_line_len, 0, memory_order_relaxed);
 }
 
 void endgame_ctx_reset_worker_and_game(EndgameCtx *solver, uint64_t base_seed,
@@ -1793,6 +1853,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
   assert(pv_node || alpha == beta - 1);
 
+  // Live-progress: count this node visit in the per-thread local counter.
+  // The published-to-shared atomic is updated alongside the deadline check
+  // below, batching ~DEPTH_DEADLINE_CHECK_INTERVAL increments into one
+  // atomic_store. Reader sees an upper-bound-stale view, which is fine for
+  // a "is the engine making progress" UI.
+  worker->local_nodes_searched++;
+
   if (iterative_deepening_should_stop(worker->solver)) {
     return ABDADA_INTERRUPTED;
   }
@@ -1804,6 +1871,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // deep searches (e.g. 25-ply) would otherwise overflow the stack.
   if (++worker->nodes_since_deadline_check >= DEPTH_DEADLINE_CHECK_INTERVAL) {
     worker->nodes_since_deadline_check = 0;
+    // Flush per-thread node count to the shared atomic at the same
+    // cadence as the deadline check, so the live-progress getter sees
+    // updates ~once per DEPTH_DEADLINE_CHECK_INTERVAL nodes per worker.
+    atomic_store_explicit(&worker->published_nodes_searched,
+                          worker->local_nodes_searched, memory_order_relaxed);
     if (check_depth_deadline(worker)) {
       return ABDADA_INTERRUPTED;
     }
@@ -2115,6 +2187,16 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // Calculate undo index for incremental backup
       int undo_index = worker->solver->requested_plies - depth;
 
+      // Live-progress: publish this move into the per-thread "current
+      // line" buffer before recursing so a polling reader can see what
+      // the engine is currently exploring even during a long single-
+      // root subtree where no other signal updates. Length store uses
+      // release ordering so the reader (acquire on length) sees the
+      // tiny_move write.
+      worker->current_line[undo_index] = small_move->tiny_move;
+      atomic_store_explicit(&worker->current_line_len, undo_index + 1,
+                            memory_order_release);
+
       // Use optimized function for outplays - skips board/cross-set updates
       if (is_outplay) {
         play_move_endgame_outplay(worker->move_list->spare_move,
@@ -2207,6 +2289,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                                  worker->game_copy);
         board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
       }
+
+      // Live-progress: pop the line back to the parent's depth. The
+      // entry at undo_index is left as-is (will be overwritten by the
+      // next sibling's push). Release pairs with reader's acquire on
+      // length.
+      atomic_store_explicit(&worker->current_line_len, undo_index,
+                            memory_order_release);
 
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;
