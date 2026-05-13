@@ -1901,7 +1901,43 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   theme_apply_fg(plane, theme->fg);
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
-  ncplane_putstr_yx(plane, row, interior_left, prefix);
+  if (e->pending) {
+    // Pending turn: paint the "N." chunk with tile colors so it reads
+    // like a played tile next to the spinner. Leading space (when N
+    // is a single digit) and the trailing separator stay on the
+    // normal background.
+    int digit_start = 0;
+    while (prefix[digit_start] == ' ') {
+      digit_start++;
+    }
+    int after_period = digit_start;
+    while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
+      after_period++;
+    }
+    if (digit_start > 0) {
+      char leading[8];
+      memcpy(leading, prefix, (size_t)digit_start);
+      leading[digit_start] = '\0';
+      ncplane_putstr_yx(plane, row, interior_left, leading);
+    }
+    char tile_part[8];
+    const int tile_len = after_period - digit_start;
+    memcpy(tile_part, prefix + digit_start, (size_t)tile_len);
+    tile_part[tile_len] = '\0';
+    theme_apply_fg(plane, theme->tile_fg);
+    theme_apply_bg(plane, theme->tile_bg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row, interior_left + digit_start, tile_part);
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, theme->bg);
+    if (prefix[after_period] != '\0') {
+      ncplane_putstr_yx(plane, row, interior_left + after_period,
+                        prefix + after_period);
+    }
+  } else {
+    ncplane_putstr_yx(plane, row, interior_left, prefix);
+  }
 
   if (e->pending) {
     // Bot is still computing this turn — show a braille spinner where
@@ -2190,7 +2226,11 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // to the left interior column. Below it, a single blank row
   // separates the header from the candidate list.
   const int header_row = interior_top;
-  const int turn_num = state->history_count + 1;
+  // The bot worker appends the pending history entry BEFORE running
+  // the sim, so history_count already counts that turn — using it
+  // directly (no +1) keeps the analysis header in sync with the
+  // pending turn's index in history.
+  const int turn_num = state->history_count;
   if (interior_bottom - header_row >= 1) {
     render_turn_tile_header(plane, theme, header_row, interior_left, turn_num);
   }
@@ -2231,9 +2271,10 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const Stat *win_stat = simmed_play_get_win_pct_stat(play);
     const Stat *eq_stat = simmed_play_get_equity_stat(play);
     const double win_pct = stat_get_mean(win_stat) * 100.0;
-    // equity_stat holds Equity values (millipoints). Mean is still in
-    // those units; convert to points for display.
-    const double eq_pts = stat_get_mean(eq_stat) / 1000.0;
+    // equity_stat is fed via equity_to_double in
+    // simmed_play_add_equity_stat, so the mean is already in points
+    // (equity_to_double converts millipoints → points internally).
+    const double eq_pts = stat_get_mean(eq_stat);
 
     char rank_str[8];
     snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
