@@ -697,6 +697,12 @@ endgame_ctx_get_transposition_table(const EndgameCtx *ctx) {
   return ctx->transposition_table;
 }
 
+void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
+  if (ctx->transposition_table != NULL) {
+    transposition_table_reset(ctx->transposition_table);
+  }
+}
+
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed,

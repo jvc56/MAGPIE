@@ -131,6 +131,12 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 const TranspositionTable *
 endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
+// Reset (zero) the transposition table contents but keep the allocation.
+// Useful between unrelated solves on the same ctx when the caller wants
+// each solve to start from a cold cache without paying the realloc cost
+// (the cost is the same — a memset of the full TT — but no malloc/free).
+// No-op if the ctx has no TT (tt_fraction_of_mem == 0).
+void endgame_ctx_clear_transposition_table(EndgameCtx *ctx);
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed, int *ply2_moves_total);

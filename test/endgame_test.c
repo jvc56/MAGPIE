@@ -1222,6 +1222,13 @@ void test_endgame_progress_stream(void) {
         args.per_root_move_callback_data = &stream;
       }
 
+      // Clear the TT before each timed iteration so each one searches
+      // from a cold cache. This costs a 2GB memset (~200ms) on this
+      // host but happens BEFORE the reader thread is spawned and before
+      // the timer is started by the d=0 callback, so it isn't counted
+      // in any displayed elapsed time.
+      endgame_ctx_clear_transposition_table(ctx);
+
       cpthread_t reader;
       cpthread_create(&reader, stream_reader_thread, &stream);
 
