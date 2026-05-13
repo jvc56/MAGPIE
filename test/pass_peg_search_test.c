@@ -2200,7 +2200,37 @@ typedef struct PegNEnumCtx {
 
   FILE *tsv_f;
   PegNCandResult *res;
+
+  // Optional semicolon-separated list of "drawn/remaining" patterns; if
+  // non-NULL, only scenarios whose canonical (drawn,remaining) tile strings
+  // match one of these substrings get evaluated. Drawn / remaining are
+  // emitted as sorted-by-type-index tile lists. Examples: "III/A",
+  // "GII/U;IIT/A".
+  const char *scenario_filter;
 } PegNEnumCtx;
+
+// True when (drawn_str, remaining_str) matches one of the semicolon-
+// separated "drawn/remaining" patterns in `filter`. NULL filter = always
+// matches.
+static bool pegN_scenario_filter_match(const char *filter,
+                                       const char *drawn_str,
+                                       const char *remaining_str) {
+  if (!filter) {
+    return true;
+  }
+  char joined[64];
+  snprintf(joined, sizeof(joined), "%s/%s", drawn_str, remaining_str);
+  char tmp[2048];
+  snprintf(tmp, sizeof(tmp), "%s", filter);
+  char *tok = strtok(tmp, ";");
+  while (tok != NULL) {
+    if (strcmp(tok, joined) == 0) {
+      return true;
+    }
+    tok = strtok(NULL, ";");
+  }
+  return false;
+}
 
 // Leaf: build the realized split's tile arrays, run a greedy playout, and
 // fold the outcome into res / TSV.
@@ -2230,6 +2260,13 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       }
     }
   }
+  // Apply scenario filter (skip silently if no match — the cand's
+  // aggregated stats reflect only the scenarios we evaluated).
+  if (!pegN_scenario_filter_match(ctx->scenario_filter, drawn_str,
+                                  remaining_str)) {
+    return;
+  }
+
   // Multinomial weight: number of distinguishable physical-tile assignments
   // realizing (mover_drawn, bag_remaining) from the unseen pool.
   // = ∏_t C(c_t, m_t) × C(c_t − m_t, b_t)
@@ -2333,13 +2370,18 @@ void test_pass_pegN_greedy_bench(void) {
   int top_k = topk_env && *topk_env ? atoi(topk_env) : 15;
   const char *only_env = getenv("PASSPEGN_GREEDY_ONLY");
   const char *only_moves = only_env && *only_env ? only_env : NULL;
+  const char *only_scen_env = getenv("PASSPEGN_GREEDY_ONLY_SCEN");
+  const char *scenario_filter =
+      only_scen_env && *only_scen_env ? only_scen_env : NULL;
   const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
   const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
 
   char **cgps = NULL;
   int n_pos = load_cgp_lines(path, &cgps, 1000);
   if (n_pos == 0) log_fatal("no positions loaded from %s", path);
-  fprintf(stderr, "[pegNgreedy] loaded %d positions from %s\n", n_pos, path);
+  fprintf(stderr, "[pegNgreedy] loaded %d positions from %s%s%s\n", n_pos,
+          path, scenario_filter ? "  scenario_filter=" : "",
+          scenario_filter ? scenario_filter : "");
   fflush(stderr);
 
   FILE *tsv_f = NULL;
@@ -2469,6 +2511,7 @@ void test_pass_pegN_greedy_bench(void) {
           .ld = ld,
           .tsv_f = tsv_f,
           .res = res,
+          .scenario_filter = scenario_filter,
       };
       pegN_enum_outer_multiset(&enum_ctx, 0, N);
     }
