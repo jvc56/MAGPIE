@@ -375,10 +375,17 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   args.num_threads = get_num_cores();
   args.use_heuristics = true;
   // We want the analysis panel to list a leaderboard, so ask the
-  // solver for the top-K PVs (capped to MAX_ENDGAME_DISPLAY_PVS).
-  args.num_top_moves =
-      SIM_CANDIDATES < MAX_ENDGAME_DISPLAY_PVS ? SIM_CANDIDATES
-                                               : MAX_ENDGAME_DISPLAY_PVS;
+  // solver for the top-K PVs. The negamax search has a stack-allocated
+  // topk_values[MAX_VARIANT_LENGTH] (25) array per ply, so passing
+  // anything > 25 stack-overflows the solver. Clamp to that.
+  int top_k = SIM_CANDIDATES;
+  if (top_k > MAX_VARIANT_LENGTH) {
+    top_k = MAX_VARIANT_LENGTH;
+  }
+  if (top_k > MAX_ENDGAME_DISPLAY_PVS) {
+    top_k = MAX_ENDGAME_DISPLAY_PVS;
+  }
+  args.num_top_moves = top_k;
   args.enable_pv_display = true;
   args.per_ply_callback = NULL;
   args.per_ply_callback_data = NULL;
