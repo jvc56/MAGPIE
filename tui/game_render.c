@@ -2466,65 +2466,37 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
   return n;
 }
 
-// Populate the row cache from the endgame multi-PV leaderboard.
-// Returns the number of rows filled (≤ max_rows). W/T/L is computed
-// from the captured initial spread + the PV's value.
-//
-// Important: SmallMove → Move conversion walks the live board to fill
-// in played-through letters, so it's only safe to call while the
-// solver-owned board hasn't shifted out from under it. We gate the
-// whole path on endgame_results_active (set by the bot worker for
-// the duration of one solve) and lock the display PV slot for the
-// duration of the read.
+// Populate the row cache from the most recent endgame snapshot. The
+// snapshot owns its own Board, Rack, and Move array (captured when
+// the solve finished, before play_move shifted the live state), so
+// this is safe to call any time the snapshot is marked valid.
 static int fill_analysis_rows_from_endgame(const TuiGameState *state,
                                            AnalysisRow *rows, int max_rows) {
-  EndgameResults *results = state->endgame_results;
-  if (results == NULL) {
+  const TuiEndgameSnapshot *snap = &state->endgame_snapshot;
+  if (!snap->valid || snap->num_entries <= 0 || snap->board == NULL) {
     return 0;
   }
-  if (!atomic_load(&((TuiGameState *)state)->endgame_results_active)) {
-    return 0;
-  }
-  endgame_results_lock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
-  const int num_pvs = endgame_results_get_num_pvs(results);
-  if (num_pvs <= 0) {
-    endgame_results_unlock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
-    return 0;
-  }
-  int n = num_pvs < max_rows ? num_pvs : max_rows;
-  const int initial_spread =
-      atomic_load(&((TuiGameState *)state)->endgame_initial_spread);
-  const Board *board = game_get_board(state->game);
-  // Use the on-turn player's rack at solve time. While
-  // endgame_results_active is true the bot worker hasn't called
-  // play_move yet, so the on-turn player still matches the solver.
-  const int player_idx = game_get_player_on_turn_index(state->game);
-  const Rack *solve_rack =
-      player_get_rack(game_get_player(state->game, player_idx));
-
+  const int n =
+      snap->num_entries < max_rows ? snap->num_entries : max_rows;
   for (int i = 0; i < n; i++) {
     rows[i].valid = false;
     rows[i].move[0] = '\0';
     rows[i].leave[0] = '\0';
     rows[i].primary[0] = '\0';
     rows[i].secondary[0] = '\0';
-    const PVLine *pv = endgame_results_get_multi_pvline(results, i);
-    if (pv == NULL || pv->num_moves <= 0) {
+    const Move *move = snap->moves[i];
+    if (move == NULL) {
       continue;
     }
-    Move first;
-    small_move_to_move(&first, &pv->moves[0], board);
-    // The PV's score is the solver's value (final - initial). The
-    // final spread on the board tells us W/T/L.
-    const int value = (int)pv->score;
-    const int final_spread = initial_spread + value;
-    const char *wtl = (final_spread > 0) ? "W"
-                                         : (final_spread < 0) ? "L" : "T";
+    const int value = snap->values[i];
+    const int final_spread = snap->initial_spread + value;
+    const char *wtl =
+        (final_spread > 0) ? "W" : (final_spread < 0) ? "L" : "T";
     snprintf(rows[i].primary, sizeof(rows[i].primary), "%s", wtl);
     snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+d", value);
 
     StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, board, &first, state->ld, false);
+    string_builder_add_move(sb, snap->board, move, state->ld, false);
     size_t mlen = 0;
     char *mdump = string_builder_dump(sb, &mlen);
     if (mdump != NULL) {
@@ -2536,9 +2508,9 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     }
     string_builder_destroy(sb);
 
-    if (solve_rack != NULL) {
+    if (snap->solve_rack != NULL) {
       StringBuilder *lsb = string_builder_create();
-      string_builder_add_move_leave(lsb, solve_rack, &first, state->ld);
+      string_builder_add_move_leave(lsb, snap->solve_rack, move, state->ld);
       size_t llen = 0;
       char *ldump = string_builder_dump(lsb, &llen);
       if (ldump != NULL) {
@@ -2552,7 +2524,6 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     }
     rows[i].valid = true;
   }
-  endgame_results_unlock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
   return n;
 }
 
@@ -2568,19 +2539,18 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  // Pick mode: endgame when the bag has run dry (and we have a recent
-  // endgame solve to show); otherwise the sim leaderboard.
+  // Pick mode: endgame when the bag has run dry (and we have a saved
+  // snapshot from a completed solve); otherwise the sim leaderboard.
   const bool bag_empty =
       state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
   const bool use_endgame =
-      bag_empty && state->endgame_results != NULL &&
-      endgame_results_get_num_pvs(state->endgame_results) > 0;
+      bag_empty && state->endgame_snapshot.valid &&
+      state->endgame_snapshot.num_entries > 0;
 
   // Title varies by mode.
   char title[64];
   if (use_endgame) {
-    const int depth =
-        endgame_results_get_depth(state->endgame_results, ENDGAME_RESULT_BEST);
+    const int depth = state->endgame_snapshot.depth;
     if (depth > 0) {
       snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", depth);
     } else {

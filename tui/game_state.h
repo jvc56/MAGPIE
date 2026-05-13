@@ -19,7 +19,26 @@ struct MoveList;
 struct WinPct;
 struct SimResults;
 struct EndgameResults;
+struct Board;
+struct Move;
+struct Rack;
 typedef struct TuiGlyphCache TuiGlyphCache;
+
+// Saved copy of an endgame solve. Owns its own board + rack snapshot
+// + Move array so the renderer can keep displaying the leaderboard
+// after the bot has played and the live board has moved on. Move
+// strings render against `board`; leaves render against `solve_rack`.
+typedef struct {
+  struct Board *board;     // owned; board_duplicate at solve time
+  struct Rack *solve_rack; // owned; rack_duplicate at solve time
+  struct Move **moves;     // owned: each Move owned; array also owned
+  int *values;             // PV value (solver-perspective spread delta)
+  int num_entries;
+  int initial_spread;
+  int depth;
+  int solving_player;
+  bool valid;
+} TuiEndgameSnapshot;
 
 enum {
   TUI_HISTORY_MAX = 200,
@@ -102,6 +121,11 @@ typedef struct {
   _Atomic bool endgame_results_active;
   _Atomic int endgame_results_turn_idx;
   _Atomic int endgame_initial_spread;
+
+  // Latest endgame solve snapshot, populated by the bot worker after
+  // each successful solve (and while it still holds the pre-play
+  // board). Renderer reads under state->mutex.
+  TuiEndgameSnapshot endgame_snapshot;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature
@@ -135,6 +159,11 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
                          size_t error_message_size);
 
 void tui_game_state_destroy(TuiGameState *state);
+
+// Frees everything inside an endgame snapshot (board, rack, moves,
+// values), zeros the fields, marks invalid. Safe on a zero-init or
+// already-cleared snapshot.
+void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
 
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".

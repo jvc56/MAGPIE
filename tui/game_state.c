@@ -5,9 +5,12 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/game.h"
+#include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/gameplay.h"
@@ -249,5 +252,38 @@ void tui_game_state_destroy(TuiGameState *state) {
   if (state->endgame_results != NULL) {
     endgame_results_destroy(state->endgame_results);
   }
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
   memset(state, 0, sizeof(*state));
+}
+
+void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap) {
+  if (snap == NULL) {
+    return;
+  }
+  if (snap->board != NULL) {
+    board_destroy(snap->board);
+    snap->board = NULL;
+  }
+  if (snap->solve_rack != NULL) {
+    rack_destroy(snap->solve_rack);
+    snap->solve_rack = NULL;
+  }
+  if (snap->moves != NULL) {
+    for (int i = 0; i < snap->num_entries; i++) {
+      if (snap->moves[i] != NULL) {
+        move_destroy(snap->moves[i]);
+      }
+    }
+    free(snap->moves);
+    snap->moves = NULL;
+  }
+  if (snap->values != NULL) {
+    free(snap->values);
+    snap->values = NULL;
+  }
+  snap->num_entries = 0;
+  snap->initial_spread = 0;
+  snap->depth = 0;
+  snap->solving_player = 0;
+  snap->valid = false;
 }

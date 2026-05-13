@@ -4,6 +4,7 @@
 #include "../src/def/bai_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -402,10 +403,6 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   atomic_store(&state->endgame_results_active, true);
 
   EndgameResults *results = state->endgame_results;
-  // Reuse a single EndgameCtx across turns so the transposition table
-  // primes between solves; the bot worker owns the cleanup at
-  // shutdown via... wait, simpler: let endgame_solve allocate and
-  // destroy per call. Memory is freed at function exit.
   EndgameCtx *ctx = NULL;
   ErrorStack *err = error_stack_create();
   endgame_solve(&ctx, &args, results, err);
@@ -422,6 +419,46 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
     small_move_to_move(out_move, &pv->moves[0], game_get_board(state->game));
     got_move = true;
   }
+
+  // Snapshot the leaderboard before we release control to play_move.
+  // The board, rack, and converted Moves all need to be captured
+  // against the pre-play state because small_move_to_move walks the
+  // live board to reconstruct played-through letters.
+  pthread_mutex_lock(&state->mutex);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  TuiEndgameSnapshot *snap = &state->endgame_snapshot;
+  snap->board = board_duplicate(game_get_board(state->game));
+  snap->solve_rack =
+      rack_duplicate(player_get_rack(game_get_player(state->game, solving_player)));
+  snap->initial_spread = initial_spread;
+  snap->depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+  snap->solving_player = solving_player;
+  // Iterate the multi-PV array under the display lock so concurrent
+  // solver updates can't tear num_moves while we copy.
+  endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  if (num_pvs > 0) {
+    snap->moves = (Move **)calloc((size_t)num_pvs, sizeof(Move *));
+    snap->values = (int *)calloc((size_t)num_pvs, sizeof(int));
+    if (snap->moves != NULL && snap->values != NULL) {
+      int filled = 0;
+      for (int i = 0; i < num_pvs; i++) {
+        const PVLine *pvi = endgame_results_get_multi_pvline(results, i);
+        if (pvi == NULL || pvi->num_moves <= 0) {
+          continue;
+        }
+        snap->moves[filled] = move_create();
+        small_move_to_move(snap->moves[filled], &pvi->moves[0], snap->board);
+        snap->values[filled] = (int)pvi->score;
+        filled++;
+      }
+      snap->num_entries = filled;
+      snap->valid = filled > 0;
+    }
+  }
+  endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
 
   atomic_store(&state->endgame_results_active, false);
 
