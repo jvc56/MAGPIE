@@ -985,6 +985,11 @@ static void stream_before_search_cb(const Game *game,
   cpthread_mutex_lock(&s->mutex);
   s->seen_initial = true;
   s->initial_move_count = initial_move_count;
+  // Start the elapsed-time clock here. Per-iteration setup before this
+  // point (TT memset, KWG pruning, worker pool spinup) is bookkeeping
+  // the user doesn't care about; only "time spent on actual estimates
+  // and search" is interesting to display.
+  s->solve_start_ns = ctimer_monotonic_ns();
   cpthread_mutex_unlock(&s->mutex);
 }
 
@@ -1031,6 +1036,7 @@ static void *stream_reader_thread(void *arg) {
     const int32_t last_root_value = s->last_root_value;
     const uint64_t last_root_tiny = s->last_root_tiny;
     const int per_root_calls = s->per_root_calls;
+    const int64_t solve_start_ns = s->solve_start_ns;
     cpthread_mutex_unlock(&s->mutex);
 
     int cur_depth = 0;
@@ -1042,24 +1048,29 @@ static void *stream_reader_thread(void *arg) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
     }
-    const double elapsed_ms =
-        (double)(ctimer_monotonic_ns() - s->solve_start_ns) / 1.0e6;
 
     // Common prefix: timing + d=0 status + last completed depth + root
-    // counter. Mode-specific suffix appended below.
+    // counter. Mode-specific suffix appended below.  Pre-d=0 frames have
+    // no meaningful elapsed value (the timer is started by the d=0
+    // callback to exclude setup overhead like TT allocation).
     char prefix[160];
     if (!seen_initial) {
-      snprintf(prefix, sizeof(prefix), "  [%6.0fms] (waiting for d=0 callback)",
-               elapsed_ms);
-    } else if (last_depth == 0) {
       snprintf(prefix, sizeof(prefix),
-               "  [%6.0fms] d=0 published (n=%d) cur_depth=%d searching %d/%d",
-               elapsed_ms, initial_count, cur_depth, done, total);
+               "  [    --ms] (waiting for d=0 callback)");
     } else {
-      snprintf(prefix, sizeof(prefix),
-               "  [%6.0fms] last_completed=d%d val=%d "
-               "cur_depth=%d searching %d/%d",
-               elapsed_ms, last_depth, last_val, cur_depth, done, total);
+      const double elapsed_ms =
+          (double)(ctimer_monotonic_ns() - solve_start_ns) / 1.0e6;
+      if (last_depth == 0) {
+        snprintf(
+            prefix, sizeof(prefix),
+            "  [%6.0fms] d=0 published (n=%d) cur_depth=%d searching %d/%d",
+            elapsed_ms, initial_count, cur_depth, done, total);
+      } else {
+        snprintf(prefix, sizeof(prefix),
+                 "  [%6.0fms] last_completed=d%d val=%d "
+                 "cur_depth=%d searching %d/%d",
+                 elapsed_ms, last_depth, last_val, cur_depth, done, total);
+      }
     }
 
     if (s->mode == STREAM_MODE_POLL_PLY2) {
@@ -1119,6 +1130,46 @@ void test_endgame_progress_stream(void) {
   // exercises every combination.)
   XoshiroPRNG *prng = prng_create((uint64_t)ctime_get_current_time());
 
+  // Allocate the EndgameCtx (and its transposition table) once, outside
+  // the iteration loop. Subsequent iterations reuse it, so the
+  // ~200ms one-off TT memset doesn't get counted into per-iteration
+  // streaming output. The elapsed-time clock in each iteration is
+  // started by stream_before_search_cb, so even the first iteration's
+  // streaming numbers exclude setup overhead.
+  EndgameCtx *ctx = NULL;
+  {
+    // Warmup: one quick solve with eplies=1 to force ctx + TT allocation.
+    // Its stream output is suppressed (no reader thread); we just care
+    // about getting the TT on the heap.
+    Config *warmup_config = config_create_or_die("set -s1 score -s2 score");
+    char warmup_cmd[1024];
+    snprintf(warmup_cmd, sizeof(warmup_cmd), "cgp %s -lex %s", positions[0].cgp,
+             positions[0].lex);
+    load_and_exec_config_or_die(warmup_config, warmup_cmd);
+    EndgameArgs warmup_args = {0};
+    warmup_args.thread_control = config_get_thread_control(warmup_config);
+    warmup_args.game = config_get_game(warmup_config);
+    warmup_args.plies = 1;
+    warmup_args.tt_fraction_of_mem =
+        config_get_tt_fraction_of_mem(warmup_config);
+    warmup_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    warmup_args.num_threads = 1;
+    warmup_args.num_top_moves = 1;
+    warmup_args.use_heuristics = true;
+    warmup_args.forced_pass_bypass = true;
+    warmup_args.enable_iterative_deepening = true;
+    warmup_args.enable_pv_display = true;
+    warmup_args.seed = 1;
+    EndgameResults *warmup_results = config_get_endgame_results(warmup_config);
+    ErrorStack *warmup_err = error_stack_create();
+    endgame_solve(&ctx, &warmup_args, warmup_results, warmup_err);
+    assert(error_stack_is_empty(warmup_err));
+    error_stack_destroy(warmup_err);
+    config_destroy(warmup_config);
+    printf("(warmup complete; TT pre-allocated)\n");
+  }
+
   const int kIterations = npos * nmodes;
   int iter = 0;
   for (int pos_idx = 0; pos_idx < npos; pos_idx++) {
@@ -1138,13 +1189,12 @@ void test_endgame_progress_stream(void) {
           iter, kIterations, pos_idx, mode_labels[mode_idx], threads,
           positions[pos_idx].eplies, positions[pos_idx].lex);
 
-      EndgameCtx *ctx = NULL;
       ProgressStream stream = {0};
       cpthread_mutex_init(&stream.mutex);
       atomic_store(&stream.should_stop, 0);
       stream.ctx_pp = &ctx;
       stream.mode = mode;
-      stream.solve_start_ns = ctimer_monotonic_ns();
+      // solve_start_ns will be filled in by stream_before_search_cb.
 
       EndgameArgs args = {0};
       args.thread_control = config_get_thread_control(config);
@@ -1194,11 +1244,11 @@ void test_endgame_progress_stream(void) {
         assert(stream.per_root_calls >= stream.last_completed_depth);
       }
 
-      endgame_ctx_destroy(ctx);
       error_stack_destroy(error_stack);
       config_destroy(config);
     }
   }
+  endgame_ctx_destroy(ctx);
   prng_destroy(prng);
 }
 
