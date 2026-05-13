@@ -2508,7 +2508,7 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row, (int)col, " ");
   }
 
-  // Left side: "Language · Lexicon · 60 fps · 234MB ram". FPS and the
+  // Left side: "Language · Lexicon · 60 fps · 234MB mem". FPS and the
   // process resident-set size are tacked onto the left so they sit
   // next to the other engine-state readouts; the right side is
   // reserved for transient control hints. Show fps as an integer so
@@ -2550,7 +2550,7 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
         decimals = 2;
       }
     }
-    snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s ram", decimals, val,
+    snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s mem", decimals, val,
              unit);
   }
   char left_buf[160];
