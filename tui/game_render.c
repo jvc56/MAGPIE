@@ -2270,7 +2270,8 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const int rank_len = (int)strlen(rank_str);
     const int win_len = (int)strlen(win_str);
     const int eq_len = (int)strlen(eq_str);
-    const int gap = 2; // gap between win% and eq columns
+    const int gap = 1; // gap between win% and eq columns
+                       // (%+6.1f's leading pad provides one more)
 
     const int eq_col = interior_right - eq_len + 1;
     const int win_col = eq_col - gap - win_len;
