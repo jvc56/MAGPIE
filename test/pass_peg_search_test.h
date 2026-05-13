@@ -81,3 +81,5 @@ void test_pass_peg_print_report(void);
 void test_pass_peg_oracle_eval_move(void);
 
 #endif
+
+void test_pass_pegN_greedy_bench(void);

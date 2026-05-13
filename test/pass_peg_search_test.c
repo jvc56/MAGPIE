@@ -20,6 +20,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
+#include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -1933,4 +1934,602 @@ void test_pass_peg_oracle_eval_move(void) {
          q_spread, weight_sum);
 
   config_destroy(config);
+}
+
+// ====================================================================
+// pegNgreedy: fresh N-in-bag greedy bench (d=0 only)
+//
+// Goal: for each candidate mover move, enumerate the distinct N-tile bag
+// compositions (= the bag's tile multiset at the moment mover plays), split
+// each into (mover_drawn, bag_remaining), greedy-play to game end, and
+// aggregate weighted win % / mean spread.
+//
+// Scenarios = (mover_drawn_multiset, bag_remaining_multiset) pairs. Within
+// the drawn multiset the order of tiles doesn't matter — mover ends up
+// with the same rack regardless of draw order. Within the remaining
+// multiset (size 1 for K_drawn=N-1, more otherwise) the order also doesn't
+// matter since opp will eventually draw them. So we enumerate by per-type
+// COUNTS, not by ordered tuples.
+//
+// d=0 means: after mover plays cand and the bag/opp-rack are set up, we
+// do a pure greedy playout (highest-equity move while bag has tiles,
+// highest-score once bag empties) until natural game end. mover_total =
+// signed (mover_score - opp_score) at terminal, with rack penalties
+// applied if both players pass to the scoreless cap.
+//
+// Env knobs:
+//   PASSPEGN_GREEDY_PATH    — CGP file (default /tmp/pegN_positions.txt)
+//   PASSPEGN_GREEDY_LEX     — lex override; empty = let CGP's -lex stand
+//   PASSPEGN_GREEDY_TOP_K   — number of top cands to print (default 15)
+//   PASSPEGN_GREEDY_ONLY    — semicolon-separated cand-text substrings;
+//                             only cands whose movegen text matches one
+//                             of these are evaluated. Empty = all cands.
+//   PASSPEGN_GREEDY_TSV     — output path for per-scenario TSV
+// ====================================================================
+
+static int pegN_compute_unseen(const Game *game, int mover_idx,
+                               uint8_t unseen[MAX_ALPHABET_SIZE]) {
+  const LetterDistribution *ld = game_get_ld(game);
+  int ld_size = ld_get_size(ld);
+  memset(unseen, 0, sizeof(uint8_t) * MAX_ALPHABET_SIZE);
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mrack = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] -= (uint8_t)rack_get_letter(mrack, ml);
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_is_empty(board, row, col)) continue;
+      MachineLetter ml = board_get_letter(board, row, col);
+      if (get_is_blanked(ml)) {
+        if (unseen[BLANK_MACHINE_LETTER] > 0) unseen[BLANK_MACHINE_LETTER]--;
+      } else if (unseen[ml] > 0) {
+        unseen[ml]--;
+      }
+    }
+  }
+  int total = 0;
+  for (int ml = 0; ml < ld_size; ml++) total += unseen[ml];
+  return total;
+}
+
+// Drain bag, then add the listed N tiles (insert_point=0).
+static void pegN_set_bag_tiles(Bag *bag, const MachineLetter *tiles,
+                               int n_tiles, int ld_size) {
+  for (int ml = 0; ml < ld_size; ml++) {
+    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
+    }
+  }
+  for (int i = 0; i < n_tiles; i++) bag_add_letter(bag, tiles[i], 0);
+}
+
+// Reset opp's rack to (unseen MINUS drawn) tiles.
+static void pegN_set_opp_rack(Rack *opp_rack,
+                              const uint8_t unseen[MAX_ALPHABET_SIZE],
+                              int ld_size, const MachineLetter *drawn,
+                              int n_drawn) {
+  uint8_t remaining[MAX_ALPHABET_SIZE];
+  for (int ml = 0; ml < ld_size; ml++) remaining[ml] = unseen[ml];
+  for (int i = 0; i < n_drawn; i++) {
+    if (remaining[drawn[i]] > 0) remaining[drawn[i]]--;
+  }
+  rack_reset(opp_rack);
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int i = 0; i < remaining[ml]; i++) {
+      rack_add_letter(opp_rack, (MachineLetter)ml);
+    }
+  }
+}
+
+// Build the post-cand game state for one (mover_drawn, bag_remaining) split:
+// bag holds (mover_drawn ++ bag_remaining) = N tiles total, opp rack is set
+// to (unseen − bag tiles), cand is played, then mover draws their
+// K_drawn tiles. Result: mover's rack has K_drawn drawn tiles added, bag has
+// only bag_remaining left, opp's rack is the deal (full 7).
+static Game *pegN_make_post_cand_game(
+    const Game *base_game, int mover_idx, const uint8_t *unseen, int ld_size,
+    const Move *cand, int K_drawn, const MachineLetter *mover_drawn,
+    int n_bag_remaining, const MachineLetter *bag_remaining) {
+  Game *g = game_duplicate(base_game);
+  game_set_endgame_solving_mode(g);
+  game_set_backup_mode(g, BACKUP_MODE_OFF);
+  Bag *bag = game_get_bag(g);
+  Rack *opp_r = player_get_rack(game_get_player(g, 1 - mover_idx));
+  Rack *mover_r = player_get_rack(game_get_player(g, mover_idx));
+  // Combine drawn + remaining into one N-tile array for bag setup.
+  MachineLetter all_bag[16];
+  int N = K_drawn + n_bag_remaining;
+  for (int i = 0; i < K_drawn; i++) all_bag[i] = mover_drawn[i];
+  for (int i = 0; i < n_bag_remaining; i++) {
+    all_bag[K_drawn + i] = bag_remaining[i];
+  }
+  pegN_set_bag_tiles(bag, all_bag, N, ld_size);
+  pegN_set_opp_rack(opp_r, unseen, ld_size, all_bag, N);
+  play_move_without_drawing_tiles(cand, g);
+  for (int i = 0; i < K_drawn; i++) {
+    rack_add_letter(mover_r, mover_drawn[i]);
+    (void)bag_draw_letter(bag, mover_drawn[i], 0);
+  }
+  return g;
+}
+
+// Greedy playout to game end. Returns signed mover spread at terminal
+// (mover_score − opp_score). Records each played move into out_pv (text)
+// and writes final mover/opp rack contents to out_*_rack. If out_pv_text
+// is NULL no PV is recorded.
+static int32_t pegN_greedy_playout_pv(
+    Game *game, int mover_idx, MoveList *playout_ml, int thread_index,
+    char *out_pv_text, size_t out_pv_text_cap, char *out_mover_rack_end,
+    size_t out_mover_rack_end_cap, char *out_opp_rack_end,
+    size_t out_opp_rack_end_cap, char *out_final_cgp,
+    size_t out_final_cgp_cap) {
+  const LetterDistribution *ld = game_get_ld(game);
+  StringBuilder *pv_sb = NULL;
+  if (out_pv_text && out_pv_text_cap > 0) {
+    pv_sb = string_builder_create();
+    out_pv_text[0] = '\0';
+  }
+  int n_plies = 0;
+  for (int turn = 0; turn < MAX_SEARCH_DEPTH; turn++) {
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) break;
+    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
+    const MoveGenArgs ga = {
+        .game = game,
+        .move_list = playout_ml,
+        .move_record_type = MOVE_RECORD_BEST,
+        .move_sort_type = bag_has_tiles ? MOVE_SORT_EQUITY : MOVE_SORT_SCORE,
+        .override_kwg = NULL,
+        .thread_index = thread_index,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&ga);
+    if (move_list_get_count(playout_ml) == 0) break;
+    const Move *best = move_list_get_move(playout_ml, 0);
+    if (pv_sb) {
+      if (n_plies > 0) string_builder_add_string(pv_sb, " | ");
+      string_builder_add_move(pv_sb, game_get_board(game), best, ld, true);
+    }
+    play_move(best, game, NULL);
+    n_plies++;
+  }
+  if (pv_sb) {
+    snprintf(out_pv_text, out_pv_text_cap, "%s", string_builder_peek(pv_sb));
+    string_builder_destroy(pv_sb);
+  }
+  if (out_mover_rack_end && out_mover_rack_end_cap > 0) {
+    StringBuilder *rsb = string_builder_create();
+    string_builder_add_rack(rsb,
+                            player_get_rack(game_get_player(game, mover_idx)),
+                            ld, false);
+    snprintf(out_mover_rack_end, out_mover_rack_end_cap, "%s",
+             string_builder_peek(rsb));
+    string_builder_destroy(rsb);
+  }
+  if (out_opp_rack_end && out_opp_rack_end_cap > 0) {
+    StringBuilder *rsb = string_builder_create();
+    string_builder_add_rack(
+        rsb, player_get_rack(game_get_player(game, 1 - mover_idx)), ld,
+        false);
+    snprintf(out_opp_rack_end, out_opp_rack_end_cap, "%s",
+             string_builder_peek(rsb));
+    string_builder_destroy(rsb);
+  }
+  if (out_final_cgp && out_final_cgp_cap > 0) {
+    char *cgp = game_get_cgp(game, true);
+    snprintf(out_final_cgp, out_final_cgp_cap, "%s", cgp ? cgp : "");
+    free(cgp);
+  }
+  const Player *me = game_get_player(game, mover_idx);
+  const Player *op = game_get_player(game, 1 - mover_idx);
+  int32_t spread = equity_to_int(player_get_score(me) - player_get_score(op));
+  if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    spread -= (int32_t)equity_to_int(rack_get_score(ld, player_get_rack(me)));
+    spread += (int32_t)equity_to_int(rack_get_score(ld, player_get_rack(op)));
+  }
+  return spread;
+}
+
+static int64_t pegN_binomial(int n, int k) {
+  if (k < 0 || k > n) return 0;
+  if (k == 0 || k == n) return 1;
+  if (k > n - k) k = n - k;
+  int64_t r = 1;
+  for (int i = 0; i < k; i++) r = r * (n - i) / (i + 1);
+  return r;
+}
+
+// Recursive enumerator over N-multisets from `counts[0..K_types-1]`. Calls
+// cb(picked, ctx) once per distinct multiset.
+static void pegN_enum_multiset(int *picked, int idx, int remaining,
+                               const int *counts, int K_types,
+                               void (*cb)(const int *picked, void *ctx),
+                               void *ctx) {
+  if (idx == K_types) {
+    if (remaining == 0) cb(picked, ctx);
+    return;
+  }
+  int max_take = counts[idx] < remaining ? counts[idx] : remaining;
+  for (int k = 0; k <= max_take; k++) {
+    picked[idx] = k;
+    pegN_enum_multiset(picked, idx + 1, remaining - k, counts, K_types, cb,
+                       ctx);
+  }
+  picked[idx] = 0;
+}
+
+typedef struct PegNCandResult {
+  int ci;
+  int64_t weight_sum;
+  int64_t win_x2;     // 2 per win, 1 per tie, 0 per loss (scaled by weight)
+  int64_t spread_sum; // signed (mover − opp) at terminal × weight
+  int n_scen;
+} PegNCandResult;
+
+// Shared state for one cand's enumeration; passed by pointer through the
+// recursive enumerators below so we don't rely on gcc nested functions.
+typedef struct PegNEnumCtx {
+  // The current N-multiset being explored (per-type counts, summing to N).
+  // pegN_enum_outer_multiset writes into this; pegN_enum_mover_drawn reads.
+  int *n_multiset;
+  // The current mover-drawn sub-multiset (per-type counts, summing to
+  // K_drawn). pegN_enum_mover_drawn writes into this; the leaf
+  // pegN_emit_split reads.
+  int *mover_pick;
+
+  const MachineLetter *types;
+  const int *type_counts;
+  int K_types;
+  int K_drawn;
+  int n_bag_remaining;
+
+  const Game *base_game;
+  int mover_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  const Move *cand;
+  const char *cand_txt;
+  int cand_score;
+  int pos_idx;
+  const LetterDistribution *ld;
+
+  FILE *tsv_f;
+  PegNCandResult *res;
+} PegNEnumCtx;
+
+// Leaf: build the realized split's tile arrays, run a greedy playout, and
+// fold the outcome into res / TSV.
+static void pegN_emit_split(const PegNEnumCtx *ctx) {
+  MachineLetter mover_drawn[16];
+  MachineLetter bag_remaining[16];
+  int mover_drawn_n = 0;
+  int bag_remaining_n = 0;
+  char drawn_str[32] = {0};
+  char remaining_str[32] = {0};
+  int drawn_len = 0;
+  int remaining_len = 0;
+  for (int type_idx = 0; type_idx < ctx->K_types; type_idx++) {
+    const int mover_count = ctx->mover_pick[type_idx];
+    const int bag_count = ctx->n_multiset[type_idx] - mover_count;
+    for (int k = 0; k < mover_count; k++) {
+      mover_drawn[mover_drawn_n++] = ctx->types[type_idx];
+      if (drawn_len < 30) {
+        drawn_str[drawn_len++] = ctx->ld->ld_ml_to_hl[ctx->types[type_idx]][0];
+      }
+    }
+    for (int k = 0; k < bag_count; k++) {
+      bag_remaining[bag_remaining_n++] = ctx->types[type_idx];
+      if (remaining_len < 30) {
+        remaining_str[remaining_len++] =
+            ctx->ld->ld_ml_to_hl[ctx->types[type_idx]][0];
+      }
+    }
+  }
+  // Multinomial weight: number of distinguishable physical-tile assignments
+  // realizing (mover_drawn, bag_remaining) from the unseen pool.
+  // = ∏_t C(c_t, m_t) × C(c_t − m_t, b_t)
+  int64_t weight = 1;
+  for (int type_idx = 0; type_idx < ctx->K_types; type_idx++) {
+    const int total_count = ctx->type_counts[type_idx];
+    const int mover_count = ctx->mover_pick[type_idx];
+    const int bag_count = ctx->n_multiset[type_idx] - mover_count;
+    weight *= pegN_binomial(total_count, mover_count) *
+              pegN_binomial(total_count - mover_count, bag_count);
+  }
+
+  Game *game = pegN_make_post_cand_game(
+      ctx->base_game, ctx->mover_idx, ctx->unseen, ctx->ld_size, ctx->cand,
+      ctx->K_drawn, mover_drawn, ctx->n_bag_remaining, bag_remaining);
+  char post_cand_cgp[512] = {0};
+  if (ctx->tsv_f) {
+    char *cgp = game_get_cgp(game, true);
+    snprintf(post_cand_cgp, sizeof(post_cand_cgp), "%s", cgp ? cgp : "");
+    free(cgp);
+  }
+  MoveList *playout_ml = move_list_create(4096);
+  char pv_text[1024] = {0};
+  char final_cgp[512] = {0};
+  char mover_rack_end[32] = {0};
+  char opp_rack_end[32] = {0};
+  const int32_t mover_total = pegN_greedy_playout_pv(
+      game, ctx->mover_idx, playout_ml, 0,
+      ctx->tsv_f ? pv_text : NULL, sizeof(pv_text),
+      ctx->tsv_f ? mover_rack_end : NULL, sizeof(mover_rack_end),
+      ctx->tsv_f ? opp_rack_end : NULL, sizeof(opp_rack_end),
+      ctx->tsv_f ? final_cgp : NULL, sizeof(final_cgp));
+  move_list_destroy(playout_ml);
+  game_destroy(game);
+
+  ctx->res->weight_sum += weight;
+  ctx->res->spread_sum += weight * (int64_t)mover_total;
+  if (mover_total > 0) {
+    ctx->res->win_x2 += 2 * weight;
+  } else if (mover_total == 0) {
+    ctx->res->win_x2 += weight;
+  }
+  ctx->res->n_scen++;
+
+  if (ctx->tsv_f) {
+    fprintf(
+        ctx->tsv_f,
+        "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
+        ctx->pos_idx, ctx->cand_txt, ctx->cand_score,
+        ctx->K_drawn + ctx->n_bag_remaining, ctx->K_drawn, drawn_str,
+        remaining_str, (long long)weight, (int)mover_total, post_cand_cgp,
+        final_cgp, pv_text, mover_rack_end, opp_rack_end);
+  }
+}
+
+// For a fixed N-multiset in ctx->n_multiset, enumerate all mover-drawn
+// sub-multisets of size K_drawn (= per-type counts summing to K_drawn).
+static void pegN_enum_mover_drawn(PegNEnumCtx *ctx, int type_idx,
+                                  int remaining) {
+  if (type_idx == ctx->K_types) {
+    if (remaining == 0) {
+      pegN_emit_split(ctx);
+    }
+    return;
+  }
+  const int max_take = ctx->n_multiset[type_idx] < remaining
+                           ? ctx->n_multiset[type_idx]
+                           : remaining;
+  for (int take = 0; take <= max_take; take++) {
+    ctx->mover_pick[type_idx] = take;
+    pegN_enum_mover_drawn(ctx, type_idx + 1, remaining - take);
+  }
+  ctx->mover_pick[type_idx] = 0;
+}
+
+// Enumerate all N-multisets from `type_counts` (the unseen pool). For each
+// emitted multiset, fan out to pegN_enum_mover_drawn to enumerate splits.
+static void pegN_enum_outer_multiset(PegNEnumCtx *ctx, int type_idx,
+                                     int remaining) {
+  if (type_idx == ctx->K_types) {
+    if (remaining == 0) {
+      pegN_enum_mover_drawn(ctx, 0, ctx->K_drawn);
+    }
+    return;
+  }
+  const int max_take = ctx->type_counts[type_idx] < remaining
+                           ? ctx->type_counts[type_idx]
+                           : remaining;
+  for (int take = 0; take <= max_take; take++) {
+    ctx->n_multiset[type_idx] = take;
+    pegN_enum_outer_multiset(ctx, type_idx + 1, remaining - take);
+  }
+  ctx->n_multiset[type_idx] = 0;
+}
+
+void test_pass_pegN_greedy_bench(void) {
+  const char *path_env = getenv("PASSPEGN_GREEDY_PATH");
+  const char *path =
+      path_env && *path_env ? path_env : "/tmp/pegN_positions.txt";
+  const char *topk_env = getenv("PASSPEGN_GREEDY_TOP_K");
+  int top_k = topk_env && *topk_env ? atoi(topk_env) : 15;
+  const char *only_env = getenv("PASSPEGN_GREEDY_ONLY");
+  const char *only_moves = only_env && *only_env ? only_env : NULL;
+  const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
+  const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
+
+  char **cgps = NULL;
+  int n_pos = load_cgp_lines(path, &cgps, 1000);
+  if (n_pos == 0) log_fatal("no positions loaded from %s", path);
+  fprintf(stderr, "[pegNgreedy] loaded %d positions from %s\n", n_pos, path);
+  fflush(stderr);
+
+  FILE *tsv_f = NULL;
+  if (tsv_path) {
+    tsv_f = fopen(tsv_path, "we");
+    if (!tsv_f) log_fatal("cannot open TSV %s", tsv_path);
+    fprintf(tsv_f,
+            "pos\tcand\tcand_score\tN\tK_drawn\tdrawn\tremaining\tweight"
+            "\tmover_total\tpost_cand_cgp\tfinal_cgp\tpv_text"
+            "\tmover_rack_end\topp_rack_end\n");
+  }
+
+  for (int pi = 0; pi < n_pos; pi++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    char load_cmd[10240];
+    snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgps[pi]);
+    load_and_exec_config_or_die(config, load_cmd);
+    Game *game = config_get_game(config);
+    int mover_idx = game_get_player_on_turn_index(game);
+    const LetterDistribution *ld = game_get_ld(game);
+    int lds = ld_get_size(ld);
+
+    // Recover the true bag size N. For PEG-style CGPs where opp's rack is
+    // empty in the CGP, the loader stuffs all unseen tiles into the bag;
+    // subtract RACK_SIZE for opp's would-be rack.
+    Bag *bag = game_get_bag(game);
+    Rack *opp_rack_chk =
+        player_get_rack(game_get_player(game, 1 - mover_idx));
+    int N = bag_get_letters(bag);
+    if (rack_get_total_letters(opp_rack_chk) == 0) {
+      N -= (RACK_SIZE);
+    }
+
+    uint8_t unseen[MAX_ALPHABET_SIZE];
+    int total_unseen = pegN_compute_unseen(game, mover_idx, unseen);
+
+    MachineLetter types[MAX_ALPHABET_SIZE];
+    int counts[MAX_ALPHABET_SIZE];
+    int K_types = 0;
+    for (int ml = 0; ml < lds; ml++) {
+      if (unseen[ml] > 0) {
+        types[K_types] = (MachineLetter)ml;
+        counts[K_types] = (int)unseen[ml];
+        K_types++;
+      }
+    }
+
+    MoveList *ml_cands = move_list_create(16384);
+    const MoveGenArgs ga = {
+        .game = game,
+        .move_list = ml_cands,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&ga);
+    int n_all = move_list_get_count(ml_cands);
+
+    fprintf(stderr,
+            "[pegNgreedy] pos %d  N=%d  unseen=%d  K_types=%d  cands=%d\n",
+            pi, N, total_unseen, K_types, n_all);
+    fflush(stderr);
+
+    PegNCandResult *results =
+        calloc_or_die((size_t)(n_all > 0 ? n_all : 1), sizeof(PegNCandResult));
+    int n_results = 0;
+
+    Timer t;
+    ctimer_start(&t);
+
+    for (int ci = 0; ci < n_all; ci++) {
+      const Move *cand = move_list_get_move(ml_cands, ci);
+      if (move_get_type(cand) == GAME_EVENT_PASS ||
+          move_get_tiles_played(cand) < 1) {
+        continue;
+      }
+      // only_moves filter
+      char cand_txt[256] = {0};
+      {
+        StringBuilder *sb_m = string_builder_create();
+        string_builder_add_move(sb_m, game_get_board(game), cand, ld, true);
+        snprintf(cand_txt, sizeof(cand_txt), "%s", string_builder_peek(sb_m));
+        string_builder_destroy(sb_m);
+      }
+      if (only_moves) {
+        bool match = false;
+        char tmp[2048];
+        snprintf(tmp, sizeof(tmp), "%s", only_moves);
+        char *tok = strtok(tmp, ";");
+        while (tok) {
+          if (strstr(cand_txt, tok)) { match = true; break; }
+          tok = strtok(NULL, ";");
+        }
+        if (!match) continue;
+      }
+
+      int K = move_get_tiles_played(cand);
+      int K_drawn = K < N ? K : N;
+      int n_bag_remaining = N - K_drawn;
+      int cand_score = (int)equity_to_int(move_get_score(cand));
+
+      PegNCandResult *res = &results[n_results++];
+      res->ci = ci;
+
+      int n_multiset_buf[MAX_ALPHABET_SIZE] = {0};
+      int mover_pick_buf[MAX_ALPHABET_SIZE] = {0};
+      PegNEnumCtx enum_ctx = {
+          .n_multiset = n_multiset_buf,
+          .mover_pick = mover_pick_buf,
+          .types = types,
+          .type_counts = counts,
+          .K_types = K_types,
+          .K_drawn = K_drawn,
+          .n_bag_remaining = n_bag_remaining,
+          .base_game = game,
+          .mover_idx = mover_idx,
+          .unseen = unseen,
+          .ld_size = lds,
+          .cand = cand,
+          .cand_txt = cand_txt,
+          .cand_score = cand_score,
+          .pos_idx = pi,
+          .ld = ld,
+          .tsv_f = tsv_f,
+          .res = res,
+      };
+      pegN_enum_outer_multiset(&enum_ctx, 0, N);
+    }
+
+    double wall = ctimer_elapsed_seconds(&t);
+
+    // Sort results by u = q_win + 1e-4 × q_spread.
+    typedef struct {
+      int ci;
+      double q_win, q_spread, u;
+      int64_t weight_sum;
+      int n_scen;
+    } Ranked;
+    Ranked *ranked = calloc_or_die((size_t)(n_results > 0 ? n_results : 1),
+                                    sizeof(Ranked));
+    int n_ranked = 0;
+    for (int r = 0; r < n_results; r++) {
+      if (results[r].weight_sum <= 0) continue;
+      double q_win =
+          (double)results[r].win_x2 / (2.0 * (double)results[r].weight_sum);
+      double q_spread =
+          (double)results[r].spread_sum / (double)results[r].weight_sum;
+      ranked[n_ranked++] = (Ranked){results[r].ci, q_win, q_spread,
+                                     q_win + 1e-4 * q_spread,
+                                     results[r].weight_sum,
+                                     results[r].n_scen};
+    }
+    for (int i = 0; i < n_ranked; i++) {
+      for (int j = i + 1; j < n_ranked; j++) {
+        if (ranked[j].u > ranked[i].u) {
+          Ranked tmp = ranked[i];
+          ranked[i] = ranked[j];
+          ranked[j] = tmp;
+        }
+      }
+    }
+    int show = top_k < n_ranked ? top_k : n_ranked;
+    fprintf(stderr, "[pegNgreedy] pos %d wall=%.3fs  top-%d cands:\n", pi,
+            wall, show);
+    for (int r = 0; r < show; r++) {
+      const Move *m = move_list_get_move(ml_cands, ranked[r].ci);
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_move(sb, game_get_board(game), m, ld, true);
+      fprintf(stderr,
+              "  #%-2d  win=%.4f  spread=%+9.3f  scen=%d  weight=%lld  %s\n",
+              r + 1, ranked[r].q_win, ranked[r].q_spread, ranked[r].n_scen,
+              (long long)ranked[r].weight_sum, string_builder_peek(sb));
+      string_builder_destroy(sb);
+    }
+    fflush(stderr);
+
+    free(ranked);
+    free(results);
+    move_list_destroy(ml_cands);
+    config_destroy(config);
+  }
+
+  if (tsv_f) {
+    fclose(tsv_f);
+    fprintf(stderr, "[pegNgreedy] TSV written to %s\n", tsv_path);
+  }
+  for (int i = 0; i < n_pos; i++) free(cgps[i]);
+  free(cgps);
 }

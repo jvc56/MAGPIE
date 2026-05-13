@@ -160,6 +160,7 @@ static TestEntry on_demand_test_table[] = {
     {"passpegbench", test_pass_peg_bench},
     {"passpegreport", test_pass_peg_print_report},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"pegNgreedy", test_pass_pegN_greedy_bench},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
