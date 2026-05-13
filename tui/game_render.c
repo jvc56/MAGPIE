@@ -2232,129 +2232,192 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const Board *board = game_get_board(state->game);
   const Rack *sim_rack = sim_results_get_rack(results);
 
-  // Common column widths reused across rows. The leave column is up
-  // to RACK_SIZE characters (typically 7); bingos render as a blank
-  // cell, which keeps the win%/equity columns aligned.
-  enum { LEAVE_WIDTH = RACK_SIZE };
+  // Numeric columns are fixed-width; right-anchor them, then size the
+  // leave + move columns to fit what's actually in the data.
+  const char *win_fmt = "%5.1f%%";  // "67.3%"
+  const char *eq_fmt = "%+6.1f";   // " +32.5" / "-109.3"
+  const int win_w = 6;
+  const int eq_w = 6;
+  const int win_eq_gap = 1; // %+6.1f provides one more leading space
+  const int eq_col = interior_right - eq_w + 1;
+  const int win_col = eq_col - win_eq_gap - win_w;
 
-  // Layout per row:
-  //   "  1. 8E TURNS                AIT  67.3%  +32.5"
-  //   "  2. 8H TURNED                    74.1%  +28.0"
-  // Right-anchored numeric columns; leave column sits between move
-  // and win% when there's room (skipped when the panel is too narrow
-  // to afford it).
-  theme_apply_bg(plane, theme->bg);
-  int row = list_top;
-  for (int i = 0; i < num_plays && row <= interior_bottom; i++) {
+  // Build everything we need to render up front, so we can fit the
+  // leave column to the data instead of the worst case. Cache hold
+  // both move and leave strings to avoid rebuilding them on the
+  // render pass.
+  enum { ROW_CACHE_CAP = 64 };
+  const int max_visible = interior_bottom - list_top + 1;
+  int visible = num_plays < max_visible ? num_plays : max_visible;
+  if (visible > ROW_CACHE_CAP) {
+    visible = ROW_CACHE_CAP;
+  }
+
+  char move_strs[ROW_CACHE_CAP][80];
+  char leave_strs[ROW_CACHE_CAP][16];
+  double win_pcts[ROW_CACHE_CAP];
+  double eq_pts[ROW_CACHE_CAP];
+  int max_leave_w = 0;
+  int max_move_w = 0;
+
+  for (int i = 0; i < visible; i++) {
+    move_strs[i][0] = '\0';
+    leave_strs[i][0] = '\0';
+    win_pcts[i] = 0.0;
+    eq_pts[i] = 0.0;
     const SimmedPlay *play =
         sim_results_get_display_simmed_play(results, i);
     if (play == NULL) {
       continue;
     }
     const Move *move = simmed_play_get_move(play);
-    const Stat *win_stat = simmed_play_get_win_pct_stat(play);
-    const Stat *eq_stat = simmed_play_get_equity_stat(play);
-    const double win_pct = stat_get_mean(win_stat) * 100.0;
-    // equity_stat is fed via equity_to_double in
-    // simmed_play_add_equity_stat, so the mean is already in points
-    // (equity_to_double converts millipoints → points internally).
-    const double eq_pts = stat_get_mean(eq_stat);
+    win_pcts[i] = stat_get_mean(simmed_play_get_win_pct_stat(play)) * 100.0;
+    eq_pts[i] = stat_get_mean(simmed_play_get_equity_stat(play));
 
-    char rank_str[8];
-    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
-    char win_str[16];
-    snprintf(win_str, sizeof(win_str), "%5.1f%%", win_pct);
-    char eq_str[16];
-    snprintf(eq_str, sizeof(eq_str), "%+6.1f", eq_pts);
-
-    // Build move notation via the engine string-builder, same as
-    // history entries.
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, board, move, state->ld, false);
-    size_t move_len = 0;
-    char *move_dump = string_builder_dump(sb, &move_len);
+    size_t mlen = 0;
+    char *mdump = string_builder_dump(sb, &mlen);
+    if (mdump != NULL) {
+      const size_t copy =
+          mlen < sizeof(move_strs[i]) ? mlen : sizeof(move_strs[i]) - 1;
+      memcpy(move_strs[i], mdump, copy);
+      move_strs[i][copy] = '\0';
+      free(mdump);
+    }
     string_builder_destroy(sb);
 
-    // Build leave (rack remaining after this play). Bingos leave
-    // nothing on the rack; that becomes an empty cell.
-    char leave_buf[16] = "";
     if (sim_rack != NULL) {
       StringBuilder *lsb = string_builder_create();
       string_builder_add_move_leave(lsb, sim_rack, move, state->ld);
-      size_t lsz = 0;
-      char *ldump = string_builder_dump(lsb, &lsz);
+      size_t llen = 0;
+      char *ldump = string_builder_dump(lsb, &llen);
       if (ldump != NULL) {
         const size_t copy =
-            lsz < sizeof(leave_buf) ? lsz : sizeof(leave_buf) - 1;
-        memcpy(leave_buf, ldump, copy);
-        leave_buf[copy] = '\0';
+            llen < sizeof(leave_strs[i]) ? llen : sizeof(leave_strs[i]) - 1;
+        memcpy(leave_strs[i], ldump, copy);
+        leave_strs[i][copy] = '\0';
         free(ldump);
       }
       string_builder_destroy(lsb);
     }
 
-    const int rank_len = (int)strlen(rank_str);
-    const int win_len = (int)strlen(win_str);
-    const int eq_len = (int)strlen(eq_str);
-    const int gap = 1; // gap between win% and eq columns
-                       // (%+6.1f's leading pad provides one more)
+    const int ml = (int)strlen(move_strs[i]);
+    const int ll = (int)strlen(leave_strs[i]);
+    if (ml > max_move_w) {
+      max_move_w = ml;
+    }
+    if (ll > max_leave_w) {
+      max_leave_w = ll;
+    }
+  }
 
-    const int eq_col = interior_right - eq_len + 1;
-    const int win_col = eq_col - gap - win_len;
-    const int move_col = interior_left + rank_len;
+  // Width arithmetic. "  N. " rank prefix occupies a fixed slot; we
+  // need rank + move + (leave_w + 2 gaps) + numerics to fit, or just
+  // rank + move + numerics if we have to drop the leave.
+  char rank_probe[8];
+  snprintf(rank_probe, sizeof(rank_probe), "%2d. ", visible);
+  const int rank_w = (int)strlen(rank_probe);
+  const int move_col = interior_left + rank_w;
 
-    // Try to fit the leave column between move and win%. Need
-    // LEAVE_WIDTH cols of slot + 1 col gap on each side. If the panel
-    // is too narrow we just drop it and let the move grow.
-    const int leave_gap_l = 2; // space between move text and leave slot
-    const int leave_gap_r = 2; // space between leave slot and win%
-    const int leave_col =
-        win_col - leave_gap_r - LEAVE_WIDTH; // left edge of leave slot
-    const bool show_leave =
-        (leave_col >= move_col + leave_gap_l + 4); // leave room for some move
+  const int leave_gap_l = 2;
+  const int leave_gap_r = 1; // tight enough that 100.0% still has breathing room
 
-    const int move_max =
-        (show_leave ? leave_col - leave_gap_l : win_col - 1) - move_col;
-
-    // Truncate move text to fit available space.
-    if (move_dump != NULL) {
-      if (move_max > 0 && (int)strlen(move_dump) > move_max) {
-        if (move_max < (int)sizeof(char) * 4) {
-          move_dump[0] = '\0';
-        } else {
-          move_dump[move_max] = '\0';
+  // If full-fat "(exch ABCD)" notation pushes the longest move past
+  // the panel's move budget, compact every exchange in the cache to
+  // "-ABCD" form. We do them all at once (rather than per row) so the
+  // exchange entries line up consistently in the listing.
+  const int max_move_budget = win_col - 1 - move_col;
+  if (max_move_w > max_move_budget) {
+    int new_max = 0;
+    for (int i = 0; i < visible; i++) {
+      char *s = move_strs[i];
+      if (strncmp(s, "(exch ", 6) == 0) {
+        char *close_paren = strchr(s, ')');
+        if (close_paren != NULL) {
+          const int letters_len = (int)(close_paren - (s + 6));
+          // Slide the letters left over the "(exch " prefix and drop
+          // the close paren. Prepend '-' as the compact marker.
+          char tmp[80];
+          tmp[0] = '-';
+          const int copy = letters_len < (int)sizeof(tmp) - 2
+                               ? letters_len
+                               : (int)sizeof(tmp) - 2;
+          memcpy(tmp + 1, s + 6, (size_t)copy);
+          tmp[1 + copy] = '\0';
+          const size_t tlen = strlen(tmp);
+          const size_t cap = sizeof(move_strs[i]) - 1;
+          const size_t finalcopy = tlen < cap ? tlen : cap;
+          memcpy(s, tmp, finalcopy);
+          s[finalcopy] = '\0';
         }
       }
+      const int ml = (int)strlen(s);
+      if (ml > new_max) {
+        new_max = ml;
+      }
+    }
+    max_move_w = new_max;
+  }
+
+  // Reserve only as many columns as the actual longest leave needs.
+  // If every visible play is a bingo (max_leave_w == 0) we skip the
+  // column entirely. Otherwise we try to fit the longest move
+  // untruncated alongside the leave; if that doesn't fit we drop the
+  // leave (preferring full move text over the supplementary column).
+  bool show_leave = max_leave_w > 0;
+  int leave_col = win_col - leave_gap_r - max_leave_w; // left edge of slot
+  int move_max = win_col - 1 - move_col;
+  if (show_leave) {
+    const int with_leave_max = leave_col - leave_gap_l - move_col;
+    if (with_leave_max >= max_move_w) {
+      move_max = with_leave_max;
+    } else {
+      show_leave = false; // drop the column to keep the move full-width
+    }
+  }
+
+  theme_apply_bg(plane, theme->bg);
+  int row = list_top;
+  for (int i = 0; i < visible && row <= interior_bottom; i++) {
+    char rank_str[8];
+    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
+    char win_str[16];
+    snprintf(win_str, sizeof(win_str), win_fmt, win_pcts[i]);
+    char eq_str[16];
+    snprintf(eq_str, sizeof(eq_str), eq_fmt, eq_pts[i]);
+
+    // Truncate move text to the budgeted width if (and only if) it
+    // doesn't fit. The pre-pass set move_max so that the typical case
+    // does fit, so this branch is rarely taken.
+    char *move_text = move_strs[i];
+    if (move_max > 0 && (int)strlen(move_text) > move_max) {
+      move_text[move_max] = '\0';
+    } else if (move_max <= 0) {
+      move_text[0] = '\0';
     }
 
     theme_apply_fg(plane, theme->dim_fg);
     ncplane_putstr_yx(plane, row, interior_left, rank_str);
 
-    if (move_dump != NULL && move_max > 0) {
+    if (move_max > 0 && move_text[0] != '\0') {
       theme_apply_fg(plane, theme->fg);
-      render_move_styled(plane, row, move_col, move_dump);
+      render_move_styled(plane, row, move_col, move_text);
     }
 
-    if (show_leave) {
-      // Right-justify the leave inside its slot. Bingos have an empty
-      // leave string and naturally render as blanks.
-      const int leave_len = (int)strlen(leave_buf);
-      if (leave_len > 0 && leave_len <= LEAVE_WIDTH) {
-        const int leave_right_edge = leave_col + LEAVE_WIDTH - 1;
-        const int leave_text_col = leave_right_edge - leave_len + 1;
-        theme_apply_fg(plane, theme->dim_fg);
-        ncplane_putstr_yx(plane, row, leave_text_col, leave_buf);
-      }
-    }
-
-    if (win_col > move_col + (int)strlen(move_dump != NULL ? move_dump : "")) {
-      theme_apply_fg(plane, theme->fg);
-      ncplane_putstr_yx(plane, row, win_col, win_str);
+    if (show_leave && leave_strs[i][0] != '\0') {
+      const int leave_len = (int)strlen(leave_strs[i]);
+      const int leave_right_edge = leave_col + max_leave_w - 1;
+      const int leave_text_col = leave_right_edge - leave_len + 1;
       theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row, eq_col, eq_str);
+      ncplane_putstr_yx(plane, row, leave_text_col, leave_strs[i]);
     }
 
-    free(move_dump);
+    theme_apply_fg(plane, theme->fg);
+    ncplane_putstr_yx(plane, row, win_col, win_str);
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, row, eq_col, eq_str);
+
     row++;
   }
 
