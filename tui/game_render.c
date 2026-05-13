@@ -2469,28 +2469,36 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
 // Populate the row cache from the endgame multi-PV leaderboard.
 // Returns the number of rows filled (≤ max_rows). W/T/L is computed
 // from the captured initial spread + the PV's value.
+//
+// Important: SmallMove → Move conversion walks the live board to fill
+// in played-through letters, so it's only safe to call while the
+// solver-owned board hasn't shifted out from under it. We gate the
+// whole path on endgame_results_active (set by the bot worker for
+// the duration of one solve) and lock the display PV slot for the
+// duration of the read.
 static int fill_analysis_rows_from_endgame(const TuiGameState *state,
                                            AnalysisRow *rows, int max_rows) {
   EndgameResults *results = state->endgame_results;
   if (results == NULL) {
     return 0;
   }
+  if (!atomic_load(&((TuiGameState *)state)->endgame_results_active)) {
+    return 0;
+  }
+  endgame_results_lock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
   const int num_pvs = endgame_results_get_num_pvs(results);
   if (num_pvs <= 0) {
+    endgame_results_unlock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
     return 0;
   }
   int n = num_pvs < max_rows ? num_pvs : max_rows;
   const int initial_spread =
       atomic_load(&((TuiGameState *)state)->endgame_initial_spread);
   const Board *board = game_get_board(state->game);
-  // Use the on-turn player's rack at solve time. The PV's first move
-  // was generated against that rack so the leave is meaningful.
-  // For endgame we don't have a sim-style rack stash; pull from the
-  // game's pending entry instead.
-  const int player_idx =
-      state->history_count > 0
-          ? state->history[state->history_count - 1].player_idx
-          : game_get_player_on_turn_index(state->game);
+  // Use the on-turn player's rack at solve time. While
+  // endgame_results_active is true the bot worker hasn't called
+  // play_move yet, so the on-turn player still matches the solver.
+  const int player_idx = game_get_player_on_turn_index(state->game);
   const Rack *solve_rack =
       player_get_rack(game_get_player(state->game, player_idx));
 
@@ -2544,6 +2552,7 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     }
     rows[i].valid = true;
   }
+  endgame_results_unlock((EndgameResults *)results, ENDGAME_RESULT_DISPLAY);
   return n;
 }
 
