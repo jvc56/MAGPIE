@@ -2230,11 +2230,19 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
 
   const int num_plays = sim_results_get_number_of_plays(results);
   const Board *board = game_get_board(state->game);
+  const Rack *sim_rack = sim_results_get_rack(results);
+
+  // Common column widths reused across rows. The leave column is up
+  // to RACK_SIZE characters (typically 7); bingos render as a blank
+  // cell, which keeps the win%/equity columns aligned.
+  enum { LEAVE_WIDTH = RACK_SIZE };
 
   // Layout per row:
-  //   "  1. 8E TURNS                   67.3%  +32.5"
-  // We left-anchor rank+move, right-anchor the two numeric columns.
-  // Width budget for the move string is whatever's left between them.
+  //   "  1. 8E TURNS                AIT  67.3%  +32.5"
+  //   "  2. 8H TURNED                    74.1%  +28.0"
+  // Right-anchored numeric columns; leave column sits between move
+  // and win% when there's room (skipped when the panel is too narrow
+  // to afford it).
   theme_apply_bg(plane, theme->bg);
   int row = list_top;
   for (int i = 0; i < num_plays && row <= interior_bottom; i++) {
@@ -2267,6 +2275,24 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     char *move_dump = string_builder_dump(sb, &move_len);
     string_builder_destroy(sb);
 
+    // Build leave (rack remaining after this play). Bingos leave
+    // nothing on the rack; that becomes an empty cell.
+    char leave_buf[16] = "";
+    if (sim_rack != NULL) {
+      StringBuilder *lsb = string_builder_create();
+      string_builder_add_move_leave(lsb, sim_rack, move, state->ld);
+      size_t lsz = 0;
+      char *ldump = string_builder_dump(lsb, &lsz);
+      if (ldump != NULL) {
+        const size_t copy =
+            lsz < sizeof(leave_buf) ? lsz : sizeof(leave_buf) - 1;
+        memcpy(leave_buf, ldump, copy);
+        leave_buf[copy] = '\0';
+        free(ldump);
+      }
+      string_builder_destroy(lsb);
+    }
+
     const int rank_len = (int)strlen(rank_str);
     const int win_len = (int)strlen(win_str);
     const int eq_len = (int)strlen(eq_str);
@@ -2276,7 +2302,19 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const int eq_col = interior_right - eq_len + 1;
     const int win_col = eq_col - gap - win_len;
     const int move_col = interior_left + rank_len;
-    const int move_max = win_col - 1 - move_col; // room before win%
+
+    // Try to fit the leave column between move and win%. Need
+    // LEAVE_WIDTH cols of slot + 1 col gap on each side. If the panel
+    // is too narrow we just drop it and let the move grow.
+    const int leave_gap_l = 2; // space between move text and leave slot
+    const int leave_gap_r = 2; // space between leave slot and win%
+    const int leave_col =
+        win_col - leave_gap_r - LEAVE_WIDTH; // left edge of leave slot
+    const bool show_leave =
+        (leave_col >= move_col + leave_gap_l + 4); // leave room for some move
+
+    const int move_max =
+        (show_leave ? leave_col - leave_gap_l : win_col - 1) - move_col;
 
     // Truncate move text to fit available space.
     if (move_dump != NULL) {
@@ -2295,6 +2333,18 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     if (move_dump != NULL && move_max > 0) {
       theme_apply_fg(plane, theme->fg);
       render_move_styled(plane, row, move_col, move_dump);
+    }
+
+    if (show_leave) {
+      // Right-justify the leave inside its slot. Bingos have an empty
+      // leave string and naturally render as blanks.
+      const int leave_len = (int)strlen(leave_buf);
+      if (leave_len > 0 && leave_len <= LEAVE_WIDTH) {
+        const int leave_right_edge = leave_col + LEAVE_WIDTH - 1;
+        const int leave_text_col = leave_right_edge - leave_len + 1;
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, row, leave_text_col, leave_buf);
+      }
     }
 
     if (win_col > move_col + (int)strlen(move_dump != NULL ? move_dump : "")) {
