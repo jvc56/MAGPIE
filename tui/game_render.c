@@ -1891,6 +1891,53 @@ static int history_entry_rows(const TuiHistoryEntry *e) {
   return e->end_bonus != 0 ? 4 : 2;
 }
 
+// Render a GCG-style move notation with played-through letters (the
+// segments wrapped in parentheses) unbolded — everything outside parens
+// reads as bold. The history and analysis panels share this so a
+// played-through "(O)" looks consistent in both. Caller positions the
+// text; this routine handles segmenting and style changes only.
+static void render_move_styled(struct ncplane *plane, int row, int col,
+                               const char *move_str) {
+  if (move_str == NULL || *move_str == '\0') {
+    return;
+  }
+  const char *p = move_str;
+  const char *end = p + strlen(move_str);
+  int x = col;
+  while (p < end) {
+    const char *seg_end;
+    bool seg_bold;
+    if (*p == '(') {
+      seg_bold = false;
+      seg_end = p;
+      while (seg_end < end && *seg_end != ')') {
+        seg_end++;
+      }
+      if (seg_end < end) {
+        seg_end++; // include the close paren
+      }
+    } else {
+      seg_bold = true;
+      seg_end = p;
+      while (seg_end < end && *seg_end != '(') {
+        seg_end++;
+      }
+    }
+    ncplane_set_styles(plane, seg_bold ? NCSTYLE_BOLD : 0);
+    char buf[64];
+    size_t len = (size_t)(seg_end - p);
+    if (len >= sizeof(buf)) {
+      len = sizeof(buf) - 1;
+    }
+    memcpy(buf, p, len);
+    buf[len] = '\0';
+    ncplane_putstr_yx(plane, row, x, buf);
+    x += (int)strlen(buf);
+    p = seg_end;
+  }
+  ncplane_set_styles(plane, 0);
+}
+
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx, int row,
                                  int interior_left, int interior_right,
@@ -1957,44 +2004,8 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     const int frame = (int)((ms / 80) % SPINNER_FRAMES);
     ncplane_putstr(plane, spinner_frames[frame]);
   } else {
-    // Batch the move string into bold-runs (outside parens) and
-    // non-bold-runs (parens + their content). Terminal.app mis-renders
-    // when we emit an SGR escape between every character, so we set
-    // styles once per run and write the whole run with a single
-    // putstr.
-    const char *p = e->move_str;
-    const char *end = p + strlen(e->move_str);
-    while (p < end) {
-      const char *seg_end;
-      bool seg_bold;
-      if (*p == '(') {
-        seg_bold = false;
-        seg_end = p;
-        while (seg_end < end && *seg_end != ')') {
-          seg_end++;
-        }
-        if (seg_end < end) {
-          seg_end++; // include the close paren
-        }
-      } else {
-        seg_bold = true;
-        seg_end = p;
-        while (seg_end < end && *seg_end != '(') {
-          seg_end++;
-        }
-      }
-      ncplane_set_styles(plane, seg_bold ? NCSTYLE_BOLD : 0);
-      char buf[64];
-      size_t len = (size_t)(seg_end - p);
-      if (len >= sizeof(buf)) {
-        len = sizeof(buf) - 1;
-      }
-      memcpy(buf, p, len);
-      buf[len] = '\0';
-      ncplane_putstr(plane, buf);
-      p = seg_end;
-    }
-    ncplane_set_styles(plane, 0);
+    render_move_styled(plane, row, interior_left + (int)strlen(prefix),
+                       e->move_str);
 
     char delta_str[16];
     snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
@@ -2179,30 +2190,6 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 // matches the board's played tiles. Below it the ranked candidates
 // scroll: each row shows rank, move notation, win%, and mean equity.
 
-// Render "N." as a 3-col x 2-row tile block at (top_row, left_col)
-// using theme->tile_fg / theme->tile_bg. The 3 characters of the top
-// row are right-aligned ("23." or " 3.") and the bottom row is just
-// the matching tile background so the whole block reads as one tall
-// "played tile" footprint.
-static void render_turn_tile_header(struct ncplane *plane, const Theme *theme,
-                                    int top_row, int left_col, int turn_num) {
-  char txt[4];
-  if (turn_num < 10) {
-    snprintf(txt, sizeof(txt), " %d.", turn_num);
-  } else {
-    snprintf(txt, sizeof(txt), "%d.", turn_num > 99 ? 99 : turn_num);
-  }
-  theme_apply_fg(plane, theme->tile_fg);
-  theme_apply_bg(plane, theme->tile_bg);
-  ncplane_set_styles(plane, NCSTYLE_BOLD);
-  // Row 1: " 23." style number + period.
-  ncplane_putstr_yx(plane, top_row, left_col, txt);
-  // Row 2: matching solid tile-bg under each of the 3 cells so the
-  // header reads as a single tall tile.
-  ncplane_putstr_yx(plane, top_row + 1, left_col, "   ");
-  ncplane_set_styles(plane, 0);
-}
-
 static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                   const TuiGameState *state,
                                   const Layout *L) {
@@ -2222,19 +2209,8 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
 
-  // Turn-number header occupies the first two interior rows, aligned
-  // to the left interior column. Below it, a single blank row
-  // separates the header from the candidate list.
-  const int header_row = interior_top;
-  // The bot worker appends the pending history entry BEFORE running
-  // the sim, so history_count already counts that turn — using it
-  // directly (no +1) keeps the analysis header in sync with the
-  // pending turn's index in history.
-  const int turn_num = state->history_count;
-  if (interior_bottom - header_row >= 1) {
-    render_turn_tile_header(plane, theme, header_row, interior_left, turn_num);
-  }
-  const int list_top = header_row + 3;
+  // Top play sits flush against the "Analysis" title row.
+  const int list_top = interior_top;
 
   // Pull the (locked, sorted) display plays. Returns false when the
   // sim hasn't run yet — show the placeholder in that case.
@@ -2317,9 +2293,7 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
 
     if (move_dump != NULL && move_max > 0) {
       theme_apply_fg(plane, theme->fg);
-      ncplane_set_styles(plane, NCSTYLE_BOLD);
-      ncplane_putstr_yx(plane, row, move_col, move_dump);
-      ncplane_set_styles(plane, 0);
+      render_move_styled(plane, row, move_col, move_dump);
     }
 
     if (win_col > move_col + (int)strlen(move_dump != NULL ? move_dump : "")) {
