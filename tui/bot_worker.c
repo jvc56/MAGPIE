@@ -387,14 +387,36 @@ static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
         }
         Move *candidate = move_create();
         small_move_to_move(candidate, &pvi->moves[0], snap->board);
-        // The engine's multi-PV extraction can produce duplicate
-        // first moves in distinct PVLines (extract_multi_pvs doesn't
-        // dedupe). Drop them defensively so the leaderboard doesn't
-        // list the same play twice.
+        // Dedupe on board-effect equivalence: same move_type, same
+        // anchor + direction + tiles, regardless of move->score. The
+        // engine's compare_moves_without_equity checks score first
+        // which lets identical plays slip through when the re-search
+        // updated one PV's score but not the other.
         bool duplicate = false;
         for (int j = 0; j < filled; j++) {
-          if (compare_moves_without_equity(candidate, snap->moves[j],
-                                            true) == -1) {
+          const Move *other = snap->moves[j];
+          if (candidate->move_type != other->move_type) {
+            continue;
+          }
+          if (candidate->move_type == GAME_EVENT_PASS) {
+            duplicate = true; // only one "pass" play, no further fields
+            break;
+          }
+          if (candidate->row_start != other->row_start ||
+              candidate->col_start != other->col_start ||
+              candidate->dir != other->dir ||
+              candidate->tiles_played != other->tiles_played ||
+              candidate->tiles_length != other->tiles_length) {
+            continue;
+          }
+          bool tiles_match = true;
+          for (int t = 0; t < candidate->tiles_length; t++) {
+            if (candidate->tiles[t] != other->tiles[t]) {
+              tiles_match = false;
+              break;
+            }
+          }
+          if (tiles_match) {
             duplicate = true;
             break;
           }
@@ -406,6 +428,20 @@ static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
         snap->moves[filled] = candidate;
         snap->values[filled] = (int)pvi->score;
         filled++;
+      }
+      // Sort by value descending so the leaderboard reads top-down.
+      // Simple insertion sort — num_entries is tiny.
+      for (int i = 1; i < filled; i++) {
+        Move *km = snap->moves[i];
+        int kv = snap->values[i];
+        int j = i - 1;
+        while (j >= 0 && snap->values[j] < kv) {
+          snap->moves[j + 1] = snap->moves[j];
+          snap->values[j + 1] = snap->values[j];
+          j--;
+        }
+        snap->moves[j + 1] = km;
+        snap->values[j + 1] = kv;
       }
       snap->num_entries = filled;
       snap->valid = filled > 0;
