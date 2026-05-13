@@ -7,6 +7,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
@@ -124,6 +125,14 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
     out_state->win_pcts = NULL;
   }
 
+  // SimResults is allocated once and reused for every sim turn so the
+  // analysis panel can read it. cutoff matches the bot worker's BAI
+  // options (sim_results_set_cutoff inside the sim overrides this
+  // when the sim starts).
+  out_state->sim_results = sim_results_create(0.005);
+  atomic_store(&out_state->sim_results_active, false);
+  atomic_store(&out_state->sim_results_turn_idx, -1);
+
   const GameArgs args = {
       .players_data = out_state->players_data,
       .board_layout = out_state->board_layout,
@@ -219,6 +228,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->win_pcts != NULL) {
     win_pct_destroy(state->win_pcts);
+  }
+  if (state->sim_results != NULL) {
+    sim_results_destroy(state->sim_results);
   }
   memset(state, 0, sizeof(*state));
 }

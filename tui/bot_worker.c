@@ -306,7 +306,14 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   // declaration is `const Game *`.
   args.game = state->game;
 
-  SimResults *results = sim_results_create(args.bai_options.cutoff);
+  // The analysis panel reads state->sim_results in real time while the
+  // sim is running. Flip the active flag and stamp the current turn
+  // index BEFORE the simmer kicks off so the renderer doesn't show
+  // stale data from a previous turn.
+  atomic_store(&state->sim_results_turn_idx, state->history_count);
+  atomic_store(&state->sim_results_active, true);
+
+  SimResults *results = state->sim_results;
   ErrorStack *err = error_stack_create();
   simulate_without_ctx(&args, results, err);
 
@@ -327,8 +334,9 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
     got_move = true;
   }
 
+  atomic_store(&state->sim_results_active, false);
+
   error_stack_destroy(err);
-  sim_results_destroy(results);
   thread_control_destroy(tc);
   moves_for_move_list_destroy(candidates);
   free(candidates);

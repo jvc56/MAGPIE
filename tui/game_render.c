@@ -10,6 +10,9 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
+#include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
 #include "glyph_cache.h"
@@ -2135,14 +2138,38 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 
 // ── Analysis panel ────────────────────────────────────────────────────────
 //
-// Shows whatever the bot worker last produced — sim leaderboard while
-// the bag has tiles, endgame PV when it's empty. For now the panel is
-// a labeled box with a placeholder; engine data plumbing follows in a
-// later commit.
+// Shows the latest sim leaderboard. The header is a 3×2 tile-styled
+// block holding the on-turn move number ("23.") so it visually
+// matches the board's played tiles. Below it the ranked candidates
+// scroll: each row shows rank, move notation, win%, and mean equity.
+
+// Render "N." as a 3-col x 2-row tile block at (top_row, left_col)
+// using theme->tile_fg / theme->tile_bg. The 3 characters of the top
+// row are right-aligned ("23." or " 3.") and the bottom row is just
+// the matching tile background so the whole block reads as one tall
+// "played tile" footprint.
+static void render_turn_tile_header(struct ncplane *plane, const Theme *theme,
+                                    int top_row, int left_col, int turn_num) {
+  char txt[4];
+  if (turn_num < 10) {
+    snprintf(txt, sizeof(txt), " %d.", turn_num);
+  } else {
+    snprintf(txt, sizeof(txt), "%d.", turn_num > 99 ? 99 : turn_num);
+  }
+  theme_apply_fg(plane, theme->tile_fg);
+  theme_apply_bg(plane, theme->tile_bg);
+  ncplane_set_styles(plane, NCSTYLE_BOLD);
+  // Row 1: " 23." style number + period.
+  ncplane_putstr_yx(plane, top_row, left_col, txt);
+  // Row 2: matching solid tile-bg under each of the 3 cells so the
+  // header reads as a single tall tile.
+  ncplane_putstr_yx(plane, top_row + 1, left_col, "   ");
+  ncplane_set_styles(plane, 0);
+}
+
 static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                   const TuiGameState *state,
                                   const Layout *L) {
-  (void)state;
   if (!L->has_analysis) {
     return;
   }
@@ -2154,18 +2181,118 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   draw_box(plane, theme, L->analysis_top, L->analysis_left, height, width,
            "Analysis");
 
-  // Placeholder: a single dim line until sim/endgame results are plumbed
-  // through.
-  theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
-  const char *msg = "(no analysis yet)";
-  const int interior_width = width - 2;
-  const int row = L->analysis_top + 1;
-  if (row <= L->analysis_bottom - 1) {
-    const int col =
-        L->analysis_left + 1 + (interior_width - (int)strlen(msg)) / 2;
-    ncplane_putstr_yx(plane, row, col, msg);
+  const int interior_left = L->analysis_left + 1;
+  const int interior_right = L->analysis_right - 1;
+  const int interior_top = L->analysis_top + 1;
+  const int interior_bottom = L->analysis_bottom - 1;
+
+  // Turn-number header occupies the first two interior rows, aligned
+  // to the left interior column. Below it, a single blank row
+  // separates the header from the candidate list.
+  const int header_row = interior_top;
+  const int turn_num = state->history_count + 1;
+  if (interior_bottom - header_row >= 1) {
+    render_turn_tile_header(plane, theme, header_row, interior_left, turn_num);
   }
+  const int list_top = header_row + 3;
+
+  // Pull the (locked, sorted) display plays. Returns false when the
+  // sim hasn't run yet — show the placeholder in that case.
+  SimResults *results = state->sim_results;
+  if (results == NULL ||
+      !sim_results_lock_and_sort_display_simmed_plays(results)) {
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    const char *msg = "(no sim data yet)";
+    const int msg_col =
+        interior_left + (interior_right - interior_left + 1 - (int)strlen(msg)) / 2;
+    if (list_top <= interior_bottom) {
+      ncplane_putstr_yx(plane, list_top, msg_col, msg);
+    }
+    return;
+  }
+
+  const int num_plays = sim_results_get_number_of_plays(results);
+  const Board *board = game_get_board(state->game);
+
+  // Layout per row:
+  //   "  1. 8E TURNS                   67.3%  +32.5"
+  // We left-anchor rank+move, right-anchor the two numeric columns.
+  // Width budget for the move string is whatever's left between them.
+  theme_apply_bg(plane, theme->bg);
+  int row = list_top;
+  for (int i = 0; i < num_plays && row <= interior_bottom; i++) {
+    const SimmedPlay *play =
+        sim_results_get_display_simmed_play(results, i);
+    if (play == NULL) {
+      continue;
+    }
+    const Move *move = simmed_play_get_move(play);
+    const Stat *win_stat = simmed_play_get_win_pct_stat(play);
+    const Stat *eq_stat = simmed_play_get_equity_stat(play);
+    const double win_pct = stat_get_mean(win_stat) * 100.0;
+    // equity_stat holds Equity values (millipoints). Mean is still in
+    // those units; convert to points for display.
+    const double eq_pts = stat_get_mean(eq_stat) / 1000.0;
+
+    char rank_str[8];
+    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
+    char win_str[16];
+    snprintf(win_str, sizeof(win_str), "%5.1f%%", win_pct);
+    char eq_str[16];
+    snprintf(eq_str, sizeof(eq_str), "%+6.1f", eq_pts);
+
+    // Build move notation via the engine string-builder, same as
+    // history entries.
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, board, move, state->ld, false);
+    size_t move_len = 0;
+    char *move_dump = string_builder_dump(sb, &move_len);
+    string_builder_destroy(sb);
+
+    const int rank_len = (int)strlen(rank_str);
+    const int win_len = (int)strlen(win_str);
+    const int eq_len = (int)strlen(eq_str);
+    const int gap = 2; // gap between win% and eq columns
+
+    const int eq_col = interior_right - eq_len + 1;
+    const int win_col = eq_col - gap - win_len;
+    const int move_col = interior_left + rank_len;
+    const int move_max = win_col - 1 - move_col; // room before win%
+
+    // Truncate move text to fit available space.
+    if (move_dump != NULL) {
+      if (move_max > 0 && (int)strlen(move_dump) > move_max) {
+        if (move_max < (int)sizeof(char) * 4) {
+          move_dump[0] = '\0';
+        } else {
+          move_dump[move_max] = '\0';
+        }
+      }
+    }
+
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, row, interior_left, rank_str);
+
+    if (move_dump != NULL && move_max > 0) {
+      theme_apply_fg(plane, theme->fg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row, move_col, move_dump);
+      ncplane_set_styles(plane, 0);
+    }
+
+    if (win_col > move_col + (int)strlen(move_dump != NULL ? move_dump : "")) {
+      theme_apply_fg(plane, theme->fg);
+      ncplane_putstr_yx(plane, row, win_col, win_str);
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, eq_col, eq_str);
+    }
+
+    free(move_dump);
+    row++;
+  }
+
+  sim_results_unlock_display_infos(results);
 }
 
 // EMA-smoothed FPS based on the interval between status-bar renders.

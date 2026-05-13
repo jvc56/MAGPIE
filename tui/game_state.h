@@ -17,6 +17,7 @@ struct PlayersData;
 struct BoardLayout;
 struct MoveList;
 struct WinPct;
+struct SimResults;
 typedef struct TuiGlyphCache TuiGlyphCache;
 
 enum {
@@ -78,6 +79,18 @@ typedef struct {
   // the file couldn't be loaded — in that case the bot worker falls
   // back to plain equity-best moves.
   struct WinPct *win_pcts;
+
+  // Sim results, allocated once and reused across turns. The bot
+  // worker populates this on each sim turn and the analysis panel
+  // reads it. `sim_results_active` tracks whether the SimResults
+  // currently holds data — flipped to true when a sim starts and back
+  // off when the turn is finalized. The `sim_results_turn_idx` value
+  // is the history index this sim was computed for, so the renderer
+  // can title the "Move N." block correctly even after play_move has
+  // moved on.
+  struct SimResults *sim_results;
+  _Atomic bool sim_results_active;
+  _Atomic int sim_results_turn_idx;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature
