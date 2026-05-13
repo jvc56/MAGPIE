@@ -337,9 +337,18 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   L.history_bottom = L.status_row - 1;
 
   // Default bag region: rack_bottom+1 to status_row-1. Tightened below
-  // in the BELOW_BAG case so analysis can sit beneath the bag.
+  // in the BELOW_BAG case so analysis can sit beneath the bag, and
+  // also when the bag is fully empty — in that case render_bag_panel
+  // collapses to a single divider line and we shouldn't waste rows
+  // on a blank box.
   L.bag_top = L.rack_bottom + 1;
   L.bag_bottom = L.status_row - 1;
+  const bool bag_empty =
+      state != NULL && state->game != NULL &&
+      bag_get_letters(game_get_bag(state->game)) == 0;
+  if (bag_empty) {
+    L.bag_bottom = L.bag_top; // single-row divider
+  }
 
   // Three-column: analysis fills the right strip from the very top of
   // the plane down to the status bar. There's nothing else over there,
@@ -376,32 +385,42 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   // column. Bag shrinks to its content height (plus borders + tally),
   // and analysis claims everything else above the status bar.
   if (L.analysis_placement == ANALYSIS_BELOW_BAG) {
-    const int interior_width = L.board_width - 2;
-    const int chars = bag_unseen_chars(state);
-    int content_lines =
-        interior_width > 0 ? (chars + interior_width - 1) / interior_width : 1;
-    if (content_lines < 1) {
-      content_lines = 1;
+    int bag_height;
+    if (bag_empty) {
+      // The empty-bag divider only needs one row.
+      bag_height = 1;
+      L.bag_bottom = L.bag_top;
+    } else {
+      const int interior_width = L.board_width - 2;
+      const int chars = bag_unseen_chars(state);
+      int content_lines = interior_width > 0
+                              ? (chars + interior_width - 1) / interior_width
+                              : 1;
+      if (content_lines < 1) {
+        content_lines = 1;
+      }
+      // 2 borders + content rows + 1 tally row.
+      bag_height = 2 + content_lines + 1;
     }
-    // 2 borders + content rows + 1 tally row.
-    int bag_height = 2 + content_lines + 1;
-    const int total = L.bag_bottom - L.bag_top + 1;
-    // Leave room for an analysis box of at least 3 rows + 1 gap.
+    // Floor 1 instead of 0 in case the math collapses; we still need
+    // at least the bag's own row before the analysis starts.
+    const int total = L.status_row - 1 - L.bag_top + 1;
     const int analysis_floor = 3 + 1;
     if (bag_height > total - analysis_floor) {
       bag_height = total - analysis_floor;
     }
-    if (bag_height >= 3) {
-      L.bag_bottom = L.bag_top + bag_height - 1;
-      const int analysis_top = L.bag_bottom + 1;
-      if (analysis_top <= L.status_row - 1 &&
-          L.status_row - 1 - analysis_top + 1 >= 3) {
-        L.analysis_top = analysis_top;
-        L.analysis_bottom = L.status_row - 1;
-        L.analysis_left = 0;
-        L.analysis_right = L.board_width - 1;
-        L.has_analysis = true;
-      }
+    if (bag_height < 1) {
+      bag_height = 1;
+    }
+    L.bag_bottom = L.bag_top + bag_height - 1;
+    const int analysis_top = L.bag_bottom + 1;
+    if (analysis_top <= L.status_row - 1 &&
+        L.status_row - 1 - analysis_top + 1 >= 3) {
+      L.analysis_top = analysis_top;
+      L.analysis_bottom = L.status_row - 1;
+      L.analysis_left = 0;
+      L.analysis_right = L.board_width - 1;
+      L.has_analysis = true;
     }
   }
 
@@ -1642,12 +1661,41 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
 }
 
 // ── Bag panel ─────────────────────────────────────────────────────────────
+// Single-row divider used when the bag is empty: just a horizontal
+// rule with " Bag (0) " inset near the left. Replaces the full 4-row
+// box so endgames don't waste vertical space on a blank panel.
+static void render_bag_divider(struct ncplane *plane, const Theme *theme,
+                               int row, int left, int width,
+                               const char *title) {
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  const int right = left + width - 1;
+  for (int col = left; col <= right; col++) {
+    ncplane_putstr_yx(plane, row, col, BOX_HZ);
+  }
+  if (title != NULL && title[0] != '\0') {
+    theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_putstr_yx(plane, row, left + 2, " ");
+    ncplane_putstr(plane, title);
+    ncplane_putstr(plane, " ");
+  }
+}
+
 static void render_bag_panel(struct ncplane *plane, const Theme *theme,
                              const TuiGameState *state, const Layout *L) {
   const Bag *bag = game_get_bag(state->game);
   const int bag_count = bag_get_letters(bag);
   char title[32];
   snprintf(title, sizeof(title), "Bag (%d)", bag_count);
+
+  // Empty bag: skip the box, the tile listing, and the tally line.
+  // The endgame UI doesn't need any of that — opponent's tiles are
+  // already in the P2 pill.
+  if (bag_count == 0) {
+    render_bag_divider(plane, theme, L->bag_top, 0, L->board_width, title);
+    return;
+  }
 
   const int height = L->bag_bottom - L->bag_top + 1;
   if (height < 3) {
