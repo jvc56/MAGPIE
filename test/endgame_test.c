@@ -11,6 +11,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -23,6 +24,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -803,6 +805,315 @@ void test_topk_no_duplicates(void) {
   }
 }
 
+// ---------------------------------------------------------------------------
+// before_search_callback tests
+// ---------------------------------------------------------------------------
+
+typedef struct BeforeSearchCaptured {
+  int call_count;
+  int initial_move_count;
+  int initial_spread;
+  int solving_player;
+  // first move's tiny_move + estimated_value (lets us verify the array is
+  // sorted descending by static estimate at the moment of firing)
+  uint64_t first_move_tiny;
+  int32_t first_move_estimate;
+  // sortedness check across all received moves
+  bool sorted_desc_by_estimate;
+} BeforeSearchCaptured;
+
+static void capture_before_search_cb(const Game *game,
+                                     const SmallMove *initial_moves,
+                                     int initial_move_count, int initial_spread,
+                                     int solving_player, void *user_data) {
+  (void)game;
+  BeforeSearchCaptured *c = (BeforeSearchCaptured *)user_data;
+  c->call_count++;
+  c->initial_move_count = initial_move_count;
+  c->initial_spread = initial_spread;
+  c->solving_player = solving_player;
+  if (initial_move_count > 0) {
+    c->first_move_tiny = initial_moves[0].tiny_move;
+    c->first_move_estimate = small_move_get_estimated_value(&initial_moves[0]);
+  }
+  c->sorted_desc_by_estimate = true;
+  for (int i = 1; i < initial_move_count; i++) {
+    if (small_move_get_estimated_value(&initial_moves[i]) >
+        small_move_get_estimated_value(&initial_moves[i - 1])) {
+      c->sorted_desc_by_estimate = false;
+      break;
+    }
+  }
+}
+
+// Asserts the new before_search_callback fires exactly once per solve, with
+// initial_move_count > 0, sorted descending by estimated_value, and that the
+// polled progress atomics show root_moves_total == initial_move_count and
+// root_moves_completed == 0 immediately at callback time (so a UI polling
+// the atomics can render a coherent d=0 leaderboard from the same snapshot
+// the callback delivered).
+static atomic_int g_atomic_check_state_total;
+static atomic_int g_atomic_check_state_completed;
+static atomic_int g_atomic_check_state_depth;
+static EndgameCtx **g_atomic_check_ctx_pp;
+
+static void capture_and_poll_before_search_cb(
+    const Game *game, const SmallMove *initial_moves, int initial_move_count,
+    int initial_spread, int solving_player, void *user_data) {
+  capture_before_search_cb(game, initial_moves, initial_move_count,
+                           initial_spread, solving_player, user_data);
+  // Poll the public progress atomics from inside the callback so we can
+  // assert UI-visible state agrees with the callback args at the same
+  // moment in time.
+  int cur_depth = 0;
+  int done = 0;
+  int total = 0;
+  int dummy_a = 0;
+  int dummy_b = 0;
+  endgame_ctx_get_progress(*g_atomic_check_ctx_pp, &cur_depth, &done, &total,
+                           &dummy_a, &dummy_b);
+  atomic_store(&g_atomic_check_state_depth, cur_depth);
+  atomic_store(&g_atomic_check_state_completed, done);
+  atomic_store(&g_atomic_check_state_total, total);
+}
+
+void test_before_search_callback(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/"
+              "8WE2OBI/6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/"
+              "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 "
+              "-lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  BeforeSearchCaptured captured = {0};
+  atomic_store(&g_atomic_check_state_total, -1);
+  atomic_store(&g_atomic_check_state_completed, -1);
+  atomic_store(&g_atomic_check_state_depth, -1);
+  g_atomic_check_ctx_pp = &ctx;
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 3;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 4;
+  args.num_top_moves = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = true;
+  args.seed = 42;
+  args.before_search_callback = capture_and_poll_before_search_cb;
+  args.before_search_callback_data = &captured;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(captured.call_count == 1);
+  assert(captured.initial_move_count > 0);
+  assert(captured.solving_player == 0);
+  assert(captured.first_move_tiny != 0); // not PASS at slot 0
+  assert(captured.sorted_desc_by_estimate);
+
+  // Polled atomics seen from inside the callback must match the callback's
+  // own view of the candidate count, with no prior depth started.
+  const int polled_total = atomic_load(&g_atomic_check_state_total);
+  const int polled_completed = atomic_load(&g_atomic_check_state_completed);
+  const int polled_depth = atomic_load(&g_atomic_check_state_depth);
+  assert(polled_total == captured.initial_move_count);
+  assert(polled_completed == 0);
+  assert(polled_depth == 0);
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// On-demand: streaming-progress test
+// ---------------------------------------------------------------------------
+
+// Shared state between the main solver thread and the reader/printer thread.
+// All cross-thread fields are either atomic_* or guarded by `mutex`.
+typedef struct ProgressStream {
+  EndgameCtx **ctx_pp;        // populated by endgame_solve when it creates ctx
+  cpthread_mutex_t mutex;     // guards completed-depth snapshot fields below
+  bool seen_initial;          // before_search_callback has fired
+  int last_completed_depth;   // most recent per_ply_callback's depth (0 = none)
+  int32_t last_completed_val; // and value
+  int initial_move_count;     // from before_search_callback
+  int64_t solve_start_ns;
+  atomic_int should_stop; // main thread sets to 1 when endgame_solve returns
+  int frames_printed;     // bumped by the reader; used so we can verify
+                          // the test actually streamed something
+} ProgressStream;
+
+static void stream_before_search_cb(const Game *game,
+                                    const SmallMove *initial_moves,
+                                    int initial_move_count, int initial_spread,
+                                    int solving_player, void *user_data) {
+  (void)game;
+  (void)initial_moves;
+  (void)initial_spread;
+  (void)solving_player;
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->seen_initial = true;
+  s->initial_move_count = initial_move_count;
+  cpthread_mutex_unlock(&s->mutex);
+}
+
+static void stream_per_ply_cb(int depth, int32_t value,
+                              const struct PVLine *pv_line,
+                              const struct Game *game,
+                              const struct PVLine *ranked_pvs,
+                              int num_ranked_pvs, void *user_data) {
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->last_completed_depth = depth;
+  s->last_completed_val = value;
+  cpthread_mutex_unlock(&s->mutex);
+}
+
+static void *stream_reader_thread(void *arg) {
+  ProgressStream *s = (ProgressStream *)arg;
+  while (!atomic_load(&s->should_stop)) {
+    const EndgameCtx *ctx = *s->ctx_pp;
+    cpthread_mutex_lock(&s->mutex);
+    const bool seen_initial = s->seen_initial;
+    const int last_depth = s->last_completed_depth;
+    const int32_t last_val = s->last_completed_val;
+    const int initial_count = s->initial_move_count;
+    cpthread_mutex_unlock(&s->mutex);
+
+    int cur_depth = 0;
+    int done = 0;
+    int total = 0;
+    int dummy_a = 0;
+    int dummy_b = 0;
+    if (ctx != NULL) {
+      endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &dummy_a,
+                               &dummy_b);
+    }
+    const double elapsed_ms =
+        (double)(ctimer_monotonic_ns() - s->solve_start_ns) / 1.0e6;
+    if (!seen_initial) {
+      printf("  [%6.0fms] (waiting for d=0 callback)\n", elapsed_ms);
+    } else if (last_depth == 0) {
+      printf("  [%6.0fms] d=0 published (n=%d) "
+             "cur_depth=%d searching %d/%d\n",
+             elapsed_ms, initial_count, cur_depth, done, total);
+    } else {
+      printf("  [%6.0fms] last_completed=d%d val=%d "
+             "cur_depth=%d searching %d/%d\n",
+             elapsed_ms, last_depth, last_val, cur_depth, done, total);
+    }
+    (void)fflush(stdout);
+    s->frames_printed++;
+    ctime_nap(0.016); // ~60fps
+  }
+  return NULL;
+}
+
+void test_endgame_progress_stream(void) {
+  // Hand-picked positions tuned so each solve runs for ~1-3 seconds with
+  // multiple completed depths visible in the stream.  Don't crank
+  // eplies higher: deep searches on a wide root (n>500) blow past 30s
+  // per iteration and the test stops being useful as a demo.
+  static const struct {
+    const char *cgp;
+    const char *lex;
+    int eplies;
+  } positions[] = {
+      // Tight 7-tile endgame, ~60-100 root moves, completes through d=5
+      // quickly enough to show many depth transitions in the stream.
+      {"9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0",
+       "NWL20", 6},
+      // Stuck-tile (Z) position, asymmetric racks, slower per-ply.
+      {"GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/"
+       "1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/"
+       "1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0",
+       "CSW21", 5},
+  };
+  static const int npos = (int)(sizeof(positions) / sizeof(positions[0]));
+  static const int kIterations = 4;
+
+  // Use system time for "random". Each run picks a different
+  // (position, threads, plies) tuple per iteration.
+  XoshiroPRNG *prng = prng_create((uint64_t)ctime_get_current_time());
+
+  for (int iter = 0; iter < kIterations; iter++) {
+    const int pos_idx = (int)prng_get_random_number(prng, (uint64_t)npos);
+    const int threads = 2 + (int)prng_get_random_number(prng, 5); // 2..6
+
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    char cmd[1024];
+    snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
+             positions[pos_idx].lex);
+    load_and_exec_config_or_die(config, cmd);
+
+    printf("\n=== iter %d/%d: pos=%d threads=%d plies=%d lex=%s ===\n",
+           iter + 1, kIterations, pos_idx, threads, positions[pos_idx].eplies,
+           positions[pos_idx].lex);
+
+    EndgameCtx *ctx = NULL;
+    ProgressStream stream = {0};
+    cpthread_mutex_init(&stream.mutex);
+    atomic_store(&stream.should_stop, 0);
+    stream.ctx_pp = &ctx;
+    stream.solve_start_ns = ctimer_monotonic_ns();
+
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = positions[pos_idx].eplies;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = threads;
+    args.num_top_moves = 5;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.enable_iterative_deepening = true;
+    args.enable_pv_display = true;
+    args.seed = 42;
+    args.before_search_callback = stream_before_search_cb;
+    args.before_search_callback_data = &stream;
+    args.per_ply_callback = stream_per_ply_cb;
+    args.per_ply_callback_data = &stream;
+
+    cpthread_t reader;
+    cpthread_create(&reader, stream_reader_thread, &stream);
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    atomic_store(&stream.should_stop, 1);
+    cpthread_join(reader);
+
+    printf("  [done] frames_printed=%d final_completed_depth=%d\n",
+           stream.frames_printed, stream.last_completed_depth);
+    assert(stream.frames_printed > 0);
+    assert(stream.seen_initial);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+  prng_destroy(prng);
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -818,6 +1129,10 @@ void test_endgame(void) {
   test_topk_fully_solved();
   test_topk_full_solve_no_pipe();
   test_topk_no_duplicates();
+  test_before_search_callback();
+  // test_endgame_progress_stream is on-demand (registered as
+  // "endgame_stream"); it prints live progress to stdout and isn't
+  // suitable for the silent CI run.
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();

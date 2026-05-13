@@ -153,6 +153,11 @@ struct EndgameCtx {
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
 
+  // Fired once from worker thread 0 after initial movegen and before
+  // depth-1 negamax. Lets clients render a d=0 leaderboard immediately.
+  EndgameBeforeSearchCallback before_search_callback;
+  void *before_search_callback_data;
+
   // Owned by the caller:
   EndgameResults *results;
   ThreadControl *thread_control;
@@ -647,6 +652,8 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
+  es->before_search_callback = endgame_args->before_search_callback;
+  es->before_search_callback_data = endgame_args->before_search_callback_data;
   if (endgame_args->tt_fraction_of_mem == 0) {
     transposition_table_destroy(es->transposition_table);
     es->transposition_table = NULL;
@@ -2405,6 +2412,22 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   worker->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
+
+  // Publish the d=0 root-move list to clients before any depth begins.
+  // root_moves_total is bumped here (rather than only at depth-loop entry)
+  // so the polled progress atomics agree with the callback's view of the
+  // candidate count even before depth-1 starts. Thread 0 only.
+  if (worker->thread_index == 0) {
+    atomic_store(&worker->solver->root_moves_total, initial_move_count);
+    if (worker->solver->before_search_callback) {
+      const SmallMove *initial_moves =
+          (const SmallMove *)worker->small_move_arena->memory;
+      worker->solver->before_search_callback(
+          worker->game_copy, initial_moves, initial_move_count,
+          worker->solver->initial_spread, worker->solver->solving_player,
+          worker->solver->before_search_callback_data);
+    }
+  }
 
   worker->current_iterative_deepening_depth = 1;
   int start = 1;

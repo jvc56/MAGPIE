@@ -33,6 +33,25 @@ typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
                                       const struct PVLine *ranked_pvs,
                                       int num_ranked_pvs, void *user_data);
 
+// Callback fired once before iterative deepening begins. Provides the
+// d=0 root-move list (sorted descending by static estimate from
+// assign_estimates_and_sort), letting the caller render an initial
+// leaderboard before any depth completes. Fires from worker thread 0
+// after its initial-move generation finishes (sub-ms after
+// endgame_solve start) and before any negamax call. The polled
+// atomics (endgame_ctx_get_progress) are guaranteed to show
+// root_moves_total == initial_move_count and root_moves_completed == 0
+// at the moment this callback fires; current_depth is still 0.
+//
+// game is the worker's game copy (already in endgame_solving_mode);
+// initial_moves points into the worker's small_move_arena and is
+// valid only for the duration of the callback. Copy out anything
+// needed past callback return.
+typedef void (*EndgameBeforeSearchCallback)(
+    const struct Game *game, const struct SmallMove *initial_moves,
+    int initial_move_count, int initial_spread, int solving_player,
+    void *user_data);
+
 typedef struct EndgameArgs {
   ThreadControl *thread_control;
   const Game *game;
@@ -46,6 +65,8 @@ typedef struct EndgameArgs {
   int num_top_moves;
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  EndgameBeforeSearchCallback before_search_callback;
+  void *before_search_callback_data;
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
