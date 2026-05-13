@@ -242,12 +242,6 @@ int main(int argc, char *argv[]) {
 
   setlocale(LC_ALL, "");
 
-  // Unbuffer stderr so engine log_fatal output reaches disk before
-  // abort(). Otherwise the crash handler is the only thing that
-  // leaves a trace.
-  setvbuf(stderr, NULL, _IONBF, 0);
-  install_crash_handlers();
-
   notcurses_options opts = {
       .flags = NCOPTION_SUPPRESS_BANNERS,
   };
@@ -256,6 +250,13 @@ int main(int argc, char *argv[]) {
     return 1;
   }
   g_crash_nc = nc;
+
+  // Unbuffer stderr so engine log_fatal output reaches disk before
+  // abort(); install our crash handlers *after* notcurses_core_init
+  // because notcurses installs its own SIGABRT/SIGSEGV handlers
+  // during init and would clobber ours otherwise.
+  setvbuf(stderr, NULL, _IONBF, 0);
+  install_crash_handlers();
   // Hard-disable scrolling on the std plane: macOS Terminal can otherwise
   // scroll the alt screen when render coords overflow the visible area
   // mid-resize, and that scroll is irreversible.
