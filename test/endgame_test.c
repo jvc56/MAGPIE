@@ -735,45 +735,39 @@ static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
   return sa->tiny_move == sb->tiny_move;
 }
 
-// Repro for the etopk duplicate-PV bug surfaced by the TUI analysis
-// panel: extract_multi_pvs (plus the post-solve walk-down re-search
-// from #530) can land with two PVLines whose moves[0] is the same
-// SmallMove. Tries several known short-endgame positions until one
-// reproduces, then asserts uniqueness.
+// Regression test for an etopk duplicate-PV bug: extract_multi_pvs could
+// land with two PVLines whose moves[0] was the same SmallMove. Cause:
+// solver->principal_variation was zero-initialized and never written, so
+// the swap that was meant to hoist the search-tracked best move into
+// root_moves[0] would instead swap a deep PASS into slot 0. With several
+// root moves tied on estimated_value (qsort is unstable), the actual best
+// move could be at root_moves[1..k-1] and get copied into multi_pvs[r] as
+// a duplicate of the multi_pvs[0] entry already set from
+// ENDGAME_RESULT_BEST. Reproduces only with multi-PV (num_top_moves >= 2)
+// and parallel threads, and only when ties exist among root moves.
+//
+// Pre-fix at this config (eplies=3, threads=2, etopk=5) the bug fired in
+// ~97% of solves, so 10 iterations gives ~1 - 0.03^10 ≈ certainty of
+// catching a regression. Total cost ≈ 3s.
 void test_topk_no_duplicates(void) {
-  // Same position as test_topk_full_solve_no_pipe. With eplies=4,
-  // threads=6, etopk=10, NWL20 lex, PV[0] and PV[2] come back with
-  // moves[0].tiny_move = 0x20018d, score=11, num_moves=3 — the
-  // walk-down re-search lands on two distinct PVLines that both
-  // claim the same first move. Reproduces reliably with seed=42.
-  struct {
-    const char *cgp;
-    int eplies;
-    int threads;
-    int etopk;
-  } positions[] = {
-      {"9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0",
-       4, 6, 10},
-  };
-  const int npos = (int)(sizeof(positions) / sizeof(positions[0]));
-
-  for (int p = 0; p < npos; p++) {
+  static const int kIterations = 10;
+  for (int iter = 0; iter < kIterations; iter++) {
     Config *config = config_create_or_die("set -s1 score -s2 score");
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "cgp %s -lex NWL20", positions[p].cgp);
-    load_and_exec_config_or_die(config, cmd);
+    load_and_exec_config_or_die(
+        config,
+        "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+        "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+        "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
 
     EndgameCtx *ctx = NULL;
     EndgameArgs args = {0};
     args.thread_control = config_get_thread_control(config);
     args.game = config_get_game(config);
-    args.plies = positions[p].eplies;
+    args.plies = 3;
     args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
     args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = positions[p].threads;
-    args.num_top_moves = positions[p].etopk;
+    args.num_threads = 2;
+    args.num_top_moves = 5;
     args.use_heuristics = true;
     args.forced_pass_bypass = true;
     args.enable_iterative_deepening = true;
@@ -791,11 +785,13 @@ void test_topk_no_duplicates(void) {
       for (int j = i + 1; j < num_pvs; j++) {
         const PVLine *pj = endgame_results_get_multi_pvline(results, j);
         if (pvline_first_move_equivalent(pi, pj)) {
-          printf("position[%d] PV[%d] and PV[%d] share moves[0].tiny_move "
+          printf("iter=%d PV[%d] and PV[%d] share moves[0].tiny_move "
                  "(0x%llx)\n",
-                 p, i, j, (unsigned long long)pi->moves[0].tiny_move);
-          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score, pi->num_moves);
-          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score, pj->num_moves);
+                 iter, i, j, (unsigned long long)pi->moves[0].tiny_move);
+          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score,
+                 pi->num_moves);
+          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score,
+                 pj->num_moves);
           assert(0 && "duplicate first move in multi_pvs");
         }
       }
@@ -821,8 +817,7 @@ void test_endgame(void) {
   test_endgame_interrupt();
   test_topk_fully_solved();
   test_topk_full_solve_no_pipe();
-  // test_topk_no_duplicates is an on-demand test (registered in
-  // on_demand_test_table as "topk_dup_repro"); not run here.
+  test_topk_no_duplicates();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
