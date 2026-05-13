@@ -133,6 +133,15 @@ static void install_crash_handlers(void) {
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGFPE, &sa, NULL);
   sigaction(SIGILL, &sa, NULL);
+
+  // Touch the log file so we can verify the handler at least got
+  // installed — if /tmp/magpie_crash.log doesn't exist post-crash,
+  // we know the install never ran or got clobbered.
+  int fd = open(MAGPIE_CRASH_LOG, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+  if (fd >= 0) {
+    crash_write(fd, "magpie_tui started, crash handlers installed\n");
+    close(fd);
+  }
 }
 
 typedef struct {
@@ -242,20 +251,23 @@ int main(int argc, char *argv[]) {
 
   setlocale(LC_ALL, "");
 
+  // Unbuffer stderr so engine log_fatal output reaches disk before
+  // abort().
+  setvbuf(stderr, NULL, _IONBF, 0);
+
   notcurses_options opts = {
-      .flags = NCOPTION_SUPPRESS_BANNERS,
+      // NO_QUIT_SIGHANDLERS prevents notcurses from installing its
+      // own SIGABRT/SIGSEGV/etc handlers during init — we install our
+      // own immediately below and want them to be the ONLY thing on
+      // the signal, otherwise notcurses's chained handler eats the
+      // crash before our backtrace dump runs.
+      .flags = NCOPTION_SUPPRESS_BANNERS | NCOPTION_NO_QUIT_SIGHANDLERS,
   };
   struct notcurses *nc = notcurses_core_init(&opts, NULL);
   if (nc == NULL) {
     return 1;
   }
   g_crash_nc = nc;
-
-  // Unbuffer stderr so engine log_fatal output reaches disk before
-  // abort(); install our crash handlers *after* notcurses_core_init
-  // because notcurses installs its own SIGABRT/SIGSEGV handlers
-  // during init and would clobber ours otherwise.
-  setvbuf(stderr, NULL, _IONBF, 0);
   install_crash_handlers();
   // Hard-disable scrolling on the std plane: macOS Terminal can otherwise
   // scroll the alt screen when render coords overflow the visible area
