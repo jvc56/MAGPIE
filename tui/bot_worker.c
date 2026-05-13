@@ -385,8 +385,25 @@ static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
         if (pvi->num_moves <= 0) {
           continue;
         }
-        snap->moves[filled] = move_create();
-        small_move_to_move(snap->moves[filled], &pvi->moves[0], snap->board);
+        Move *candidate = move_create();
+        small_move_to_move(candidate, &pvi->moves[0], snap->board);
+        // The engine's multi-PV extraction can produce duplicate
+        // first moves in distinct PVLines (extract_multi_pvs doesn't
+        // dedupe). Drop them defensively so the leaderboard doesn't
+        // list the same play twice.
+        bool duplicate = false;
+        for (int j = 0; j < filled; j++) {
+          if (compare_moves_without_equity(candidate, snap->moves[j],
+                                            true) == -1) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (duplicate) {
+          move_destroy(candidate);
+          continue;
+        }
+        snap->moves[filled] = candidate;
         snap->values[filled] = (int)pvi->score;
         filled++;
       }
