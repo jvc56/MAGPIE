@@ -163,6 +163,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -308,6 +309,7 @@ void test_single_pv_display(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 5;
@@ -367,6 +369,7 @@ void test_ctx_reuse(void) {
         DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
     endgame_args.num_threads = thread_counts[solve_idx];
     endgame_args.use_heuristics = true;
+    endgame_args.enable_iterative_deepening = true;
     endgame_args.forced_pass_bypass = true;
     endgame_args.enable_pv_display = true;
     endgame_args.num_top_moves = 1;
@@ -467,6 +470,7 @@ void test_kue(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -529,6 +533,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .num_threads = 1,
       .num_top_moves = 1,
       .use_heuristics = false,
+      .enable_iterative_deepening = true,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
@@ -554,6 +559,165 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
+// Test that topk_fully_solved fires when the actual game is shorter than eplies
+// (all branches end before the depth limit), and does NOT fire when unfinished
+// leaves remain. Covers single-thread, multi-thread, single-PV, and etopk.
+void test_topk_fully_solved(void) {
+  // --- Case 1: game ends before eplies (early-stop must fire) ---
+  // BGIV/DEHILOR: 4+7=11 tiles. Score=11, confirmed by test_solve_standard
+  // at eplies=4. With eplies=10, early-stop fires at depth 7-8 (< 10),
+  // well before the depth limit. The search completes in seconds even
+  // single-threaded because the 11-tile game tree is small.
+  const char *short_cgp =
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+
+  typedef struct {
+    int threads;
+    int topk;
+  } EarlyStopCase;
+  const EarlyStopCase cases[] = {
+      {1, 1}, // single-thread, single-PV
+      {6, 1}, // multi-thread ABDADA, single-PV
+      {6, 3}, // multi-thread ABDADA, etopk
+  };
+  for (int ci = 0; ci < 3; ci++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, short_cgp);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 10;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = cases[ci].threads;
+    args.num_top_moves = cases[ci].topk;
+    args.use_heuristics = true;
+    args.enable_iterative_deepening = true;
+    args.forced_pass_bypass = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved early-stop (threads=%d topk=%d): "
+           "score=%d completed_depth=%d\n",
+           cases[ci].threads, cases[ci].topk, pv->score, completed_depth);
+    // Correct score: 11 (matches test_solve_standard at eplies=4).
+    assert(pv->score == 11);
+    // Early-stop must have fired (completed_depth < eplies=10).
+    assert(completed_depth > 0 && completed_depth < 10);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+
+  // --- Case 2: non-terminal horizon (early-stop must NOT fire) ---
+  // ?AEEKSU/BEIQUVW: 14 tiles. At eplies=2 most branches still have tiles
+  // in hand → any_leaf_game_unfinished is set → topk_fully_solved stays false.
+  // The solver must terminate via ply==plies, so completed_depth == 2.
+  {
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -ttfraction 0.5");
+    load_and_exec_config_or_die(
+        config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+                "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+                "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+                "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 2;
+    args.tt_fraction_of_mem = 0.5;
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 6;
+    args.num_top_moves = 3;
+    args.use_heuristics = false;
+    args.enable_iterative_deepening = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved non-terminal horizon: completed_depth=%d\n",
+           completed_depth);
+    // Early-stop must NOT have fired; solver must reach the eplies limit.
+    assert(completed_depth == 2);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
+// Asserts the post-solve re-search produces TT_EXACT entries throughout each
+// multi-PV display PV: every PV's negamax_depth covers all of its moves so
+// the display never renders a "|" mid-PV. Uses BGIV/DEHILOR (the same
+// short-game position as test_topk_fully_solved); at eplies=4 the search
+// reaches game-end on the principal lines for all top-10 root moves, so
+// the walk-down re-search has room to populate EXACT entries throughout.
+void test_topk_full_solve_no_pipe(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 4;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 6;
+  args.num_top_moves = 10;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = true;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  assert(num_pvs > 1);
+  // For each PV whose game tree fits within the eplies budget, the post-solve
+  // re-search + walk-down should populate TT_EXACT entries the whole way down,
+  // so the display would render no "|" mid-PV. PVs that extend past eplies
+  // (long pass-heavy lines etc.) get greedy moves appended past the horizon
+  // and legitimately have negamax_depth < num_moves.
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    const PVLine *pv = endgame_results_get_multi_pvline(results, pv_idx);
+    if (pv->num_moves <= args.plies) {
+      assert(pv->negamax_depth >= pv->num_moves);
+    }
+  }
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -566,6 +730,8 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  test_topk_fully_solved();
+  test_topk_full_solve_no_pipe();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
@@ -596,6 +762,7 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -649,6 +816,7 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
   endgame_args.seed = 42;
@@ -714,4 +882,45 @@ void test_endgame_wasm(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+}
+
+// Regression test for stack-buffer-overflow in abdada_negamax: topk_values
+// was sized to MAX_VARIANT_LENGTH (25) but multi_pv_k can go up to
+// MAX_ENDGAME_DISPLAY_PVS (100) via -etopk. With -etopk > 25, topk_insert
+// writes past the array, clobbering topk_n and adjacent stack. ASAN catches
+// this on dev builds; release builds crash with SIGABRT from the stack
+// canary. Uses the same short BGIV/DEHILOR position as test_topk_fully_solved.
+void test_topk50_overflow_repro(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 4;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.num_top_moves = 50; // > MAX_VARIANT_LENGTH (25); pre-fix overflows
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  // Intentionally leave args.enable_iterative_deepening = false: this
+  // exercises the depth-jumps-to-plies path on thread 0, which (along with
+  // -etopk 50) is the configuration that originally tripped the overflow.
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  printf("topk50 overflow repro: solved\n");
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
