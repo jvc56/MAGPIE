@@ -746,11 +746,11 @@ static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
 // ENDGAME_RESULT_BEST. Reproduces only with multi-PV (num_top_moves >= 2)
 // and parallel threads, and only when ties exist among root moves.
 //
-// Pre-fix this fired ~70% of runs (depended on thread scheduling); the
-// outer iter loop here keeps the test cheap while making detection
-// effectively certain if the regression returns.
+// Pre-fix at this config (eplies=3, threads=2, etopk=5) the bug fired in
+// ~97% of solves, so 10 iterations gives ~1 - 0.03^10 ≈ certainty of
+// catching a regression. Total cost ≈ 3s.
 void test_topk_no_duplicates(void) {
-  static const int kIterations = 5;
+  static const int kIterations = 10;
   for (int iter = 0; iter < kIterations; iter++) {
     Config *config = config_create_or_die("set -s1 score -s2 score");
     load_and_exec_config_or_die(
@@ -763,11 +763,11 @@ void test_topk_no_duplicates(void) {
     EndgameArgs args = {0};
     args.thread_control = config_get_thread_control(config);
     args.game = config_get_game(config);
-    args.plies = 4;
+    args.plies = 3;
     args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
     args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = 6;
-    args.num_top_moves = 10;
+    args.num_threads = 2;
+    args.num_top_moves = 5;
     args.use_heuristics = true;
     args.forced_pass_bypass = true;
     args.enable_iterative_deepening = true;
