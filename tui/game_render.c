@@ -19,6 +19,9 @@
 #include "theme.h"
 #include "tui_resize.h"
 #include <ctype.h>
+#ifdef __APPLE__
+#include <mach/mach.h>
+#endif
 #include <notcurses/notcurses.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -2505,19 +2508,60 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row, (int)col, " ");
   }
 
-  // Left side: "Language · Lexicon · 60 fps". FPS is tacked onto the
-  // left so it sits next to the other engine-state readouts; the right
-  // side is reserved for transient control hints. We show an integer to
-  // avoid the last digit twitching every frame.
+  // Left side: "Language · Lexicon · 60 fps · 234MB ram". FPS and the
+  // process resident-set size are tacked onto the left so they sit
+  // next to the other engine-state readouts; the right side is
+  // reserved for transient control hints. Show fps as an integer so
+  // the last digit doesn't twitch every frame.
   const double fps = measure_fps();
-  char left_buf[128];
+  char mem_str[24];
+  mem_str[0] = '\0';
+  uint64_t resident_bytes = 0;
+#ifdef __APPLE__
+  {
+    mach_task_basic_info_data_t info;
+    mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+    if (task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                  (task_info_t)&info, &count) == KERN_SUCCESS) {
+      resident_bytes = (uint64_t)info.resident_size;
+    }
+  }
+#endif
+  if (resident_bytes > 0) {
+    // Pick the largest unit that keeps the number compact and the
+    // precision sane: GB always shows 1 decimal; MB shows 2/1/0
+    // decimals depending on magnitude so we land at "9.23MB",
+    // "12.3MB", "234MB", "2.4GB".
+    double val;
+    const char *unit;
+    int decimals;
+    if (resident_bytes >= (1ULL << 30)) {
+      val = (double)resident_bytes / (1024.0 * 1024.0 * 1024.0);
+      unit = "GB";
+      decimals = 1;
+    } else {
+      val = (double)resident_bytes / (1024.0 * 1024.0);
+      unit = "MB";
+      if (val >= 100.0) {
+        decimals = 0;
+      } else if (val >= 10.0) {
+        decimals = 1;
+      } else {
+        decimals = 2;
+      }
+    }
+    snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s ram", decimals, val,
+             unit);
+  }
+  char left_buf[160];
   if (fps > 0.0) {
-    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s \xc2\xb7 %d fps",
+    snprintf(left_buf, sizeof(left_buf),
+             " %s \xc2\xb7 %s \xc2\xb7 %d fps%s",
              language_for_lexicon(state->lexicon), state->lexicon,
-             (int)(fps + 0.5));
+             (int)(fps + 0.5), mem_str);
   } else {
-    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
-             language_for_lexicon(state->lexicon), state->lexicon);
+    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s%s",
+             language_for_lexicon(state->lexicon), state->lexicon, mem_str);
   }
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
