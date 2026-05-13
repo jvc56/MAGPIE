@@ -34,7 +34,7 @@
 
 enum {
   SIM_CANDIDATES = 15,
-  SIM_PLIES = 5,
+  SIM_PLIES = 4,
   ENDGAME_PLIES = 25,
   // Untimed games still want a noticeable pause per turn so the player
   // can read the previous move; 5s gives the engine real work to do
