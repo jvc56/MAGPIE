@@ -102,6 +102,14 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
     copy_error(err, error_message, error_message_size);
     goto fail;
   }
+  // Load WMP for the faster wordmap-backed movegen. Best-effort: if
+  // the bundled lexicon doesn't ship a .wmp the engine still runs on
+  // the KWG alone, so we reset the error stack and continue.
+  players_data_set(out_state->players_data, PLAYERS_DATA_TYPE_WMP, data_paths,
+                   lexicon, lexicon, false, err);
+  if (!error_stack_is_empty(err)) {
+    error_stack_reset(err);
+  }
   // Both players: pick the best move by static-eval equity.
   players_data_set_move_sort_type(out_state->players_data, 0, MOVE_SORT_EQUITY);
   players_data_set_move_sort_type(out_state->players_data, 1, MOVE_SORT_EQUITY);
