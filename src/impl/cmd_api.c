@@ -60,4 +60,7 @@ void magpie_stop_current_command(const Magpie *mp) {
   thread_control_set_status(tc, THREAD_CONTROL_STATUS_USER_INTERRUPT);
 }
 
-Config *magpie_get_config(const Magpie *mp) { return mp->config; }
+int magpie_get_thread_status(const Magpie *mp) {
+  ThreadControl *tc = config_get_thread_control(mp->config);
+  return (int)thread_control_get_status(tc);
+}

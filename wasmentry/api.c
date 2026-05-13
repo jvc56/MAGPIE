@@ -1,7 +1,5 @@
 #include "../src/compat/cpthread.h"
-#include "../src/ent/thread_control.h"
 #include "../src/impl/cmd_api.h"
-#include "../src/impl/config.h"
 #include "../src/impl/exec.h"
 #include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
@@ -118,15 +116,7 @@ int wasm_get_thread_status(void) {
   if (!wasm_magpie) {
     return 0;
   }
-  Config *config = magpie_get_config(wasm_magpie);
-  if (!config) {
-    return 0;
-  }
-  ThreadControl *tc = config_get_thread_control(config);
-  if (!tc) {
-    return 0;
-  }
-  return (int)thread_control_get_status(tc);
+  return magpie_get_thread_status(wasm_magpie);
 }
 
 void wasm_stop_command(void) {

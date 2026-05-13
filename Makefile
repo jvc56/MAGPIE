@@ -46,9 +46,6 @@ cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
-cflags.dll_dev = -g -O0 -fpic -Wall
-cflags.dll_release = -O3 -fpic -flto -march=native -Wall -Wno-trigraphs
-
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
@@ -57,8 +54,6 @@ ldflags.vlg := -pthread
 ldflags.release := -pthread
 ldflags.profile := -pthread
 ldflags.cov := -pthread
-ldflags.dll_dev := -pthread
-ldflags.dll_release := -pthread
 
 CFLAGS := ${cflags.${BUILD}}
 
@@ -81,8 +76,8 @@ LDLIBS   := -lm
 
 all: magpie magpie_test
 
-magpie_so: $(OBJ_SRC)
-	$(CC) -shared $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o libmagpie.so
+libmagpie_core.a: $(OBJ_SRC)
+	ar rcs $@ $^
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
@@ -104,7 +99,7 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR)
+	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR) libmagpie_core.a
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
