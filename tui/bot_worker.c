@@ -403,9 +403,13 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   atomic_store(&state->endgame_results_active, true);
 
   EndgameResults *results = state->endgame_results;
-  EndgameCtx *ctx = NULL;
   ErrorStack *err = error_stack_create();
-  endgame_solve(&ctx, &args, results, err);
+  // Reuse state->endgame_ctx across turns. endgame_solve allocates
+  // on first call (*ctx == NULL) and reuses afterward — including
+  // the transposition table, which is large enough (10% of system
+  // memory by default) that recreating it every turn was the most
+  // likely source of the SIGABRT we kept hitting under fragmentation.
+  endgame_solve(&state->endgame_ctx, &args, results, err);
 
   atomic_store(&wd.finished, true);
   if (wd_started) {
@@ -462,9 +466,8 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
 
   atomic_store(&state->endgame_results_active, false);
 
-  if (ctx != NULL) {
-    endgame_ctx_destroy(ctx);
-  }
+  // state->endgame_ctx is owned by the game state and freed in
+  // tui_game_state_destroy — don't tear it down here.
   error_stack_destroy(err);
   thread_control_destroy(tc);
   return got_move;

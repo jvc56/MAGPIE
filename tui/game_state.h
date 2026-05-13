@@ -19,6 +19,7 @@ struct MoveList;
 struct WinPct;
 struct SimResults;
 struct EndgameResults;
+struct EndgameCtx;
 struct Board;
 struct Move;
 struct Rack;
@@ -118,6 +119,11 @@ typedef struct {
   // begins so the renderer can show W/T/L vs the current score
   // without having to know which player was on turn at solve time.
   struct EndgameResults *endgame_results;
+  // Reused across turns so the TT and small-move arena don't get
+  // reallocated each solve — the old per-turn pattern churned ~1.6GB
+  // of virtual memory and could SIGABRT under fragmentation. Owned
+  // by the bot worker thread; destroyed in tui_game_state_destroy.
+  struct EndgameCtx *endgame_ctx;
   _Atomic bool endgame_results_active;
   _Atomic int endgame_results_turn_idx;
   _Atomic int endgame_initial_spread;

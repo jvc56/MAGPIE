@@ -7,6 +7,7 @@
 #include "../src/ent/game.h"
 #include "../src/ent/board.h"
 #include "../src/ent/endgame_results.h"
+#include "../src/impl/endgame.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
@@ -251,6 +252,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->endgame_results != NULL) {
     endgame_results_destroy(state->endgame_results);
+  }
+  if (state->endgame_ctx != NULL) {
+    endgame_ctx_destroy(state->endgame_ctx);
   }
   tui_endgame_snapshot_clear(&state->endgame_snapshot);
   memset(state, 0, sizeof(*state));
