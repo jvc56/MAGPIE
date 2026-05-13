@@ -100,7 +100,7 @@ static int append_pending_history(TuiGameState *state, int player_idx,
 //
 // Caller must hold state->mutex.
 static void finalize_history(TuiGameState *state, int idx, const Move *move,
-                             int score, int total_after) {
+                             int score, int total_after, const Rack *leave) {
   if (idx < 0 || idx >= state->history_count) {
     return;
   }
@@ -111,6 +111,16 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
                           false);
+  // Append the post-play leave in parentheses, e.g. "3L ODAH (IUS)".
+  // The history renderer's segmenter leaves anything inside parens
+  // unbolded, so the leave reads as supplementary to the move text.
+  // Empty leaves (bingos and other plays that empty the rack) skip
+  // the appended chunk entirely.
+  if (leave != NULL && !rack_is_empty(leave)) {
+    string_builder_add_string(sb, " (");
+    string_builder_add_rack(sb, leave, state->ld, false);
+    string_builder_add_string(sb, ")");
+  }
   size_t move_len = 0;
   char *move_dump = string_builder_dump(sb, &move_len);
   copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
@@ -477,7 +487,8 @@ static void *bot_thread_main(void *arg) {
       }
     }
     const int total_after_move = post_play_score - bonus;
-    finalize_history(state, pending_idx, chosen, move_score, total_after_move);
+    finalize_history(state, pending_idx, chosen, move_score, total_after_move,
+                     &leave);
 
     // Charge wall time used to the on-turn player. Clamp negative
     // deltas (clock skew / bad turn_started) to 0 so a single bad
