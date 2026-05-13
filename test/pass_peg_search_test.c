@@ -2207,6 +2207,19 @@ typedef struct PegNEnumCtx {
   // emitted as sorted-by-type-index tile lists. Examples: "III/A",
   // "GII/U;IIT/A".
   const char *scenario_filter;
+
+  // Evaluation depth.
+  //   0 = greedy playout from post-cand state (mover & opp both greedy).
+  //   >=1 = enumerate opp's top-K moves at post-cand; for each, apply,
+  //         then run endgame_solve at `depth` plies (bag is empty after
+  //         opp draws the last bag tile). Take MIN over branches —
+  //         matches macondo "guaranteed wins": any opp move that beats
+  //         mover ⇒ mark scenario a loss.
+  int depth;
+  // Number of opp moves enumerated at d>=1. Top-K by EQUITY.
+  int opp_top_k;
+  // ThreadControl for endgame_solve at d>=1.
+  ThreadControl *thread_control;
 } PegNEnumCtx;
 
 // True when (drawn_str, remaining_str) matches one of the semicolon-
@@ -2288,18 +2301,197 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     snprintf(post_cand_cgp, sizeof(post_cand_cgp), "%s", cgp ? cgp : "");
     free(cgp);
   }
-  MoveList *playout_ml = move_list_create(4096);
+
+  int32_t mover_total = 0;
   char pv_text[1024] = {0};
   char final_cgp[512] = {0};
   char mover_rack_end[32] = {0};
   char opp_rack_end[32] = {0};
-  const int32_t mover_total = pegN_greedy_playout_pv(
-      game, ctx->mover_idx, playout_ml, 0,
-      ctx->tsv_f ? pv_text : NULL, sizeof(pv_text),
-      ctx->tsv_f ? mover_rack_end : NULL, sizeof(mover_rack_end),
-      ctx->tsv_f ? opp_rack_end : NULL, sizeof(opp_rack_end),
-      ctx->tsv_f ? final_cgp : NULL, sizeof(final_cgp));
-  move_list_destroy(playout_ml);
+
+  if (ctx->depth == 0) {
+    // Pure greedy from post-cand: opp + mover both greedy to game end.
+    MoveList *playout_ml = move_list_create(4096);
+    mover_total = pegN_greedy_playout_pv(
+        game, ctx->mover_idx, playout_ml, 0,
+        ctx->tsv_f ? pv_text : NULL, sizeof(pv_text),
+        ctx->tsv_f ? mover_rack_end : NULL, sizeof(mover_rack_end),
+        ctx->tsv_f ? opp_rack_end : NULL, sizeof(opp_rack_end),
+        ctx->tsv_f ? final_cgp : NULL, sizeof(final_cgp));
+    move_list_destroy(playout_ml);
+  } else {
+    // d>=1: enumerate opp's top-K moves, apply each, then evaluate the
+    // resulting position via endgame_solve at `depth` plies (bag is empty
+    // after opp draws the last tile, so endgame_solve gives optimal play
+    // up to that depth). Take MIN over branches.
+    MoveList *opp_ml = move_list_create(16384);
+    const MoveGenArgs opp_ga = {
+        .game = game,
+        .move_list = opp_ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&opp_ga);
+    const int n_opp = move_list_get_count(opp_ml);
+    const int n_eval =
+        n_opp < ctx->opp_top_k ? n_opp : ctx->opp_top_k;
+
+    int32_t worst_for_mover = 0;
+    bool have_any = false;
+    char worst_opp_text[64] = {0};
+    StringBuilder *pv_builder = ctx->tsv_f ? string_builder_create() : NULL;
+
+    int branches_run = 0;
+    for (int opp_rank = 0; opp_rank < n_opp && branches_run < n_eval;
+         opp_rank++) {
+      const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
+      // Skip PASS / EXCHANGE: those leave the bag non-empty, which breaks
+      // endgame_solve's bag-empty assumption (it falls into a degenerate
+      // both-pass-terminal scoring path). Tile-placement moves drain the
+      // last bag tile via play_move's draw, leaving a clean 0-bag state.
+      const int move_type = move_get_type(opp_move);
+      if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+        continue;
+      }
+      branches_run++;
+      Game *branch = game_duplicate(game);
+      game_set_endgame_solving_mode(branch);
+      game_set_backup_mode(branch, BACKUP_MODE_OFF);
+      // Capture opp move text for this branch's PV.
+      char opp_move_text[64] = {0};
+      if (pv_builder != NULL) {
+        StringBuilder *opp_sb = string_builder_create();
+        string_builder_add_move(opp_sb, game_get_board(branch), opp_move,
+                                game_get_ld(branch), true);
+        snprintf(opp_move_text, sizeof(opp_move_text), "%s",
+                 string_builder_peek(opp_sb));
+        string_builder_destroy(opp_sb);
+      }
+      play_move(opp_move, branch, NULL);
+      game_set_game_end_reason(branch, GAME_END_REASON_NONE);
+
+      // After opp plays, the bag is empty (mover drew K_drawn tiles, opp
+      // drew the remaining bag_remaining tiles). Run endgame_solve at
+      // ctx->depth plies for an optimal-play evaluation.
+      int32_t branch_total = 0;
+      char branch_pv[1024] = {0};
+      char branch_mover_rack[32] = {0};
+      char branch_opp_rack[32] = {0};
+      char branch_final_cgp[512] = {0};
+      {
+        const LetterDistribution *bld = game_get_ld(branch);
+        const int32_t mover_lead = equity_to_int(player_get_score(
+            game_get_player(branch, ctx->mover_idx))) -
+            equity_to_int(player_get_score(
+                game_get_player(branch, 1 - ctx->mover_idx)));
+        if (game_get_game_end_reason(branch) != GAME_END_REASON_NONE) {
+          branch_total = mover_lead;
+        } else {
+          EndgameCtx *eg_ctx = NULL;
+          EndgameResults *eg_results = endgame_results_create();
+          EndgameArgs ea = {
+              .thread_control = ctx->thread_control,
+              .game = branch,
+              .plies = ctx->depth,
+              .shared_tt = NULL,
+              .initial_small_move_arena_size =
+                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+              .num_threads = 1,
+              .use_heuristics = true,
+              .num_top_moves = 1,
+              .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+              .skip_word_pruning = false,
+              .thread_index_offset = 0,
+              .soft_time_limit = 5.0,
+              .hard_time_limit = 5.0,
+          };
+          endgame_solve_inline(&eg_ctx, &ea, eg_results);
+          const int eg_val =
+              endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+          // After opp's move, mover is on turn → eg_val is mover's gain.
+          branch_total = mover_lead + eg_val;
+          // Optional: capture endgame PV as text.
+          if (pv_builder) {
+            const PVLine *pv =
+                endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
+            if (pv && pv->num_moves > 0) {
+              Game *pv_game = game_duplicate(branch);
+              game_set_endgame_solving_mode(pv_game);
+              game_set_backup_mode(pv_game, BACKUP_MODE_OFF);
+              StringBuilder *pv_sb = string_builder_create();
+              for (int mi = 0; mi < pv->num_moves; mi++) {
+                Move m_full;
+                small_move_to_move(&m_full, &pv->moves[mi],
+                                   game_get_board(pv_game));
+                if (mi > 0) {
+                  string_builder_add_string(pv_sb, " | ");
+                }
+                string_builder_add_move(pv_sb, game_get_board(pv_game),
+                                        &m_full, bld, true);
+                play_move(&m_full, pv_game, NULL);
+              }
+              snprintf(branch_pv, sizeof(branch_pv), "%s",
+                       string_builder_peek(pv_sb));
+              string_builder_destroy(pv_sb);
+              char *cgp = game_get_cgp(pv_game, true);
+              snprintf(branch_final_cgp, sizeof(branch_final_cgp), "%s",
+                       cgp ? cgp : "");
+              free(cgp);
+              StringBuilder *rsb = string_builder_create();
+              string_builder_add_rack(
+                  rsb,
+                  player_get_rack(
+                      game_get_player(pv_game, ctx->mover_idx)),
+                  bld, false);
+              snprintf(branch_mover_rack, sizeof(branch_mover_rack), "%s",
+                       string_builder_peek(rsb));
+              string_builder_destroy(rsb);
+              StringBuilder *rsb2 = string_builder_create();
+              string_builder_add_rack(
+                  rsb2,
+                  player_get_rack(
+                      game_get_player(pv_game, 1 - ctx->mover_idx)),
+                  bld, false);
+              snprintf(branch_opp_rack, sizeof(branch_opp_rack), "%s",
+                       string_builder_peek(rsb2));
+              string_builder_destroy(rsb2);
+              game_destroy(pv_game);
+            }
+          }
+          endgame_ctx_destroy(eg_ctx);
+          endgame_results_destroy(eg_results);
+        }
+      }
+      game_destroy(branch);
+
+      if (!have_any || branch_total < worst_for_mover) {
+        worst_for_mover = branch_total;
+        snprintf(worst_opp_text, sizeof(worst_opp_text), "%s", opp_move_text);
+        if (pv_builder) {
+          // Capture the FULL PV for the worst branch in the TSV row: opp's
+          // move first, then the greedy continuation that pegN_greedy_*
+          // recorded.
+          snprintf(pv_text, sizeof(pv_text), "%s%s%s", opp_move_text,
+                   branch_pv[0] ? " | " : "", branch_pv);
+          snprintf(final_cgp, sizeof(final_cgp), "%s", branch_final_cgp);
+          snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                   branch_mover_rack);
+          snprintf(opp_rack_end, sizeof(opp_rack_end), "%s", branch_opp_rack);
+        }
+        have_any = true;
+      }
+    }
+    if (pv_builder) {
+      string_builder_destroy(pv_builder);
+    }
+    move_list_destroy(opp_ml);
+    mover_total = worst_for_mover;
+    (void)worst_opp_text;
+  }
   game_destroy(game);
 
   ctx->res->weight_sum += weight;
@@ -2373,14 +2565,22 @@ void test_pass_pegN_greedy_bench(void) {
   const char *only_scen_env = getenv("PASSPEGN_GREEDY_ONLY_SCEN");
   const char *scenario_filter =
       only_scen_env && *only_scen_env ? only_scen_env : NULL;
+  const char *depth_env = getenv("PASSPEGN_GREEDY_DEPTH");
+  const int depth = depth_env && *depth_env ? atoi(depth_env) : 0;
+  const char *opp_topk_env = getenv("PASSPEGN_GREEDY_OPP_TOP_K");
+  const int opp_top_k =
+      opp_topk_env && *opp_topk_env ? atoi(opp_topk_env) : 8;
   const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
   const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
 
   char **cgps = NULL;
   int n_pos = load_cgp_lines(path, &cgps, 1000);
   if (n_pos == 0) log_fatal("no positions loaded from %s", path);
-  fprintf(stderr, "[pegNgreedy] loaded %d positions from %s%s%s\n", n_pos,
-          path, scenario_filter ? "  scenario_filter=" : "",
+  fprintf(stderr,
+          "[pegNgreedy] loaded %d positions from %s  depth=%d  opp_top_k=%d"
+          "%s%s\n",
+          n_pos, path, depth, opp_top_k,
+          scenario_filter ? "  scenario_filter=" : "",
           scenario_filter ? scenario_filter : "");
   fflush(stderr);
 
@@ -2512,6 +2712,9 @@ void test_pass_pegN_greedy_bench(void) {
           .tsv_f = tsv_f,
           .res = res,
           .scenario_filter = scenario_filter,
+          .depth = depth,
+          .opp_top_k = opp_top_k,
+          .thread_control = config_get_thread_control(config),
       };
       pegN_enum_outer_multiset(&enum_ctx, 0, N);
     }
