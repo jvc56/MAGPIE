@@ -2208,6 +2208,12 @@ typedef struct PegNEnumCtx {
   // "GII/U;IIT/A".
   const char *scenario_filter;
 
+  // Optional semicolon-separated list of substrings; when non-NULL, only
+  // opp moves whose movegen text contains one of these substrings are
+  // considered. Lets us isolate specific opp moves (e.g. TEMPURA, 6D (T)A)
+  // when probing a single scenario at depth.
+  const char *opp_move_filter;
+
   // Evaluation depth.
   //   0 = greedy playout from post-cand state (mover & opp both greedy).
   //   >=1 = enumerate opp's top-K moves at post-cand; for each, apply,
@@ -2340,6 +2346,248 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     const int n_eval =
         n_opp < ctx->opp_top_k ? n_opp : ctx->opp_top_k;
 
+    // One-shot Noah utility ranking, per the "rational Noah" model. For
+    // each opp tile-placement move, evaluate it across all of opp's
+    // perceived bag-tile scenarios (= the distinct types in opp's unseen
+    // pool, which is mover_rack + bag from opp's POV), do a greedy
+    // playout for each, and aggregate into Noah's win% / mean spread.
+    // Noah utility = win_pct + alpha * mean_spread (alpha = env value).
+    // Triggered when PASSPEGN_GREEDY_NOAH_UTIL is set (its value = alpha).
+    const char *noah_env = getenv("PASSPEGN_GREEDY_NOAH_UTIL");
+    if (noah_env && *noah_env) {
+      const double alpha = atof(noah_env);
+      // If PASSPEGN_GREEDY_NOAH_DEPTH > 0, replace the per-hypothetical-
+      // scenario greedy playout with endgame_solve at that ply depth.
+      // The bag is empty after opp plays + draws the 1 bag tile, so
+      // endgame_solve is well-defined.
+      const char *noah_depth_env = getenv("PASSPEGN_GREEDY_NOAH_DEPTH");
+      const int noah_depth =
+          noah_depth_env && *noah_depth_env ? atoi(noah_depth_env) : 0;
+      const int opp_idx = 1 - ctx->mover_idx;
+      uint8_t opp_unseen[MAX_ALPHABET_SIZE];
+      pegN_compute_unseen(game, opp_idx, opp_unseen);
+      MachineLetter opp_types[MAX_ALPHABET_SIZE];
+      int opp_type_counts[MAX_ALPHABET_SIZE];
+      int n_opp_types = 0;
+      int opp_pool_total = 0;
+      for (int ml = 0; ml < ctx->ld_size; ml++) {
+        if (opp_unseen[ml] > 0) {
+          opp_types[n_opp_types] = (MachineLetter)ml;
+          opp_type_counts[n_opp_types] = (int)opp_unseen[ml];
+          opp_pool_total += (int)opp_unseen[ml];
+          n_opp_types++;
+        }
+      }
+      fprintf(stderr,
+              "[noah_util] scenario %s/%s  alpha=%g  opp_pool=%d tiles in "
+              "%d types\n",
+              drawn_str, remaining_str, alpha, opp_pool_total, n_opp_types);
+
+      typedef struct {
+        int move_idx;
+        double win_pct;
+        double mean_spread;
+        double utility;
+      } NoahRanked;
+      NoahRanked *ranked =
+          calloc_or_die((size_t)n_opp, sizeof(NoahRanked));
+      int n_ranked = 0;
+
+      for (int opp_rank = 0; opp_rank < n_opp; opp_rank++) {
+        const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
+        if (move_get_type(opp_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
+        }
+        int64_t weight_sum = 0;
+        double win_x2_sum = 0.0;
+        int64_t spread_sum = 0;
+        for (int ti = 0; ti < n_opp_types; ti++) {
+          const MachineLetter bag_X = opp_types[ti];
+          const int weight = opp_type_counts[ti];
+          // Build a hypothetical scenario: bag has bag_X (1 tile),
+          // mover_rack has the rest of opp_unseen (pool minus bag_X),
+          // opp_rack stays at the actual opp_rack, board is post-cand.
+          Game *hyp = game_duplicate(game);
+          game_set_endgame_solving_mode(hyp);
+          game_set_backup_mode(hyp, BACKUP_MODE_OFF);
+          Bag *hyp_bag = game_get_bag(hyp);
+          Rack *hyp_mover_rack =
+              player_get_rack(game_get_player(hyp, ctx->mover_idx));
+          // Drain hyp bag and mover rack, then refill.
+          for (int ml = 0; ml < ctx->ld_size; ml++) {
+            while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
+              (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
+            }
+          }
+          rack_reset(hyp_mover_rack);
+          bag_add_letter(hyp_bag, bag_X, 0);
+          for (int t = 0; t < n_opp_types; t++) {
+            int copies = opp_type_counts[t] - (t == ti ? 1 : 0);
+            for (int k = 0; k < copies; k++) {
+              rack_add_letter(hyp_mover_rack, opp_types[t]);
+            }
+          }
+          // Apply opp's move (uses opp_rack tiles, opp draws from bag).
+          play_move(opp_move, hyp, NULL);
+          game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
+          int32_t hyp_mover_total = 0;
+          if (noah_depth == 0) {
+            MoveList *pl = move_list_create(4096);
+            hyp_mover_total = pegN_greedy_playout_pv(
+                hyp, ctx->mover_idx, pl, 0, NULL, 0, NULL, 0, NULL, 0,
+                NULL, 0);
+            move_list_destroy(pl);
+          } else {
+            const int32_t hyp_lead = equity_to_int(player_get_score(
+                game_get_player(hyp, ctx->mover_idx))) -
+                equity_to_int(player_get_score(
+                    game_get_player(hyp, 1 - ctx->mover_idx)));
+            if (game_get_game_end_reason(hyp) != GAME_END_REASON_NONE) {
+              hyp_mover_total = hyp_lead;
+            } else {
+              EndgameCtx *eg = NULL;
+              EndgameResults *er = endgame_results_create();
+              EndgameArgs ea = {
+                  .thread_control = ctx->thread_control,
+                  .game = hyp,
+                  .plies = noah_depth,
+                  .shared_tt = NULL,
+                  .initial_small_move_arena_size =
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                  .num_threads = 1,
+                  .use_heuristics = true,
+                  .num_top_moves = 1,
+                  .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+                  .skip_word_pruning = false,
+                  .thread_index_offset = 0,
+                  .soft_time_limit = 5.0,
+                  .hard_time_limit = 5.0,
+              };
+              endgame_solve_inline(&eg, &ea, er);
+              const int eg_val = endgame_results_get_value(
+                  er, ENDGAME_RESULT_BEST);
+              hyp_mover_total = hyp_lead + eg_val;
+              endgame_ctx_destroy(eg);
+              endgame_results_destroy(er);
+            }
+          }
+          game_destroy(hyp);
+
+          // From Noah's POV: Noah wins if mover_total < 0; ties at 0.
+          weight_sum += weight;
+          spread_sum += (int64_t)(-hyp_mover_total) * weight;
+          if (hyp_mover_total < 0) {
+            win_x2_sum += 2.0 * weight;
+          } else if (hyp_mover_total == 0) {
+            win_x2_sum += weight;
+          }
+        }
+        const double noah_win_pct = win_x2_sum / (2.0 * (double)weight_sum);
+        const double noah_mean_spread =
+            (double)spread_sum / (double)weight_sum;
+        const double utility =
+            noah_win_pct + alpha * noah_mean_spread;
+        ranked[n_ranked].move_idx = opp_rank;
+        ranked[n_ranked].win_pct = noah_win_pct;
+        ranked[n_ranked].mean_spread = noah_mean_spread;
+        ranked[n_ranked].utility = utility;
+        n_ranked++;
+      }
+      // Sort by utility descending.
+      for (int i = 0; i < n_ranked; i++) {
+        for (int j = i + 1; j < n_ranked; j++) {
+          if (ranked[j].utility > ranked[i].utility) {
+            NoahRanked tmp = ranked[i];
+            ranked[i] = ranked[j];
+            ranked[j] = tmp;
+          }
+        }
+      }
+      const char *noah_topn_env = getenv("PASSPEGN_GREEDY_NOAH_TOPN");
+      const int noah_topn =
+          noah_topn_env && *noah_topn_env ? atoi(noah_topn_env) : 20;
+      fprintf(stderr, "[noah_util] top-%d by utility:\n", noah_topn);
+      for (int i = 0; i < n_ranked && i < noah_topn; i++) {
+        const Move *m = move_list_get_move(opp_ml, ranked[i].move_idx);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_move(sb, game_get_board(game), m,
+                                game_get_ld(game), true);
+        fprintf(stderr,
+                "  #%-3d  win=%.4f  spread=%+8.3f  util=%+9.5f  %s\n",
+                i + 1, ranked[i].win_pct, ranked[i].mean_spread,
+                ranked[i].utility, string_builder_peek(sb));
+        string_builder_destroy(sb);
+      }
+      // Locate the target moves of interest (TEMPURA, AUGUSTER, TEMPTER).
+      const char *targets[] = {"(TEMP)URA", "A(U)GUSTER", "(TEMP)TER",
+                                "(TEMP)ERAS", "(TEMP)TERS"};
+      for (size_t t = 0; t < sizeof(targets) / sizeof(targets[0]); t++) {
+        for (int i = 0; i < n_ranked; i++) {
+          const Move *m = move_list_get_move(opp_ml, ranked[i].move_idx);
+          StringBuilder *sb = string_builder_create();
+          string_builder_add_move(sb, game_get_board(game), m,
+                                  game_get_ld(game), true);
+          if (strstr(string_builder_peek(sb), targets[t]) != NULL) {
+            fprintf(stderr,
+                    "[noah_util] %-12s ranks #%-3d  win=%.4f  spread=%+7.3f"
+                    "  util=%+9.5f  %s\n",
+                    targets[t], i + 1, ranked[i].win_pct,
+                    ranked[i].mean_spread, ranked[i].utility,
+                    string_builder_peek(sb));
+            string_builder_destroy(sb);
+            break;
+          }
+          string_builder_destroy(sb);
+        }
+      }
+      free(ranked);
+      fflush(stderr);
+    }
+
+    // One-shot dump of every opp tile-placement move for this scenario,
+    // including the mover_total that results from greedy continuation
+    // (so you can sort by "actual outcome" instead of equity). Triggered
+    // by PASSPEGN_GREEDY_DUMP_OPP=1.
+    const char *dump_opp_env = getenv("PASSPEGN_GREEDY_DUMP_OPP");
+    if (dump_opp_env && atoi(dump_opp_env) == 1) {
+      fprintf(stderr,
+              "[dump_opp] scenario %s/%s  n_opp=%d  cand=%s\n",
+              drawn_str, remaining_str, n_opp, ctx->cand_txt);
+      for (int dump_rank = 0; dump_rank < n_opp; dump_rank++) {
+        const Move *dump_move = move_list_get_move(opp_ml, dump_rank);
+        const int dump_type = move_get_type(dump_move);
+        if (dump_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
+        }
+        // Apply this opp move on a branch and greedy-play to game end.
+        Game *dump_branch = game_duplicate(game);
+        game_set_endgame_solving_mode(dump_branch);
+        game_set_backup_mode(dump_branch, BACKUP_MODE_OFF);
+        play_move(dump_move, dump_branch, NULL);
+        game_set_game_end_reason(dump_branch, GAME_END_REASON_NONE);
+        MoveList *dump_pl = move_list_create(4096);
+        char dump_pv[1024] = {0};
+        char dump_mr[32] = {0};
+        char dump_or[32] = {0};
+        const int32_t dump_mt = pegN_greedy_playout_pv(
+            dump_branch, ctx->mover_idx, dump_pl, 0, dump_pv, sizeof(dump_pv),
+            dump_mr, sizeof(dump_mr), dump_or, sizeof(dump_or), NULL, 0);
+        move_list_destroy(dump_pl);
+        game_destroy(dump_branch);
+        StringBuilder *dump_sb = string_builder_create();
+        string_builder_add_move(dump_sb, game_get_board(game), dump_move,
+                                game_get_ld(game), true);
+        fprintf(stderr,
+                "  #%-5d  score=%-4d  greedy_mt=%+5d  %s  | pv: %s | end mover=[%s] opp=[%s]\n",
+                dump_rank + 1,
+                (int)equity_to_int(move_get_score(dump_move)),
+                (int)dump_mt, string_builder_peek(dump_sb), dump_pv, dump_mr,
+                dump_or);
+        string_builder_destroy(dump_sb);
+      }
+      fflush(stderr);
+    }
+
     int32_t worst_for_mover = 0;
     bool have_any = false;
     char worst_opp_text[64] = {0};
@@ -2361,9 +2609,10 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       Game *branch = game_duplicate(game);
       game_set_endgame_solving_mode(branch);
       game_set_backup_mode(branch, BACKUP_MODE_OFF);
-      // Capture opp move text for this branch's PV.
+      // Build the opp move text up front so the optional opp_move_filter
+      // can compare against it.
       char opp_move_text[64] = {0};
-      if (pv_builder != NULL) {
+      {
         StringBuilder *opp_sb = string_builder_create();
         string_builder_add_move(opp_sb, game_get_board(branch), opp_move,
                                 game_get_ld(branch), true);
@@ -2371,6 +2620,27 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                  string_builder_peek(opp_sb));
         string_builder_destroy(opp_sb);
       }
+      if (ctx->opp_move_filter) {
+        bool match = false;
+        char tmp[2048];
+        snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+        char *tok = strtok(tmp, ";");
+        while (tok != NULL) {
+          if (strstr(opp_move_text, tok) != NULL) {
+            match = true;
+            break;
+          }
+          tok = strtok(NULL, ";");
+        }
+        if (!match) {
+          game_destroy(branch);
+          branches_run--;
+          continue;
+        }
+      }
+      // Stash the per-branch text into the PV (it'll be prepended to the
+      // PV captured by endgame_solve below).
+      (void)opp_move_text;
       play_move(opp_move, branch, NULL);
       game_set_game_end_reason(branch, GAME_END_REASON_NONE);
 
@@ -2570,6 +2840,9 @@ void test_pass_pegN_greedy_bench(void) {
   const char *opp_topk_env = getenv("PASSPEGN_GREEDY_OPP_TOP_K");
   const int opp_top_k =
       opp_topk_env && *opp_topk_env ? atoi(opp_topk_env) : 8;
+  const char *opp_match_env = getenv("PASSPEGN_GREEDY_OPP_MATCH");
+  const char *opp_move_filter =
+      opp_match_env && *opp_match_env ? opp_match_env : NULL;
   const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
   const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
 
@@ -2712,6 +2985,7 @@ void test_pass_pegN_greedy_bench(void) {
           .tsv_f = tsv_f,
           .res = res,
           .scenario_filter = scenario_filter,
+          .opp_move_filter = opp_move_filter,
           .depth = depth,
           .opp_top_k = opp_top_k,
           .thread_control = config_get_thread_control(config),
