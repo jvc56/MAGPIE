@@ -7,5 +7,7 @@ void test_multi_pv(void);
 void test_kue(void);
 void test_eldar_v_stick(void);
 void test_monster_q(void);
+void test_topk50_overflow_repro(void);
+void test_topk_no_duplicates(void);
 
 #endif
