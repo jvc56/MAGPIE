@@ -158,6 +158,11 @@ struct EndgameCtx {
   EndgameBeforeSearchCallback before_search_callback;
   void *before_search_callback_data;
 
+  // Fired from thread 0 each time a root move completes at the current
+  // depth. Per-root resolution for live leaderboard re-ranking.
+  EndgamePerRootMoveCallback per_root_move_callback;
+  void *per_root_move_callback_data;
+
   // Owned by the caller:
   EndgameResults *results;
   ThreadControl *thread_control;
@@ -654,6 +659,8 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
   es->before_search_callback = endgame_args->before_search_callback;
   es->before_search_callback_data = endgame_args->before_search_callback_data;
+  es->per_root_move_callback = endgame_args->per_root_move_callback;
+  es->per_root_move_callback_data = endgame_args->per_root_move_callback_data;
   if (endgame_args->tt_fraction_of_mem == 0) {
     transposition_table_destroy(es->transposition_table);
     es->transposition_table = NULL;
@@ -2236,6 +2243,14 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // are not missed.
         if (worker->thread_index == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
+          if (worker->solver->per_root_move_callback) {
+            // Spread-adjusted value, same sign convention as PVLine.score.
+            const int32_t reported_value =
+                -value - worker->solver->initial_spread;
+            worker->solver->per_root_move_callback(
+                depth, idx, small_move, reported_value,
+                worker->solver->per_root_move_callback_data);
+          }
         }
       }
       if (is_ply2) {

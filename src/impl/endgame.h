@@ -52,6 +52,29 @@ typedef void (*EndgameBeforeSearchCallback)(
     int initial_move_count, int initial_spread, int solving_player,
     void *user_data);
 
+// Callback fired each time a root move completes its negamax evaluation
+// at the current iterative-deepening depth, from worker thread 0 only.
+// Lets clients re-rank the leaderboard live (per-root resolution rather
+// than per-completed-depth) and watch values swing during long depths.
+//
+// Parameters:
+//   depth      - the IDS depth this completion is at (>= 1)
+//   root_index - index of the root move within the (currently sorted)
+//                root_moves array, 0..root_moves_total-1
+//   move       - the root move that just completed (caller must copy if
+//                it needs the value past callback return)
+//   value      - the negamax value of this root, in spread units
+//                (already adjusted by initial_spread; same sign convention
+//                as PVLine.score)
+//   user_data  - opaque
+//
+// Fires from inside abdada_negamax. Multiple per-root callbacks may
+// happen back-to-back at the same depth as roots complete in scan order.
+// Implementations must be thread-safe even though only thread 0 calls.
+typedef void (*EndgamePerRootMoveCallback)(int depth, int root_index,
+                                           const struct SmallMove *move,
+                                           int32_t value, void *user_data);
+
 typedef struct EndgameArgs {
   ThreadControl *thread_control;
   const Game *game;
@@ -67,6 +90,8 @@ typedef struct EndgameArgs {
   void *per_ply_callback_data;
   EndgameBeforeSearchCallback before_search_callback;
   void *before_search_callback_data;
+  EndgamePerRootMoveCallback per_root_move_callback;
+  void *per_root_move_callback_data;
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;

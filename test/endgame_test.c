@@ -937,15 +937,36 @@ void test_before_search_callback(void) {
 // On-demand: streaming-progress test
 // ---------------------------------------------------------------------------
 
+// Two streaming modes for the on-demand demo. Both share the same
+// reader/printer thread; the difference is which signal source the
+// reader includes in each frame.
+typedef enum {
+  // Poll the ply2 atomics that are already exposed by
+  // endgame_ctx_get_progress. Adds intra-root sub-progress for the
+  // first root move's children.
+  STREAM_MODE_POLL_PLY2,
+  // Use the per_root_move_callback to track the last root completed.
+  // Gives per-root resolution across the whole top level, so the
+  // reader can describe live root-by-root completions.
+  STREAM_MODE_CALLBACK_PER_ROOT,
+} StreamMode;
+
 // Shared state between the main solver thread and the reader/printer thread.
 // All cross-thread fields are either atomic_* or guarded by `mutex`.
 typedef struct ProgressStream {
   EndgameCtx **ctx_pp;        // populated by endgame_solve when it creates ctx
-  cpthread_mutex_t mutex;     // guards completed-depth snapshot fields below
+  StreamMode mode;            // selects which signal the reader prints
+  cpthread_mutex_t mutex;     // guards the snapshot fields below
   bool seen_initial;          // before_search_callback has fired
   int last_completed_depth;   // most recent per_ply_callback's depth (0 = none)
   int32_t last_completed_val; // and value
   int initial_move_count;     // from before_search_callback
+  // Per-root callback snapshot (mode == STREAM_MODE_CALLBACK_PER_ROOT)
+  int last_root_depth;
+  int last_root_idx;
+  int32_t last_root_value;
+  uint64_t last_root_tiny;
+  int per_root_calls;
   int64_t solve_start_ns;
   atomic_int should_stop; // main thread sets to 1 when endgame_solve returns
   int frames_printed;     // bumped by the reader; used so we can verify
@@ -983,6 +1004,19 @@ static void stream_per_ply_cb(int depth, int32_t value,
   cpthread_mutex_unlock(&s->mutex);
 }
 
+static void stream_per_root_cb(int depth, int root_index,
+                               const struct SmallMove *move, int32_t value,
+                               void *user_data) {
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->last_root_depth = depth;
+  s->last_root_idx = root_index;
+  s->last_root_value = value;
+  s->last_root_tiny = move->tiny_move;
+  s->per_root_calls++;
+  cpthread_mutex_unlock(&s->mutex);
+}
+
 static void *stream_reader_thread(void *arg) {
   ProgressStream *s = (ProgressStream *)arg;
   while (!atomic_load(&s->should_stop)) {
@@ -992,29 +1026,58 @@ static void *stream_reader_thread(void *arg) {
     const int last_depth = s->last_completed_depth;
     const int32_t last_val = s->last_completed_val;
     const int initial_count = s->initial_move_count;
+    const int last_root_depth = s->last_root_depth;
+    const int last_root_idx = s->last_root_idx;
+    const int32_t last_root_value = s->last_root_value;
+    const uint64_t last_root_tiny = s->last_root_tiny;
+    const int per_root_calls = s->per_root_calls;
     cpthread_mutex_unlock(&s->mutex);
 
     int cur_depth = 0;
     int done = 0;
     int total = 0;
-    int dummy_a = 0;
-    int dummy_b = 0;
+    int ply2_done = 0;
+    int ply2_total = 0;
     if (ctx != NULL) {
-      endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &dummy_a,
-                               &dummy_b);
+      endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
+                               &ply2_total);
     }
     const double elapsed_ms =
         (double)(ctimer_monotonic_ns() - s->solve_start_ns) / 1.0e6;
+
+    // Common prefix: timing + d=0 status + last completed depth + root
+    // counter. Mode-specific suffix appended below.
+    char prefix[160];
     if (!seen_initial) {
-      printf("  [%6.0fms] (waiting for d=0 callback)\n", elapsed_ms);
+      snprintf(prefix, sizeof(prefix), "  [%6.0fms] (waiting for d=0 callback)",
+               elapsed_ms);
     } else if (last_depth == 0) {
-      printf("  [%6.0fms] d=0 published (n=%d) "
-             "cur_depth=%d searching %d/%d\n",
-             elapsed_ms, initial_count, cur_depth, done, total);
+      snprintf(prefix, sizeof(prefix),
+               "  [%6.0fms] d=0 published (n=%d) cur_depth=%d searching %d/%d",
+               elapsed_ms, initial_count, cur_depth, done, total);
     } else {
-      printf("  [%6.0fms] last_completed=d%d val=%d "
-             "cur_depth=%d searching %d/%d\n",
-             elapsed_ms, last_depth, last_val, cur_depth, done, total);
+      snprintf(prefix, sizeof(prefix),
+               "  [%6.0fms] last_completed=d%d val=%d "
+               "cur_depth=%d searching %d/%d",
+               elapsed_ms, last_depth, last_val, cur_depth, done, total);
+    }
+
+    if (s->mode == STREAM_MODE_POLL_PLY2) {
+      // Sub-progress under root #1: child A out of L children.
+      // Reset by the engine each time root #1's depth begins.
+      printf("%s | ply2 %d/%d\n", prefix, ply2_done, ply2_total);
+    } else {
+      // Per-root callback: cumulative count + last root completion seen.
+      // last_root_idx is the position in the *currently sorted* root_moves
+      // array at the time of completion, which can swap as values come in.
+      if (per_root_calls == 0) {
+        printf("%s | per_root: 0 calls\n", prefix);
+      } else {
+        printf("%s | per_root: %d calls, last d%d idx=%d val=%d "
+               "tiny=0x%llx\n",
+               prefix, per_root_calls, last_root_depth, last_root_idx,
+               last_root_value, (unsigned long long)last_root_tiny);
+      }
     }
     (void)fflush(stdout);
     s->frames_printed++;
@@ -1046,70 +1109,95 @@ void test_endgame_progress_stream(void) {
        "CSW21", 5},
   };
   static const int npos = (int)(sizeof(positions) / sizeof(positions[0]));
-  static const int kIterations = 4;
+  static const StreamMode modes[] = {STREAM_MODE_POLL_PLY2,
+                                     STREAM_MODE_CALLBACK_PER_ROOT};
+  static const int nmodes = (int)(sizeof(modes) / sizeof(modes[0]));
+  static const char *mode_labels[] = {"poll_ply2", "callback_per_root"};
 
-  // Use system time for "random". Each run picks a different
-  // (position, threads, plies) tuple per iteration.
+  // Use system time as the RNG seed only for choosing thread counts.
+  // (Position and mode are cycled deterministically so the test always
+  // exercises every combination.)
   XoshiroPRNG *prng = prng_create((uint64_t)ctime_get_current_time());
 
-  for (int iter = 0; iter < kIterations; iter++) {
-    const int pos_idx = (int)prng_get_random_number(prng, (uint64_t)npos);
-    const int threads = 2 + (int)prng_get_random_number(prng, 5); // 2..6
+  const int kIterations = npos * nmodes;
+  int iter = 0;
+  for (int pos_idx = 0; pos_idx < npos; pos_idx++) {
+    for (int mode_idx = 0; mode_idx < nmodes; mode_idx++) {
+      iter++;
+      const int threads = 2 + (int)prng_get_random_number(prng, 5); // 2..6
+      const StreamMode mode = modes[mode_idx];
 
-    Config *config = config_create_or_die("set -s1 score -s2 score");
-    char cmd[1024];
-    snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
-             positions[pos_idx].lex);
-    load_and_exec_config_or_die(config, cmd);
+      Config *config = config_create_or_die("set -s1 score -s2 score");
+      char cmd[1024];
+      snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
+               positions[pos_idx].lex);
+      load_and_exec_config_or_die(config, cmd);
 
-    printf("\n=== iter %d/%d: pos=%d threads=%d plies=%d lex=%s ===\n",
-           iter + 1, kIterations, pos_idx, threads, positions[pos_idx].eplies,
-           positions[pos_idx].lex);
+      printf(
+          "\n=== iter %d/%d: pos=%d mode=%s threads=%d plies=%d lex=%s ===\n",
+          iter, kIterations, pos_idx, mode_labels[mode_idx], threads,
+          positions[pos_idx].eplies, positions[pos_idx].lex);
 
-    EndgameCtx *ctx = NULL;
-    ProgressStream stream = {0};
-    cpthread_mutex_init(&stream.mutex);
-    atomic_store(&stream.should_stop, 0);
-    stream.ctx_pp = &ctx;
-    stream.solve_start_ns = ctimer_monotonic_ns();
+      EndgameCtx *ctx = NULL;
+      ProgressStream stream = {0};
+      cpthread_mutex_init(&stream.mutex);
+      atomic_store(&stream.should_stop, 0);
+      stream.ctx_pp = &ctx;
+      stream.mode = mode;
+      stream.solve_start_ns = ctimer_monotonic_ns();
 
-    EndgameArgs args = {0};
-    args.thread_control = config_get_thread_control(config);
-    args.game = config_get_game(config);
-    args.plies = positions[pos_idx].eplies;
-    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = threads;
-    args.num_top_moves = 5;
-    args.use_heuristics = true;
-    args.forced_pass_bypass = true;
-    args.enable_iterative_deepening = true;
-    args.enable_pv_display = true;
-    args.seed = 42;
-    args.before_search_callback = stream_before_search_cb;
-    args.before_search_callback_data = &stream;
-    args.per_ply_callback = stream_per_ply_cb;
-    args.per_ply_callback_data = &stream;
+      EndgameArgs args = {0};
+      args.thread_control = config_get_thread_control(config);
+      args.game = config_get_game(config);
+      args.plies = positions[pos_idx].eplies;
+      args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+      args.initial_small_move_arena_size =
+          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+      args.num_threads = threads;
+      args.num_top_moves = 5;
+      args.use_heuristics = true;
+      args.forced_pass_bypass = true;
+      args.enable_iterative_deepening = true;
+      args.enable_pv_display = true;
+      args.seed = 42;
+      args.before_search_callback = stream_before_search_cb;
+      args.before_search_callback_data = &stream;
+      args.per_ply_callback = stream_per_ply_cb;
+      args.per_ply_callback_data = &stream;
+      // Only install the per-root callback when the mode actually wants it,
+      // so each mode runs with only its own signal active and the comparison
+      // is honest.
+      if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {
+        args.per_root_move_callback = stream_per_root_cb;
+        args.per_root_move_callback_data = &stream;
+      }
 
-    cpthread_t reader;
-    cpthread_create(&reader, stream_reader_thread, &stream);
+      cpthread_t reader;
+      cpthread_create(&reader, stream_reader_thread, &stream);
 
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-    endgame_solve(&ctx, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
+      EndgameResults *results = config_get_endgame_results(config);
+      ErrorStack *error_stack = error_stack_create();
+      endgame_solve(&ctx, &args, results, error_stack);
+      assert(error_stack_is_empty(error_stack));
 
-    atomic_store(&stream.should_stop, 1);
-    cpthread_join(reader);
+      atomic_store(&stream.should_stop, 1);
+      cpthread_join(reader);
 
-    printf("  [done] frames_printed=%d final_completed_depth=%d\n",
-           stream.frames_printed, stream.last_completed_depth);
-    assert(stream.frames_printed > 0);
-    assert(stream.seen_initial);
+      printf("  [done] frames_printed=%d final_completed_depth=%d "
+             "per_root_calls=%d\n",
+             stream.frames_printed, stream.last_completed_depth,
+             stream.per_root_calls);
+      assert(stream.frames_printed > 0);
+      assert(stream.seen_initial);
+      if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {
+        // Should fire at least once per completed depth.
+        assert(stream.per_root_calls >= stream.last_completed_depth);
+      }
 
-    endgame_ctx_destroy(ctx);
-    error_stack_destroy(error_stack);
-    config_destroy(config);
+      endgame_ctx_destroy(ctx);
+      error_stack_destroy(error_stack);
+      config_destroy(config);
+    }
   }
   prng_destroy(prng);
 }
