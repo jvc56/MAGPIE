@@ -5,6 +5,7 @@
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/bonus_square.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
@@ -2236,10 +2237,315 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 
 // ── Analysis panel ────────────────────────────────────────────────────────
 //
-// Shows the latest sim leaderboard. The header is a 3×2 tile-styled
-// block holding the on-turn move number ("23.") so it visually
-// matches the board's played tiles. Below it the ranked candidates
-// scroll: each row shows rank, move notation, win%, and mean equity.
+// Shows the latest engine leaderboard — sim candidates while the bag
+// still has tiles, endgame PVs after it's empty. Ranked candidates
+// scroll below the title: each row shows rank, move notation, an
+// optional leave column, a "primary" metric (win% in sim, W/T/L in
+// endgame) and a "secondary" metric (mean equity in sim, integer
+// spread delta in endgame).
+
+enum { ANALYSIS_ROW_CAP = 64 };
+
+typedef struct {
+  char move[80];
+  char leave[16];
+  char primary[8];   // "67.3%" or "W"/"T"/"L"
+  char secondary[8]; // "+32.5" or "+27"
+  bool valid;
+} AnalysisRow;
+
+// Render the ranked candidates given a pre-populated row array.
+// Handles the leave column auto-sizing, exchange compaction, and
+// right-anchored primary/secondary columns. primary_bold gates whether
+// the primary string renders in bold (true for win%, false for W/T/L
+// which already pop visually).
+static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
+                                 const Layout *L, AnalysisRow *rows,
+                                 int visible, int primary_w, int secondary_w,
+                                 int primary_secondary_gap,
+                                 bool primary_bold) {
+  const int interior_left = L->analysis_left + 1;
+  const int interior_right = L->analysis_right - 1;
+  const int interior_top = L->analysis_top + 1;
+  const int interior_bottom = L->analysis_bottom - 1;
+  const int list_top = interior_top;
+
+  const int sec_col = interior_right - secondary_w + 1;
+  const int prim_col = sec_col - primary_secondary_gap - primary_w;
+
+  char rank_probe[8];
+  snprintf(rank_probe, sizeof(rank_probe), "%2d. ", visible);
+  const int rank_w = (int)strlen(rank_probe);
+  const int move_col = interior_left + rank_w;
+
+  const int leave_gap_l = 2;
+  const int leave_gap_r = 1;
+
+  int max_move_w = 0;
+  int max_leave_w = 0;
+  for (int i = 0; i < visible; i++) {
+    if (!rows[i].valid) {
+      continue;
+    }
+    const int ml = (int)strlen(rows[i].move);
+    const int ll = (int)strlen(rows[i].leave);
+    if (ml > max_move_w) {
+      max_move_w = ml;
+    }
+    if (ll > max_leave_w) {
+      max_leave_w = ll;
+    }
+  }
+
+  // Compact "(exch ABCD)" → "-ABCD" if the verbose form doesn't fit.
+  const int max_move_budget = prim_col - 1 - move_col;
+  if (max_move_w > max_move_budget) {
+    int new_max = 0;
+    for (int i = 0; i < visible; i++) {
+      char *s = rows[i].move;
+      if (strncmp(s, "(exch ", 6) == 0) {
+        char *close_paren = strchr(s, ')');
+        if (close_paren != NULL) {
+          const int letters_len = (int)(close_paren - (s + 6));
+          char tmp[80];
+          tmp[0] = '-';
+          const int copy = letters_len < (int)sizeof(tmp) - 2
+                               ? letters_len
+                               : (int)sizeof(tmp) - 2;
+          memcpy(tmp + 1, s + 6, (size_t)copy);
+          tmp[1 + copy] = '\0';
+          const size_t tlen = strlen(tmp);
+          const size_t cap = sizeof(rows[i].move) - 1;
+          const size_t finalcopy = tlen < cap ? tlen : cap;
+          memcpy(s, tmp, finalcopy);
+          s[finalcopy] = '\0';
+        }
+      }
+      const int ml = (int)strlen(s);
+      if (ml > new_max) {
+        new_max = ml;
+      }
+    }
+    max_move_w = new_max;
+  }
+
+  bool show_leave = max_leave_w > 0;
+  int leave_col = prim_col - leave_gap_r - max_leave_w;
+  int move_max = prim_col - 1 - move_col;
+  if (show_leave) {
+    const int with_leave_max = leave_col - leave_gap_l - move_col;
+    if (with_leave_max >= max_move_w) {
+      move_max = with_leave_max;
+    } else {
+      show_leave = false;
+    }
+  }
+
+  theme_apply_bg(plane, theme->bg);
+  int row = list_top;
+  for (int i = 0; i < visible && row <= interior_bottom; i++) {
+    if (!rows[i].valid) {
+      row++;
+      continue;
+    }
+    char rank_str[8];
+    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
+
+    char *move_text = rows[i].move;
+    if (move_max > 0 && (int)strlen(move_text) > move_max) {
+      move_text[move_max] = '\0';
+    } else if (move_max <= 0) {
+      move_text[0] = '\0';
+    }
+
+    theme_apply_fg(plane, theme->dim_fg);
+    ncplane_putstr_yx(plane, row, interior_left, rank_str);
+
+    if (move_max > 0 && move_text[0] != '\0') {
+      theme_apply_fg(plane, theme->fg);
+      render_move_styled(plane, row, move_col, move_text);
+    }
+
+    if (show_leave && rows[i].leave[0] != '\0') {
+      const int leave_len = (int)strlen(rows[i].leave);
+      const int leave_right_edge = leave_col + max_leave_w - 1;
+      const int leave_text_col = leave_right_edge - leave_len + 1;
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, leave_text_col, rows[i].leave);
+    }
+
+    // Primary column (win% or W/T/L). Right-justified within its slot
+    // so single-char W/T/L lines up with the right edge.
+    {
+      const int len = (int)strlen(rows[i].primary);
+      const int col = sec_col - primary_secondary_gap - len;
+      theme_apply_fg(plane, theme->fg);
+      if (primary_bold) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
+      ncplane_putstr_yx(plane, row, col, rows[i].primary);
+      if (primary_bold) {
+        ncplane_set_styles(plane, 0);
+      }
+    }
+
+    // Secondary column (equity or spread).
+    {
+      const int len = (int)strlen(rows[i].secondary);
+      const int col = interior_right - len + 1;
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, col, rows[i].secondary);
+    }
+
+    row++;
+  }
+}
+
+// Populate the row cache from the sim leaderboard. Returns the
+// number of rows filled (≤ max_rows).
+static int fill_analysis_rows_from_sim(const TuiGameState *state,
+                                       AnalysisRow *rows, int max_rows) {
+  SimResults *results = state->sim_results;
+  if (results == NULL ||
+      !sim_results_lock_and_sort_display_simmed_plays(results)) {
+    return 0;
+  }
+  const int num_plays = sim_results_get_number_of_plays(results);
+  int n = num_plays < max_rows ? num_plays : max_rows;
+  const Board *board = game_get_board(state->game);
+  const Rack *sim_rack = sim_results_get_rack(results);
+  for (int i = 0; i < n; i++) {
+    rows[i].valid = false;
+    rows[i].move[0] = '\0';
+    rows[i].leave[0] = '\0';
+    rows[i].primary[0] = '\0';
+    rows[i].secondary[0] = '\0';
+    const SimmedPlay *play =
+        sim_results_get_display_simmed_play(results, i);
+    if (play == NULL) {
+      continue;
+    }
+    const Move *move = simmed_play_get_move(play);
+    const double win_pct =
+        stat_get_mean(simmed_play_get_win_pct_stat(play)) * 100.0;
+    const double eq_pts =
+        stat_get_mean(simmed_play_get_equity_stat(play));
+    snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%", win_pct);
+    snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+6.1f", eq_pts);
+
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, board, move, state->ld, false);
+    size_t mlen = 0;
+    char *mdump = string_builder_dump(sb, &mlen);
+    if (mdump != NULL) {
+      const size_t copy =
+          mlen < sizeof(rows[i].move) ? mlen : sizeof(rows[i].move) - 1;
+      memcpy(rows[i].move, mdump, copy);
+      rows[i].move[copy] = '\0';
+      free(mdump);
+    }
+    string_builder_destroy(sb);
+
+    if (sim_rack != NULL) {
+      StringBuilder *lsb = string_builder_create();
+      string_builder_add_move_leave(lsb, sim_rack, move, state->ld);
+      size_t llen = 0;
+      char *ldump = string_builder_dump(lsb, &llen);
+      if (ldump != NULL) {
+        const size_t copy =
+            llen < sizeof(rows[i].leave) ? llen : sizeof(rows[i].leave) - 1;
+        memcpy(rows[i].leave, ldump, copy);
+        rows[i].leave[copy] = '\0';
+        free(ldump);
+      }
+      string_builder_destroy(lsb);
+    }
+    rows[i].valid = true;
+  }
+  sim_results_unlock_display_infos(results);
+  return n;
+}
+
+// Populate the row cache from the endgame multi-PV leaderboard.
+// Returns the number of rows filled (≤ max_rows). W/T/L is computed
+// from the captured initial spread + the PV's value.
+static int fill_analysis_rows_from_endgame(const TuiGameState *state,
+                                           AnalysisRow *rows, int max_rows) {
+  EndgameResults *results = state->endgame_results;
+  if (results == NULL) {
+    return 0;
+  }
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  if (num_pvs <= 0) {
+    return 0;
+  }
+  int n = num_pvs < max_rows ? num_pvs : max_rows;
+  const int initial_spread =
+      atomic_load(&((TuiGameState *)state)->endgame_initial_spread);
+  const Board *board = game_get_board(state->game);
+  // Use the on-turn player's rack at solve time. The PV's first move
+  // was generated against that rack so the leave is meaningful.
+  // For endgame we don't have a sim-style rack stash; pull from the
+  // game's pending entry instead.
+  const int player_idx =
+      state->history_count > 0
+          ? state->history[state->history_count - 1].player_idx
+          : game_get_player_on_turn_index(state->game);
+  const Rack *solve_rack =
+      player_get_rack(game_get_player(state->game, player_idx));
+
+  for (int i = 0; i < n; i++) {
+    rows[i].valid = false;
+    rows[i].move[0] = '\0';
+    rows[i].leave[0] = '\0';
+    rows[i].primary[0] = '\0';
+    rows[i].secondary[0] = '\0';
+    const PVLine *pv = endgame_results_get_multi_pvline(results, i);
+    if (pv == NULL || pv->num_moves <= 0) {
+      continue;
+    }
+    Move first;
+    small_move_to_move(&first, &pv->moves[0], board);
+    // The PV's score is the solver's value (final - initial). The
+    // final spread on the board tells us W/T/L.
+    const int value = (int)pv->score;
+    const int final_spread = initial_spread + value;
+    const char *wtl = (final_spread > 0) ? "W"
+                                         : (final_spread < 0) ? "L" : "T";
+    snprintf(rows[i].primary, sizeof(rows[i].primary), "%s", wtl);
+    snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+d", value);
+
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, board, &first, state->ld, false);
+    size_t mlen = 0;
+    char *mdump = string_builder_dump(sb, &mlen);
+    if (mdump != NULL) {
+      const size_t copy =
+          mlen < sizeof(rows[i].move) ? mlen : sizeof(rows[i].move) - 1;
+      memcpy(rows[i].move, mdump, copy);
+      rows[i].move[copy] = '\0';
+      free(mdump);
+    }
+    string_builder_destroy(sb);
+
+    if (solve_rack != NULL) {
+      StringBuilder *lsb = string_builder_create();
+      string_builder_add_move_leave(lsb, solve_rack, &first, state->ld);
+      size_t llen = 0;
+      char *ldump = string_builder_dump(lsb, &llen);
+      if (ldump != NULL) {
+        const size_t copy =
+            llen < sizeof(rows[i].leave) ? llen : sizeof(rows[i].leave) - 1;
+        memcpy(rows[i].leave, ldump, copy);
+        rows[i].leave[copy] = '\0';
+        free(ldump);
+      }
+      string_builder_destroy(lsb);
+    }
+    rows[i].valid = true;
+  }
+  return n;
+}
 
 static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                   const TuiGameState *state,
@@ -2252,19 +2558,30 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3 || width < 6) {
     return;
   }
-  // Title includes the sim's plies depth and total sample count when
-  // those are available — the getters are atomic so we can read them
-  // without locking the display. Sample counts compact to K/M so the
-  // title stays narrow even after a long sim run.
+
+  // Pick mode: endgame when the bag has run dry (and we have a recent
+  // endgame solve to show); otherwise the sim leaderboard.
+  const bool bag_empty =
+      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+  const bool use_endgame =
+      bag_empty && state->endgame_results != NULL &&
+      endgame_results_get_num_pvs(state->endgame_results) > 0;
+
+  // Title varies by mode.
   char title[64];
-  if (state->sim_results != NULL) {
+  if (use_endgame) {
+    const int depth =
+        endgame_results_get_depth(state->endgame_results, ENDGAME_RESULT_BEST);
+    if (depth > 0) {
+      snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", depth);
+    } else {
+      snprintf(title, sizeof(title), "Analysis (negamax)");
+    }
+  } else if (state->sim_results != NULL) {
     const int plies = sim_results_get_num_plies(state->sim_results);
     const uint64_t iters =
         sim_results_get_iteration_count(state->sim_results);
     if (plies > 0 && iters > 0) {
-      // Keep the count under 4 characters: show raw 4-digit ints up
-      // through 9999, then K above 10K (so we never display "9K" when
-      // "9999" is shorter and more informative), then M above 1M.
       char samples[16];
       if (iters >= 1000000ULL) {
         snprintf(samples, sizeof(samples), "%lluM",
@@ -2291,220 +2608,45 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const int interior_right = L->analysis_right - 1;
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
-
-  // Top play sits flush against the "Analysis" title row.
   const int list_top = interior_top;
+  const int max_visible = interior_bottom - list_top + 1;
 
-  // Pull the (locked, sorted) display plays. Returns false when the
-  // sim hasn't run yet — show the placeholder in that case.
-  SimResults *results = state->sim_results;
-  if (results == NULL ||
-      !sim_results_lock_and_sort_display_simmed_plays(results)) {
+  AnalysisRow rows[ANALYSIS_ROW_CAP];
+  int cap = max_visible < ANALYSIS_ROW_CAP ? max_visible : ANALYSIS_ROW_CAP;
+
+  int visible = 0;
+  int primary_w, secondary_w, primary_secondary_gap;
+  bool primary_bold;
+  if (use_endgame) {
+    visible = fill_analysis_rows_from_endgame(state, rows, cap);
+    primary_w = 1;            // "W"/"T"/"L"
+    secondary_w = 4;          // "+999" / "-100"
+    primary_secondary_gap = 2;
+    primary_bold = false;
+  } else {
+    visible = fill_analysis_rows_from_sim(state, rows, cap);
+    primary_w = 6;            // "100.0%"
+    secondary_w = 6;          // "%+6.1f" → " -19.9"
+    primary_secondary_gap = 1; // %+6.1f leading pad provides one more
+    primary_bold = false;
+  }
+
+  if (visible == 0) {
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
-    const char *msg = "(no sim data yet)";
+    const char *msg =
+        use_endgame ? "(no endgame data yet)" : "(no sim data yet)";
     const int msg_col =
-        interior_left + (interior_right - interior_left + 1 - (int)strlen(msg)) / 2;
+        interior_left +
+        (interior_right - interior_left + 1 - (int)strlen(msg)) / 2;
     if (list_top <= interior_bottom) {
       ncplane_putstr_yx(plane, list_top, msg_col, msg);
     }
     return;
   }
 
-  const int num_plays = sim_results_get_number_of_plays(results);
-  const Board *board = game_get_board(state->game);
-  const Rack *sim_rack = sim_results_get_rack(results);
-
-  // Numeric columns are fixed-width; right-anchor them, then size the
-  // leave + move columns to fit what's actually in the data.
-  const char *win_fmt = "%5.1f%%";  // "67.3%"
-  const char *eq_fmt = "%+6.1f";   // " +32.5" / "-109.3"
-  const int win_w = 6;
-  const int eq_w = 6;
-  const int win_eq_gap = 1; // %+6.1f provides one more leading space
-  const int eq_col = interior_right - eq_w + 1;
-  const int win_col = eq_col - win_eq_gap - win_w;
-
-  // Build everything we need to render up front, so we can fit the
-  // leave column to the data instead of the worst case. Cache hold
-  // both move and leave strings to avoid rebuilding them on the
-  // render pass.
-  enum { ROW_CACHE_CAP = 64 };
-  const int max_visible = interior_bottom - list_top + 1;
-  int visible = num_plays < max_visible ? num_plays : max_visible;
-  if (visible > ROW_CACHE_CAP) {
-    visible = ROW_CACHE_CAP;
-  }
-
-  char move_strs[ROW_CACHE_CAP][80];
-  char leave_strs[ROW_CACHE_CAP][16];
-  double win_pcts[ROW_CACHE_CAP];
-  double eq_pts[ROW_CACHE_CAP];
-  int max_leave_w = 0;
-  int max_move_w = 0;
-
-  for (int i = 0; i < visible; i++) {
-    move_strs[i][0] = '\0';
-    leave_strs[i][0] = '\0';
-    win_pcts[i] = 0.0;
-    eq_pts[i] = 0.0;
-    const SimmedPlay *play =
-        sim_results_get_display_simmed_play(results, i);
-    if (play == NULL) {
-      continue;
-    }
-    const Move *move = simmed_play_get_move(play);
-    win_pcts[i] = stat_get_mean(simmed_play_get_win_pct_stat(play)) * 100.0;
-    eq_pts[i] = stat_get_mean(simmed_play_get_equity_stat(play));
-
-    StringBuilder *sb = string_builder_create();
-    string_builder_add_move(sb, board, move, state->ld, false);
-    size_t mlen = 0;
-    char *mdump = string_builder_dump(sb, &mlen);
-    if (mdump != NULL) {
-      const size_t copy =
-          mlen < sizeof(move_strs[i]) ? mlen : sizeof(move_strs[i]) - 1;
-      memcpy(move_strs[i], mdump, copy);
-      move_strs[i][copy] = '\0';
-      free(mdump);
-    }
-    string_builder_destroy(sb);
-
-    if (sim_rack != NULL) {
-      StringBuilder *lsb = string_builder_create();
-      string_builder_add_move_leave(lsb, sim_rack, move, state->ld);
-      size_t llen = 0;
-      char *ldump = string_builder_dump(lsb, &llen);
-      if (ldump != NULL) {
-        const size_t copy =
-            llen < sizeof(leave_strs[i]) ? llen : sizeof(leave_strs[i]) - 1;
-        memcpy(leave_strs[i], ldump, copy);
-        leave_strs[i][copy] = '\0';
-        free(ldump);
-      }
-      string_builder_destroy(lsb);
-    }
-
-    const int ml = (int)strlen(move_strs[i]);
-    const int ll = (int)strlen(leave_strs[i]);
-    if (ml > max_move_w) {
-      max_move_w = ml;
-    }
-    if (ll > max_leave_w) {
-      max_leave_w = ll;
-    }
-  }
-
-  // Width arithmetic. "  N. " rank prefix occupies a fixed slot; we
-  // need rank + move + (leave_w + 2 gaps) + numerics to fit, or just
-  // rank + move + numerics if we have to drop the leave.
-  char rank_probe[8];
-  snprintf(rank_probe, sizeof(rank_probe), "%2d. ", visible);
-  const int rank_w = (int)strlen(rank_probe);
-  const int move_col = interior_left + rank_w;
-
-  const int leave_gap_l = 2;
-  const int leave_gap_r = 1; // tight enough that 100.0% still has breathing room
-
-  // If full-fat "(exch ABCD)" notation pushes the longest move past
-  // the panel's move budget, compact every exchange in the cache to
-  // "-ABCD" form. We do them all at once (rather than per row) so the
-  // exchange entries line up consistently in the listing.
-  const int max_move_budget = win_col - 1 - move_col;
-  if (max_move_w > max_move_budget) {
-    int new_max = 0;
-    for (int i = 0; i < visible; i++) {
-      char *s = move_strs[i];
-      if (strncmp(s, "(exch ", 6) == 0) {
-        char *close_paren = strchr(s, ')');
-        if (close_paren != NULL) {
-          const int letters_len = (int)(close_paren - (s + 6));
-          // Slide the letters left over the "(exch " prefix and drop
-          // the close paren. Prepend '-' as the compact marker.
-          char tmp[80];
-          tmp[0] = '-';
-          const int copy = letters_len < (int)sizeof(tmp) - 2
-                               ? letters_len
-                               : (int)sizeof(tmp) - 2;
-          memcpy(tmp + 1, s + 6, (size_t)copy);
-          tmp[1 + copy] = '\0';
-          const size_t tlen = strlen(tmp);
-          const size_t cap = sizeof(move_strs[i]) - 1;
-          const size_t finalcopy = tlen < cap ? tlen : cap;
-          memcpy(s, tmp, finalcopy);
-          s[finalcopy] = '\0';
-        }
-      }
-      const int ml = (int)strlen(s);
-      if (ml > new_max) {
-        new_max = ml;
-      }
-    }
-    max_move_w = new_max;
-  }
-
-  // Reserve only as many columns as the actual longest leave needs.
-  // If every visible play is a bingo (max_leave_w == 0) we skip the
-  // column entirely. Otherwise we try to fit the longest move
-  // untruncated alongside the leave; if that doesn't fit we drop the
-  // leave (preferring full move text over the supplementary column).
-  bool show_leave = max_leave_w > 0;
-  int leave_col = win_col - leave_gap_r - max_leave_w; // left edge of slot
-  int move_max = win_col - 1 - move_col;
-  if (show_leave) {
-    const int with_leave_max = leave_col - leave_gap_l - move_col;
-    if (with_leave_max >= max_move_w) {
-      move_max = with_leave_max;
-    } else {
-      show_leave = false; // drop the column to keep the move full-width
-    }
-  }
-
-  theme_apply_bg(plane, theme->bg);
-  int row = list_top;
-  for (int i = 0; i < visible && row <= interior_bottom; i++) {
-    char rank_str[8];
-    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
-    char win_str[16];
-    snprintf(win_str, sizeof(win_str), win_fmt, win_pcts[i]);
-    char eq_str[16];
-    snprintf(eq_str, sizeof(eq_str), eq_fmt, eq_pts[i]);
-
-    // Truncate move text to the budgeted width if (and only if) it
-    // doesn't fit. The pre-pass set move_max so that the typical case
-    // does fit, so this branch is rarely taken.
-    char *move_text = move_strs[i];
-    if (move_max > 0 && (int)strlen(move_text) > move_max) {
-      move_text[move_max] = '\0';
-    } else if (move_max <= 0) {
-      move_text[0] = '\0';
-    }
-
-    theme_apply_fg(plane, theme->dim_fg);
-    ncplane_putstr_yx(plane, row, interior_left, rank_str);
-
-    if (move_max > 0 && move_text[0] != '\0') {
-      theme_apply_fg(plane, theme->fg);
-      render_move_styled(plane, row, move_col, move_text);
-    }
-
-    if (show_leave && leave_strs[i][0] != '\0') {
-      const int leave_len = (int)strlen(leave_strs[i]);
-      const int leave_right_edge = leave_col + max_leave_w - 1;
-      const int leave_text_col = leave_right_edge - leave_len + 1;
-      theme_apply_fg(plane, theme->dim_fg);
-      ncplane_putstr_yx(plane, row, leave_text_col, leave_strs[i]);
-    }
-
-    theme_apply_fg(plane, theme->fg);
-    ncplane_putstr_yx(plane, row, win_col, win_str);
-    theme_apply_fg(plane, theme->dim_fg);
-    ncplane_putstr_yx(plane, row, eq_col, eq_str);
-
-    row++;
-  }
-
-  sim_results_unlock_display_infos(results);
+  render_analysis_rows(plane, theme, L, rows, visible, primary_w, secondary_w,
+                       primary_secondary_gap, primary_bold);
 }
 
 // EMA-smoothed FPS based on the interval between status-bar renders.

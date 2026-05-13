@@ -5,6 +5,7 @@
 #include "../src/def/players_data_defs.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/game.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/sim_results.h"
@@ -141,6 +142,11 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
   atomic_store(&out_state->sim_results_active, false);
   atomic_store(&out_state->sim_results_turn_idx, -1);
 
+  out_state->endgame_results = endgame_results_create();
+  atomic_store(&out_state->endgame_results_active, false);
+  atomic_store(&out_state->endgame_results_turn_idx, -1);
+  atomic_store(&out_state->endgame_initial_spread, 0);
+
   const GameArgs args = {
       .players_data = out_state->players_data,
       .board_layout = out_state->board_layout,
@@ -239,6 +245,9 @@ void tui_game_state_destroy(TuiGameState *state) {
   }
   if (state->sim_results != NULL) {
     sim_results_destroy(state->sim_results);
+  }
+  if (state->endgame_results != NULL) {
+    endgame_results_destroy(state->endgame_results);
   }
   memset(state, 0, sizeof(*state));
 }

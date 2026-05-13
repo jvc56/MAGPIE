@@ -18,6 +18,7 @@ struct BoardLayout;
 struct MoveList;
 struct WinPct;
 struct SimResults;
+struct EndgameResults;
 typedef struct TuiGlyphCache TuiGlyphCache;
 
 enum {
@@ -91,6 +92,16 @@ typedef struct {
   struct SimResults *sim_results;
   _Atomic bool sim_results_active;
   _Atomic int sim_results_turn_idx;
+
+  // Endgame results, same idea as sim_results above — allocated once
+  // at init, reused per turn. `endgame_initial_spread` captures the
+  // solver's score margin (solver - opponent) at the moment the solve
+  // begins so the renderer can show W/T/L vs the current score
+  // without having to know which player was on turn at solve time.
+  struct EndgameResults *endgame_results;
+  _Atomic bool endgame_results_active;
+  _Atomic int endgame_results_turn_idx;
+  _Atomic int endgame_initial_spread;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature

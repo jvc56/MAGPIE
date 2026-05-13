@@ -373,8 +373,12 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   args.num_threads = get_num_cores();
   args.use_heuristics = true;
-  args.num_top_moves = 1;
-  args.enable_pv_display = false;
+  // We want the analysis panel to list a leaderboard, so ask the
+  // solver for the top-K PVs (capped to MAX_ENDGAME_DISPLAY_PVS).
+  args.num_top_moves =
+      SIM_CANDIDATES < MAX_ENDGAME_DISPLAY_PVS ? SIM_CANDIDATES
+                                               : MAX_ENDGAME_DISPLAY_PVS;
+  args.enable_pv_display = true;
   args.per_ply_callback = NULL;
   args.per_ply_callback_data = NULL;
   args.forced_pass_bypass = false;
@@ -382,7 +386,26 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   args.hard_time_limit = budget_sec;
   args.seed = (uint64_t)time(NULL);
 
-  EndgameResults *results = endgame_results_create();
+  // Capture the solver's initial spread so the renderer can show
+  // W/T/L from the correct side once the bot has played and the
+  // on-turn flag has flipped.
+  const int solving_player = game_get_player_on_turn_index(state->game);
+  const int p0_score =
+      equity_to_int(player_get_score(game_get_player(state->game, 0)));
+  const int p1_score =
+      equity_to_int(player_get_score(game_get_player(state->game, 1)));
+  const int initial_spread =
+      (solving_player == 0) ? p0_score - p1_score : p1_score - p0_score;
+
+  atomic_store(&state->endgame_initial_spread, initial_spread);
+  atomic_store(&state->endgame_results_turn_idx, state->history_count);
+  atomic_store(&state->endgame_results_active, true);
+
+  EndgameResults *results = state->endgame_results;
+  // Reuse a single EndgameCtx across turns so the transposition table
+  // primes between solves; the bot worker owns the cleanup at
+  // shutdown via... wait, simpler: let endgame_solve allocate and
+  // destroy per call. Memory is freed at function exit.
   EndgameCtx *ctx = NULL;
   ErrorStack *err = error_stack_create();
   endgame_solve(&ctx, &args, results, err);
@@ -400,11 +423,12 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
     got_move = true;
   }
 
+  atomic_store(&state->endgame_results_active, false);
+
   if (ctx != NULL) {
     endgame_ctx_destroy(ctx);
   }
   error_stack_destroy(err);
-  endgame_results_destroy(results);
   thread_control_destroy(tc);
   return got_move;
 }
