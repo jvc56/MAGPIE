@@ -113,7 +113,6 @@ struct EndgameCtx {
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
-  PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
@@ -2640,41 +2639,28 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-// Format and log all final PV lines: move-by-move replay, game-end
-// annotations (rack points, 6 zeros), win/loss/tie summary.
-// Read root SmallMoves from best thread's arena, swap PV move to front,
-// build PVLines with TT extension for non-best root moves. Returns number
-// of PVs filled. multi_pvs[0] must already be set by caller.
+// Build PVLines for the next-best root moves (slots 1..num_top-1) from
+// the best worker's root SmallMove arena, with TT extension.  Returns the
+// number of PVs filled.  multi_pvs[0] must already be set by caller (from
+// ENDGAME_RESULT_BEST), and serves as the de-dup reference: any root_moves
+// entry sharing its tiny_move is skipped so the search-tracked best move
+// can't reappear later in multi_pvs.  The final qsort in iterative_deepening
+// is unstable, so when several root moves tie on estimated_value the
+// search-tracked best one may sit at any of the tied indices.
 static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
                              const Game *game, PVLine *multi_pvs, int num_top,
                              endgame_movegen_caller_t caller) {
-  int n_root = best_worker->n_initial_moves;
-  int k = (num_top < n_root) ? num_top : n_root;
-  SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
+  const int n_root = best_worker->n_initial_moves;
+  const SmallMove *root_moves =
+      (const SmallMove *)best_worker->small_move_arena->memory;
+  const uint64_t best_tiny = multi_pvs[0].moves[0].tiny_move;
 
-  // Root moves are already sorted by estimated_value descending from the
-  // final qsort in iterative_deepening. The estimated_value for each root
-  // move is the actual negamax return value set during the search
-  // (line small_move_set_estimated_value(small_move, -value) at root).
-
-  // Ensure the PV's first move is at root_moves[0] to avoid duplicates.
-  // qsort is not stable, so tied values may place the PV move elsewhere.
-  uint64_t pv_tiny = solver->principal_variation.moves[0].tiny_move;
-  if (root_moves[0].tiny_move != pv_tiny) {
-    for (int r = 1; r < n_root; r++) {
-      if (root_moves[r].tiny_move == pv_tiny) {
-        SmallMove tmp = root_moves[0];
-        root_moves[0] = root_moves[r];
-        root_moves[r] = tmp;
-        break;
-      }
+  int dst = 1;
+  for (int r = 0; r < n_root && dst < num_top; r++) {
+    if (root_moves[r].tiny_move == best_tiny) {
+      continue;
     }
-  }
-
-  // Build PVLines for non-best root moves (r=1..k-1).
-  // PV[0] is already set from the search-tracked principal variation above.
-  for (int r = 1; r < k; r++) {
-    PVLine *pv = &multi_pvs[r];
+    PVLine *pv = &multi_pvs[dst];
     pv->moves[0] = root_moves[r];
     pv->num_moves = 1;
     pv->score =
@@ -2685,8 +2671,9 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
     if (solver->transposition_table) {
       solver_pvline_extend_from_tt(pv, solver, game, 0, caller);
     }
+    dst++;
   }
-  return k;
+  return dst;
 }
 
 // Parallel re-search task: workers grab PVs from a shared atomic counter

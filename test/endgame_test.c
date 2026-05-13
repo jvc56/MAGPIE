@@ -718,6 +718,91 @@ void test_topk_full_solve_no_pipe(void) {
   config_destroy(config);
 }
 
+// Returns true if two PVLines describe the same first move in terms of
+// what hits the board (anchor + direction + tile sequence). Ignores
+// SmallMove.metadata.score because the engine's walk-down re-search
+// can update one PV's score while leaving an identical sibling PV's
+// score stale.
+static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
+  if (a->num_moves <= 0 || b->num_moves <= 0) {
+    return false;
+  }
+  const SmallMove *sa = &a->moves[0];
+  const SmallMove *sb = &b->moves[0];
+  // tiny_move encodes anchor + direction + tile placement; metadata
+  // holds the cached score and is what diverges between near-duplicate
+  // re-search outputs.
+  return sa->tiny_move == sb->tiny_move;
+}
+
+// Regression test for an etopk duplicate-PV bug: extract_multi_pvs could
+// land with two PVLines whose moves[0] was the same SmallMove. Cause:
+// solver->principal_variation was zero-initialized and never written, so
+// the swap that was meant to hoist the search-tracked best move into
+// root_moves[0] would instead swap a deep PASS into slot 0. With several
+// root moves tied on estimated_value (qsort is unstable), the actual best
+// move could be at root_moves[1..k-1] and get copied into multi_pvs[r] as
+// a duplicate of the multi_pvs[0] entry already set from
+// ENDGAME_RESULT_BEST. Reproduces only with multi-PV (num_top_moves >= 2)
+// and parallel threads, and only when ties exist among root moves.
+//
+// Pre-fix this fired ~70% of runs (depended on thread scheduling); the
+// outer iter loop here keeps the test cheap while making detection
+// effectively certain if the regression returns.
+void test_topk_no_duplicates(void) {
+  static const int kIterations = 5;
+  for (int iter = 0; iter < kIterations; iter++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(
+        config,
+        "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+        "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+        "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 4;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 6;
+    args.num_top_moves = 10;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.enable_iterative_deepening = true;
+    args.enable_pv_display = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const int num_pvs = endgame_results_get_num_pvs(results);
+    for (int i = 0; i < num_pvs; i++) {
+      const PVLine *pi = endgame_results_get_multi_pvline(results, i);
+      for (int j = i + 1; j < num_pvs; j++) {
+        const PVLine *pj = endgame_results_get_multi_pvline(results, j);
+        if (pvline_first_move_equivalent(pi, pj)) {
+          printf("iter=%d PV[%d] and PV[%d] share moves[0].tiny_move "
+                 "(0x%llx)\n",
+                 iter, i, j, (unsigned long long)pi->moves[0].tiny_move);
+          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score,
+                 pi->num_moves);
+          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score,
+                 pj->num_moves);
+          assert(0 && "duplicate first move in multi_pvs");
+        }
+      }
+    }
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -732,6 +817,7 @@ void test_endgame(void) {
   test_endgame_interrupt();
   test_topk_fully_solved();
   test_topk_full_solve_no_pipe();
+  test_topk_no_duplicates();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
