@@ -2203,15 +2203,30 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   }
   // Title includes the sim's plies depth and total sample count when
   // those are available — the getters are atomic so we can read them
-  // without locking the display.
+  // without locking the display. Sample counts compact to K/M so the
+  // title stays narrow even after a long sim run.
   char title[64];
   if (state->sim_results != NULL) {
     const int plies = sim_results_get_num_plies(state->sim_results);
     const uint64_t iters =
         sim_results_get_iteration_count(state->sim_results);
     if (plies > 0 && iters > 0) {
-      snprintf(title, sizeof(title), "Analysis (%d-ply, %llu samples)", plies,
-               (unsigned long long)iters);
+      // Keep the count under 4 characters: show raw 4-digit ints up
+      // through 9999, then K above 10K (so we never display "9K" when
+      // "9999" is shorter and more informative), then M above 1M.
+      char samples[16];
+      if (iters >= 1000000ULL) {
+        snprintf(samples, sizeof(samples), "%lluM",
+                 (unsigned long long)(iters / 1000000ULL));
+      } else if (iters >= 10000ULL) {
+        snprintf(samples, sizeof(samples), "%lluK",
+                 (unsigned long long)(iters / 1000ULL));
+      } else {
+        snprintf(samples, sizeof(samples), "%llu",
+                 (unsigned long long)iters);
+      }
+      snprintf(title, sizeof(title), "Analysis (%d-ply, %s samples)", plies,
+               samples);
     } else {
       snprintf(title, sizeof(title), "Analysis");
     }
