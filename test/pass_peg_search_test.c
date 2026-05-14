@@ -2348,6 +2348,31 @@ typedef struct PegNNoahInnerJob {
 } PegNNoahInnerJob;
 static void pegN_noah_inner_worker_fn(void *arg, int worker_idx);
 
+// Generalized Noah-perception hypothesis: the perceived pool has
+// opp_type_counts[t] tiles of type opp_types[t]; the hypothesis says
+// the bag holds hyp_bag_counts[t] of each type and the mover's rack
+// holds the rest (opp_type_counts[t] - hyp_bag_counts[t]). For
+// n_bag_now == 1 this degenerates to the single-tile case the
+// PegNNoahInnerJob path supports today.
+typedef struct PegNHypJob {
+  const Game *base_game;            // walker state (RO, shared)
+  int mover_idx;
+  int ld_size;
+  const Move *opp_move;             // shared, RO
+  int n_opp_types;
+  const MachineLetter *opp_types;   // shared, RO
+  const int *opp_type_counts;       // total perceived-pool counts (RO)
+  const int *hyp_bag_counts;        // bag composition under this hyp (RO)
+  ThreadControl *thread_control;
+  int32_t mover_total;              // output (realized mt under this hyp)
+} PegNHypJob;
+static void pegN_hyp_worker_fn(void *arg, int worker_idx);
+static void pegN_eval_opp_with_perception(
+    const PegNEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
+    const MachineLetter *opp_types, const int *opp_type_counts,
+    int n_opp_types, int n_bag_now, const int *realized_bag_counts,
+    double alpha, double *out_utility, int32_t *out_realized_mt);
+
 static void pegN_emit_split(const PegNEnumCtx *ctx) {
   MachineLetter mover_drawn[16];
   MachineLetter bag_remaining[16];
@@ -2742,7 +2767,166 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     const bool rational =
         rational_env && atoi(rational_env) > 0 && ctx->n_bag_remaining >= 1;
 
-    if (rational) {
+    // PASSPEGN_GREEDY_RAT_WALK=1 — rational walker for inner 2+peg
+    // states (also handles 1peg as a degenerate case). At each PEG ply
+    // we take opp_top_k candidates by movegen equity, rank them at
+    // d=0 (Noah's utility = avg over n_bag-multiset perception for opp
+    // plies; realized greedy mt for mover plies), pick top-1, apply.
+    // When the bag empties we run a greedy playout to game end.
+    // The realized scenario's mover_total is the realized spread.
+    const char *walk_env = getenv("PASSPEGN_GREEDY_RAT_WALK");
+    const bool walk_rat = rational && walk_env && atoi(walk_env) > 0;
+
+    if (walk_rat) {
+      const char *walk_alpha_env = getenv("PASSPEGN_GREEDY_ALPHA");
+      const double walk_alpha = walk_alpha_env && *walk_alpha_env
+                                    ? atof(walk_alpha_env)
+                                    : 1e-4;
+      const int per_ply_k =
+          ctx->opp_top_k > 0 ? ctx->opp_top_k : 8;
+
+      Game *walker = game_duplicate(game);
+      game_set_endgame_solving_mode(walker);
+      game_set_backup_mode(walker, BACKUP_MODE_OFF);
+      StringBuilder *walker_pv =
+          ctx->tsv_f ? string_builder_create() : NULL;
+
+      while (bag_get_letters(game_get_bag(walker)) > 0) {
+        const int turn = game_get_player_on_turn_index(walker);
+        const bool is_opp = (turn != ctx->mover_idx);
+
+        MoveList *wml = move_list_create(16384);
+        const MoveGenArgs wga = {
+            .game = walker,
+            .move_list = wml,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .thread_index = ctx->worker_idx,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&wga);
+        const int n_full = move_list_get_count(wml);
+        int sel_idx[256];
+        int n_sel = 0;
+        for (int i = 0; i < n_full && n_sel < per_ply_k && n_sel < 256;
+             i++) {
+          const Move *m = move_list_get_move(wml, i);
+          if (move_get_type(m) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+            continue;
+          }
+          sel_idx[n_sel++] = i;
+        }
+        if (n_sel == 0) {
+          move_list_destroy(wml);
+          break;
+        }
+
+        int best_local = 0;
+        if (is_opp) {
+          // Opp ply: perception eval with n_bag-multiset enumeration.
+          const int opp_idx = turn;
+          uint8_t walk_unseen[MAX_ALPHABET_SIZE];
+          pegN_compute_unseen(walker, opp_idx, walk_unseen);
+          MachineLetter walk_types[MAX_ALPHABET_SIZE];
+          int walk_type_counts[MAX_ALPHABET_SIZE];
+          int n_walk_types = 0;
+          for (int ml_idx = 0; ml_idx < ctx->ld_size; ml_idx++) {
+            if (walk_unseen[ml_idx] > 0) {
+              walk_types[n_walk_types] = (MachineLetter)ml_idx;
+              walk_type_counts[n_walk_types] = (int)walk_unseen[ml_idx];
+              n_walk_types++;
+            }
+          }
+          // Realized bag composition (indexed parallel to walk_types).
+          int realized_bag_counts[MAX_ALPHABET_SIZE] = {0};
+          const Bag *wbag = game_get_bag(walker);
+          const int n_bag_now = bag_get_letters(wbag);
+          for (int t = 0; t < n_walk_types; t++) {
+            realized_bag_counts[t] = bag_get_letter(
+                (Bag *)wbag, walk_types[t]);
+          }
+          double best_util = -1e18;
+          for (int s = 0; s < n_sel; s++) {
+            const Move *m = move_list_get_move(wml, sel_idx[s]);
+            double util = 0.0;
+            int32_t realized = 0;
+            pegN_eval_opp_with_perception(
+                ctx, walker, m, walk_types, walk_type_counts,
+                n_walk_types, n_bag_now, realized_bag_counts, walk_alpha,
+                &util, &realized);
+            if (util > best_util) {
+              best_util = util;
+              best_local = s;
+            }
+          }
+        } else {
+          // Mover ply: realized greedy mt per candidate.
+          int32_t best_mt = INT32_MIN;
+          for (int s = 0; s < n_sel; s++) {
+            const Move *m = move_list_get_move(wml, sel_idx[s]);
+            Game *probe = game_duplicate(walker);
+            game_set_endgame_solving_mode(probe);
+            game_set_backup_mode(probe, BACKUP_MODE_OFF);
+            play_move(m, probe, NULL);
+            game_set_game_end_reason(probe, GAME_END_REASON_NONE);
+            MoveList *pml = move_list_create(4096);
+            const int32_t mt = pegN_greedy_playout_pv(
+                probe, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
+                NULL, 0, NULL, 0, NULL, 0);
+            move_list_destroy(pml);
+            game_destroy(probe);
+            if (mt > best_mt) {
+              best_mt = mt;
+              best_local = s;
+            }
+          }
+        }
+
+        const Move *picked = move_list_get_move(wml, sel_idx[best_local]);
+        if (walker_pv) {
+          if (string_builder_length(walker_pv) > 0) {
+            string_builder_add_string(walker_pv, " | ");
+          }
+          string_builder_add_move(walker_pv, game_get_board(walker),
+                                  picked, game_get_ld(walker), true);
+        }
+        play_move(picked, walker, NULL);
+        game_set_game_end_reason(walker, GAME_END_REASON_NONE);
+        move_list_destroy(wml);
+      }
+
+      // Bag empty (or no legal play) — greedy to end.
+      MoveList *final_ml = move_list_create(4096);
+      char final_pv[1024] = {0};
+      char final_mr[32] = {0};
+      char final_or[32] = {0};
+      const int32_t walker_mt = pegN_greedy_playout_pv(
+          walker, ctx->mover_idx, final_ml, ctx->worker_idx,
+          walker_pv ? final_pv : NULL, sizeof(final_pv),
+          walker_pv ? final_mr : NULL, sizeof(final_mr),
+          walker_pv ? final_or : NULL, sizeof(final_or), NULL, 0);
+      move_list_destroy(final_ml);
+
+      if (walker_pv) {
+        if (final_pv[0] != '\0') {
+          if (string_builder_length(walker_pv) > 0) {
+            string_builder_add_string(walker_pv, " | ");
+          }
+          string_builder_add_string(walker_pv, final_pv);
+        }
+        snprintf(pv_text, sizeof(pv_text), "%s",
+                 string_builder_peek(walker_pv));
+        snprintf(mover_rack_end, sizeof(mover_rack_end), "%s", final_mr);
+        snprintf(opp_rack_end, sizeof(opp_rack_end), "%s", final_or);
+        string_builder_destroy(walker_pv);
+      }
+      game_destroy(walker);
+      mover_total = walker_mt;
+      move_list_destroy(opp_ml);
+    } else if (rational) {
       // 1. Pre-filter opp moves to placements + opp_move_filter.
       int *opp_cand_idx =
           malloc_or_die((size_t)(n_opp > 0 ? n_opp : 1) * sizeof(int));
@@ -3471,6 +3655,162 @@ static void pegN_noah_inner_worker_fn(void *arg, int worker_idx) {
   }
   game_destroy(hyp);
   j->mover_total = mt;
+}
+
+// Generalized hyp worker: bag = hyp_bag_counts, mover_rack = total -
+// hyp_bag_counts. Applies opp_move and runs greedy playout to game end.
+static void pegN_hyp_worker_fn(void *arg, int worker_idx) {
+  PegNHypJob *j = (PegNHypJob *)arg;
+  Game *hyp = game_duplicate(j->base_game);
+  game_set_endgame_solving_mode(hyp);
+  game_set_backup_mode(hyp, BACKUP_MODE_OFF);
+  Bag *hyp_bag = game_get_bag(hyp);
+  Rack *hyp_mover_rack =
+      player_get_rack(game_get_player(hyp, j->mover_idx));
+  // Drain bag and mover rack.
+  for (int ml = 0; ml < j->ld_size; ml++) {
+    while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
+    }
+  }
+  rack_reset(hyp_mover_rack);
+  // Bag = hyp_bag_counts.
+  for (int t = 0; t < j->n_opp_types; t++) {
+    for (int k = 0; k < j->hyp_bag_counts[t]; k++) {
+      bag_add_letter(hyp_bag, j->opp_types[t], 0);
+    }
+  }
+  // Mover rack = total - hyp_bag_counts.
+  for (int t = 0; t < j->n_opp_types; t++) {
+    const int copies = j->opp_type_counts[t] - j->hyp_bag_counts[t];
+    for (int k = 0; k < copies; k++) {
+      rack_add_letter(hyp_mover_rack, j->opp_types[t]);
+    }
+  }
+  play_move(j->opp_move, hyp, NULL);
+  game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
+  MoveList *pl = move_list_create(4096);
+  const int32_t mt = pegN_greedy_playout_pv(
+      hyp, j->mover_idx, pl, worker_idx, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
+  move_list_destroy(pl);
+  game_destroy(hyp);
+  j->mover_total = mt;
+}
+
+// Recursive accumulator: for each n_bag-multiset of perceived pool,
+// build a hyp, run greedy, fold into Noah's win/spread totals (and
+// stash the realized mt when the multiset matches the realized bag).
+typedef struct PegNHypEnumCtx {
+  const PegNEnumCtx *outer_ctx;
+  const Game *walker;
+  const Move *opp_move;
+  int n_opp_types;
+  const MachineLetter *opp_types;
+  const int *opp_type_counts;
+  const int *realized_bag_counts;
+  int *cur_hyp_bag; // size n_opp_types
+  // accumulators
+  int64_t total_weight;
+  double win_x2_sum;       // weighted by hypothesis weight, Noah's POV
+  int64_t spread_sum_noah; // weighted spread sum, Noah's POV
+  bool realized_set;
+  int32_t realized_mt;
+} PegNHypEnumCtx;
+
+static void pegN_enum_hyp_recursive(PegNHypEnumCtx *e, int type_idx,
+                                    int remaining) {
+  if (type_idx == e->n_opp_types) {
+    if (remaining != 0) {
+      return;
+    }
+    int64_t weight = 1;
+    for (int t = 0; t < e->n_opp_types; t++) {
+      weight *= pegN_binomial(e->opp_type_counts[t], e->cur_hyp_bag[t]);
+    }
+    PegNHypJob job = {
+        .base_game = e->walker,
+        .mover_idx = e->outer_ctx->mover_idx,
+        .ld_size = e->outer_ctx->ld_size,
+        .opp_move = e->opp_move,
+        .n_opp_types = e->n_opp_types,
+        .opp_types = e->opp_types,
+        .opp_type_counts = e->opp_type_counts,
+        .hyp_bag_counts = e->cur_hyp_bag,
+        .thread_control = e->outer_ctx->thread_control,
+        .mover_total = 0,
+    };
+    pegN_hyp_worker_fn(&job, e->outer_ctx->worker_idx);
+    const int32_t mt = job.mover_total;
+    const int32_t mt_noah = -mt;
+    e->total_weight += weight;
+    e->spread_sum_noah += (int64_t)mt_noah * weight;
+    if (mt_noah > 0) {
+      e->win_x2_sum += 2.0 * (double)weight;
+    } else if (mt_noah == 0) {
+      e->win_x2_sum += (double)weight;
+    }
+    if (!e->realized_set) {
+      bool matches = true;
+      for (int t = 0; t < e->n_opp_types; t++) {
+        if (e->cur_hyp_bag[t] != e->realized_bag_counts[t]) {
+          matches = false;
+          break;
+        }
+      }
+      if (matches) {
+        e->realized_mt = mt;
+        e->realized_set = true;
+      }
+    }
+    return;
+  }
+  const int max_take = e->opp_type_counts[type_idx] < remaining
+                           ? e->opp_type_counts[type_idx]
+                           : remaining;
+  for (int k = 0; k <= max_take; k++) {
+    e->cur_hyp_bag[type_idx] = k;
+    pegN_enum_hyp_recursive(e, type_idx + 1, remaining - k);
+  }
+  e->cur_hyp_bag[type_idx] = 0;
+}
+
+// Public-ish helper: evaluate Noah's utility for one opp_move at the
+// given walker state, averaging over all n_bag-multisets of opp's
+// perceived pool (weighted by multinomial). Also returns the realized
+// mt under the actual bag composition (used as scenario outcome at the
+// final ply).
+static void pegN_eval_opp_with_perception(
+    const PegNEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
+    const MachineLetter *opp_types, const int *opp_type_counts,
+    int n_opp_types, int n_bag_now, const int *realized_bag_counts,
+    double alpha, double *out_utility, int32_t *out_realized_mt) {
+  int cur_hyp_bag[MAX_ALPHABET_SIZE] = {0};
+  PegNHypEnumCtx e = {
+      .outer_ctx = outer_ctx,
+      .walker = walker,
+      .opp_move = opp_move,
+      .n_opp_types = n_opp_types,
+      .opp_types = opp_types,
+      .opp_type_counts = opp_type_counts,
+      .realized_bag_counts = realized_bag_counts,
+      .cur_hyp_bag = cur_hyp_bag,
+      .total_weight = 0,
+      .win_x2_sum = 0.0,
+      .spread_sum_noah = 0,
+      .realized_set = false,
+      .realized_mt = 0,
+  };
+  pegN_enum_hyp_recursive(&e, 0, n_bag_now);
+  if (e.total_weight > 0) {
+    const double winpct =
+        e.win_x2_sum / (2.0 * (double)e.total_weight);
+    const double mean_spread =
+        (double)e.spread_sum_noah / (double)e.total_weight;
+    *out_utility = winpct + alpha * mean_spread;
+  } else {
+    *out_utility = -1e9;
+  }
+  *out_realized_mt = e.realized_mt;
 }
 
 // For a fixed N-multiset in ctx->n_multiset, enumerate all mover-drawn
