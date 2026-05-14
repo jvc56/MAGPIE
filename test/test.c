@@ -143,6 +143,9 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"topk50repro", test_topk50_overflow_repro},
+    {"topk_dup_repro", test_topk_no_duplicates},
+    {"endgame_stream", test_endgame_progress_stream},
+    {"endgame_bench_kue", test_endgame_bench_kue},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     {NULL, NULL} // Sentinel value to mark end of array
