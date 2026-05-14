@@ -118,10 +118,23 @@ void generator_destroy(MoveGen *gen) {
 }
 
 MoveGen *get_movegen(int thread_index) {
-  if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = calloc_or_die(1, sizeof(MoveGen));
+  // Double-checked init: the lock-free fast path covers every call after
+  // this slot has been populated. The lock only fires on first-touch, which
+  // is racy under multi-threaded executors (two threads with the same
+  // thread_index would both calloc and one would leak; worse, both could
+  // briefly proceed with different pointers until the store winner wins).
+  MoveGen *gen = cached_gens[thread_index];
+  if (gen) {
+    return gen;
   }
-  return cached_gens[thread_index];
+  cpthread_mutex_lock(&cache_mutex);
+  gen = cached_gens[thread_index];
+  if (!gen) {
+    gen = calloc_or_die(1, sizeof(MoveGen));
+    cached_gens[thread_index] = gen;
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  return gen;
 }
 
 void gen_destroy_cache(void) {

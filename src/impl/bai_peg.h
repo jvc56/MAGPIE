@@ -88,6 +88,26 @@ BaiPegExecutor *bai_peg_executor_create(int num_workers,
 // executor while a bai_peg_solve / session step is still running on it.
 void bai_peg_executor_destroy(BaiPegExecutor *executor);
 
+// Number of workers / thread_index_offset queried back so external callers
+// can pick a non-colliding helper_worker_idx and per-thread scratch sizes.
+int bai_peg_executor_num_workers(const BaiPegExecutor *executor);
+int bai_peg_executor_thread_index_offset(const BaiPegExecutor *executor);
+
+// Generic work-item signature. `worker_idx` is the executor's thread index
+// for cache keying (movegen / endgame caches keyed by this number).
+typedef void (*BaiPegExecutorFn)(void *arg, int worker_idx);
+
+// Submit a batch of `n` items as `(fn, args[i])` pairs and block until all
+// complete. While blocked, the calling thread helps drain queue items so
+// nested submissions don't deadlock. `helper_worker_idx` is the index used
+// for cache keying when the helper runs items; pass the calling worker's
+// idx if invoked from inside a worker, otherwise any idx outside the
+// executor's [offset, offset + num_workers) range.
+void bai_peg_executor_submit_and_wait(BaiPegExecutor *executor,
+                                      BaiPegExecutorFn fn,
+                                      void *const *args, int n,
+                                      int helper_worker_idx);
+
 // Caller-supplied callback fired whenever a candidate's depth advances (or
 // the solver wants to checkpoint progress). Ranked moves are ordered by
 // utility (win_pct + utility_alpha * mean_spread, with visited candidates

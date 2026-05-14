@@ -257,6 +257,30 @@ void bai_peg_executor_destroy(BaiPegExecutor *e) {
   free(e);
 }
 
+int bai_peg_executor_num_workers(const BaiPegExecutor *e) {
+  return e ? e->num_workers : 0;
+}
+
+int bai_peg_executor_thread_index_offset(const BaiPegExecutor *e) {
+  return e ? e->thread_index_offset : 0;
+}
+
+void bai_peg_executor_submit_and_wait(BaiPegExecutor *e, BaiPegExecutorFn fn,
+                                      void *const *args, int n,
+                                      int helper_worker_idx) {
+  if (n <= 0) {
+    return;
+  }
+  BpExecItem *items = malloc_or_die((size_t)n * sizeof(*items));
+  for (int i = 0; i < n; i++) {
+    items[i].fn = (BpExecFn)fn;
+    items[i].arg = args[i];
+    items[i].batch = NULL;
+  }
+  bp_exec_submit_and_wait(e, items, n, helper_worker_idx);
+  free(items);
+}
+
 // ---------------------------------------------------------------------------
 // Local helpers
 // ---------------------------------------------------------------------------

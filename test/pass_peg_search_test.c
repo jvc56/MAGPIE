@@ -1,11 +1,15 @@
 #include "pass_peg_search_test.h"
 
+#include "../src/compat/cpthread.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/game.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -17,7 +21,9 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/word_prune.h"
 #include "../src/str/game_string.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
@@ -2226,7 +2232,74 @@ typedef struct PegNEnumCtx {
   int opp_top_k;
   // ThreadControl for endgame_solve at d>=1.
   ThreadControl *thread_control;
+
+  // ---- threading ----
+  // The thread_index used for movegen + endgame caches by this scenario's
+  // worker. Set per-job by the worker fn (= worker_idx the executor hands
+  // in). Zero for the serial / non-executor code path.
+  int worker_idx;
+  // Optional shared executor for inner Noah-util dispatch from inside
+  // emit_split. NULL = run the Noah-util sweep serially.
+  BaiPegExecutor *executor;
+  // Mutex protecting the per-cand aggregator `res`. Multiple scenarios
+  // of the same cand may run concurrently. NULL = serial mode.
+  cpthread_mutex_t *res_mutex;
+  // Mutex protecting writes to `tsv_f`. NULL = serial mode.
+  cpthread_mutex_t *tsv_mutex;
+  // Mutex serializing endgame_solve_inline calls. The internal endgame
+  // state has shared mutables (movegen/ABDADA caches keyed by fixed-ish
+  // thread indices, pruned-KWG generation, etc.) that race under
+  // concurrent workers — so we currently serialize the heavy solve step
+  // while keeping the cheaper scenario setup (game_duplicate, opp
+  // movegen, MIN aggregation) parallel. NULL = serial mode.
+  cpthread_mutex_t *endgame_mutex;
+  // When non-NULL, emit_split pushes a copy of (n_multiset, mover_pick)
+  // onto this list and returns instead of evaluating. Used by the outer
+  // driver to enumerate scenarios in one thread before dispatching them
+  // to workers. Guarded by *jobs_mutex (callers run enumeration
+  // single-threaded, but the worker fn shares the result back).
+  struct PegNScenarioJobList *out_jobs;
 } PegNEnumCtx;
+
+// One (cand, n_multiset, mover_pick) scenario, packaged for dispatch
+// through BaiPegExecutor. `base_ctx` is a shared read-only template;
+// `n_multiset` and `mover_pick` are owned copies (K_types ints each).
+typedef struct PegNScenarioJob {
+  const PegNEnumCtx *base_ctx;
+  int *n_multiset;
+  int *mover_pick;
+} PegNScenarioJob;
+
+typedef struct PegNScenarioJobList {
+  PegNScenarioJob *items;
+  int n;
+  int cap;
+} PegNScenarioJobList;
+
+static void pegN_joblist_push(PegNScenarioJobList *jl, PegNScenarioJob job) {
+  if (jl->n == jl->cap) {
+    int new_cap = jl->cap > 0 ? jl->cap * 2 : 256;
+    jl->items =
+        realloc(jl->items, (size_t)new_cap * sizeof(PegNScenarioJob));
+    if (!jl->items) {
+      log_fatal("pegN joblist realloc failed");
+    }
+    jl->cap = new_cap;
+  }
+  jl->items[jl->n++] = job;
+}
+
+static inline void pegN_lock(cpthread_mutex_t *m) {
+  if (m) {
+    cpthread_mutex_lock(m);
+  }
+}
+
+static inline void pegN_unlock(cpthread_mutex_t *m) {
+  if (m) {
+    cpthread_mutex_unlock(m);
+  }
+}
 
 // True when (drawn_str, remaining_str) matches one of the semicolon-
 // separated "drawn/remaining" patterns in `filter`. NULL filter = always
@@ -2253,6 +2326,28 @@ static bool pegN_scenario_filter_match(const char *filter,
 
 // Leaf: build the realized split's tile arrays, run a greedy playout, and
 // fold the outcome into res / TSV.
+// One (opp_move, perceived_bag_tile) leaf for the Noah utility sweep
+// inside emit_split. Read-only fields are shared; mover_total is the
+// only per-job write target. The worker fn body is declared after
+// emit_split (it shares scope with the outer scenario worker), so we
+// forward-declare it here.
+typedef struct PegNNoahInnerJob {
+  const Game *base_game;            // post-cand game (RO, shared)
+  int mover_idx;
+  int ld_size;
+  const Move *opp_move;             // shared, RO
+  MachineLetter bag_X;              // perceived bag tile in this hypothetical
+  int weight;                       // == opp_type_counts[ti]
+  int n_opp_types;
+  const MachineLetter *opp_types;
+  const int *opp_type_counts;
+  int ti;                           // index into opp_types for this scenario
+  int noah_depth;
+  ThreadControl *thread_control;
+  int32_t mover_total;              // output
+} PegNNoahInnerJob;
+static void pegN_noah_inner_worker_fn(void *arg, int worker_idx);
+
 static void pegN_emit_split(const PegNEnumCtx *ctx) {
   MachineLetter mover_drawn[16];
   MachineLetter bag_remaining[16];
@@ -2283,6 +2378,24 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   // aggregated stats reflect only the scenarios we evaluated).
   if (!pegN_scenario_filter_match(ctx->scenario_filter, drawn_str,
                                   remaining_str)) {
+    return;
+  }
+
+  // Collect-mode: defer evaluation by pushing a (n_multiset, mover_pick)
+  // copy onto out_jobs. The dispatcher will hand it to a worker which
+  // calls back here with out_jobs == NULL.
+  if (ctx->out_jobs) {
+    PegNScenarioJob job;
+    job.base_ctx = ctx;
+    job.n_multiset =
+        malloc_or_die((size_t)ctx->K_types * sizeof(int));
+    job.mover_pick =
+        malloc_or_die((size_t)ctx->K_types * sizeof(int));
+    memcpy(job.n_multiset, ctx->n_multiset,
+           (size_t)ctx->K_types * sizeof(int));
+    memcpy(job.mover_pick, ctx->mover_pick,
+           (size_t)ctx->K_types * sizeof(int));
+    pegN_joblist_push(ctx->out_jobs, job);
     return;
   }
 
@@ -2318,7 +2431,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     // Pure greedy from post-cand: opp + mover both greedy to game end.
     MoveList *playout_ml = move_list_create(4096);
     mover_total = pegN_greedy_playout_pv(
-        game, ctx->mover_idx, playout_ml, 0,
+        game, ctx->mover_idx, playout_ml, ctx->worker_idx,
         ctx->tsv_f ? pv_text : NULL, sizeof(pv_text),
         ctx->tsv_f ? mover_rack_end : NULL, sizeof(mover_rack_end),
         ctx->tsv_f ? opp_rack_end : NULL, sizeof(opp_rack_end),
@@ -2336,7 +2449,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         .move_record_type = MOVE_RECORD_ALL,
         .move_sort_type = MOVE_SORT_EQUITY,
         .override_kwg = NULL,
-        .thread_index = 0,
+        .thread_index = ctx->worker_idx,
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -2393,87 +2506,79 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           calloc_or_die((size_t)n_opp, sizeof(NoahRanked));
       int n_ranked = 0;
 
+      // Collect tile-placement opp ranks; PASS/EXCHANGE are skipped.
+      int *placement_opp_ranks =
+          malloc_or_die((size_t)n_opp * sizeof(int));
+      int n_placement = 0;
       for (int opp_rank = 0; opp_rank < n_opp; opp_rank++) {
         const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
-        if (move_get_type(opp_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
-          continue;
+        if (move_get_type(opp_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          placement_opp_ranks[n_placement++] = opp_rank;
         }
+      }
+
+      // Build one job per (opp_move, perceived_bag_tile) leaf. Flat
+      // layout: jobs[pp * n_opp_types + ti] is the (placement_opp_ranks
+      // [pp], opp_types[ti]) leaf.
+      const int n_inner_jobs =
+          n_placement > 0 ? n_placement * n_opp_types : 0;
+      PegNNoahInnerJob *inner_jobs = NULL;
+      void **inner_arg_ptrs = NULL;
+      if (n_inner_jobs > 0) {
+        inner_jobs = malloc_or_die((size_t)n_inner_jobs *
+                                    sizeof(PegNNoahInnerJob));
+        inner_arg_ptrs =
+            malloc_or_die((size_t)n_inner_jobs * sizeof(void *));
+        for (int pp = 0; pp < n_placement; pp++) {
+          const int opp_rank = placement_opp_ranks[pp];
+          const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
+          for (int ti = 0; ti < n_opp_types; ti++) {
+            const int idx = pp * n_opp_types + ti;
+            inner_jobs[idx] = (PegNNoahInnerJob){
+                .base_game = game,
+                .mover_idx = ctx->mover_idx,
+                .ld_size = ctx->ld_size,
+                .opp_move = opp_move,
+                .bag_X = opp_types[ti],
+                .weight = opp_type_counts[ti],
+                .n_opp_types = n_opp_types,
+                .opp_types = opp_types,
+                .opp_type_counts = opp_type_counts,
+                .ti = ti,
+                .noah_depth = noah_depth,
+                .thread_control = ctx->thread_control,
+                .mover_total = 0,
+            };
+            inner_arg_ptrs[idx] = &inner_jobs[idx];
+          }
+        }
+      }
+
+      // Dispatch. With a shared executor we can submit nested work; the
+      // help-while-waiting protocol on submit_and_wait lets the calling
+      // worker continue draining the queue (no deadlock when nested
+      // inner work is submitted from within an outer scenario worker).
+      if (ctx->executor && n_inner_jobs > 0) {
+        bai_peg_executor_submit_and_wait(ctx->executor,
+                                         pegN_noah_inner_worker_fn,
+                                         inner_arg_ptrs, n_inner_jobs,
+                                         ctx->worker_idx);
+      } else {
+        for (int idx = 0; idx < n_inner_jobs; idx++) {
+          pegN_noah_inner_worker_fn(&inner_jobs[idx], ctx->worker_idx);
+        }
+      }
+
+      // Aggregate per-opp_rank.
+      for (int pp = 0; pp < n_placement; pp++) {
+        const int opp_rank = placement_opp_ranks[pp];
         int64_t weight_sum = 0;
         double win_x2_sum = 0.0;
         int64_t spread_sum = 0;
         for (int ti = 0; ti < n_opp_types; ti++) {
-          const MachineLetter bag_X = opp_types[ti];
-          const int weight = opp_type_counts[ti];
-          // Build a hypothetical scenario: bag has bag_X (1 tile),
-          // mover_rack has the rest of opp_unseen (pool minus bag_X),
-          // opp_rack stays at the actual opp_rack, board is post-cand.
-          Game *hyp = game_duplicate(game);
-          game_set_endgame_solving_mode(hyp);
-          game_set_backup_mode(hyp, BACKUP_MODE_OFF);
-          Bag *hyp_bag = game_get_bag(hyp);
-          Rack *hyp_mover_rack =
-              player_get_rack(game_get_player(hyp, ctx->mover_idx));
-          // Drain hyp bag and mover rack, then refill.
-          for (int ml = 0; ml < ctx->ld_size; ml++) {
-            while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
-              (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
-            }
-          }
-          rack_reset(hyp_mover_rack);
-          bag_add_letter(hyp_bag, bag_X, 0);
-          for (int t = 0; t < n_opp_types; t++) {
-            int copies = opp_type_counts[t] - (t == ti ? 1 : 0);
-            for (int k = 0; k < copies; k++) {
-              rack_add_letter(hyp_mover_rack, opp_types[t]);
-            }
-          }
-          // Apply opp's move (uses opp_rack tiles, opp draws from bag).
-          play_move(opp_move, hyp, NULL);
-          game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
-          int32_t hyp_mover_total = 0;
-          if (noah_depth == 0) {
-            MoveList *pl = move_list_create(4096);
-            hyp_mover_total = pegN_greedy_playout_pv(
-                hyp, ctx->mover_idx, pl, 0, NULL, 0, NULL, 0, NULL, 0,
-                NULL, 0);
-            move_list_destroy(pl);
-          } else {
-            const int32_t hyp_lead = equity_to_int(player_get_score(
-                game_get_player(hyp, ctx->mover_idx))) -
-                equity_to_int(player_get_score(
-                    game_get_player(hyp, 1 - ctx->mover_idx)));
-            if (game_get_game_end_reason(hyp) != GAME_END_REASON_NONE) {
-              hyp_mover_total = hyp_lead;
-            } else {
-              EndgameCtx *eg = NULL;
-              EndgameResults *er = endgame_results_create();
-              EndgameArgs ea = {
-                  .thread_control = ctx->thread_control,
-                  .game = hyp,
-                  .plies = noah_depth,
-                  .shared_tt = NULL,
-                  .initial_small_move_arena_size =
-                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                  .num_threads = 1,
-                  .use_heuristics = true,
-                  .num_top_moves = 1,
-                  .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-                  .skip_word_pruning = false,
-                  .thread_index_offset = 0,
-                  .soft_time_limit = 5.0,
-                  .hard_time_limit = 5.0,
-              };
-              endgame_solve_inline(&eg, &ea, er);
-              const int eg_val = endgame_results_get_value(
-                  er, ENDGAME_RESULT_BEST);
-              hyp_mover_total = hyp_lead + eg_val;
-              endgame_ctx_destroy(eg);
-              endgame_results_destroy(er);
-            }
-          }
-          game_destroy(hyp);
-
-          // From Noah's POV: Noah wins if mover_total < 0; ties at 0.
+          const int idx = pp * n_opp_types + ti;
+          const int32_t hyp_mover_total = inner_jobs[idx].mover_total;
+          const int weight = inner_jobs[idx].weight;
           weight_sum += weight;
           spread_sum += (int64_t)(-hyp_mover_total) * weight;
           if (hyp_mover_total < 0) {
@@ -2482,6 +2587,8 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             win_x2_sum += weight;
           }
         }
+        const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
+        (void)opp_move; // used below via opp_rank
         const double noah_win_pct = win_x2_sum / (2.0 * (double)weight_sum);
         const double noah_mean_spread =
             (double)spread_sum / (double)weight_sum;
@@ -2541,6 +2648,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
       }
       free(ranked);
+      free(placement_opp_ranks);
+      free(inner_jobs);
+      free(inner_arg_ptrs);
       fflush(stderr);
     }
 
@@ -2570,8 +2680,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         char dump_mr[32] = {0};
         char dump_or[32] = {0};
         const int32_t dump_mt = pegN_greedy_playout_pv(
-            dump_branch, ctx->mover_idx, dump_pl, 0, dump_pv, sizeof(dump_pv),
-            dump_mr, sizeof(dump_mr), dump_or, sizeof(dump_or), NULL, 0);
+            dump_branch, ctx->mover_idx, dump_pl, ctx->worker_idx, dump_pv,
+            sizeof(dump_pv), dump_mr, sizeof(dump_mr), dump_or,
+            sizeof(dump_or), NULL, 0);
         move_list_destroy(dump_pl);
         game_destroy(dump_branch);
         StringBuilder *dump_sb = string_builder_create();
@@ -2674,8 +2785,8 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
               .use_heuristics = true,
               .num_top_moves = 1,
               .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-              .skip_word_pruning = false,
-              .thread_index_offset = 0,
+              .skip_word_pruning = true,
+              .thread_index_offset = ctx->worker_idx + 200,
               .soft_time_limit = 5.0,
               .hard_time_limit = 5.0,
           };
@@ -2764,6 +2875,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   }
   game_destroy(game);
 
+  pegN_lock(ctx->res_mutex);
   ctx->res->weight_sum += weight;
   ctx->res->spread_sum += weight * (int64_t)mover_total;
   if (mover_total > 0) {
@@ -2772,8 +2884,10 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     ctx->res->win_x2 += weight;
   }
   ctx->res->n_scen++;
+  pegN_unlock(ctx->res_mutex);
 
   if (ctx->tsv_f) {
+    pegN_lock(ctx->tsv_mutex);
     fprintf(
         ctx->tsv_f,
         "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
@@ -2781,7 +2895,88 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         ctx->K_drawn + ctx->n_bag_remaining, ctx->K_drawn, drawn_str,
         remaining_str, (long long)weight, (int)mover_total, post_cand_cgp,
         final_cgp, pv_text, mover_rack_end, opp_rack_end);
+    pegN_unlock(ctx->tsv_mutex);
   }
+}
+
+// Worker fn invoked by BaiPegExecutor for each (cand, scenario) job. Builds
+// a per-worker PegNEnumCtx pointing at the job's owned (n_multiset,
+// mover_pick) and calls pegN_emit_split with execute mode (out_jobs=NULL).
+static void pegN_scenario_worker_fn(void *arg, int worker_idx) {
+  PegNScenarioJob *job = (PegNScenarioJob *)arg;
+  PegNEnumCtx local = *job->base_ctx;
+  local.n_multiset = job->n_multiset;
+  local.mover_pick = job->mover_pick;
+  local.worker_idx = worker_idx;
+  local.out_jobs = NULL;
+  pegN_emit_split(&local);
+}
+
+static void pegN_noah_inner_worker_fn(void *arg, int worker_idx) {
+  PegNNoahInnerJob *j = (PegNNoahInnerJob *)arg;
+  Game *hyp = game_duplicate(j->base_game);
+  game_set_endgame_solving_mode(hyp);
+  game_set_backup_mode(hyp, BACKUP_MODE_OFF);
+  Bag *hyp_bag = game_get_bag(hyp);
+  Rack *hyp_mover_rack =
+      player_get_rack(game_get_player(hyp, j->mover_idx));
+  for (int ml = 0; ml < j->ld_size; ml++) {
+    while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
+    }
+  }
+  rack_reset(hyp_mover_rack);
+  bag_add_letter(hyp_bag, j->bag_X, 0);
+  for (int t = 0; t < j->n_opp_types; t++) {
+    int copies = j->opp_type_counts[t] - (t == j->ti ? 1 : 0);
+    for (int k = 0; k < copies; k++) {
+      rack_add_letter(hyp_mover_rack, j->opp_types[t]);
+    }
+  }
+  play_move(j->opp_move, hyp, NULL);
+  game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
+  int32_t mt = 0;
+  if (j->noah_depth == 0) {
+    MoveList *pl = move_list_create(4096);
+    mt = pegN_greedy_playout_pv(hyp, j->mover_idx, pl, worker_idx, NULL, 0,
+                                NULL, 0, NULL, 0, NULL, 0);
+    move_list_destroy(pl);
+  } else {
+    const int32_t hyp_lead = equity_to_int(player_get_score(
+        game_get_player(hyp, j->mover_idx))) -
+        equity_to_int(player_get_score(
+            game_get_player(hyp, 1 - j->mover_idx)));
+    if (game_get_game_end_reason(hyp) != GAME_END_REASON_NONE) {
+      mt = hyp_lead;
+    } else {
+      EndgameCtx *eg = NULL;
+      EndgameResults *er = endgame_results_create();
+      EndgameArgs ea = {
+          .thread_control = j->thread_control,
+          .game = hyp,
+          .plies = j->noah_depth,
+          .shared_tt = NULL,
+          .initial_small_move_arena_size =
+              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+          .num_threads = 1,
+          .use_heuristics = true,
+          .num_top_moves = 1,
+          .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+          .skip_word_pruning = true,
+          .thread_index_offset = worker_idx + 200,
+          .soft_time_limit = 5.0,
+          .hard_time_limit = 5.0,
+      };
+      endgame_solve_inline(&eg, &ea, er);
+      const int eg_val =
+          endgame_results_get_value(er, ENDGAME_RESULT_BEST);
+      mt = hyp_lead + eg_val;
+      endgame_ctx_destroy(eg);
+      endgame_results_destroy(er);
+    }
+  }
+  game_destroy(hyp);
+  j->mover_total = mt;
 }
 
 // For a fixed N-multiset in ctx->n_multiset, enumerate all mover-drawn
@@ -2845,14 +3040,31 @@ void test_pass_pegN_greedy_bench(void) {
       opp_match_env && *opp_match_env ? opp_match_env : NULL;
   const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
   const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
+  const char *threads_env = getenv("PASSPEGN_GREEDY_THREADS");
+  const int n_threads =
+      threads_env && *threads_env ? atoi(threads_env) : 1;
+
+  // Persistent worker pool reused across positions and across the outer
+  // (cand × scenario) loop AND the inner Noah utility sweep. workers
+  // claim indices in [100, 100 + n_threads); the main thread runs at
+  // helper_worker_idx = 0, outside that range.
+  BaiPegExecutor *executor =
+      n_threads > 1 ? bai_peg_executor_create(n_threads, 100) : NULL;
+  cpthread_mutex_t res_mutex;
+  cpthread_mutex_t tsv_mutex;
+  cpthread_mutex_t endgame_mutex;
+  cpthread_mutex_init(&res_mutex);
+  cpthread_mutex_init(&tsv_mutex);
+  cpthread_mutex_init(&endgame_mutex);
 
   char **cgps = NULL;
   int n_pos = load_cgp_lines(path, &cgps, 1000);
   if (n_pos == 0) log_fatal("no positions loaded from %s", path);
   fprintf(stderr,
           "[pegNgreedy] loaded %d positions from %s  depth=%d  opp_top_k=%d"
+          "  threads=%d"
           "%s%s\n",
-          n_pos, path, depth, opp_top_k,
+          n_pos, path, depth, opp_top_k, n_threads,
           scenario_filter ? "  scenario_filter=" : "",
           scenario_filter ? scenario_filter : "");
   fflush(stderr);
@@ -2922,6 +3134,31 @@ void test_pass_pegN_greedy_bench(void) {
             pi, N, total_unseen, K_types, n_all);
     fflush(stderr);
 
+    // Pre-build a pruned KWG for the current board state and install it
+    // as an override on the base game. game_duplicate (used inside
+    // emit_split via pegN_make_post_cand_game) carries the override
+    // pointer through to every scenario's branch, so endgame_solve can
+    // run with skip_word_pruning=true and reuse this single pruned KWG
+    // instead of rebuilding one per (cand, scenario). The rebuild path
+    // shares state that races under concurrent workers; pre-building
+    // once per position eliminates that race entirely. The pruned KWG
+    // for the pre-cand board is a superset of the words playable in any
+    // post-cand position (the post-cand board has strictly more tiles
+    // and strictly fewer possible words), so this is a correctness-
+    // preserving optimization.
+    KWG *pegN_pruned_kwg = NULL;
+    if (depth >= 1) {
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
+      generate_possible_words(game, full_kwg, word_list);
+      pegN_pruned_kwg = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+      game_set_override_kwgs(game, pegN_pruned_kwg, NULL,
+                             DUAL_LEXICON_MODE_IGNORANT);
+      game_gen_all_cross_sets(game);
+    }
+
     PegNCandResult *results =
         calloc_or_die((size_t)(n_all > 0 ? n_all : 1), sizeof(PegNCandResult));
     int n_results = 0;
@@ -2989,8 +3226,40 @@ void test_pass_pegN_greedy_bench(void) {
           .depth = depth,
           .opp_top_k = opp_top_k,
           .thread_control = config_get_thread_control(config),
+          .worker_idx = 0,
+          .executor = executor,
+          .res_mutex = executor ? &res_mutex : NULL,
+          .tsv_mutex = executor ? &tsv_mutex : NULL,
+          .endgame_mutex = executor ? &endgame_mutex : NULL,
+          .out_jobs = NULL,
       };
-      pegN_enum_outer_multiset(&enum_ctx, 0, N);
+      if (executor == NULL) {
+        pegN_enum_outer_multiset(&enum_ctx, 0, N);
+      } else {
+        // Phase 1: enumerate scenarios into the job list (single-threaded).
+        PegNScenarioJobList jobs = {0};
+        enum_ctx.out_jobs = &jobs;
+        pegN_enum_outer_multiset(&enum_ctx, 0, N);
+        enum_ctx.out_jobs = NULL;
+        // Phase 2: dispatch (cand, scenario) leaves to workers. The
+        // worker fn rebuilds a local PegNEnumCtx from each job and runs
+        // emit_split in execute mode.
+        if (jobs.n > 0) {
+          void **args =
+              malloc_or_die((size_t)jobs.n * sizeof(void *));
+          for (int j = 0; j < jobs.n; j++) {
+            args[j] = &jobs.items[j];
+          }
+          bai_peg_executor_submit_and_wait(
+              executor, pegN_scenario_worker_fn, args, jobs.n, 0);
+          free(args);
+        }
+        for (int j = 0; j < jobs.n; j++) {
+          free(jobs.items[j].n_multiset);
+          free(jobs.items[j].mover_pick);
+        }
+        free(jobs.items);
+      }
     }
 
     double wall = ctimer_elapsed_seconds(&t);
@@ -3043,12 +3312,19 @@ void test_pass_pegN_greedy_bench(void) {
     free(ranked);
     free(results);
     move_list_destroy(ml_cands);
+    if (pegN_pruned_kwg) {
+      game_set_override_kwgs(game, NULL, NULL, DUAL_LEXICON_MODE_IGNORANT);
+      kwg_destroy(pegN_pruned_kwg);
+    }
     config_destroy(config);
   }
 
   if (tsv_f) {
     fclose(tsv_f);
     fprintf(stderr, "[pegNgreedy] TSV written to %s\n", tsv_path);
+  }
+  if (executor) {
+    bai_peg_executor_destroy(executor);
   }
   for (int i = 0; i < n_pos; i++) free(cgps[i]);
   free(cgps);
