@@ -2150,6 +2150,40 @@ static int64_t pegN_binomial(int n, int k) {
   return r;
 }
 
+// In-place lexicographic next-permutation over MachineLetter arrays.
+// Skips duplicates naturally (only enumerates distinct orderings).
+// Caller should sort the array ascending before the first iteration.
+// Returns false when the array is at the last permutation.
+static bool pegN_next_perm(MachineLetter *arr, int n) {
+  if (n <= 1) {
+    return false;
+  }
+  int k = n - 2;
+  while (k >= 0 && arr[k] >= arr[k + 1]) {
+    k--;
+  }
+  if (k < 0) {
+    return false;
+  }
+  int l = n - 1;
+  while (arr[k] >= arr[l]) {
+    l--;
+  }
+  MachineLetter tmp = arr[k];
+  arr[k] = arr[l];
+  arr[l] = tmp;
+  int i = k + 1;
+  int j = n - 1;
+  while (i < j) {
+    tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+    i++;
+    j--;
+  }
+  return true;
+}
+
 // Recursive enumerator over N-multisets from `counts[0..K_types-1]`. Calls
 // cb(picked, ctx) once per distinct multiset.
 static void pegN_enum_multiset(int *picked, int idx, int remaining,
@@ -2785,9 +2819,43 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       const int per_ply_k =
           ctx->opp_top_k > 0 ? ctx->opp_top_k : 8;
 
-      Game *walker = game_duplicate(game);
-      game_set_endgame_solving_mode(walker);
-      game_set_backup_mode(walker, BACKUP_MODE_OFF);
+      // opp_ml (generated at the top of the d>=1 branch on the original
+      // `game`) is unused by the walker; release it here. The walker
+      // builds fresh post-cand games per permutation below.
+      move_list_destroy(opp_ml);
+      game_destroy(game);
+
+      // Enumerate distinct lexicographic orderings of bag_remaining.
+      // Each ordering is a sub-scenario: opp draws the first tile in
+      // order, mover draws the second, etc. We rebuild the post-cand
+      // game per perm so that the bag's deterministic draw order
+      // matches the perm.
+      MachineLetter perm[16];
+      for (int i = 0; i < ctx->n_bag_remaining; i++) {
+        perm[i] = bag_remaining[i];
+      }
+      // Sort ascending.
+      for (int i = 1; i < ctx->n_bag_remaining; i++) {
+        for (int j = i;
+             j > 0 && perm[j] < perm[j - 1]; j--) {
+          MachineLetter tmp = perm[j];
+          perm[j] = perm[j - 1];
+          perm[j - 1] = tmp;
+        }
+      }
+
+      do {
+      char perm_remaining_str[32] = {0};
+      for (int i = 0;
+           i < ctx->n_bag_remaining && i < 30; i++) {
+        perm_remaining_str[i] =
+            ctx->ld->ld_ml_to_hl[perm[i]][0];
+      }
+
+      Game *walker = pegN_make_post_cand_game(
+          ctx->base_game, ctx->mover_idx, ctx->unseen, ctx->ld_size,
+          ctx->cand, ctx->K_drawn, mover_drawn, ctx->n_bag_remaining,
+          perm);
       StringBuilder *walker_pv =
           ctx->tsv_f ? string_builder_create() : NULL;
 
@@ -2924,8 +2992,38 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         string_builder_destroy(walker_pv);
       }
       game_destroy(walker);
-      mover_total = walker_mt;
-      move_list_destroy(opp_ml);
+
+      // Per-perm aggregation. Each ordering counts as a distinct
+      // sub-scenario with weight = multiset weight (so a multiset with
+      // n_orderings letter orderings contributes n_orderings entries
+      // to weight_sum; this captures the physical bag-draw orderings
+      // we'd otherwise miss).
+      pegN_lock(ctx->res_mutex);
+      ctx->res->weight_sum += weight;
+      ctx->res->spread_sum += weight * (int64_t)walker_mt;
+      if (walker_mt > 0) {
+        ctx->res->win_x2 += 2 * weight;
+      } else if (walker_mt == 0) {
+        ctx->res->win_x2 += weight;
+      }
+      ctx->res->n_scen++;
+      pegN_unlock(ctx->res_mutex);
+
+      if (ctx->tsv_f) {
+        pegN_lock(ctx->tsv_mutex);
+        fprintf(
+            ctx->tsv_f,
+            "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
+            ctx->pos_idx, ctx->cand_txt, ctx->cand_score,
+            ctx->K_drawn + ctx->n_bag_remaining, ctx->K_drawn, drawn_str,
+            perm_remaining_str, (long long)weight, (int)walker_mt,
+            post_cand_cgp, "", pv_text, mover_rack_end, opp_rack_end);
+        pegN_unlock(ctx->tsv_mutex);
+      }
+      } while (pegN_next_perm(perm, ctx->n_bag_remaining));
+
+      return;  // walker handled all aggregation per-perm; skip the
+               // single-mt fold at the bottom of emit_split.
     } else if (rational) {
       // 1. Pre-filter opp moves to placements + opp_move_filter.
       int *opp_cand_idx =
