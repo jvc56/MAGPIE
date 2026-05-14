@@ -2456,8 +2456,6 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     };
     generate_moves(&opp_ga);
     const int n_opp = move_list_get_count(opp_ml);
-    const int n_eval =
-        n_opp < ctx->opp_top_k ? n_opp : ctx->opp_top_k;
 
     // One-shot Noah utility ranking, per the "rational Noah" model. For
     // each opp tile-placement move, evaluate it across all of opp's
@@ -2730,24 +2728,96 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     char worst_opp_text[64] = {0};
     StringBuilder *pv_builder = ctx->tsv_f ? string_builder_create() : NULL;
 
-    int branches_run = 0;
-    for (int opp_rank = 0; opp_rank < n_opp && branches_run < n_eval;
-         opp_rank++) {
-      const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
-      // Skip PASS / EXCHANGE: those leave the bag non-empty, which breaks
-      // endgame_solve's bag-empty assumption (it falls into a degenerate
-      // both-pass-terminal scoring path). Tile-placement moves drain the
-      // last bag tile via play_move's draw, leaving a clean 0-bag state.
-      const int move_type = move_get_type(opp_move);
-      if (move_type != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    // Pre-filter to placement moves (and optionally to the opp_move_filter
+    // substring set). When PASSPEGN_GREEDY_OPP_RERANK=1, also sort by
+    // d=0 greedy mover_total ascending (worst-for-mover first) and take
+    // the top opp_top_k — much more honest than equity's natural order
+    // for the d=1 MIN-over-branches semantics (a low-equity but lethal
+    // reply like TEMPURA can sit at rank #700 by equity but be #1 by
+    // greedy mover_total). Default is the legacy equity order.
+    int *opp_cand_idx =
+        malloc_or_die((size_t)(n_opp > 0 ? n_opp : 1) * sizeof(int));
+    int n_opp_cand = 0;
+    for (int opp_rank = 0; opp_rank < n_opp; opp_rank++) {
+      const Move *opp_move_chk = move_list_get_move(opp_ml, opp_rank);
+      if (move_get_type(opp_move_chk) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
         continue;
       }
-      branches_run++;
+      if (ctx->opp_move_filter) {
+        char text[64] = {0};
+        StringBuilder *sb_chk = string_builder_create();
+        string_builder_add_move(sb_chk, game_get_board(game), opp_move_chk,
+                                game_get_ld(game), true);
+        snprintf(text, sizeof(text), "%s", string_builder_peek(sb_chk));
+        string_builder_destroy(sb_chk);
+        bool match = false;
+        char tmp[2048];
+        snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+        char *tok = strtok(tmp, ";");
+        while (tok != NULL) {
+          if (strstr(text, tok) != NULL) {
+            match = true;
+            break;
+          }
+          tok = strtok(NULL, ";");
+        }
+        if (!match) {
+          continue;
+        }
+      }
+      opp_cand_idx[n_opp_cand++] = opp_rank;
+    }
+
+    const char *rerank_env = getenv("PASSPEGN_GREEDY_OPP_RERANK");
+    const bool rerank = rerank_env && atoi(rerank_env) > 0;
+    if (rerank && n_opp_cand > 1) {
+      int32_t *opp_mt =
+          malloc_or_die((size_t)n_opp_cand * sizeof(int32_t));
+      for (int i = 0; i < n_opp_cand; i++) {
+        const Move *opp_move_p =
+            move_list_get_move(opp_ml, opp_cand_idx[i]);
+        Game *prior_branch = game_duplicate(game);
+        game_set_endgame_solving_mode(prior_branch);
+        game_set_backup_mode(prior_branch, BACKUP_MODE_OFF);
+        play_move(opp_move_p, prior_branch, NULL);
+        game_set_game_end_reason(prior_branch, GAME_END_REASON_NONE);
+        MoveList *pml = move_list_create(4096);
+        opp_mt[i] = pegN_greedy_playout_pv(
+            prior_branch, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
+            NULL, 0, NULL, 0, NULL, 0);
+        move_list_destroy(pml);
+        game_destroy(prior_branch);
+      }
+      // Selection sort ascending by opp_mt (worst-for-mover first).
+      // n_opp_cand is at most ~1000 so this is fine.
+      for (int i = 0; i < n_opp_cand; i++) {
+        int min_i = i;
+        for (int j = i + 1; j < n_opp_cand; j++) {
+          if (opp_mt[j] < opp_mt[min_i]) {
+            min_i = j;
+          }
+        }
+        if (min_i != i) {
+          int32_t tmp_mt = opp_mt[i];
+          opp_mt[i] = opp_mt[min_i];
+          opp_mt[min_i] = tmp_mt;
+          int tmp_idx = opp_cand_idx[i];
+          opp_cand_idx[i] = opp_cand_idx[min_i];
+          opp_cand_idx[min_i] = tmp_idx;
+        }
+      }
+      free(opp_mt);
+    }
+
+    const int n_eval_final =
+        n_opp_cand < ctx->opp_top_k ? n_opp_cand : ctx->opp_top_k;
+
+    for (int eval_idx = 0; eval_idx < n_eval_final; eval_idx++) {
+      const int opp_rank = opp_cand_idx[eval_idx];
+      const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
       Game *branch = game_duplicate(game);
       game_set_endgame_solving_mode(branch);
       game_set_backup_mode(branch, BACKUP_MODE_OFF);
-      // Build the opp move text up front so the optional opp_move_filter
-      // can compare against it.
       char opp_move_text[64] = {0};
       {
         StringBuilder *opp_sb = string_builder_create();
@@ -2757,26 +2827,6 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                  string_builder_peek(opp_sb));
         string_builder_destroy(opp_sb);
       }
-      if (ctx->opp_move_filter) {
-        bool match = false;
-        char tmp[2048];
-        snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
-        char *tok = strtok(tmp, ";");
-        while (tok != NULL) {
-          if (strstr(opp_move_text, tok) != NULL) {
-            match = true;
-            break;
-          }
-          tok = strtok(NULL, ";");
-        }
-        if (!match) {
-          game_destroy(branch);
-          branches_run--;
-          continue;
-        }
-      }
-      // Stash the per-branch text into the PV (it'll be prepended to the
-      // PV captured by endgame_solve below).
       (void)opp_move_text;
       play_move(opp_move, branch, NULL);
       game_set_game_end_reason(branch, GAME_END_REASON_NONE);
@@ -2895,6 +2945,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     if (pv_builder) {
       string_builder_destroy(pv_builder);
     }
+    free(opp_cand_idx);
     move_list_destroy(opp_ml);
     mover_total = worst_for_mover;
     (void)worst_opp_text;
