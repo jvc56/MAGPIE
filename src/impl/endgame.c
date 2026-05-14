@@ -235,6 +235,18 @@ struct EndgameCtxWorker {
   // structurally consistent (length matches what's been written).
   uint64_t current_line[MAX_SEARCH_DEPTH];
   _Atomic int current_line_len;
+
+  // Live best-PV-from-root snapshot. Updated by abdada_negamax every
+  // time best_value improves at the root (is_root=true), so a polling
+  // reader can watch the engine's evolving best line refine through
+  // each depth.  Seqlock pattern: live_pv_seq is even when the
+  // snapshot is consistent, odd while a write is in progress. Reader
+  // loads seq, reads length+moves+value, loads seq again; retries on
+  // odd or mismatched seq.
+  uint64_t live_pv_tiny_moves[MAX_SEARCH_DEPTH];
+  _Atomic int32_t live_pv_value;
+  _Atomic int live_pv_length;
+  _Atomic uint64_t live_pv_seq;
 };
 
 #ifndef MAX
@@ -779,6 +791,45 @@ void endgame_ctx_get_eta_data(const EndgameCtx *ctx,
       &ctx->prev_prev_completed_depth_ns, memory_order_relaxed);
 }
 
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
+                            uint64_t *out_moves, int max_len,
+                            int32_t *out_value) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+    *out_value = 0;
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  // Seqlock read: try a few times to capture a consistent snapshot
+  // (length, moves, value all from the same writer update).
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int len = atomic_load_explicit(&w->live_pv_length, memory_order_relaxed);
+    const int32_t value =
+        atomic_load_explicit(&w->live_pv_value, memory_order_relaxed);
+    if (len > max_len) {
+      len = max_len;
+    }
+    if (len > MAX_SEARCH_DEPTH) {
+      len = MAX_SEARCH_DEPTH;
+    }
+    for (int i = 0; i < len; i++) {
+      out_moves[i] = w->live_pv_tiny_moves[i];
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      *out_value = value;
+      return len;
+    }
+  }
+  *out_value = 0;
+  return 0;
+}
+
 double endgame_ctx_get_current_depth_eta_fraction(const EndgameCtx *ctx) {
   int64_t started_ns;
   int64_t prev_ns;
@@ -890,6 +941,10 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
                         memory_order_relaxed);
   atomic_store_explicit(&solver_worker->current_line_len, 0,
                         memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->live_pv_length, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->live_pv_value, 0, memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->live_pv_seq, 0, memory_order_relaxed);
 
   return solver_worker;
 }
@@ -916,6 +971,9 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   atomic_store_explicit(&worker->published_nodes_searched, 0,
                         memory_order_relaxed);
   atomic_store_explicit(&worker->current_line_len, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_length, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_value, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_seq, 0, memory_order_relaxed);
 }
 
 void endgame_ctx_reset_worker_and_game(EndgameCtx *solver, uint64_t base_seed,
@@ -2391,6 +2449,32 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         pvline_update(pv, &child_pv, small_move,
                       best_value - worker->solver->initial_spread);
         pv->negamax_depth = child_pv.negamax_depth + 1;
+        // Live PV publish (root only): a polling reader sees the
+        // engine's evolving best line refine through each depth as
+        // root moves get evaluated. Seqlock pattern: bump seq odd to
+        // signal "writing", write moves+value+length, bump seq even
+        // to signal "consistent". Reader retries on odd / mismatched
+        // seq.
+        if (is_root) {
+          int new_len = pv->num_moves;
+          if (new_len > MAX_SEARCH_DEPTH) {
+            new_len = MAX_SEARCH_DEPTH;
+          }
+          const uint64_t seq_before =
+              atomic_load_explicit(&worker->live_pv_seq, memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_seq, seq_before + 1,
+                                memory_order_release);
+          for (int i = 0; i < new_len; i++) {
+            worker->live_pv_tiny_moves[i] = pv->moves[i].tiny_move;
+          }
+          atomic_store_explicit(&worker->live_pv_length, new_len,
+                                memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_value,
+                                best_value - worker->solver->initial_spread,
+                                memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_seq, seq_before + 2,
+                                memory_order_release);
+        }
       }
       if (is_root) {
         // At the very top depth, set the estimated value of the small move,

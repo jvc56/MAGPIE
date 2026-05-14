@@ -968,9 +968,10 @@ typedef struct ProgressStream {
   uint64_t last_root_tiny;
   int per_root_calls;
   int64_t solve_start_ns;
-  atomic_int should_stop; // main thread sets to 1 when endgame_solve returns
-  int frames_printed;     // bumped by the reader; used so we can verify
-                          // the test actually streamed something
+  atomic_int should_stop;   // main thread sets to 1 when endgame_solve returns
+  int frames_printed;       // bumped by the reader; used so we can verify
+                            // the test actually streamed something
+  int live_pv_change_count; // distinct live PVs the reader observed
 } ProgressStream;
 
 static void stream_before_search_cb(const Game *game,
@@ -1026,6 +1027,10 @@ static void *stream_reader_thread(void *arg) {
   ProgressStream *s = (ProgressStream *)arg;
   uint64_t prev_nodes = 0;
   int64_t prev_nodes_ns = 0;
+  // Track how often the live PV's content actually changes between
+  // poll frames (not just the seqlock seq, the displayed bytes).
+  uint64_t last_pv_hash = 0;
+  int live_pv_change_count = 0;
   while (!atomic_load(&s->should_stop)) {
     const EndgameCtx *ctx = *s->ctx_pp;
     cpthread_mutex_lock(&s->mutex);
@@ -1050,12 +1055,32 @@ static void *stream_reader_thread(void *arg) {
     uint64_t line[MAX_SEARCH_DEPTH];
     int line_len = 0;
     double eta_fraction = -1.0;
+    uint64_t live_pv[MAX_SEARCH_DEPTH];
+    int live_pv_len = 0;
+    int32_t live_pv_value = 0;
     if (ctx != NULL) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
       nodes = endgame_ctx_get_nodes_searched(ctx);
       line_len = endgame_ctx_get_current_line(ctx, 0, line, MAX_SEARCH_DEPTH);
       eta_fraction = endgame_ctx_get_current_depth_eta_fraction(ctx);
+      live_pv_len = endgame_ctx_get_live_pv(ctx, 0, live_pv, MAX_SEARCH_DEPTH,
+                                            &live_pv_value);
+    }
+    // Hash the live PV (length + moves + value) so we can count the
+    // number of distinct snapshots seen by the reader. This isn't the
+    // engine-side update count — it's "how often a polling display
+    // would observe a change."
+    uint64_t pv_hash = (uint64_t)live_pv_len * 0x9E3779B97F4A7C15ULL;
+    for (int i = 0; i < live_pv_len; i++) {
+      pv_hash ^=
+          live_pv[i] + 0x9E3779B97F4A7C15ULL + (pv_hash << 6) + (pv_hash >> 2);
+    }
+    pv_hash ^= (uint64_t)(uint32_t)live_pv_value;
+    if (pv_hash != last_pv_hash) {
+      live_pv_change_count++;
+      last_pv_hash = pv_hash;
+      s->live_pv_change_count = live_pv_change_count;
     }
     const int64_t now_ns = ctimer_monotonic_ns();
     double knodes_per_sec = 0.0;
@@ -1112,19 +1137,35 @@ static void *stream_reader_thread(void *arg) {
       snprintf(eta_str, sizeof(eta_str), "depth_eta=%2.0f%%",
                eta_fraction * 100.0);
     }
+    char pv_str[256];
+    int pv_written = 0;
+    pv_written +=
+        snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "[");
+    for (int i = 0; i < live_pv_len && pv_written < (int)sizeof(pv_str) - 32;
+         i++) {
+      pv_written +=
+          snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "%s0x%llx",
+                   i == 0 ? "" : ",", (unsigned long long)live_pv[i]);
+    }
+    snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "]");
+
     if (s->mode == STREAM_MODE_POLL_PLY2) {
-      printf("%s | ply2 %d/%d | %.0fk nps | %s | t0_line %s\n", prefix,
-             ply2_done, ply2_total, knodes_per_sec, eta_str, line_str);
+      printf("%s | ply2 %d/%d | %.0fk nps | %s | t0_line %s | "
+             "live_pv val=%d %s\n",
+             prefix, ply2_done, ply2_total, knodes_per_sec, eta_str, line_str,
+             live_pv_value, pv_str);
     } else {
       if (per_root_calls == 0) {
-        printf("%s | per_root: 0 calls | %.0fk nps | %s | t0_line %s\n", prefix,
-               knodes_per_sec, eta_str, line_str);
+        printf("%s | per_root: 0 calls | %.0fk nps | %s | t0_line %s | "
+               "live_pv val=%d %s\n",
+               prefix, knodes_per_sec, eta_str, line_str, live_pv_value,
+               pv_str);
       } else {
         printf("%s | per_root: %d calls, last d%d idx=%d val=%d tiny=0x%llx | "
-               "%.0fk nps | %s | t0_line %s\n",
+               "%.0fk nps | %s | t0_line %s | live_pv val=%d %s\n",
                prefix, per_root_calls, last_root_depth, last_root_idx,
                last_root_value, (unsigned long long)last_root_tiny,
-               knodes_per_sec, eta_str, line_str);
+               knodes_per_sec, eta_str, line_str, live_pv_value, pv_str);
       }
     }
     (void)fflush(stdout);
@@ -1278,9 +1319,9 @@ void test_endgame_progress_stream(void) {
       cpthread_join(reader);
 
       printf("  [done] frames_printed=%d final_completed_depth=%d "
-             "per_root_calls=%d\n",
+             "per_root_calls=%d live_pv_changes=%d\n",
              stream.frames_printed, stream.last_completed_depth,
-             stream.per_root_calls);
+             stream.per_root_calls, stream.live_pv_change_count);
       assert(stream.frames_printed > 0);
       assert(stream.seen_initial);
       if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {

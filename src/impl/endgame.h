@@ -191,4 +191,23 @@ void endgame_ctx_get_eta_data(const EndgameCtx *ctx,
 // falls back to a fixed assumption otherwise.
 double endgame_ctx_get_current_depth_eta_fraction(const EndgameCtx *ctx);
 
+// Snapshot of the live best PV from worker `thread_index`. Updated by
+// the engine each time best_value improves at the root (so during a
+// long depth the reader can see the engine's best line refine as
+// successive root moves get evaluated).
+//
+// Writes up to `max_len` `tiny_move` entries into `out_moves` and
+// returns the number written (0..max_len). `*out_value` is set to
+// the spread-adjusted PV value (same sign convention as
+// PVLine.score).
+//
+// Uses a seqlock so the moves array, length, and value all come
+// from the same writer update — never from a half-overwritten
+// state. If a consistent snapshot can't be obtained after a few
+// retries (writer continuously updating) returns 0 and *out_value=0;
+// callers should treat that as "no fresh PV this frame".
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
+                            uint64_t *out_moves, int max_len,
+                            int32_t *out_value);
+
 #endif
