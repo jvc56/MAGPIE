@@ -160,37 +160,6 @@ uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
                                  uint64_t *out_line, int max_len);
 
-// Live ETA data for callers that want to render a wall-clock progress
-// bar for the in-flight IDS depth.  All values are CLOCK_MONOTONIC ns.
-//
-//   *current_depth_started_ns  - timestamp when the engine entered the
-//                                current IDS depth. 0 if no depth has
-//                                begun yet (callable before search).
-//   *prev_completed_depth_ns   - duration of the most recently completed
-//                                IDS depth. 0 if no depth has completed.
-//   *prev_prev_completed_depth_ns - duration of the depth before that
-//                                (so callers can compute a 2-ply EBF
-//                                = prev / prev_prev, per-ply EBF
-//                                = sqrt of that).
-//
-// Suggested use: predicted_total_for_current_depth =
-// prev_completed_depth_ns * sqrt(prev / prev_prev). Fraction done =
-// (now - current_depth_started_ns) / predicted_total. Time-based
-// rather than node-based to avoid TT cache effects (an engine that
-// hits a hot TT runs faster per-node but doesn't get more wall-clock
-// done — the node count would mislead).
-void endgame_ctx_get_eta_data(const EndgameCtx *ctx,
-                              int64_t *current_depth_started_ns,
-                              int64_t *prev_completed_depth_ns,
-                              int64_t *prev_prev_completed_depth_ns);
-
-// Convenience: returns an estimated 0..1 fraction of the current IDS
-// depth's wall-clock done. Returns -1.0 if no estimate is possible
-// (first depth, or no depth has begun yet). Capped at 1.0 if the
-// search has overshot the prediction. Uses 2-ply EBF when available,
-// falls back to a fixed assumption otherwise.
-double endgame_ctx_get_current_depth_eta_fraction(const EndgameCtx *ctx);
-
 // Snapshot of the live best PV from worker `thread_index`. Updated by
 // the engine each time best_value improves at the root (so during a
 // long depth the reader can see the engine's best line refine as

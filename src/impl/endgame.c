@@ -149,16 +149,6 @@ struct EndgameCtx {
   atomic_int ply2_moves_completed;
   atomic_int ply2_moves_total;
 
-  // Live ETA tracking (thread 0 only writes). Times in CLOCK_MONOTONIC ns.
-  // Set to monotonic_ns() when each new IDS depth begins; 0 = no depth yet.
-  _Atomic int64_t current_depth_started_ns;
-  // Wall-clock duration of the most recently completed IDS depth.
-  _Atomic int64_t prev_completed_depth_ns;
-  // Wall-clock duration of the depth before that. With both, callers can
-  // compute a 2-ply EBF (sqrt(prev/prev_prev)) and predict this depth's
-  // total wall-clock time (= prev_completed_depth_ns * EBF).
-  _Atomic int64_t prev_prev_completed_depth_ns;
-
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
@@ -709,9 +699,6 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   atomic_store(&es->current_depth, 0);
   atomic_store(&es->ply2_moves_completed, 0);
   atomic_store(&es->ply2_moves_total, 0);
-  atomic_store(&es->current_depth_started_ns, 0);
-  atomic_store(&es->prev_completed_depth_ns, 0);
-  atomic_store(&es->prev_prev_completed_depth_ns, 0);
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
@@ -795,18 +782,6 @@ int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
   return len;
 }
 
-void endgame_ctx_get_eta_data(const EndgameCtx *ctx,
-                              int64_t *current_depth_started_ns,
-                              int64_t *prev_completed_depth_ns,
-                              int64_t *prev_prev_completed_depth_ns) {
-  *current_depth_started_ns = atomic_load_explicit(
-      &ctx->current_depth_started_ns, memory_order_relaxed);
-  *prev_completed_depth_ns =
-      atomic_load_explicit(&ctx->prev_completed_depth_ns, memory_order_relaxed);
-  *prev_prev_completed_depth_ns = atomic_load_explicit(
-      &ctx->prev_prev_completed_depth_ns, memory_order_relaxed);
-}
-
 int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
                             uint64_t *out_moves, int max_len,
                             int32_t *out_value) {
@@ -885,44 +860,6 @@ int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
     }
   }
   return 0;
-}
-
-double endgame_ctx_get_current_depth_eta_fraction(const EndgameCtx *ctx) {
-  int64_t started_ns;
-  int64_t prev_ns;
-  int64_t prev_prev_ns;
-  endgame_ctx_get_eta_data(ctx, &started_ns, &prev_ns, &prev_prev_ns);
-  if (started_ns == 0 || prev_ns <= 0) {
-    return -1.0;
-  }
-  // 2-ply EBF when we have two completed depths; otherwise assume 4
-  // (representative endgame branching factor at typical fullness).
-  double per_ply_ebf;
-  if (prev_prev_ns > 0) {
-    const double ratio_2ply = (double)prev_ns / (double)prev_prev_ns;
-    per_ply_ebf = sqrt(ratio_2ply);
-    // Clamp to a sane range so a fluky first-depth ratio doesn't blow up.
-    if (per_ply_ebf < 1.5) {
-      per_ply_ebf = 1.5;
-    } else if (per_ply_ebf > 20.0) {
-      per_ply_ebf = 20.0;
-    }
-  } else {
-    per_ply_ebf = 4.0;
-  }
-  const double predicted_ns = (double)prev_ns * per_ply_ebf;
-  const int64_t now_ns = ctimer_monotonic_ns();
-  const double elapsed_ns = (double)(now_ns - started_ns);
-  if (predicted_ns <= 0.0) {
-    return -1.0;
-  }
-  double fraction = elapsed_ns / predicted_ns;
-  if (fraction < 0.0) {
-    fraction = 0.0;
-  } else if (fraction > 1.0) {
-    fraction = 1.0;
-  }
-  return fraction;
 }
 
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
@@ -2877,8 +2814,6 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
       atomic_store(&worker->solver->ply2_moves_completed, 0);
       atomic_store(&worker->solver->ply2_moves_total, 0);
-      atomic_store(&worker->solver->current_depth_started_ns,
-                   ctimer_monotonic_ns());
       // Live multi-PV: clear the top-K leaderboard so it reflects the
       // new depth's evaluations only. Brief seqlock window; reader
       // will see filled=0 momentarily and then watch entries fill in
@@ -2952,23 +2887,6 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     prev_value = val;
-
-    // Live ETA tracking: snapshot the just-completed depth's wall-clock
-    // duration into the public atomics so a polling reader can predict
-    // the next depth's ETA via 2-ply EBF. Thread 0 only — soft_time_limit
-    // gating in the block below decides whether to STOP based on EBF; we
-    // expose the data unconditionally so even untimed solves get an ETA.
-    if (worker->thread_index == 0) {
-      const int64_t now_ns = ctimer_monotonic_ns();
-      const int64_t depth_started_ns =
-          atomic_load(&worker->solver->current_depth_started_ns);
-      const int64_t this_depth_ns =
-          (depth_started_ns > 0) ? (now_ns - depth_started_ns) : 0;
-      const int64_t prev_ns =
-          atomic_load(&worker->solver->prev_completed_depth_ns);
-      atomic_store(&worker->solver->prev_prev_completed_depth_ns, prev_ns);
-      atomic_store(&worker->solver->prev_completed_depth_ns, this_depth_ns);
-    }
 
     // sort initial moves by valuation for next time.
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
