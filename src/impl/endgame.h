@@ -210,4 +210,31 @@ int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
                             uint64_t *out_moves, int max_len,
                             int32_t *out_value);
 
+// One slot of the live multi-PV top-K leaderboard. root_tiny is the
+// first move (a SmallMove tiny_move); value is the spread-adjusted
+// negamax value (same sign convention as PVLine.score); continuation
+// is the rest of the line (depth - 1 moves at most), with
+// continuation_len in [0, MAX_SEARCH_DEPTH].
+typedef struct EndgameLivePvSnapshot {
+  uint64_t root_tiny;
+  int32_t value;
+  int continuation_len;
+  uint64_t continuation_tiny[MAX_SEARCH_DEPTH];
+} EndgameLivePvSnapshot;
+
+// Snapshot of the live multi-PV top-K leaderboard from worker
+// `thread_index`. Each slot in `out` is filled with one root move,
+// its current value, and the continuation line found at this depth.
+// Slots are sorted descending by value; the leaderboard is reset at
+// the start of each IDS depth and fills in as roots complete (so the
+// reader may see fewer than max_k entries early in a depth).
+//
+// Writes up to min(max_k, MAX_ENDGAME_DISPLAY_PVS, K_currently_filled)
+// entries and returns the number written. Uses a seqlock so a
+// snapshot is consistent (every entry came from the same writer
+// update). Returns 0 if a consistent snapshot can't be obtained
+// after a few retries.
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
+                                   EndgameLivePvSnapshot *out, int max_k);
+
 #endif

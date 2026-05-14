@@ -247,6 +247,22 @@ struct EndgameCtxWorker {
   _Atomic int32_t live_pv_value;
   _Atomic int live_pv_length;
   _Atomic uint64_t live_pv_seq;
+
+  // Live multi-PV top-K snapshot, updated per root completion (so
+  // every per_root_move_callback firing also republishes here).
+  // Each slot has (root tiny_move, spread-adjusted value, the
+  // continuation tiny_moves from after the root move, and the
+  // continuation length).  Entries are sorted descending by value.
+  // live_top_k_filled is how many of MAX_ENDGAME_DISPLAY_PVS slots
+  // are currently populated. Same seqlock pattern as live_pv.
+  // Reset to 0 entries at the start of each new IDS depth so the
+  // leaderboard reflects the current depth's evaluations only.
+  uint64_t live_top_k_root_tiny[MAX_ENDGAME_DISPLAY_PVS];
+  int32_t live_top_k_value[MAX_ENDGAME_DISPLAY_PVS];
+  uint64_t live_top_k_continuation[MAX_ENDGAME_DISPLAY_PVS][MAX_SEARCH_DEPTH];
+  int live_top_k_continuation_len[MAX_ENDGAME_DISPLAY_PVS];
+  _Atomic int live_top_k_filled;
+  _Atomic uint64_t live_top_k_seq;
 };
 
 #ifndef MAX
@@ -830,6 +846,47 @@ int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
   return 0;
 }
 
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
+                                   EndgameLivePvSnapshot *out, int max_k) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers || max_k <= 0) {
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int filled =
+        atomic_load_explicit(&w->live_top_k_filled, memory_order_relaxed);
+    if (filled > max_k) {
+      filled = max_k;
+    }
+    if (filled > MAX_ENDGAME_DISPLAY_PVS) {
+      filled = MAX_ENDGAME_DISPLAY_PVS;
+    }
+    for (int i = 0; i < filled; i++) {
+      out[i].root_tiny = w->live_top_k_root_tiny[i];
+      out[i].value = w->live_top_k_value[i];
+      int cont_len = w->live_top_k_continuation_len[i];
+      if (cont_len > MAX_SEARCH_DEPTH) {
+        cont_len = MAX_SEARCH_DEPTH;
+      }
+      out[i].continuation_len = cont_len;
+      for (int j = 0; j < cont_len; j++) {
+        out[i].continuation_tiny[j] = w->live_top_k_continuation[i][j];
+      }
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      return filled;
+    }
+  }
+  return 0;
+}
+
 double endgame_ctx_get_current_depth_eta_fraction(const EndgameCtx *ctx) {
   int64_t started_ns;
   int64_t prev_ns;
@@ -945,6 +1002,10 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
                         memory_order_relaxed);
   atomic_store_explicit(&solver_worker->live_pv_value, 0, memory_order_relaxed);
   atomic_store_explicit(&solver_worker->live_pv_seq, 0, memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->live_top_k_filled, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&solver_worker->live_top_k_seq, 0,
+                        memory_order_relaxed);
 
   return solver_worker;
 }
@@ -974,6 +1035,8 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   atomic_store_explicit(&worker->live_pv_length, 0, memory_order_relaxed);
   atomic_store_explicit(&worker->live_pv_value, 0, memory_order_relaxed);
   atomic_store_explicit(&worker->live_pv_seq, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_filled, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_seq, 0, memory_order_relaxed);
 }
 
 void endgame_ctx_reset_worker_and_game(EndgameCtx *solver, uint64_t base_seed,
@@ -1968,6 +2031,92 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   return false;
 }
 
+// Insert (root_tiny, value, continuation_pv) into the worker's live
+// multi-PV top-K snapshot under its seqlock. If a slot already exists
+// for the same root_tiny (e.g. ABDADA pass-2 re-evaluation) it's
+// removed first so re-inserting reflects the new value/continuation.
+// Insertion is sorted descending by value; capped at K_max slots.
+// Caller must be the worker's owning thread (only thread 0 should
+// call this so the writer side stays single-threaded).
+static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
+                                  int32_t value,
+                                  const struct PVLine *continuation,
+                                  int K_max) {
+  if (K_max < 1) {
+    return;
+  }
+  if (K_max > MAX_ENDGAME_DISPLAY_PVS) {
+    K_max = MAX_ENDGAME_DISPLAY_PVS;
+  }
+  // Begin seqlock write window: bump seq odd.
+  const uint64_t seq_before =
+      atomic_load_explicit(&worker->live_top_k_seq, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_seq, seq_before + 1,
+                        memory_order_release);
+
+  int filled =
+      atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
+
+  // Remove existing entry for same root_tiny so we can re-insert sorted.
+  for (int i = 0; i < filled; i++) {
+    if (worker->live_top_k_root_tiny[i] == root_tiny) {
+      for (int j = i; j < filled - 1; j++) {
+        worker->live_top_k_root_tiny[j] = worker->live_top_k_root_tiny[j + 1];
+        worker->live_top_k_value[j] = worker->live_top_k_value[j + 1];
+        worker->live_top_k_continuation_len[j] =
+            worker->live_top_k_continuation_len[j + 1];
+        memcpy(worker->live_top_k_continuation[j],
+               worker->live_top_k_continuation[j + 1],
+               sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+      }
+      filled--;
+      break;
+    }
+  }
+
+  // Find insertion position (descending order by value).
+  int insert_pos = filled;
+  for (int i = 0; i < filled; i++) {
+    if (value > worker->live_top_k_value[i]) {
+      insert_pos = i;
+      break;
+    }
+  }
+
+  if (insert_pos < K_max) {
+    const int last = (filled < K_max) ? filled : (K_max - 1);
+    for (int i = last; i > insert_pos; i--) {
+      worker->live_top_k_root_tiny[i] = worker->live_top_k_root_tiny[i - 1];
+      worker->live_top_k_value[i] = worker->live_top_k_value[i - 1];
+      worker->live_top_k_continuation_len[i] =
+          worker->live_top_k_continuation_len[i - 1];
+      memcpy(worker->live_top_k_continuation[i],
+             worker->live_top_k_continuation[i - 1],
+             sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+    }
+    worker->live_top_k_root_tiny[insert_pos] = root_tiny;
+    worker->live_top_k_value[insert_pos] = value;
+    int cont_len = (continuation != NULL) ? continuation->num_moves : 0;
+    if (cont_len > MAX_SEARCH_DEPTH) {
+      cont_len = MAX_SEARCH_DEPTH;
+    }
+    for (int i = 0; i < cont_len; i++) {
+      worker->live_top_k_continuation[insert_pos][i] =
+          continuation->moves[i].tiny_move;
+    }
+    worker->live_top_k_continuation_len[insert_pos] = cont_len;
+    if (filled < K_max) {
+      filled++;
+    }
+    atomic_store_explicit(&worker->live_top_k_filled, filled,
+                          memory_order_relaxed);
+  }
+
+  // End seqlock write window: bump seq even.
+  atomic_store_explicit(&worker->live_top_k_seq, seq_before + 2,
+                        memory_order_release);
+}
+
 int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                        int32_t alpha, int32_t beta, PVLine *pv, bool pv_node,
                        bool exclusive_p, float opp_stuck_frac) {
@@ -2485,14 +2634,21 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // are not missed.
         if (worker->thread_index == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
+          // Spread-adjusted value, same sign convention as PVLine.score.
+          const int32_t reported_value =
+              -value - worker->solver->initial_spread;
           if (worker->solver->per_root_move_callback) {
-            // Spread-adjusted value, same sign convention as PVLine.score.
-            const int32_t reported_value =
-                -value - worker->solver->initial_spread;
             worker->solver->per_root_move_callback(
                 depth, idx, small_move, reported_value,
                 worker->solver->per_root_move_callback_data);
           }
+          // Live multi-PV: republish the top-K leaderboard with this
+          // root's evaluation. Covers all root completions (including
+          // ABDADA pass-2 deferred re-evaluations), so the displayed
+          // leaderboard always reflects the most recent value seen for
+          // each root move at the current depth.
+          publish_live_top_k_pv(worker, small_move->tiny_move, reported_value,
+                                &child_pv, worker->solver->num_top_moves);
         }
       }
       if (is_ply2) {
@@ -2723,6 +2879,18 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       atomic_store(&worker->solver->ply2_moves_total, 0);
       atomic_store(&worker->solver->current_depth_started_ns,
                    ctimer_monotonic_ns());
+      // Live multi-PV: clear the top-K leaderboard so it reflects the
+      // new depth's evaluations only. Brief seqlock window; reader
+      // will see filled=0 momentarily and then watch entries fill in
+      // as roots complete.
+      const uint64_t topk_seq_before =
+          atomic_load_explicit(&worker->live_top_k_seq, memory_order_relaxed);
+      atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 1,
+                            memory_order_release);
+      atomic_store_explicit(&worker->live_top_k_filled, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 2,
+                            memory_order_release);
       worker->in_first_root_move = false;
     }
     double depth_start_time = ctimer_elapsed_seconds(&ids_timer);

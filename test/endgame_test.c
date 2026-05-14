@@ -972,6 +972,8 @@ typedef struct ProgressStream {
   int frames_printed;       // bumped by the reader; used so we can verify
                             // the test actually streamed something
   int live_pv_change_count; // distinct live PVs the reader observed
+  int live_top_k_change_count; // distinct top-K snapshots observed
+  uint64_t last_topk_hash;     // hash of last top-K snapshot seen
 } ProgressStream;
 
 static void stream_before_search_cb(const Game *game,
@@ -1058,6 +1060,8 @@ static void *stream_reader_thread(void *arg) {
     uint64_t live_pv[MAX_SEARCH_DEPTH];
     int live_pv_len = 0;
     int32_t live_pv_value = 0;
+    EndgameLivePvSnapshot live_top_k[10];
+    int live_top_k_n = 0;
     if (ctx != NULL) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
@@ -1066,6 +1070,7 @@ static void *stream_reader_thread(void *arg) {
       eta_fraction = endgame_ctx_get_current_depth_eta_fraction(ctx);
       live_pv_len = endgame_ctx_get_live_pv(ctx, 0, live_pv, MAX_SEARCH_DEPTH,
                                             &live_pv_value);
+      live_top_k_n = endgame_ctx_get_live_top_k_pvs(ctx, 0, live_top_k, 10);
     }
     // Hash the live PV (length + moves + value) so we can count the
     // number of distinct snapshots seen by the reader. This isn't the
@@ -1081,6 +1086,23 @@ static void *stream_reader_thread(void *arg) {
       live_pv_change_count++;
       last_pv_hash = pv_hash;
       s->live_pv_change_count = live_pv_change_count;
+    }
+    // Hash the multi-PV top-K snapshot (length + each entry's
+    // root_tiny + value + continuation) to count how often the
+    // observable leaderboard changes between polls.
+    uint64_t topk_hash = (uint64_t)live_top_k_n * 0x9E3779B97F4A7C15ULL;
+    for (int i = 0; i < live_top_k_n; i++) {
+      topk_hash ^=
+          live_top_k[i].root_tiny + (topk_hash << 6) + (topk_hash >> 2);
+      topk_hash ^= (uint64_t)(uint32_t)live_top_k[i].value;
+      for (int j = 0; j < live_top_k[i].continuation_len; j++) {
+        topk_hash ^= live_top_k[i].continuation_tiny[j] + (topk_hash << 6) +
+                     (topk_hash >> 2);
+      }
+    }
+    if (topk_hash != s->last_topk_hash) {
+      s->live_top_k_change_count++;
+      s->last_topk_hash = topk_hash;
     }
     const int64_t now_ns = ctimer_monotonic_ns();
     double knodes_per_sec = 0.0;
@@ -1149,23 +1171,42 @@ static void *stream_reader_thread(void *arg) {
     }
     snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "]");
 
+    // Compact "top-K" tail: show first-move tiny + value for each slot,
+    // then "+continuation_len" for the longest continuation. Reader
+    // verifies the leaderboard fills in as roots complete.
+    char topk_str[128];
+    int topk_written = 0;
+    topk_written +=
+        snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written,
+                 "%d{", live_top_k_n);
+    for (int i = 0;
+         i < live_top_k_n && topk_written < (int)sizeof(topk_str) - 32; i++) {
+      topk_written +=
+          snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written,
+                   "%s0x%llx=%d+%d", i == 0 ? "" : ",",
+                   (unsigned long long)live_top_k[i].root_tiny,
+                   live_top_k[i].value, live_top_k[i].continuation_len);
+    }
+    snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written, "}");
+
     if (s->mode == STREAM_MODE_POLL_PLY2) {
       printf("%s | ply2 %d/%d | %.0fk nps | %s | t0_line %s | "
-             "live_pv val=%d %s\n",
+             "live_pv val=%d %s | top_k %s\n",
              prefix, ply2_done, ply2_total, knodes_per_sec, eta_str, line_str,
-             live_pv_value, pv_str);
+             live_pv_value, pv_str, topk_str);
     } else {
       if (per_root_calls == 0) {
         printf("%s | per_root: 0 calls | %.0fk nps | %s | t0_line %s | "
-               "live_pv val=%d %s\n",
-               prefix, knodes_per_sec, eta_str, line_str, live_pv_value,
-               pv_str);
+               "live_pv val=%d %s | top_k %s\n",
+               prefix, knodes_per_sec, eta_str, line_str, live_pv_value, pv_str,
+               topk_str);
       } else {
         printf("%s | per_root: %d calls, last d%d idx=%d val=%d tiny=0x%llx | "
-               "%.0fk nps | %s | t0_line %s | live_pv val=%d %s\n",
+               "%.0fk nps | %s | t0_line %s | live_pv val=%d %s | top_k %s\n",
                prefix, per_root_calls, last_root_depth, last_root_idx,
                last_root_value, (unsigned long long)last_root_tiny,
-               knodes_per_sec, eta_str, line_str, live_pv_value, pv_str);
+               knodes_per_sec, eta_str, line_str, live_pv_value, pv_str,
+               topk_str);
       }
     }
     (void)fflush(stdout);
@@ -1319,9 +1360,11 @@ void test_endgame_progress_stream(void) {
       cpthread_join(reader);
 
       printf("  [done] frames_printed=%d final_completed_depth=%d "
-             "per_root_calls=%d live_pv_changes=%d\n",
+             "per_root_calls=%d live_pv_changes=%d "
+             "live_top_k_changes=%d\n",
              stream.frames_printed, stream.last_completed_depth,
-             stream.per_root_calls, stream.live_pv_change_count);
+             stream.per_root_calls, stream.live_pv_change_count,
+             stream.live_top_k_change_count);
       assert(stream.frames_printed > 0);
       assert(stream.seen_initial);
       if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {
