@@ -2556,7 +2556,7 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const bool searching =
         atomic_load(&((TuiGameState *)state)->endgame_results_active);
     if (exhaustive) {
-      snprintf(title, sizeof(title), "Analysis (exhaustive)");
+      snprintf(title, sizeof(title), "Endgame (exhaustive)");
     } else if (searching) {
       // Poll the engine's live progress atomics so the title's depth
       // and per-depth completion ratio update at render rate, not
@@ -2571,21 +2571,21 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                  &dummy_a, &dummy_b);
       }
       if (cur_depth <= 0 && snap_depth <= 0) {
-        snprintf(title, sizeof(title), "Analysis (starting\xe2\x80\xa6)");
+        snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
       } else if (total > 0 && cur_depth > 0) {
         // Mid-depth: show "d=N · M/K" where N is the depth the
         // workers are currently churning on.
         snprintf(title, sizeof(title),
-                 "Analysis (searching, d=%d \xc2\xb7 %d/%d)", cur_depth, done,
+                 "Endgame (searching, d=%d \xc2\xb7 %d/%d)", cur_depth, done,
                  total);
       } else {
-        snprintf(title, sizeof(title), "Analysis (searching, d=%d)",
+        snprintf(title, sizeof(title), "Endgame (searching, d=%d)",
                  snap_depth);
       }
     } else if (snap_depth > 0) {
-      snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", snap_depth);
+      snprintf(title, sizeof(title), "Endgame (%d-ply negamax)", snap_depth);
     } else {
-      snprintf(title, sizeof(title), "Analysis (negamax)");
+      snprintf(title, sizeof(title), "Endgame (negamax)");
     }
   } else if (state->sim_results != NULL) {
     const int plies = sim_results_get_num_plies(state->sim_results);
@@ -2603,10 +2603,10 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
         snprintf(samples, sizeof(samples), "%llu",
                  (unsigned long long)iters);
       }
-      snprintf(title, sizeof(title), "Analysis (%d-ply, %s samples)", plies,
+      snprintf(title, sizeof(title), "Sim (%d-ply, %s samples)", plies,
                samples);
     } else {
-      snprintf(title, sizeof(title), "Analysis");
+      snprintf(title, sizeof(title), "Sim");
     }
   } else {
     snprintf(title, sizeof(title), "Analysis");
