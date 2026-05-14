@@ -2931,6 +2931,105 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           }
         }
         mover_total_rational = final_realized[picked];
+        // For TSV: capture Noah's pick text + endgame PV under the
+        // realized bag tile. One extra endgame_solve per scenario.
+        if (ctx->tsv_f) {
+          const Move *picked_move =
+              move_list_get_move(opp_ml, opp_cand_idx[picked]);
+          char picked_text[64] = {0};
+          {
+            StringBuilder *sb_p = string_builder_create();
+            string_builder_add_move(sb_p, game_get_board(game), picked_move,
+                                    game_get_ld(game), true);
+            snprintf(picked_text, sizeof(picked_text), "%s",
+                     string_builder_peek(sb_p));
+            string_builder_destroy(sb_p);
+          }
+          // Build the realized hyp game (same as pegN_noah_inner_worker_fn
+          // does, but for the realized bag tile only) and run
+          // endgame_solve with PV capture.
+          Game *hyp = game_duplicate(game);
+          game_set_endgame_solving_mode(hyp);
+          game_set_backup_mode(hyp, BACKUP_MODE_OFF);
+          {
+            Bag *hb = game_get_bag(hyp);
+            for (int ml = 0; ml < ctx->ld_size; ml++) {
+              while (bag_get_letter(hb, (MachineLetter)ml) > 0) {
+                (void)bag_draw_letter(hb, (MachineLetter)ml, 0);
+              }
+            }
+            // Bag should already be empty; nothing else to seed since
+            // the realized state mirrors the post-cand game.
+          }
+          play_move(picked_move, hyp, NULL);
+          game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
+          const LetterDistribution *bld = game_get_ld(hyp);
+          EndgameCtx *eg_ctx = NULL;
+          EndgameResults *eg_results = endgame_results_create();
+          EndgameArgs ea = {
+              .thread_control = ctx->thread_control,
+              .game = hyp,
+              .plies = ctx->depth,
+              .shared_tt = NULL,
+              .initial_small_move_arena_size =
+                  DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+              .num_threads = 1,
+              .use_heuristics = true,
+              .num_top_moves = 1,
+              .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+              .skip_word_pruning = true,
+              .thread_index_offset = ctx->worker_idx + 200,
+              .soft_time_limit = 5.0,
+              .hard_time_limit = 5.0,
+          };
+          endgame_solve_inline(&eg_ctx, &ea, eg_results);
+          // Build the PV text: Noah's pick first, then endgame plies.
+          StringBuilder *pv_sb = string_builder_create();
+          string_builder_add_string(pv_sb, picked_text);
+          const PVLine *pv =
+              endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
+          if (pv && pv->num_moves > 0) {
+            Game *pv_game = game_duplicate(hyp);
+            game_set_endgame_solving_mode(pv_game);
+            game_set_backup_mode(pv_game, BACKUP_MODE_OFF);
+            for (int mi = 0; mi < pv->num_moves; mi++) {
+              Move m_full;
+              small_move_to_move(&m_full, &pv->moves[mi],
+                                 game_get_board(pv_game));
+              string_builder_add_string(pv_sb, " | ");
+              string_builder_add_move(pv_sb, game_get_board(pv_game),
+                                      &m_full, bld, true);
+              play_move(&m_full, pv_game, NULL);
+            }
+            char *cgp = game_get_cgp(pv_game, true);
+            snprintf(final_cgp, sizeof(final_cgp), "%s", cgp ? cgp : "");
+            free(cgp);
+            StringBuilder *rsb = string_builder_create();
+            string_builder_add_rack(
+                rsb,
+                player_get_rack(game_get_player(pv_game, ctx->mover_idx)),
+                bld, false);
+            snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                     string_builder_peek(rsb));
+            string_builder_destroy(rsb);
+            StringBuilder *rsb2 = string_builder_create();
+            string_builder_add_rack(
+                rsb2,
+                player_get_rack(
+                    game_get_player(pv_game, 1 - ctx->mover_idx)),
+                bld, false);
+            snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
+                     string_builder_peek(rsb2));
+            string_builder_destroy(rsb2);
+            game_destroy(pv_game);
+          }
+          snprintf(pv_text, sizeof(pv_text), "%s",
+                   string_builder_peek(pv_sb));
+          string_builder_destroy(pv_sb);
+          endgame_ctx_destroy(eg_ctx);
+          endgame_results_destroy(eg_results);
+          game_destroy(hyp);
+        }
       }
       free(final_utility);
       free(final_realized);
