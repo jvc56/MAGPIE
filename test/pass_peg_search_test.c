@@ -2723,7 +2723,222 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       fflush(stderr);
     }
 
-    int32_t worst_for_mover = 0;
+    // Rational-Noah halving path (opt-in). Noah doesn't know the
+    // realized bag tile: he evaluates each opp candidate move at the
+    // current stage's depth across every perceived bag-tile type
+    // (weighted by physical-tile counts), and picks the move that
+    // maximizes utility = noah_win_pct + alpha * noah_mean_spread.
+    // The scenario's mover_total is then the *realized* mt of Noah's
+    // pick — utility is used only to choose the move and then
+    // discarded; aggregate win % is computed from realized outcomes.
+    // Halving: starting from opp_top_k cands, stage s = 0..depth-1
+    // cuts to opp_top_k >> s by utility-DESC, final stage at depth
+    // picks the utility-max from the survivors.
+    // Bag-emptier case (n_bag_remaining == 0): no perceived bag tile,
+    // Noah's "perceived" pool collapses to a single deterministic
+    // scenario (mover's known rack), so utility-pick == MIN-over-opp.
+    // Falls into the legacy MIN path below.
+    const char *rational_env = getenv("PASSPEGN_GREEDY_RATIONAL");
+    const bool rational =
+        rational_env && atoi(rational_env) > 0 && ctx->n_bag_remaining >= 1;
+
+    if (rational) {
+      // 1. Pre-filter opp moves to placements + opp_move_filter.
+      int *opp_cand_idx =
+          malloc_or_die((size_t)(n_opp > 0 ? n_opp : 1) * sizeof(int));
+      int n_opp_cand = 0;
+      for (int opp_rank = 0; opp_rank < n_opp; opp_rank++) {
+        const Move *opp_move_chk = move_list_get_move(opp_ml, opp_rank);
+        if (move_get_type(opp_move_chk) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
+        }
+        if (ctx->opp_move_filter) {
+          char text[64] = {0};
+          StringBuilder *sb_chk = string_builder_create();
+          string_builder_add_move(sb_chk, game_get_board(game),
+                                  opp_move_chk, game_get_ld(game), true);
+          snprintf(text, sizeof(text), "%s",
+                   string_builder_peek(sb_chk));
+          string_builder_destroy(sb_chk);
+          bool match = false;
+          char tmp[2048];
+          snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+          char *tok = strtok(tmp, ";");
+          while (tok != NULL) {
+            if (strstr(text, tok) != NULL) {
+              match = true;
+              break;
+            }
+            tok = strtok(NULL, ";");
+          }
+          if (!match) {
+            continue;
+          }
+        }
+        opp_cand_idx[n_opp_cand++] = opp_rank;
+      }
+
+      // 2. Noah's perceived bag-tile pool.
+      const int opp_idx = 1 - ctx->mover_idx;
+      uint8_t opp_unseen[MAX_ALPHABET_SIZE];
+      pegN_compute_unseen(game, opp_idx, opp_unseen);
+      MachineLetter opp_types[MAX_ALPHABET_SIZE];
+      int opp_type_counts[MAX_ALPHABET_SIZE];
+      int n_opp_types = 0;
+      for (int ml = 0; ml < ctx->ld_size; ml++) {
+        if (opp_unseen[ml] > 0) {
+          opp_types[n_opp_types] = (MachineLetter)ml;
+          opp_type_counts[n_opp_types] = (int)opp_unseen[ml];
+          n_opp_types++;
+        }
+      }
+      int realized_ti = -1;
+      {
+        const MachineLetter realized_tile = bag_remaining[0];
+        for (int t = 0; t < n_opp_types; t++) {
+          if (opp_types[t] == realized_tile) {
+            realized_ti = t;
+            break;
+          }
+        }
+      }
+
+      const char *alpha_env = getenv("PASSPEGN_GREEDY_ALPHA");
+      const double alpha =
+          alpha_env && *alpha_env ? atof(alpha_env) : 1e-4;
+
+      // 3. Halving: stages 0..depth-1 cut, final stage at depth picks.
+      int n_to_eval = n_opp_cand;
+      double *final_utility = NULL;
+      int32_t *final_realized = NULL;
+      for (int stage = 0; stage <= ctx->depth && n_to_eval > 0; stage++) {
+        const int target_k =
+            stage < ctx->depth ? (ctx->opp_top_k >> stage) : n_to_eval;
+        if (stage < ctx->depth && (target_k <= 0 || n_to_eval <= target_k)) {
+          continue;
+        }
+        // Build per-(opp, perceived_tile) jobs and dispatch.
+        const int n_jobs = n_to_eval * n_opp_types;
+        PegNNoahInnerJob *jobs =
+            malloc_or_die((size_t)n_jobs * sizeof(PegNNoahInnerJob));
+        void **args =
+            malloc_or_die((size_t)n_jobs * sizeof(void *));
+        for (int i = 0; i < n_to_eval; i++) {
+          const Move *opp_move =
+              move_list_get_move(opp_ml, opp_cand_idx[i]);
+          for (int ti = 0; ti < n_opp_types; ti++) {
+            int idx = i * n_opp_types + ti;
+            jobs[idx] = (PegNNoahInnerJob){
+                .base_game = game,
+                .mover_idx = ctx->mover_idx,
+                .ld_size = ctx->ld_size,
+                .opp_move = opp_move,
+                .bag_X = opp_types[ti],
+                .weight = opp_type_counts[ti],
+                .n_opp_types = n_opp_types,
+                .opp_types = opp_types,
+                .opp_type_counts = opp_type_counts,
+                .ti = ti,
+                .noah_depth = stage,
+                .thread_control = ctx->thread_control,
+                .mover_total = 0,
+            };
+            args[idx] = &jobs[idx];
+          }
+        }
+        if (ctx->executor && n_jobs > 0) {
+          bai_peg_executor_submit_and_wait(
+              ctx->executor, pegN_noah_inner_worker_fn, args, n_jobs,
+              ctx->worker_idx);
+        } else {
+          for (int j = 0; j < n_jobs; j++) {
+            pegN_noah_inner_worker_fn(&jobs[j], ctx->worker_idx);
+          }
+        }
+        // Aggregate per-opp utility + realized mt.
+        double *stage_util =
+            malloc_or_die((size_t)n_to_eval * sizeof(double));
+        int32_t *stage_realized =
+            malloc_or_die((size_t)n_to_eval * sizeof(int32_t));
+        for (int i = 0; i < n_to_eval; i++) {
+          int64_t weight_sum = 0;
+          int64_t spread_sum_noah = 0;
+          double win_x2_sum = 0.0;
+          int32_t realized_mt = 0;
+          for (int ti = 0; ti < n_opp_types; ti++) {
+            int idx = i * n_opp_types + ti;
+            int32_t mt = jobs[idx].mover_total;
+            int w = jobs[idx].weight;
+            int32_t mt_noah = -mt;
+            weight_sum += w;
+            spread_sum_noah += (int64_t)mt_noah * w;
+            if (mt_noah > 0) {
+              win_x2_sum += 2.0 * w;
+            } else if (mt_noah == 0) {
+              win_x2_sum += w;
+            }
+            if (ti == realized_ti) {
+              realized_mt = mt;
+            }
+          }
+          double noah_winpct = win_x2_sum / (2.0 * (double)weight_sum);
+          double noah_mean_spread =
+              (double)spread_sum_noah / (double)weight_sum;
+          stage_util[i] = noah_winpct + alpha * noah_mean_spread;
+          stage_realized[i] = realized_mt;
+        }
+        free(jobs);
+        free(args);
+        if (stage < ctx->depth) {
+          // Partial selection sort: top target_k by utility DESC.
+          for (int i = 0; i < target_k; i++) {
+            int max_i = i;
+            for (int j = i + 1; j < n_to_eval; j++) {
+              if (stage_util[j] > stage_util[max_i]) {
+                max_i = j;
+              }
+            }
+            if (max_i != i) {
+              double t_u = stage_util[i];
+              stage_util[i] = stage_util[max_i];
+              stage_util[max_i] = t_u;
+              int32_t t_r = stage_realized[i];
+              stage_realized[i] = stage_realized[max_i];
+              stage_realized[max_i] = t_r;
+              int t_idx = opp_cand_idx[i];
+              opp_cand_idx[i] = opp_cand_idx[max_i];
+              opp_cand_idx[max_i] = t_idx;
+            }
+          }
+          n_to_eval = target_k;
+          free(stage_util);
+          free(stage_realized);
+        } else {
+          free(final_utility);
+          free(final_realized);
+          final_utility = stage_util;
+          final_realized = stage_realized;
+        }
+      }
+
+      // 4. Noah picks utility-max from the final stage.
+      int32_t mover_total_rational = 0;
+      if (final_utility != NULL && n_to_eval > 0) {
+        int picked = 0;
+        for (int i = 1; i < n_to_eval; i++) {
+          if (final_utility[i] > final_utility[picked]) {
+            picked = i;
+          }
+        }
+        mover_total_rational = final_realized[picked];
+      }
+      free(final_utility);
+      free(final_realized);
+      free(opp_cand_idx);
+      move_list_destroy(opp_ml);
+      mover_total = mover_total_rational;
+    } else {
+      int32_t worst_for_mover = 0;
     bool have_any = false;
     char worst_opp_text[64] = {0};
     StringBuilder *pv_builder = ctx->tsv_f ? string_builder_create() : NULL;
@@ -3051,6 +3266,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     move_list_destroy(opp_ml);
     mover_total = worst_for_mover;
     (void)worst_opp_text;
+    }  // end legacy MIN-over-realized branch
   }
   game_destroy(game);
 
