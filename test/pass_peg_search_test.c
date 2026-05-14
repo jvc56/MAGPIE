@@ -2816,8 +2816,31 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       const double walk_alpha = walk_alpha_env && *walk_alpha_env
                                     ? atof(walk_alpha_env)
                                     : 1e-4;
-      const int per_ply_k =
+      const int per_ply_k_default =
           ctx->opp_top_k > 0 ? ctx->opp_top_k : 8;
+      // PASSPEGN_GREEDY_WALK_K="K1,K2,K3,K4" overrides the per-ply
+      // candidate cap by current bag-size-at-ply. Position i = bag
+      // size i+1. Unspecified entries fall back to per_ply_k_default.
+      // Example: WALK_K="8,32,8" → at a ply with bag=1 use K=8, bag=2
+      // K=32, bag=3 K=8. Lets you spend more search where it counts
+      // (inner 2-peg) and less where it's cheap (inner 3-peg).
+      int walk_k_by_bag[16];
+      for (int i = 0; i < 16; i++) {
+        walk_k_by_bag[i] = per_ply_k_default;
+      }
+      {
+        const char *walk_k_env = getenv("PASSPEGN_GREEDY_WALK_K");
+        if (walk_k_env && *walk_k_env) {
+          char tmp[256];
+          snprintf(tmp, sizeof(tmp), "%s", walk_k_env);
+          int i = 0;
+          char *tok = strtok(tmp, ",");
+          while (tok != NULL && i < 16) {
+            walk_k_by_bag[i++] = atoi(tok);
+            tok = strtok(NULL, ",");
+          }
+        }
+      }
 
       // opp_ml (generated at the top of the d>=1 branch on the original
       // `game`) is unused by the walker; release it here. The walker
@@ -2862,6 +2885,11 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       while (bag_get_letters(game_get_bag(walker)) > 0) {
         const int turn = game_get_player_on_turn_index(walker);
         const bool is_opp = (turn != ctx->mover_idx);
+        const int bag_at_ply = bag_get_letters(game_get_bag(walker));
+        const int per_ply_k =
+            (bag_at_ply >= 1 && bag_at_ply <= 16)
+                ? walk_k_by_bag[bag_at_ply - 1]
+                : per_ply_k_default;
 
         MoveList *wml = move_list_create(16384);
         const MoveGenArgs wga = {
