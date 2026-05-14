@@ -1049,11 +1049,13 @@ static void *stream_reader_thread(void *arg) {
     uint64_t nodes = 0;
     uint64_t line[MAX_SEARCH_DEPTH];
     int line_len = 0;
+    double eta_fraction = -1.0;
     if (ctx != NULL) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
       nodes = endgame_ctx_get_nodes_searched(ctx);
       line_len = endgame_ctx_get_current_line(ctx, 0, line, MAX_SEARCH_DEPTH);
+      eta_fraction = endgame_ctx_get_current_depth_eta_fraction(ctx);
     }
     const int64_t now_ns = ctimer_monotonic_ns();
     double knodes_per_sec = 0.0;
@@ -1103,19 +1105,26 @@ static void *stream_reader_thread(void *arg) {
     // from worker thread 0. Either alone is enough to prove the engine
     // is alive during a long single-root subtree where no other signal
     // updates.
+    char eta_str[32];
+    if (eta_fraction < 0.0) {
+      snprintf(eta_str, sizeof(eta_str), "depth_eta=--");
+    } else {
+      snprintf(eta_str, sizeof(eta_str), "depth_eta=%2.0f%%",
+               eta_fraction * 100.0);
+    }
     if (s->mode == STREAM_MODE_POLL_PLY2) {
-      printf("%s | ply2 %d/%d | %.0fk nps | t0_line %s\n", prefix, ply2_done,
-             ply2_total, knodes_per_sec, line_str);
+      printf("%s | ply2 %d/%d | %.0fk nps | %s | t0_line %s\n", prefix,
+             ply2_done, ply2_total, knodes_per_sec, eta_str, line_str);
     } else {
       if (per_root_calls == 0) {
-        printf("%s | per_root: 0 calls | %.0fk nps | t0_line %s\n", prefix,
-               knodes_per_sec, line_str);
+        printf("%s | per_root: 0 calls | %.0fk nps | %s | t0_line %s\n", prefix,
+               knodes_per_sec, eta_str, line_str);
       } else {
         printf("%s | per_root: %d calls, last d%d idx=%d val=%d tiny=0x%llx | "
-               "%.0fk nps | t0_line %s\n",
+               "%.0fk nps | %s | t0_line %s\n",
                prefix, per_root_calls, last_root_depth, last_root_idx,
                last_root_value, (unsigned long long)last_root_tiny,
-               knodes_per_sec, line_str);
+               knodes_per_sec, eta_str, line_str);
       }
     }
     (void)fflush(stdout);
