@@ -479,6 +479,39 @@ static void endgame_per_ply_cb(int depth, int32_t value,
                             /*exhaustive=*/false);
 }
 
+// Engine callback fired once, before any worker spawns, with the
+// initial root-move list sorted by static estimate. Gives us a d=0
+// snapshot within sub-ms of endgame_solve start — the analysis panel
+// can show *something* fresh before any negamax work has happened.
+static void endgame_before_search_cb(const Game *game,
+                                     const SmallMove *initial_moves,
+                                     int initial_move_count,
+                                     int initial_spread, int solving_player,
+                                     void *user_data) {
+  TuiGameState *state = (TuiGameState *)user_data;
+  if (state == NULL || initial_moves == NULL || initial_move_count <= 0) {
+    return;
+  }
+  // Build a temporary PVLine array on the stack so we can reuse
+  // endgame_snapshot_from_pvs. Each PVLine wraps one SmallMove with
+  // its current estimated value (in PVLine.score's spread-adjusted
+  // sign convention: value - initial_spread).
+  const int n = initial_move_count > MAX_ENDGAME_DISPLAY_PVS
+                    ? MAX_ENDGAME_DISPLAY_PVS
+                    : initial_move_count;
+  PVLine pvs[MAX_ENDGAME_DISPLAY_PVS];
+  for (int i = 0; i < n; i++) {
+    pvs[i].moves[0] = initial_moves[i];
+    pvs[i].num_moves = 1;
+    pvs[i].negamax_depth = 0;
+    pvs[i].game = NULL;
+    pvs[i].score = small_move_get_estimated_value(&initial_moves[i]) -
+                   initial_spread;
+  }
+  endgame_snapshot_from_pvs(state, pvs, n, /*depth=*/0, initial_spread,
+                            solving_player, game, /*exhaustive=*/false);
+}
+
 static bool run_endgame(TuiGameState *state, double budget_sec,
                         Move *out_move) {
   ThreadControl *tc = thread_control_create();
@@ -506,9 +539,21 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   }
   args.num_top_moves = top_k;
   args.enable_pv_display = true;
-  // Live updates: the engine invokes this once per completed
-  // iterative-deepening pass so the analysis panel can show progress
-  // before the full solve finishes.
+  // Iterative deepening is REQUIRED for the per-ply callback to fire
+  // incrementally. Without it thread 0 jumps straight to the
+  // requested ply depth (25) and only the final post-solve update
+  // ever lands in the snapshot — which is why the panel used to feel
+  // stuck on stale data until the search fully completed.
+  args.enable_iterative_deepening = true;
+  // Live updates:
+  //   before_search_callback fires once before any worker spawns,
+  //     populating the snapshot with the d=0 leaderboard (root moves
+  //     sorted by static estimate).
+  //   per_ply_callback fires after each iterative-deepening pass
+  //     completes, updating the snapshot with that depth's ranked
+  //     leaderboard.
+  args.before_search_callback = endgame_before_search_cb;
+  args.before_search_callback_data = state;
   args.per_ply_callback = endgame_per_ply_cb;
   args.per_ply_callback_data = state;
   args.forced_pass_bypass = false;
@@ -529,6 +574,16 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
 
   atomic_store(&state->endgame_initial_spread, initial_spread);
   atomic_store(&state->endgame_results_turn_idx, state->history_count);
+
+  // Clear the previous turn's snapshot now so the renderer doesn't
+  // keep showing it during the gap between activation and the engine's
+  // first before_search_callback. The before_search_callback will
+  // populate a fresh d=0 snapshot within sub-ms.
+  pthread_mutex_lock(&state->mutex);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+
   atomic_store(&state->endgame_results_active, true);
 
   EndgameResults *results = state->endgame_results;

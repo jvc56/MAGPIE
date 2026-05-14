@@ -13,6 +13,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
+#include "../src/impl/endgame.h"
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
@@ -2550,11 +2551,39 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // Title varies by mode.
   char title[64];
   if (use_endgame) {
-    const int depth = state->endgame_snapshot.depth;
-    if (state->endgame_snapshot.exhaustive) {
+    const int snap_depth = state->endgame_snapshot.depth;
+    const bool exhaustive = state->endgame_snapshot.exhaustive;
+    const bool searching =
+        atomic_load(&((TuiGameState *)state)->endgame_results_active);
+    if (exhaustive) {
       snprintf(title, sizeof(title), "Analysis (exhaustive)");
-    } else if (depth > 0) {
-      snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", depth);
+    } else if (searching) {
+      // Poll the engine's live progress atomics so the title's depth
+      // and per-depth completion ratio update at render rate, not
+      // only when a callback fires.
+      int cur_depth = 0;
+      int done = 0;
+      int total = 0;
+      int dummy_a = 0;
+      int dummy_b = 0;
+      if (state->endgame_ctx != NULL) {
+        endgame_ctx_get_progress(state->endgame_ctx, &cur_depth, &done, &total,
+                                 &dummy_a, &dummy_b);
+      }
+      if (cur_depth <= 0 && snap_depth <= 0) {
+        snprintf(title, sizeof(title), "Analysis (starting\xe2\x80\xa6)");
+      } else if (total > 0 && cur_depth > 0) {
+        // Mid-depth: show "d=N · M/K" where N is the depth the
+        // workers are currently churning on.
+        snprintf(title, sizeof(title),
+                 "Analysis (searching, d=%d \xc2\xb7 %d/%d)", cur_depth, done,
+                 total);
+      } else {
+        snprintf(title, sizeof(title), "Analysis (searching, d=%d)",
+                 snap_depth);
+      }
+    } else if (snap_depth > 0) {
+      snprintf(title, sizeof(title), "Analysis (%d-ply negamax)", snap_depth);
     } else {
       snprintf(title, sizeof(title), "Analysis (negamax)");
     }
