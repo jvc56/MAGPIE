@@ -2768,8 +2768,110 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       opp_cand_idx[n_opp_cand++] = opp_rank;
     }
 
+    // Optional Sequential-Halving ladder. PASSPEGN_GREEDY_OPP_HALVE=1
+    // implies cuts of K, K/2, K/4, ..., K/2^(D-1) at depths 0, 1, ...,
+    // D-1, where K = opp_top_k and D = ctx->depth. The final MIN runs
+    // over the K/2^(D-1) survivors at depth D. For (K=8, D=2):
+    //   d=0 on all → top 8, d=1 on 8 → top 4, d=2 on 4 → MIN.
+    // When set, supersedes PASSPEGN_GREEDY_OPP_RERANK.
+    const char *halve_env = getenv("PASSPEGN_GREEDY_OPP_HALVE");
+    const bool halve = halve_env && atoi(halve_env) > 0;
+    if (halve && n_opp_cand > 1 && ctx->depth >= 1) {
+      int cuts[16];
+      int n_stages = 0;
+      // Stage s cuts to opp_top_k >> s for s = 0..depth-1.
+      // (At s=0 we filter from the full opp pool down to opp_top_k.)
+      for (int s = 0; s < ctx->depth && n_stages < 16; s++) {
+        int k = ctx->opp_top_k >> s;
+        if (k < 1) {
+          k = 1;
+        }
+        cuts[n_stages++] = k;
+      }
+      for (int s = 0; s < n_stages; s++) {
+        if (n_opp_cand <= cuts[s] || cuts[s] <= 0) {
+          continue;
+        }
+        const int stage_depth = s; // d=0, d=1, d=2, ...
+        int32_t *mt_arr =
+            malloc_or_die((size_t)n_opp_cand * sizeof(int32_t));
+        for (int i = 0; i < n_opp_cand; i++) {
+          const Move *opp_move_p =
+              move_list_get_move(opp_ml, opp_cand_idx[i]);
+          Game *prior_branch = game_duplicate(game);
+          game_set_endgame_solving_mode(prior_branch);
+          game_set_backup_mode(prior_branch, BACKUP_MODE_OFF);
+          play_move(opp_move_p, prior_branch, NULL);
+          game_set_game_end_reason(prior_branch, GAME_END_REASON_NONE);
+          if (stage_depth == 0) {
+            MoveList *pml = move_list_create(4096);
+            mt_arr[i] = pegN_greedy_playout_pv(
+                prior_branch, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
+                NULL, 0, NULL, 0, NULL, 0);
+            move_list_destroy(pml);
+          } else {
+            const int32_t mover_lead =
+                equity_to_int(player_get_score(game_get_player(
+                    prior_branch, ctx->mover_idx))) -
+                equity_to_int(player_get_score(game_get_player(
+                    prior_branch, 1 - ctx->mover_idx)));
+            if (game_get_game_end_reason(prior_branch) !=
+                GAME_END_REASON_NONE) {
+              mt_arr[i] = mover_lead;
+            } else {
+              EndgameCtx *eg = NULL;
+              EndgameResults *er = endgame_results_create();
+              EndgameArgs ea = {
+                  .thread_control = ctx->thread_control,
+                  .game = prior_branch,
+                  .plies = stage_depth,
+                  .shared_tt = NULL,
+                  .initial_small_move_arena_size =
+                      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                  .num_threads = 1,
+                  .use_heuristics = true,
+                  .num_top_moves = 1,
+                  .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+                  .skip_word_pruning = true,
+                  .thread_index_offset = ctx->worker_idx + 200,
+                  .soft_time_limit = 5.0,
+                  .hard_time_limit = 5.0,
+              };
+              endgame_solve_inline(&eg, &ea, er);
+              mt_arr[i] = mover_lead + endgame_results_get_value(
+                                            er, ENDGAME_RESULT_BEST);
+              endgame_ctx_destroy(eg);
+              endgame_results_destroy(er);
+            }
+          }
+          game_destroy(prior_branch);
+        }
+        // Partial selection sort: bring the top `keep` worst-for-mover
+        // entries to the front of opp_cand_idx.
+        const int keep = cuts[s];
+        for (int i = 0; i < keep; i++) {
+          int min_i = i;
+          for (int j = i + 1; j < n_opp_cand; j++) {
+            if (mt_arr[j] < mt_arr[min_i]) {
+              min_i = j;
+            }
+          }
+          if (min_i != i) {
+            int32_t tmp_mt = mt_arr[i];
+            mt_arr[i] = mt_arr[min_i];
+            mt_arr[min_i] = tmp_mt;
+            int tmp_idx = opp_cand_idx[i];
+            opp_cand_idx[i] = opp_cand_idx[min_i];
+            opp_cand_idx[min_i] = tmp_idx;
+          }
+        }
+        n_opp_cand = keep;
+        free(mt_arr);
+      }
+    }
+
     const char *rerank_env = getenv("PASSPEGN_GREEDY_OPP_RERANK");
-    const bool rerank = rerank_env && atoi(rerank_env) > 0;
+    const bool rerank = !halve && rerank_env && atoi(rerank_env) > 0;
     if (rerank && n_opp_cand > 1) {
       int32_t *opp_mt =
           malloc_or_die((size_t)n_opp_cand * sizeof(int32_t));
