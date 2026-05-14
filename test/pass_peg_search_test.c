@@ -2507,14 +2507,40 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       int n_ranked = 0;
 
       // Collect tile-placement opp ranks; PASS/EXCHANGE are skipped.
+      // If opp_move_filter is set, also restrict to the named opp moves
+      // (substring match on movegen text). Lets the test do SH-style
+      // ladders that re-rank only the previous round's survivors.
       int *placement_opp_ranks =
           malloc_or_die((size_t)n_opp * sizeof(int));
       int n_placement = 0;
       for (int opp_rank = 0; opp_rank < n_opp; opp_rank++) {
         const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
-        if (move_get_type(opp_move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-          placement_opp_ranks[n_placement++] = opp_rank;
+        if (move_get_type(opp_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+          continue;
         }
+        if (ctx->opp_move_filter) {
+          char text[64] = {0};
+          StringBuilder *sb_m = string_builder_create();
+          string_builder_add_move(sb_m, game_get_board(game), opp_move,
+                                  game_get_ld(game), true);
+          snprintf(text, sizeof(text), "%s", string_builder_peek(sb_m));
+          string_builder_destroy(sb_m);
+          bool match = false;
+          char tmp[2048];
+          snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+          char *tok = strtok(tmp, ";");
+          while (tok != NULL) {
+            if (strstr(text, tok) != NULL) {
+              match = true;
+              break;
+            }
+            tok = strtok(NULL, ";");
+          }
+          if (!match) {
+            continue;
+          }
+        }
+        placement_opp_ranks[n_placement++] = opp_rank;
       }
 
       // Build one job per (opp_move, perceived_bag_tile) leaf. Flat
