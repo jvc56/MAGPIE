@@ -845,8 +845,11 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       const bool render_uppercase = is_blank && blank_uppercase;
       const MachineLetter glyph_ml =
           render_uppercase ? get_unblanked_machine_letter(ml) : ml;
-      theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : theme->tile1_fg);
-      theme_apply_bg(plane, theme->tile1_bg);
+      const int owner = board_get_square_owner(board, row, col);
+      const ThemeRgb tile_fg = owner == 1 ? theme->tile2_fg : theme->tile1_fg;
+      const ThemeRgb tile_bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+      theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : tile_fg);
+      theme_apply_bg(plane, tile_bg);
       if (halfwidth) {
         const char *ascii = ld->ld_ml_to_hl[glyph_ml];
         ncplane_putstr_yx(plane, screen_row, screen_col,
@@ -1089,8 +1092,10 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         const bool render_uppercase = is_blank && state->blank_uppercase;
         const MachineLetter glyph_ml =
             render_uppercase ? get_unblanked_machine_letter(ml) : ml;
-        bg = theme->tile1_bg;
-        fg = is_blank ? theme->blank_tile_fg : theme->tile1_fg;
+        const int owner = board_get_square_owner(board, row, col);
+        bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+        fg = is_blank ? theme->blank_tile_fg
+                      : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
         const char *ascii = state->ld->ld_ml_to_hl[glyph_ml];
         if (ascii != NULL && ascii[0] != '\0' &&
             (unsigned char)ascii[0] < 0x80) {
@@ -1596,6 +1601,13 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   const int player_idx = game_get_player_on_turn_index(state->game);
   const Rack *rack = player_get_rack(game_get_player(state->game, player_idx));
   const LetterDistribution *ld = state->ld;
+  // P1 gets the green pair; P2 gets the amber pair so the racked
+  // tiles read as the same family of glyphs the player has already
+  // committed to the board.
+  const ThemeRgb rt_fg =
+      player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg;
+  const ThemeRgb rt_bg =
+      player_idx == 1 ? theme->rack_tile2_bg : theme->rack_tile1_bg;
 
   int tile_idx = 0;
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
@@ -1603,7 +1615,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     for (int copy = 0; copy < count && tile_idx < tile_count;
          copy++, tile_idx++) {
       const int tx = tile_idx * tile_w;
-      fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, theme->rack_tile1_bg);
+      fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, rt_bg);
       const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
       const TuiGlyph *g =
           (ascii != NULL && ascii[0] != '\0' &&
@@ -1624,11 +1636,11 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
           const int baseline = 0 + (int)(tile_h * 0.72) - shift_y;
           const int glyph_top = baseline - g->bearing_y;
           const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
-          blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g,
-                        theme->rack_tile1_fg, theme->rack_tile1_bg);
+          blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, rt_fg,
+                        rt_bg);
         } else {
           blit_glyph_into_buf(buf, buf_w, buf_h, tx, 0, tile_w, tile_h, g,
-                              theme->rack_tile1_fg, theme->rack_tile1_bg);
+                              rt_fg, rt_bg);
         }
       }
 
@@ -1655,8 +1667,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
             }
             const int gleft = pen_right - gd->width;
             const int gtop = digit_bottom - gd->height;
-            blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd,
-                          theme->rack_tile1_fg, theme->rack_tile1_bg);
+            blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd, rt_fg, rt_bg);
             pen_right = gleft - 1;
           }
         }
@@ -1732,8 +1743,10 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     const int count = rack_get_letter(rack, (MachineLetter)ml);
     for (int copy = 0; copy < count; copy++) {
-      theme_apply_fg(plane, theme->rack_tile1_fg);
-      theme_apply_bg(plane, theme->rack_tile1_bg);
+      theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
+                                            : theme->rack_tile1_fg);
+      theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
+                                            : theme->rack_tile1_bg);
       if (halfwidth) {
         const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
         ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
@@ -1953,13 +1966,15 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 
   const Player *player = game_get_player(state->game, player_idx);
   const bool on_turn = game_get_player_on_turn_index(state->game) == player_idx;
+  const ThemeRgb player_accent =
+      player_idx == 1 ? theme->on_turn_fg_p2 : theme->on_turn_fg;
   const int content_row = top + 1;
   // One col of padding inside the box (was 2). The on-turn arrow lives
   // in the very first interior col so the rack has more room.
   const int content_left = left + 1;
   const int content_right = right - 1;
 
-  theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
+  theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, content_left,
                     on_turn ? "\xe2\x96\xb6 " : "  ");
@@ -1981,7 +1996,7 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
 
   const int clock_len = (int)strlen(clock_str);
   const int clock_col = content_right - clock_len + 1;
-  theme_apply_fg(plane, on_turn ? theme->accent_fg : theme->dim_fg);
+  theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
 

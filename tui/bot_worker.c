@@ -112,15 +112,17 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
                           false);
-  // Append the post-play leave in parentheses, e.g. "3L ODAH (IUS)".
-  // The history renderer's segmenter leaves anything inside parens
-  // unbolded, so the leave reads as supplementary to the move text.
-  // Empty leaves (bingos and other plays that empty the rack) skip
-  // the appended chunk entirely.
+  // Append the post-play leave in square brackets, e.g. "3L ODAH
+  // [IUS]". Brackets visually separate the leave from any
+  // playthrough segments (which use parens), so a play like
+  // "F5 CA(JO)N [ANTZ]" reads unambiguously. The history renderer's
+  // segmenter treats anything inside brackets as non-bold, same as
+  // it does for parens. Empty leaves (bingos and other plays that
+  // empty the rack) skip the appended chunk entirely.
   if (leave != NULL && !rack_is_empty(leave)) {
-    string_builder_add_string(sb, " (");
+    string_builder_add_string(sb, " [");
     string_builder_add_rack(sb, leave, state->ld, false);
-    string_builder_add_string(sb, ")");
+    string_builder_add_string(sb, "]");
   }
   size_t move_len = 0;
   char *move_dump = string_builder_dump(sb, &move_len);
@@ -456,10 +458,9 @@ static void endgame_snapshot_from_pvs(TuiGameState *state, const PVLine *pvs,
 // in EndgameArgs. The engine guarantees this only fires from worker
 // thread index 0, so we can mutate the snapshot under state->mutex
 // without worrying about concurrent calls.
-static void endgame_per_ply_cb(int depth, int32_t value,
-                               const PVLine *pv_line, const Game *game,
-                               const PVLine *ranked_pvs, int num_ranked_pvs,
-                               void *user_data) {
+static void endgame_per_ply_cb(int depth, int32_t value, const PVLine *pv_line,
+                               const Game *game, const PVLine *ranked_pvs,
+                               int num_ranked_pvs, void *user_data) {
   (void)value;
   (void)pv_line;
   TuiGameState *state = (TuiGameState *)user_data;
@@ -469,8 +470,7 @@ static void endgame_per_ply_cb(int depth, int32_t value,
   const int solving_player = atomic_load(&state->endgame_results_turn_idx) >= 0
                                  ? game_get_player_on_turn_index(game)
                                  : 0;
-  const int initial_spread =
-      atomic_load(&state->endgame_initial_spread);
+  const int initial_spread = atomic_load(&state->endgame_initial_spread);
   // Partial snapshot — search is still running, so not exhaustive
   // yet. Final snapshot in run_endgame may flip exhaustive=true once
   // endgame_solve returns with status FINISHED.
@@ -485,9 +485,8 @@ static void endgame_per_ply_cb(int depth, int32_t value,
 // can show *something* fresh before any negamax work has happened.
 static void endgame_before_search_cb(const Game *game,
                                      const SmallMove *initial_moves,
-                                     int initial_move_count,
-                                     int initial_spread, int solving_player,
-                                     void *user_data) {
+                                     int initial_move_count, int initial_spread,
+                                     int solving_player, void *user_data) {
   TuiGameState *state = (TuiGameState *)user_data;
   if (state == NULL || initial_moves == NULL || initial_move_count <= 0) {
     return;
@@ -505,8 +504,8 @@ static void endgame_before_search_cb(const Game *game,
     pvs[i].num_moves = 1;
     pvs[i].negamax_depth = 0;
     pvs[i].game = NULL;
-    pvs[i].score = small_move_get_estimated_value(&initial_moves[i]) -
-                   initial_spread;
+    pvs[i].score =
+        small_move_get_estimated_value(&initial_moves[i]) - initial_spread;
   }
   endgame_snapshot_from_pvs(state, pvs, n, /*depth=*/0, initial_spread,
                             solving_player, game, /*exhaustive=*/false);
@@ -601,8 +600,7 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   }
 
   bool got_move = false;
-  const PVLine *pv =
-      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   if (pv != NULL && pv->num_moves > 0) {
     small_move_to_move(out_move, &pv->moves[0], game_get_board(state->game));
     got_move = true;
@@ -617,11 +615,10 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
   const int num_pvs = endgame_results_get_num_pvs(results);
   PVLine *multi = endgame_results_get_multi_pvs(results);
-  endgame_snapshot_from_pvs(state, multi, num_pvs,
-                            endgame_results_get_depth(results,
-                                                       ENDGAME_RESULT_BEST),
-                            initial_spread, solving_player, state->game,
-                            exhaustive);
+  endgame_snapshot_from_pvs(
+      state, multi, num_pvs,
+      endgame_results_get_depth(results, ENDGAME_RESULT_BEST), initial_spread,
+      solving_player, state->game, exhaustive);
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
 
   atomic_store(&state->endgame_results_active, false);
@@ -699,6 +696,28 @@ static void *bot_thread_main(void *arg) {
     rack_set_dist_size(&leave, ld_get_size(state->ld));
     play_move(chosen, state->game, &leave);
 
+    // Tag the squares that got tiles placed on them with this
+    // player's index so the renderer can colour them P1-green or
+    // P2-amber later. Only happens here in the "live" game loop —
+    // sim/endgame board copies leave the owner bits untouched.
+    if (move_get_type(chosen) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      const int dir = move_get_dir(chosen);
+      int r = move_get_row_start(chosen);
+      int c = move_get_col_start(chosen);
+      const int tile_count = move_get_tiles_length(chosen);
+      for (int t = 0; t < tile_count; t++) {
+        if (move_get_tile(chosen, t) != PLAYED_THROUGH_MARKER) {
+          board_set_square_owner(game_get_board(state->game), r, c,
+                                 player_idx);
+        }
+        if (board_is_dir_vertical(dir)) {
+          r++;
+        } else {
+          c++;
+        }
+      }
+    }
+
     const int post_play_score = equity_to_int(
         player_get_score(game_get_player(state->game, player_idx)));
     int bonus = 0;
@@ -706,8 +725,7 @@ static void *bot_thread_main(void *arg) {
     if (game_over(state->game)) {
       opp_rack = player_get_rack(game_get_player(state->game, 1 - player_idx));
       if (!rack_is_empty(opp_rack)) {
-        bonus =
-            equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
+        bonus = equity_to_int(calculate_end_rack_points(opp_rack, state->ld));
       }
     }
     const int total_after_move = post_play_score - bonus;
