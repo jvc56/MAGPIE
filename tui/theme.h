@@ -32,16 +32,30 @@ typedef struct {
   ThemeRgb header_bg;
   ThemeRgb status_fg;
   ThemeRgb error_fg;
+  // Subtle background tint (a couple shades off `bg`) used for things
+  // like the analysis-panel column-header strip. Pairs with dim_fg
+  // for a low-contrast "this is a label row" feel without shouting.
+  ThemeRgb subtle_bg;
 
   // Board (used by phase 2 renderer; defined now so the palette shape is
   // stable as we port string_builder_add_game).
   ThemeRgb board_bg;
-  ThemeRgb tile_fg;
-  ThemeRgb tile_bg;
-  ThemeRgb blank_tile_fg; // fg for played-blank tiles, distinct from tile_fg
-  ThemeRgb rack_tile_fg;
-  ThemeRgb rack_tile_bg;
-  ThemeRgb on_turn_fg;
+  // Player tiles come in two palettes — P1 in green, P2 in amber —
+  // so a finished board reads as two distinct sets of plays. Both
+  // pairs are populated unconditionally; the renderer picks one per
+  // tile based on who placed it (engine-tracked square owner; not
+  // yet wired up — all callers currently use tile1).
+  ThemeRgb tile1_fg;
+  ThemeRgb tile1_bg;
+  ThemeRgb tile2_fg;
+  ThemeRgb tile2_bg;
+  ThemeRgb blank_tile_fg; // fg for played-blank tiles, distinct from tileN_fg
+  ThemeRgb rack_tile1_fg;
+  ThemeRgb rack_tile1_bg;
+  ThemeRgb rack_tile2_fg;
+  ThemeRgb rack_tile2_bg;
+  ThemeRgb on_turn_fg;    // P1 turn-marker arrow / chyron
+  ThemeRgb on_turn_fg_p2; // P2 turn-marker arrow / chyron
   // Premium squares carry both a tinted background that fills the cell
   // and a foreground color used for the punctuation marker that lives in
   // it (＝ －  ＂ ＇ ＊). Themes that want flat premium squares can set

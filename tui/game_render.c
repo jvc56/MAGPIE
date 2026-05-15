@@ -19,8 +19,10 @@
 #include "game_state.h"
 #include "glyph_cache.h"
 #include "theme.h"
+#include "time_picker.h"
 #include "tui_resize.h"
 #include <ctype.h>
+#include <limits.h>
 #ifdef __APPLE__
 #include <mach/mach.h>
 #endif
@@ -73,11 +75,14 @@ enum {
   PILL_HEIGHT = 3,
   RIGHT_COL_LEFT_OFFSET = 0, // right column sits flush against the board
   RIGHT_COL_MIN_WIDTH = 32,  // narrowest the right column can be
-  // History switches to two columns once the panel is at least this wide.
-  // At 68 cols the panel splits into two ~33-col halves, which is just
-  // wide enough to fit a fullwidth 7-tile rack inside each player pill
-  // alongside the name, score, and clock.
+  // Two-column history thresholds, by pill-rack rendering mode.
+  // FULLWIDTH: each rack tile takes 2 cols (cleaner look) — needs
+  // ~33 cols per pill (`▶ P1 ＡＢＣＤＥＦＧ 999 99:59`) × 2 + gutter.
+  // HALFWIDTH: each rack tile takes 1 col — needs ~25 cols per pill
+  // (`▶ P1 ABCDEFG 999 99:59`) × 2 + gutter. Below the halfwidth
+  // threshold the history must drop to a single column.
   HISTORY_TWO_COL_THRESHOLD = 68,
+  HISTORY_TWO_COL_HALFWIDTH_THRESHOLD = 52,
   // Analysis panel sizing.
   ANALYSIS_MIN_WIDTH = 30,        // narrower than this and we skip the panel
   ANALYSIS_DEFAULT_ROWS = 20,     // height used in "below history" mode when
@@ -119,6 +124,22 @@ typedef struct {
   int right_col_left, right_col_right;
   int right_col_width;
   bool two_col;
+  // In two-col mode, true when the right column is narrow enough
+  // that the player pills must render their racks as halfwidth
+  // (1 col per tile) instead of fullwidth (2 cols).
+  bool pills_halfwidth;
+  // In two-col mode the pills + history sit inside one combined
+  // box: pill content rows on top, a single horizontal divider, and
+  // history rows below. Saves a row of pill bottom-border + history
+  // top-border and visually ties the headers to their columns.
+  // When true, render_player_pill and render_history_panel skip
+  // their own box drawing — draw_combined_pills_history_frame draws
+  // all borders, joints, and the vertical column divider.
+  bool combined_pills_history;
+  // Column at which the combined frame's vertical divider lives
+  // (also the right edge of pill1's box and the left edge of pill2's
+  // box). Only meaningful in two_col mode.
+  int divider_col;
 
   // Pills. In two-col mode they sit side-by-side on the same row; in
   // one-col mode they stack vertically.
@@ -280,11 +301,15 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   L.right_col_width = L.right_col_right - L.right_col_left + 1;
 
   // Decide where the analysis panel lives based on right-column width.
+  // Two-col history is allowed as long as halfwidth pills fit; the
+  // analysis-three-col split still gates on the fullwidth threshold
+  // because the leftover slice still has to be wide enough to host a
+  // useful analysis panel.
   L.analysis_placement = ANALYSIS_NONE;
   if (state != NULL) {
     if (L.right_col_width >= ANALYSIS_THREE_COL_THRESHOLD) {
       L.analysis_placement = ANALYSIS_RIGHT_OF_HISTORY;
-    } else if (L.right_col_width >= HISTORY_TWO_COL_THRESHOLD) {
+    } else if (L.right_col_width >= HISTORY_TWO_COL_HALFWIDTH_THRESHOLD) {
       L.analysis_placement = ANALYSIS_BELOW_HISTORY;
     } else {
       L.analysis_placement = ANALYSIS_BELOW_BAG;
@@ -303,28 +328,32 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
     L.right_col_width = L.right_col_right - L.right_col_left + 1;
   }
 
-  L.two_col = L.right_col_width >= HISTORY_TWO_COL_THRESHOLD;
+  L.two_col = L.right_col_width >= HISTORY_TWO_COL_HALFWIDTH_THRESHOLD;
+  L.pills_halfwidth = L.two_col && L.right_col_width < HISTORY_TWO_COL_THRESHOLD;
 
   if (L.two_col) {
-    // Pills act as column headers — one above each history subcolumn.
-    // Force equal pill widths so right-aligned content (score + clock)
-    // sits the same number of cells from the leftmost "P" marker in
-    // both pills; otherwise on odd-width right-column space, pill2 was
-    // a column wider than pill1 and the ones-digit of P2's score drifted
-    // one cell further from its "P" than P1's did. Pill1 stays anchored
-    // to the panel's left edge, pill2 stays anchored to the right edge,
-    // and any slack ends up as a slightly wider gutter between them.
-    const int min_gutter = 2;
-    const int half = (L.right_col_width - min_gutter) / 2;
+    // Pills + history share one combined box. The vertical divider
+    // between the two columns runs through both the pill row and
+    // the history rows; the divider row between pill content and
+    // history is the pills' bottom border (├─┼─┤). Geometry:
+    //   row 0:   ┌─...─┬─...─┐   (combined top border)
+    //   row 1:   │pill1 │pill2│   (pill content)
+    //   row 2:   ├─...─┼─...─┤   (horizontal divider == pill bottom)
+    //   rows 3+: │hist1 │hist2│
+    //   bot:     └─...─┴─...─┘
+    const int gutter = 1; // box-vertical, drawn by the combined frame
+    const int half_width = (L.right_col_width - 2 - gutter) / 2;
+    L.combined_pills_history = true;
+    L.divider_col = L.right_col_left + 1 + half_width;
     L.pill1_top = 0;
-    L.pill1_bottom = PILL_HEIGHT - 1;
+    L.pill1_bottom = PILL_HEIGHT - 1; // == row 2, the divider row
     L.pill1_left = L.right_col_left;
-    L.pill1_right = L.pill1_left + half - 1;
+    L.pill1_right = L.divider_col;
     L.pill2_top = L.pill1_top;
     L.pill2_bottom = L.pill1_bottom;
+    L.pill2_left = L.divider_col;
     L.pill2_right = L.right_col_right;
-    L.pill2_left = L.pill2_right - half + 1;
-    L.history_top = L.pill1_bottom + 1;
+    L.history_top = L.pill1_bottom; // shared divider row
   } else {
     L.pill1_top = 0;
     L.pill1_bottom = PILL_HEIGHT - 1;
@@ -435,7 +464,12 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
 #define BOX_BL "\xe2\x94\x94" // └
 #define BOX_BR "\xe2\x94\x98" // ┘
 #define BOX_HZ "\xe2\x94\x80" // ─
-#define BOX_VT "\xe2\x94\x82" // │
+#define BOX_VT "\xe2\x94\x82"     // │
+#define BOX_T_DOWN "\xe2\x94\xac" // ┬
+#define BOX_T_UP "\xe2\x94\xb4"   // ┴
+#define BOX_T_RIGHT "\xe2\x94\x9c" // ├
+#define BOX_T_LEFT "\xe2\x94\xa4"  // ┤
+#define BOX_CROSS "\xe2\x94\xbc"   // ┼
 
 // Fullwidth column labels Ａ..Ｚ.
 static const char *const fullwidth_col_labels[] = {
@@ -590,6 +624,62 @@ static void draw_box(struct ncplane *plane, const Theme *theme, int top_row,
     ncplane_putstr(plane, title);
     ncplane_putstr(plane, " ");
   }
+}
+
+// Draws the outer borders + horizontal divider + vertical column
+// divider for the combined pills+history box in two-col mode. Pill
+// and history content rendering skip their own draw_box calls when
+// this fires; this function paints the full frame with proper T and
+// cross junctions.
+static void draw_combined_pills_history_frame(struct ncplane *plane,
+                                              const Theme *theme,
+                                              const Layout *L) {
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  const int top = L->pill1_top;
+  const int divider_row = L->pill1_bottom;
+  const int bottom = L->history_bottom;
+  const int left = L->right_col_left;
+  const int right = L->right_col_right;
+  const int mid = L->divider_col;
+
+  // Top border: ┌──────┬──────┐
+  ncplane_putstr_yx(plane, top, left, BOX_TL);
+  for (int col = left + 1; col < right; col++) {
+    ncplane_putstr_yx(plane, top, col, col == mid ? BOX_T_DOWN : BOX_HZ);
+  }
+  ncplane_putstr_yx(plane, top, right, BOX_TR);
+
+  // Pill content row (row top+1) is filled in by render_player_pill;
+  // we only need to paint the column borders here.
+  for (int row = top + 1; row < divider_row; row++) {
+    ncplane_putstr_yx(plane, row, left, BOX_VT);
+    ncplane_putstr_yx(plane, row, mid, BOX_VT);
+    ncplane_putstr_yx(plane, row, right, BOX_VT);
+  }
+
+  // Horizontal divider: ├──────┼──────┤
+  ncplane_putstr_yx(plane, divider_row, left, BOX_T_RIGHT);
+  for (int col = left + 1; col < right; col++) {
+    ncplane_putstr_yx(plane, divider_row, col,
+                      col == mid ? BOX_CROSS : BOX_HZ);
+  }
+  ncplane_putstr_yx(plane, divider_row, right, BOX_T_LEFT);
+
+  // History content rows: just paint the side and middle column
+  // borders. History content rendering fills in the rest.
+  for (int row = divider_row + 1; row < bottom; row++) {
+    ncplane_putstr_yx(plane, row, left, BOX_VT);
+    ncplane_putstr_yx(plane, row, mid, BOX_VT);
+    ncplane_putstr_yx(plane, row, right, BOX_VT);
+  }
+
+  // Bottom border: └──────┴──────┘
+  ncplane_putstr_yx(plane, bottom, left, BOX_BL);
+  for (int col = left + 1; col < right; col++) {
+    ncplane_putstr_yx(plane, bottom, col, col == mid ? BOX_T_UP : BOX_HZ);
+  }
+  ncplane_putstr_yx(plane, bottom, right, BOX_BR);
 }
 
 static void format_clock(int seconds, char *buf, size_t buf_size) {
@@ -755,8 +845,8 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
       const bool render_uppercase = is_blank && blank_uppercase;
       const MachineLetter glyph_ml =
           render_uppercase ? get_unblanked_machine_letter(ml) : ml;
-      theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : theme->tile_fg);
-      theme_apply_bg(plane, theme->tile_bg);
+      theme_apply_fg(plane, is_blank ? theme->blank_tile_fg : theme->tile1_fg);
+      theme_apply_bg(plane, theme->tile1_bg);
       if (halfwidth) {
         const char *ascii = ld->ld_ml_to_hl[glyph_ml];
         ncplane_putstr_yx(plane, screen_row, screen_col,
@@ -999,8 +1089,8 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         const bool render_uppercase = is_blank && state->blank_uppercase;
         const MachineLetter glyph_ml =
             render_uppercase ? get_unblanked_machine_letter(ml) : ml;
-        bg = theme->tile_bg;
-        fg = is_blank ? theme->blank_tile_fg : theme->tile_fg;
+        bg = theme->tile1_bg;
+        fg = is_blank ? theme->blank_tile_fg : theme->tile1_fg;
         const char *ascii = state->ld->ld_ml_to_hl[glyph_ml];
         if (ascii != NULL && ascii[0] != '\0' &&
             (unsigned char)ascii[0] < 0x80) {
@@ -1200,8 +1290,8 @@ static void render_board_labels_pixel(struct ncplane *plane,
   const int row_cols = CELL_COL_BASE;
 
   struct ncplane *col_p =
-      acquire_grid_plane(&grid_planes.labels_col, plane, "board_col_labels", 0,
-                         CELL_COL_BASE, col_rows, col_cols);
+      acquire_grid_plane(&grid_planes.labels_col, plane, "board_col_labels",
+                         COL_LABELS_ROW, CELL_COL_BASE, col_rows, col_cols);
   struct ncplane *row_p =
       acquire_grid_plane(&grid_planes.labels_row, plane, "board_row_labels",
                          CELL_ROW_BASE, 0, row_rows, row_cols);
@@ -1300,11 +1390,13 @@ static void render_board_labels_pixel(struct ncplane *plane,
     if (buf == NULL) {
       return;
     }
-    fill_tile_rect(buf, buf_w, 0, 0, buf_w, buf_h, bg);
-    const int right_margin = (int)((double)cdy * 0.22);
+    // Leave the buffer's background transparent (calloc gave us
+    // alpha=0 everywhere). The pixel plane then composites on top of
+    // the text plane, so the box's left border `│` shows through for
+    // the rows that need it — only the digit pixels mask the border.
+    const int right_margin = (int)((double)cdy * 0.18);
     const int content_right = buf_w - right_margin;
-    const int slot_w =
-        content_right > 0 ? content_right / 2 : 0; // per-digit slot
+    const int inter_digit_gap = (int)((double)cdy * 0.05);
     for (int row = 0; row < BOARD_DIM; row++) {
       char label[4];
       snprintf(label, sizeof(label), "%2d", row + 1);
@@ -1313,7 +1405,11 @@ static void render_board_labels_pixel(struct ncplane *plane,
       // Center a 1-row-tall label box vertically in the 2-row cell.
       const int box_top = cell_top + (cell_h_px - icdy) / 2;
       const int baseline = box_top + (int)(cdy * 0.78);
-      for (int i = 0; i < 2; i++) {
+      // Pack digits flush right with a small fixed gap, right-to-left.
+      // Single-digit rows (1..9) have the leading char as ' '; skip it
+      // and only render the trailing digit at the rightmost slot.
+      int right_edge = content_right;
+      for (int i = 1; i >= 0; i--) {
         const char ch = label[i];
         if (ch == '\0' || ch == ' ') {
           continue;
@@ -1323,13 +1419,10 @@ static void render_board_labels_pixel(struct ncplane *plane,
         if (g == NULL || g->width <= 0 || g->height <= 0) {
           continue;
         }
-        // Pack the two slots flush against content_right so the
-        // rightmost digit lines up just inside right_margin from the
-        // board's left edge.
-        const int slot_left = content_right - (2 - i) * slot_w;
-        const int glyph_left = slot_left + (slot_w - g->width) / 2;
+        const int glyph_left = right_edge - g->width;
         const int glyph_top = baseline - g->bearing_y;
         blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg);
+        right_edge = glyph_left - inter_digit_gap;
       }
     }
     struct ncvisual_options vopts = {0};
@@ -1510,7 +1603,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     for (int copy = 0; copy < count && tile_idx < tile_count;
          copy++, tile_idx++) {
       const int tx = tile_idx * tile_w;
-      fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, theme->rack_tile_bg);
+      fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, theme->rack_tile1_bg);
       const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
       const TuiGlyph *g =
           (ascii != NULL && ascii[0] != '\0' &&
@@ -1532,10 +1625,10 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
           const int glyph_top = baseline - g->bearing_y;
           const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
           blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g,
-                        theme->rack_tile_fg, theme->rack_tile_bg);
+                        theme->rack_tile1_fg, theme->rack_tile1_bg);
         } else {
           blit_glyph_into_buf(buf, buf_w, buf_h, tx, 0, tile_w, tile_h, g,
-                              theme->rack_tile_fg, theme->rack_tile_bg);
+                              theme->rack_tile1_fg, theme->rack_tile1_bg);
         }
       }
 
@@ -1563,7 +1656,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
             const int gleft = pen_right - gd->width;
             const int gtop = digit_bottom - gd->height;
             blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd,
-                          theme->rack_tile_fg, theme->rack_tile_bg);
+                          theme->rack_tile1_fg, theme->rack_tile1_bg);
             pen_right = gleft - 1;
           }
         }
@@ -1639,8 +1732,8 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   for (int ml = 0; ml < ld_get_size(ld); ml++) {
     const int count = rack_get_letter(rack, (MachineLetter)ml);
     for (int copy = 0; copy < count; copy++) {
-      theme_apply_fg(plane, theme->rack_tile_fg);
-      theme_apply_bg(plane, theme->rack_tile_bg);
+      theme_apply_fg(plane, theme->rack_tile1_fg);
+      theme_apply_bg(plane, theme->rack_tile1_bg);
       if (halfwidth) {
         const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
         ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
@@ -1851,9 +1944,12 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
 // side-by-side as column headers in two-col mode or stack in one-col mode.
 static void render_player_pill(struct ncplane *plane, const Theme *theme,
                                const TuiGameState *state, int player_idx,
-                               int top, int left, int right) {
+                               int top, int left, int right, bool halfwidth,
+                               bool draw_box_around) {
   const int width = right - left + 1;
-  draw_box(plane, theme, top, left, PILL_HEIGHT, width, NULL);
+  if (draw_box_around) {
+    draw_box(plane, theme, top, left, PILL_HEIGHT, width, NULL);
+  }
 
   const Player *player = game_get_player(state->game, player_idx);
   const bool on_turn = game_get_player_on_turn_index(state->game) == player_idx;
@@ -1894,29 +1990,40 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   theme_apply_fg(plane, theme->fg);
   ncplane_putstr_yx(plane, content_row, score_col, score_str);
 
-  // Fullwidth rack between the name and the score, on tile_bg. Each tile
-  // is 2 cols wide. After "▶ P1 " (4 chars + 1 gap) the rack starts at
-  // content_left + 5.
+  // Rack between the name and the score, on tile_bg. After "▶ P1 "
+  // (4 chars + 1 gap) the rack starts at content_left + 5. Each tile
+  // is 2 cols wide in fullwidth mode, 1 col in halfwidth — halfwidth
+  // kicks in when the right column is too narrow for two fullwidth
+  // pills side-by-side but still wide enough to fit two halfwidth
+  // pills.
   const Rack *rack = player_get_rack(player);
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
-  if (rack_right_max >= rack_left + 1) {
+  const int tile_w = halfwidth ? 1 : 2;
+  if (rack_right_max >= rack_left + (tile_w - 1)) {
     int rcol = rack_left;
-    theme_apply_fg(plane, theme->rack_tile_fg);
-    theme_apply_bg(plane, theme->rack_tile_bg);
-    for (int ml = 0; ml < ld_get_size(ld) && rcol + 1 <= rack_right_max; ml++) {
+    theme_apply_fg(plane, theme->rack_tile1_fg);
+    theme_apply_bg(plane, theme->rack_tile1_bg);
+    for (int ml = 0;
+         ml < ld_get_size(ld) && rcol + (tile_w - 1) <= rack_right_max; ml++) {
       const int count = rack_get_letter(rack, (MachineLetter)ml);
-      for (int copy = 0; copy < count && rcol + 1 <= rack_right_max; copy++) {
-        const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
-        if (fullwidth[0] != '\0') {
-          ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
-        } else {
+      for (int copy = 0;
+           copy < count && rcol + (tile_w - 1) <= rack_right_max; copy++) {
+        if (halfwidth) {
           const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-          ncplane_putstr_yx(plane, content_row, rcol, " ");
-          ncplane_putstr(plane, ascii);
+          ncplane_putstr_yx(plane, content_row, rcol, ascii);
+        } else {
+          const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
+          if (fullwidth[0] != '\0') {
+            ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
+          } else {
+            const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+            ncplane_putstr_yx(plane, content_row, rcol, " ");
+            ncplane_putstr(plane, ascii);
+          }
         }
-        rcol += 2;
+        rcol += tile_w;
       }
     }
   }
@@ -1945,12 +2052,19 @@ static int history_entry_rows(const TuiHistoryEntry *e) {
 }
 
 // Render a GCG-style move notation with played-through letters (the
-// segments wrapped in parentheses) unbolded — everything outside parens
-// reads as bold. The history and analysis panels share this so a
-// played-through "(O)" looks consistent in both. Caller positions the
-// text; this routine handles segmenting and style changes only.
+// segments wrapped in parentheses) and the post-play leave (in square
+// brackets) unbolded — everything outside the bracketed/parenthesized
+// segments reads as bold. The history and analysis panels share this
+// so segments look consistent in both. Caller positions the text;
+// this routine handles segmenting and style changes only.
+//
+// `hide_parens` is true in the analysis panel: the parentheses
+// themselves are skipped (so "T(H)OLOI" reads as "THOLOI", with the H
+// rendered non-bold). History keeps the parens so a played-through
+// tile is visually unmistakable in the move log. Square brackets
+// (used for leaves in history) are always shown verbatim.
 static void render_move_styled(struct ncplane *plane, int row, int col,
-                               const char *move_str) {
+                               const char *move_str, bool hide_parens) {
   if (move_str == NULL || *move_str == '\0') {
     return;
   }
@@ -1958,6 +2072,7 @@ static void render_move_styled(struct ncplane *plane, int row, int col,
   const char *end = p + strlen(move_str);
   int x = col;
   while (p < end) {
+    const char *seg_start = p;
     const char *seg_end;
     bool seg_bold;
     if (*p == '(') {
@@ -1966,27 +2081,43 @@ static void render_move_styled(struct ncplane *plane, int row, int col,
       while (seg_end < end && *seg_end != ')') {
         seg_end++;
       }
+      if (hide_parens) {
+        seg_start = p + 1; // skip '('; ')' is dropped via seg_end below
+      } else if (seg_end < end) {
+        seg_end++; // include the close paren in the rendered segment
+      }
+    } else if (*p == '[') {
+      seg_bold = false;
+      seg_end = p;
+      while (seg_end < end && *seg_end != ']') {
+        seg_end++;
+      }
       if (seg_end < end) {
-        seg_end++; // include the close paren
+        seg_end++; // include the close bracket in the rendered segment
       }
     } else {
       seg_bold = true;
       seg_end = p;
-      while (seg_end < end && *seg_end != '(') {
+      while (seg_end < end && *seg_end != '(' && *seg_end != '[') {
         seg_end++;
       }
     }
     ncplane_set_styles(plane, seg_bold ? NCSTYLE_BOLD : 0);
     char buf[64];
-    size_t len = (size_t)(seg_end - p);
+    size_t len = (size_t)(seg_end - seg_start);
     if (len >= sizeof(buf)) {
       len = sizeof(buf) - 1;
     }
-    memcpy(buf, p, len);
+    memcpy(buf, seg_start, len);
     buf[len] = '\0';
     ncplane_putstr_yx(plane, row, x, buf);
     x += (int)strlen(buf);
-    p = seg_end;
+    // When hiding parens we landed on ')'; skip it.
+    if (hide_parens && seg_end < end && *seg_end == ')') {
+      p = seg_end + 1;
+    } else {
+      p = seg_end;
+    }
   }
   ncplane_set_styles(plane, 0);
 }
@@ -2000,7 +2131,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   ncplane_set_styles(plane, 0);
   theme_apply_fg(plane, theme->fg);
   char prefix[8];
-  snprintf(prefix, sizeof(prefix), "%2d. ", idx + 1);
+  snprintf(prefix, sizeof(prefix), "%d. ", idx + 1);
   if (e->pending) {
     // Pending turn: paint the "N." chunk with tile colors so it reads
     // like a played tile next to the spinner. Leading space (when N
@@ -2024,8 +2155,8 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     const int tile_len = after_period - digit_start;
     memcpy(tile_part, prefix + digit_start, (size_t)tile_len);
     tile_part[tile_len] = '\0';
-    theme_apply_fg(plane, theme->tile_fg);
-    theme_apply_bg(plane, theme->tile_bg);
+    theme_apply_fg(plane, theme->tile1_fg);
+    theme_apply_bg(plane, theme->tile1_bg);
     ncplane_set_styles(plane, NCSTYLE_BOLD);
     ncplane_putstr_yx(plane, row, interior_left + digit_start, tile_part);
     ncplane_set_styles(plane, 0);
@@ -2058,7 +2189,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_putstr(plane, spinner_frames[frame]);
   } else {
     render_move_styled(plane, row, interior_left + (int)strlen(prefix),
-                       e->move_str);
+                       e->move_str, /*hide_parens=*/false);
 
     char delta_str[16];
     snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
@@ -2081,8 +2212,10 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
                sizeof(clock_str));
   char left_line[48];
-  snprintf(left_line, sizeof(left_line), "    %s %s", clock_str,
-           e->rack_str[0] ? e->rack_str : "—");
+  // Row 2 indent matches the prefix length so the clock aligns with
+  // where the move started on row 1 ("4. 14F XU" → "   2:45 EGIPS").
+  snprintf(left_line, sizeof(left_line), "%*s%s %s", (int)strlen(prefix), "",
+           clock_str, e->rack_str[0] ? e->rack_str : "—");
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
 
   if (!e->pending) {
@@ -2148,8 +2281,10 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3) {
     return;
   }
-  draw_box(plane, theme, L->history_top, L->right_col_left, height, width,
-           NULL);
+  if (!L->combined_pills_history) {
+    draw_box(plane, theme, L->history_top, L->right_col_left, height, width,
+             NULL);
+  }
 
   if (state->history_count == 0) {
     theme_apply_fg(plane, theme->dim_fg);
@@ -2168,8 +2303,8 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   const int rows_avail = bottom - top + 1;
 
   if (!L->two_col) {
-    const int interior_left = L->right_col_left + 2;
-    const int interior_right = L->right_col_right - 2;
+    const int interior_left = L->right_col_left + 1;
+    const int interior_right = L->right_col_right - 1;
 
     // Walk backwards to find the oldest entry that still fits, so the
     // most recent entries always show.
@@ -2195,13 +2330,13 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 
   // Two-column layout. Entries are assigned to columns by absolute index
   // parity (even → left, odd → right) so the going-out player's row
-  // stays in whichever column they happened to land on.
-  const int gutter = 2;
-  const int half_width = (width - 2 - gutter) / 2;
-  const int left_l = L->right_col_left + 2;
-  const int left_r = left_l + half_width - 1;
-  const int right_l = left_r + 1 + gutter;
-  const int right_r = L->right_col_right - 2;
+  // stays in whichever column they happened to land on. Combined mode
+  // (when pills + history share a single box) draws the outer borders
+  // and the column divider for us; this just positions the content.
+  const int left_l = L->right_col_left + 1;
+  const int left_r = L->divider_col - 1;
+  const int right_l = L->divider_col + 1;
+  const int right_r = L->right_col_right - 1;
 
   // Walk backwards, tracking per-column row usage, to find the oldest
   // entry that still fits in its target column.
@@ -2247,11 +2382,26 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 
 enum { ANALYSIS_ROW_CAP = 64 };
 
+typedef enum {
+  ANALYSIS_TINT_NONE = 0, // use the default dim_fg
+  ANALYSIS_TINT_WIN,      // positive final spread — accent (green)
+  ANALYSIS_TINT_LOSS,     // negative final spread — error (red)
+  ANALYSIS_TINT_TIE,      // zero final spread — dim (grey)
+} AnalysisTint;
+
 typedef struct {
   char move[80];
   char leave[16];
-  char primary[8];   // "67.3%" or "W"/"T"/"L"
+  char score[8];     // "30" / "120"; empty if not applicable
+  char primary[8];   // "67.3%" in sim; empty in endgame
   char secondary[8]; // "+32.5" or "+27"
+  AnalysisTint secondary_tint;
+  // Raw values, kept alongside the display strings so the renderer
+  // can bold the highest-scoring row(s) using full precision instead
+  // of the rounded display values.
+  int score_value;
+  double primary_value;
+  double secondary_value;
   bool valid;
 } AnalysisRow;
 
@@ -2263,44 +2413,80 @@ typedef struct {
 static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                  const Layout *L, AnalysisRow *rows,
                                  int visible, int primary_w, int secondary_w,
-                                 int primary_secondary_gap,
-                                 bool primary_bold) {
+                                 int primary_secondary_gap, bool primary_bold,
+                                 int title_end_col) {
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
-  const int list_top = interior_top;
+  // Reserve a column-header strip; either on the panel's top border
+  // (sharing the row with the title, when there's room) or on the
+  // first interior row. The on-border placement is preferred since
+  // it gives the data one extra row of vertical space. Final
+  // decision happens below once we know how far the leftmost header
+  // would extend; placeholder values here.
+  bool show_headers = interior_top <= interior_bottom;
+  int header_row = interior_top;
+  int list_top = show_headers ? interior_top + 1 : interior_top;
 
   const int sec_col = interior_right - secondary_w + 1;
   const int prim_col = sec_col - primary_secondary_gap - primary_w;
 
-  char rank_probe[8];
-  snprintf(rank_probe, sizeof(rank_probe), "%2d. ", visible);
-  const int rank_w = (int)strlen(rank_probe);
+  // Size the rank column to the digit count of the largest visible
+  // rank, so a 9-row list shows "9. " (no pad) and only a 10+ list
+  // pays for the leading space. Generalizes to 100+ if ever needed.
+  int rank_digits = 1;
+  {
+    int n = visible;
+    while (n >= 10) {
+      rank_digits++;
+      n /= 10;
+    }
+  }
+  char rank_fmt[8];
+  snprintf(rank_fmt, sizeof(rank_fmt), "%%%dd. ", rank_digits);
+  const int rank_w = rank_digits + 2; // digits + ". "
   const int move_col = interior_left + rank_w;
 
   const int leave_gap_l = 2;
-  const int leave_gap_r = 1;
+  // No explicit gap between the leave column and the primary column —
+  // the win% format ("%5.1f%%") leaves an implicit leading space
+  // unless the value hits exactly 100.0%, which gives a clean 1-col
+  // visual gap from the leave for any realistic win percentage.
+  const int leave_gap_r = 0;
 
+  // Move text in analysis renders with hide_parens=true, so the
+  // rendered column width is strlen minus paren characters. Use the
+  // rendered width for layout decisions; using raw strlen
+  // overestimates and causes the leave column to get suppressed when
+  // a playthrough move's parens push the max over the budget.
   int max_move_w = 0;
   int max_leave_w = 0;
   for (int i = 0; i < visible; i++) {
     if (!rows[i].valid) {
       continue;
     }
-    const int ml = (int)strlen(rows[i].move);
+    int rendered = 0;
+    for (const char *p = rows[i].move; *p != '\0'; p++) {
+      if (*p != '(' && *p != ')') {
+        rendered++;
+      }
+    }
     const int ll = (int)strlen(rows[i].leave);
-    if (ml > max_move_w) {
-      max_move_w = ml;
+    if (rendered > max_move_w) {
+      max_move_w = rendered;
     }
     if (ll > max_leave_w) {
       max_leave_w = ll;
     }
   }
 
-  // Compact "(exch ABCD)" → "-ABCD" if the verbose form doesn't fit.
-  const int max_move_budget = prim_col - 1 - move_col;
-  if (max_move_w > max_move_budget) {
+  // Always compact "(exch ABCD)" → "-ABCD" in the analysis panel —
+  // the verbose form takes too much horizontal room and the short
+  // form is unambiguous next to placement moves like "7F JUTE".
+  // Recompute max_move_w after compaction using rendered width
+  // (parens hidden), since parens don't show up at render time.
+  {
     int new_max = 0;
     for (int i = 0; i < visible; i++) {
       char *s = rows[i].move;
@@ -2322,7 +2508,12 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
           s[finalcopy] = '\0';
         }
       }
-      const int ml = (int)strlen(s);
+      int ml = 0;
+      for (const char *p = s; *p != '\0'; p++) {
+        if (*p != '(' && *p != ')') {
+          ml++;
+        }
+      }
       if (ml > new_max) {
         new_max = ml;
       }
@@ -2330,16 +2521,402 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     max_move_w = new_max;
   }
 
-  bool show_leave = max_leave_w > 0;
-  int leave_col = prim_col - leave_gap_r - max_leave_w;
-  int move_max = prim_col - 1 - move_col;
-  if (show_leave) {
-    const int with_leave_max = leave_col - leave_gap_l - move_col;
-    if (with_leave_max >= max_move_w) {
-      move_max = with_leave_max;
-    } else {
-      show_leave = false;
+  // Compact mode: when the standard layout (rank + widest move +
+  // primary + spread) doesn't fit the panel, drop to a tight form.
+  // Spread is always omitted; everything else is added back in
+  // priority order as long as it fits.
+  //
+  //   level 0: <move>  <int%>
+  //   level 1: + rank "N." (no space after period)
+  //   level 2: + space after period -> "N. <move>" (first priority)
+  //   level 3: + leave column (second priority)
+  const int interior_width = interior_right - interior_left + 1;
+  const int standard_need = rank_w + max_move_w + 1 + primary_w +
+                            primary_secondary_gap + secondary_w;
+  if (standard_need > interior_width) {
+    // Width of the widest integer-percent we'll actually render. "100%"
+    // is 4 cols but only matters when a row actually hits it; with
+    // every visible row below 100% we size the slot at 3 ("XX%") and
+    // get a free column for rank, space, or leave. W/T/L primaries
+    // stay 1 col.
+    int compact_primary_w = 0;
+    for (int i = 0; i < visible; i++) {
+      if (!rows[i].valid) {
+        continue;
+      }
+      int len_here;
+      if (strchr(rows[i].primary, '.') != NULL) {
+        const double val = atof(rows[i].primary);
+        int int_pct = (int)(val + 0.5);
+        if (int_pct > 100) {
+          int_pct = 100;
+        }
+        if (int_pct < 0) {
+          int_pct = 0;
+        }
+        char tmp[8];
+        snprintf(tmp, sizeof(tmp), "%d%%", int_pct);
+        len_here = (int)strlen(tmp);
+      } else {
+        const char *src = rows[i].primary;
+        while (*src == ' ') {
+          src++;
+        }
+        len_here = (int)strlen(src);
+      }
+      if (len_here > compact_primary_w) {
+        compact_primary_w = len_here;
+      }
     }
+    if (compact_primary_w == 0) {
+      compact_primary_w = 1;
+    }
+    const int rank_short = rank_digits + 1; // "N."
+    const int rank_full = rank_short + 1;   // "N. "
+    const int base_need = max_move_w + 1 + compact_primary_w;
+    const int level1_need = rank_short + base_need;
+    const int level2_need = rank_full + base_need;
+    const int level3_need = rank_full + max_move_w + leave_gap_l +
+                            max_leave_w + 1 + compact_primary_w;
+
+    int level = 0;
+    if (level1_need <= interior_width) {
+      level = 1;
+    }
+    if (level2_need <= interior_width) {
+      level = 2;
+    }
+    if (level3_need <= interior_width && max_leave_w > 0) {
+      level = 3;
+    }
+
+    const int compact_rank_w = (level == 0)   ? 0
+                               : (level == 1) ? rank_short
+                                              : rank_full;
+    const int compact_move_col = interior_left + compact_rank_w;
+    const bool compact_show_leave = (level >= 3);
+    char rfmt[8];
+    if (level >= 1) {
+      snprintf(rfmt, sizeof(rfmt), level == 1 ? "%%%dd." : "%%%dd. ",
+               rank_digits);
+    }
+
+    theme_apply_bg(plane, theme->bg);
+    int row = list_top;
+    for (int i = 0; i < visible && row <= interior_bottom; i++) {
+      if (!rows[i].valid) {
+        row++;
+        continue;
+      }
+      // Reformat the primary: percent values (containing '.') round
+      // to an integer; W/T/L stay as-is.
+      char pbuf[8];
+      if (strchr(rows[i].primary, '.') != NULL) {
+        const double val = atof(rows[i].primary);
+        int int_pct = (int)(val + 0.5);
+        if (int_pct > 100) {
+          int_pct = 100;
+        }
+        if (int_pct < 0) {
+          int_pct = 0;
+        }
+        snprintf(pbuf, sizeof(pbuf), "%d%%", int_pct);
+      } else {
+        const char *src = rows[i].primary;
+        while (*src == ' ') {
+          src++;
+        }
+        snprintf(pbuf, sizeof(pbuf), "%s", src);
+      }
+      const int plen = (int)strlen(pbuf);
+      const int pcol = interior_right - plen + 1;
+
+      if (level >= 1) {
+        char rstr[8];
+        snprintf(rstr, sizeof(rstr), rfmt, i + 1);
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, row, interior_left, rstr);
+      }
+
+      // Optional leave column, right-anchored just before the int%.
+      const int leave_len = (int)strlen(rows[i].leave);
+      int leave_text_col = 0;
+      bool this_row_show_leave = false;
+      int move_budget;
+      if (compact_show_leave && leave_len > 0) {
+        leave_text_col = pcol - 1 - leave_len;
+        const int with_leave_budget =
+            leave_text_col - leave_gap_l - compact_move_col;
+        // Count this row's rendered move width.
+        int row_rendered = 0;
+        for (const char *p = rows[i].move; *p != '\0'; p++) {
+          if (*p != '(' && *p != ')') {
+            row_rendered++;
+          }
+        }
+        if (with_leave_budget > 0 && row_rendered <= with_leave_budget) {
+          this_row_show_leave = true;
+          move_budget = with_leave_budget;
+        } else {
+          move_budget = pcol - compact_move_col - 1;
+        }
+      } else {
+        move_budget = pcol - compact_move_col - 1;
+      }
+
+      char *move_text = rows[i].move;
+      int rendered = 0;
+      for (const char *p = move_text; *p != '\0'; p++) {
+        if (*p != '(' && *p != ')') {
+          rendered++;
+        }
+      }
+      if (move_budget <= 0) {
+        move_text[0] = '\0';
+      } else if (rendered > move_budget) {
+        int cnt = 0;
+        char *p = move_text;
+        for (; *p != '\0'; p++) {
+          if (*p != '(' && *p != ')') {
+            if (cnt >= move_budget) {
+              break;
+            }
+            cnt++;
+          }
+        }
+        *p = '\0';
+      }
+      if (move_budget > 0 && move_text[0] != '\0') {
+        theme_apply_fg(plane, theme->fg);
+        render_move_styled(plane, row, compact_move_col, move_text,
+                           /*hide_parens=*/true);
+      }
+
+      if (this_row_show_leave) {
+        theme_apply_fg(plane, theme->dim_fg);
+        ncplane_putstr_yx(plane, row, leave_text_col, rows[i].leave);
+      }
+
+      theme_apply_fg(plane, theme->fg);
+      if (primary_bold) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
+      ncplane_putstr_yx(plane, row, pcol, pbuf);
+      if (primary_bold) {
+        ncplane_set_styles(plane, 0);
+      }
+
+      row++;
+    }
+    return;
+  }
+
+  // Score column: shown when any visible row has a score and the
+  // widest move still fits beside it. Score takes priority over leave
+  // — if both can't fit, drop leave first. Width is 2 cols when no
+  // score reaches 100, else 3.
+  int max_score_int = 0;
+  bool any_score = false;
+  for (int i = 0; i < visible; i++) {
+    if (!rows[i].valid || rows[i].score[0] == '\0') {
+      continue;
+    }
+    any_score = true;
+    const int s = atoi(rows[i].score);
+    if (s > max_score_int) {
+      max_score_int = s;
+    }
+  }
+  int score_w = 0;
+  if (any_score) {
+    score_w = max_score_int >= 100 ? 3 : 2;
+    // Budget for: rank + max_move + 1 (gap) + score + ps_gap + primary + sec
+    const int with_score_need = rank_w + max_move_w + 1 + score_w +
+                                primary_secondary_gap + primary_w + secondary_w;
+    const int avail_width = interior_right - interior_left + 1;
+    if (with_score_need > avail_width) {
+      score_w = 0;
+    }
+  }
+  const bool show_score = score_w > 0;
+  const int score_right_edge = show_score ? prim_col - 1 : prim_col;
+  const int score_left_edge =
+      show_score ? score_right_edge - score_w + 1 : prim_col;
+
+  // Find the max values across visible rows so we can bold the
+  // row(s) that achieve each maximum. Score is integer (exact ties
+  // legit and all bold); primary/secondary use the raw double so
+  // ties at the displayed precision still resolve to a unique winner
+  // when the underlying values differ.
+  int best_score = INT_MIN;
+  double best_primary = -1e300;
+  double best_secondary = -1e300;
+  bool any_primary = false;
+  bool any_secondary = false;
+  for (int i = 0; i < visible; i++) {
+    if (!rows[i].valid) {
+      continue;
+    }
+    if (rows[i].score[0] != '\0' && rows[i].score_value > best_score) {
+      best_score = rows[i].score_value;
+    }
+    if (rows[i].primary[0] != '\0') {
+      if (!any_primary || rows[i].primary_value > best_primary) {
+        best_primary = rows[i].primary_value;
+        any_primary = true;
+      }
+    }
+    if (rows[i].secondary[0] != '\0') {
+      if (!any_secondary || rows[i].secondary_value > best_secondary) {
+        best_secondary = rows[i].secondary_value;
+        any_secondary = true;
+      }
+    }
+  }
+  // Leave's right edge slides left to make room for the score column.
+  const int leave_to_score_gap = 1;
+  const int leave_right_edge = show_score
+                                   ? score_left_edge - leave_to_score_gap - 1
+                                   : prim_col - leave_gap_r - 1;
+  // Per-row leave fitting: each row decides for itself whether the
+  // leave fits beside its move. Longer plays tend to use more rack
+  // tiles so they leave shorter strings — the row-local budget gives
+  // them their needed move width while still showing leaves for the
+  // shorter plays on other rows. Leaves are right-anchored to a
+  // fixed edge so they line up visually even when start columns
+  // differ per row.
+  const int full_move_max = (show_score ? score_left_edge - 2 : prim_col - 1) -
+                            move_col;
+
+  // Column headers above the data rows. Sim only (primary_w == 6 for
+  // "XX.X%"); endgame's "W"/"T"/"L" primary doesn't warrant a header.
+  // Each header right-aligns at the same edge as the column it labels.
+  show_headers = show_headers && primary_w >= 4;
+  if (show_headers) {
+    // Find the leftmost col any header would touch (the "leave"
+    // header is the leftmost; if no leave column, "sc" or "win%").
+    int leftmost_header_col = INT_MAX;
+    if (max_leave_w > 0) {
+      const int col = leave_right_edge - 5 + 1; // "leave"
+      if (col < leftmost_header_col) {
+        leftmost_header_col = col;
+      }
+    }
+    if (show_score) {
+      const int len = score_w == 2 ? 2 : 3;
+      const int col = score_right_edge - len + 1;
+      if (col < leftmost_header_col) {
+        leftmost_header_col = col;
+      }
+    }
+    {
+      const int col = prim_col + primary_w - 4; // "win%"
+      if (col < leftmost_header_col) {
+        leftmost_header_col = col;
+      }
+    }
+    // Prefer the top border row when the title leaves enough room
+    // there. title_end_col is the last col of the title's trailing
+    // " "; we need a 1-col gap after it before the leftmost header.
+    const bool headers_fit_on_border =
+        title_end_col >= 0 &&
+        leftmost_header_col > title_end_col + 1 &&
+        leftmost_header_col >= L->analysis_left + 1;
+    if (headers_fit_on_border) {
+      header_row = L->analysis_top;
+      list_top = interior_top;
+    } else {
+      header_row = interior_top;
+      list_top = interior_top + 1;
+    }
+
+    // Paint the header strip. The right portion (from the leftmost
+    // header word out to the right interior edge) always uses the
+    // inverted band — same look the on-border placement gets. The
+    // LEFT portion of an inside-panel strip fades into the panel's
+    // bg using DOS-style shade glyphs (░ ▒ ▓) split into thirds:
+    //   ░ section at the far left, ▓ section just before the band,
+    //   ▒ in the middle. The shade glyph density alone reads as
+    //   banded, so we also linearly ramp the foreground color from
+    //   bg (invisible) at the far left to dim_fg at the band — the
+    //   dithering pattern remains visible but the overall line
+    //   fades smoothly into the surrounding rows.
+    {
+      // Right portion: inverted band.
+      const int band_left =
+          headers_fit_on_border ? leftmost_header_col : leftmost_header_col;
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, theme->dim_fg);
+      for (int c = band_left; c <= interior_right; c++) {
+        ncplane_putstr_yx(plane, header_row, c, " ");
+      }
+    }
+    if (!headers_fit_on_border && interior_left < leftmost_header_col) {
+      // Each cell renders a left-half-block ▌ (U+258C): fg paints
+      // the cell's left half, bg paints the right half. That gives
+      // us two color samples per terminal cell — twice the
+      // gradient resolution of plain spaces — so the fade from
+      // theme->bg to theme->dim_fg eases in smoothly even on
+      // narrow strips.
+      const int fade_left = interior_left;
+      const int fade_right = leftmost_header_col - 1;
+      const int fade_w = fade_right - fade_left + 1;
+      const int sub_steps = 2 * fade_w;
+      for (int c = fade_left; c <= fade_right; c++) {
+        const int pos = c - fade_left;
+        const int left_sub = 2 * pos;
+        const int right_sub = left_sub + 1;
+        const double tl = sub_steps > 1
+                              ? (double)left_sub / (double)(sub_steps - 1)
+                              : 1.0;
+        const double tr = sub_steps > 1
+                              ? (double)right_sub / (double)(sub_steps - 1)
+                              : 1.0;
+        ThemeRgb fg;
+        fg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tl);
+        fg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tl);
+        fg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tl);
+        ThemeRgb bg;
+        bg.r = (uint8_t)(theme->bg.r + (theme->dim_fg.r - theme->bg.r) * tr);
+        bg.g = (uint8_t)(theme->bg.g + (theme->dim_fg.g - theme->bg.g) * tr);
+        bg.b = (uint8_t)(theme->bg.b + (theme->dim_fg.b - theme->bg.b) * tr);
+        theme_apply_fg(plane, fg);
+        theme_apply_bg(plane, bg);
+        ncplane_putstr_yx(plane, header_row, c,
+                          "\xe2\x96\x8c"); // ▌ left-half block
+      }
+    }
+
+    theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, theme->dim_fg);
+    if (max_leave_w > 0) {
+      const char *leave_label = "leave";
+      const int len = (int)strlen(leave_label);
+      const int col = leave_right_edge - len + 1;
+      if (col >= move_col) {
+        ncplane_putstr_yx(plane, header_row, col, leave_label);
+      }
+    }
+    if (show_score) {
+      const char *sc_label = score_w == 2 ? "sc" : "scr";
+      const int len = (int)strlen(sc_label);
+      const int col = score_right_edge - len + 1;
+      ncplane_putstr_yx(plane, header_row, col, sc_label);
+    }
+    {
+      const char *win_label = "win%";
+      const int len = (int)strlen(win_label);
+      const int col = prim_col + primary_w - len;
+      ncplane_putstr_yx(plane, header_row, col, win_label);
+    }
+    {
+      const char *sprd_label = "sprd";
+      const int len = (int)strlen(sprd_label);
+      const int col = interior_right - len + 1;
+      ncplane_putstr_yx(plane, header_row, col, sprd_label);
+    }
+  } else {
+    list_top = interior_top;
   }
 
   theme_apply_bg(plane, theme->bg);
@@ -2350,29 +2927,78 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       continue;
     }
     char rank_str[8];
-    snprintf(rank_str, sizeof(rank_str), "%2d. ", i + 1);
+    snprintf(rank_str, sizeof(rank_str), rank_fmt, i + 1);
+
+    // Rendered width of this row's move (parens are dropped at
+    // render time so they don't count toward layout width).
+    int rendered = 0;
+    for (const char *p = rows[i].move; *p != '\0'; p++) {
+      if (*p != '(' && *p != ')') {
+        rendered++;
+      }
+    }
+
+    // Try to fit this row's leave to the left of leave_right_edge.
+    const int leave_len = (int)strlen(rows[i].leave);
+    int leave_text_col = 0;
+    bool show_this_leave = false;
+    int this_move_max = full_move_max;
+    if (leave_len > 0) {
+      leave_text_col = leave_right_edge - leave_len + 1;
+      const int with_leave_budget = leave_text_col - leave_gap_l - move_col;
+      if (with_leave_budget > 0 && rendered <= with_leave_budget) {
+        show_this_leave = true;
+        this_move_max = with_leave_budget;
+      }
+    }
 
     char *move_text = rows[i].move;
-    if (move_max > 0 && (int)strlen(move_text) > move_max) {
-      move_text[move_max] = '\0';
-    } else if (move_max <= 0) {
+    if (this_move_max <= 0) {
       move_text[0] = '\0';
+    } else if (rendered > this_move_max) {
+      // Truncate against rendered width, not raw strlen — a move
+      // like "H2 ISOBU(TA)NE" has strlen 14 but renders as 12
+      // ("H2 ISOBUTANE" with hide_parens). Counting parens as
+      // billable width would crop the move unnecessarily.
+      int cnt = 0;
+      char *p = move_text;
+      for (; *p != '\0'; p++) {
+        if (*p != '(' && *p != ')') {
+          if (cnt >= this_move_max) {
+            break;
+          }
+          cnt++;
+        }
+      }
+      *p = '\0';
     }
 
     theme_apply_fg(plane, theme->dim_fg);
     ncplane_putstr_yx(plane, row, interior_left, rank_str);
 
-    if (move_max > 0 && move_text[0] != '\0') {
+    if (this_move_max > 0 && move_text[0] != '\0') {
       theme_apply_fg(plane, theme->fg);
-      render_move_styled(plane, row, move_col, move_text);
+      render_move_styled(plane, row, move_col, move_text,
+                         /*hide_parens=*/true);
     }
 
-    if (show_leave && rows[i].leave[0] != '\0') {
-      const int leave_len = (int)strlen(rows[i].leave);
-      const int leave_right_edge = leave_col + max_leave_w - 1;
-      const int leave_text_col = leave_right_edge - leave_len + 1;
+    if (show_this_leave) {
       theme_apply_fg(plane, theme->dim_fg);
       ncplane_putstr_yx(plane, row, leave_text_col, rows[i].leave);
+    }
+
+    if (show_score && rows[i].score[0] != '\0') {
+      const int sl = (int)strlen(rows[i].score);
+      const int sc_col = score_right_edge - sl + 1;
+      const bool is_best = (rows[i].score_value == best_score);
+      theme_apply_fg(plane, theme->fg);
+      if (is_best) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
+      ncplane_putstr_yx(plane, row, sc_col, rows[i].score);
+      if (is_best) {
+        ncplane_set_styles(plane, 0);
+      }
     }
 
     // Primary column (win% or W/T/L). Right-justified within its slot
@@ -2381,21 +3007,37 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       const int len = (int)strlen(rows[i].primary);
       const int col = sec_col - primary_secondary_gap - len;
       theme_apply_fg(plane, theme->fg);
-      if (primary_bold) {
+      const bool is_best =
+          any_primary && rows[i].primary[0] != '\0' &&
+          rows[i].primary_value == best_primary;
+      const bool bold = primary_bold || is_best;
+      if (bold) {
         ncplane_set_styles(plane, NCSTYLE_BOLD);
       }
       ncplane_putstr_yx(plane, row, col, rows[i].primary);
-      if (primary_bold) {
+      if (bold) {
         ncplane_set_styles(plane, 0);
       }
     }
 
-    // Secondary column (equity or spread).
+    // Secondary column (equity or spread). Stays in the dim color
+    // even when bolded — the spread column reads as supplementary
+    // info next to the white win%, and switching it to full white
+    // when bolded made it shout louder than win%.
     {
       const int len = (int)strlen(rows[i].secondary);
       const int col = interior_right - len + 1;
+      const bool is_best =
+          any_secondary && rows[i].secondary[0] != '\0' &&
+          rows[i].secondary_value == best_secondary;
       theme_apply_fg(plane, theme->dim_fg);
+      if (is_best) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
       ncplane_putstr_yx(plane, row, col, rows[i].secondary);
+      if (is_best) {
+        ncplane_set_styles(plane, 0);
+      }
     }
 
     row++;
@@ -2414,11 +3056,20 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
   const int num_plays = sim_results_get_number_of_plays(results);
   int n = num_plays < max_rows ? num_plays : max_rows;
   const Board *board = game_get_board(state->game);
-  const Rack *sim_rack = sim_results_get_rack(results);
+  // Read the rack from the live game (the on-turn player's rack at
+  // the moment we're rendering, which during a sim is still the
+  // pre-play rack since play_move runs only after the sim returns).
+  // The sim_results internal rack is also valid in principle, but
+  // sourcing it from the game directly removes a memory-ordering
+  // dependency on the simmer's writes from another thread.
+  const int on_turn = game_get_player_on_turn_index(state->game);
+  const Rack *sim_rack =
+      player_get_rack(game_get_player(state->game, on_turn));
   for (int i = 0; i < n; i++) {
     rows[i].valid = false;
     rows[i].move[0] = '\0';
     rows[i].leave[0] = '\0';
+    rows[i].score[0] = '\0';
     rows[i].primary[0] = '\0';
     rows[i].secondary[0] = '\0';
     const SimmedPlay *play =
@@ -2431,8 +3082,21 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
         stat_get_mean(simmed_play_get_win_pct_stat(play)) * 100.0;
     const double eq_pts =
         stat_get_mean(simmed_play_get_equity_stat(play));
-    snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%", win_pct);
+    // When the value rounds to 100.0%, drop the decimal so the cell
+    // shows "  100%" instead of "100.0%". Same 6-col width, but
+    // preserves the leading-space pad that the leave column relies
+    // on for its 1-col visual gap from the win%.
+    if (win_pct >= 99.95) {
+      snprintf(rows[i].primary, sizeof(rows[i].primary), "  100%%");
+    } else {
+      snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%", win_pct);
+    }
     snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+6.1f", eq_pts);
+    const int play_score = equity_to_int(move_get_score(move));
+    snprintf(rows[i].score, sizeof(rows[i].score), "%d", play_score);
+    rows[i].score_value = play_score;
+    rows[i].primary_value = win_pct;
+    rows[i].secondary_value = eq_pts;
 
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, board, move, state->ld, false);
@@ -2483,6 +3147,7 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     rows[i].valid = false;
     rows[i].move[0] = '\0';
     rows[i].leave[0] = '\0';
+    rows[i].score[0] = '\0';
     rows[i].primary[0] = '\0';
     rows[i].secondary[0] = '\0';
     const Move *move = snap->moves[i];
@@ -2556,7 +3221,7 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const bool searching =
         atomic_load(&((TuiGameState *)state)->endgame_results_active);
     if (exhaustive) {
-      snprintf(title, sizeof(title), "Endgame (exhaustive)");
+      snprintf(title, sizeof(title), "Endgame (done)");
     } else if (searching) {
       // Poll the engine's live progress atomics so the title's depth
       // and per-depth completion ratio update at render rate, not
@@ -2594,8 +3259,12 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     if (plies > 0 && iters > 0) {
       char samples[16];
       if (iters >= 1000000ULL) {
-        snprintf(samples, sizeof(samples), "%lluM",
-                 (unsigned long long)(iters / 1000000ULL));
+        // Past 1M sample count, show 2 decimal places — sim runs
+        // build up samples fast and an integer M reading rolls
+        // forward in big jumps. "1.23M" gives a smoother progress
+        // feel.
+        snprintf(samples, sizeof(samples), "%.2fM",
+                 (double)iters / 1000000.0);
       } else if (iters >= 10000ULL) {
         snprintf(samples, sizeof(samples), "%lluK",
                  (unsigned long long)(iters / 1000ULL));
@@ -2603,8 +3272,15 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
         snprintf(samples, sizeof(samples), "%llu",
                  (unsigned long long)iters);
       }
+      // Long form: "Sim (4-ply, 148K samples)" — falls back to
+      // "Sim (4p/148K)" when the panel can't fit it. draw_box
+      // surrounds the title with " " padding and ─ corners; budget
+      // ~4 cols beyond the title text for that decoration.
       snprintf(title, sizeof(title), "Sim (%d-ply, %s samples)", plies,
                samples);
+      if ((int)strlen(title) + 4 > width) {
+        snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, samples);
+      }
     } else {
       snprintf(title, sizeof(title), "Sim");
     }
@@ -2618,8 +3294,17 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const int interior_right = L->analysis_right - 1;
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
-  const int list_top = interior_top;
-  const int max_visible = interior_bottom - list_top + 1;
+  // Fill into the full interior — render_analysis_rows will decide
+  // whether the header strip lives on the top border (sharing a row
+  // with the title) or on the first interior row, and place data
+  // rows accordingly.
+  const int max_visible = interior_bottom - interior_top + 1;
+  const int list_top_for_empty = interior_top;
+  // Column of the cell just after the title's closing " ". draw_box
+  // paints " " + title + " " starting at left_col + 2 (see ~ line
+  // 620), so the next free cell on the top border is at:
+  //   analysis_left + 2 + 1 + strlen(title) + 1 = analysis_left + len(title) + 4.
+  const int title_end_col = L->analysis_left + (int)strlen(title) + 3;
 
   AnalysisRow rows[ANALYSIS_ROW_CAP];
   int cap = max_visible < ANALYSIS_ROW_CAP ? max_visible : ANALYSIS_ROW_CAP;
@@ -2635,9 +3320,9 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     primary_bold = false;
   } else {
     visible = fill_analysis_rows_from_sim(state, rows, cap);
-    primary_w = 6;            // "100.0%"
-    secondary_w = 6;          // "%+6.1f" → " -19.9"
-    primary_secondary_gap = 1; // %+6.1f leading pad provides one more
+    primary_w = 6;             // "100.0%"
+    secondary_w = 6;           // "%+6.1f" → " -19.9"
+    primary_secondary_gap = 0; // %+6.1f leading pad provides the gap
     primary_bold = false;
   }
 
@@ -2649,14 +3334,14 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     const int msg_col =
         interior_left +
         (interior_right - interior_left + 1 - (int)strlen(msg)) / 2;
-    if (list_top <= interior_bottom) {
-      ncplane_putstr_yx(plane, list_top, msg_col, msg);
+    if (list_top_for_empty <= interior_bottom) {
+      ncplane_putstr_yx(plane, list_top_for_empty, msg_col, msg);
     }
     return;
   }
 
   render_analysis_rows(plane, theme, L, rows, visible, primary_w, secondary_w,
-                       primary_secondary_gap, primary_bold);
+                       primary_secondary_gap, primary_bold, title_end_col);
 }
 
 // EMA-smoothed FPS based on the interval between status-bar renders.
@@ -2753,15 +3438,19 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     snprintf(mem_str, sizeof(mem_str), " \xc2\xb7 %.*f%s mem", decimals, val,
              unit);
   }
-  char left_buf[160];
+  char dim_str[24];
+  snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u", L->plane_cols,
+           L->plane_rows);
+  char left_buf[192];
   if (fps > 0.0) {
     snprintf(left_buf, sizeof(left_buf),
-             " %s \xc2\xb7 %s \xc2\xb7 %d fps%s",
+             " %s \xc2\xb7 %s \xc2\xb7 %d fps%s%s",
              language_for_lexicon(state->lexicon), state->lexicon,
-             (int)(fps + 0.5), mem_str);
+             (int)(fps + 0.5), mem_str, dim_str);
   } else {
-    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s%s",
-             language_for_lexicon(state->lexicon), state->lexicon, mem_str);
+    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s%s%s",
+             language_for_lexicon(state->lexicon), state->lexicon, mem_str,
+             dim_str);
   }
   ncplane_putstr_yx(plane, row, 0, left_buf);
 
@@ -2775,6 +3464,10 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
            "\x86\x92 adjust \xc2\xb7 esc back ";
+    break;
+  case TUI_MODAL_TIME_PICKER:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 enter confirm \xc2"
+           "\xb7 esc back ";
     break;
   case TUI_MODAL_NONE:
   default:
@@ -2882,25 +3575,25 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state, &L);
-  // 2x bakes the grid into its RGBA composite. At 0x/1x the tiles are
-  // std-plane cell text, so the grid rides a separate transparent-base
-  // pixel plane on top — same look the user wants, just delivered via
-  // an overlay instead of in-buffer. Notcurses re-emits a pixel plane
-  // every render, so this caps the FPS around 250 with borders on;
-  // accepted trade-off for the visual.
-  if (L.scale < 2 && state->border_thickness > 0) {
-    render_board_grid_overlay(
-        plane, theme, &L, state->border_thickness,
-        atomic_load(&((TuiGameState *)state)->render_version));
-  }
+  // Grid overlay only at 2x — 2x bakes it into the RGBA composite
+  // directly. The 1x board uses standard cell text and the pixel-grid
+  // overlay just looked busy at that scale (thin colored lines
+  // between half-width cells); the cells themselves already read as
+  // a grid via their colored backgrounds.
+  (void)render_board_grid_overlay;
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
 
   (void)time_per_side_seconds; // now read from state->time_per_side_seconds
+  if (L.combined_pills_history) {
+    draw_combined_pills_history_frame(plane, theme, &L);
+  }
   render_player_pill(plane, theme, state, 0, L.pill1_top, L.pill1_left,
-                     L.pill1_right);
+                     L.pill1_right, L.pills_halfwidth,
+                     !L.combined_pills_history);
   render_player_pill(plane, theme, state, 1, L.pill2_top, L.pill2_left,
-                     L.pill2_right);
+                     L.pill2_right, L.pills_halfwidth,
+                     !L.combined_pills_history);
   render_history_panel(plane, theme, state, &L);
   render_analysis_panel(plane, theme, state, &L);
 
@@ -3000,10 +3693,32 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
     return;
   }
   const char *items[TUI_MENU_ITEM_COUNT];
+  items[TUI_MENU_NEW_GAME] = "New game";
   items[TUI_MENU_SETTINGS] = "Settings";
   items[TUI_MENU_QUIT] = "Quit";
   items[TUI_MENU_BACK] = "Back";
   render_modal(plane, theme, "Menu", items, TUI_MENU_ITEM_COUNT, focus, 28);
+}
+
+void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
+                                 int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  const int n = tui_time_picker_preset_count();
+  // Format each row as "1 minute    ultra" — left-justified label
+  // followed by a blurb. render_modal takes plain strings so we
+  // pre-format into per-row buffers and pass pointers into items[].
+  enum { ROW_BUF = 40 };
+  static char buf[8][ROW_BUF];
+  const char *items[8];
+  const int rows = n < 8 ? n : 8;
+  for (int i = 0; i < rows; i++) {
+    snprintf(buf[i], ROW_BUF, "%-12s %s", tui_time_picker_preset_label(i),
+             tui_time_picker_preset_blurb(i));
+    items[i] = buf[i];
+  }
+  render_modal(plane, theme, "Time control", items, rows, focus, 28);
 }
 
 // Helper for an arrow-adjusted Settings row. Renders
