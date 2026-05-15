@@ -1748,7 +1748,11 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
       theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
                                             : theme->rack_tile1_bg);
       if (halfwidth) {
-        const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+        // Halfwidth blank: glyph + zero-width non-joiner so two
+        // adjacent "?" tiles don't shape into a "??" ligature in
+        // fonts that have one. ZWNJ has zero advance width; it
+        // sits inside the same grapheme cluster as the "?".
+        const char *ascii = (ml == 0) ? "?\xe2\x80\x8c" : ld->ld_ml_to_hl[ml];
         ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
                           ascii[0] != '\0' ? ascii : " ");
       } else {
@@ -1842,6 +1846,16 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
     const size_t letter_len = strlen(letter);
     for (int i = 0; i < counts[ml] && pos + letter_len + 1 < sizeof(line);
          i++) {
+      // Insert a zero-width non-joiner between adjacent blanks
+      // (`??`) so fonts that ligature double question marks render
+      // them as two distinct glyphs. Cell width is unchanged on
+      // terminals that respect the ZWNJ; the few that don't will
+      // either render it as a blank cell (rare in monospace) or
+      // ignore it entirely.
+      if (ml == 0 && i > 0 && pos + 3 + letter_len + 1 < sizeof(line)) {
+        memcpy(line + pos, "\xe2\x80\x8c", 3);
+        pos += 3;
+      }
       memcpy(line + pos, letter, letter_len);
       pos += letter_len;
     }
@@ -1862,18 +1876,32 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   int line_row = content_top;
   size_t i = 0;
   while (i < pos && line_row <= content_bottom) {
-    size_t limit = i + (size_t)interior_width;
-    if (limit >= pos) {
-      limit = pos;
-    } else {
-      // Try to break at a space.
-      size_t back = limit;
-      while (back > i && line[back] != ' ') {
-        back--;
+    // Walk the bytes from `i` forward, counting visible cells.
+    // Each ASCII byte = 1 cell. The 3-byte ZWNJ sequence
+    // (0xE2 0x80 0x8C) is 0 cells. Remember the last space we
+    // passed; if we hit the column limit mid-word we'll back up to
+    // that space and break there.
+    size_t scan = i;
+    size_t last_space = i;
+    bool space_seen = false;
+    int cells = 0;
+    while (scan < pos && cells < interior_width) {
+      if (scan + 2 < pos && (unsigned char)line[scan] == 0xE2 &&
+          (unsigned char)line[scan + 1] == 0x80 &&
+          (unsigned char)line[scan + 2] == 0x8C) {
+        scan += 3; // ZWNJ — invisible
+        continue;
       }
-      if (back > i) {
-        limit = back;
+      if (line[scan] == ' ') {
+        last_space = scan;
+        space_seen = true;
       }
+      scan++;
+      cells++;
+    }
+    size_t limit = scan;
+    if (limit < pos && space_seen) {
+      limit = last_space;
     }
     char chunk[256];
     size_t chunk_len = limit - i;
@@ -1885,8 +1913,19 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, line_row, interior_left, chunk);
     line_row++;
     i = limit;
-    while (i < pos && line[i] == ' ') {
-      i++;
+    // Skip leading spaces and any ZWNJ run on the next row.
+    while (i < pos) {
+      if (line[i] == ' ') {
+        i++;
+        continue;
+      }
+      if (i + 2 < pos && (unsigned char)line[i] == 0xE2 &&
+          (unsigned char)line[i + 1] == 0x80 &&
+          (unsigned char)line[i + 2] == 0x8C) {
+        i += 3;
+        continue;
+      }
+      break;
     }
   }
 
@@ -1978,8 +2017,9 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, content_left,
                     on_turn ? "\xe2\x96\xb6 " : "  ");
-  theme_apply_fg(plane, theme->fg);
-  // Short names — "P1" / "P2" — leave more space for the rack.
+  // "P1" / "P2" in the player's own accent color so the header reads
+  // as belonging to that player even when they're off-turn.
+  theme_apply_fg(plane, player_accent);
   char name[8];
   snprintf(name, sizeof(name), "P%d", player_idx + 1);
   ncplane_putstr(plane, name);
@@ -2018,15 +2058,20 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   const int tile_w = halfwidth ? 1 : 2;
   if (rack_right_max >= rack_left + (tile_w - 1)) {
     int rcol = rack_left;
-    theme_apply_fg(plane, theme->rack_tile1_fg);
-    theme_apply_bg(plane, theme->rack_tile1_bg);
+    theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
+                                          : theme->rack_tile1_fg);
+    theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
+                                          : theme->rack_tile1_bg);
     for (int ml = 0;
          ml < ld_get_size(ld) && rcol + (tile_w - 1) <= rack_right_max; ml++) {
       const int count = rack_get_letter(rack, (MachineLetter)ml);
       for (int copy = 0;
            copy < count && rcol + (tile_w - 1) <= rack_right_max; copy++) {
         if (halfwidth) {
-          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+          // Halfwidth blank: glyph + ZWNJ so adjacent "?" tiles
+          // don't form a "??" ligature in fonts that have one.
+          const char *ascii =
+              (ml == 0) ? "?\xe2\x80\x8c" : ld->ld_ml_to_hl[ml];
           ncplane_putstr_yx(plane, content_row, rcol, ascii);
         } else {
           const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
@@ -2141,10 +2186,16 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx, int row,
                                  int interior_left, int interior_right,
                                  int row_bottom_inclusive) {
+  // Pick the player-specific text-color pair so the entry reads as
+  // belonging to whichever player made the move.
+  const ThemeRgb player_fg =
+      e->player_idx == 1 ? theme->history_p2_fg : theme->history_p1_fg;
+  const ThemeRgb player_dim_fg =
+      e->player_idx == 1 ? theme->history_p2_dim_fg : theme->history_p1_dim_fg;
   // ── Row 1 (lighter): " 18. L1 RE(W)I(N)              +38" ──────────────
   theme_apply_bg(plane, theme->bg);
   ncplane_set_styles(plane, 0);
-  theme_apply_fg(plane, theme->fg);
+  theme_apply_fg(plane, player_fg);
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "%d. ", idx + 1);
   if (e->pending) {
@@ -2170,12 +2221,14 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     const int tile_len = after_period - digit_start;
     memcpy(tile_part, prefix + digit_start, (size_t)tile_len);
     tile_part[tile_len] = '\0';
-    theme_apply_fg(plane, theme->tile1_fg);
-    theme_apply_bg(plane, theme->tile1_bg);
+    theme_apply_fg(plane, e->player_idx == 1 ? theme->tile2_fg
+                                              : theme->tile1_fg);
+    theme_apply_bg(plane, e->player_idx == 1 ? theme->tile2_bg
+                                              : theme->tile1_bg);
     ncplane_set_styles(plane, NCSTYLE_BOLD);
     ncplane_putstr_yx(plane, row, interior_left + digit_start, tile_part);
     ncplane_set_styles(plane, 0);
-    theme_apply_fg(plane, theme->fg);
+    theme_apply_fg(plane, player_fg);
     theme_apply_bg(plane, theme->bg);
     if (prefix[after_period] != '\0') {
       ncplane_putstr_yx(plane, row, interior_left + after_period,
@@ -2222,7 +2275,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   const int row2 = row + 1;
 
-  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_fg(plane, player_dim_fg);
   char clock_str[16];
   format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
                sizeof(clock_str));
@@ -2255,7 +2308,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
   const int row3 = row + 2;
   ncplane_set_styles(plane, 0);
-  theme_apply_fg(plane, theme->fg);
+  theme_apply_fg(plane, player_fg);
   char bonus_left[48];
   if (e->end_rack_str[0] != '\0') {
     snprintf(bonus_left, sizeof(bonus_left), "    (%s)", e->end_rack_str);
@@ -2279,7 +2332,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     return;
   }
   const int row4 = row + 3;
-  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_fg(plane, player_dim_fg);
   char total4_str[16];
   snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
   const int total4_len = (int)strlen(total4_str);
@@ -2793,13 +2846,18 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int leave_right_edge = show_score
                                    ? score_left_edge - leave_to_score_gap - 1
                                    : prim_col - leave_gap_r - 1;
-  // Per-row leave fitting: each row decides for itself whether the
-  // leave fits beside its move. Longer plays tend to use more rack
-  // tiles so they leave shorter strings — the row-local budget gives
-  // them their needed move width while still showing leaves for the
-  // shorter plays on other rows. Leaves are right-anchored to a
-  // fixed edge so they line up visually even when start columns
-  // differ per row.
+  // All-or-nothing leave column. A previous per-row decision let
+  // short-move rows show their leave while wider-move rows dropped
+  // theirs — but the random gaps read as "this play was a bingo",
+  // which is misleading. So the leave column is enabled only if the
+  // widest visible move still fits beside the leave column reserved
+  // for the widest leave; otherwise we hide leaves for every row.
+  // (Bingos legitimately have empty leave strings — those still
+  // render as a blank slot under the column.)
+  const int move_budget_with_leaves =
+      leave_right_edge - max_leave_w - leave_gap_l - move_col + 1;
+  const bool show_leaves =
+      max_leave_w > 0 && move_budget_with_leaves >= max_move_w;
   const int full_move_max = (show_score ? score_left_edge - 2 : prim_col - 1) -
                             move_col;
 
@@ -2857,10 +2915,12 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     //   dithering pattern remains visible but the overall line
     //   fades smoothly into the surrounding rows.
     {
-      // Right portion: inverted band.
+      // Right portion: true inverted band — dark text on the
+      // dim_fg-colored band, matching how header_bg / header_fg
+      // chrome bars elsewhere read.
       const int band_left =
           headers_fit_on_border ? leftmost_header_col : leftmost_header_col;
-      theme_apply_fg(plane, theme->fg);
+      theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, theme->dim_fg);
       for (int c = band_left; c <= interior_right; c++) {
         ncplane_putstr_yx(plane, header_row, c, " ");
@@ -2902,7 +2962,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
     }
 
-    theme_apply_fg(plane, theme->fg);
+    theme_apply_fg(plane, theme->bg);
     theme_apply_bg(plane, theme->dim_fg);
     if (max_leave_w > 0) {
       const char *leave_label = "leave";
@@ -2953,19 +3013,18 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
     }
 
-    // Try to fit this row's leave to the left of leave_right_edge.
+    // Leave column placement is decided globally (show_leaves):
+    // either every row shows its own leave at leave_right_edge, or
+    // the column is hidden entirely. A bingo's empty leave string
+    // still rightly renders as a blank slot under the column.
     const int leave_len = (int)strlen(rows[i].leave);
-    int leave_text_col = 0;
-    bool show_this_leave = false;
-    int this_move_max = full_move_max;
-    if (leave_len > 0) {
-      leave_text_col = leave_right_edge - leave_len + 1;
-      const int with_leave_budget = leave_text_col - leave_gap_l - move_col;
-      if (with_leave_budget > 0 && rendered <= with_leave_budget) {
-        show_this_leave = true;
-        this_move_max = with_leave_budget;
-      }
-    }
+    const int leave_text_col =
+        show_leaves && leave_len > 0 ? leave_right_edge - leave_len + 1 : 0;
+    const bool show_this_leave = show_leaves && leave_len > 0;
+    const int this_move_max = show_leaves
+                                  ? leave_right_edge - leave_gap_l - move_col
+                                                + 1 - max_leave_w
+                                  : full_move_max;
 
     char *move_text = rows[i].move;
     if (this_move_max <= 0) {
@@ -3170,10 +3229,10 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
       continue;
     }
     const int value = snap->values[i];
-    const int final_spread = snap->initial_spread + value;
-    const char *wtl =
-        (final_spread > 0) ? "W" : (final_spread < 0) ? "L" : "T";
-    snprintf(rows[i].primary, sizeof(rows[i].primary), "%s", wtl);
+    // No W/L/T column for endgame anymore — the signed spread
+    // already conveys win/loss, and the W/L being a single char
+    // got eaten by the leave column visually.
+    rows[i].primary[0] = '\0';
     snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+d", value);
 
     StringBuilder *sb = string_builder_create();
@@ -3222,6 +3281,9 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
 
   // Pick mode: endgame when the bag has run dry (and we have a saved
   // snapshot from a completed solve); otherwise the sim leaderboard.
+  // The snapshot persists across turns and through game-over, so the
+  // last-completed endgame analysis stays on screen even after the
+  // game ends — which is what you want to study a finished game.
   const bool bag_empty =
       state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
   const bool use_endgame =
@@ -3329,9 +3391,9 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   bool primary_bold;
   if (use_endgame) {
     visible = fill_analysis_rows_from_endgame(state, rows, cap);
-    primary_w = 1;            // "W"/"T"/"L"
-    secondary_w = 4;          // "+999" / "-100"
-    primary_secondary_gap = 2;
+    primary_w = 0;             // no W/T/L column
+    secondary_w = 4;           // "+999" / "-100"
+    primary_secondary_gap = 0; // no primary, no inter-column gap
     primary_bold = false;
   } else {
     visible = fill_analysis_rows_from_sim(state, rows, cap);
