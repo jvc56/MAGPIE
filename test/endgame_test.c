@@ -554,6 +554,110 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
+// Test that topk_fully_solved fires when the actual game is shorter than eplies
+// (all branches end before the depth limit), and does NOT fire when unfinished
+// leaves remain. Covers single-thread, multi-thread, single-PV, and etopk.
+void test_topk_fully_solved(void) {
+  // --- Case 1: game ends before eplies (early-stop must fire) ---
+  // BGIV/DEHILOR: 4+7=11 tiles. Score=11, confirmed by test_solve_standard
+  // at eplies=4. With eplies=10, early-stop fires at depth 7-8 (< 10),
+  // well before the depth limit. The search completes in seconds even
+  // single-threaded because the 11-tile game tree is small.
+  const char *short_cgp =
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+
+  typedef struct {
+    int threads;
+    int topk;
+  } EarlyStopCase;
+  const EarlyStopCase cases[] = {
+      {1, 1}, // single-thread, single-PV
+      {6, 1}, // multi-thread ABDADA, single-PV
+      {6, 3}, // multi-thread ABDADA, etopk
+  };
+  for (int ci = 0; ci < 3; ci++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, short_cgp);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 10;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = cases[ci].threads;
+    args.num_top_moves = cases[ci].topk;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved early-stop (threads=%d topk=%d): "
+           "score=%d completed_depth=%d\n",
+           cases[ci].threads, cases[ci].topk, pv->score, completed_depth);
+    // Correct score: 11 (matches test_solve_standard at eplies=4).
+    assert(pv->score == 11);
+    // Early-stop must have fired (completed_depth < eplies=10).
+    assert(completed_depth > 0 && completed_depth < 10);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+
+  // --- Case 2: non-terminal horizon (early-stop must NOT fire) ---
+  // ?AEEKSU/BEIQUVW: 14 tiles. At eplies=2 most branches still have tiles
+  // in hand → any_leaf_game_unfinished is set → topk_fully_solved stays false.
+  // The solver must terminate via ply==plies, so completed_depth == 2.
+  {
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -ttfraction 0.5");
+    load_and_exec_config_or_die(
+        config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+                "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+                "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+                "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 2;
+    args.tt_fraction_of_mem = 0.5;
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 6;
+    args.num_top_moves = 3;
+    args.use_heuristics = false;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved non-terminal horizon: completed_depth=%d\n",
+           completed_depth);
+    // Early-stop must NOT have fired; solver must reach the eplies limit.
+    assert(completed_depth == 2);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -566,6 +670,7 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  test_topk_fully_solved();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
