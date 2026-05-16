@@ -2684,7 +2684,7 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                         const SmallMove *initial_moves,
                                         int initial_move_count,
                                         endgame_movegen_caller_t caller) {
-  enum { MAX_RANKED_CALLBACK_PVS = 10 };
+  enum { MAX_RANKED_CALLBACK_PVS = 50 };
   int n_ranked = initial_move_count < MAX_RANKED_CALLBACK_PVS
                      ? initial_move_count
                      : MAX_RANKED_CALLBACK_PVS;

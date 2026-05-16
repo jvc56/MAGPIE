@@ -1,5 +1,6 @@
 #include "lexicon_picker.h"
 
+#include "game_render.h"
 #include "theme.h"
 #include "tui_resize.h"
 #include <ctype.h>
@@ -103,6 +104,8 @@ typedef struct {
   char name[LEXICON_NAME_MAX];
   LexLang lang;
   int word_count; // -1 if the .txt sibling could not be read
+  bool has_wmp;   // sibling .wmp file present
+  bool has_rit;   // sibling .rit file present
 } LexiconEntry;
 
 static int count_lines_in_file(const char *path) {
@@ -150,7 +153,7 @@ static void format_with_commas(int value, char *out, size_t out_size) {
   out[out_idx < out_size ? out_idx : out_size - 1] = '\0';
 }
 
-typedef struct {
+struct LexiconList {
   LexiconEntry entries[LEXICON_LIST_MAX];
   int count;
   const char *source_dir;
@@ -158,7 +161,8 @@ typedef struct {
   // inserted before each group.
   int entry_display_row[LEXICON_LIST_MAX];
   int total_display_rows;
-} LexiconList;
+};
+typedef struct LexiconList LexiconList;
 
 static int compare_entries(const void *lhs, const void *rhs) {
   const LexiconEntry *left = (const LexiconEntry *)lhs;
@@ -214,6 +218,22 @@ static bool scan_lexica_dir(const char *dir_path, LexiconList *list) {
       out->word_count = count_lines_in_file(txt_path);
     } else {
       out->word_count = -1;
+    }
+    // Stat the optional .wmp / .rit siblings. fopen-and-close avoids
+    // pulling in <sys/stat.h>; both files are small headers so the
+    // cost is negligible and lexica/ is small anyway.
+    char side_path[512];
+    snprintf(side_path, sizeof(side_path), "%s/%s.wmp", dir_path, out->name);
+    FILE *f = fopen(side_path, "rb");
+    out->has_wmp = (f != NULL);
+    if (f != NULL) {
+      fclose(f);
+    }
+    snprintf(side_path, sizeof(side_path), "%s/%s.rit", dir_path, out->name);
+    f = fopen(side_path, "rb");
+    out->has_rit = (f != NULL);
+    if (f != NULL) {
+      fclose(f);
     }
     list->count++;
   }
@@ -323,6 +343,18 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
         theme_apply_fg(plane, theme->dim_fg);
         ncplane_putstr_yx(plane, screen_row, count_col, count_line);
       }
+      // WMP / RIT availability flags. The label always renders;
+      // accent_fg when present (lexicon ships the data table) and
+      // dim_fg when missing. Two narrow columns right of the word
+      // count.
+      const int wmp_col = 36;
+      const int rit_col = 42;
+      theme_apply_fg(plane, list->entries[idx].has_wmp ? theme->accent_fg
+                                                       : theme->dim_fg);
+      ncplane_putstr_yx(plane, screen_row, wmp_col, "wmp");
+      theme_apply_fg(plane, list->entries[idx].has_rit ? theme->accent_fg
+                                                       : theme->dim_fg);
+      ncplane_putstr_yx(plane, screen_row, rit_col, "rit");
     }
     display_row++;
   }
@@ -508,6 +540,236 @@ bool tui_lexicon_picker_run(struct notcurses *nc, const Theme *theme,
       return true;
     } else if (key == NCKEY_ESC || key == 'q' || key == 'Q') {
       return false;
+    }
+  }
+}
+
+// ── Modal-style picker (in-session) ──────────────────────────────────────
+//
+// Heap-allocated list driven by main.c's input loop. The render
+// function paints into the shared modal plane and only expands the
+// language containing the focused entry — all other languages
+// collapse to their header row so the modal stays compact.
+
+LexiconList *tui_lexicon_list_load(void) {
+  LexiconList *list = (LexiconList *)calloc(1, sizeof(LexiconList));
+  if (list == NULL) {
+    return NULL;
+  }
+  if (!load_lexicon_list(list)) {
+    free(list);
+    return NULL;
+  }
+  return list;
+}
+
+void tui_lexicon_list_destroy(LexiconList *list) { free(list); }
+
+int tui_lexicon_list_count(const LexiconList *list) {
+  return list == NULL ? 0 : list->count;
+}
+
+int tui_lexicon_list_find(const LexiconList *list, const char *name) {
+  if (list == NULL || name == NULL) {
+    return -1;
+  }
+  for (int idx = 0; idx < list->count; idx++) {
+    if (strcmp(list->entries[idx].name, name) == 0) {
+      return idx;
+    }
+  }
+  return -1;
+}
+
+bool tui_lexicon_list_name(const LexiconList *list, int idx, char *out_buf,
+                           size_t out_buf_size) {
+  if (list == NULL || idx < 0 || idx >= list->count || out_buf == NULL ||
+      out_buf_size == 0) {
+    return false;
+  }
+  snprintf(out_buf, out_buf_size, "%s", list->entries[idx].name);
+  return true;
+}
+
+// MODAL_INNER_WIDTH is the box content width — wide enough to fit
+// "  CSW24    280,887 words   wmp  rit" (~35 cols) with margin.
+enum { MODAL_INNER_WIDTH = 38 };
+
+// Render the in-session lexicon picker modal. Layout: top/bottom
+// borders, a row per language header, plus N rows for the lexica
+// within the focused language. Other languages render only their
+// header, collapsed.
+void tui_game_render_lexicon_picker(struct ncplane *plane, const Theme *theme,
+                                    const LexiconList *list, int focus_idx) {
+  if (plane == NULL || theme == NULL || list == NULL || list->count == 0) {
+    return;
+  }
+  if (focus_idx < 0) {
+    focus_idx = 0;
+  } else if (focus_idx >= list->count) {
+    focus_idx = list->count - 1;
+  }
+  const LexLang focused_lang = list->entries[focus_idx].lang;
+
+  // Count lexica per language to size the modal. Only the focused
+  // language's lexica contribute beyond the header row count.
+  int lang_count[LEX_LANG_COUNT] = {0};
+  bool lang_seen[LEX_LANG_COUNT] = {false};
+  for (int idx = 0; idx < list->count; idx++) {
+    lang_seen[list->entries[idx].lang] = true;
+    if (list->entries[idx].lang == focused_lang) {
+      lang_count[focused_lang]++;
+    }
+  }
+  int total_rows = 0;
+  for (int l = 0; l < LEX_LANG_COUNT; l++) {
+    if (lang_seen[l]) {
+      total_rows++; // header
+      if (l == (int)focused_lang) {
+        total_rows += lang_count[focused_lang];
+      }
+    }
+  }
+
+  unsigned plane_rows = 0;
+  unsigned plane_cols = 0;
+  ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+  const int width = MODAL_INNER_WIDTH;
+  // 2 border rows + content rows + 1 shadow row.
+  const int height = 2 + total_rows;
+  const int plane_h = height + 1;
+  const int plane_w = width + 1;
+  if ((unsigned)plane_w >= plane_cols || (unsigned)plane_h >= plane_rows) {
+    return;
+  }
+  const int top = (int)(plane_rows - plane_h) / 2;
+  const int left = (int)(plane_cols - plane_w) / 2;
+
+  // Use the shared modal plane via the same lifecycle as the other
+  // modals — main.c's tui_game_render destroys it when modal returns
+  // to NONE.
+  struct ncplane *mp = tui_game_render_get_or_create_modal_plane(
+      plane, top, left, plane_h, plane_w);
+  if (mp == NULL) {
+    return;
+  }
+
+  // Plane base transparent so the shadow strip lets content show
+  // through.
+  uint64_t base_ch = 0;
+  ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+  ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+  ncplane_set_base(mp, " ", 0, base_ch);
+  ncplane_erase(mp);
+  ncplane_move_top(mp);
+  ncplane_set_channels(mp, 0);
+
+  // Fill modal interior with modal_bg.
+  theme_apply_fg(mp, theme->modal_fg);
+  theme_apply_bg(mp, theme->modal_bg);
+  for (int r = 0; r < height; r++) {
+    for (int c = 0; c < width; c++) {
+      ncplane_putstr_yx(mp, r, c, " ");
+    }
+  }
+
+  // Frame chrome.
+  const int right_col = width - 1;
+  const int bottom_row = height - 1;
+  theme_apply_fg(mp, theme->modal_border_fg);
+  theme_apply_bg(mp, theme->modal_border_bg);
+  ncplane_putstr_yx(mp, 0, 0, "\xe2\x94\x8c"); // ┌
+  for (int c = 1; c < right_col; c++) {
+    ncplane_putstr_yx(mp, 0, c, "\xe2\x94\x80"); // ─
+  }
+  ncplane_putstr_yx(mp, 0, right_col, "\xe2\x94\x90"); // ┐
+  for (int r = 1; r < bottom_row; r++) {
+    ncplane_putstr_yx(mp, r, 0, "\xe2\x94\x82");         // │
+    ncplane_putstr_yx(mp, r, right_col, "\xe2\x94\x82"); // │
+  }
+  ncplane_putstr_yx(mp, bottom_row, 0, "\xe2\x94\x94"); // └
+  for (int c = 1; c < right_col; c++) {
+    ncplane_putstr_yx(mp, bottom_row, c, "\xe2\x94\x80"); // ─
+  }
+  ncplane_putstr_yx(mp, bottom_row, right_col, "\xe2\x94\x98"); // ┘
+
+  // Title on top border.
+  theme_apply_fg(mp, theme->modal_fg);
+  theme_apply_bg(mp, theme->modal_border_bg);
+  ncplane_putstr_yx(mp, 0, 2, " Choose lexicon ");
+
+  // Body. Walk languages in their natural order so the modal layout
+  // is stable; only the focused language expands its lexica.
+  int row = 1;
+  LexLang prev_lang = LEX_LANG_COUNT;
+  for (int idx = 0; idx < list->count; idx++) {
+    const LexLang lang = list->entries[idx].lang;
+    if (lang != prev_lang) {
+      // Language header.
+      theme_apply_fg(mp, theme->accent_fg);
+      theme_apply_bg(mp, theme->modal_bg);
+      ncplane_set_styles(mp, 0);
+      // Clear interior of the header row.
+      for (int c = 1; c <= right_col - 1; c++) {
+        ncplane_putstr_yx(mp, row, c, " ");
+      }
+      ncplane_putstr_yx(mp, row, 2, lang_label(lang));
+      row++;
+      prev_lang = lang;
+    }
+    if (lang != focused_lang) {
+      continue;
+    }
+    // Lexicon row inside the focused language.
+    const bool focused = (idx == focus_idx);
+    const ThemeRgb row_fg = focused ? theme->modal_focus_fg : theme->modal_fg;
+    const ThemeRgb row_bg = focused ? theme->modal_focus_bg : theme->modal_bg;
+    theme_apply_fg(mp, row_fg);
+    theme_apply_bg(mp, row_bg);
+    ncplane_set_styles(mp, focused ? NCSTYLE_BOLD : 0);
+    for (int c = 1; c <= right_col - 1; c++) {
+      ncplane_putstr_yx(mp, row, c, " ");
+    }
+    ncplane_putstr_yx(mp, row, 4, list->entries[idx].name);
+    if (list->entries[idx].word_count >= 0) {
+      char count_str[16];
+      format_with_commas(list->entries[idx].word_count, count_str,
+                         sizeof(count_str));
+      char count_line[32];
+      snprintf(count_line, sizeof(count_line), "%9s words", count_str);
+      ncplane_putstr_yx(mp, row, 12, count_line);
+    }
+    // WMP / RIT flags — colored variants outside the focus-bar bg.
+    // Even when focused, dim missing flags so the user can tell
+    // availability at a glance.
+    theme_apply_bg(mp, row_bg);
+    theme_apply_fg(mp, list->entries[idx].has_wmp ? theme->accent_fg
+                                                  : theme->modal_shortcut_fg);
+    ncplane_putstr_yx(mp, row, 28, "wmp");
+    theme_apply_fg(mp, list->entries[idx].has_rit ? theme->accent_fg
+                                                  : theme->modal_shortcut_fg);
+    ncplane_putstr_yx(mp, row, 33, "rit");
+    ncplane_set_styles(mp, 0);
+    row++;
+  }
+
+  // Drop shadow (half-cell quadrants, same scheme as render_modal).
+  {
+    uint64_t shadow_ch = 0;
+    ncchannels_set_fg_rgb8(&shadow_ch, theme->modal_shadow_fg.r,
+                           theme->modal_shadow_fg.g,
+                           theme->modal_shadow_fg.b);
+    ncchannels_set_bg_alpha(&shadow_ch, NCALPHA_TRANSPARENT);
+    ncplane_set_channels(mp, shadow_ch);
+    const int shadow_row = height;
+    const int shadow_col = width;
+    ncplane_putstr_yx(mp, shadow_row, 0, "\xe2\x96\x9d"); // ▝
+    for (int c = 1; c < shadow_col; c++) {
+      ncplane_putstr_yx(mp, shadow_row, c, "\xe2\x96\x80"); // ▀
+    }
+    ncplane_putstr_yx(mp, shadow_row, shadow_col, "\xe2\x96\x98"); // ▘
+    for (int r = 1; r < shadow_row; r++) {
+      ncplane_putstr_yx(mp, r, shadow_col, "\xe2\x96\x8c"); // ▌
     }
   }
 }

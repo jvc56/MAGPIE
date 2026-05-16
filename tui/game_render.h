@@ -16,6 +16,7 @@ typedef enum {
   TUI_MODAL_MAIN_MENU = 1,
   TUI_MODAL_SETTINGS = 2,
   TUI_MODAL_TIME_PICKER = 3,
+  TUI_MODAL_LEXICON_PICKER = 4,
 } TuiModalState;
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
@@ -48,8 +49,10 @@ typedef enum {
   TUI_SETTINGS_BORDER = 3,
   TUI_SETTINGS_PREMIUM = 4,
   TUI_SETTINGS_BLANKS = 5,
-  TUI_SETTINGS_BACK = 6,
-  TUI_SETTINGS_ITEM_COUNT = 7,
+  TUI_SETTINGS_LEXICON = 6,
+  TUI_SETTINGS_RIT = 7,
+  TUI_SETTINGS_BACK = 8,
+  TUI_SETTINGS_ITEM_COUNT = 9,
 } TuiSettingsItem;
 
 // `board_scale` is 1 or 2; the scale row is grayed out when 2x is
@@ -61,13 +64,21 @@ typedef enum {
 // TTF loaded. `premium_labels` selects the TW/tw/none labeling style
 // for premium squares. `blank_uppercase` controls whether played blanks
 // render uppercase (with blank_tile_fg) or lowercase (with tile_fg).
+// Shared modal-plane accessor (used by render_modal and the lexicon
+// picker). Creates the plane on first use; resizes/repositions on
+// subsequent calls. The plane is destroyed when tui_game_render sees
+// modal == TUI_MODAL_NONE, so callers don't manage its lifetime.
+struct ncplane *tui_game_render_get_or_create_modal_plane(
+    struct ncplane *parent, int top, int left, int rows, int cols);
+
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int board_scale, bool antialias,
                               TuiScoreSubscripts score_subscripts,
                               int border_thickness, bool pixel_supported,
                               bool font_available,
                               TuiPremiumLabels premium_labels,
-                              bool blank_uppercase);
+                              bool blank_uppercase, const char *lexicon,
+                              bool load_rit);
 
 // Render just the board cells (no row/col labels) at (top, left). Each
 // cell is 2 columns wide; the rendered region is BOARD_DIM rows tall and

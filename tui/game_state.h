@@ -157,6 +157,21 @@ typedef struct {
   pthread_t bot_thread;
   bool bot_started;
   _Atomic bool bot_stop;
+
+  // Active session snapshot of the settings that take effect at game-
+  // state init time only (lexicon name, whether RIT was loaded). The
+  // Settings UI writes to the config; comparing config-vs-active is
+  // how the "(restart to apply)" pending-change line decides what to
+  // surface. Replaced on each tui_game_state_init.
+  char active_lexicon[32];
+  bool active_load_rit;
+  // Pending values written by the Settings UI when the user picks a
+  // different lexicon or toggles RIT. The renderer compares
+  // pending_* to active_* to decide whether to show the pending-
+  // change banner above the status bar. Initialized to match the
+  // active values at game-state init.
+  char pending_lexicon[32];
+  bool pending_load_rit;
 } TuiGameState;
 
 // Initializes a fresh game using `lexicon` (e.g., "CSW21"). Resolves the
@@ -167,7 +182,7 @@ typedef struct {
 //
 // Returns true on success. On failure, fills `error_message` (caller
 // buffer) with a user-visible diagnostic and leaves `out_state` zeroed.
-bool tui_game_state_init(const char *lexicon, uint64_t seed,
+bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                          TuiGameState *out_state, char *error_message,
                          size_t error_message_size);
 

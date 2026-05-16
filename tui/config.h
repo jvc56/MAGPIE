@@ -65,6 +65,12 @@ typedef struct {
   // for the tile's point value.
   TuiScoreSubscripts score_subscripts;
   bool score_subscripts_set;
+  // Whether to load the per-lexicon RackInfoTable at startup. Costs
+  // tens of MB; only worthwhile when inference / advanced rack-aware
+  // analysis is in use. Defaults off; honored on the next New Game
+  // start.
+  bool load_rit;
+  bool load_rit_set;
 } TuiConfig;
 
 // Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or

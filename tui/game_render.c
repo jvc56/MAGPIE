@@ -107,6 +107,15 @@ typedef struct {
   unsigned plane_cols;
 
   int status_row;
+  // -1 when no pending settings; otherwise the row where the pending-
+  // change banner renders (one above the status bar). When set, panels
+  // shrink by one row so the banner has somewhere to live without
+  // overlapping content.
+  int pending_row;
+  // Last row a content panel may render into. = (pending_row >= 0 ?
+  // pending_row : status_row) - 1. Use this everywhere the old
+  // `status_row - 1` was used.
+  int content_bottom_row;
 
   // Scale-dependent board geometry. At scale=1: cell_w=2, cell_h=1, the
   // 33-col / 16-row classic layout. At scale=2: cell_w=4, cell_h=2 →
@@ -177,6 +186,10 @@ typedef struct {
 //   2 = double    (4 cols × 2 rows, FreeType pixel composite)
 // compute_effective_scale picks the largest scale ≤ user_pref that fits
 // the current plane. Returns -1 when even halfwidth is too cramped.
+// Forward-declared so the analysis-panel titles can use it; the body
+// lives next to the other status-bar helpers further down.
+static void format_count_compact(uint64_t n, char *buf, size_t bufsz);
+
 static int compute_effective_scale(int user_pref, unsigned plane_cols,
                                    unsigned plane_rows) {
   static const int cell_w_for[3] = {1, 2, 4};
@@ -272,6 +285,17 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   ncplane_dim_yx(plane, &L.plane_rows, &L.plane_cols);
 
   L.status_row = (int)L.plane_rows - 1;
+  // Pending-change banner: rendered above the status bar when the
+  // user's Settings have outpaced the live game's loaded tables.
+  // Content panels treat content_bottom_row as their lowest available
+  // row regardless of which path is active.
+  const bool pending_changes =
+      state != NULL &&
+      (strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
+       state->pending_load_rit != state->active_load_rit);
+  L.pending_row = pending_changes ? L.status_row - 1 : -1;
+  L.content_bottom_row =
+      (L.pending_row >= 0 ? L.pending_row : L.status_row) - 1;
 
   L.scale = compute_effective_scale(user_scale, L.plane_cols, L.plane_rows);
   if (L.scale < 0) {
@@ -409,15 +433,15 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
     L.pill2_right = L.right_col_right;
     L.history_top = L.pill2_bottom + 1;
   }
-  L.history_bottom = L.status_row - 1;
+  L.history_bottom = L.content_bottom_row;
 
-  // Default bag region: rack_bottom+1 to status_row-1. Tightened below
-  // in the BELOW_BAG case so analysis can sit beneath the bag, and
-  // also when the bag is fully empty — in that case render_bag_panel
-  // collapses to a single divider line and we shouldn't waste rows
-  // on a blank box.
+  // Default bag region: rack_bottom+1 to content_bottom_row. Tightened
+  // below in the BELOW_BAG case so analysis can sit beneath the bag,
+  // and also when the bag is fully empty — in that case
+  // render_bag_panel collapses to a single divider line and we
+  // shouldn't waste rows on a blank box.
   L.bag_top = L.rack_bottom + 1;
-  L.bag_bottom = L.status_row - 1;
+  L.bag_bottom = L.content_bottom_row;
   const bool bag_empty =
       state != NULL && state->game != NULL &&
       bag_get_letters(game_get_bag(state->game)) == 0;
@@ -430,7 +454,7 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   // so there's no reason to align with the pills row.
   if (L.analysis_placement == ANALYSIS_RIGHT_OF_HISTORY) {
     L.analysis_top = 0;
-    L.analysis_bottom = L.status_row - 1;
+    L.analysis_bottom = L.content_bottom_row;
     L.has_analysis = (L.analysis_bottom - L.analysis_top + 1) >= 3;
   }
 
@@ -479,7 +503,7 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
     }
     // Floor 1 instead of 0 in case the math collapses; we still need
     // at least the bag's own row before the analysis starts.
-    const int total = L.status_row - 1 - L.bag_top + 1;
+    const int total = L.content_bottom_row - L.bag_top + 1;
     const int analysis_floor = 3 + 1;
     if (bag_height > total - analysis_floor) {
       bag_height = total - analysis_floor;
@@ -489,10 +513,10 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
     }
     L.bag_bottom = L.bag_top + bag_height - 1;
     const int analysis_top = L.bag_bottom + 1;
-    if (analysis_top <= L.status_row - 1 &&
-        L.status_row - 1 - analysis_top + 1 >= 3) {
+    if (analysis_top <= L.content_bottom_row &&
+        L.content_bottom_row - analysis_top + 1 >= 3) {
       L.analysis_top = analysis_top;
-      L.analysis_bottom = L.status_row - 1;
+      L.analysis_bottom = L.content_bottom_row;
       L.analysis_left = 0;
       L.analysis_right = L.board_width - 1;
       L.has_analysis = true;
@@ -827,6 +851,34 @@ static void invalidate_grid_planes(void) {
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
+
+// Public accessor for the cached modal plane, shared across all modal
+// renderers (menu / settings / time picker / lexicon picker). Creates
+// the plane on first use; resizes/repositions on subsequent calls.
+// Returns NULL on allocation failure. The plane is destroyed when
+// tui_game_render sees modal == TUI_MODAL_NONE, so callers don't
+// have to manage its lifetime.
+struct ncplane *tui_game_render_get_or_create_modal_plane(
+    struct ncplane *parent, int top, int left, int rows, int cols) {
+  if (grid_planes.modal == NULL) {
+    ncplane_options opts = {0};
+    opts.y = top;
+    opts.x = left;
+    opts.rows = (unsigned)rows;
+    opts.cols = (unsigned)cols;
+    opts.name = "modal";
+    grid_planes.modal = ncplane_create(parent, &opts);
+    return grid_planes.modal;
+  }
+  unsigned cur_rows = 0;
+  unsigned cur_cols = 0;
+  ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
+  if ((int)cur_rows != rows || (int)cur_cols != cols) {
+    ncplane_resize_simple(grid_planes.modal, (unsigned)rows, (unsigned)cols);
+  }
+  ncplane_move_yx(grid_planes.modal, top, left);
+  return grid_planes.modal;
+}
 
 // Acquire (or move/resize) a cached child plane via a pointer-to-pointer
 // slot in `grid_planes`. On first call we allocate and set the base cell
@@ -2367,9 +2419,14 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     const int frame = (int)((ms / 80) % SPINNER_FRAMES);
     ncplane_putstr(plane, spinner_frames[frame]);
   } else {
+    // All paren groups in the engine's move notation are playthrough
+    // (the lowercase-inside-parens case is a playthrough blank, not a
+    // newly-played blank — newly-played blanks render as lowercase
+    // letters with no parens). Drop them all and render the content
+    // non-bold so playthrough tiles read as background context.
     render_move_styled(plane, row, interior_left + (int)strlen(prefix),
-                       e->move_str, /*hide_parens=*/false,
-                       /*hide_playthrough_parens=*/true);
+                       e->move_str, /*hide_parens=*/true,
+                       /*hide_playthrough_parens=*/false);
 
     char delta_str[16];
     snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
@@ -2437,22 +2494,23 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
 
   // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
-  // Rendered with the same shape as a scoring play — opponent's leftover
-  // rack on the left in standard GCG (LNRU) notation, bonus delta
-  // right-aligned. Color matches the move row (theme->fg) so the bonus
-  // visually parses as "another play."
+  // Split coloring: the leftover-rack chunk on the left is rendered
+  // in the *opponent's* color (those are their tiles), while the
+  // "+N" bonus stays in the going-out player's color (their points).
   if (e->end_bonus == 0 || row + 2 > row_bottom_inclusive) {
     return;
   }
   const int row3 = row + 2;
   ncplane_set_styles(plane, 0);
-  theme_apply_fg(plane, player_fg);
+  const ThemeRgb opponent_fg =
+      e->player_idx == 1 ? theme->history_p1_fg : theme->history_p2_fg;
   char bonus_left[48];
   if (e->end_rack_str[0] != '\0') {
     snprintf(bonus_left, sizeof(bonus_left), "    (%s)", e->end_rack_str);
   } else {
     snprintf(bonus_left, sizeof(bonus_left), "    ");
   }
+  theme_apply_fg(plane, opponent_fg);
   ncplane_putstr_yx(plane, row3, interior_left, bonus_left);
 
   char delta3_str[16];
@@ -2460,6 +2518,7 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const int delta3_len = (int)strlen(delta3_str);
   const int delta3_col = interior_right - delta3_len + 1;
   if (delta3_col > interior_left + (int)strlen(bonus_left)) {
+    theme_apply_fg(plane, player_fg);
     ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
   }
 
@@ -3554,64 +3613,54 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   char title[64];
   if (use_endgame) {
     const int snap_depth = state->endgame_snapshot.depth;
-    const bool exhaustive = state->endgame_snapshot.exhaustive;
     const bool searching =
         atomic_load(&((TuiGameState *)state)->endgame_results_active);
-    if (exhaustive) {
-      snprintf(title, sizeof(title), "Endgame (done)");
-    } else if (searching) {
-      // Poll the engine's live progress atomics so the title's depth
-      // and per-depth completion ratio update at render rate, not
-      // only when a callback fires.
-      int cur_depth = 0;
+    // Compact "Endgame (d7/123K)" — depth on the left, total nodes
+    // searched on the right (humanized the same way Sim humanizes
+    // sample counts). During an active search, prefer the live
+    // current-depth atomic over the snapshot's depth so the title
+    // ticks up as iterative deepening progresses.
+    int cur_depth = 0;
+    if (state->endgame_ctx != NULL && searching) {
       int done = 0;
       int total = 0;
       int dummy_a = 0;
       int dummy_b = 0;
-      if (state->endgame_ctx != NULL) {
-        endgame_ctx_get_progress(state->endgame_ctx, &cur_depth, &done, &total,
-                                 &dummy_a, &dummy_b);
-      }
-      if (cur_depth <= 0 && snap_depth <= 0) {
-        snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
-      } else if (total > 0 && cur_depth > 0) {
-        // Mid-depth: show "d=N · M/K" where N is the depth the
-        // workers are currently churning on.
-        snprintf(title, sizeof(title),
-                 "Endgame (searching, d=%d \xc2\xb7 %d/%d)", cur_depth, done,
-                 total);
-      } else {
-        snprintf(title, sizeof(title), "Endgame (searching, d=%d)",
-                 snap_depth);
-      }
-    } else if (snap_depth > 0) {
-      snprintf(title, sizeof(title), "Endgame (%d-ply negamax)", snap_depth);
+      endgame_ctx_get_progress(state->endgame_ctx, &cur_depth, &done, &total,
+                               &dummy_a, &dummy_b);
+    }
+    const int depth_to_show = cur_depth > 0 ? cur_depth : snap_depth;
+    uint64_t nodes = 0;
+    if (state->endgame_ctx != NULL) {
+      nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
+    }
+    char nodes_str[16];
+    nodes_str[0] = '\0';
+    if (nodes > 0) {
+      format_count_compact(nodes, nodes_str, sizeof(nodes_str));
+    }
+    if (depth_to_show > 0 && nodes_str[0] != '\0') {
+      snprintf(title, sizeof(title), "Endgame (d%d/%s)", depth_to_show,
+               nodes_str);
+    } else if (depth_to_show > 0) {
+      snprintf(title, sizeof(title), "Endgame (d%d)", depth_to_show);
+    } else if (searching) {
+      snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
     } else {
-      snprintf(title, sizeof(title), "Endgame (negamax)");
+      snprintf(title, sizeof(title), "Endgame");
     }
   } else if (state->sim_results != NULL) {
     const int plies = sim_results_get_num_plies(state->sim_results);
     const uint64_t iters =
         sim_results_get_iteration_count(state->sim_results);
     if (plies > 0 && iters > 0) {
-      char samples[16];
-      if (iters >= 1000000ULL) {
-        // Past 1M sample count, show 2 decimal places — sim runs
-        // build up samples fast and an integer M reading rolls
-        // forward in big jumps. "1.23M" gives a smoother progress
-        // feel.
-        snprintf(samples, sizeof(samples), "%.2fM",
-                 (double)iters / 1000000.0);
-      } else if (iters >= 10000ULL) {
-        snprintf(samples, sizeof(samples), "%lluK",
-                 (unsigned long long)(iters / 1000ULL));
-      } else {
-        snprintf(samples, sizeof(samples), "%llu",
-                 (unsigned long long)iters);
-      }
-      // Compact form everywhere now — "Sim (4p/148K)" reads cleanly
-      // and saves panel width for the data rows.
-      snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, samples);
+      // Report node count instead of sample count so the unit lines
+      // up with what Endgame reports. Each iteration visits the root
+      // plus `plies` plies, so nodes ≈ iters * (plies + 1).
+      const uint64_t nodes = iters * (uint64_t)(plies + 1);
+      char nodes_str[16];
+      format_count_compact(nodes, nodes_str, sizeof(nodes_str));
+      snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, nodes_str);
     } else {
       snprintf(title, sizeof(title), "Sim");
     }
@@ -3680,6 +3729,71 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
 // what we actually care about — terminal frame rate after all the
 // game/grid/composite work. alpha=0.1 gives a stable readout that
 // still responds within a second or so when the rate genuinely shifts.
+// Compact count formatter shared by the analysis-panel titles and the
+// status bar's NPS readout. Same threshold ladder as a chess engine
+// info line: bare integer up to 9999, then K / M / B / T with two
+// decimal places past the first thousand-tier boundary so the digits
+// roll smoothly rather than in big jumps.
+static void format_count_compact(uint64_t n, char *buf, size_t bufsz) {
+  if (n >= 1000000000000ULL) {
+    snprintf(buf, bufsz, "%.2fT", (double)n / 1e12);
+  } else if (n >= 1000000000ULL) {
+    snprintf(buf, bufsz, "%.2fB", (double)n / 1e9);
+  } else if (n >= 1000000ULL) {
+    snprintf(buf, bufsz, "%.2fM", (double)n / 1e6);
+  } else if (n >= 10000ULL) {
+    snprintf(buf, bufsz, "%lluK", (unsigned long long)(n / 1000ULL));
+  } else {
+    snprintf(buf, bufsz, "%llu", (unsigned long long)n);
+  }
+}
+
+// EMA-smoothed nodes-per-second based on the per-frame delta of a
+// monotonically-increasing node counter. Lighter damping (α=0.3) than
+// measure_fps so the readout responds quickly when a search ramps up
+// or winds down. Resets gracefully when the counter resets (new
+// search) or when there's no active counter (returns 0).
+static double measure_nps(uint64_t nodes_now) {
+  static double ema = 0.0;
+  static struct timespec last;
+  static uint64_t last_nodes = 0;
+  static bool inited = false;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (!inited) {
+    inited = true;
+    last = now;
+    last_nodes = nodes_now;
+    return 0.0;
+  }
+  const double dt = (double)(now.tv_sec - last.tv_sec) +
+                    (double)(now.tv_nsec - last.tv_nsec) / 1e9;
+  // Reset path: counter went backward (new search) or no progress.
+  // Realign the baseline and decay the EMA toward 0 so the readout
+  // fades when the bot stops.
+  if (nodes_now < last_nodes || nodes_now == 0) {
+    last = now;
+    last_nodes = nodes_now;
+    ema = ema * 0.7;
+    return ema;
+  }
+  if (dt <= 0.0 || dt > 5.0) {
+    last = now;
+    last_nodes = nodes_now;
+    return ema;
+  }
+  const uint64_t delta = nodes_now - last_nodes;
+  last = now;
+  last_nodes = nodes_now;
+  const double instant = (double)delta / dt;
+  if (ema <= 0.0) {
+    ema = instant;
+  } else {
+    ema = ema * 0.7 + instant * 0.3;
+  }
+  return ema;
+}
+
 static double measure_fps(void) {
   static double ema = 0.0;
   static struct timespec last;
@@ -3694,9 +3808,14 @@ static double measure_fps(void) {
   const double dt = (double)(now.tv_sec - last.tv_sec) +
                     (double)(now.tv_nsec - last.tv_nsec) / 1e9;
   last = now;
-  if (dt <= 0.0 || dt > 5.0) {
-    // Skip pathological intervals (clock jumps, long pauses) so they
-    // can't poison the running average with a one-frame spike.
+  // Skip pathological intervals: clock jumps / long pauses (dt > 5s)
+  // and the "unslept frame after a long frame" case where the main
+  // loop's overrun-recovery branch runs the next render immediately
+  // without sleeping, so the gap between measure_fps calls collapses
+  // and 1/dt blows up to 200+ fps. The render loop targets 60 fps,
+  // so any reading above 120 is a measurement artifact, not a real
+  // frame rate — drop it rather than let it poison the EMA.
+  if (dt <= 0.0 || dt > 5.0 || dt < 1.0 / 120.0) {
     return ema;
   }
   const double instant = 1.0 / dt;
@@ -3709,6 +3828,55 @@ static double measure_fps(void) {
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
+// Pending-change banner: when the user has changed Lexicon or RIT
+// via Settings but the live game is still using the values from
+// game-state init, render a one-line summary just above the status
+// bar so they see exactly what needs a New Game to apply. Subtle
+// color (theme->dim_fg on theme->bg) since it's informational, not
+// alarming.
+static void render_pending_bar(struct ncplane *plane, const Theme *theme,
+                               const TuiGameState *state, const Layout *L) {
+  if (L->pending_row < 0 || state == NULL) {
+    return;
+  }
+  const int row = L->pending_row;
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  for (unsigned col = 0; col < L->plane_cols; col++) {
+    ncplane_putstr_yx(plane, row, (int)col, " ");
+  }
+  char buf[160];
+  int written = 0;
+  written += snprintf(buf + written,
+                      sizeof(buf) > (size_t)written ? sizeof(buf) - (size_t)written : 0,
+                      " Next game:");
+  bool any = false;
+  if (strcmp(state->pending_lexicon, state->active_lexicon) != 0) {
+    written += snprintf(buf + written,
+                        sizeof(buf) > (size_t)written
+                            ? sizeof(buf) - (size_t)written
+                            : 0,
+                        " lexicon %s \xe2\x86\x92 %s", state->active_lexicon,
+                        state->pending_lexicon);
+    any = true;
+  }
+  if (state->pending_load_rit != state->active_load_rit) {
+    written += snprintf(buf + written,
+                        sizeof(buf) > (size_t)written
+                            ? sizeof(buf) - (size_t)written
+                            : 0,
+                        "%s RIT %s \xe2\x86\x92 %s", any ? "," : "",
+                        state->active_load_rit ? "on" : "off",
+                        state->pending_load_rit ? "on" : "off");
+    any = true;
+  }
+  snprintf(buf + written,
+           sizeof(buf) > (size_t)written ? sizeof(buf) - (size_t)written : 0,
+           " \xc2\xb7 restart to apply");
+  ncplane_putstr_yx(plane, row, 0, buf);
+}
+
 static void render_status_bar(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L,
                               TuiModalState modal) {
@@ -3773,18 +3941,58 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   char dim_str[24];
   snprintf(dim_str, sizeof(dim_str), " \xc2\xb7 %ux%u", L->plane_cols,
            L->plane_rows);
+  // FPS is normally hidden — only surfaces when we're off the 60Hz
+  // target (under 55 or over 70). When shown it gets bold + error_fg
+  // so it reads as a "something's wrong" callout. The chunk is
+  // rendered separately from left_buf so the styling is local to the
+  // " · NN fps" segment and doesn't leak into the rest of the bar.
+  const int fps_int = (int)(fps + 0.5);
+  const bool show_fps = fps > 0.0 && (fps_int < 55 || fps_int > 70);
   char left_buf[192];
-  if (fps > 0.0) {
-    snprintf(left_buf, sizeof(left_buf),
-             " %s \xc2\xb7 %s \xc2\xb7 %d fps%s%s",
-             language_for_lexicon(state->lexicon), state->lexicon,
-             (int)(fps + 0.5), mem_str, dim_str);
-  } else {
-    snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s%s%s",
-             language_for_lexicon(state->lexicon), state->lexicon, mem_str,
-             dim_str);
+  snprintf(left_buf, sizeof(left_buf), " %s \xc2\xb7 %s",
+           language_for_lexicon(state->lexicon), state->lexicon);
+  char right_buf[64];
+  snprintf(right_buf, sizeof(right_buf), "%s%s", mem_str, dim_str);
+  // NPS: only shown while the bot is computing. Sim mode reports
+  // iters*(plies+1); endgame reports the per-worker atomic sum.
+  // measure_nps EMA-smooths the per-frame delta so the readout is
+  // visually stable, and decays toward 0 when the counter idles.
+  uint64_t bot_nodes = 0;
+  if (atomic_load(&((TuiGameState *)state)->endgame_results_active)) {
+    if (state->endgame_ctx != NULL) {
+      bot_nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
+    }
+  } else if (atomic_load(&((TuiGameState *)state)->sim_results_active) &&
+             state->sim_results != NULL) {
+    const int plies = sim_results_get_num_plies(state->sim_results);
+    const uint64_t iters =
+        sim_results_get_iteration_count(state->sim_results);
+    bot_nodes = iters * (uint64_t)(plies + 1);
   }
+  const double nps = measure_nps(bot_nodes);
+  const bool show_nps = nps >= 1.0;
+
   ncplane_putstr_yx(plane, row, 0, left_buf);
+  if (show_fps) {
+    char fps_buf[24];
+    snprintf(fps_buf, sizeof(fps_buf), " \xc2\xb7 %d fps", fps_int);
+    theme_apply_fg(plane, theme->error_fg);
+    theme_apply_bg(plane, theme->dim_fg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr(plane, fps_buf);
+    ncplane_set_styles(plane, 0);
+    // Restore the inverted-grey band colors for the rest of the bar.
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, theme->dim_fg);
+  }
+  if (show_nps) {
+    char nps_str[16];
+    format_count_compact((uint64_t)(nps + 0.5), nps_str, sizeof(nps_str));
+    char nps_buf[32];
+    snprintf(nps_buf, sizeof(nps_buf), " \xc2\xb7 %s nps", nps_str);
+    ncplane_putstr(plane, nps_buf);
+  }
+  ncplane_putstr(plane, right_buf);
 
   // Right side: dynamic shortcut hint depending on what modal is open.
   const char *hint = " esc for menu ";
@@ -3929,6 +4137,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_history_panel(plane, theme, state, &L);
   render_analysis_panel(plane, theme, state, &L);
 
+  render_pending_bar(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
 
   // When a modal closes, drop its plane so the next open recreates it
@@ -4222,7 +4431,8 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int border_thickness, bool pixel_supported,
                               bool font_available,
                               TuiPremiumLabels premium_labels,
-                              bool blank_uppercase) {
+                              bool blank_uppercase, const char *lexicon,
+                              bool load_rit) {
   if (plane == NULL || theme == NULL) {
     return;
   }
@@ -4303,6 +4513,25 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                      blank_uppercase ? "uppercase" : "lowercase",
                      focus == TUI_SETTINGS_BLANKS);
 
+  // Lexicon row. Enter on this row opens the lexicon picker; the
+  // arrow keys are no-ops here since cycling through ~12 lexica
+  // doesn't make sense as a left/right toggle. Format mirrors the
+  // arrow rows except the value side carries a "▶" hint to suggest
+  // "press Enter to open" rather than "left/right to adjust".
+  char lexicon_label[96];
+  if (focus == TUI_SETTINGS_LEXICON) {
+    snprintf(lexicon_label, sizeof(lexicon_label), "%-13s%s \xe2\x96\xb6",
+             "Lexicon", lexicon != NULL ? lexicon : "");
+  } else {
+    snprintf(lexicon_label, sizeof(lexicon_label), "%-13s%s", "Lexicon",
+             lexicon != NULL ? lexicon : "");
+  }
+
+  // RIT row. Plain on/off arrow toggle like Antialias.
+  char rit_label[96];
+  format_setting_row(rit_label, sizeof(rit_label), "RIT",
+                     load_rit ? "on" : "off", focus == TUI_SETTINGS_RIT);
+
   // Antialias / Subscript / Border are only meaningful at 2x — hide
   // them entirely when the board isn't rendering at 2x rather than
   // showing greyed "n/a at 1x" placeholders. settings_visible() in
@@ -4339,6 +4568,12 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
       break;
     case TUI_SETTINGS_BLANKS:
       label = blanks_label;
+      break;
+    case TUI_SETTINGS_LEXICON:
+      label = lexicon_label;
+      break;
+    case TUI_SETTINGS_RIT:
+      label = rit_label;
       break;
     case TUI_SETTINGS_BACK:
       label = "Back";

@@ -210,6 +210,14 @@ bool tui_config_load(TuiConfig *config) {
         config->score_subscripts = TUI_SCORE_SUBSCRIPTS_ALL;
         config->score_subscripts_set = true;
       }
+    } else if (strcmp(trimmed, "load_rit") == 0) {
+      if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
+        config->load_rit = true;
+        config->load_rit_set = true;
+      } else if (strcmp(value, "false") == 0 || strcmp(value, "0") == 0) {
+        config->load_rit = false;
+        config->load_rit_set = true;
+      }
     }
   }
 
@@ -294,6 +302,9 @@ bool tui_config_save(const TuiConfig *config) {
       break;
     }
     fprintf(file, "score_subscripts = \"%s\"\n", value);
+  }
+  if (config->load_rit_set) {
+    fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
   }
 
   if (fclose(file) != 0) {

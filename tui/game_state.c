@@ -61,10 +61,19 @@ static void copy_error(ErrorStack *err, char *buf, size_t buf_size) {
   }
 }
 
-bool tui_game_state_init(const char *lexicon, uint64_t seed,
+bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                          TuiGameState *out_state, char *error_message,
                          size_t error_message_size) {
   memset(out_state, 0, sizeof(*out_state));
+  // Snapshot of the settings we're locking in for this session. The
+  // pending-change line above the status bar compares these to the
+  // live config to decide what "(restart to apply)" should surface.
+  snprintf(out_state->active_lexicon, sizeof(out_state->active_lexicon), "%s",
+           lexicon);
+  out_state->active_load_rit = load_rit;
+  snprintf(out_state->pending_lexicon, sizeof(out_state->pending_lexicon), "%s",
+           lexicon);
+  out_state->pending_load_rit = load_rit;
   if (error_message != NULL && error_message_size > 0) {
     error_message[0] = '\0';
   }
@@ -114,6 +123,16 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed,
                    lexicon, lexicon, false, err);
   if (!error_stack_is_empty(err)) {
     error_stack_reset(err);
+  }
+  // RIT (rack info table) is large and only useful for inference /
+  // advanced rack-aware analysis. Opt-in via load_rit; best-effort
+  // even when requested so a missing file doesn't kill startup.
+  if (load_rit) {
+    players_data_set(out_state->players_data, PLAYERS_DATA_TYPE_RIT, data_paths,
+                     lexicon, lexicon, false, err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_reset(err);
+    }
   }
   // Both players: pick the best move by static-eval equity.
   players_data_set_move_sort_type(out_state->players_data, 0, MOVE_SORT_EQUITY);

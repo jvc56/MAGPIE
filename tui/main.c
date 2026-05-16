@@ -345,8 +345,9 @@ int main(int argc, char *argv[]) {
   TuiGameState game_state = {0};
   char init_error[256] = {0};
   const uint64_t seed = (uint64_t)time(NULL);
-  if (!tui_game_state_init(chosen_lexicon, seed, &game_state, init_error,
-                           sizeof(init_error))) {
+  const bool initial_load_rit = loaded.load_rit_set ? loaded.load_rit : false;
+  if (!tui_game_state_init(chosen_lexicon, seed, initial_load_rit, &game_state,
+                           init_error, sizeof(init_error))) {
     render_init_error(std_plane, theme, chosen_lexicon, init_error);
     notcurses_render(nc);
     ncinput input;
@@ -386,6 +387,10 @@ int main(int argc, char *argv[]) {
   int main_menu_focus = 0;
   int settings_focus = 0;
   int time_focus = 0;
+  // Modal-style lexicon picker state. Lazily allocated when the user
+  // enters the modal; destroyed before exit.
+  LexiconList *lexicon_list = NULL;
+  int lexicon_focus = 0;
   // Settings rows for Antialias / Subscript / Border are hidden when
   // the board isn't rendering at 2x — they're 2x-only settings. The
   // renderer in game_render.c filters identically; this predicate
@@ -436,13 +441,21 @@ int main(int argc, char *argv[]) {
     if (modal == TUI_MODAL_MAIN_MENU) {
       tui_game_render_menu(std_plane, theme, main_menu_focus);
     } else if (modal == TUI_MODAL_SETTINGS) {
+      const char *current_lexicon =
+          to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
+      const bool current_load_rit =
+          to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
       tui_game_render_settings(
           std_plane, theme, settings_focus, game_state.board_scale,
           game_state.antialias, game_state.score_subscripts,
           game_state.border_thickness, pixel_supported, font_available,
-          game_state.premium_labels, game_state.blank_uppercase);
+          game_state.premium_labels, game_state.blank_uppercase,
+          current_lexicon, current_load_rit);
     } else if (modal == TUI_MODAL_TIME_PICKER) {
       tui_game_render_time_picker(std_plane, theme, time_focus);
+    } else if (modal == TUI_MODAL_LEXICON_PICKER && lexicon_list != NULL) {
+      tui_game_render_lexicon_picker(std_plane, theme, lexicon_list,
+                                     lexicon_focus);
     }
     notcurses_render(nc);
 
@@ -697,10 +710,40 @@ int main(int argc, char *argv[]) {
             to_save.blank_uppercase_set = true;
             tui_config_save(&to_save);
           }
+        } else if (settings_focus == TUI_SETTINGS_RIT) {
+          // RIT is a deferred toggle — write to config; the live
+          // game keeps using whatever was loaded at game-state init.
+          // The pending-change banner picks up the divergence and the
+          // setting takes effect on the next New Game.
+          const bool prev = to_save.load_rit_set ? to_save.load_rit
+                                                 : initial_load_rit;
+          to_save.load_rit = !prev;
+          to_save.load_rit_set = true;
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.pending_load_rit = to_save.load_rit;
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            tui_config_save(&to_save);
+          }
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         if (settings_focus == TUI_SETTINGS_BACK) {
           modal = TUI_MODAL_MAIN_MENU;
+        } else if (settings_focus == TUI_SETTINGS_LEXICON) {
+          // Pivot to the modal-style lexicon picker. Load the list
+          // lazily; reuse it across opens. Focus the currently-
+          // selected lexicon so the right language is expanded.
+          if (lexicon_list == NULL) {
+            lexicon_list = tui_lexicon_list_load();
+          }
+          if (lexicon_list != NULL) {
+            const char *current = to_save.lexicon_set ? to_save.lexicon
+                                                       : chosen_lexicon;
+            const int found =
+                tui_lexicon_list_find(lexicon_list, current);
+            lexicon_focus = found >= 0 ? found : 0;
+            modal = TUI_MODAL_LEXICON_PICKER;
+          }
         }
       }
       continue;
@@ -723,26 +766,95 @@ int main(int argc, char *argv[]) {
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         const int new_time = tui_time_picker_preset_seconds(time_focus);
         if (new_time > 0) {
-          // Stop the bot, apply the chosen time, reset the game in
-          // place, restart the bot. Mutex protects the reset so the
-          // next render doesn't see a half-reset state.
+          // Stop the bot.
           atomic_store(&game_state.bot_stop, true);
           pthread_join(game_state.bot_thread, NULL);
           game_state.bot_started = false;
           atomic_store(&game_state.bot_stop, false);
           chosen_time = new_time;
-          pthread_mutex_lock(&game_state.mutex);
-          tui_game_state_set_time_per_side(&game_state, new_time);
-          tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
-          pthread_mutex_unlock(&game_state.mutex);
           if (!args.no_config) {
             to_save.time_per_side_seconds = new_time;
             to_save.time_per_side_set = true;
             tui_config_save(&to_save);
           }
+          // Pending lexicon / RIT changes that need a full re-init?
+          // If so, tear down the state and re-init with the new
+          // settings (loading fresh tables). Otherwise the fast in-
+          // place reset is enough.
+          const bool needs_reinit =
+              strcmp(game_state.pending_lexicon, game_state.active_lexicon) !=
+                  0 ||
+              game_state.pending_load_rit != game_state.active_load_rit;
+          if (needs_reinit) {
+            char new_lexicon[TUI_LEXICON_NAME_MAX];
+            snprintf(new_lexicon, sizeof(new_lexicon), "%s",
+                     game_state.pending_lexicon);
+            const bool new_load_rit = game_state.pending_load_rit;
+            tui_game_state_destroy(&game_state);
+            char reinit_error[256] = {0};
+            if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
+                                     new_load_rit, &game_state, reinit_error,
+                                     sizeof(reinit_error))) {
+              // Re-init failed; fall back to the previously active
+              // settings so the user isn't left without a playable
+              // game. We've already torn the state down, so we have
+              // to retry with the old values.
+              if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
+                                       initial_load_rit, &game_state,
+                                       reinit_error, sizeof(reinit_error))) {
+                running = false;
+                modal = TUI_MODAL_NONE;
+                continue;
+              }
+            } else {
+              snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
+                       new_lexicon);
+            }
+            tui_game_state_set_time_per_side(&game_state, new_time);
+          } else {
+            pthread_mutex_lock(&game_state.mutex);
+            tui_game_state_set_time_per_side(&game_state, new_time);
+            tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
+            pthread_mutex_unlock(&game_state.mutex);
+          }
           tui_bot_worker_start(&game_state);
         }
         modal = TUI_MODAL_NONE;
+      }
+      continue;
+    }
+
+    if (modal == TUI_MODAL_LEXICON_PICKER) {
+      const int n = tui_lexicon_list_count(lexicon_list);
+      if (key == NCKEY_ESC) {
+        modal = TUI_MODAL_SETTINGS;
+      } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+        if (lexicon_focus > 0) {
+          lexicon_focus--;
+        }
+      } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (lexicon_focus < n - 1) {
+          lexicon_focus++;
+        }
+      } else if (key == NCKEY_HOME || key == 'g') {
+        lexicon_focus = 0;
+      } else if (key == NCKEY_END || key == 'G') {
+        lexicon_focus = n - 1;
+      } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+        char picked[TUI_LEXICON_NAME_MAX] = {0};
+        if (tui_lexicon_list_name(lexicon_list, lexicon_focus, picked,
+                                  sizeof(picked))) {
+          snprintf(to_save.lexicon, sizeof(to_save.lexicon), "%s", picked);
+          to_save.lexicon_set = true;
+          pthread_mutex_lock(&game_state.mutex);
+          snprintf(game_state.pending_lexicon,
+                   sizeof(game_state.pending_lexicon), "%s", picked);
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            tui_config_save(&to_save);
+          }
+        }
+        modal = TUI_MODAL_SETTINGS;
       }
       continue;
     }
@@ -756,6 +868,9 @@ int main(int argc, char *argv[]) {
   }
 
   tui_game_state_destroy(&game_state);
+  if (lexicon_list != NULL) {
+    tui_lexicon_list_destroy(lexicon_list);
+  }
   notcurses_stop(nc);
   return 0;
 }
