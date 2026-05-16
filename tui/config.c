@@ -176,6 +176,10 @@ bool tui_config_load(TuiConfig *config) {
       } else if (strcmp(value, "lowercase") == 0) {
         config->premium_labels = TUI_PREMIUM_LABELS_LOWERCASE;
         config->premium_labels_set = true;
+      } else if (strcmp(value, "punctuation") == 0 ||
+                 strcmp(value, "punct") == 0) {
+        config->premium_labels = TUI_PREMIUM_LABELS_PUNCT;
+        config->premium_labels_set = true;
       } else if (strcmp(value, "none") == 0) {
         config->premium_labels = TUI_PREMIUM_LABELS_NONE;
         config->premium_labels_set = true;
@@ -253,6 +257,9 @@ bool tui_config_save(const TuiConfig *config) {
     switch (config->premium_labels) {
     case TUI_PREMIUM_LABELS_LOWERCASE:
       value = "lowercase";
+      break;
+    case TUI_PREMIUM_LABELS_PUNCT:
+      value = "punctuation";
       break;
     case TUI_PREMIUM_LABELS_NONE:
       value = "none";

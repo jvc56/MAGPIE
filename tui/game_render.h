@@ -15,6 +15,7 @@ typedef enum {
   TUI_MODAL_NONE = 0,
   TUI_MODAL_MAIN_MENU = 1,
   TUI_MODAL_SETTINGS = 2,
+  TUI_MODAL_TIME_PICKER = 3,
 } TuiModalState;
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
@@ -24,13 +25,19 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 // Main menu modal — rendered on top of the game frame when the user
 // presses Esc.
 typedef enum {
-  TUI_MENU_SETTINGS = 0,
-  TUI_MENU_QUIT = 1,
+  TUI_MENU_NEW_GAME = 0,
+  TUI_MENU_SETTINGS = 1,
   TUI_MENU_BACK = 2,
-  TUI_MENU_ITEM_COUNT = 3,
+  TUI_MENU_QUIT = 3,
+  TUI_MENU_ITEM_COUNT = 4,
 } TuiMenuItem;
 
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
+
+// Time-picker modal — opened from "New game" in the main menu.
+// Items come from time_picker.h's preset accessors.
+void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
+                                 int focus);
 
 // Settings modal — opened from the main menu. Left/Right arrows on the
 // focused row adjust that setting's value.

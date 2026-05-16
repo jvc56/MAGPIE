@@ -14,14 +14,15 @@ typedef struct {
 } TimePreset;
 
 static const TimePreset presets[] = {
-    {60, "1 minute", "ultra"},   {180, "3 minutes", "blitz"},
-    {300, "5 minutes", "rapid"}, {600, "10 minutes", "club"},
-    {900, "15 minutes", "long"}, {1500, "25 minutes", "classical"},
+    {60, "1 minute", "ultra"},
+    {180, "3 minutes", "blitz"},
+    {600, "10 minutes", "rapid"},
+    {1500, "25 minutes", "classical"},
 };
 
 enum {
   PRESET_COUNT = sizeof(presets) / sizeof(presets[0]),
-  DEFAULT_PRESET_INDEX = 2, // 5 minutes
+  DEFAULT_PRESET_INDEX = 2, // 10 minutes (rapid)
 };
 
 static void fill_row(struct ncplane *plane, int row, unsigned cols) {
@@ -75,9 +76,53 @@ static void render_picker(struct ncplane *plane, const Theme *theme,
   }
 
   theme_apply_fg(plane, theme->dim_fg);
-  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4,
-                    "↑/↓ or j/k navigate   1–6 jump   Enter confirm   "
-                    "Esc cancel");
+  char hint[96];
+  snprintf(hint, sizeof(hint),
+           "↑/↓ or j/k navigate   1–%d jump   Enter confirm   Esc cancel",
+           PRESET_COUNT);
+  ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, hint);
+}
+
+int tui_time_picker_preset_count(void) { return PRESET_COUNT; }
+
+int tui_time_picker_preset_seconds(int idx) {
+  if (idx < 0 || idx >= PRESET_COUNT) {
+    return -1;
+  }
+  return presets[idx].seconds;
+}
+
+const char *tui_time_picker_preset_label(int idx) {
+  if (idx < 0 || idx >= PRESET_COUNT) {
+    return "";
+  }
+  return presets[idx].label;
+}
+
+const char *tui_time_picker_preset_blurb(int idx) {
+  if (idx < 0 || idx >= PRESET_COUNT) {
+    return "";
+  }
+  return presets[idx].blurb;
+}
+
+int tui_time_picker_closest_index(int initial_seconds) {
+  if (initial_seconds <= 0) {
+    return DEFAULT_PRESET_INDEX;
+  }
+  int closest_idx = DEFAULT_PRESET_INDEX;
+  int closest_diff = -1;
+  for (int idx = 0; idx < PRESET_COUNT; idx++) {
+    int diff = presets[idx].seconds - initial_seconds;
+    if (diff < 0) {
+      diff = -diff;
+    }
+    if (closest_diff < 0 || diff < closest_diff) {
+      closest_diff = diff;
+      closest_idx = idx;
+    }
+  }
+  return closest_idx;
 }
 
 int tui_time_picker_run(struct notcurses *nc, const Theme *theme,
@@ -85,22 +130,7 @@ int tui_time_picker_run(struct notcurses *nc, const Theme *theme,
   if (nc == NULL || theme == NULL) {
     return -1;
   }
-  int focus = DEFAULT_PRESET_INDEX;
-  if (initial_seconds > 0) {
-    int closest_idx = DEFAULT_PRESET_INDEX;
-    int closest_diff = -1;
-    for (int idx = 0; idx < PRESET_COUNT; idx++) {
-      int diff = presets[idx].seconds - initial_seconds;
-      if (diff < 0) {
-        diff = -diff;
-      }
-      if (closest_diff < 0 || diff < closest_diff) {
-        closest_diff = diff;
-        closest_idx = idx;
-      }
-    }
-    focus = closest_idx;
-  }
+  int focus = tui_time_picker_closest_index(initial_seconds);
 
   struct ncplane *std_plane = notcurses_stdplane(nc);
   while (true) {

@@ -58,6 +58,7 @@ typedef struct {
   int clock_at_start; // seconds remaining when this player's turn began
   char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
   char rack_str[16];  // full rack the player had at the start of the turn
+  char leave_str[16]; // tiles kept after the play (empty = outplay/exchange-all)
   // Going-out bonus, attached to the going-out player's last move so it
   // renders as a third line of that entry instead of its own row. Zero
   // when this entry has no end-of-game adjustment.
@@ -180,5 +181,11 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".
 void tui_game_state_set_time_per_side(TuiGameState *state, int seconds);
+
+// Resets the game to a fresh start: new seed, fresh racks, empty
+// history, zeroed clocks, cleared sim/endgame state, cleared
+// snapshot, and a cold endgame TT. Caller must stop the bot worker
+// first (otherwise the bot's reads race against the reset).
+void tui_game_state_reset_game(TuiGameState *state, uint64_t seed);
 
 #endif

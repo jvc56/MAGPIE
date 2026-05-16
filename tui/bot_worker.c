@@ -112,23 +112,44 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, game_get_board(state->game), move, state->ld,
                           false);
-  // Append the post-play leave in square brackets, e.g. "3L ODAH
-  // [IUS]". Brackets visually separate the leave from any
-  // playthrough segments (which use parens), so a play like
-  // "F5 CA(JO)N [ANTZ]" reads unambiguously. The history renderer's
-  // segmenter treats anything inside brackets as non-bold, same as
-  // it does for parens. Empty leaves (bingos and other plays that
-  // empty the rack) skip the appended chunk entirely.
-  if (leave != NULL && !rack_is_empty(leave)) {
-    string_builder_add_string(sb, " [");
-    string_builder_add_rack(sb, leave, state->ld, false);
-    string_builder_add_string(sb, "]");
-  }
   size_t move_len = 0;
   char *move_dump = string_builder_dump(sb, &move_len);
   copy_str(entry->move_str, sizeof(entry->move_str), move_dump);
   free(move_dump);
   string_builder_destroy(sb);
+
+  // Compact exchanges to "-ABCD" form, matching the analysis panel.
+  // The renderer (render_move_styled) already special-cases a leading
+  // "-" so it renders non-bold like the legacy "(exch ...)" group.
+  if (strncmp(entry->move_str, "(exch ", 6) == 0) {
+    char *close_paren = strchr(entry->move_str, ')');
+    if (close_paren != NULL) {
+      const int letters_len = (int)(close_paren - (entry->move_str + 6));
+      char tmp[sizeof(entry->move_str)];
+      tmp[0] = '-';
+      const int cap = (int)sizeof(tmp) - 2;
+      const int copy = letters_len < cap ? letters_len : cap;
+      memcpy(tmp + 1, entry->move_str + 6, (size_t)copy);
+      tmp[1 + copy] = '\0';
+      copy_str(entry->move_str, sizeof(entry->move_str), tmp);
+    }
+  }
+
+  // Leave goes in its own right-aligned column rather than inline; the
+  // renderer pulls it from entry->leave_str. Empty leaves (bingos /
+  // outplays) leave the string empty and render as a "·" placeholder.
+  entry->leave_str[0] = '\0';
+  if (leave != NULL && !rack_is_empty(leave)) {
+    StringBuilder *lsb = string_builder_create();
+    string_builder_add_rack(lsb, leave, state->ld, false);
+    size_t leave_len = 0;
+    char *leave_dump = string_builder_dump(lsb, &leave_len);
+    if (leave_dump != NULL) {
+      copy_str(entry->leave_str, sizeof(entry->leave_str), leave_dump);
+      free(leave_dump);
+    }
+    string_builder_destroy(lsb);
+  }
 
   entry->pending = false;
 }
@@ -467,6 +488,24 @@ static void endgame_per_ply_cb(int depth, int32_t value, const PVLine *pv_line,
   if (state == NULL) {
     return;
   }
+  // Throttle the snapshot rebuild to ~10 Hz. The rebuild duplicates
+  // the whole Board (~29 KB) under state->mutex; firing it 25× per
+  // ply iteration during a small endgame starves the main render
+  // thread, which is what was causing the ~4 fps freeze when a game
+  // hit endgame phase. The final solve still publishes a full
+  // snapshot from run_endgame after the search returns, so the
+  // displayed leaderboard converges either way.
+  static _Atomic uint64_t last_ns;
+  enum { THROTTLE_NS = 100 * 1000 * 1000 }; // 100 ms
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  const uint64_t now_ns =
+      (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+  const uint64_t last = atomic_load(&last_ns);
+  if (last != 0 && now_ns - last < THROTTLE_NS) {
+    return;
+  }
+  atomic_store(&last_ns, now_ns);
   const int solving_player = atomic_load(&state->endgame_results_turn_idx) >= 0
                                  ? game_get_player_on_turn_index(game)
                                  : 0;

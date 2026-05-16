@@ -385,6 +385,16 @@ int main(int argc, char *argv[]) {
   TuiModalState modal = TUI_MODAL_NONE;
   int main_menu_focus = 0;
   int settings_focus = 0;
+  int time_focus = 0;
+  // Settings rows for Antialias / Subscript / Border are hidden when
+  // the board isn't rendering at 2x — they're 2x-only settings. The
+  // renderer in game_render.c filters identically; this predicate
+  // mirrors it so up/down navigation can skip past hidden rows.
+  // Forward-declared lambda style: we capture the relevant state by
+  // re-evaluating each call rather than threading args in.
+#define SETTINGS_2X_ONLY(idx)                                                  \
+  ((idx) == TUI_SETTINGS_AA || (idx) == TUI_SETTINGS_SUBSCRIPTS ||             \
+   (idx) == TUI_SETTINGS_BORDER)
   // Frame-pacing anchor: at the top of every iteration we sleep until
   // next_frame_deadline, then advance the deadline by FRAME_NS. Sitting
   // at the top means the various `continue` paths below can't bypass
@@ -416,8 +426,7 @@ int main(int argc, char *argv[]) {
         next_frame_deadline.tv_nsec += FRAME_NS;
       }
       if (next_frame_deadline.tv_nsec >= 1000000000L) {
-        next_frame_deadline.tv_sec +=
-            next_frame_deadline.tv_nsec / 1000000000L;
+        next_frame_deadline.tv_sec += next_frame_deadline.tv_nsec / 1000000000L;
         next_frame_deadline.tv_nsec %= 1000000000L;
       }
     }
@@ -432,6 +441,8 @@ int main(int argc, char *argv[]) {
           game_state.antialias, game_state.score_subscripts,
           game_state.border_thickness, pixel_supported, font_available,
           game_state.premium_labels, game_state.blank_uppercase);
+    } else if (modal == TUI_MODAL_TIME_PICKER) {
+      tui_game_render_time_picker(std_plane, theme, time_focus);
     }
     notcurses_render(nc);
 
@@ -473,8 +484,25 @@ int main(int argc, char *argv[]) {
         if (main_menu_focus < TUI_MENU_ITEM_COUNT - 1) {
           main_menu_focus++;
         }
+      } else if (key == 'n' || key == 'N') {
+        // Mnemonic shortcuts trigger the action immediately, matching
+        // the hint shown to the right of each item in the modal. They
+        // skip focus-then-Enter so the menu behaves like a launcher.
+        modal = TUI_MODAL_TIME_PICKER;
+        time_focus = tui_time_picker_closest_index(chosen_time);
+      } else if (key == 's' || key == 'S') {
+        modal = TUI_MODAL_SETTINGS;
+        settings_focus = 0;
+      } else if (key == 'q' || key == 'Q') {
+        running = false;
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-        if (main_menu_focus == TUI_MENU_SETTINGS) {
+        if (main_menu_focus == TUI_MENU_NEW_GAME) {
+          // Pivot to the time-picker modal. The new-game side effects
+          // (stop bot, reset, restart) happen when the user confirms
+          // a time inside that modal; Esc there returns to this menu.
+          modal = TUI_MODAL_TIME_PICKER;
+          time_focus = tui_time_picker_closest_index(chosen_time);
+        } else if (main_menu_focus == TUI_MENU_SETTINGS) {
           modal = TUI_MODAL_SETTINGS;
           settings_focus = 0;
         } else if (main_menu_focus == TUI_MENU_QUIT) {
@@ -502,12 +530,25 @@ int main(int argc, char *argv[]) {
         // entry without re-opening from scratch.
         modal = TUI_MODAL_MAIN_MENU;
       } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-        if (settings_focus > 0) {
-          settings_focus--;
+        const bool effective_2x = pixel_supported && font_available &&
+                                  game_state.board_scale >= 2;
+        int idx = settings_focus - 1;
+        while (idx > 0 && SETTINGS_2X_ONLY(idx) && !effective_2x) {
+          idx--;
+        }
+        if (idx >= 0) {
+          settings_focus = idx;
         }
       } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-        if (settings_focus < TUI_SETTINGS_ITEM_COUNT - 1) {
-          settings_focus++;
+        const bool effective_2x = pixel_supported && font_available &&
+                                  game_state.board_scale >= 2;
+        int idx = settings_focus + 1;
+        while (idx < TUI_SETTINGS_ITEM_COUNT - 1 && SETTINGS_2X_ONLY(idx) &&
+               !effective_2x) {
+          idx++;
+        }
+        if (idx < TUI_SETTINGS_ITEM_COUNT) {
+          settings_focus = idx;
         }
       } else if (key == NCKEY_LEFT || key == 'h' || key == 'H') {
         if (settings_focus == TUI_SETTINGS_SCALE && pixel_supported &&
@@ -661,6 +702,47 @@ int main(int argc, char *argv[]) {
         if (settings_focus == TUI_SETTINGS_BACK) {
           modal = TUI_MODAL_MAIN_MENU;
         }
+      }
+      continue;
+    }
+
+    if (modal == TUI_MODAL_TIME_PICKER) {
+      const int preset_count = tui_time_picker_preset_count();
+      if (key == NCKEY_ESC) {
+        modal = TUI_MODAL_MAIN_MENU;
+      } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+        if (time_focus > 0) {
+          time_focus--;
+        }
+      } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (time_focus < preset_count - 1) {
+          time_focus++;
+        }
+      } else if (key >= '1' && key <= (uint32_t)('0' + preset_count)) {
+        time_focus = (int)(key - '1');
+      } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+        const int new_time = tui_time_picker_preset_seconds(time_focus);
+        if (new_time > 0) {
+          // Stop the bot, apply the chosen time, reset the game in
+          // place, restart the bot. Mutex protects the reset so the
+          // next render doesn't see a half-reset state.
+          atomic_store(&game_state.bot_stop, true);
+          pthread_join(game_state.bot_thread, NULL);
+          game_state.bot_started = false;
+          atomic_store(&game_state.bot_stop, false);
+          chosen_time = new_time;
+          pthread_mutex_lock(&game_state.mutex);
+          tui_game_state_set_time_per_side(&game_state, new_time);
+          tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
+          pthread_mutex_unlock(&game_state.mutex);
+          if (!args.no_config) {
+            to_save.time_per_side_seconds = new_time;
+            to_save.time_per_side_set = true;
+            tui_config_save(&to_save);
+          }
+          tui_bot_worker_start(&game_state);
+        }
+        modal = TUI_MODAL_NONE;
       }
       continue;
     }

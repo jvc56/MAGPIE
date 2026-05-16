@@ -56,6 +56,43 @@ typedef struct {
   ThemeRgb rack_tile2_bg;
   ThemeRgb on_turn_fg;    // P1 turn-marker arrow / chyron
   ThemeRgb on_turn_fg_p2; // P2 turn-marker arrow / chyron
+
+  // Modal / menu palette. Intentionally clinical greys — game
+  // content (rack, board, history) uses the green/amber accents,
+  // so chrome like the menu should sit clearly outside that palette
+  // and read as a system surface rather than part of the game.
+  //   modal_bg          — interior surface, a couple shades lighter
+  //                       than `bg`
+  //   modal_fg          — item text (near-white in dark mode)
+  //   modal_shortcut_fg — right-aligned shortcut hint (mid grey)
+  //   modal_border_bg   — frame chrome (top/bottom row + left/right col),
+  //                       a hair lighter than modal_bg so the edge reads
+  //                       as a defined trim — the macOS-style hairline.
+  //   modal_border_fg   — single-line box-drawing glyph color
+  //   modal_focus_bg    — selection bar background (lifted off modal_bg)
+  //   modal_focus_fg    — selection bar text
+  //   modal_shadow_fg   — half-block drop shadow along the bottom row
+  //                       and right column; should be a dark tone so
+  //                       it reads as a shadow over arbitrary
+  //                       underlying content.
+  ThemeRgb modal_bg;
+  ThemeRgb modal_fg;
+  ThemeRgb modal_shortcut_fg;
+  ThemeRgb modal_border_bg;
+  ThemeRgb modal_border_fg;
+  ThemeRgb modal_focus_bg;
+  ThemeRgb modal_focus_fg;
+  ThemeRgb modal_shadow_fg;
+
+  // Per-player text colors used by the move history. The "fg"
+  // variant paints the move row (top); the "dim_fg" variant paints
+  // the clock/leave row (bottom). Lets a finished history read as
+  // two distinct columns of plays without checking the player_idx
+  // by eye on every row.
+  ThemeRgb history_p1_fg;
+  ThemeRgb history_p1_dim_fg;
+  ThemeRgb history_p2_fg;
+  ThemeRgb history_p2_dim_fg;
   // Premium squares carry both a tinted background that fills the cell
   // and a foreground color used for the punctuation marker that lives in
   // it (＝ －  ＂ ＇ ＊). Themes that want flat premium squares can set

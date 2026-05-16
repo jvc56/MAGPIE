@@ -3,17 +3,17 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
-#include "../src/ent/board_layout.h"
-#include "../src/ent/game.h"
 #include "../src/ent/board.h"
+#include "../src/ent/board_layout.h"
 #include "../src/ent/endgame_results.h"
-#include "../src/impl/endgame.h"
+#include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/win_pct.h"
+#include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
 #include "glyph_cache.h"
@@ -215,6 +215,29 @@ void tui_game_state_set_time_per_side(TuiGameState *state, int seconds) {
   state->seconds_used[0] = 0.0;
   state->seconds_used[1] = 0.0;
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
+}
+
+void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
+  if (state == NULL || state->game == NULL) {
+    return;
+  }
+  game_reset(state->game);
+  game_seed(state->game, seed);
+  draw_starting_racks(state->game);
+  state->history_count = 0;
+  state->seconds_used[0] = 0.0;
+  state->seconds_used[1] = 0.0;
+  clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
+  atomic_store(&state->sim_results_active, false);
+  atomic_store(&state->sim_results_turn_idx, -1);
+  atomic_store(&state->endgame_results_active, false);
+  atomic_store(&state->endgame_results_turn_idx, -1);
+  atomic_store(&state->endgame_initial_spread, 0);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  if (state->endgame_ctx != NULL) {
+    endgame_ctx_clear_transposition_table(state->endgame_ctx);
+  }
+  atomic_fetch_add(&state->render_version, 1);
 }
 
 void tui_game_state_destroy(TuiGameState *state) {
