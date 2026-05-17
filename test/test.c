@@ -157,6 +157,7 @@ static TestEntry on_demand_test_table[] = {
     {"passpegforce", test_pass_peg_search_forced},
     {"passpegsample", test_pass_peg_sample_solve},
     {"passpegrand", test_pass_peg_generate_random_1pegs},
+    {"passpegrandN", test_pass_peg_generate_random_pegN},
     {"passpegbench", test_pass_peg_bench},
     {"passpegreport", test_pass_peg_print_report},
     {"passpegoracle", test_pass_peg_oracle_eval_move},

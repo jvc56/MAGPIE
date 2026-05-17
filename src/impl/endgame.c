@@ -53,8 +53,9 @@ enum {
   MAX_DEFERRED_STACK = 64,
   // How many abdada_negamax calls between per-depth deadline checks.
   // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
-  // 4096 nodes ≈ 40ms granularity — cheap but responsive enough to bail early.
-  DEPTH_DEADLINE_CHECK_INTERVAL = 4096,
+  // 1024 nodes ≈ 10ms granularity — tighter response for PEG inner solves
+  // where each scenario's endgame budget can be tens of ms.
+  DEPTH_DEADLINE_CHECK_INTERVAL = 1024,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning

@@ -56,6 +56,12 @@ void test_pass_peg_sample_solve(void);
 //                         with the engineered candidates' seed range)
 void test_pass_peg_generate_random_1pegs(void);
 
+// Generate random positions with target bag size + score-margin filter.
+// Env knobs: PASSPEG_RAND_N (count), PASSPEG_RAND_N_BAG (target bag),
+// PASSPEG_RAND_LEX (default CSW24), PASSPEG_RAND_MARGIN (max abs margin,
+// default 40), PASSPEG_RAND_SEED, PASSPEG_RAND_OUT.
+void test_pass_peg_generate_random_pegN(void);
+
 // Bench: run 4 algo×include-pass variants × 3 wall-clock budgets across
 // /tmp/passpeg_candidates.txt + /tmp/random_1pegs.txt. Writes per-run
 // rows to /tmp/passpeg_bench.csv. See env knobs in the impl.
