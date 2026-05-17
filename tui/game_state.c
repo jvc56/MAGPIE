@@ -74,6 +74,20 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   snprintf(out_state->pending_lexicon, sizeof(out_state->pending_lexicon), "%s",
            lexicon);
   out_state->pending_load_rit = load_rit;
+  // Camera panel defaults: off. The user opts in with "/camera on";
+  // until then the layout doesn't reserve the bottom-right region
+  // and the AVFoundation session is never started (no privacy
+  // surprise from grabbing webcam frames on a tool launch).
+  // camera_enabled flips on once cam_init + cam_start succeed.
+  //
+  // Aspect: monospace cells are roughly 1:2 (twice as tall as
+  // wide), so the inner pixel aspect of a 28×8 inner area
+  // (= 30×10 outer) lands near 16:9 in real pixels — that's the
+  // camera's native ratio.
+  out_state->camera_visible = false;
+  out_state->camera_enabled = false;
+  out_state->camera_cells_w = 30;
+  out_state->camera_cells_h = 10;
   if (error_message != NULL && error_message_size > 0) {
     error_message[0] = '\0';
   }

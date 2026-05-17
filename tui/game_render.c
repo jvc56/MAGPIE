@@ -15,6 +15,7 @@
 #include "../src/ent/stats.h"
 #include "../src/impl/endgame.h"
 #include "../src/str/move_string.h"
+#include "../src/cam/cam.h"
 #include "../src/util/string_util.h"
 #include "game_state.h"
 #include "glyph_cache.h"
@@ -183,6 +184,11 @@ typedef struct {
   } analysis_placement;
   bool has_analysis;
   int analysis_top, analysis_bottom, analysis_left, analysis_right;
+  // Camera panel region carved out of the bottom of the analysis
+  // panel when state->camera_visible is true. Right-aligned within
+  // the analysis column; analysis_bottom is reduced accordingly.
+  bool has_camera;
+  int camera_top, camera_bottom, camera_left, camera_right;
 } Layout;
 
 // Three tile scales:
@@ -533,6 +539,63 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
       L.analysis_left = 0;
       L.analysis_right = L.board_width - 1;
       L.has_analysis = true;
+    }
+  }
+
+  // Camera region: carved out of the bottom of the analysis panel
+  // when the camera is enabled and the panel has enough vertical
+  // room to give up. Right-aligned within the analysis column at
+  // the configured cell dimensions; if the column is narrower than
+  // camera_cells_w, the camera shrinks to fit. Analysis panel keeps
+  // the rows above; the camera owns the bottom block.
+  L.has_camera = false;
+  if (state != NULL && state->camera_visible && L.has_analysis &&
+      state->camera_cells_h > 0 && state->camera_cells_w > 0) {
+    const int analysis_h = L.analysis_bottom - L.analysis_top + 1;
+    const int analysis_w = L.analysis_right - L.analysis_left + 1;
+    // In 3-pane mode the analysis column is the Sim panel —
+    // expand the camera to its full width so the two panels line
+    // up visually, and re-derive the height so the inner image
+    // stays at 16:9 (camera native aspect). Monospace cells are
+    // ~1:2 (twice as tall as wide), so an inner area of w_cells
+    // by h_cells lands at 16:9 when h_cells = w_cells * 9 / 32.
+    // In below-history / below-bag layouts the analysis column
+    // is shared with other panels, so we keep the fixed 30×10
+    // outer-cell defaults.
+    int cam_w;
+    int cam_h;
+    if (L.analysis_placement == ANALYSIS_RIGHT_OF_HISTORY) {
+      cam_w = analysis_w;
+      const int inner_w = cam_w - 2;
+      const int inner_h = (inner_w * 9 + 16) / 32; // round to nearest
+      cam_h = inner_h + 2;
+    } else {
+      cam_w = state->camera_cells_w;
+      if (cam_w > analysis_w) {
+        cam_w = analysis_w;
+      }
+      cam_h = state->camera_cells_h;
+    }
+    // Need at least 3 rows left for the analysis panel above. If
+    // the derived camera height exceeds what's available, shrink
+    // it to fit rather than dropping the panel entirely.
+    if (analysis_h >= cam_h + 3) {
+      L.camera_bottom = L.analysis_bottom;
+      L.camera_top = L.camera_bottom - cam_h + 1;
+      L.camera_right = L.analysis_right;
+      L.camera_left = L.camera_right - cam_w + 1;
+      L.analysis_bottom = L.camera_top - 1;
+      L.has_camera = true;
+    } else if (analysis_h >= 6) {
+      // Tight squeeze: keep at least 3 rows for analysis above,
+      // give the rest to the camera.
+      const int squeezed_h = analysis_h - 3;
+      L.camera_bottom = L.analysis_bottom;
+      L.camera_top = L.camera_bottom - squeezed_h + 1;
+      L.camera_right = L.analysis_right;
+      L.camera_left = L.camera_right - cam_w + 1;
+      L.analysis_bottom = L.camera_top - 1;
+      L.has_camera = true;
     }
   }
 
@@ -917,6 +980,11 @@ static struct {
   // pixel composite. A dedicated top-most modal plane keeps both the
   // board and the menu visible at once.
   struct ncplane *modal;
+  // Camera pixel-image plane (Kitty graphics blit target). Lives at
+  // the interior of the [6] Camera panel, sized to match the inner
+  // cells. Recycled across frames; rebuilt on layout change or
+  // resize.
+  struct ncplane *camera;
 } grid_planes;
 
 // Cache for the 2x board pixel composite. ncblit_rgba is the FPS
@@ -961,6 +1029,10 @@ static void invalidate_grid_planes(void) {
     ncplane_destroy(grid_planes.modal);
     grid_planes.modal = NULL;
   }
+  if (grid_planes.camera != NULL) {
+    ncplane_destroy(grid_planes.camera);
+    grid_planes.camera = NULL;
+  }
   invalidate_blit_caches();
 }
 
@@ -998,6 +1070,10 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
         return TUI_FOCUS_HISTORY;
       }
     } else {
+      if (L.has_camera && y >= L.camera_top && y <= L.camera_bottom &&
+          x >= L.camera_left && x <= L.camera_right) {
+        return TUI_FOCUS_CAMERA;
+      }
       if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
           x >= L.analysis_left && x <= L.analysis_right) {
         return TUI_FOCUS_ANALYSIS;
@@ -1009,6 +1085,10 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
   }
   // Three-column analysis lives even further right (separate from
   // the history column).
+  if (L.has_camera && y >= L.camera_top && y <= L.camera_bottom &&
+      x >= L.camera_left && x <= L.camera_right) {
+    return TUI_FOCUS_CAMERA;
+  }
   if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
       x >= L.analysis_left && x <= L.analysis_right) {
     return TUI_FOCUS_ANALYSIS;
@@ -4170,8 +4250,148 @@ static void render_pending_bar(struct ncplane *plane, const Theme *theme,
 // hint ("/ for cmd") prompting the user to enter command-input mode.
 // When [0] is the focused index, the row paints on
 // theme->panel_focus_border_bg with bold [0] — matching the panel
-// border treatment so focus reads consistently across the chrome.
-// The actual /-input + autocomplete is wired in a follow-up.
+// Camera panel: draws the panel chrome and (when a frame is
+// available) blits the latest captured BGRA frame onto a child
+// plane sized to the panel's interior using NCBLIT_PIXEL — i.e.,
+// the Kitty graphics protocol.
+//
+// Flicker avoidance: AVFoundation publishes at ~30fps but the
+// render loop runs at 60fps, so cam_get_frame returns -1 on every
+// other tick. If we destroyed the pixel plane on misses (or wrote
+// "warming up" placeholder text into the parent on misses) the
+// image would flash off every other frame. Instead, once we've
+// shown any frame at all, missed ticks are a no-op — the cached
+// pixel plane stays put and the previous frame keeps showing
+// until the next real frame arrives. The placeholder text is only
+// drawn before the very first frame has rendered.
+static void render_camera_panel(struct ncplane *plane, const Theme *theme,
+                                const TuiGameState *state, const Layout *L) {
+  // Persists across calls: tracks whether we've successfully
+  // blitted at least one camera frame. Reset back to false only
+  // when the panel is hidden, when the layout drops the camera
+  // region, or when the camera is disabled — never on a single
+  // missed-frame tick.
+  static bool s_have_frame = false;
+
+  if (!L->has_camera) {
+    if (grid_planes.camera != NULL) {
+      ncplane_destroy(grid_planes.camera);
+      grid_planes.camera = NULL;
+    }
+    s_have_frame = false;
+    return;
+  }
+  const int cam_w = L->camera_right - L->camera_left + 1;
+  const int cam_h = L->camera_bottom - L->camera_top + 1;
+  const bool focused = state != NULL &&
+                       state->focused_panel == TUI_FOCUS_CAMERA;
+  draw_box_styled(plane, theme, L->camera_top, L->camera_left, cam_h, cam_w,
+                  "Camera", TUI_FOCUS_CAMERA, focused);
+
+  const int inner_top = L->camera_top + 1;
+  const int inner_left = L->camera_left + 1;
+  const int inner_h = cam_h - 2;
+  const int inner_w = cam_w - 2;
+  if (inner_h <= 0 || inner_w <= 0) {
+    return;
+  }
+
+  struct notcurses *nc = ncplane_notcurses(plane);
+  const bool pixel_ok = nc != NULL && notcurses_canpixel(nc);
+  const bool cam_on = state != NULL && state->camera_enabled;
+
+  // Pull a new frame if one is ready. cam_get_frame returns -1
+  // when nothing fresh is available since the last call.
+  cam_frame_t frame = {0};
+  const bool got_frame = cam_on && pixel_ok && cam_get_frame(&frame) == 0;
+
+  if (got_frame) {
+    if (grid_planes.camera == NULL) {
+      ncplane_options opts = {0};
+      opts.y = inner_top;
+      opts.x = inner_left;
+      opts.rows = (unsigned)inner_h;
+      opts.cols = (unsigned)inner_w;
+      opts.name = "camera";
+      grid_planes.camera = ncplane_create(plane, &opts);
+    } else {
+      unsigned cur_rows = 0;
+      unsigned cur_cols = 0;
+      ncplane_dim_yx(grid_planes.camera, &cur_rows, &cur_cols);
+      if ((int)cur_rows != inner_h || (int)cur_cols != inner_w) {
+        ncplane_resize_simple(grid_planes.camera, (unsigned)inner_h,
+                              (unsigned)inner_w);
+      }
+      ncplane_move_yx(grid_planes.camera, inner_top, inner_left);
+    }
+    if (grid_planes.camera != NULL) {
+      // ncblit_bgrx is the direct path: takes BGRX bytes and
+      // handles the BGR→RGB reorder during the scale pass, so we
+      // skip both the ncvisual_from_bgra allocation and the full-
+      // image RGBA conversion memcpy that path does internally.
+      // The (void) alpha byte that's actually alpha in our buffer
+      // is ignored, which is fine since the camera frame is fully
+      // opaque anyway.
+      struct ncvisual_options vopts = {0};
+      vopts.n = grid_planes.camera;
+      vopts.scaling = NCSCALE_STRETCH;
+      vopts.blitter = NCBLIT_PIXEL;
+      vopts.leny = (unsigned)frame.height;
+      vopts.lenx = (unsigned)frame.width;
+      if (ncblit_bgrx(frame.data, frame.stride, &vopts) >= 0) {
+        s_have_frame = true;
+      }
+    }
+    cam_release_frame(&frame);
+    return;
+  }
+
+  // No new frame this tick. If we've shown one before, keep the
+  // cached pixel plane visible verbatim — the rasterizer will
+  // re-emit its sprixel as-is, which is what stops the flicker.
+  // Still keep the plane aligned to the current layout in case
+  // the panel moved or resized.
+  if (s_have_frame && grid_planes.camera != NULL) {
+    unsigned cur_rows = 0;
+    unsigned cur_cols = 0;
+    ncplane_dim_yx(grid_planes.camera, &cur_rows, &cur_cols);
+    if ((int)cur_rows != inner_h || (int)cur_cols != inner_w) {
+      ncplane_resize_simple(grid_planes.camera, (unsigned)inner_h,
+                            (unsigned)inner_w);
+    }
+    int cy = 0;
+    int cx = 0;
+    ncplane_yx(grid_planes.camera, &cy, &cx);
+    if (cy != inner_top || cx != inner_left) {
+      ncplane_move_yx(grid_planes.camera, inner_top, inner_left);
+    }
+    return;
+  }
+
+  // First-ever frame hasn't landed yet (or camera is off / no
+  // pixel support). Show a static placeholder; once a frame
+  // arrives we won't hit this branch again.
+  if (grid_planes.camera != NULL) {
+    ncplane_destroy(grid_planes.camera);
+    grid_planes.camera = NULL;
+  }
+  const char *msg = NULL;
+  if (!cam_on) {
+    msg = !pixel_ok ? "Camera needs Kitty graphics" : "Camera unavailable";
+  } else {
+    msg = "Camera warming up\xe2\x80\xa6"; // "warming up…"
+  }
+  const int msg_len = (int)strlen(msg);
+  const int msg_row = inner_top + inner_h / 2;
+  const int msg_col = inner_left + (inner_w - msg_len) / 2;
+  theme_apply_fg(plane, theme->dim_fg);
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  if (msg_col >= inner_left && msg_col + msg_len <= inner_left + inner_w) {
+    ncplane_putstr_yx(plane, msg_row, msg_col, msg);
+  }
+}
+
 // Command palette popup: rendered above the command bar while
 // slash mode is active. Lists commands whose name starts with the
 // typed prefix and a short description, mirroring the Claude Code
@@ -4192,6 +4412,8 @@ static void render_command_palette(struct ncplane *plane, const Theme *theme,
     const char *desc;
   };
   static const struct Cmd cmds[] = {
+      {"camera off", "Disable webcam panel"},
+      {"camera on", "Enable webcam panel"},
       {"new", "Start a new game"},
       {"quit", "Quit MAGPIE TUI"},
       {"settings", "Open settings"},
@@ -4662,6 +4884,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
                      !L.combined_pills_history);
   render_history_panel(plane, theme, state, &L);
   render_analysis_panel(plane, theme, state, &L);
+  render_camera_panel(plane, theme, state, &L);
 
   render_pending_bar(plane, theme, state, &L);
   render_command_bar(plane, theme, state, &L);
