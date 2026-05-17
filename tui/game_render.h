@@ -17,7 +17,23 @@ typedef enum {
   TUI_MODAL_SETTINGS = 2,
   TUI_MODAL_TIME_PICKER = 3,
   TUI_MODAL_LEXICON_PICKER = 4,
+  TUI_MODAL_QUIT_CONFIRM = 5,
 } TuiModalState;
+
+// Which panel currently has keyboard focus. NONE means no panel is
+// focused — pressing 1..5 selects the matching panel; 0 unfocuses.
+// Panel-specific behaviors (history scrollback, analysis candidate
+// preview, etc.) consult this enum to decide whether to intercept
+// keys; render code uses it to bold/highlight the focused panel's
+// [N] indicator.
+typedef enum {
+  TUI_FOCUS_NONE = 0,
+  TUI_FOCUS_BOARD = 1,
+  TUI_FOCUS_RACK = 2,
+  TUI_FOCUS_BAG = 3,
+  TUI_FOCUS_HISTORY = 4,
+  TUI_FOCUS_ANALYSIS = 5,
+} TuiPanelFocus;
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, int time_per_side_seconds,
@@ -39,6 +55,12 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme, int focus);
 // Items come from time_picker.h's preset accessors.
 void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
                                  int focus);
+
+// Quit-confirmation modal. Two items: No (focus 0) / Yes (focus 1).
+// Default focus is 0 (No) so the safer option is Enter-confirmable;
+// Y / N shortcuts trigger their action regardless of current focus.
+void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
+                                  int focus);
 
 // Settings modal — opened from the main menu. Left/Right arrows on the
 // focused row adjust that setting's value.
@@ -70,6 +92,13 @@ typedef enum {
 // modal == TUI_MODAL_NONE, so callers don't manage its lifetime.
 struct ncplane *tui_game_render_get_or_create_modal_plane(
     struct ncplane *parent, int top, int left, int rows, int cols);
+
+// Hit-test a (y, x) cell coordinate against the panel layout that
+// tui_game_render would draw for the given state on the given plane.
+// Returns the TuiPanelFocus index of the panel containing the click,
+// or -1 if the click misses every panel.
+int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
+                      int x);
 
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int board_scale, bool antialias,

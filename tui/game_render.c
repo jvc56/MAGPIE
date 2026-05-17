@@ -107,14 +107,19 @@ typedef struct {
   unsigned plane_cols;
 
   int status_row;
+  // Always-reserved command bar above the status bar. Hosts the [0]
+  // focus indicator and (eventually) a "/ for cmd" Minecraft-style
+  // prompt. Always present, so content panels lose at least one row
+  // to it even when no pending changes are queued.
+  int command_bar_row;
   // -1 when no pending settings; otherwise the row where the pending-
-  // change banner renders (one above the status bar). When set, panels
-  // shrink by one row so the banner has somewhere to live without
-  // overlapping content.
+  // change banner renders (just above the command bar). When set,
+  // panels shrink by another row so the banner has somewhere to live
+  // without overlapping content.
   int pending_row;
-  // Last row a content panel may render into. = (pending_row >= 0 ?
-  // pending_row : status_row) - 1. Use this everywhere the old
-  // `status_row - 1` was used.
+  // Last row a content panel may render into. Use this everywhere the
+  // old `status_row - 1` was used; it tracks whichever of the bottom
+  // bars is highest.
   int content_bottom_row;
 
   // Scale-dependent board geometry. At scale=1: cell_w=2, cell_h=1, the
@@ -198,6 +203,13 @@ static int compute_effective_scale(int user_pref, unsigned plane_cols,
     user_pref = 0;
   } else if (user_pref > 2) {
     user_pref = 2;
+  }
+  // Account for the chrome rows compute_layout reserves at the
+  // bottom: command bar (always) + status bar (always). The pending
+  // banner is ignored here — if it shows up later the panels just
+  // get one row tighter, which is fine and visually unchanged.
+  if (plane_rows >= 2) {
+    plane_rows -= 1;
   }
   for (int s = user_pref; s >= 0; s--) {
     const int cols = CELL_COL_BASE + BOARD_DIM * cell_w_for[s] +
@@ -285,7 +297,8 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   ncplane_dim_yx(plane, &L.plane_rows, &L.plane_cols);
 
   L.status_row = (int)L.plane_rows - 1;
-  // Pending-change banner: rendered above the status bar when the
+  L.command_bar_row = L.status_row - 1;
+  // Pending-change banner: rendered above the command bar when the
   // user's Settings have outpaced the live game's loaded tables.
   // Content panels treat content_bottom_row as their lowest available
   // row regardless of which path is active.
@@ -293,9 +306,9 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
       state != NULL &&
       (strcmp(state->pending_lexicon, state->active_lexicon) != 0 ||
        state->pending_load_rit != state->active_load_rit);
-  L.pending_row = pending_changes ? L.status_row - 1 : -1;
+  L.pending_row = pending_changes ? L.command_bar_row - 1 : -1;
   L.content_bottom_row =
-      (L.pending_row >= 0 ? L.pending_row : L.status_row) - 1;
+      (L.pending_row >= 0 ? L.pending_row : L.command_bar_row) - 1;
 
   L.scale = compute_effective_scale(user_scale, L.plane_cols, L.plane_rows);
   if (L.scale < 0) {
@@ -533,6 +546,13 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
 #define BOX_BR "\xe2\x94\x98" // ┘
 #define BOX_HZ "\xe2\x94\x80" // ─
 #define BOX_VT "\xe2\x94\x82"     // │
+// Double-line variants for the focused-panel border.
+#define BOX2_TL "\xe2\x95\x94" // ╔
+#define BOX2_TR "\xe2\x95\x97" // ╗
+#define BOX2_BL "\xe2\x95\x9a" // ╚
+#define BOX2_BR "\xe2\x95\x9d" // ╝
+#define BOX2_HZ "\xe2\x95\x90" // ═
+#define BOX2_VT "\xe2\x95\x91" // ║
 #define BOX_T_DOWN "\xe2\x94\xac" // ┬
 #define BOX_T_UP "\xe2\x94\xb4"   // ┴
 #define BOX_T_RIGHT "\xe2\x94\x9c" // ├
@@ -674,37 +694,85 @@ static const char *language_for_lexicon(const char *name) {
 }
 
 // ── Generic helpers ───────────────────────────────────────────────────────
-static void draw_box(struct ncplane *plane, const Theme *theme, int top_row,
-                     int left_col, int height, int width, const char *title) {
-  theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+// Render a panel border. When `focused` is true the box uses double-
+// line glyphs and the border row/col cells paint with
+// theme->panel_focus_border_bg so the frame lifts off the void. The
+// `hotkey` digit (1..5; 0 = none) renders as "[N] " just before the
+// title in the top border, dim-grey when unfocused and bold + bright
+// when focused. The title itself is drawn in theme->fg on whichever
+// bg the border row is using.
+static void draw_box_styled(struct ncplane *plane, const Theme *theme,
+                            int top_row, int left_col, int height, int width,
+                            const char *title, int hotkey, bool focused) {
+  const ThemeRgb border_fg = focused ? theme->fg : theme->dim_fg;
+  const ThemeRgb border_bg = focused ? theme->panel_focus_border_bg : theme->bg;
+  const char *tl = focused ? BOX2_TL : BOX_TL;
+  const char *tr = focused ? BOX2_TR : BOX_TR;
+  const char *bl = focused ? BOX2_BL : BOX_BL;
+  const char *br = focused ? BOX2_BR : BOX_BR;
+  const char *hz = focused ? BOX2_HZ : BOX_HZ;
+  const char *vt = focused ? BOX2_VT : BOX_VT;
+  theme_apply_fg(plane, border_fg);
+  theme_apply_bg(plane, border_bg);
   const int right_col = left_col + width - 1;
   const int bottom_row = top_row + height - 1;
 
-  ncplane_putstr_yx(plane, top_row, left_col, BOX_TL);
+  ncplane_putstr_yx(plane, top_row, left_col, tl);
   for (int col = left_col + 1; col < right_col; col++) {
-    ncplane_putstr_yx(plane, top_row, col, BOX_HZ);
+    ncplane_putstr_yx(plane, top_row, col, hz);
   }
-  ncplane_putstr_yx(plane, top_row, right_col, BOX_TR);
+  ncplane_putstr_yx(plane, top_row, right_col, tr);
 
   for (int row = top_row + 1; row < bottom_row; row++) {
-    ncplane_putstr_yx(plane, row, left_col, BOX_VT);
-    ncplane_putstr_yx(plane, row, right_col, BOX_VT);
+    ncplane_putstr_yx(plane, row, left_col, vt);
+    ncplane_putstr_yx(plane, row, right_col, vt);
   }
 
-  ncplane_putstr_yx(plane, bottom_row, left_col, BOX_BL);
+  ncplane_putstr_yx(plane, bottom_row, left_col, bl);
   for (int col = left_col + 1; col < right_col; col++) {
-    ncplane_putstr_yx(plane, bottom_row, col, BOX_HZ);
+    ncplane_putstr_yx(plane, bottom_row, col, hz);
   }
-  ncplane_putstr_yx(plane, bottom_row, right_col, BOX_BR);
+  ncplane_putstr_yx(plane, bottom_row, right_col, br);
 
   if (title != NULL && title[0] != '\0') {
+    // Title block flush against the top-left corner (one cell in
+    // from the corner glyph). The previous two-cell inset wasted
+    // a column on every panel; with N panels stacked, that adds up.
+    int col = left_col + 1;
+    // [N] hotkey indicator. Dim-grey when unfocused; bold + bright
+    // when focused. Always renders if hotkey > 0.
+    if (hotkey > 0) {
+      const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
+      theme_apply_fg(plane, hk_fg);
+      theme_apply_bg(plane, border_bg);
+      if (focused) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
+      char buf[8];
+      snprintf(buf, sizeof(buf), "[%d]", hotkey);
+      ncplane_putstr_yx(plane, top_row, col, buf);
+      col += (int)strlen(buf);
+      ncplane_set_styles(plane, 0);
+      // Space between [N] and title.
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, border_bg);
+      ncplane_putstr_yx(plane, top_row, col++, " ");
+    }
+    // Title text.
     theme_apply_fg(plane, theme->fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_putstr_yx(plane, top_row, left_col + 2, " ");
-    ncplane_putstr(plane, title);
-    ncplane_putstr(plane, " ");
+    theme_apply_bg(plane, border_bg);
+    ncplane_putstr_yx(plane, top_row, col, title);
+    col += (int)strlen(title);
+    // Trailing pad.
+    ncplane_putstr_yx(plane, top_row, col, " ");
   }
+}
+
+// Back-compat wrapper for callers that don't care about focus/hotkey.
+static void draw_box(struct ncplane *plane, const Theme *theme, int top_row,
+                     int left_col, int height, int width, const char *title) {
+  draw_box_styled(plane, theme, top_row, left_col, height, width, title,
+                  /*hotkey=*/0, /*focused=*/false);
 }
 
 // Draws the outer borders + horizontal divider + vertical column
@@ -712,11 +780,30 @@ static void draw_box(struct ncplane *plane, const Theme *theme, int top_row,
 // and history content rendering skip their own draw_box calls when
 // this fires; this function paints the full frame with proper T and
 // cross junctions.
+// The combined pills+history frame treats both pills and the history
+// rows as ONE logical component (player columns headering their move
+// histories), with a single shared box. The history title and its
+// [4] hotkey live in the top border, top-left — flush against the
+// corner, so it reads as the component name of the whole assembly.
+// When focused (history hotkey active), the entire outer frame plus
+// the cross-bar divider switch to double-line glyphs on the lighter
+// panel_focus_border_bg.
 static void draw_combined_pills_history_frame(struct ncplane *plane,
                                               const Theme *theme,
-                                              const Layout *L) {
-  theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+                                              const Layout *L, bool focused) {
+  const ThemeRgb border_fg = focused ? theme->fg : theme->dim_fg;
+  const ThemeRgb border_bg = focused ? theme->panel_focus_border_bg : theme->bg;
+  const char *tl = focused ? BOX2_TL : BOX_TL;
+  const char *tr = focused ? BOX2_TR : BOX_TR;
+  const char *bl = focused ? BOX2_BL : BOX_BL;
+  const char *br = focused ? BOX2_BR : BOX_BR;
+  const char *hz = focused ? BOX2_HZ : BOX_HZ;
+  const char *vt = focused ? BOX2_VT : BOX_VT;
+  // No double-line equivalents for the T-junctions here — keep them
+  // single-line for now; the visual hit is small and matches the
+  // single-line glyphs the pill cell rendering puts inside.
+  theme_apply_fg(plane, border_fg);
+  theme_apply_bg(plane, border_bg);
   const int top = L->pill1_top;
   const int divider_row = L->pill1_bottom;
   const int bottom = L->history_bottom;
@@ -724,43 +811,70 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
   const int right = L->right_col_right;
   const int mid = L->divider_col;
 
-  // Top border: ┌──────┬──────┐
-  ncplane_putstr_yx(plane, top, left, BOX_TL);
+  // Top border with title in the top-left.
+  ncplane_putstr_yx(plane, top, left, tl);
   for (int col = left + 1; col < right; col++) {
-    ncplane_putstr_yx(plane, top, col, col == mid ? BOX_T_DOWN : BOX_HZ);
+    ncplane_putstr_yx(plane, top, col, col == mid ? BOX_T_DOWN : hz);
   }
-  ncplane_putstr_yx(plane, top, right, BOX_TR);
+  ncplane_putstr_yx(plane, top, right, tr);
 
   // Pill content row (row top+1) is filled in by render_player_pill;
   // we only need to paint the column borders here.
   for (int row = top + 1; row < divider_row; row++) {
-    ncplane_putstr_yx(plane, row, left, BOX_VT);
+    ncplane_putstr_yx(plane, row, left, vt);
     ncplane_putstr_yx(plane, row, mid, BOX_VT);
-    ncplane_putstr_yx(plane, row, right, BOX_VT);
+    ncplane_putstr_yx(plane, row, right, vt);
   }
 
-  // Horizontal divider: ├──────┼──────┤
-  ncplane_putstr_yx(plane, divider_row, left, BOX_T_RIGHT);
+  // Horizontal divider: ├──────┼──────┤ (single inside, double-into-
+  // outer-frame junctions when focused via ╟ / ╢ so the outer ║
+  // visually continues through the divider row).
+  const char *div_left = focused ? "\xe2\x95\x9f" /* ╟ */ : BOX_T_RIGHT;
+  const char *div_right = focused ? "\xe2\x95\xa2" /* ╢ */ : BOX_T_LEFT;
+  ncplane_putstr_yx(plane, divider_row, left, div_left);
   for (int col = left + 1; col < right; col++) {
     ncplane_putstr_yx(plane, divider_row, col,
                       col == mid ? BOX_CROSS : BOX_HZ);
   }
-  ncplane_putstr_yx(plane, divider_row, right, BOX_T_LEFT);
+  ncplane_putstr_yx(plane, divider_row, right, div_right);
 
-  // History content rows: just paint the side and middle column
-  // borders. History content rendering fills in the rest.
+  // History content rows.
   for (int row = divider_row + 1; row < bottom; row++) {
-    ncplane_putstr_yx(plane, row, left, BOX_VT);
+    ncplane_putstr_yx(plane, row, left, vt);
     ncplane_putstr_yx(plane, row, mid, BOX_VT);
-    ncplane_putstr_yx(plane, row, right, BOX_VT);
+    ncplane_putstr_yx(plane, row, right, vt);
   }
 
-  // Bottom border: └──────┴──────┘
-  ncplane_putstr_yx(plane, bottom, left, BOX_BL);
+  // Bottom border.
+  ncplane_putstr_yx(plane, bottom, left, bl);
   for (int col = left + 1; col < right; col++) {
-    ncplane_putstr_yx(plane, bottom, col, col == mid ? BOX_T_UP : BOX_HZ);
+    ncplane_putstr_yx(plane, bottom, col, col == mid ? BOX_T_UP : hz);
   }
-  ncplane_putstr_yx(plane, bottom, right, BOX_BR);
+  ncplane_putstr_yx(plane, bottom, right, br);
+
+  // [4] History title on the DIVIDER row (between pills and history)
+  // rather than the top border — there's nothing controllable in the
+  // pills row, and putting the title above the first history entry
+  // matches what "this is the history panel" should refer to.
+  // Flush against the left edge (col = left + 1) so the indicator
+  // aligns with the "1." rank-prefix column below.
+  {
+    int col = left + 1;
+    const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
+    theme_apply_fg(plane, hk_fg);
+    theme_apply_bg(plane, border_bg);
+    if (focused) {
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+    }
+    ncplane_putstr_yx(plane, divider_row, col, "[4]");
+    col += 3;
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, theme->fg);
+    ncplane_putstr_yx(plane, divider_row, col++, " ");
+    ncplane_putstr_yx(plane, divider_row, col, "History");
+    col += 7;
+    ncplane_putstr_yx(plane, divider_row, col, " ");
+  }
 }
 
 static void format_clock(int seconds, char *buf, size_t buf_size) {
@@ -851,6 +965,68 @@ static void invalidate_grid_planes(void) {
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
+
+// Map a cell coordinate to the panel beneath it. Mirrors the layout
+// compute_layout produces for the same state. Returns one of the
+// TUI_FOCUS_* values, or -1 when the click misses every panel.
+int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
+                      int x) {
+  if (plane == NULL || state == NULL || y < 0 || x < 0) {
+    return -1;
+  }
+  // Pick the user's preferred scale the same way tui_game_render
+  // does so the recomputed layout matches what's actually on screen.
+  struct notcurses *render_nc = ncplane_notcurses(plane);
+  const bool pixel_ok = render_nc != NULL && notcurses_canpixel(render_nc);
+  const int user_pref =
+      (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
+                                                                          : 1;
+  const Layout L = compute_layout(plane, user_pref, state);
+  if (L.scale < 0) {
+    return -1;
+  }
+  // Command bar and status bar — clicks on either focus [0].
+  if (y == L.command_bar_row || y == L.status_row) {
+    return TUI_FOCUS_NONE;
+  }
+  // Right column is the pills+history assembly (treated as one
+  // component) or the separate panels in 3-column mode. The
+  // combined_pills_history bool decides.
+  if (x >= L.right_col_left && x <= L.right_col_right) {
+    if (L.combined_pills_history) {
+      if (y >= L.pill1_top && y <= L.history_bottom) {
+        return TUI_FOCUS_HISTORY;
+      }
+    } else {
+      if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
+          x >= L.analysis_left && x <= L.analysis_right) {
+        return TUI_FOCUS_ANALYSIS;
+      }
+      if (y >= L.history_top && y <= L.history_bottom) {
+        return TUI_FOCUS_HISTORY;
+      }
+    }
+  }
+  // Three-column analysis lives even further right (separate from
+  // the history column).
+  if (L.has_analysis && y >= L.analysis_top && y <= L.analysis_bottom &&
+      x >= L.analysis_left && x <= L.analysis_right) {
+    return TUI_FOCUS_ANALYSIS;
+  }
+  // Left column: board (top), rack, bag stacked vertically.
+  if (x >= 0 && x < L.board_width) {
+    if (y <= L.board_bottom_row + 1) {
+      return TUI_FOCUS_BOARD;
+    }
+    if (y >= L.rack_top && y <= L.rack_bottom) {
+      return TUI_FOCUS_RACK;
+    }
+    if (y >= L.bag_top && y <= L.bag_bottom) {
+      return TUI_FOCUS_BAG;
+    }
+  }
+  return -1;
+}
 
 // Public accessor for the cached modal plane, shared across all modal
 // renderers (menu / settings / time picker / lexicon picker). Creates
@@ -1578,7 +1754,9 @@ static void render_board_box(struct ncplane *plane, const Theme *theme,
   const int height = L->board_bottom_row + 2; // top border .. bottom border
   char title[32];
   snprintf(title, sizeof(title), "Board (%d)", board_tile_count(state->game));
-  draw_box(plane, theme, 0, 0, height, L->board_width, title);
+  const bool focused = state->focused_panel == TUI_FOCUS_BOARD;
+  draw_box_styled(plane, theme, 0, 0, height, L->board_width, title,
+                  TUI_FOCUS_BOARD, focused);
 }
 
 static void render_board(struct ncplane *plane, const Theme *theme,
@@ -1813,7 +1991,9 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   const Rack *rack = player_get_rack(player);
   char title[32];
   snprintf(title, sizeof(title), "Rack (%d)", rack_get_total_letters(rack));
-  draw_box(plane, theme, L->rack_top, 0, box_height, L->board_width, title);
+  const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
+  draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
+                  title, TUI_FOCUS_RACK, rack_focused);
   const LetterDistribution *ld = state->ld;
 
   const int cell_w = L->board_cell_w;
@@ -1857,17 +2037,12 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
       theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
                                             : theme->rack_tile1_bg);
       if (halfwidth) {
-        // Halfwidth blank: glyph + zero-width non-joiner so two
-        // adjacent "?" tiles don't shape into a "??" ligature in
-        // fonts that have one. Only append ZWNJ when another blank
-        // follows in this inner loop — see render_player_pill for
-        // why an unconditional trailing ZWNJ is unsafe.
-        const char *ascii;
-        if (ml == 0) {
-          ascii = (copy + 1 < count) ? "?\xe2\x80\x8c" : "?";
-        } else {
-          ascii = ld->ld_ml_to_hl[ml];
-        }
+        // Halfwidth blank: just the "?" glyph. We used to splice a
+        // zero-width non-joiner in between adjacent blanks to defeat
+        // "??" font ligatures, but it caused the row containing
+        // blanks to drop out on some terminals; the ligature is the
+        // lesser evil.
+        const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
         ncplane_putstr_yx(plane, L->rack_top + 1, start_col + col_offset,
                           ascii[0] != '\0' ? ascii : " ");
       } else {
@@ -1893,19 +2068,37 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
 // box so endgames don't waste vertical space on a blank panel.
 static void render_bag_divider(struct ncplane *plane, const Theme *theme,
                                int row, int left, int width,
-                               const char *title) {
-  theme_apply_fg(plane, theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
+                               const char *title, int hotkey, bool focused) {
+  const ThemeRgb border_fg = focused ? theme->fg : theme->dim_fg;
+  const ThemeRgb border_bg = focused ? theme->panel_focus_border_bg : theme->bg;
+  const char *hz = focused ? BOX2_HZ : BOX_HZ;
+  theme_apply_fg(plane, border_fg);
+  theme_apply_bg(plane, border_bg);
   const int right = left + width - 1;
   for (int col = left; col <= right; col++) {
-    ncplane_putstr_yx(plane, row, col, BOX_HZ);
+    ncplane_putstr_yx(plane, row, col, hz);
   }
   if (title != NULL && title[0] != '\0') {
-    theme_apply_fg(plane, theme->fg);
-    theme_apply_bg(plane, theme->bg);
-    ncplane_putstr_yx(plane, row, left + 2, " ");
-    ncplane_putstr(plane, title);
-    ncplane_putstr(plane, " ");
+    int col = left + 1;
+    if (hotkey > 0) {
+      const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
+      theme_apply_fg(plane, hk_fg);
+      theme_apply_bg(plane, border_bg);
+      if (focused) {
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      }
+      char buf[8];
+      snprintf(buf, sizeof(buf), "[%d]", hotkey);
+      ncplane_putstr_yx(plane, row, col, buf);
+      col += (int)strlen(buf);
+      ncplane_set_styles(plane, 0);
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, border_bg);
+      ncplane_putstr_yx(plane, row, col++, " ");
+    }
+    ncplane_putstr_yx(plane, row, col, title);
+    col += (int)strlen(title);
+    ncplane_putstr_yx(plane, row, col, " ");
   }
 }
 
@@ -1920,7 +2113,9 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   // The endgame UI doesn't need any of that — opponent's tiles are
   // already in the P2 pill.
   if (bag_count == 0) {
-    render_bag_divider(plane, theme, L->bag_top, 0, L->board_width, title);
+    const bool empty_focused = state->focused_panel == TUI_FOCUS_BAG;
+    render_bag_divider(plane, theme, L->bag_top, 0, L->board_width, title,
+                       TUI_FOCUS_BAG, empty_focused);
     return;
   }
 
@@ -1928,7 +2123,9 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3) {
     return;
   }
-  draw_box(plane, theme, L->bag_top, 0, height, L->board_width, title);
+  const bool bag_focused = state->focused_panel == TUI_FOCUS_BAG;
+  draw_box_styled(plane, theme, L->bag_top, 0, height, L->board_width, title,
+                  TUI_FOCUS_BAG, bag_focused);
 
   // Tally bag + off-turn rack into a per-ml count array (the on-turn rack
   // is "seen", so it doesn't count as unseen).
@@ -1961,16 +2158,9 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
     const size_t letter_len = strlen(letter);
     for (int i = 0; i < counts[ml] && pos + letter_len + 1 < sizeof(line);
          i++) {
-      // Insert a zero-width non-joiner between adjacent blanks
-      // (`??`) so fonts that ligature double question marks render
-      // them as two distinct glyphs. Cell width is unchanged on
-      // terminals that respect the ZWNJ; the few that don't will
-      // either render it as a blank cell (rare in monospace) or
-      // ignore it entirely.
-      if (ml == 0 && i > 0 && pos + 3 + letter_len + 1 < sizeof(line)) {
-        memcpy(line + pos, "\xe2\x80\x8c", 3);
-        pos += 3;
-      }
+      // No ZWNJ between adjacent blanks: dropping the row entirely on
+      // some terminals (when the bag listing contains "??" + a ZWNJ)
+      // is worse than letting fonts ligature the two question marks.
       memcpy(line + pos, letter, letter_len);
       pos += letter_len;
     }
@@ -2183,18 +2373,10 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
       for (int copy = 0;
            copy < count && rcol + (tile_w - 1) <= rack_right_max; copy++) {
         if (halfwidth) {
-          // Halfwidth blank: glyph + ZWNJ so adjacent "?" tiles
-          // don't form a "??" ligature in fonts that have one.
-          // Only append the ZWNJ when another blank follows in this
-          // same inner loop — that's the only case the ligature can
-          // form, and an unconditional trailing ZWNJ has been seen
-          // to make isolated blanks disappear on some terminals.
-          const char *ascii;
-          if (ml == 0) {
-            ascii = (copy + 1 < count) ? "?\xe2\x80\x8c" : "?";
-          } else {
-            ascii = ld->ld_ml_to_hl[ml];
-          }
+          // Halfwidth blank: plain "?" glyph. The previous ZWNJ-
+          // splicing-between-adjacent-blanks trick caused the row
+          // containing the blanks to drop out on some terminals.
+          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
           ncplane_putstr_yx(plane, content_row, rcol, ascii);
         } else {
           const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
@@ -2547,8 +2729,9 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
   if (!L->combined_pills_history) {
-    draw_box(plane, theme, L->history_top, L->right_col_left, height, width,
-             NULL);
+    const bool history_focused = state->focused_panel == TUI_FOCUS_HISTORY;
+    draw_box_styled(plane, theme, L->history_top, L->right_col_left, height,
+                    width, "History", TUI_FOCUS_HISTORY, history_focused);
   }
 
   if (state->history_count == 0) {
@@ -2699,6 +2882,8 @@ typedef enum {
   ANALYSIS_TINT_TIE,      // zero final spread — dim (grey)
 } AnalysisTint;
 
+enum { MAX_ANALYSIS_PLIES = 8 };
+
 typedef struct {
   char move[80];
   char leave[16];
@@ -2712,6 +2897,15 @@ typedef struct {
   int score_value;
   double primary_value;
   double secondary_value;
+  // Per-ply mean move-score (only populated for sim mode). ply_count
+  // is the number of plies the sim ran. The renderer colors avg1 with
+  // the candidate's (on-turn) player color, avg2 with the opponent's,
+  // alternating onward.
+  double ply_avg[MAX_ANALYSIS_PLIES];
+  int ply_count;
+  // Player index whose turn it is for ply 0 (the candidate's player).
+  // Used by the renderer to color the per-ply columns.
+  int candidate_player_idx;
   bool valid;
 } AnalysisRow;
 
@@ -2739,8 +2933,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   int header_row = interior_top;
   int list_top = show_headers ? interior_top + 1 : interior_top;
 
-  const int sec_col = interior_right - secondary_w + 1;
-  const int prim_col = sec_col - primary_secondary_gap - primary_w;
+  // Forward declaration only — final values are set further down
+  // after rank_w / max_move_w / score_w are known. Initialized to
+  // safe defaults so any accidental early read doesn't crash.
+  enum { AVG_COL_W = 4, AVG_GAP_W = 1 };
 
   // Size the rank column to the digit count of the largest visible
   // rank, so a 9-row list shows "9. " (no pad) and only a 10+ list
@@ -2830,6 +3026,33 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     }
     max_move_w = new_max;
   }
+
+  // Now that rank_w + max_move_w are final, decide the avg-block
+  // width and the right-side anchor in one pass. score_w isn't
+  // known yet but its eventual maximum is 3, so probe with that
+  // ceiling here — slightly pessimistic but keeps sec_col / prim_col
+  // stable for the rest of the function.
+  int avg_block_w_probe_ply = 0;
+  for (int i = 0; i < visible; i++) {
+    if (rows[i].valid && rows[i].ply_count > avg_block_w_probe_ply) {
+      avg_block_w_probe_ply = rows[i].ply_count;
+    }
+  }
+  const int avg_block_w_tentative =
+      avg_block_w_probe_ply * (AVG_COL_W + AVG_GAP_W);
+  const int avg_need =
+      rank_w + max_move_w + 1 + 4 /* score column + gap, ceiling */ +
+      primary_secondary_gap + primary_w + secondary_w + avg_block_w_tentative;
+  const int avail_w = interior_right - interior_left + 1;
+  const bool show_avgs =
+      avg_block_w_probe_ply > 0 && avg_need <= avail_w;
+  const int avg_block_w = show_avgs ? avg_block_w_tentative : 0;
+  const int max_ply_count = show_avgs ? avg_block_w_probe_ply : 0;
+  const int right_anchor =
+      show_avgs ? interior_right - avg_block_w : interior_right;
+  const int sec_col = right_anchor - secondary_w + 1;
+  const int prim_col = sec_col - primary_secondary_gap - primary_w;
+  const int avg_left_edge = show_avgs ? right_anchor + 1 : -1;
 
   // Compact mode: when the standard layout (rank + widest move +
   // primary + spread) doesn't fit the panel, drop to a tight form.
@@ -3120,6 +3343,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     }
   }
   const bool show_score = score_w > 0;
+  // show_avgs / avg_block_w were finalized earlier (before sec_col
+  // and prim_col were derived) so the right_anchor doesn't drift.
+  // With avgs to the right of sprd, the leave/score block's right
+  // boundary is unchanged (= prim_col).
   const int score_right_edge = show_score ? prim_col - 1 : prim_col;
   const int score_left_edge =
       show_score ? score_right_edge - score_w + 1 : prim_col;
@@ -3195,6 +3422,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         leftmost_header_col = col;
       }
     }
+    // avg cols are right-anchored past sprd, so they don't affect
+    // leftmost_header_col — they sit further right than every other
+    // header.
     {
       const int col = prim_col + primary_w - 4; // "win%"
       if (col < leftmost_header_col) {
@@ -3292,6 +3522,15 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       const int col = score_right_edge - len + 1;
       ncplane_putstr_yx(plane, header_row, col, sc_label);
     }
+    if (show_avgs) {
+      for (int ply = 0; ply < max_ply_count; ply++) {
+        char hdr[8];
+        snprintf(hdr, sizeof(hdr), "avg%d", ply + 1);
+        const int col = avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) +
+                        AVG_GAP_W;
+        ncplane_putstr_yx(plane, header_row, col, hdr);
+      }
+    }
     {
       const char *win_label = "win%";
       const int len = (int)strlen(win_label);
@@ -3301,7 +3540,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     {
       const char *sprd_label = "sprd";
       const int len = (int)strlen(sprd_label);
-      const int col = interior_right - len + 1;
+      // Right-align inside the secondary column's slot, not against
+      // interior_right — when the avg block is on, sec_col has
+      // shifted left to make room for the avgs further right.
+      const int col = sec_col + secondary_w - len;
       ncplane_putstr_yx(plane, header_row, col, sprd_label);
     }
     ncplane_set_styles(plane, 0);
@@ -3394,6 +3636,33 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
     }
 
+    // Per-ply averages. Ply 0 is the candidate-player's move (on-
+    // turn at evaluation time); subsequent plies alternate. Color
+    // each column by whose turn that ply was, using the same per-
+    // player accent the player pill uses.
+    if (show_avgs && rows[i].ply_count > 0) {
+      const int candidate_idx = rows[i].candidate_player_idx;
+      for (int ply = 0; ply < rows[i].ply_count; ply++) {
+        const int ply_player = (candidate_idx + ply) % 2;
+        const ThemeRgb ply_color =
+            ply_player == 1 ? theme->on_turn_fg_p2 : theme->on_turn_fg;
+        const int col = avg_left_edge + ply * (AVG_COL_W + AVG_GAP_W) +
+                        AVG_GAP_W;
+        // Pick "12" vs "12.3" so the value fits in AVG_COL_W cells.
+        char buf[16];
+        const double v = rows[i].ply_avg[ply];
+        if (v >= 100.0 || v <= -10.0) {
+          snprintf(buf, sizeof(buf), "%*.0f", AVG_COL_W, v);
+        } else {
+          snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
+        }
+        theme_apply_fg(plane, ply_color);
+        ncplane_set_styles(plane, 0);
+        ncplane_putstr_yx(plane, row, col, buf);
+      }
+      theme_apply_fg(plane, theme->fg);
+    }
+
     // Primary column (win% or W/T/L). Right-justified within its slot
     // so single-char W/T/L lines up with the right edge.
     {
@@ -3419,7 +3688,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // when bolded made it shout louder than win%.
     {
       const int len = (int)strlen(rows[i].secondary);
-      const int col = interior_right - len + 1;
+      // Mirror the header: right-align within sec_col's slot rather
+      // than against interior_right, so the column tracks sec_col
+      // when it shifts left to make room for the avg block.
+      const int col = sec_col + secondary_w - len;
       const bool is_best =
           any_secondary && rows[i].secondary[0] != '\0' &&
           rows[i].secondary_value == best_secondary;
@@ -3465,6 +3737,7 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
     rows[i].score[0] = '\0';
     rows[i].primary[0] = '\0';
     rows[i].secondary[0] = '\0';
+    rows[i].ply_count = 0;
     const SimmedPlay *play =
         sim_results_get_display_simmed_play(results, i);
     if (play == NULL) {
@@ -3490,6 +3763,19 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
     rows[i].score_value = play_score;
     rows[i].primary_value = win_pct;
     rows[i].secondary_value = eq_pts;
+
+    // Per-ply average move-score (mean of every iteration's move-
+    // score at that ply, including 0 for pass / exchange). Capped at
+    // MAX_ANALYSIS_PLIES so the row stays small.
+    const int sim_plies = sim_results_get_num_plies(results);
+    const int plies_to_store =
+        sim_plies < MAX_ANALYSIS_PLIES ? sim_plies : MAX_ANALYSIS_PLIES;
+    rows[i].ply_count = plies_to_store;
+    rows[i].candidate_player_idx = on_turn;
+    for (int ply = 0; ply < plies_to_store; ply++) {
+      const Stat *score_stat = simmed_play_get_score_stat(play, ply);
+      rows[i].ply_avg[ply] = score_stat ? stat_get_mean(score_stat) : 0.0;
+    }
 
     StringBuilder *sb = string_builder_create();
     string_builder_add_move(sb, board, move, state->ld, false);
@@ -3543,6 +3829,7 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
     rows[i].score[0] = '\0';
     rows[i].primary[0] = '\0';
     rows[i].secondary[0] = '\0';
+    rows[i].ply_count = 0;
     const Move *move = snap->moves[i];
     if (move == NULL) {
       continue;
@@ -3667,8 +3954,9 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   } else {
     snprintf(title, sizeof(title), "Analysis");
   }
-  draw_box(plane, theme, L->analysis_top, L->analysis_left, height, width,
-           title);
+  const bool analysis_focused = state->focused_panel == TUI_FOCUS_ANALYSIS;
+  draw_box_styled(plane, theme, L->analysis_top, L->analysis_left, height,
+                  width, title, TUI_FOCUS_ANALYSIS, analysis_focused);
 
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
@@ -3877,6 +4165,233 @@ static void render_pending_bar(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, row, 0, buf);
 }
 
+// Command bar: always-on row directly above the status bar. Hosts
+// the [0] focus indicator on the left and a placeholder right-side
+// hint ("/ for cmd") prompting the user to enter command-input mode.
+// When [0] is the focused index, the row paints on
+// theme->panel_focus_border_bg with bold [0] — matching the panel
+// border treatment so focus reads consistently across the chrome.
+// The actual /-input + autocomplete is wired in a follow-up.
+// Command palette popup: rendered above the command bar while
+// slash mode is active. Lists commands whose name starts with the
+// typed prefix and a short description, mirroring the Claude Code
+// CLI's `/`-prompt style — typed prefix in theme->fg, remaining
+// command-name letters and descriptions in a dim grey. When the
+// prefix matches nothing, shows a single "No commands match"
+// message instead of an empty popup. Drawn directly on the std
+// plane and sized to the visible matches; the next frame's content
+// rendering naturally repaints over it when the popup goes away.
+static void render_command_palette(struct ncplane *plane, const Theme *theme,
+                                   const TuiGameState *state,
+                                   const Layout *L) {
+  if (state == NULL || !state->slash_active) {
+    return;
+  }
+  struct Cmd {
+    const char *name;
+    const char *desc;
+  };
+  static const struct Cmd cmds[] = {
+      {"new", "Start a new game"},
+      {"quit", "Quit MAGPIE TUI"},
+      {"settings", "Open settings"},
+  };
+  static const int n_cmds = (int)(sizeof(cmds) / sizeof(cmds[0]));
+
+  // Filter to prefix matches against the lowercase slash buffer.
+  int match_idx[16];
+  int n_match = 0;
+  for (int i = 0; i < n_cmds && n_match < (int)(sizeof(match_idx) /
+                                                  sizeof(match_idx[0]));
+       i++) {
+    if (state->slash_len == 0 ||
+        ((int)strlen(cmds[i].name) >= state->slash_len &&
+         strncmp(cmds[i].name, state->slash_buf,
+                 (size_t)state->slash_len) == 0)) {
+      match_idx[n_match++] = i;
+    }
+  }
+
+  const int popup_rows = n_match > 0 ? n_match : 1;
+  const int popup_top = L->command_bar_row - popup_rows;
+  if (popup_top < 0) {
+    return;
+  }
+
+  if (n_match == 0) {
+    // Single-line "No commands match" message.
+    char buf[128];
+    snprintf(buf, sizeof(buf), " No commands match \"/%s\"", state->slash_buf);
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    // Clear the row then write.
+    for (unsigned c = 0; c < L->plane_cols; c++) {
+      ncplane_putstr_yx(plane, popup_top, (int)c, " ");
+    }
+    ncplane_putstr_yx(plane, popup_top, 1, buf);
+    return;
+  }
+
+  // Compute description column: aligns the descriptions across all
+  // matching rows. Leading "/" plus the command name, plus a fixed
+  // gap of 3 cells.
+  int max_name = 0;
+  for (int i = 0; i < n_match; i++) {
+    const int w = (int)strlen(cmds[match_idx[i]].name);
+    if (w > max_name) {
+      max_name = w;
+    }
+  }
+  const int name_col = 1; // 1-cell left pad
+  const int desc_col = name_col + 1 /* "/" */ + max_name + 3;
+
+  for (int i = 0; i < n_match; i++) {
+    const int row = popup_top + i;
+    const struct Cmd *c = &cmds[match_idx[i]];
+    // Clear row to theme->bg first so we don't inherit colored
+    // content from the panel that was drawn below.
+    theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, 0);
+    for (unsigned col = 0; col < L->plane_cols; col++) {
+      ncplane_putstr_yx(plane, row, (int)col, " ");
+    }
+    // Leading "/" in dim (it's the same for every row, not part of
+    // the matched-prefix highlight).
+    int col = name_col;
+    theme_apply_fg(plane, theme->modal_shortcut_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_putstr_yx(plane, row, col++, "/");
+    // Matched prefix portion in bright theme->fg.
+    theme_apply_fg(plane, theme->fg);
+    for (int k = 0; k < state->slash_len && c->name[k] != '\0'; k++) {
+      char ch[2] = {c->name[k], '\0'};
+      ncplane_putstr_yx(plane, row, col++, ch);
+    }
+    // Remainder of the command name in dim grey.
+    theme_apply_fg(plane, theme->modal_shortcut_fg);
+    for (int k = state->slash_len; c->name[k] != '\0'; k++) {
+      char ch[2] = {c->name[k], '\0'};
+      ncplane_putstr_yx(plane, row, col++, ch);
+    }
+    // Description column, dim grey.
+    if (desc_col < (int)L->plane_cols) {
+      theme_apply_fg(plane, theme->modal_shortcut_fg);
+      ncplane_putstr_yx(plane, row, desc_col, c->desc);
+    }
+  }
+}
+
+static void render_command_bar(struct ncplane *plane, const Theme *theme,
+                               const TuiGameState *state, const Layout *L) {
+  if (L->command_bar_row < 0) {
+    return;
+  }
+  const int row = L->command_bar_row;
+  const bool focused = state != NULL && state->focused_panel == 0;
+  const ThemeRgb bar_bg = focused ? theme->panel_focus_border_bg : theme->bg;
+  theme_apply_fg(plane, theme->fg);
+  theme_apply_bg(plane, bar_bg);
+  ncplane_set_styles(plane, 0);
+  for (unsigned col = 0; col < L->plane_cols; col++) {
+    ncplane_putstr_yx(plane, row, (int)col, " ");
+  }
+  // Left side: "[0] Command>" prompt. The ">" hangs off "Command"
+  // with no space, so it reads as one prompt token like a shell.
+  int col = 1;
+  const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
+  theme_apply_fg(plane, hk_fg);
+  theme_apply_bg(plane, bar_bg);
+  if (focused) {
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+  }
+  ncplane_putstr_yx(plane, row, col, "[0]");
+  col += 3;
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, theme->fg);
+  ncplane_putstr_yx(plane, row, col++, " ");
+  ncplane_putstr_yx(plane, row, col, "Command>");
+  col += 8;
+  ncplane_putstr_yx(plane, row, col++, " ");
+
+  // After the prompt we render either:
+  //  - the slash-mode input (typed bold, autocomplete suffix dim),
+  //  - the placeholder hint "/ to type commands" (dim italic),
+  //  - or nothing if neither applies (slash mode not entered, [0]
+  //    not focused).
+  if (state != NULL && state->slash_active) {
+    // "/" prompt, non-bold.
+    theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, bar_bg);
+    ncplane_set_styles(plane, 0);
+    ncplane_putstr_yx(plane, row, col++, "/");
+    const int typed_start = col;
+    for (int i = 0; i < state->slash_len; i++) {
+      char ch[2] = {state->slash_buf[i], '\0'};
+      ncplane_putstr_yx(plane, row, col++, ch);
+    }
+    // Live terminal cursor at slash_cursor's column. Matching
+    // commands and their descriptions appear in a popup above the
+    // bar (render_command_palette), so there's no inline ghost text
+    // here anymore.
+    struct notcurses *nc = ncplane_notcurses(plane);
+    if (nc != NULL) {
+      notcurses_cursor_enable(nc, row, typed_start + state->slash_cursor);
+    }
+  } else {
+    // Not in slash mode. Show the placeholder, dim italic.
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, bar_bg);
+    ncplane_set_styles(plane, NCSTYLE_ITALIC);
+    ncplane_putstr_yx(plane, row, col, "/ to type commands");
+    ncplane_set_styles(plane, 0);
+    struct notcurses *nc = ncplane_notcurses(plane);
+    if (nc != NULL) {
+      notcurses_cursor_disable(nc);
+    }
+  }
+
+  // Right side: when [0] is focused (and we're not actively in
+  // slash mode), surface the alphabetical commands as inline help.
+  // Each entry is "<KEY> <name>", separated by " · ". The key
+  // letter renders in modal_shortcut_fg, the name in theme->fg.
+  if (focused && !(state != NULL && state->slash_active)) {
+    struct {
+      const char *key;
+      const char *name;
+    } cmds[] = {{"N", "new"}, {"S", "settings"}, {"Q", "quit"}};
+    const int n = (int)(sizeof(cmds) / sizeof(cmds[0]));
+    // Pre-compute width to right-align.
+    int total = 0;
+    for (int i = 0; i < n; i++) {
+      if (i > 0) {
+        total += 3; // " · "
+      }
+      total += (int)strlen(cmds[i].key) + 1 + (int)strlen(cmds[i].name);
+    }
+    int rcol = (int)L->plane_cols - total - 1;
+    if (rcol > col + 2) {
+      for (int i = 0; i < n; i++) {
+        if (i > 0) {
+          theme_apply_fg(plane, theme->dim_fg);
+          theme_apply_bg(plane, bar_bg);
+          ncplane_putstr_yx(plane, row, rcol, " \xc2\xb7 "); // " · "
+          rcol += 3;
+        }
+        theme_apply_fg(plane, theme->modal_shortcut_fg);
+        theme_apply_bg(plane, bar_bg);
+        ncplane_putstr_yx(plane, row, rcol, cmds[i].key);
+        rcol += (int)strlen(cmds[i].key);
+        theme_apply_fg(plane, theme->fg);
+        ncplane_putstr_yx(plane, row, rcol++, " ");
+        ncplane_putstr_yx(plane, row, rcol, cmds[i].name);
+        rcol += (int)strlen(cmds[i].name);
+      }
+    }
+  }
+}
+
 static void render_status_bar(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L,
                               TuiModalState modal) {
@@ -3995,19 +4510,29 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   ncplane_putstr(plane, right_buf);
 
   // Right side: dynamic shortcut hint depending on what modal is open.
-  const char *hint = " esc for menu ";
+  // Key names use leading caps for consistency with the rest of the
+  // chrome (e.g. status bar's "Esc menu", command bar's "Q quit").
+  const char *hint = " Esc menu ";
   switch (modal) {
   case TUI_MODAL_MAIN_MENU:
-    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 enter confirm \xc2"
-           "\xb7 esc back ";
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
+           "\xb7 Esc back ";
     break;
   case TUI_MODAL_SETTINGS:
     hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 \xe2\x86\x90\xe2"
-           "\x86\x92 adjust \xc2\xb7 esc back ";
+           "\x86\x92 adjust \xc2\xb7 Esc back ";
     break;
   case TUI_MODAL_TIME_PICKER:
-    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 enter confirm \xc2"
-           "\xb7 esc back ";
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
+           "\xb7 Esc back ";
+    break;
+  case TUI_MODAL_LEXICON_PICKER:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
+           "\xb7 Esc back ";
+    break;
+  case TUI_MODAL_QUIT_CONFIRM:
+    hint = " \xe2\x86\x91\xe2\x86\x93 navigate \xc2\xb7 Enter confirm \xc2"
+           "\xb7 Esc back ";
     break;
   case TUI_MODAL_NONE:
   default:
@@ -4126,7 +4651,8 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 
   (void)time_per_side_seconds; // now read from state->time_per_side_seconds
   if (L.combined_pills_history) {
-    draw_combined_pills_history_frame(plane, theme, &L);
+    draw_combined_pills_history_frame(plane, theme, &L,
+                                      state->focused_panel == TUI_FOCUS_HISTORY);
   }
   render_player_pill(plane, theme, state, 0, L.pill1_top, L.pill1_left,
                      L.pill1_right, L.pills_halfwidth,
@@ -4138,6 +4664,8 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_analysis_panel(plane, theme, state, &L);
 
   render_pending_bar(plane, theme, state, &L);
+  render_command_bar(plane, theme, state, &L);
+  render_command_palette(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
 
   // When a modal closes, drop its plane so the next open recreates it
@@ -4382,6 +4910,16 @@ void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
     items[i] = buf[i];
   }
   render_modal(plane, theme, "Time control", items, NULL, rows, focus, 28);
+}
+
+void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
+                                  int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  const char *items[2] = {"No", "Yes"};
+  const char *shortcuts[2] = {"N", "Y"};
+  render_modal(plane, theme, "Quit?", items, shortcuts, 2, focus, 24);
 }
 
 // Helper for an arrow-adjusted Settings row. Renders

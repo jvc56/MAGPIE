@@ -57,6 +57,13 @@ typedef struct {
   ThemeRgb on_turn_fg;    // P1 turn-marker arrow / chyron
   ThemeRgb on_turn_fg_p2; // P2 turn-marker arrow / chyron
 
+  // Panel focus chrome. When a panel has keyboard focus (user pressed
+  // its [N] hotkey), the border frame paints onto this slightly-
+  // lighter bg strip and uses double-line box-drawing glyphs so the
+  // panel visibly lifts off the void around it. Unfocused panels
+  // render as before (single-line border on theme->bg).
+  ThemeRgb panel_focus_border_bg;
+
   // Modal / menu palette. Intentionally clinical greys — game
   // content (rack, board, history) uses the green/amber accents,
   // so chrome like the menu should sit clearly outside that palette

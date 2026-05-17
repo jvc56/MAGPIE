@@ -165,6 +165,26 @@ typedef struct {
   // surface. Replaced on each tui_game_state_init.
   char active_lexicon[32];
   bool active_load_rit;
+  // Currently focused panel (0 = none, 1..5 = Board/Rack/Bag/History
+  // /Analysis). Driven by 1..5 / 0 / Tab in main.c's input loop;
+  // consumed by game_render.c to draw a focused-panel border style
+  // (double-line glyphs on a slightly-lighter bg strip).
+  int focused_panel;
+
+  // Command-bar slash input. When slash_active is true, the bar
+  // renders a "/" prompt + slash_buf with the terminal cursor live
+  // at slash_buf's end, and main.c's input loop captures letters /
+  // Tab / Enter / Backspace into the buffer instead of the global
+  // hotkey dispatch.
+  bool slash_active;
+  char slash_buf[64];
+  int slash_len;
+  // Insertion-point cursor into slash_buf, in [0, slash_len]. Driven
+  // by arrow keys / Home / End. Typed characters insert at this
+  // position, Backspace removes the char before it, Delete removes
+  // the char at it.
+  int slash_cursor;
+
   // Pending values written by the Settings UI when the user picks a
   // different lexicon or toggles RIT. The renderer compares
   // pending_* to active_* to decide whether to show the pending-

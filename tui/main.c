@@ -273,6 +273,13 @@ int main(int argc, char *argv[]) {
   // scroll the alt screen when render coords overflow the visible area
   // mid-resize, and that scroll is irreversible.
   ncplane_set_scrolling(notcurses_stdplane(nc), false);
+  // Enable mouse-button reports. With NCMICE_BUTTON_EVENT the input
+  // stream now delivers NCTYPE_PRESS / NCTYPE_RELEASE / NCSCROLL_*
+  // records alongside keystrokes. No handlers wired yet — this is a
+  // pure smoke-test of what enabling does to the terminal's feel
+  // (notably: text selection now requires the platform modifier,
+  // typically Option/Cmd on macOS).
+  notcurses_mice_enable(nc, NCMICE_BUTTON_EVENT);
 
   // Load saved settings (if any), then resolve each in order: theme first
   // (it controls the picker palette for the others), then lexicon, then
@@ -386,7 +393,22 @@ int main(int argc, char *argv[]) {
   TuiModalState modal = TUI_MODAL_NONE;
   int main_menu_focus = 0;
   int settings_focus = 0;
+  // Where to return when Esc is pressed inside the Settings modal.
+  // Reached from the main menu → return to the menu so the user can
+  // pick another entry. Reached from the command-bar S → return to
+  // no modal, since that's where the user was.
+  TuiModalState settings_return = TUI_MODAL_MAIN_MENU;
   int time_focus = 0;
+  // Where Esc inside the time picker should return to. Reached
+  // from the main menu's New Game → MAIN_MENU; reached via the
+  // command bar's N / /new → NONE.
+  TuiModalState time_picker_return = TUI_MODAL_MAIN_MENU;
+  // Quit-confirmation modal: focus tracks Yes/No (0 = No, 1 = Yes),
+  // default No since it's the safer option. quit_confirm_return is
+  // the modal to return to when the user picks No / hits Esc; the
+  // caller (main menu Q or command-bar Q) sets this before opening.
+  int quit_confirm_focus = 0;
+  TuiModalState quit_confirm_return = TUI_MODAL_NONE;
   // Modal-style lexicon picker state. Lazily allocated when the user
   // enters the modal; destroyed before exit.
   LexiconList *lexicon_list = NULL;
@@ -456,6 +478,8 @@ int main(int argc, char *argv[]) {
     } else if (modal == TUI_MODAL_LEXICON_PICKER && lexicon_list != NULL) {
       tui_game_render_lexicon_picker(std_plane, theme, lexicon_list,
                                      lexicon_focus);
+    } else if (modal == TUI_MODAL_QUIT_CONFIRM) {
+      tui_game_render_quit_confirm(std_plane, theme, quit_confirm_focus);
     }
     notcurses_render(nc);
 
@@ -472,6 +496,25 @@ int main(int argc, char *argv[]) {
       continue;
     }
     if (input.evtype == NCTYPE_RELEASE) {
+      continue;
+    }
+    // Left mouse click → focus the panel under the cursor. Only
+    // NCKEY_BUTTON1 (left-button press) for now; scroll wheel and
+    // right-click are reserved for future per-panel interactions.
+    if (key == NCKEY_BUTTON1 && modal == TUI_MODAL_NONE) {
+      const int hit = tui_game_panel_at(std_plane, &game_state, input.y,
+                                        input.x);
+      if (hit >= 0) {
+        pthread_mutex_lock(&game_state.mutex);
+        if (hit != 0 && game_state.slash_active) {
+          game_state.slash_active = false;
+          game_state.slash_len = 0;
+          game_state.slash_cursor = 0;
+          game_state.slash_buf[0] = '\0';
+        }
+        game_state.focused_panel = hit;
+        pthread_mutex_unlock(&game_state.mutex);
+      }
       continue;
     }
     if (key == NCKEY_RESIZE) {
@@ -503,11 +546,15 @@ int main(int argc, char *argv[]) {
         // skip focus-then-Enter so the menu behaves like a launcher.
         modal = TUI_MODAL_TIME_PICKER;
         time_focus = tui_time_picker_closest_index(chosen_time);
+        time_picker_return = TUI_MODAL_MAIN_MENU;
       } else if (key == 's' || key == 'S') {
         modal = TUI_MODAL_SETTINGS;
         settings_focus = 0;
+        settings_return = TUI_MODAL_MAIN_MENU;
       } else if (key == 'q' || key == 'Q') {
-        running = false;
+        modal = TUI_MODAL_QUIT_CONFIRM;
+        quit_confirm_focus = 0;
+        quit_confirm_return = TUI_MODAL_MAIN_MENU;
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         if (main_menu_focus == TUI_MENU_NEW_GAME) {
           // Pivot to the time-picker modal. The new-game side effects
@@ -515,11 +562,15 @@ int main(int argc, char *argv[]) {
           // a time inside that modal; Esc there returns to this menu.
           modal = TUI_MODAL_TIME_PICKER;
           time_focus = tui_time_picker_closest_index(chosen_time);
+          time_picker_return = TUI_MODAL_MAIN_MENU;
         } else if (main_menu_focus == TUI_MENU_SETTINGS) {
           modal = TUI_MODAL_SETTINGS;
           settings_focus = 0;
+          settings_return = TUI_MODAL_MAIN_MENU;
         } else if (main_menu_focus == TUI_MENU_QUIT) {
-          running = false;
+          modal = TUI_MODAL_QUIT_CONFIRM;
+          quit_confirm_focus = 0;
+          quit_confirm_return = TUI_MODAL_MAIN_MENU;
         } else if (main_menu_focus == TUI_MENU_BACK) {
           modal = TUI_MODAL_NONE;
         }
@@ -539,9 +590,12 @@ int main(int argc, char *argv[]) {
         atomic_fetch_add(&game_state.render_version, 1);
       }
       if (key == NCKEY_ESC) {
-        // Esc returns to the main menu so the user can pick another
-        // entry without re-opening from scratch.
-        modal = TUI_MODAL_MAIN_MENU;
+        // Esc returns to whichever modal opened Settings — main menu
+        // when reached via Esc → Settings (so the user can navigate
+        // to another menu entry without re-opening from scratch), or
+        // back to no modal when reached via the command-bar S
+        // shortcut.
+        modal = settings_return;
       } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
         const bool effective_2x = pixel_supported && font_available &&
                                   game_state.board_scale >= 2;
@@ -728,7 +782,7 @@ int main(int argc, char *argv[]) {
         }
       } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
         if (settings_focus == TUI_SETTINGS_BACK) {
-          modal = TUI_MODAL_MAIN_MENU;
+          modal = settings_return;
         } else if (settings_focus == TUI_SETTINGS_LEXICON) {
           // Pivot to the modal-style lexicon picker. Load the list
           // lazily; reuse it across opens. Focus the currently-
@@ -752,7 +806,7 @@ int main(int argc, char *argv[]) {
     if (modal == TUI_MODAL_TIME_PICKER) {
       const int preset_count = tui_time_picker_preset_count();
       if (key == NCKEY_ESC) {
-        modal = TUI_MODAL_MAIN_MENU;
+        modal = time_picker_return;
       } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
         if (time_focus > 0) {
           time_focus--;
@@ -859,12 +913,252 @@ int main(int argc, char *argv[]) {
       continue;
     }
 
+    if (modal == TUI_MODAL_QUIT_CONFIRM) {
+      // Y / N shortcuts trigger their action regardless of focus.
+      // Enter confirms whatever's focused (default No, the safer
+      // option). Esc / N returns to whichever modal opened the
+      // confirm (main menu when launched via Quit there, or NONE
+      // when launched via the command-bar Q).
+      if (key == NCKEY_ESC) {
+        modal = quit_confirm_return;
+      } else if (key == 'y' || key == 'Y') {
+        running = false;
+      } else if (key == 'n' || key == 'N') {
+        modal = quit_confirm_return;
+      } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
+        if (quit_confirm_focus > 0) {
+          quit_confirm_focus--;
+        }
+      } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (quit_confirm_focus < 1) {
+          quit_confirm_focus++;
+        }
+      } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+        if (quit_confirm_focus == 1) {
+          running = false;
+        } else {
+          modal = quit_confirm_return;
+        }
+      }
+      continue;
+    }
+
     if (key == NCKEY_ESC) {
       modal = TUI_MODAL_MAIN_MENU;
       main_menu_focus = 0;
+    } else if (key >= '0' && key <= '5') {
+      // Direct panel focus hotkeys (no modal). '0' focuses the
+      // command bar; '1'-'5' focus the corresponding panel. These
+      // work globally regardless of which panel is currently
+      // focused — typing digits never gets captured by a panel.
+      pthread_mutex_lock(&game_state.mutex);
+      const int new_focus = (int)(key - '0');
+      if (new_focus != 0 && game_state.slash_active) {
+        game_state.slash_active = false;
+        game_state.slash_len = 0;
+        game_state.slash_cursor = 0;
+        game_state.slash_buf[0] = '\0';
+      }
+      game_state.focused_panel = new_focus;
+      pthread_mutex_unlock(&game_state.mutex);
+    } else if ((key == NCKEY_TAB || key == '\t') &&
+               !game_state.slash_active) {
+      // Tab cycles forward through 0..5 (Command → Board → ... →
+      // Analysis → Command). Useful as a discoverability path —
+      // press Tab repeatedly to walk every focus state. While slash
+      // mode is active Tab means "autocomplete" instead, so it
+      // falls through to the [0]-focused handler below.
+      pthread_mutex_lock(&game_state.mutex);
+      const int new_focus = (game_state.focused_panel + 1) % 6;
+      if (new_focus != 0 && game_state.slash_active) {
+        game_state.slash_active = false;
+        game_state.slash_len = 0;
+        game_state.slash_cursor = 0;
+        game_state.slash_buf[0] = '\0';
+      }
+      game_state.focused_panel = new_focus;
+      pthread_mutex_unlock(&game_state.mutex);
+    } else if (key == '/' && !game_state.slash_active) {
+      // Global "/" — focuses [0] Command if it isn't already and
+      // begins a slash-command. Lets the user kick off a command
+      // from any panel without first pressing 0 / Tab to land on
+      // the command bar.
+      pthread_mutex_lock(&game_state.mutex);
+      game_state.focused_panel = 0;
+      game_state.slash_active = true;
+      game_state.slash_len = 0;
+      game_state.slash_cursor = 0;
+      game_state.slash_buf[0] = '\0';
+      pthread_mutex_unlock(&game_state.mutex);
+    } else if (game_state.focused_panel == 0) {
+      // Slash-mode input loop: typing /, letters, Tab, Backspace,
+      // Enter, Esc all map to slash buffer behavior rather than
+      // global hotkeys. Falls through to the alphabetical hotkeys
+      // (N/S/Q) only when slash mode is NOT active.
+      if (game_state.slash_active) {
+        if (key == NCKEY_ESC) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.slash_active = false;
+          game_state.slash_len = 0;
+          game_state.slash_cursor = 0;
+          game_state.slash_buf[0] = '\0';
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_LEFT) {
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.slash_cursor > 0) {
+            game_state.slash_cursor--;
+          }
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_RIGHT) {
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.slash_cursor < game_state.slash_len) {
+            game_state.slash_cursor++;
+          }
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_HOME) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.slash_cursor = 0;
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_END) {
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.slash_cursor = game_state.slash_len;
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_DEL) {
+          // Forward-delete: remove char at cursor.
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.slash_cursor < game_state.slash_len) {
+            memmove(game_state.slash_buf + game_state.slash_cursor,
+                    game_state.slash_buf + game_state.slash_cursor + 1,
+                    (size_t)(game_state.slash_len - game_state.slash_cursor));
+            game_state.slash_len--;
+          }
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_BACKSPACE || key == 0x7F || key == '\b') {
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.slash_cursor > 0) {
+            // Remove the char before the cursor.
+            memmove(game_state.slash_buf + game_state.slash_cursor - 1,
+                    game_state.slash_buf + game_state.slash_cursor,
+                    (size_t)(game_state.slash_len -
+                             game_state.slash_cursor + 1));
+            game_state.slash_len--;
+            game_state.slash_cursor--;
+          } else if (game_state.slash_len == 0) {
+            // Backspace at the very start of an empty buffer exits.
+            game_state.slash_active = false;
+          }
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if (key == NCKEY_TAB || key == '\t') {
+          // Tab completes against the unique prefix match.
+          static const char *cmd_names[] = {"new", "quit", "settings"};
+          static const int n_cmds =
+              (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
+          const char *match = NULL;
+          int n_match = 0;
+          for (int i = 0; i < n_cmds; i++) {
+            if ((int)strlen(cmd_names[i]) >= game_state.slash_len &&
+                strncmp(cmd_names[i], game_state.slash_buf,
+                        (size_t)game_state.slash_len) == 0) {
+              match = cmd_names[i];
+              n_match++;
+            }
+          }
+          if (n_match == 1 && match != NULL) {
+            pthread_mutex_lock(&game_state.mutex);
+            snprintf(game_state.slash_buf, sizeof(game_state.slash_buf), "%s",
+                     match);
+            game_state.slash_len = (int)strlen(match);
+            game_state.slash_cursor = game_state.slash_len;
+            pthread_mutex_unlock(&game_state.mutex);
+          }
+        } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+          // Execute the typed-or-completed command. Fall back to a
+          // unique prefix match if user pressed Enter without
+          // completing first.
+          char cmd[64];
+          snprintf(cmd, sizeof(cmd), "%s", game_state.slash_buf);
+          if (strcmp(cmd, "new") == 0 || strcmp(cmd, "n") == 0) {
+            modal = TUI_MODAL_TIME_PICKER;
+            time_focus = tui_time_picker_closest_index(chosen_time);
+            time_picker_return = TUI_MODAL_NONE;
+          } else if (strcmp(cmd, "settings") == 0) {
+            modal = TUI_MODAL_SETTINGS;
+            settings_focus = 0;
+            settings_return = TUI_MODAL_NONE;
+          } else if (strcmp(cmd, "quit") == 0) {
+            modal = TUI_MODAL_QUIT_CONFIRM;
+            quit_confirm_focus = 0;
+            quit_confirm_return = TUI_MODAL_NONE;
+          } else {
+            // Try a unique prefix match.
+            static const char *cmd_names[] = {"new", "quit", "settings"};
+            static const int n_cmds =
+                (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
+            const char *match = NULL;
+            int n_match = 0;
+            for (int i = 0; i < n_cmds; i++) {
+              if ((int)strlen(cmd_names[i]) >= game_state.slash_len &&
+                  strncmp(cmd_names[i], game_state.slash_buf,
+                          (size_t)game_state.slash_len) == 0) {
+                match = cmd_names[i];
+                n_match++;
+              }
+            }
+            if (n_match == 1 && match != NULL) {
+              if (strcmp(match, "new") == 0) {
+                modal = TUI_MODAL_TIME_PICKER;
+                time_focus = tui_time_picker_closest_index(chosen_time);
+                time_picker_return = TUI_MODAL_NONE;
+              } else if (strcmp(match, "settings") == 0) {
+                modal = TUI_MODAL_SETTINGS;
+                settings_focus = 0;
+                settings_return = TUI_MODAL_NONE;
+              } else if (strcmp(match, "quit") == 0) {
+                modal = TUI_MODAL_QUIT_CONFIRM;
+                quit_confirm_focus = 0;
+                quit_confirm_return = TUI_MODAL_NONE;
+              }
+            }
+          }
+          pthread_mutex_lock(&game_state.mutex);
+          game_state.slash_active = false;
+          game_state.slash_len = 0;
+          game_state.slash_cursor = 0;
+          game_state.slash_buf[0] = '\0';
+          pthread_mutex_unlock(&game_state.mutex);
+        } else if ((key >= 'a' && key <= 'z') ||
+                   (key >= 'A' && key <= 'Z')) {
+          // Insert (lowercased) at the cursor position rather than
+          // always appending. Shifts the buffer tail right.
+          const char ch =
+              (key >= 'A' && key <= 'Z') ? (char)(key + ('a' - 'A')) : (char)key;
+          pthread_mutex_lock(&game_state.mutex);
+          if (game_state.slash_len <
+              (int)sizeof(game_state.slash_buf) - 1) {
+            memmove(game_state.slash_buf + game_state.slash_cursor + 1,
+                    game_state.slash_buf + game_state.slash_cursor,
+                    (size_t)(game_state.slash_len -
+                             game_state.slash_cursor + 1));
+            game_state.slash_buf[game_state.slash_cursor] = ch;
+            game_state.slash_len++;
+            game_state.slash_cursor++;
+          }
+          pthread_mutex_unlock(&game_state.mutex);
+        }
+      } else if (key == 'q' || key == 'Q') {
+        modal = TUI_MODAL_QUIT_CONFIRM;
+        quit_confirm_focus = 0;
+        quit_confirm_return = TUI_MODAL_NONE;
+      } else if (key == 's' || key == 'S') {
+        modal = TUI_MODAL_SETTINGS;
+        settings_focus = 0;
+        settings_return = TUI_MODAL_NONE;
+      } else if (key == 'n' || key == 'N') {
+        modal = TUI_MODAL_TIME_PICKER;
+        time_focus = tui_time_picker_closest_index(chosen_time);
+        time_picker_return = TUI_MODAL_NONE;
+      }
     }
-    // q/Q intentionally unbound — the user will be typing tiles. Quit
-    // through Esc → Quit (or Ctrl-C signal).
   }
 
   tui_game_state_destroy(&game_state);
