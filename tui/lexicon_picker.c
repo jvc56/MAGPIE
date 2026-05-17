@@ -757,8 +757,7 @@ void tui_game_render_lexicon_picker(struct ncplane *plane, const Theme *theme,
   {
     uint64_t shadow_ch = 0;
     ncchannels_set_fg_rgb8(&shadow_ch, theme->modal_shadow_fg.r,
-                           theme->modal_shadow_fg.g,
-                           theme->modal_shadow_fg.b);
+                           theme->modal_shadow_fg.g, theme->modal_shadow_fg.b);
     ncchannels_set_bg_alpha(&shadow_ch, NCALPHA_TRANSPARENT);
     ncplane_set_channels(mp, shadow_ch);
     const int shadow_row = height;

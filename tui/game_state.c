@@ -248,11 +248,20 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   game_reset(state->game);
   game_seed(state->game, seed);
   draw_starting_racks(state->game);
-  // Free per-entry board snapshots before zeroing the count.
+  // Free per-entry owned state before zeroing the count.
   for (int idx = 0; idx < state->history_count; idx++) {
-    if (state->history[idx].board_before != NULL) {
-      board_destroy(state->history[idx].board_before);
-      state->history[idx].board_before = NULL;
+    TuiHistoryEntry *entry = &state->history[idx];
+    if (entry->board_before != NULL) {
+      board_destroy(entry->board_before);
+      entry->board_before = NULL;
+    }
+    if (entry->rack_before != NULL) {
+      rack_destroy(entry->rack_before);
+      entry->rack_before = NULL;
+    }
+    if (entry->sim_results_saved != NULL) {
+      sim_results_destroy(entry->sim_results_saved);
+      entry->sim_results_saved = NULL;
     }
   }
   state->history_count = 0;
@@ -281,11 +290,20 @@ void tui_game_state_destroy(TuiGameState *state) {
     pthread_join(state->bot_thread, NULL);
     state->bot_started = false;
   }
-  // Free per-entry board snapshots stashed during gameplay.
+  // Free per-entry owned state stashed during gameplay.
   for (int idx = 0; idx < state->history_count; idx++) {
-    if (state->history[idx].board_before != NULL) {
-      board_destroy(state->history[idx].board_before);
-      state->history[idx].board_before = NULL;
+    TuiHistoryEntry *entry = &state->history[idx];
+    if (entry->board_before != NULL) {
+      board_destroy(entry->board_before);
+      entry->board_before = NULL;
+    }
+    if (entry->rack_before != NULL) {
+      rack_destroy(entry->rack_before);
+      entry->rack_before = NULL;
+    }
+    if (entry->sim_results_saved != NULL) {
+      sim_results_destroy(entry->sim_results_saved);
+      entry->sim_results_saved = NULL;
     }
   }
   state->history_count = 0;

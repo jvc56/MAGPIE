@@ -79,16 +79,23 @@ static int append_pending_history(TuiGameState *state, int player_idx,
   // watching — slide the cursor forward to keep it on the live
   // turn. If they parked the cursor on an older entry (or back at
   // the [4>] label) we leave it alone.
-  const bool follow_to_new_pending = state->history_cursor >= 0 &&
-                                     state->history_cursor ==
-                                         state->history_count - 1;
+  const bool follow_to_new_pending =
+      state->history_cursor >= 0 &&
+      state->history_cursor == state->history_count - 1;
   if (state->history_count >= TUI_HISTORY_MAX) {
-    // Ring-buffer eviction: drop the oldest entry's snapshot before
-    // we shift the array left so we don't leak its Board. Shift the
-    // cursor down by one too so it tracks the same logical move; if
-    // it was on the evicted entry, it falls back to the [4>] label.
+    // Ring-buffer eviction: drop the oldest entry's owned state
+    // before we shift the array left so we don't leak anything.
+    // Shift the cursor down by one too so it tracks the same
+    // logical move; if it was on the evicted entry, it falls back
+    // to the [4>] label.
     if (state->history[0].board_before != NULL) {
       board_destroy(state->history[0].board_before);
+    }
+    if (state->history[0].rack_before != NULL) {
+      rack_destroy(state->history[0].rack_before);
+    }
+    if (state->history[0].sim_results_saved != NULL) {
+      sim_results_destroy(state->history[0].sim_results_saved);
     }
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
@@ -102,11 +109,18 @@ static int append_pending_history(TuiGameState *state, int player_idx,
   entry->player_idx = player_idx;
   entry->clock_at_start = clock_at_start;
   entry->pending = true;
-  // Snapshot the board NOW (pre-move) so the History cursor can
-  // replay the position this player saw at the moment of decision.
-  // Owned by the entry; destroyed when the entry is dropped or the
-  // game state is torn down.
+  // Snapshot the board AND rack NOW (pre-move) so the History
+  // cursor can replay the position this player saw at the moment
+  // of decision. Both are owned by the entry; destroyed when the
+  // entry is dropped or the game state is torn down. The rack is
+  // the engine-friendly Rack object — analysis resumption needs
+  // it; the text rack_str field on the entry is just for display.
   entry->board_before = board_duplicate(game_get_board(state->game));
+  if (rack_at_start != NULL) {
+    entry->rack_before = rack_duplicate(rack_at_start);
+  } else {
+    entry->rack_before = NULL;
+  }
   if (follow_to_new_pending) {
     state->history_cursor = state->history_count - 1;
   }
@@ -191,6 +205,14 @@ static void pop_history(TuiGameState *state) {
     if (entry->board_before != NULL) {
       board_destroy(entry->board_before);
       entry->board_before = NULL;
+    }
+    if (entry->rack_before != NULL) {
+      rack_destroy(entry->rack_before);
+      entry->rack_before = NULL;
+    }
+    if (entry->sim_results_saved != NULL) {
+      sim_results_destroy(entry->sim_results_saved);
+      entry->sim_results_saved = NULL;
     }
     state->history_count--;
   }
@@ -768,9 +790,22 @@ static void *bot_thread_main(void *arg) {
     // pre-move board + rack). The pending history entry already
     // exists at pending_idx; stash the snapshot into it so the
     // History cursor can replay this turn's analysis later.
+    //
+    // For sim turns ALSO deep-copy the live SimResults — every
+    // Stat / PRNG / BAIResult / SimmedPlay — so a future "/resume"
+    // can pick up iterating onto these samples rather than restart
+    // from zero. The duplicate is owned by the entry; destroyed on
+    // pop / reset / state-destroy.
     if (pending_idx >= 0 && pending_idx < state->history_count) {
-      tui_capture_analysis_snapshot(
-          state, &state->history[pending_idx].analysis_snapshot);
+      TuiHistoryEntry *finalized = &state->history[pending_idx];
+      tui_capture_analysis_snapshot(state, &finalized->analysis_snapshot);
+      if (finalized->analysis_snapshot.is_sim && state->sim_results != NULL) {
+        if (finalized->sim_results_saved != NULL) {
+          sim_results_destroy(finalized->sim_results_saved);
+        }
+        finalized->sim_results_saved =
+            sim_results_duplicate(state->sim_results);
+      }
     }
     Rack leave;
     rack_set_dist_size(&leave, ld_get_size(state->ld));
@@ -787,8 +822,7 @@ static void *bot_thread_main(void *arg) {
       const int tile_count = move_get_tiles_length(chosen);
       for (int t = 0; t < tile_count; t++) {
         if (move_get_tile(chosen, t) != PLAYED_THROUGH_MARKER) {
-          board_set_square_owner(game_get_board(state->game), r, c,
-                                 player_idx);
+          board_set_square_owner(game_get_board(state->game), r, c, player_idx);
         }
         if (board_is_dir_vertical(dir)) {
           r++;

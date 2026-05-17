@@ -122,7 +122,8 @@ typedef struct {
   int clock_at_start; // seconds remaining when this player's turn began
   char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
   char rack_str[16];  // full rack the player had at the start of the turn
-  char leave_str[16]; // tiles kept after the play (empty = outplay/exchange-all)
+  char
+      leave_str[16]; // tiles kept after the play (empty = outplay/exchange-all)
   // Going-out bonus, attached to the going-out player's last move so it
   // renders as a third line of that entry instead of its own row. Zero
   // when this entry has no end-of-game adjustment.
@@ -148,6 +149,21 @@ typedef struct {
   // when this turn was decided. Cleared when the entry is dropped
   // or the game is reset.
   TuiAnalysisSnapshot analysis_snapshot;
+
+  // Full deep-copy of the SimResults that drove this turn's sim
+  // decision, captured at the same finalize-time moment as
+  // analysis_snapshot. Owned by this entry. NULL when no sim ran
+  // for this turn (e.g., endgame turns). Preserves every Stat /
+  // PRNG / BAIResult / SimmedPlay so a follow-up "/resume" can
+  // continue iterating onto the saved samples instead of
+  // restarting from zero.
+  struct SimResults *sim_results_saved;
+
+  // Pre-move rack snapshot, owned. Pairs with board_before for
+  // resuming analysis on this turn's position. The text rack_str
+  // above is for display; this is the engine-friendly object the
+  // simmer / endgame would consume.
+  struct Rack *rack_before;
 } TuiHistoryEntry;
 
 typedef struct {

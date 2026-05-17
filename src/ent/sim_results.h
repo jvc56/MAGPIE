@@ -48,6 +48,15 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(const double cutoff);
+// Allocate a new SimResults whose state mirrors `src`. Every Stat,
+// PRNG, heat map, BAIResult, and SimmedPlay is independently
+// owned by the duplicate so the source can keep mutating without
+// touching the snapshot. Mutexes are freshly initialized — the
+// duplicate is a frozen archive of the source at the moment of
+// the call, with no ongoing contention shared between them. Use
+// this to save the full sim state per game turn so the analysis
+// can later be resumed (kept accumulating onto the prior samples).
+SimResults *sim_results_duplicate(SimResults *src);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map);
 void sim_results_destroy(SimResults *sim_results);

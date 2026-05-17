@@ -502,8 +502,8 @@ int main(int argc, char *argv[]) {
     // NCKEY_BUTTON1 (left-button press) for now; scroll wheel and
     // right-click are reserved for future per-panel interactions.
     if (key == NCKEY_BUTTON1 && modal == TUI_MODAL_NONE) {
-      const int hit = tui_game_panel_at(std_plane, &game_state, input.y,
-                                        input.x);
+      const int hit =
+          tui_game_panel_at(std_plane, &game_state, input.y, input.x);
       if (hit >= 0) {
         pthread_mutex_lock(&game_state.mutex);
         if (hit != 0 && game_state.slash_active) {
@@ -525,7 +525,7 @@ int main(int argc, char *argv[]) {
           }
         } else {
           game_state.focused_panel = hit;
-            }
+        }
         pthread_mutex_unlock(&game_state.mutex);
       }
       continue;
@@ -610,8 +610,8 @@ int main(int argc, char *argv[]) {
         // shortcut.
         modal = settings_return;
       } else if (key == NCKEY_UP || key == 'k' || key == 'K') {
-        const bool effective_2x = pixel_supported && font_available &&
-                                  game_state.board_scale >= 2;
+        const bool effective_2x =
+            pixel_supported && font_available && game_state.board_scale >= 2;
         int idx = settings_focus - 1;
         while (idx > 0 && SETTINGS_2X_ONLY(idx) && !effective_2x) {
           idx--;
@@ -620,8 +620,8 @@ int main(int argc, char *argv[]) {
           settings_focus = idx;
         }
       } else if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
-        const bool effective_2x = pixel_supported && font_available &&
-                                  game_state.board_scale >= 2;
+        const bool effective_2x =
+            pixel_supported && font_available && game_state.board_scale >= 2;
         int idx = settings_focus + 1;
         while (idx < TUI_SETTINGS_ITEM_COUNT - 1 && SETTINGS_2X_ONLY(idx) &&
                !effective_2x) {
@@ -782,8 +782,8 @@ int main(int argc, char *argv[]) {
           // game keeps using whatever was loaded at game-state init.
           // The pending-change banner picks up the divergence and the
           // setting takes effect on the next New Game.
-          const bool prev = to_save.load_rit_set ? to_save.load_rit
-                                                 : initial_load_rit;
+          const bool prev =
+              to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
           to_save.load_rit = !prev;
           to_save.load_rit_set = true;
           pthread_mutex_lock(&game_state.mutex);
@@ -804,10 +804,9 @@ int main(int argc, char *argv[]) {
             lexicon_list = tui_lexicon_list_load();
           }
           if (lexicon_list != NULL) {
-            const char *current = to_save.lexicon_set ? to_save.lexicon
-                                                       : chosen_lexicon;
-            const int found =
-                tui_lexicon_list_find(lexicon_list, current);
+            const char *current =
+                to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
+            const int found = tui_lexicon_list_find(lexicon_list, current);
             lexicon_focus = found >= 0 ? found : 0;
             modal = TUI_MODAL_LEXICON_PICKER;
           }
@@ -974,8 +973,7 @@ int main(int argc, char *argv[]) {
       }
       game_state.focused_panel = new_focus;
       pthread_mutex_unlock(&game_state.mutex);
-    } else if ((key == NCKEY_TAB || key == '\t') &&
-               !game_state.slash_active) {
+    } else if ((key == NCKEY_TAB || key == '\t') && !game_state.slash_active) {
       // Tab cycles forward through 0..5 (Command → Board → ... →
       // Analysis → Command); Shift-Tab cycles the other way.
       // Useful as a discoverability path — press Tab repeatedly to
@@ -1006,10 +1004,10 @@ int main(int argc, char *argv[]) {
       game_state.slash_buf[0] = '\0';
       pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
-               (key == NCKEY_UP || key == NCKEY_DOWN ||
-                key == NCKEY_LEFT || key == NCKEY_RIGHT ||
-                key == 'k' || key == 'K' || key == 'j' || key == 'J' ||
-                key == 'h' || key == 'H' || key == 'l' || key == 'L')) {
+               (key == NCKEY_UP || key == NCKEY_DOWN || key == NCKEY_LEFT ||
+                key == NCKEY_RIGHT || key == 'k' || key == 'K' || key == 'j' ||
+                key == 'J' || key == 'h' || key == 'H' || key == 'l' ||
+                key == 'L')) {
       // History panel keyboard nav. Cursor positions: -1 = on the
       // "[4>" label (default upon entering focus); 0..N-1 = on
       // history entry idx. Down/Right move toward newer entries
@@ -1017,8 +1015,7 @@ int main(int argc, char *argv[]) {
       // label. Vim's h/j/k/l aliases work too for the keyboard-
       // centric users.
       const bool forward = key == NCKEY_DOWN || key == NCKEY_RIGHT ||
-                           key == 'j' || key == 'J' || key == 'l' ||
-                           key == 'L';
+                           key == 'j' || key == 'J' || key == 'l' || key == 'L';
       pthread_mutex_lock(&game_state.mutex);
       const int last = game_state.history_count - 1;
       if (forward) {
@@ -1078,10 +1075,10 @@ int main(int argc, char *argv[]) {
           pthread_mutex_lock(&game_state.mutex);
           if (game_state.slash_cursor > 0) {
             // Remove the char before the cursor.
-            memmove(game_state.slash_buf + game_state.slash_cursor - 1,
-                    game_state.slash_buf + game_state.slash_cursor,
-                    (size_t)(game_state.slash_len -
-                             game_state.slash_cursor + 1));
+            memmove(
+                game_state.slash_buf + game_state.slash_cursor - 1,
+                game_state.slash_buf + game_state.slash_cursor,
+                (size_t)(game_state.slash_len - game_state.slash_cursor + 1));
             game_state.slash_len--;
             game_state.slash_cursor--;
           } else if (game_state.slash_len == 0) {
@@ -1132,7 +1129,8 @@ int main(int argc, char *argv[]) {
             quit_confirm_return = TUI_MODAL_NONE;
           } else {
             // Try a unique prefix match.
-            static const char *cmd_names[] = {"exit", "new", "quit", "settings"};
+            static const char *cmd_names[] = {"exit", "new", "quit",
+                                              "settings"};
             static const int n_cmds =
                 (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
             const char *match = NULL;
@@ -1168,19 +1166,17 @@ int main(int argc, char *argv[]) {
           game_state.slash_cursor = 0;
           game_state.slash_buf[0] = '\0';
           pthread_mutex_unlock(&game_state.mutex);
-        } else if ((key >= 'a' && key <= 'z') ||
-                   (key >= 'A' && key <= 'Z')) {
+        } else if ((key >= 'a' && key <= 'z') || (key >= 'A' && key <= 'Z')) {
           // Insert (lowercased) at the cursor position rather than
           // always appending. Shifts the buffer tail right.
-          const char ch =
-              (key >= 'A' && key <= 'Z') ? (char)(key + ('a' - 'A')) : (char)key;
+          const char ch = (key >= 'A' && key <= 'Z') ? (char)(key + ('a' - 'A'))
+                                                     : (char)key;
           pthread_mutex_lock(&game_state.mutex);
-          if (game_state.slash_len <
-              (int)sizeof(game_state.slash_buf) - 1) {
-            memmove(game_state.slash_buf + game_state.slash_cursor + 1,
-                    game_state.slash_buf + game_state.slash_cursor,
-                    (size_t)(game_state.slash_len -
-                             game_state.slash_cursor + 1));
+          if (game_state.slash_len < (int)sizeof(game_state.slash_buf) - 1) {
+            memmove(
+                game_state.slash_buf + game_state.slash_cursor + 1,
+                game_state.slash_buf + game_state.slash_cursor,
+                (size_t)(game_state.slash_len - game_state.slash_cursor + 1));
             game_state.slash_buf[game_state.slash_cursor] = ch;
             game_state.slash_len++;
             game_state.slash_cursor++;

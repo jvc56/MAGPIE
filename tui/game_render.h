@@ -90,8 +90,9 @@ typedef enum {
 // picker). Creates the plane on first use; resizes/repositions on
 // subsequent calls. The plane is destroyed when tui_game_render sees
 // modal == TUI_MODAL_NONE, so callers don't manage its lifetime.
-struct ncplane *tui_game_render_get_or_create_modal_plane(
-    struct ncplane *parent, int top, int left, int rows, int cols);
+struct ncplane *
+tui_game_render_get_or_create_modal_plane(struct ncplane *parent, int top,
+                                          int left, int rows, int cols);
 
 // Hit-test a (y, x) cell coordinate against the panel layout that
 // tui_game_render would draw for the given state on the given plane.
@@ -125,14 +126,11 @@ int tui_history_cursor_at(int y, int x);
 void tui_capture_analysis_snapshot(const TuiGameState *state,
                                    TuiAnalysisSnapshot *out);
 
-void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
-                              int focus, int board_scale, bool antialias,
-                              TuiScoreSubscripts score_subscripts,
-                              int border_thickness, bool pixel_supported,
-                              bool font_available,
-                              TuiPremiumLabels premium_labels,
-                              bool blank_uppercase, const char *lexicon,
-                              bool load_rit);
+void tui_game_render_settings(
+    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
+    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
+    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
+    bool blank_uppercase, const char *lexicon, bool load_rit);
 
 // Render just the board cells (no row/col labels) at (top, left). Each
 // cell is 2 columns wide; the rendered region is BOARD_DIM rows tall and
