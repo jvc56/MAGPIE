@@ -33,7 +33,6 @@ typedef enum {
   TUI_FOCUS_BAG = 3,
   TUI_FOCUS_HISTORY = 4,
   TUI_FOCUS_ANALYSIS = 5,
-  TUI_FOCUS_CAMERA = 6,
 } TuiPanelFocus;
 
 void tui_game_render(struct ncplane *plane, const Theme *theme,

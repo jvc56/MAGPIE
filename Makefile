@@ -15,10 +15,6 @@ BIN_DIR := bin
 COV_DIR := cov
 
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
-# Camera backend: the platform pick is made below. Exclude both
-# candidates from the generic SRC wildcard so only the one we want
-# gets compiled per platform.
-SRC := $(filter-out $(SRC_DIR)/cam/cam_stub.c,$(SRC))
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
 TUI := $(wildcard $(TUI_DIR)/*.c)
@@ -27,23 +23,6 @@ OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
 TUI_OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(TUI_OBJ_DIR)/$(SRC_DIR)/%.o)
 TUI_OBJ_TUI := $(TUI:$(TUI_DIR)/%.c=$(TUI_OBJ_DIR)/$(TUI_DIR)/%.o)
-
-# Platform-specific camera backend object + link flags. macOS uses
-# AVFoundation; everything else gets a no-op stub. The TUI link adds
-# CAM_OBJ to its inputs and CAM_LDLIBS to its link line.
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-    CAM_OBJ := $(TUI_OBJ_DIR)/$(SRC_DIR)/cam/cam_macos.o
-    # -lc++ is required: cam_macos.mm is Objective-C++ and LTO pulls
-    # in __gxx_personality_v0, which lives in the C++ runtime.
-    CAM_LDLIBS := -lc++ -framework AVFoundation -framework CoreMedia \
-                  -framework CoreVideo -framework Foundation
-    CAM_DEFINE := -DMAGPIE_HAVE_CAMERA
-else
-    CAM_OBJ := $(TUI_OBJ_DIR)/$(SRC_DIR)/cam/cam_stub.o
-    CAM_LDLIBS :=
-    CAM_DEFINE :=
-endif
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
@@ -183,7 +162,7 @@ magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
-magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) $(CAM_OBJ) | $(BIN_DIR)
+magpie_tui: $(TUI_OBJ_SRC) $(TUI_OBJ_TUI) | $(BIN_DIR)
 ifeq ($(strip $(NOTCURSES_CFLAGS)),)
 	@echo "magpie_tui: notcurses not found. Install via 'brew install notcurses' (macOS) or 'apt install libnotcurses-dev' (Debian/Ubuntu)."
 	@exit 1
@@ -191,7 +170,7 @@ else ifeq ($(strip $(FREETYPE_CFLAGS)),)
 	@echo "magpie_tui: freetype not found. Install via 'brew install freetype' (macOS) or 'apt install libfreetype-dev' (Debian/Ubuntu)."
 	@exit 1
 else
-	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) $(CAM_LDLIBS) -o $(BIN_DIR)/$@
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -o $(BIN_DIR)/$@
 endif
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
@@ -204,16 +183,7 @@ $(TUI_OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(
 	$(CC) $(TUI_ENGINE_CFLAGS) -c $< -o $@
 
 $(TUI_OBJ_DIR)/$(TUI_DIR)/%.o: $(TUI_DIR)/%.c | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(TUI_DIR)
-	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) $(CAM_DEFINE) -c $< -o $@
-
-# Objective-C++ rule for cam_macos.mm. Compiled only on Darwin, and
-# only when CAM_OBJ refers to it; the recipe is unconditional but
-# the dependency keeps it from running on other platforms.
-$(TUI_OBJ_DIR)/$(SRC_DIR)/cam/cam_macos.o: $(SRC_DIR)/cam/cam_macos.mm \
-                                          | $(TUI_OBJ_DIR) $(TUI_OBJ_DIR)/$(SRC_DIR) $(TUI_SRC_OBJ_SUBDIRS)
-	clang -fobjc-arc -ObjC++ $(TUI_OPT) $(TUI_LTO) -g -DNDEBUG -Wall \
-	      -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) \
-	      $(CAM_DEFINE) -MMD -MP -c $< -o $@
+	$(CC) $(TUI_CFLAGS) $(NOTCURSES_CFLAGS) $(FREETYPE_CFLAGS) -c $< -o $@
 
 # Test files: use test_release flags if BUILD=release, otherwise use dev flags
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)

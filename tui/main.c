@@ -1,4 +1,3 @@
-#include "../src/cam/cam.h"
 #include "bot_worker.h"
 #include "config.h"
 #include "game_render.h"
@@ -386,11 +385,6 @@ int main(int argc, char *argv[]) {
   if (game_state.board_scale >= 2 && (!pixel_supported || !font_available)) {
     game_state.board_scale = 1;
   }
-
-  // Camera capture is deferred until the user opts in with
-  // "/camera on" — keeps the webcam light off on plain launches and
-  // avoids the AVFoundation permission prompt at startup.
-
   tui_bot_worker_start(&game_state);
 
   // Modal state: which (if any) modal is open. Drives keyboard routing
@@ -952,9 +946,9 @@ int main(int argc, char *argv[]) {
     if (key == NCKEY_ESC) {
       modal = TUI_MODAL_MAIN_MENU;
       main_menu_focus = 0;
-    } else if (key >= '0' && key <= '6') {
+    } else if (key >= '0' && key <= '5') {
       // Direct panel focus hotkeys (no modal). '0' focuses the
-      // command bar; '1'-'6' focus the corresponding panel. These
+      // command bar; '1'-'5' focus the corresponding panel. These
       // work globally regardless of which panel is currently
       // focused — typing digits never gets captured by a panel.
       pthread_mutex_lock(&game_state.mutex);
@@ -969,13 +963,13 @@ int main(int argc, char *argv[]) {
       pthread_mutex_unlock(&game_state.mutex);
     } else if ((key == NCKEY_TAB || key == '\t') &&
                !game_state.slash_active) {
-      // Tab cycles forward through 0..6 (Command → Board → ... →
-      // Camera → Command). Useful as a discoverability path —
+      // Tab cycles forward through 0..5 (Command → Board → ... →
+      // Analysis → Command). Useful as a discoverability path —
       // press Tab repeatedly to walk every focus state. While slash
       // mode is active Tab means "autocomplete" instead, so it
       // falls through to the [0]-focused handler below.
       pthread_mutex_lock(&game_state.mutex);
-      const int new_focus = (game_state.focused_panel + 1) % 7;
+      const int new_focus = (game_state.focused_panel + 1) % 6;
       if (new_focus != 0 && game_state.slash_active) {
         game_state.slash_active = false;
         game_state.slash_len = 0;
@@ -1056,8 +1050,7 @@ int main(int argc, char *argv[]) {
           pthread_mutex_unlock(&game_state.mutex);
         } else if (key == NCKEY_TAB || key == '\t') {
           // Tab completes against the unique prefix match.
-          static const char *cmd_names[] = {
-              "camera off", "camera on", "new", "quit", "settings"};
+          static const char *cmd_names[] = {"new", "quit", "settings"};
           static const int n_cmds =
               (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
           const char *match = NULL;
@@ -1096,30 +1089,9 @@ int main(int argc, char *argv[]) {
             modal = TUI_MODAL_QUIT_CONFIRM;
             quit_confirm_focus = 0;
             quit_confirm_return = TUI_MODAL_NONE;
-          } else if (strcmp(cmd, "camera on") == 0) {
-            // Lazy init: try to bring up the AVFoundation session
-            // on first /camera on. Subsequent /camera on after
-            // /camera off goes through cam_stop → cam_start again.
-            pthread_mutex_lock(&game_state.mutex);
-            game_state.camera_visible = true;
-            if (!game_state.camera_enabled && cam_is_available()) {
-              if (cam_init(0) == 0 && cam_start(320, 240, 30) == 0) {
-                game_state.camera_enabled = true;
-              }
-            }
-            pthread_mutex_unlock(&game_state.mutex);
-          } else if (strcmp(cmd, "camera off") == 0) {
-            pthread_mutex_lock(&game_state.mutex);
-            game_state.camera_visible = false;
-            if (game_state.camera_enabled) {
-              cam_stop();
-              game_state.camera_enabled = false;
-            }
-            pthread_mutex_unlock(&game_state.mutex);
           } else {
             // Try a unique prefix match.
-            static const char *cmd_names[] = {
-                "camera off", "camera on", "new", "quit", "settings"};
+            static const char *cmd_names[] = {"new", "quit", "settings"};
             static const int n_cmds =
                 (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
             const char *match = NULL;
@@ -1145,23 +1117,6 @@ int main(int argc, char *argv[]) {
                 modal = TUI_MODAL_QUIT_CONFIRM;
                 quit_confirm_focus = 0;
                 quit_confirm_return = TUI_MODAL_NONE;
-              } else if (strcmp(match, "camera on") == 0) {
-                pthread_mutex_lock(&game_state.mutex);
-                game_state.camera_visible = true;
-                if (!game_state.camera_enabled && cam_is_available()) {
-                  if (cam_init(0) == 0 && cam_start(320, 240, 30) == 0) {
-                    game_state.camera_enabled = true;
-                  }
-                }
-                pthread_mutex_unlock(&game_state.mutex);
-              } else if (strcmp(match, "camera off") == 0) {
-                pthread_mutex_lock(&game_state.mutex);
-                game_state.camera_visible = false;
-                if (game_state.camera_enabled) {
-                  cam_stop();
-                  game_state.camera_enabled = false;
-                }
-                pthread_mutex_unlock(&game_state.mutex);
               }
             }
           }
@@ -1172,11 +1127,9 @@ int main(int argc, char *argv[]) {
           game_state.slash_buf[0] = '\0';
           pthread_mutex_unlock(&game_state.mutex);
         } else if ((key >= 'a' && key <= 'z') ||
-                   (key >= 'A' && key <= 'Z') || key == ' ') {
+                   (key >= 'A' && key <= 'Z')) {
           // Insert (lowercased) at the cursor position rather than
-          // always appending. Shifts the buffer tail right. Spaces
-          // are allowed so the user can type two-word commands like
-          // "camera on" / "camera off".
+          // always appending. Shifts the buffer tail right.
           const char ch =
               (key >= 'A' && key <= 'Z') ? (char)(key + ('a' - 'A')) : (char)key;
           pthread_mutex_lock(&game_state.mutex);
@@ -1212,8 +1165,6 @@ int main(int argc, char *argv[]) {
   if (lexicon_list != NULL) {
     tui_lexicon_list_destroy(lexicon_list);
   }
-  cam_stop();
-  cam_shutdown();
   notcurses_stop(nc);
   return 0;
 }

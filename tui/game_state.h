@@ -185,20 +185,6 @@ typedef struct {
   // the char at it.
   int slash_cursor;
 
-  // Camera panel state. camera_enabled is set after cam_init +
-  // cam_start succeed; if the backend can't open a device it stays
-  // false and the panel renders a "Camera unavailable" placeholder
-  // (when camera_visible is true). camera_visible toggles the
-  // panel on/off in the layout entirely — when false the layout
-  // releases the bottom-right region back to the analysis panel.
-  bool camera_enabled;
-  bool camera_visible;
-  // Dimensions of the reserved camera region in cells. Defaults set
-  // at game_state init; the renderer uses these to size the panel
-  // and the ncvisual blit.
-  int camera_cells_w;
-  int camera_cells_h;
-
   // Pending values written by the Settings UI when the user picks a
   // different lexicon or toggles RIT. The renderer compares
   // pending_* to active_* to decide whether to show the pending-
