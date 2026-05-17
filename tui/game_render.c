@@ -742,18 +742,25 @@ static void draw_box_styled(struct ncplane *plane, const Theme *theme,
     // [N] hotkey indicator. Dim-grey when unfocused; bold + bright
     // when focused. Always renders if hotkey > 0.
     if (hotkey > 0) {
-      const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
-      theme_apply_fg(plane, hk_fg);
-      theme_apply_bg(plane, border_bg);
-      if (focused) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
       char buf[8];
-      snprintf(buf, sizeof(buf), "[%d]", hotkey);
+      // When the panel is focused the badge inverts to a grey-on-
+      // grey "[n>" tag — same idea as a selection chip in a GUI
+      // toolbar. When unfocused it stays as the standard "[n]"
+      // hint in modal_shortcut_fg.
+      if (focused) {
+        snprintf(buf, sizeof(buf), "[%d>", hotkey);
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, theme->fg);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      } else {
+        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        theme_apply_fg(plane, theme->modal_shortcut_fg);
+        theme_apply_bg(plane, border_bg);
+      }
       ncplane_putstr_yx(plane, top_row, col, buf);
       col += (int)strlen(buf);
       ncplane_set_styles(plane, 0);
-      // Space between [N] and title.
+      // Space between badge and title.
       theme_apply_fg(plane, theme->fg);
       theme_apply_bg(plane, border_bg);
       ncplane_putstr_yx(plane, top_row, col++, " ");
@@ -790,6 +797,7 @@ static void draw_box(struct ncplane *plane, const Theme *theme, int top_row,
 // panel_focus_border_bg.
 static void draw_combined_pills_history_frame(struct ncplane *plane,
                                               const Theme *theme,
+                                              const TuiGameState *state,
                                               const Layout *L, bool focused) {
   const ThemeRgb border_fg = focused ? theme->fg : theme->dim_fg;
   const ThemeRgb border_bg = focused ? theme->panel_focus_border_bg : theme->bg;
@@ -853,23 +861,32 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
   ncplane_putstr_yx(plane, bottom, right, br);
 
   // [4] History title on the DIVIDER row (between pills and history)
-  // rather than the top border — there's nothing controllable in the
-  // pills row, and putting the title above the first history entry
-  // matches what "this is the history panel" should refer to.
-  // Flush against the left edge (col = left + 1) so the indicator
-  // aligns with the "1." rank-prefix column below.
+  // rather than the top border — there's nothing controllable in
+  // the pills row, and putting the title above the first history
+  // entry matches what "this is the history panel" should refer
+  // to. Flush against the left edge (col = left + 1) so the
+  // indicator aligns with the "1." rank-prefix column below.
+  //
+  // Focused panels render the badge as the inverted "[4>" chip
+  // (grey-on-grey, bold) to match the focus marker every other
+  // panel uses; unfocused stays as a dim "[4]" hint.
   {
+    (void)state;
     int col = left + 1;
-    const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
-    theme_apply_fg(plane, hk_fg);
-    theme_apply_bg(plane, border_bg);
     if (focused) {
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->fg);
       ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, divider_row, col, "[4>");
+    } else {
+      theme_apply_fg(plane, theme->modal_shortcut_fg);
+      theme_apply_bg(plane, border_bg);
+      ncplane_putstr_yx(plane, divider_row, col, "[4]");
     }
-    ncplane_putstr_yx(plane, divider_row, col, "[4]");
     col += 3;
     ncplane_set_styles(plane, 0);
     theme_apply_fg(plane, theme->fg);
+    theme_apply_bg(plane, border_bg);
     ncplane_putstr_yx(plane, divider_row, col++, " ");
     ncplane_putstr_yx(plane, divider_row, col, "History");
     col += 7;
@@ -2081,14 +2098,17 @@ static void render_bag_divider(struct ncplane *plane, const Theme *theme,
   if (title != NULL && title[0] != '\0') {
     int col = left + 1;
     if (hotkey > 0) {
-      const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
-      theme_apply_fg(plane, hk_fg);
-      theme_apply_bg(plane, border_bg);
-      if (focused) {
-        ncplane_set_styles(plane, NCSTYLE_BOLD);
-      }
       char buf[8];
-      snprintf(buf, sizeof(buf), "[%d]", hotkey);
+      if (focused) {
+        snprintf(buf, sizeof(buf), "[%d>", hotkey);
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, theme->fg);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      } else {
+        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        theme_apply_fg(plane, theme->modal_shortcut_fg);
+        theme_apply_bg(plane, border_bg);
+      }
       ncplane_putstr_yx(plane, row, col, buf);
       col += (int)strlen(buf);
       ncplane_set_styles(plane, 0);
@@ -2728,8 +2748,11 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   if (height < 3) {
     return;
   }
+  const bool history_focused = state->focused_panel == TUI_FOCUS_HISTORY;
   if (!L->combined_pills_history) {
-    const bool history_focused = state->focused_panel == TUI_FOCUS_HISTORY;
+    // draw_box_styled now renders "[n>" inverted when focused, so
+    // no extra overpaint is needed here — the History badge picks
+    // up the same selection chip every other focused panel uses.
     draw_box_styled(plane, theme, L->history_top, L->right_col_left, height,
                     width, "History", TUI_FOCUS_HISTORY, history_focused);
   }
@@ -3361,6 +3384,15 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   double best_secondary = -1e300;
   bool any_primary = false;
   bool any_secondary = false;
+  // Per-ply column maxes. best_ply_avg[k] is the maximum value in
+  // avg-column k across all visible, valid rows that ran at least
+  // k+1 plies. any_ply_avg[k] gates against the all-empty case.
+  double best_ply_avg[MAX_ANALYSIS_PLIES];
+  bool any_ply_avg[MAX_ANALYSIS_PLIES];
+  for (int k = 0; k < MAX_ANALYSIS_PLIES; k++) {
+    best_ply_avg[k] = -1e300;
+    any_ply_avg[k] = false;
+  }
   for (int i = 0; i < visible; i++) {
     if (!rows[i].valid) {
       continue;
@@ -3378,6 +3410,12 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       if (!any_secondary || rows[i].secondary_value > best_secondary) {
         best_secondary = rows[i].secondary_value;
         any_secondary = true;
+      }
+    }
+    for (int k = 0; k < rows[i].ply_count && k < MAX_ANALYSIS_PLIES; k++) {
+      if (!any_ply_avg[k] || rows[i].ply_avg[k] > best_ply_avg[k]) {
+        best_ply_avg[k] = rows[i].ply_avg[k];
+        any_ply_avg[k] = true;
       }
     }
   }
@@ -3656,10 +3694,13 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         } else {
           snprintf(buf, sizeof(buf), "%*.1f", AVG_COL_W, v);
         }
+        const bool is_best = ply < MAX_ANALYSIS_PLIES &&
+                             any_ply_avg[ply] && v == best_ply_avg[ply];
         theme_apply_fg(plane, ply_color);
-        ncplane_set_styles(plane, 0);
+        ncplane_set_styles(plane, is_best ? NCSTYLE_BOLD : 0);
         ncplane_putstr_yx(plane, row, col, buf);
       }
+      ncplane_set_styles(plane, 0);
       theme_apply_fg(plane, theme->fg);
     }
 
@@ -4192,6 +4233,7 @@ static void render_command_palette(struct ncplane *plane, const Theme *theme,
     const char *desc;
   };
   static const struct Cmd cmds[] = {
+      {"exit", "Quit MAGPIE TUI (alias for /quit)"},
       {"new", "Start a new game"},
       {"quit", "Quit MAGPIE TUI"},
       {"settings", "Open settings"},
@@ -4299,17 +4341,23 @@ static void render_command_bar(struct ncplane *plane, const Theme *theme,
   }
   // Left side: "[0] Command>" prompt. The ">" hangs off "Command"
   // with no space, so it reads as one prompt token like a shell.
+  // Focused: grey-on-grey "[0>" chip matching every other panel's
+  // focus badge. Unfocused: dim "[0]" hint.
   int col = 1;
-  const ThemeRgb hk_fg = focused ? theme->fg : theme->modal_shortcut_fg;
-  theme_apply_fg(plane, hk_fg);
-  theme_apply_bg(plane, bar_bg);
   if (focused) {
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, theme->fg);
     ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row, col, "[0>");
+  } else {
+    theme_apply_fg(plane, theme->modal_shortcut_fg);
+    theme_apply_bg(plane, bar_bg);
+    ncplane_putstr_yx(plane, row, col, "[0]");
   }
-  ncplane_putstr_yx(plane, row, col, "[0]");
   col += 3;
   ncplane_set_styles(plane, 0);
   theme_apply_fg(plane, theme->fg);
+  theme_apply_bg(plane, bar_bg);
   ncplane_putstr_yx(plane, row, col++, " ");
   ncplane_putstr_yx(plane, row, col, "Command>");
   col += 8;
@@ -4651,7 +4699,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 
   (void)time_per_side_seconds; // now read from state->time_per_side_seconds
   if (L.combined_pills_history) {
-    draw_combined_pills_history_frame(plane, theme, &L,
+    draw_combined_pills_history_frame(plane, theme, state, &L,
                                       state->focused_panel == TUI_FOCUS_HISTORY);
   }
   render_player_pill(plane, theme, state, 0, L.pill1_top, L.pill1_left,

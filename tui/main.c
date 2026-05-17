@@ -513,6 +513,7 @@ int main(int argc, char *argv[]) {
           game_state.slash_buf[0] = '\0';
         }
         game_state.focused_panel = hit;
+        game_state.history_cursor = -1;
         pthread_mutex_unlock(&game_state.mutex);
       }
       continue;
@@ -960,16 +961,19 @@ int main(int argc, char *argv[]) {
         game_state.slash_buf[0] = '\0';
       }
       game_state.focused_panel = new_focus;
+      game_state.history_cursor = -1;
       pthread_mutex_unlock(&game_state.mutex);
     } else if ((key == NCKEY_TAB || key == '\t') &&
                !game_state.slash_active) {
       // Tab cycles forward through 0..5 (Command → Board → ... →
-      // Analysis → Command). Useful as a discoverability path —
-      // press Tab repeatedly to walk every focus state. While slash
-      // mode is active Tab means "autocomplete" instead, so it
-      // falls through to the [0]-focused handler below.
+      // Analysis → Command); Shift-Tab cycles the other way.
+      // Useful as a discoverability path — press Tab repeatedly to
+      // walk every focus state. While slash mode is active Tab
+      // means "autocomplete" instead, so it falls through to the
+      // [0]-focused handler below.
       pthread_mutex_lock(&game_state.mutex);
-      const int new_focus = (game_state.focused_panel + 1) % 6;
+      const int delta = ncinput_shift_p(&input) ? 5 : 1; // 5 = (-1 mod 6)
+      const int new_focus = (game_state.focused_panel + delta) % 6;
       if (new_focus != 0 && game_state.slash_active) {
         game_state.slash_active = false;
         game_state.slash_len = 0;
@@ -977,6 +981,7 @@ int main(int argc, char *argv[]) {
         game_state.slash_buf[0] = '\0';
       }
       game_state.focused_panel = new_focus;
+      game_state.history_cursor = -1;
       pthread_mutex_unlock(&game_state.mutex);
     } else if (key == '/' && !game_state.slash_active) {
       // Global "/" — focuses [0] Command if it isn't already and
@@ -989,6 +994,25 @@ int main(int argc, char *argv[]) {
       game_state.slash_len = 0;
       game_state.slash_cursor = 0;
       game_state.slash_buf[0] = '\0';
+      pthread_mutex_unlock(&game_state.mutex);
+    } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
+               (key == NCKEY_UP || key == NCKEY_DOWN || key == 'k' ||
+                key == 'K' || key == 'j' || key == 'J')) {
+      // History panel keyboard nav. Cursor positions: -1 = on the
+      // "[4>" label (default upon entering focus); 0..N-1 = on
+      // history entry idx. Down moves toward newer entries
+      // (-1 → 0 → 1 → … → N-1); Up moves back toward the label.
+      pthread_mutex_lock(&game_state.mutex);
+      const int last = game_state.history_count - 1;
+      if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+        if (game_state.history_cursor < last) {
+          game_state.history_cursor++;
+        }
+      } else {
+        if (game_state.history_cursor > -1) {
+          game_state.history_cursor--;
+        }
+      }
       pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == 0) {
       // Slash-mode input loop: typing /, letters, Tab, Backspace,
@@ -1050,7 +1074,7 @@ int main(int argc, char *argv[]) {
           pthread_mutex_unlock(&game_state.mutex);
         } else if (key == NCKEY_TAB || key == '\t') {
           // Tab completes against the unique prefix match.
-          static const char *cmd_names[] = {"new", "quit", "settings"};
+          static const char *cmd_names[] = {"exit", "new", "quit", "settings"};
           static const int n_cmds =
               (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
           const char *match = NULL;
@@ -1085,13 +1109,13 @@ int main(int argc, char *argv[]) {
             modal = TUI_MODAL_SETTINGS;
             settings_focus = 0;
             settings_return = TUI_MODAL_NONE;
-          } else if (strcmp(cmd, "quit") == 0) {
+          } else if (strcmp(cmd, "quit") == 0 || strcmp(cmd, "exit") == 0) {
             modal = TUI_MODAL_QUIT_CONFIRM;
             quit_confirm_focus = 0;
             quit_confirm_return = TUI_MODAL_NONE;
           } else {
             // Try a unique prefix match.
-            static const char *cmd_names[] = {"new", "quit", "settings"};
+            static const char *cmd_names[] = {"exit", "new", "quit", "settings"};
             static const int n_cmds =
                 (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
             const char *match = NULL;
@@ -1113,7 +1137,8 @@ int main(int argc, char *argv[]) {
                 modal = TUI_MODAL_SETTINGS;
                 settings_focus = 0;
                 settings_return = TUI_MODAL_NONE;
-              } else if (strcmp(match, "quit") == 0) {
+              } else if (strcmp(match, "quit") == 0 ||
+                         strcmp(match, "exit") == 0) {
                 modal = TUI_MODAL_QUIT_CONFIRM;
                 quit_confirm_focus = 0;
                 quit_confirm_return = TUI_MODAL_NONE;

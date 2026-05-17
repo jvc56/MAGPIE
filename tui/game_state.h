@@ -171,6 +171,12 @@ typedef struct {
   // (double-line glyphs on a slightly-lighter bg strip).
   int focused_panel;
 
+  // History-panel cursor. -1 = cursor on the "[4>" label (default
+  // upon focusing the panel); 0..history_count-1 = cursor on that
+  // entry. Driven by Up/Down (or k/j) while the History panel is
+  // focused. Resets to -1 each time focus enters History.
+  int history_cursor;
+
   // Command-bar slash input. When slash_active is true, the bar
   // renders a "/" prompt + slash_buf with the terminal cursor live
   // at slash_buf's end, and main.c's input loop captures letters /
