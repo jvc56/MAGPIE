@@ -512,8 +512,20 @@ int main(int argc, char *argv[]) {
           game_state.slash_cursor = 0;
           game_state.slash_buf[0] = '\0';
         }
-        game_state.focused_panel = hit;
-        game_state.history_cursor = -1;
+        // First click into a panel just focuses it (with the cursor
+        // reset to the label). A click on History when it's ALREADY
+        // focused reads the per-entry hit map to move the in-panel
+        // cursor — clicks on the title / chrome row snap back to
+        // -1, clicks on a turn jump to that entry.
+        if (hit == TUI_FOCUS_HISTORY &&
+            game_state.focused_panel == TUI_FOCUS_HISTORY) {
+          const int target = tui_history_cursor_at(input.y, input.x);
+          if (target >= -1) {
+            game_state.history_cursor = target;
+          }
+        } else {
+          game_state.focused_panel = hit;
+            }
         pthread_mutex_unlock(&game_state.mutex);
       }
       continue;
@@ -961,7 +973,6 @@ int main(int argc, char *argv[]) {
         game_state.slash_buf[0] = '\0';
       }
       game_state.focused_panel = new_focus;
-      game_state.history_cursor = -1;
       pthread_mutex_unlock(&game_state.mutex);
     } else if ((key == NCKEY_TAB || key == '\t') &&
                !game_state.slash_active) {
@@ -981,7 +992,6 @@ int main(int argc, char *argv[]) {
         game_state.slash_buf[0] = '\0';
       }
       game_state.focused_panel = new_focus;
-      game_state.history_cursor = -1;
       pthread_mutex_unlock(&game_state.mutex);
     } else if (key == '/' && !game_state.slash_active) {
       // Global "/" — focuses [0] Command if it isn't already and
@@ -996,15 +1006,22 @@ int main(int argc, char *argv[]) {
       game_state.slash_buf[0] = '\0';
       pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
-               (key == NCKEY_UP || key == NCKEY_DOWN || key == 'k' ||
-                key == 'K' || key == 'j' || key == 'J')) {
+               (key == NCKEY_UP || key == NCKEY_DOWN ||
+                key == NCKEY_LEFT || key == NCKEY_RIGHT ||
+                key == 'k' || key == 'K' || key == 'j' || key == 'J' ||
+                key == 'h' || key == 'H' || key == 'l' || key == 'L')) {
       // History panel keyboard nav. Cursor positions: -1 = on the
       // "[4>" label (default upon entering focus); 0..N-1 = on
-      // history entry idx. Down moves toward newer entries
-      // (-1 → 0 → 1 → … → N-1); Up moves back toward the label.
+      // history entry idx. Down/Right move toward newer entries
+      // (-1 → 0 → 1 → … → N-1); Up/Left move back toward the
+      // label. Vim's h/j/k/l aliases work too for the keyboard-
+      // centric users.
+      const bool forward = key == NCKEY_DOWN || key == NCKEY_RIGHT ||
+                           key == 'j' || key == 'J' || key == 'l' ||
+                           key == 'L';
       pthread_mutex_lock(&game_state.mutex);
       const int last = game_state.history_count - 1;
-      if (key == NCKEY_DOWN || key == 'j' || key == 'J') {
+      if (forward) {
         if (game_state.history_cursor < last) {
           game_state.history_cursor++;
         }

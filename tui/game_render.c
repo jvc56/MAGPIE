@@ -869,11 +869,16 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
   //
   // Focused panels render the badge as the inverted "[4>" chip
   // (grey-on-grey, bold) to match the focus marker every other
-  // panel uses; unfocused stays as a dim "[4]" hint.
+  // panel uses — UNLESS the in-panel history cursor has moved off
+  // the label (history_cursor >= 0). In that case the cursor is
+  // visible on an individual entry and the badge dims to the
+  // unfocused "[4]" hint so the user only sees one selection
+  // marker at a time.
   {
-    (void)state;
     int col = left + 1;
-    if (focused) {
+    const bool show_label_cursor =
+        focused && (state == NULL || state->history_cursor == -1);
+    if (show_label_cursor) {
       theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, theme->fg);
       ncplane_set_styles(plane, NCSTYLE_BOLD);
@@ -944,6 +949,11 @@ typedef struct {
   uint64_t version;     // game_state.render_version at last blit
   unsigned cdy, cdx;    // notcurses cell-pixel dims at last blit
   int param_a, param_b; // scale, antialias
+  // History-cursor index at last blit. -1 = live board (the
+  // common case); 0..N-1 = previewing entry N's pre-move board.
+  // Changing this invalidates the cache so the historical board
+  // gets re-rasterized on the first frame after navigation.
+  int history_cursor;
   bool valid;
 } BlitCache;
 
@@ -951,10 +961,54 @@ static BlitCache board_pixel_cache;
 static BlitCache rack_pixel_cache;
 static BlitCache label_pixel_cache;
 
+// Per-entry hit-test rectangles, populated by render_history_panel
+// on every frame so mouse clicks can locate which turn the user
+// tapped. Sized to TUI_HISTORY_MAX so a fully-populated history
+// panel can still be hit-tested without truncation.
+typedef struct {
+  int top_row;    // first screen row of entry, inclusive
+  int bottom_row; // last screen row of entry, inclusive
+  int left_col;   // first column, inclusive
+  int right_col;  // last column, inclusive
+  int idx;        // history entry index
+} HistoryRowMap;
+
+static HistoryRowMap history_row_map[TUI_HISTORY_MAX];
+static int history_row_map_count;
+// Bounding box of the History panel as a whole — used by
+// tui_history_cursor_at to detect clicks on the title / chrome
+// (between entries) and snap the cursor back to -1 (the [4>]
+// label). Refreshed every frame alongside the row map.
+static int history_panel_top;
+static int history_panel_bottom;
+static int history_panel_left;
+static int history_panel_right;
+
 static void invalidate_blit_caches(void) {
   board_pixel_cache.valid = false;
   rack_pixel_cache.valid = false;
   label_pixel_cache.valid = false;
+}
+
+// Pick which Board the board renderer should display: the entry's
+// pre-move snapshot when the History panel is focused and the
+// cursor is on a committed entry, otherwise the live game board.
+// Pending entries fall back to live since their snapshot IS the
+// current board and the spinner UX is already conveying that the
+// move is in flight.
+static const Board *pick_render_board(const TuiGameState *state) {
+  if (state == NULL) {
+    return NULL;
+  }
+  if (state->focused_panel == TUI_FOCUS_HISTORY &&
+      state->history_cursor >= 0 &&
+      state->history_cursor < state->history_count) {
+    const TuiHistoryEntry *entry = &state->history[state->history_cursor];
+    if (!entry->pending && entry->board_before != NULL) {
+      return entry->board_before;
+    }
+  }
+  return state->game != NULL ? game_get_board(state->game) : NULL;
 }
 
 static void invalidate_grid_planes(void) {
@@ -1045,6 +1099,26 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
   return -1;
 }
 
+int tui_history_cursor_at(int y, int x) {
+  // Outside the History panel entirely.
+  if (y < history_panel_top || y > history_panel_bottom ||
+      x < history_panel_left || x > history_panel_right) {
+    return -2;
+  }
+  // Inside the panel — see whether the point falls on one of the
+  // per-entry rectangles populated during the last render.
+  for (int i = 0; i < history_row_map_count; i++) {
+    const HistoryRowMap *m = &history_row_map[i];
+    if (y >= m->top_row && y <= m->bottom_row && x >= m->left_col &&
+        x <= m->right_col) {
+      return m->idx;
+    }
+  }
+  // Inside the panel but not on any entry — title / chrome / blank
+  // space. Caller snaps the cursor back to -1 (the [4>] label).
+  return -1;
+}
+
 // Public accessor for the cached modal plane, shared across all modal
 // renderers (menu / settings / time picker / lexicon picker). Creates
 // the plane on first use; resizes/repositions on subsequent calls.
@@ -1116,7 +1190,8 @@ static struct ncplane *acquire_grid_plane(struct ncplane **slot,
 // in-game board (at CELL_ROW_BASE/CELL_COL_BASE) and the theme picker's
 // preview (at whatever offset the picker chose).
 static void render_board_cells(struct ncplane *plane, const Theme *theme,
-                               const Game *game, const LetterDistribution *ld,
+                               const Board *board,
+                               const LetterDistribution *ld,
                                bool blank_uppercase,
                                TuiPremiumLabels premium_labels,
                                int border_thickness, int cell_w, int top,
@@ -1127,7 +1202,6 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
   // the underline reads as part of the glyph on fullwidth tiles and
   // the user vetoed that look.
   (void)border_thickness;
-  const Board *board = game_get_board(game);
   const bool halfwidth = (cell_w == 1);
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -1322,11 +1396,19 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   const uint64_t cur_version =
       atomic_load(&((TuiGameState *)state)->render_version);
   const int sub_mode = (int)state->score_subscripts;
+  // history_cursor is part of the cache key: navigating to a
+  // committed entry shows that entry's pre-move board, which
+  // doesn't share content with the live board even though the
+  // version counter hasn't changed.
+  const int cursor_key = (state->focused_panel == TUI_FOCUS_HISTORY)
+                             ? state->history_cursor
+                             : -1;
   if (board_pixel_cache.valid && board_pixel_cache.version == cur_version &&
       board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
       board_pixel_cache.param_a == L->scale &&
       board_pixel_cache.param_b ==
-          ((state->antialias ? 1 : 0) | (sub_mode << 1))) {
+          ((state->antialias ? 1 : 0) | (sub_mode << 1)) &&
+      board_pixel_cache.history_cursor == cursor_key) {
     return;
   }
   const int tile_w = (int)cdx * L->board_cell_w;
@@ -1361,7 +1443,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  const Board *board = game_get_board(state->game);
+  const Board *board = pick_render_board(state);
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       const int tx = col * tile_w;
@@ -1504,6 +1586,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   board_pixel_cache.cdx = cdx;
   board_pixel_cache.param_a = L->scale;
   board_pixel_cache.param_b = (state->antialias ? 1 : 0) | (sub_mode << 1);
+  board_pixel_cache.history_cursor = cursor_key;
 }
 
 // Pixel-graphics grid overlay for the cell-text modes (scale 0 / 1).
@@ -1819,7 +1902,7 @@ static void render_board(struct ncplane *plane, const Theme *theme,
     snprintf(label, sizeof(label), "%2d", row + 1);
     ncplane_putstr_yx(plane, CELL_ROW_BASE + row, ROW_LABEL_COL, label);
   }
-  render_board_cells(plane, theme, state->game, state->ld,
+  render_board_cells(plane, theme, pick_render_board(state), state->ld,
                      state->blank_uppercase, state->premium_labels,
                      state->border_thickness, L->board_cell_w, CELL_ROW_BASE,
                      CELL_COL_BASE);
@@ -1835,8 +1918,8 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
   }
   // Preview is always fullwidth (cell_w=2); the picker is shown on a
   // dedicated screen where halfwidth fallback isn't relevant.
-  render_board_cells(plane, theme, game, ld, blank_uppercase, premium_labels,
-                     border_thickness, CELL_WIDTH, top, left);
+  render_board_cells(plane, theme, game_get_board(game), ld, blank_uppercase,
+                     premium_labels, border_thickness, CELL_WIDTH, top, left);
 }
 
 // ── Rack panel ────────────────────────────────────────────────────────────
@@ -2546,7 +2629,8 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
                                  const TuiHistoryEntry *e, int idx, int row,
                                  int interior_left, int interior_right,
                                  int row_bottom_inclusive, int leave_col_w,
-                                 int rank_digits) {
+                                 int rank_digits, bool cursor_here,
+                                 bool history_focused) {
   // Pick the player-specific text-color pair so the entry reads as
   // belonging to whichever player made the move.
   const ThemeRgb player_fg =
@@ -2563,7 +2647,54 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   char prefix[8];
   snprintf(prefix, sizeof(prefix), "%*d. ", rank_digits > 0 ? rank_digits : 1,
            idx + 1);
-  if (e->pending) {
+  if (cursor_here) {
+    // History-panel cursor sits on this entry: render the rank
+    // prefix with inverted colors (player hue preserved — bg =
+    // player_fg, fg = theme->bg) and turn the trailing "." into
+    // ">" when the panel is focused so the chip reads as "5>";
+    // when the panel has lost focus, keep the inverted highlight
+    // but restore the "." so it reads as a parked selection
+    // rather than the active cursor. Bold for the same visual
+    // weight a played tile uses. This takes precedence over the
+    // pending tile-style highlight so the user can land the
+    // cursor on the in-flight turn while the spinner is still
+    // running.
+    int digit_start = 0;
+    while (prefix[digit_start] == ' ') {
+      digit_start++;
+    }
+    int after_period = digit_start;
+    while (prefix[after_period] != '\0' && prefix[after_period] != ' ') {
+      after_period++;
+    }
+    // Leading spaces stay on theme->bg in the player color.
+    if (digit_start > 0) {
+      char leading[8];
+      memcpy(leading, prefix, (size_t)digit_start);
+      leading[digit_start] = '\0';
+      ncplane_putstr_yx(plane, row, interior_left, leading);
+    }
+    // "5>" / "5." segment: digits as-is, then ">" or "." in the
+    // tail. Both share the inverted-colors chip.
+    char chip[8];
+    int chip_len = 0;
+    for (int k = digit_start; k < after_period - 1 && chip_len < 6; k++) {
+      chip[chip_len++] = prefix[k];
+    }
+    chip[chip_len++] = history_focused ? '>' : '.';
+    chip[chip_len] = '\0';
+    theme_apply_fg(plane, theme->bg);
+    theme_apply_bg(plane, player_fg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row, interior_left + digit_start, chip);
+    ncplane_set_styles(plane, 0);
+    theme_apply_fg(plane, player_fg);
+    theme_apply_bg(plane, theme->bg);
+    if (prefix[after_period] != '\0') {
+      ncplane_putstr_yx(plane, row, interior_left + after_period,
+                        prefix + after_period);
+    }
+  } else if (e->pending) {
     // Pending turn: paint the "N." chunk with tile colors so it reads
     // like a played tile next to the spinner. Leading space (when N
     // is a single digit) and the trailing separator stay on the
@@ -2749,12 +2880,27 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
   const bool history_focused = state->focused_panel == TUI_FOCUS_HISTORY;
+  // Reset the per-frame hit-test map. Bounding box always reflects
+  // the whole panel so a click on the chrome (or the title row in
+  // combined mode) still resolves to "in history, but not on an
+  // entry" and snaps the cursor to the [4>] label.
+  history_row_map_count = 0;
+  history_panel_top = L->history_top;
+  history_panel_bottom = L->history_bottom;
+  history_panel_left = L->right_col_left;
+  history_panel_right = L->right_col_right;
   if (!L->combined_pills_history) {
-    // draw_box_styled now renders "[n>" inverted when focused, so
-    // no extra overpaint is needed here — the History badge picks
-    // up the same selection chip every other focused panel uses.
     draw_box_styled(plane, theme, L->history_top, L->right_col_left, height,
                     width, "History", TUI_FOCUS_HISTORY, history_focused);
+    // When the in-panel cursor has moved off the label onto an
+    // entry, overpaint the focused "[4>" chip with a muted "[4]"
+    // so only the entry shows the selection marker.
+    if (history_focused && state->history_cursor >= 0) {
+      theme_apply_fg(plane, theme->modal_shortcut_fg);
+      theme_apply_bg(plane, theme->panel_focus_border_bg);
+      ncplane_set_styles(plane, 0);
+      ncplane_putstr_yx(plane, L->history_top, L->right_col_left + 1, "[4]");
+    }
   }
 
   if (state->history_count == 0) {
@@ -2815,9 +2961,21 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
     int row = top;
     for (int idx = first; idx < state->history_count; idx++) {
       const TuiHistoryEntry *e = &state->history[idx];
+      const bool cursor_here = state->history_cursor == idx;
+      const int entry_rows = history_entry_rows(e);
       render_history_entry(plane, theme, e, idx, row, interior_left,
-                           interior_right, bottom, leave_col_w, rank_digits);
-      row += history_entry_rows(e);
+                           interior_right, bottom, leave_col_w, rank_digits,
+                           cursor_here, history_focused);
+      if (history_row_map_count <
+          (int)(sizeof(history_row_map) / sizeof(history_row_map[0]))) {
+        HistoryRowMap *m = &history_row_map[history_row_map_count++];
+        m->top_row = row;
+        m->bottom_row = row + entry_rows - 1;
+        m->left_col = interior_left;
+        m->right_col = interior_right;
+        m->idx = idx;
+      }
+      row += entry_rows;
     }
     return;
   }
@@ -2875,14 +3033,35 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   for (int idx = first; idx < state->history_count; idx++) {
     const TuiHistoryEntry *e = &state->history[idx];
     const int rows = history_entry_rows(e);
+    const bool cursor_here = state->history_cursor == idx;
+    int row_top = 0;
+    int col_left = 0;
+    int col_right = 0;
     if ((idx % 2) == 0) {
+      row_top = row_left;
+      col_left = left_l;
+      col_right = left_r;
       render_history_entry(plane, theme, e, idx, row_left, left_l, left_r,
-                           bottom, leave_w_left, rank_digits);
+                           bottom, leave_w_left, rank_digits, cursor_here,
+                           history_focused);
       row_left += rows;
     } else {
+      row_top = row_right;
+      col_left = right_l;
+      col_right = right_r;
       render_history_entry(plane, theme, e, idx, row_right, right_l, right_r,
-                           bottom, leave_w_right, rank_digits);
+                           bottom, leave_w_right, rank_digits, cursor_here,
+                           history_focused);
       row_right += rows;
+    }
+    if (history_row_map_count <
+        (int)(sizeof(history_row_map) / sizeof(history_row_map[0]))) {
+      HistoryRowMap *m = &history_row_map[history_row_map_count++];
+      m->top_row = row_top;
+      m->bottom_row = row_top + rows - 1;
+      m->left_col = col_left;
+      m->right_col = col_right;
+      m->idx = idx;
     }
   }
 }
@@ -2896,41 +3075,9 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 // endgame) and a "secondary" metric (mean equity in sim, integer
 // spread delta in endgame).
 
-enum { ANALYSIS_ROW_CAP = 64 };
-
-typedef enum {
-  ANALYSIS_TINT_NONE = 0, // use the default dim_fg
-  ANALYSIS_TINT_WIN,      // positive final spread — accent (green)
-  ANALYSIS_TINT_LOSS,     // negative final spread — error (red)
-  ANALYSIS_TINT_TIE,      // zero final spread — dim (grey)
-} AnalysisTint;
-
-enum { MAX_ANALYSIS_PLIES = 8 };
-
-typedef struct {
-  char move[80];
-  char leave[16];
-  char score[8];     // "30" / "120"; empty if not applicable
-  char primary[8];   // "67.3%" in sim; empty in endgame
-  char secondary[8]; // "+32.5" or "+27"
-  AnalysisTint secondary_tint;
-  // Raw values, kept alongside the display strings so the renderer
-  // can bold the highest-scoring row(s) using full precision instead
-  // of the rounded display values.
-  int score_value;
-  double primary_value;
-  double secondary_value;
-  // Per-ply mean move-score (only populated for sim mode). ply_count
-  // is the number of plies the sim ran. The renderer colors avg1 with
-  // the candidate's (on-turn) player color, avg2 with the opponent's,
-  // alternating onward.
-  double ply_avg[MAX_ANALYSIS_PLIES];
-  int ply_count;
-  // Player index whose turn it is for ply 0 (the candidate's player).
-  // Used by the renderer to color the per-ply columns.
-  int candidate_player_idx;
-  bool valid;
-} AnalysisRow;
+// AnalysisRow / AnalysisTint / row + ply caps now live in
+// game_state.h so per-turn snapshots stored on TuiHistoryEntry
+// can share the same shape with no conversion.
 
 // Render the ranked candidates given a pre-populated row array.
 // Handles the leave column auto-sizing, exchange compaction, and
@@ -3914,6 +4061,39 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
   return n;
 }
 
+void tui_capture_analysis_snapshot(const TuiGameState *state,
+                                   TuiAnalysisSnapshot *out) {
+  if (state == NULL || out == NULL) {
+    return;
+  }
+  memset(out, 0, sizeof(*out));
+  const bool bag_empty =
+      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+  const bool use_endgame =
+      bag_empty && state->endgame_snapshot.valid &&
+      state->endgame_snapshot.num_entries > 0;
+  if (use_endgame) {
+    out->is_sim = false;
+    out->num_rows = fill_analysis_rows_from_endgame(state, out->rows,
+                                                    ANALYSIS_ROW_CAP);
+    out->endgame_depth = state->endgame_snapshot.depth;
+    out->endgame_exhaustive = state->endgame_snapshot.exhaustive;
+    if (state->endgame_ctx != NULL) {
+      out->endgame_nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
+    }
+    out->valid = out->num_rows > 0;
+  } else if (state->sim_results != NULL) {
+    out->is_sim = true;
+    out->num_rows = fill_analysis_rows_from_sim(state, out->rows,
+                                                ANALYSIS_ROW_CAP);
+    out->sim_plies = sim_results_get_num_plies(state->sim_results);
+    out->sim_iterations = sim_results_get_iteration_count(state->sim_results);
+    out->sim_nodes =
+        out->sim_iterations * (uint64_t)(out->sim_plies + 1);
+    out->valid = out->num_rows > 0;
+  }
+}
+
 static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
                                   const TuiGameState *state,
                                   const Layout *L) {
@@ -3926,41 +4106,67 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  // Pick mode: endgame when the bag has run dry (and we have a saved
-  // snapshot from a completed solve); otherwise the sim leaderboard.
-  // The snapshot persists across turns and through game-over, so the
-  // last-completed endgame analysis stays on screen even after the
-  // game ends — which is what you want to study a finished game.
+  // If the History cursor is on a committed entry with a saved
+  // analysis snapshot, the panel renders THAT saved leaderboard
+  // (with its frozen title meta) instead of the live solve. The
+  // live (in-flight pending) turn still falls through to the live
+  // path so the user sees the bot's progress in real time.
+  const TuiAnalysisSnapshot *snap = NULL;
+  if (state->history_cursor >= 0 &&
+      state->history_cursor < state->history_count) {
+    const TuiHistoryEntry *cursor_entry =
+        &state->history[state->history_cursor];
+    if (!cursor_entry->pending && cursor_entry->analysis_snapshot.valid) {
+      snap = &cursor_entry->analysis_snapshot;
+    }
+  }
+
+  // Pick mode: when replaying a snapshot, use whatever mode it
+  // captured. Otherwise, endgame when the bag has run dry (and we
+  // have a saved snapshot from a completed solve); else sim. The
+  // live endgame snapshot persists across turns and through game-
+  // over, so the last-completed endgame analysis stays on screen
+  // after the game ends — which is what you want to study a
+  // finished game.
   const bool bag_empty =
       state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
   const bool use_endgame =
-      bag_empty && state->endgame_snapshot.valid &&
-      state->endgame_snapshot.num_entries > 0;
+      snap != NULL
+          ? !snap->is_sim
+          : (bag_empty && state->endgame_snapshot.valid &&
+             state->endgame_snapshot.num_entries > 0);
 
   // Title varies by mode.
   char title[64];
   if (use_endgame) {
-    const int snap_depth = state->endgame_snapshot.depth;
-    const bool searching =
-        atomic_load(&((TuiGameState *)state)->endgame_results_active);
-    // Compact "Endgame (d7/123K)" — depth on the left, total nodes
-    // searched on the right (humanized the same way Sim humanizes
-    // sample counts). During an active search, prefer the live
-    // current-depth atomic over the snapshot's depth so the title
-    // ticks up as iterative deepening progresses.
-    int cur_depth = 0;
-    if (state->endgame_ctx != NULL && searching) {
-      int done = 0;
-      int total = 0;
-      int dummy_a = 0;
-      int dummy_b = 0;
-      endgame_ctx_get_progress(state->endgame_ctx, &cur_depth, &done, &total,
-                               &dummy_a, &dummy_b);
-    }
-    const int depth_to_show = cur_depth > 0 ? cur_depth : snap_depth;
+    int depth_to_show = 0;
     uint64_t nodes = 0;
-    if (state->endgame_ctx != NULL) {
-      nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
+    bool searching = false;
+    if (snap != NULL) {
+      depth_to_show = snap->endgame_depth;
+      nodes = snap->endgame_nodes;
+    } else {
+      const int snap_depth = state->endgame_snapshot.depth;
+      searching =
+          atomic_load(&((TuiGameState *)state)->endgame_results_active);
+      // Compact "Endgame (d7/123K)" — depth on the left, total nodes
+      // searched on the right (humanized the same way Sim humanizes
+      // sample counts). During an active search, prefer the live
+      // current-depth atomic over the snapshot's depth so the title
+      // ticks up as iterative deepening progresses.
+      int cur_depth = 0;
+      if (state->endgame_ctx != NULL && searching) {
+        int done = 0;
+        int total = 0;
+        int dummy_a = 0;
+        int dummy_b = 0;
+        endgame_ctx_get_progress(state->endgame_ctx, &cur_depth, &done, &total,
+                                 &dummy_a, &dummy_b);
+      }
+      depth_to_show = cur_depth > 0 ? cur_depth : snap_depth;
+      if (state->endgame_ctx != NULL) {
+        nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
+      }
     }
     char nodes_str[16];
     nodes_str[0] = '\0';
@@ -3976,6 +4182,15 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
     } else {
       snprintf(title, sizeof(title), "Endgame");
+    }
+  } else if (snap != NULL) {
+    if (snap->sim_plies > 0 && snap->sim_iterations > 0) {
+      char nodes_str[16];
+      format_count_compact(snap->sim_nodes, nodes_str, sizeof(nodes_str));
+      snprintf(title, sizeof(title), "Sim (%dp/%s)", snap->sim_plies,
+               nodes_str);
+    } else {
+      snprintf(title, sizeof(title), "Sim");
     }
   } else if (state->sim_results != NULL) {
     const int plies = sim_results_get_num_plies(state->sim_results);
@@ -4022,13 +4237,23 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   int primary_w, secondary_w, primary_secondary_gap;
   bool primary_bold;
   if (use_endgame) {
-    visible = fill_analysis_rows_from_endgame(state, rows, cap);
+    if (snap != NULL) {
+      visible = snap->num_rows < cap ? snap->num_rows : cap;
+      memcpy(rows, snap->rows, sizeof(AnalysisRow) * (size_t)visible);
+    } else {
+      visible = fill_analysis_rows_from_endgame(state, rows, cap);
+    }
     primary_w = 0;             // no W/T/L column
     secondary_w = 4;           // "+999" / "-100"
     primary_secondary_gap = 0; // no primary, no inter-column gap
     primary_bold = false;
   } else {
-    visible = fill_analysis_rows_from_sim(state, rows, cap);
+    if (snap != NULL) {
+      visible = snap->num_rows < cap ? snap->num_rows : cap;
+      memcpy(rows, snap->rows, sizeof(AnalysisRow) * (size_t)visible);
+    } else {
+      visible = fill_analysis_rows_from_sim(state, rows, cap);
+    }
     primary_w = 6;             // "100.0%"
     secondary_w = 6;           // "%+6.1f" → " -19.9"
     primary_secondary_gap = 0; // %+6.1f leading pad provides the gap

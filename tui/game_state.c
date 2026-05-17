@@ -193,6 +193,11 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   atomic_store(&out_state->bot_stop, false);
   out_state->bot_started = false;
   out_state->history_count = 0;
+  // -1 = cursor sits on the [4>] label. The cursor persists across
+  // panel-focus changes (so the user keeps their place when they
+  // click away and come back), so it's important to start at the
+  // label rather than at memset's 0 (entry 0).
+  out_state->history_cursor = -1;
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;
   out_state->seconds_used[1] = 0.0;
@@ -243,7 +248,15 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   game_reset(state->game);
   game_seed(state->game, seed);
   draw_starting_racks(state->game);
+  // Free per-entry board snapshots before zeroing the count.
+  for (int idx = 0; idx < state->history_count; idx++) {
+    if (state->history[idx].board_before != NULL) {
+      board_destroy(state->history[idx].board_before);
+      state->history[idx].board_before = NULL;
+    }
+  }
   state->history_count = 0;
+  state->history_cursor = -1;
   state->seconds_used[0] = 0.0;
   state->seconds_used[1] = 0.0;
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
@@ -268,6 +281,14 @@ void tui_game_state_destroy(TuiGameState *state) {
     pthread_join(state->bot_thread, NULL);
     state->bot_started = false;
   }
+  // Free per-entry board snapshots stashed during gameplay.
+  for (int idx = 0; idx < state->history_count; idx++) {
+    if (state->history[idx].board_before != NULL) {
+      board_destroy(state->history[idx].board_before);
+      state->history[idx].board_before = NULL;
+    }
+  }
+  state->history_count = 0;
   if (state->game != NULL) {
     game_destroy(state->game);
   }

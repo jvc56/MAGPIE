@@ -24,6 +24,7 @@
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
+#include "game_render.h"
 #include "game_state.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -73,16 +74,42 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
 static int append_pending_history(TuiGameState *state, int player_idx,
                                   const Rack *rack_at_start,
                                   int clock_at_start) {
+  // If the user's history cursor was sitting on the previous last
+  // entry, the new pending turn is "the current one" they were
+  // watching — slide the cursor forward to keep it on the live
+  // turn. If they parked the cursor on an older entry (or back at
+  // the [4>] label) we leave it alone.
+  const bool follow_to_new_pending = state->history_cursor >= 0 &&
+                                     state->history_cursor ==
+                                         state->history_count - 1;
   if (state->history_count >= TUI_HISTORY_MAX) {
+    // Ring-buffer eviction: drop the oldest entry's snapshot before
+    // we shift the array left so we don't leak its Board. Shift the
+    // cursor down by one too so it tracks the same logical move; if
+    // it was on the evicted entry, it falls back to the [4>] label.
+    if (state->history[0].board_before != NULL) {
+      board_destroy(state->history[0].board_before);
+    }
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
     state->history_count = TUI_HISTORY_MAX - 1;
+    if (state->history_cursor >= 0) {
+      state->history_cursor--; // -1 = label, which is fine if 0 → -1
+    }
   }
   TuiHistoryEntry *entry = &state->history[state->history_count++];
   memset(entry, 0, sizeof(*entry));
   entry->player_idx = player_idx;
   entry->clock_at_start = clock_at_start;
   entry->pending = true;
+  // Snapshot the board NOW (pre-move) so the History cursor can
+  // replay the position this player saw at the moment of decision.
+  // Owned by the entry; destroyed when the entry is dropped or the
+  // game state is torn down.
+  entry->board_before = board_duplicate(game_get_board(state->game));
+  if (follow_to_new_pending) {
+    state->history_cursor = state->history_count - 1;
+  }
 
   if (rack_at_start != NULL) {
     StringBuilder *rsb = string_builder_create();
@@ -160,6 +187,11 @@ static void finalize_history(TuiGameState *state, int idx, const Move *move,
 // Caller must hold state->mutex.
 static void pop_history(TuiGameState *state) {
   if (state->history_count > 0) {
+    TuiHistoryEntry *entry = &state->history[state->history_count - 1];
+    if (entry->board_before != NULL) {
+      board_destroy(entry->board_before);
+      entry->board_before = NULL;
+    }
     state->history_count--;
   }
 }
@@ -731,6 +763,15 @@ static void *bot_thread_main(void *arg) {
     }
 
     const int move_score = equity_to_int(move_get_score(chosen));
+    // Snapshot the Analysis-panel state BEFORE the move is played
+    // (so the move-string formatting and leave column read off the
+    // pre-move board + rack). The pending history entry already
+    // exists at pending_idx; stash the snapshot into it so the
+    // History cursor can replay this turn's analysis later.
+    if (pending_idx >= 0 && pending_idx < state->history_count) {
+      tui_capture_analysis_snapshot(
+          state, &state->history[pending_idx].analysis_snapshot);
+    }
     Rack leave;
     rack_set_dist_size(&leave, ld_get_size(state->ld));
     play_move(chosen, state->game, &leave);

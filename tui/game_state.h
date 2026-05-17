@@ -49,7 +49,71 @@ typedef struct {
 
 enum {
   TUI_HISTORY_MAX = 200,
+  // Max ranked candidates shown in the Analysis panel. Same cap is
+  // used for the saved per-turn snapshot so navigating history can
+  // replay the full leaderboard.
+  ANALYSIS_ROW_CAP = 64,
+  // Max plies the per-ply average columns track. Sim engine runs
+  // up to ~4 plies in practice; the cap is generous.
+  MAX_ANALYSIS_PLIES = 8,
 };
+
+typedef enum {
+  ANALYSIS_TINT_NONE = 0, // default dim_fg
+  ANALYSIS_TINT_WIN,      // positive final spread — accent (green)
+  ANALYSIS_TINT_LOSS,     // negative final spread — error (red)
+  ANALYSIS_TINT_TIE,      // zero final spread — dim (grey)
+} AnalysisTint;
+
+// One ranked candidate row in the Analysis panel. Same shape is
+// used both for the live render and for the saved-per-turn
+// snapshot stored on each history entry, so the renderer can
+// route through identical layout code regardless of which source
+// is supplying the data.
+typedef struct {
+  char move[80];
+  char leave[16];
+  char score[8];     // "30" / "120"; empty if not applicable
+  char primary[8];   // "67.3%" in sim; empty in endgame
+  char secondary[8]; // "+32.5" or "+27"
+  AnalysisTint secondary_tint;
+  // Raw values, kept alongside the display strings so the renderer
+  // can bold the highest-scoring row(s) using full precision
+  // instead of the rounded display values.
+  int score_value;
+  double primary_value;
+  double secondary_value;
+  // Per-ply mean move-score (only populated for sim mode).
+  double ply_avg[MAX_ANALYSIS_PLIES];
+  int ply_count;
+  // Player index whose turn it is for ply 0 (the candidate's
+  // player). Used by the renderer to color the per-ply columns.
+  int candidate_player_idx;
+  bool valid;
+} AnalysisRow;
+
+// Saved-per-turn snapshot of the Analysis panel contents. Captured
+// at bot-worker finalize time (move chosen, before play_move) so
+// the user can navigate the history cursor back to any committed
+// turn and re-display the analysis that was visible at the moment
+// the bot decided. Sim and endgame share this shape; `is_sim`
+// flips which set of meta fields the title rendering reads.
+typedef struct {
+  AnalysisRow rows[ANALYSIS_ROW_CAP];
+  int num_rows;
+  // Sim-mode title meta. Reproduces what render_analysis_panel
+  // would compute from a live SimResults.
+  int sim_plies;
+  uint64_t sim_iterations;
+  uint64_t sim_nodes;
+  // Endgame-mode title meta.
+  int endgame_depth;
+  uint64_t endgame_nodes;
+  bool endgame_exhaustive;
+  // True when this snapshot is from a sim solve; false for endgame.
+  bool is_sim;
+  bool valid;
+} TuiAnalysisSnapshot;
 
 typedef struct {
   int player_idx;
@@ -69,6 +133,21 @@ typedef struct {
   // and the bot worker flips it back to false once the move is
   // finalized.
   bool pending;
+
+  // Board snapshot captured BEFORE this turn was played. Owned by
+  // this entry; board_duplicate'd in append_pending_history and
+  // destroyed in pop_history / state destroy / game reset. Used
+  // by the History-panel cursor preview: navigating to entry idx
+  // displays this board so the user can replay the position the
+  // player faced at the moment of decision.
+  struct Board *board_before;
+
+  // Sim / endgame snapshot captured at finalize time (just after
+  // the bot picks the move, before play_move). Lets the History
+  // cursor replay the Analysis-panel contents that were visible
+  // when this turn was decided. Cleared when the entry is dropped
+  // or the game is reset.
+  TuiAnalysisSnapshot analysis_snapshot;
 } TuiHistoryEntry;
 
 typedef struct {

@@ -100,6 +100,31 @@ struct ncplane *tui_game_render_get_or_create_modal_plane(
 int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
                       int x);
 
+// Hit-test (y, x) against the History panel's last-rendered entry
+// rectangles. Returns:
+//   -2 — the point is outside the History panel entirely
+//   -1 — inside the panel but not on a specific entry row (title,
+//        chrome, empty space below the entries) — caller should
+//        snap history_cursor to -1 (the [4>] label)
+//   0..N-1 — the history entry index that was clicked
+//
+// Reads a per-frame cache the renderer populates each tick, so this
+// is only meaningful right after tui_game_render has run on the
+// same plane geometry.
+int tui_history_cursor_at(int y, int x);
+
+// Populate a snapshot of the Analysis-panel contents for the
+// currently-active sim or endgame solve. Called by the bot worker
+// at finalize time (just after a move is chosen, just before
+// play_move advances the board) so each history entry can
+// preserve the analysis the user was looking at when the bot
+// committed. Picks sim vs endgame the same way the live render
+// does: endgame when the bag is empty and the endgame snapshot
+// is valid, sim otherwise. Safe to call from any thread that
+// already holds state->mutex.
+void tui_capture_analysis_snapshot(const TuiGameState *state,
+                                   TuiAnalysisSnapshot *out);
+
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int board_scale, bool antialias,
                               TuiScoreSubscripts score_subscripts,
