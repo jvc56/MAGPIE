@@ -29,6 +29,19 @@ BAIResult *bai_result_create(void) {
   return bai_result;
 }
 
+BAIResult *bai_result_duplicate(const BAIResult *src) {
+  if (src == NULL) {
+    return NULL;
+  }
+  BAIResult *dst = malloc_or_die(sizeof(BAIResult));
+  cpthread_mutex_init(&dst->mutex);
+  dst->status = src->status;
+  dst->best_arm = src->best_arm;
+  dst->time_limit_seconds = src->time_limit_seconds;
+  dst->timer = src->timer;
+  return dst;
+}
+
 void bai_result_destroy(BAIResult *bai_result) { free(bai_result); }
 
 // Not thread safe, the BAI algorithm handles the threading logic

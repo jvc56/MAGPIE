@@ -22,8 +22,16 @@ typedef struct Square {
   Equity cross_score;
   MachineLetter letter;
   BonusSquare bonus_square;
-  bool anchor;
-  bool is_cross_word;
+  // anchor, is_cross_word, and player_idx pack into a single byte
+  // so adding owner tracking didn't grow Square past 32 bytes.
+  // player_idx is the player who placed the tile (0 or 1); only
+  // meaningful when letter != ALPHABET_EMPTY_SQUARE_MARKER, and
+  // only updated by callers that explicitly want to track it
+  // (sim/endgame board copies leave it as-is).
+  uint8_t anchor : 1;
+  uint8_t is_cross_word : 1;
+  uint8_t player_idx : 1;
+  uint8_t _pad : 5;
 } Square;
 
 typedef struct Board {
@@ -194,6 +202,27 @@ board_get_readonly_square(const Board *b, int row, int col, int dir, int ci) {
 static inline MachineLetter board_get_letter(const Board *b, int row, int col) {
   // Cross index doesn't matter for letter reads.
   return square_get_letter(board_get_readonly_square(b, row, col, 0, 0));
+}
+
+// Marks every sub-board copy of (row, col) with `player_idx` (0 or 1).
+// Only meaningful when the square actually has a letter. Sim and
+// endgame board copies don't call this — only the "live" game's
+// play_move flow does (via the TUI), which is why callers must invoke
+// it explicitly rather than having board_set_letter touch the owner
+// bit. Reading: `board_get_writable_square(b, row, col, 0, 0)->player_idx`
+// or the inline accessor below.
+static inline void board_set_square_owner(Board *b, int row, int col,
+                                          int player_idx) {
+  for (int ci = 0; ci < 2; ci++) {
+    for (int dir = 0; dir < 2; dir++) {
+      board_get_writable_square(b, row, col, dir, ci)->player_idx =
+          (uint8_t)(player_idx & 1);
+    }
+  }
+}
+
+static inline int board_get_square_owner(const Board *b, int row, int col) {
+  return board_get_readonly_square(b, row, col, 0, 0)->player_idx;
 }
 
 static inline void board_set_letter(Board *b, int row, int col,

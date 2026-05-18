@@ -1,6 +1,7 @@
 .vscode
 bin
 obj
+obj_tui
 cov
 covhtml
 *.gcda
@@ -8,6 +9,7 @@ covhtml
 *.info
 *.out
 magpie*
+!tui/assets/magpie.ttf
 dev/*.txt
 perf*
 .env

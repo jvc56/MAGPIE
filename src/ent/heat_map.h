@@ -41,6 +41,17 @@ static inline void heat_map_reset(HeatMap *hm) {
   memset(hm->counts, 0, sizeof(hm->counts));
 }
 
+// Allocate a new HeatMap whose state matches `src`. Caller owns
+// the result and must heat_map_destroy it.
+static inline HeatMap *heat_map_duplicate(const HeatMap *src) {
+  if (src == NULL) {
+    return NULL;
+  }
+  HeatMap *dst = (HeatMap *)calloc_or_die(1, sizeof(HeatMap));
+  memcpy(dst, src, sizeof(HeatMap));
+  return dst;
+}
+
 static inline size_t heat_map_get_index(int row, int col, heat_map_t type) {
   return (((size_t)row * BOARD_DIM + col) * NUM_HEAT_MAP_TYPES) + type;
 }
