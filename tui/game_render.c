@@ -955,6 +955,15 @@ static struct {
 static _Atomic long g_board_blit_latency_us;
 static _Atomic long g_ncblit_us;
 static _Atomic long g_max_frame_us;
+// notcurses sprixel emission counters. The renderer queries
+// these once per frame to compare against the last snapshot; the
+// delta is how many sprixels notcurses actually pushed to the
+// terminal that frame, vs how many it elided (placed without
+// re-uploading) because the content was unchanged. High emit
+// counts on idle frames mean the elision logic isn't catching
+// our planes.
+static _Atomic uint64_t g_sprixel_emits_delta;
+static _Atomic uint64_t g_sprixel_elides_delta;
 // Number of tile pixel planes ncblit'd on the most-recent frame
 // that performed any board work. 0 means no blits (cache hit).
 // High values (5–7) line up with bingos / multi-letter plays
@@ -964,6 +973,29 @@ static int g_last_blitted_cursor;
 static bool g_last_blit_tracked;
 static struct timespec g_cursor_pending_since;
 static bool g_cursor_pending;
+
+// Snapshot the notcurses sprixel counters and stash the per-frame
+// delta into the atomics that the debug overlay reads. Called
+// from main.c right after each notcurses_render(). Lets us see
+// whether unchanged sprixels are being elided (placed via short
+// re-positioning commands) or fully re-emitted (full RGBA push).
+void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides) {
+  static uint64_t last_emits;
+  static uint64_t last_elides;
+  static bool init;
+  if (!init) {
+    last_emits = emits;
+    last_elides = elides;
+    init = true;
+    return;
+  }
+  const uint64_t de = (emits >= last_emits) ? emits - last_emits : 0;
+  const uint64_t dl = (elides >= last_elides) ? elides - last_elides : 0;
+  atomic_store(&g_sprixel_emits_delta, de);
+  atomic_store(&g_sprixel_elides_delta, dl);
+  last_emits = emits;
+  last_elides = elides;
+}
 
 void tui_debug_record_frame_us(long frame_us) {
   static long max_in_window;
@@ -1027,6 +1059,35 @@ typedef struct {
 static TileCache board_tile_cache[BOARD_DIM][BOARD_DIM];
 static struct ncplane *board_tile_planes[BOARD_DIM][BOARD_DIM];
 
+// Per-tile state for the rack panel. Same idea as the board tile
+// cache: one small pixel plane per rack slot, re-blit only when
+// the letter at that slot changes. RACK_SIZE = 7 in standard
+// games. When the bot finalizes a move and draws fresh tiles,
+// only the slots that actually changed letters re-emit instead
+// of the whole rack strip thrashing.
+typedef struct {
+  int letter;
+  int player_idx;
+  int score;
+  bool antialias;
+  int score_subscripts;
+  unsigned cdy, cdx;
+  int scale;
+  bool valid;
+} RackTileCache;
+static RackTileCache rack_tile_cache[RACK_SIZE];
+static struct ncplane *rack_tile_planes[RACK_SIZE];
+
+static void invalidate_rack_tile_planes(void) {
+  for (int i = 0; i < RACK_SIZE; i++) {
+    if (rack_tile_planes[i] != NULL) {
+      ncplane_destroy(rack_tile_planes[i]);
+      rack_tile_planes[i] = NULL;
+    }
+    rack_tile_cache[i].valid = false;
+  }
+}
+
 // Tear down every cached tile plane. Used when scale flips back
 // to 1x (planes would otherwise occlude the text-mode board) and
 // at game-reset / state-destroy.
@@ -1040,6 +1101,7 @@ static void invalidate_tile_planes(void) {
       board_tile_cache[row][col].valid = false;
     }
   }
+  invalidate_rack_tile_planes();
 }
 
 static BlitCache board_pixel_cache;
@@ -2320,6 +2382,85 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
 // ASCII chars. The panel box gains one row at scale=2 so the 2-row
 // tiles fit.
 
+// Compose ONE rack tile's RGBA buffer (rack_tileN bg + letter
+// glyph + optional score subscript). Caller owns + frees the
+// buffer. Returns NULL on failure. The rack uses its own
+// palette (rack_tile1_*, rack_tile2_*) rather than the board's
+// tile colors; blanks render as "?" with subscript 0.
+static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
+                                         int tile_w, int tile_h,
+                                         TuiGlyphCache *glyph_cache,
+                                         TuiGlyphCache *glyph_cache_sub,
+                                         TuiScoreSubscripts score_subscripts,
+                                         bool antialias, const Theme *theme,
+                                         const LetterDistribution *ld) {
+  uint8_t *buf = (uint8_t *)calloc(1, (size_t)tile_w * tile_h * 4);
+  if (buf == NULL) {
+    return NULL;
+  }
+  const ThemeRgb bg =
+      player_idx == 1 ? theme->rack_tile2_bg : theme->rack_tile1_bg;
+  const ThemeRgb fg =
+      player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg;
+  fill_tile_rect(buf, tile_w, 0, 0, tile_w, tile_h, bg);
+
+  const int sub_mode = (int)score_subscripts;
+  const bool subs_on =
+      sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && glyph_cache_sub != NULL;
+  const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
+  const int sub_px = (int)((double)tile_h * 0.24);
+  tui_glyph_cache_set_size(glyph_cache, letter_px, antialias);
+  if (subs_on) {
+    tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
+  }
+
+  const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+  const TuiGlyph *g =
+      (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80)
+          ? tui_glyph_cache_get(glyph_cache, (uint32_t)ascii[0])
+          : NULL;
+  const int tile_score = (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, ml));
+  if (g != NULL && g->width > 0 && g->height > 0) {
+    if (subs_on) {
+      const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
+      const int shift_x = (int)((double)tile_w * shift_x_frac);
+      const int shift_y = (int)((double)tile_h * 0.08);
+      const int baseline = (int)(tile_h * 0.72) - shift_y;
+      const int glyph_top = baseline - g->bearing_y;
+      const int glyph_left = (tile_w - g->width) / 2 - shift_x;
+      blit_glyph_at(buf, tile_w, tile_h, glyph_left, glyph_top, g, fg, bg);
+    } else {
+      blit_glyph_into_buf(buf, tile_w, tile_h, 0, 0, tile_w, tile_h, g, fg, bg);
+    }
+  }
+  if (subs_on) {
+    // Blanks always get a "0" subscript so their value is explicit.
+    const bool show_subscript =
+        (ml == 0) || (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
+        (tile_score != 0);
+    if (show_subscript) {
+      char digits[8];
+      snprintf(digits, sizeof(digits), "%d", tile_score);
+      const int margin_x = (int)((double)tile_w * 0.12);
+      const int margin_y = (int)((double)tile_h * 0.16);
+      const int digit_bottom = tile_h - margin_y;
+      int pen_right = tile_w - margin_x;
+      for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
+        const TuiGlyph *gd =
+            tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
+        if (gd == NULL || gd->width <= 0) {
+          continue;
+        }
+        const int gleft = pen_right - gd->width;
+        const int gtop = digit_bottom - gd->height;
+        blit_glyph_at(buf, tile_w, tile_h, gleft, gtop, gd, fg, bg);
+        pen_right = gleft - 1;
+      }
+    }
+  }
+  return buf;
+}
+
 static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                                     const TuiGameState *state, const Layout *L,
                                     int start_col, int tile_count) {
@@ -2330,162 +2471,112 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   }
   const int cell_w = L->board_cell_w; // 4
   const int cell_h = L->board_cell_h; // 2
-  const int rows = cell_h;
-  const int cols = tile_count * cell_w;
-  // Rack content sits on the rows immediately below the box top. With
-  // box top at L->rack_top, the 2-row content area is rows
-  // (rack_top + 1, rack_top + 2).
-  struct ncplane *p =
-      acquire_grid_plane(&grid_planes.rack, plane, "rack_pixel",
-                         L->rack_top + 1, start_col, rows, cols);
-  if (p == NULL) {
-    return;
-  }
+  // Probe cell-pixel geometry off the parent plane.
   unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
-  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  ncplane_pixel_geom(plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
   if (cdy == 0 || cdx == 0) {
-    return;
-  }
-  // Cache key by RACK CONTENT, not render_version. render_version
-  // bumps for endgame iterative-deepening passes and sim spinner
-  // updates — neither of which changes the rack — and each of
-  // those bumps was forcing a full rack rasterize + ~MB-scale
-  // Kitty graphics emit while the bot was thinking. Fingerprint
-  // the on-turn player's rack instead.
-  const int player_idx_for_fp = game_get_player_on_turn_index(state->game);
-  const Rack *rack_for_fp =
-      player_get_rack(game_get_player(state->game, player_idx_for_fp));
-  uint64_t rack_fp = 0xcbf29ce484222325ULL ^ ((uint64_t)player_idx_for_fp << 56);
-  if (rack_for_fp != NULL) {
-    const uint16_t dist = rack_get_dist_size(rack_for_fp);
-    for (uint16_t i = 0; i < dist; i++) {
-      rack_fp ^= rack_get_letter(rack_for_fp, (MachineLetter)i);
-      rack_fp *= 0x100000001b3ULL;
-    }
-  }
-  if (rack_pixel_cache.valid && rack_pixel_cache.version == rack_fp &&
-      rack_pixel_cache.cdy == cdy && rack_pixel_cache.cdx == cdx &&
-      rack_pixel_cache.param_a == tile_count &&
-      rack_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
     return;
   }
   const int tile_w = (int)cdx * cell_w;
   const int tile_h = (int)cdy * cell_h;
-  const int buf_w = tile_w * tile_count;
-  const int buf_h = tile_h;
-  // Match the board's subscript-mode sizing so rack tiles look the
-  // same as placed tiles at the same scale.
-  const int sub_mode = (int)state->score_subscripts;
-  const bool subs_on = sub_mode != TUI_SCORE_SUBSCRIPTS_OFF &&
-                       state->glyph_cache_sub != NULL;
-  const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
-  const int sub_px = (int)((double)tile_h * 0.24);
-  tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
-  if (subs_on) {
-    tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
-  }
-
-  uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
-  if (buf == NULL) {
+  if (tile_w <= 0 || tile_h <= 0) {
     return;
   }
 
+  // Expand the rack into a per-slot letter array so we can cache
+  // each slot independently. tile_count comes from the caller and
+  // is the visible rack length.
   const int player_idx = game_get_player_on_turn_index(state->game);
-  const Rack *rack = player_get_rack(game_get_player(state->game, player_idx));
-  const LetterDistribution *ld = state->ld;
-  // P1 gets the green pair; P2 gets the amber pair so the racked
-  // tiles read as the same family of glyphs the player has already
-  // committed to the board.
-  const ThemeRgb rt_fg =
-      player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg;
-  const ThemeRgb rt_bg =
-      player_idx == 1 ? theme->rack_tile2_bg : theme->rack_tile1_bg;
-
-  int tile_idx = 0;
-  for (int ml = 0; ml < ld_get_size(ld); ml++) {
-    const int count = rack_get_letter(rack, (MachineLetter)ml);
-    for (int copy = 0; copy < count && tile_idx < tile_count;
-         copy++, tile_idx++) {
-      const int tx = tile_idx * tile_w;
-      fill_tile_rect(buf, buf_w, tx, 0, tile_w, tile_h, rt_bg);
-      const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-      const TuiGlyph *g =
-          (ascii != NULL && ascii[0] != '\0' &&
-           (unsigned char)ascii[0] < 0x80)
-              ? tui_glyph_cache_get(state->glyph_cache, (uint32_t)ascii[0])
-              : NULL;
-      // Score for shift sizing + subscript. An undesignated blank reads
-      // as "?" but we always subscript it "0", so it's a 1-digit score.
-      const int tile_score =
-          (ml == 0) ? 0 : equity_to_int(ld_get_score(ld, (MachineLetter)ml));
-      if (g != NULL && g->width > 0 && g->height > 0) {
-        if (subs_on) {
-          // Same centered-with-bias placement as placed board tiles —
-          // digit-aware horizontal shift.
-          const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
-          const int shift_x = (int)((double)tile_w * shift_x_frac);
-          const int shift_y = (int)((double)tile_h * 0.08);
-          const int baseline = 0 + (int)(tile_h * 0.72) - shift_y;
-          const int glyph_top = baseline - g->bearing_y;
-          const int glyph_left = tx + (tile_w - g->width) / 2 - shift_x;
-          blit_glyph_at(buf, buf_w, buf_h, glyph_left, glyph_top, g, rt_fg,
-                        rt_bg);
-        } else {
-          blit_glyph_into_buf(buf, buf_w, buf_h, tx, 0, tile_w, tile_h, g,
-                              rt_fg, rt_bg);
-        }
-      }
-
-      // Subscript: an undesignated blank in the rack always gets a "0"
-      // when subscripts are enabled (it makes the "?" tile's worth
-      // explicit). Regular letters use ld_get_score and follow the
-      // configured mode.
-      if (subs_on) {
-        const bool show_subscript =
-            (ml == 0) || (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
-            (tile_score != 0);
-        if (show_subscript) {
-          char digits[8];
-          snprintf(digits, sizeof(digits), "%d", tile_score);
-          const int margin_x = (int)((double)tile_w * 0.12);
-          const int margin_y = (int)((double)tile_h * 0.16);
-          const int digit_bottom = 0 + tile_h - margin_y;
-          int pen_right = tx + tile_w - margin_x;
-          for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
-            const TuiGlyph *gd = tui_glyph_cache_get(state->glyph_cache_sub,
-                                                    (uint32_t)digits[i]);
-            if (gd == NULL || gd->width <= 0) {
-              continue;
-            }
-            const int gleft = pen_right - gd->width;
-            const int gtop = digit_bottom - gd->height;
-            blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd, rt_fg, rt_bg);
-            pen_right = gleft - 1;
-          }
-        }
+  const Rack *rack =
+      player_get_rack(game_get_player(state->game, player_idx));
+  MachineLetter slot_letters[RACK_SIZE];
+  for (int i = 0; i < RACK_SIZE; i++) {
+    slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
+  }
+  int slot_idx = 0;
+  if (rack != NULL) {
+    for (int ml = 0; ml < ld_get_size(state->ld) && slot_idx < tile_count &&
+                     slot_idx < RACK_SIZE;
+         ml++) {
+      const int count = rack_get_letter(rack, (MachineLetter)ml);
+      for (int copy = 0;
+           copy < count && slot_idx < tile_count && slot_idx < RACK_SIZE;
+           copy++) {
+        slot_letters[slot_idx++] = (MachineLetter)ml;
       }
     }
   }
 
-  // Borders along bottom + right of each tile, in theme->bg, just like
-  // the board composite. Single ncblit_rgba ships the whole strip.
-  overlay_grid_lines(buf, buf_w, buf_h, 1, tile_count, tile_h, tile_w,
-                     state->border_thickness, theme->bg);
+  // Drop any cached tile plane beyond the visible rack length so
+  // shrinking rack (end of game) frees its planes.
+  for (int i = tile_count; i < RACK_SIZE; i++) {
+    if (rack_tile_planes[i] != NULL) {
+      ncplane_destroy(rack_tile_planes[i]);
+      rack_tile_planes[i] = NULL;
+      rack_tile_cache[i].valid = false;
+    }
+  }
 
-  struct ncvisual_options vopts = {0};
-  vopts.n = p;
-  vopts.blitter = NCBLIT_PIXEL;
-  vopts.leny = (unsigned)buf_h;
-  vopts.lenx = (unsigned)buf_w;
-  ncblit_rgba(buf, buf_w * 4, &vopts);
-  free(buf);
-
-  rack_pixel_cache.valid = true;
-  rack_pixel_cache.version = rack_fp;
-  rack_pixel_cache.cdy = cdy;
-  rack_pixel_cache.cdx = cdx;
-  rack_pixel_cache.param_a = tile_count;
-  rack_pixel_cache.param_b = state->antialias ? 1 : 0;
+  for (int i = 0; i < tile_count && i < RACK_SIZE; i++) {
+    const MachineLetter ml = slot_letters[i];
+    RackTileCache *rc = &rack_tile_cache[i];
+    const int tile_score =
+        (ml == 0) ? 0 : equity_to_int(ld_get_score(state->ld, ml));
+    if (rc->valid && rc->letter == (int)ml && rc->player_idx == player_idx &&
+        rc->score == tile_score && rc->antialias == state->antialias &&
+        rc->score_subscripts == (int)state->score_subscripts &&
+        rc->cdy == cdy && rc->cdx == cdx && rc->scale == L->scale &&
+        rack_tile_planes[i] != NULL) {
+      continue;
+    }
+    const int screen_top = L->rack_top + 1;
+    const int screen_left = start_col + i * cell_w;
+    if (rack_tile_planes[i] == NULL) {
+      ncplane_options opts = {0};
+      opts.y = screen_top;
+      opts.x = screen_left;
+      opts.rows = (unsigned)cell_h;
+      opts.cols = (unsigned)cell_w;
+      opts.name = "rack_tile";
+      rack_tile_planes[i] = ncplane_create(plane, &opts);
+      if (rack_tile_planes[i] == NULL) {
+        continue;
+      }
+    } else {
+      ncplane_move_yx(rack_tile_planes[i], screen_top, screen_left);
+    }
+    uint8_t *buf = compose_rack_tile_pixels(
+        ml, player_idx, tile_w, tile_h, state->glyph_cache,
+        state->glyph_cache_sub, state->score_subscripts, state->antialias,
+        theme, state->ld);
+    if (buf == NULL) {
+      continue;
+    }
+    struct ncvisual_options vopts = {0};
+    vopts.n = rack_tile_planes[i];
+    vopts.blitter = NCBLIT_PIXEL;
+    vopts.leny = (unsigned)tile_h;
+    vopts.lenx = (unsigned)tile_w;
+    ncblit_rgba(buf, tile_w * 4, &vopts);
+    free(buf);
+    rc->letter = (int)ml;
+    rc->player_idx = player_idx;
+    rc->score = tile_score;
+    rc->antialias = state->antialias;
+    rc->score_subscripts = (int)state->score_subscripts;
+    rc->cdy = cdy;
+    rc->cdx = cdx;
+    rc->scale = L->scale;
+    rc->valid = true;
+  }
+  // The legacy single-plane rack_pixel_cache is unused now; clear
+  // it so a future regression that re-enables it starts cold
+  // rather than reusing stale state.
+  rack_pixel_cache.valid = false;
+  if (grid_planes.rack != NULL) {
+    ncplane_destroy(grid_planes.rack);
+    grid_planes.rack = NULL;
+  }
 }
 
 static void render_rack_panel(struct ncplane *plane, const Theme *theme,
@@ -5357,12 +5448,15 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     const long blit_us = atomic_load(&g_ncblit_us);
     const long max_us = atomic_load(&g_max_frame_us);
     const int tile_blits_last = atomic_load(&g_last_tile_blits);
-    char dbg[96];
+    const uint64_t spr_emit = atomic_load(&g_sprixel_emits_delta);
+    const uint64_t spr_elide = atomic_load(&g_sprixel_elides_delta);
+    char dbg[128];
     snprintf(dbg, sizeof(dbg),
-             " %dt lat %ld.%01ld blit %ld.%01ld max %ld.%01ld ms ",
-             tile_blits_last, lat_us / 1000L, (lat_us % 1000L) / 100L,
-             blit_us / 1000L, (blit_us % 1000L) / 100L, max_us / 1000L,
-             (max_us % 1000L) / 100L);
+             " %dt e%llu/l%llu max %ld.%01ld ms ", tile_blits_last,
+             (unsigned long long)spr_emit, (unsigned long long)spr_elide,
+             max_us / 1000L, (max_us % 1000L) / 100L);
+    (void)lat_us;
+    (void)blit_us;
     const int len = (int)strlen(dbg);
     const int col = (int)L.plane_cols - len;
     if (col >= 0) {

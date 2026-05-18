@@ -486,6 +486,8 @@ int main(int argc, char *argv[]) {
     // can surface the worst-case frame in the last second. Captures
     // notcurses_render too, where the Kitty graphics emit lives.
     extern void tui_debug_record_frame_us(long);
+    extern void tui_debug_record_sprixel_stats(uint64_t emits,
+                                               uint64_t elides);
     struct timespec frame_start;
     clock_gettime(CLOCK_MONOTONIC, &frame_start);
     notcurses_render(nc);
@@ -495,6 +497,17 @@ int main(int argc, char *argv[]) {
         (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
         (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
     tui_debug_record_frame_us(frame_us);
+    // Snapshot notcurses' sprixel emission counters so the debug
+    // overlay can show whether re-emits happen on idle frames.
+    {
+      ncstats *st = notcurses_stats_alloc(nc);
+      if (st != NULL) {
+        notcurses_stats(nc, st);
+        tui_debug_record_sprixel_stats(st->sprixelemissions,
+                                       st->sprixelelisions);
+        free(st);
+      }
+    }
 
     // Input is polled non-blocking; the throttle lives at the top of
     // the loop so `continue` paths can't bypass it.

@@ -362,7 +362,13 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
-  const int num_threads = get_num_cores();
+  // Reserve a core for the UI thread + notcurses so frame
+  // rendering doesn't fight the simmer for scheduler time.
+  // On a 10+ core machine giving up 1-2 cores is barely
+  // perceptible in sim throughput; in exchange the TUI stays
+  // smooth during "bot thinking" frames.
+  const int hw_cores = get_num_cores();
+  const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
   SimArgs args = {0};
   args.num_plies = SIM_PLIES;
   args.move_list = candidates;
@@ -620,7 +626,10 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   args.tt_fraction_of_mem = 0.10;
   args.plies = ENDGAME_PLIES;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  args.num_threads = get_num_cores();
+  {
+    const int hw = get_num_cores();
+    args.num_threads = hw > 2 ? hw - 1 : hw;
+  }
   args.use_heuristics = true;
   // Ask the solver for a top-K leaderboard. Post-#530 the negamax
   // search uses topk_values[MAX_ENDGAME_DISPLAY_PVS], so that's the
