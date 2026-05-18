@@ -554,6 +554,175 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
+// Pos 28 from the 2peg random suite (CSW24). After mover plays 4L (V)IA 19
+// in scenario IS (mover drew I,S from bag): bag empty, opp has AIINOOU,
+// mover has CDIOST?. The blank gives mover a DISCO(U)nT bingo at 1A through
+// the existing U at row 1 col F, scoring 167 + 14 going-out bonus = +181
+// value. Opp's only defence is 2B ONIO(N) 10 which creates an "IO" cross
+// below 1B and BLOCKS DISCO(U)nT. Discovered while debugging the pegN
+// greedy d=0 evaluator: a tight -tlim that interrupts IDS in the middle
+// of its depth-3 iteration was returning pass-pass at "status: finished"
+// even though -plies 3 with adequate time gives the correct answer.
+//
+// The tests below verify both halves of the response at every search depth:
+// (1) from mover's turn (after opp would pass), mover MUST find DISCO(U)nT
+// (2) from opp's turn, opp MUST block and the PV ends in mover's bingo.
+
+#define VIA_IS_OPP_TURN_CGP                                                    \
+  "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"          \
+  "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
+  "4RENEGADE2P AIINOOU/CDIOST? 392/450 0 -lex CSW24"
+
+#define VIA_IS_MOVER_TURN_CGP                                                  \
+  "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"          \
+  "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
+  "4RENEGADE2P CDIOST?/AIINOOU 450/392 0 -lex CSW24"
+
+void test_via_mover_must_bingo_every_depth(void) {
+  // Mover (CDIOST?) on turn after VIA + (implicit opp pass). Bag empty.
+  // Mover MUST play DISCO(U)nT 167 going out, value +181, at every depth.
+  // The bingo terminates the game so depth-1 already suffices; depths 4-6
+  // search the same tree but get pruned quickly when the leaf finds the
+  // going-out bonus. Test plies 1..4 (5-6 just confirm the same answer
+  // at much higher wall-time cost).
+  for (int plies = 1; plies <= 3; plies++) {
+    char settings[128];
+    snprintf(settings, sizeof(settings),
+             "set -s1 score -s2 score -threads 6 -eplies %d "
+             "-ttfraction 0.05",
+             plies);
+    test_single_endgame(settings, VIA_IS_MOVER_TURN_CGP,
+                        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        ERROR_STATUS_SUCCESS, 181, false, 0);
+  }
+}
+
+// Stress test: post-VIA opp-on-turn position with many randomized short
+// time cutoffs. Asserts that even when IDS is interrupted mid-iteration,
+// the returned result is "reasonable" — concretely, opp's value must not
+// exceed 0 (opp's optimal play LOSES spread in this position; if the
+// solver reports opp gains spread, that's the depth-3 IDS glitch).
+void test_via_interrupted_reasonable_under_time_pressure(void) {
+  // Focus on short tlim (0.05s - 0.8s): bug fires reliably when IDS gets
+  // interrupted before depth-3 or depth-4 fully resolves. Earlier sweep
+  // with [0.3, 3.0] range hit the glitch ~35% of the time, mostly at the
+  // bottom of the range. Tighter range here both repros more often and
+  // keeps the test fast.
+  const int N_ITERATIONS = 100;
+  const double TLIM_MIN = 0.05;
+  const double TLIM_MAX = 0.8;
+  // Fixed seed for reproducibility across runs.
+  uint64_t rng = 0xdeadbeefULL;
+  int n_glitched = 0;
+  int n_finished = 0;
+  int n_interrupted_no_result = 0;
+  for (int iter = 0; iter < N_ITERATIONS; iter++) {
+    // xorshift for a deterministic pseudo-random tlim in [TLIM_MIN, TLIM_MAX].
+    rng ^= rng << 13;
+    rng ^= rng >> 7;
+    rng ^= rng << 17;
+    double frac = (double)(rng & 0xFFFFFFu) / (double)(0x1000000);
+    double tlim = TLIM_MIN + frac * (TLIM_MAX - TLIM_MIN);
+
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -threads 6 -eplies 25");
+    load_and_exec_config_or_die(config, VIA_IS_OPP_TURN_CGP);
+
+    EndgameCtx *endgame_ctx = NULL;
+    Game *game = config_get_game(config);
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = 25;
+    endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 6;
+    endgame_args.use_heuristics = true;
+    endgame_args.forced_pass_bypass = true;
+    endgame_args.enable_pv_display = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.seed = 42;
+    endgame_args.soft_time_limit = tlim;
+    endgame_args.hard_time_limit = tlim;
+    endgame_args.external_deadline_ns =
+        ctimer_monotonic_ns() + (int64_t)(tlim * 1.0e9);
+
+    EndgameResults *endgame_results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+
+    if (!error_stack_is_empty(error_stack)) {
+      n_interrupted_no_result++;
+      printf("  iter %2d tlim=%.3fs: error during solve (acceptable)\n", iter,
+             tlim);
+      error_stack_reset(error_stack);
+    } else {
+      const PVLine *pv =
+          endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+      int32_t value = pv->score;
+      bool is_pass = small_move_is_pass(&pv->moves[0]);
+      int depth =
+          endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST);
+      bool glitched = (value > 0);
+      if (glitched) {
+        n_glitched++;
+      }
+      n_finished++;
+      // Render the first PV move as a readable string.
+      char move_str[64] = {0};
+      if (is_pass) {
+        snprintf(move_str, sizeof(move_str), "pass");
+      } else {
+        Move first_move;
+        small_move_to_move(&first_move, &pv->moves[0],
+                           game_get_board(game));
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_move(sb, game_get_board(game), &first_move,
+                                game_get_ld(game), true);
+        snprintf(move_str, sizeof(move_str), "%s",
+                 string_builder_peek(sb));
+        string_builder_destroy(sb);
+      }
+      printf("  iter %3d tlim=%.3fs depth=%d move=%-22s value=%+4d %s\n",
+             iter, tlim, depth, move_str, value,
+             glitched ? "*** GLITCHED ***" : "");
+    }
+
+    error_stack_destroy(error_stack);
+    endgame_ctx_destroy(endgame_ctx);
+    config_destroy(config);
+  }
+  printf(
+      "VIA-interrupt stress: %d iterations, %d finished, %d errored, "
+      "%d glitched (value > 0)\n",
+      N_ITERATIONS, n_finished, n_interrupted_no_result, n_glitched);
+  // Opp's optimal play in this position LOSES spread (~ -78). Any
+  // "finished" result reporting value > 0 is the depth-3 IDS glitch
+  // (pass-pass returning value = +2). Tolerate 0 glitches.
+  assert(n_glitched == 0);
+}
+
+void test_via_opp_must_block_every_depth(void) {
+  // Opp (AIINOOU) on turn after mover played VIA. Bag empty, mover holds
+  // CDIOST? with the DISCO(U)nT bingo threat at 1A through the U at 1F.
+  // Opp's optimal play is 2B ONIO(N) 10 (or equivalent), which puts an O
+  // at 2B forming "IO" below 1B and blocking the bingo column. Mover then
+  // finds B7 STICc(A)DO 82 bingo instead (blank as c). Value from opp's
+  // POV is -78, opp's first move scores 10 and is not pass. Test plies
+  // 1..4 (deeper plies confirm the same answer at much higher cost).
+  for (int plies = 1; plies <= 3; plies++) {
+    char settings[128];
+    snprintf(settings, sizeof(settings),
+             "set -s1 score -s2 score -threads 6 -eplies %d "
+             "-ttfraction 0.05",
+             plies);
+    test_single_endgame(settings, VIA_IS_OPP_TURN_CGP,
+                        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        ERROR_STATUS_SUCCESS, -78, false, 0);
+  }
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -566,6 +735,11 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  // Mover-must-bingo / opp-must-block at every depth (Pos 28 VIA scenario).
+  test_via_mover_must_bingo_every_depth();
+  test_via_opp_must_block_every_depth();
+  // Stress test: same position with random short tlims; assert no glitch.
+  test_via_interrupted_reasonable_under_time_pressure();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();

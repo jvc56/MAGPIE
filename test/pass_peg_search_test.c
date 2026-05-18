@@ -2189,6 +2189,15 @@ static Game *pegN_make_post_cand_game(
     rack_add_letter(mover_r, mover_drawn[i]);
     (void)bag_draw_letter(bag, mover_drawn[i], 0);
   }
+  // play_move_without_drawing_tiles sets GAME_END_REASON_STANDARD when the
+  // rack empties post-placement and bag <= RACK_SIZE — meant for the endgame
+  // solver's no-drawing world. We manually re-stock the rack right after,
+  // so the going-out flag is stale. Clear it whenever the rack isn't empty;
+  // otherwise the greedy playout's first-line "if game_end != NONE break"
+  // bails before simulating any continuation for emptier candidates.
+  if (!rack_is_empty(mover_r)) {
+    game_set_game_end_reason(g, GAME_END_REASON_NONE);
+  }
   return g;
 }
 
@@ -2780,16 +2789,16 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   // weight = samples × k so the expected aggregate weight is preserved.
   // Default k=1 (no sampling). Applies at every level (outer + inner).
   //
-  // Bag-size gate: when the root bag is 1 (1peg), the entire scenario
-  // space is just the n_opp_types distinct bag-tile possibilities. Stride
-  // sampling on that tiny space throws away crucial coverage — skip
-  // stride entirely when N (= K_drawn + n_bag_remaining) <= 1.
+  // Bag-size gate: when the root bag is 1 or 2 (1peg/2peg), the scenario
+  // space is still small enough to enumerate fully — stride sampling on
+  // that tiny space throws away crucial coverage. Disable stride when
+  // N (= K_drawn + n_bag_remaining) <= 2; only enable for 3peg+.
   {
     const int N_root = ctx->K_drawn + ctx->n_bag_remaining;
     const char *stride_env = getenv("PASSPEGN_SCENARIO_STRIDE");
     const int stride_req =
         stride_env && *stride_env ? atoi(stride_env) : 1;
-    const int stride = (N_root >= 2) ? stride_req : 1;
+    const int stride = (N_root >= 3) ? stride_req : 1;
     if (stride > 1 && ctx->res) {
       pegN_lock(ctx->res_mutex);
       const int64_t old_seen = ctx->res->sampled_weight_seen;
@@ -4706,13 +4715,16 @@ static void pegN_eval_opp_with_perception(
     int n_opp_types, int n_bag_now, const int *realized_bag_counts,
     double alpha, double *out_utility, int32_t *out_realized_mt) {
   int cur_hyp_bag[MAX_ALPHABET_SIZE] = {0};
-  // Perception stride only fires when the bag holds >= 2 tiles. With 1
-  // tile in the bag, the hypothesis space is at most n_opp_types (one
-  // per possible single-tile bag composition) — sampling 1/k of that is
-  // too aggressive (information loss outweighs the compute saving).
+  // Perception stride only fires when the root bag size is large enough
+  // that the perception hypothesis space justifies sampling. At root bag
+  // <= 2 (1peg / 2peg) the space is small enough to enumerate; sampling
+  // 1/k of it throws away too much coverage.
+  const int root_bag_size =
+      outer_ctx->K_drawn + outer_ctx->n_bag_remaining;
   const char *perception_stride_env = getenv("PASSPEGN_PERCEPTION_STRIDE");
   const int perception_stride =
-      (n_bag_now >= 2 && perception_stride_env && *perception_stride_env)
+      (root_bag_size >= 3 && n_bag_now >= 2 && perception_stride_env &&
+       *perception_stride_env)
           ? atoi(perception_stride_env)
           : 1;
   PegNHypEnumCtx e = {

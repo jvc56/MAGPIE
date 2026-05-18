@@ -183,8 +183,14 @@ struct EndgameCtxWorker {
   MoveList *move_list;
   EndgameCtx *solver;
   int current_iterative_deepening_depth;
-  // Array of MoveUndo structures for incremental play/unplay
-  MoveUndo move_undos[MAX_SEARCH_DEPTH];
+  // Array of MoveUndo structures for incremental play/unplay. Sized at
+  // MAX_SEARCH_DEPTH + 1 so the greedy leaf playout has at least one slot
+  // available past negamax's deepest move when requested_plies ==
+  // MAX_SEARCH_DEPTH. Without this slack the greedy `while` loop never runs
+  // at full-depth IDS and the leaf returns the static rack-adjusted spread,
+  // producing wildly wrong values (e.g. +31 instead of -78) for positions
+  // where the greedy needs to play one final bingo to terminate the game.
+  MoveUndo move_undos[MAX_SEARCH_DEPTH + 1];
   // Per-depth MoveUndo for forced-pass bypass. Pass recurses at the same depth
   // so it cannot share move_undos[]; indexed by the depth parameter (0..25).
   MoveUndo pass_undos[MAX_SEARCH_DEPTH + 1];
@@ -1379,7 +1385,13 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   int solving_player = worker->solver->solving_player;
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
-  int max_playout = MAX_SEARCH_DEPTH - plies;
+  // +1 because move_undos[] is now sized MAX_SEARCH_DEPTH+1 specifically so
+  // the greedy can claim at least one slot past the deepest negamax-used
+  // slot. Without this, full-depth IDS (plies == MAX_SEARCH_DEPTH) gives
+  // greedy 0 plies and leaks the static rack-adjusted spread instead of
+  // playing a terminating move.
+  int max_playout = MAX_SEARCH_DEPTH + 1 - plies;
+
 
   // Recompute opp_stuck_frac from the current position rather than using the
   // parent's value. This ensures position-dependent (not path-dependent)
@@ -2370,6 +2382,78 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     start = plies;
   }
 
+  // Depth-0 fallback (thread 0 only): before the IDS loop runs depth-1+,
+  // do a greedy-leaf evaluation of EACH root candidate and store the best
+  // as a depth-0 result. If the IDS is interrupted before depth-1 completes
+  // even once, the caller gets the best-from-static-greedy answer instead
+  // of the default "no result / pass / value=0".
+  if (worker->thread_index == 0) {
+    SmallMove *initial_moves =
+        (SmallMove *)(worker->small_move_arena->memory);
+    int32_t best_root_value = -LARGE_VALUE;
+    SmallMove best_root_move;
+    bool have_root_best = false;
+    PVLine d0_pv;
+    d0_pv.game = worker->game_copy;
+    d0_pv.num_moves = 0;
+    d0_pv.negamax_depth = 0;
+
+    for (int i = 0; i < initial_move_count; i++) {
+      if (iterative_deepening_should_stop(worker->solver)) {
+        break;
+      }
+      const SmallMove *sm = &initial_moves[i];
+      small_move_to_move(worker->move_list->spare_move, sm,
+                         game_get_board(worker->game_copy));
+      // Slot 0 — the root play. Negamax's IDS will reuse this slot for
+      // its own play at depth=requested_plies; the depth-0 sweep finishes
+      // (play + leaf + unplay) before IDS starts, so the slot is free.
+      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                            &worker->move_undos[0]);
+      // Compute leaf value from the perspective of the post-move
+      // player-on-turn (= mover, since we just played opp's move at root).
+      const int post_on_turn = game_get_player_on_turn_index(worker->game_copy);
+      const int32_t post_on_turn_spread = equity_to_int(
+          player_get_score(game_get_player(worker->game_copy, post_on_turn)) -
+          player_get_score(
+              game_get_player(worker->game_copy, 1 - post_on_turn)));
+      PVLine child_pv;
+      child_pv.game = worker->game_copy;
+      child_pv.num_moves = 0;
+      child_pv.negamax_depth = 0;
+      int32_t leaf_val = negamax_greedy_leaf_playout(
+          worker, 0, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
+      unplay_move_incremental(worker->game_copy, &worker->move_undos[0]);
+      if (leaf_val == ABDADA_INTERRUPTED) {
+        break;
+      }
+      // Negamax convention: opp's value for this move = -leaf_val.
+      int32_t opp_val = -leaf_val;
+      if (opp_val > best_root_value) {
+        best_root_value = opp_val;
+        best_root_move = *sm;
+        d0_pv.moves[0] = *sm;
+        for (int j = 0; j < child_pv.num_moves &&
+                        j + 1 < MAX_VARIANT_LENGTH;
+             j++) {
+          d0_pv.moves[j + 1] = child_pv.moves[j];
+        }
+        d0_pv.num_moves =
+            (child_pv.num_moves + 1 < MAX_VARIANT_LENGTH)
+                ? child_pv.num_moves + 1
+                : MAX_VARIANT_LENGTH;
+        d0_pv.negamax_depth = 0;
+        have_root_best = true;
+      }
+    }
+    if (have_root_best) {
+      d0_pv.score = best_root_value - worker->solver->initial_spread;
+      endgame_results_set_best_pvline(worker->solver->results, &d0_pv,
+                                      d0_pv.score, 0);
+    }
+    (void)best_root_move;
+  }
+
   // ABDADA depth jitter: spread threads across different starting depths
   // so they don't all compete on the same shallow levels simultaneously.
   // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
@@ -2410,8 +2494,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Track whether this depth's search completed validly
     bool search_valid = true;
 
-    // Use aspiration windows after depth 1
-    if (use_aspiration && ply > 1 && !worker->solver->first_win_optim) {
+    // Use aspiration windows once this worker has searched at least one
+    // prior depth — otherwise prev_value is uninitialized and the window
+    // is bogus. With ABDADA depth-jitter, threads with thread_index > 0
+    // can start at depth > 1, so checking `ply > 1` is insufficient.
+    if (use_aspiration && ply > start && !worker->solver->first_win_optim) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;

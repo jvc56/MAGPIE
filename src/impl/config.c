@@ -266,7 +266,7 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
-  int time_limit_seconds;
+  double time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -285,8 +285,8 @@ struct Config {
   uint64_t p2_min_play_iterations;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
-  int p1_time_limit_seconds;
-  int p2_time_limit_seconds;
+  double p1_time_limit_seconds;
+  double p2_time_limit_seconds;
   bai_threshold_t p1_threshold;
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
@@ -2487,7 +2487,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->num_threads, config->print_interval,
       config->max_num_display_plays, config->shplies, config->seed,
       config->max_iterations, config->min_play_iterations,
-      config->stop_cond_pct, config->threshold, config->time_limit_seconds,
+      config->stop_cond_pct, config->threshold,
+      (int)(config->time_limit_seconds),
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
 }
 
@@ -2841,8 +2842,15 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
-  endgame_args->soft_time_limit = 0;
-  endgame_args->hard_time_limit = 0;
+  endgame_args->soft_time_limit = config->time_limit_seconds;
+  endgame_args->hard_time_limit = config->time_limit_seconds;
+  // External monotonic-ns deadline gives strict mid-search interruption
+  // (soft/hard_time_limit only gate between IDS depth iterations).
+  endgame_args->external_deadline_ns =
+      config->time_limit_seconds > 0.0
+          ? ctimer_monotonic_ns() +
+                (int64_t)(config->time_limit_seconds * 1.0e9)
+          : 0;
   endgame_args->seed = config->seed;
 }
 
@@ -2959,7 +2967,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_num_plays, config->shplies,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
-      config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
+      (int)(config->p1_time_limit_seconds),
+      config->p1_sampling_rule, config->cutoff,
       &p1_inference_args, &autoplay_args->p1_sim_args);
 
   sim_args_fill(
@@ -2971,7 +2980,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_num_plays, config->shplies,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
-      config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
+      (int)(config->p2_time_limit_seconds),
+      config->p2_sampling_rule, config->cutoff,
       &p2_inference_args, &autoplay_args->p2_sim_args);
 }
 
@@ -6164,8 +6174,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
-                  &config->time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_TIME_LIMIT, 0.0, (double)INT_MAX,
+                     &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6651,13 +6661,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
   }
-  config_load_int(config, ARG_TOKEN_P1_TIME_LIMIT, 0, INT_MAX,
-                  &config->p1_time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_P1_TIME_LIMIT, 0.0, (double)INT_MAX,
+                     &config->p1_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_load_int(config, ARG_TOKEN_P2_TIME_LIMIT, 0, INT_MAX,
-                  &config->p2_time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_P2_TIME_LIMIT, 0.0, (double)INT_MAX,
+                     &config->p2_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -8131,16 +8141,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->time_limit_seconds);
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->time_limit_seconds);
       break;
     case ARG_TOKEN_P1_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_time_limit_seconds);
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_time_limit_seconds);
       break;
     case ARG_TOKEN_P2_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_time_limit_seconds);
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",

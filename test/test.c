@@ -162,6 +162,9 @@ static TestEntry on_demand_test_table[] = {
     {"passpegreport", test_pass_peg_print_report},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {"pegNgreedy", test_pass_pegN_greedy_bench},
+    {"viamover", test_via_mover_must_bingo_every_depth},
+    {"viaopp", test_via_opp_must_block_every_depth},
+    {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
