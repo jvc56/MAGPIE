@@ -100,6 +100,9 @@ static int append_pending_history(TuiGameState *state, int player_idx,
     if (state->history[0].sim_results_saved != NULL) {
       sim_results_destroy(state->history[0].sim_results_saved);
     }
+    if (state->history[0].endgame_moves_saved != NULL) {
+      free(state->history[0].endgame_moves_saved);
+    }
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
     state->history_count = TUI_HISTORY_MAX - 1;
@@ -142,6 +145,10 @@ static int append_pending_history(TuiGameState *state, int player_idx,
     // likely about to play) instead of inheriting whatever row
     // the user had selected on the previous turn.
     state->analysis_cursor = 0;
+    // Drop back to RANK column on turn advance: the prior turn's
+    // anchored move doesn't apply to the new turn's leaderboard.
+    state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
+    state->analysis_anchored_move[0] = '\0';
   }
 
   if (rack_at_start != NULL) {
@@ -236,6 +243,11 @@ static void pop_history(TuiGameState *state) {
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
+    }
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
     }
     state->history_count--;
   }
@@ -837,6 +849,29 @@ static void *bot_thread_main(void *arg) {
         }
         finalized->sim_results_saved =
             sim_results_duplicate(state->sim_results);
+      } else if (!finalized->analysis_snapshot.is_sim &&
+                 state->endgame_snapshot.valid &&
+                 state->endgame_snapshot.num_entries > 0 &&
+                 state->endgame_snapshot.moves != NULL) {
+        // Endgame turn — deep-copy the leaderboard moves so the
+        // History cursor can preview each candidate on the board
+        // even after the live endgame_snapshot has moved on.
+        if (finalized->endgame_moves_saved != NULL) {
+          free(finalized->endgame_moves_saved);
+        }
+        const int n = state->endgame_snapshot.num_entries;
+        finalized->endgame_moves_saved = (Move *)malloc((size_t)n * sizeof(Move));
+        if (finalized->endgame_moves_saved != NULL) {
+          for (int i = 0; i < n; i++) {
+            if (state->endgame_snapshot.moves[i] != NULL) {
+              move_copy(&finalized->endgame_moves_saved[i],
+                        state->endgame_snapshot.moves[i]);
+            } else {
+              memset(&finalized->endgame_moves_saved[i], 0, sizeof(Move));
+            }
+          }
+          finalized->endgame_moves_saved_count = n;
+        }
       }
     }
     Rack leave;

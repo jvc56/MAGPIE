@@ -551,17 +551,35 @@ int main(int argc, char *argv[]) {
             // Snap the Analysis cursor to row 0 so the panel
             // shows the move actually played for that turn (or
             // the top play of the in-progress analysis when
-            // cursor is on the label / a pending entry).
+            // cursor is on the label / a pending entry). Also
+            // drop back to RANK column — the user is repositioning
+            // to a fresh turn and the anchored move from the prior
+            // turn is no longer relevant.
             game_state.analysis_cursor = 0;
+            game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
+            game_state.analysis_anchored_move[0] = '\0';
           }
         } else if (hit == TUI_FOCUS_ANALYSIS &&
                    game_state.focused_panel == TUI_FOCUS_ANALYSIS) {
           // Same routing as History: an already-focused click on
           // the Analysis panel moves the in-panel cursor instead
-          // of re-focusing. Title / chrome clicks snap to -1.
-          const int target = tui_analysis_cursor_at(input.y, input.x);
+          // of re-focusing. The hit also reports which column was
+          // clicked (rank gutter vs move text) so the cursor lands
+          // in the right mode. Title / chrome clicks snap to -1.
+          TuiAnalysisColumn clicked_col = TUI_ANALYSIS_COLUMN_RANK;
+          const int target =
+              tui_analysis_cursor_column_at(input.y, input.x, &clicked_col);
           if (target >= -1) {
             game_state.analysis_cursor = target;
+            game_state.analysis_cursor_column = clicked_col;
+            if (clicked_col == TUI_ANALYSIS_COLUMN_MOVE && target >= 0 &&
+                target < game_state.last_rendered_analysis_row_count) {
+              snprintf(game_state.analysis_anchored_move,
+                       sizeof(game_state.analysis_anchored_move), "%s",
+                       game_state.last_rendered_analysis_rows[target].move);
+            } else {
+              game_state.analysis_anchored_move[0] = '\0';
+            }
           }
         } else {
           game_state.focused_panel = hit;
@@ -1048,20 +1066,60 @@ int main(int argc, char *argv[]) {
                 key == NCKEY_RIGHT || key == 'k' || key == 'K' || key == 'j' ||
                 key == 'J' || key == 'h' || key == 'H' || key == 'l' ||
                 key == 'L')) {
-      // Analysis panel nav. Same shape as History: -1 = cursor on
-      // the [5>] label; 0..N-1 = on the visible candidate row.
-      const bool forward = key == NCKEY_DOWN || key == NCKEY_RIGHT ||
-                           key == 'j' || key == 'J' || key == 'l' ||
-                           key == 'L';
+      // Analysis panel nav. -1 = cursor on the [5>] label;
+      // 0..N-1 = on a visible candidate row. Up/Down (and j/k)
+      // moves the cursor row; Left/Right (and h/l) toggles the
+      // column: LEFT/h → RANK (cursor pins to a row index),
+      // RIGHT/l → MOVE (cursor pins to the move at the current
+      // row and follows it as the sim reorders).
+      const bool key_up =
+          key == NCKEY_UP || key == 'k' || key == 'K';
+      const bool key_down =
+          key == NCKEY_DOWN || key == 'j' || key == 'J';
+      const bool key_left =
+          key == NCKEY_LEFT || key == 'h' || key == 'H';
+      const bool key_right =
+          key == NCKEY_RIGHT || key == 'l' || key == 'L';
       pthread_mutex_lock(&game_state.mutex);
-      const int last = atomic_load(&game_state.analysis_visible_rows) - 1;
-      if (forward) {
-        if (game_state.analysis_cursor < last) {
-          game_state.analysis_cursor++;
+      if (key_up || key_down) {
+        const int last = atomic_load(&game_state.analysis_visible_rows) - 1;
+        if (key_down) {
+          if (game_state.analysis_cursor < last) {
+            game_state.analysis_cursor++;
+          }
+        } else {
+          if (game_state.analysis_cursor > -1) {
+            game_state.analysis_cursor--;
+          }
         }
-      } else {
-        if (game_state.analysis_cursor > -1) {
-          game_state.analysis_cursor--;
+        // Re-anchor when in MOVE column so the cursor follows the
+        // new row's move from this point on.
+        if (game_state.analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE) {
+          const int idx = game_state.analysis_cursor;
+          if (idx >= 0 &&
+              idx < game_state.last_rendered_analysis_row_count) {
+            snprintf(game_state.analysis_anchored_move,
+                     sizeof(game_state.analysis_anchored_move), "%s",
+                     game_state.last_rendered_analysis_rows[idx].move);
+          } else {
+            game_state.analysis_anchored_move[0] = '\0';
+          }
+        }
+      } else if (key_left) {
+        // Drop to RANK column. Discard anchor — the cursor sticks
+        // to whatever row it's currently sitting at.
+        game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
+        game_state.analysis_anchored_move[0] = '\0';
+      } else if (key_right) {
+        // Switch to MOVE column. Capture the current row's move
+        // text so the cursor will follow it as the sim reorders.
+        const int idx = game_state.analysis_cursor;
+        if (idx >= 0 &&
+            idx < game_state.last_rendered_analysis_row_count) {
+          snprintf(game_state.analysis_anchored_move,
+                   sizeof(game_state.analysis_anchored_move), "%s",
+                   game_state.last_rendered_analysis_rows[idx].move);
+          game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_MOVE;
         }
       }
       pthread_mutex_unlock(&game_state.mutex);
@@ -1098,6 +1156,8 @@ int main(int argc, char *argv[]) {
       // the user is looking at.
       if (game_state.history_cursor != prev_cursor) {
         game_state.analysis_cursor = 0;
+        game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
+        game_state.analysis_anchored_move[0] = '\0';
       }
       pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == 0) {

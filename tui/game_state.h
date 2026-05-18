@@ -160,6 +160,15 @@ typedef struct {
   // restarting from zero.
   struct SimResults *sim_results_saved;
 
+  // Deep-copy of the endgame leaderboard moves at finalize time,
+  // captured for turns the bot decided via endgame solve (rather
+  // than sim). Lets the History cursor preview each endgame
+  // candidate on the board the same way it does for sim turns.
+  // Owned by this entry; contiguous Move array, length stored in
+  // endgame_moves_saved_count. NULL when not an endgame turn.
+  struct Move *endgame_moves_saved;
+  int endgame_moves_saved_count;
+
   // Pre-move rack snapshot, owned. Pairs with board_before for
   // resuming analysis on this turn's position. The text rack_str
   // above is for display; this is the engine-friendly object the
@@ -337,6 +346,24 @@ typedef struct {
   // h/j/k/l) when the Analysis panel is focused, and click-to-
   // select via the same rect-map hit test history uses.
   int analysis_cursor;
+  // Cursor column for the Analysis panel — RANK (cursor pinned to
+  // a row index) vs MOVE (cursor pinned to a specific move so the
+  // selection follows it as the sim reorders). Stored as an int so
+  // game_state.h doesn't have to include game_render.h; values are
+  // the TuiAnalysisColumn enum (0=RANK, 1=MOVE).
+  int analysis_cursor_column;
+  // When analysis_cursor_column == MOVE, holds the move-text the
+  // cursor is anchored to (e.g. "5E IrISATED"). Each render in
+  // MOVE mode scans the visible rows for a matching `move` field
+  // to recover the cursor's current index. Empty string when not
+  // anchored.
+  char analysis_anchored_move[80];
+  // Snapshot of the analysis rows actually rendered last frame.
+  // Input handlers read this when they need to know the move text
+  // at a given row index (e.g. when transitioning to MOVE column).
+  // Written each frame under state->mutex by the render path.
+  AnalysisRow last_rendered_analysis_rows[ANALYSIS_ROW_CAP];
+  int last_rendered_analysis_row_count;
   // Renderer publishes the count of visible analysis rows here so
   // main.c can bound cursor++ without re-computing the layout.
   _Atomic int analysis_visible_rows;

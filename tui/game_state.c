@@ -207,6 +207,9 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   // label rather than at memset's 0 (entry 0).
   out_state->history_cursor = -1;
   out_state->analysis_cursor = -1;
+  out_state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
+  out_state->analysis_anchored_move[0] = '\0';
+  out_state->last_rendered_analysis_row_count = 0;
   atomic_store(&out_state->analysis_visible_rows, 0);
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;

@@ -114,6 +114,16 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
 // same plane geometry.
 int tui_history_cursor_at(int y, int x);
 
+// Analysis cursor column. The Analysis cursor remembers not just
+// which row it's on but which "column" — rank-anchored (cursor
+// pins to the row index, ignoring sim reorderings) or move-
+// anchored (cursor pins to a specific move and follows it as the
+// leaderboard reorders). Left/Right arrows toggle the column.
+typedef enum {
+  TUI_ANALYSIS_COLUMN_RANK = 0,
+  TUI_ANALYSIS_COLUMN_MOVE = 1,
+} TuiAnalysisColumn;
+
 // Hit-test (y, x) against the Analysis panel's last-rendered row
 // rectangles. Returns:
 //   -2 — point is outside the Analysis panel
@@ -122,6 +132,13 @@ int tui_history_cursor_at(int y, int x);
 //        should snap analysis_cursor back to -1 (the [5>] label)
 //   0..N-1 — the row index that was clicked
 int tui_analysis_cursor_at(int y, int x);
+
+// Like tui_analysis_cursor_at, but also reports which column of the
+// row was clicked via *out_column. Returns the same row-index code
+// as tui_analysis_cursor_at. *out_column is set to the appropriate
+// TuiAnalysisColumn value when the click hits a row, and is left
+// unchanged otherwise.
+int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column);
 
 // Populate a snapshot of the Analysis-panel contents for the
 // currently-active sim or endgame solve. Called by the bot worker
