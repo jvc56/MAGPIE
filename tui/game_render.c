@@ -1085,8 +1085,7 @@ static const Board *pick_render_board(const TuiGameState *state) {
   if (state == NULL) {
     return NULL;
   }
-  if (state->focused_panel == TUI_FOCUS_HISTORY &&
-      state->history_cursor >= 0 &&
+  if (state->history_cursor >= 0 &&
       state->history_cursor < state->history_count) {
     const TuiHistoryEntry *entry = &state->history[state->history_cursor];
     if (!entry->pending && entry->board_before != NULL) {
@@ -1785,9 +1784,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
   if (board == NULL) {
     return;
   }
-  const int cursor_key = (state->focused_panel == TUI_FOCUS_HISTORY)
-                             ? state->history_cursor
-                             : -1;
+  const int cursor_key = state->history_cursor;
   if (g_last_blit_tracked && cursor_key != g_last_blitted_cursor &&
       !g_cursor_pending) {
     clock_gettime(CLOCK_MONOTONIC, &g_cursor_pending_since);
