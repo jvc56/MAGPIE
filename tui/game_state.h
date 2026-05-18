@@ -120,6 +120,7 @@ typedef struct {
   int score;          // points earned on this play
   int total_after;    // running total after this play (excluding bonus)
   int clock_at_start; // seconds remaining when this player's turn began
+  int opp_clock_at_start; // opponent's seconds remaining at the same moment
   char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
   char rack_str[16];  // full rack the player had at the start of the turn
   char
@@ -164,6 +165,11 @@ typedef struct {
   // above is for display; this is the engine-friendly object the
   // simmer / endgame would consume.
   struct Rack *rack_before;
+  // Opponent's rack at the moment this turn began. Snapshotted so
+  // that the History cursor can rewind the off-turn player's pill
+  // alongside the on-turn rack panel and board. NULL until
+  // populated by append_pending_history.
+  struct Rack *opp_rack_before;
 } TuiHistoryEntry;
 
 typedef struct {
@@ -324,6 +330,16 @@ typedef struct {
   // entry. Driven by Up/Down (or k/j) while the History panel is
   // focused. Resets to -1 each time focus enters History.
   int history_cursor;
+
+  // Analysis-panel cursor. -1 = cursor on the "[5>" label; 0..N-1
+  // = on the N-th visible candidate row. Same shape as
+  // history_cursor — navigates with Up/Down/Left/Right (and
+  // h/j/k/l) when the Analysis panel is focused, and click-to-
+  // select via the same rect-map hit test history uses.
+  int analysis_cursor;
+  // Renderer publishes the count of visible analysis rows here so
+  // main.c can bound cursor++ without re-computing the layout.
+  _Atomic int analysis_visible_rows;
 
   // Command-bar slash input. When slash_active is true, the bar
   // renders a "/" prompt + slash_buf with the terminal cursor live

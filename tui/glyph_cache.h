@@ -61,4 +61,10 @@ void tui_glyph_cache_reset(TuiGlyphCache *cache);
 // not hold it across frames.
 const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint);
 
+// Same as tui_glyph_cache_get, but rasterizes a bold variant via
+// FreeType's outline-embolden pass. Bold glyphs live in a parallel
+// slot array so regular and bold lookups don't trample each other.
+const TuiGlyph *tui_glyph_cache_get_bold(TuiGlyphCache *cache,
+                                         uint32_t codepoint);
+
 #endif

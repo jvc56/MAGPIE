@@ -114,6 +114,15 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
 // same plane geometry.
 int tui_history_cursor_at(int y, int x);
 
+// Hit-test (y, x) against the Analysis panel's last-rendered row
+// rectangles. Returns:
+//   -2 — point is outside the Analysis panel
+//   -1 — inside the panel but not on a specific row (title /
+//        column-header strip / blank space below the list); caller
+//        should snap analysis_cursor back to -1 (the [5>] label)
+//   0..N-1 — the row index that was clicked
+int tui_analysis_cursor_at(int y, int x);
+
 // Populate a snapshot of the Analysis-panel contents for the
 // currently-active sim or endgame solve. Called by the bot worker
 // at finalize time (just after a move is chosen, just before

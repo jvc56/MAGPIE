@@ -94,6 +94,9 @@ static int append_pending_history(TuiGameState *state, int player_idx,
     if (state->history[0].rack_before != NULL) {
       rack_destroy(state->history[0].rack_before);
     }
+    if (state->history[0].opp_rack_before != NULL) {
+      rack_destroy(state->history[0].opp_rack_before);
+    }
     if (state->history[0].sim_results_saved != NULL) {
       sim_results_destroy(state->history[0].sim_results_saved);
     }
@@ -108,6 +111,11 @@ static int append_pending_history(TuiGameState *state, int player_idx,
   memset(entry, 0, sizeof(*entry));
   entry->player_idx = player_idx;
   entry->clock_at_start = clock_at_start;
+  // Snapshot the opponent's clock too so the History-cursor view
+  // can show both players' time-remaining as it stood at the
+  // start of this turn.
+  entry->opp_clock_at_start = state->time_per_side_seconds -
+                              (int)state->seconds_used[1 - player_idx];
   entry->pending = true;
   // Snapshot the board AND rack NOW (pre-move) so the History
   // cursor can replay the position this player saw at the moment
@@ -121,8 +129,19 @@ static int append_pending_history(TuiGameState *state, int player_idx,
   } else {
     entry->rack_before = NULL;
   }
+  // Capture the opponent's rack at this moment too so the History
+  // cursor can rewind both pills together.
+  const Rack *opp_rack =
+      player_get_rack(game_get_player(state->game, 1 - player_idx));
+  entry->opp_rack_before = opp_rack != NULL ? rack_duplicate(opp_rack) : NULL;
   if (follow_to_new_pending) {
     state->history_cursor = state->history_count - 1;
+    // Reset the Analysis cursor to row 0 so the panel snaps to
+    // the top play of the new turn's in-progress analysis (the
+    // current best by sim ranking, == the move the bot is most
+    // likely about to play) instead of inheriting whatever row
+    // the user had selected on the previous turn.
+    state->analysis_cursor = 0;
   }
 
   if (rack_at_start != NULL) {
@@ -209,6 +228,10 @@ static void pop_history(TuiGameState *state) {
     if (entry->rack_before != NULL) {
       rack_destroy(entry->rack_before);
       entry->rack_before = NULL;
+    }
+    if (entry->opp_rack_before != NULL) {
+      rack_destroy(entry->opp_rack_before);
+      entry->opp_rack_before = NULL;
     }
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);

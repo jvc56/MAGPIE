@@ -206,6 +206,8 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   // click away and come back), so it's important to start at the
   // label rather than at memset's 0 (entry 0).
   out_state->history_cursor = -1;
+  out_state->analysis_cursor = -1;
+  atomic_store(&out_state->analysis_visible_rows, 0);
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;
   out_state->seconds_used[1] = 0.0;
@@ -274,6 +276,10 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
     if (entry->rack_before != NULL) {
       rack_destroy(entry->rack_before);
       entry->rack_before = NULL;
+    }
+    if (entry->opp_rack_before != NULL) {
+      rack_destroy(entry->opp_rack_before);
+      entry->opp_rack_before = NULL;
     }
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);
@@ -344,6 +350,10 @@ void tui_game_state_destroy(TuiGameState *state) {
     if (entry->rack_before != NULL) {
       rack_destroy(entry->rack_before);
       entry->rack_before = NULL;
+    }
+    if (entry->opp_rack_before != NULL) {
+      rack_destroy(entry->opp_rack_before);
+      entry->opp_rack_before = NULL;
     }
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);

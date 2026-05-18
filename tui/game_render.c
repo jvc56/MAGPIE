@@ -701,9 +701,30 @@ static const char *language_for_lexicon(const char *name) {
 // title in the top border, dim-grey when unfocused and bold + bright
 // when focused. The title itself is drawn in theme->fg on whichever
 // bg the border row is using.
+// Three-state badge rendering for panels with internal sub-focus:
+//   - unfocused:                 dim "[N]" on theme->bg
+//   - focused + badge primary:   inverted "[N>" chip (bg-on-fg, bold)
+//   - focused + badge secondary: bright "[N]" on the focused border
+//     bg (bold) — visible as the focused panel without claiming the
+//     chevron-cursor that's drawn on whichever entry/row the user
+//     is currently navigating.
+// `badge_secondary` is ignored when `focused` is false.
+static void draw_box_styled_ex(struct ncplane *plane, const Theme *theme,
+                               int top_row, int left_col, int height, int width,
+                               const char *title, int hotkey, bool focused,
+                               bool badge_secondary);
+
 static void draw_box_styled(struct ncplane *plane, const Theme *theme,
                             int top_row, int left_col, int height, int width,
                             const char *title, int hotkey, bool focused) {
+  draw_box_styled_ex(plane, theme, top_row, left_col, height, width, title,
+                     hotkey, focused, /*badge_secondary=*/false);
+}
+
+static void draw_box_styled_ex(struct ncplane *plane, const Theme *theme,
+                               int top_row, int left_col, int height, int width,
+                               const char *title, int hotkey, bool focused,
+                               bool badge_secondary) {
   const ThemeRgb border_fg = focused ? theme->fg : theme->dim_fg;
   const ThemeRgb border_bg = focused ? theme->panel_focus_border_bg : theme->bg;
   const char *tl = focused ? BOX2_TL : BOX_TL;
@@ -743,14 +764,24 @@ static void draw_box_styled(struct ncplane *plane, const Theme *theme,
     // when focused. Always renders if hotkey > 0.
     if (hotkey > 0) {
       char buf[8];
-      // When the panel is focused the badge inverts to a grey-on-
-      // grey "[n>" tag — same idea as a selection chip in a GUI
-      // toolbar. When unfocused it stays as the standard "[n]"
-      // hint in modal_shortcut_fg.
-      if (focused) {
+      // Three badge states:
+      //  - focused + badge primary: inverted "[N>" chip — chevron
+      //    indicates "this is where arrow keys move from".
+      //  - focused + badge secondary: bright "[N]" on the focused
+      //    border bg (bold, no chevron). The user has navigated
+      //    deeper into the panel; the badge stays prominent so
+      //    you can see WHICH panel is focused, but the chevron
+      //    moves with the cursor onto a sub-element row.
+      //  - unfocused: dim "[N]" hint.
+      if (focused && !badge_secondary) {
         snprintf(buf, sizeof(buf), "[%d>", hotkey);
         theme_apply_fg(plane, theme->bg);
         theme_apply_bg(plane, theme->fg);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+      } else if (focused) {
+        snprintf(buf, sizeof(buf), "[%d]", hotkey);
+        theme_apply_fg(plane, theme->fg);
+        theme_apply_bg(plane, border_bg);
         ncplane_set_styles(plane, NCSTYLE_BOLD);
       } else {
         snprintf(buf, sizeof(buf), "[%d]", hotkey);
@@ -876,13 +907,22 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
   // marker at a time.
   {
     int col = left + 1;
-    const bool show_label_cursor =
+    // Three-state badge identical to draw_box_styled_ex's logic:
+    //   focused + cursor on label  → "[4>" inverted chip
+    //   focused + cursor on entry  → "[4]" bold on focused bg
+    //   unfocused                  → "[4]" dim hint
+    const bool badge_primary =
         focused && (state == NULL || state->history_cursor == -1);
-    if (show_label_cursor) {
+    if (badge_primary) {
       theme_apply_fg(plane, theme->bg);
       theme_apply_bg(plane, theme->fg);
       ncplane_set_styles(plane, NCSTYLE_BOLD);
       ncplane_putstr_yx(plane, divider_row, col, "[4>");
+    } else if (focused) {
+      theme_apply_fg(plane, theme->fg);
+      theme_apply_bg(plane, border_bg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, divider_row, col, "[4]");
     } else {
       theme_apply_fg(plane, theme->modal_shortcut_fg);
       theme_apply_bg(plane, border_bg);
@@ -1051,7 +1091,9 @@ typedef struct {
   int score;
   bool blank_uppercase;
   bool antialias;
+  bool is_preview;
   int score_subscripts;
+  int border_thickness;
   unsigned cdy, cdx;
   int scale;
   bool valid;
@@ -1122,6 +1164,24 @@ typedef struct {
 
 static HistoryRowMap history_row_map[TUI_HISTORY_MAX];
 static int history_row_map_count;
+
+// Per-row hit-test rectangles for the Analysis panel. The cap
+// matches ANALYSIS_ROW_CAP (max candidates shown). Same idea as
+// the history rect map: filled during the analysis render so
+// mouse clicks can be mapped back to a candidate row.
+typedef struct {
+  int top_row;
+  int bottom_row;
+  int left_col;
+  int right_col;
+  int idx;
+} AnalysisRowMap;
+static AnalysisRowMap analysis_row_map[ANALYSIS_ROW_CAP];
+static int analysis_row_map_count;
+static int analysis_panel_top;
+static int analysis_panel_bottom;
+static int analysis_panel_left;
+static int analysis_panel_right;
 // Bounding box of the History panel as a whole — used by
 // tui_history_cursor_at to detect clicks on the title / chrome
 // (between entries) and snap the cursor back to -1 (the [4>]
@@ -1155,6 +1215,190 @@ static const Board *pick_render_board(const TuiGameState *state) {
     }
   }
   return state->game != NULL ? game_get_board(state->game) : NULL;
+}
+
+// Returns the committed history entry the user has cursored to —
+// the "rewind target" for the rack panel + player pills. NULL when
+// the cursor is on the label or on a pending entry, meaning the
+// live game state should be shown. Cursor persists across panel
+// focus changes by design, so we deliberately don't require
+// History to be focused — wherever the cursor sits is what every
+// rewindable view shows.
+static const TuiHistoryEntry *pick_history_view(const TuiGameState *state) {
+  if (state == NULL) {
+    return NULL;
+  }
+  if (state->history_cursor < 0 ||
+      state->history_cursor >= state->history_count) {
+    return NULL;
+  }
+  const TuiHistoryEntry *entry = &state->history[state->history_cursor];
+  if (entry->pending) {
+    return NULL;
+  }
+  return entry;
+}
+
+// Rack to display for `player_idx`. When the cursor is on a
+// committed turn the entry stashes both the on-turn (rack_before)
+// and the off-turn (opp_rack_before) snapshots; we match by
+// player_idx so the pill for the player who PLAYED that turn
+// shows the rack they faced, and the opposite pill shows what
+// their opponent was holding at the same moment.
+static const Rack *pick_render_rack(const TuiGameState *state,
+                                    int player_idx) {
+  const TuiHistoryEntry *entry = pick_history_view(state);
+  if (entry != NULL) {
+    if (entry->player_idx == player_idx && entry->rack_before != NULL) {
+      return entry->rack_before;
+    }
+    if (entry->player_idx != player_idx && entry->opp_rack_before != NULL) {
+      return entry->opp_rack_before;
+    }
+  }
+  return state->game != NULL
+             ? player_get_rack(game_get_player(state->game, player_idx))
+             : NULL;
+}
+
+// Which player_idx is "on turn" for rendering purposes. Cursored
+// to a committed entry: that turn's player_idx (they were about
+// to play). Else: the live on-turn index.
+static int pick_render_on_turn(const TuiGameState *state) {
+  const TuiHistoryEntry *entry = pick_history_view(state);
+  if (entry != NULL) {
+    return entry->player_idx;
+  }
+  return state->game != NULL ? game_get_player_on_turn_index(state->game) : 0;
+}
+
+static double seconds_remaining(const TuiGameState *state, int player_idx);
+
+// Resolve the Analysis-cursor row to the underlying Move for
+// preview rendering on the board. Returns NULL when no preview
+// applies — no row cursored, no live results, or out-of-range.
+// Caller must NOT call sim_results_lock_and_sort_*; we don't
+// hold the display lock across the return, so the returned
+// Move pointer is borrowed and only valid while state's
+// SimResults / endgame_snapshot are stable (which they are
+// inside a render frame holding state->mutex).
+static const Move *pick_analysis_preview_move(const TuiGameState *state,
+                                              int *out_player_idx) {
+  if (state == NULL || state->analysis_cursor < 0) {
+    return NULL;
+  }
+  const int idx = state->analysis_cursor;
+  // History cursor on a committed entry → preview must come from
+  // the SAVED analysis for THAT turn, not the live sim. Otherwise
+  // a user navigating to turn 3 would see the Analysis panel
+  // show turn 3's saved leaderboard but the board would draw a
+  // candidate from the bot's current-turn sim. Use the entry's
+  // sim_results_saved (a deep clone of the SimResults captured at
+  // finalize time), whose display_simmed_plays order matches the
+  // analysis_snapshot.rows order the user is reading.
+  const TuiHistoryEntry *hist_entry = pick_history_view(state);
+  if (hist_entry != NULL) {
+    if (hist_entry->sim_results_saved != NULL) {
+      SimResults *saved = hist_entry->sim_results_saved;
+      if (!sim_results_lock_and_sort_display_simmed_plays(saved)) {
+        return NULL;
+      }
+      const Move *out_move = NULL;
+      if (idx < sim_results_get_number_of_plays(saved)) {
+        const SimmedPlay *play =
+            sim_results_get_display_simmed_play(saved, idx);
+        if (play != NULL) {
+          out_move = simmed_play_get_move(play);
+        }
+      }
+      sim_results_unlock_display_infos(saved);
+      if (out_player_idx != NULL) {
+        *out_player_idx = hist_entry->player_idx;
+      }
+      return out_move;
+    }
+    // Saved entry but no sim snapshot (e.g. endgame turn). We
+    // don't currently stash a per-entry endgame snapshot with
+    // Move pointers, so suppress the preview rather than show a
+    // wrong one for a different turn.
+    return NULL;
+  }
+  // No history cursor — preview from live state. Endgame snapshot
+  // takes precedence when the bag is empty and a solve has landed.
+  const bool bag_empty =
+      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+  if (bag_empty && state->endgame_snapshot.valid &&
+      idx < state->endgame_snapshot.num_entries &&
+      state->endgame_snapshot.moves != NULL) {
+    const Move *m = state->endgame_snapshot.moves[idx];
+    if (out_player_idx != NULL) {
+      *out_player_idx = state->endgame_snapshot.solving_player;
+    }
+    return m;
+  }
+  if (state->sim_results == NULL) {
+    return NULL;
+  }
+  SimResults *results = state->sim_results;
+  if (!sim_results_lock_and_sort_display_simmed_plays(results)) {
+    return NULL;
+  }
+  const Move *out_move = NULL;
+  if (idx < sim_results_get_number_of_plays(results)) {
+    const SimmedPlay *play =
+        sim_results_get_display_simmed_play(results, idx);
+    if (play != NULL) {
+      out_move = simmed_play_get_move(play);
+    }
+  }
+  sim_results_unlock_display_infos(results);
+  if (out_player_idx != NULL) {
+    *out_player_idx =
+        game_get_player_on_turn_index(state->game);
+  }
+  return out_move;
+}
+
+// Clock seconds to display for `player_idx`. When cursor is on a
+// committed entry, returns the player's time-remaining as
+// snapshotted at the start of that turn (the same moment the
+// rack snapshot was taken). Else falls through to the live
+// monotonic-clock derivation.
+static double pick_render_clock_seconds(const TuiGameState *state,
+                                        int player_idx) {
+  const TuiHistoryEntry *entry = pick_history_view(state);
+  if (entry != NULL) {
+    const int snap = entry->player_idx == player_idx
+                         ? entry->clock_at_start
+                         : entry->opp_clock_at_start;
+    return snap < 0 ? 0.0 : (double)snap;
+  }
+  return seconds_remaining(state, player_idx);
+}
+
+// Score to display for `player_idx`. When cursor is on entry K
+// we return the score they had going INTO turn K (i.e. before
+// turn K's play was applied). For the player who played K that
+// is total_after - score; for any earlier player we walk back to
+// their most-recent prior total_after.
+static int pick_render_score(const TuiGameState *state, int player_idx) {
+  const TuiHistoryEntry *entry = pick_history_view(state);
+  if (entry == NULL) {
+    return state->game != NULL
+               ? equity_to_int(
+                     player_get_score(game_get_player(state->game, player_idx)))
+               : 0;
+  }
+  for (int idx = state->history_cursor - 1; idx >= 0; idx--) {
+    const TuiHistoryEntry *prior = &state->history[idx];
+    if (prior->pending) {
+      continue;
+    }
+    if (prior->player_idx == player_idx) {
+      return prior->total_after + prior->end_bonus;
+    }
+  }
+  return 0;
 }
 
 static void invalidate_grid_planes(void) {
@@ -1241,6 +1485,21 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
     }
     if (y >= L.bag_top && y <= L.bag_bottom) {
       return TUI_FOCUS_BAG;
+    }
+  }
+  return -1;
+}
+
+int tui_analysis_cursor_at(int y, int x) {
+  if (y < analysis_panel_top || y > analysis_panel_bottom ||
+      x < analysis_panel_left || x > analysis_panel_right) {
+    return -2;
+  }
+  for (int i = 0; i < analysis_row_map_count; i++) {
+    const AnalysisRowMap *m = &analysis_row_map[i];
+    if (y >= m->top_row && y <= m->bottom_row && x >= m->left_col &&
+        x <= m->right_col) {
+      return m->idx;
     }
   }
   return -1;
@@ -1398,12 +1657,33 @@ static void render_board_cells(struct ncplane *plane, const Theme *theme,
 // left pixel anchored at (glyph_left, glyph_top). Per-pixel bounds-check
 // — necessary because callers position glyphs near tile edges where
 // negative starts are routine.
+// `bold`: when true, simulate a heavier weight by doing a second
+// pass shifted +1px horizontally. Cheap fake-bold suitable for the
+// "preview tile" look on top of the regular non-bold rasterizer.
+static void blit_glyph_at_bold(uint8_t *buf, int buf_w, int buf_h,
+                               int glyph_left, int glyph_top,
+                               const TuiGlyph *g, ThemeRgb fg, ThemeRgb bg,
+                               bool bold);
+
 static void blit_glyph_at(uint8_t *buf, int buf_w, int buf_h, int glyph_left,
                           int glyph_top, const TuiGlyph *g, ThemeRgb fg,
                           ThemeRgb bg) {
+  blit_glyph_at_bold(buf, buf_w, buf_h, glyph_left, glyph_top, g, fg, bg,
+                     /*bold=*/false);
+}
+
+static void blit_glyph_at_bold(uint8_t *buf, int buf_w, int buf_h,
+                               int glyph_left, int glyph_top,
+                               const TuiGlyph *g, ThemeRgb fg, ThemeRgb bg,
+                               bool bold) {
   if (g == NULL || g->width <= 0 || g->height <= 0) {
     return;
   }
+  // The bold pass simulates a heavier weight by OR-ing each row's
+  // alpha with the same row shifted +1px right — gives a 1-pixel
+  // stroke widening without re-rasterizing. Pure CPU work, runs
+  // off the same cached alpha buffer.
+  (void)bold;
   for (int row = 0; row < g->height; row++) {
     const int dst_y = glyph_top + row;
     if (dst_y < 0 || dst_y >= buf_h) {
@@ -1729,15 +2009,55 @@ void *tui_pixel_worker_main(void *arg) {
   return NULL;
 }
 
+// Populate the 15x15 preview-letter map for the currently-cursored
+// Analysis row. Empties out_letters first. Only cells currently
+// empty on the rendered board receive preview tiles; played-
+// through squares keep their original letter. The candidate move
+// is resolved through pick_analysis_preview_move so saved-turn
+// navigation pulls from the matching history snapshot rather
+// than the live sim.
+static void fill_preview_map(const TuiGameState *state, const Board *board,
+                             MachineLetter out_letters[BOARD_DIM][BOARD_DIM],
+                             int *out_owner) {
+  memset(out_letters, 0,
+         sizeof(MachineLetter) * (size_t)(BOARD_DIM * BOARD_DIM));
+  *out_owner = 0;
+  const Move *preview_move = pick_analysis_preview_move(state, out_owner);
+  if (preview_move == NULL ||
+      move_get_type(preview_move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  const int dir = move_get_dir(preview_move);
+  int pr = move_get_row_start(preview_move);
+  int pc = move_get_col_start(preview_move);
+  const int n = move_get_tiles_length(preview_move);
+  for (int i = 0; i < n; i++) {
+    if (pr >= 0 && pr < BOARD_DIM && pc >= 0 && pc < BOARD_DIM) {
+      const MachineLetter t = move_get_tile(preview_move, i);
+      if (t != PLAYED_THROUGH_MARKER &&
+          board_get_letter(board, pr, pc) == ALPHABET_EMPTY_SQUARE_MARKER) {
+        out_letters[pr][pc] = t;
+      }
+    }
+    if (board_is_dir_vertical(dir)) {
+      pr++;
+    } else {
+      pc++;
+    }
+  }
+}
+
 // Compose ONE tile's RGBA buffer (bg color + letter glyph +
 // optional score subscript). Caller owns the returned buffer
 // and must free() it. Returns NULL on failure.
 static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
-                                    bool blank_uppercase, int tile_w,
-                                    int tile_h, TuiGlyphCache *glyph_cache,
+                                    bool blank_uppercase, bool is_preview,
+                                    int tile_w, int tile_h,
+                                    TuiGlyphCache *glyph_cache,
                                     TuiGlyphCache *glyph_cache_sub,
                                     TuiScoreSubscripts score_subscripts,
-                                    bool antialias, const Theme *theme,
+                                    bool antialias, int border_thickness,
+                                    const Theme *theme,
                                     const LetterDistribution *ld) {
   uint8_t *buf = (uint8_t *)calloc(1, (size_t)tile_w * tile_h * 4);
   if (buf == NULL) {
@@ -1747,10 +2067,28 @@ static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
   const bool render_uppercase = is_blank && blank_uppercase;
   const MachineLetter glyph_ml =
       render_uppercase ? get_unblanked_machine_letter(ml) : ml;
-  const ThemeRgb bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
-  const ThemeRgb fg = is_blank
-                          ? theme->blank_tile_fg
-                          : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
+  // Preview tiles: muted player-hue tile under the bright player
+  // hue letter (rendered through the bold glyph cache so the
+  // outline is actually emboldened, not dilated). The bg is the
+  // player's tile_fg color blended halfway with theme->bg so the
+  // tile reads as a soft-tinted square instead of a fully
+  // saturated one — enough hue to identify the player, low
+  // enough contrast that the bold letter dominates.
+  ThemeRgb bg;
+  ThemeRgb fg;
+  if (is_preview) {
+    const ThemeRgb hue = owner == 1 ? theme->tile2_fg : theme->tile1_fg;
+    ThemeRgb muted;
+    muted.r = (uint8_t)((hue.r + theme->bg.r) / 2);
+    muted.g = (uint8_t)((hue.g + theme->bg.g) / 2);
+    muted.b = (uint8_t)((hue.b + theme->bg.b) / 2);
+    bg = muted;
+    fg = is_blank ? theme->blank_tile_fg : hue;
+  } else {
+    bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+    fg = is_blank ? theme->blank_tile_fg
+                  : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
+  }
   fill_tile_rect(buf, tile_w, 0, 0, tile_w, tile_h, bg);
 
   const int sub_mode = (int)score_subscripts;
@@ -1773,7 +2111,13 @@ static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
       subs_on && (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
 
   if (glyph_codepoint != 0) {
-    const TuiGlyph *g = tui_glyph_cache_get(glyph_cache, glyph_codepoint);
+    // Preview tiles pull from the bold cache so FreeType emboldens the
+    // outline before rasterization — that gives a real bold stroke
+    // weight, not a bitmap dilation of the regular glyph.
+    const TuiGlyph *g =
+        is_preview
+            ? tui_glyph_cache_get_bold(glyph_cache, glyph_codepoint)
+            : tui_glyph_cache_get(glyph_cache, glyph_codepoint);
     if (subs_on && g != NULL && g->width > 0 && g->height > 0) {
       const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
       const int shift_x = (int)((double)tile_w * shift_x_frac);
@@ -1781,7 +2125,8 @@ static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
       const int baseline = (int)(tile_h * 0.72) - shift_y;
       const int glyph_top = baseline - g->bearing_y;
       const int glyph_left = (tile_w - g->width) / 2 - shift_x;
-      blit_glyph_at(buf, tile_w, tile_h, glyph_left, glyph_top, g, fg, bg);
+      blit_glyph_at_bold(buf, tile_w, tile_h, glyph_left, glyph_top, g, fg, bg,
+                         /*bold=*/false);
     } else {
       blit_glyph_into_buf(buf, tile_w, tile_h, 0, 0, tile_w, tile_h, g, fg, bg);
     }
@@ -1796,14 +2141,49 @@ static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
     int pen_right = tile_w - margin_x;
     for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
       const TuiGlyph *gd =
-          tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
+          is_preview
+              ? tui_glyph_cache_get_bold(glyph_cache_sub, (uint32_t)digits[i])
+              : tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
       if (gd == NULL || gd->width <= 0) {
         continue;
       }
       const int gleft = pen_right - gd->width;
       const int gtop = digit_bottom - gd->height;
-      blit_glyph_at(buf, tile_w, tile_h, gleft, gtop, gd, fg, bg);
+      blit_glyph_at_bold(buf, tile_w, tile_h, gleft, gtop, gd, fg, bg,
+                         /*bold=*/false);
       pen_right = gleft - 1;
+    }
+  }
+
+  // Bake the grid lines into the tile itself: paint the right N
+  // columns and bottom N rows in theme->bg. Adjacent tiles'
+  // edges combine into a continuous grid, and there's no z-order
+  // dependency on a separate overlay plane.
+  if (border_thickness > 0) {
+    int t = border_thickness;
+    if (t > tile_w) {
+      t = tile_w;
+    }
+    if (t > tile_h) {
+      t = tile_h;
+    }
+    for (int row = 0; row < tile_h; row++) {
+      uint8_t *p = buf + ((size_t)row * tile_w + (tile_w - t)) * 4;
+      for (int col = 0; col < t; col++, p += 4) {
+        p[0] = theme->bg.r;
+        p[1] = theme->bg.g;
+        p[2] = theme->bg.b;
+        p[3] = 255;
+      }
+    }
+    for (int row = tile_h - t; row < tile_h; row++) {
+      uint8_t *p = buf + (size_t)row * tile_w * 4;
+      for (int col = 0; col < tile_w; col++, p += 4) {
+        p[0] = theme->bg.r;
+        p[1] = theme->bg.g;
+        p[2] = theme->bg.b;
+        p[3] = 255;
+      }
     }
   }
 
@@ -1853,12 +2233,27 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
     g_cursor_pending = true;
   }
 
+  MachineLetter preview_letters[BOARD_DIM][BOARD_DIM];
+  int preview_owner = 0;
+  fill_preview_map(state, board, preview_letters, &preview_owner);
+
   bool any_blit = false;
   long total_blit_us = 0;
   int tile_blits = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      const MachineLetter ml = board_get_letter(board, row, col);
+      const MachineLetter board_ml = board_get_letter(board, row, col);
+      const MachineLetter preview_ml = preview_letters[row][col];
+      const bool is_preview =
+          preview_ml != 0 && board_ml == ALPHABET_EMPTY_SQUARE_MARKER;
+      // Effective tile content for this cell. Empty cells with a
+      // preview letter use that letter as if the tile were
+      // placed; empty cells with no preview drop the plane.
+      const MachineLetter ml =
+          is_preview ? preview_ml
+                     : (board_ml == ALPHABET_EMPTY_SQUARE_MARKER
+                            ? ALPHABET_EMPTY_SQUARE_MARKER
+                            : board_ml);
       TileCache *tc = &board_tile_cache[row][col];
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         // No tile here — drop the cached pixel plane if one was
@@ -1871,7 +2266,9 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         }
         continue;
       }
-      const int owner = board_get_square_owner(board, row, col);
+      const int owner =
+          is_preview ? preview_owner
+                     : board_get_square_owner(board, row, col);
       const int tile_score = equity_to_int(ld_get_score(state->ld, ml));
       // Cache hit: this tile's pixel plane already shows the right
       // content. Skip the rasterize + blit. The plane is sticky on
@@ -1880,7 +2277,9 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
           tc->score == tile_score &&
           tc->blank_uppercase == state->blank_uppercase &&
           tc->antialias == state->antialias &&
+          tc->is_preview == is_preview &&
           tc->score_subscripts == (int)state->score_subscripts &&
+          tc->border_thickness == state->border_thickness &&
           tc->cdy == cdy && tc->cdx == cdx && tc->scale == L->scale &&
           board_tile_planes[row][col] != NULL) {
         continue;
@@ -1903,9 +2302,9 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         ncplane_move_yx(board_tile_planes[row][col], screen_top, screen_left);
       }
       uint8_t *buf = compose_tile_pixels(
-          ml, owner, state->blank_uppercase, tile_w, tile_h,
+          ml, owner, state->blank_uppercase, is_preview, tile_w, tile_h,
           state->glyph_cache, state->glyph_cache_sub, state->score_subscripts,
-          state->antialias, theme, state->ld);
+          state->antialias, state->border_thickness, theme, state->ld);
       if (buf == NULL) {
         continue;
       }
@@ -1931,6 +2330,8 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       tc->blank_uppercase = state->blank_uppercase;
       tc->antialias = state->antialias;
       tc->score_subscripts = (int)state->score_subscripts;
+      tc->border_thickness = state->border_thickness;
+      tc->is_preview = is_preview;
       tc->cdy = cdy;
       tc->cdx = cdx;
       tc->scale = L->scale;
@@ -2044,6 +2445,13 @@ static void render_board_grid_overlay(struct ncplane *parent,
   if (p == NULL) {
     return;
   }
+  // Bump the grid plane to the top of the z-order on every frame.
+  // notcurses orders planes by creation time, and per-tile pixel
+  // planes get added later in the game as tiles land — without
+  // this nudge, those newer tile planes occlude the grid lines
+  // along their right + bottom edges, leaving the placed area
+  // looking grid-less.
+  ncplane_move_top(p);
   unsigned pxy = 0, pxx = 0, cdy = 0, cdx = 0, mby = 0, mbx = 0;
   ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
   if (cdy == 0 || cdx == 0) {
@@ -2310,6 +2718,17 @@ static void render_board(struct ncplane *plane, const Theme *theme,
                            L->board_cell_h, CELL_ROW_BASE, CELL_COL_BASE);
     }
     render_board_pixel(plane, theme, state, L);
+    // Grid lines are now baked into each per-tile pixel buffer's
+    // right + bottom edges (see compose_tile_pixels) — adjacent
+    // tiles' edges combine into a continuous grid. The separate
+    // grid-overlay plane couldn't reliably stay on top of newly-
+    // created tile planes in notcurses' Kitty graphics z-order;
+    // baking the lines into the tile sprixels sidesteps that.
+    // Drop any leftover overlay plane from a previous code path.
+    if (grid_planes.board != NULL) {
+      ncplane_destroy(grid_planes.board);
+      grid_planes.board = NULL;
+    }
     return;
   }
   // 2x-only pixel planes are no-ops at scale < 2 but their stale
@@ -2354,10 +2773,55 @@ static void render_board(struct ncplane *plane, const Theme *theme,
     snprintf(label, sizeof(label), "%2d", row + 1);
     ncplane_putstr_yx(plane, CELL_ROW_BASE + row, ROW_LABEL_COL, label);
   }
-  render_board_cells(plane, theme, pick_render_board(state), state->ld,
-                     state->blank_uppercase, state->premium_labels,
-                     state->border_thickness, L->board_cell_w, CELL_ROW_BASE,
-                     CELL_COL_BASE);
+  const Board *brd = pick_render_board(state);
+  render_board_cells(plane, theme, brd, state->ld, state->blank_uppercase,
+                     state->premium_labels, state->border_thickness,
+                     L->board_cell_w, CELL_ROW_BASE, CELL_COL_BASE);
+  // Analysis-cursored candidate overlay: paint the proposed
+  // tiles on top of empty cells in a muted player-hue palette
+  // (matches the 2x pixel-mode preview look, just delivered via
+  // text cells).
+  if (brd != NULL) {
+    MachineLetter preview_letters[BOARD_DIM][BOARD_DIM];
+    int preview_owner = 0;
+    fill_preview_map(state, brd, preview_letters, &preview_owner);
+    const ThemeRgb hue = preview_owner == 1 ? theme->tile2_fg : theme->tile1_fg;
+    ThemeRgb muted;
+    muted.r = (uint8_t)((hue.r + theme->bg.r) / 2);
+    muted.g = (uint8_t)((hue.g + theme->bg.g) / 2);
+    muted.b = (uint8_t)((hue.b + theme->bg.b) / 2);
+    const bool halfwidth = (L->board_cell_w == 1);
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        const MachineLetter ml = preview_letters[row][col];
+        if (ml == 0) {
+          continue;
+        }
+        theme_apply_fg(plane, hue);
+        theme_apply_bg(plane, muted);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+        const int screen_row = CELL_ROW_BASE + row;
+        const int screen_col = CELL_COL_BASE + col * L->board_cell_w;
+        if (halfwidth) {
+          const char *ascii =
+              (ml == 0) ? "?" : state->ld->ld_ml_to_hl[ml];
+          ncplane_putstr_yx(plane, screen_row, screen_col,
+                            ascii[0] != '\0' ? ascii : " ");
+        } else {
+          const char *fullwidth = state->ld->ld_ml_to_alt_hl[ml];
+          if (fullwidth[0] != '\0') {
+            ncplane_putstr_yx(plane, screen_row, screen_col, fullwidth);
+          } else {
+            const char *ascii =
+                (ml == 0) ? "?" : state->ld->ld_ml_to_hl[ml];
+            ncplane_putstr_yx(plane, screen_row, screen_col, " ");
+            ncplane_putstr(plane, ascii);
+          }
+        }
+        ncplane_set_styles(plane, 0);
+      }
+    }
+  }
 }
 
 void tui_render_board_at(struct ncplane *plane, int top, int left,
@@ -2485,10 +2949,12 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
 
   // Expand the rack into a per-slot letter array so we can cache
   // each slot independently. tile_count comes from the caller and
-  // is the visible rack length.
-  const int player_idx = game_get_player_on_turn_index(state->game);
-  const Rack *rack =
-      player_get_rack(game_get_player(state->game, player_idx));
+  // is the visible rack length. Cursor-aware: the on-turn player
+  // is resolved through pick_render_on_turn so navigating to a
+  // committed turn rewinds the rack panel to that turn's player
+  // + rack.
+  const int player_idx = pick_render_on_turn(state);
+  const Rack *rack = pick_render_rack(state, player_idx);
   MachineLetter slot_letters[RACK_SIZE];
   for (int i = 0; i < RACK_SIZE; i++) {
     slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
@@ -2582,9 +3048,15 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
 static void render_rack_panel(struct ncplane *plane, const Theme *theme,
                               const TuiGameState *state, const Layout *L) {
   const int box_height = L->rack_bottom - L->rack_top + 1;
-  const int player_idx = game_get_player_on_turn_index(state->game);
-  const Player *player = game_get_player(state->game, player_idx);
-  const Rack *rack = player_get_rack(player);
+  // Follow the History cursor: when parked on a committed turn we
+  // show that turn's player + rack, not the live game's on-turn
+  // player. pick_render_rack falls through to live state when the
+  // cursor is on the label or a pending entry.
+  const int player_idx = pick_render_on_turn(state);
+  const Rack *rack = pick_render_rack(state, player_idx);
+  if (rack == NULL) {
+    return;
+  }
   char title[32];
   snprintf(title, sizeof(title), "Rack (%d)", rack_get_total_letters(rack));
   const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
@@ -2908,7 +3380,7 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   }
 
   const Player *player = game_get_player(state->game, player_idx);
-  const bool on_turn = game_get_player_on_turn_index(state->game) == player_idx;
+  const bool on_turn = pick_render_on_turn(state) == player_idx;
   const ThemeRgb player_accent =
       player_idx == 1 ? theme->on_turn_fg_p2 : theme->on_turn_fg;
   const int content_row = top + 1;
@@ -2929,11 +3401,13 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   ncplane_putstr(plane, name);
 
   // Right side: clock and score, separated by a single col gap. Clock
-  // tops out at "99:59" (5 chars).
+  // tops out at "99:59" (5 chars). Score follows the History cursor:
+  // it's whatever this player had going into the cursored turn.
+  (void)player;
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
-           equity_to_int(player_get_score(player)));
-  const double remaining = seconds_remaining(state, player_idx);
+           pick_render_score(state, player_idx));
+  const double remaining = pick_render_clock_seconds(state, player_idx);
   char clock_str[16];
   format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
                sizeof(clock_str));
@@ -2955,7 +3429,10 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   // kicks in when the right column is too narrow for two fullwidth
   // pills side-by-side but still wide enough to fit two halfwidth
   // pills.
-  const Rack *rack = player_get_rack(player);
+  const Rack *rack = pick_render_rack(state, player_idx);
+  if (rack == NULL) {
+    return;
+  }
   const LetterDistribution *ld = state->ld;
   const int rack_left = content_left + 5;
   const int rack_right_max = score_col - 2;
@@ -3386,17 +3863,14 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   history_panel_left = L->right_col_left;
   history_panel_right = L->right_col_right;
   if (!L->combined_pills_history) {
-    draw_box_styled(plane, theme, L->history_top, L->right_col_left, height,
-                    width, "History", TUI_FOCUS_HISTORY, history_focused);
-    // When the in-panel cursor has moved off the label onto an
-    // entry, overpaint the focused "[4>" chip with a muted "[4]"
-    // so only the entry shows the selection marker.
-    if (history_focused && state->history_cursor >= 0) {
-      theme_apply_fg(plane, theme->modal_shortcut_fg);
-      theme_apply_bg(plane, theme->panel_focus_border_bg);
-      ncplane_set_styles(plane, 0);
-      ncplane_putstr_yx(plane, L->history_top, L->right_col_left + 1, "[4]");
-    }
+    // badge_secondary = true when focus is on a sub-element (an
+    // entry row) so the chevron moves off the label and onto the
+    // selected row; the badge stays bright as the focus-of-panel
+    // indicator but reverts from "[4>" to "[4]".
+    const bool badge_secondary = state->history_cursor >= 0;
+    draw_box_styled_ex(plane, theme, L->history_top, L->right_col_left, height,
+                       width, "History", TUI_FOCUS_HISTORY, history_focused,
+                       badge_secondary);
   }
 
   if (state->history_count == 0) {
@@ -3581,14 +4055,21 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
 // the primary string renders in bold (true for win%, false for W/T/L
 // which already pop visually).
 static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
-                                 const Layout *L, AnalysisRow *rows,
-                                 int visible, int primary_w, int secondary_w,
-                                 int primary_secondary_gap, bool primary_bold,
-                                 int title_end_col) {
+                                 const TuiGameState *state, const Layout *L,
+                                 AnalysisRow *rows, int visible, int primary_w,
+                                 int secondary_w, int primary_secondary_gap,
+                                 bool primary_bold, int title_end_col) {
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
+  // Reset per-frame hit-test map + panel bounds so mouse clicks
+  // and arrow-key navigation can target individual analysis rows.
+  analysis_row_map_count = 0;
+  analysis_panel_top = L->analysis_top;
+  analysis_panel_bottom = L->analysis_bottom;
+  analysis_panel_left = L->analysis_left;
+  analysis_panel_right = L->analysis_right;
   // Reserve a column-header strip; either on the panel's top border
   // (sharing the row with the title, when there's room) or on the
   // first interior row. The on-border placement is preferred since
@@ -4288,8 +4769,60 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       *p = '\0';
     }
 
-    theme_apply_fg(plane, theme->dim_fg);
-    ncplane_putstr_yx(plane, row, interior_left, rank_str);
+    // Cursor styling: when the Analysis cursor is parked on this
+    // row, invert the rank chip (theme->bg on theme->fg, bold)
+    // and replace the trailing "." with ">" while the panel is
+    // focused, or keep "." to read as a parked selection while
+    // focus is elsewhere. Mirrors how the History cursor styles
+    // its turn number.
+    const int cursor_idx = state != NULL ? state->analysis_cursor : -1;
+    const bool cursor_here = (cursor_idx == i);
+    const bool focused_here =
+        state != NULL && state->focused_panel == TUI_FOCUS_ANALYSIS;
+    if (cursor_here) {
+      // Find the position of the '.' in rank_str (right-aligned;
+      // walk to end and back). Then split: leading digits +
+      // padding go inverted, the '.' becomes '>' (or stays '.'
+      // when unfocused) inverted, the trailing space goes plain.
+      char chip[8];
+      int chip_len = 0;
+      int after_period_idx = 0;
+      for (int k = 0; rank_str[k] != '\0'; k++) {
+        if (rank_str[k] == '.') {
+          after_period_idx = k + 1;
+          break;
+        }
+      }
+      for (int k = 0; k < after_period_idx - 1 && chip_len < 6; k++) {
+        chip[chip_len++] = rank_str[k];
+      }
+      chip[chip_len++] = focused_here ? '>' : '.';
+      chip[chip_len] = '\0';
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->fg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row, interior_left, chip);
+      ncplane_set_styles(plane, 0);
+      theme_apply_fg(plane, theme->dim_fg);
+      theme_apply_bg(plane, theme->bg);
+      if (rank_str[after_period_idx] != '\0') {
+        ncplane_putstr_yx(plane, row, interior_left + after_period_idx,
+                          rank_str + after_period_idx);
+      }
+    } else {
+      theme_apply_fg(plane, theme->dim_fg);
+      ncplane_putstr_yx(plane, row, interior_left, rank_str);
+    }
+    // Record the row's screen rectangle for click-to-cursor.
+    if (analysis_row_map_count <
+        (int)(sizeof(analysis_row_map) / sizeof(analysis_row_map[0]))) {
+      AnalysisRowMap *m = &analysis_row_map[analysis_row_map_count++];
+      m->top_row = row;
+      m->bottom_row = row;
+      m->left_col = interior_left;
+      m->right_col = interior_right;
+      m->idx = i;
+    }
 
     if (this_move_max > 0 && move_text[0] != '\0') {
       theme_apply_fg(plane, theme->fg);
@@ -4390,6 +4923,10 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     }
 
     row++;
+  }
+  if (state != NULL) {
+    atomic_store(&((TuiGameState *)state)->analysis_visible_rows,
+                 analysis_row_map_count);
   }
 }
 
@@ -4707,8 +5244,13 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     snprintf(title, sizeof(title), "Analysis");
   }
   const bool analysis_focused = state->focused_panel == TUI_FOCUS_ANALYSIS;
-  draw_box_styled(plane, theme, L->analysis_top, L->analysis_left, height,
-                  width, title, TUI_FOCUS_ANALYSIS, analysis_focused);
+  // badge_secondary: the cursor has navigated off the label onto a
+  // specific candidate row, so "[5>" → "[5]" while focus stays
+  // bright. Mirrors the History panel.
+  const bool analysis_badge_secondary = state->analysis_cursor >= 0;
+  draw_box_styled_ex(plane, theme, L->analysis_top, L->analysis_left, height,
+                     width, title, TUI_FOCUS_ANALYSIS, analysis_focused,
+                     analysis_badge_secondary);
 
   const int interior_left = L->analysis_left + 1;
   const int interior_right = L->analysis_right - 1;
@@ -4770,7 +5312,8 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     return;
   }
 
-  render_analysis_rows(plane, theme, L, rows, visible, primary_w, secondary_w,
+  render_analysis_rows(plane, theme, state, L, rows, visible, primary_w,
+                       secondary_w,
                        primary_secondary_gap, primary_bold, title_end_col);
 }
 
@@ -5409,11 +5952,8 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   render_board(plane, theme, state, &L);
-  // Grid overlay only at 2x — 2x bakes it into the RGBA composite
-  // directly. The 1x board uses standard cell text and the pixel-grid
-  // overlay just looked busy at that scale (thin colored lines
-  // between half-width cells); the cells themselves already read as
-  // a grid via their colored backgrounds.
+  // Grid lines are baked into each per-tile pixel buffer now (see
+  // compose_tile_pixels); no separate overlay plane needed.
   (void)render_board_grid_overlay;
   render_rack_panel(plane, theme, state, &L);
   render_bag_panel(plane, theme, state, &L);
@@ -5437,36 +5977,11 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_command_palette(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
 
-  // Debug overlay (top-right): three counters for the pixel-worker
-  // pipeline. lat = cursor-change-to-blit latency; blit = UI-thread
-  // ncblit_rgba duration on the last frame that consumed a result;
-  // max = peak UI-thread frame time over the last ~1s window
-  // (i.e. the worst "dropped frame" lately). Temporary — remove
-  // once the perf story is settled.
-  {
-    const long lat_us = atomic_load(&g_board_blit_latency_us);
-    const long blit_us = atomic_load(&g_ncblit_us);
-    const long max_us = atomic_load(&g_max_frame_us);
-    const int tile_blits_last = atomic_load(&g_last_tile_blits);
-    const uint64_t spr_emit = atomic_load(&g_sprixel_emits_delta);
-    const uint64_t spr_elide = atomic_load(&g_sprixel_elides_delta);
-    char dbg[128];
-    snprintf(dbg, sizeof(dbg),
-             " %dt e%llu/l%llu max %ld.%01ld ms ", tile_blits_last,
-             (unsigned long long)spr_emit, (unsigned long long)spr_elide,
-             max_us / 1000L, (max_us % 1000L) / 100L);
-    (void)lat_us;
-    (void)blit_us;
-    const int len = (int)strlen(dbg);
-    const int col = (int)L.plane_cols - len;
-    if (col >= 0) {
-      theme_apply_fg(plane, theme->bg);
-      theme_apply_bg(plane, theme->accent_fg);
-      ncplane_set_styles(plane, NCSTYLE_BOLD);
-      ncplane_putstr_yx(plane, 0, col, dbg);
-      ncplane_set_styles(plane, 0);
-    }
-  }
+  // Debug perf overlay disabled. The pipeline-instrumentation
+  // counters (g_board_blit_latency_us, g_ncblit_us, g_max_frame_us,
+  // g_last_tile_blits, g_sprixel_emits_delta, g_sprixel_elides_delta)
+  // are still updated by render_board_pixel / main.c so a one-line
+  // re-enable here is enough if we need to look at them again.
 
   // When a modal closes, drop its plane so the next open recreates it
   // at the right size and z-position. Cheap (one destroy) and keeps

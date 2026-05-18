@@ -1,6 +1,7 @@
 #include "glyph_cache.h"
 
 #include <freetype/freetype.h>
+#include <freetype/ftsynth.h>
 #include <ft2build.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -19,6 +20,7 @@ struct TuiGlyphCache {
   int pixel_size;
   bool antialias;
   TuiGlyph *slots[GLYPH_CACHE_CAPACITY];
+  TuiGlyph *slots_bold[GLYPH_CACHE_CAPACITY];
 };
 
 bool tui_glyph_cache_resolve_font_path(char *out, size_t out_size) {
@@ -81,19 +83,20 @@ TuiGlyphCache *tui_glyph_cache_create(const char *font_path) {
   return cache;
 }
 
-static void free_slot(TuiGlyphCache *cache, int idx) {
-  TuiGlyph *g = cache->slots[idx];
+static void free_slot_in(TuiGlyph **slots, int idx) {
+  TuiGlyph *g = slots[idx];
   if (g == NULL) {
     return;
   }
   free(g->alpha);
   free(g);
-  cache->slots[idx] = NULL;
+  slots[idx] = NULL;
 }
 
 static void drop_all_slots(TuiGlyphCache *cache) {
   for (int idx = 0; idx < GLYPH_CACHE_CAPACITY; idx++) {
-    free_slot(cache, idx);
+    free_slot_in(cache->slots, idx);
+    free_slot_in(cache->slots_bold, idx);
   }
 }
 
@@ -140,13 +143,15 @@ void tui_glyph_cache_reset(TuiGlyphCache *cache) {
   cache->pixel_size = 0;
 }
 
-const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint) {
+static const TuiGlyph *cache_get_styled(TuiGlyphCache *cache,
+                                        uint32_t codepoint, bool bold) {
   if (cache == NULL || codepoint >= GLYPH_CACHE_CAPACITY ||
       cache->pixel_size <= 0) {
     return NULL;
   }
-  if (cache->slots[codepoint] != NULL) {
-    return cache->slots[codepoint];
+  TuiGlyph **slots = bold ? cache->slots_bold : cache->slots;
+  if (slots[codepoint] != NULL) {
+    return slots[codepoint];
   }
 
   // FT_LOAD_DEFAULT lets FreeType use bytecode hints if the font has
@@ -157,6 +162,14 @@ const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint) {
   FT_Int32 load_flags = FT_LOAD_DEFAULT;
   if (FT_Load_Char(cache->face, codepoint, load_flags) != 0) {
     return NULL;
+  }
+  if (bold) {
+    // Outline-level emboldening: thickens the actual glyph outline
+    // before rasterization, so the result has the proper terminals
+    // and curve weights of a bold stroke rather than a flat
+    // bitmap dilation. Default emboldening strength is proportional
+    // to the loaded pixel size.
+    FT_GlyphSlot_Embolden(cache->face->glyph);
   }
   FT_Render_Mode render_mode =
       cache->antialias ? FT_RENDER_MODE_NORMAL : FT_RENDER_MODE_MONO;
@@ -211,6 +224,15 @@ const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint) {
     }
   }
 
-  cache->slots[codepoint] = g;
+  slots[codepoint] = g;
   return g;
+}
+
+const TuiGlyph *tui_glyph_cache_get(TuiGlyphCache *cache, uint32_t codepoint) {
+  return cache_get_styled(cache, codepoint, /*bold=*/false);
+}
+
+const TuiGlyph *tui_glyph_cache_get_bold(TuiGlyphCache *cache,
+                                         uint32_t codepoint) {
+  return cache_get_styled(cache, codepoint, /*bold=*/true);
 }

@@ -548,6 +548,20 @@ int main(int argc, char *argv[]) {
           const int target = tui_history_cursor_at(input.y, input.x);
           if (target >= -1) {
             game_state.history_cursor = target;
+            // Snap the Analysis cursor to row 0 so the panel
+            // shows the move actually played for that turn (or
+            // the top play of the in-progress analysis when
+            // cursor is on the label / a pending entry).
+            game_state.analysis_cursor = 0;
+          }
+        } else if (hit == TUI_FOCUS_ANALYSIS &&
+                   game_state.focused_panel == TUI_FOCUS_ANALYSIS) {
+          // Same routing as History: an already-focused click on
+          // the Analysis panel moves the in-panel cursor instead
+          // of re-focusing. Title / chrome clicks snap to -1.
+          const int target = tui_analysis_cursor_at(input.y, input.x);
+          if (target >= -1) {
+            game_state.analysis_cursor = target;
           }
         } else {
           game_state.focused_panel = hit;
@@ -1029,6 +1043,28 @@ int main(int argc, char *argv[]) {
       game_state.slash_cursor = 0;
       game_state.slash_buf[0] = '\0';
       pthread_mutex_unlock(&game_state.mutex);
+    } else if (game_state.focused_panel == TUI_FOCUS_ANALYSIS &&
+               (key == NCKEY_UP || key == NCKEY_DOWN || key == NCKEY_LEFT ||
+                key == NCKEY_RIGHT || key == 'k' || key == 'K' || key == 'j' ||
+                key == 'J' || key == 'h' || key == 'H' || key == 'l' ||
+                key == 'L')) {
+      // Analysis panel nav. Same shape as History: -1 = cursor on
+      // the [5>] label; 0..N-1 = on the visible candidate row.
+      const bool forward = key == NCKEY_DOWN || key == NCKEY_RIGHT ||
+                           key == 'j' || key == 'J' || key == 'l' ||
+                           key == 'L';
+      pthread_mutex_lock(&game_state.mutex);
+      const int last = atomic_load(&game_state.analysis_visible_rows) - 1;
+      if (forward) {
+        if (game_state.analysis_cursor < last) {
+          game_state.analysis_cursor++;
+        }
+      } else {
+        if (game_state.analysis_cursor > -1) {
+          game_state.analysis_cursor--;
+        }
+      }
+      pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
                (key == NCKEY_UP || key == NCKEY_DOWN || key == NCKEY_LEFT ||
                 key == NCKEY_RIGHT || key == 'k' || key == 'K' || key == 'j' ||
@@ -1044,6 +1080,7 @@ int main(int argc, char *argv[]) {
                            key == 'j' || key == 'J' || key == 'l' || key == 'L';
       pthread_mutex_lock(&game_state.mutex);
       const int last = game_state.history_count - 1;
+      const int prev_cursor = game_state.history_cursor;
       if (forward) {
         if (game_state.history_cursor < last) {
           game_state.history_cursor++;
@@ -1052,6 +1089,15 @@ int main(int argc, char *argv[]) {
         if (game_state.history_cursor > -1) {
           game_state.history_cursor--;
         }
+      }
+      // Whenever the History cursor lands on a new turn, snap the
+      // Analysis cursor back to row 0 so the panel highlights the
+      // play actually made for that turn (or the top play of the
+      // live in-progress analysis when on the label / a pending
+      // entry). Keeps the board preview consistent with the row
+      // the user is looking at.
+      if (game_state.history_cursor != prev_cursor) {
+        game_state.analysis_cursor = 0;
       }
       pthread_mutex_unlock(&game_state.mutex);
     } else if (game_state.focused_panel == 0) {
