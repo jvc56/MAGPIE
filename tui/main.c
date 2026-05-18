@@ -386,6 +386,7 @@ int main(int argc, char *argv[]) {
     game_state.board_scale = 1;
   }
   tui_bot_worker_start(&game_state);
+  tui_pixel_worker_start(&game_state);
 
   // Modal state: which (if any) modal is open. Drives keyboard routing
   // and the status-bar control hints.
@@ -481,7 +482,19 @@ int main(int argc, char *argv[]) {
     } else if (modal == TUI_MODAL_QUIT_CONFIRM) {
       tui_game_render_quit_confirm(std_plane, theme, quit_confirm_focus);
     }
+    // Time the UI thread's full render path so the debug overlay
+    // can surface the worst-case frame in the last second. Captures
+    // notcurses_render too, where the Kitty graphics emit lives.
+    extern void tui_debug_record_frame_us(long);
+    struct timespec frame_start;
+    clock_gettime(CLOCK_MONOTONIC, &frame_start);
     notcurses_render(nc);
+    struct timespec frame_end;
+    clock_gettime(CLOCK_MONOTONIC, &frame_end);
+    const long frame_us =
+        (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
+        (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
+    tui_debug_record_frame_us(frame_us);
 
     // Input is polled non-blocking; the throttle lives at the top of
     // the loop so `continue` paths can't bypass it.

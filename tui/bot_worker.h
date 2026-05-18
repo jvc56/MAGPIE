@@ -11,4 +11,9 @@
 // (and release the thread) by calling tui_game_state_destroy.
 void tui_bot_worker_start(TuiGameState *state);
 
+// Spawn the pixel-worker thread that rasterizes the 2x board RGBA
+// composite off the UI thread. Idempotent. The thread is joined by
+// tui_game_state_destroy.
+void tui_pixel_worker_start(TuiGameState *state);
+
 #endif

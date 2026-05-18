@@ -253,6 +253,59 @@ typedef struct {
   bool bot_started;
   _Atomic bool bot_stop;
 
+  // Pixel worker — rasterizes the 2x board RGBA composite off the
+  // UI thread so cursor scrubbing through History doesn't stall
+  // notcurses_render. The worker owns its own glyph caches
+  // (pixel_glyph_cache / _sub) and communicates with the UI thread
+  // via two slots guarded by pixel_mutex + pixel_cond:
+  //   - pixel_request: UI snapshots the inputs (board copy, scale,
+  //     antialias, etc.) and signals; worker picks it up.
+  //   - pixel_result: worker publishes an RGBA buffer + the
+  //     identity of the snapshot it was rendered from; UI ncblits
+  //     it on the next frame whose params still match.
+  pthread_t pixel_thread;
+  bool pixel_started;
+  _Atomic bool pixel_stop;
+  pthread_mutex_t pixel_mutex;
+  pthread_cond_t pixel_cond;
+  TuiGlyphCache *pixel_glyph_cache;
+  TuiGlyphCache *pixel_glyph_cache_sub;
+  struct TuiPixelRequest {
+    bool pending;
+    struct Board *board;   // owned: board_duplicate'd by UI
+    const void *theme; // borrowed pointer to a Theme (theme.h);
+                       // declared as void* here to keep game_state.h free
+                       // of the notcurses dependency theme.h drags in.
+    int scale;
+    int cell_w, cell_h;
+    unsigned cdy, cdx;
+    bool blank_uppercase;
+    bool antialias;
+    TuiPremiumLabels premium_labels;
+    TuiScoreSubscripts score_subscripts;
+    int border_thickness;
+    uint64_t version;     // render_version at request time
+    int history_cursor;   // -1 = live, else committed entry idx
+  } pixel_request;
+  struct TuiPixelResult {
+    bool ready;
+    uint8_t *buf; // owned: worker malloc'd, UI free's after blit
+    int buf_w;
+    int buf_h;
+    // Identity matches pixel_request shape so UI can compare and
+    // discard the result if it's stale relative to current params.
+    int scale;
+    int cell_w, cell_h;
+    unsigned cdy, cdx;
+    bool blank_uppercase;
+    bool antialias;
+    TuiPremiumLabels premium_labels;
+    TuiScoreSubscripts score_subscripts;
+    int border_thickness;
+    uint64_t version;
+    int history_cursor;
+  } pixel_result;
+
   // Active session snapshot of the settings that take effect at game-
   // state init time only (lexicon name, whether RIT was loaded). The
   // Settings UI writes to the config; comparing config-vs-active is

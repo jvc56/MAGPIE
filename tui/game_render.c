@@ -941,6 +941,54 @@ static struct {
   struct ncplane *modal;
 } grid_planes;
 
+// Debug instrumentation. Three counters surfaced in the top-right
+// overlay while we tune the pixel-worker pipeline:
+//   lat — end-to-end microseconds from a History-cursor change to
+//         the corresponding pixel-board blit landing on screen.
+//   blit — microseconds the UI thread last spent inside
+//          ncblit_rgba (memcpy + plane-state churn). Excludes the
+//          notcurses_render Kitty emit that happens later.
+//   max — peak UI-thread frame time over the last ~1 second
+//         (microseconds between consecutive notcurses_render
+//         returns observed from main.c). Lets us see if the loop
+//         is dropping below 60fps even when no cursor moved.
+static _Atomic long g_board_blit_latency_us;
+static _Atomic long g_ncblit_us;
+static _Atomic long g_max_frame_us;
+// Number of tile pixel planes ncblit'd on the most-recent frame
+// that performed any board work. 0 means no blits (cache hit).
+// High values (5–7) line up with bingos / multi-letter plays
+// landing on the board.
+static _Atomic int g_last_tile_blits;
+static int g_last_blitted_cursor;
+static bool g_last_blit_tracked;
+static struct timespec g_cursor_pending_since;
+static bool g_cursor_pending;
+
+void tui_debug_record_frame_us(long frame_us) {
+  static long max_in_window;
+  static struct timespec window_start;
+  static bool window_init;
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  if (!window_init) {
+    window_init = true;
+    window_start = now;
+    max_in_window = 0;
+  }
+  if (frame_us > max_in_window) {
+    max_in_window = frame_us;
+  }
+  const long since_start_ms =
+      (long)(now.tv_sec - window_start.tv_sec) * 1000L +
+      (long)(now.tv_nsec - window_start.tv_nsec) / 1000000L;
+  if (since_start_ms >= 1000) {
+    atomic_store(&g_max_frame_us, max_in_window);
+    max_in_window = 0;
+    window_start = now;
+  }
+}
+
 // Cache for the 2x board pixel composite. ncblit_rgba is the FPS
 // bottleneck even when the buffer hasn't changed; tracking a signature
 // lets us skip the work and rely on notcurses keeping the plane's
@@ -956,6 +1004,43 @@ typedef struct {
   int history_cursor;
   bool valid;
 } BlitCache;
+
+// Per-tile cache for the 2x layered renderer (text bg + small
+// pixel planes per placed tile). If the (letter, owner, score,
+// antialias, subs, cdy, cdx, scale) tuple hasn't changed since
+// the tile was last rasterized, we skip both the rasterize AND
+// the ncblit_rgba — the existing sprixel on the plane is still
+// correct. This is what lets cursor scrolling through history
+// snapshots cost only ~the tiles that differ between snapshots,
+// instead of re-emitting the entire board.
+typedef struct {
+  int letter;
+  int owner;
+  int score;
+  bool blank_uppercase;
+  bool antialias;
+  int score_subscripts;
+  unsigned cdy, cdx;
+  int scale;
+  bool valid;
+} TileCache;
+static TileCache board_tile_cache[BOARD_DIM][BOARD_DIM];
+static struct ncplane *board_tile_planes[BOARD_DIM][BOARD_DIM];
+
+// Tear down every cached tile plane. Used when scale flips back
+// to 1x (planes would otherwise occlude the text-mode board) and
+// at game-reset / state-destroy.
+static void invalidate_tile_planes(void) {
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      if (board_tile_planes[row][col] != NULL) {
+        ncplane_destroy(board_tile_planes[row][col]);
+        board_tile_planes[row][col] = NULL;
+      }
+      board_tile_cache[row][col].valid = false;
+    }
+  }
+}
 
 static BlitCache board_pixel_cache;
 static BlitCache rack_pixel_cache;
@@ -1033,6 +1118,7 @@ static void invalidate_grid_planes(void) {
     grid_planes.modal = NULL;
   }
   invalidate_blit_caches();
+  invalidate_tile_planes();
 }
 
 void tui_game_render_reset_grids(void) { invalidate_grid_planes(); }
@@ -1361,89 +1447,46 @@ static void overlay_grid_lines(uint8_t *buf, int buf_w, int buf_h, int tiles_y,
   }
 }
 
-static void render_board_pixel(struct ncplane *plane, const Theme *theme,
-                               const TuiGameState *state, const Layout *L) {
-  struct notcurses *nc = ncplane_notcurses(plane);
-  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
-    return;
-  }
-  const int rows = BOARD_DIM * L->board_cell_h;
-  const int cols = BOARD_DIM * L->board_cell_w;
-  struct ncplane *p =
-      acquire_grid_plane(&grid_planes.board, plane, "board_pixel",
-                         CELL_ROW_BASE, CELL_COL_BASE, rows, cols);
-  if (p == NULL) {
-    return;
-  }
-  unsigned pxy = 0;
-  unsigned pxx = 0;
-  unsigned cdy = 0;
-  unsigned cdx = 0;
-  unsigned mby = 0;
-  unsigned mbx = 0;
-  ncplane_pixel_geom(p, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
-  if (cdy == 0 || cdx == 0) {
-    return;
-  }
-  // Cache short-circuit. Re-encoding a 4.5MB Kitty graphics image
-  // through the PTY 60 times a second on identical content is the
-  // primary FPS killer; bail out if nothing's changed since the last
-  // successful blit. `render_version` is bumped by the bot worker on
-  // each play and by main.c on every settings flip, so the only state
-  // we still need to track per-frame is the cell-pixel ratio (font
-  // size) which the resize path already handles via
-  // invalidate_blit_caches().
-  const uint64_t cur_version =
-      atomic_load(&((TuiGameState *)state)->render_version);
-  const int sub_mode = (int)state->score_subscripts;
-  // history_cursor is part of the cache key: navigating to a
-  // committed entry shows that entry's pre-move board, which
-  // doesn't share content with the live board even though the
-  // version counter hasn't changed.
-  const int cursor_key = (state->focused_panel == TUI_FOCUS_HISTORY)
-                             ? state->history_cursor
-                             : -1;
-  if (board_pixel_cache.valid && board_pixel_cache.version == cur_version &&
-      board_pixel_cache.cdy == cdy && board_pixel_cache.cdx == cdx &&
-      board_pixel_cache.param_a == L->scale &&
-      board_pixel_cache.param_b ==
-          ((state->antialias ? 1 : 0) | (sub_mode << 1)) &&
-      board_pixel_cache.history_cursor == cursor_key) {
-    return;
-  }
-  const int tile_w = (int)cdx * L->board_cell_w;
-  const int tile_h = (int)cdy * L->board_cell_h;
+// Composes the full 2x board RGBA buffer for the given inputs and
+// returns a heap-allocated buffer of size *out_buf_w * *out_buf_h
+// * 4 bytes. Caller owns the buffer and must free() it. Returns
+// NULL on allocation failure.
+//
+// The function is pure compute (no notcurses calls) so it's safe
+// to invoke from a worker thread provided the supplied glyph
+// caches are not in concurrent use elsewhere — it calls
+// tui_glyph_cache_set_size on both, which would race with a
+// concurrent reader of the same cache. The TUI keeps one set of
+// caches owned by the UI thread (used for rack + label renders)
+// and a separate pair owned by the pixel worker (used here).
+static uint8_t *compose_board_pixels(
+    const Board *board, const LetterDistribution *ld, const Theme *theme,
+    TuiGlyphCache *glyph_cache, TuiGlyphCache *glyph_cache_sub,
+    int board_cell_w, int board_cell_h, unsigned cdy, unsigned cdx,
+    bool blank_uppercase, TuiPremiumLabels premium_labels, bool antialias,
+    TuiScoreSubscripts score_subscripts, int border_thickness, int *out_buf_w,
+    int *out_buf_h) {
+  const int tile_w = (int)cdx * board_cell_w;
+  const int tile_h = (int)cdy * board_cell_h;
   const int buf_w = tile_w * BOARD_DIM;
   const int buf_h = tile_h * BOARD_DIM;
   if (buf_w <= 0 || buf_h <= 0) {
-    return;
+    return NULL;
   }
-  // Glyph sizes. Without subscripts: the historical 74% target leaves
-  // ~13% margin top + bottom and reads well at every cell-pixel ratio.
-  // With subscripts: shrink the letter to 80% of that (~59%) and pin
-  // it to the upper-left so the digit fits in the bottom-right at
-  // ~42%. Both caches use the same font, just different sizes — set
-  // them once per render, not per cell.
-  const bool subs_on =
-      sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && state->glyph_cache_sub != NULL;
-  // Subscript-less tiles keep the 0.74 target (centered, generous).
-  // Subscript-on tiles shrink the letter to 0.50 of tile height; the
-  // subscript sits in the bottom-right at 0.24 with a 0.12 right /
-  // 0.16 bottom margin. The letter's center shifts up-and-left by
-  // 0.08 of tile dims so descenders (Q's tail) clear the subscript.
+  const bool subs_on = score_subscripts != TUI_SCORE_SUBSCRIPTS_OFF &&
+                       glyph_cache_sub != NULL;
   const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
   const int sub_px = (int)((double)tile_h * 0.24);
-  tui_glyph_cache_set_size(state->glyph_cache, letter_px, state->antialias);
+  tui_glyph_cache_set_size(glyph_cache, letter_px, antialias);
   if (subs_on) {
-    tui_glyph_cache_set_size(state->glyph_cache_sub, sub_px, state->antialias);
+    tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
   }
 
   uint8_t *buf = (uint8_t *)calloc(1, (size_t)buf_w * buf_h * 4);
   if (buf == NULL) {
-    return;
+    return NULL;
   }
 
-  const Board *board = pick_render_board(state);
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       const int tx = col * tile_w;
@@ -1453,18 +1496,15 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       ThemeRgb bg;
       ThemeRgb fg;
       uint32_t glyph_codepoint = 0;
-      uint32_t glyph_second = 0; // second char of "TW"-style premium labels
+      uint32_t glyph_second = 0;
       bool is_placed_tile = false;
       int tile_score = 0;
 
       if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
         const PremiumMarker marker = premium_marker_for_cell(
-            theme, bs, row, col, state->premium_labels, L->board_cell_w);
+            theme, bs, row, col, premium_labels, board_cell_w);
         bg = marker.bg;
         fg = marker.fg;
-        // marker.glyph is either an ideographic space (non-premium /
-        // labels=NONE) or a 2-char ASCII label like "TW". Pull the
-        // ASCII characters out when present.
         if ((unsigned char)marker.glyph[0] < 0x80 &&
             (unsigned char)marker.glyph[1] < 0x80 && marker.glyph[0] != ' ') {
           glyph_codepoint = (uint32_t)marker.glyph[0];
@@ -1473,41 +1513,30 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       } else {
         is_placed_tile = true;
         const bool is_blank = get_is_blanked(ml);
-        const bool render_uppercase = is_blank && state->blank_uppercase;
+        const bool render_uppercase = is_blank && blank_uppercase;
         const MachineLetter glyph_ml =
             render_uppercase ? get_unblanked_machine_letter(ml) : ml;
         const int owner = board_get_square_owner(board, row, col);
         bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
         fg = is_blank ? theme->blank_tile_fg
                       : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
-        const char *ascii = state->ld->ld_ml_to_hl[glyph_ml];
+        const char *ascii = ld->ld_ml_to_hl[glyph_ml];
         if (ascii != NULL && ascii[0] != '\0' &&
             (unsigned char)ascii[0] < 0x80) {
           glyph_codepoint = (uint32_t)ascii[0];
         }
-        // ld_get_score returns Equity (millipoints). For blanks the
-        // backing array is zero unless the LD overrode it, which is
-        // exactly the behavior we want — blank scores naturally drop
-        // out under the "nonzero" mode.
-        tile_score = equity_to_int(ld_get_score(state->ld, ml));
+        tile_score = equity_to_int(ld_get_score(ld, ml));
       }
 
       fill_tile_rect(buf, buf_w, tx, ty, tile_w, tile_h, bg);
 
-      // Layout the letter. Subscript mode pins it upper-left so the
-      // bottom-right corner is free for the score digits; otherwise
-      // the historical centered placement.
       const bool show_subscript =
           is_placed_tile && subs_on &&
-          (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
+          (score_subscripts == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
       if (glyph_codepoint != 0 && glyph_second == 0) {
-        const TuiGlyph *g =
-            tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
+        const TuiGlyph *g = tui_glyph_cache_get(glyph_cache, glyph_codepoint);
         if (is_placed_tile && subs_on && g != NULL && g->width > 0 &&
             g->height > 0) {
-          // Centered, but biased up-and-left to clear the subscript
-          // corner. A 1-digit subscript only needs a small horizontal
-          // shift; a 2-digit subscript needs more room.
           const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
           const int shift_x = (int)((double)tile_w * shift_x_frac);
           const int shift_y = (int)((double)tile_h * 0.08);
@@ -1520,25 +1549,15 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
                               bg);
         }
       } else if (glyph_codepoint != 0 && glyph_second != 0) {
-        // Two-char label ("TW" etc.) — render side by side, splitting
-        // the tile's horizontal real estate in half.
         const TuiGlyph *g1 =
-            tui_glyph_cache_get(state->glyph_cache, glyph_codepoint);
-        const TuiGlyph *g2 =
-            tui_glyph_cache_get(state->glyph_cache, glyph_second);
+            tui_glyph_cache_get(glyph_cache, glyph_codepoint);
+        const TuiGlyph *g2 = tui_glyph_cache_get(glyph_cache, glyph_second);
         blit_glyph_into_buf(buf, buf_w, buf_h, tx, ty, tile_w / 2, tile_h, g1,
                             fg, bg);
         blit_glyph_into_buf(buf, buf_w, buf_h, tx + tile_w / 2, ty, tile_w / 2,
                             tile_h, g2, fg, bg);
       }
 
-      // Score subscript: right-aligned bottom-right with a 0.12 margin
-      // on the right and bottom edges. We anchor on the digit's
-      // BITMAP BOTTOM (gtop + height) rather than the font baseline so
-      // the visible bottom of the digit lands exactly at margin_y from
-      // the tile floor — baseline-anchoring gave the appearance of no
-      // margin because the user reads the digit's actual pixels, not
-      // its baseline.
       if (show_subscript) {
         char digits[8];
         snprintf(digits, sizeof(digits), "%d", tile_score);
@@ -1548,45 +1567,403 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
         int pen_right = tx + tile_w - margin_x;
         for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
           const TuiGlyph *gd =
-              tui_glyph_cache_get(state->glyph_cache_sub, (uint32_t)digits[i]);
+              tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
           if (gd == NULL || gd->width <= 0) {
             continue;
           }
           const int gleft = pen_right - gd->width;
           const int gtop = digit_bottom - gd->height;
           blit_glyph_at(buf, buf_w, buf_h, gleft, gtop, gd, fg, bg);
-          pen_right = gleft - 1; // small kerning gap between digits
+          pen_right = gleft - 1;
         }
       }
     }
   }
 
-  // Tile borders. The 1x text path uses render_board_grid + a separate
-  // overlay plane; at 2x the composite owns the only plane that covers
-  // the board, so paint the lines directly into the same RGBA buffer
-  // before we ship it.
   overlay_grid_lines(buf, buf_w, buf_h, BOARD_DIM, BOARD_DIM, tile_h, tile_w,
-                     state->border_thickness, theme->bg);
+                     border_thickness, theme->bg);
 
-  struct ncvisual_options vopts = {0};
-  vopts.n = p;
-  vopts.blitter = NCBLIT_PIXEL;
-  vopts.leny = (unsigned)buf_h;
-  vopts.lenx = (unsigned)buf_w;
-  ncblit_rgba(buf, buf_w * 4, &vopts);
-  free(buf);
+  *out_buf_w = buf_w;
+  *out_buf_h = buf_h;
+  return buf;
+}
 
-  // Record the parameters of the blit we just completed so the next
-  // frame can short-circuit if nothing's changed. param_b packs
-  // antialias (bit 0) and the score_subscripts tri-state (bits 1-2)
-  // so a flip of either invalidates the cache.
-  board_pixel_cache.valid = true;
-  board_pixel_cache.version = cur_version;
-  board_pixel_cache.cdy = cdy;
-  board_pixel_cache.cdx = cdx;
-  board_pixel_cache.param_a = L->scale;
-  board_pixel_cache.param_b = (state->antialias ? 1 : 0) | (sub_mode << 1);
-  board_pixel_cache.history_cursor = cursor_key;
+// Pixel-worker thread main loop. Pulls one pending request at a
+// time off state->pixel_request, composes the RGBA buffer using
+// the worker's dedicated glyph caches, then publishes the result
+// into state->pixel_result. The UI thread picks up the result on
+// its next frame and ncblits it onto the board plane. Holds
+// pixel_mutex for the lock/unlock around request + result slots
+// only; the heavy compose runs unlocked so the UI thread can post
+// follow-up requests while the worker is busy.
+void *tui_pixel_worker_main(void *arg) {
+  TuiGameState *state = (TuiGameState *)arg;
+  while (true) {
+    pthread_mutex_lock(&state->pixel_mutex);
+    while (!state->pixel_request.pending && !atomic_load(&state->pixel_stop)) {
+      pthread_cond_wait(&state->pixel_cond, &state->pixel_mutex);
+    }
+    if (atomic_load(&state->pixel_stop)) {
+      pthread_mutex_unlock(&state->pixel_mutex);
+      break;
+    }
+    Board *board = state->pixel_request.board;
+    state->pixel_request.board = NULL;
+    state->pixel_request.pending = false;
+    const Theme *theme = (const Theme *)state->pixel_request.theme;
+    const int scale = state->pixel_request.scale;
+    const int cell_w = state->pixel_request.cell_w;
+    const int cell_h = state->pixel_request.cell_h;
+    const unsigned cdy = state->pixel_request.cdy;
+    const unsigned cdx = state->pixel_request.cdx;
+    const bool blank_uppercase = state->pixel_request.blank_uppercase;
+    const bool antialias = state->pixel_request.antialias;
+    const TuiPremiumLabels premium_labels =
+        state->pixel_request.premium_labels;
+    const TuiScoreSubscripts score_subscripts =
+        state->pixel_request.score_subscripts;
+    const int border_thickness = state->pixel_request.border_thickness;
+    const uint64_t version = state->pixel_request.version;
+    const int history_cursor = state->pixel_request.history_cursor;
+    pthread_mutex_unlock(&state->pixel_mutex);
+
+    int buf_w = 0;
+    int buf_h = 0;
+    uint8_t *buf = compose_board_pixels(
+        board, state->ld, theme, state->pixel_glyph_cache,
+        state->pixel_glyph_cache_sub, cell_w, cell_h, cdy, cdx,
+        blank_uppercase, premium_labels, antialias, score_subscripts,
+        border_thickness, &buf_w, &buf_h);
+    if (board != NULL) {
+      board_destroy(board);
+    }
+    if (buf == NULL) {
+      continue;
+    }
+
+    pthread_mutex_lock(&state->pixel_mutex);
+    if (state->pixel_result.buf != NULL) {
+      // UI never consumed the prior result — drop it. Newer is
+      // better.
+      free(state->pixel_result.buf);
+    }
+    state->pixel_result.buf = buf;
+    state->pixel_result.buf_w = buf_w;
+    state->pixel_result.buf_h = buf_h;
+    state->pixel_result.scale = scale;
+    state->pixel_result.cell_w = cell_w;
+    state->pixel_result.cell_h = cell_h;
+    state->pixel_result.cdy = cdy;
+    state->pixel_result.cdx = cdx;
+    state->pixel_result.blank_uppercase = blank_uppercase;
+    state->pixel_result.antialias = antialias;
+    state->pixel_result.premium_labels = premium_labels;
+    state->pixel_result.score_subscripts = score_subscripts;
+    state->pixel_result.border_thickness = border_thickness;
+    state->pixel_result.version = version;
+    state->pixel_result.history_cursor = history_cursor;
+    state->pixel_result.ready = true;
+    pthread_mutex_unlock(&state->pixel_mutex);
+  }
+  return NULL;
+}
+
+// Compose ONE tile's RGBA buffer (bg color + letter glyph +
+// optional score subscript). Caller owns the returned buffer
+// and must free() it. Returns NULL on failure.
+static uint8_t *compose_tile_pixels(MachineLetter ml, int owner,
+                                    bool blank_uppercase, int tile_w,
+                                    int tile_h, TuiGlyphCache *glyph_cache,
+                                    TuiGlyphCache *glyph_cache_sub,
+                                    TuiScoreSubscripts score_subscripts,
+                                    bool antialias, const Theme *theme,
+                                    const LetterDistribution *ld) {
+  uint8_t *buf = (uint8_t *)calloc(1, (size_t)tile_w * tile_h * 4);
+  if (buf == NULL) {
+    return NULL;
+  }
+  const bool is_blank = get_is_blanked(ml);
+  const bool render_uppercase = is_blank && blank_uppercase;
+  const MachineLetter glyph_ml =
+      render_uppercase ? get_unblanked_machine_letter(ml) : ml;
+  const ThemeRgb bg = owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+  const ThemeRgb fg = is_blank
+                          ? theme->blank_tile_fg
+                          : (owner == 1 ? theme->tile2_fg : theme->tile1_fg);
+  fill_tile_rect(buf, tile_w, 0, 0, tile_w, tile_h, bg);
+
+  const int sub_mode = (int)score_subscripts;
+  const bool subs_on =
+      sub_mode != TUI_SCORE_SUBSCRIPTS_OFF && glyph_cache_sub != NULL;
+  const int letter_px = (int)((double)tile_h * (subs_on ? 0.50 : 0.74));
+  const int sub_px = (int)((double)tile_h * 0.24);
+  tui_glyph_cache_set_size(glyph_cache, letter_px, antialias);
+  if (subs_on) {
+    tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
+  }
+
+  const char *ascii = ld->ld_ml_to_hl[glyph_ml];
+  uint32_t glyph_codepoint = 0;
+  if (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80) {
+    glyph_codepoint = (uint32_t)ascii[0];
+  }
+  const int tile_score = equity_to_int(ld_get_score(ld, ml));
+  const bool show_subscript =
+      subs_on && (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL || tile_score != 0);
+
+  if (glyph_codepoint != 0) {
+    const TuiGlyph *g = tui_glyph_cache_get(glyph_cache, glyph_codepoint);
+    if (subs_on && g != NULL && g->width > 0 && g->height > 0) {
+      const double shift_x_frac = (tile_score >= 10) ? 0.07 : 0.03;
+      const int shift_x = (int)((double)tile_w * shift_x_frac);
+      const int shift_y = (int)((double)tile_h * 0.08);
+      const int baseline = (int)(tile_h * 0.72) - shift_y;
+      const int glyph_top = baseline - g->bearing_y;
+      const int glyph_left = (tile_w - g->width) / 2 - shift_x;
+      blit_glyph_at(buf, tile_w, tile_h, glyph_left, glyph_top, g, fg, bg);
+    } else {
+      blit_glyph_into_buf(buf, tile_w, tile_h, 0, 0, tile_w, tile_h, g, fg, bg);
+    }
+  }
+
+  if (show_subscript) {
+    char digits[8];
+    snprintf(digits, sizeof(digits), "%d", tile_score);
+    const int margin_x = (int)((double)tile_w * 0.12);
+    const int margin_y = (int)((double)tile_h * 0.16);
+    const int digit_bottom = tile_h - margin_y;
+    int pen_right = tile_w - margin_x;
+    for (int i = (int)strlen(digits) - 1; i >= 0; i--) {
+      const TuiGlyph *gd =
+          tui_glyph_cache_get(glyph_cache_sub, (uint32_t)digits[i]);
+      if (gd == NULL || gd->width <= 0) {
+        continue;
+      }
+      const int gleft = pen_right - gd->width;
+      const int gtop = digit_bottom - gd->height;
+      blit_glyph_at(buf, tile_w, tile_h, gleft, gtop, gd, fg, bg);
+      pen_right = gleft - 1;
+    }
+  }
+
+  return buf;
+}
+
+// Layered 2x board render. The cell backgrounds + premium labels
+// go on the std plane as text (fast), and each placed tile gets
+// its own small pixel plane (~6KB Kitty graphics payload, vs
+// ~1.4MB for the previous single full-board plane). A per-tile
+// cache means cursor scrolling through history snapshots only
+// touches the tiles that actually differ between snapshots.
+static void render_board_pixel(struct ncplane *plane, const Theme *theme,
+                               const TuiGameState *state, const Layout *L) {
+  struct notcurses *nc = ncplane_notcurses(plane);
+  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
+    return;
+  }
+  // Probe the cell-pixel geometry. We need a child plane to ask
+  // ncplane_pixel_geom about pixel ratios; reuse the first cached
+  // tile plane if one exists, or make a tiny scratch plane.
+  unsigned pxy = 0;
+  unsigned pxx = 0;
+  unsigned cdy = 0;
+  unsigned cdx = 0;
+  unsigned mby = 0;
+  unsigned mbx = 0;
+  ncplane_pixel_geom(plane, &pxy, &pxx, &cdy, &cdx, &mby, &mbx);
+  if (cdy == 0 || cdx == 0) {
+    return;
+  }
+
+  const int tile_w = (int)cdx * L->board_cell_w;
+  const int tile_h = (int)cdy * L->board_cell_h;
+  if (tile_w <= 0 || tile_h <= 0) {
+    return;
+  }
+
+  const Board *board = pick_render_board(state);
+  if (board == NULL) {
+    return;
+  }
+  const int cursor_key = (state->focused_panel == TUI_FOCUS_HISTORY)
+                             ? state->history_cursor
+                             : -1;
+  if (g_last_blit_tracked && cursor_key != g_last_blitted_cursor &&
+      !g_cursor_pending) {
+    clock_gettime(CLOCK_MONOTONIC, &g_cursor_pending_since);
+    g_cursor_pending = true;
+  }
+
+  bool any_blit = false;
+  long total_blit_us = 0;
+  int tile_blits = 0;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const MachineLetter ml = board_get_letter(board, row, col);
+      TileCache *tc = &board_tile_cache[row][col];
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        // No tile here — drop the cached pixel plane if one was
+        // left over from a previous frame, so the text bg below
+        // shows through.
+        if (board_tile_planes[row][col] != NULL) {
+          ncplane_destroy(board_tile_planes[row][col]);
+          board_tile_planes[row][col] = NULL;
+          tc->valid = false;
+        }
+        continue;
+      }
+      const int owner = board_get_square_owner(board, row, col);
+      const int tile_score = equity_to_int(ld_get_score(state->ld, ml));
+      // Cache hit: this tile's pixel plane already shows the right
+      // content. Skip the rasterize + blit. The plane is sticky on
+      // the screen until something invalidates it.
+      if (tc->valid && tc->letter == (int)ml && tc->owner == owner &&
+          tc->score == tile_score &&
+          tc->blank_uppercase == state->blank_uppercase &&
+          tc->antialias == state->antialias &&
+          tc->score_subscripts == (int)state->score_subscripts &&
+          tc->cdy == cdy && tc->cdx == cdx && tc->scale == L->scale &&
+          board_tile_planes[row][col] != NULL) {
+        continue;
+      }
+      // Ensure a plane exists at the tile's screen position.
+      const int screen_top = CELL_ROW_BASE + row * L->board_cell_h;
+      const int screen_left = CELL_COL_BASE + col * L->board_cell_w;
+      if (board_tile_planes[row][col] == NULL) {
+        ncplane_options opts = {0};
+        opts.y = screen_top;
+        opts.x = screen_left;
+        opts.rows = (unsigned)L->board_cell_h;
+        opts.cols = (unsigned)L->board_cell_w;
+        opts.name = "tile";
+        board_tile_planes[row][col] = ncplane_create(plane, &opts);
+        if (board_tile_planes[row][col] == NULL) {
+          continue;
+        }
+      } else {
+        ncplane_move_yx(board_tile_planes[row][col], screen_top, screen_left);
+      }
+      uint8_t *buf = compose_tile_pixels(
+          ml, owner, state->blank_uppercase, tile_w, tile_h,
+          state->glyph_cache, state->glyph_cache_sub, state->score_subscripts,
+          state->antialias, theme, state->ld);
+      if (buf == NULL) {
+        continue;
+      }
+      struct ncvisual_options vopts = {0};
+      vopts.n = board_tile_planes[row][col];
+      vopts.blitter = NCBLIT_PIXEL;
+      vopts.leny = (unsigned)tile_h;
+      vopts.lenx = (unsigned)tile_w;
+      struct timespec blit_start;
+      clock_gettime(CLOCK_MONOTONIC, &blit_start);
+      ncblit_rgba(buf, tile_w * 4, &vopts);
+      struct timespec blit_end;
+      clock_gettime(CLOCK_MONOTONIC, &blit_end);
+      total_blit_us +=
+          (long)(blit_end.tv_sec - blit_start.tv_sec) * 1000000L +
+          (long)(blit_end.tv_nsec - blit_start.tv_nsec) / 1000L;
+      free(buf);
+      any_blit = true;
+      tile_blits++;
+      tc->letter = (int)ml;
+      tc->owner = owner;
+      tc->score = tile_score;
+      tc->blank_uppercase = state->blank_uppercase;
+      tc->antialias = state->antialias;
+      tc->score_subscripts = (int)state->score_subscripts;
+      tc->cdy = cdy;
+      tc->cdx = cdx;
+      tc->scale = L->scale;
+      tc->valid = true;
+    }
+  }
+
+  if (any_blit) {
+    atomic_store(&g_ncblit_us, total_blit_us);
+    atomic_store(&g_last_tile_blits, tile_blits);
+    if (g_cursor_pending) {
+      struct timespec now;
+      clock_gettime(CLOCK_MONOTONIC, &now);
+      const long us =
+          (long)(now.tv_sec - g_cursor_pending_since.tv_sec) * 1000000L +
+          (long)(now.tv_nsec - g_cursor_pending_since.tv_nsec) / 1000L;
+      atomic_store(&g_board_blit_latency_us, us);
+      g_cursor_pending = false;
+    }
+    g_last_blitted_cursor = cursor_key;
+    g_last_blit_tracked = true;
+  }
+}
+
+// Renders the cell-text backdrop for the 2x board: premium markers
+// on empty cells, plain tile-bg color on placed cells (the per-
+// tile pixel planes draw the letter + subscript on top). Doing
+// the backdrop in cells instead of in the pixel plane is what
+// keeps Kitty graphics payloads tiny.
+//
+// At 2x each board cell occupies cell_h std-plane rows and cell_w
+// std-plane columns (4 wide × 2 tall in practice). The premium
+// markers and tile-bg-color blanks come back as fullwidth glyphs
+// (always 2 cells wide); we pad the remaining cells inside the
+// block with bg-colored halfwidth spaces so the entire cell area
+// is uniformly painted before the pixel overlay drops its letter.
+static void render_board_text_bg(struct ncplane *plane, const Theme *theme,
+                                 const Board *board,
+                                 const LetterDistribution *ld,
+                                 TuiPremiumLabels premium_labels, int cell_w,
+                                 int cell_h, int top, int left) {
+  (void)ld;
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      const int screen_row = top + row * cell_h;
+      const int screen_col = left + col * cell_w;
+      const MachineLetter ml = board_get_letter(board, row, col);
+      ThemeRgb fg;
+      ThemeRgb bg;
+      const char *glyph;
+      bool glyph_fullwidth;
+      if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+        // premium_marker_for_cell wants cell_w of 1 for halfwidth
+        // glyphs, anything else for fullwidth. Map our 4-wide cell
+        // back to 2 (fullwidth) so we get the same marker glyph the
+        // 1x mode uses.
+        const PremiumMarker marker = premium_marker_for_cell(
+            theme, board_get_bonus_square(board, row, col), row, col,
+            premium_labels, cell_w == 1 ? 1 : 2);
+        fg = marker.fg;
+        bg = marker.bg;
+        glyph = marker.glyph;
+        glyph_fullwidth = (cell_w != 1);
+      } else {
+        const int owner = board_get_square_owner(board, row, col);
+        const ThemeRgb tile_bg =
+            owner == 1 ? theme->tile2_bg : theme->tile1_bg;
+        fg = tile_bg;
+        bg = tile_bg;
+        glyph = (cell_w == 1) ? " " : "\xe3\x80\x80"; // U+3000
+        glyph_fullwidth = (cell_w != 1);
+      }
+      // Row 0: glyph, then bg-colored halfwidth padding to fill
+      // the rest of the cell's width.
+      theme_apply_fg(plane, fg);
+      theme_apply_bg(plane, bg);
+      ncplane_putstr_yx(plane, screen_row, screen_col, glyph);
+      const int glyph_cells = glyph_fullwidth ? 2 : 1;
+      theme_apply_fg(plane, bg);
+      theme_apply_bg(plane, bg);
+      for (int c = glyph_cells; c < cell_w; c++) {
+        ncplane_putstr_yx(plane, screen_row, screen_col + c, " ");
+      }
+      // Remaining rows: solid bg, halfwidth spaces all the way
+      // across the cell.
+      for (int r = 1; r < cell_h; r++) {
+        for (int c = 0; c < cell_w; c++) {
+          ncplane_putstr_yx(plane, screen_row + r, screen_col + c, " ");
+        }
+      }
+    }
+  }
 }
 
 // Pixel-graphics grid overlay for the cell-text modes (scale 0 / 1).
@@ -1864,12 +2241,27 @@ static void render_board(struct ncplane *plane, const Theme *theme,
   render_board_box(plane, theme, state, L);
   if (L->scale >= 2 && state->glyph_cache != NULL) {
     render_board_labels_pixel(plane, theme, state, L);
+    // Backdrop in text cells: premium markers + per-tile bg color
+    // for placed cells. The per-tile pixel planes paint the letter
+    // + subscript on top.
+    const Board *board = pick_render_board(state);
+    if (board != NULL) {
+      render_board_text_bg(plane, theme, board, state->ld,
+                           state->premium_labels, L->board_cell_w,
+                           L->board_cell_h, CELL_ROW_BASE, CELL_COL_BASE);
+    }
     render_board_pixel(plane, theme, state, L);
     return;
   }
-  // 2x-only pixel label planes are no-ops at scale < 2 but their stale
-  // image data would otherwise sit on top of the text-mode layout. Drop
-  // them; they'll be reacquired on the next 2x render.
+  // 2x-only pixel planes are no-ops at scale < 2 but their stale
+  // image data would otherwise sit on top of the text-mode layout.
+  // Drop the cached board grid-overlay plane, the labels, AND any
+  // per-tile pixel planes from the layered 2x renderer.
+  if (grid_planes.board != NULL) {
+    ncplane_destroy(grid_planes.board);
+    grid_planes.board = NULL;
+    board_pixel_cache.valid = false;
+  }
   if (grid_planes.labels_col != NULL) {
     ncplane_destroy(grid_planes.labels_col);
     grid_planes.labels_col = NULL;
@@ -1880,6 +2272,7 @@ static void render_board(struct ncplane *plane, const Theme *theme,
     grid_planes.labels_row = NULL;
     label_pixel_cache.valid = false;
   }
+  invalidate_tile_planes();
   // Column labels: fullwidth Ａ-Ｏ at scale 1, halfwidth A-O at scale 0.
   theme_apply_fg(plane, theme->dim_fg);
   theme_apply_bg(plane, theme->bg);
@@ -1956,9 +2349,24 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   if (cdy == 0 || cdx == 0) {
     return;
   }
-  const uint64_t cur_version =
-      atomic_load(&((TuiGameState *)state)->render_version);
-  if (rack_pixel_cache.valid && rack_pixel_cache.version == cur_version &&
+  // Cache key by RACK CONTENT, not render_version. render_version
+  // bumps for endgame iterative-deepening passes and sim spinner
+  // updates — neither of which changes the rack — and each of
+  // those bumps was forcing a full rack rasterize + ~MB-scale
+  // Kitty graphics emit while the bot was thinking. Fingerprint
+  // the on-turn player's rack instead.
+  const int player_idx_for_fp = game_get_player_on_turn_index(state->game);
+  const Rack *rack_for_fp =
+      player_get_rack(game_get_player(state->game, player_idx_for_fp));
+  uint64_t rack_fp = 0xcbf29ce484222325ULL ^ ((uint64_t)player_idx_for_fp << 56);
+  if (rack_for_fp != NULL) {
+    const uint16_t dist = rack_get_dist_size(rack_for_fp);
+    for (uint16_t i = 0; i < dist; i++) {
+      rack_fp ^= rack_get_letter(rack_for_fp, (MachineLetter)i);
+      rack_fp *= 0x100000001b3ULL;
+    }
+  }
+  if (rack_pixel_cache.valid && rack_pixel_cache.version == rack_fp &&
       rack_pixel_cache.cdy == cdy && rack_pixel_cache.cdx == cdx &&
       rack_pixel_cache.param_a == tile_count &&
       rack_pixel_cache.param_b == (state->antialias ? 1 : 0)) {
@@ -2076,7 +2484,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   free(buf);
 
   rack_pixel_cache.valid = true;
-  rack_pixel_cache.version = cur_version;
+  rack_pixel_cache.version = rack_fp;
   rack_pixel_cache.cdy = cdy;
   rack_pixel_cache.cdx = cdx;
   rack_pixel_cache.param_a = tile_count;
@@ -4940,6 +5348,34 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_command_bar(plane, theme, state, &L);
   render_command_palette(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
+
+  // Debug overlay (top-right): three counters for the pixel-worker
+  // pipeline. lat = cursor-change-to-blit latency; blit = UI-thread
+  // ncblit_rgba duration on the last frame that consumed a result;
+  // max = peak UI-thread frame time over the last ~1s window
+  // (i.e. the worst "dropped frame" lately). Temporary — remove
+  // once the perf story is settled.
+  {
+    const long lat_us = atomic_load(&g_board_blit_latency_us);
+    const long blit_us = atomic_load(&g_ncblit_us);
+    const long max_us = atomic_load(&g_max_frame_us);
+    const int tile_blits_last = atomic_load(&g_last_tile_blits);
+    char dbg[96];
+    snprintf(dbg, sizeof(dbg),
+             " %dt lat %ld.%01ld blit %ld.%01ld max %ld.%01ld ms ",
+             tile_blits_last, lat_us / 1000L, (lat_us % 1000L) / 100L,
+             blit_us / 1000L, (blit_us % 1000L) / 100L, max_us / 1000L,
+             (max_us % 1000L) / 100L);
+    const int len = (int)strlen(dbg);
+    const int col = (int)L.plane_cols - len;
+    if (col >= 0) {
+      theme_apply_fg(plane, theme->bg);
+      theme_apply_bg(plane, theme->accent_fg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, 0, col, dbg);
+      ncplane_set_styles(plane, 0);
+    }
+  }
 
   // When a modal closes, drop its plane so the next open recreates it
   // at the right size and z-position. Cheap (one destroy) and keeps

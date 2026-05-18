@@ -192,6 +192,14 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   pthread_mutex_init(&out_state->mutex, NULL);
   atomic_store(&out_state->bot_stop, false);
   out_state->bot_started = false;
+  // Pixel worker primitives. The thread itself is started later by
+  // tui_pixel_worker_start (called from main.c alongside the bot
+  // worker start). Initializing the mutex/cond unconditionally is
+  // safe — they're cheap when never signaled.
+  pthread_mutex_init(&out_state->pixel_mutex, NULL);
+  pthread_cond_init(&out_state->pixel_cond, NULL);
+  atomic_store(&out_state->pixel_stop, false);
+  out_state->pixel_started = false;
   out_state->history_count = 0;
   // -1 = cursor sits on the [4>] label. The cursor persists across
   // panel-focus changes (so the user keeps their place when they
@@ -216,9 +224,17 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   if (tui_glyph_cache_resolve_font_path(font_path, sizeof(font_path))) {
     out_state->glyph_cache = tui_glyph_cache_create(font_path);
     out_state->glyph_cache_sub = tui_glyph_cache_create(font_path);
+    // Dedicated glyph caches owned exclusively by the pixel-worker
+    // thread, so the worker's FT_Set_Pixel_Sizes / FT_Load_Glyph
+    // calls never race with the UI thread rendering the rack or
+    // label planes off the primary caches.
+    out_state->pixel_glyph_cache = tui_glyph_cache_create(font_path);
+    out_state->pixel_glyph_cache_sub = tui_glyph_cache_create(font_path);
   } else {
     out_state->glyph_cache = NULL;
     out_state->glyph_cache_sub = NULL;
+    out_state->pixel_glyph_cache = NULL;
+    out_state->pixel_glyph_cache_sub = NULL;
   }
   clock_gettime(CLOCK_MONOTONIC, &out_state->turn_started);
 
@@ -289,6 +305,34 @@ void tui_game_state_destroy(TuiGameState *state) {
     atomic_store(&state->bot_stop, true);
     pthread_join(state->bot_thread, NULL);
     state->bot_started = false;
+  }
+  // Tear down the pixel worker: set the stop flag, wake the thread
+  // (it might be blocked in cond_wait), join.
+  if (state->pixel_started) {
+    pthread_mutex_lock(&state->pixel_mutex);
+    atomic_store(&state->pixel_stop, true);
+    pthread_cond_signal(&state->pixel_cond);
+    pthread_mutex_unlock(&state->pixel_mutex);
+    pthread_join(state->pixel_thread, NULL);
+    state->pixel_started = false;
+  }
+  // Free any owned request/result residue before the glyph caches
+  // go away.
+  if (state->pixel_request.board != NULL) {
+    board_destroy(state->pixel_request.board);
+    state->pixel_request.board = NULL;
+  }
+  if (state->pixel_result.buf != NULL) {
+    free(state->pixel_result.buf);
+    state->pixel_result.buf = NULL;
+  }
+  if (state->pixel_glyph_cache != NULL) {
+    tui_glyph_cache_destroy(state->pixel_glyph_cache);
+    state->pixel_glyph_cache = NULL;
+  }
+  if (state->pixel_glyph_cache_sub != NULL) {
+    tui_glyph_cache_destroy(state->pixel_glyph_cache_sub);
+    state->pixel_glyph_cache_sub = NULL;
   }
   // Free per-entry owned state stashed during gameplay.
   for (int idx = 0; idx < state->history_count; idx++) {

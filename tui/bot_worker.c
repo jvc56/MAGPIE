@@ -899,3 +899,15 @@ void tui_bot_worker_start(TuiGameState *state) {
     state->bot_started = true;
   }
 }
+
+void *tui_pixel_worker_main(void *arg);
+
+void tui_pixel_worker_start(TuiGameState *state) {
+  if (state == NULL || state->pixel_started) {
+    return;
+  }
+  if (pthread_create(&state->pixel_thread, NULL, tui_pixel_worker_main,
+                     state) == 0) {
+    state->pixel_started = true;
+  }
+}
