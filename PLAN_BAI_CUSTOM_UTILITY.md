@@ -13,15 +13,17 @@ Single change point: `rv_sim_sample()` in `src/impl/random_variable.c`. After
 it computes `wpct`, instead of returning `wpct` directly, return:
 
 ```
-utility = w_winpct · wpct + w_spread · spread_norm(spread)
+spread01 = 1 / (1 + exp(-spread_pts / spread_scale))
+utility  = (w_winpct · wpct + w_spread · spread01) / (w_winpct + w_spread)
 ```
 
 - `spread` is from `initial_player`'s perspective, already correctly signed
-  across `plies % 2`.
-- `spread_norm(s)`: maps `Equity` to roughly `[-1, +1]`. Default: clamp and
-  divide, `clamp(s / spread_scale, -1, 1)`, `spread_scale = 100` (so ±100
-  points saturates). Shift+scale into `[0, 1]` before blending so the sum
-  stays bounded.
+  by the existing rollout code (no parity flip needed here).
+- `spread01` is a logistic sigmoid, strictly bounded in `(0, 1)` for any
+  finite spread. Unlike a clamp, the sigmoid preserves a vanishing
+  distinction at extreme spreads: with `scale=100`, `avg=+1000` gives
+  `spread01 ≈ 1 − 4.5e−5`, `avg=+200` gives `≈ 0.881`, `avg=+50` gives
+  `≈ 0.622`. The slope at zero is `1 / (4·spread_scale)`.
 
 ## Knobs
 
@@ -29,7 +31,7 @@ utility = w_winpct · wpct + w_spread · spread_norm(spread)
 |---|---|---|
 | `-uwin` | `1.0` | weight on win% |
 | `-uspread` | `0.0` | weight on spread (after normalization) |
-| `-uspreadscale` | `100.0` | spread points that map to ±1.0 |
+| `-uspreadscale` | `100.0` | spread points for the sigmoid slope (half-saturation point) |
 
 With defaults, return value equals the existing `wpct`, so existing tests
 and benchmarks are unaffected.
@@ -37,10 +39,10 @@ and benchmarks are unaffected.
 ## Threshold caveat
 
 BAI's GK16/AISTAR thresholds assume sub-Gaussian rewards in roughly `[0,1]`.
-With non-zero `w_spread`, support widens unless we normalize. Approach:
-shift+scale spread into `[0,1]` and renormalize the blend by
-`w_winpct + w_spread`. User can supply unnormalized weights (e.g. `7, 3`)
-and get the same answer as `0.7, 0.3`.
+With non-zero `w_spread`, the support is kept inside `[0,1]` because both
+`wpct` and `spread01` (sigmoid output) are in `[0,1]`, and the weighted
+average is renormalized by `w_winpct + w_spread`. User can supply
+unnormalized weights (e.g. `7, 3`) and get the same answer as `0.7, 0.3`.
 
 ## Plumbing
 

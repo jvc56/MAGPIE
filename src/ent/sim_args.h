@@ -10,6 +10,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include <math.h>
 #include <stdint.h>
 
 typedef struct SimArgs {
@@ -33,9 +34,12 @@ typedef struct SimArgs {
   // Utility weights for blending win% and spread into the BAI sample value.
   // Defaults: (1.0, 0.0, 100.0) -> pure win%, backward compatible. With
   // non-zero utility_w_spread, rv_sim_sample returns
-  // (w_winpct*wpct + w_spread*spread01) / (w_winpct + w_spread)
-  // where spread01 = clamp(spread / utility_spread_scale, -1, 1) shifted
-  // to [0, 1].
+  //   (w_winpct*wpct + w_spread*spread01) / (w_winpct + w_spread)
+  // where
+  //   spread01 = 1 / (1 + exp(-spread_pts / utility_spread_scale))
+  // a logistic sigmoid. Bounded in (0, 1) for all finite spread, with
+  // utility_spread_scale controlling the slope at zero (the half-saturation
+  // point is +/- utility_spread_scale: sigmoid(+/-1) ~= 0.73 / 0.27).
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
@@ -94,28 +98,31 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_spread_scale = 100.0;
 }
 
-// Blend rollout win% and (normalized) spread into a single BAI sample value.
+// Blend rollout win% and (sigmoid-normalized) spread into a single BAI
+// sample value.
 //
-//   spread01 = 0.5 * (clamp(spread_pts / spread_scale, -1, 1) + 1)
+//   spread01 = 1 / (1 + exp(-spread_pts / spread_scale))
 //   utility  = (w_winpct * wpct + w_spread * spread01) / (w_winpct + w_spread)
 //
-// When w_spread == 0 the function returns wpct exactly (no FP rounding), so
-// the default configuration is byte-identical to the pre-change behavior.
-// Both wpct and spread01 are in [0, 1], so the blend stays in [0, 1].
+// When w_spread == 0 the function returns wpct exactly (no FP arithmetic),
+// so the default configuration is byte-identical to the pre-change behavior.
+// Both wpct and spread01 are in [0, 1] (spread01 in (0, 1) strictly), so the
+// blend stays in [0, 1] -- BAI's sub-Gaussian threshold assumptions remain
+// valid regardless of weight magnitudes.
+//
+// Unlike a clamp, the sigmoid preserves a (vanishing) distinction at extreme
+// spreads: avg=+1000 with scale=100 gives spread01 ~= 1 - 4.5e-5, vs
+// avg=+200 -> ~0.881, vs avg=+50 -> ~0.622. The slope at zero is
+// 1/(4*spread_scale), so spread_scale = 100 means a 1-point spread change
+// near zero shifts utility by ~0.0025 per unit weight.
 static inline double sim_utility_blend(double wpct, Equity spread,
                                        double w_winpct, double w_spread,
                                        double spread_scale) {
   if (w_spread == 0.0) {
     return wpct;
   }
-  double s = equity_to_double(spread) / spread_scale;
-  if (s < -1.0) {
-    s = -1.0;
-  }
-  if (s > 1.0) {
-    s = 1.0;
-  }
-  const double spread01 = 0.5 * (s + 1.0);
+  const double s = equity_to_double(spread) / spread_scale;
+  const double spread01 = 1.0 / (1.0 + exp(-s));
   return (w_winpct * wpct + w_spread * spread01) / (w_winpct + w_spread);
 }
 
