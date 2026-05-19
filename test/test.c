@@ -44,6 +44,8 @@
 #include "rack_list_test.h"
 #include "rack_test.h"
 #include "roundrobin_benchmark.h"
+#include "simmedinf_benchmark.h"
+#include "simmedinf_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
 #include "sim_test.h"
@@ -101,6 +103,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
+    {"simmedinf_exchange", test_simmedinf},
     {"command", test_command},
     {"gcg", test_gcg},
     {"autoplay", test_autoplay},
@@ -131,7 +134,15 @@ static TestEntry on_demand_test_table[] = {
     {"infercmp", test_infer_cmp},
     {"infgp", test_inference_gamepair_benchmark},
     {"roundrobin", test_roundrobin_benchmark},
+    {"simmedinf", test_simmedinf_benchmark},
     {"debug_infer", test_debug_infer_turn2},
+    {"qintar", test_qintar_simmedinf},
+    {"dings", test_dings_simmedinf},
+    {"qi", test_qi_simmedinf},
+    {"es", test_es_simmedinf},
+    {"eau", test_eau_simmedinf},
+    {"euoi", test_euoi_simmedinf},
+    {"guvy", test_guvy_simmedinf},
     {"inftiming", test_inference_timing_benchmark},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},

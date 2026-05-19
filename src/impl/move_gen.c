@@ -57,6 +57,10 @@ void generator_destroy(MoveGen *gen) {
 }
 
 MoveGen *get_movegen(int thread_index) {
+  if (thread_index < 0 || thread_index >= MAX_THREADS) {
+    log_fatal("get_movegen: thread_index %d out of [0, %d)", thread_index,
+              MAX_THREADS);
+  }
   if (!cached_gens[thread_index]) {
     cached_gens[thread_index] = malloc_or_die(sizeof(MoveGen));
   }
@@ -1968,8 +1972,15 @@ static inline void set_descending_tile_scores(MoveGen *gen) {
   const int ld_size = ld_get_size(&gen->ld);
   for (int j = 0; j < ld_size; j++) {
     const MachineLetter j_score_order = ld_get_score_order(&gen->ld, j);
-    for (int k = 0; k < rack_get_letter(&gen->player_rack, j_score_order);
-         k++) {
+    const uint16_t count = rack_get_letter(&gen->player_rack, j_score_order);
+    if (i + count > RACK_SIZE) {
+      log_fatal(
+          "set_descending_tile_scores: rack overflow: i=%d count=%d "
+          "j=%d j_score_order=%d total_letters=%d ld_size=%d RACK_SIZE=%d",
+          i, (int)count, j, (int)j_score_order,
+          (int)rack_get_total_letters(&gen->player_rack), ld_size, RACK_SIZE);
+    }
+    for (int k = 0; k < count; k++) {
       gen->descending_tile_scores[i] = gen->tile_scores[j_score_order];
       i++;
     }

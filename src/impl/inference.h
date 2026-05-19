@@ -20,4 +20,12 @@ void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
 void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
                        ErrorStack *error_stack);
 
+// Helpers used by simmed_inference.c to populate InferenceResults.
+uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
+                                      const Rack *rack);
+void record_valid_leave(const Rack *rack, InferenceResults *results,
+                        inference_stat_t inference_stat_type,
+                        double current_leave_value,
+                        uint64_t number_of_draws_for_leave);
+
 #endif

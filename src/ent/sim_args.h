@@ -18,6 +18,10 @@ typedef struct SimArgs {
   Rack *known_opp_rack;
   WinPct *win_pcts;
   bool use_inference;
+  // When true, inference_results is already populated (e.g. by simmed_infer())
+  // and simulate() must skip the internal infer() call but still read
+  // num_infer_leaves from the pre-populated results.
+  bool inference_results_precomputed;
   bool use_heat_map;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
@@ -51,6 +55,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
+  sim_args->inference_results_precomputed = false;
   sim_args->use_heat_map = use_heat_map;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;

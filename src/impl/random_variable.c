@@ -359,6 +359,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
                      const int thread_index, const uint64_t sample_count,
                      BAILogger __attribute__((unused)) * bai_logger) {
   Simmer *simmer = (Simmer *)rvs->data;
+  if (thread_index < 0 || thread_index >= simmer->num_threads) {
+    log_fatal("rv_sim_sample: thread_index %d out of [0, %d)", thread_index,
+              simmer->num_threads);
+  }
   SimResults *sim_results = simmer->sim_results;
   SimmedPlay *simmed_play =
       sim_results_get_simmed_play(sim_results, (int)play_index);
