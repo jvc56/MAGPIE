@@ -497,7 +497,24 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return wpct;
+  // Blend wpct with normalized spread when the user has asked for it.
+  // Defaults (w_spread == 0) short-circuit to the original wpct return so
+  // existing tests / benchmarks see identical behavior.
+  const double w_winpct = simmer->utility_w_winpct;
+  const double w_spread = simmer->utility_w_spread;
+  if (w_spread == 0.0) {
+    return wpct;
+  }
+  const double scale = simmer->utility_spread_scale;
+  double s = equity_to_double(spread) / scale;
+  if (s < -1.0) {
+    s = -1.0;
+  }
+  if (s > 1.0) {
+    s = 1.0;
+  }
+  const double spread01 = 0.5 * (s + 1.0);
+  return (w_winpct * wpct + w_spread * spread01) / (w_winpct + w_spread);
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
