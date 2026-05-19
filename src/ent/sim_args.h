@@ -29,6 +29,15 @@ typedef struct SimArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  // Utility weights for blending win% and spread into the BAI sample value.
+  // Defaults: (1.0, 0.0, 100.0) -> pure win%, backward compatible. With
+  // non-zero utility_w_spread, rv_sim_sample returns
+  // (w_winpct*wpct + w_spread*spread01) / (w_winpct + w_spread)
+  // where spread01 = clamp(spread / utility_spread_scale, -1, 1) shifted
+  // to [0, 1].
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
 } SimArgs;
 
 static inline void
@@ -78,6 +87,10 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;
   sim_args->bai_options.num_arm_avoid_prune = 0;
+  // Default utility weights: pure win%, no spread contribution.
+  sim_args->utility_w_winpct = 1.0;
+  sim_args->utility_w_spread = 0.0;
+  sim_args->utility_spread_scale = 100.0;
 }
 
 #endif

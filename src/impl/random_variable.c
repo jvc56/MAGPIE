@@ -347,6 +347,11 @@ typedef struct Simmer {
   int print_interval;
   int max_num_display_plays;
   int max_num_display_plies;
+  // Utility blend weights (see SimArgs comments). Phase 1: stored but
+  // unused; rv_sim_sample still returns pure wpct. Phase 2 will use these.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -567,6 +572,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
   simmer->inference_results = sim_args->inference_results;
 
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
+
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
@@ -614,6 +623,10 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,
