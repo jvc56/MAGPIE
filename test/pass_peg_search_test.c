@@ -5038,22 +5038,79 @@ void test_pass_pegN_greedy_bench(void) {
         (cand_topk_limit > 0 && cand_topk_limit < cand_order_n)
             ? cand_topk_limit
             : cand_order_n;
-    for (int i = 0; i < cand_sort_top; i++) {
-      int best = i;
-      Equity best_eq =
-          move_get_equity(move_list_get_move(ml_cands, cand_order[i]));
-      for (int j = i + 1; j < cand_order_n; j++) {
-        const Equity je =
-            move_get_equity(move_list_get_move(ml_cands, cand_order[j]));
-        if (je > best_eq) {
-          best = j;
-          best_eq = je;
+    // Ordering:
+    //  - With PASSPEGN_GREEDY_ONLY set, the filter is a semicolon-separated
+    //    list of move-text substrings IN PREVIOUS-STAGE RANK ORDER. Honor
+    //    that order so partial-stage runs (budget hit mid-stage) evaluate
+    //    the previous stage's best-known cands first.
+    //  - Otherwise, fall back to static-equity descending.
+    if (only_moves) {
+      // Build a parallel array of cand text strings so we can substring-
+      // match each filter token to find which ml_cand index it refers to.
+      char (*cand_text)[256] = (char (*)[256])malloc_or_die(
+          (size_t)cand_order_n * sizeof(char[256]));
+      for (int i = 0; i < cand_order_n; i++) {
+        const Move *m = move_list_get_move(ml_cands, cand_order[i]);
+        StringBuilder *sb_m = string_builder_create();
+        string_builder_add_move(sb_m, game_get_board(game), m, ld, true);
+        snprintf(cand_text[i], 256, "%s", string_builder_peek(sb_m));
+        string_builder_destroy(sb_m);
+      }
+      int *new_order = malloc_or_die((size_t)cand_order_n * sizeof(int));
+      int new_order_n = 0;
+      bool *consumed =
+          (bool *)malloc_or_die((size_t)cand_order_n * sizeof(bool));
+      memset(consumed, 0, (size_t)cand_order_n * sizeof(bool));
+      char tmp_filter[4096];
+      snprintf(tmp_filter, sizeof(tmp_filter), "%s", only_moves);
+      char *tok = strtok(tmp_filter, ";");
+      while (tok) {
+        // Skip leading spaces in the token.
+        while (*tok == ' ') {
+          tok++;
+        }
+        for (int i = 0; i < cand_order_n; i++) {
+          if (!consumed[i] && strstr(cand_text[i], tok)) {
+            new_order[new_order_n++] = cand_order[i];
+            consumed[i] = true;
+            break;
+          }
+        }
+        tok = strtok(NULL, ";");
+      }
+      // Append any unmatched cands at the end so they still get evaluated
+      // if budget allows (preserves the prior behaviour for cands the
+      // filter never named; mostly relevant outside the wrapper path).
+      for (int i = 0; i < cand_order_n; i++) {
+        if (!consumed[i]) {
+          new_order[new_order_n++] = cand_order[i];
         }
       }
-      if (best != i) {
-        const int tmp = cand_order[i];
-        cand_order[i] = cand_order[best];
-        cand_order[best] = tmp;
+      // Replace cand_order with the filter-driven ordering.
+      memcpy(cand_order, new_order, (size_t)new_order_n * sizeof(int));
+      cand_order_n = new_order_n;
+      free(new_order);
+      free(consumed);
+      free(cand_text);
+    } else {
+      // Static-equity descending (selection sort over the top-K).
+      for (int i = 0; i < cand_sort_top; i++) {
+        int best = i;
+        Equity best_eq =
+            move_get_equity(move_list_get_move(ml_cands, cand_order[i]));
+        for (int j = i + 1; j < cand_order_n; j++) {
+          const Equity je =
+              move_get_equity(move_list_get_move(ml_cands, cand_order[j]));
+          if (je > best_eq) {
+            best = j;
+            best_eq = je;
+          }
+        }
+        if (best != i) {
+          const int tmp = cand_order[i];
+          cand_order[i] = cand_order[best];
+          cand_order[best] = tmp;
+        }
       }
     }
     const int cand_iter_n = cand_sort_top;
