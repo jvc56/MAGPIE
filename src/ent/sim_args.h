@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
@@ -91,6 +92,31 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = 1.0;
   sim_args->utility_w_spread = 0.0;
   sim_args->utility_spread_scale = 100.0;
+}
+
+// Blend rollout win% and (normalized) spread into a single BAI sample value.
+//
+//   spread01 = 0.5 * (clamp(spread_pts / spread_scale, -1, 1) + 1)
+//   utility  = (w_winpct * wpct + w_spread * spread01) / (w_winpct + w_spread)
+//
+// When w_spread == 0 the function returns wpct exactly (no FP rounding), so
+// the default configuration is byte-identical to the pre-change behavior.
+// Both wpct and spread01 are in [0, 1], so the blend stays in [0, 1].
+static inline double sim_utility_blend(double wpct, Equity spread,
+                                       double w_winpct, double w_spread,
+                                       double spread_scale) {
+  if (w_spread == 0.0) {
+    return wpct;
+  }
+  double s = equity_to_double(spread) / spread_scale;
+  if (s < -1.0) {
+    s = -1.0;
+  }
+  if (s > 1.0) {
+    s = 1.0;
+  }
+  const double spread01 = 0.5 * (s + 1.0);
+  return (w_winpct * wpct + w_spread * spread01) / (w_winpct + w_spread);
 }
 
 #endif
