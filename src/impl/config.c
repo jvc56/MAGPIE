@@ -1659,12 +1659,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<weight>";
       examples[0] = "1.0";
       examples[1] = "0.7";
-      text =
-          "Weight on win percentage in the BAI sample utility. The sample "
-          "returned by each sim rollout is "
-          "(uwin*wpct + uspread*spread01) / (uwin + uspread), where spread01 "
-          "is the rollout spread clamped to +/- uspreadscale points and "
-          "rescaled to [0, 1]. Default 1.0 (pure win%).";
+      text = "Weight on win percentage in the BAI sample utility. The sample "
+             "returned by each sim rollout is "
+             "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
+             "spread_sigmoid "
+             "is the rollout spread clamped to +/- uspreadscale points and "
+             "rescaled to [0, 1]. Default 1.0 (pure win%).";
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
