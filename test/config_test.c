@@ -2523,27 +2523,32 @@ void test_config_utility_blend(void) {
     config_destroy(config);
   }
 
-  // Validation: both global weights zero is rejected.
-  test_config_load_error(config_create_default_test(), "set -uwin 0 -uspread 0",
+  // Validation cases: reuse one config across all (test_config_load_error
+  // calls error_stack_reset, so subsequent calls aren't affected).
+  Config *err_config = config_create_default_test();
+
+  // Both global weights zero is rejected.
+  test_config_load_error(err_config, "set -uwin 0 -uspread 0",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
 
-  // Validation: P1 weights summing to zero (via per-player overrides) is
-  // rejected even when the global is positive.
-  test_config_load_error(
-      config_create_default_test(), "set -uwin1 0 -uspread1 0",
-      ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG, error_stack);
-
-  // Validation: P2 weights summing to zero is rejected.
-  test_config_load_error(
-      config_create_default_test(), "set -uwin2 0 -uspread2 0",
-      ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG, error_stack);
-
-  // Validation: non-numeric value is rejected.
-  test_config_load_error(config_create_default_test(), "set -uwin abc",
+  // P1 weights summing to zero (via per-player overrides) is rejected
+  // even when the global is positive.
+  test_config_load_error(err_config, "set -uwin1 0 -uspread1 0",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                          error_stack);
 
+  // P2 weights summing to zero is rejected.
+  test_config_load_error(err_config, "set -uwin2 0 -uspread2 0",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  // Non-numeric value is rejected.
+  test_config_load_error(err_config, "set -uwin abc",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  config_destroy(err_config);
   error_stack_destroy(error_stack);
 }
 
