@@ -102,9 +102,7 @@ void test_bai_utility(void) {
     prev_u = u;
   }
 
-  // Output is always in [0, 1] regardless of inputs. Sweep wpct in tenths
-  // via an integer loop counter (cert-flp30-c forbids the natural
-  // `for (double wpct = 0; wpct <= 1; wpct += 0.1)`).
+  // Output is always in [0, 1] regardless of inputs.
   for (int spread_pts = -2000; spread_pts <= 2000; spread_pts += 100) {
     for (int wpct_tenths = 0; wpct_tenths <= 10; wpct_tenths++) {
       const double wpct = wpct_tenths / 10.0;
