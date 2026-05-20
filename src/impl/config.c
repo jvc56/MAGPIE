@@ -1670,18 +1670,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<weight>";
       examples[0] = "0.0";
       examples[1] = "0.3";
-      text =
-          "Weight on (normalized) spread in the BAI sample utility. Default "
-          "0.0 (pure win%). With non-zero uspread the simmer favors plays "
-          "with higher rollout spread in addition to higher win%.";
+      text = "Weight on (normalized) spread in the BAI sample utility. Default "
+             "0.0 (pure win%). With non-zero uspread the simmer favors plays "
+             "with higher rollout spread in addition to higher win%.";
       break;
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
       examples[0] = "100.0";
-      text =
-          "Spread points for the sigmoid slope: rollout spread is fed into "
-          "1/(1+exp(-spread/scale)) so the half-saturation point is "
-          "+/- this many points. Default 100.";
+      text = "Spread points for the sigmoid slope: rollout spread is fed into "
+             "1/(1+exp(-spread/scale)) so the half-saturation point is "
+             "+/- this many points. Default 100.";
       break;
     case ARG_TOKEN_P1_UTILITY_W_WINPCT:
     case ARG_TOKEN_P2_UTILITY_W_WINPCT:
@@ -1691,11 +1689,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_P2_UTILITY_SPREAD_SCALE:
       usages[0] = "<value>";
       examples[0] = "1.0";
-      text =
-          "Per-player override of -uwin / -uspread / -uspreadscale. If "
-          "specified, takes precedence over the global setting for the "
-          "matching player. Used by autoplay with -gp true to compare "
-          "different utility blends head-to-head.";
+      text = "Per-player override of -uwin / -uspread / -uspreadscale. If "
+             "specified, takes precedence over the global setting for the "
+             "matching player. Used by autoplay with -gp true to compare "
+             "different utility blends head-to-head.";
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       usages[0] = "<true_or_false>";
@@ -6635,8 +6632,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
   if (config->utility_w_winpct + config->utility_w_spread <= 0) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                      string_duplicate("at least one of -uwin/-uspread must be "
                                       "positive"));
     return;
@@ -6700,8 +6696,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   }
   if (config->p1_utility_w_winpct + config->p1_utility_w_spread <= 0 ||
       config->p2_utility_w_winpct + config->p2_utility_w_spread <= 0) {
-    error_stack_push(error_stack,
-                     ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                      string_duplicate("each player needs at least one of "
                                       "uwin/uspread positive"));
     return;

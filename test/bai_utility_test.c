@@ -5,7 +5,6 @@
 
 #include "../src/ent/equity.h"
 #include "../src/ent/sim_args.h"
-
 #include <assert.h>
 #include <math.h>
 #include <stdio.h>
@@ -63,8 +62,8 @@ void test_bai_utility(void) {
   // 50/50 blend at (wpct=0.6, spread=+50): (0.6 + sigmoid(0.5)) / 2.
   {
     const double expected = (0.6 + sigmoid(0.5)) / 2.0;
-    assert_close(sim_utility_blend(0.6, plus50, 1.0, 1.0, 100.0), expected,
-                 tol, "50/50 blend at (0.6, +50)");
+    assert_close(sim_utility_blend(0.6, plus50, 1.0, 1.0, 100.0), expected, tol,
+                 "50/50 blend at (0.6, +50)");
   }
 
   // Weight normalization: (7, 3) == (0.7, 0.3) == (70, 30).
@@ -83,8 +82,7 @@ void test_bai_utility(void) {
   // -- this is the property the clamp implementation lacked beyond +/- scale.
   double prev_u = -1.0;
   for (int s = -500; s <= 500; s += 25) {
-    const double u =
-        sim_utility_blend(0.5, int_to_equity(s), 0.0, 1.0, 100.0);
+    const double u = sim_utility_blend(0.5, int_to_equity(s), 0.0, 1.0, 100.0);
     if (u <= prev_u) {
       printf("  FAIL monotonic: u(%d)=%.9f <= prev=%.9f\n", s, u, prev_u);
       assert(false);
@@ -95,8 +93,7 @@ void test_bai_utility(void) {
   // Output is always in [0, 1] regardless of inputs.
   for (int s = -2000; s <= 2000; s += 100) {
     for (double w = 0.0; w <= 1.0; w += 0.1) {
-      const double u =
-          sim_utility_blend(w, int_to_equity(s), 1.0, 1.0, 100.0);
+      const double u = sim_utility_blend(w, int_to_equity(s), 1.0, 1.0, 100.0);
       assert(u >= 0.0);
       assert(u <= 1.0);
     }
