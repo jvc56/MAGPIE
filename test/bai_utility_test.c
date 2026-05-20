@@ -104,7 +104,8 @@ void test_bai_utility(void) {
 
   // Output is always in [0, 1] regardless of inputs.
   for (int s = -2000; s <= 2000; s += 100) {
-    for (double w = 0.0; w <= 1.0; w += 0.1) {
+    for (int wi = 0; wi <= 10; wi++) {
+      const double w = wi / 10.0;
       const double u = sim_utility_blend(w, int_to_equity(s), 1.0, 1.0, 100.0);
       assert(u >= 0.0);
       assert(u <= 1.0);
