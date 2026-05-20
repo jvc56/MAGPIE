@@ -37,9 +37,10 @@ typedef struct SimArgs {
   //   (w_winpct*wpct + w_spread*spread_sigmoid) / (w_winpct + w_spread)
   // where
   //   spread_sigmoid = 1 / (1 + exp(-spread_pts / utility_spread_scale))
-  // a logistic sigmoid. Bounded in (0, 1) for all finite spread, with
-  // utility_spread_scale controlling the slope at zero (the half-saturation
-  // point is +/- utility_spread_scale: sigmoid(+/-1) ~= 0.73 / 0.27).
+  // a logistic sigmoid, strictly in (0, 1) for any finite spread.
+  // utility_spread_scale is the sigmoid's scale parameter: the slope at
+  // spread=0 is 1/(4*utility_spread_scale), and at spread = +/-scale the
+  // sigmoid is ~0.731 / ~0.269.
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;

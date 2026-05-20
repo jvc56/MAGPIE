@@ -18,6 +18,18 @@ static void assert_close(double got, double expected, double tol,
   }
 }
 
+// Exact bit-equal compare. Used for the default-config short-circuit so we
+// catch regressions if anyone later removes the `if (w_spread == 0) return
+// wpct;` fast path and replaces it with FP arithmetic that happens to round
+// to wpct.
+static void assert_exact(double got, double expected, const char *label) {
+  if (got != expected) {
+    printf("  FAIL %s: got %.17g, expected %.17g (not bit-equal)\n", label, got,
+           expected);
+    assert(false);
+  }
+}
+
 static double sigmoid(double x) { return 1.0 / (1.0 + exp(-x)); }
 
 void test_bai_utility(void) {
@@ -33,11 +45,11 @@ void test_bai_utility(void) {
   const Equity minus1000 = int_to_equity(-1000);
 
   // Default: (1, 0, 100) -- pure win%, byte-identical to wpct.
-  assert_close(sim_utility_blend(0.42, plus100, 1.0, 0.0, 100.0), 0.42, tol,
+  assert_exact(sim_utility_blend(0.42, plus100, 1.0, 0.0, 100.0), 0.42,
                "default returns wpct exactly");
-  assert_close(sim_utility_blend(0.0, plus100, 1.0, 0.0, 100.0), 0.0, tol,
+  assert_exact(sim_utility_blend(0.0, plus100, 1.0, 0.0, 100.0), 0.0,
                "default with wpct=0");
-  assert_close(sim_utility_blend(1.0, minus1000, 1.0, 0.0, 100.0), 1.0, tol,
+  assert_exact(sim_utility_blend(1.0, minus1000, 1.0, 0.0, 100.0), 1.0,
                "default ignores spread sign and magnitude");
 
   // Pure spread: (0, 1, 100) -- returns sigmoid(spread/scale).

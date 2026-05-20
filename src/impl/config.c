@@ -1662,9 +1662,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Weight on win percentage in the BAI sample utility. The sample "
              "returned by each sim rollout is "
              "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
-             "spread_sigmoid "
-             "is the rollout spread clamped to +/- uspreadscale points and "
-             "rescaled to [0, 1]. Default 1.0 (pure win%).";
+             "spread_sigmoid = 1/(1+exp(-spread/uspreadscale)) is the "
+             "logistic sigmoid of the rollout spread (strictly in (0, 1)). "
+             "Default 1.0 (pure win%).";
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
@@ -1677,9 +1677,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
       examples[0] = "100.0";
-      text = "Spread points for the sigmoid slope: rollout spread is fed into "
-             "1/(1+exp(-spread/scale)) so the half-saturation point is "
-             "+/- this many points. Default 100.";
+      text = "Scale (in spread points) of the logistic sigmoid that maps "
+             "rollout spread into [0, 1]: spread_sigmoid = "
+             "1/(1+exp(-spread/uspreadscale)). Controls the slope of the "
+             "sigmoid -- the derivative at spread=0 is 1/(4*uspreadscale). "
+             "At spread = +/-uspreadscale the sigmoid is ~0.731 / ~0.269. "
+             "Default 100.";
       break;
     case ARG_TOKEN_P1_UTILITY_W_WINPCT:
     case ARG_TOKEN_P2_UTILITY_W_WINPCT:
@@ -6694,11 +6697,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
-  if (config->p1_utility_w_winpct + config->p1_utility_w_spread <= 0 ||
-      config->p2_utility_w_winpct + config->p2_utility_w_spread <= 0) {
+  if (config->p1_utility_w_winpct + config->p1_utility_w_spread <= 0) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
-                     string_duplicate("each player needs at least one of "
-                                      "uwin/uspread positive"));
+                     string_duplicate("at least one of -uwin1/-uspread1 (or "
+                                      "the global -uwin/-uspread fallback) "
+                                      "must be positive"));
+    return;
+  }
+  if (config->p2_utility_w_winpct + config->p2_utility_w_spread <= 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                     string_duplicate("at least one of -uwin2/-uspread2 (or "
+                                      "the global -uwin/-uspread fallback) "
+                                      "must be positive"));
     return;
   }
 

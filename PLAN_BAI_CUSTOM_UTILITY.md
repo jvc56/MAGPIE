@@ -31,7 +31,7 @@ utility  = (w_winpct · wpct + w_spread · spread_sigmoid) / (w_winpct + w_sprea
 |---|---|---|
 | `-uwin` | `1.0` | weight on win% |
 | `-uspread` | `0.0` | weight on spread (after normalization) |
-| `-uspreadscale` | `100.0` | spread points for the sigmoid slope (half-saturation point) |
+| `-uspreadscale` | `100.0` | sigmoid scale (in spread points); slope at zero is `1 / (4·uspreadscale)`, and `spread = ±uspreadscale` maps to `~0.731 / ~0.269` |
 
 With defaults, return value equals the existing `wpct`, so existing tests
 and benchmarks are unaffected.

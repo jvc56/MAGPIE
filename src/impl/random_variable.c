@@ -347,8 +347,8 @@ typedef struct Simmer {
   int print_interval;
   int max_num_display_plays;
   int max_num_display_plies;
-  // Utility blend weights (see SimArgs comments). Phase 1: stored but
-  // unused; rv_sim_sample still returns pure wpct. Phase 2 will use these.
+  // Utility blend weights consumed by rv_sim_sample (see sim_utility_blend
+  // in sim_args.h). Copied from SimArgs on create/reset.
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
