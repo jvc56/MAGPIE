@@ -102,11 +102,14 @@ void test_bai_utility(void) {
     prev_u = u;
   }
 
-  // Output is always in [0, 1] regardless of inputs.
-  for (int s = -2000; s <= 2000; s += 100) {
-    for (int wi = 0; wi <= 10; wi++) {
-      const double w = wi / 10.0;
-      const double u = sim_utility_blend(w, int_to_equity(s), 1.0, 1.0, 100.0);
+  // Output is always in [0, 1] regardless of inputs. Sweep wpct in tenths
+  // via an integer loop counter (cert-flp30-c forbids the natural
+  // `for (double wpct = 0; wpct <= 1; wpct += 0.1)`).
+  for (int spread_pts = -2000; spread_pts <= 2000; spread_pts += 100) {
+    for (int wpct_tenths = 0; wpct_tenths <= 10; wpct_tenths++) {
+      const double wpct = wpct_tenths / 10.0;
+      const double u =
+          sim_utility_blend(wpct, int_to_equity(spread_pts), 1.0, 1.0, 100.0);
       assert(u >= 0.0);
       assert(u <= 1.0);
     }
