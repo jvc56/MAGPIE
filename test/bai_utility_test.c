@@ -65,7 +65,7 @@ void test_bai_utility(void) {
                tol, "+200 => sigmoid(2.0) ~ 0.8808");
   assert_close(sim_utility_blend(0.42, minus200, 0.0, 1.0, 100.0),
                sigmoid(-2.0), tol, "-200 => sigmoid(-2.0) ~ 0.1192");
-  // Extreme spreads: still strictly bounded, no longer clamped flat.
+  // Extreme spreads stay strictly bounded.
   assert_close(sim_utility_blend(0.42, plus1000, 0.0, 1.0, 100.0),
                sigmoid(10.0), tol, "+1000 => sigmoid(10) ~ 0.99995");
   assert_close(sim_utility_blend(0.42, minus1000, 0.0, 1.0, 100.0),
@@ -90,8 +90,7 @@ void test_bai_utility(void) {
   assert_close(sim_utility_blend(0.0, int_to_equity(25), 0.0, 1.0, 50.0),
                sigmoid(0.5), tol, "scale=50 with +25 -> sigmoid(0.5)");
 
-  // Pure-spread term is strictly monotonic increasing in the spread value
-  // -- this is the property the clamp implementation lacked beyond +/- scale.
+  // Pure-spread term is strictly monotonic increasing in the spread value.
   double prev_u = -1.0;
   for (int s = -500; s <= 500; s += 25) {
     const double u = sim_utility_blend(0.5, int_to_equity(s), 0.0, 1.0, 100.0);
