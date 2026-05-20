@@ -149,6 +149,9 @@ typedef enum {
   ARG_TOKEN_SAMPLING_RULE,
   ARG_TOKEN_THRESHOLD,
   ARG_TOKEN_CUTOFF,
+  ARG_TOKEN_UTILITY_W_WINPCT,
+  ARG_TOKEN_UTILITY_W_SPREAD,
+  ARG_TOKEN_UTILITY_SPREAD_SCALE,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
@@ -201,6 +204,12 @@ typedef enum {
   ARG_TOKEN_P2_THRESHOLD,
   ARG_TOKEN_P1_SAMPLING_RULE,
   ARG_TOKEN_P2_SAMPLING_RULE,
+  ARG_TOKEN_P1_UTILITY_W_WINPCT,
+  ARG_TOKEN_P2_UTILITY_W_WINPCT,
+  ARG_TOKEN_P1_UTILITY_W_SPREAD,
+  ARG_TOKEN_P2_UTILITY_W_SPREAD,
+  ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,
+  ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
@@ -247,6 +256,9 @@ struct Config {
   uint64_t min_play_iterations;
   double stop_cond_pct;
   double cutoff;
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -291,6 +303,12 @@ struct Config {
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
   bai_sampling_rule_t p2_sampling_rule;
+  double p1_utility_w_winpct;
+  double p2_utility_w_winpct;
+  double p1_utility_w_spread;
+  double p2_utility_w_spread;
+  double p1_utility_spread_scale;
+  double p2_utility_spread_scale;
   Equity p1_eq_margin_inference;
   Equity p2_eq_margin_inference;
   multi_threading_mode_t multi_threading_mode;
@@ -447,6 +465,34 @@ uint64_t config_get_seed(const Config *config) { return config->seed; }
 
 double config_get_tt_fraction_of_mem(const Config *config) {
   return config->tt_fraction_of_mem;
+}
+
+double config_get_utility_w_winpct(const Config *config) {
+  return config->utility_w_winpct;
+}
+double config_get_utility_w_spread(const Config *config) {
+  return config->utility_w_spread;
+}
+double config_get_utility_spread_scale(const Config *config) {
+  return config->utility_spread_scale;
+}
+double config_get_p1_utility_w_winpct(const Config *config) {
+  return config->p1_utility_w_winpct;
+}
+double config_get_p1_utility_w_spread(const Config *config) {
+  return config->p1_utility_w_spread;
+}
+double config_get_p1_utility_spread_scale(const Config *config) {
+  return config->p1_utility_spread_scale;
+}
+double config_get_p2_utility_w_winpct(const Config *config) {
+  return config->p2_utility_w_winpct;
+}
+double config_get_p2_utility_w_spread(const Config *config) {
+  return config->p2_utility_w_spread;
+}
+double config_get_p2_utility_spread_scale(const Config *config) {
+  return config->p2_utility_spread_scale;
 }
 
 BoardLayout *config_get_board_layout(const Config *config) {
@@ -1637,6 +1683,48 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "or both are within cutoff of 0.0, they are considered equivalent "
           "and tiebroken by equity. The default is 0.005.";
       break;
+    case ARG_TOKEN_UTILITY_W_WINPCT:
+      usages[0] = "<weight>";
+      examples[0] = "1.0";
+      examples[1] = "0.7";
+      text = "Weight on win percentage in the BAI sample utility. The sample "
+             "returned by each sim rollout is "
+             "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
+             "spread_sigmoid = 1/(1+exp(-spread/uspreadscale)) is the "
+             "logistic sigmoid of the rollout spread (strictly in (0, 1)). "
+             "Default 1.0 (pure win%).";
+      break;
+    case ARG_TOKEN_UTILITY_W_SPREAD:
+      usages[0] = "<weight>";
+      examples[0] = "0.0";
+      examples[1] = "0.3";
+      text = "Weight on (normalized) spread in the BAI sample utility. Default "
+             "0.0 (pure win%). With non-zero uspread the simmer favors plays "
+             "with higher rollout spread in addition to higher win%.";
+      break;
+    case ARG_TOKEN_UTILITY_SPREAD_SCALE:
+      usages[0] = "<points>";
+      examples[0] = "100.0";
+      text = "Scale (in spread points) of the logistic sigmoid that maps "
+             "rollout spread into [0, 1]: spread_sigmoid = "
+             "1/(1+exp(-spread/uspreadscale)). Controls the slope of the "
+             "sigmoid -- the derivative at spread=0 is 1/(4*uspreadscale). "
+             "At spread = +/-uspreadscale the sigmoid is ~0.731 / ~0.269. "
+             "Default 100.";
+      break;
+    case ARG_TOKEN_P1_UTILITY_W_WINPCT:
+    case ARG_TOKEN_P2_UTILITY_W_WINPCT:
+    case ARG_TOKEN_P1_UTILITY_W_SPREAD:
+    case ARG_TOKEN_P2_UTILITY_W_SPREAD:
+    case ARG_TOKEN_P1_UTILITY_SPREAD_SCALE:
+    case ARG_TOKEN_P2_UTILITY_SPREAD_SCALE:
+      usages[0] = "<value>";
+      examples[0] = "1.0";
+      text = "Per-player override of -uwin / -uspread / -uspreadscale. If "
+             "specified, takes precedence over the global setting for the "
+             "matching player. Used by autoplay with -gp true to compare "
+             "different utility blends head-to-head.";
+      break;
     case ARG_TOKEN_PRINT_BOARDS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -1947,48 +2035,57 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
-        ARG_TOKEN_CUTOFF,                 /* cutoff */
-        ARG_TOKEN_ENDGAME_PLIES,          /* eplies */
-        ARG_TOKEN_ENDGAME_TOP_K,          /* etopk */
-        ARG_TOKEN_USE_GAME_PAIRS,         /* gp */
-        ARG_TOKEN_INFERENCE_MARGIN,       /* imargin */
-        ARG_TOKEN_P1_INFERENCE_MARGIN,    /* im1 */
-        ARG_TOKEN_P2_INFERENCE_MARGIN,    /* im2 */
-        ARG_TOKEN_MAX_ITERATIONS,         /* iterations */
-        ARG_TOKEN_P1_MAX_ITERATIONS,      /* i1 */
-        ARG_TOKEN_P2_MAX_ITERATIONS,      /* i2 */
-        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, /* mi1 */
-        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, /* mi2 */
-        ARG_TOKEN_MIN_PLAY_ITERATIONS,    /* minplayiterations */
-        ARG_TOKEN_MOVEGEN_MARGIN,         /* mmargin */
-        ARG_TOKEN_MULTI_THREADING_MODE,   /* mtmode */
-        ARG_TOKEN_NUMBER_OF_PLAYS,        /* numplays */
-        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,  /* numsmallplays */
-        ARG_TOKEN_P1_NUM_PLAYS,           /* np1 */
-        ARG_TOKEN_P2_NUM_PLAYS,           /* np2 */
-        ARG_TOKEN_P1_SIM_PLIES,           /* pl1 */
-        ARG_TOKEN_P2_SIM_PLIES,           /* pl2 */
-        ARG_TOKEN_PLIES,                  /* plies */
-        ARG_TOKEN_STOP_COND_PCT,          /* scondition */
-        ARG_TOKEN_SIM_WITH_INFERENCE,     /* sinfer */
-        ARG_TOKEN_USE_SMALL_PLAYS,        /* sp */
-        ARG_TOKEN_SAMPLING_RULE,          /* sr */
-        ARG_TOKEN_P1_STOP_COND_PCT,       /* sc1 */
-        ARG_TOKEN_P2_STOP_COND_PCT,       /* sc2 */
-        ARG_TOKEN_P1_SIM_WITH_INFERENCE,  /* si1 */
-        ARG_TOKEN_P2_SIM_WITH_INFERENCE,  /* si2 */
-        ARG_TOKEN_P1_SAMPLING_RULE,       /* sa1 */
-        ARG_TOKEN_P2_SAMPLING_RULE,       /* sa2 */
-        ARG_TOKEN_P1_THRESHOLD,           /* th1 */
-        ARG_TOKEN_P2_THRESHOLD,           /* th2 */
-        ARG_TOKEN_THRESHOLD,              /* threshold */
-        ARG_TOKEN_P1_TIME_LIMIT,          /* tl1 */
-        ARG_TOKEN_P2_TIME_LIMIT,          /* tl2 */
-        ARG_TOKEN_TIME_LIMIT,             /* tlim */
-        ARG_TOKEN_TT_FRACTION_OF_MEM,     /* ttfraction */
-        ARG_TOKEN_USE_HEAT_MAP,           /* useheatmap */
-        ARG_TOKEN_WRITE_BUFFER_SIZE,      /* wb */
-        ARG_TOKEN_WIN_PCT,                /* winpct */
+        ARG_TOKEN_CUTOFF,                  /* cutoff */
+        ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
+        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
+        ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
+        ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
+        ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
+        ARG_TOKEN_P2_INFERENCE_MARGIN,     /* im2 */
+        ARG_TOKEN_MAX_ITERATIONS,          /* iterations */
+        ARG_TOKEN_P1_MAX_ITERATIONS,       /* i1 */
+        ARG_TOKEN_P2_MAX_ITERATIONS,       /* i2 */
+        ARG_TOKEN_P1_MIN_PLAY_ITERATIONS,  /* mi1 */
+        ARG_TOKEN_P2_MIN_PLAY_ITERATIONS,  /* mi2 */
+        ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
+        ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
+        ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
+        ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
+        ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
+        ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
+        ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
+        ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
+        ARG_TOKEN_PLIES,                   /* plies */
+        ARG_TOKEN_STOP_COND_PCT,           /* scondition */
+        ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
+        ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
+        ARG_TOKEN_SAMPLING_RULE,           /* sr */
+        ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
+        ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
+        ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
+        ARG_TOKEN_P2_SIM_WITH_INFERENCE,   /* si2 */
+        ARG_TOKEN_P1_SAMPLING_RULE,        /* sa1 */
+        ARG_TOKEN_P2_SAMPLING_RULE,        /* sa2 */
+        ARG_TOKEN_P1_THRESHOLD,            /* th1 */
+        ARG_TOKEN_P2_THRESHOLD,            /* th2 */
+        ARG_TOKEN_THRESHOLD,               /* threshold */
+        ARG_TOKEN_P1_TIME_LIMIT,           /* tl1 */
+        ARG_TOKEN_P2_TIME_LIMIT,           /* tl2 */
+        ARG_TOKEN_TIME_LIMIT,              /* tlim */
+        ARG_TOKEN_TT_FRACTION_OF_MEM,      /* ttfraction */
+        ARG_TOKEN_USE_HEAT_MAP,            /* useheatmap */
+        ARG_TOKEN_UTILITY_W_SPREAD,        /* uspread */
+        ARG_TOKEN_P1_UTILITY_W_SPREAD,     /* uspread1 */
+        ARG_TOKEN_P2_UTILITY_W_SPREAD,     /* uspread2 */
+        ARG_TOKEN_UTILITY_SPREAD_SCALE,    /* uspreadscale */
+        ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, /* uspreadscale1 */
+        ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, /* uspreadscale2 */
+        ARG_TOKEN_UTILITY_W_WINPCT,        /* uwin */
+        ARG_TOKEN_P1_UTILITY_W_WINPCT,     /* uwin1 */
+        ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
+        ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
+        ARG_TOKEN_WIN_PCT,                 /* winpct */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -2489,6 +2586,9 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
+  sim_args->utility_w_winpct = config->utility_w_winpct;
+  sim_args->utility_w_spread = config->utility_w_spread;
+  sim_args->utility_spread_scale = config->utility_spread_scale;
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -2961,6 +3061,10 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
       &p1_inference_args, &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.utility_w_winpct = config->p1_utility_w_winpct;
+  autoplay_args->p1_sim_args.utility_w_spread = config->p1_utility_w_spread;
+  autoplay_args->p1_sim_args.utility_spread_scale =
+      config->p1_utility_spread_scale;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -2973,6 +3077,10 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
       &p2_inference_args, &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.utility_w_winpct = config->p2_utility_w_winpct;
+  autoplay_args->p2_sim_args.utility_w_spread = config->p2_utility_w_spread;
+  autoplay_args->p2_sim_args.utility_spread_scale =
+      config->p2_utility_spread_scale;
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -6542,6 +6650,105 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->cutoff = convert_user_cutoff_to_cutoff(user_cutoff);
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_W_WINPCT, 0)) {
+    config_load_double(config, ARG_TOKEN_UTILITY_W_WINPCT, 0, 1e6,
+                       &config->utility_w_winpct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_W_SPREAD, 0)) {
+    config_load_double(config, ARG_TOKEN_UTILITY_W_SPREAD, 0, 1e6,
+                       &config->utility_w_spread, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_SPREAD_SCALE, 0)) {
+    config_load_double(config, ARG_TOKEN_UTILITY_SPREAD_SCALE, 1e-6, 1e6,
+                       &config->utility_spread_scale, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config->utility_w_winpct + config->utility_w_spread <= 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                     string_duplicate("at least one of -uwin/-uspread must be "
+                                      "positive"));
+    return;
+  }
+
+  // Per-player utility (global overwrites both if user provided it, then
+  // per-player tokens override).
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_W_WINPCT, 0)) {
+    config->p1_utility_w_winpct = config->utility_w_winpct;
+    config->p2_utility_w_winpct = config->utility_w_winpct;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_W_SPREAD, 0)) {
+    config->p1_utility_w_spread = config->utility_w_spread;
+    config->p2_utility_w_spread = config->utility_w_spread;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_UTILITY_SPREAD_SCALE, 0)) {
+    config->p1_utility_spread_scale = config->utility_spread_scale;
+    config->p2_utility_spread_scale = config->utility_spread_scale;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P1_UTILITY_W_WINPCT, 0)) {
+    config_load_double(config, ARG_TOKEN_P1_UTILITY_W_WINPCT, 0, 1e6,
+                       &config->p1_utility_w_winpct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P2_UTILITY_W_WINPCT, 0)) {
+    config_load_double(config, ARG_TOKEN_P2_UTILITY_W_WINPCT, 0, 1e6,
+                       &config->p2_utility_w_winpct, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P1_UTILITY_W_SPREAD, 0)) {
+    config_load_double(config, ARG_TOKEN_P1_UTILITY_W_SPREAD, 0, 1e6,
+                       &config->p1_utility_w_spread, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P2_UTILITY_W_SPREAD, 0)) {
+    config_load_double(config, ARG_TOKEN_P2_UTILITY_W_SPREAD, 0, 1e6,
+                       &config->p2_utility_w_spread, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, 0)) {
+    config_load_double(config, ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, 1e-6, 1e6,
+                       &config->p1_utility_spread_scale, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, 0)) {
+    config_load_double(config, ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, 1e-6, 1e6,
+                       &config->p2_utility_spread_scale, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config->p1_utility_w_winpct + config->p1_utility_w_spread <= 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                     string_duplicate("at least one of -uwin1/-uspread1 (or "
+                                      "the global -uwin/-uspread fallback) "
+                                      "must be positive"));
+    return;
+  }
+  if (config->p2_utility_w_winpct + config->p2_utility_w_spread <= 0) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                     string_duplicate("at least one of -uwin2/-uspread2 (or "
+                                      "the global -uwin/-uspread fallback) "
+                                      "must be positive"));
+    return;
+  }
+
   // Per-player sim options (global overwrites p1/p2 if user provided it, then
   // per-player tokens override)
 
@@ -7567,6 +7774,15 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SAMPLING_RULE, "sr", 1, 1);
   arg(ARG_TOKEN_THRESHOLD, "threshold", 1, 1);
   arg(ARG_TOKEN_CUTOFF, "cutoff", 1, 1);
+  arg(ARG_TOKEN_UTILITY_W_WINPCT, "uwin", 1, 1);
+  arg(ARG_TOKEN_UTILITY_W_SPREAD, "uspread", 1, 1);
+  arg(ARG_TOKEN_UTILITY_SPREAD_SCALE, "uspreadscale", 1, 1);
+  arg(ARG_TOKEN_P1_UTILITY_W_WINPCT, "uwin1", 1, 1);
+  arg(ARG_TOKEN_P2_UTILITY_W_WINPCT, "uwin2", 1, 1);
+  arg(ARG_TOKEN_P1_UTILITY_W_SPREAD, "uspread1", 1, 1);
+  arg(ARG_TOKEN_P2_UTILITY_W_SPREAD, "uspread2", 1, 1);
+  arg(ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, "uspreadscale1", 1, 1);
+  arg(ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, "uspreadscale2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_PLIES, "pl1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_PLIES, "pl2", 1, 1);
   arg(ARG_TOKEN_P1_NUM_PLAYS, "np1", 1, 1);
@@ -7646,6 +7862,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
+  config->utility_w_winpct = 1.0;
+  config->utility_w_spread = 0.0;
+  config->utility_spread_scale = 100.0;
   config->time_limit_seconds = 60;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
@@ -7674,6 +7893,12 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
   config->p2_sampling_rule = config->sampling_rule;
+  config->p1_utility_w_winpct = config->utility_w_winpct;
+  config->p2_utility_w_winpct = config->utility_w_winpct;
+  config->p1_utility_w_spread = config->utility_w_spread;
+  config->p2_utility_w_spread = config->utility_w_spread;
+  config->p1_utility_spread_scale = config->utility_spread_scale;
+  config->p2_utility_spread_scale = config->utility_spread_scale;
   config->p1_eq_margin_inference = config->eq_margin_inference;
   config->p2_eq_margin_inference = config->eq_margin_inference;
   config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
@@ -8175,6 +8400,42 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CUTOFF:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, convert_cutoff_to_user_cutoff(config->cutoff));
+      break;
+    case ARG_TOKEN_UTILITY_W_WINPCT:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->utility_w_winpct);
+      break;
+    case ARG_TOKEN_UTILITY_W_SPREAD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->utility_w_spread);
+      break;
+    case ARG_TOKEN_UTILITY_SPREAD_SCALE:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->utility_spread_scale);
+      break;
+    case ARG_TOKEN_P1_UTILITY_W_WINPCT:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_utility_w_winpct);
+      break;
+    case ARG_TOKEN_P2_UTILITY_W_WINPCT:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_utility_w_winpct);
+      break;
+    case ARG_TOKEN_P1_UTILITY_W_SPREAD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p1_utility_w_spread);
+      break;
+    case ARG_TOKEN_P2_UTILITY_W_SPREAD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->p2_utility_w_spread);
+      break;
+    case ARG_TOKEN_P1_UTILITY_SPREAD_SCALE:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_utility_spread_scale);
+      break;
+    case ARG_TOKEN_P2_UTILITY_SPREAD_SCALE:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_utility_spread_scale);
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

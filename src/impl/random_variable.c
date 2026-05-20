@@ -347,6 +347,11 @@ typedef struct Simmer {
   int print_interval;
   int max_num_display_plays;
   int max_num_display_plies;
+  // Utility blend weights consumed by rv_sim_sample (see sim_utility_blend
+  // in sim_args.h). Copied from SimArgs on create/reset.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -492,7 +497,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return wpct;
+  return sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+                           simmer->utility_w_spread,
+                           simmer->utility_spread_scale);
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
@@ -567,6 +574,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
   simmer->inference_results = sim_args->inference_results;
 
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
+
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
@@ -614,6 +625,10 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,
