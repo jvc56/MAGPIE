@@ -467,6 +467,34 @@ double config_get_tt_fraction_of_mem(const Config *config) {
   return config->tt_fraction_of_mem;
 }
 
+double config_get_utility_w_winpct(const Config *config) {
+  return config->utility_w_winpct;
+}
+double config_get_utility_w_spread(const Config *config) {
+  return config->utility_w_spread;
+}
+double config_get_utility_spread_scale(const Config *config) {
+  return config->utility_spread_scale;
+}
+double config_get_p1_utility_w_winpct(const Config *config) {
+  return config->p1_utility_w_winpct;
+}
+double config_get_p1_utility_w_spread(const Config *config) {
+  return config->p1_utility_w_spread;
+}
+double config_get_p1_utility_spread_scale(const Config *config) {
+  return config->p1_utility_spread_scale;
+}
+double config_get_p2_utility_w_winpct(const Config *config) {
+  return config->p2_utility_w_winpct;
+}
+double config_get_p2_utility_w_spread(const Config *config) {
+  return config->p2_utility_w_spread;
+}
+double config_get_p2_utility_spread_scale(const Config *config) {
+  return config->p2_utility_spread_scale;
+}
+
 BoardLayout *config_get_board_layout(const Config *config) {
   return config->board_layout;
 }

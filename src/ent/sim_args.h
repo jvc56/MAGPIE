@@ -123,9 +123,22 @@ static inline double sim_utility_blend(double wpct, Equity spread,
   if (w_spread == 0.0) {
     return wpct;
   }
+  // Sign-branched sigmoid so exp() always takes a non-positive argument
+  // and can underflow harmlessly to 0 instead of overflowing to +inf.
   const double s = equity_to_double(spread) / spread_scale;
-  const double spread_sigmoid = 1.0 / (1.0 + exp(-s));
-  return (w_winpct * wpct + w_spread * spread_sigmoid) / (w_winpct + w_spread);
+  double spread_sigmoid;
+  if (s >= 0.0) {
+    spread_sigmoid = 1.0 / (1.0 + exp(-s));
+  } else {
+    const double es = exp(s);
+    spread_sigmoid = es / (1.0 + es);
+  }
+  // Normalize weights before multiplying so the individual products
+  // can't underflow before the division would otherwise cancel them.
+  const double total_weight = w_winpct + w_spread;
+  const double norm_winpct = w_winpct / total_weight;
+  const double norm_spread = w_spread / total_weight;
+  return norm_winpct * wpct + norm_spread * spread_sigmoid;
 }
 
 #endif
