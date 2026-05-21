@@ -726,7 +726,7 @@ void config_load_double(const Config *config, arg_token_t arg_token, double min,
                          config_get_parg_name(config, arg_token), double_str));
     return;
   }
-  if (new_value < min || new_value > max) {
+  if (!isfinite(new_value) || new_value < min || new_value > max) {
     error_stack_push(
         error_stack, ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
         get_formatted_string(
