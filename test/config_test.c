@@ -2452,6 +2452,106 @@ void test_config_exchange_blank(void) {
   config_destroy(config);
 }
 
+void test_config_utility_blend(void) {
+  ErrorStack *error_stack = error_stack_create();
+
+  // Defaults: (1.0, 0.0, 100.0), fanned out identically to both players.
+  {
+    Config *config = config_create_default_test();
+    assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_utility_spread_scale(config), 100.0));
+    assert(within_epsilon(config_get_p1_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p1_utility_spread_scale(config), 100.0));
+    assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
+    config_destroy(config);
+  }
+
+  // Global -uwin / -uspread / -uspreadscale fans out to both players.
+  {
+    Config *config = config_create_default_test();
+    load_and_exec_config_or_die(config,
+                                "set -uwin 0.7 -uspread 0.3 -uspreadscale 80");
+    assert(within_epsilon(config_get_utility_w_winpct(config), 0.7));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.3));
+    assert(within_epsilon(config_get_utility_spread_scale(config), 80.0));
+    assert(within_epsilon(config_get_p1_utility_w_winpct(config), 0.7));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.3));
+    assert(within_epsilon(config_get_p1_utility_spread_scale(config), 80.0));
+    assert(within_epsilon(config_get_p2_utility_w_winpct(config), 0.7));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.3));
+    assert(within_epsilon(config_get_p2_utility_spread_scale(config), 80.0));
+    config_destroy(config);
+  }
+
+  // Per-player flags override the global on the matching player only.
+  {
+    Config *config = config_create_default_test();
+    load_and_exec_config_or_die(config,
+                                "set -uwin 0.5 -uspread 0.5 -uspreadscale 100 "
+                                "-uwin1 1 -uspread1 2 -uspreadscale1 50 "
+                                "-uwin2 1 -uspread2 0");
+    // Global retains what was set.
+    assert(within_epsilon(config_get_utility_w_winpct(config), 0.5));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
+    assert(within_epsilon(config_get_utility_spread_scale(config), 100.0));
+    // P1 overridden on all three.
+    assert(within_epsilon(config_get_p1_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 2.0));
+    assert(within_epsilon(config_get_p1_utility_spread_scale(config), 50.0));
+    // P2 overridden on w_winpct/w_spread, scale inherited from global.
+    assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
+    config_destroy(config);
+  }
+
+  // Per-player flags alone (no global) override only the matching player;
+  // the other player keeps the defaults.
+  {
+    Config *config = config_create_default_test();
+    load_and_exec_config_or_die(config, "set -uwin1 0.4 -uspread1 0.6");
+    assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p1_utility_w_winpct(config), 0.4));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.6));
+    assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    config_destroy(config);
+  }
+
+  // Validation cases: reuse one config across all (test_config_load_error
+  // calls error_stack_reset, so subsequent calls aren't affected).
+  Config *err_config = config_create_default_test();
+
+  // Both global weights zero is rejected.
+  test_config_load_error(err_config, "set -uwin 0 -uspread 0",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  // P1 weights summing to zero (via per-player overrides) is rejected
+  // even when the global is positive.
+  test_config_load_error(err_config, "set -uwin1 0 -uspread1 0",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  // P2 weights summing to zero is rejected.
+  test_config_load_error(err_config, "set -uwin2 0 -uspread2 0",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  // Non-numeric value is rejected.
+  test_config_load_error(err_config, "set -uwin abc",
+                         ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+
+  config_destroy(err_config);
+  error_stack_destroy(error_stack);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2469,4 +2569,5 @@ void test_config(void) {
   test_config_note_move_interpolation();
   test_config_fg_required();
   test_config_exchange_blank();
+  test_config_utility_blend();
 }

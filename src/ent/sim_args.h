@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_args.h"
@@ -9,6 +10,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include <math.h>
 #include <stdint.h>
 
 typedef struct SimArgs {
@@ -29,6 +31,12 @@ typedef struct SimArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  // Utility weights for the BAI sample blend. Defaults (1.0, 0.0, 100.0)
+  // are pure win%, backward compatible. See sim_utility_blend below for
+  // the formula and the role of utility_spread_scale.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
 } SimArgs;
 
 static inline void
@@ -78,6 +86,49 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;
   sim_args->bai_options.num_arm_avoid_prune = 0;
+  // Default utility weights: pure win%, no spread contribution.
+  sim_args->utility_w_winpct = 1.0;
+  sim_args->utility_w_spread = 0.0;
+  sim_args->utility_spread_scale = 100.0;
+}
+
+// Blend rollout win% and (sigmoid-normalized) spread into a single BAI
+// sample value:
+//
+//   spread_sigmoid = 1 / (1 + exp(-spread_pts / spread_scale))   in (0, 1)
+//   utility = (w_winpct * wpct + w_spread * spread_sigmoid)
+//             / (w_winpct + w_spread)                            in [0, 1]
+//
+// spread_scale is the logistic's scale parameter: slope at spread=0 is
+// 1/(4*spread_scale), and at spread = +/-scale the sigmoid is ~0.731/~0.269.
+// The blend stays bounded in [0, 1] so BAI's sub-Gaussian threshold
+// assumptions remain valid regardless of weight magnitudes.
+//
+// When w_spread == 0 the function returns wpct exactly with no FP
+// arithmetic, so the default configuration is bit-identical to the
+// pre-change behavior.
+static inline double sim_utility_blend(double wpct, Equity spread,
+                                       double w_winpct, double w_spread,
+                                       double spread_scale) {
+  if (w_spread == 0.0) {
+    return wpct;
+  }
+  // Sign-branched sigmoid so exp() always takes a non-positive argument
+  // and can underflow harmlessly to 0 instead of overflowing to +inf.
+  const double scaled_spread = equity_to_double(spread) / spread_scale;
+  double spread_sigmoid;
+  if (scaled_spread >= 0.0) {
+    spread_sigmoid = 1.0 / (1.0 + exp(-scaled_spread));
+  } else {
+    const double exp_scaled_spread = exp(scaled_spread);
+    spread_sigmoid = exp_scaled_spread / (1.0 + exp_scaled_spread);
+  }
+  // Normalize weights before multiplying so the individual products
+  // can't underflow before the division would otherwise cancel them.
+  const double total_weight = w_winpct + w_spread;
+  const double norm_winpct = w_winpct / total_weight;
+  const double norm_spread = w_spread / total_weight;
+  return norm_winpct * wpct + norm_spread * spread_sigmoid;
 }
 
 #endif
