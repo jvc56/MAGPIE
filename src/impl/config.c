@@ -266,7 +266,7 @@ struct Config {
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
-  int time_limit_seconds;
+  double time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -285,8 +285,8 @@ struct Config {
   uint64_t p2_min_play_iterations;
   bool p1_sim_with_inference;
   bool p2_sim_with_inference;
-  int p1_time_limit_seconds;
-  int p2_time_limit_seconds;
+  double p1_time_limit_seconds;
+  double p2_time_limit_seconds;
   bai_threshold_t p1_threshold;
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
@@ -1602,8 +1602,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_TIME_LIMIT:
       usages[0] = "<time_limit>";
       examples[0] = "10";
-      examples[1] = "30";
-      text = "Specifies the time limit in seconds for simulations.";
+      examples[1] = "0.05";
+      text = "Specifies the time limit in seconds for simulations. "
+             "Fractional values (e.g. 0.05 for 50 ms) are supported.";
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       usages[0] = "<sampling_rule>";
@@ -1777,7 +1778,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_P2_TIME_LIMIT:
       usages[0] = "<time_limit_seconds>";
       text = "Specifies the time limit in seconds for simulation for player "
-             "1 or 2 during autoplay.";
+             "1 or 2 during autoplay. Fractional values supported.";
       break;
     case ARG_TOKEN_P1_THRESHOLD:
     case ARG_TOKEN_P2_THRESHOLD:
@@ -6164,8 +6165,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  config_load_int(config, ARG_TOKEN_TIME_LIMIT, 0, INT_MAX,
-                  &config->time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_TIME_LIMIT, 0, 1e9,
+                     &config->time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6651,13 +6652,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->p1_time_limit_seconds = config->time_limit_seconds;
     config->p2_time_limit_seconds = config->time_limit_seconds;
   }
-  config_load_int(config, ARG_TOKEN_P1_TIME_LIMIT, 0, INT_MAX,
-                  &config->p1_time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_P1_TIME_LIMIT, 0, 1e9,
+                     &config->p1_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  config_load_int(config, ARG_TOKEN_P2_TIME_LIMIT, 0, INT_MAX,
-                  &config->p2_time_limit_seconds, error_stack);
+  config_load_double(config, ARG_TOKEN_P2_TIME_LIMIT, 0, 1e9,
+                     &config->p2_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -8131,16 +8132,16 @@ void config_add_settings_to_string_builder(const Config *config,
                                                   config->tt_fraction_of_mem);
       break;
     case ARG_TOKEN_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->time_limit_seconds);
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->time_limit_seconds);
       break;
     case ARG_TOKEN_P1_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p1_time_limit_seconds);
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_time_limit_seconds);
       break;
     case ARG_TOKEN_P2_TIME_LIMIT:
-      config_add_int_setting_to_string_builder(config, sb, arg_token,
-                                               config->p2_time_limit_seconds);
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_time_limit_seconds);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
