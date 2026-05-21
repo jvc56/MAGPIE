@@ -69,10 +69,15 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   const uint64_t original_sample_minimum = sim_args->bai_options.sample_minimum;
   const int original_num_plies = sim_args->num_plies;
   if (bag_is_empty(game_get_bag(sim_args->game))) {
-    sim_args->bai_options.sample_limit =
-        move_list_get_count(sim_args->move_list);
+    const uint64_t num_moves = move_list_get_count(sim_args->move_list);
+    sim_args->bai_options.sample_limit = num_moves;
     sim_args->bai_options.sample_minimum = 1;
     sim_args->num_plies = MAX_PLIES;
+    // Also update fidelity levels to match endgame overrides
+    for (int i = 0; i < sim_args->num_fidelity_levels; i++) {
+      sim_args->fidelity_levels[i].sample_limit = num_moves;
+      sim_args->fidelity_levels[i].sample_minimum = 1;
+    }
   }
 
   if (*sim_ctx == NULL) {
@@ -120,8 +125,36 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
   sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
 
-  bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+  // Multi-fidelity: run BAI for each fidelity level sequentially.
+  // Each level overrides sample_limit/sample_minimum and ply strategy.
+  // The last level's result is the final answer.
+  const int num_levels = sim_args->num_fidelity_levels;
+  for (int level_idx = 0; level_idx < num_levels; level_idx++) {
+    const FidelityLevel *level = &sim_args->fidelity_levels[level_idx];
+
+    // Update ply strategy for this fidelity level
+    rvs_set_fidelity_level((*sim_ctx)->rvs, level);
+
+    // Set BAI options for this level
+    BAIOptions level_bai_options = sim_args->bai_options;
+    level_bai_options.sample_limit = level->sample_limit;
+    level_bai_options.sample_minimum = level->sample_minimum;
+    if (level->time_limit_seconds > 0) {
+      level_bai_options.time_limit_seconds = level->time_limit_seconds;
+    }
+    // Inherit caller's parent_worker_thread_index / arm-avoid prune list
+    // (level_bai_options is a copy of sim_args->bai_options so already set).
+
+    bai(&level_bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
+        sim_args->thread_control, NULL,
+        sim_results_get_bai_result(sim_results));
+
+    // Check for early termination (user interrupt, etc.)
+    if (thread_control_get_status(sim_args->thread_control) !=
+        THREAD_CONTROL_STATUS_STARTED) {
+      break;
+    }
+  }
 
   // Reset the sim args to their original values in case they were modified for
   // endgame sims

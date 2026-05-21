@@ -200,11 +200,11 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
 }
 
 bool is_win_pct_at_upper_extreme(const double wp, const double cutoff) {
-  return wp >= (1.0 - cutoff);
+  return cutoff > 0.0 && wp >= (1.0 - cutoff);
 }
 
 bool is_win_pct_at_lower_extreme(const double wp, const double cutoff) {
-  return wp <= cutoff;
+  return cutoff > 0.0 && wp <= cutoff;
 }
 
 bool is_win_pct_within_cutoff(const double win_pct, const double cutoff) {

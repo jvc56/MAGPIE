@@ -40,6 +40,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
                                    const Move *move);
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover);
+void simmed_play_push_win_pct(SimmedPlay *simmed_play, double wpct);
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,

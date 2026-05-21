@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../def/sim_defs.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -37,6 +38,9 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Multi-fidelity configuration
+  int num_fidelity_levels;
+  FidelityLevel fidelity_levels[MAX_FIDELITY_LEVELS];
 } SimArgs;
 
 static inline void
@@ -90,6 +94,17 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = 1.0;
   sim_args->utility_w_spread = 0.0;
   sim_args->utility_spread_scale = 100.0;
+  // Default: single fidelity level with static ply strategy (existing behavior)
+  sim_args->num_fidelity_levels = 1;
+  sim_args->fidelity_levels[0] = (FidelityLevel){
+      .sample_limit = max_iterations,
+      .sample_minimum = min_play_iterations,
+      .time_limit_seconds = time_limit_seconds,
+      .ply_strategy = PLY_STRATEGY_STATIC,
+      .nested_candidates = 0,
+      .nested_rollouts = 0,
+      .nested_plies = 0,
+  };
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

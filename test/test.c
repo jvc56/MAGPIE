@@ -24,6 +24,7 @@
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
 #include "game_test.h"
+#include "gamepair_bai_benchmark.h"
 #include "gameplay_test.h"
 #include "gcg_test.h"
 #include "heat_map_test.h"
@@ -39,6 +40,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "nested_sim_benchmark.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -146,6 +148,10 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    {"nestsimbench", test_nested_sim_benchmark},
+    {"gamepairbai", test_gamepair_bai_benchmark},
+    {"lategame", test_gamepair_bai_late_game},
+    {"cutofftest", test_gamepair_bai_cutoff},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
