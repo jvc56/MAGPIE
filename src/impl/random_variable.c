@@ -8,6 +8,7 @@
 #include "../def/sim_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
+#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
@@ -22,7 +23,6 @@
 #include "../ent/xoshiro.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
-#include "../ent/endgame_results.h"
 #include "bai_logger.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -331,9 +331,9 @@ typedef struct SimmerWorker {
   XoshiroPRNG *prng;
   // Resources for nested simulation ply decisions.
   // Only allocated when ply_strategy == PLY_STRATEGY_NESTED_SIM.
-  Game *nested_game;               // scratch game for mini-rollouts
-  MoveList *nested_move_list;      // capacity-1 list for inner movegen
-  MoveList *candidate_move_list;   // capacity-K list for outer candidate gen
+  Game *nested_game;             // scratch game for mini-rollouts
+  MoveList *nested_move_list;    // capacity-1 list for inner movegen
+  MoveList *candidate_move_list; // capacity-K list for outer candidate gen
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -369,11 +369,17 @@ typedef struct Simmer {
   int nested_candidates;
   int nested_rollouts;
   int nested_plies;
+  // Inner utility weights consumed by get_top_nested_sim_move (same semantics
+  // as the outer utility_* triple above; see sim_utility_blend).
+  double inner_w_winpct;
+  double inner_w_spread;
+  double inner_spread_scale;
 } Simmer;
 
-SimmerWorker *simmer_create_worker(const Game *game, ply_strategy_t ply_strategy,
-                                   int nested_candidates,
-                                   int thread_index, int num_sim_threads) {
+SimmerWorker *simmer_create_worker(const Game *game,
+                                   ply_strategy_t ply_strategy,
+                                   int nested_candidates, int thread_index,
+                                   int num_sim_threads) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
   simmer_worker->game = game_duplicate(game);
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
@@ -433,11 +439,11 @@ static const Move *endgame_ply_solve(Game *game, int thread_index,
 // average spread). If best_wpct_out is non-NULL, writes the best candidate's
 // average win% there. The returned Move* points into candidate_move_list and
 // remains valid until the next generate_moves call on that list.
-static Move *get_top_nested_sim_move(Game *game, int thread_index,
-                                     SimmerWorker *worker,
-                                     const WinPct *win_pcts,
-                                     int num_rollouts, int num_plies,
-                                     double *best_wpct_out) {
+static Move *
+get_top_nested_sim_move(Game *game, int thread_index, SimmerWorker *worker,
+                        const WinPct *win_pcts, int num_rollouts, int num_plies,
+                        double inner_w_winpct, double inner_w_spread,
+                        double inner_spread_scale, double *best_wpct_out) {
   MoveList *candidate_list = worker->candidate_move_list;
   Game *nested_game = worker->nested_game;
   MoveList *nested_move_list = worker->nested_move_list;
@@ -468,7 +474,7 @@ static Move *get_top_nested_sim_move(Game *game, int thread_index,
   const bool plies_are_odd = (num_plies % 2) != 0;
   int best_candidate = 0;
   double best_avg_wpct = -1.0;
-  double best_avg_spread = -1e18;
+  double best_utility = -1.0;
 
   for (int k = 0; k < actual_candidates; k++) {
     const Move *candidate = move_list_get_move(candidate_list, k);
@@ -493,8 +499,8 @@ static Move *get_top_nested_sim_move(Game *game, int thread_index,
         if (bag_is_empty(game_get_bag(nested_game))) {
           best = endgame_ply_solve(nested_game, thread_index, worker);
         } else {
-          best = get_top_equity_move(nested_game, thread_index,
-                                     nested_move_list);
+          best =
+              get_top_equity_move(nested_game, thread_index, nested_move_list);
         }
         play_move(best, nested_game, NULL);
       }
@@ -534,10 +540,12 @@ static Move *get_top_nested_sim_move(Game *game, int thread_index,
 
     const double avg_wpct = total_wpct / num_rollouts;
     const double avg_spread = total_spread / num_rollouts;
-    if (avg_wpct > best_avg_wpct ||
-        (avg_wpct == best_avg_wpct && avg_spread > best_avg_spread)) {
+    const double utility =
+        sim_utility_blend(avg_wpct, double_to_equity(avg_spread),
+                          inner_w_winpct, inner_w_spread, inner_spread_scale);
+    if (utility > best_utility) {
+      best_utility = utility;
       best_avg_wpct = avg_wpct;
-      best_avg_spread = avg_spread;
       best_candidate = k;
     }
   }
@@ -645,7 +653,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       double this_wpct;
       best_play = get_top_nested_sim_move(
           game, thread_index, simmer_worker, simmer->win_pcts,
-          simmer->nested_rollouts, simmer->nested_plies, &this_wpct);
+          simmer->nested_rollouts, simmer->nested_plies, simmer->inner_w_winpct,
+          simmer->inner_w_spread, simmer->inner_spread_scale, &this_wpct);
       inner_wpct = this_wpct;
       inner_wpct_valid = true;
       last_ply_player = player_on_turn_index;
@@ -773,15 +782,22 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   // Set ply strategy from the first fidelity level (will be updated
   // per-level during multi-fidelity runs)
   if (sim_args->num_fidelity_levels > 0) {
-    simmer->ply_strategy = sim_args->fidelity_levels[0].ply_strategy;
-    simmer->nested_candidates = sim_args->fidelity_levels[0].nested_candidates;
-    simmer->nested_rollouts = sim_args->fidelity_levels[0].nested_rollouts;
-    simmer->nested_plies = sim_args->fidelity_levels[0].nested_plies;
+    const FidelityLevel *l0 = &sim_args->fidelity_levels[0];
+    simmer->ply_strategy = l0->ply_strategy;
+    simmer->nested_candidates = l0->nested_candidates;
+    simmer->nested_rollouts = l0->nested_rollouts;
+    simmer->nested_plies = l0->nested_plies;
+    simmer->inner_w_winpct = l0->inner_w_winpct;
+    simmer->inner_w_spread = l0->inner_w_spread;
+    simmer->inner_spread_scale = l0->inner_spread_scale;
   } else {
     simmer->ply_strategy = PLY_STRATEGY_STATIC;
     simmer->nested_candidates = 0;
     simmer->nested_rollouts = 0;
     simmer->nested_plies = 0;
+    simmer->inner_w_winpct = 1.0;
+    simmer->inner_w_spread = 0.0;
+    simmer->inner_spread_scale = 100.0;
   }
 
   // Determine if any fidelity level uses nested sim so we can pre-allocate
@@ -802,8 +818,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   for (int thread_index = 0; thread_index < simmer->num_threads;
        thread_index++) {
     simmer->workers[thread_index] = simmer_create_worker(
-        sim_args->game, max_ply_strategy, max_nested_candidates,
-        thread_index, simmer->num_threads);
+        sim_args->game, max_ply_strategy, max_nested_candidates, thread_index,
+        simmer->num_threads);
   }
 
   simmer->win_pcts = sim_args->win_pcts;
@@ -868,10 +884,14 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
 
   // Update ply strategy from current fidelity level
   if (sim_args->num_fidelity_levels > 0) {
-    simmer->ply_strategy = sim_args->fidelity_levels[0].ply_strategy;
-    simmer->nested_candidates = sim_args->fidelity_levels[0].nested_candidates;
-    simmer->nested_rollouts = sim_args->fidelity_levels[0].nested_rollouts;
-    simmer->nested_plies = sim_args->fidelity_levels[0].nested_plies;
+    const FidelityLevel *l0 = &sim_args->fidelity_levels[0];
+    simmer->ply_strategy = l0->ply_strategy;
+    simmer->nested_candidates = l0->nested_candidates;
+    simmer->nested_rollouts = l0->nested_rollouts;
+    simmer->nested_plies = l0->nested_plies;
+    simmer->inner_w_winpct = l0->inner_w_winpct;
+    simmer->inner_w_spread = l0->inner_w_spread;
+    simmer->inner_spread_scale = l0->inner_spread_scale;
   } else {
     simmer->ply_strategy = PLY_STRATEGY_STATIC;
   }
@@ -885,13 +905,15 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                     sim_args->use_heat_map);
 }
 
-void rvs_set_fidelity_level(RandomVariables *rvs,
-                            const FidelityLevel *level) {
+void rvs_set_fidelity_level(RandomVariables *rvs, const FidelityLevel *level) {
   Simmer *simmer = (Simmer *)rvs->data;
   simmer->ply_strategy = level->ply_strategy;
   simmer->nested_candidates = level->nested_candidates;
   simmer->nested_rollouts = level->nested_rollouts;
   simmer->nested_plies = level->nested_plies;
+  simmer->inner_w_winpct = level->inner_w_winpct;
+  simmer->inner_w_spread = level->inner_w_spread;
+  simmer->inner_spread_scale = level->inner_spread_scale;
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {

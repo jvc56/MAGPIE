@@ -22,12 +22,19 @@ typedef enum {
 typedef struct FidelityLevel {
   uint64_t sample_limit;
   uint64_t sample_minimum;
-  double time_limit_seconds;  // per-level time budget (0 = no limit)
+  double time_limit_seconds; // per-level time budget (0 = no limit)
   ply_strategy_t ply_strategy;
   // Fields below only used when ply_strategy == PLY_STRATEGY_NESTED_SIM
-  int nested_candidates;   // K: number of candidate moves to evaluate per ply
-  int nested_rollouts;     // N: mini-rollouts per candidate
-  int nested_plies;        // depth of each mini-rollout
+  int nested_candidates; // K: number of candidate moves to evaluate per ply
+  int nested_rollouts;   // N: mini-rollouts per candidate
+  int nested_plies;      // depth of each mini-rollout
+  // Inner utility weights used by the nested ply chooser. Same semantics as
+  // SimArgs.utility_w_{winpct,spread} / utility_spread_scale (see
+  // sim_utility_blend in sim_args.h). Defaults (1.0, 0.0, 100.0) pick by
+  // pure win%, matching the legacy lexicographic behavior.
+  double inner_w_winpct;
+  double inner_w_spread;
+  double inner_spread_scale;
 } FidelityLevel;
 
 enum {

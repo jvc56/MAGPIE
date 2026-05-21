@@ -104,6 +104,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
       .nested_candidates = 0,
       .nested_rollouts = 0,
       .nested_plies = 0,
+      .inner_w_winpct = 1.0,
+      .inner_w_spread = 0.0,
+      .inner_spread_scale = 100.0,
   };
 }
 
