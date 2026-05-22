@@ -52,7 +52,11 @@ enum {
   // Max ranked candidates shown in the Analysis panel. Same cap is
   // used for the saved per-turn snapshot so navigating history can
   // replay the full leaderboard.
-  ANALYSIS_ROW_CAP = 64,
+  // Max candidate rows the panel can track per frame and per
+  // saved snapshot. Matches the upper bound of the sim_candidates
+  // setting (Watch setup row, range 2-1024) so users who crank
+  // candidates high can still scroll through every one.
+  ANALYSIS_ROW_CAP = 1024,
   // Max plies the per-ply average columns track. Sim engine runs
   // up to ~4 plies in practice; the cap is generous.
   MAX_ANALYSIS_PLIES = 8,
@@ -121,6 +125,11 @@ typedef struct {
   int total_after;    // running total after this play (excluding bonus)
   int clock_at_start; // seconds remaining when this player's turn began
   int opp_clock_at_start; // opponent's seconds remaining at the same moment
+  // Seconds remaining when this player's move ended. Set by the bot
+  // worker right after seconds_used is updated for the turn. For
+  // loaded GCGs we don't have per-move clock data, so this stays at
+  // clock_at_start (effectively unused outside the live-watch flow).
+  int clock_at_end;
   char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
   char rack_str[16];  // full rack the player had at the start of the turn
   char
@@ -174,6 +183,12 @@ typedef struct {
   // above is for display; this is the engine-friendly object the
   // simmer / endgame would consume.
   struct Rack *rack_before;
+  // Owned, deep-copied Move that this turn played, for loaded
+  // GCG entries that don't carry a sim/endgame leaderboard. Lets
+  // the board renderer ghost the played tiles when the user
+  // cursors onto the "Plays" row. NULL for live-game entries
+  // (those preview from sim_results_saved / endgame_moves_saved).
+  struct Move *loaded_move;
   // Opponent's rack at the moment this turn began. Snapshotted so
   // that the History cursor can rewind the off-turn player's pill
   // alongside the on-turn rack panel and board. NULL until
@@ -196,6 +211,12 @@ typedef struct {
   TuiHistoryEntry history[TUI_HISTORY_MAX];
   int history_count;
 
+  // Per-player display name. Populated when a GCG is loaded (from
+  // the #player1/#player2 directives) so the pill headers can
+  // surface real names instead of the generic "P1"/"P2". Empty
+  // string = no name set; renderer falls back to "P1"/"P2".
+  char player_names[2][32];
+
   // Visual settings.
   int border_thickness; // pixel-grid line thickness; 0 = off
   bool blank_uppercase; // played blanks render uppercase + blank_tile_fg
@@ -203,6 +224,7 @@ typedef struct {
   int board_scale; // 1 = classic cell tiles, 2 = 4×2 pixel tiles
   bool antialias;  // FT_RENDER_MODE_NORMAL vs MONO at 2x
   TuiScoreSubscripts score_subscripts; // off / nonzero / all (2x only)
+  TuiRackSort rack_sort;               // display ordering of rack tiles
   // Glyph cache used by the 2x render path. NULL when the bundled font
   // could not be loaded or freetype init failed — that disables 2x
   // regardless of the user's saved board_scale. `glyph_cache_sub` is a
@@ -364,6 +386,40 @@ typedef struct {
   // Written each frame under state->mutex by the render path.
   AnalysisRow last_rendered_analysis_rows[ANALYSIS_ROW_CAP];
   int last_rendered_analysis_row_count;
+  // Scroll position for the Analysis panel — the rank index of the
+  // first row visible in the scroll window. Auto-adjusted to keep
+  // the cursor visible; can also be driven directly by the
+  // scrollbar (click + drag) or scroll wheel. Reset to 0 whenever
+  // history_cursor lands on a new turn, since the rank set
+  // changes.
+  int analysis_scroll_offset;
+  // True while a scrollbar drag is in progress (button held down
+  // after a click that started inside the thumb). Reset on
+  // button-up or focus change. The render code uses this to keep
+  // tracking even when the cursor leaves the thumb's screen rect
+  // mid-drag.
+  bool analysis_scrollbar_dragging;
+  // Geometry the renderer publishes for the Analysis scrollbar so
+  // main.c can hit-test mouse clicks and convert them to a
+  // scroll_offset. The rectangle spans
+  //   [scrollbar_top..scrollbar_bottom] × scrollbar_col
+  // in plane coordinates. analysis_scrollbar_total is the total
+  // rank count the bar is scrolling over (state at last render);
+  // analysis_scrollbar_view is the visible window height. Zero
+  // values mean the scrollbar is hidden (no scroll needed).
+  _Atomic int analysis_scrollbar_top;
+  _Atomic int analysis_scrollbar_bottom;
+  _Atomic int analysis_scrollbar_col;
+  _Atomic int analysis_scrollbar_total;
+  _Atomic int analysis_scrollbar_view;
+  // Sim configuration the bot worker passes through to simmer
+  // every turn. Defaults seeded at game_state init; the Watch
+  // setup modal mutates these before a new game starts so each
+  // run can tune depth vs. breadth without rebuilding. Both
+  // persist to tui.toml so subsequent launches reuse the last
+  // values.
+  int sim_plies;
+  int sim_candidates;
   // Renderer publishes the count of visible analysis rows here so
   // main.c can bound cursor++ without re-computing the layout.
   _Atomic int analysis_visible_rows;
@@ -389,7 +445,77 @@ typedef struct {
   // active values at game-state init.
   char pending_lexicon[32];
   bool pending_load_rit;
+
+  // Annotation edit state. edit_history_idx == -1 means we're
+  // not editing anything; otherwise it's the index of the
+  // pending entry being edited and edit_field selects which
+  // sub-cell is taking keystrokes.
+  //   TUI_EDIT_FIELD_MOVE — the row-1 text ("8H POND"). On
+  //     commit, the coord + word land in entry->move_str. If
+  //     the word has any uppercase letters (newly-placed
+  //     tiles), those letters are copied into the rack too
+  //     so a 7-tile bingo implicitly specifies the rack.
+  //   TUI_EDIT_FIELD_RACK — the row-2 rack ("ABCDEFG"). On
+  //     commit, lands in entry->rack_str.
+  // Each field keeps its own buffer + cursor so the user can
+  // hop between them without losing in-progress text.
+  int edit_history_idx;
+  int edit_field;
+  char edit_move_buf[80];
+  int edit_move_len;
+  int edit_move_cursor;
+  bool edit_move_valid;
+  char edit_rack_buf[20];
+  int edit_rack_len;
+  int edit_rack_cursor;
+  bool edit_rack_valid;
+  // Result of parsing the move buffer. edit_move_kind classifies
+  // what the buffer currently represents — drives both validity
+  // coloring and the commit path:
+  //   EMPTY        — nothing typed; row renders neutral.
+  //   PARTIAL      — well-formed prefix (e.g. "8H", "ex "); not
+  //                  yet a complete move. Renders as valid.
+  //   PLACEMENT    — "<coord> <word>"; canonical lives in
+  //                  edit_move_canonical. Score in edit_move_score.
+  //   WORD_ONLY    — bare word, no coord. Triggers the placement-
+  //                  enumeration flow on focus-away.
+  //   EXCHANGE     — "-<tiles>" or any prefix of "exchange" +
+  //                  tiles. Canonical is "ex <tiles>".
+  //   PASS         — first token is "pass".
+  //   INVALID      — anything else; renders red.
+  int edit_move_kind;
+  // Engine score (raw points) for a PLACEMENT/EXCHANGE that
+  // validated cleanly. -1 if score is not applicable.
+  int edit_move_score;
+  // Normalized notation passed to the engine on commit /
+  // validation. Empty when kind is not PLACEMENT/EXCHANGE/PASS.
+  char edit_move_canonical[80];
+  // Tiles inferred from the played-letters portion of the move
+  // buffer (uppercase → letter, lowercase → '?', dots skipped).
+  // The rack panel uses this to preview the player's rack
+  // while the user is still typing the move.
+  char edit_move_inferred_rack[16];
+  // Leave preview: the rack buffer's tiles minus the move's
+  // played tiles (multiset subtraction). Empty when one side
+  // is missing or the subtraction can't be performed because
+  // the rack doesn't contain all played letters.
+  char edit_move_leave[16];
 } TuiGameState;
+
+enum {
+  TUI_EDIT_FIELD_MOVE = 0,
+  TUI_EDIT_FIELD_RACK = 1,
+};
+
+typedef enum {
+  TUI_EDIT_MOVE_KIND_EMPTY = 0,
+  TUI_EDIT_MOVE_KIND_PARTIAL,
+  TUI_EDIT_MOVE_KIND_PLACEMENT,
+  TUI_EDIT_MOVE_KIND_WORD_ONLY,
+  TUI_EDIT_MOVE_KIND_EXCHANGE,
+  TUI_EDIT_MOVE_KIND_PASS,
+  TUI_EDIT_MOVE_KIND_INVALID,
+} TuiEditMoveKind;
 
 // Initializes a fresh game using `lexicon` (e.g., "CSW21"). Resolves the
 // data root by probing for the lexicon's .kwg under "data/", "../data/",
@@ -404,6 +530,19 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                          size_t error_message_size);
 
 void tui_game_state_destroy(TuiGameState *state);
+
+// Re-parse the annotation edit buffers (move + rack) and store
+// the resulting validity flags on state. Called whenever a
+// buffer changes (typing / backspace / etc.). Move parses as
+// "<coord> <word>"; rack parses as 1-7 chars of A-Z/?.
+void tui_game_state_parse_edit_buf(TuiGameState *state);
+
+// Annotation-mode reset: same per-entry cleanup and clock /
+// cursor reset as tui_game_state_reset_game, but resets the
+// game to an empty board with full bag and DOES NOT draw
+// starting racks. The annotator fills the racks in by hand as
+// the live game progresses.
+void tui_game_state_reset_game_for_annotation(TuiGameState *state);
 
 // Frees everything inside an endgame snapshot (board, rack, moves,
 // values), zeros the fields, marks invalid. Safe on a zero-init or

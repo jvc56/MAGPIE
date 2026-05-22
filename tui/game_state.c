@@ -10,12 +10,16 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/players_data.h"
+#include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/validated_move.h"
 #include "../src/ent/win_pct.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/util/io_util.h"
+#include "../src/def/board_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "glyph_cache.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -65,6 +69,10 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
                          TuiGameState *out_state, char *error_message,
                          size_t error_message_size) {
   memset(out_state, 0, sizeof(*out_state));
+  // Annotation edit state defaults to "not editing." All other
+  // edit_* fields are already zeroed by the memset above; the
+  // -1 sentinel just disambiguates "idle" from "editing entry 0."
+  out_state->edit_history_idx = -1;
   // Snapshot of the settings we're locking in for this session. The
   // pending-change line above the status bar compares these to the
   // live config to decide what "(restart to apply)" should surface.
@@ -184,7 +192,10 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
     goto fail;
   }
 
-  draw_starting_racks(out_state->game);
+  // Racks intentionally start empty so the startup menu sees the
+  // widgets in an "idle" state (Bag full, Racks empty, Board empty).
+  // The first game starts via tui_game_state_reset_game, which
+  // draws fresh starting racks at that point.
 
   strncpy(out_state->lexicon, lexicon, sizeof(out_state->lexicon) - 1);
   out_state->lexicon[sizeof(out_state->lexicon) - 1] = '\0';
@@ -210,6 +221,15 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
   out_state->analysis_anchored_move[0] = '\0';
   out_state->last_rendered_analysis_row_count = 0;
+  out_state->analysis_scroll_offset = 0;
+  out_state->analysis_scrollbar_dragging = false;
+  atomic_store(&out_state->analysis_scrollbar_top, 0);
+  atomic_store(&out_state->analysis_scrollbar_bottom, 0);
+  atomic_store(&out_state->analysis_scrollbar_col, 0);
+  atomic_store(&out_state->analysis_scrollbar_total, 0);
+  atomic_store(&out_state->analysis_scrollbar_view, 0);
+  out_state->sim_plies = 4;
+  out_state->sim_candidates = 100;
   atomic_store(&out_state->analysis_visible_rows, 0);
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;
@@ -220,6 +240,7 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->board_scale = 1;
   out_state->antialias = true;
   out_state->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
+  out_state->rack_sort = TUI_RACK_SORT_ALPHA;
   atomic_store(&out_state->render_version, (uint64_t)1);
   // Load the bundled TTF for 2x mode. Failure here just leaves
   // glyph_cache NULL — the renderer treats that as "scale=2 unavailable"
@@ -262,6 +283,527 @@ void tui_game_state_set_time_per_side(TuiGameState *state, int seconds) {
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
 }
 
+static bool tok_is_rack_char(char c) {
+  return (c >= 'A' && c <= 'Z') || c == '?';
+}
+static bool tok_is_word_char(char c) {
+  return (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || c == '.';
+}
+
+// True if `s` (length `n`) is well-formed coord notation and the
+// row/column are inside BOARD_DIM. Accepts either order:
+//   <digits><letter>  e.g. "8H"   (row 8, col H)
+//   <letter><digits>  e.g. "H8"   (col H, row 8)
+// Reject "AA9" (two letters), "17B" (row 17 > BOARD_DIM), "0H"
+// (rows are 1-indexed), and any 1- or 4+-char string.
+static bool parse_coord_token(const char *s, int n) {
+  if (n < 2 || n > 3) {
+    return false;
+  }
+  const int max_col_letter = 'A' + BOARD_DIM - 1;
+  // Walk forward separating letters from digits exactly once.
+  // The token is valid only as <digits><letter> or <letter><digits>.
+  int digit_value = 0;
+  int digit_count = 0;
+  char letter = '\0';
+  int letter_count = 0;
+  // Track ordering so we reject interleaved patterns like "8H8".
+  bool seen_letter_after_digit = false;
+  bool seen_digit_after_letter = false;
+  for (int i = 0; i < n; i++) {
+    const char c = s[i];
+    if (c >= '0' && c <= '9') {
+      if (letter_count > 0) {
+        seen_digit_after_letter = true;
+      }
+      digit_value = digit_value * 10 + (c - '0');
+      digit_count++;
+    } else if (c >= 'A' && c <= 'Z') {
+      if (digit_count > 0) {
+        seen_letter_after_digit = true;
+      }
+      letter = c;
+      letter_count++;
+    } else {
+      return false;
+    }
+  }
+  if (letter_count != 1 || digit_count < 1 || digit_count > 2) {
+    return false;
+  }
+  if (seen_letter_after_digit && seen_digit_after_letter) {
+    return false; // both transitions present → 3 segments → invalid
+  }
+  if (digit_value < 1 || digit_value > BOARD_DIM) {
+    return false;
+  }
+  if (letter < 'A' || letter > max_col_letter) {
+    return false;
+  }
+  return true;
+}
+
+// Returns true if `s` is a non-empty case-insensitive prefix of
+// "exchange" — "e", "ex", "exc", ..., "exchange". Used to detect
+// the user's exchange shortcut so the canonical "ex <tiles>" form
+// can be forwarded to the engine validator.
+static bool is_prefix_of_exchange(const char *s, int n) {
+  static const char *full = "exchange";
+  const int full_len = 8;
+  if (n <= 0 || n > full_len) {
+    return false;
+  }
+  for (int i = 0; i < n; i++) {
+    const char c = s[i];
+    const char lower = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    if (lower != full[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// "pass" prefix detector — same shape as exchange's but
+// short-circuits when the buffer is exactly "pass".
+static bool is_iequal(const char *s, int n, const char *target) {
+  const int t = (int)strlen(target);
+  if (n != t) {
+    return false;
+  }
+  for (int i = 0; i < n; i++) {
+    const char c = s[i];
+    const char lower = (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
+    if (lower != target[i]) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Walks the played-letters portion of a move's word token,
+// extracting just the tiles that come off the rack: uppercase →
+// the letter itself, lowercase → '?' (a played blank), '.' →
+// skipped (playthrough). The result is sorted ascending (so '?'
+// comes first, then A..Z) — this matches the order
+// sort_rack_for_display would produce from a Rack count-table,
+// and format_alphagram_for_sort can rebucket from there into
+// whichever rack-sort the user picked without scrambling the
+// input.
+static int char_cmp(const void *a, const void *b) {
+  return *(const unsigned char *)a - *(const unsigned char *)b;
+}
+static void infer_rack_from_word(const char *word, int word_len,
+                                 char *out, size_t out_cap) {
+  size_t oi = 0;
+  for (int i = 0; i < word_len && oi + 1 < out_cap; i++) {
+    const char c = word[i];
+    if (c == '.') {
+      continue;
+    }
+    if (c >= 'a' && c <= 'z') {
+      out[oi++] = '?';
+    } else if (c >= 'A' && c <= 'Z') {
+      out[oi++] = c;
+    }
+  }
+  out[oi] = '\0';
+  if (oi > 1) {
+    qsort(out, oi, 1, char_cmp);
+  }
+}
+
+// Multiset subtraction of `played` from `full_rack`, producing
+// the leave (whatever tiles are left over) sorted ascending so
+// '?' comes first, then A..Z. Returns false (leaves out[0] = '\0')
+// when `played` contains a letter that isn't in `full_rack` —
+// i.e., the user typed a move whose tiles aren't a subset of
+// the typed rack. Callers gate leave display on a true return.
+static bool compute_leave(const char *full_rack, const char *played,
+                          char *out, size_t out_cap) {
+  if (out == NULL || out_cap == 0) {
+    return false;
+  }
+  out[0] = '\0';
+  int counts[256] = {0};
+  for (const char *p = full_rack; *p != '\0'; p++) {
+    counts[(unsigned char)*p]++;
+  }
+  for (const char *p = played; *p != '\0'; p++) {
+    counts[(unsigned char)*p]--;
+    if (counts[(unsigned char)*p] < 0) {
+      return false;
+    }
+  }
+  size_t oi = 0;
+  for (int c = 0; c < 256 && oi + 1 < out_cap; c++) {
+    while (counts[c] > 0 && oi + 1 < out_cap) {
+      out[oi++] = (char)c;
+      counts[c]--;
+    }
+  }
+  out[oi] = '\0';
+  return true;
+}
+
+// True if every char in [s, s+n) is A-Z (no digits, no dots,
+// no blanks). Used to detect a bare-word entry like "JUNKY"
+// that should trigger the placement enumeration flow.
+static bool tok_is_all_uppercase(const char *s, int n) {
+  if (n <= 0) {
+    return false;
+  }
+  for (int i = 0; i < n; i++) {
+    if (s[i] < 'A' || s[i] > 'Z') {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Set the on-turn player's rack to mirror the live editor:
+// rack buffer takes precedence (the user is typing tiles
+// directly); otherwise fall back to whatever the move buffer
+// inferred from its played letters; otherwise empty.
+// Caller must hold state->mutex.
+static void sync_player_rack_to_editor(TuiGameState *state) {
+  if (state->game == NULL || state->edit_history_idx < 0 ||
+      state->edit_history_idx >= state->history_count) {
+    return;
+  }
+  const int player_idx = state->history[state->edit_history_idx].player_idx;
+  Player *player = game_get_player(state->game, player_idx);
+  if (player == NULL) {
+    return;
+  }
+  Rack *rack = player_get_rack(player);
+  if (rack == NULL) {
+    return;
+  }
+  const char *source = NULL;
+  if (state->edit_rack_len > 0 && state->edit_rack_valid) {
+    source = state->edit_rack_buf;
+  } else if (state->edit_move_inferred_rack[0] != '\0') {
+    source = state->edit_move_inferred_rack;
+  }
+  if (source != NULL) {
+    rack_set_to_string(state->ld, rack, source);
+  } else {
+    rack->dist_size = ld_get_size(state->ld);
+    rack_reset(rack);
+  }
+}
+
+// Try to score `canonical` (a notation string in engine form, e.g.
+// "8H JUNKY" or "ex AB") against the live board with the player's
+// rack already set. Returns score (>=0) on success, -1 if the
+// engine rejected the move. We pass allow_phonies=true so words
+// not in the lexicon still produce a score — the renderer keeps
+// the in-flight buffer green and lets the user commit; phony
+// gating is a future refinement.
+static int score_canonical_move(const TuiGameState *state,
+                                const char *canonical, int player_idx) {
+  if (state->game == NULL || canonical[0] == '\0') {
+    return -1;
+  }
+  ErrorStack *err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      state->game, player_idx, canonical, /*allow_phonies=*/true,
+      /*allow_playthrough=*/true, err);
+  int score = -1;
+  if (error_stack_is_empty(err) && vms != NULL &&
+      validated_moves_get_number_of_moves(vms) > 0) {
+    const Move *m = validated_moves_get_move(vms, 0);
+    if (m != NULL) {
+      score = equity_to_int(move_get_score(m));
+    }
+  }
+  if (vms != NULL) {
+    validated_moves_destroy(vms);
+  }
+  error_stack_destroy(err);
+  return score;
+}
+
+void tui_game_state_parse_edit_buf(TuiGameState *state) {
+  if (state == NULL) {
+    return;
+  }
+  // ── Move buffer ──────────────────────────────────────────────
+  // Reset derived fields up front so an early-return leaves
+  // consistent state.
+  state->edit_move_kind = TUI_EDIT_MOVE_KIND_EMPTY;
+  state->edit_move_score = -1;
+  state->edit_move_canonical[0] = '\0';
+  state->edit_move_inferred_rack[0] = '\0';
+  state->edit_move_leave[0] = '\0';
+  state->edit_move_valid = true;
+
+  const char *buf = state->edit_move_buf;
+  const int n = state->edit_move_len;
+  // Tokenize into up to two whitespace-delimited fields.
+  int i = 0;
+  while (i < n && (buf[i] == ' ' || buf[i] == '\t')) {
+    i++;
+  }
+  const int t1_s = i;
+  while (i < n && buf[i] != ' ' && buf[i] != '\t') {
+    i++;
+  }
+  const int t1_len = i - t1_s;
+  while (i < n && (buf[i] == ' ' || buf[i] == '\t')) {
+    i++;
+  }
+  const int t2_s = i;
+  while (i < n && buf[i] != ' ' && buf[i] != '\t') {
+    i++;
+  }
+  const int t2_len = i - t2_s;
+  const bool has_trailing_space =
+      t1_len > 0 && t2_len == 0 && i > t1_s + t1_len;
+
+  if (t1_len == 0) {
+    // Empty buffer or pure whitespace.
+    sync_player_rack_to_editor(state);
+    goto parse_rack;
+  }
+
+  const char *t1 = buf + t1_s;
+  const char *t2 = buf + t2_s;
+
+  // ── Exchange shortcut: leading '-' ────────────────────────
+  if (t1[0] == '-') {
+    // "-" alone is PARTIAL; "-X..." is EXCHANGE if the tiles
+    // are well-formed rack chars (A-Z or '?'), capped at 7.
+    if (t1_len == 1 && t2_len == 0) {
+      state->edit_move_kind = TUI_EDIT_MOVE_KIND_PARTIAL;
+      goto parse_rack;
+    }
+    const char *tiles = t1 + 1;
+    int tiles_len = t1_len - 1;
+    // Allow "- ABC" form too: if user typed a space after -,
+    // pick up the second token.
+    if (t1_len == 1 && t2_len > 0) {
+      tiles = t2;
+      tiles_len = t2_len;
+    }
+    if (tiles_len > 7) {
+      state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+      state->edit_move_valid = false;
+      goto parse_rack;
+    }
+    for (int j = 0; j < tiles_len; j++) {
+      if (!tok_is_rack_char(tiles[j])) {
+        state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+        state->edit_move_valid = false;
+        goto parse_rack;
+      }
+    }
+    state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
+    // Canonical form for the engine: "ex <tiles>".
+    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
+             "ex %.*s", tiles_len, tiles);
+    snprintf(state->edit_move_inferred_rack,
+             sizeof(state->edit_move_inferred_rack), "%.*s", tiles_len, tiles);
+    sync_player_rack_to_editor(state);
+    state->edit_move_score = score_canonical_move(
+        state, state->edit_move_canonical,
+        state->history[state->edit_history_idx].player_idx);
+    if (state->edit_move_score < 0) {
+      // Engine rejected (e.g., bag too small for an exchange).
+      // Format is still well-formed so we keep edit_move_valid
+      // true and just lose the score column.
+    }
+    goto parse_rack;
+  }
+
+  // ── Pass ──────────────────────────────────────────────────
+  if (is_iequal(t1, t1_len, "pass") && t2_len == 0) {
+    state->edit_move_kind = TUI_EDIT_MOVE_KIND_PASS;
+    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
+             "pass");
+    state->edit_move_score = 0;
+    sync_player_rack_to_editor(state);
+    goto parse_rack;
+  }
+
+  // ── Exchange word: any prefix of "exchange" ──────────────
+  // Examples: "e Q", "ex AB", "exch ABC", "exchange QU".
+  // The space between the keyword and the tiles is required
+  // so a bare "e" doesn't get hijacked from word-only mode.
+  if (is_prefix_of_exchange(t1, t1_len)) {
+    if (t2_len == 0) {
+      // "e", "ex" — the user might mean the word "EX" or might
+      // be typing toward "ex ABC". Wait for the space.
+      // Without a trailing space this is WORD_ONLY (the letters
+      // might be a real word). With a trailing space it's a
+      // partial exchange.
+      if (has_trailing_space) {
+        state->edit_move_kind = TUI_EDIT_MOVE_KIND_PARTIAL;
+        goto parse_rack;
+      }
+      // Fall through to the word-only / coord branches below.
+    } else {
+      if (t2_len > 7) {
+        state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+        state->edit_move_valid = false;
+        goto parse_rack;
+      }
+      for (int j = 0; j < t2_len; j++) {
+        if (!tok_is_rack_char(t2[j])) {
+          state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+          state->edit_move_valid = false;
+          goto parse_rack;
+        }
+      }
+      state->edit_move_kind = TUI_EDIT_MOVE_KIND_EXCHANGE;
+      snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
+               "ex %.*s", t2_len, t2);
+      snprintf(state->edit_move_inferred_rack,
+               sizeof(state->edit_move_inferred_rack), "%.*s", t2_len, t2);
+      sync_player_rack_to_editor(state);
+      state->edit_move_score = score_canonical_move(
+          state, state->edit_move_canonical,
+          state->history[state->edit_history_idx].player_idx);
+      goto parse_rack;
+    }
+  }
+
+  // ── Coord-led placement: "8H JUNKY" or "8H" (partial) ────
+  if (parse_coord_token(t1, t1_len)) {
+    if (t2_len == 0) {
+      state->edit_move_kind = TUI_EDIT_MOVE_KIND_PARTIAL;
+      goto parse_rack;
+    }
+    // Word token must be all word-chars.
+    for (int j = 0; j < t2_len; j++) {
+      if (!tok_is_word_char(t2[j])) {
+        state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+        state->edit_move_valid = false;
+        goto parse_rack;
+      }
+    }
+    state->edit_move_kind = TUI_EDIT_MOVE_KIND_PLACEMENT;
+    snprintf(state->edit_move_canonical, sizeof(state->edit_move_canonical),
+             "%.*s %.*s", t1_len, t1, t2_len, t2);
+    infer_rack_from_word(t2, t2_len, state->edit_move_inferred_rack,
+                         sizeof(state->edit_move_inferred_rack));
+    sync_player_rack_to_editor(state);
+    state->edit_move_score = score_canonical_move(
+        state, state->edit_move_canonical,
+        state->history[state->edit_history_idx].player_idx);
+    // Engine rejection here usually means the placement
+    // doesn't fit / doesn't touch existing tiles. Keep format
+    // valid (the user is shaping a real move) but score stays
+    // -1 so the renderer suppresses "+N".
+    goto parse_rack;
+  }
+
+  // ── Bare word (no coord): "JUNKY" ────────────────────────
+  // No mixed digits, no dots, no blanks — case-sensitive
+  // uppercase only. The placement-enumeration flow will fan
+  // this out across the board on focus-away.
+  if (t2_len == 0 && tok_is_all_uppercase(t1, t1_len)) {
+    state->edit_move_kind = TUI_EDIT_MOVE_KIND_WORD_ONLY;
+    infer_rack_from_word(t1, t1_len, state->edit_move_inferred_rack,
+                         sizeof(state->edit_move_inferred_rack));
+    sync_player_rack_to_editor(state);
+    goto parse_rack;
+  }
+
+  // Anything else is malformed.
+  state->edit_move_kind = TUI_EDIT_MOVE_KIND_INVALID;
+  state->edit_move_valid = false;
+  sync_player_rack_to_editor(state);
+
+parse_rack:
+  // ── Rack buffer: 1..7 chars of A-Z or ? ──────────────────
+  {
+    bool ok = state->edit_rack_len <= 7;
+    if (state->edit_rack_len > 0) {
+      for (int j = 0; j < state->edit_rack_len && ok; j++) {
+        if (!tok_is_rack_char(state->edit_rack_buf[j])) {
+          ok = false;
+        }
+      }
+    }
+    state->edit_rack_valid = ok;
+  }
+  // Live leave preview. The leave is the rack buffer minus the
+  // played tiles. We only compute it when both sides are valid
+  // and the rack is a superset of the played letters — otherwise
+  // the row 1 leave zone keeps its "·" placeholder.
+  if ((state->edit_move_kind == TUI_EDIT_MOVE_KIND_PLACEMENT ||
+       state->edit_move_kind == TUI_EDIT_MOVE_KIND_EXCHANGE) &&
+      state->edit_rack_valid && state->edit_rack_len > 0 &&
+      state->edit_move_inferred_rack[0] != '\0') {
+    char rack_buf[24];
+    snprintf(rack_buf, sizeof(rack_buf), "%.*s", state->edit_rack_len,
+             state->edit_rack_buf);
+    char leave_buf[16];
+    if (compute_leave(rack_buf, state->edit_move_inferred_rack, leave_buf,
+                      sizeof(leave_buf))) {
+      snprintf(state->edit_move_leave, sizeof(state->edit_move_leave), "%s",
+               leave_buf);
+    }
+  }
+  // Re-sync the rack panel: the rack buffer might override the
+  // move buffer's inferred letters, so the final state of the
+  // player's rack only settles after both have parsed.
+  sync_player_rack_to_editor(state);
+}
+
+void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
+  if (state == NULL || state->game == NULL) {
+    return;
+  }
+  // No seed, no rack draw — the engine lands at the "before
+  // move 1" position with an empty board, racks empty, and the
+  // full bag intact. The annotator fills each turn's rack in
+  // by hand as the live game plays.
+  game_reset(state->game);
+  // Same per-entry / clock / atomic teardown the normal
+  // reset_game does; duplicated here rather than refactored to
+  // keep this change scoped.
+  for (int idx = 0; idx < state->history_count; idx++) {
+    TuiHistoryEntry *entry = &state->history[idx];
+    if (entry->board_before != NULL) {
+      board_destroy(entry->board_before);
+      entry->board_before = NULL;
+    }
+    if (entry->rack_before != NULL) {
+      rack_destroy(entry->rack_before);
+      entry->rack_before = NULL;
+    }
+    if (entry->opp_rack_before != NULL) {
+      rack_destroy(entry->opp_rack_before);
+      entry->opp_rack_before = NULL;
+    }
+    if (entry->sim_results_saved != NULL) {
+      sim_results_destroy(entry->sim_results_saved);
+      entry->sim_results_saved = NULL;
+    }
+    if (entry->loaded_move != NULL) {
+      free(entry->loaded_move);
+      entry->loaded_move = NULL;
+    }
+  }
+  state->history_count = 0;
+  state->history_cursor = -1;
+  state->seconds_used[0] = 0.0;
+  state->seconds_used[1] = 0.0;
+  clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
+  atomic_store(&state->sim_results_active, false);
+  atomic_store(&state->sim_results_turn_idx, -1);
+  atomic_store(&state->endgame_results_active, false);
+  atomic_store(&state->endgame_results_turn_idx, -1);
+  atomic_store(&state->endgame_initial_spread, 0);
+  tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  if (state->endgame_ctx != NULL) {
+    endgame_ctx_clear_transposition_table(state->endgame_ctx);
+  }
+  atomic_fetch_add(&state->render_version, 1);
+}
+
 void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   if (state == NULL || state->game == NULL) {
     return;
@@ -287,6 +829,10 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
+    }
+    if (entry->loaded_move != NULL) {
+      free(entry->loaded_move);
+      entry->loaded_move = NULL;
     }
   }
   state->history_count = 0;
@@ -361,6 +907,10 @@ void tui_game_state_destroy(TuiGameState *state) {
     if (entry->sim_results_saved != NULL) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
+    }
+    if (entry->loaded_move != NULL) {
+      free(entry->loaded_move);
+      entry->loaded_move = NULL;
     }
   }
   state->history_count = 0;

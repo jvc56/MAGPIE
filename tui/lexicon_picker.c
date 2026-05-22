@@ -591,6 +591,61 @@ bool tui_lexicon_list_name(const LexiconList *list, int idx, char *out_buf,
   return true;
 }
 
+bool tui_lexicon_list_language_name(const LexiconList *list, int idx,
+                                    char *out_buf, size_t out_buf_size) {
+  if (list == NULL || idx < 0 || idx >= list->count || out_buf == NULL ||
+      out_buf_size == 0) {
+    return false;
+  }
+  snprintf(out_buf, out_buf_size, "%s", lang_label(list->entries[idx].lang));
+  return true;
+}
+
+int tui_lexicon_list_step_same_language(const LexiconList *list, int idx,
+                                        int dir) {
+  if (list == NULL || idx < 0 || idx >= list->count || dir == 0) {
+    return idx;
+  }
+  const LexLang current = list->entries[idx].lang;
+  const int next = idx + (dir > 0 ? 1 : -1);
+  if (next < 0 || next >= list->count) {
+    return idx;
+  }
+  if (list->entries[next].lang != current) {
+    return idx;
+  }
+  return next;
+}
+
+int tui_lexicon_list_step_language(const LexiconList *list, int idx, int dir) {
+  if (list == NULL || idx < 0 || idx >= list->count || dir == 0) {
+    return idx;
+  }
+  const LexLang current = list->entries[idx].lang;
+  // Entries are sorted by language, so each language group is a
+  // contiguous run. Walk past the current run, then land on the
+  // first entry of the next/prev run.
+  if (dir > 0) {
+    int probe = idx + 1;
+    while (probe < list->count && list->entries[probe].lang == current) {
+      probe++;
+    }
+    return probe < list->count ? probe : idx;
+  }
+  int probe = idx - 1;
+  if (probe < 0) {
+    return idx;
+  }
+  const LexLang target = list->entries[probe].lang;
+  // Walk back to the FIRST entry in the previous group so cycling
+  // back lands on a stable anchor rather than the last of that
+  // group.
+  while (probe > 0 && list->entries[probe - 1].lang == target) {
+    probe--;
+  }
+  return probe;
+}
+
 // MODAL_INNER_WIDTH is the box content width — wide enough to fit
 // "  CSW24    280,887 words   wmp  rit" (~35 cols) with margin.
 enum { MODAL_INNER_WIDTH = 38 };

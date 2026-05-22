@@ -291,6 +291,69 @@ static int history_two_col_rows_needed(const TuiGameState *state) {
   return left > right ? left : right;
 }
 
+// Forward declarations of the cursor-view pickers (defined later in
+// the file alongside the rest of the cursor-aware accessors). Used
+// by compute_layout below so the layout's bag_empty heuristic
+// follows whatever board/rack the user is currently viewing
+// instead of the live game state — otherwise scrolling back to
+// a mid-game turn in a finished game leaves the bag panel
+// collapsed to a divider even though the cursor view has plenty
+// of tiles to show.
+static const struct Board *pick_render_board(const TuiGameState *state);
+static const TuiHistoryEntry *pick_history_view(const TuiGameState *state);
+
+// True when the bag the user is currently looking at is empty.
+// Mirrors render_bag_panel's formula (ld_total − on_board −
+// on_turn_rack) so the layout's bag-collapse decision matches
+// what the renderer will actually paint.
+static bool cursor_view_bag_empty(const TuiGameState *state) {
+  if (state == NULL || state->ld == NULL) {
+    return true;
+  }
+  const Board *render_board = pick_render_board(state);
+  const TuiHistoryEntry *hview = pick_history_view(state);
+  const Rack *on_turn_rack = NULL;
+  if (hview != NULL && hview->rack_before != NULL) {
+    on_turn_rack = hview->rack_before;
+  } else if (state->game != NULL) {
+    on_turn_rack = player_get_rack(game_get_player(
+        state->game, game_get_player_on_turn_index(state->game)));
+  }
+  int board_counts[64] = {0};
+  if (render_board != NULL) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        MachineLetter ml = board_get_letter(render_board, row, col);
+        if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+          continue;
+        }
+        if (ml & BLANK_MASK) {
+          ml = 0;
+        }
+        if (ml < (int)(sizeof(board_counts) / sizeof(int))) {
+          board_counts[ml]++;
+        }
+      }
+    }
+  }
+  const int ld_size = ld_get_size(state->ld);
+  for (int ml = 0;
+       ml < ld_size && ml < (int)(sizeof(board_counts) / sizeof(int)); ml++) {
+    const int dist = ld_get_dist(state->ld, (MachineLetter)ml);
+    const int on_rack = on_turn_rack != NULL
+                            ? rack_get_letter(on_turn_rack, (MachineLetter)ml)
+                            : 0;
+    int v = dist - board_counts[ml] - on_rack;
+    if (v < 0) {
+      v = 0;
+    }
+    if (v > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static Layout compute_layout(struct ncplane *plane, int user_scale,
                              const TuiGameState *state) {
   Layout L = {0};
@@ -410,6 +473,46 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   }
 
   L.two_col = L.right_col_width >= HISTORY_TWO_COL_HALFWIDTH_THRESHOLD;
+  // Even at a width that nominally fits two columns, a single
+  // entry's move + leave + delta combo can be longer than the
+  // half-column interior. When that happens the move text runs
+  // into the leave column and produces visible character overlap.
+  // Downgrade to single-column mode in that case — each row gets
+  // ~2× the width and the overlap clears. Zero-gap collisions are
+  // fine (color styling differentiates them); we only flip when a
+  // truly negative gap would be needed.
+  if (L.two_col && state != NULL && state->history_count > 0) {
+    const int gutter = 1;
+    const int half_width = (L.right_col_width - 2 - gutter) / 2;
+    const int per_col_interior_w = half_width - 2; // minus side borders
+    int rank_digits = 1;
+    for (int n = state->history_count; n >= 10; n /= 10) {
+      rank_digits++;
+    }
+    const int prefix_w = rank_digits + 2; // digits + ". "
+    // 4 cells reserved on the right for the delta column (a 3-char
+    // "+NN" + a 1-char gap). Same reservation render_history_entry
+    // uses when placing the leave.
+    const int delta_room = 4;
+    for (int i = 0; i < state->history_count; i++) {
+      const TuiHistoryEntry *e = &state->history[i];
+      if (e->pending) {
+        continue;
+      }
+      int move_w = 0;
+      for (const char *p = e->move_str; *p != '\0'; p++) {
+        if (*p != '(' && *p != ')') {
+          move_w++;
+        }
+      }
+      const int leave_w =
+          e->leave_str[0] != '\0' ? (int)strlen(e->leave_str) : 1;
+      if (move_w + leave_w + delta_room + prefix_w > per_col_interior_w) {
+        L.two_col = false;
+        break;
+      }
+    }
+  }
   L.pills_halfwidth = L.two_col && L.right_col_width < HISTORY_TWO_COL_THRESHOLD;
 
   if (L.two_col) {
@@ -455,9 +558,9 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   // shouldn't waste rows on a blank box.
   L.bag_top = L.rack_bottom + 1;
   L.bag_bottom = L.content_bottom_row;
-  const bool bag_empty =
-      state != NULL && state->game != NULL &&
-      bag_get_letters(game_get_bag(state->game)) == 0;
+  // Follow the cursor view so scrolling back to a mid-game turn
+  // in a finished game restores the bag panel.
+  const bool bag_empty = cursor_view_bag_empty(state);
   if (bag_empty) {
     L.bag_bottom = L.bag_top; // single-row divider
   }
@@ -1197,6 +1300,34 @@ static int history_panel_bottom;
 static int history_panel_left;
 static int history_panel_right;
 
+// Per-frame hit-test data for the currently-open modal (when one
+// is open and routed through render_modal_ex). All coordinates
+// are absolute screen rows/cols. invalidated when no modal
+// renders this frame.
+enum { MODAL_MAX_ITEMS = 16 };
+typedef struct {
+  int top;        // screen row of modal interior top (item rows)
+  int left;       // screen col of modal interior left (clickable area)
+  int right;      // screen col of modal interior right
+  int item_count; // number of items rendered
+  bool disabled[MODAL_MAX_ITEMS];
+  // Per-row chevron screen columns: where the ◀ and ▶ glyphs sit
+  // on rows that include them (focused settings/watch-setup
+  // rows). -1 when the row has no chevron. Lets click handlers
+  // detect "user clicked the left/right chevron to adjust" vs.
+  // "user clicked the row to focus."
+  int left_chev_col[MODAL_MAX_ITEMS];
+  int right_chev_col[MODAL_MAX_ITEMS];
+  // Modal outer bounding box, used to differentiate "click inside
+  // modal but not on an item" from "click outside modal."
+  int outer_top;
+  int outer_bottom;
+  int outer_left;
+  int outer_right;
+  bool valid;
+} ModalHitMap;
+static ModalHitMap modal_hit_map;
+
 static void invalidate_blit_caches(void) {
   board_pixel_cache.valid = false;
   rack_pixel_cache.valid = false;
@@ -1313,8 +1444,15 @@ static int find_anchored_move_row(const TuiGameState *state) {
 // position — find_anchored_move_row resolves it against the
 // rows already prepared for this frame.
 static int effective_analysis_cursor(const TuiGameState *state) {
-  if (state == NULL || state->analysis_cursor < 0) {
-    return state == NULL ? -1 : state->analysis_cursor;
+  if (state == NULL) {
+    return -1;
+  }
+  if (state->analysis_cursor < 0) {
+    // Cursor on the [5] label rather than a specific candidate:
+    // implicitly highlight the top rank since that's the move
+    // the panel previews on the board. Falls back to -1 when
+    // there's nothing to preview.
+    return state->last_rendered_analysis_row_count > 0 ? 0 : -1;
   }
   if (state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE) {
     const int idx = find_anchored_move_row(state);
@@ -1335,7 +1473,7 @@ static int effective_analysis_cursor(const TuiGameState *state) {
 // inside a render frame holding state->mutex).
 static const Move *pick_analysis_preview_move(const TuiGameState *state,
                                               int *out_player_idx) {
-  if (state == NULL || state->analysis_cursor < 0) {
+  if (state == NULL) {
     return NULL;
   }
   const int idx = effective_analysis_cursor(state);
@@ -1381,6 +1519,16 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
       }
       return &hist_entry->endgame_moves_saved[idx];
     }
+    // Loaded GCG entry — no sim/endgame leaderboard, just the
+    // single move that was played. Surface it as the preview so
+    // the board ghosts the played tiles when the cursor lands on
+    // the "Plays" row.
+    if (hist_entry->loaded_move != NULL && idx == 0) {
+      if (out_player_idx != NULL) {
+        *out_player_idx = hist_entry->player_idx;
+      }
+      return hist_entry->loaded_move;
+    }
     return NULL;
   }
   // No history cursor — preview from live state. Endgame snapshot
@@ -1419,6 +1567,187 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
   return out_move;
 }
 
+// Reorder an alphagram-style string (e.g. "AEHIIRV" or "?AAEIN") so
+// it reads in the user's chosen rack-sort order. Used for the
+// rack + leave columns inside history entries — those strings are
+// pre-built engine-side as alphabetical-with-? alphagrams; we
+// re-bucket them at render time so the user sees rack/leave
+// orderings consistent with the live rack panel.
+static int alphagram_char_cmp(const void *a, const void *b) {
+  return *(const unsigned char *)a - *(const unsigned char *)b;
+}
+
+static void format_alphagram_for_sort(const char *in,
+                                      const LetterDistribution *ld,
+                                      TuiRackSort sort, char *out,
+                                      size_t out_size) {
+  if (out == NULL || out_size == 0) {
+    return;
+  }
+  out[0] = '\0';
+  if (in == NULL || ld == NULL) {
+    return;
+  }
+  // Bucket each input char into blanks / vowels / consonants. We
+  // also keep a flat "alphas" run (everything except blanks) in
+  // input order, so the alpha-with-? modes don't need to scan
+  // twice.
+  char blanks[32] = {0};
+  int nb = 0;
+  char vowels[32] = {0};
+  int nv = 0;
+  char cons[32] = {0};
+  int nc = 0;
+  char alphas[64] = {0};
+  int na = 0;
+  for (const char *p = in; *p != '\0'; p++) {
+    const char c = *p;
+    if (c == '?') {
+      if (nb < (int)sizeof(blanks)) {
+        blanks[nb++] = c;
+      }
+      continue;
+    }
+    if (na < (int)sizeof(alphas)) {
+      alphas[na++] = c;
+    }
+    // Map char back to ML for vowel classification. Linear scan
+    // over the LD's letter table — small (≤30ish entries), and
+    // alphagrams are short (≤7 chars), so this stays cheap.
+    bool is_vowel = false;
+    for (int ml = 1; ml < ld_get_size(ld); ml++) {
+      if (ld->ld_ml_to_hl[ml][0] == c && ld->ld_ml_to_hl[ml][1] == '\0') {
+        is_vowel = ld_get_is_vowel(ld, (MachineLetter)ml);
+        break;
+      }
+    }
+    if (is_vowel) {
+      if (nv < (int)sizeof(vowels)) {
+        vowels[nv++] = c;
+      }
+    } else {
+      if (nc < (int)sizeof(cons)) {
+        cons[nc++] = c;
+      }
+    }
+  }
+  // Sort each bucket alphabetically so the user-visible order
+  // doesn't depend on what the input happened to be. Committed
+  // rack_strs come from string_builder_add_rack (already in
+  // ml-order, so this is a no-op) — but the annotation editor's
+  // user-typed rack buffer can be in arbitrary entry order, and
+  // we don't want a typed "ACKQUEL" to surface as "AUECKQL".
+  if (na > 1) {
+    qsort(alphas, (size_t)na, 1, alphagram_char_cmp);
+  }
+  if (nv > 1) {
+    qsort(vowels, (size_t)nv, 1, alphagram_char_cmp);
+  }
+  if (nc > 1) {
+    qsort(cons, (size_t)nc, 1, alphagram_char_cmp);
+  }
+  size_t pos = 0;
+#define ALPHAGRAM_APPEND(buf, n)                                               \
+  do {                                                                         \
+    for (int _i = 0; _i < (n) && pos + 1 < out_size; _i++) {                   \
+      out[pos++] = (buf)[_i];                                                  \
+    }                                                                          \
+  } while (0)
+  switch (sort) {
+  case TUI_RACK_SORT_BLANKS_ALPHA:
+    ALPHAGRAM_APPEND(blanks, nb);
+    ALPHAGRAM_APPEND(alphas, na);
+    break;
+  case TUI_RACK_SORT_VOWELS:
+    ALPHAGRAM_APPEND(vowels, nv);
+    ALPHAGRAM_APPEND(cons, nc);
+    ALPHAGRAM_APPEND(blanks, nb);
+    break;
+  case TUI_RACK_SORT_BLANKS_VOWELS:
+    ALPHAGRAM_APPEND(blanks, nb);
+    ALPHAGRAM_APPEND(vowels, nv);
+    ALPHAGRAM_APPEND(cons, nc);
+    break;
+  case TUI_RACK_SORT_ALPHA:
+  case TUI_RACK_SORT_COUNT:
+  default:
+    ALPHAGRAM_APPEND(alphas, na);
+    ALPHAGRAM_APPEND(blanks, nb);
+    break;
+  }
+#undef ALPHAGRAM_APPEND
+  out[pos < out_size ? pos : out_size - 1] = '\0';
+}
+
+// Fill `out_slots` with the visible rack tiles for `rack` in the
+// display order chosen by `sort`. Returns the slot count. The
+// engine's internal rack ordering isn't touched — this is purely
+// presentation. Vowel grouping uses the letter-distribution's
+// is_vowel flag so the same setting works for any language.
+static int sort_rack_for_display(const Rack *rack,
+                                 const LetterDistribution *ld,
+                                 TuiRackSort sort, MachineLetter *out_slots,
+                                 int max_slots) {
+  if (rack == NULL || ld == NULL || out_slots == NULL || max_slots <= 0) {
+    return 0;
+  }
+  int n = 0;
+  const int ld_size = ld_get_size(ld);
+#define EMIT_ML(_ml)                                                           \
+  do {                                                                         \
+    const int _cnt = rack_get_letter(rack, (MachineLetter)(_ml));              \
+    for (int _c = 0; _c < _cnt && n < max_slots; _c++) {                       \
+      out_slots[n++] = (MachineLetter)(_ml);                                   \
+    }                                                                          \
+  } while (0)
+  switch (sort) {
+  case TUI_RACK_SORT_BLANKS_ALPHA:
+    // ? first, then A..Z. Machine-letter order already encodes
+    // this since BLANK_MACHINE_LETTER == 0.
+    for (int ml = 0; ml < ld_size && n < max_slots; ml++) {
+      EMIT_ML(ml);
+    }
+    break;
+  case TUI_RACK_SORT_BLANKS_VOWELS:
+    EMIT_ML(BLANK_MACHINE_LETTER);
+    for (int ml = 1; ml < ld_size && n < max_slots; ml++) {
+      if (ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        EMIT_ML(ml);
+      }
+    }
+    for (int ml = 1; ml < ld_size && n < max_slots; ml++) {
+      if (!ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        EMIT_ML(ml);
+      }
+    }
+    break;
+  case TUI_RACK_SORT_VOWELS:
+    for (int ml = 1; ml < ld_size && n < max_slots; ml++) {
+      if (ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        EMIT_ML(ml);
+      }
+    }
+    for (int ml = 1; ml < ld_size && n < max_slots; ml++) {
+      if (!ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        EMIT_ML(ml);
+      }
+    }
+    EMIT_ML(BLANK_MACHINE_LETTER);
+    break;
+  case TUI_RACK_SORT_ALPHA:
+  case TUI_RACK_SORT_COUNT:
+  default:
+    // Default: A..Z first, blank last.
+    for (int ml = 1; ml < ld_size && n < max_slots; ml++) {
+      EMIT_ML(ml);
+    }
+    EMIT_ML(BLANK_MACHINE_LETTER);
+    break;
+  }
+#undef EMIT_ML
+  return n;
+}
+
 // Mark which rack slots correspond to tiles consumed by the
 // currently-previewed move. Visited in slot order so the first
 // occurrence of each used letter gets ghosted (the rack panel
@@ -1432,14 +1761,21 @@ static void compute_rack_ghost_mask(const TuiGameState *state,
     out_ghost[i] = false;
   }
   const Move *m = pick_analysis_preview_move(state, NULL);
-  if (m == NULL || move_get_type(m) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+  if (m == NULL) {
+    return;
+  }
+  const game_event_t mtype = move_get_type(m);
+  if (mtype != GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      mtype != GAME_EVENT_EXCHANGE) {
     return;
   }
   // Count rack-tiles needed by the move. Blanks consume a blank
   // rack tile (ml = 0) regardless of which letter they stand in
-  // for, so strip the blank bit before bucketing.
+  // for, so strip the blank bit before bucketing. Exchanges have
+  // no PLAYED_THROUGH_MARKER positions; placements may.
   int needed[256] = {0};
-  const int n = move_get_tiles_length(m);
+  const int n = mtype == GAME_EVENT_EXCHANGE ? move_get_tiles_played(m)
+                                              : move_get_tiles_length(m);
   for (int t = 0; t < n; t++) {
     const MachineLetter tile = move_get_tile(m, t);
     if (tile == PLAYED_THROUGH_MARKER) {
@@ -1614,7 +1950,58 @@ int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column) {
   return -1;
 }
 
+int tui_modal_item_at(int y, int x) {
+  if (!modal_hit_map.valid) {
+    return -2;
+  }
+  // Outside the modal entirely (including the shadow column/row).
+  if (y < modal_hit_map.outer_top || y > modal_hit_map.outer_bottom ||
+      x < modal_hit_map.outer_left || x > modal_hit_map.outer_right) {
+    return -2;
+  }
+  // Inside the modal but on the chrome (top/bottom border, side
+  // columns). The clickable item rectangle runs from
+  // (top, left) to (top + item_count - 1, right) inclusive.
+  if (y < modal_hit_map.top ||
+      y >= modal_hit_map.top + modal_hit_map.item_count ||
+      x < modal_hit_map.left || x > modal_hit_map.right) {
+    return -1;
+  }
+  const int idx = y - modal_hit_map.top;
+  if (idx < 0 || idx >= modal_hit_map.item_count) {
+    return -1;
+  }
+  // Disabled items count as chrome — clicks are absorbed but not
+  // activated.
+  if (modal_hit_map.disabled[idx]) {
+    return -1;
+  }
+  return idx;
+}
+
+TuiModalChevron tui_modal_chevron_at(int y, int x) {
+  const int idx = tui_modal_item_at(y, x);
+  if (idx < 0) {
+    return TUI_MODAL_CHEVRON_NONE;
+  }
+  // The chevron column was recorded as the screen col of the
+  // glyph cell itself. Accept that exact col as a hit.
+  if (modal_hit_map.left_chev_col[idx] >= 0 &&
+      x == modal_hit_map.left_chev_col[idx]) {
+    return TUI_MODAL_CHEVRON_LEFT;
+  }
+  if (modal_hit_map.right_chev_col[idx] >= 0 &&
+      x == modal_hit_map.right_chev_col[idx]) {
+    return TUI_MODAL_CHEVRON_RIGHT;
+  }
+  return TUI_MODAL_CHEVRON_NONE;
+}
+
 int tui_history_cursor_at(int y, int x) {
+  return tui_history_cursor_field_at(y, x, NULL);
+}
+
+int tui_history_cursor_field_at(int y, int x, int *out_field) {
   // Outside the History panel entirely.
   if (y < history_panel_top || y > history_panel_bottom ||
       x < history_panel_left || x > history_panel_right) {
@@ -1626,6 +2013,11 @@ int tui_history_cursor_at(int y, int x) {
     const HistoryRowMap *m = &history_row_map[i];
     if (y >= m->top_row && y <= m->bottom_row && x >= m->left_col &&
         x <= m->right_col) {
+      if (out_field != NULL) {
+        // Row offset within the entry. 0 = top (move text),
+        // 1 = second row (rack), 2+ = end-bonus extension.
+        *out_field = y - m->top_row;
+      }
       return m->idx;
     }
   }
@@ -2785,9 +3177,14 @@ static void render_board_labels_pixel(struct ncplane *plane,
   label_pixel_cache.param_b = state->antialias ? 1 : 0;
 }
 
-// Count of letters currently on the board (regular + blanks).
-static int board_tile_count(const Game *game) {
-  const Board *board = game_get_board(game);
+// Count of letters currently on the given board (regular + blanks).
+// Pass NULL to get 0 — callers route the result of pick_render_board
+// here so the count tracks whatever the user is currently viewing
+// (live game vs. a history-cursor snapshot).
+static int board_tile_count(const Board *board) {
+  if (board == NULL) {
+    return 0;
+  }
   int count = 0;
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -2806,7 +3203,8 @@ static void render_board_box(struct ncplane *plane, const Theme *theme,
                              const TuiGameState *state, const Layout *L) {
   const int height = L->board_bottom_row + 2; // top border .. bottom border
   char title[32];
-  snprintf(title, sizeof(title), "Board (%d)", board_tile_count(state->game));
+  snprintf(title, sizeof(title), "Board (%d)",
+           board_tile_count(pick_render_board(state)));
   const bool focused = state->focused_panel == TUI_FOCUS_BOARD;
   draw_box_styled(plane, theme, 0, 0, height, L->board_width, title,
                   TUI_FOCUS_BOARD, focused);
@@ -3047,8 +3445,21 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                                     const TuiGameState *state, const Layout *L,
                                     int start_col, int tile_count) {
   struct notcurses *nc = ncplane_notcurses(plane);
-  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL ||
-      tile_count <= 0) {
+  if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
+    return;
+  }
+  // When the rack drops to 0 tiles (e.g. P2 just went out), fall
+  // through to the cleanup loop below so the previously-rendered
+  // pixel planes get destroyed instead of sitting on screen
+  // showing stale DI/etc tiles.
+  if (tile_count <= 0) {
+    for (int i = 0; i < RACK_SIZE; i++) {
+      if (rack_tile_planes[i] != NULL) {
+        ncplane_destroy(rack_tile_planes[i]);
+        rack_tile_planes[i] = NULL;
+        rack_tile_cache[i].valid = false;
+      }
+    }
     return;
   }
   const int cell_w = L->board_cell_w; // 4
@@ -3077,19 +3488,11 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   for (int i = 0; i < RACK_SIZE; i++) {
     slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
   }
-  int slot_idx = 0;
-  if (rack != NULL) {
-    for (int ml = 0; ml < ld_get_size(state->ld) && slot_idx < tile_count &&
-                     slot_idx < RACK_SIZE;
-         ml++) {
-      const int count = rack_get_letter(rack, (MachineLetter)ml);
-      for (int copy = 0;
-           copy < count && slot_idx < tile_count && slot_idx < RACK_SIZE;
-           copy++) {
-        slot_letters[slot_idx++] = (MachineLetter)ml;
-      }
-    }
-  }
+  const int slot_max =
+      tile_count < RACK_SIZE ? tile_count : RACK_SIZE;
+  int slot_idx =
+      sort_rack_for_display(rack, state->ld, state->rack_sort,
+                            slot_letters, slot_max);
   bool slot_ghost[RACK_SIZE];
   compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
   for (int i = slot_idx; i < RACK_SIZE; i++) {
@@ -3112,16 +3515,25 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     RackTileCache *rc = &rack_tile_cache[i];
     const int tile_score =
         (ml == 0) ? 0 : equity_to_int(ld_get_score(state->ld, ml));
+    const int screen_top = L->rack_top + 1;
+    const int screen_left = start_col + i * cell_w;
+    // Cache hit on contents → skip the pixel composite. But the
+    // rack's start_col shifts as the tile count changes (the rack
+    // is centered on the board), so always nudge the cached plane
+    // to the current screen position before continuing. Without
+    // this, a slot whose letter happened to survive a re-sort
+    // (e.g. "U" at slot 0 across "U" → "UJ" → "UJN" with the
+    // VOWELS sort) keeps drawing at the previous frame's start_col
+    // and ends up overlapping the freshly-positioned neighbor.
     if (rc->valid && rc->letter == (int)ml && rc->player_idx == player_idx &&
         rc->score == tile_score && rc->antialias == state->antialias &&
         rc->ghost == ghost &&
         rc->score_subscripts == (int)state->score_subscripts &&
         rc->cdy == cdy && rc->cdx == cdx && rc->scale == L->scale &&
         rack_tile_planes[i] != NULL) {
+      ncplane_move_yx(rack_tile_planes[i], screen_top, screen_left);
       continue;
     }
-    const int screen_top = L->rack_top + 1;
-    const int screen_left = start_col + i * cell_w;
     if (rack_tile_planes[i] == NULL) {
       ncplane_options opts = {0};
       opts.y = screen_top;
@@ -3206,6 +3618,18 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
     start_col = 1;
   }
 
+  if (total_letters == 0) {
+    // Idle / pre-game state: rack hasn't been drawn yet. Print a
+    // single dim placeholder centered in the panel interior. The
+    // 2x pixel path still gets called below so any leftover rack
+    // pixel planes from a prior game get destroyed.
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    const char *msg = "(no rack specified)";
+    const int msg_col = 1 + (L->board_width - 2 - (int)strlen(msg)) / 2;
+    ncplane_putstr_yx(plane, L->rack_top + 1, msg_col, msg);
+  }
+
   if (L->scale >= 2 && state->glyph_cache != NULL) {
     render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters);
     return;
@@ -3222,28 +3646,21 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   // Cell-text rack: row sits one below the box top. Halfwidth uses
   // single-char glyphs, fullwidth uses ld_ml_to_alt_hl.
   const bool halfwidth = (cell_w == 1);
-  // Build the same slot_letters / ghost mask the pixel renderer
-  // uses so the text mode visually matches: rack tiles consumed
-  // by the previewed move render gray.
+  // Build slot_letters in the user's chosen display order, then
+  // compute the ghost mask against it so previewed-move tiles
+  // render gray in the same positions the pixel renderer uses.
   MachineLetter slot_letters[RACK_SIZE];
-  int slot_idx = 0;
-  for (int ml2 = 0; ml2 < ld_get_size(ld) && slot_idx < RACK_SIZE; ml2++) {
-    const int cnt = rack_get_letter(rack, (MachineLetter)ml2);
-    for (int copy = 0; copy < cnt && slot_idx < RACK_SIZE; copy++) {
-      slot_letters[slot_idx++] = (MachineLetter)ml2;
-    }
-  }
+  const int slot_idx =
+      sort_rack_for_display(rack, ld, state->rack_sort, slot_letters,
+                            RACK_SIZE);
   bool slot_ghost[RACK_SIZE];
   compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
   const ThemeRgb ghost_fg = {.r = 102, .g = 102, .b = 102};
   int col_offset = 0;
-  int rendered_idx = 0;
-  for (int ml = 0; ml < ld_get_size(ld); ml++) {
-    const int count = rack_get_letter(rack, (MachineLetter)ml);
-    for (int copy = 0; copy < count; copy++) {
-      const bool is_ghost =
-          rendered_idx < RACK_SIZE ? slot_ghost[rendered_idx] : false;
-      rendered_idx++;
+  for (int i = 0; i < slot_idx; i++) {
+    const MachineLetter ml = slot_letters[i];
+    {
+      const bool is_ghost = slot_ghost[i];
       if (is_ghost) {
         theme_apply_fg(plane, ghost_fg);
         theme_apply_bg(plane, theme->bg);
@@ -3324,8 +3741,62 @@ static void render_bag_divider(struct ncplane *plane, const Theme *theme,
 
 static void render_bag_panel(struct ncplane *plane, const Theme *theme,
                              const TuiGameState *state, const Layout *L) {
-  const Bag *bag = game_get_bag(state->game);
-  const int bag_count = bag_get_letters(bag);
+  // Bag inventory follows the history-cursor view, not the live
+  // game state, so navigating through loaded turns shows what the
+  // bag looked like at each point. The inventory we display is
+  // "unseen by the on-turn player" = bag + opponent's rack, which
+  // is identical to ld_total − board − on_turn_rack. Computing it
+  // that way avoids needing per-turn bag snapshots.
+  const LetterDistribution *ld = state->ld;
+  const int ld_size = ld_get_size(ld);
+  int counts[64] = {0};
+
+  const Board *render_board = pick_render_board(state);
+  const TuiHistoryEntry *hview = pick_history_view(state);
+  const Rack *on_turn_rack = NULL;
+  if (hview != NULL && hview->rack_before != NULL) {
+    on_turn_rack = hview->rack_before;
+  } else if (state->game != NULL) {
+    on_turn_rack = player_get_rack(
+        game_get_player(state->game, game_get_player_on_turn_index(state->game)));
+  }
+
+  if (render_board != NULL) {
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        MachineLetter ml = board_get_letter(render_board, row, col);
+        if (ml == ALPHABET_EMPTY_SQUARE_MARKER) {
+          continue;
+        }
+        // Played blanks consume a blank tile from the bag; map them
+        // back to ml=0 for distribution accounting.
+        if (ml & BLANK_MASK) {
+          ml = 0;
+        }
+        if (ml < (int)(sizeof(counts) / sizeof(int))) {
+          counts[ml]++;
+        }
+      }
+    }
+  }
+
+  int bag_count = 0;
+  for (int ml = 0; ml < ld_size && ml < (int)(sizeof(counts) / sizeof(int));
+       ml++) {
+    const int dist = ld_get_dist(ld, (MachineLetter)ml);
+    const int on_rack =
+        on_turn_rack != NULL ? rack_get_letter(on_turn_rack, (MachineLetter)ml)
+                             : 0;
+    // ld_total − on_board − on_turn_rack. Clamp at 0 in case the
+    // snapshot data is slightly inconsistent (defensive).
+    int v = dist - counts[ml] - on_rack;
+    if (v < 0) {
+      v = 0;
+    }
+    counts[ml] = v;
+    bag_count += v;
+  }
+
   char title[32];
   snprintf(title, sizeof(title), "Bag (%d)", bag_count);
 
@@ -3347,27 +3818,69 @@ static void render_bag_panel(struct ncplane *plane, const Theme *theme,
   draw_box_styled(plane, theme, L->bag_top, 0, height, L->board_width, title,
                   TUI_FOCUS_BAG, bag_focused);
 
-  // Tally bag + off-turn rack into a per-ml count array (the on-turn rack
-  // is "seen", so it doesn't count as unseen).
-  const LetterDistribution *ld = state->ld;
-  const int ld_size = ld_get_size(ld);
-  int counts[64] = {0};
-  for (int ml = 0; ml < ld_size && ml < (int)(sizeof(counts) / sizeof(int));
-       ml++) {
-    counts[ml] = bag_get_letter(bag, (MachineLetter)ml);
-  }
-  const int off_turn = 1 - game_get_player_on_turn_index(state->game);
-  const Rack *off_rack =
-      player_get_rack(game_get_player(state->game, off_turn));
-  for (int ml = 0; ml < ld_size && ml < (int)(sizeof(counts) / sizeof(int));
-       ml++) {
-    counts[ml] += rack_get_letter(off_rack, (MachineLetter)ml);
+  // Build the dense inline "?? AAAAAAA BB ..." string. The walk
+  // order matches the user's rack_sort preference so the bag
+  // listing follows the same grouping as their tiles in the rack:
+  //   ALPHA          → A..Z then ?
+  //   BLANKS_ALPHA   → ? then A..Z
+  //   VOWELS         → vowels, consonants, ?
+  //   BLANKS_VOWELS  → ?, vowels, consonants
+  // Build the order as a sequence of ml indices (with one slot
+  // for the blank) and then walk it.
+  int ml_order[64];
+  int ml_order_n = 0;
+  switch (state->rack_sort) {
+  case TUI_RACK_SORT_BLANKS_ALPHA:
+    for (int ml = 0; ml < ld_size && ml_order_n < 64; ml++) {
+      ml_order[ml_order_n++] = ml;
+    }
+    break;
+  case TUI_RACK_SORT_BLANKS_VOWELS:
+    if (ml_order_n < 64) {
+      ml_order[ml_order_n++] = BLANK_MACHINE_LETTER;
+    }
+    for (int ml = 1; ml < ld_size && ml_order_n < 64; ml++) {
+      if (ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        ml_order[ml_order_n++] = ml;
+      }
+    }
+    for (int ml = 1; ml < ld_size && ml_order_n < 64; ml++) {
+      if (!ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        ml_order[ml_order_n++] = ml;
+      }
+    }
+    break;
+  case TUI_RACK_SORT_VOWELS:
+    for (int ml = 1; ml < ld_size && ml_order_n < 64; ml++) {
+      if (ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        ml_order[ml_order_n++] = ml;
+      }
+    }
+    for (int ml = 1; ml < ld_size && ml_order_n < 64; ml++) {
+      if (!ld_get_is_vowel(ld, (MachineLetter)ml)) {
+        ml_order[ml_order_n++] = ml;
+      }
+    }
+    if (ml_order_n < 64) {
+      ml_order[ml_order_n++] = BLANK_MACHINE_LETTER;
+    }
+    break;
+  case TUI_RACK_SORT_ALPHA:
+  case TUI_RACK_SORT_COUNT:
+  default:
+    for (int ml = 1; ml < ld_size && ml_order_n < 64; ml++) {
+      ml_order[ml_order_n++] = ml;
+    }
+    if (ml_order_n < 64) {
+      ml_order[ml_order_n++] = BLANK_MACHINE_LETTER;
+    }
+    break;
   }
 
-  // Build the dense inline "?? AAAAAAA BB ..." string.
   char line[512];
   size_t pos = 0;
-  for (int ml = 0; ml < ld_size; ml++) {
+  for (int k = 0; k < ml_order_n; k++) {
+    const int ml = ml_order[k];
     if (counts[ml] == 0) {
       continue;
     }
@@ -3494,7 +4007,12 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
   if (used < 0.0) {
     used = 0.0;
   }
-  if (game_get_player_on_turn_index(state->game) == player_idx &&
+  // Only tick the live elapsed-time portion when a game is actually
+  // in progress (the bot worker is running). At app launch the bot
+  // is idle behind the startup menu — without this gate the on-turn
+  // clock would count down even though no game has started.
+  if (state->bot_started &&
+      game_get_player_on_turn_index(state->game) == player_idx &&
       !game_over(state->game)) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
@@ -3542,11 +4060,26 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   theme_apply_bg(plane, theme->bg);
   ncplane_putstr_yx(plane, content_row, content_left,
                     on_turn ? "\xe2\x96\xb6 " : "  ");
-  // "P1" / "P2" in the player's own accent color so the header reads
-  // as belonging to that player even when they're off-turn.
+  // Player name (from a loaded GCG) if set; else fall back to the
+  // generic "P1"/"P2" label. Always in the player's accent so the
+  // header reads as belonging to that player even when off-turn.
+  // Truncated to MAX_NAME_W so longer names like "New_Player_1"
+  // don't push out the rack/score area. ASCII byte length is
+  // used as a column count, which is accurate for the nicknames
+  // we see in practice.
+  enum { MAX_NAME_W = 10 };
   theme_apply_fg(plane, player_accent);
-  char name[8];
-  snprintf(name, sizeof(name), "P%d", player_idx + 1);
+  char name[32];
+  if (state->player_names[player_idx][0] != '\0') {
+    snprintf(name, sizeof(name), "%s", state->player_names[player_idx]);
+  } else {
+    snprintf(name, sizeof(name), "P%d", player_idx + 1);
+  }
+  int name_w = (int)strlen(name);
+  if (name_w > MAX_NAME_W) {
+    name[MAX_NAME_W] = '\0';
+    name_w = MAX_NAME_W;
+  }
   ncplane_putstr(plane, name);
 
   // Right side: clock and score, separated by a single col gap. Clock
@@ -3556,65 +4089,89 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   char score_str[16];
   snprintf(score_str, sizeof(score_str), "%d",
            pick_render_score(state, player_idx));
-  const double remaining = pick_render_clock_seconds(state, player_idx);
-  char clock_str[16];
-  format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
-               sizeof(clock_str));
-
-  const int clock_len = (int)strlen(clock_str);
-  const int clock_col = content_right - clock_len + 1;
-  theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
-  theme_apply_bg(plane, theme->bg);
-  ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
-
-  const int score_len = (int)strlen(score_str);
-  const int score_col = clock_col - 1 - score_len;
+  // Clocks are only meaningful for live Watch games. In CGP / load
+  // mode the bot worker isn't running and the displayed times
+  // don't reflect any real time control, so we hide them and
+  // right-align the score against the pill's right edge.
+  const bool show_clock = state->bot_started;
+  int score_col;
+  if (show_clock) {
+    const double remaining = pick_render_clock_seconds(state, player_idx);
+    char clock_str[16];
+    format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
+                 sizeof(clock_str));
+    const int clock_len = (int)strlen(clock_str);
+    const int clock_col = content_right - clock_len + 1;
+    theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
+    const int score_len = (int)strlen(score_str);
+    score_col = clock_col - 1 - score_len;
+  } else {
+    const int score_len = (int)strlen(score_str);
+    score_col = content_right - score_len + 1;
+  }
   theme_apply_fg(plane, theme->fg);
   ncplane_putstr_yx(plane, content_row, score_col, score_str);
 
-  // Rack between the name and the score, on tile_bg. After "▶ P1 "
-  // (4 chars + 1 gap) the rack starts at content_left + 5. Each tile
-  // is 2 cols wide in fullwidth mode, 1 col in halfwidth — halfwidth
-  // kicks in when the right column is too narrow for two fullwidth
-  // pills side-by-side but still wide enough to fit two halfwidth
-  // pills.
+  // Rack between the name and the score, on tile_bg. Anchored to
+  // the right edge of the name + a 1-col gap, so longer names
+  // (from loaded GCGs) don't get clobbered by tile pills. Each
+  // tile is 2 cols wide in fullwidth mode, 1 col in halfwidth —
+  // halfwidth kicks in when the right column is too narrow for
+  // two fullwidth pills side-by-side but still wide enough to
+  // fit two halfwidth pills.
   const Rack *rack = pick_render_rack(state, player_idx);
   if (rack == NULL) {
     return;
   }
   const LetterDistribution *ld = state->ld;
-  const int rack_left = content_left + 5;
+  // content_left + 2 = column after the arrow / 2-space prefix.
+  // + name_w = past the name. + 1 = one-col gap before the rack.
+  const int rack_left = content_left + 2 + name_w + 1;
   const int rack_right_max = score_col - 2;
   const int tile_w = halfwidth ? 1 : 2;
+  // Idle state: no rack tiles to render. Print a dim placeholder
+  // where the tiles would normally appear.
+  if (rack_get_total_letters(rack) == 0) {
+    theme_apply_fg(plane, theme->dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    const char *msg = "(no rack)";
+    if (rack_left + (int)strlen(msg) - 1 <= rack_right_max) {
+      ncplane_putstr_yx(plane, content_row, rack_left, msg);
+    }
+    return;
+  }
   if (rack_right_max >= rack_left + (tile_w - 1)) {
     int rcol = rack_left;
     theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
                                           : theme->rack_tile1_fg);
     theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
                                           : theme->rack_tile1_bg);
-    for (int ml = 0;
-         ml < ld_get_size(ld) && rcol + (tile_w - 1) <= rack_right_max; ml++) {
-      const int count = rack_get_letter(rack, (MachineLetter)ml);
-      for (int copy = 0;
-           copy < count && rcol + (tile_w - 1) <= rack_right_max; copy++) {
-        if (halfwidth) {
-          // Halfwidth blank: plain "?" glyph. The previous ZWNJ-
-          // splicing-between-adjacent-blanks trick caused the row
-          // containing the blanks to drop out on some terminals.
-          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-          ncplane_putstr_yx(plane, content_row, rcol, ascii);
+    MachineLetter pill_slots[RACK_SIZE];
+    const int pill_slot_count =
+        sort_rack_for_display(rack, ld, state->rack_sort, pill_slots,
+                              RACK_SIZE);
+    for (int i = 0;
+         i < pill_slot_count && rcol + (tile_w - 1) <= rack_right_max; i++) {
+      const MachineLetter ml = pill_slots[i];
+      if (halfwidth) {
+        // Halfwidth blank: plain "?" glyph. The previous ZWNJ-
+        // splicing-between-adjacent-blanks trick caused the row
+        // containing the blanks to drop out on some terminals.
+        const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+        ncplane_putstr_yx(plane, content_row, rcol, ascii);
+      } else {
+        const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
+        if (fullwidth[0] != '\0') {
+          ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
         } else {
-          const char *fullwidth = ld->ld_ml_to_alt_hl[ml];
-          if (fullwidth[0] != '\0') {
-            ncplane_putstr_yx(plane, content_row, rcol, fullwidth);
-          } else {
-            const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
-            ncplane_putstr_yx(plane, content_row, rcol, " ");
-            ncplane_putstr(plane, ascii);
-          }
+          const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+          ncplane_putstr_yx(plane, content_row, rcol, " ");
+          ncplane_putstr(plane, ascii);
         }
-        rcol += tile_w;
       }
+      rcol += tile_w;
     }
   }
 }
@@ -3719,11 +4276,41 @@ static void render_move_styled(struct ncplane *plane, int row, int col,
         seg_end++; // include the close bracket in the rendered segment
       }
     } else {
+      // Bold segment: a run of characters before the next paren or
+      // bracket. We subdivide it so the '.' playthrough marker —
+      // a fallback for moves whose position prefix couldn't be
+      // parsed and so didn't get its dots resolved to (L) — still
+      // renders non-bold. Lowercase letters in this segment are
+      // newly-played blanks (the GCG convention is bare lowercase
+      // for new blanks; played-through blanks come pre-wrapped as
+      // (l)) and render bold like the rest. seg_bold is set
+      // per-sub-run inside the inner loop, so the outer
+      // initialization is just a placeholder.
       seg_bold = true;
       seg_end = p;
       while (seg_end < end && *seg_end != '(' && *seg_end != '[') {
         seg_end++;
       }
+      const char *q = seg_start;
+      while (q < seg_end) {
+        const char *run_start = q;
+        const bool run_dim = (*q == '.');
+        while (q < seg_end && (*q == '.') == run_dim) {
+          q++;
+        }
+        ncplane_set_styles(plane, run_dim ? 0 : NCSTYLE_BOLD);
+        char rbuf[64];
+        size_t rlen = (size_t)(q - run_start);
+        if (rlen >= sizeof(rbuf)) {
+          rlen = sizeof(rbuf) - 1;
+        }
+        memcpy(rbuf, run_start, rlen);
+        rbuf[rlen] = '\0';
+        ncplane_putstr_yx(plane, row, x, rbuf);
+        x += (int)strlen(rbuf);
+      }
+      p = seg_end;
+      continue;
     }
     ncplane_set_styles(plane, seg_bold ? NCSTYLE_BOLD : 0);
     char buf[64];
@@ -3748,11 +4335,16 @@ static void render_move_styled(struct ncplane *plane, int row, int col,
 }
 
 static void render_history_entry(struct ncplane *plane, const Theme *theme,
+                                 const TuiGameState *state,
                                  const TuiHistoryEntry *e, int idx, int row,
                                  int interior_left, int interior_right,
                                  int row_bottom_inclusive, int leave_col_w,
                                  int rank_digits, bool cursor_here,
-                                 bool history_focused) {
+                                 bool history_focused, bool clocks_active,
+                                 const LetterDistribution *ld,
+                                 TuiRackSort rack_sort) {
+  const bool editing =
+      state != NULL && state->edit_history_idx == idx && e->pending;
   // Pick the player-specific text-color pair so the entry reads as
   // belonging to whichever player made the move.
   const ThemeRgb player_fg =
@@ -3856,23 +4448,178 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row, interior_left, prefix);
   }
 
-  if (e->pending) {
+  if (editing) {
+    // Annotation editor — render only the MOVE buffer on row 1
+    // here. Row 2 (rack) is painted in its own block below.
+    //
+    // Layout mirrors the committed-entry row so the eye doesn't
+    // jump when an edit commits:
+    //   "1> [move zone gray___] [leave gray]    +score"
+    // The +score sits flush with interior_right on the normal
+    // bg, exactly like a committed turn's delta. The leave zone
+    // (gray) holds a "·" placeholder until inferred. The move
+    // zone (gray) fills the rest of the row up to a 1-cell gap
+    // before the leave.
+    const int base_col = interior_left + (int)strlen(prefix);
+    const ThemeRgb gray_bg = {55, 55, 60};
+    const ThemeRgb white_bg = {255, 255, 255};
+    // Reserve a fixed 4-cell strip at the right edge for "+100".
+    // This matches the committed-entry layout (delta_col =
+    // interior_right - delta_len + 1) so columns line up.
+    const int score_col_w = 4;
+    const int score_col_right = interior_right;
+    const int score_col_left = score_col_right - score_col_w + 1;
+    const int leave_zone_w = 1; // "·" or 1-tile leave preview
+    const int leave_zone_right = score_col_left - 2; // 1-cell gap
+    const int leave_zone_left = leave_zone_right - leave_zone_w + 1;
+    const int move_zone_left = base_col;
+    const int move_zone_right = leave_zone_left - 2; // 1-cell gap
+    // Paint move zone background.
+    theme_apply_bg(plane, gray_bg);
+    theme_apply_fg(plane, theme->dim_fg);
+    for (int c = move_zone_left; c <= move_zone_right && c <= interior_right;
+         c++) {
+      ncplane_putstr_yx(plane, row, c, " ");
+    }
+    // Move buffer text overlay (preserves gray bg).
+    const char *buf = state->edit_move_buf;
+    const int buf_len = state->edit_move_len;
+    const ThemeRgb move_txt_fg =
+        state->edit_move_valid ? player_fg : theme->error_fg;
+    for (int j = 0; j < buf_len; j++) {
+      const int col = move_zone_left + j;
+      if (col > move_zone_right) {
+        break;
+      }
+      theme_apply_fg(plane, move_txt_fg);
+      theme_apply_bg(plane, gray_bg);
+      char ch[2] = {buf[j], '\0'};
+      ncplane_putstr_yx(plane, row, col, ch);
+    }
+    // Paint leave zone background. If the parser produced a
+    // non-empty leave (rack tiles minus the move's played
+    // letters), render those letters sorted; otherwise show
+    // the "·" placeholder used elsewhere for an empty/bingo
+    // leave.
+    if (leave_zone_left > move_zone_right) {
+      theme_apply_bg(plane, gray_bg);
+      theme_apply_fg(plane, player_dim_fg);
+      for (int c = leave_zone_left; c <= leave_zone_right; c++) {
+        ncplane_putstr_yx(plane, row, c, " ");
+      }
+      if (state->edit_move_leave[0] != '\0') {
+        char sorted_leave[24];
+        format_alphagram_for_sort(state->edit_move_leave, state->ld,
+                                  state->rack_sort, sorted_leave,
+                                  sizeof(sorted_leave));
+        ncplane_putstr_yx(plane, row, leave_zone_left, sorted_leave);
+      } else {
+        ncplane_putstr_yx(plane, row, leave_zone_left, "\xc2\xb7");
+      }
+    }
+    // "+score" right-anchored at interior_right on the normal
+    // (non-gray) background, bold player accent — same look as a
+    // committed turn's delta. Rendered after the gray zones so
+    // it never gets painted over.
+    if (state->edit_move_score >= 0) {
+      char score_str[8];
+      snprintf(score_str, sizeof(score_str), "+%d", state->edit_move_score);
+      const int score_len = (int)strlen(score_str);
+      const int score_col = score_col_right - score_len + 1;
+      theme_apply_fg(plane, player_fg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row, score_col, score_str);
+      ncplane_set_styles(plane, 0);
+    }
+    // Block cursor — only painted when this field has focus.
+    // Solid white background overrides the gray cell so the
+    // single insertion point is unambiguous.
+    if (state->edit_field == TUI_EDIT_FIELD_MOVE) {
+      const int cur_col = move_zone_left + state->edit_move_cursor;
+      if (cur_col >= move_zone_left && cur_col <= move_zone_right) {
+        char ch[2] = {' ', '\0'};
+        if (state->edit_move_cursor < buf_len) {
+          ch[0] = buf[state->edit_move_cursor];
+        }
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, white_bg);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+        ncplane_putstr_yx(plane, row, cur_col, ch);
+        ncplane_set_styles(plane, 0);
+      }
+    }
+    // Restore default bg for any code that follows.
+    theme_apply_bg(plane, theme->bg);
+  } else if (e->pending && e->move_str[0] != '\0') {
+    // Annotation in progress: the user has committed a move
+    // into this still-pending row (via Enter on the move field).
+    // Render the move text + leave + "+score" the same way a
+    // finalized entry would, so closing the editor doesn't make
+    // the committed text disappear.
+    render_move_styled(plane, row, interior_left + (int)strlen(prefix),
+                       e->move_str, /*hide_parens=*/true,
+                       /*hide_playthrough_parens=*/false);
+    char delta_str[16];
+    snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
+    const int delta_len = (int)strlen(delta_str);
+    const int delta_col = interior_right - delta_len + 1;
+    if (delta_col > interior_left + (int)strlen(prefix)) {
+      theme_apply_fg(plane, player_fg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row, delta_col, delta_str);
+      ncplane_set_styles(plane, 0);
+    }
+    // Leave column — same right-anchored geometry committed
+    // turns use (4 cells right of interior_right for the delta,
+    // then leave snug to its left). Empty leave shows the "·"
+    // bingo glyph; otherwise the alphagrammed leave.
+    {
+      const bool empty = e->leave_str[0] == '\0';
+      char sorted_leave[24];
+      if (!empty && ld != NULL) {
+        format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
+                                  sizeof(sorted_leave));
+      } else {
+        sorted_leave[0] = '\0';
+      }
+      const char *leave_text = empty ? "\xc2\xb7" : sorted_leave;
+      const int leave_w = empty ? 1 : (int)strlen(leave_text);
+      int leave_right_edge = interior_right - 4;
+      if (leave_right_edge >= delta_col) {
+        leave_right_edge = delta_col - 1;
+      }
+      const int leave_col = leave_right_edge - leave_w + 1;
+      if (leave_col > interior_left + (int)strlen(prefix)) {
+        theme_apply_fg(plane, player_dim_fg);
+        theme_apply_bg(plane, theme->bg);
+        ncplane_set_styles(plane, 0);
+        ncplane_putstr_yx(plane, row, leave_col, leave_text);
+      }
+    }
+  } else if (e->pending) {
     // Bot is still computing this turn — show a braille spinner where
     // the move notation will go and leave the +score column blank.
     // 10-frame cycle at ~80ms per frame derives from CLOCK_MONOTONIC
     // so the animation runs even when the renderer is otherwise idle.
-    static const char *const spinner_frames[] = {
-        "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
-        "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
-        "\xe2\xa0\x87", "\xe2\xa0\x8f",
-    };
-    enum { SPINNER_FRAMES = 10 };
-    struct timespec ts;
-    clock_gettime(CLOCK_MONOTONIC, &ts);
-    const uint64_t ms =
-        (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
-    const int frame = (int)((ms / 80) % SPINNER_FRAMES);
-    ncplane_putstr(plane, spinner_frames[frame]);
+    //
+    // Skip the spinner in CGP / non-bot mode: no one is "thinking,"
+    // and showing a perpetual spinner reads as the app being busy.
+    if (clocks_active) {
+      static const char *const spinner_frames[] = {
+          "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
+          "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
+          "\xe2\xa0\x87", "\xe2\xa0\x8f",
+      };
+      enum { SPINNER_FRAMES = 10 };
+      struct timespec ts;
+      clock_gettime(CLOCK_MONOTONIC, &ts);
+      const uint64_t ms =
+          (uint64_t)ts.tv_sec * 1000ULL + (uint64_t)(ts.tv_nsec / 1000000L);
+      const int frame = (int)((ms / 80) % SPINNER_FRAMES);
+      ncplane_putstr(plane, spinner_frames[frame]);
+    }
   } else {
     // All paren groups in the engine's move notation are playthrough
     // (the lowercase-inside-parens case is a playthrough blank, not a
@@ -3900,7 +4647,14 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     // reads as belonging to that player.
     if (leave_col_w > 0) {
       const bool empty = e->leave_str[0] == '\0';
-      const char *leave_text = empty ? "\xc2\xb7" : e->leave_str;
+      char sorted_leave[24];
+      if (!empty && ld != NULL) {
+        format_alphagram_for_sort(e->leave_str, ld, rack_sort, sorted_leave,
+                                  sizeof(sorted_leave));
+      } else {
+        sorted_leave[0] = '\0';
+      }
+      const char *leave_text = empty ? "\xc2\xb7" : sorted_leave;
       // Visual width: "·" (U+00B7) is 2 bytes but renders as 1 cell.
       // strlen would over-shift the right-alignment by a column.
       const int leave_w = empty ? 1 : (int)strlen(leave_text);
@@ -3926,15 +4680,112 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   const int row2 = row + 1;
 
   theme_apply_fg(plane, player_dim_fg);
-  char clock_str[16];
-  format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
-               sizeof(clock_str));
   char left_line[48];
-  // Row 2 indent matches the prefix length so the clock aligns with
+  // Resort the rack alphagram per the user's preference so it
+  // matches what their rack panel shows for the same letters.
+  char sorted_rack[24];
+  if (e->rack_str[0] != '\0' && ld != NULL) {
+    format_alphagram_for_sort(e->rack_str, ld, rack_sort, sorted_rack,
+                              sizeof(sorted_rack));
+  } else {
+    sorted_rack[0] = '\0';
+  }
+  // Empty rack on a finalized entry renders an em-dash ("—") so
+  // the row's secondary line isn't ambiguously blank. Pending
+  // entries (annotation seed rows, in-flight bot turns with no
+  // rack yet) just leave the cell empty — once a block cursor
+  // lives in this cell during editing, the cursor itself will
+  // be the only visible mark.
+  const char *rack_disp = sorted_rack[0] != '\0' ? sorted_rack
+                          : e->pending           ? ""
+                                                 : "\xe2\x80\x94";
+  // Row 2 indent matches the prefix length so the secondary
+  // info (clock + rack, or just rack in CGP mode) aligns with
   // where the move started on row 1 ("4. 14F XU" → "   2:45 EGIPS").
-  snprintf(left_line, sizeof(left_line), "%*s%s %s", (int)strlen(prefix), "",
-           clock_str, e->rack_str[0] ? e->rack_str : "—");
+  if (clocks_active) {
+    char clock_str[16];
+    format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
+                 sizeof(clock_str));
+    snprintf(left_line, sizeof(left_line), "%*s%s %s",
+             (int)strlen(prefix), "", clock_str, rack_disp);
+  } else {
+    snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix), "",
+             rack_disp);
+  }
   ncplane_putstr_yx(plane, row2, interior_left, left_line);
+
+  // When this entry's RACK field is being edited, overlay the
+  // edit-rack buffer (with optional white block cursor) on top
+  // of the row-2 rack rendering. The buffer is rendered at the
+  // same indent as left_line's rack position (after the prefix
+  // and the optional clock). A 7-cell gray zone marks the
+  // editable area regardless of how many tiles have been typed.
+  if (editing) {
+    int rack_col = interior_left + (int)strlen(prefix);
+    if (clocks_active) {
+      char clock_str[16];
+      format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
+                   sizeof(clock_str));
+      rack_col += (int)strlen(clock_str) + 1;
+    }
+    const ThemeRgb gray_bg = {55, 55, 60};
+    const ThemeRgb white_bg = {255, 255, 255};
+    const int rack_zone_left = rack_col;
+    const int rack_zone_right = rack_col + 6; // 7 cells for 7 tiles
+    // Paint rack zone background.
+    theme_apply_bg(plane, gray_bg);
+    theme_apply_fg(plane, theme->dim_fg);
+    for (int c = rack_zone_left; c <= rack_zone_right && c <= interior_right;
+         c++) {
+      ncplane_putstr_yx(plane, row2, c, " ");
+    }
+    // Display the rack buffer alphagrammed by the user's
+    // rack-sort preference (vowels-first, blanks-first, etc.) so
+    // the in-cell rack matches the Rack panel's order. The
+    // buffer itself stays in typed (storage) order — sorting is
+    // purely visual, applied per-frame to whatever the user
+    // typed.
+    char sorted_rbuf[24];
+    sorted_rbuf[0] = '\0';
+    if (state->edit_rack_len > 0) {
+      char tmp[24];
+      const int copy = state->edit_rack_len < (int)sizeof(tmp) - 1
+                           ? state->edit_rack_len
+                           : (int)sizeof(tmp) - 1;
+      memcpy(tmp, state->edit_rack_buf, (size_t)copy);
+      tmp[copy] = '\0';
+      format_alphagram_for_sort(tmp, state->ld, state->rack_sort, sorted_rbuf,
+                                sizeof(sorted_rbuf));
+    }
+    const int sorted_len = (int)strlen(sorted_rbuf);
+    const ThemeRgb rack_fg =
+        state->edit_rack_valid ? player_dim_fg : theme->error_fg;
+    for (int j = 0; j < sorted_len; j++) {
+      const int col = rack_zone_left + j;
+      if (col > rack_zone_right) {
+        break;
+      }
+      theme_apply_fg(plane, rack_fg);
+      theme_apply_bg(plane, gray_bg);
+      char ch[2] = {sorted_rbuf[j], '\0'};
+      ncplane_putstr_yx(plane, row2, col, ch);
+    }
+    if (state->edit_field == TUI_EDIT_FIELD_RACK) {
+      // Cursor sits at the end of the sorted display — the user
+      // is appending tiles, and a "middle of sorted alphagram"
+      // cursor wouldn't correspond to any meaningful insertion
+      // point in the underlying typed buffer.
+      const int cur_col = rack_zone_left + sorted_len;
+      if (cur_col >= rack_zone_left && cur_col <= rack_zone_right) {
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, white_bg);
+        ncplane_set_styles(plane, NCSTYLE_BOLD);
+        ncplane_putstr_yx(plane, row2, cur_col, " ");
+        ncplane_set_styles(plane, 0);
+      }
+    }
+    theme_apply_bg(plane, theme->bg);
+  }
 
   if (!e->pending) {
     char total_str[16];
@@ -3946,6 +4797,50 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
       ncplane_putstr_yx(plane, row2, total_col, total_str);
       ncplane_set_styles(plane, 0);
     }
+  } else if (e->pending && !editing && e->move_str[0] != '\0') {
+    // Pending row with a committed move — show the cumulative
+    // total the same way a finalized row does. Sum prior same-
+    // player committed scores and add this entry's score.
+    int total_before = 0;
+    for (int prev = 0; prev < idx; prev++) {
+      const TuiHistoryEntry *pe = &state->history[prev];
+      if (pe->player_idx == e->player_idx && !pe->pending) {
+        total_before += pe->score + pe->end_bonus;
+      }
+    }
+    char total_str[16];
+    snprintf(total_str, sizeof(total_str), "%d", total_before + e->score);
+    const int total_len = (int)strlen(total_str);
+    const int total_col = interior_right - total_len + 1;
+    if (total_col > interior_left + (int)strlen(left_line)) {
+      theme_apply_fg(plane, player_dim_fg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr_yx(plane, row2, total_col, total_str);
+      ncplane_set_styles(plane, 0);
+    }
+  } else if (editing && state->edit_move_score >= 0) {
+    // Running total preview: sum prior turns for this player
+    // plus the just-parsed move's score. Renders bold in the
+    // muted player accent so the eye reads it as "what your
+    // score WILL be" rather than committed.
+    int total_before = 0;
+    for (int prev = 0; prev < idx; prev++) {
+      const TuiHistoryEntry *pe = &state->history[prev];
+      if (pe->player_idx == e->player_idx && !pe->pending) {
+        total_before += pe->score + pe->end_bonus;
+      }
+    }
+    char total_str[16];
+    snprintf(total_str, sizeof(total_str), "%d",
+             total_before + state->edit_move_score);
+    const int total_len = (int)strlen(total_str);
+    const int total_col = interior_right - total_len + 1;
+    theme_apply_fg(plane, player_dim_fg);
+    theme_apply_bg(plane, theme->bg);
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row2, total_col, total_str);
+    ncplane_set_styles(plane, 0);
   }
 
   // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
@@ -3961,7 +4856,14 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
       e->player_idx == 1 ? theme->history_p1_fg : theme->history_p2_fg;
   char bonus_left[48];
   if (e->end_rack_str[0] != '\0') {
-    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", e->end_rack_str);
+    char sorted_end[24];
+    if (ld != NULL) {
+      format_alphagram_for_sort(e->end_rack_str, ld, rack_sort, sorted_end,
+                                sizeof(sorted_end));
+    } else {
+      snprintf(sorted_end, sizeof(sorted_end), "%s", e->end_rack_str);
+    }
+    snprintf(bonus_left, sizeof(bonus_left), "    (%s)", sorted_end);
   } else {
     snprintf(bonus_left, sizeof(bonus_left), "    ");
   }
@@ -3977,13 +4879,28 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_putstr_yx(plane, row3, delta3_col, delta3_str);
   }
 
-  // ── Row 4 (final score): "                                    489" ────
-  // Bold, right-aligned in the dim color — mirrors the total row of a
-  // scoring play and represents the final game total for this player.
+  // ── Row 4 (final clock + final score): "    0:09         489" ──────────
+  // Bold, right-aligned final game total; on the left, the player's
+  // clock at the moment they finished the game so the closing time
+  // shows in-place rather than only in the player pill. Mirrors
+  // row 2's "<clock> <rack>" layout — same indent, same player
+  // accent color.
   if (row + 3 > row_bottom_inclusive) {
     return;
   }
   const int row4 = row + 3;
+
+  if (clocks_active) {
+    char end_clock_str[16];
+    format_clock(e->clock_at_end < 0 ? 0 : e->clock_at_end, end_clock_str,
+                 sizeof(end_clock_str));
+    char end_line[32];
+    snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
+             end_clock_str);
+    theme_apply_fg(plane, player_fg);
+    ncplane_putstr_yx(plane, row4, interior_left, end_line);
+  }
+
   theme_apply_fg(plane, player_dim_fg);
   char total4_str[16];
   snprintf(total4_str, sizeof(total4_str), "%d", e->total_after + e->end_bonus);
@@ -4025,12 +4942,15 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
   if (state->history_count == 0) {
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
-    const int center_row = L->history_top + height / 2;
-    const char *msg = "No moves yet.";
+    // Place the placeholder on the panel's top interior row instead
+    // of vertically centered — the startup modal sits in the middle
+    // of the screen and would otherwise hide the empty-state text.
+    const int top_row = L->history_top + 1;
+    const char *msg = "(no moves yet)";
     const int interior_width = width - 2;
     const int msg_col =
         L->right_col_left + 1 + (interior_width - (int)strlen(msg)) / 2;
-    ncplane_putstr_yx(plane, center_row, msg_col, msg);
+    ncplane_putstr_yx(plane, top_row, msg_col, msg);
     return;
   }
 
@@ -4082,9 +5002,10 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
       const TuiHistoryEntry *e = &state->history[idx];
       const bool cursor_here = state->history_cursor == idx;
       const int entry_rows = history_entry_rows(e);
-      render_history_entry(plane, theme, e, idx, row, interior_left,
+      render_history_entry(plane, theme, state, e, idx, row, interior_left,
                            interior_right, bottom, leave_col_w, rank_digits,
-                           cursor_here, history_focused);
+                           cursor_here, history_focused, state->bot_started,
+                           state->ld, state->rack_sort);
       if (history_row_map_count <
           (int)(sizeof(history_row_map) / sizeof(history_row_map[0]))) {
         HistoryRowMap *m = &history_row_map[history_row_map_count++];
@@ -4160,17 +5081,21 @@ static void render_history_panel(struct ncplane *plane, const Theme *theme,
       row_top = row_left;
       col_left = left_l;
       col_right = left_r;
-      render_history_entry(plane, theme, e, idx, row_left, left_l, left_r,
+      render_history_entry(plane, theme, state, e, idx, row_left, left_l,
+                           left_r,
                            bottom, leave_w_left, rank_digits, cursor_here,
-                           history_focused);
+                           history_focused, state->bot_started, state->ld,
+                           state->rack_sort);
       row_left += rows;
     } else {
       row_top = row_right;
       col_left = right_l;
       col_right = right_r;
-      render_history_entry(plane, theme, e, idx, row_right, right_l, right_r,
+      render_history_entry(plane, theme, state, e, idx, row_right, right_l,
+                           right_r,
                            bottom, leave_w_right, rank_digits, cursor_here,
-                           history_focused);
+                           history_focused, state->bot_started, state->ld,
+                           state->rack_sort);
       row_right += rows;
     }
     if (history_row_map_count <
@@ -4209,7 +5134,17 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
                                  int secondary_w, int primary_secondary_gap,
                                  bool primary_bold, int title_end_col) {
   const int interior_left = L->analysis_left + 1;
-  const int interior_right = L->analysis_right - 1;
+  const int interior_right_full = L->analysis_right - 1;
+  // Reserve the rightmost interior cell for the scrollbar whenever
+  // the candidate list overflows the visible window. interior_right
+  // (and everything that anchors to it — sec_col, prim_col, avg
+  // block, leave column, etc.) shrinks by 1 cell in that case so
+  // data doesn't sit underneath the scrollbar track.
+  const int total_rows =
+      state != NULL ? state->last_rendered_analysis_row_count : 0;
+  const bool scrollbar_visible = total_rows > visible;
+  const int interior_right =
+      scrollbar_visible ? interior_right_full - 1 : interior_right_full;
   const int interior_top = L->analysis_top + 1;
   const int interior_bottom = L->analysis_bottom - 1;
   // Reset per-frame hit-test map + panel bounds so mouse clicks
@@ -4712,10 +5647,19 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   const int full_move_max = (show_score ? score_left_edge - 2 : prim_col - 1) -
                             move_col;
 
-  // Column headers above the data rows. Sim only (primary_w == 6 for
-  // "XX.X%"); endgame's "W"/"T"/"L" primary doesn't warrant a header.
-  // Each header right-aligns at the same edge as the column it labels.
-  show_headers = show_headers && primary_w >= 4;
+  // Column headers above the data rows. We render the strip whenever
+  // at least one label has something to say. Sim mode lights up
+  // every header (leave / sc / win% / sprd / avg…); play-only mode
+  // (loaded GCG with no sim results — primary_w == secondary_w == 0)
+  // shows just leave + sc; endgame mode (primary_w == 0,
+  // secondary_w == 4) suppresses headers entirely because its
+  // W/T/L + spread labels don't fit the strip's style. Each header
+  // right-aligns at the same edge as the column it labels.
+  const bool has_primary_label = primary_w >= 4;
+  const bool has_secondary_label = secondary_w >= 4;
+  show_headers = show_headers &&
+                 (has_primary_label || has_secondary_label ||
+                  show_score || max_leave_w > 0);
   if (show_headers) {
     // Find the leftmost col any header would touch (the "leave"
     // header is the leftmost; if no leave column, "sc" or "win%").
@@ -4736,7 +5680,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // avg cols are right-anchored past sprd, so they don't affect
     // leftmost_header_col — they sit further right than every other
     // header.
-    {
+    if (has_primary_label) {
       const int col = prim_col + primary_w - 4; // "win%"
       if (col < leftmost_header_col) {
         leftmost_header_col = col;
@@ -4842,13 +5786,13 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         ncplane_putstr_yx(plane, header_row, col, hdr);
       }
     }
-    {
+    if (has_primary_label) {
       const char *win_label = "win%";
       const int len = (int)strlen(win_label);
       const int col = prim_col + primary_w - len;
       ncplane_putstr_yx(plane, header_row, col, win_label);
     }
-    {
+    if (has_secondary_label) {
       const char *sprd_label = "sprd";
       const int len = (int)strlen(sprd_label);
       // Right-align inside the secondary column's slot, not against
@@ -4869,27 +5813,70 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   // anchored move's current position in rows[].
   const int effective_cursor =
       state != NULL ? effective_analysis_cursor(state) : -1;
+  // Scroll window — the rank range currently painted. view_h is
+  // the panel's visible row capacity; scroll_offset is the rank
+  // index of the first painted row. Auto-scroll adjusts the
+  // offset to keep the cursor visible (cursor + view move
+  // together).
+  const int view_h = visible;
+  // total_rows + scrollbar_visible are computed at the top of the
+  // function (so interior_right could shrink by 1). Reuse them here.
+  int scroll_offset = state != NULL ? state->analysis_scroll_offset : 0;
+  if (effective_cursor >= 0) {
+    if (effective_cursor < scroll_offset) {
+      scroll_offset = effective_cursor;
+    }
+    if (effective_cursor >= scroll_offset + view_h) {
+      scroll_offset = effective_cursor - view_h + 1;
+    }
+  } else {
+    // Cursor is parked on the [5] label (or otherwise inactive).
+    // Snap the view back to the top so a stale scroll_offset from
+    // a previous interaction doesn't leave the panel scrolled
+    // when the user has nothing selected.
+    scroll_offset = 0;
+  }
+  if (scroll_offset > total_rows - view_h) {
+    scroll_offset = total_rows - view_h;
+  }
+  if (scroll_offset < 0) {
+    scroll_offset = 0;
+  }
+  if (state != NULL) {
+    ((TuiGameState *)state)->analysis_scroll_offset = scroll_offset;
+  }
   // Docking: only when the cursor is in MOVE column AND the
-  // anchored move's current rank is below the visible window. In
-  // that case the panel renders rows 0..visible-3, a divider at
-  // visible-2, and the docked row at visible-1 (re-using the same
-  // per-row paint, just at a non-rank-aligned slot).
+  // anchored move's rank sits outside the currently-scrolled
+  // window. With cursor-follow scroll the auto-scroll keeps the
+  // cursor in view so this rarely fires for keyboard nav, but a
+  // user-driven scroll (wheel / scrollbar drag) that moves the
+  // view away from the cursor will re-engage the dock.
+  const bool cursor_outside_window =
+      effective_cursor >= 0 &&
+      (effective_cursor < scroll_offset ||
+       effective_cursor >= scroll_offset + view_h);
   const bool dock_active =
       state != NULL &&
       state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_MOVE &&
-      effective_cursor >= visible && visible >= 2;
+      cursor_outside_window && view_h >= 2;
+
+  // Number of painted rows for this frame: capped by view_h and
+  // by how many ranks remain after the scroll offset.
+  const int painted_rows =
+      total_rows - scroll_offset < view_h ? total_rows - scroll_offset
+                                          : view_h;
 
   theme_apply_bg(plane, theme->bg);
   int row = list_top;
-  for (int slot = 0; slot < visible && row <= interior_bottom; slot++) {
+  for (int slot = 0; slot < painted_rows && row <= interior_bottom; slot++) {
     // Translate visible slot index → row data index. Normally
-    // slot == data_i, but in dock mode the last slot displays
-    // the anchored move's data (which lives at effective_cursor)
-    // and the slot immediately above it is rendered as a divider
-    // line rather than a row.
-    int data_i = slot;
+    // data_i = scroll_offset + slot. In dock mode the last slot
+    // displays the anchored move's data (which lives at
+    // effective_cursor) and the slot immediately above it is
+    // rendered as a divider line rather than a row.
+    int data_i = scroll_offset + slot;
     if (dock_active) {
-      if (slot == visible - 2) {
+      if (slot == painted_rows - 2) {
         // Divider line — uses the dim_fg color so it reads as
         // a subdued separator, not a heavy rule.
         theme_apply_fg(plane, theme->dim_fg);
@@ -4901,7 +5888,7 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
         row++;
         continue;
       }
-      if (slot == visible - 1) {
+      if (slot == painted_rows - 1) {
         data_i = effective_cursor;
       }
     }
@@ -4928,8 +5915,19 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // the rack (bingos / endgame outplays) have an empty leave —
     // render those as "·" so the column stays consistently
     // populated, otherwise the gaps look like rendering bugs.
+    // Re-sort the candidate's leave per the user's rack-sort
+    // preference so the leave column lines up with how rack
+    // tiles are ordered elsewhere (rack panel, history).
+    char sorted_row_leave[24];
+    if (rows[data_i].leave[0] != '\0' && state != NULL && state->ld != NULL) {
+      format_alphagram_for_sort(rows[data_i].leave, state->ld,
+                                state->rack_sort, sorted_row_leave,
+                                sizeof(sorted_row_leave));
+    } else {
+      sorted_row_leave[0] = '\0';
+    }
     const char *leave_str =
-        rows[data_i].leave[0] != '\0' ? rows[data_i].leave : "\xc2\xb7";
+        sorted_row_leave[0] != '\0' ? sorted_row_leave : "\xc2\xb7";
     const int leave_len = (int)strlen(leave_str);
     const int leave_text_col =
         show_leaves ? leave_right_edge -
@@ -4970,8 +5968,18 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     // The "cursor here" test compares against effective_cursor —
     // the row currently selected after MOVE-anchor resolution.
     const bool cursor_here = (data_i == effective_cursor);
-    const bool focused_here =
+    // The cursor is "explicit" when state->analysis_cursor is on a
+    // real candidate row; -1 means the user is parked on the [5]
+    // label and effective_cursor only fell through to 0 to mark
+    // the implicit "previewed" row. The inverted/chevron look
+    // (the active-cursor cue) only fires when the cursor is
+    // explicit AND the panel is focused; otherwise the row
+    // renders with the medium-bg parked-selection look.
+    const bool cursor_explicit =
+        state != NULL && state->analysis_cursor >= 0;
+    const bool panel_focused =
         state != NULL && state->focused_panel == TUI_FOCUS_ANALYSIS;
+    const bool focused_here = cursor_explicit && panel_focused;
     const bool cursor_on_rank =
         cursor_here && state != NULL &&
         state->analysis_cursor_column == TUI_ANALYSIS_COLUMN_RANK;
@@ -4981,8 +5989,9 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
     if (cursor_on_rank) {
       // Find the position of the '.' in rank_str (right-aligned;
       // walk to end and back). Then split: leading digits +
-      // padding go inverted, the '.' becomes '>' (or stays '.'
-      // when unfocused) inverted, the trailing space goes plain.
+      // padding go on the chip, the '.' becomes '>' when the
+      // panel is focused (stays '.' otherwise), the trailing
+      // space goes plain.
       char chip[8];
       int chip_len = 0;
       int after_period_idx = 0;
@@ -4997,8 +6006,35 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
       }
       chip[chip_len++] = focused_here ? '>' : '.';
       chip[chip_len] = '\0';
-      theme_apply_fg(plane, theme->bg);
-      theme_apply_bg(plane, theme->fg);
+      // Focused panel: full-invert (bg on fg, bold) so the active
+      // cursor pops. Unfocused panel: keep the rank readable in
+      // normal fg, but sit it on a medium-brightness bg (the
+      // on-turn player's tile_bg, same family used for unfocused
+      // thinking-turn chips in History) so the row reads as
+      // "parked selection, panel not focused" — visually distinct
+      // from the active cursor.
+      if (focused_here) {
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, theme->fg);
+      } else {
+        // Parked-cursor chip: same luminance as the player tile_bg
+        // used in the History panel's pending chip, but neutral
+        // gray — the Analysis row shouldn't pick up the player's
+        // green / amber tint when it's just marking the top move,
+        // since at that point it's a cursor cue rather than a
+        // "this tile belongs to player X" indicator.
+        const int candidate_idx =
+            rows[data_i].candidate_player_idx;
+        const ThemeRgb tile_bg =
+            candidate_idx == 1 ? theme->tile2_bg : theme->tile1_bg;
+        const uint8_t lum = (uint8_t)((30u * tile_bg.r +
+                                       59u * tile_bg.g +
+                                       11u * tile_bg.b) /
+                                      100u);
+        const ThemeRgb gray_bg = {lum, lum, lum};
+        theme_apply_fg(plane, theme->fg);
+        theme_apply_bg(plane, gray_bg);
+      }
       ncplane_set_styles(plane, NCSTYLE_BOLD);
       ncplane_putstr_yx(plane, row, interior_left, chip);
       ncplane_set_styles(plane, 0);
@@ -5146,6 +6182,130 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
   if (state != NULL) {
     atomic_store(&((TuiGameState *)state)->analysis_visible_rows,
                  analysis_row_map_count);
+  }
+
+  // Scrollbar — right edge of the panel interior. Renders a track
+  // across the scroll-window rows with a thumb proportional to
+  // visible/total, using LEFT N/8 BLOCK chars on the track and
+  // LOWER N/8 BLOCK chars for the thumb's fractional top/bottom
+  // edges (gives ~1/8-row visual precision).
+  if (scrollbar_visible && state != NULL && view_h > 0 && total_rows > 0) {
+    const int scrollbar_col = interior_right + 1;
+    const int track_top = list_top;
+    const int track_bottom = list_top + view_h - 1;
+    const int track_h = view_h;
+    // Thumb position in 1/8 row units relative to the track.
+    const int total_eighths = track_h * 8;
+    int thumb_top_8 =
+        (int)((long long)scroll_offset * total_eighths / total_rows);
+    int thumb_bot_8 =
+        (int)((long long)(scroll_offset + view_h) * total_eighths /
+              total_rows);
+    if (thumb_bot_8 > total_eighths) {
+      thumb_bot_8 = total_eighths;
+    }
+    if (thumb_top_8 < 0) {
+      thumb_top_8 = 0;
+    }
+    // Ensure the thumb always shows at least 1/8 of a cell so the
+    // user can see something even when total_rows >> view_h.
+    if (thumb_bot_8 - thumb_top_8 < 1) {
+      thumb_bot_8 = thumb_top_8 + 1;
+      if (thumb_bot_8 > total_eighths) {
+        thumb_bot_8 = total_eighths;
+        thumb_top_8 = thumb_bot_8 - 1;
+      }
+    }
+    // Single thumb color so every pixel of the bar reads as
+    // exactly the same shade regardless of which glyph variant
+    // the cell uses (full block, lower-N, inverted upper-N).
+    // Pulls from the theme so dark / light / etc. palettes all
+    // theme the bar appropriately; only the *uniformity* across
+    // cells is the constraint here.
+    const ThemeRgb thumb_color = theme->fg;
+    static const char *const lower_blocks[9] = {
+        "\xe2\x96\x8f", // ▏ track (LEFT ONE EIGHTH) — used as track sliver
+        "\xe2\x96\x81", // ▁ lower 1/8
+        "\xe2\x96\x82", // ▂ lower 2/8
+        "\xe2\x96\x83", // ▃ lower 3/8
+        "\xe2\x96\x84", // ▄ lower 4/8 (half)
+        "\xe2\x96\x85", // ▅ lower 5/8
+        "\xe2\x96\x86", // ▆ lower 6/8
+        "\xe2\x96\x87", // ▇ lower 7/8
+        "\xe2\x96\x88", // █ full
+    };
+    for (int r = 0; r < track_h; r++) {
+      const int cell_top_8 = r * 8;
+      const int cell_bot_8 = cell_top_8 + 8;
+      int overlap_top_8 = thumb_top_8 > cell_top_8 ? thumb_top_8 : cell_top_8;
+      int overlap_bot_8 = thumb_bot_8 < cell_bot_8 ? thumb_bot_8 : cell_bot_8;
+      const int in_cell_top = overlap_top_8 - cell_top_8;
+      const int in_cell_bot = overlap_bot_8 - cell_top_8;
+      const int fill_eighths =
+          overlap_bot_8 > overlap_top_8 ? overlap_bot_8 - overlap_top_8 : 0;
+      if (fill_eighths <= 0) {
+        // Cell entirely outside the thumb. Paint as panel bg so
+        // the track shares the same color as the non-thumb
+        // portions of partial cells — gives a clean seam at the
+        // thumb's edges. The thumb is the only visible mark of
+        // the scrollbar; clicks elsewhere in the column still
+        // hit-test via the published geometry.
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, theme->bg);
+        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, " ");
+        continue;
+      }
+      if (fill_eighths == 8) {
+        // Cell entirely inside the thumb → full block.
+        theme_apply_fg(plane, thumb_color);
+        theme_apply_bg(plane, theme->bg);
+        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, lower_blocks[8]);
+        continue;
+      }
+      if (in_cell_top == 0) {
+        // Thumb fills FROM THE TOP downward to in_cell_bot/8. To
+        // get top-filled-N/8 we render a lower-(8-N) block with
+        // fg=panel_bg, bg=thumb_color. ON pixels (bottom portion)
+        // render in panel_bg so the cell's non-thumb region
+        // matches the surrounding track exactly — no dim-gray
+        // band appears at the thumb's upper edge.
+        const int inv_idx = 8 - in_cell_bot;
+        theme_apply_fg(plane, theme->bg);
+        theme_apply_bg(plane, thumb_color);
+        ncplane_putstr_yx(plane, track_top + r, scrollbar_col,
+                          lower_blocks[inv_idx]);
+      } else if (in_cell_bot == 8) {
+        // Thumb fills FROM THE BOTTOM upward. ON pixels = thumb,
+        // OFF pixels = panel_bg (track).
+        const int idx = 8 - in_cell_top;
+        theme_apply_fg(plane, thumb_color);
+        theme_apply_bg(plane, theme->bg);
+        ncplane_putstr_yx(plane, track_top + r, scrollbar_col,
+                          lower_blocks[idx]);
+      } else {
+        // Thumb sits entirely in the middle of the cell (rare —
+        // happens only when total_rows is large enough that the
+        // thumb is shorter than 1/8 of a cell). Render a half-
+        // block thumb centered visually.
+        theme_apply_fg(plane, thumb_color);
+        theme_apply_bg(plane, theme->bg);
+        ncplane_putstr_yx(plane, track_top + r, scrollbar_col, "\xe2\x96\x84");
+      }
+    }
+    // Publish geometry so main.c's input handlers can hit-test
+    // mouse clicks against the scrollbar.
+    TuiGameState *mut = (TuiGameState *)state;
+    atomic_store(&mut->analysis_scrollbar_top, track_top);
+    atomic_store(&mut->analysis_scrollbar_bottom, track_bottom);
+    atomic_store(&mut->analysis_scrollbar_col, scrollbar_col);
+    atomic_store(&mut->analysis_scrollbar_total, total_rows);
+    atomic_store(&mut->analysis_scrollbar_view, view_h);
+  } else if (state != NULL) {
+    // Hidden scrollbar — publish zero so input handlers know not
+    // to try to hit-test against stale geometry.
+    TuiGameState *mut = (TuiGameState *)state;
+    atomic_store(&mut->analysis_scrollbar_total, 0);
+    atomic_store(&mut->analysis_scrollbar_view, 0);
   }
 }
 
@@ -5353,6 +6513,27 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
     state->last_rendered_analysis_row_count = fill_analysis_rows_from_sim(
         state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
   }
+
+  // Fallback: nothing computed (loaded GCG turn that wasn't simmed
+  // by this TUI), but the cursor is parked on a committed entry —
+  // surface the played move + leave + score as a single
+  // "Analysis" row so the panel isn't blank while reviewing.
+  if (state->last_rendered_analysis_row_count == 0 &&
+      state->history_cursor >= 0 &&
+      state->history_cursor < state->history_count) {
+    const TuiHistoryEntry *e = &state->history[state->history_cursor];
+    if (!e->pending && e->move_str[0] != '\0') {
+      AnalysisRow *row = &state->last_rendered_analysis_rows[0];
+      memset(row, 0, sizeof(*row));
+      snprintf(row->move, sizeof(row->move), "%s", e->move_str);
+      snprintf(row->leave, sizeof(row->leave), "%s", e->leave_str);
+      snprintf(row->score, sizeof(row->score), "%d", e->score);
+      row->score_value = e->score;
+      row->candidate_player_idx = e->player_idx;
+      row->valid = true;
+      state->last_rendered_analysis_row_count = 1;
+    }
+  }
 }
 
 void tui_capture_analysis_snapshot(const TuiGameState *state,
@@ -5499,11 +6680,25 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       format_count_compact(nodes, nodes_str, sizeof(nodes_str));
       snprintf(title, sizeof(title), "Sim (%dp/%s)", plies, nodes_str);
     } else {
-      snprintf(title, sizeof(title), "Sim");
+      // sim_results exists but no real sim ran (e.g. loaded GCG
+      // viewer). The panel is in fallback "just-the-played-move"
+      // mode, so it's a Plays log rather than analysis output.
+      snprintf(title, sizeof(title), "Plays");
     }
   } else {
-    snprintf(title, sizeof(title), "Analysis");
+    snprintf(title, sizeof(title), "Plays");
   }
+  // play_only_fallback: not a saved snapshot, not endgame, not an
+  // active sim — we're showing just the played move (or "(no
+  // analysis yet)" if even that's missing). Used below to drop
+  // the win% and sprd columns: there's no probabilistic data to
+  // populate them, and showing empty columns is visual noise.
+  const bool sim_has_data =
+      state->sim_results != NULL &&
+      sim_results_get_num_plies(state->sim_results) > 0 &&
+      sim_results_get_iteration_count(state->sim_results) > 0;
+  const bool play_only_fallback =
+      snap == NULL && !use_endgame && !sim_has_data;
   const bool analysis_focused = state->focused_panel == TUI_FOCUS_ANALYSIS;
   // badge_secondary: the cursor has navigated off the label onto a
   // specific candidate row, so "[5>" → "[5]" while focus stays
@@ -5546,6 +6741,14 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
     secondary_w = 4;           // "+999" / "-100"
     primary_secondary_gap = 0; // no primary, no inter-column gap
     primary_bold = false;
+  } else if (play_only_fallback) {
+    // Plays mode (loaded GCG, no sim/endgame data) — drop the
+    // win% and sprd columns entirely since they have nothing to
+    // show. The play row needs only move + leave + score.
+    primary_w = 0;
+    secondary_w = 0;
+    primary_secondary_gap = 0;
+    primary_bold = false;
   } else {
     primary_w = 6;             // "100.0%"
     secondary_w = 6;           // "%+6.1f" → " -19.9"
@@ -5556,8 +6759,8 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   if (visible == 0) {
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, theme->bg);
-    const char *msg =
-        use_endgame ? "(no endgame data yet)" : "(no sim data yet)";
+    const char *msg = "(no analysis yet)";
+    (void)use_endgame; // both modes share the same empty-state copy
     const int msg_col =
         interior_left +
         (interior_right - interior_left + 1 - (int)strlen(msg)) / 2;
@@ -5572,9 +6775,14 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // pristine copies in state->last_rendered_analysis_rows are still
   // usable for MOVE-anchor lookups later in the frame and in input
   // handlers.
+  // Copy the FULL row set, not just the visible window: with
+  // scrolling the renderer indexes by absolute rank
+  // (scroll_offset + slot), so anything past `visible` would be
+  // read past the live data into garbage if we only copied the
+  // visible portion.
   AnalysisRow rows[ANALYSIS_ROW_CAP];
   memcpy(rows, state->last_rendered_analysis_rows,
-         sizeof(AnalysisRow) * (size_t)visible);
+         sizeof(AnalysisRow) * (size_t)total_rows);
   render_analysis_rows(plane, theme, state, L, rows, visible, primary_w,
                        secondary_w,
                        primary_secondary_gap, primary_bold, title_end_col);
@@ -5853,7 +7061,8 @@ static void render_command_palette(struct ncplane *plane, const Theme *theme,
 }
 
 static void render_command_bar(struct ncplane *plane, const Theme *theme,
-                               const TuiGameState *state, const Layout *L) {
+                               const TuiGameState *state, const Layout *L,
+                               TuiModalState modal) {
   if (L->command_bar_row < 0) {
     return;
   }
@@ -5914,13 +7123,25 @@ static void render_command_bar(struct ncplane *plane, const Theme *theme,
     if (nc != NULL) {
       notcurses_cursor_enable(nc, row, typed_start + state->slash_cursor);
     }
-  } else {
-    // Not in slash mode. Show the placeholder, dim italic.
+  } else if (modal == TUI_MODAL_NONE) {
+    // Not in slash mode and no modal open — show the "/" hint so
+    // the user knows the command bar is reachable. When a modal
+    // is up, the "/" key won't refocus [0] anyway, so suppress
+    // the hint instead of advertising an action that won't work.
     theme_apply_fg(plane, theme->dim_fg);
     theme_apply_bg(plane, bar_bg);
     ncplane_set_styles(plane, NCSTYLE_ITALIC);
     ncplane_putstr_yx(plane, row, col, "/ to type commands");
     ncplane_set_styles(plane, 0);
+    struct notcurses *nc = ncplane_notcurses(plane);
+    if (nc != NULL) {
+      notcurses_cursor_disable(nc);
+    }
+  } else {
+    // Modal up: nothing in the input slot. Make sure the live
+    // terminal cursor (which slash mode may have enabled) is
+    // disabled so it doesn't blink in the command bar while the
+    // user is interacting with the modal.
     struct notcurses *nc = ncplane_notcurses(plane);
     if (nc != NULL) {
       notcurses_cursor_disable(nc);
@@ -6145,6 +7366,10 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
     return;
   }
 
+  // Invalidate modal hit-test data at the start of each frame.
+  // render_modal_ex will set it valid again if a modal renders.
+  modal_hit_map.valid = false;
+
   // Force a defensive full repaint whenever the plane's dimensions have
   // changed since the previous render — not only when *this* call did the
   // resize. main.c's NCKEY_RESIZE handler calls ncplane_resize_simple
@@ -6243,7 +7468,7 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   render_analysis_panel(plane, theme, state, &L);
 
   render_pending_bar(plane, theme, state, &L);
-  render_command_bar(plane, theme, state, &L);
+  render_command_bar(plane, theme, state, &L, modal);
   render_command_palette(plane, theme, state, &L);
   render_status_bar(plane, theme, state, &L, modal);
 
@@ -6273,10 +7498,19 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
 // hint. The modal uses its own clinical-grey palette (theme->modal_*)
 // rather than the game-content green/amber, so menus read as system
 // chrome distinct from the game surface.
-static void render_modal(struct ncplane *plane, const Theme *theme,
-                         const char *title, const char *const *items,
-                         const char *const *shortcuts, int item_count,
-                         int focus, int width) {
+// An "input-field zone" decoration for a modal row: a fixed-width,
+// right-anchored-within-the-row rectangle painted in a darker bg
+// so the user can see exactly where typing lands. zone_starts[i]
+// is the modal-local items[]-string offset of the zone's left
+// edge; zone_widths[i] is the zone width in cells. Pass NULL for
+// either to disable zones for the whole modal.
+static void render_modal_ex(struct ncplane *plane, const Theme *theme,
+                            const char *title, const char *const *items,
+                            const char *const *shortcuts,
+                            const bool *disabled,
+                            const int *cursor_cols,
+                            const int *zone_starts, const int *zone_widths,
+                            int item_count, int focus, int width) {
   unsigned plane_rows = 0;
   unsigned plane_cols = 0;
   ncplane_dim_yx(plane, &plane_rows, &plane_cols);
@@ -6295,6 +7529,62 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
   }
   const int top = (int)(plane_rows - plane_h) / 2;
   const int left = (int)(plane_cols - plane_w) / 2;
+
+  // Publish hit-test data for mouse-click handling. Items live at
+  // rows [top+1 .. top+item_count] within columns [left+1 .. left+width-2]
+  // (the 1-cell border on each side is non-clickable chrome). The
+  // shadow row/col are not part of the clickable surface.
+  modal_hit_map.valid = true;
+  modal_hit_map.outer_top = top;
+  modal_hit_map.outer_bottom = top + height - 1;
+  modal_hit_map.outer_left = left;
+  modal_hit_map.outer_right = left + width - 1;
+  modal_hit_map.top = top + 1; // first item row
+  modal_hit_map.left = left + 1;
+  modal_hit_map.right = left + width - 2;
+  modal_hit_map.item_count =
+      item_count < MODAL_MAX_ITEMS ? item_count : MODAL_MAX_ITEMS;
+  for (int i = 0; i < modal_hit_map.item_count; i++) {
+    modal_hit_map.disabled[i] = disabled != NULL && disabled[i];
+    modal_hit_map.left_chev_col[i] = -1;
+    modal_hit_map.right_chev_col[i] = -1;
+    // Scan the item text for ◀ (E2 97 80) and ▶ (E2 96 B6).
+    // Each chevron occupies 1 display column. Item text renders
+    // starting at modal-interior col 3, so the screen column is
+    // (left + 3 + display_offset).
+    if (items != NULL && items[i] != NULL) {
+      const unsigned char *s = (const unsigned char *)items[i];
+      int disp = 0;
+      while (*s != '\0') {
+        if (s[0] == 0xe2 && s[1] == 0x97 && s[2] == 0x80) {
+          modal_hit_map.left_chev_col[i] = left + 3 + disp;
+          s += 3;
+          disp++;
+        } else if (s[0] == 0xe2 && s[1] == 0x96 && s[2] == 0xb6) {
+          modal_hit_map.right_chev_col[i] = left + 3 + disp;
+          s += 3;
+          disp++;
+        } else if (s[0] >= 0x80) {
+          // Other multi-byte UTF-8 glyph; advance bytes by the
+          // UTF-8 length and column by 1 (assumes BMP narrow,
+          // which holds for the strings the modals build).
+          int len = 1;
+          if ((s[0] & 0xe0) == 0xc0) {
+            len = 2;
+          } else if ((s[0] & 0xf0) == 0xe0) {
+            len = 3;
+          } else if ((s[0] & 0xf8) == 0xf0) {
+            len = 4;
+          }
+          s += len;
+          disp++;
+        } else {
+          s++;
+          disp++;
+        }
+      }
+    }
+  }
 
   // Modal lives on its own child plane that always sits on top of the
   // z-stack. Otherwise the 2x pixel composite (also a child of std)
@@ -6390,10 +7680,18 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
   for (int i = 0; i < item_count; i++) {
     const int item_row = 1 + i;
     const bool focused = (i == focus);
-    const ThemeRgb row_fg = focused ? theme->modal_focus_fg : theme->modal_fg;
-    const ThemeRgb row_bg = focused ? theme->modal_focus_bg : theme->modal_bg;
+    const bool item_disabled = disabled != NULL && disabled[i];
+    // Disabled items never use the focus highlight — they paint
+    // dim text on the unfocused row background so they read as
+    // "informational only, not selectable".
+    const ThemeRgb row_fg = item_disabled ? theme->modal_shortcut_fg
+                            : focused      ? theme->modal_focus_fg
+                                           : theme->modal_fg;
+    const ThemeRgb row_bg =
+        (focused && !item_disabled) ? theme->modal_focus_bg : theme->modal_bg;
     const ThemeRgb shortcut_fg =
-        focused ? theme->modal_focus_fg : theme->modal_shortcut_fg;
+        focused && !item_disabled ? theme->modal_focus_fg
+                                  : theme->modal_shortcut_fg;
 
     // Fill the row background (between the side borders).
     theme_apply_fg(mp, row_fg);
@@ -6402,9 +7700,67 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
       ncplane_putstr_yx(mp, item_row, c, " ");
     }
 
-    // Label, 2-space left padding.
+    // Per-row input-field zone (e.g. annotate-setup name field).
+    // Paint a darker bg over the zone before the items text so
+    // the editable region reads as a recessed input rectangle.
+    const int z_start = (zone_starts != NULL) ? zone_starts[i] : -1;
+    const int z_width = (zone_widths != NULL) ? zone_widths[i] : 0;
+    const bool has_zone = z_start >= 0 && z_width > 0;
+    if (has_zone) {
+      theme_apply_fg(mp, row_fg);
+      theme_apply_bg(mp, theme->bg);
+      for (int z = 0; z < z_width; z++) {
+        ncplane_putstr_yx(mp, item_row, 3 + z_start + z, " ");
+      }
+    }
+
+    // Label / value text. When a zone is set we split the paint
+    // so the zone keeps its darker bg: label region uses row_bg,
+    // zone region uses theme->bg.
     if (items[i] != NULL) {
-      ncplane_putstr_yx(mp, item_row, 3, items[i]);
+      if (has_zone) {
+        const int items_len = (int)strlen(items[i]);
+        // Region before the zone.
+        if (z_start > 0 && z_start <= items_len) {
+          char before[96];
+          int n = z_start;
+          if (n > (int)sizeof(before) - 1) {
+            n = sizeof(before) - 1;
+          }
+          memcpy(before, items[i], (size_t)n);
+          before[n] = '\0';
+          theme_apply_fg(mp, row_fg);
+          theme_apply_bg(mp, row_bg);
+          ncplane_putstr_yx(mp, item_row, 3, before);
+        }
+        // Region inside the zone.
+        if (z_start < items_len) {
+          char inside[96];
+          int end = z_start + z_width;
+          if (end > items_len) {
+            end = items_len;
+          }
+          int n = end - z_start;
+          if (n > (int)sizeof(inside) - 1) {
+            n = sizeof(inside) - 1;
+          }
+          memcpy(inside, items[i] + z_start, (size_t)n);
+          inside[n] = '\0';
+          theme_apply_fg(mp, row_fg);
+          theme_apply_bg(mp, theme->bg);
+          ncplane_putstr_yx(mp, item_row, 3 + z_start, inside);
+        }
+        // Region after the zone, if any.
+        const int after_off = z_start + z_width;
+        if (after_off < items_len) {
+          theme_apply_fg(mp, row_fg);
+          theme_apply_bg(mp, row_bg);
+          ncplane_putstr_yx(mp, item_row, 3 + after_off,
+                            items[i] + after_off);
+        }
+      } else {
+        ncplane_putstr_yx(mp, item_row, 3, items[i]);
+      }
     }
 
     // Right-aligned shortcut hint, 2-space right padding.
@@ -6415,6 +7771,35 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
         theme_apply_fg(mp, shortcut_fg);
         theme_apply_bg(mp, row_bg);
         ncplane_putstr_yx(mp, item_row, sc_col, shortcuts[i]);
+      }
+    }
+
+    // Optional block cursor for this row. cursor_cols[i] is the
+    // BYTE OFFSET into items[i] where the caret sits (-1 = no
+    // cursor on this row). The cell repaints with inverted
+    // colors — when the caret sits inside a zone we invert the
+    // zone's darker bg, otherwise we invert the row bg. When the
+    // caret is past the end of the string we draw a space, same
+    // color treatment.
+    if (cursor_cols != NULL && items[i] != NULL && cursor_cols[i] >= 0) {
+      const int items_len = (int)strlen(items[i]);
+      const int co = cursor_cols[i];
+      const int screen_col = 3 + co;
+      if (screen_col >= 1 && screen_col <= right_col - 1) {
+        char ch[2] = {' ', '\0'};
+        if (co < items_len) {
+          ch[0] = items[i][co];
+        }
+        const bool over_zone =
+            has_zone && co >= z_start && co < z_start + z_width;
+        const ThemeRgb cursor_fg = over_zone ? theme->bg : row_bg;
+        // Invert: cursor cell bg = row_fg, cursor cell fg = the
+        // bg we'd otherwise have at this cell.
+        theme_apply_fg(mp, cursor_fg);
+        theme_apply_bg(mp, row_fg);
+        ncplane_set_styles(mp, NCSTYLE_BOLD);
+        ncplane_putstr_yx(mp, item_row, screen_col, ch);
+        ncplane_set_styles(mp, 0);
       }
     }
   }
@@ -6457,6 +7842,24 @@ static void render_modal(struct ncplane *plane, const Theme *theme,
   }
 }
 
+// Backwards-compatible wrapper: existing callers (menu, settings,
+// pickers) never gray out items, so they pass NULL for the
+// disabled mask and reach the same paint code path.
+static void render_modal(struct ncplane *plane, const Theme *theme,
+                         const char *title, const char *const *items,
+                         const char *const *shortcuts, int item_count,
+                         int focus, int width) {
+  render_modal_ex(plane, theme, title, items, shortcuts, /*disabled=*/NULL,
+                  /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
+                  /*zone_widths=*/NULL, item_count, focus, width);
+}
+
+// Forward declaration so tui_game_render_watch_setup can format
+// adjustable rows using the same arrow-marker convention as the
+// Settings modal. Defined a few hundred lines below.
+static void format_setting_row(char *out, size_t out_size, const char *label,
+                               const char *value, bool focused);
+
 void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
                           int focus) {
   if (plane == NULL || theme == NULL) {
@@ -6474,6 +7877,439 @@ void tui_game_render_menu(struct ncplane *plane, const Theme *theme,
   shortcuts[TUI_MENU_QUIT] = "Q";
   render_modal(plane, theme, "Menu", items, shortcuts, TUI_MENU_ITEM_COUNT,
                focus, 28);
+}
+
+void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
+                                  int focus) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  // Per-row buffers so we can append "(coming soon)" to unbuilt
+  // modes without separate string literals for each variant.
+  enum { ROW_BUF = 48 };
+  static char buf[TUI_STARTUP_ITEM_COUNT][ROW_BUF];
+  const char *items[TUI_STARTUP_ITEM_COUNT];
+  const char *shortcuts[TUI_STARTUP_ITEM_COUNT];
+  bool disabled[TUI_STARTUP_ITEM_COUNT];
+  const char *labels[TUI_STARTUP_ITEM_COUNT] = {
+      "Watch computer play",
+      "Load a position",
+      "Load a game",
+      "Annotate a live game",
+      "Play against the computer",
+  };
+  const char *shortcut_chars[TUI_STARTUP_ITEM_COUNT] = {"W", "P", "G", "A", "V"};
+  // Only "Watch computer play" is wired up today; the others
+  // render dimmed with a "(coming soon)" tag and cursor skips
+  // past them. As each mode ships, flip the corresponding entry
+  // to enabled and add an Enter handler in main.c.
+  const bool item_disabled[TUI_STARTUP_ITEM_COUNT] = {
+      false, false, false, false, true,
+  };
+  for (int i = 0; i < TUI_STARTUP_ITEM_COUNT; i++) {
+    if (item_disabled[i]) {
+      snprintf(buf[i], ROW_BUF, "%s (coming soon)", labels[i]);
+    } else {
+      snprintf(buf[i], ROW_BUF, "%s", labels[i]);
+    }
+    items[i] = buf[i];
+    shortcuts[i] = item_disabled[i] ? NULL : shortcut_chars[i];
+    disabled[i] = item_disabled[i];
+  }
+  render_modal_ex(plane, theme, "MAGPIE", items, shortcuts, disabled,
+                  /*cursor_cols=*/NULL, /*zone_starts=*/NULL,
+                  /*zone_widths=*/NULL, TUI_STARTUP_ITEM_COUNT, focus, 44);
+}
+
+// Format a Watch-setup row as "Label" left-aligned + "value"
+// right-aligned within `content_w` display columns. When `focused`
+// is true, the value is wrapped in ◀ ▶ markers to signal that
+// Left/Right arrows will adjust it. `content_w` is the cell width
+// available between the modal's 2-space left padding and the
+// right border padding — the caller picks a value that matches
+// the modal's `width - 4`.
+static void format_setup_row(char *out, size_t out_size, int content_w,
+                             const char *label, const char *value,
+                             bool focused) {
+  // Display width of the value, including arrow decorations when
+  // focused. Each arrow is one display column despite being 3
+  // bytes of UTF-8 (◀ = U+25C0, ▶ = U+25B6).
+  const int value_disp = (int)strlen(value);
+  const int decorated_disp = focused ? value_disp + 4 : value_disp;
+  const int label_disp = (int)strlen(label);
+  int pad = content_w - label_disp - decorated_disp;
+  if (pad < 1) {
+    pad = 1;
+  }
+  if (focused) {
+    snprintf(out, out_size, "%s%*s\xe2\x97\x80 %s \xe2\x96\xb6", label, pad,
+             "", value);
+  } else {
+    snprintf(out, out_size, "%s%*s%s", label, pad, "", value);
+  }
+}
+
+void tui_game_render_watch_setup(struct ncplane *plane, const Theme *theme,
+                                 int focus, int time_seconds,
+                                 const char *language, const char *lexicon,
+                                 int sim_plies, int sim_candidates) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  // Resolve the time-control display string from whichever preset
+  // currently matches. Falls back to a "Ns" form so a custom value
+  // (e.g., loaded from config) renders sensibly.
+  const int preset_idx = tui_time_picker_closest_index(time_seconds);
+  const char *time_label = tui_time_picker_preset_seconds(preset_idx) ==
+                                   time_seconds
+                               ? tui_time_picker_preset_label(preset_idx)
+                               : NULL;
+  char time_value[24];
+  if (time_label != NULL) {
+    snprintf(time_value, sizeof(time_value), "%s", time_label);
+  } else if (time_seconds <= 0) {
+    snprintf(time_value, sizeof(time_value), "untimed");
+  } else if (time_seconds % 60 == 0) {
+    snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
+  } else {
+    snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
+  }
+
+  // Modal width chosen to comfortably fit the widest row. "Sim
+  // candidates" + 4 digits + ◀ ▶ markers needs ~30 cols of
+  // content; 56 keeps the value column visually anchored to the
+  // right edge for every row.
+  enum { MODAL_WIDTH = 56, CONTENT_W = MODAL_WIDTH - 4, ROW_BUF = 96 };
+  static char buf[TUI_WATCH_SETUP_ITEM_COUNT][ROW_BUF];
+  const char *items[TUI_WATCH_SETUP_ITEM_COUNT];
+  const bool focus_time = (focus == TUI_WATCH_SETUP_TIME);
+  const bool focus_lang = (focus == TUI_WATCH_SETUP_LANGUAGE);
+  const bool focus_lex = (focus == TUI_WATCH_SETUP_LEXICON);
+  const bool focus_plies = (focus == TUI_WATCH_SETUP_SIM_PLIES);
+  const bool focus_cands = (focus == TUI_WATCH_SETUP_SIM_CANDIDATES);
+  format_setup_row(buf[TUI_WATCH_SETUP_TIME], ROW_BUF, CONTENT_W, "Time",
+                   time_value, focus_time);
+  format_setup_row(buf[TUI_WATCH_SETUP_LANGUAGE], ROW_BUF, CONTENT_W,
+                   "Language",
+                   language != NULL && language[0] != '\0' ? language : "(none)",
+                   focus_lang);
+  format_setup_row(buf[TUI_WATCH_SETUP_LEXICON], ROW_BUF, CONTENT_W, "Lexicon",
+                   lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)",
+                   focus_lex);
+  char plies_str[8];
+  snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
+  format_setup_row(buf[TUI_WATCH_SETUP_SIM_PLIES], ROW_BUF, CONTENT_W,
+                   "Sim plies", plies_str, focus_plies);
+  char cands_str[8];
+  snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
+  format_setup_row(buf[TUI_WATCH_SETUP_SIM_CANDIDATES], ROW_BUF, CONTENT_W,
+                   "Sim candidates", cands_str, focus_cands);
+  snprintf(buf[TUI_WATCH_SETUP_START], ROW_BUF, "Start game");
+  for (int i = 0; i < TUI_WATCH_SETUP_ITEM_COUNT; i++) {
+    items[i] = buf[i];
+  }
+  render_modal(plane, theme, "Watch setup", items, NULL,
+               TUI_WATCH_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
+}
+
+// Format a row with a right-anchored fixed-width input zone.
+// Layout:
+//   [label][   space-padding   ][   input zone   ]
+// The input zone is `zone_width` cells wide and ends at column
+// content_w-1. The value (possibly empty) sits left-justified
+// inside the zone, padded with spaces so the entire zone is
+// covered by characters — the renderer paints a darker bg on
+// the zone, and characters here keep that bg.
+static void format_setup_text_row(char *out, size_t out_size, int content_w,
+                                  int zone_width, const char *label,
+                                  const char *value) {
+  if (out_size == 0) {
+    return;
+  }
+  for (size_t i = 0; i < out_size - 1; i++) {
+    out[i] = ' ';
+  }
+  out[out_size - 1] = '\0';
+  const int label_disp = label != NULL ? (int)strlen(label) : 0;
+  int li = 0;
+  while (label != NULL && label[li] != '\0' && li < content_w &&
+         (size_t)li < out_size - 1) {
+    out[li] = label[li];
+    li++;
+  }
+  const int zone_start = content_w - zone_width;
+  (void)label_disp;
+  if (value != NULL && zone_width > 0 && zone_start >= 0) {
+    const int max_chars = zone_width - 1; // leave a trailing cell for the
+                                          // end-of-text caret
+    for (int i = 0; value[i] != '\0' && i < max_chars &&
+                    (size_t)(zone_start + i) < out_size - 1;
+         i++) {
+      out[zone_start + i] = value[i];
+    }
+  }
+  if ((size_t)content_w < out_size) {
+    out[content_w] = '\0';
+  }
+}
+
+void tui_game_render_annotate_setup(struct ncplane *plane, const Theme *theme,
+                                    int focus, const char *lexicon,
+                                    const char *p1_name, const char *p2_name,
+                                    int name_edit_pos) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  enum {
+    MODAL_WIDTH = 56,
+    CONTENT_W = MODAL_WIDTH - 4,
+    ROW_BUF = 96,
+    // Right-anchored input zone for the player-name rows. Width
+    // is the visual size of the rectangle the renderer paints
+    // in a darker bg; the value sits left-justified inside, and
+    // the trailing cell is reserved for the block cursor when
+    // the caret is at end-of-text. 24 cells fits "PlayerNameHere "
+    // — plenty for tournament-style nicknames.
+    NAME_ZONE_W = 24,
+    NAME_ZONE_START = CONTENT_W - NAME_ZONE_W,
+  };
+  static char buf[TUI_ANNOTATE_SETUP_ITEM_COUNT][ROW_BUF];
+  const char *items[TUI_ANNOTATE_SETUP_ITEM_COUNT];
+  int cursor_cols[TUI_ANNOTATE_SETUP_ITEM_COUNT];
+  int zone_starts[TUI_ANNOTATE_SETUP_ITEM_COUNT];
+  int zone_widths[TUI_ANNOTATE_SETUP_ITEM_COUNT];
+  const bool focus_lex = (focus == TUI_ANNOTATE_SETUP_LEXICON);
+  const bool focus_p1 = (focus == TUI_ANNOTATE_SETUP_P1_NAME);
+  const bool focus_p2 = (focus == TUI_ANNOTATE_SETUP_P2_NAME);
+
+  format_setup_row(buf[TUI_ANNOTATE_SETUP_LEXICON], ROW_BUF, CONTENT_W,
+                   "Lexicon",
+                   lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)",
+                   focus_lex);
+  format_setup_text_row(buf[TUI_ANNOTATE_SETUP_P1_NAME], ROW_BUF, CONTENT_W,
+                        NAME_ZONE_W, "Player 1",
+                        p1_name != NULL ? p1_name : "");
+  format_setup_text_row(buf[TUI_ANNOTATE_SETUP_P2_NAME], ROW_BUF, CONTENT_W,
+                        NAME_ZONE_W, "Player 2",
+                        p2_name != NULL ? p2_name : "");
+  snprintf(buf[TUI_ANNOTATE_SETUP_START], ROW_BUF, "Start");
+  for (int i = 0; i < TUI_ANNOTATE_SETUP_ITEM_COUNT; i++) {
+    items[i] = buf[i];
+    cursor_cols[i] = -1;
+    zone_starts[i] = -1;
+    zone_widths[i] = 0;
+  }
+  // Both name rows always show the input zone (so the user can
+  // see where typing will land before they focus the row). The
+  // block cursor is only painted on the focused row.
+  zone_starts[TUI_ANNOTATE_SETUP_P1_NAME] = NAME_ZONE_START;
+  zone_widths[TUI_ANNOTATE_SETUP_P1_NAME] = NAME_ZONE_W;
+  zone_starts[TUI_ANNOTATE_SETUP_P2_NAME] = NAME_ZONE_START;
+  zone_widths[TUI_ANNOTATE_SETUP_P2_NAME] = NAME_ZONE_W;
+  if (focus_p1) {
+    cursor_cols[TUI_ANNOTATE_SETUP_P1_NAME] = NAME_ZONE_START + name_edit_pos;
+  }
+  if (focus_p2) {
+    cursor_cols[TUI_ANNOTATE_SETUP_P2_NAME] = NAME_ZONE_START + name_edit_pos;
+  }
+  render_modal_ex(plane, theme, "Annotate setup", items, /*shortcuts=*/NULL,
+                  /*disabled=*/NULL, cursor_cols, zone_starts, zone_widths,
+                  TUI_ANNOTATE_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
+}
+
+// Render a load-style modal (text input + Enter-to-load + error
+// line). Both Load-position (CGP) and Load-game (GCG) use this
+// with just title + prompt differing.
+static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
+                                   const char *title, const char *prompt,
+                                   const char *buf, int cursor,
+                                   const char *error);
+
+void tui_game_render_load_position(struct ncplane *plane, const Theme *theme,
+                                   const char *buf, int cursor,
+                                   const char *error) {
+  render_load_text_modal(
+      plane, theme, " Load position ",
+      "Type or paste a CGP format position, or drag a .cgp file to this window.",
+      buf, cursor, error);
+}
+
+void tui_game_render_load_game(struct ncplane *plane, const Theme *theme,
+                               const char *buf, int cursor,
+                               const char *error) {
+  render_load_text_modal(
+      plane, theme, " Load game ",
+      "Drag a .gcg file to this window (or type its path).",
+      buf, cursor, error);
+}
+
+static void render_load_text_modal(struct ncplane *plane, const Theme *theme,
+                                   const char *title, const char *prompt,
+                                   const char *buf, int cursor,
+                                   const char *error) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  // Layout: prompt (1) + spacer (1) + INPUT_ROWS + spacer (1) +
+  // Load button (1) + error line (1) inside the box, plus the
+  // top/bottom borders. INPUT_ROWS includes a one-row pad below
+  // the lowest line of text so the cursor doesn't sit flush
+  // against the next row.
+  enum {
+    MODAL_WIDTH = 80,
+    INPUT_ROWS = 8,
+    INTERIOR_LEFT = 3,
+  };
+  const int interior_w = MODAL_WIDTH - 2 - INTERIOR_LEFT - 2;
+  // Total content height: prompt (1) + blank (1) + INPUT_ROWS +
+  // hint (1) + error (1) = INPUT_ROWS + 4.
+  const int height = INPUT_ROWS + 4 + 2; // +2 for top/bottom borders
+  const int width = MODAL_WIDTH;
+
+  unsigned plane_rows = 0;
+  unsigned plane_cols = 0;
+  ncplane_dim_yx(plane, &plane_rows, &plane_cols);
+  if ((unsigned)width >= plane_cols || (unsigned)height >= plane_rows) {
+    return;
+  }
+  const int top = (int)(plane_rows - height) / 2;
+  const int left = (int)(plane_cols - width) / 2;
+
+  // Reuse the shared modal plane (created on first use by
+  // render_modal_ex) — same z-order rules apply. Re-create if
+  // not present and size to our dimensions.
+  if (grid_planes.modal == NULL) {
+    ncplane_options opts = {0};
+    opts.y = top;
+    opts.x = left;
+    opts.rows = (unsigned)height;
+    opts.cols = (unsigned)width;
+    opts.name = "modal";
+    grid_planes.modal = ncplane_create(plane, &opts);
+    if (grid_planes.modal == NULL) {
+      return;
+    }
+  } else {
+    unsigned cur_rows = 0;
+    unsigned cur_cols = 0;
+    ncplane_dim_yx(grid_planes.modal, &cur_rows, &cur_cols);
+    if ((int)cur_rows != height || (int)cur_cols != width) {
+      ncplane_resize_simple(grid_planes.modal, (unsigned)height,
+                            (unsigned)width);
+    }
+    ncplane_move_yx(grid_planes.modal, top, left);
+  }
+  struct ncplane *mp = grid_planes.modal;
+  uint64_t base_ch = 0;
+  ncchannels_set_fg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+  ncchannels_set_bg_alpha(&base_ch, NCALPHA_TRANSPARENT);
+  ncplane_set_base(mp, " ", 0, base_ch);
+  ncplane_erase(mp);
+  ncplane_move_top(mp);
+  ncplane_set_channels(mp, 0);
+
+  // Background fill + border chrome.
+  theme_apply_fg(mp, theme->modal_fg);
+  theme_apply_bg(mp, theme->modal_bg);
+  for (int r = 0; r < height; r++) {
+    for (int c = 0; c < width; c++) {
+      ncplane_putstr_yx(mp, r, c, " ");
+    }
+  }
+  const int right_col = width - 1;
+  const int bottom_row = height - 1;
+  theme_apply_fg(mp, theme->modal_border_fg);
+  theme_apply_bg(mp, theme->modal_border_bg);
+  ncplane_putstr_yx(mp, 0, 0, BOX_TL);
+  for (int col = 1; col < right_col; col++) {
+    ncplane_putstr_yx(mp, 0, col, BOX_HZ);
+  }
+  ncplane_putstr_yx(mp, 0, right_col, BOX_TR);
+  for (int row = 1; row < bottom_row; row++) {
+    ncplane_putstr_yx(mp, row, 0, BOX_VT);
+    ncplane_putstr_yx(mp, row, right_col, BOX_VT);
+  }
+  ncplane_putstr_yx(mp, bottom_row, 0, BOX_BL);
+  for (int col = 1; col < right_col; col++) {
+    ncplane_putstr_yx(mp, bottom_row, col, BOX_HZ);
+  }
+  ncplane_putstr_yx(mp, bottom_row, right_col, BOX_BR);
+
+  // Title inset.
+  theme_apply_fg(mp, theme->modal_fg);
+  theme_apply_bg(mp, theme->modal_border_bg);
+  ncplane_putstr_yx(mp, 0, 2, title != NULL ? title : " Load ");
+
+  // Prompt row.
+  theme_apply_fg(mp, theme->modal_shortcut_fg);
+  theme_apply_bg(mp, theme->modal_bg);
+  if (prompt != NULL) {
+    ncplane_putstr_yx(mp, 1, INTERIOR_LEFT, prompt);
+  }
+
+  // Walk the buffer into (row, col) display coordinates.
+  // For each character paint it within the input area; record
+  // where the cursor lands so we can paint it inverted last.
+  const int input_top = 3;
+  const int input_left = INTERIOR_LEFT;
+  int row_in = 0;
+  int col_in = 0;
+  int cursor_row = 0;
+  int cursor_col = 0;
+  theme_apply_fg(mp, theme->modal_fg);
+  theme_apply_bg(mp, theme->modal_bg);
+  for (int i = 0; buf != NULL && buf[i] != '\0'; i++) {
+    if (i == cursor) {
+      cursor_row = row_in;
+      cursor_col = col_in;
+    }
+    const char ch = buf[i];
+    if (ch == '\n') {
+      row_in++;
+      col_in = 0;
+      continue;
+    }
+    if (row_in < INPUT_ROWS && col_in < interior_w) {
+      char one[2] = {ch, '\0'};
+      ncplane_putstr_yx(mp, input_top + row_in, input_left + col_in, one);
+    }
+    col_in++;
+    if (col_in >= interior_w) {
+      // Soft wrap so a long line keeps flowing into the next row.
+      row_in++;
+      col_in = 0;
+    }
+  }
+  // Cursor at end-of-buffer case.
+  if (buf == NULL || cursor >= (int)(buf != NULL ? strlen(buf) : 0)) {
+    cursor_row = row_in;
+    cursor_col = col_in;
+  }
+  // Render the cursor as an inverted cell so the user always
+  // sees where the next inserted/deleted character will land.
+  if (cursor_row < INPUT_ROWS) {
+    const int cy = input_top + cursor_row;
+    const int cx = input_left + (cursor_col < interior_w ? cursor_col : interior_w - 1);
+    theme_apply_fg(mp, theme->modal_bg);
+    theme_apply_bg(mp, theme->modal_fg);
+    ncplane_putstr_yx(mp, cy, cx, " ");
+  }
+
+  // Hint row below the input area.
+  const int hint_row = input_top + INPUT_ROWS;
+  theme_apply_fg(mp, theme->modal_shortcut_fg);
+  theme_apply_bg(mp, theme->modal_bg);
+  ncplane_putstr_yx(mp, hint_row, INTERIOR_LEFT, "Enter: load  Esc: cancel");
+
+  // Error line just below the hint, dim red.
+  if (error != NULL && error[0] != '\0') {
+    const int err_row = hint_row + 1;
+    theme_apply_fg(mp, theme->error_fg);
+    theme_apply_bg(mp, theme->modal_bg);
+    char trunc[96];
+    snprintf(trunc, sizeof(trunc), "%.*s", interior_w, error);
+    ncplane_putstr_yx(mp, err_row, INTERIOR_LEFT, trunc);
+  }
 }
 
 void tui_game_render_time_picker(struct ncplane *plane, const Theme *theme,
@@ -6548,17 +8384,42 @@ static const char *score_subscripts_value(TuiScoreSubscripts mode) {
   }
 }
 
+// Display label for a rack-sort enum value. Concise on purpose so it
+// fits in the right-aligned value column of the Settings modal:
+//   "?+alpha" / "alpha+?" / "?+vow+con" / "vow+con+?"
+// Leading "?+" means blanks come first; the rest is the letter
+// ordering ("alpha" = alphabetical, "vow+con" = vowels then
+// consonants).
+static const char *rack_sort_value(TuiRackSort sort) {
+  switch (sort) {
+  case TUI_RACK_SORT_BLANKS_ALPHA:
+    return "?+alpha";
+  case TUI_RACK_SORT_BLANKS_VOWELS:
+    return "?+vow+con";
+  case TUI_RACK_SORT_VOWELS:
+    return "vow+con+?";
+  case TUI_RACK_SORT_ALPHA:
+  case TUI_RACK_SORT_COUNT:
+  default:
+    return "alpha+?";
+  }
+}
+
 void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                               int focus, int board_scale, bool antialias,
                               TuiScoreSubscripts score_subscripts,
                               int border_thickness, bool pixel_supported,
                               bool font_available,
                               TuiPremiumLabels premium_labels,
-                              bool blank_uppercase, const char *lexicon,
-                              bool load_rit) {
+                              bool blank_uppercase, TuiRackSort rack_sort,
+                              const char *lexicon, bool load_rit) {
   if (plane == NULL || theme == NULL) {
     return;
   }
+  // Lexicon row has been removed — lexicon is set only via the
+  // New Game / Watch setup flow. Keep the param for signature
+  // stability with existing callers.
+  (void)lexicon;
 
   // Scale row. 2x needs both pixel graphics and a loaded font; if
   // either is missing, the row reports unavailable and arrow keys
@@ -6636,19 +8497,11 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
                      blank_uppercase ? "uppercase" : "lowercase",
                      focus == TUI_SETTINGS_BLANKS);
 
-  // Lexicon row. Enter on this row opens the lexicon picker; the
-  // arrow keys are no-ops here since cycling through ~12 lexica
-  // doesn't make sense as a left/right toggle. Format mirrors the
-  // arrow rows except the value side carries a "▶" hint to suggest
-  // "press Enter to open" rather than "left/right to adjust".
-  char lexicon_label[96];
-  if (focus == TUI_SETTINGS_LEXICON) {
-    snprintf(lexicon_label, sizeof(lexicon_label), "%-13s%s \xe2\x96\xb6",
-             "Lexicon", lexicon != NULL ? lexicon : "");
-  } else {
-    snprintf(lexicon_label, sizeof(lexicon_label), "%-13s%s", "Lexicon",
-             lexicon != NULL ? lexicon : "");
-  }
+  // Rack-sort row.
+  char rack_sort_label[96];
+  format_setting_row(rack_sort_label, sizeof(rack_sort_label), "Rack sort",
+                     rack_sort_value(rack_sort),
+                     focus == TUI_SETTINGS_RACK_SORT);
 
   // RIT row. Plain on/off arrow toggle like Antialias.
   char rit_label[96];
@@ -6692,8 +8545,8 @@ void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
     case TUI_SETTINGS_BLANKS:
       label = blanks_label;
       break;
-    case TUI_SETTINGS_LEXICON:
-      label = lexicon_label;
+    case TUI_SETTINGS_RACK_SORT:
+      label = rack_sort_label;
       break;
     case TUI_SETTINGS_RIT:
       label = rit_label;

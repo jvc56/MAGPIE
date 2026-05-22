@@ -35,6 +35,25 @@ typedef enum {
   TUI_SCORE_SUBSCRIPTS_COUNT,
 } TuiScoreSubscripts;
 
+// Rack display ordering. Engine-side rack state isn't reordered —
+// only the display:
+//   TUI_RACK_SORT_ALPHA         ("alpha+?")    → A..Z then ? (default)
+//   TUI_RACK_SORT_BLANKS_ALPHA  ("?+alpha")    → ? then A..Z
+//   TUI_RACK_SORT_VOWELS        ("vow+con+?")  → vowels, consonants, ?
+//   TUI_RACK_SORT_BLANKS_VOWELS ("?+vow+con")  → ?, vowels, consonants
+// Cycle order matches the enum order so Left/Right walks the
+// blank-last variants first (the more common preference) and
+// then the blank-first variants. "Vowels" is per-language —
+// derived from the letter distribution's is_vowel flag, so the
+// setting works for non-English lexica.
+typedef enum {
+  TUI_RACK_SORT_ALPHA = 0,
+  TUI_RACK_SORT_BLANKS_ALPHA = 1,
+  TUI_RACK_SORT_VOWELS = 2,
+  TUI_RACK_SORT_BLANKS_VOWELS = 3,
+  TUI_RACK_SORT_COUNT,
+} TuiRackSort;
+
 typedef struct {
   ThemeName theme;
   bool theme_set;
@@ -65,6 +84,11 @@ typedef struct {
   // for the tile's point value.
   TuiScoreSubscripts score_subscripts;
   bool score_subscripts_set;
+  // How to order tiles in the rack panel + player-pill rack.
+  // Pure display ordering; the engine's internal rack stays the
+  // same regardless. See TuiRackSort doc above for the value list.
+  TuiRackSort rack_sort;
+  bool rack_sort_set;
   // Whether to load the per-lexicon RackInfoTable at startup. Costs
   // tens of MB; only worthwhile when inference / advanced rack-aware
   // analysis is in use. Defaults off; honored on the next New Game

@@ -71,17 +71,25 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
 // player had when the turn began.
 //
 // Caller must hold state->mutex.
-static int append_pending_history(TuiGameState *state, int player_idx,
-                                  const Rack *rack_at_start,
-                                  int clock_at_start) {
+int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
+                                          const struct Rack *rack_at_start,
+                                          int clock_at_start) {
   // If the user's history cursor was sitting on the previous last
   // entry, the new pending turn is "the current one" they were
   // watching — slide the cursor forward to keep it on the live
-  // turn. If they parked the cursor on an older entry (or back at
-  // the [4>] label) we leave it alone.
+  // turn. If they parked the cursor on an older entry we leave it
+  // alone.
   const bool follow_to_new_pending =
       state->history_cursor >= 0 &&
       state->history_cursor == state->history_count - 1;
+  // The Analysis cursor should reset even when the History
+  // cursor is parked on the [4>] label — both states mean
+  // "watching the live latest turn," so the new turn's
+  // leaderboard should fresh-start at rank 0 rather than
+  // inheriting wherever the user was looking on the previous
+  // turn.
+  const bool watching_latest_turn =
+      state->history_cursor < 0 || follow_to_new_pending;
   if (state->history_count >= TUI_HISTORY_MAX) {
     // Ring-buffer eviction: drop the oldest entry's owned state
     // before we shift the array left so we don't leak anything.
@@ -102,6 +110,9 @@ static int append_pending_history(TuiGameState *state, int player_idx,
     }
     if (state->history[0].endgame_moves_saved != NULL) {
       free(state->history[0].endgame_moves_saved);
+    }
+    if (state->history[0].loaded_move != NULL) {
+      free(state->history[0].loaded_move);
     }
     memmove(&state->history[0], &state->history[1],
             sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
@@ -139,16 +150,25 @@ static int append_pending_history(TuiGameState *state, int player_idx,
   entry->opp_rack_before = opp_rack != NULL ? rack_duplicate(opp_rack) : NULL;
   if (follow_to_new_pending) {
     state->history_cursor = state->history_count - 1;
+  }
+  if (watching_latest_turn) {
     // Reset the Analysis cursor to row 0 so the panel snaps to
     // the top play of the new turn's in-progress analysis (the
     // current best by sim ranking, == the move the bot is most
     // likely about to play) instead of inheriting whatever row
-    // the user had selected on the previous turn.
+    // the user had selected on the previous turn. Also fires
+    // when the History cursor is on the [4>] label — both that
+    // and "following the latest" mean the panel was tracking
+    // the live turn.
     state->analysis_cursor = 0;
     // Drop back to RANK column on turn advance: the prior turn's
     // anchored move doesn't apply to the new turn's leaderboard.
     state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
     state->analysis_anchored_move[0] = '\0';
+    // Reset the scroll position so the new turn's leaderboard
+    // starts from the top instead of wherever the previous turn
+    // happened to be scrolled to.
+    state->analysis_scroll_offset = 0;
   }
 
   if (rack_at_start != NULL) {
@@ -248,6 +268,10 @@ static void pop_history(TuiGameState *state) {
       free(entry->endgame_moves_saved);
       entry->endgame_moves_saved = NULL;
       entry->endgame_moves_saved_count = 0;
+    }
+    if (entry->loaded_move != NULL) {
+      free(entry->loaded_move);
+      entry->loaded_move = NULL;
     }
     state->history_count--;
   }
@@ -377,7 +401,10 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
 // time budget. Returns true and writes the chosen move on success.
 // Falls back to equity-best on any internal failure.
 static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
-  MoveList *candidates = generate_top_candidates(state->game, SIM_CANDIDATES);
+  const int requested_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  MoveList *candidates =
+      generate_top_candidates(state->game, requested_cands);
   if (candidates == NULL) {
     return false;
   }
@@ -405,7 +432,13 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   const int hw_cores = get_num_cores();
   const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
   SimArgs args = {0};
-  args.num_plies = SIM_PLIES;
+  // Pull sim depth + breadth from state so the Watch setup modal
+  // can tune them per game. Clamp to sensible bounds — a 0 ply
+  // sim is a no-op and a 0 candidate sim asks BAI to pick from
+  // nothing.
+  int s_plies = state->sim_plies > 0 ? state->sim_plies : 4;
+  int s_cands = state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  args.num_plies = s_plies;
   args.move_list = candidates;
   args.num_plays = move_list_get_count(candidates);
   args.known_opp_rack = NULL;
@@ -415,8 +448,8 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   args.inference_results = NULL;
   args.num_threads = num_threads;
   args.print_interval = 0;
-  args.max_num_display_plays = SIM_CANDIDATES;
-  args.max_num_display_plies = SIM_PLIES;
+  args.max_num_display_plays = s_cands;
+  args.max_num_display_plies = s_plies;
   args.seed = (uint64_t)time(NULL);
   args.thread_control = tc;
   args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
@@ -796,7 +829,7 @@ static void *bot_thread_main(void *arg) {
     rack_copy(&rack_at_start,
               player_get_rack(game_get_player(state->game, player_idx)));
 
-    pending_idx = append_pending_history(state, player_idx, &rack_at_start,
+    pending_idx = tui_bot_worker_append_pending_history(state, player_idx, &rack_at_start,
                                          clock_at_start);
     budget_sec = compute_budget_sec(state, player_idx);
     empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
@@ -926,6 +959,16 @@ static void *bot_thread_main(void *arg) {
     state->seconds_used[player_idx] += elapsed;
     state->turn_started = now;
 
+    // Snapshot the player's clock at end-of-move so the going-out
+    // entry's bonus row can surface it (the player pills only show
+    // it when no turn is focused; the History panel needs its own
+    // copy for the cursor preview).
+    if (pending_idx >= 0 && pending_idx < state->history_count) {
+      state->history[pending_idx].clock_at_end =
+          state->time_per_side_seconds -
+          (int)state->seconds_used[player_idx];
+    }
+
     // Surface end-of-game bonus on the same entry that just went out.
     bool finished = false;
     if (game_over(state->game)) {
@@ -942,6 +985,21 @@ static void *bot_thread_main(void *arg) {
         string_builder_destroy(rsb);
       }
       finished = true;
+      // Auto-park the History cursor on the last committed turn at
+      // game over. Without this the cursor stays at -1 (label) and
+      // the renderers fall back to the live game state — which is
+      // the post-going-out position (board has DI placed, rack is
+      // empty) and any candidate previews in Analysis don't match
+      // visually. Parking on the last turn rewinds board/rack/
+      // pills/clocks to the pre-going-out moment so the saved
+      // endgame leaderboard the user is browsing makes sense
+      // against what's on screen.
+      if (state->history_count > 0) {
+        state->history_cursor = state->history_count - 1;
+        state->analysis_cursor = 0;
+        state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
+        state->analysis_anchored_move[0] = '\0';
+      }
     }
 
     atomic_fetch_add(&state->render_version, 1);

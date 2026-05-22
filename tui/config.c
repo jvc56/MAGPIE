@@ -95,6 +95,8 @@ bool tui_config_load(TuiConfig *config) {
   config->antialias_set = false;
   config->score_subscripts = TUI_SCORE_SUBSCRIPTS_OFF;
   config->score_subscripts_set = false;
+  config->rack_sort = TUI_RACK_SORT_ALPHA;
+  config->rack_sort_set = false;
 
   char path[TUI_CONFIG_PATH_MAX];
   if (!tui_config_resolve_path(path, sizeof(path))) {
@@ -210,6 +212,20 @@ bool tui_config_load(TuiConfig *config) {
         config->score_subscripts = TUI_SCORE_SUBSCRIPTS_ALL;
         config->score_subscripts_set = true;
       }
+    } else if (strcmp(trimmed, "rack_sort") == 0) {
+      if (strcmp(value, "blanks_alpha") == 0) {
+        config->rack_sort = TUI_RACK_SORT_BLANKS_ALPHA;
+        config->rack_sort_set = true;
+      } else if (strcmp(value, "alpha") == 0) {
+        config->rack_sort = TUI_RACK_SORT_ALPHA;
+        config->rack_sort_set = true;
+      } else if (strcmp(value, "blanks_vowels") == 0) {
+        config->rack_sort = TUI_RACK_SORT_BLANKS_VOWELS;
+        config->rack_sort_set = true;
+      } else if (strcmp(value, "vowels") == 0) {
+        config->rack_sort = TUI_RACK_SORT_VOWELS;
+        config->rack_sort_set = true;
+      }
     } else if (strcmp(trimmed, "load_rit") == 0) {
       if (strcmp(value, "true") == 0 || strcmp(value, "1") == 0) {
         config->load_rit = true;
@@ -302,6 +318,26 @@ bool tui_config_save(const TuiConfig *config) {
       break;
     }
     fprintf(file, "score_subscripts = \"%s\"\n", value);
+  }
+  if (config->rack_sort_set) {
+    const char *value = "blanks_alpha";
+    switch (config->rack_sort) {
+    case TUI_RACK_SORT_ALPHA:
+      value = "alpha";
+      break;
+    case TUI_RACK_SORT_BLANKS_VOWELS:
+      value = "blanks_vowels";
+      break;
+    case TUI_RACK_SORT_VOWELS:
+      value = "vowels";
+      break;
+    case TUI_RACK_SORT_BLANKS_ALPHA:
+    case TUI_RACK_SORT_COUNT:
+    default:
+      value = "blanks_alpha";
+      break;
+    }
+    fprintf(file, "rack_sort = \"%s\"\n", value);
   }
   if (config->load_rit_set) {
     fprintf(file, "load_rit = %s\n", config->load_rit ? "true" : "false");
