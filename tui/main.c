@@ -1728,8 +1728,19 @@ int main(int argc, char *argv[]) {
           case TUI_EDIT_MOVE_KIND_PLACEMENT:
           case TUI_EDIT_MOVE_KIND_EXCHANGE:
           case TUI_EDIT_MOVE_KIND_PASS: {
-            snprintf(e->move_str, sizeof(e->move_str), "%s",
-                     game_state.edit_move_canonical);
+            // Exchanges go onto the entry in the TUI's compact
+            // "-ABC" form (matching how finalize_history shows
+            // bot-played exchanges). The engine validator still
+            // sees "ex ABC" via edit_move_canonical above; this
+            // is purely a display normalization at the commit
+            // boundary.
+            if (strncmp(game_state.edit_move_canonical, "ex ", 3) == 0) {
+              snprintf(e->move_str, sizeof(e->move_str), "-%s",
+                       game_state.edit_move_canonical + 3);
+            } else {
+              snprintf(e->move_str, sizeof(e->move_str), "%s",
+                       game_state.edit_move_canonical);
+            }
             if (game_state.edit_move_score >= 0) {
               e->score = game_state.edit_move_score;
             }
@@ -1883,7 +1894,13 @@ int main(int argc, char *argv[]) {
       }
       if (key >= 0x20 && key < 0x7f) {
         pthread_mutex_lock(&game_state.mutex);
-        if (*plen + 1 < (int)buf_cap) {
+        // RACK field caps at 7 tiles regardless of buffer size —
+        // a Scrabble rack never holds more than that, and the
+        // visible zone in the cell is 7 + 1 (cursor) cells wide.
+        // Hitting the cap leaves the cursor parked in the 8th
+        // cell as a visual "no room" signal.
+        const int per_field_cap = field_move ? (int)buf_cap - 1 : 7;
+        if (*plen < per_field_cap && *plen + 1 < (int)buf_cap) {
           // Move-field is uppercase-only for letters but keeps
           // case-folding for lowercase typed-as-blank. Rack
           // field also uppercases. Space is meaningful in MOVE

@@ -4449,39 +4449,69 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   }
 
   if (editing) {
-    // Annotation editor — render only the MOVE buffer on row 1
-    // here. Row 2 (rack) is painted in its own block below.
+    // Annotation editor — modal-text-edit style. The row when
+    // selected for editing gets a mid-grey "selection bar"
+    // background; the editable text-input rectangles sit on
+    // pure black, mirroring the modal's "row_bg + dark zone"
+    // pattern so the visual language stays consistent across
+    // every input surface.
     //
-    // Layout mirrors the committed-entry row so the eye doesn't
-    // jump when an edit commits:
-    //   "1> [move zone gray___] [leave gray]    +score"
-    // The +score sits flush with interior_right on the normal
-    // bg, exactly like a committed turn's delta. The leave zone
-    // (gray) holds a "·" placeholder until inferred. The move
-    // zone (gray) fills the rest of the row up to a 1-cell gap
-    // before the leave.
+    // Layout:  "1> [move zone (black)] [leave (black)]    +score"
+    // The +score sits flush with interior_right on the row bg
+    // (mid-grey), matching the committed-row geometry. The
+    // editable zones live inside that bar as recessed black
+    // rectangles.
     const int base_col = interior_left + (int)strlen(prefix);
-    const ThemeRgb gray_bg = {55, 55, 60};
+    const ThemeRgb row_bg = {38, 38, 38};
+    const ThemeRgb zone_bg = {0, 0, 0};
     const ThemeRgb white_bg = {255, 255, 255};
-    // Reserve a fixed 4-cell strip at the right edge for "+100".
-    // This matches the committed-entry layout (delta_col =
-    // interior_right - delta_len + 1) so columns line up.
+    // 4-cell strip at the right edge holds "+100" — same as
+    // committed rows, so the score column stays aligned across
+    // edit / non-edit states.
     const int score_col_w = 4;
     const int score_col_right = interior_right;
     const int score_col_left = score_col_right - score_col_w + 1;
-    const int leave_zone_w = 1; // "·" or 1-tile leave preview
+    // Compute the leave display string up front so we can size
+    // its zone to fit. Empty leave = "·" (1 cell). Non-empty
+    // leave gets alphagrammed via the user's rack-sort; that
+    // sets the zone width (which can be up to 6 for a max
+    // non-bingo leave). The right edge stays pinned next to the
+    // score column — the zone *grows leftward* as the leave
+    // grows, and the move zone shrinks to make room.
+    char leave_disp[24];
+    leave_disp[0] = '\0';
+    if (state->edit_move_leave[0] != '\0') {
+      format_alphagram_for_sort(state->edit_move_leave, state->ld,
+                                state->rack_sort, leave_disp,
+                                sizeof(leave_disp));
+    }
+    const bool leave_empty = leave_disp[0] == '\0';
+    const int leave_zone_w = leave_empty ? 1 : (int)strlen(leave_disp);
     const int leave_zone_right = score_col_left - 2; // 1-cell gap
     const int leave_zone_left = leave_zone_right - leave_zone_w + 1;
     const int move_zone_left = base_col;
     const int move_zone_right = leave_zone_left - 2; // 1-cell gap
-    // Paint move zone background.
-    theme_apply_bg(plane, gray_bg);
+    // Paint the entire row (under the chip / prefix region too)
+    // with the selection bar bg. The "1>" chip was already
+    // painted above on theme->bg; repaint the post-chip prefix
+    // tail and the gaps between zones with row_bg.
+    theme_apply_bg(plane, row_bg);
+    theme_apply_fg(plane, theme->fg);
+    for (int c = interior_left + (int)strlen(prefix) - 1;
+         c <= interior_right; c++) {
+      if (c < interior_left) {
+        continue;
+      }
+      ncplane_putstr_yx(plane, row, c, " ");
+    }
+    // Recessed black rectangle for the move-text input.
+    theme_apply_bg(plane, zone_bg);
     theme_apply_fg(plane, theme->dim_fg);
     for (int c = move_zone_left; c <= move_zone_right && c <= interior_right;
          c++) {
       ncplane_putstr_yx(plane, row, c, " ");
     }
-    // Move buffer text overlay (preserves gray bg).
+    // Move buffer text overlay (preserves zone bg).
     const char *buf = state->edit_move_buf;
     const int buf_len = state->edit_move_len;
     const ThemeRgb move_txt_fg =
@@ -4492,49 +4522,40 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
         break;
       }
       theme_apply_fg(plane, move_txt_fg);
-      theme_apply_bg(plane, gray_bg);
+      theme_apply_bg(plane, zone_bg);
       char ch[2] = {buf[j], '\0'};
       ncplane_putstr_yx(plane, row, col, ch);
     }
-    // Paint leave zone background. If the parser produced a
-    // non-empty leave (rack tiles minus the move's played
-    // letters), render those letters sorted; otherwise show
-    // the "·" placeholder used elsewhere for an empty/bingo
-    // leave.
+    // Leave input rectangle (also recessed black). Width was
+    // already sized to fit the alphagrammed leave; render its
+    // letters left-justified inside the zone. Empty leave shows
+    // the "·" placeholder in a single-cell zone.
     if (leave_zone_left > move_zone_right) {
-      theme_apply_bg(plane, gray_bg);
+      theme_apply_bg(plane, zone_bg);
       theme_apply_fg(plane, player_dim_fg);
       for (int c = leave_zone_left; c <= leave_zone_right; c++) {
         ncplane_putstr_yx(plane, row, c, " ");
       }
-      if (state->edit_move_leave[0] != '\0') {
-        char sorted_leave[24];
-        format_alphagram_for_sort(state->edit_move_leave, state->ld,
-                                  state->rack_sort, sorted_leave,
-                                  sizeof(sorted_leave));
-        ncplane_putstr_yx(plane, row, leave_zone_left, sorted_leave);
+      if (!leave_empty) {
+        ncplane_putstr_yx(plane, row, leave_zone_left, leave_disp);
       } else {
         ncplane_putstr_yx(plane, row, leave_zone_left, "\xc2\xb7");
       }
     }
-    // "+score" right-anchored at interior_right on the normal
-    // (non-gray) background, bold player accent — same look as a
-    // committed turn's delta. Rendered after the gray zones so
-    // it never gets painted over.
+    // "+score" right-anchored at interior_right on the row bar
+    // bg (not on the input black) — matches committed-row geometry.
     if (state->edit_move_score >= 0) {
       char score_str[8];
       snprintf(score_str, sizeof(score_str), "+%d", state->edit_move_score);
       const int score_len = (int)strlen(score_str);
       const int score_col = score_col_right - score_len + 1;
       theme_apply_fg(plane, player_fg);
-      theme_apply_bg(plane, theme->bg);
+      theme_apply_bg(plane, row_bg);
       ncplane_set_styles(plane, NCSTYLE_BOLD);
       ncplane_putstr_yx(plane, row, score_col, score_str);
       ncplane_set_styles(plane, 0);
     }
-    // Block cursor — only painted when this field has focus.
-    // Solid white background overrides the gray cell so the
-    // single insertion point is unambiguous.
+    // White block cursor, only when MOVE has focus.
     if (state->edit_field == TUI_EDIT_FIELD_MOVE) {
       const int cur_col = move_zone_left + state->edit_move_cursor;
       if (cur_col >= move_zone_left && cur_col <= move_zone_right) {
@@ -4718,8 +4739,10 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
   // edit-rack buffer (with optional white block cursor) on top
   // of the row-2 rack rendering. The buffer is rendered at the
   // same indent as left_line's rack position (after the prefix
-  // and the optional clock). A 7-cell gray zone marks the
-  // editable area regardless of how many tiles have been typed.
+  // and the optional clock). The zone is 8 cells wide — 7 for
+  // tile slots plus a final cell that's reserved for the cursor
+  // when the rack is full. Input is capped at 7 tiles so the
+  // cursor in cell 8 reads as "rack is full, no room for more".
   if (editing) {
     int rack_col = interior_left + (int)strlen(prefix);
     if (clocks_active) {
@@ -4728,25 +4751,33 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
                    sizeof(clock_str));
       rack_col += (int)strlen(clock_str) + 1;
     }
-    const ThemeRgb gray_bg = {55, 55, 60};
+    const ThemeRgb row_bg = {38, 38, 38};
+    const ThemeRgb zone_bg = {0, 0, 0};
     const ThemeRgb white_bg = {255, 255, 255};
     const int rack_zone_left = rack_col;
-    const int rack_zone_right = rack_col + 6; // 7 cells for 7 tiles
-    // Paint rack zone background.
-    theme_apply_bg(plane, gray_bg);
+    const int rack_zone_right = rack_col + 7; // 8 cells: 7 tiles + cursor slot
+    // Repaint the entire row-2 with the selection-bar bg so the
+    // gaps around the zone match modal text-edit chrome.
+    theme_apply_bg(plane, row_bg);
+    theme_apply_fg(plane, player_dim_fg);
+    for (int c = interior_left; c <= interior_right; c++) {
+      ncplane_putstr_yx(plane, row2, c, " ");
+    }
+    // Recessed black rectangle for the rack input.
+    theme_apply_bg(plane, zone_bg);
     theme_apply_fg(plane, theme->dim_fg);
     for (int c = rack_zone_left; c <= rack_zone_right && c <= interior_right;
          c++) {
       ncplane_putstr_yx(plane, row2, c, " ");
     }
-    // Display the rack buffer alphagrammed by the user's
-    // rack-sort preference (vowels-first, blanks-first, etc.) so
-    // the in-cell rack matches the Rack panel's order. The
-    // buffer itself stays in typed (storage) order — sorting is
-    // purely visual, applied per-frame to whatever the user
-    // typed.
-    char sorted_rbuf[24];
-    sorted_rbuf[0] = '\0';
+    // Buffer display. While the RACK field has focus we render
+    // the typed buffer verbatim — letters stay where the user
+    // put them. When RACK is unfocused (edit_field == MOVE) we
+    // alphagram via the user's rack-sort preference so it lines
+    // up with the rest of the UI. The sort only kicks in on
+    // focus-leave, matching the modal text-edit feel.
+    char display_buf[24];
+    display_buf[0] = '\0';
     if (state->edit_rack_len > 0) {
       char tmp[24];
       const int copy = state->edit_rack_len < (int)sizeof(tmp) - 1
@@ -4754,28 +4785,36 @@ static void render_history_entry(struct ncplane *plane, const Theme *theme,
                            : (int)sizeof(tmp) - 1;
       memcpy(tmp, state->edit_rack_buf, (size_t)copy);
       tmp[copy] = '\0';
-      format_alphagram_for_sort(tmp, state->ld, state->rack_sort, sorted_rbuf,
-                                sizeof(sorted_rbuf));
+      if (state->edit_field == TUI_EDIT_FIELD_RACK) {
+        snprintf(display_buf, sizeof(display_buf), "%s", tmp);
+      } else {
+        format_alphagram_for_sort(tmp, state->ld, state->rack_sort, display_buf,
+                                  sizeof(display_buf));
+      }
     }
-    const int sorted_len = (int)strlen(sorted_rbuf);
+    const int display_len = (int)strlen(display_buf);
     const ThemeRgb rack_fg =
         state->edit_rack_valid ? player_dim_fg : theme->error_fg;
-    for (int j = 0; j < sorted_len; j++) {
+    for (int j = 0; j < display_len; j++) {
       const int col = rack_zone_left + j;
       if (col > rack_zone_right) {
         break;
       }
       theme_apply_fg(plane, rack_fg);
-      theme_apply_bg(plane, gray_bg);
-      char ch[2] = {sorted_rbuf[j], '\0'};
+      theme_apply_bg(plane, zone_bg);
+      char ch[2] = {display_buf[j], '\0'};
       ncplane_putstr_yx(plane, row2, col, ch);
     }
     if (state->edit_field == TUI_EDIT_FIELD_RACK) {
-      // Cursor sits at the end of the sorted display — the user
-      // is appending tiles, and a "middle of sorted alphagram"
-      // cursor wouldn't correspond to any meaningful insertion
-      // point in the underlying typed buffer.
-      const int cur_col = rack_zone_left + sorted_len;
+      // Cursor sits at the buffer's end position. With input
+      // capped at 7 tiles, the cursor reaches column 7 (the
+      // 8th cell) when the rack is full — a visual signal that
+      // further keypresses won't add tiles.
+      int cur_off = display_len;
+      if (cur_off > 7) {
+        cur_off = 7;
+      }
+      const int cur_col = rack_zone_left + cur_off;
       if (cur_col >= rack_zone_left && cur_col <= rack_zone_right) {
         theme_apply_fg(plane, theme->bg);
         theme_apply_bg(plane, white_bg);

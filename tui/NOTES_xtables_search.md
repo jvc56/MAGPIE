@@ -1,9 +1,34 @@
 # cross-tables.com search — endpoints and integration notes
 
-Reverse-engineered URL surface for adding player and tournament search
-to the MAGPIE TUI's load-game flow. cross-tables.com has no documented
-JSON API; everything below is server-rendered HTML scraped by trying
-queries against the live site (2026-05).
+URL surface for adding player and tournament search to the MAGPIE TUI's
+load-game flow. cross-tables.com publishes a documented REST API at
+<https://cross-tables.com/rest/> — **prefer that for any new integration**
+(see [REST API](#rest-api) below). The HTML-scraping endpoints documented
+in the rest of this file were reverse-engineered against the live site
+(2026-05) before we noticed the REST API existed; they're kept here as
+a fallback for surfaces the REST API doesn't cover.
+
+## REST API
+
+cross-tables.com exposes a JSON API under `https://cross-tables.com/rest/`.
+We haven't audited which endpoints cover which use cases — that's a
+prerequisite step before the TUI integration described below. Action
+items:
+
+1. Visit `https://cross-tables.com/rest/` and enumerate the documented
+   endpoints. Map each to the four flows the TUI needs:
+   - Search players by name.
+   - Search tournaments by name.
+   - List a player's annotated games.
+   - List a tournament's annotated games.
+2. For any flow not covered by REST, fall back to the HTML-scraping
+   endpoints below.
+3. Replace the [Implementation outline](#implementation-outline) with
+   one that calls REST first and only reaches for HTML scraping where
+   necessary.
+
+Once that audit is done, the rest of this document should be slimmed
+to "fallback when REST doesn't cover X".
 
 ## Endpoint map
 
@@ -69,13 +94,16 @@ re.findall(r'href="tourney\.php\?t=\d+">([^<]+)</a>',     body)
 
 ## HTTP gotchas
 
+Applies to the HTML scrape endpoints — re-check against the REST API,
+which may have different conventions.
+
 - **`User-Agent` must look like curl or a browser.** `Python-urllib/3.x`
   trips mod_security and gets a 406. `User-Agent: curl/8.0` works.
 - **`Accept: */*` is required** on most endpoints, otherwise 406.
 - **No documented rate limit.** Reuse `fetch_games.py`'s convention of
   ~300 ms between fetches.
-- **No JSON, no API key.** Everything is server-rendered HTML; no
-  authentication needed.
+- **No API key required for the scrape endpoints.** The `<rest/>` JSON
+  surface may or may not require one — confirm during the audit.
 - **No directory listings.** `annotated/`, `annotated/selfgcg/`, etc.
   return 403 — paths only work for fully-qualified game URLs.
 
