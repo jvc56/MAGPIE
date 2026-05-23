@@ -559,7 +559,7 @@ void test_2lex_informed(void) {
 // mover has CDIOST?. The blank gives mover a DISCO(U)nT bingo at 1A through
 // the existing U at row 1 col F, scoring 167 + 14 going-out bonus = +181
 // value. Opp's only defence is 2B ONIO(N) 10 which creates an "IO" cross
-// below 1B and BLOCKS DISCO(U)nT. Discovered while debugging the pegN
+// below 1B and BLOCKS DISCO(U)nT. Discovered while debugging the peg
 // greedy d=0 evaluator: a tight -tlim that interrupts IDS in the middle
 // of its depth-3 iteration was returning pass-pass at "status: finished"
 // even though -plies 3 with adequate time gives the correct answer.

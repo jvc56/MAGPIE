@@ -14,7 +14,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
-#include "../src/impl/bai_peg.h"
+#include "../src/impl/peg_pool.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/cgp.h"
@@ -31,6 +31,7 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -296,7 +297,7 @@ static void play_until_1_in_bag(Game *game, MoveList *move_list) {
 // Play greedy moves until the bag has <= `target_bag` tiles (or no legal
 // moves remain). Stops as soon as the post-play bag size drops at or
 // below `target_bag` so the caller can check `== target_bag` exactly.
-static void play_until_N_in_bag(Game *game, MoveList *move_list,
+static void play_until_n_in_bag(Game *game, MoveList *move_list,
                                 int target_bag) {
   while (bag_get_letters(game_get_bag(game)) > target_bag &&
          game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
@@ -813,8 +814,8 @@ static bool play_85_system_to_drain(Game *game, MoveList *ml) {
   return false;
 }
 
-void test_pass_peg_search_forced(void) {
-  fprintf(stderr, "[passpegforce] starting\n");
+void test_pass_peg_engineered_search(void) {
+  fprintf(stderr, "[passpegengineered] starting\n");
   fflush(stderr);
 
   const char *rack_env = getenv("PASSPEG_FORCE_RACK");
@@ -836,7 +837,7 @@ void test_pass_peg_search_forced(void) {
                              : 1ULL;
 
   fprintf(stderr,
-          "[passpegforce] R=%s target_count=%d max_attempts=%d "
+          "[passpegengineered] R=%s target_count=%d max_attempts=%d "
           "seed_offset=%llu\n",
           target_rack, target_count, max_attempts,
           (unsigned long long)seed_offset);
@@ -855,7 +856,7 @@ void test_pass_peg_search_forced(void) {
       log_fatal("could not load %s; run pegracks first", racks_path);
     }
     fprintf(stderr,
-            "[passpegforce] multi-rack mode: cycling through %d racks\n",
+            "[passpegengineered] multi-rack mode: cycling through %d racks\n",
             n_sigs);
     fflush(stderr);
   }
@@ -909,7 +910,7 @@ void test_pass_peg_search_forced(void) {
     n_attempts++;
     if (attempt > 0 && attempt % 1000 == 0) {
       fprintf(stderr,
-              "[passpegforce] attempt=%d drained=%d band=%d "
+              "[passpegengineered] attempt=%d drained=%d band=%d "
               "found=%d\n",
               attempt, n_drained, n_lead_band, found);
       fflush(stderr);
@@ -1049,7 +1050,7 @@ void test_pass_peg_search_forced(void) {
 
     char *cgp = game_get_cgp(game, true);
     fprintf(stderr,
-            "[passpegforce] HIT seed=%llu R=%s lead=%+d bingos=%d "
+            "[passpegengineered] HIT seed=%llu R=%s lead=%+d bingos=%d "
             "(mover=%d opp=%d)\n",
             (unsigned long long)(seed_offset + (uint64_t)attempt), target_rack,
             lead, bingo_count, mover_score, opp_score);
@@ -1101,191 +1102,6 @@ void test_pass_peg_search_forced(void) {
   move_list_destroy(ml);
   config_destroy(config);
 }
-
-// ---------------------------------------------------------------------------
-// Sample solve: run bai_peg_solve on the first N CGPs from
-// /tmp/passpeg_candidates.txt (one row per candidate from passpegforce),
-// dumping per-cand visit/depth_evaluated stats so we can see how PUCT
-// allocates compute on these engineered pass-PEG positions.
-// ---------------------------------------------------------------------------
-
-void test_pass_peg_sample_solve(void) {
-  const char *n_env = getenv("PASSPEG_SAMPLE_N");
-  int sample_n = n_env && *n_env ? atoi(n_env) : 10;
-  if (sample_n < 1) {
-    sample_n = 1;
-  }
-  const char *time_env = getenv("PASSPEG_SAMPLE_TIME");
-  double time_budget = time_env && *time_env ? atof(time_env) : 15.0;
-  const char *workers_env = getenv("PASSPEG_SAMPLE_WORKERS");
-  int workers = workers_env && *workers_env ? atoi(workers_env) : 8;
-  const char *topk_env = getenv("PASSPEG_SAMPLE_TOP_K");
-  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
-
-  const char *cgps_path = "/tmp/passpeg_candidates.txt";
-  FILE *f = fopen(cgps_path, "re");
-  if (!f) {
-    log_fatal("could not open %s", cgps_path);
-  }
-
-  fprintf(stderr, "[passpegsample] n=%d time/pos=%.1fs workers=%d top_k=%d\n",
-          sample_n, time_budget, workers, top_k);
-  fflush(stderr);
-
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  BaiPegExecutor *executor =
-      workers > 0 ? bai_peg_executor_create(workers, 100) : NULL;
-
-  printf("\n%-3s %-12s %5s %5s %3s %4s %5s %4s %s\n", "Pos", "R", "lead",
-         "evals", "B?", "best", "win%", "dpth", "best_move");
-  printf("--- ------------ ----- ----- --- ---- ----- ---- "
-         "------------------------------\n");
-
-  // Per-cand visit/depth aggregate stats across all sampled positions.
-  long total_visits = 0;
-  long total_evals = 0;
-  int total_cands = 0;
-  int max_depth_seen = 0;
-  int min_depth_seen = 1000;
-  long sum_depth = 0;
-  int pass_best_count = 0;
-
-  char line[8192];
-  int processed = 0;
-  while (processed < sample_n && fgets(line, sizeof(line), f)) {
-    int len = (int)strlen(line);
-    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r')) {
-      line[--len] = '\0';
-    }
-    if (len == 0) {
-      continue;
-    }
-    // Split on tab: CGP\tR=...\tlead=...\tbingos=...
-    char *tab = strchr(line, '\t');
-    char rack_letter[16] = "?";
-    int lead = 0;
-    if (tab) {
-      *tab = '\0';
-      const char *meta = tab + 1;
-      // R=XXXX
-      const char *r_eq = strstr(meta, "R=");
-      if (r_eq) {
-        sscanf(r_eq + 2, "%15s", rack_letter);
-      }
-      const char *lead_eq = strstr(meta, "lead=");
-      if (lead_eq) {
-        sscanf(lead_eq + 5, "%d", &lead);
-      }
-    }
-
-    char load_cmd[10240];
-    snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", line);
-    load_and_exec_config_or_die(config, load_cmd);
-    Game *game = config_get_game(config);
-
-    BaiPegArgs args = {
-        .game = game,
-        .thread_control = config_get_thread_control(config),
-        .num_threads = 1,
-        .tt_fraction_of_mem = 0.0,
-        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-        .initial_top_k = top_k,
-        .inner_initial_top_k = 8,
-        .max_depth = BAI_PEG_MAX_DEPTH,
-        .endgame_time_per_solve = 5.0,
-        .time_budget_seconds = time_budget,
-        .puct_c = 1.0,
-        .utility_alpha = 1e-4,
-        .progressive_widening = false,
-        .min_active = 0,
-        .sweep_max_depth = 0, // normal PUCT, not sweep
-        .include_pass = true,
-        .pass_opp_max_depth = 0, // coupled mode tracks mover PUCT depth
-        .executor = executor,
-        .log_solve_details = false,
-        .request_cand_stats = true,
-    };
-    BaiPegResult result;
-    ErrorStack *err = error_stack_create();
-    bai_peg_solve(&args, &result, err);
-    assert(error_stack_is_empty(err));
-
-    bool best_is_pass = small_move_is_pass(&result.best_move);
-    if (best_is_pass) {
-      pass_best_count++;
-    }
-
-    // Format best move text.
-    char best_text[64];
-    if (best_is_pass) {
-      snprintf(best_text, sizeof(best_text), "(Pass)");
-    } else {
-      Move m;
-      small_move_to_move(&m, &result.best_move, game_get_board(game));
-      StringBuilder *sb = string_builder_create();
-      string_builder_add_move(sb, game_get_board(game), &m, game_get_ld(game),
-                              /*add_score=*/true);
-      const char *peek = string_builder_peek(sb);
-      size_t pn = strlen(peek);
-      if (pn >= sizeof(best_text)) {
-        pn = sizeof(best_text) - 1;
-      }
-      memcpy(best_text, peek, pn);
-      best_text[pn] = '\0';
-      string_builder_destroy(sb);
-    }
-
-    printf("%-3d %-12s %+5d %5d %3s %s %5.3f %4d %-30s\n", processed + 1,
-           rack_letter, lead, result.evaluations_done, best_is_pass ? "Y" : "N",
-           best_is_pass ? "PASS" : "play", result.best_win_pct,
-           result.best_depth_evaluated, best_text);
-
-    // Aggregate across cands.
-    if (result.cand_stats) {
-      for (int i = 0; i < result.candidates_considered; i++) {
-        const BaiCandStats *s = &result.cand_stats[i];
-        total_visits += s->visits;
-        if (s->depth_evaluated > 0) {
-          if (s->depth_evaluated > max_depth_seen) {
-            max_depth_seen = s->depth_evaluated;
-          }
-          if (s->depth_evaluated < min_depth_seen) {
-            min_depth_seen = s->depth_evaluated;
-          }
-        }
-        sum_depth += s->depth_evaluated;
-        total_cands++;
-      }
-    }
-    total_evals += result.evaluations_done;
-
-    error_stack_destroy(err);
-    bai_cand_stats_free(result.cand_stats);
-    processed++;
-  }
-  (void)fclose(f);
-
-  printf("\n=== Sample solve aggregate (%d positions) ===\n", processed);
-  printf("  pass_best_count        : %d / %d\n", pass_best_count, processed);
-  printf("  total cand evaluations : %ld\n", total_evals);
-  printf("  total cand visits      : %ld\n", total_visits);
-  printf("  total cands seen       : %d\n", total_cands);
-  if (total_cands > 0) {
-    printf("  avg visits per cand    : %.2f\n",
-           (double)total_visits / total_cands);
-    printf("  avg depth per cand     : %.2f\n",
-           (double)sum_depth / total_cands);
-  }
-  printf("  min/max depth seen     : %d / %d\n", min_depth_seen,
-         max_depth_seen);
-  printf("============================================\n");
-
-  if (executor) {
-    bai_peg_executor_destroy(executor);
-  }
-  config_destroy(config);
-}
-
 // ---------------------------------------------------------------------------
 // Random 1-peg generator (no engineering): autoplay-to-1peg starting from
 // random seeds, output CGPs that PASS the basic 1-peg shape (bag=1, both
@@ -1300,8 +1116,8 @@ void test_pass_peg_sample_solve(void) {
 //   PASSPEG_RAND_MARGIN   - max abs(mover_score - opp_score); 0 = no filter
 //                           (default 40)
 //   PASSPEG_RAND_SEED     - seed offset (default 100001)
-//   PASSPEG_RAND_OUT      - output path (default /tmp/random_pegN.txt)
-void test_pass_peg_generate_random_pegN(void) {
+//   PASSPEG_RAND_OUT      - output path (default /tmp/random_peg.txt)
+void test_generate_peg_cgps(void) {
   const char *n_env = getenv("PASSPEG_RAND_N");
   int target_n = n_env && *n_env ? atoi(n_env) : 100;
   if (target_n < 1) {
@@ -1322,7 +1138,7 @@ void test_pass_peg_generate_random_pegN(void) {
       seed_env && *seed_env ? strtoull(seed_env, NULL, 10) : 100001ULL;
   const char *out_env = getenv("PASSPEG_RAND_OUT");
   const char *out_path =
-      out_env && *out_env ? out_env : "/tmp/random_pegN.txt";
+      out_env && *out_env ? out_env : "/tmp/random_peg.txt";
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[256];
@@ -1340,7 +1156,7 @@ void test_pass_peg_generate_random_pegN(void) {
   int found = 0;
   int attempt = 0;
   fprintf(stderr,
-          "[passpegrandN] generating %d positions with bag=%d, lex=%s, "
+          "[genpeg] generating %d positions with bag=%d, lex=%s, "
           "|margin|<=%d -> %s\n",
           target_n, target_bag, lex, margin_abs, out_path);
   fflush(stderr);
@@ -1348,7 +1164,7 @@ void test_pass_peg_generate_random_pegN(void) {
     game_reset(game);
     game_seed(game, seed_offset + (uint64_t)attempt);
     draw_starting_racks(game);
-    play_until_N_in_bag(game, ml, target_bag);
+    play_until_n_in_bag(game, ml, target_bag);
     attempt++;
     if (bag_get_letters(game_get_bag(game)) != target_bag) {
       continue;
@@ -1381,92 +1197,19 @@ void test_pass_peg_generate_random_pegN(void) {
     free(cgp);
     found++;
     if (found % 10 == 0) {
-      fprintf(stderr, "[passpegrandN] %d/%d (after %d attempts)\n", found,
+      fprintf(stderr, "[genpeg] %d/%d (after %d attempts)\n", found,
               target_n, attempt);
       fflush(stderr);
     }
   }
   (void)fclose(f);
   fprintf(stderr,
-          "[passpegrandN] DONE: %d positions in %d attempts -> %s\n",
+          "[genpeg] DONE: %d positions in %d attempts -> %s\n",
           found, attempt, out_path);
   fflush(stderr);
   move_list_destroy(ml);
   config_destroy(config);
 }
-
-void test_pass_peg_generate_random_1pegs(void) {
-  const char *n_env = getenv("PASSPEG_RAND_N");
-  int target_n = n_env && *n_env ? atoi(n_env) : 100;
-  if (target_n < 1) {
-    target_n = 1;
-  }
-  const char *seed_env = getenv("PASSPEG_RAND_SEED");
-  uint64_t seed_offset =
-      seed_env && *seed_env ? strtoull(seed_env, NULL, 10) : 100001ULL;
-
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(
-      config,
-      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex TWL98");
-  Game *game = config_get_game(config);
-  MoveList *ml = move_list_create(20);
-
-  const char *out_path = "/tmp/random_1pegs.txt";
-  FILE *f = fopen(out_path, "we");
-  if (!f) {
-    log_fatal("cannot open %s", out_path);
-  }
-  int found = 0;
-  int attempt = 0;
-  fprintf(stderr, "[passpegrand] generating %d random 1-pegs\n", target_n);
-  fflush(stderr);
-  while (found < target_n && attempt < 1000000) {
-    game_reset(game);
-    game_seed(game, seed_offset + (uint64_t)attempt);
-    draw_starting_racks(game);
-    play_until_1_in_bag(game, ml);
-    attempt++;
-    if (bag_get_letters(game_get_bag(game)) != 1) {
-      continue;
-    }
-    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-      continue;
-    }
-    int mover_idx = game_get_player_on_turn_index(game);
-    const Rack *mr = player_get_rack(game_get_player(game, mover_idx));
-    const Rack *opp_r = player_get_rack(game_get_player(game, 1 - mover_idx));
-    if (rack_get_total_letters(mr) != RACK_SIZE) {
-      continue;
-    }
-    if (rack_is_empty(opp_r)) {
-      continue;
-    }
-    char *cgp = game_get_cgp(game, true);
-    fprintf(f, "%s\n", cgp);
-    free(cgp);
-    found++;
-    if (found % 10 == 0) {
-      fprintf(stderr, "[passpegrand] %d/%d (after %d attempts)\n", found,
-              target_n, attempt);
-      fflush(stderr);
-    }
-  }
-  (void)fclose(f);
-  fprintf(stderr, "[passpegrand] DONE: %d positions in %d attempts -> %s\n",
-          found, attempt, out_path);
-  fflush(stderr);
-  move_list_destroy(ml);
-  config_destroy(config);
-}
-
-// ---------------------------------------------------------------------------
-// Bench: run bai_peg_solve in 4 variants × 3 wall budgets across the
-// 100 engineered + 100 random 1-pegs.
-// Variants: {include_pass=true, include_pass=false} × {algo=PUCT, algo=SH}.
-// Budgets: 10, 20, 30 seconds.
-// CSV out: /tmp/passpeg_bench.csv
-// ---------------------------------------------------------------------------
 
 static int load_cgp_lines(const char *path, char ***out, int max_n) {
   FILE *f = fopen(path, "re");
@@ -1494,213 +1237,6 @@ static int load_cgp_lines(const char *path, char ***out, int max_n) {
   (void)fclose(f);
   *out = arr;
   return n;
-}
-
-void test_pass_peg_bench(void) {
-  const char *n_pass_env = getenv("PASSPEG_BENCH_N_PASS");
-  const char *n_rand_env = getenv("PASSPEG_BENCH_N_RAND");
-  int n_pass = n_pass_env && *n_pass_env ? atoi(n_pass_env) : 100;
-  int n_rand = n_rand_env && *n_rand_env ? atoi(n_rand_env) : 100;
-
-  // Comma-separated budgets; default 10,20,30.
-  const char *budgets_env = getenv("PASSPEG_BENCH_BUDGETS");
-  const char *budgets_str =
-      budgets_env && *budgets_env ? budgets_env : "10,20,30";
-  double budgets[8] = {0};
-  int num_budgets = 0;
-  {
-    const char *p = budgets_str;
-    while (*p && num_budgets < 8) {
-      char *end;
-      double v = strtod(p, &end);
-      if (end == p) {
-        break;
-      }
-      budgets[num_budgets++] = v;
-      p = (*end == ',') ? end + 1 : end;
-    }
-  }
-  if (num_budgets == 0) {
-    log_fatal("no budgets parsed");
-  }
-
-  const char *workers_env = getenv("PASSPEG_BENCH_WORKERS");
-  int workers = workers_env && *workers_env ? atoi(workers_env) : 8;
-  const char *topk_env = getenv("PASSPEG_BENCH_TOP_K");
-  int top_k = topk_env && *topk_env ? atoi(topk_env) : 32;
-
-  // Optional: skip variants for partial reruns.
-  const char *skip_sh_env = getenv("PASSPEG_BENCH_SKIP_SH");
-  bool skip_sh = skip_sh_env && *skip_sh_env && atoi(skip_sh_env) != 0;
-  const char *skip_puct_env = getenv("PASSPEG_BENCH_SKIP_PUCT");
-  const bool log_solve = getenv("PASSPEG_BENCH_LOG") != NULL;
-  const bool only_pass = getenv("PASSPEG_BENCH_ONLY_INCP") != NULL;
-  bool skip_puct = skip_puct_env && *skip_puct_env && atoi(skip_puct_env) != 0;
-
-  char **pass_cgps = NULL;
-  int loaded_pass =
-      load_cgp_lines("/tmp/passpeg_candidates.txt", &pass_cgps, n_pass);
-  char **rand_cgps = NULL;
-  int loaded_rand = load_cgp_lines("/tmp/random_1pegs.txt", &rand_cgps, n_rand);
-  if (loaded_pass < n_pass || loaded_rand < n_rand) {
-    fprintf(stderr,
-            "[passpegbench] WARN loaded pass=%d/%d rand=%d/%d (continuing)\n",
-            loaded_pass, n_pass, loaded_rand, n_rand);
-    if (loaded_pass < n_pass) {
-      n_pass = loaded_pass;
-    }
-    if (loaded_rand < n_rand) {
-      n_rand = loaded_rand;
-    }
-  }
-  fprintf(stderr,
-          "[passpegbench] pass=%d rand=%d budgets=%d workers=%d top_k=%d\n",
-          n_pass, n_rand, num_budgets, workers, top_k);
-  fflush(stderr);
-
-  const char *csv_path = "/tmp/passpeg_bench.csv";
-  FILE *csv = fopen(csv_path, "we");
-  if (!csv) {
-    log_fatal("cannot open %s", csv_path);
-  }
-  fprintf(csv, "pos_id,source,algo,include_pass,budget_secs,wall_secs,"
-               "evals_done,best_is_pass,best_win_pct,best_spread,"
-               "best_depth,cands_considered,best_move\n");
-  fflush(csv);
-
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  BaiPegExecutor *executor =
-      workers > 0 ? bai_peg_executor_create(workers, 100) : NULL;
-
-  // Variant matrix: (include_pass, algo) × budgets.
-  // algo: 0 = PUCT, 1 = Sequential Halving.
-  int total_variants = 0;
-  if (!skip_puct) {
-    total_variants += 2; // PUCT × {pass, no-pass}
-  }
-  if (!skip_sh) {
-    total_variants += 2;
-  }
-  int total_runs = (n_pass + n_rand) * total_variants * num_budgets;
-  int run_idx = 0;
-  fprintf(stderr, "[passpegbench] total_runs=%d\n", total_runs);
-  fflush(stderr);
-
-  for (int src = 0; src < 2; src++) {
-    int n_total = (src == 0) ? n_pass : n_rand;
-    char **arr = (src == 0) ? pass_cgps : rand_cgps;
-    const char *src_label = (src == 0) ? "passpeg" : "random";
-    for (int p = 0; p < n_total; p++) {
-      const char *cgp = arr[p];
-      char load_cmd[10240];
-      snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
-      // (variant configs)
-      for (int algo = 0; algo < 2; algo++) {
-        if (algo == 0 && skip_puct) {
-          continue;
-        }
-        if (algo == 1 && skip_sh) {
-          continue;
-        }
-        for (int incp = only_pass ? 1 : 0; incp < 2; incp++) {
-          for (int b = 0; b < num_budgets; b++) {
-            double budget = budgets[b];
-            // Reload CGP fresh for each run.
-            load_and_exec_config_or_die(config, load_cmd);
-            Game *game = config_get_game(config);
-            BaiPegArgs args = {
-                .game = game,
-                .thread_control = config_get_thread_control(config),
-                .num_threads = 1,
-                .tt_fraction_of_mem = 0.0,
-                .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-                .initial_top_k = top_k,
-                .inner_initial_top_k = 8,
-                .max_depth = BAI_PEG_MAX_DEPTH,
-                .endgame_time_per_solve = 5.0,
-                .time_budget_seconds = budget,
-                .puct_c = 1.0,
-                .utility_alpha = 1e-4,
-                .progressive_widening = false,
-                .min_active = 0,
-                .sweep_max_depth = 0,
-                .include_pass = (incp == 1),
-                .pass_opp_max_depth = 0,
-                .executor = executor,
-                .log_solve_details = log_solve,
-                .request_cand_stats = false,
-                .sequential_halving = (algo == 1),
-            };
-            BaiPegResult result;
-            ErrorStack *err = error_stack_create();
-            bai_peg_solve(&args, &result, err);
-            assert(error_stack_is_empty(err));
-            bool best_is_pass = small_move_is_pass(&result.best_move);
-            // Format best_move as a human-readable move string. We format
-            // off the loaded game's board so playthrough tiles in
-            // multi-tile placements render correctly (e.g. show A12 HEM
-            // rather than just the played squares).
-            char move_str[64];
-            move_str[0] = '\0';
-            if (best_is_pass) {
-              snprintf(move_str, sizeof(move_str), "PASS");
-            } else {
-              Move full_move;
-              small_move_to_move(&full_move, &result.best_move,
-                                 game_get_board(game));
-              StringBuilder *move_sb = string_builder_create();
-              string_builder_add_move(move_sb, game_get_board(game),
-                                      &full_move, game_get_ld(game),
-                                      /*add_score=*/true);
-              const char *peek = string_builder_peek(move_sb);
-              size_t len = strlen(peek);
-              if (len >= sizeof(move_str)) {
-                len = sizeof(move_str) - 1;
-              }
-              memcpy(move_str, peek, len);
-              move_str[len] = '\0';
-              string_builder_destroy(move_sb);
-            }
-            fprintf(csv, "%d,%s,%s,%d,%.0f,%.3f,%d,%d,%.4f,%.4f,%d,%d,%s\n",
-                    p, src_label, algo == 0 ? "PUCT" : "SH", incp, budget,
-                    result.seconds_elapsed, result.evaluations_done,
-                    best_is_pass ? 1 : 0, result.best_win_pct,
-                    result.best_mean_spread, result.best_depth_evaluated,
-                    result.candidates_considered, move_str);
-            fflush(csv);
-            error_stack_destroy(err);
-            bai_cand_stats_free(result.cand_stats);
-            run_idx++;
-            if (run_idx % 20 == 0) {
-              fprintf(stderr,
-                      "[passpegbench] progress %d / %d (src=%s p=%d "
-                      "algo=%s pass=%d budget=%.0f)\n",
-                      run_idx, total_runs, src_label, p,
-                      algo == 0 ? "PUCT" : "SH", incp, budget);
-              fflush(stderr);
-            }
-          }
-        }
-      }
-    }
-  }
-
-  (void)fclose(csv);
-  fprintf(stderr, "[passpegbench] DONE: %d runs -> %s\n", run_idx, csv_path);
-  fflush(stderr);
-
-  if (executor) {
-    bai_peg_executor_destroy(executor);
-  }
-  for (int i = 0; i < n_pass; i++) {
-    free(pass_cgps[i]);
-  }
-  free(pass_cgps);
-  for (int i = 0; i < n_rand; i++) {
-    free(rand_cgps[i]);
-  }
-  free(rand_cgps);
-  config_destroy(config);
 }
 
 // ---------------------------------------------------------------------------
@@ -1873,9 +1409,9 @@ void test_pass_peg_print_report(void) {
 
 // ---------------------------------------------------------------------------
 // Oracle eval: evaluate a fixed candidate move on a 1-in-bag PEG by direct
-// scenario-by-scenario endgame_solve. This bypasses bai_peg_solve's whole
-// search machinery and just gives us the ground-truth win%/spread for the
-// chosen move at the requested endgame depth.
+// scenario-by-scenario endgame_solve. Bypasses the PEG search and gives
+// the ground-truth win%/spread for the chosen move at the requested
+// endgame depth.
 // ---------------------------------------------------------------------------
 void test_pass_peg_oracle_eval_move(void) {
   // Default to passpeg position 1 (the lone disagreement vs macondo) and
@@ -2072,7 +1608,7 @@ void test_pass_peg_oracle_eval_move(void) {
 }
 
 // ====================================================================
-// pegNgreedy: fresh N-in-bag greedy bench (d=0 only)
+// peggreedy: fresh N-in-bag greedy bench (d=0 only)
 //
 // Goal: for each candidate mover move, enumerate the distinct N-tile bag
 // compositions (= the bag's tile multiset at the moment mover plays), split
@@ -2082,7 +1618,7 @@ void test_pass_peg_oracle_eval_move(void) {
 // Scenarios = (mover_drawn_multiset, bag_remaining_multiset) pairs. Within
 // the drawn multiset the order of tiles doesn't matter — mover ends up
 // with the same rack regardless of draw order. Within the remaining
-// multiset (size 1 for K_drawn=N-1, more otherwise) the order also doesn't
+// multiset (size 1 for k_drawn=N-1, more otherwise) the order also doesn't
 // matter since opp will eventually draw them. So we enumerate by per-type
 // COUNTS, not by ordered tuples.
 //
@@ -2093,16 +1629,16 @@ void test_pass_peg_oracle_eval_move(void) {
 // applied if both players pass to the scoreless cap.
 //
 // Env knobs:
-//   PASSPEGN_GREEDY_PATH    — CGP file (default /tmp/pegN_positions.txt)
-//   PASSPEGN_GREEDY_LEX     — lex override; empty = let CGP's -lex stand
-//   PASSPEGN_GREEDY_TOP_K   — number of top cands to print (default 15)
-//   PASSPEGN_GREEDY_ONLY    — semicolon-separated cand-text substrings;
+//   PASSPEG_GREEDY_PATH    — CGP file (default /tmp/peg_positions.txt)
+//   PASSPEG_GREEDY_LEX     — lex override; empty = let CGP's -lex stand
+//   PASSPEG_GREEDY_TOP_K   — number of top cands to print (default 15)
+//   PASSPEG_GREEDY_ONLY    — semicolon-separated cand-text substrings;
 //                             only cands whose movegen text matches one
 //                             of these are evaluated. Empty = all cands.
-//   PASSPEGN_GREEDY_TSV     — output path for per-scenario TSV
+//   PASSPEG_GREEDY_TSV     — output path for per-scenario TSV
 // ====================================================================
 
-static int pegN_compute_unseen(const Game *game, int mover_idx,
+static int peg_compute_unseen(const Game *game, int mover_idx,
                                uint8_t unseen[MAX_ALPHABET_SIZE]) {
   const LetterDistribution *ld = game_get_ld(game);
   int ld_size = ld_get_size(ld);
@@ -2132,7 +1668,7 @@ static int pegN_compute_unseen(const Game *game, int mover_idx,
 }
 
 // Drain bag, then add the listed N tiles (insert_point=0).
-static void pegN_set_bag_tiles(Bag *bag, const MachineLetter *tiles,
+static void peg_set_bag_tiles(Bag *bag, const MachineLetter *tiles,
                                int n_tiles, int ld_size) {
   for (int ml = 0; ml < ld_size; ml++) {
     while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
@@ -2143,7 +1679,7 @@ static void pegN_set_bag_tiles(Bag *bag, const MachineLetter *tiles,
 }
 
 // Reset opp's rack to (unseen MINUS drawn) tiles.
-static void pegN_set_opp_rack(Rack *opp_rack,
+static void peg_set_opp_rack(Rack *opp_rack,
                               const uint8_t unseen[MAX_ALPHABET_SIZE],
                               int ld_size, const MachineLetter *drawn,
                               int n_drawn) {
@@ -2163,11 +1699,11 @@ static void pegN_set_opp_rack(Rack *opp_rack,
 // Build the post-cand game state for one (mover_drawn, bag_remaining) split:
 // bag holds (mover_drawn ++ bag_remaining) = N tiles total, opp rack is set
 // to (unseen − bag tiles), cand is played, then mover draws their
-// K_drawn tiles. Result: mover's rack has K_drawn drawn tiles added, bag has
+// k_drawn tiles. Result: mover's rack has k_drawn drawn tiles added, bag has
 // only bag_remaining left, opp's rack is the deal (full 7).
-static Game *pegN_make_post_cand_game(
+static Game *peg_make_post_cand_game(
     const Game *base_game, int mover_idx, const uint8_t *unseen, int ld_size,
-    const Move *cand, int K_drawn, const MachineLetter *mover_drawn,
+    const Move *cand, int k_drawn, const MachineLetter *mover_drawn,
     int n_bag_remaining, const MachineLetter *bag_remaining) {
   Game *g = game_duplicate(base_game);
   game_set_endgame_solving_mode(g);
@@ -2177,15 +1713,15 @@ static Game *pegN_make_post_cand_game(
   Rack *mover_r = player_get_rack(game_get_player(g, mover_idx));
   // Combine drawn + remaining into one N-tile array for bag setup.
   MachineLetter all_bag[16];
-  int N = K_drawn + n_bag_remaining;
-  for (int i = 0; i < K_drawn; i++) all_bag[i] = mover_drawn[i];
+  int N = k_drawn + n_bag_remaining;
+  for (int i = 0; i < k_drawn; i++) all_bag[i] = mover_drawn[i];
   for (int i = 0; i < n_bag_remaining; i++) {
-    all_bag[K_drawn + i] = bag_remaining[i];
+    all_bag[k_drawn + i] = bag_remaining[i];
   }
-  pegN_set_bag_tiles(bag, all_bag, N, ld_size);
-  pegN_set_opp_rack(opp_r, unseen, ld_size, all_bag, N);
+  peg_set_bag_tiles(bag, all_bag, N, ld_size);
+  peg_set_opp_rack(opp_r, unseen, ld_size, all_bag, N);
   play_move_without_drawing_tiles(cand, g);
-  for (int i = 0; i < K_drawn; i++) {
+  for (int i = 0; i < k_drawn; i++) {
     rack_add_letter(mover_r, mover_drawn[i]);
     (void)bag_draw_letter(bag, mover_drawn[i], 0);
   }
@@ -2205,7 +1741,7 @@ static Game *pegN_make_post_cand_game(
 // (mover_score − opp_score). Records each played move into out_pv (text)
 // and writes final mover/opp rack contents to out_*_rack. If out_pv_text
 // is NULL no PV is recorded.
-static int32_t pegN_greedy_playout_pv(
+static int32_t peg_greedy_playout_pv(
     Game *game, int mover_idx, MoveList *playout_ml, int thread_index,
     char *out_pv_text, size_t out_pv_text_cap, char *out_mover_rack_end,
     size_t out_mover_rack_end_cap, char *out_opp_rack_end,
@@ -2279,7 +1815,7 @@ static int32_t pegN_greedy_playout_pv(
   return spread;
 }
 
-static int64_t pegN_binomial(int n, int k) {
+static int64_t peg_binomial(int n, int k) {
   if (k < 0 || k > n) return 0;
   if (k == 0 || k == n) return 1;
   if (k > n - k) k = n - k;
@@ -2292,7 +1828,7 @@ static int64_t pegN_binomial(int n, int k) {
 // Skips duplicates naturally (only enumerates distinct orderings).
 // Caller should sort the array ascending before the first iteration.
 // Returns false when the array is at the last permutation.
-static bool pegN_next_perm(MachineLetter *arr, int n) {
+static bool peg_next_perm(MachineLetter *arr, int n) {
   if (n <= 1) {
     return false;
   }
@@ -2322,52 +1858,58 @@ static bool pegN_next_perm(MachineLetter *arr, int n) {
   return true;
 }
 
-// Recursive enumerator over N-multisets from `counts[0..K_types-1]`. Calls
+// Recursive enumerator over N-multisets from `counts[0..k_types-1]`. Calls
 // cb(picked, ctx) once per distinct multiset.
-static void pegN_enum_multiset(int *picked, int idx, int remaining,
-                               const int *counts, int K_types,
+static void peg_enum_multiset(int *picked, int idx, int remaining,
+                               const int *counts, int k_types,
                                void (*cb)(const int *picked, void *ctx),
                                void *ctx) {
-  if (idx == K_types) {
+  if (idx == k_types) {
     if (remaining == 0) cb(picked, ctx);
     return;
   }
   int max_take = counts[idx] < remaining ? counts[idx] : remaining;
   for (int k = 0; k <= max_take; k++) {
     picked[idx] = k;
-    pegN_enum_multiset(picked, idx + 1, remaining - k, counts, K_types, cb,
+    peg_enum_multiset(picked, idx + 1, remaining - k, counts, k_types, cb,
                        ctx);
   }
   picked[idx] = 0;
 }
 
-typedef struct PegNCandResult {
+typedef struct PegCandResult {
   int ci;
   int64_t weight_sum;
   int64_t win_x2;     // 2 per win, 1 per tie, 0 per loss (scaled by weight)
   int64_t spread_sum; // signed (mover − opp) at terminal × weight
   int n_scen;
   // Running tally of total per-scenario weight encountered so far; used by
-  // PASSPEGN_SCENARIO_STRIDE for stratified sampling proportional to
+  // PASSPEG_SCENARIO_STRIDE for stratified sampling proportional to
   // weight (weight-unit stride mod k).
   int64_t sampled_weight_seen;
-} PegNCandResult;
+  // True if any inner endgame_solve returned with depth=-1 (no IDS pass
+  // completed before the global deadline). In that case get_value() is
+  // the uninitialized zero, so mt = mover_lead and the spread/win tallies
+  // for that opp-POV state are bogus. Stage post-processing drops cands flagged
+  // incomplete from the ranking.
+  bool incomplete;
+} PegCandResult;
 
 // Shared state for one cand's enumeration; passed by pointer through the
 // recursive enumerators below so we don't rely on gcc nested functions.
-typedef struct PegNEnumCtx {
+typedef struct PegEnumCtx {
   // The current N-multiset being explored (per-type counts, summing to N).
-  // pegN_enum_outer_multiset writes into this; pegN_enum_mover_drawn reads.
+  // peg_enum_outer_multiset writes into this; peg_enum_mover_drawn reads.
   int *n_multiset;
   // The current mover-drawn sub-multiset (per-type counts, summing to
-  // K_drawn). pegN_enum_mover_drawn writes into this; the leaf
-  // pegN_emit_split reads.
+  // k_drawn). peg_enum_mover_drawn writes into this; the leaf
+  // peg_emit_split reads.
   int *mover_pick;
 
   const MachineLetter *types;
   const int *type_counts;
-  int K_types;
-  int K_drawn;
+  int k_types;
+  int k_drawn;
   int n_bag_remaining;
 
   const Game *base_game;
@@ -2381,7 +1923,7 @@ typedef struct PegNEnumCtx {
   const LetterDistribution *ld;
 
   FILE *tsv_f;
-  PegNCandResult *res;
+  PegCandResult *res;
 
   // Optional semicolon-separated list of "drawn/remaining" patterns; if
   // non-NULL, only scenarios whose canonical (drawn,remaining) tile strings
@@ -2414,9 +1956,9 @@ typedef struct PegNEnumCtx {
   // worker. Set per-job by the worker fn (= worker_idx the executor hands
   // in). Zero for the serial / non-executor code path.
   int worker_idx;
-  // Optional shared executor for inner Noah-util dispatch from inside
-  // emit_split. NULL = run the Noah-util sweep serially.
-  BaiPegExecutor *executor;
+  // Optional shared executor for inner opp-util dispatch from inside
+  // emit_split. NULL = run the opp-util sweep serially.
+  PegPool *executor;
   // Mutex protecting the per-cand aggregator `res`. Multiple scenarios
   // of the same cand may run concurrently. NULL = serial mode.
   cpthread_mutex_t *res_mutex;
@@ -2434,7 +1976,7 @@ typedef struct PegNEnumCtx {
   // driver to enumerate scenarios in one thread before dispatching them
   // to workers. Guarded by *jobs_mutex (callers run enumeration
   // single-threaded, but the worker fn shares the result back).
-  struct PegNScenarioJobList *out_jobs;
+  struct PegScenarioJobList *out_jobs;
   // Deadline-watch shared by all workers for time-budget interruption.
   // budget_timer points at the shared start Timer; budget_secs is the
   // total budget. Workers check `ctimer_elapsed_seconds(budget_timer) >
@@ -2448,49 +1990,78 @@ typedef struct PegNEnumCtx {
   // so abdada_negamax bails out mid-search rather than running to ply
   // completion. 0 = no deadline.
   int64_t deadline_monotonic_ns;
-} PegNEnumCtx;
+  // Optional per-inner opp-POV TSV, set via PASSPEG_INNER_TSV. When non-NULL,
+  // peg_opp_pov_worker_fn writes one row per evaluated opp-POV state with the
+  // outer-scenario tile letters, the opp candidate, the opp-POV bag composition,
+  // opp-POV weight, and the leaf mt. Lets us trace exactly what the inner 1peg
+  // evaluator saw for each candidate. Guarded by inner_tsv_mutex.
+  FILE *inner_tsv_f;
+  cpthread_mutex_t *inner_tsv_mutex;
+  // Per-cand cache of post-opp game state -> mover_total. Allocated by
+  // the per-cand dispatcher, freed after the cand's scenarios complete.
+  // NULL means caching disabled. See PegOppPovCache above. Largely
+  // ineffective on its own (3.5% hit rate on leaf-state collisions) —
+  // kept for diagnostics; the real speedup is the shared_eg_tt below.
+  struct PegOppPovCache *opp_pov_cache;
+  // Per-cand shared endgame TranspositionTable. Passed as shared_tt
+  // into every endgame_solve call in this cand's scenarios so the TT
+  // is reused across opp-POV states + opp_moves + scenarios. Endgame search
+  // sub-trees often share positions (especially right after opp's move
+  // when only a couple of tiles differ); the TT hits cut redundant
+  // negamax work. macondo's "nested-cache 71.9% hit rate" is the
+  // equivalent of this TT sharing.
+  TranspositionTable *shared_eg_tt;
+  // Per-worker persistent EndgameCtx pointers, indexed by
+  // (worker_idx - executor_thread_offset). Workers reuse their own slot
+  // across all endgame_solve calls in this cand's evaluation,
+  // amortizing the per-call setup cost (ABDADA init, move sort, etc.).
+  // Slot 0 reserved for the main thread (worker_idx 0).
+  EndgameCtx **per_worker_eg_ctx;
+  int per_worker_eg_ctx_n;
+  int per_worker_eg_ctx_offset;  // = executor_thread_offset (100)
+} PegEnumCtx;
 
 // One (cand, n_multiset, mover_pick) scenario, packaged for dispatch
-// through BaiPegExecutor. `base_ctx` is a shared read-only template;
-// `n_multiset` and `mover_pick` are owned copies (K_types ints each).
+// through PegPool. `base_ctx` is a shared read-only template;
+// `n_multiset` and `mover_pick` are owned copies (k_types ints each).
 // One (multiset, mover_pick) scenario, packaged for dispatch through
-// BaiPegExecutor. `base_ctx` is the per-cand read-only template;
-// `n_multiset` and `mover_pick` are owned copies (K_types ints each). The
-// worker hands this to pegN_emit_split (with out_jobs=NULL) — at d=0 the
-// worker walks bag-tile orderings serially via pegN_eval_d0_ordering; at
+// PegPool. `base_ctx` is the per-cand read-only template;
+// `n_multiset` and `mover_pick` are owned copies (k_types ints each). The
+// worker hands this to peg_emit_split (with out_jobs=NULL) — at d=0 the
+// worker walks bag-tile orderings serially via peg_eval_d0_ordering; at
 // d>=1 the bag is empty at the leaf so there is no ordering walk.
-typedef struct PegNScenarioJob {
-  const PegNEnumCtx *base_ctx;
+typedef struct PegScenarioJob {
+  const PegEnumCtx *base_ctx;
   int *n_multiset;
   int *mover_pick;
-} PegNScenarioJob;
+} PegScenarioJob;
 
-typedef struct PegNScenarioJobList {
-  PegNScenarioJob *items;
+typedef struct PegScenarioJobList {
+  PegScenarioJob *items;
   int n;
   int cap;
-} PegNScenarioJobList;
+} PegScenarioJobList;
 
-static void pegN_joblist_push(PegNScenarioJobList *jl, PegNScenarioJob job) {
+static void peg_joblist_push(PegScenarioJobList *jl, PegScenarioJob job) {
   if (jl->n == jl->cap) {
     int new_cap = jl->cap > 0 ? jl->cap * 2 : 256;
     jl->items =
-        realloc(jl->items, (size_t)new_cap * sizeof(PegNScenarioJob));
+        realloc(jl->items, (size_t)new_cap * sizeof(PegScenarioJob));
     if (!jl->items) {
-      log_fatal("pegN joblist realloc failed");
+      log_fatal("peg joblist realloc failed");
     }
     jl->cap = new_cap;
   }
   jl->items[jl->n++] = job;
 }
 
-static inline void pegN_lock(cpthread_mutex_t *m) {
+static inline void peg_lock(cpthread_mutex_t *m) {
   if (m) {
     cpthread_mutex_lock(m);
   }
 }
 
-static inline void pegN_unlock(cpthread_mutex_t *m) {
+static inline void peg_unlock(cpthread_mutex_t *m) {
   if (m) {
     cpthread_mutex_unlock(m);
   }
@@ -2499,7 +2070,7 @@ static inline void pegN_unlock(cpthread_mutex_t *m) {
 // True when (drawn_str, remaining_str) matches one of the semicolon-
 // separated "drawn/remaining" patterns in `filter`. NULL filter = always
 // matches.
-static bool pegN_scenario_filter_match(const char *filter,
+static bool peg_scenario_filter_match(const char *filter,
                                        const char *drawn_str,
                                        const char *remaining_str) {
   if (!filter) {
@@ -2521,35 +2092,221 @@ static bool pegN_scenario_filter_match(const char *filter,
 
 // Leaf: build the realized split's tile arrays, run a greedy playout, and
 // fold the outcome into res / TSV.
-// One (opp_move, perceived_bag_tile) leaf for the Noah utility sweep
+// One (opp_move, perceived_bag_tile) leaf for the opp utility sweep
 // inside emit_split. Read-only fields are shared; mover_total is the
 // only per-job write target. The worker fn body is declared after
 // emit_split (it shares scope with the outer scenario worker), so we
 // forward-declare it here.
-typedef struct PegNNoahInnerJob {
+typedef struct PegOppInnerJob {
   const Game *base_game;            // post-cand game (RO, shared)
   int mover_idx;
   int ld_size;
   const Move *opp_move;             // shared, RO
-  MachineLetter bag_X;              // perceived bag tile in this hypothetical
+  MachineLetter bag_ml;              // perceived bag tile in this opp-POV
   int weight;                       // == opp_type_counts[ti]
   int n_opp_types;
   const MachineLetter *opp_types;
   const int *opp_type_counts;
   int ti;                           // index into opp_types for this scenario
-  int noah_depth;
+  int opp_depth;
   ThreadControl *thread_control;
+  // Absolute monotonic-ns wall deadline for this item. When 0, no deadline.
+  // Set by the caller from the outer peg ctx so a slow opp-inner can bail
+  // cleanly instead of running the whole inner endgame past the cascade
+  // budget.
+  int64_t deadline_monotonic_ns;
   int32_t mover_total;              // output
-} PegNNoahInnerJob;
-static void pegN_noah_inner_worker_fn(void *arg, int worker_idx);
+} PegOppInnerJob;
+static void peg_opp_inner_worker_fn(void *arg, int worker_idx);
 
-// Generalized Noah-perception hypothesis: the perceived pool has
-// opp_type_counts[t] tiles of type opp_types[t]; the hypothesis says
-// the bag holds hyp_bag_counts[t] of each type and the mover's rack
-// holds the rest (opp_type_counts[t] - hyp_bag_counts[t]). For
+// Per-cand cache of (post-opp game state) -> mover_total. The walker
+// re-evaluates many opp-POV states that produce structurally identical post-opp
+// states (different scenarios reaching the same board + racks). macondo's
+// equivalent caches the recursive PEG sub-result and hits ~70%+; sharing
+// the leaf eval across scenarios within one cand cuts the redundant
+// endgame_solve / greedy work substantially.
+//
+// Key: 64-bit FNV-1a over (board tiles | mover_rack counts | opp_rack
+// counts | bag counts | scores). Open-addressing with linear probing.
+// Single mutex — contention is low because each scenario does many cache
+// ops between its single endgame_solve, and the cache is small.
+typedef struct PegOppPovCacheEntry {
+  uint64_t key;
+  int32_t  mt;
+  bool     valid;
+} PegOppPovCacheEntry;
+
+typedef struct PegOppPovCache {
+  PegOppPovCacheEntry *entries;
+  size_t capacity;        // power of 2
+  cpthread_mutex_t mutex;
+  atomic_int hits;
+  atomic_int misses;
+} PegOppPovCache;
+
+static PegOppPovCache *peg_opp_pov_cache_create(size_t capacity) {
+  // Round up to power of 2.
+  size_t cap = 1;
+  while (cap < capacity) cap *= 2;
+  PegOppPovCache *cache = malloc_or_die(sizeof(PegOppPovCache));
+  cache->entries = calloc_or_die(cap, sizeof(PegOppPovCacheEntry));
+  cache->capacity = cap;
+  cpthread_mutex_init(&cache->mutex);
+  atomic_init(&cache->hits, 0);
+  atomic_init(&cache->misses, 0);
+  return cache;
+}
+
+static void peg_opp_pov_cache_destroy(PegOppPovCache *cache) {
+  if (!cache) return;
+  free(cache->entries);
+  free(cache);
+}
+
+static inline uint64_t peg_fnv1a_update(uint64_t hash,
+                                          const void *data, size_t len) {
+  const uint8_t *bytes = (const uint8_t *)data;
+  for (size_t byte_idx = 0; byte_idx < len; byte_idx++) {
+    hash ^= bytes[byte_idx];
+    hash *= 0x100000001b3ULL;
+  }
+  return hash;
+}
+
+// Hash a Game state for the cache. We hash everything that affects the
+// leaf-eval outcome (board tiles, both racks, bag, scores) so that two
+// game-state-identical positions get the same key regardless of which
+// path produced them.
+static uint64_t peg_hash_game_state(const Game *game, int mover_idx) {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter ml = board_get_letter(board, row, col);
+      hash = peg_fnv1a_update(hash, &ml, sizeof(ml));
+    }
+  }
+  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int dist_size = ld_get_size(game_get_ld(game));
+  for (int i = 0; i < dist_size; i++) {
+    uint8_t mover_count = rack_get_letter(mover_rack, i);
+    uint8_t opp_count = rack_get_letter(opp_rack, i);
+    hash = peg_fnv1a_update(hash, &mover_count, sizeof(mover_count));
+    hash = peg_fnv1a_update(hash, &opp_count, sizeof(opp_count));
+  }
+  const Bag *bag = game_get_bag(game);
+  for (int i = 0; i < dist_size; i++) {
+    uint8_t bag_count = bag_get_letter((Bag *)bag, (MachineLetter)i);
+    hash = peg_fnv1a_update(hash, &bag_count, sizeof(bag_count));
+  }
+  Equity mover_score = player_get_score(game_get_player(game, mover_idx));
+  Equity opp_score = player_get_score(game_get_player(game, 1 - mover_idx));
+  hash = peg_fnv1a_update(hash, &mover_score, sizeof(mover_score));
+  hash = peg_fnv1a_update(hash, &opp_score, sizeof(opp_score));
+  // Avoid 0 since we use it as "no key" sentinel in some paths.
+  if (hash == 0) hash = 1;
+  return hash;
+}
+
+// Lookup. Returns true on hit (and writes *out_mt); false on miss.
+static bool peg_opp_pov_cache_lookup(PegOppPovCache *cache, uint64_t key,
+                                   int32_t *out_mt) {
+  if (!cache) return false;
+  const size_t mask = cache->capacity - 1;
+  size_t idx = (size_t)key & mask;
+  cpthread_mutex_lock(&cache->mutex);
+  for (size_t probe = 0; probe < cache->capacity; probe++) {
+    PegOppPovCacheEntry *entry = &cache->entries[(idx + probe) & mask];
+    if (!entry->valid) {
+      cpthread_mutex_unlock(&cache->mutex);
+      atomic_fetch_add(&cache->misses, 1);
+      return false;
+    }
+    if (entry->key == key) {
+      *out_mt = entry->mt;
+      cpthread_mutex_unlock(&cache->mutex);
+      atomic_fetch_add(&cache->hits, 1);
+      return true;
+    }
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+  return false;  // table full — extremely unlikely
+}
+
+static void peg_opp_pov_cache_store(PegOppPovCache *cache, uint64_t key, int32_t mt) {
+  if (!cache) return;
+  const size_t mask = cache->capacity - 1;
+  size_t idx = (size_t)key & mask;
+  cpthread_mutex_lock(&cache->mutex);
+  for (size_t probe = 0; probe < cache->capacity; probe++) {
+    PegOppPovCacheEntry *entry = &cache->entries[(idx + probe) & mask];
+    if (!entry->valid || entry->key == key) {
+      entry->key = key;
+      entry->mt = mt;
+      entry->valid = true;
+      cpthread_mutex_unlock(&cache->mutex);
+      return;
+    }
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+}
+
+// Count tiles a cand actually plays from rack (letters outside parens in
+// the move text). E.g. "C6 ACIDOT(I)c 80" -> 7 (the (I) is a board tile);
+// "5E A(N) 4" -> 1. Used by the cascade driver to bucket cands as
+// emptier vs non-emptier given a known bag size.
+static int peg_count_tiles_played(const char *cand_text) {
+  if (!cand_text) {
+    return 0;
+  }
+  // Skip past the position token (chars up to first space).
+  const char *p = cand_text;
+  while (*p && *p != ' ') {
+    p++;
+  }
+  while (*p == ' ') {
+    p++;
+  }
+  // Count alpha chars outside parens until the next space (the score).
+  int count = 0;
+  bool in_paren = false;
+  while (*p && *p != ' ') {
+    if (*p == '(') {
+      in_paren = true;
+    } else if (*p == ')') {
+      in_paren = false;
+    } else if (!in_paren &&
+               ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z'))) {
+      count++;
+    }
+    p++;
+  }
+  return count;
+}
+
+// Three-bucket classifier for cascade diversity quota.
+//   0 = capable-emp:   tp >= bag AND post-cand rack >= 5 (bingo-capable
+//                      next turn after drawing the bag)
+//   1 = non-emp:       tp <  bag (mover doesn't drain bag this turn)
+//   2 = incapable-emp: tp >= bag AND post-cand rack <  5
+// post-cand rack = (rack_size + bag_size) - tp  when tp >= bag,
+//                  rack_size                     when tp <  bag.
+static int peg_cand_bucket(int tiles_played, int bag_size, int rack_size) {
+  if (tiles_played < bag_size) {
+    return 1;  // non-emp
+  }
+  const int post_rack = rack_size + bag_size - tiles_played;
+  return post_rack >= 5 ? 0 : 2;  // capable-emp : incapable-emp
+}
+
+// Generalized opp-perception opp-POV state: the perceived pool has
+// opp_type_counts[t] tiles of type opp_types[t]; the opp-POV state says
+// the bag holds opp_pov_bag_counts[t] of each type and the mover's rack
+// holds the rest (opp_type_counts[t] - opp_pov_bag_counts[t]). For
 // n_bag_now == 1 this degenerates to the single-tile case the
-// PegNNoahInnerJob path supports today.
-typedef struct PegNHypJob {
+// PegOppInnerJob path supports today.
+typedef struct PegOppPovJob {
   const Game *base_game;            // walker state (RO, shared)
   int mover_idx;
   int ld_size;
@@ -2557,20 +2314,65 @@ typedef struct PegNHypJob {
   int n_opp_types;
   const MachineLetter *opp_types;   // shared, RO
   const int *opp_type_counts;       // total perceived-pool counts (RO)
-  const int *hyp_bag_counts;        // bag composition under this hyp (RO)
+  const int *opp_pov_bag_counts;        // bag composition under this opp_pov_game (RO)
   ThreadControl *thread_control;
-  int32_t mover_total;              // output (realized mt under this hyp)
-} PegNHypJob;
-static void pegN_hyp_worker_fn(void *arg, int worker_idx);
-static void pegN_eval_opp_with_perception(
-    const PegNEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
+  // Outer ctx is borrowed for budget plumbing (deadline_monotonic_ns,
+  // budget_timer/secs) when the inner-endgame path is selected. RO.
+  const struct PegEnumCtx *outer_ctx;
+  // Optional per-inner opp-POV TSV context: when outer_ctx->inner_tsv_f is set,
+  // these annotate the row with the outer realized scenario and the opp
+  // cand's text/score so the consumer can group by (cand, scenario, opp).
+  const char *outer_drawn_str;
+  const char *outer_remaining_str;
+  const char *opp_move_text;
+  int opp_move_score;
+  int64_t opp_pov_weight;
+  int32_t mover_total;              // output (realized mt under this opp_pov_game)
+  bool incomplete;                  // output: depth=-1 (eg never iterated)
+} PegOppPovJob;
+
+// Per-call timing log captured via endgame_solve's per_ply_callback. Used
+// by both the K<N walker leaf (peg_opp_pov_worker_fn) and the K=N bag-emptier
+// path (peg_emit_split). The callback fires once per completed IDS depth
+// on the first thread of the solver and records (depth, value, ms).
+typedef struct PegInnerEgDepthLog {
+  Timer call_timer;
+  int n;
+  int depths[32];
+  int32_t values[32];
+  double times_ms[32];
+} PegInnerEgDepthLog;
+
+static void peg_inner_eg_per_ply_cb(int depth, int32_t value,
+                                     const struct PVLine *pv_line,
+                                     const struct Game *game,
+                                     const struct PVLine *ranked_pvs,
+                                     int num_ranked_pvs, void *user_data) {
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  PegInnerEgDepthLog *log = (PegInnerEgDepthLog *)user_data;
+  if (log->n < 32) {
+    log->depths[log->n] = depth;
+    log->values[log->n] = value;
+    log->times_ms[log->n] = ctimer_elapsed_seconds(&log->call_timer) * 1000.0;
+    log->n++;
+  }
+}
+
+static void peg_opp_pov_worker_fn(void *arg, int worker_idx);
+static void peg_eval_opp_with_perception(
+    const PegEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
     const MachineLetter *opp_types, const int *opp_type_counts,
     int n_opp_types, int n_bag_now, const int *realized_bag_counts,
-    double alpha, double *out_utility, int32_t *out_realized_mt);
+    double alpha, double *out_utility, int32_t *out_realized_mt,
+    const char *outer_drawn_str, const char *outer_remaining_str,
+    const char *opp_move_text, int opp_move_score);
 
 // Evaluate ONE bag-tile ordering at depth=0: build the post-cand game with
 // `iter_perm` as the residual bag, run the greedy playout (or endgame_solve
-// for an emptier when PASSPEGN_EMPTIER_USE_ENDGAME is set), and aggregate
+// for an emptier when PASSPEG_EMPTIER_USE_ENDGAME is set), and aggregate
 // the realized mover_total into ctx->res under res_mutex. This is the leaf
 // of the d=0 search — extracted so that ordering-grained parallel jobs and
 // the serial in-loop path share a single implementation.
@@ -2579,11 +2381,11 @@ static void pegN_eval_opp_with_perception(
 // drew this scenario. `drawn_str` is its canonical short form (for TSV).
 // `n_bag_perm` is the number of meaningful entries in `iter_perm`; zero
 // for emptiers (in which case bag is already empty post-cand).
-// Compute the time still available under our PegN budget. Returns 0 when
+// Compute the time still available under our Peg budget. Returns 0 when
 // no budget is set (= unlimited for downstream calls). When the budget is
 // already exhausted returns 0.001 (1 ms) so an endgame_solve call returns
 // promptly with whatever partial result it has rather than running cold.
-static double pegN_remaining_budget_secs(const PegNEnumCtx *ctx) {
+static double peg_remaining_budget_secs(const PegEnumCtx *ctx) {
   if (ctx->budget_timer == NULL || ctx->budget_secs <= 0.0) {
     return 0.0;
   }
@@ -2595,20 +2397,40 @@ static double pegN_remaining_budget_secs(const PegNEnumCtx *ctx) {
   return remaining;
 }
 
-static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
+// Pick the earlier of a per-call deadline and the cascade deadline. Either
+// may be 0 (meaning "no deadline"); the result is "no deadline" only if
+// both are 0. Used to ensure endgame_solve calls inside the bench never
+// outlive the cascade's overall budget — without this, a single
+// endgame_solve at depth=4 can blow a 32s budget by 30s+ because the
+// per-call wall budget (inner_eg_budget or kn_budget) is independent of
+// the cascade's deadline_monotonic_ns.
+static int64_t peg_clamp_deadline_ns(int64_t per_call_deadline_ns,
+                                       int64_t cascade_deadline_ns) {
+  if (cascade_deadline_ns <= 0) {
+    return per_call_deadline_ns;
+  }
+  if (per_call_deadline_ns <= 0) {
+    return cascade_deadline_ns;
+  }
+  return per_call_deadline_ns < cascade_deadline_ns
+             ? per_call_deadline_ns
+             : cascade_deadline_ns;
+}
+
+static void peg_eval_d0_ordering(const PegEnumCtx *ctx,
                                   const MachineLetter *mover_drawn,
                                   int mover_drawn_n,
                                   const char *drawn_str,
                                   const MachineLetter *iter_perm,
                                   int n_bag_perm, int64_t this_weight) {
-  (void)mover_drawn_n;  // implied by ctx->K_drawn
+  (void)mover_drawn_n;  // implied by ctx->k_drawn
   char perm_remaining_str[32] = {0};
   for (int i = 0; i < n_bag_perm && i < 30; i++) {
     perm_remaining_str[i] = ctx->ld->ld_ml_to_hl[iter_perm[i]][0];
   }
-  Game *perm_game = pegN_make_post_cand_game(
+  Game *perm_game = peg_make_post_cand_game(
       ctx->base_game, ctx->mover_idx, ctx->unseen, ctx->ld_size, ctx->cand,
-      ctx->K_drawn, mover_drawn, n_bag_perm, iter_perm);
+      ctx->k_drawn, mover_drawn, n_bag_perm, iter_perm);
   char perm_post_cgp[512] = {0};
   if (ctx->tsv_f) {
     char *cgp = game_get_cgp(perm_game, true);
@@ -2620,7 +2442,22 @@ static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
   char perm_mover_rack[32] = {0};
   char perm_opp_rack[32] = {0};
   int32_t perm_mt = 0;
-  const char *empty_eg_env = getenv("PASSPEGN_EMPTIER_USE_ENDGAME");
+  // Per-scenario timing for the inner TSV. Captures both the greedy d=0
+  // path and the optional EMPTIER endgame fallback so the report can show
+  // first-pass wall time per scenario.
+  double scen_start_ms = 0.0;
+  double scen_dur_ms = 0.0;
+  int scen_eg_plies = 0;          // 0 == pure greedy path
+  int scen_eg_depth = 0;
+  int scen_eg_num_moves = 0;
+  PegInnerEgDepthLog scen_log = {0};
+  if (ctx->inner_tsv_f) {
+    if (ctx->budget_timer) {
+      scen_start_ms = ctimer_elapsed_seconds(ctx->budget_timer) * 1000.0;
+    }
+    ctimer_start(&scen_log.call_timer);
+  }
+  const char *empty_eg_env = getenv("PASSPEG_EMPTIER_USE_ENDGAME");
   const int empty_eg_plies =
       empty_eg_env && *empty_eg_env ? atoi(empty_eg_env) : 0;
   if (n_bag_perm == 0 && empty_eg_plies > 0 &&
@@ -2645,8 +2482,8 @@ static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_word_pruning = true,
         .thread_index_offset = ctx->worker_idx + 200,
-        .soft_time_limit = pegN_remaining_budget_secs(ctx),
-        .hard_time_limit = pegN_remaining_budget_secs(ctx),
+        .soft_time_limit = peg_remaining_budget_secs(ctx),
+        .hard_time_limit = peg_remaining_budget_secs(ctx),
         .external_deadline_ns = ctx->deadline_monotonic_ns,
     };
     endgame_solve_inline(&eg_ctx, &ea, eg_results);
@@ -2655,6 +2492,33 @@ static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
         endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
     perm_mt = (turn == ctx->mover_idx) ? mover_lead + eg_val
                                        : mover_lead - eg_val;
+    scen_eg_plies = empty_eg_plies;
+    scen_eg_depth =
+        endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+    if (ctx->inner_tsv_f) {
+      const PVLine *pv =
+          endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
+      if (pv) scen_eg_num_moves = pv->num_moves;
+      if (pv && pv->num_moves > 0) {
+        Game *pv_g = game_duplicate(perm_game);
+        game_set_endgame_solving_mode(pv_g);
+        game_set_backup_mode(pv_g, BACKUP_MODE_OFF);
+        StringBuilder *psb = string_builder_create();
+        for (int mi = 0; mi < pv->num_moves; mi++) {
+          Move mf;
+          small_move_to_move(&mf, &pv->moves[mi],
+                             game_get_board(pv_g));
+          if (mi > 0) string_builder_add_string(psb, " | ");
+          string_builder_add_move(psb, game_get_board(pv_g), &mf,
+                                  game_get_ld(pv_g), true);
+          play_move(&mf, pv_g, NULL);
+        }
+        snprintf(perm_pv, sizeof(perm_pv), "%s",
+                 string_builder_peek(psb));
+        string_builder_destroy(psb);
+        game_destroy(pv_g);
+      }
+    }
     endgame_ctx_destroy(eg_ctx);
     endgame_results_destroy(eg_results);
   } else {
@@ -2663,17 +2527,22 @@ static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
     // allocated ~hundreds of KB per playout for slots that were never
     // touched.
     MoveList *playout_ml = move_list_create(1);
-    perm_mt = pegN_greedy_playout_pv(
+    const bool need_pv = ctx->tsv_f || ctx->inner_tsv_f;
+    perm_mt = peg_greedy_playout_pv(
         perm_game, ctx->mover_idx, playout_ml, ctx->worker_idx,
-        ctx->tsv_f ? perm_pv : NULL, sizeof(perm_pv),
-        ctx->tsv_f ? perm_mover_rack : NULL, sizeof(perm_mover_rack),
-        ctx->tsv_f ? perm_opp_rack : NULL, sizeof(perm_opp_rack),
+        need_pv ? perm_pv : NULL, sizeof(perm_pv),
+        need_pv ? perm_mover_rack : NULL, sizeof(perm_mover_rack),
+        need_pv ? perm_opp_rack : NULL, sizeof(perm_opp_rack),
         ctx->tsv_f ? perm_final_cgp : NULL, sizeof(perm_final_cgp));
     move_list_destroy(playout_ml);
+    // scen_eg_plies stays 0 → "pure greedy path" in the report.
+  }
+  if (ctx->inner_tsv_f) {
+    scen_dur_ms = ctimer_elapsed_seconds(&scen_log.call_timer) * 1000.0;
   }
   game_destroy(perm_game);
 
-  pegN_lock(ctx->res_mutex);
+  peg_lock(ctx->res_mutex);
   ctx->res->weight_sum += this_weight;
   ctx->res->spread_sum += this_weight * (int64_t)perm_mt;
   if (perm_mt > 0) {
@@ -2682,22 +2551,43 @@ static void pegN_eval_d0_ordering(const PegNEnumCtx *ctx,
     ctx->res->win_x2 += this_weight;
   }
   ctx->res->n_scen++;
-  pegN_unlock(ctx->res_mutex);
+  peg_unlock(ctx->res_mutex);
 
   if (ctx->tsv_f) {
-    pegN_lock(ctx->tsv_mutex);
+    peg_lock(ctx->tsv_mutex);
     fprintf(ctx->tsv_f,
             "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
             ctx->pos_idx, ctx->cand_txt, ctx->cand_score,
-            ctx->K_drawn + n_bag_perm, ctx->K_drawn, drawn_str,
+            ctx->k_drawn + n_bag_perm, ctx->k_drawn, drawn_str,
             perm_remaining_str, (long long)this_weight, (int)perm_mt,
             perm_post_cgp, perm_final_cgp, perm_pv, perm_mover_rack,
             perm_opp_rack);
-    pegN_unlock(ctx->tsv_mutex);
+    peg_unlock(ctx->tsv_mutex);
+  }
+  // Per-scenario row to the inner TSV — same schema as the K=N/K<N
+  // endgame rows but with opp_pov_bag = "" and (for the pure greedy first
+  // pass) eg_plies = 0, eg_depth = 0. Lets the report show first-pass
+  // timing for every scenario.
+  if (ctx->inner_tsv_f) {
+    peg_lock(ctx->inner_tsv_mutex);
+    fprintf(ctx->inner_tsv_f,
+            "%s\t%s\t%s\t%s\t%d\t%s\t%lld\t%d\t%d\t%d\t%d\t%d\t%d"
+            "\t%.1f\t%.1f\t%s\t%s\t%s\n",
+            ctx->cand_txt ? ctx->cand_txt : "", drawn_str,
+            perm_remaining_str,
+            "",   // opp_move — none at d=0 (greedy plays it out)
+            0,    // opp_score
+            "",   // opp_pov_bag — no perception at d=0
+            (long long)this_weight,
+            (int)perm_mt,
+            scen_eg_plies, scen_eg_depth, 0, scen_eg_num_moves, 0,
+            scen_start_ms, scen_dur_ms, "" /* depth_log */,
+            perm_mover_rack, perm_pv);
+    peg_unlock(ctx->inner_tsv_mutex);
   }
 }
 
-static void pegN_emit_split(const PegNEnumCtx *ctx) {
+static void peg_emit_split(const PegEnumCtx *ctx) {
   MachineLetter mover_drawn[16];
   MachineLetter bag_remaining[16];
   int mover_drawn_n = 0;
@@ -2706,7 +2596,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   char remaining_str[32] = {0};
   int drawn_len = 0;
   int remaining_len = 0;
-  for (int type_idx = 0; type_idx < ctx->K_types; type_idx++) {
+  for (int type_idx = 0; type_idx < ctx->k_types; type_idx++) {
     const int mover_count = ctx->mover_pick[type_idx];
     const int bag_count = ctx->n_multiset[type_idx] - mover_count;
     for (int k = 0; k < mover_count; k++) {
@@ -2725,7 +2615,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   }
   // Apply scenario filter (skip silently if no match — the cand's
   // aggregated stats reflect only the scenarios we evaluated).
-  if (!pegN_scenario_filter_match(ctx->scenario_filter, drawn_str,
+  if (!peg_scenario_filter_match(ctx->scenario_filter, drawn_str,
                                   remaining_str)) {
     return;
   }
@@ -2737,50 +2627,50 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   //     ordering). Workers later evaluate one ordering each — gives
   //     ordering-grained parallelism (up to N_bag! per multiset).
   //   depth >= 1: push one multiset job; the worker calls back into
-  //     pegN_emit_split (with out_jobs=NULL) to run the opp-top-K +
+  //     peg_emit_split (with out_jobs=NULL) to run the opp-top-K +
   //     endgame_solve flow. At d>=1 the bag is empty at the leaf so
   //     there is no ordering walk to split.
   // Collect-mode: defer evaluation by pushing a (multiset, mover_pick)
   // job onto out_jobs. The dispatcher hands it to a worker which calls
   // emit_split again with out_jobs=NULL — at d=0 the worker walks bag-tile
-  // orderings serially via pegN_eval_d0_ordering, at d>=1 it runs the
+  // orderings serially via peg_eval_d0_ordering, at d>=1 it runs the
   // opp-top-K + endgame_solve flow.
   //
   // We tried splitting d=0 jobs one-per-ordering for finer parallelism but
   // it cost ~13% wall on POND 4peg — job overhead beat the gain. Multiset
   // granularity is the right fit for ~50-250 us scenarios.
   if (ctx->out_jobs) {
-    PegNScenarioJob job;
+    PegScenarioJob job;
     job.base_ctx = ctx;
-    job.n_multiset = malloc_or_die((size_t)ctx->K_types * sizeof(int));
-    job.mover_pick = malloc_or_die((size_t)ctx->K_types * sizeof(int));
+    job.n_multiset = malloc_or_die((size_t)ctx->k_types * sizeof(int));
+    job.mover_pick = malloc_or_die((size_t)ctx->k_types * sizeof(int));
     memcpy(job.n_multiset, ctx->n_multiset,
-           (size_t)ctx->K_types * sizeof(int));
+           (size_t)ctx->k_types * sizeof(int));
     memcpy(job.mover_pick, ctx->mover_pick,
-           (size_t)ctx->K_types * sizeof(int));
-    pegN_joblist_push(ctx->out_jobs, job);
+           (size_t)ctx->k_types * sizeof(int));
+    peg_joblist_push(ctx->out_jobs, job);
     return;
   }
 
   // Ordered-pair weight: number of labeled-tile sequences in which mover
-  // first draws K_drawn tiles (in order), then bag_remaining is the bag's
+  // first draws k_drawn tiles (in order), then bag_remaining is the bag's
   // residual (the walker further iterates its orderings as sub-scenarios).
-  // For mover's draw the type-multiset (m_t) admits K_drawn! orderings of
+  // For mover's draw the type-multiset (m_t) admits k_drawn! orderings of
   // the labeled tiles, so the per-multiset weight is
-  //   K_drawn! × ∏_t C(c_t, m_t) × C(c_t − m_t, b_t)
-  // Total over all multisets sums to P(N, K_drawn + n_bag_remaining), the
+  //   k_drawn! × ∏_t C(c_t, m_t) × C(c_t − m_t, b_t)
+  // Total over all multisets sums to P(N, k_drawn + n_bag_remaining), the
   // ordered-pair basis macondo/peg.c use.
   int64_t weight = 1;
-  for (int type_idx = 0; type_idx < ctx->K_types; type_idx++) {
+  for (int type_idx = 0; type_idx < ctx->k_types; type_idx++) {
     const int total_count = ctx->type_counts[type_idx];
     const int mover_count = ctx->mover_pick[type_idx];
     const int bag_count = ctx->n_multiset[type_idx] - mover_count;
-    weight *= pegN_binomial(total_count, mover_count) *
-              pegN_binomial(total_count - mover_count, bag_count);
+    weight *= peg_binomial(total_count, mover_count) *
+              peg_binomial(total_count - mover_count, bag_count);
   }
-  for (int f = 2; f <= ctx->K_drawn; f++) weight *= f;
+  for (int f = 2; f <= ctx->k_drawn; f++) weight *= f;
 
-  // PASSPEGN_SCENARIO_STRIDE=k: stratified sampling on the conceptual
+  // PASSPEG_SCENARIO_STRIDE=k: stratified sampling on the conceptual
   // weight-unit-expanded job list. Each multiset of weight w contributes
   // w "weight-units" to a running tally. We sample a multiset if and only
   // if at least one stride-boundary (multiple of k) falls inside its
@@ -2792,18 +2682,18 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   // Bag-size gate: when the root bag is 1 or 2 (1peg/2peg), the scenario
   // space is still small enough to enumerate fully — stride sampling on
   // that tiny space throws away crucial coverage. Disable stride when
-  // N (= K_drawn + n_bag_remaining) <= 2; only enable for 3peg+.
+  // N (= k_drawn + n_bag_remaining) <= 2; only enable for 3peg+.
   {
-    const int N_root = ctx->K_drawn + ctx->n_bag_remaining;
-    const char *stride_env = getenv("PASSPEGN_SCENARIO_STRIDE");
+    const int n_root = ctx->k_drawn + ctx->n_bag_remaining;
+    const char *stride_env = getenv("PASSPEG_SCENARIO_STRIDE");
     const int stride_req =
         stride_env && *stride_env ? atoi(stride_env) : 1;
-    const int stride = (N_root >= 3) ? stride_req : 1;
+    const int stride = (n_root >= 3) ? stride_req : 1;
     if (stride > 1 && ctx->res) {
-      pegN_lock(ctx->res_mutex);
+      peg_lock(ctx->res_mutex);
       const int64_t old_seen = ctx->res->sampled_weight_seen;
       ctx->res->sampled_weight_seen += weight;
-      pegN_unlock(ctx->res_mutex);
+      peg_unlock(ctx->res_mutex);
       const int64_t samples =
           (old_seen + weight) / (int64_t)stride - old_seen / (int64_t)stride;
       if (samples == 0) {
@@ -2820,9 +2710,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   Game *game = NULL;
   char post_cand_cgp[512] = {0};
   if (ctx->depth >= 1) {
-    game = pegN_make_post_cand_game(ctx->base_game, ctx->mover_idx,
+    game = peg_make_post_cand_game(ctx->base_game, ctx->mover_idx,
                                     ctx->unseen, ctx->ld_size, ctx->cand,
-                                    ctx->K_drawn, mover_drawn,
+                                    ctx->k_drawn, mover_drawn,
                                     ctx->n_bag_remaining, bag_remaining);
     if (ctx->tsv_f) {
       char *cgp = game_get_cgp(game, true);
@@ -2844,7 +2734,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     // d>=1 behavior). Per-perm aggregation here; early-return to skip
     // the bottom single-mt fold.
     //
-    // PASSPEGN_WALK_SAMPLE=N: instead of walking all K!/∏b_t! distinct
+    // PASSPEG_WALK_SAMPLE=N: instead of walking all K!/∏b_t! distinct
     // orderings per multiset, sample N cyclic rotations of the sorted
     // bag_remaining (= [0, 1, ..., min(N, K)-1]-shift) and scale per-
     // sample weight by full_orderings/N so the per-multiset total
@@ -2861,18 +2751,18 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       }
     }
     // Two ways to sub-sample the ordering walk (independent of
-    // PASSPEGN_SCENARIO_STRIDE):
-    //   PASSPEGN_WALK_SAMPLE=N    — take EXACTLY N cyclic rotations of the
+    // PASSPEG_SCENARIO_STRIDE):
+    //   PASSPEG_WALK_SAMPLE=N    — take EXACTLY N cyclic rotations of the
     //                                sorted perm per multiset.
-    //   PASSPEGN_WALK_STRIDE=k    — take ~1/k of orderings per multiset
+    //   PASSPEG_WALK_STRIDE=k    — take ~1/k of orderings per multiset
     //                                (n_to_sample = ceil(n_full / k)).
     // Both reuse the same cyclic-rotation sampler: deterministic,
     // per-multiset, no cross-multiset coordination -> no mutex needed.
     // If both env vars are set, WALK_SAMPLE wins (explicit count).
-    const char *sample_env = getenv("PASSPEGN_WALK_SAMPLE");
+    const char *sample_env = getenv("PASSPEG_WALK_SAMPLE");
     const int sample_count =
         sample_env && *sample_env ? atoi(sample_env) : 0;
-    const char *walk_stride_env = getenv("PASSPEGN_WALK_STRIDE");
+    const char *walk_stride_env = getenv("PASSPEG_WALK_STRIDE");
     const int walk_stride =
         walk_stride_env && *walk_stride_env ? atoi(walk_stride_env) : 1;
     const bool sample_mode =
@@ -2932,10 +2822,10 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       const int64_t this_weight =
           sample_mode ? per_sample_weight : weight;
       const MachineLetter *iter_perm = sample_mode ? eff_perm : perm;
-      pegN_eval_d0_ordering(ctx, mover_drawn, mover_drawn_n, drawn_str,
+      peg_eval_d0_ordering(ctx, mover_drawn, mover_drawn_n, drawn_str,
                             iter_perm, ctx->n_bag_remaining, this_weight);
     } while ((sample_mode && sample_idx < n_to_sample) ||
-             (!sample_mode && pegN_next_perm(perm, ctx->n_bag_remaining)));
+             (!sample_mode && peg_next_perm(perm, ctx->n_bag_remaining)));
     return;
   } else if (ctx->n_bag_remaining == 0) {
     // Bag-emptier: the bag is empty, both racks are determined, and opp is
@@ -2952,30 +2842,161 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     } else {
       EndgameCtx *eg_ctx = NULL;
       EndgameResults *eg_results = endgame_results_create();
+      // Per-call timing log so the inner-TSV report can show when each
+      // IDS depth was reached (same instrumentation as the K<N walker path).
+      PegInnerEgDepthLog kn_log = {0};
+      double kn_start_ms = 0.0;
+      if (ctx->budget_timer) {
+        kn_start_ms = ctimer_elapsed_seconds(ctx->budget_timer) * 1000.0;
+      }
+      ctimer_start(&kn_log.call_timer);
+      // K=N (bag-emptier) endgame: plies driven by the current stage
+      // depth (so stage 1 = 1-ply, stage 2 = 2-ply, etc.) unless the
+      // user overrides via PASSPEG_INNER_EG_PLIES. Optional wall-cap
+      // via PASSPEG_INNER_EG_BUDGET (default 0 = no cap — let the
+      // small N-ply IDS finish naturally).
+      const char *kn_budget_env = getenv("PASSPEG_INNER_EG_BUDGET");
+      const double kn_budget = (kn_budget_env && *kn_budget_env)
+                                   ? atof(kn_budget_env) : 0.0;
+      const char *kn_plies_env = getenv("PASSPEG_INNER_EG_PLIES");
+      const int kn_plies = (kn_plies_env && *kn_plies_env)
+                                ? atoi(kn_plies_env) : ctx->depth;
       EndgameArgs ea = {
           .thread_control = ctx->thread_control,
           .game = game,
-          .plies = ctx->depth,
-          .shared_tt = NULL,
+          .plies = kn_plies,
+          .shared_tt = ctx->shared_eg_tt,
           .initial_small_move_arena_size =
               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
           .num_threads = 1,
           .use_heuristics = true,
           .num_top_moves = 1,
+          .per_ply_callback = ctx->inner_tsv_f ? peg_inner_eg_per_ply_cb
+                                                : NULL,
+          .per_ply_callback_data = ctx->inner_tsv_f ? (void *)&kn_log : NULL,
           .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
           .skip_word_pruning = true,
           .thread_index_offset = ctx->worker_idx + 200,
-          .soft_time_limit = pegN_remaining_budget_secs(ctx),
-          .hard_time_limit = pegN_remaining_budget_secs(ctx),
-          .external_deadline_ns = ctx->deadline_monotonic_ns,
+          .soft_time_limit = kn_budget,
+          .hard_time_limit = kn_budget,
+          // Clamp by the cascade deadline so a bag-empty K=N endgame at
+          // ctx->depth plies can never outlive the outer wall budget.
+          // Without this clamp, default kn_budget=0 leaves external_deadline_ns=0
+          // and endgame_solve runs unbounded — a single pos 61 d=4 scenario
+          // hangs the cascade past the 60s bp_exec watchdog.
+          .external_deadline_ns = peg_clamp_deadline_ns(
+              kn_budget > 0.0
+                  ? ctimer_monotonic_ns() + (int64_t)(kn_budget * 1.0e9)
+                  : 0,
+              ctx->deadline_monotonic_ns),
       };
       endgame_solve_inline(&eg_ctx, &ea, eg_results);
+      const double kn_dur_ms =
+          ctimer_elapsed_seconds(&kn_log.call_timer) * 1000.0;
       // endgame_solve returns the value from the player-on-turn's POV
       // (here: opp). Negate to express it from mover's POV, then add to
       // mover_lead to get mover_total.
-      const int32_t opp_pov_val =
-          endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
-      mover_total = mover_lead - opp_pov_val;
+      //
+      // If the cascade deadline fired before depth 1 completed, the result
+      // value/PV are uninitialized — using them downstream blows up on
+      // equity_to_int / "duplicate move type" assertions. Fall back to a
+      // greedy playout so we always return a sane number.
+      const int kn_depth_reached =
+          endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+      if (kn_depth_reached < 0) {
+        MoveList *pl_fb = move_list_create(1);
+        mover_total = peg_greedy_playout_pv(
+            game, ctx->mover_idx, pl_fb, ctx->worker_idx, NULL, 0, NULL, 0,
+            NULL, 0, NULL, 0);
+        move_list_destroy(pl_fb);
+      } else {
+        const int32_t opp_pov_val =
+            endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+        mover_total = mover_lead - opp_pov_val;
+      }
+      // Emit a row to the inner TSV so the report can show this cand's
+      // K=N evaluation alongside the K<N walker rows. We synthesize a
+      // single "row per scenario" — there's no opp_move iteration here
+      // (the endgame picks opp's best move internally). Skip the PV walk
+      // when no depth completed — the SmallMove entries may be partial
+      // and tripping play_move asserts ("duplicate move type").
+      if (ctx->inner_tsv_f) {
+        const int kn_depth =
+            endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+        char kn_pv_text[1024] = {0};
+        int kn_pv_num_moves = 0;
+        int kn_pv_negamax = 0;
+        const PVLine *pv_line = kn_depth_reached >= 0
+            ? endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST)
+            : NULL;
+        if (pv_line) {
+          kn_pv_num_moves = pv_line->num_moves;
+          kn_pv_negamax = pv_line->negamax_depth;
+          if (pv_line->num_moves > 0) {
+            Game *pv_g = game_duplicate(game);
+            game_set_endgame_solving_mode(pv_g);
+            game_set_backup_mode(pv_g, BACKUP_MODE_OFF);
+            StringBuilder *psb = string_builder_create();
+            for (int mi = 0; mi < pv_line->num_moves; mi++) {
+              Move mf;
+              small_move_to_move(&mf, &pv_line->moves[mi],
+                                 game_get_board(pv_g));
+              if (mi > 0) string_builder_add_string(psb, " | ");
+              string_builder_add_move(psb, game_get_board(pv_g), &mf,
+                                      game_get_ld(pv_g), true);
+              play_move(&mf, pv_g, NULL);
+            }
+            snprintf(kn_pv_text, sizeof(kn_pv_text), "%s",
+                     string_builder_peek(psb));
+            string_builder_destroy(psb);
+            game_destroy(pv_g);
+          }
+        }
+        char kn_dlog[256] = {0};
+        int kn_off = 0;
+        for (int i = 0;
+             i < kn_log.n && kn_off + 24 < (int)sizeof(kn_dlog); i++) {
+          kn_off += snprintf(kn_dlog + kn_off, sizeof(kn_dlog) - kn_off,
+                             "%s%d@%.1f=%+d", i == 0 ? "" : ";",
+                             kn_log.depths[i], kn_log.times_ms[i],
+                             (int)kn_log.values[i]);
+        }
+        // K=N path: mover rack is on `game` (mover already played the cand
+        // and drew); render it for the report column.
+        char kn_mover_rack[32] = {0};
+        {
+          const LetterDistribution *ld = game_get_ld(game);
+          StringBuilder *rsb = string_builder_create();
+          string_builder_add_rack(
+              rsb,
+              player_get_rack(game_get_player(game, ctx->mover_idx)),
+              ld, false);
+          snprintf(kn_mover_rack, sizeof(kn_mover_rack), "%s",
+                   string_builder_peek(rsb));
+          string_builder_destroy(rsb);
+        }
+        peg_lock(ctx->inner_tsv_mutex);
+        fprintf(ctx->inner_tsv_f,
+                "%s\t%s\t%s\t%s\t%d\t%s\t%lld\t%d\t%d\t%d\t%d\t%d\t%d"
+                "\t%.1f\t%.1f\t%s\t%s\t%s\n",
+                ctx->cand_txt ? ctx->cand_txt : "", drawn_str,
+                "",     // remaining_str — empty for bag-emptier
+                "",     // opp_move — not selected separately
+                0,      // opp_score
+                "",     // opp_pov_bag — no perception
+                0LL,    // opp_pov_weight
+                (int)mover_total,
+                ctx->depth, kn_depth, 0,
+                kn_pv_num_moves, kn_pv_negamax,
+                kn_start_ms, kn_dur_ms, kn_dlog,
+                kn_mover_rack, kn_pv_text);
+        peg_unlock(ctx->inner_tsv_mutex);
+        // With per-call budget the K=N endgame should always reach at
+        // least depth 1. If it didn\'t, mover_total = mover_lead (a
+        // valid but uninformative number); we no longer drop the cand —
+        // the user\'s design is "return the best result when
+        // interrupted", and partial endgame data is still a real signal.
+      }
       if (ctx->tsv_f) {
         const PVLine *pv =
             endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
@@ -3039,26 +3060,26 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     generate_moves(&opp_ga);
     const int n_opp = move_list_get_count(opp_ml);
 
-    // One-shot Noah utility ranking, per the "rational Noah" model. For
+    // One-shot opp utility ranking, per the "rational opp" model. For
     // each opp tile-placement move, evaluate it across all of opp's
     // perceived bag-tile scenarios (= the distinct types in opp's unseen
     // pool, which is mover_rack + bag from opp's POV), do a greedy
-    // playout for each, and aggregate into Noah's win% / mean spread.
-    // Noah utility = win_pct + alpha * mean_spread (alpha = env value).
-    // Triggered when PASSPEGN_GREEDY_NOAH_UTIL is set (its value = alpha).
-    const char *noah_env = getenv("PASSPEGN_GREEDY_NOAH_UTIL");
-    if (noah_env && *noah_env) {
-      const double alpha = atof(noah_env);
-      // If PASSPEGN_GREEDY_NOAH_DEPTH > 0, replace the per-hypothetical-
+    // playout for each, and aggregate into opp's win% / mean spread.
+    // opp utility = win_pct + alpha * mean_spread (alpha = env value).
+    // Triggered when PASSPEG_GREEDY_OPP_UTIL is set (its value = alpha).
+    const char *opp_env = getenv("PASSPEG_GREEDY_OPP_UTIL");
+    if (opp_env && *opp_env) {
+      const double alpha = atof(opp_env);
+      // If PASSPEG_GREEDY_OPP_DEPTH > 0, replace the per-opp-POV-
       // scenario greedy playout with endgame_solve at that ply depth.
       // The bag is empty after opp plays + draws the 1 bag tile, so
       // endgame_solve is well-defined.
-      const char *noah_depth_env = getenv("PASSPEGN_GREEDY_NOAH_DEPTH");
-      const int noah_depth =
-          noah_depth_env && *noah_depth_env ? atoi(noah_depth_env) : 0;
+      const char *opp_depth_env = getenv("PASSPEG_GREEDY_OPP_DEPTH");
+      const int opp_depth =
+          opp_depth_env && *opp_depth_env ? atoi(opp_depth_env) : 0;
       const int opp_idx = 1 - ctx->mover_idx;
       uint8_t opp_unseen[MAX_ALPHABET_SIZE];
-      pegN_compute_unseen(game, opp_idx, opp_unseen);
+      peg_compute_unseen(game, opp_idx, opp_unseen);
       MachineLetter opp_types[MAX_ALPHABET_SIZE];
       int opp_type_counts[MAX_ALPHABET_SIZE];
       int n_opp_types = 0;
@@ -3072,7 +3093,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
       }
       fprintf(stderr,
-              "[noah_util] scenario %s/%s  alpha=%g  opp_pool=%d tiles in "
+              "[opp_util] scenario %s/%s  alpha=%g  opp_pool=%d tiles in "
               "%d types\n",
               drawn_str, remaining_str, alpha, opp_pool_total, n_opp_types);
 
@@ -3081,9 +3102,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         double win_pct;
         double mean_spread;
         double utility;
-      } NoahRanked;
-      NoahRanked *ranked =
-          calloc_or_die((size_t)n_opp, sizeof(NoahRanked));
+      } OppRanked;
+      OppRanked *ranked =
+          calloc_or_die((size_t)n_opp, sizeof(OppRanked));
       int n_ranked = 0;
 
       // Collect tile-placement opp ranks; PASS/EXCHANGE are skipped.
@@ -3128,11 +3149,11 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       // [pp], opp_types[ti]) leaf.
       const int n_inner_jobs =
           n_placement > 0 ? n_placement * n_opp_types : 0;
-      PegNNoahInnerJob *inner_jobs = NULL;
+      PegOppInnerJob *inner_jobs = NULL;
       void **inner_arg_ptrs = NULL;
       if (n_inner_jobs > 0) {
         inner_jobs = malloc_or_die((size_t)n_inner_jobs *
-                                    sizeof(PegNNoahInnerJob));
+                                    sizeof(PegOppInnerJob));
         inner_arg_ptrs =
             malloc_or_die((size_t)n_inner_jobs * sizeof(void *));
         for (int pp = 0; pp < n_placement; pp++) {
@@ -3140,19 +3161,20 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
           for (int ti = 0; ti < n_opp_types; ti++) {
             const int idx = pp * n_opp_types + ti;
-            inner_jobs[idx] = (PegNNoahInnerJob){
+            inner_jobs[idx] = (PegOppInnerJob){
                 .base_game = game,
                 .mover_idx = ctx->mover_idx,
                 .ld_size = ctx->ld_size,
                 .opp_move = opp_move,
-                .bag_X = opp_types[ti],
+                .bag_ml = opp_types[ti],
                 .weight = opp_type_counts[ti],
                 .n_opp_types = n_opp_types,
                 .opp_types = opp_types,
                 .opp_type_counts = opp_type_counts,
                 .ti = ti,
-                .noah_depth = noah_depth,
+                .opp_depth = opp_depth,
                 .thread_control = ctx->thread_control,
+                .deadline_monotonic_ns = ctx->deadline_monotonic_ns,
                 .mover_total = 0,
             };
             inner_arg_ptrs[idx] = &inner_jobs[idx];
@@ -3165,13 +3187,13 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       // worker continue draining the queue (no deadlock when nested
       // inner work is submitted from within an outer scenario worker).
       if (ctx->executor && n_inner_jobs > 0) {
-        bai_peg_executor_submit_and_wait(ctx->executor,
-                                         pegN_noah_inner_worker_fn,
+        peg_pool_submit_and_wait(ctx->executor,
+                                         peg_opp_inner_worker_fn,
                                          inner_arg_ptrs, n_inner_jobs,
                                          ctx->worker_idx);
       } else {
         for (int idx = 0; idx < n_inner_jobs; idx++) {
-          pegN_noah_inner_worker_fn(&inner_jobs[idx], ctx->worker_idx);
+          peg_opp_inner_worker_fn(&inner_jobs[idx], ctx->worker_idx);
         }
       }
 
@@ -3183,26 +3205,26 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         int64_t spread_sum = 0;
         for (int ti = 0; ti < n_opp_types; ti++) {
           const int idx = pp * n_opp_types + ti;
-          const int32_t hyp_mover_total = inner_jobs[idx].mover_total;
+          const int32_t opp_pov_mover_total = inner_jobs[idx].mover_total;
           const int weight = inner_jobs[idx].weight;
           weight_sum += weight;
-          spread_sum += (int64_t)(-hyp_mover_total) * weight;
-          if (hyp_mover_total < 0) {
+          spread_sum += (int64_t)(-opp_pov_mover_total) * weight;
+          if (opp_pov_mover_total < 0) {
             win_x2_sum += 2.0 * weight;
-          } else if (hyp_mover_total == 0) {
+          } else if (opp_pov_mover_total == 0) {
             win_x2_sum += weight;
           }
         }
         const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
         (void)opp_move; // used below via opp_rank
-        const double noah_win_pct = win_x2_sum / (2.0 * (double)weight_sum);
-        const double noah_mean_spread =
+        const double opp_win_pct = win_x2_sum / (2.0 * (double)weight_sum);
+        const double opp_mean_spread =
             (double)spread_sum / (double)weight_sum;
         const double utility =
-            noah_win_pct + alpha * noah_mean_spread;
+            opp_win_pct + alpha * opp_mean_spread;
         ranked[n_ranked].move_idx = opp_rank;
-        ranked[n_ranked].win_pct = noah_win_pct;
-        ranked[n_ranked].mean_spread = noah_mean_spread;
+        ranked[n_ranked].win_pct = opp_win_pct;
+        ranked[n_ranked].mean_spread = opp_mean_spread;
         ranked[n_ranked].utility = utility;
         n_ranked++;
       }
@@ -3210,17 +3232,17 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       for (int i = 0; i < n_ranked; i++) {
         for (int j = i + 1; j < n_ranked; j++) {
           if (ranked[j].utility > ranked[i].utility) {
-            NoahRanked tmp = ranked[i];
+            OppRanked tmp = ranked[i];
             ranked[i] = ranked[j];
             ranked[j] = tmp;
           }
         }
       }
-      const char *noah_topn_env = getenv("PASSPEGN_GREEDY_NOAH_TOPN");
-      const int noah_topn =
-          noah_topn_env && *noah_topn_env ? atoi(noah_topn_env) : 20;
-      fprintf(stderr, "[noah_util] top-%d by utility:\n", noah_topn);
-      for (int i = 0; i < n_ranked && i < noah_topn; i++) {
+      const char *opp_topn_env = getenv("PASSPEG_GREEDY_OPP_TOPN");
+      const int opp_topn =
+          opp_topn_env && *opp_topn_env ? atoi(opp_topn_env) : 20;
+      fprintf(stderr, "[opp_util] top-%d by utility:\n", opp_topn);
+      for (int i = 0; i < n_ranked && i < opp_topn; i++) {
         const Move *m = move_list_get_move(opp_ml, ranked[i].move_idx);
         StringBuilder *sb = string_builder_create();
         string_builder_add_move(sb, game_get_board(game), m,
@@ -3242,7 +3264,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                                   game_get_ld(game), true);
           if (strstr(string_builder_peek(sb), targets[t]) != NULL) {
             fprintf(stderr,
-                    "[noah_util] %-12s ranks #%-3d  win=%.4f  spread=%+7.3f"
+                    "[opp_util] %-12s ranks #%-3d  win=%.4f  spread=%+7.3f"
                     "  util=%+9.5f  %s\n",
                     targets[t], i + 1, ranked[i].win_pct,
                     ranked[i].mean_spread, ranked[i].utility,
@@ -3263,8 +3285,8 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     // One-shot dump of every opp tile-placement move for this scenario,
     // including the mover_total that results from greedy continuation
     // (so you can sort by "actual outcome" instead of equity). Triggered
-    // by PASSPEGN_GREEDY_DUMP_OPP=1.
-    const char *dump_opp_env = getenv("PASSPEGN_GREEDY_DUMP_OPP");
+    // by PASSPEG_GREEDY_DUMP_OPP=1.
+    const char *dump_opp_env = getenv("PASSPEG_GREEDY_DUMP_OPP");
     if (dump_opp_env && atoi(dump_opp_env) == 1) {
       fprintf(stderr,
               "[dump_opp] scenario %s/%s  n_opp=%d  cand=%s\n",
@@ -3285,7 +3307,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         char dump_pv[1024] = {0};
         char dump_mr[32] = {0};
         char dump_or[32] = {0};
-        const int32_t dump_mt = pegN_greedy_playout_pv(
+        const int32_t dump_mt = peg_greedy_playout_pv(
             dump_branch, ctx->mover_idx, dump_pl, ctx->worker_idx, dump_pv,
             sizeof(dump_pv), dump_mr, sizeof(dump_mr), dump_or,
             sizeof(dump_or), NULL, 0);
@@ -3305,53 +3327,53 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       fflush(stderr);
     }
 
-    // Rational-Noah halving path (opt-in). Noah doesn't know the
+    // rational-opp halving path (opt-in). opp doesn't know the
     // realized bag tile: he evaluates each opp candidate move at the
     // current stage's depth across every perceived bag-tile type
     // (weighted by physical-tile counts), and picks the move that
-    // maximizes utility = noah_win_pct + alpha * noah_mean_spread.
-    // The scenario's mover_total is then the *realized* mt of Noah's
+    // maximizes utility = opp_win_pct + alpha * opp_mean_spread.
+    // The scenario's mover_total is then the *realized* mt of opp's
     // pick — utility is used only to choose the move and then
     // discarded; aggregate win % is computed from realized outcomes.
     // Halving: starting from opp_top_k cands, stage s = 0..depth-1
     // cuts to opp_top_k >> s by utility-DESC, final stage at depth
     // picks the utility-max from the survivors.
     // Bag-emptier case (n_bag_remaining == 0): no perceived bag tile,
-    // Noah's "perceived" pool collapses to a single deterministic
+    // opp's "perceived" pool collapses to a single deterministic
     // scenario (mover's known rack), so utility-pick == MIN-over-opp.
     // Falls into the legacy MIN path below.
-    const char *rational_env = getenv("PASSPEGN_GREEDY_RATIONAL");
+    const char *rational_env = getenv("PASSPEG_GREEDY_RATIONAL");
     const bool rational =
         rational_env && atoi(rational_env) > 0 && ctx->n_bag_remaining >= 1;
 
-    // PASSPEGN_GREEDY_RAT_WALK=1 — rational walker for inner 2+peg
+    // PASSPEG_GREEDY_RAT_WALK=1 — rational walker for inner 2+peg
     // states (also handles 1peg as a degenerate case). At each PEG ply
     // we take opp_top_k candidates by movegen equity, rank them at
-    // d=0 (Noah's utility = avg over n_bag-multiset perception for opp
+    // d=0 (opp's utility = avg over n_bag-multiset perception for opp
     // plies; realized greedy mt for mover plies), pick top-1, apply.
     // When the bag empties we run a greedy playout to game end.
     // The realized scenario's mover_total is the realized spread.
     //
-    // PASSPEGN_GREEDY_AUTO_WALKER=1 — per-cand auto-dispatch:
+    // PASSPEG_GREEDY_AUTO_WALKER=1 — per-cand auto-dispatch:
     //   bag-after >= 2 → walker
     //   bag-after == 1 → rational halving (no walker)
     //   bag-after == 0 → bag-emptier path (existing MIN/endgame)
     // When set, overrides RAT_WALK.
-    const char *walk_env = getenv("PASSPEGN_GREEDY_RAT_WALK");
-    const char *auto_walk_env = getenv("PASSPEGN_GREEDY_AUTO_WALKER");
+    const char *walk_env = getenv("PASSPEG_GREEDY_RAT_WALK");
+    const char *auto_walk_env = getenv("PASSPEG_GREEDY_AUTO_WALKER");
     const bool auto_walker = auto_walk_env && atoi(auto_walk_env) > 0;
     const bool walk_rat = rational && (auto_walker
                                            ? ctx->n_bag_remaining >= 2
                                            : (walk_env && atoi(walk_env) > 0));
 
     if (walk_rat) {
-      const char *walk_alpha_env = getenv("PASSPEGN_GREEDY_ALPHA");
+      const char *walk_alpha_env = getenv("PASSPEG_GREEDY_ALPHA");
       const double walk_alpha = walk_alpha_env && *walk_alpha_env
                                     ? atof(walk_alpha_env)
                                     : 1e-4;
       const int per_ply_k_default =
           ctx->opp_top_k > 0 ? ctx->opp_top_k : 8;
-      // PASSPEGN_GREEDY_WALK_K="K1,K2,K3,K4" overrides the per-ply
+      // PASSPEG_GREEDY_WALK_K="K1,K2,K3,K4" overrides the per-ply
       // candidate cap by current bag-size-at-ply. Position i = bag
       // size i+1. Unspecified entries fall back to per_ply_k_default.
       // Example: WALK_K="8,32,8" → at a ply with bag=1 use K=8, bag=2
@@ -3362,7 +3384,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         walk_k_by_bag[i] = per_ply_k_default;
       }
       {
-        const char *walk_k_env = getenv("PASSPEGN_GREEDY_WALK_K");
+        const char *walk_k_env = getenv("PASSPEG_GREEDY_WALK_K");
         if (walk_k_env && *walk_k_env) {
           char tmp[256];
           snprintf(tmp, sizeof(tmp), "%s", walk_k_env);
@@ -3408,9 +3430,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             ctx->ld->ld_ml_to_hl[perm[i]][0];
       }
 
-      Game *walker = pegN_make_post_cand_game(
+      Game *walker = peg_make_post_cand_game(
           ctx->base_game, ctx->mover_idx, ctx->unseen, ctx->ld_size,
-          ctx->cand, ctx->K_drawn, mover_drawn, ctx->n_bag_remaining,
+          ctx->cand, ctx->k_drawn, mover_drawn, ctx->n_bag_remaining,
           perm);
       StringBuilder *walker_pv =
           ctx->tsv_f ? string_builder_create() : NULL;
@@ -3420,9 +3442,9 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       // vs subsequent opp decisions (where the bag is smaller and the
       // game is more constrained).
       const char *first_opp_k_env =
-          getenv("PASSPEGN_GREEDY_WALK_K_FIRST_OPP");
+          getenv("PASSPEG_GREEDY_WALK_K_FIRST_OPP");
       const char *later_opp_k_env =
-          getenv("PASSPEGN_GREEDY_WALK_K_LATER_OPP");
+          getenv("PASSPEG_GREEDY_WALK_K_LATER_OPP");
       const int first_opp_k =
           first_opp_k_env && *first_opp_k_env ? atoi(first_opp_k_env) : 0;
       const int later_opp_k =
@@ -3436,6 +3458,15 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       int walker_plies = 0;
 
       while (bag_get_letters(game_get_bag(walker)) > 0) {
+        // Cascade-budget poll. The walker loop fans out into deep
+        // per-ply work (opp-side perception enumerations, mover-side
+        // move generation + playouts). Without this poll a single
+        // scenario can run the full walker tree even after the outer
+        // wall budget is exceeded.
+        if (ctx->deadline_monotonic_ns > 0 &&
+            ctimer_monotonic_ns() > ctx->deadline_monotonic_ns) {
+          break;
+        }
         const int turn = game_get_player_on_turn_index(walker);
         const bool is_opp = (turn != ctx->mover_idx);
         const int bag_at_ply = bag_get_letters(game_get_bag(walker));
@@ -3496,19 +3527,19 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             placement_idx[best] = tmp;
           }
         }
-        // PASSPEGN_OPP_RANK_BY_PLAYOUT=1: at each opp ply, re-rank the
-        // top-PASSPEGN_OPP_RANK_POOL (default 32) static-equity candidates
+        // PASSPEG_OPP_RANK_BY_PLAYOUT=1: at each opp ply, re-rank the
+        // top-PASSPEG_OPP_RANK_POOL (default 32) static-equity candidates
         // by realized greedy-playout outcome (lowest mover_total = worst
         // for mover = best opp choice), then keep the top per_ply_k from
         // that re-rank. This is more expensive but should pick up moves
         // that are defensively strong without scoring high (which static
         // equity systematically under-ranks).
         if (is_opp) {
-          const char *opp_rank_env = getenv("PASSPEGN_OPP_RANK_BY_PLAYOUT");
+          const char *opp_rank_env = getenv("PASSPEG_OPP_RANK_BY_PLAYOUT");
           const bool rank_by_playout =
               opp_rank_env && atoi(opp_rank_env) > 0;
           if (rank_by_playout) {
-            const char *pool_env = getenv("PASSPEGN_OPP_RANK_POOL");
+            const char *pool_env = getenv("PASSPEG_OPP_RANK_POOL");
             const int pool_size_req =
                 pool_env && *pool_env ? atoi(pool_env) : 32;
             const int pool_size = pool_size_req < n_placement
@@ -3548,7 +3579,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
               play_move(m, probe, NULL);
               game_set_game_end_reason(probe, GAME_END_REASON_NONE);
               MoveList *pml = move_list_create(1);
-              po_mt[i] = pegN_greedy_playout_pv(
+              po_mt[i] = peg_greedy_playout_pv(
                   probe, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
                   NULL, 0, NULL, 0, NULL, 0);
               move_list_destroy(pml);
@@ -3594,7 +3625,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           // Opp ply: perception eval with n_bag-multiset enumeration.
           const int opp_idx = turn;
           uint8_t walk_unseen[MAX_ALPHABET_SIZE];
-          pegN_compute_unseen(walker, opp_idx, walk_unseen);
+          peg_compute_unseen(walker, opp_idx, walk_unseen);
           MachineLetter walk_types[MAX_ALPHABET_SIZE];
           int walk_type_counts[MAX_ALPHABET_SIZE];
           int n_walk_types = 0;
@@ -3614,38 +3645,69 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                 (Bag *)wbag, walk_types[t]);
           }
           double best_util = -1e18;
-          for (int s = 0; s < n_sel; s++) {
-            const Move *m = move_list_get_move(wml, sel_idx[s]);
+          for (int pick_idx = 0; pick_idx < n_sel; pick_idx++) {
+            // Per-iteration cascade-budget poll. Each peg_eval_opp_with_perception
+            // call is a deep recursive enumeration over perception opp-POV states that
+            // can run hundreds of game_duplicate + greedy_playout calls;
+            // without this poll a single scenario can exceed the outer wall
+            // budget by an order of magnitude.
+            if (ctx->deadline_monotonic_ns > 0 &&
+                ctimer_monotonic_ns() > ctx->deadline_monotonic_ns) {
+              break;
+            }
+            const Move *m = move_list_get_move(wml, sel_idx[pick_idx]);
             double util = 0.0;
             int32_t realized = 0;
-            pegN_eval_opp_with_perception(
+            // Format opp move text for inner-TSV annotation (cheap when
+            // tsv disabled — string_builder is light, and the actual write
+            // only happens if inner_tsv_f is set).
+            char opp_move_text[64] = {0};
+            int opp_move_score = 0;
+            if (ctx->inner_tsv_f) {
+              StringBuilder *sb = string_builder_create();
+              string_builder_add_move(sb, game_get_board(walker), m,
+                                      game_get_ld(walker), true);
+              snprintf(opp_move_text, sizeof(opp_move_text), "%s",
+                       string_builder_peek(sb));
+              string_builder_destroy(sb);
+              opp_move_score = equity_to_int(move_get_score(m));
+            }
+            peg_eval_opp_with_perception(
                 ctx, walker, m, walk_types, walk_type_counts,
                 n_walk_types, n_bag_now, realized_bag_counts, walk_alpha,
-                &util, &realized);
+                &util, &realized,
+                ctx->inner_tsv_f ? drawn_str : NULL,
+                ctx->inner_tsv_f ? perm_remaining_str : NULL,
+                ctx->inner_tsv_f ? opp_move_text : NULL,
+                opp_move_score);
             if (util > best_util) {
               best_util = util;
-              best_local = s;
+              best_local = pick_idx;
             }
           }
         } else {
           // Mover ply: realized greedy mt per candidate.
           int32_t best_mt = INT32_MIN;
-          for (int s = 0; s < n_sel; s++) {
-            const Move *m = move_list_get_move(wml, sel_idx[s]);
+          for (int pick_idx = 0; pick_idx < n_sel; pick_idx++) {
+            if (ctx->deadline_monotonic_ns > 0 &&
+                ctimer_monotonic_ns() > ctx->deadline_monotonic_ns) {
+              break;
+            }
+            const Move *m = move_list_get_move(wml, sel_idx[pick_idx]);
             Game *probe = game_duplicate(walker);
             game_set_endgame_solving_mode(probe);
             game_set_backup_mode(probe, BACKUP_MODE_OFF);
             play_move(m, probe, NULL);
             game_set_game_end_reason(probe, GAME_END_REASON_NONE);
             MoveList *pml = move_list_create(1);
-            const int32_t mt = pegN_greedy_playout_pv(
+            const int32_t mt = peg_greedy_playout_pv(
                 probe, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
                 NULL, 0, NULL, 0, NULL, 0);
             move_list_destroy(pml);
             game_destroy(probe);
             if (mt > best_mt) {
               best_mt = mt;
-              best_local = s;
+              best_local = pick_idx;
             }
           }
         }
@@ -3674,7 +3736,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
 
       // Finish the scenario. Every cand at stage `depth` gets exactly
       // `depth` lookahead plies. The walker has already done some of
-      // those (`walker_plies` — its rational-Noah pre-bag-empty
+      // those (`walker_plies` — its rational-opp pre-bag-empty
       // decisions). The remaining (`depth - walker_plies`) plies are
       // filled in by endgame_solve when the bag is empty. If the bag
       // still has tiles (walker capped early due to walker_plies >=
@@ -3688,9 +3750,23 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       char final_pv[1024] = {0};
       char final_mr[32] = {0};
       char final_or[32] = {0};
-      const int remaining_plies = ctx->depth - walker_plies;
+      int remaining_plies = ctx->depth - walker_plies;
       const bool bag_empty_now =
           bag_get_letters(game_get_bag(walker)) == 0;
+      // PASSPEG_INNER_USE_ENDGAME=N (plies): when the walker exits with the
+      // bag already empty but no remaining plies in its depth budget, the
+      // fallback is greedy — that misvalues endgames the same way the leaf
+      // does. Promote remaining_plies to at least N so the terminal eval
+      // uses endgame_solve (already endgame-aware downstream).
+      {
+        const char *inner_eg_env = getenv("PASSPEG_INNER_USE_ENDGAME");
+        const int inner_eg_plies =
+            inner_eg_env && *inner_eg_env ? atoi(inner_eg_env) : 0;
+        if (inner_eg_plies > 0 && bag_empty_now &&
+            remaining_plies < inner_eg_plies) {
+          remaining_plies = inner_eg_plies;
+        }
+      }
       if (remaining_plies > 0 && bag_empty_now &&
           game_get_game_end_reason(walker) == GAME_END_REASON_NONE) {
         EndgameCtx *eg_ctx = NULL;
@@ -3708,21 +3784,35 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
             .skip_word_pruning = true,
             .thread_index_offset = ctx->worker_idx + 200,
-            .soft_time_limit = pegN_remaining_budget_secs(ctx),
-            .hard_time_limit = pegN_remaining_budget_secs(ctx),
+            .soft_time_limit = peg_remaining_budget_secs(ctx),
+            .hard_time_limit = peg_remaining_budget_secs(ctx),
             .external_deadline_ns = ctx->deadline_monotonic_ns,
         };
         endgame_solve_inline(&eg_ctx, &ea, eg_results);
-        const int turn = game_get_player_on_turn_index(walker);
-        const int32_t eg_val =
-            endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
-        walker_mt =
-            (turn == ctx->mover_idx) ? mover_lead + eg_val : mover_lead - eg_val;
+        // Cascade deadline may have fired mid-search — guard against using
+        // an uninitialized result (see equity.h equity_to_int assertion).
+        const int walker_eg_depth =
+            endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+        if (walker_eg_depth < 0) {
+          MoveList *pl_fb = move_list_create(1);
+          walker_mt = peg_greedy_playout_pv(
+              walker, ctx->mover_idx, pl_fb, ctx->worker_idx,
+              walker_pv ? final_pv : NULL, sizeof(final_pv),
+              walker_pv ? final_mr : NULL, sizeof(final_mr),
+              walker_pv ? final_or : NULL, sizeof(final_or), NULL, 0);
+          move_list_destroy(pl_fb);
+        } else {
+          const int turn = game_get_player_on_turn_index(walker);
+          const int32_t eg_val =
+              endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+          walker_mt =
+              (turn == ctx->mover_idx) ? mover_lead + eg_val : mover_lead - eg_val;
+        }
         endgame_ctx_destroy(eg_ctx);
         endgame_results_destroy(eg_results);
       } else {
         MoveList *final_ml = move_list_create(1);
-        walker_mt = pegN_greedy_playout_pv(
+        walker_mt = peg_greedy_playout_pv(
             walker, ctx->mover_idx, final_ml, ctx->worker_idx,
             walker_pv ? final_pv : NULL, sizeof(final_pv),
             walker_pv ? final_mr : NULL, sizeof(final_mr),
@@ -3750,7 +3840,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       // n_orderings letter orderings contributes n_orderings entries
       // to weight_sum; this captures the physical bag-draw orderings
       // we'd otherwise miss).
-      pegN_lock(ctx->res_mutex);
+      peg_lock(ctx->res_mutex);
       ctx->res->weight_sum += weight;
       ctx->res->spread_sum += weight * (int64_t)walker_mt;
       if (walker_mt > 0) {
@@ -3759,20 +3849,20 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         ctx->res->win_x2 += weight;
       }
       ctx->res->n_scen++;
-      pegN_unlock(ctx->res_mutex);
+      peg_unlock(ctx->res_mutex);
 
       if (ctx->tsv_f) {
-        pegN_lock(ctx->tsv_mutex);
+        peg_lock(ctx->tsv_mutex);
         fprintf(
             ctx->tsv_f,
             "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
             ctx->pos_idx, ctx->cand_txt, ctx->cand_score,
-            ctx->K_drawn + ctx->n_bag_remaining, ctx->K_drawn, drawn_str,
+            ctx->k_drawn + ctx->n_bag_remaining, ctx->k_drawn, drawn_str,
             perm_remaining_str, (long long)weight, (int)walker_mt,
             post_cand_cgp, "", pv_text, mover_rack_end, opp_rack_end);
-        pegN_unlock(ctx->tsv_mutex);
+        peg_unlock(ctx->tsv_mutex);
       }
-      } while (pegN_next_perm(perm, ctx->n_bag_remaining));
+      } while (peg_next_perm(perm, ctx->n_bag_remaining));
 
       return;  // walker handled all aggregation per-perm; skip the
                // single-mt fold at the bottom of emit_split.
@@ -3812,10 +3902,10 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         opp_cand_idx[n_opp_cand++] = opp_rank;
       }
 
-      // 2. Noah's perceived bag-tile pool.
+      // 2. opp's perceived bag-tile pool.
       const int opp_idx = 1 - ctx->mover_idx;
       uint8_t opp_unseen[MAX_ALPHABET_SIZE];
-      pegN_compute_unseen(game, opp_idx, opp_unseen);
+      peg_compute_unseen(game, opp_idx, opp_unseen);
       MachineLetter opp_types[MAX_ALPHABET_SIZE];
       int opp_type_counts[MAX_ALPHABET_SIZE];
       int n_opp_types = 0;
@@ -3837,7 +3927,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
       }
 
-      const char *alpha_env = getenv("PASSPEGN_GREEDY_ALPHA");
+      const char *alpha_env = getenv("PASSPEG_GREEDY_ALPHA");
       const double alpha =
           alpha_env && *alpha_env ? atof(alpha_env) : 1e-4;
 
@@ -3853,8 +3943,8 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
         // Build per-(opp, perceived_tile) jobs and dispatch.
         const int n_jobs = n_to_eval * n_opp_types;
-        PegNNoahInnerJob *jobs =
-            malloc_or_die((size_t)n_jobs * sizeof(PegNNoahInnerJob));
+        PegOppInnerJob *jobs =
+            malloc_or_die((size_t)n_jobs * sizeof(PegOppInnerJob));
         void **args =
             malloc_or_die((size_t)n_jobs * sizeof(void *));
         for (int i = 0; i < n_to_eval; i++) {
@@ -3862,31 +3952,32 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
               move_list_get_move(opp_ml, opp_cand_idx[i]);
           for (int ti = 0; ti < n_opp_types; ti++) {
             int idx = i * n_opp_types + ti;
-            jobs[idx] = (PegNNoahInnerJob){
+            jobs[idx] = (PegOppInnerJob){
                 .base_game = game,
                 .mover_idx = ctx->mover_idx,
                 .ld_size = ctx->ld_size,
                 .opp_move = opp_move,
-                .bag_X = opp_types[ti],
+                .bag_ml = opp_types[ti],
                 .weight = opp_type_counts[ti],
                 .n_opp_types = n_opp_types,
                 .opp_types = opp_types,
                 .opp_type_counts = opp_type_counts,
                 .ti = ti,
-                .noah_depth = stage,
+                .opp_depth = stage,
                 .thread_control = ctx->thread_control,
+                .deadline_monotonic_ns = ctx->deadline_monotonic_ns,
                 .mover_total = 0,
             };
             args[idx] = &jobs[idx];
           }
         }
         if (ctx->executor && n_jobs > 0) {
-          bai_peg_executor_submit_and_wait(
-              ctx->executor, pegN_noah_inner_worker_fn, args, n_jobs,
+          peg_pool_submit_and_wait(
+              ctx->executor, peg_opp_inner_worker_fn, args, n_jobs,
               ctx->worker_idx);
         } else {
           for (int j = 0; j < n_jobs; j++) {
-            pegN_noah_inner_worker_fn(&jobs[j], ctx->worker_idx);
+            peg_opp_inner_worker_fn(&jobs[j], ctx->worker_idx);
           }
         }
         // Aggregate per-opp utility + realized mt.
@@ -3896,29 +3987,29 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             malloc_or_die((size_t)n_to_eval * sizeof(int32_t));
         for (int i = 0; i < n_to_eval; i++) {
           int64_t weight_sum = 0;
-          int64_t spread_sum_noah = 0;
+          int64_t spread_sum_opp = 0;
           double win_x2_sum = 0.0;
           int32_t realized_mt = 0;
           for (int ti = 0; ti < n_opp_types; ti++) {
             int idx = i * n_opp_types + ti;
             int32_t mt = jobs[idx].mover_total;
             int w = jobs[idx].weight;
-            int32_t mt_noah = -mt;
+            int32_t mt_opp = -mt;
             weight_sum += w;
-            spread_sum_noah += (int64_t)mt_noah * w;
-            if (mt_noah > 0) {
+            spread_sum_opp += (int64_t)mt_opp * w;
+            if (mt_opp > 0) {
               win_x2_sum += 2.0 * w;
-            } else if (mt_noah == 0) {
+            } else if (mt_opp == 0) {
               win_x2_sum += w;
             }
             if (ti == realized_ti) {
               realized_mt = mt;
             }
           }
-          double noah_winpct = win_x2_sum / (2.0 * (double)weight_sum);
-          double noah_mean_spread =
-              (double)spread_sum_noah / (double)weight_sum;
-          stage_util[i] = noah_winpct + alpha * noah_mean_spread;
+          double opp_winpct = win_x2_sum / (2.0 * (double)weight_sum);
+          double opp_mean_spread =
+              (double)spread_sum_opp / (double)weight_sum;
+          stage_util[i] = opp_winpct + alpha * opp_mean_spread;
           stage_realized[i] = realized_mt;
         }
         free(jobs);
@@ -3955,7 +4046,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
       }
 
-      // 4. Noah picks utility-max from the final stage.
+      // 4. opp picks utility-max from the final stage.
       int32_t mover_total_rational = 0;
       if (final_utility != NULL && n_to_eval > 0) {
         int picked = 0;
@@ -3965,7 +4056,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           }
         }
         mover_total_rational = final_realized[picked];
-        // For TSV: capture Noah's pick text + endgame PV under the
+        // For TSV: capture opp's pick text + endgame PV under the
         // realized bag tile. One extra endgame_solve per scenario.
         if (ctx->tsv_f) {
           const Move *picked_move =
@@ -3979,14 +4070,14 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                      string_builder_peek(sb_p));
             string_builder_destroy(sb_p);
           }
-          // Build the realized hyp game (same as pegN_noah_inner_worker_fn
+          // Build the realized opp_pov_game game (same as peg_opp_inner_worker_fn
           // does, but for the realized bag tile only) and run
           // endgame_solve with PV capture.
-          Game *hyp = game_duplicate(game);
-          game_set_endgame_solving_mode(hyp);
-          game_set_backup_mode(hyp, BACKUP_MODE_OFF);
+          Game *opp_pov_game = game_duplicate(game);
+          game_set_endgame_solving_mode(opp_pov_game);
+          game_set_backup_mode(opp_pov_game, BACKUP_MODE_OFF);
           {
-            Bag *hb = game_get_bag(hyp);
+            Bag *hb = game_get_bag(opp_pov_game);
             for (int ml = 0; ml < ctx->ld_size; ml++) {
               while (bag_get_letter(hb, (MachineLetter)ml) > 0) {
                 (void)bag_draw_letter(hb, (MachineLetter)ml, 0);
@@ -3995,14 +4086,14 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
             // Bag should already be empty; nothing else to seed since
             // the realized state mirrors the post-cand game.
           }
-          play_move(picked_move, hyp, NULL);
-          game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
-          const LetterDistribution *bld = game_get_ld(hyp);
+          play_move(picked_move, opp_pov_game, NULL);
+          game_set_game_end_reason(opp_pov_game, GAME_END_REASON_NONE);
+          const LetterDistribution *bld = game_get_ld(opp_pov_game);
           EndgameCtx *eg_ctx = NULL;
           EndgameResults *eg_results = endgame_results_create();
           EndgameArgs ea = {
               .thread_control = ctx->thread_control,
-              .game = hyp,
+              .game = opp_pov_game,
               .plies = ctx->depth,
               .shared_tt = NULL,
               .initial_small_move_arena_size =
@@ -4015,15 +4106,22 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
               .thread_index_offset = ctx->worker_idx + 200,
               .soft_time_limit = 5.0,
               .hard_time_limit = 5.0,
+              // soft/hard_time_limit only caps the next IDS depth start —
+              // a single depth can run past it. external_deadline_ns is
+              // the strict mid-search bail. Clamp by cascade deadline so
+              // this realized-pick endgame can never outlive the wall budget.
+              .external_deadline_ns = peg_clamp_deadline_ns(
+                  ctimer_monotonic_ns() + (int64_t)(5.0 * 1.0e9),
+                  ctx->deadline_monotonic_ns),
           };
           endgame_solve_inline(&eg_ctx, &ea, eg_results);
-          // Build the PV text: Noah's pick first, then endgame plies.
+          // Build the PV text: opp's pick first, then endgame plies.
           StringBuilder *pv_sb = string_builder_create();
           string_builder_add_string(pv_sb, picked_text);
           const PVLine *pv =
               endgame_results_get_pvline(eg_results, ENDGAME_RESULT_BEST);
           if (pv && pv->num_moves > 0) {
-            Game *pv_game = game_duplicate(hyp);
+            Game *pv_game = game_duplicate(opp_pov_game);
             game_set_endgame_solving_mode(pv_game);
             game_set_backup_mode(pv_game, BACKUP_MODE_OFF);
             for (int mi = 0; mi < pv->num_moves; mi++) {
@@ -4062,7 +4160,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           string_builder_destroy(pv_sb);
           endgame_ctx_destroy(eg_ctx);
           endgame_results_destroy(eg_results);
-          game_destroy(hyp);
+          game_destroy(opp_pov_game);
         }
       }
       free(final_utility);
@@ -4077,7 +4175,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     StringBuilder *pv_builder = ctx->tsv_f ? string_builder_create() : NULL;
 
     // Pre-filter to placement moves (and optionally to the opp_move_filter
-    // substring set). When PASSPEGN_GREEDY_OPP_RERANK=1, also sort by
+    // substring set). When PASSPEG_GREEDY_OPP_RERANK=1, also sort by
     // d=0 greedy mover_total ascending (worst-for-mover first) and take
     // the top opp_top_k — much more honest than equity's natural order
     // for the d=1 MIN-over-branches semantics (a low-equity but lethal
@@ -4145,31 +4243,31 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       }
     }
 
-    // Optional Sequential-Halving ladder. PASSPEGN_GREEDY_OPP_HALVE=1
+    // Optional Sequential-Halving ladder. PASSPEG_GREEDY_OPP_HALVE=1
     // implies cuts of K, K/2, K/4, ..., K/2^(D-1) at depths 0, 1, ...,
     // D-1, where K = opp_top_k and D = ctx->depth. The final MIN runs
     // over the K/2^(D-1) survivors at depth D. For (K=8, D=2):
     //   d=0 on all → top 8, d=1 on 8 → top 4, d=2 on 4 → MIN.
-    // When set, supersedes PASSPEGN_GREEDY_OPP_RERANK.
-    const char *halve_env = getenv("PASSPEGN_GREEDY_OPP_HALVE");
+    // When set, supersedes PASSPEG_GREEDY_OPP_RERANK.
+    const char *halve_env = getenv("PASSPEG_GREEDY_OPP_HALVE");
     const bool halve = halve_env && atoi(halve_env) > 0;
     if (halve && n_opp_cand > 1 && ctx->depth >= 1) {
       int cuts[16];
       int n_stages = 0;
       // Stage s cuts to opp_top_k >> s for s = 0..depth-1.
       // (At s=0 we filter from the full opp pool down to opp_top_k.)
-      for (int s = 0; s < ctx->depth && n_stages < 16; s++) {
-        int k = ctx->opp_top_k >> s;
+      for (int stage_idx = 0; stage_idx < ctx->depth && n_stages < 16; stage_idx++) {
+        int k = ctx->opp_top_k >> stage_idx;
         if (k < 1) {
           k = 1;
         }
         cuts[n_stages++] = k;
       }
-      for (int s = 0; s < n_stages; s++) {
-        if (n_opp_cand <= cuts[s] || cuts[s] <= 0) {
+      for (int stage_idx = 0; stage_idx < n_stages; stage_idx++) {
+        if (n_opp_cand <= cuts[stage_idx] || cuts[stage_idx] <= 0) {
           continue;
         }
-        const int stage_depth = s; // d=0, d=1, d=2, ...
+        const int stage_depth = stage_idx; // d=0, d=1, d=2, ...
         int32_t *mt_arr =
             malloc_or_die((size_t)n_opp_cand * sizeof(int32_t));
         for (int i = 0; i < n_opp_cand; i++) {
@@ -4182,7 +4280,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
           game_set_game_end_reason(prior_branch, GAME_END_REASON_NONE);
           if (stage_depth == 0) {
             MoveList *pml = move_list_create(1);
-            mt_arr[i] = pegN_greedy_playout_pv(
+            mt_arr[i] = peg_greedy_playout_pv(
                 prior_branch, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
                 NULL, 0, NULL, 0, NULL, 0);
             move_list_destroy(pml);
@@ -4213,6 +4311,11 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
                   .thread_index_offset = ctx->worker_idx + 200,
                   .soft_time_limit = 5.0,
                   .hard_time_limit = 5.0,
+                  // Clamp by cascade deadline — soft/hard_time_limit alone
+                  // can't strictly cap a single IDS depth.
+                  .external_deadline_ns = peg_clamp_deadline_ns(
+                      ctimer_monotonic_ns() + (int64_t)(5.0 * 1.0e9),
+                      ctx->deadline_monotonic_ns),
               };
               endgame_solve_inline(&eg, &ea, er);
               mt_arr[i] = mover_lead + endgame_results_get_value(
@@ -4225,7 +4328,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         }
         // Partial selection sort: bring the top `keep` worst-for-mover
         // entries to the front of opp_cand_idx.
-        const int keep = cuts[s];
+        const int keep = cuts[stage_idx];
         for (int i = 0; i < keep; i++) {
           int min_i = i;
           for (int j = i + 1; j < n_opp_cand; j++) {
@@ -4247,7 +4350,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       }
     }
 
-    const char *rerank_env = getenv("PASSPEGN_GREEDY_OPP_RERANK");
+    const char *rerank_env = getenv("PASSPEG_GREEDY_OPP_RERANK");
     const bool rerank = !halve && rerank_env && atoi(rerank_env) > 0;
     if (rerank && n_opp_cand > 1) {
       int32_t *opp_mt =
@@ -4261,7 +4364,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         play_move(opp_move_p, prior_branch, NULL);
         game_set_game_end_reason(prior_branch, GAME_END_REASON_NONE);
         MoveList *pml = move_list_create(1);
-        opp_mt[i] = pegN_greedy_playout_pv(
+        opp_mt[i] = peg_greedy_playout_pv(
             prior_branch, ctx->mover_idx, pml, ctx->worker_idx, NULL, 0,
             NULL, 0, NULL, 0, NULL, 0);
         move_list_destroy(pml);
@@ -4310,14 +4413,14 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
       play_move(opp_move, branch, NULL);
       game_set_game_end_reason(branch, GAME_END_REASON_NONE);
 
-      // After opp plays, the bag is empty (mover drew K_drawn tiles, opp
+      // After opp plays, the bag is empty (mover drew k_drawn tiles, opp
       // drew the remaining bag_remaining tiles). Run endgame_solve at
       // ctx->depth plies for an optimal-play evaluation.
       //
       // For bag-emptier cands (n_bag_remaining == 0) we grant one extra
-      // ply: non-emptiers spend their first ply on the rational Noah pick
+      // ply: non-emptiers spend their first ply on the rational opp pick
       // (the perception-utility step), leaving (depth-1) plies for the
-      // post-pick endgame; emptiers have no Noah-perception ply and need
+      // post-pick endgame; emptiers have no opp-perception ply and need
       // the extra ply to compare like-for-like.
       const int eg_plies = (ctx->n_bag_remaining == 0)
                                ? ctx->depth + 1
@@ -4353,6 +4456,11 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
               .thread_index_offset = ctx->worker_idx + 200,
               .soft_time_limit = 5.0,
               .hard_time_limit = 5.0,
+              // Clamp by cascade deadline — soft/hard_time_limit alone
+              // can't strictly cap a single IDS depth.
+              .external_deadline_ns = peg_clamp_deadline_ns(
+                  ctimer_monotonic_ns() + (int64_t)(5.0 * 1.0e9),
+                  ctx->deadline_monotonic_ns),
           };
           endgame_solve_inline(&eg_ctx, &ea, eg_results);
           const int eg_val =
@@ -4418,7 +4526,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
         snprintf(worst_opp_text, sizeof(worst_opp_text), "%s", opp_move_text);
         if (pv_builder) {
           // Capture the FULL PV for the worst branch in the TSV row: opp's
-          // move first, then the greedy continuation that pegN_greedy_*
+          // move first, then the greedy continuation that peg_greedy_*
           // recorded.
           snprintf(pv_text, sizeof(pv_text), "%s%s%s", opp_move_text,
                    branch_pv[0] ? " | " : "", branch_pv);
@@ -4441,7 +4549,7 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
   }
   game_destroy(game);
 
-  pegN_lock(ctx->res_mutex);
+  peg_lock(ctx->res_mutex);
   ctx->res->weight_sum += weight;
   ctx->res->spread_sum += weight * (int64_t)mover_total;
   if (mover_total > 0) {
@@ -4450,29 +4558,29 @@ static void pegN_emit_split(const PegNEnumCtx *ctx) {
     ctx->res->win_x2 += weight;
   }
   ctx->res->n_scen++;
-  pegN_unlock(ctx->res_mutex);
+  peg_unlock(ctx->res_mutex);
 
   if (ctx->tsv_f) {
-    pegN_lock(ctx->tsv_mutex);
+    peg_lock(ctx->tsv_mutex);
     fprintf(
         ctx->tsv_f,
         "%d\t%s\t%d\t%d\t%d\t%s\t%s\t%lld\t%d\t%s\t%s\t%s\t%s\t%s\n",
         ctx->pos_idx, ctx->cand_txt, ctx->cand_score,
-        ctx->K_drawn + ctx->n_bag_remaining, ctx->K_drawn, drawn_str,
+        ctx->k_drawn + ctx->n_bag_remaining, ctx->k_drawn, drawn_str,
         remaining_str, (long long)weight, (int)mover_total, post_cand_cgp,
         final_cgp, pv_text, mover_rack_end, opp_rack_end);
-    pegN_unlock(ctx->tsv_mutex);
+    peg_unlock(ctx->tsv_mutex);
   }
 }
 
-// Worker fn invoked by BaiPegExecutor for each scenario job. Builds a
-// per-worker PegNEnumCtx pointing at the job's owned (n_multiset,
-// mover_pick) and calls pegN_emit_split in execute mode (out_jobs=NULL).
+// Worker fn invoked by PegPool for each scenario job. Builds a
+// per-worker PegEnumCtx pointing at the job's owned (n_multiset,
+// mover_pick) and calls peg_emit_split in execute mode (out_jobs=NULL).
 // At d=0 emit_split walks bag-tile orderings serially via the helper;
 // at d>=1 it runs the opp-top-K + endgame_solve flow.
-static void pegN_scenario_worker_fn(void *arg, int worker_idx) {
-  PegNScenarioJob *job = (PegNScenarioJob *)arg;
-  PegNEnumCtx local = *job->base_ctx;
+static void peg_scenario_worker_fn(void *arg, int worker_idx) {
+  PegScenarioJob *job = (PegScenarioJob *)arg;
+  PegEnumCtx local = *job->base_ctx;
   // Skip if the time budget has expired. The result accumulator just
   // misses this scenario; rankings reflect whichever scenarios completed
   // before the deadline.
@@ -4484,52 +4592,68 @@ static void pegN_scenario_worker_fn(void *arg, int worker_idx) {
   local.mover_pick = job->mover_pick;
   local.worker_idx = worker_idx;
   local.out_jobs = NULL;
-  pegN_emit_split(&local);
+  peg_emit_split(&local);
 }
 
-static void pegN_noah_inner_worker_fn(void *arg, int worker_idx) {
-  PegNNoahInnerJob *j = (PegNNoahInnerJob *)arg;
-  Game *hyp = game_duplicate(j->base_game);
-  game_set_endgame_solving_mode(hyp);
-  game_set_backup_mode(hyp, BACKUP_MODE_OFF);
-  Bag *hyp_bag = game_get_bag(hyp);
-  Rack *hyp_mover_rack =
-      player_get_rack(game_get_player(hyp, j->mover_idx));
+static void peg_opp_inner_worker_fn(void *arg, int worker_idx) {
+  PegOppInnerJob *j = (PegOppInnerJob *)arg;
+  // Bail immediately if the cascade deadline has already fired — don't
+  // even allocate the opp_pov_game game. Leaves j->mover_total at its default (0).
+  if (j->deadline_monotonic_ns > 0 &&
+      ctimer_monotonic_ns() > j->deadline_monotonic_ns) {
+    return;
+  }
+  Game *opp_pov_game = game_duplicate(j->base_game);
+  game_set_endgame_solving_mode(opp_pov_game);
+  game_set_backup_mode(opp_pov_game, BACKUP_MODE_OFF);
+  Bag *opp_pov_bag = game_get_bag(opp_pov_game);
+  Rack *opp_pov_mover_rack =
+      player_get_rack(game_get_player(opp_pov_game, j->mover_idx));
   for (int ml = 0; ml < j->ld_size; ml++) {
-    while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
-      (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
+    while (bag_get_letter(opp_pov_bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(opp_pov_bag, (MachineLetter)ml, 0);
     }
   }
-  rack_reset(hyp_mover_rack);
-  bag_add_letter(hyp_bag, j->bag_X, 0);
+  rack_reset(opp_pov_mover_rack);
+  bag_add_letter(opp_pov_bag, j->bag_ml, 0);
   for (int t = 0; t < j->n_opp_types; t++) {
     int copies = j->opp_type_counts[t] - (t == j->ti ? 1 : 0);
     for (int k = 0; k < copies; k++) {
-      rack_add_letter(hyp_mover_rack, j->opp_types[t]);
+      rack_add_letter(opp_pov_mover_rack, j->opp_types[t]);
     }
   }
-  play_move(j->opp_move, hyp, NULL);
-  game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
+  play_move(j->opp_move, opp_pov_game, NULL);
+  game_set_game_end_reason(opp_pov_game, GAME_END_REASON_NONE);
   int32_t mt = 0;
-  if (j->noah_depth == 0) {
+  if (j->opp_depth == 0) {
     MoveList *pl = move_list_create(1);
-    mt = pegN_greedy_playout_pv(hyp, j->mover_idx, pl, worker_idx, NULL, 0,
+    mt = peg_greedy_playout_pv(opp_pov_game, j->mover_idx, pl, worker_idx, NULL, 0,
                                 NULL, 0, NULL, 0, NULL, 0);
     move_list_destroy(pl);
   } else {
-    const int32_t hyp_lead = equity_to_int(player_get_score(
-        game_get_player(hyp, j->mover_idx))) -
+    const int32_t opp_pov_lead = equity_to_int(player_get_score(
+        game_get_player(opp_pov_game, j->mover_idx))) -
         equity_to_int(player_get_score(
-            game_get_player(hyp, 1 - j->mover_idx)));
-    if (game_get_game_end_reason(hyp) != GAME_END_REASON_NONE) {
-      mt = hyp_lead;
+            game_get_player(opp_pov_game, 1 - j->mover_idx)));
+    if (game_get_game_end_reason(opp_pov_game) != GAME_END_REASON_NONE) {
+      mt = opp_pov_lead;
     } else {
       EndgameCtx *eg = NULL;
       EndgameResults *er = endgame_results_create();
+      // Per-call hard wall budget for the opp-inner endgame solve.
+      // soft/hard time limits only govern starting the *next* IDS depth;
+      // without an external_deadline the *current* depth can run forever
+      // on a pathological position. Plumbing this as an absolute
+      // monotonic-ns deadline makes check_depth_deadline interrupt
+      // mid-search. Configurable via PASSPEG_OPP_INNER_BUDGET (seconds).
+      const char *opp_budget_env = getenv("PASSPEG_OPP_INNER_BUDGET");
+      const double opp_budget = opp_budget_env && *opp_budget_env
+                                     ? atof(opp_budget_env)
+                                     : 5.0;
       EndgameArgs ea = {
           .thread_control = j->thread_control,
-          .game = hyp,
-          .plies = j->noah_depth,
+          .game = opp_pov_game,
+          .plies = j->opp_depth,
           .shared_tt = NULL,
           .initial_small_move_arena_size =
               DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
@@ -4539,116 +4663,428 @@ static void pegN_noah_inner_worker_fn(void *arg, int worker_idx) {
           .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
           .skip_word_pruning = true,
           .thread_index_offset = worker_idx + 200,
-          .soft_time_limit = 5.0,
-          .hard_time_limit = 5.0,
+          .soft_time_limit = opp_budget,
+          .hard_time_limit = opp_budget,
+          // Clamp per-call deadline by the cascade deadline so an inner
+          // solve can never outlive the outer budget.
+          .external_deadline_ns = peg_clamp_deadline_ns(
+              ctimer_monotonic_ns() + (int64_t)(opp_budget * 1.0e9),
+              j->deadline_monotonic_ns),
       };
+      const int64_t solve_start_ns = ctimer_monotonic_ns();
       endgame_solve_inline(&eg, &ea, er);
-      const int eg_val =
-          endgame_results_get_value(er, ENDGAME_RESULT_BEST);
-      mt = hyp_lead + eg_val;
+      const int64_t solve_end_ns = ctimer_monotonic_ns();
+      const double solve_secs = (solve_end_ns - solve_start_ns) / 1.0e9;
+      if (solve_secs > opp_budget * 1.2 + 0.2) {
+        // Flag if endgame_solve didn't honor the external deadline.
+        fprintf(stderr,
+                "[opp_inner SLOW] worker=%d plies=%d solve=%.2fs"
+                " (deadline=%.2fs — endgame_solve isn't honoring it!)\n",
+                worker_idx, j->opp_depth, solve_secs, opp_budget);
+        fflush(stderr);
+      }
+      // If the 5s deadline fired before any depth completed, the result
+      // value is uninitialized — use the opp_pov_game's mover_lead as a fallback so
+      // downstream arithmetic doesn't propagate garbage.
+      const int eg_depth =
+          endgame_results_get_depth(er, ENDGAME_RESULT_BEST);
+      if (eg_depth < 0) {
+        mt = opp_pov_lead;
+      } else {
+        const int eg_val =
+            endgame_results_get_value(er, ENDGAME_RESULT_BEST);
+        mt = opp_pov_lead + eg_val;
+      }
       endgame_ctx_destroy(eg);
       endgame_results_destroy(er);
     }
   }
-  game_destroy(hyp);
+  game_destroy(opp_pov_game);
   j->mover_total = mt;
 }
 
-// Generalized hyp worker: bag = hyp_bag_counts, mover_rack = total -
-// hyp_bag_counts. Applies opp_move and runs greedy playout to game end.
-static void pegN_hyp_worker_fn(void *arg, int worker_idx) {
-  PegNHypJob *j = (PegNHypJob *)arg;
-  Game *hyp = game_duplicate(j->base_game);
-  game_set_endgame_solving_mode(hyp);
-  game_set_backup_mode(hyp, BACKUP_MODE_OFF);
-  Bag *hyp_bag = game_get_bag(hyp);
-  Rack *hyp_mover_rack =
-      player_get_rack(game_get_player(hyp, j->mover_idx));
+// Generalized opp_pov_game worker: bag = opp_pov_bag_counts, mover_rack = total -
+// opp_pov_bag_counts. Applies opp_move and runs greedy playout to game end.
+static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
+  PegOppPovJob *j = (PegOppPovJob *)arg;
+  Game *opp_pov_game = game_duplicate(j->base_game);
+  game_set_endgame_solving_mode(opp_pov_game);
+  game_set_backup_mode(opp_pov_game, BACKUP_MODE_OFF);
+  Bag *opp_pov_bag = game_get_bag(opp_pov_game);
+  Rack *opp_pov_mover_rack =
+      player_get_rack(game_get_player(opp_pov_game, j->mover_idx));
   // Drain bag and mover rack.
   for (int ml = 0; ml < j->ld_size; ml++) {
-    while (bag_get_letter(hyp_bag, (MachineLetter)ml) > 0) {
-      (void)bag_draw_letter(hyp_bag, (MachineLetter)ml, 0);
+    while (bag_get_letter(opp_pov_bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(opp_pov_bag, (MachineLetter)ml, 0);
     }
   }
-  rack_reset(hyp_mover_rack);
-  // Bag = hyp_bag_counts.
+  rack_reset(opp_pov_mover_rack);
+  // Bag = opp_pov_bag_counts.
   for (int t = 0; t < j->n_opp_types; t++) {
-    for (int k = 0; k < j->hyp_bag_counts[t]; k++) {
-      bag_add_letter(hyp_bag, j->opp_types[t], 0);
+    for (int k = 0; k < j->opp_pov_bag_counts[t]; k++) {
+      bag_add_letter(opp_pov_bag, j->opp_types[t], 0);
     }
   }
-  // Mover rack = total - hyp_bag_counts.
+  // Mover rack = total - opp_pov_bag_counts.
   for (int t = 0; t < j->n_opp_types; t++) {
-    const int copies = j->opp_type_counts[t] - j->hyp_bag_counts[t];
+    const int copies = j->opp_type_counts[t] - j->opp_pov_bag_counts[t];
     for (int k = 0; k < copies; k++) {
-      rack_add_letter(hyp_mover_rack, j->opp_types[t]);
+      rack_add_letter(opp_pov_mover_rack, j->opp_types[t]);
     }
   }
-  play_move(j->opp_move, hyp, NULL);
-  game_set_game_end_reason(hyp, GAME_END_REASON_NONE);
-  MoveList *pl = move_list_create(1);
-  const int32_t mt = pegN_greedy_playout_pv(
-      hyp, j->mover_idx, pl, worker_idx, NULL, 0, NULL, 0, NULL, 0, NULL, 0);
-  move_list_destroy(pl);
-  game_destroy(hyp);
+  // Capture the opp_pov_game mover rack BEFORE opp plays — that's the rack the leaf
+  // evaluator sees and that the report should show. After play_move opp
+  // draws from the bag (changing nothing on mover's rack), but the rack is
+  // already what we want here.
+  char opp_pov_mover_rack_str[32] = {0};
+  if (j->outer_ctx && j->outer_ctx->inner_tsv_f) {
+    const LetterDistribution *ld = game_get_ld(opp_pov_game);
+    StringBuilder *rsb = string_builder_create();
+    string_builder_add_rack(rsb, opp_pov_mover_rack, ld, false);
+    snprintf(opp_pov_mover_rack_str, sizeof(opp_pov_mover_rack_str), "%s",
+             string_builder_peek(rsb));
+    string_builder_destroy(rsb);
+  }
+  play_move(j->opp_move, opp_pov_game, NULL);
+  game_set_game_end_reason(opp_pov_game, GAME_END_REASON_NONE);
+  // Cache lookup: if this exact post-opp game state has been evaluated
+  // before in this cand's pass, reuse the result. Big win when two opp-POV states
+  // collapse to the same (board, mover_rack, opp_rack, bag) state — common
+  // because many opp moves leave the bag empty and the rest of the state
+  // is determined by the realized opp_pov_game's bag-content.
+  uint64_t cache_key = 0;
+  bool cache_hit = false;
+  int32_t cache_hit_mt = 0;
+  if (j->outer_ctx && j->outer_ctx->opp_pov_cache) {
+    cache_key = peg_hash_game_state(opp_pov_game, j->mover_idx);
+    cache_hit = peg_opp_pov_cache_lookup(j->outer_ctx->opp_pov_cache, cache_key,
+                                       &cache_hit_mt);
+  }
+  // PASSPEG_INNER_USE_ENDGAME=N (plies): when the bag is empty after opp
+  // plays (i.e., this was effectively a 1-tile-in-bag inner state for the
+  // opp-POV state), swap greedy for an N-ply endgame_solve. Greedy systematically
+  // misvalues bingo-blocking and going-out positions; in 2peg pos 28 this
+  // asymmetry inflated K=1 A(N) over K=2 ACIDOT(I)c (the latter already gets
+  // endgame_solve via PASSPEG_EMPTIER_USE_ENDGAME at the outer K=N path).
+  // Inner endgame_solve at the K<N walker leaf is OFF by default — the
+  // walker's "1peg" cands use greedy playout. Turn it on per-stage via
+  // PASSPEG_INNER_USE_ENDGAME=N (= use N-ply IDS at the leaf). Optional
+  // per-call wall cap via PASSPEG_INNER_EG_BUDGET (seconds, default 0
+  // = no budget, let the IDS complete N plies naturally).
+  const char *inner_eg_env = getenv("PASSPEG_INNER_USE_ENDGAME");
+  const int inner_eg_plies =
+      (inner_eg_env && *inner_eg_env) ? atoi(inner_eg_env) : 0;
+  const char *inner_eg_budget_env = getenv("PASSPEG_INNER_EG_BUDGET");
+  const double inner_eg_budget = inner_eg_budget_env && *inner_eg_budget_env
+      ? atof(inner_eg_budget_env) : 0.0;
+  const bool bag_empty_post_opp = (bag_get_letters(game_get_bag(opp_pov_game)) == 0);
+  int32_t mt = 0;
+  char inner_pv_text[1024] = {0};
+  int inner_pv_plies = 0;  // 0 == greedy path; >0 == endgame depth used
+  int inner_eg_depth_reached = 0;
+  int inner_eg_status = 0; // 0 unset / 1 finished / 2 interrupted
+  int inner_eg_num_moves = 0;
+  int inner_eg_negamax_depth = 0;
+  double inner_eg_start_ms = 0.0;  // PEG-relative timestamp (ms)
+  double inner_eg_dur_ms = 0.0;
+  PegInnerEgDepthLog inner_eg_log = {0};
+  // For the greedy path we time the playout with this dedicated timer so
+  // the inner-TSV report can show stage-1 (walker + greedy leaf) per-opp_pov_game
+  // wall time too, not just the endgame-leaf path.
+  Timer greedy_timer = {0};
+  if (j->outer_ctx && j->outer_ctx->inner_tsv_f &&
+      j->outer_ctx->budget_timer) {
+    inner_eg_start_ms =
+        ctimer_elapsed_seconds(j->outer_ctx->budget_timer) * 1000.0;
+  }
+  if (cache_hit) {
+    mt = cache_hit_mt;
+    inner_pv_plies = 0;
+    // (skip both endgame and greedy paths — we have the answer)
+  } else if (inner_eg_plies > 0 && bag_empty_post_opp &&
+      game_get_game_end_reason(opp_pov_game) == GAME_END_REASON_NONE && j->outer_ctx) {
+    const int32_t mover_lead =
+        equity_to_int(
+            player_get_score(game_get_player(opp_pov_game, j->mover_idx))) -
+        equity_to_int(player_get_score(
+            game_get_player(opp_pov_game, 1 - j->mover_idx)));
+    // Reuse this worker's persistent EndgameCtx across calls. The slot
+    // is keyed by worker_idx; first call allocates, subsequent calls
+    // reset+reuse to amortize setup cost (ABDADA init, move sort, etc.).
+    EndgameCtx **eg_ctx_pp = NULL;
+    EndgameCtx *eg_ctx_local = NULL;
+    {
+      const int slot = worker_idx == 0
+          ? 0
+          : (worker_idx - j->outer_ctx->per_worker_eg_ctx_offset + 1);
+      if (j->outer_ctx->per_worker_eg_ctx &&
+          slot >= 0 && slot < j->outer_ctx->per_worker_eg_ctx_n) {
+        eg_ctx_pp = &j->outer_ctx->per_worker_eg_ctx[slot];
+      } else {
+        eg_ctx_pp = &eg_ctx_local;
+      }
+    }
+    EndgameResults *eg_results = endgame_results_create();
+    // Initialize the per-call depth log so the per_ply_callback can
+    // record (depth, value, ms) tuples. inner_eg_start_ms was set above
+    // before the if/else branch so both endgame and greedy paths share it.
+    ctimer_start(&inner_eg_log.call_timer);
+    inner_eg_log.n = 0;
+    EndgameArgs ea = {
+        .thread_control = j->thread_control,
+        .game = opp_pov_game,
+        .plies = inner_eg_plies,
+        .shared_tt = j->outer_ctx->shared_eg_tt,
+        .initial_small_move_arena_size =
+            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = 1,
+        .use_heuristics = true,
+        .num_top_moves = 1,
+        .per_ply_callback = j->outer_ctx->inner_tsv_f
+                                ? peg_inner_eg_per_ply_cb
+                                : NULL,
+        .per_ply_callback_data = j->outer_ctx->inner_tsv_f
+                                     ? (void *)&inner_eg_log
+                                     : NULL,
+        .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+        .skip_word_pruning = true,
+        .thread_index_offset = worker_idx + 200,
+        // Per-call wall budget. external_deadline_ns is what actually
+        // interrupts an in-flight iteration (check_depth_deadline polls
+        // it every 1024 nodes); soft_time_limit only governs whether to
+        // start the *next* depth. So we set BOTH: soft/hard guides EBF,
+        // external_deadline is the hard wall stop.
+        //
+        // Clamp the per-call deadline by the cascade's outer deadline so
+        // a single inner endgame solve can't outlive the cascade budget.
+        // Without this, a deep K<N walker leaf at d=4 can run 60s+ even
+        // when the cascade has 5s remaining.
+        .soft_time_limit = inner_eg_budget,
+        .hard_time_limit = inner_eg_budget,
+        .external_deadline_ns = peg_clamp_deadline_ns(
+            ctimer_monotonic_ns() + (int64_t)(inner_eg_budget * 1.0e9),
+            j->outer_ctx ? j->outer_ctx->deadline_monotonic_ns : 0),
+    };
+    endgame_solve_inline(eg_ctx_pp, &ea, eg_results);
+    inner_eg_dur_ms =
+        ctimer_elapsed_seconds(&inner_eg_log.call_timer) * 1000.0;
+    inner_eg_depth_reached =
+        endgame_results_get_depth(eg_results, ENDGAME_RESULT_BEST);
+    if (inner_eg_depth_reached < 0) {
+      // The per-call wall budget expired before any IDS iteration
+      // completed (rare with a sane 1s budget). Fall back to greedy so
+      // we still produce a real number for this opp_pov_game; mark incomplete
+      // only for stats — the cand stays in the ranking.
+      MoveList *pl_fb = move_list_create(1);
+      mt = peg_greedy_playout_pv(
+          opp_pov_game, j->mover_idx, pl_fb, worker_idx, NULL, 0, NULL, 0,
+          NULL, 0, NULL, 0);
+      move_list_destroy(pl_fb);
+      inner_pv_plies = 0;
+      j->incomplete = true;
+    } else {
+      const int turn = game_get_player_on_turn_index(opp_pov_game);
+      const int32_t eg_val =
+          endgame_results_get_value(eg_results, ENDGAME_RESULT_BEST);
+      mt = (turn == j->mover_idx) ? mover_lead + eg_val : mover_lead - eg_val;
+      inner_pv_plies = inner_eg_plies;
+    }
+    {
+      endgame_result_status_t st = endgame_results_get_status(eg_results);
+      inner_eg_status = (st == ENDGAME_RESULT_STATUS_FINISHED) ? 1
+                        : (st == ENDGAME_RESULT_STATUS_INTERRUPTED) ? 2
+                        : 0;
+    }
+    // Extract endgame PV for the inner TSV.
+    if (j->outer_ctx->inner_tsv_f) {
+      const PVLine *pv = endgame_results_get_pvline(eg_results,
+                                                    ENDGAME_RESULT_BEST);
+      if (pv) {
+        inner_eg_num_moves = pv->num_moves;
+        inner_eg_negamax_depth = pv->negamax_depth;
+      }
+      if (pv && pv->num_moves > 0) {
+        Game *pv_game = game_duplicate(opp_pov_game);
+        game_set_endgame_solving_mode(pv_game);
+        game_set_backup_mode(pv_game, BACKUP_MODE_OFF);
+        StringBuilder *pv_sb = string_builder_create();
+        for (int mi = 0; mi < pv->num_moves; mi++) {
+          Move m_full;
+          small_move_to_move(&m_full, &pv->moves[mi],
+                             game_get_board(pv_game));
+          if (mi > 0) string_builder_add_string(pv_sb, " | ");
+          string_builder_add_move(pv_sb, game_get_board(pv_game), &m_full,
+                                  game_get_ld(pv_game), true);
+          play_move(&m_full, pv_game, NULL);
+        }
+        snprintf(inner_pv_text, sizeof(inner_pv_text), "%s",
+                 string_builder_peek(pv_sb));
+        string_builder_destroy(pv_sb);
+        game_destroy(pv_game);
+      }
+    }
+    // Only destroy the ctx if we allocated it as a local (not a shared
+    // per-worker slot). Per-worker ctxs are destroyed by the cand
+    // dispatcher after all the cand's scenarios complete.
+    if (eg_ctx_pp == &eg_ctx_local) {
+      endgame_ctx_destroy(eg_ctx_local);
+    }
+    endgame_results_destroy(eg_results);
+  } else {
+    // Greedy fallback. Capture the PV when an inner TSV is requested so
+    // the report can show what greedy played out — it's the "old answer"
+    // we're contrasting endgame against. Time the playout so stage-1
+    // (walker + greedy leaf) per-opp_pov_game wall time is visible too.
+    if (j->outer_ctx && j->outer_ctx->inner_tsv_f) {
+      ctimer_start(&greedy_timer);
+    }
+    MoveList *pl = move_list_create(1);
+    if (j->outer_ctx && j->outer_ctx->inner_tsv_f) {
+      mt = peg_greedy_playout_pv(
+          opp_pov_game, j->mover_idx, pl, worker_idx,
+          inner_pv_text, sizeof(inner_pv_text),
+          NULL, 0, NULL, 0, NULL, 0);
+    } else {
+      mt = peg_greedy_playout_pv(
+          opp_pov_game, j->mover_idx, pl, worker_idx, NULL, 0, NULL, 0,
+          NULL, 0, NULL, 0);
+    }
+    move_list_destroy(pl);
+    if (j->outer_ctx && j->outer_ctx->inner_tsv_f) {
+      inner_eg_dur_ms =
+          ctimer_elapsed_seconds(&greedy_timer) * 1000.0;
+      // inner_pv_plies stays 0 → greedy path indicator in the report.
+    }
+  }
+  // Store the result so a later opp_pov_game / scenario landing on the same
+  // post-opp state can short-circuit. Skip storing on cache_hit (already
+  // there) and on incomplete (depth=-1 fallback result is greedy and may
+  // disagree with a later proper-endgame attempt at the same state — let
+  // the later call recompute rather than poison the cache).
+  if (!cache_hit && !j->incomplete && cache_key &&
+      j->outer_ctx && j->outer_ctx->opp_pov_cache) {
+    peg_opp_pov_cache_store(j->outer_ctx->opp_pov_cache, cache_key, mt);
+  }
+  // Optional per-inner opp-POV TSV. Each row: outer realized tiles, opp cand
+  // text + score, opp-POV bag composition (canonical short tile string), opp_pov_game
+  // weight, leaf mt. Consumer groups by (cand, scenario, opp).
+  if (j->outer_ctx && j->outer_ctx->inner_tsv_f) {
+    const LetterDistribution *ld = game_get_ld(j->base_game);
+    char opp_pov_bag_str[32] = {0};
+    int opp_pov_pos = 0;
+    for (int t = 0; t < j->n_opp_types && opp_pov_pos < 30; t++) {
+      for (int k = 0; k < j->opp_pov_bag_counts[t] && opp_pov_pos < 30; k++) {
+        opp_pov_bag_str[opp_pov_pos++] = ld->ld_ml_to_hl[j->opp_types[t]][0];
+      }
+    }
+    char depth_log_str[256] = {0};
+    int dl_off = 0;
+    for (int i = 0; i < inner_eg_log.n && dl_off + 24 < (int)sizeof(depth_log_str); i++) {
+      dl_off += snprintf(depth_log_str + dl_off,
+                         sizeof(depth_log_str) - dl_off,
+                         "%s%d@%.1f=%+d", i == 0 ? "" : ";",
+                         inner_eg_log.depths[i],
+                         inner_eg_log.times_ms[i],
+                         (int)inner_eg_log.values[i]);
+    }
+    peg_lock(j->outer_ctx->inner_tsv_mutex);
+    fprintf(j->outer_ctx->inner_tsv_f,
+            "%s\t%s\t%s\t%s\t%d\t%s\t%lld\t%d\t%d\t%d\t%d\t%d\t%d"
+            "\t%.1f\t%.1f\t%s\t%s\t%s\n",
+            j->outer_ctx->cand_txt ? j->outer_ctx->cand_txt : "",
+            j->outer_drawn_str ? j->outer_drawn_str : "",
+            j->outer_remaining_str ? j->outer_remaining_str : "",
+            j->opp_move_text ? j->opp_move_text : "",
+            j->opp_move_score, opp_pov_bag_str,
+            (long long)j->opp_pov_weight, (int)mt,
+            inner_pv_plies,
+            inner_eg_depth_reached, inner_eg_status,
+            inner_eg_num_moves, inner_eg_negamax_depth,
+            inner_eg_start_ms, inner_eg_dur_ms, depth_log_str,
+            opp_pov_mover_rack_str, inner_pv_text);
+    peg_unlock(j->outer_ctx->inner_tsv_mutex);
+  }
+  // Note: we no longer mark the cand "incomplete" when a opp_pov_game fell back
+  // to greedy — the user's design is "return the best result when
+  // interrupted", and the greedy fallback IS a valid (cheaper) leaf
+  // eval. Stage-level interruption is still tracked via budget_hit at
+  // the wrapper level.
+  game_destroy(opp_pov_game);
   j->mover_total = mt;
 }
 
 // Recursive accumulator: for each n_bag-multiset of perceived pool,
-// build a hyp, run greedy, fold into Noah's win/spread totals (and
+// build a opp_pov_game, run greedy, fold into opp's win/spread totals (and
 // stash the realized mt when the multiset matches the realized bag).
-typedef struct PegNHypEnumCtx {
-  const PegNEnumCtx *outer_ctx;
+typedef struct PegOppPovEnumCtx {
+  const PegEnumCtx *outer_ctx;
   const Game *walker;
   const Move *opp_move;
   int n_opp_types;
   const MachineLetter *opp_types;
   const int *opp_type_counts;
   const int *realized_bag_counts;
-  int *cur_hyp_bag; // size n_opp_types
+  int *cur_opp_pov_bag; // size n_opp_types
   // accumulators
   int64_t total_weight;
-  double win_x2_sum;       // weighted by hypothesis weight, Noah's POV
-  int64_t spread_sum_noah; // weighted spread sum, Noah's POV
+  double win_x2_sum;       // weighted by opp-POV state weight, opp's POV
+  int64_t spread_sum_opp; // weighted spread sum, opp's POV
   bool realized_set;
   int32_t realized_mt;
-  // PASSPEGN_PERCEPTION_STRIDE: stride-style stratified sampling on the
-  // hypothesis enumeration. perception_stride <= 1 means full enumeration.
-  // hyp_weight_seen is a per-call (single-threaded) running counter of
-  // hypothesis weights, used for stride boundary tracking.
+  // PASSPEG_PERCEPTION_STRIDE: stride-style stratified sampling on the
+  // opp-POV state enumeration. perception_stride <= 1 means full enumeration.
+  // opp_pov_weight_seen is a per-call (single-threaded) running counter of
+  // opp-POV state weights, used for stride boundary tracking.
   int perception_stride;
-  int64_t hyp_weight_seen;
-} PegNHypEnumCtx;
+  int64_t opp_pov_weight_seen;
+  // Carried through to PegOppPovJob for inner-TSV row annotation.
+  const char *outer_drawn_str;
+  const char *outer_remaining_str;
+  const char *opp_move_text;
+  int opp_move_score;
+} PegOppPovEnumCtx;
 
-static void pegN_enum_hyp_recursive(PegNHypEnumCtx *e, int type_idx,
+static void peg_enum_opp_pov_recursive(PegOppPovEnumCtx *e, int type_idx,
                                     int remaining) {
+  // Cascade-budget poll. enum_opp_pov_recursive calls peg_opp_pov_worker_fn
+  // SYNCHRONOUSLY per leaf opp_pov_game; without this poll a single scenario can
+  // run hundreds of game_duplicate + greedy_playout calls past the
+  // outer wall budget. Bail out early once the deadline has fired —
+  // callers treat partial opp_pov_game coverage as "scenario skipped"
+  // (out_utility stays at its initial value, no contribution to the
+  // result accumulator).
+  if (e->outer_ctx && e->outer_ctx->deadline_monotonic_ns > 0 &&
+      ctimer_monotonic_ns() > e->outer_ctx->deadline_monotonic_ns) {
+    return;
+  }
   if (type_idx == e->n_opp_types) {
     if (remaining != 0) {
       return;
     }
     int64_t weight = 1;
     for (int t = 0; t < e->n_opp_types; t++) {
-      weight *= pegN_binomial(e->opp_type_counts[t], e->cur_hyp_bag[t]);
+      weight *= peg_binomial(e->opp_type_counts[t], e->cur_opp_pov_bag[t]);
     }
-    // Identify the realized hypothesis (the one whose bag composition
+    // Identify the realized opp-POV state (the one whose bag composition
     // matches the actual bag). We always want its mt for the scenario's
     // realized outcome, even if perception stride would otherwise skip it.
     bool is_realized = true;
     for (int t = 0; t < e->n_opp_types; t++) {
-      if (e->cur_hyp_bag[t] != e->realized_bag_counts[t]) {
+      if (e->cur_opp_pov_bag[t] != e->realized_bag_counts[t]) {
         is_realized = false;
         break;
       }
     }
     // Apply perception stride: stride-style stratified sampling over
-    // hypotheses, weighted by multinomial weight. Sampled hyps contribute
+    // opp-POV states, weighted by multinomial weight. Sampled opp-POV states contribute
     // to the utility accumulators with weight scaled by samples * stride;
-    // skipped hyps don't contribute. Realized hyp is always evaluated
+    // Skipped opp-POV states don't contribute. Realized opp-POV state is always evaluated
     // (cost: one extra job at most per perception call) so realized_mt
     // is always available — but it only contributes to the utility
     // accumulators when stride samples it.
-    const int64_t old_seen = e->hyp_weight_seen;
-    e->hyp_weight_seen += weight;
+    const int64_t old_seen = e->opp_pov_weight_seen;
+    e->opp_pov_weight_seen += weight;
     bool sampled = true;
     int64_t effective_weight = weight;
     if (e->perception_stride > 1) {
@@ -4662,9 +5098,9 @@ static void pegN_enum_hyp_recursive(PegNHypEnumCtx *e, int type_idx,
       }
     }
     if (!sampled && !is_realized) {
-      return;  // stride-skipped and not the realized hyp; nothing to do.
+      return;  // stride-skipped and not the realized opp_pov_game; nothing to do.
     }
-    PegNHypJob job = {
+    PegOppPovJob job = {
         .base_game = e->walker,
         .mover_idx = e->outer_ctx->mover_idx,
         .ld_size = e->outer_ctx->ld_size,
@@ -4672,19 +5108,25 @@ static void pegN_enum_hyp_recursive(PegNHypEnumCtx *e, int type_idx,
         .n_opp_types = e->n_opp_types,
         .opp_types = e->opp_types,
         .opp_type_counts = e->opp_type_counts,
-        .hyp_bag_counts = e->cur_hyp_bag,
+        .opp_pov_bag_counts = e->cur_opp_pov_bag,
         .thread_control = e->outer_ctx->thread_control,
+        .outer_ctx = e->outer_ctx,
+        .outer_drawn_str = e->outer_drawn_str,
+        .outer_remaining_str = e->outer_remaining_str,
+        .opp_move_text = e->opp_move_text,
+        .opp_move_score = e->opp_move_score,
+        .opp_pov_weight = weight,
         .mover_total = 0,
     };
-    pegN_hyp_worker_fn(&job, e->outer_ctx->worker_idx);
+    peg_opp_pov_worker_fn(&job, e->outer_ctx->worker_idx);
     const int32_t mt = job.mover_total;
     if (sampled) {
-      const int32_t mt_noah = -mt;
+      const int32_t mt_opp = -mt;
       e->total_weight += effective_weight;
-      e->spread_sum_noah += (int64_t)mt_noah * effective_weight;
-      if (mt_noah > 0) {
+      e->spread_sum_opp += (int64_t)mt_opp * effective_weight;
+      if (mt_opp > 0) {
         e->win_x2_sum += 2.0 * (double)effective_weight;
-      } else if (mt_noah == 0) {
+      } else if (mt_opp == 0) {
         e->win_x2_sum += (double)effective_weight;
       }
     }
@@ -4698,36 +5140,38 @@ static void pegN_enum_hyp_recursive(PegNHypEnumCtx *e, int type_idx,
                            ? e->opp_type_counts[type_idx]
                            : remaining;
   for (int k = 0; k <= max_take; k++) {
-    e->cur_hyp_bag[type_idx] = k;
-    pegN_enum_hyp_recursive(e, type_idx + 1, remaining - k);
+    e->cur_opp_pov_bag[type_idx] = k;
+    peg_enum_opp_pov_recursive(e, type_idx + 1, remaining - k);
   }
-  e->cur_hyp_bag[type_idx] = 0;
+  e->cur_opp_pov_bag[type_idx] = 0;
 }
 
-// Public-ish helper: evaluate Noah's utility for one opp_move at the
+// Public-ish helper: evaluate opp's utility for one opp_move at the
 // given walker state, averaging over all n_bag-multisets of opp's
 // perceived pool (weighted by multinomial). Also returns the realized
 // mt under the actual bag composition (used as scenario outcome at the
 // final ply).
-static void pegN_eval_opp_with_perception(
-    const PegNEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
+static void peg_eval_opp_with_perception(
+    const PegEnumCtx *outer_ctx, const Game *walker, const Move *opp_move,
     const MachineLetter *opp_types, const int *opp_type_counts,
     int n_opp_types, int n_bag_now, const int *realized_bag_counts,
-    double alpha, double *out_utility, int32_t *out_realized_mt) {
-  int cur_hyp_bag[MAX_ALPHABET_SIZE] = {0};
+    double alpha, double *out_utility, int32_t *out_realized_mt,
+    const char *outer_drawn_str, const char *outer_remaining_str,
+    const char *opp_move_text, int opp_move_score) {
+  int cur_opp_pov_bag[MAX_ALPHABET_SIZE] = {0};
   // Perception stride only fires when the root bag size is large enough
-  // that the perception hypothesis space justifies sampling. At root bag
+  // that the perception opp-POV state space justifies sampling. At root bag
   // <= 2 (1peg / 2peg) the space is small enough to enumerate; sampling
   // 1/k of it throws away too much coverage.
   const int root_bag_size =
-      outer_ctx->K_drawn + outer_ctx->n_bag_remaining;
-  const char *perception_stride_env = getenv("PASSPEGN_PERCEPTION_STRIDE");
+      outer_ctx->k_drawn + outer_ctx->n_bag_remaining;
+  const char *perception_stride_env = getenv("PASSPEG_PERCEPTION_STRIDE");
   const int perception_stride =
       (root_bag_size >= 3 && n_bag_now >= 2 && perception_stride_env &&
        *perception_stride_env)
           ? atoi(perception_stride_env)
           : 1;
-  PegNHypEnumCtx e = {
+  PegOppPovEnumCtx e = {
       .outer_ctx = outer_ctx,
       .walker = walker,
       .opp_move = opp_move,
@@ -4735,21 +5179,25 @@ static void pegN_eval_opp_with_perception(
       .opp_types = opp_types,
       .opp_type_counts = opp_type_counts,
       .realized_bag_counts = realized_bag_counts,
-      .cur_hyp_bag = cur_hyp_bag,
+      .cur_opp_pov_bag = cur_opp_pov_bag,
       .total_weight = 0,
       .win_x2_sum = 0.0,
-      .spread_sum_noah = 0,
+      .spread_sum_opp = 0,
       .realized_set = false,
       .realized_mt = 0,
       .perception_stride = perception_stride,
-      .hyp_weight_seen = 0,
+      .opp_pov_weight_seen = 0,
+      .outer_drawn_str = outer_drawn_str,
+      .outer_remaining_str = outer_remaining_str,
+      .opp_move_text = opp_move_text,
+      .opp_move_score = opp_move_score,
   };
-  pegN_enum_hyp_recursive(&e, 0, n_bag_now);
+  peg_enum_opp_pov_recursive(&e, 0, n_bag_now);
   if (e.total_weight > 0) {
     const double winpct =
         e.win_x2_sum / (2.0 * (double)e.total_weight);
     const double mean_spread =
-        (double)e.spread_sum_noah / (double)e.total_weight;
+        (double)e.spread_sum_opp / (double)e.total_weight;
     *out_utility = winpct + alpha * mean_spread;
   } else {
     *out_utility = -1e9;
@@ -4758,12 +5206,12 @@ static void pegN_eval_opp_with_perception(
 }
 
 // For a fixed N-multiset in ctx->n_multiset, enumerate all mover-drawn
-// sub-multisets of size K_drawn (= per-type counts summing to K_drawn).
-static void pegN_enum_mover_drawn(PegNEnumCtx *ctx, int type_idx,
+// sub-multisets of size k_drawn (= per-type counts summing to k_drawn).
+static void peg_enum_mover_drawn(PegEnumCtx *ctx, int type_idx,
                                   int remaining) {
-  if (type_idx == ctx->K_types) {
+  if (type_idx == ctx->k_types) {
     if (remaining == 0) {
-      pegN_emit_split(ctx);
+      peg_emit_split(ctx);
     }
     return;
   }
@@ -4772,18 +5220,18 @@ static void pegN_enum_mover_drawn(PegNEnumCtx *ctx, int type_idx,
                            : remaining;
   for (int take = 0; take <= max_take; take++) {
     ctx->mover_pick[type_idx] = take;
-    pegN_enum_mover_drawn(ctx, type_idx + 1, remaining - take);
+    peg_enum_mover_drawn(ctx, type_idx + 1, remaining - take);
   }
   ctx->mover_pick[type_idx] = 0;
 }
 
 // Enumerate all N-multisets from `type_counts` (the unseen pool). For each
-// emitted multiset, fan out to pegN_enum_mover_drawn to enumerate splits.
-static void pegN_enum_outer_multiset(PegNEnumCtx *ctx, int type_idx,
+// emitted multiset, fan out to peg_enum_mover_drawn to enumerate splits.
+static void peg_enum_outer_multiset(PegEnumCtx *ctx, int type_idx,
                                      int remaining) {
-  if (type_idx == ctx->K_types) {
+  if (type_idx == ctx->k_types) {
     if (remaining == 0) {
-      pegN_enum_mover_drawn(ctx, 0, ctx->K_drawn);
+      peg_enum_mover_drawn(ctx, 0, ctx->k_drawn);
     }
     return;
   }
@@ -4792,54 +5240,68 @@ static void pegN_enum_outer_multiset(PegNEnumCtx *ctx, int type_idx,
                            : remaining;
   for (int take = 0; take <= max_take; take++) {
     ctx->n_multiset[type_idx] = take;
-    pegN_enum_outer_multiset(ctx, type_idx + 1, remaining - take);
+    peg_enum_outer_multiset(ctx, type_idx + 1, remaining - take);
   }
   ctx->n_multiset[type_idx] = 0;
 }
 
-void test_pass_pegN_greedy_bench(void) {
-  const char *path_env = getenv("PASSPEGN_GREEDY_PATH");
+void test_pass_peg_greedy_bench(void) {
+  const char *path_env = getenv("PASSPEG_GREEDY_PATH");
   const char *path =
-      path_env && *path_env ? path_env : "/tmp/pegN_positions.txt";
-  const char *topk_env = getenv("PASSPEGN_GREEDY_TOP_K");
+      path_env && *path_env ? path_env : "/tmp/peg_positions.txt";
+  const char *topk_env = getenv("PASSPEG_GREEDY_TOP_K");
   int top_k = topk_env && *topk_env ? atoi(topk_env) : 15;
-  const char *only_env = getenv("PASSPEGN_GREEDY_ONLY");
+  const char *only_env = getenv("PASSPEG_GREEDY_ONLY");
   const char *only_moves = only_env && *only_env ? only_env : NULL;
-  const char *only_scen_env = getenv("PASSPEGN_GREEDY_ONLY_SCEN");
+  const char *only_scen_env = getenv("PASSPEG_GREEDY_ONLY_SCEN");
   const char *scenario_filter =
       only_scen_env && *only_scen_env ? only_scen_env : NULL;
-  const char *depth_env = getenv("PASSPEGN_GREEDY_DEPTH");
+  const char *depth_env = getenv("PASSPEG_GREEDY_DEPTH");
   const int depth = depth_env && *depth_env ? atoi(depth_env) : 0;
-  const char *opp_topk_env = getenv("PASSPEGN_GREEDY_OPP_TOP_K");
+  const char *opp_topk_env = getenv("PASSPEG_GREEDY_OPP_TOP_K");
   const int opp_top_k =
       opp_topk_env && *opp_topk_env ? atoi(opp_topk_env) : 8;
-  const char *opp_match_env = getenv("PASSPEGN_GREEDY_OPP_MATCH");
+  const char *opp_match_env = getenv("PASSPEG_GREEDY_OPP_MATCH");
   const char *opp_move_filter =
       opp_match_env && *opp_match_env ? opp_match_env : NULL;
-  const char *tsv_env = getenv("PASSPEGN_GREEDY_TSV");
+  const char *tsv_env = getenv("PASSPEG_GREEDY_TSV");
   const char *tsv_path = tsv_env && *tsv_env ? tsv_env : NULL;
-  const char *threads_env = getenv("PASSPEGN_GREEDY_THREADS");
+  const char *inner_tsv_env = getenv("PASSPEG_INNER_TSV");
+  const char *inner_tsv_path =
+      inner_tsv_env && *inner_tsv_env ? inner_tsv_env : NULL;
+  // PASSPEG_GREEDY_RESULT_FILE: when set, write a machine-readable TSV of
+  // the ranked results (one row per cand) so a cascade driver can read the
+  // ranking instead of grepping stderr. Columns:
+  //   pos  rank  win  spread  scen  weight  tiles_played  bucket  cand_text
+  // bucket: 0=capable-empt (tp>=bag, post-rack>=5), 1=non-empt (tp<bag),
+  //         2=incapable-empt (tp>=bag, post-rack<5). rack_size assumed 7.
+  const char *result_env = getenv("PASSPEG_GREEDY_RESULT_FILE");
+  const char *result_path =
+      result_env && *result_env ? result_env : NULL;
+  const char *threads_env = getenv("PASSPEG_GREEDY_THREADS");
   const int n_threads =
       threads_env && *threads_env ? atoi(threads_env) : 1;
 
   // Persistent worker pool reused across positions and across the outer
-  // (cand × scenario) loop AND the inner Noah utility sweep. workers
+  // (cand × scenario) loop AND the inner opp utility sweep. workers
   // claim indices in [100, 100 + n_threads); the main thread runs at
   // helper_worker_idx = 0, outside that range.
-  BaiPegExecutor *executor =
-      n_threads > 1 ? bai_peg_executor_create(n_threads, 100) : NULL;
+  PegPool *executor =
+      n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
   cpthread_mutex_t res_mutex;
   cpthread_mutex_t tsv_mutex;
   cpthread_mutex_t endgame_mutex;
+  cpthread_mutex_t inner_tsv_mutex;
   cpthread_mutex_init(&res_mutex);
   cpthread_mutex_init(&tsv_mutex);
   cpthread_mutex_init(&endgame_mutex);
+  cpthread_mutex_init(&inner_tsv_mutex);
 
   char **cgps = NULL;
   int n_pos = load_cgp_lines(path, &cgps, 1000);
   if (n_pos == 0) log_fatal("no positions loaded from %s", path);
   fprintf(stderr,
-          "[pegNgreedy] loaded %d positions from %s  depth=%d  opp_top_k=%d"
+          "[peggreedy] loaded %d positions from %s  depth=%d  opp_top_k=%d"
           "  threads=%d"
           "%s%s\n",
           n_pos, path, depth, opp_top_k, n_threads,
@@ -4857,6 +5319,26 @@ void test_pass_pegN_greedy_bench(void) {
             "\tmover_rack_end\topp_rack_end\n");
   }
 
+  FILE *inner_tsv_f = NULL;
+  if (inner_tsv_path) {
+    inner_tsv_f = fopen(inner_tsv_path, "we");
+    if (!inner_tsv_f) log_fatal("cannot open INNER TSV %s", inner_tsv_path);
+    fprintf(inner_tsv_f,
+            "cand\tdrawn\tremaining\topp_move\topp_score\topp_pov_bag\topp_pov_weight"
+            "\tmover_total\teg_plies\teg_depth\teg_status\teg_pv_moves"
+            "\teg_pv_negamax\teg_start_ms\teg_dur_ms\teg_depth_log"
+            "\topp_pov_mover_rack\teg_pv\n");
+  }
+
+  FILE *result_f = NULL;
+  if (result_path) {
+    result_f = fopen(result_path, "we");
+    if (!result_f) log_fatal("cannot open RESULT %s", result_path);
+    fprintf(result_f,
+            "pos\trank\twin\tspread\tscen\tweight\ttiles_played\tbucket"
+            "\tcand_text\n");
+  }
+
   for (int pi = 0; pi < n_pos; pi++) {
     Config *config = config_create_or_die("set -s1 score -s2 score");
     char load_cmd[10240];
@@ -4872,18 +5354,18 @@ void test_pass_pegN_greedy_bench(void) {
     // tiles as unknown. Bag size N then follows by: opp gets RACK_SIZE of
     // the unseen, bag gets the rest.
     uint8_t unseen[MAX_ALPHABET_SIZE];
-    int total_unseen = pegN_compute_unseen(game, mover_idx, unseen);
+    int total_unseen = peg_compute_unseen(game, mover_idx, unseen);
     int N = total_unseen - RACK_SIZE;
     if (N < 0) N = 0;
 
     MachineLetter types[MAX_ALPHABET_SIZE];
     int counts[MAX_ALPHABET_SIZE];
-    int K_types = 0;
+    int k_types = 0;
     for (int ml = 0; ml < lds; ml++) {
       if (unseen[ml] > 0) {
-        types[K_types] = (MachineLetter)ml;
-        counts[K_types] = (int)unseen[ml];
-        K_types++;
+        types[k_types] = (MachineLetter)ml;
+        counts[k_types] = (int)unseen[ml];
+        k_types++;
       }
     }
 
@@ -4903,9 +5385,9 @@ void test_pass_pegN_greedy_bench(void) {
     int n_all = move_list_get_count(ml_cands);
 
     fprintf(stderr,
-            "[pegNgreedy] pos %d  N=%d  unseen=%d  K_types=%d  cands=%d\n",
-            pi, N, total_unseen, K_types, n_all);
-    if (getenv("PASSPEGN_DUMP_CANDS")) {
+            "[peggreedy] pos %d  N=%d  unseen=%d  k_types=%d  cands=%d\n",
+            pi, N, total_unseen, k_types, n_all);
+    if (getenv("PASSPEG_DUMP_CANDS")) {
       const int dump_top = 32;
       fprintf(stderr, "[cand_dump] top-%d by equity (sorted desc):\n",
               dump_top);
@@ -4984,7 +5466,7 @@ void test_pass_pegN_greedy_bench(void) {
 
     // Pre-build a pruned KWG for the current board state and install it
     // as an override on the base game. game_duplicate (used inside
-    // emit_split via pegN_make_post_cand_game) carries the override
+    // emit_split via peg_make_post_cand_game) carries the override
     // pointer through to every scenario's branch, so endgame_solve can
     // run with skip_word_pruning=true and reuse this single pruned KWG
     // instead of rebuilding one per (cand, scenario). The rebuild path
@@ -4994,32 +5476,32 @@ void test_pass_pegN_greedy_bench(void) {
     // post-cand position (the post-cand board has strictly more tiles
     // and strictly fewer possible words), so this is a correctness-
     // preserving optimization.
-    KWG *pegN_pruned_kwg = NULL;
+    KWG *peg_pruned_kwg = NULL;
     if (depth >= 1) {
       DictionaryWordList *word_list = dictionary_word_list_create();
       const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
       generate_possible_words(game, full_kwg, word_list);
-      pegN_pruned_kwg = make_kwg_from_words_small(
+      peg_pruned_kwg = make_kwg_from_words_small(
           word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
       dictionary_word_list_destroy(word_list);
-      game_set_override_kwgs(game, pegN_pruned_kwg, NULL,
+      game_set_override_kwgs(game, peg_pruned_kwg, NULL,
                              DUAL_LEXICON_MODE_IGNORANT);
       game_gen_all_cross_sets(game);
     }
 
-    PegNCandResult *results =
-        calloc_or_die((size_t)(n_all > 0 ? n_all : 1), sizeof(PegNCandResult));
+    PegCandResult *results =
+        calloc_or_die((size_t)(n_all > 0 ? n_all : 1), sizeof(PegCandResult));
     int n_results = 0;
 
     Timer t;
     ctimer_start(&t);
 
     // ml_cands is heap-ordered (MOVE_RECORD_ALL), not equity-sorted. Build
-    // an equity-sorted index. If PASSPEGN_CAND_TOP_K is set, only evaluate
+    // an equity-sorted index. If PASSPEG_CAND_TOP_K is set, only evaluate
     // the top-K placements by static equity — useful as a lossy speedup
     // for inner PEG runs where opp's best move is almost always near the
     // top by equity.
-    const char *_inc_pass_env = getenv("PASSPEGN_INCLUDE_PASS");
+    const char *_inc_pass_env = getenv("PASSPEG_INCLUDE_PASS");
     const bool _inc_pass_here = _inc_pass_env && atoi(_inc_pass_env) > 0;
     int *cand_order = malloc_or_die((size_t)n_all * sizeof(int));
     int cand_order_n = 0;
@@ -5031,7 +5513,7 @@ void test_pass_pegN_greedy_bench(void) {
         cand_order[cand_order_n++] = ci;
       }
     }
-    const char *cand_topk_env = getenv("PASSPEGN_CAND_TOP_K");
+    const char *cand_topk_env = getenv("PASSPEG_CAND_TOP_K");
     const int cand_topk_limit =
         cand_topk_env && *cand_topk_env ? atoi(cand_topk_env) : 0;
     const int cand_sort_top =
@@ -5039,7 +5521,7 @@ void test_pass_pegN_greedy_bench(void) {
             ? cand_topk_limit
             : cand_order_n;
     // Ordering:
-    //  - With PASSPEGN_GREEDY_ONLY set, the filter is a semicolon-separated
+    //  - With PASSPEG_GREEDY_ONLY set, the filter is a semicolon-separated
     //    list of move-text substrings IN PREVIOUS-STAGE RANK ORDER. Honor
     //    that order so partial-stage runs (budget hit mid-stage) evaluate
     //    the previous stage's best-known cands first.
@@ -5115,30 +5597,30 @@ void test_pass_pegN_greedy_bench(void) {
     }
     const int cand_iter_n = cand_sort_top;
 
-    const char *include_pass_env = getenv("PASSPEGN_INCLUDE_PASS");
+    const char *include_pass_env = getenv("PASSPEG_INCLUDE_PASS");
     const bool include_pass = include_pass_env && atoi(include_pass_env) > 0;
 
     // Pooled-dispatch storage: keep each cand's EnumCtx + cand_txt alive
     // until ALL cands' scenarios have run, so workers can pull jobs across
     // cand boundaries instead of stalling at every per-cand barrier.
-    PegNEnumCtx *enum_ctxs = NULL;
+    PegEnumCtx *enum_ctxs = NULL;
     char (*cand_txts)[256] = NULL;
-    PegNScenarioJobList all_jobs = {0};
+    PegScenarioJobList all_jobs = {0};
     if (executor != NULL) {
       enum_ctxs =
-          malloc_or_die((size_t)cand_iter_n * sizeof(PegNEnumCtx));
+          malloc_or_die((size_t)cand_iter_n * sizeof(PegEnumCtx));
       cand_txts =
           malloc_or_die((size_t)cand_iter_n * sizeof(char[256]));
     }
     int cand_used = 0;
 
-    // PASSPEGN_GREEDY_BUDGET=T (seconds, may be fractional): time budget
+    // PASSPEG_GREEDY_BUDGET=T (seconds, may be fractional): time budget
     // for this stage. Checked at the START of each cand iteration AND
     // inside the scenario worker. When exceeded, the cand loop breaks and
     // we dispatch only the cands enumerated so far. Workers that pick up
     // jobs after the deadline return early (no-op). Result is the partial
     // ranking from completed cands+scenarios.
-    const char *budget_env = getenv("PASSPEGN_GREEDY_BUDGET");
+    const char *budget_env = getenv("PASSPEG_GREEDY_BUDGET");
     const double budget_secs =
         budget_env && *budget_env ? atof(budget_env) : 0.0;
     // Absolute monotonic-ns deadline shared with endgame_solve_inline so
@@ -5153,7 +5635,7 @@ void test_pass_pegN_greedy_bench(void) {
       if (budget_secs > 0.0 &&
           ctimer_elapsed_seconds(&t) > budget_secs) {
         fprintf(stderr,
-                "[pegNgreedy] budget %.3fs hit at cand %d/%d, stopping enum\n",
+                "[peggreedy] budget %.3fs hit at cand %d/%d, stopping enum\n",
                 budget_secs, ord_i, cand_iter_n);
         break;
       }
@@ -5197,24 +5679,24 @@ void test_pass_pegN_greedy_bench(void) {
       }
 
       int K = move_get_tiles_played(cand);
-      int K_drawn = K < N ? K : N;
-      int n_bag_remaining = N - K_drawn;
+      int k_drawn = K < N ? K : N;
+      int n_bag_remaining = N - k_drawn;
       int cand_score = (int)equity_to_int(move_get_score(cand));
 
-      PegNCandResult *res = &results[n_results++];
+      PegCandResult *res = &results[n_results++];
       res->ci = ci;
 
       if (executor == NULL) {
         // Serial path: enumerate + evaluate in place with stack scratch.
         int n_multiset_buf[MAX_ALPHABET_SIZE] = {0};
         int mover_pick_buf[MAX_ALPHABET_SIZE] = {0};
-        PegNEnumCtx enum_ctx = {
+        PegEnumCtx enum_ctx = {
             .n_multiset = n_multiset_buf,
             .mover_pick = mover_pick_buf,
             .types = types,
             .type_counts = counts,
-            .K_types = K_types,
-            .K_drawn = K_drawn,
+            .k_types = k_types,
+            .k_drawn = k_drawn,
             .n_bag_remaining = n_bag_remaining,
             .base_game = game,
             .mover_idx = mover_idx,
@@ -5241,8 +5723,12 @@ void test_pass_pegN_greedy_bench(void) {
             .budget_timer = budget_secs > 0.0 ? &t : NULL,
             .budget_secs = budget_secs,
             .deadline_monotonic_ns = budget_deadline_ns,
+            .inner_tsv_f = inner_tsv_f,
+            .inner_tsv_mutex = inner_tsv_f ? &inner_tsv_mutex : NULL,
+            .opp_pov_cache = NULL,  // serial path: not yet wired to cache
+            .shared_eg_tt = NULL,  // serial path: not wired
         };
-        pegN_enum_outer_multiset(&enum_ctx, 0, N);
+        peg_enum_outer_multiset(&enum_ctx, 0, N);
       } else {
         // Pooled path: enumerate scenarios into the GLOBAL job list. The
         // EnumCtx itself lives in enum_ctxs[cand_used] so workers reading
@@ -5251,13 +5737,53 @@ void test_pass_pegN_greedy_bench(void) {
         // during enumeration; each pushed job owns its own copies.
         int n_multiset_scratch[MAX_ALPHABET_SIZE] = {0};
         int mover_pick_scratch[MAX_ALPHABET_SIZE] = {0};
-        enum_ctxs[cand_used] = (PegNEnumCtx){
+        // Per-cand opp_pov_game cache (task #35). Allocated here, freed after this
+        // cand's scenarios complete. Disable via PASSPEG_OPP_POV_CACHE=0.
+        PegOppPovCache *cand_opp_pov_cache = NULL;
+        const char *opp_pov_cache_env = getenv("PASSPEG_OPP_POV_CACHE");
+        const bool opp_pov_cache_on =
+            !opp_pov_cache_env || atoi(opp_pov_cache_env) > 0;  // default on
+        if (opp_pov_cache_on) {
+          cand_opp_pov_cache = peg_opp_pov_cache_create(16384);
+        }
+        // Per-cand shared endgame transposition table. This is the real
+        // macondo-equivalent shared cache: endgame_solve uses it for
+        // sub-tree position lookups, and any two endgame_solve calls in
+        // this cand's opp-POV states/scenarios that reach overlapping sub-trees
+        // share the work. Memory: 1% of system RAM per cand (allocated
+        // and freed per-cand). Disable via PASSPEG_SHARED_EG_TT=0.
+        TranspositionTable *cand_shared_eg_tt = NULL;
+        const char *shared_tt_env = getenv("PASSPEG_SHARED_EG_TT");
+        const bool shared_tt_on =
+            !shared_tt_env || atoi(shared_tt_env) > 0;
+        if (shared_tt_on) {
+          const char *shared_tt_frac_env =
+              getenv("PASSPEG_SHARED_EG_TT_FRAC");
+          const double shared_tt_frac =
+              (shared_tt_frac_env && *shared_tt_frac_env)
+                  ? atof(shared_tt_frac_env)
+                  : 0.01;  // 1% of memory by default
+          cand_shared_eg_tt = transposition_table_create(shared_tt_frac);
+        }
+        // Per-worker persistent EndgameCtx slots. Slot 0 = main thread;
+        // slots 1..n = executor workers (worker_idx 100..100+n-1).
+        // Default on; disable via PASSPEG_PERSIST_EG_CTX=0.
+        EndgameCtx **per_worker_eg_ctx = NULL;
+        const int per_worker_eg_ctx_n = n_threads + 1;
+        const char *persist_env = getenv("PASSPEG_PERSIST_EG_CTX");
+        const bool persist_on =
+            !persist_env || atoi(persist_env) > 0;
+        if (persist_on) {
+          per_worker_eg_ctx = calloc_or_die(
+              (size_t)per_worker_eg_ctx_n, sizeof(EndgameCtx *));
+        }
+        enum_ctxs[cand_used] = (PegEnumCtx){
             .n_multiset = n_multiset_scratch,
             .mover_pick = mover_pick_scratch,
             .types = types,
             .type_counts = counts,
-            .K_types = K_types,
-            .K_drawn = K_drawn,
+            .k_types = k_types,
+            .k_drawn = k_drawn,
             .n_bag_remaining = n_bag_remaining,
             .base_game = game,
             .mover_idx = mover_idx,
@@ -5284,33 +5810,93 @@ void test_pass_pegN_greedy_bench(void) {
             .budget_timer = budget_secs > 0.0 ? &t : NULL,
             .budget_secs = budget_secs,
             .deadline_monotonic_ns = budget_deadline_ns,
+            .inner_tsv_f = inner_tsv_f,
+            .inner_tsv_mutex = inner_tsv_f ? &inner_tsv_mutex : NULL,
+            .opp_pov_cache = cand_opp_pov_cache,
+            .shared_eg_tt = cand_shared_eg_tt,
+            .per_worker_eg_ctx = per_worker_eg_ctx,
+            .per_worker_eg_ctx_n = per_worker_eg_ctx_n,
+            .per_worker_eg_ctx_offset = 100,  // executor's thread_index_offset
         };
-        pegN_enum_outer_multiset(&enum_ctxs[cand_used], 0, N);
+        // Per-cand batch dispatch. We enumerate THIS cand's scenarios
+        // into the shared `all_jobs` list, then immediately submit just
+        // those jobs and wait for them all to finish before moving to
+        // the next cand. That gives strict best-first cand order: cand
+        // 0's evaluation fully completes (or its opp-POV states run out the
+        // global deadline and the cand is marked incomplete) before
+        // cand 1's jobs are dispatched. Worker-level scheduling can
+        // still interleave scenarios within one cand, which is fine.
+        const int cand_jobs_start = all_jobs.n;
+        peg_enum_outer_multiset(&enum_ctxs[cand_used], 0, N);
+        const int cand_jobs_end = all_jobs.n;
         // After enumeration, the scratch buffers go out of scope; clear
         // the dangling pointers so a buggy late read trips an obvious
         // null-deref instead of reading stack garbage.
         enum_ctxs[cand_used].n_multiset = NULL;
         enum_ctxs[cand_used].mover_pick = NULL;
         enum_ctxs[cand_used].out_jobs = NULL;
+        if (cand_jobs_end > cand_jobs_start) {
+          const int n_this_cand = cand_jobs_end - cand_jobs_start;
+          void **args = malloc_or_die((size_t)n_this_cand * sizeof(void *));
+          for (int j = 0; j < n_this_cand; j++) {
+            args[j] = &all_jobs.items[cand_jobs_start + j];
+          }
+          peg_pool_submit_and_wait(
+              executor, peg_scenario_worker_fn, args, n_this_cand, 0);
+          free(args);
+        }
+        // Cand's scenarios are done; free the cache and (optionally) log
+        // hit/miss stats. Clear from the ctx so any late access fails fast.
+        if (cand_opp_pov_cache) {
+          const int hits = atomic_load(&cand_opp_pov_cache->hits);
+          const int misses = atomic_load(&cand_opp_pov_cache->misses);
+          const int total = hits + misses;
+          if (total > 0 && getenv("PASSPEG_OPP_POV_CACHE_STATS")) {
+            fprintf(stderr,
+                    "[opp_pov_cache] %s: %d hits / %d total (%.1f%%), "
+                    "%d misses\n",
+                    cand_txt, hits, total, hits * 100.0 / total, misses);
+          }
+          enum_ctxs[cand_used].opp_pov_cache = NULL;
+          peg_opp_pov_cache_destroy(cand_opp_pov_cache);
+        }
+        if (cand_shared_eg_tt) {
+          if (getenv("PASSPEG_OPP_POV_CACHE_STATS")) {
+            const int tt_created = atomic_load(&cand_shared_eg_tt->created);
+            const int tt_lookups = atomic_load(&cand_shared_eg_tt->lookups);
+            const int tt_hits = atomic_load(&cand_shared_eg_tt->hits);
+            fprintf(stderr,
+                    "[shared_eg_tt] %s: created=%d lookups=%d hits=%d "
+                    "(%.1f%% hit rate)\n",
+                    cand_txt, tt_created, tt_lookups, tt_hits,
+                    tt_lookups > 0 ? tt_hits * 100.0 / tt_lookups : 0.0);
+          }
+          enum_ctxs[cand_used].shared_eg_tt = NULL;
+          transposition_table_destroy(cand_shared_eg_tt);
+        }
+        // Destroy per-worker persistent EndgameCtx slots. All this
+        // cand's scenarios have completed, so no worker is using one.
+        if (per_worker_eg_ctx) {
+          int slots_used = 0;
+          for (int slot_idx = 0; slot_idx < per_worker_eg_ctx_n; slot_idx++) {
+            if (per_worker_eg_ctx[slot_idx]) {
+              endgame_ctx_destroy(per_worker_eg_ctx[slot_idx]);
+              slots_used++;
+            }
+          }
+          if (getenv("PASSPEG_OPP_POV_CACHE_STATS")) {
+            fprintf(stderr,
+                    "[persist_eg_ctx] %s: reused across %d worker "
+                    "slot(s)\n",
+                    cand_txt, slots_used);
+          }
+          enum_ctxs[cand_used].per_worker_eg_ctx = NULL;
+          free(per_worker_eg_ctx);
+        }
         cand_used++;
       }
     }
 
-    // Single batch dispatch across ALL cands. FIFO queue + priority-
-    // ordered cand iteration above means workers process cand 0's
-    // scenarios first, then cand 1's, etc., but a worker that finishes
-    // a scenario early picks up the next available job regardless of
-    // which cand it belongs to — no per-cand barriers.
-    if (executor != NULL && all_jobs.n > 0) {
-      void **args =
-          malloc_or_die((size_t)all_jobs.n * sizeof(void *));
-      for (int j = 0; j < all_jobs.n; j++) {
-        args[j] = &all_jobs.items[j];
-      }
-      bai_peg_executor_submit_and_wait(
-          executor, pegN_scenario_worker_fn, args, all_jobs.n, 0);
-      free(args);
-    }
     if (executor != NULL) {
       for (int j = 0; j < all_jobs.n; j++) {
         free(all_jobs.items[j].n_multiset);
@@ -5334,8 +5920,17 @@ void test_pass_pegN_greedy_bench(void) {
     Ranked *ranked = calloc_or_die((size_t)(n_results > 0 ? n_results : 1),
                                     sizeof(Ranked));
     int n_ranked = 0;
+    int n_dropped_incomplete = 0;
     for (int r = 0; r < n_results; r++) {
       if (results[r].weight_sum <= 0) continue;
+      if (results[r].incomplete) {
+        // At least one inner endgame_solve returned depth=-1 (global
+        // deadline hit before any IDS iteration). Aggregated win/spread
+        // is contaminated by mover_lead defaults for those opp-POV states. Drop
+        // the cand from the ranking rather than emit a misleading score.
+        n_dropped_incomplete++;
+        continue;
+      }
       double q_win =
           (double)results[r].win_x2 / (2.0 * (double)results[r].weight_sum);
       double q_spread =
@@ -5357,9 +5952,9 @@ void test_pass_pegN_greedy_bench(void) {
     int show = top_k < n_ranked ? top_k : n_ranked;
     const double budget_used = (budget_secs > 0.0) ? budget_secs : -1.0;
     fprintf(stderr,
-            "[pegNgreedy] pos %d wall=%.3fs  budget=%.3fs  ranked=%d  "
-            "top-%d cands:\n",
-            pi, wall, budget_used, n_ranked, show);
+            "[peggreedy] pos %d wall=%.3fs  budget=%.3fs  ranked=%d  "
+            "dropped_incomplete=%d  top-%d cands:\n",
+            pi, wall, budget_used, n_ranked, n_dropped_incomplete, show);
     for (int r = 0; r < show; r++) {
       const Move *m = move_list_get_move(ml_cands, ranked[r].ci);
       StringBuilder *sb = string_builder_create();
@@ -5369,6 +5964,26 @@ void test_pass_pegN_greedy_bench(void) {
               r + 1, ranked[r].q_win, ranked[r].q_spread, ranked[r].n_scen,
               (long long)ranked[r].weight_sum, string_builder_peek(sb));
       string_builder_destroy(sb);
+    }
+    // Machine-readable rank emit for the cascade driver. Always write
+    // ALL n_ranked cands (not just top show); the driver uses the full
+    // list to apply bucket quotas at the next stage.
+    if (result_f) {
+      for (int r = 0; r < n_ranked; r++) {
+        const Move *m = move_list_get_move(ml_cands, ranked[r].ci);
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_move(sb, game_get_board(game), m, ld, true);
+        const char *cand_txt = string_builder_peek(sb);
+        const int tp = peg_count_tiles_played(cand_txt);
+        const int bucket = peg_cand_bucket(tp, N, RACK_SIZE);
+        fprintf(result_f,
+                "%d\t%d\t%.6f\t%.4f\t%d\t%lld\t%d\t%d\t%s\n",
+                pi, r + 1, ranked[r].q_win, ranked[r].q_spread,
+                ranked[r].n_scen, (long long)ranked[r].weight_sum,
+                tp, bucket, cand_txt);
+        string_builder_destroy(sb);
+      }
+      fflush(result_f);
     }
     // Static fallback: if budget expired before ANY cand completed a
     // scenario (n_ranked == 0), emit the single highest-static-equity
@@ -5389,20 +6004,473 @@ void test_pass_pegN_greedy_bench(void) {
     free(ranked);
     free(results);
     move_list_destroy(ml_cands);
-    if (pegN_pruned_kwg) {
+    if (peg_pruned_kwg) {
       game_set_override_kwgs(game, NULL, NULL, DUAL_LEXICON_MODE_IGNORANT);
-      kwg_destroy(pegN_pruned_kwg);
+      kwg_destroy(peg_pruned_kwg);
     }
     config_destroy(config);
   }
 
   if (tsv_f) {
     fclose(tsv_f);
-    fprintf(stderr, "[pegNgreedy] TSV written to %s\n", tsv_path);
+    fprintf(stderr, "[peggreedy] TSV written to %s\n", tsv_path);
+  }
+  if (inner_tsv_f) {
+    fclose(inner_tsv_f);
+    fprintf(stderr, "[peggreedy] INNER TSV written to %s\n", inner_tsv_path);
+  }
+  if (result_f) {
+    fclose(result_f);
+    fprintf(stderr, "[peggreedy] RESULT TSV written to %s\n", result_path);
   }
   if (executor) {
-    bai_peg_executor_destroy(executor);
+    peg_pool_destroy(executor);
   }
   for (int i = 0; i < n_pos; i++) free(cgps[i]);
   free(cgps);
+}
+
+// One ranked-cand row read back from the result file emitted by
+// test_pass_peg_greedy_bench (PASSPEG_GREEDY_RESULT_FILE).
+typedef struct PegCascadeRank {
+  int pos;
+  int rank;
+  double win;
+  double spread;
+  int scen;
+  int64_t weight;
+  int tiles_played;
+  int bucket;  // 0=capable, 1=non-emp, 2=incapable
+  char cand_text[256];
+} PegCascadeRank;
+
+// Parse the TSV result file into an array. Returns count, sets *out_arr.
+// Allocates *out_arr; caller frees.
+static int peg_cascade_load_results(const char *path,
+                                     PegCascadeRank **out_arr) {
+  FILE *f = fopen(path, "re");
+  if (!f) {
+    log_fatal("cannot open result file %s", path);
+  }
+  char line[1024];
+  // Skip header.
+  if (!fgets(line, sizeof(line), f)) {
+    fclose(f);
+    *out_arr = NULL;
+    return 0;
+  }
+  int cap = 64;
+  PegCascadeRank *arr = malloc_or_die((size_t)cap * sizeof(*arr));
+  int n = 0;
+  while (fgets(line, sizeof(line), f)) {
+    if (n >= cap) {
+      cap *= 2;
+      arr = realloc(arr, (size_t)cap * sizeof(*arr));
+      if (!arr) log_fatal("realloc failed");
+    }
+    PegCascadeRank *r = &arr[n];
+    long long weight_ll;
+    // Last column (cand_text) may contain spaces; parse up to cand_text
+    // then take the rest of the line minus trailing newline.
+    int consumed = 0;
+    int matched = sscanf(line,
+                         "%d\t%d\t%lf\t%lf\t%d\t%lld\t%d\t%d\t%n",
+                         &r->pos, &r->rank, &r->win, &r->spread, &r->scen,
+                         &weight_ll, &r->tiles_played, &r->bucket, &consumed);
+    if (matched != 8 || consumed == 0) {
+      continue;
+    }
+    r->weight = (int64_t)weight_ll;
+    const char *txt = line + consumed;
+    size_t tlen = strlen(txt);
+    while (tlen > 0 && (txt[tlen - 1] == '\n' || txt[tlen - 1] == '\r')) {
+      tlen--;
+    }
+    if (tlen >= sizeof(r->cand_text)) tlen = sizeof(r->cand_text) - 1;
+    memcpy(r->cand_text, txt, tlen);
+    r->cand_text[tlen] = '\0';
+    n++;
+  }
+  fclose(f);
+  *out_arr = arr;
+  return n;
+}
+
+// Apply three-bucket quota: pick top n_cap from bucket 0, top n_non from
+// bucket 1, top n_inc from bucket 2 (each bucket already pre-sorted by
+// the rank file). Builds a ';'-joined filter string into out_filter and
+// returns total count selected.
+static int peg_cascade_apply_quota(const PegCascadeRank *arr, int n,
+                                    int n_cap, int n_non, int n_inc,
+                                    char *out_filter, size_t out_filter_sz) {
+  out_filter[0] = '\0';
+  int got_cap = 0, got_non = 0, got_inc = 0;
+  size_t off = 0;
+  int total = 0;
+  for (int i = 0; i < n; i++) {
+    const PegCascadeRank *r = &arr[i];
+    bool take = false;
+    if (r->bucket == 0 && got_cap < n_cap) {
+      got_cap++;
+      take = true;
+    } else if (r->bucket == 1 && got_non < n_non) {
+      got_non++;
+      take = true;
+    } else if (r->bucket == 2 && got_inc < n_inc) {
+      got_inc++;
+      take = true;
+    }
+    if (take) {
+      const char *sep = total == 0 ? "" : ";";
+      int wrote = snprintf(out_filter + off, out_filter_sz - off, "%s%s",
+                           sep, r->cand_text);
+      if (wrote < 0 || (size_t)wrote >= out_filter_sz - off) {
+        log_fatal("quota filter overflow");
+      }
+      off += (size_t)wrote;
+      total++;
+    }
+  }
+  fprintf(stderr,
+          "[cascade] quota: %d capable-emp + %d non-emp + %d incap-emp"
+          " = %d total (requested %d+%d+%d=%d)\n",
+          got_cap, got_non, got_inc, total, n_cap, n_non, n_inc,
+          n_cap + n_non + n_inc);
+  return total;
+}
+
+// Merge the prior stage's ranking with the current stage's partial ranking.
+//
+// Rule (preserves "above-finished cands stay above" — a cand whose stage-N
+// eval didn't finish keeps its stage-(N-1) slot, so a higher-ranked stage-3
+// cand that didn't complete stage 4 doesn't get demoted by lower-ranked
+// stage-4 finishers): walk prev in order. For each prev cand, if it appears
+// in last (i.e., completed the new stage), take the next entry from last (in
+// last's ranking order) for that slot. Otherwise keep prev's entry verbatim.
+//
+// The result has length prev_n. Any last entries that didn't match (shouldn't
+// happen since last is derived from prev's filter) are appended after.
+static int peg_cascade_merge_rankings(
+    const PegCascadeRank *prev, int prev_n,
+    const PegCascadeRank *last, int last_n,
+    PegCascadeRank **out_merged) {
+  PegCascadeRank *out =
+      malloc_or_die((size_t)(prev_n + last_n) * sizeof(*out));
+  bool *last_used = calloc_or_die((size_t)last_n, sizeof(bool));
+  int next_finished_idx = 0;
+  for (int i = 0; i < prev_n; i++) {
+    bool in_last = false;
+    for (int j = 0; j < last_n; j++) {
+      if (strcmp(prev[i].cand_text, last[j].cand_text) == 0) {
+        in_last = true;
+        break;
+      }
+    }
+    if (in_last && next_finished_idx < last_n) {
+      // Advance past any last entries already used (paranoia).
+      while (next_finished_idx < last_n && last_used[next_finished_idx]) {
+        next_finished_idx++;
+      }
+      if (next_finished_idx < last_n) {
+        out[i] = last[next_finished_idx];
+        last_used[next_finished_idx] = true;
+        next_finished_idx++;
+      } else {
+        out[i] = prev[i];
+      }
+    } else {
+      out[i] = prev[i];
+    }
+  }
+  int out_n = prev_n;
+  // Append any last entries that weren't slotted (defensive — shouldn't fire
+  // if last is a strict subset of prev as enforced by the filter).
+  for (int j = 0; j < last_n; j++) {
+    if (!last_used[j]) {
+      out[out_n++] = last[j];
+    }
+  }
+  free(last_used);
+  // Renumber ranks 1..out_n so the final printout is consistent.
+  for (int i = 0; i < out_n; i++) {
+    out[i].rank = i + 1;
+  }
+  *out_merged = out;
+  return out_n;
+}
+
+// Like apply_quota but combined top-K (no bucket discrimination).
+static int peg_cascade_apply_topk(const PegCascadeRank *arr, int n, int top_k,
+                                   char *out_filter, size_t out_filter_sz) {
+  out_filter[0] = '\0';
+  int take = top_k < n ? top_k : n;
+  size_t off = 0;
+  for (int i = 0; i < take; i++) {
+    const char *sep = i == 0 ? "" : ";";
+    int wrote = snprintf(out_filter + off, out_filter_sz - off, "%s%s",
+                         sep, arr[i].cand_text);
+    if (wrote < 0 || (size_t)wrote >= out_filter_sz - off) {
+      log_fatal("topK filter overflow");
+    }
+    off += (size_t)wrote;
+  }
+  return take;
+}
+
+// Cascade stage driver. Replicates /tmp/peg_halving_quota.sh in C:
+//   Stage 0: d=0, all cands, greedy
+//   Stage 1: d=1, top 32 (quota 8+8+16) — walker + greedy leaf
+//   Stage 2: d=2, top 16 (quota 4+4+8)
+//   Stage 3: d=3, top 8 (combined)
+//   Stage 4: d=4, top 4 (combined)
+//
+// Env:
+//   PASSPEG_CASCADE_PATH      — CGP file (single-position recommended)
+//   PASSPEG_CASCADE_BUDGET    — total wall budget in seconds (default 64)
+//   PASSPEG_CASCADE_THREADS   — thread count (default 18)
+//   PASSPEG_CASCADE_MAX_STAGE — stop after this stage (default 4)
+//   PASSPEG_CASCADE_INNER_EG  — inner endgame plies for d>=1 stages (default 0
+//                                = greedy leaf)
+//   PASSPEG_CASCADE_OUT_PREFIX — file prefix for stage TSV outputs
+//                                (default /tmp/cascade)
+void test_pass_peg_cascade(void) {
+  const char *path_env = getenv("PASSPEG_CASCADE_PATH");
+  const char *path =
+      path_env && *path_env ? path_env : "/tmp/peg_positions.txt";
+  const char *budget_env = getenv("PASSPEG_CASCADE_BUDGET");
+  const double total_budget =
+      budget_env && *budget_env ? atof(budget_env) : 64.0;
+  const char *threads_env = getenv("PASSPEG_CASCADE_THREADS");
+  const char *threads_str =
+      threads_env && *threads_env ? threads_env : "18";
+  const char *max_stage_env = getenv("PASSPEG_CASCADE_MAX_STAGE");
+  const int max_stage =
+      max_stage_env && *max_stage_env ? atoi(max_stage_env) : 4;
+  const char *inner_eg_env = getenv("PASSPEG_CASCADE_INNER_EG");
+  const char *inner_eg_str =
+      inner_eg_env && *inner_eg_env ? inner_eg_env : NULL;
+  const char *prefix_env = getenv("PASSPEG_CASCADE_OUT_PREFIX");
+  const char *out_prefix =
+      prefix_env && *prefix_env ? prefix_env : "/tmp/cascade";
+
+  Timer cascade_timer;
+  ctimer_start(&cascade_timer);
+
+  // Stage table mirrors peg_halving_quota.sh. {depth, top_k_print, quota_cap,
+  // quota_non, quota_inc} — if all quotas are 0, top_k_print acts as combined
+  // top-K (no bucket discrimination).
+  typedef struct {
+    int depth;
+    int top_k;       // print count + combined top-K when no quota
+    int quota_cap;
+    int quota_non;
+    int quota_inc;
+  } StageSpec;
+  const StageSpec stages[] = {
+      {0, 8641, 0, 0, 0},  // greedy first pass; no filter, no quota
+      {1, 32, 8, 8, 16},
+      {2, 16, 4, 4, 8},
+      {3, 8, 0, 0, 0},
+      {4, 4, 0, 0, 0},
+  };
+  const int n_stages = sizeof(stages) / sizeof(stages[0]);
+
+  // Stash + restore env vars that test_pass_peg_greedy_bench reads so we
+  // don't pollute the caller's environment.
+  const char *const overridden[] = {
+      "PASSPEG_GREEDY_PATH",         "PASSPEG_GREEDY_DEPTH",
+      "PASSPEG_GREEDY_TOP_K",        "PASSPEG_GREEDY_ONLY",
+      "PASSPEG_GREEDY_RATIONAL",     "PASSPEG_GREEDY_RAT_WALK",
+      "PASSPEG_GREEDY_WALK_K_FIRST_OPP",
+      "PASSPEG_GREEDY_WALK_K_LATER_OPP",
+      "PASSPEG_SCENARIO_STRIDE",     "PASSPEG_PERCEPTION_STRIDE",
+      "PASSPEG_WALK_STRIDE",         "PASSPEG_OPP_RANK_BY_PLAYOUT",
+      "PASSPEG_OPP_RANK_POOL",       "PASSPEG_GREEDY_BUDGET",
+      "PASSPEG_GREEDY_THREADS",      "PASSPEG_GREEDY_RESULT_FILE",
+      "PASSPEG_INNER_USE_ENDGAME",
+  };
+  enum { N_OVERRIDDEN = sizeof(overridden) / sizeof(overridden[0]) };
+  char *saved[N_OVERRIDDEN];
+  for (int i = 0; i < N_OVERRIDDEN; i++) {
+    const char *v = getenv(overridden[i]);
+    saved[i] = v ? strdup(v) : NULL;
+  }
+
+  // Persistent filter buffer carried between stages. 256KB handles up to
+  // ~2000 cand texts at avg 100 chars.
+  char *filter = malloc_or_die(256 * 1024);
+  filter[0] = '\0';
+
+  // Track last stage's ranked array for the final printout. prev_arr/prev_n
+  // hold the stage N-1 ranking (the basis of the filter that ran in stage
+  // N), used to slot incomplete cands at their prior-stage position when the
+  // current stage's budget didn't cover them.
+  PegCascadeRank *last_arr = NULL;
+  int last_n = 0;
+  PegCascadeRank *prev_arr = NULL;
+  int prev_n = 0;
+
+  for (int stage_idx = 0; stage_idx <= max_stage && stage_idx < n_stages; stage_idx++) {
+    const StageSpec *sp = &stages[stage_idx];
+    const double elapsed = ctimer_elapsed_seconds(&cascade_timer);
+    const double remaining = total_budget - elapsed;
+    if (remaining <= 0.0) {
+      fprintf(stderr,
+              "[cascade] budget %.3fs exhausted at stage %d (elapsed %.3fs);"
+              " stopping\n",
+              total_budget, stage_idx, elapsed);
+      break;
+    }
+
+    char stage_file[512];
+    snprintf(stage_file, sizeof(stage_file), "%s_s%d.tsv", out_prefix, stage_idx);
+    char depth_str[16], topk_str[16], budget_str[32];
+    snprintf(depth_str, sizeof(depth_str), "%d", sp->depth);
+    snprintf(topk_str, sizeof(topk_str), "%d", sp->top_k);
+    snprintf(budget_str, sizeof(budget_str), "%.3f", remaining);
+
+    setenv("PASSPEG_GREEDY_PATH", path, 1);
+    setenv("PASSPEG_GREEDY_DEPTH", depth_str, 1);
+    setenv("PASSPEG_GREEDY_TOP_K", topk_str, 1);
+    setenv("PASSPEG_GREEDY_BUDGET", budget_str, 1);
+    setenv("PASSPEG_GREEDY_THREADS", threads_str, 1);
+    setenv("PASSPEG_GREEDY_RESULT_FILE", stage_file, 1);
+    if (stage_idx == 0) {
+      // Stage 0 is the pure greedy first pass: no filter (consider every
+      // legal move), wide scenario coverage.
+      unsetenv("PASSPEG_GREEDY_ONLY");
+      setenv("PASSPEG_SCENARIO_STRIDE", "1", 1);
+      setenv("PASSPEG_WALK_STRIDE", "5", 1);
+      unsetenv("PASSPEG_GREEDY_RATIONAL");
+      unsetenv("PASSPEG_GREEDY_RAT_WALK");
+      unsetenv("PASSPEG_PERCEPTION_STRIDE");
+      unsetenv("PASSPEG_OPP_RANK_BY_PLAYOUT");
+      unsetenv("PASSPEG_OPP_RANK_POOL");
+      unsetenv("PASSPEG_INNER_USE_ENDGAME");
+    } else {
+      setenv("PASSPEG_GREEDY_ONLY", filter, 1);
+      setenv("PASSPEG_GREEDY_RATIONAL", "1", 1);
+      setenv("PASSPEG_GREEDY_RAT_WALK", "1", 1);
+      setenv("PASSPEG_GREEDY_WALK_K_FIRST_OPP", "16", 1);
+      setenv("PASSPEG_GREEDY_WALK_K_LATER_OPP", "8", 1);
+      setenv("PASSPEG_SCENARIO_STRIDE", "1", 1);
+      setenv("PASSPEG_PERCEPTION_STRIDE", "1", 1);
+      setenv("PASSPEG_OPP_RANK_BY_PLAYOUT", "1", 1);
+      setenv("PASSPEG_OPP_RANK_POOL", "64", 1);
+      if (inner_eg_str) {
+        setenv("PASSPEG_INNER_USE_ENDGAME", inner_eg_str, 1);
+      } else {
+        unsetenv("PASSPEG_INNER_USE_ENDGAME");
+      }
+    }
+    fprintf(stderr,
+            "[cascade] === stage %d (depth=%d, top_k=%d, remaining=%.3fs) ===\n",
+            stage_idx, sp->depth, sp->top_k, remaining);
+    fflush(stderr);
+
+    test_pass_peg_greedy_bench();
+
+    // Promote previous last_arr → prev_arr (it'stage_idx the basis of the filter
+    // that just ran), then load the new stage'stage_idx results into last_arr.
+    free(prev_arr);
+    prev_arr = last_arr;
+    prev_n = last_n;
+    last_arr = NULL;
+    last_n = 0;
+    last_n = peg_cascade_load_results(stage_file, &last_arr);
+    if (last_n == 0) {
+      fprintf(stderr, "[cascade] stage %d produced no results — stopping\n", stage_idx);
+      // Roll back: leave prev_arr in place so the final printout still has
+      // something to show.
+      break;
+    }
+
+    // Build filter for NEXT stage. Apply quota if next stage has one,
+    // else combined top-K = next stage'stage_idx top_k.
+    if (stage_idx + 1 < n_stages && stage_idx + 1 <= max_stage) {
+      const StageSpec *next = &stages[stage_idx + 1];
+      if (next->quota_cap || next->quota_non || next->quota_inc) {
+        peg_cascade_apply_quota(last_arr, last_n,
+                                 next->quota_cap, next->quota_non,
+                                 next->quota_inc, filter, 256 * 1024);
+      } else {
+        int took = peg_cascade_apply_topk(last_arr, last_n, next->top_k,
+                                           filter, 256 * 1024);
+        fprintf(stderr,
+                "[cascade] combined top-%d → %d forwarded to stage %d\n",
+                next->top_k, took, stage_idx + 1);
+      }
+    }
+  }
+
+  const double total_wall = ctimer_elapsed_seconds(&cascade_timer);
+  fprintf(stderr,
+          "[cascade] DONE: total wall=%.3fs (budget %.3fs)\n",
+          total_wall, total_budget);
+
+  // Build the merged final ranking. The current stage may have dropped
+  // some of its cands as incomplete (budget hit before all their opp-POV states
+  // finished); those cands keep their stage-(N-1) position from prev_arr.
+  // Cands that completed the current stage are slotted in stage-N order
+  // into the positions originally occupied by finished cands. Cands not
+  // forwarded into the current stage (i.e., below the filter cutoff) keep
+  // their prev_arr position.
+  PegCascadeRank *final_arr = NULL;
+  int final_n = 0;
+  bool used_merge = false;
+  if (prev_arr && prev_n > 0 && last_arr && last_n > 0) {
+    final_n = peg_cascade_merge_rankings(prev_arr, prev_n, last_arr, last_n,
+                                           &final_arr);
+    used_merge = true;
+  } else if (last_arr && last_n > 0) {
+    final_arr = last_arr;
+    final_n = last_n;
+  } else if (prev_arr && prev_n > 0) {
+    final_arr = prev_arr;
+    final_n = prev_n;
+  }
+
+  if (final_arr && final_n > 0) {
+    const int show = final_n < 8 ? final_n : 8;
+    fprintf(stderr,
+            "[cascade] final top-%d (merged: last_n=%d, prev_n=%d):\n",
+            show, last_n, prev_n);
+    // Tag cands that are CURRENT-stage results vs INHERITED from prev stage.
+    // A cand is "current" if it appears in last_arr by text.
+    for (int i = 0; i < show; i++) {
+      const PegCascadeRank *r = &final_arr[i];
+      bool from_last = false;
+      if (used_merge) {
+        for (int j = 0; j < last_n; j++) {
+          if (strcmp(last_arr[j].cand_text, r->cand_text) == 0) {
+            from_last = true;
+            break;
+          }
+        }
+      } else {
+        from_last = true;
+      }
+      fprintf(stderr,
+              "  #%-2d  win=%.4f  spread=%+9.3f  scen=%d  weight=%lld  %s%s\n",
+              r->rank, r->win, r->spread, r->scen,
+              (long long)r->weight, r->cand_text,
+              from_last ? "" : "  [from-prev]");
+    }
+  }
+  if (used_merge) {
+    free(final_arr);
+  }
+  free(prev_arr);
+  free(last_arr);
+  free(filter);
+
+  // Restore caller's env.
+  for (int i = 0; i < N_OVERRIDDEN; i++) {
+    if (saved[i]) {
+      setenv(overridden[i], saved[i], 1);
+      free(saved[i]);
+    } else {
+      unsetenv(overridden[i]);
+    }
+  }
 }
