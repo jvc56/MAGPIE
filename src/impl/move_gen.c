@@ -117,23 +117,45 @@ void generator_destroy(MoveGen *gen) {
   free(gen);
 }
 
+// Thread-local MoveGen. Guarantees one MoveGen per pthread regardless of
+// the caller-supplied thread_index, so two threads passing the same
+// thread_index (which historically happens when callers reuse a hand-rolled
+// thread_index_offset scheme, or when DISPLAY/SOLVER cache slots collide
+// across concurrent endgame_solve_inline instances) can never share a
+// MoveGen and corrupt each other's state.
+//
+// We still record allocated MoveGens in cached_gens[] so gen_destroy_cache
+// can free them at shutdown — but the slot is keyed by thread_index just
+// for cleanup bookkeeping; correctness no longer depends on slot uniqueness.
+static __thread MoveGen *tl_gen = NULL;
+
 MoveGen *get_movegen(int thread_index) {
-  // Double-checked init: the lock-free fast path covers every call after
-  // this slot has been populated. The lock only fires on first-touch, which
-  // is racy under multi-threaded executors (two threads with the same
-  // thread_index would both calloc and one would leak; worse, both could
-  // briefly proceed with different pointers until the store winner wins).
-  MoveGen *gen = cached_gens[thread_index];
-  if (gen) {
-    return gen;
+  if (tl_gen) {
+    return tl_gen;
   }
+  // First touch on this pthread: allocate and store both in TLS and in the
+  // global cache (for gen_destroy_cache to find at shutdown).
   cpthread_mutex_lock(&cache_mutex);
-  gen = cached_gens[thread_index];
-  if (!gen) {
-    gen = calloc_or_die(1, sizeof(MoveGen));
-    cached_gens[thread_index] = gen;
+  // Find a free slot in cached_gens. We don't index by thread_index here
+  // because the same pthread might be passed different thread_indexes across
+  // calls — we just need *some* slot so cleanup can reach this MoveGen.
+  // Reuse the caller's thread_index if it's free; otherwise scan.
+  int slot = thread_index;
+  if (slot < 0 || slot >= MAX_THREADS || cached_gens[slot]) {
+    slot = -1;
+    for (int i = 0; i < MAX_THREADS; i++) {
+      if (cached_gens[i] == NULL) {
+        slot = i;
+        break;
+      }
+    }
+  }
+  MoveGen *gen = calloc_or_die(1, sizeof(MoveGen));
+  if (slot >= 0) {
+    cached_gens[slot] = gen;
   }
   cpthread_mutex_unlock(&cache_mutex);
+  tl_gen = gen;
   return gen;
 }
 

@@ -2561,8 +2561,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
-    // Call per-ply callback (only thread 0 to avoid race conditions)
-    if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
+    // Call per-ply callback (only the first thread of this solver — not
+    // necessarily global thread 0 — to avoid race conditions while still
+    // firing when callers pass a non-zero thread_index_offset).
+    if (worker->thread_index == worker->solver->thread_index_offset &&
+        worker->solver->per_ply_callback) {
       // Extend PV from TT + greedy playout for display
       PVLine extended_pv = pv;
       if (worker->solver->transposition_table_optim) {
@@ -2707,7 +2710,11 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
     pv->game = NULL;
 
     if (solver->transposition_table) {
-      solver_pvline_extend_from_tt(pv, solver, game, 0, caller);
+      // Use solver->thread_index_offset so concurrent endgame_solve_inline
+      // calls from sibling bench workers don't share a get_movegen cache
+      // slot (which causes data races / "duplicate move type" aborts).
+      solver_pvline_extend_from_tt(pv, solver, game,
+                                   solver->thread_index_offset, caller);
     }
   }
   return k;
@@ -2794,8 +2801,11 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     // Get the best PV from the search results (tracked via
     // endgame_results_set_best_pvline during the search).
     multi_pvs[0] = *endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-    // TT-extend the best PV for display.
-    solver_pvline_extend_from_tt(&multi_pvs[0], solver, endgame_args->game, 0,
+    // TT-extend the best PV for display. Use solver->thread_index_offset
+    // so the get_movegen cache slot doesn't collide with concurrent
+    // endgame_solve_inline calls from other bench worker threads.
+    solver_pvline_extend_from_tt(&multi_pvs[0], solver, endgame_args->game,
+                                 solver->thread_index_offset,
                                  ENDGAME_MOVEGEN_SOLVER);
     int num_pvs = 1;
     if (solver->num_top_moves > 1) {
