@@ -2481,7 +2481,7 @@ static void peg_eval_d0_ordering(const PegEnumCtx *ctx,
         .num_top_moves = 1,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_word_pruning = true,
-        .thread_index_offset = ctx->worker_idx + 200,
+        .thread_index_offset = ctx->worker_idx,
         .soft_time_limit = peg_remaining_budget_secs(ctx),
         .hard_time_limit = peg_remaining_budget_secs(ctx),
         .external_deadline_ns = ctx->deadline_monotonic_ns,
@@ -2876,7 +2876,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           .per_ply_callback_data = ctx->inner_tsv_f ? (void *)&kn_log : NULL,
           .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
           .skip_word_pruning = true,
-          .thread_index_offset = ctx->worker_idx + 200,
+          .thread_index_offset = ctx->worker_idx,
           .soft_time_limit = kn_budget,
           .hard_time_limit = kn_budget,
           // Clamp by the cascade deadline so a bag-empty K=N endgame at
@@ -3783,7 +3783,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
             .num_top_moves = 1,
             .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
             .skip_word_pruning = true,
-            .thread_index_offset = ctx->worker_idx + 200,
+            .thread_index_offset = ctx->worker_idx,
             .soft_time_limit = peg_remaining_budget_secs(ctx),
             .hard_time_limit = peg_remaining_budget_secs(ctx),
             .external_deadline_ns = ctx->deadline_monotonic_ns,
@@ -4103,7 +4103,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
               .num_top_moves = 1,
               .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
               .skip_word_pruning = true,
-              .thread_index_offset = ctx->worker_idx + 200,
+              .thread_index_offset = ctx->worker_idx,
               .soft_time_limit = 5.0,
               .hard_time_limit = 5.0,
               // soft/hard_time_limit only caps the next IDS depth start —
@@ -4308,7 +4308,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
                   .num_top_moves = 1,
                   .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
                   .skip_word_pruning = true,
-                  .thread_index_offset = ctx->worker_idx + 200,
+                  .thread_index_offset = ctx->worker_idx,
                   .soft_time_limit = 5.0,
                   .hard_time_limit = 5.0,
                   // Clamp by cascade deadline — soft/hard_time_limit alone
@@ -4453,7 +4453,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
               .num_top_moves = 1,
               .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
               .skip_word_pruning = true,
-              .thread_index_offset = ctx->worker_idx + 200,
+              .thread_index_offset = ctx->worker_idx,
               .soft_time_limit = 5.0,
               .hard_time_limit = 5.0,
               // Clamp by cascade deadline — soft/hard_time_limit alone
@@ -4662,7 +4662,7 @@ static void peg_opp_inner_worker_fn(void *arg, int worker_idx) {
           .num_top_moves = 1,
           .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
           .skip_word_pruning = true,
-          .thread_index_offset = worker_idx + 200,
+          .thread_index_offset = worker_idx,
           .soft_time_limit = opp_budget,
           .hard_time_limit = opp_budget,
           // Clamp per-call deadline by the cascade deadline so an inner
@@ -4849,7 +4849,7 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
                                      : NULL,
         .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
         .skip_word_pruning = true,
-        .thread_index_offset = worker_idx + 200,
+        .thread_index_offset = worker_idx,
         // Per-call wall budget. external_deadline_ns is what actually
         // interrupts an in-flight iteration (check_depth_deadline polls
         // it every 1024 nodes); soft_time_limit only governs whether to
