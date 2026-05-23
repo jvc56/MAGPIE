@@ -1792,8 +1792,18 @@ int main(int argc, char *argv[]) {
             case TUI_EDIT_MOVE_KIND_PLACEMENT:
             case TUI_EDIT_MOVE_KIND_EXCHANGE:
             case TUI_EDIT_MOVE_KIND_PASS: {
-              snprintf(e->move_str, sizeof(e->move_str), "%s",
-                       game_state.edit_move_canonical);
+              // Same "-ABC" display normalization the Tab/Enter-
+              // on-MOVE commit path uses. Belt-and-braces — this
+              // branch should be unreachable since Enter-on-MOVE
+              // is caught above, but if anything ever routes here
+              // we don't want stale "ex ABC" leaking onto entries.
+              if (strncmp(game_state.edit_move_canonical, "ex ", 3) == 0) {
+                snprintf(e->move_str, sizeof(e->move_str), "-%s",
+                         game_state.edit_move_canonical + 3);
+              } else {
+                snprintf(e->move_str, sizeof(e->move_str), "%s",
+                         game_state.edit_move_canonical);
+              }
               if (e->rack_str[0] == '\0' &&
                   game_state.edit_move_inferred_rack[0] != '\0') {
                 snprintf(e->rack_str, sizeof(e->rack_str), "%s",
