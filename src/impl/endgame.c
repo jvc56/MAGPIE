@@ -2753,7 +2753,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack) {
   assert(ctx);
   const int bag_size = bag_get_letters(game_get_bag(endgame_args->game));
-  if (bag_size != 0 && !endgame_args->allow_nonempty_bag) {
+  if (bag_size != 0) {
     error_stack_push(error_stack, ERROR_STATUS_ENDGAME_BAG_NOT_EMPTY,
                      get_formatted_string(
                          "bag must be empty to solve an endgame, but have %d "

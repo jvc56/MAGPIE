@@ -63,8 +63,6 @@ typedef struct EndgameArgs {
   // Useful when the caller builds pruned KWGs once and reuses them across many
   // endgame solves.
   bool skip_word_pruning;
-  // If true, allow the bag to be non-empty when endgame_solve is called.
-  bool allow_nonempty_bag;
   // If non-NULL, the solver uses this TT instead of creating/destroying its
   // own. The caller is responsible for the lifetime of the shared TT.
   // tt_fraction_of_mem is ignored when shared_tt is set.

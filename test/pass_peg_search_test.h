@@ -75,3 +75,33 @@ void test_pass_peg_oracle_eval_move(void);
 
 void test_pass_peg_greedy_bench(void);
 void test_pass_peg_cascade(void);
+
+// PEG cascade single-cand assertion tests, one per bag size. Each writes a
+// CGP to a tmp file and asserts on the win%/spread of a known candidate.
+void test_peg_1bag_pass_best(void);
+void test_peg_1bag_onyx(void);
+void test_peg_2bag_axe(void);
+void test_peg_2bag_acidotic(void);
+void test_peg_3bag_pah(void);
+void test_peg_4bag_pond(void);
+
+// Pessimistic ("guaranteed wins") oracle eval. For each ordered draw of N
+// bag tiles from the unseen pool, set bag + opp_rack to that scenario, apply
+// mover's cand, run endgame_solve at deep plies (perfect info). Aggregates
+// win% and mean spread over orderings.
+// Currently only works correctly when mover's cand drains the bag (so the
+// post-cand position is a true empty-bag endgame). Non-emptier cands at
+// N>=2-peg need a real bag-aware solver — Phase 2.
+// Env vars: PASSPEG_PESSIMISTIC_CGP, PASSPEG_PESSIMISTIC_MOVE,
+//           PASSPEG_PESSIMISTIC_PLIES (default 12),
+//           PASSPEG_PESSIMISTIC_TIME (default 30).
+void test_pass_peg_pessimistic_eval(void);
+
+// Phase 2 pessimistic: recursive solver mirroring macondo's peg_generic
+// recursiveSolve. Handles non-emptier cands where the bag is still
+// non-empty after the cand. Per-bag-ordering W/L/D, with first-loss
+// cutoff in opp-move enumeration and first-win cutoff in our-move
+// enumeration. Env vars: PASSPEG_PESSFULL_CGP, PASSPEG_PESSFULL_MOVE,
+// PASSPEG_PESSFULL_PLIES (default 12), PASSPEG_PESSFULL_TIME (default 5),
+// PASSPEG_PESSFULL_MAX_OPP_K (default 0 = no cap).
+void test_pass_peg_pessimistic_full_eval(void);

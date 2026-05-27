@@ -123,6 +123,12 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"peg1pb", test_peg_1bag_pass_best},
+    {"peg1onyx", test_peg_1bag_onyx},
+    {"peg2axe", test_peg_2bag_axe},
+    {"peg2acid", test_peg_2bag_acidotic},
+    {"peg3pah", test_peg_3bag_pah},
+    {"peg4pond", test_peg_4bag_pond},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -151,6 +157,8 @@ static TestEntry on_demand_test_table[] = {
     {"genpeg", test_generate_peg_cgps},
     {"passpegreport", test_pass_peg_print_report},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"pegpessimistic", test_pass_peg_pessimistic_eval},
+    {"pegpessfull", test_pass_peg_pessimistic_full_eval},
     {"peggreedy", test_pass_peg_greedy_bench},
     {"pegcascade", test_pass_peg_cascade},
     {"viamover", test_via_mover_must_bingo_every_depth},

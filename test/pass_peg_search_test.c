@@ -6252,6 +6252,12 @@ void test_pass_peg_cascade(void) {
   const char *prefix_env = getenv("PASSPEG_CASCADE_OUT_PREFIX");
   const char *out_prefix =
       prefix_env && *prefix_env ? prefix_env : "/tmp/cascade";
+  // PASSPEG_CASCADE_ORACLE=1: disable all stride sampling for "oracle" runs
+  // (WALK_STRIDE=5 at stage 0 becomes 1; SCENARIO/PERCEPTION stay at 1, which
+  // matches their non-oracle defaults so the flag effectively only flips
+  // WALK_STRIDE today — explicit knob in case more stride knobs get added).
+  const char *oracle_env = getenv("PASSPEG_CASCADE_ORACLE");
+  const bool oracle_mode = oracle_env && atoi(oracle_env) > 0;
 
   Timer cascade_timer;
   ctimer_start(&cascade_timer);
@@ -6340,7 +6346,7 @@ void test_pass_peg_cascade(void) {
       // legal move), wide scenario coverage.
       unsetenv("PASSPEG_GREEDY_ONLY");
       setenv("PASSPEG_SCENARIO_STRIDE", "1", 1);
-      setenv("PASSPEG_WALK_STRIDE", "5", 1);
+      setenv("PASSPEG_WALK_STRIDE", oracle_mode ? "1" : "5", 1);
       unsetenv("PASSPEG_GREEDY_RATIONAL");
       unsetenv("PASSPEG_GREEDY_RAT_WALK");
       unsetenv("PASSPEG_PERCEPTION_STRIDE");
@@ -6473,4 +6479,1228 @@ void test_pass_peg_cascade(void) {
       unsetenv(overridden[i]);
     }
   }
+}
+
+// ---------------------------------------------------------------------------
+// PEG cascade single-cand assertion tests (1-, 2-, 3-, 4-in-bag).
+//
+// Each test evaluates a known candidate move against a known CGP at oracle
+// settings (no stride sampling, full RAT_WALK + OPP_RANK_BY_PLAYOUT). The
+// depth is tuned per test so the eval finishes under 10s. Asserts within
+// tolerance on win% and spread.
+//
+// CGPs are written to a tmp file and consumed via test_pass_peg_greedy_bench
+// + PASSPEG_GREEDY_RESULT_FILE so we read back the result deterministically.
+// ---------------------------------------------------------------------------
+
+static void peg_assert_cand(const char *test_name,
+                             const char *cgp_line_with_lex,
+                             const char *cand_filter, int depth,
+                             double expected_win, double expected_spread,
+                             double win_tol, double spread_tol) {
+  const char *cgp_path = "/tmp/magpie_peg_test_cgp.txt";
+  const char *result_path = "/tmp/magpie_peg_test_result.tsv";
+
+  FILE *cgp_f = fopen(cgp_path, "we");
+  if (!cgp_f) {
+    log_fatal("[%s] cannot open %s for write", test_name, cgp_path);
+  }
+  fprintf(cgp_f, "%s\n", cgp_line_with_lex);
+  (void)fclose(cgp_f);
+
+  char depth_buf[8];
+  snprintf(depth_buf, sizeof(depth_buf), "%d", depth);
+  setenv("PASSPEG_GREEDY_PATH", cgp_path, 1);
+  setenv("PASSPEG_GREEDY_ONLY", cand_filter, 1);
+  setenv("PASSPEG_GREEDY_DEPTH", depth_buf, 1);
+  setenv("PASSPEG_GREEDY_TOP_K", "1", 1);
+  setenv("PASSPEG_GREEDY_BUDGET", "30", 1);
+  setenv("PASSPEG_GREEDY_THREADS", "4", 1);
+  setenv("PASSPEG_GREEDY_RATIONAL", "1", 1);
+  setenv("PASSPEG_GREEDY_RAT_WALK", "1", 1);
+  setenv("PASSPEG_GREEDY_WALK_K_FIRST_OPP", "16", 1);
+  setenv("PASSPEG_GREEDY_WALK_K_LATER_OPP", "8", 1);
+  setenv("PASSPEG_SCENARIO_STRIDE", "1", 1);
+  setenv("PASSPEG_PERCEPTION_STRIDE", "1", 1);
+  setenv("PASSPEG_WALK_STRIDE", "1", 1);
+  setenv("PASSPEG_OPP_RANK_BY_PLAYOUT", "1", 1);
+  setenv("PASSPEG_OPP_RANK_POOL", "64", 1);
+  setenv("PASSPEG_GREEDY_RESULT_FILE", result_path, 1);
+  setenv("PEG_POOL_STUCK_TIMEOUT_S", "0", 1);
+  setenv("PASSPEG_INCLUDE_PASS", "1", 1);
+
+  test_pass_peg_greedy_bench();
+
+  FILE *r = fopen(result_path, "re");
+  if (!r) {
+    log_fatal("[%s] result file %s not created", test_name, result_path);
+  }
+  char hdr[512];
+  if (!fgets(hdr, sizeof(hdr), r)) {
+    log_fatal("[%s] missing result header", test_name);
+  }
+  double win = -1.0;
+  double spread = 0.0;
+  char line[2048];
+  while (fgets(line, sizeof(line), r)) {
+    int pos_id = 0;
+    int rank = 0;
+    double w = 0.0;
+    double s = 0.0;
+    if (sscanf(line, "%d\t%d\t%lf\t%lf", &pos_id, &rank, &w, &s) >= 4 &&
+        rank == 1) {
+      win = w;
+      spread = s;
+      break;
+    }
+  }
+  (void)fclose(r);
+
+  if (win < 0.0) {
+    log_fatal("[%s] no rank-1 row in result file", test_name);
+  }
+  const double win_diff = win - expected_win;
+  const double abs_win_diff = win_diff < 0.0 ? -win_diff : win_diff;
+  if (abs_win_diff > win_tol) {
+    log_fatal("[%s] win %.4f outside tolerance %.4f of expected %.4f",
+              test_name, win, win_tol, expected_win);
+  }
+  const double spread_diff = spread - expected_spread;
+  const double abs_spread_diff = spread_diff < 0.0 ? -spread_diff : spread_diff;
+  if (abs_spread_diff > spread_tol) {
+    log_fatal("[%s] spread %.3f outside tolerance %.3f of expected %.3f",
+              test_name, spread, spread_tol, expected_spread);
+  }
+  fprintf(stderr,
+          "[%s OK] cand=%s d=%d  win=%.4f (exp %.4f)  spread=%+.3f (exp %+.3f)\n",
+          test_name, cand_filter, depth, win, expected_win, spread,
+          expected_spread);
+}
+
+// 1-in-bag: engineered position where passing is strictly best (mover and opp
+// both hold the same bingo rack, with a Q stranded in the bag — playing the
+// bingo opens up an opp counter-bingo, while passing forces opp to draw the
+// unplayable Q).
+void test_peg_1bag_pass_best(void) {
+  const char *cgp =
+      "7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/5JEUX3NEW/"
+      "3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/1HIDEOUT7/"
+      "VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
+  peg_assert_cand("peg1_pass_best", cgp, "pass", 4, 1.0, 59.0, 0.005, 1.0);
+}
+
+// 1-in-bag: macondo "Straightforward1PEG" — 13L ONYX wins 7.5/8 (only tying
+// when Y is the bag tile).
+//   Source: macondo peg test_test.go TestStraightforward1PEG.
+void test_peg_1bag_onyx(void) {
+  const char *cgp =
+      "15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  peg_assert_cand("peg1_onyx", cgp, "13L ONYX", 4, 0.9375, 8.75, 0.005, 1.0);
+}
+
+// 2-in-bag: macondo "TwoInBagSingleMove" — 6F (A)X(E) (the AXE move) wins
+// 70/72 = 0.9722; only loses when IE are in the bag in that order.
+//   Source: macondo peg test_test.go TestTwoInBagSingleMove.
+// Depth 3 (rather than 4) keeps runtime under 10s; the macondo win-rate is
+// unchanged at d=4 (still 0.9722).
+void test_peg_2bag_axe(void) {
+  const char *cgp =
+      "1T13/1W3Q9/VERB1U9/1E1OPIUM5C1/1LAWIN1I5O1/1Y3A1E5R1/7V4NO1/"
+      "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
+      "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
+  peg_assert_cand("peg2_axe", cgp, "6F (A)X(E)", 3, 0.9722, 41.292, 0.005,
+                  2.0);
+}
+
+// 3-in-bag: macondo manual "Position #2" (Tunnicliffe v Brennan, CSW21) —
+// asserts on 13M P(AH) at depth 2 (deeper search exceeds the 10s budget for
+// this position). PAH's eval has measurable non-determinism (~0.05 win, ~5pt
+// spread range across runs even single-threaded) — suspected wall-clock-
+// dependent depth completion in inner endgame solves. Tolerances widened to
+// cover the observed range. Worth fixing separately.
+void test_peg_3bag_pah(void) {
+  const char *cgp =
+      "BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+      "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+      "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
+  peg_assert_cand("peg3_pah", cgp, "13M P(AH)", 2, 0.84, 26.0, 0.04, 3.5);
+}
+
+// 4-in-bag: macondo manual "Position #1" (Sokol v Walton POND position,
+// NWL20) — asserts on 2L P(O)ND at depth 2 (deeper search exceeds 10s).
+// At d=2 our cascade evaluates this cand at win=1.0000, spread=+57.084.
+void test_peg_4bag_pond(void) {
+  const char *cgp =
+      "12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E3Z2C1LOO/"
+      "1TED3E1BYWORD/2Q4N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"
+      "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20";
+  peg_assert_cand("peg4_pond", cgp, "2L P(O)ND", 2, 1.0, 57.084, 0.005, 2.0);
+}
+
+// 2-in-bag: GillesB CSW24 "ACIDOTIc" position — C6 ACIDOT(I)c with the blank
+// 'c' wins 72/72 with spread +112.444 at 4 plies (per GillesB's solver).
+// Eval is ~0.2s — fastest of the suite.
+void test_peg_2bag_acidotic(void) {
+  const char *cgp =
+      "5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1V3/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
+      "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
+  peg_assert_cand("peg2_acidotic", cgp, "C6 ACIDOT(I)c", 4, 1.0, 112.444,
+                  0.005, 0.5);
+}
+
+// ---------------------------------------------------------------------------
+// Pessimistic eval (macondo-style "guaranteed wins") — Phase 1.
+//
+// For each ORDERED draw of N tiles from the unseen pool (where N = bag size):
+//   - The drawn tiles, IN ORDER, become the bag (so as mover plays and draws,
+//     they receive those tiles in sequence).
+//   - The remaining tiles become opp's rack — KNOWN to both sides (perfect
+//     info from the eval's POV).
+//   - Apply mover's cand. The cand's leave + drawn-from-bag = mover's
+//     post-cand rack. After the draw, the bag has its remaining tiles.
+//   - Run endgame_solve at deep plies with both racks known + bag known.
+//   - Count: 1 win if mover_total > 0, 0.5 if tie, 0 if loss.
+// Aggregate: total wins / total orderings.
+//
+// Env vars (all required):
+//   PASSPEG_PESSIMISTIC_CGP    CGP string (with -lex)
+//   PASSPEG_PESSIMISTIC_MOVE   mover's cand in MAGPIE notation
+//   PASSPEG_PESSIMISTIC_PLIES  endgame_solve depth (default 12)
+//   PASSPEG_PESSIMISTIC_TIME   per-solve time budget seconds (default 30)
+// ---------------------------------------------------------------------------
+
+typedef struct PessimisticAccum {
+  int64_t wins_x2;         // 2 * wins, +1 per tie (so /2 at the end)
+  int64_t spread_sum;      // signed total mover spread
+  int orderings;           // total enumerated draw orderings
+} PessimisticAccum;
+
+// Recursive enumeration of ordered draws of `remaining` tiles from
+// `tile_counts` (a multiset over `num_types`). For each TYPE-prefix the cb
+// is called once with a multiplicity = product over steps of count-before-
+// decrement, matching the number of distinguishable-tile orderings that map
+// to this type sequence.
+static void peg_pess_enum_ordered_draws(
+    const MachineLetter *tile_types, int *tile_counts, int num_types,
+    int remaining, MachineLetter *draw_buf, int draw_buf_len,
+    int64_t multiplicity,
+    void (*cb)(const MachineLetter *draw, int n, int64_t weight, void *user),
+    void *user) {
+  if (remaining == 0) {
+    cb(draw_buf, draw_buf_len, multiplicity, user);
+    return;
+  }
+  for (int ti = 0; ti < num_types; ti++) {
+    if (tile_counts[ti] <= 0) continue;
+    const int count_before = tile_counts[ti];
+    tile_counts[ti]--;
+    draw_buf[draw_buf_len] = tile_types[ti];
+    peg_pess_enum_ordered_draws(tile_types, tile_counts, num_types,
+                                 remaining - 1, draw_buf, draw_buf_len + 1,
+                                 multiplicity * count_before, cb, user);
+    tile_counts[ti]++;
+  }
+}
+
+typedef struct PessCtx {
+  const Game *base_game;
+  const Move *move;
+  int mover_idx;
+  int opp_idx;
+  int ld_size;
+  const uint8_t *unseen;          // unseen pool (size ld_size)
+  int plies;
+  double per_solve_time;
+  ThreadControl *thread_control;
+  EndgameCtx **eg_ctx;            // reused across solves
+  EndgameResults *eg_results;
+  PessimisticAccum *accum;
+  int n_scenarios_logged;
+} PessCtx;
+
+static void peg_pess_eval_one(const MachineLetter *draw, int n,
+                              int64_t weight, void *user) {
+  PessCtx *pc = (PessCtx *)user;
+
+  Game *scenario = game_duplicate(pc->base_game);
+  game_set_endgame_solving_mode(scenario);
+  game_set_backup_mode(scenario, BACKUP_MODE_OFF);
+
+  // Empty the bag (was loaded with N unseen tiles in some default order).
+  Bag *bag = game_get_bag(scenario);
+  for (int ml = 0; ml < pc->ld_size; ml++) {
+    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
+    }
+  }
+
+  // Set bag to the drawn tiles, in REVERSE order so bag_draw_letter pulls
+  // them in the requested order (MAGPIE's bag pops the most-recently-added
+  // tile first per the LIFO add/draw convention).
+  for (int i = n - 1; i >= 0; i--) {
+    bag_add_letter(bag, draw[i], 0);
+  }
+
+  // Set opp's rack = unseen - drawn tiles.
+  Rack *opp_rack = player_get_rack(game_get_player(scenario, pc->opp_idx));
+  rack_reset(opp_rack);
+  uint8_t leftover[MAX_ALPHABET_SIZE];
+  memcpy(leftover, pc->unseen, (size_t)pc->ld_size);
+  for (int i = 0; i < n; i++) {
+    leftover[draw[i]]--;
+  }
+  for (int ml = 0; ml < pc->ld_size; ml++) {
+    for (int k = 0; k < (int)leftover[ml]; k++) {
+      rack_add_letter(opp_rack, (MachineLetter)ml);
+    }
+  }
+
+  // Apply the cand. This plays the move and draws from the bag in order.
+  play_move(pc->move, scenario, NULL);
+  game_set_game_end_reason(scenario, GAME_END_REASON_NONE);
+
+  const int32_t mover_lead = equity_to_int(player_get_score(
+                                 game_get_player(scenario, pc->mover_idx))) -
+                              equity_to_int(player_get_score(
+                                  game_get_player(scenario, pc->opp_idx)));
+
+  EndgameArgs ea = {
+      .thread_control = pc->thread_control,
+      .game = scenario,
+      .plies = pc->plies,
+      .shared_tt = NULL,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .use_heuristics = true,
+      .num_top_moves = 1,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .skip_word_pruning = false,
+      .thread_index_offset = 0,
+      .soft_time_limit = pc->per_solve_time,
+      .hard_time_limit = pc->per_solve_time,
+  };
+  endgame_results_reset(pc->eg_results);
+  endgame_solve_inline(pc->eg_ctx, &ea, pc->eg_results);
+  const int eg_val =
+      endgame_results_get_value(pc->eg_results, ENDGAME_RESULT_BEST);
+
+  // endgame_solve_inline returns the value from the player-on-turn's POV.
+  // After play_move, opp is on turn — so eg_val is opp's gain. Mover's
+  // realized spread = mover_lead - eg_val.
+  const int32_t mover_total = mover_lead - eg_val;
+
+  pc->accum->spread_sum += (int64_t)mover_total * weight;
+  if (mover_total > 0) {
+    pc->accum->wins_x2 += 2 * weight;
+  } else if (mover_total == 0) {
+    pc->accum->wins_x2 += weight;
+  }
+  pc->accum->orderings += weight;
+
+  if (pc->n_scenarios_logged < 10) {
+    const LetterDistribution *ld = game_get_ld(scenario);
+    char draw_str[64] = {0};
+    for (int i = 0; i < n; i++) {
+      const char *hl = ld->ld_ml_to_hl[draw[i]];
+      strncat(draw_str, hl ? hl : "?", sizeof(draw_str) - strlen(draw_str) - 1);
+    }
+    fprintf(stderr,
+            "  [pess scenario] draw=%-8s  mover_lead=%+d  eg_val=%+d  "
+            "mover_total=%+d\n",
+            draw_str, mover_lead, eg_val, mover_total);
+    pc->n_scenarios_logged++;
+  }
+
+  game_destroy(scenario);
+}
+
+void test_pass_peg_pessimistic_eval(void) {
+  const char *cgp = getenv("PASSPEG_PESSIMISTIC_CGP");
+  if (!cgp || !*cgp) {
+    log_fatal("PASSPEG_PESSIMISTIC_CGP must be set");
+  }
+  const char *move_str = getenv("PASSPEG_PESSIMISTIC_MOVE");
+  if (!move_str || !*move_str) {
+    log_fatal("PASSPEG_PESSIMISTIC_MOVE must be set");
+  }
+  const char *plies_env = getenv("PASSPEG_PESSIMISTIC_PLIES");
+  const int plies = plies_env && *plies_env ? atoi(plies_env) : 12;
+  const char *time_env = getenv("PASSPEG_PESSIMISTIC_TIME");
+  const double per_solve_time = time_env && *time_env ? atof(time_env) : 30.0;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  char load_cmd[10240];
+  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  load_and_exec_config_or_die(config, load_cmd);
+  Game *game = config_get_game(config);
+
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int opp_idx = 1 - mover_idx;
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  const int bag_size = bag_get_letters(game_get_bag(game));
+
+  // Compute unseen pool: dist - mover_rack - board.
+  uint8_t unseen[MAX_ALPHABET_SIZE] = {0};
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mr = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] -= (uint8_t)rack_get_letter(mr, (MachineLetter)ml);
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter on_board = board_get_letter(board, row, col);
+      if (on_board == 0 || on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
+        continue;
+      }
+      MachineLetter eff =
+          get_is_blanked(on_board) ? BLANK_MACHINE_LETTER : on_board;
+      if (unseen[eff] > 0) {
+        unseen[eff]--;
+      }
+    }
+  }
+  int total_unseen = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    total_unseen += unseen[ml];
+  }
+  if (total_unseen != RACK_SIZE + bag_size) {
+    log_fatal("pessimistic eval: expected %d unseen, got %d (rack=%d bag=%d)",
+              RACK_SIZE + bag_size, total_unseen, RACK_SIZE, bag_size);
+  }
+
+  ErrorStack *parse_err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      game, mover_idx, move_str,
+      /*allow_phonies=*/false, /*allow_playthrough=*/true, parse_err);
+  if (!error_stack_is_empty(parse_err)) {
+    log_fatal("pessimistic eval: failed to parse move %s", move_str);
+  }
+  if (validated_moves_get_number_of_moves(vms) < 1) {
+    log_fatal("pessimistic eval: no moves parsed from %s", move_str);
+  }
+  const Move *move = validated_moves_get_move(vms, 0);
+
+  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  int tile_counts[MAX_ALPHABET_SIZE];
+  int num_types = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (unseen[ml] > 0) {
+      tile_types[num_types] = (MachineLetter)ml;
+      tile_counts[num_types] = (int)unseen[ml];
+      num_types++;
+    }
+  }
+
+  fprintf(stderr,
+          "[pegpessimistic] move=%s plies=%d soft_time=%.1fs bag=%d "
+          "unseen_types=%d total_unseen=%d\n",
+          move_str, plies, per_solve_time, bag_size, num_types, total_unseen);
+
+  PessimisticAccum accum = {0};
+  EndgameCtx *eg_ctx = NULL;
+  EndgameResults *eg_results = endgame_results_create();
+  PessCtx pc = {
+      .base_game = game,
+      .move = move,
+      .mover_idx = mover_idx,
+      .opp_idx = opp_idx,
+      .ld_size = ld_size,
+      .unseen = unseen,
+      .plies = plies,
+      .per_solve_time = per_solve_time,
+      .thread_control = config_get_thread_control(config),
+      .eg_ctx = &eg_ctx,
+      .eg_results = eg_results,
+      .accum = &accum,
+      .n_scenarios_logged = 0,
+  };
+
+  MachineLetter draw_buf[16];
+  peg_pess_enum_ordered_draws(tile_types, tile_counts, num_types, bag_size,
+                               draw_buf, 0, /*multiplicity=*/1,
+                               peg_pess_eval_one, &pc);
+
+  const double win_pct =
+      accum.orderings > 0 ? (double)accum.wins_x2 / (2.0 * accum.orderings)
+                          : 0.0;
+  const double mean_spread =
+      accum.orderings > 0 ? (double)accum.spread_sum / accum.orderings : 0.0;
+
+  printf("\n=== Pessimistic eval ===\n");
+  printf("CGP:  %s\n", cgp);
+  printf("Move: %s   plies=%d\n", move_str, plies);
+  printf("orderings=%d  wins_x2=%lld  win%%=%.4f  mean_spread=%+0.3f\n",
+         accum.orderings, (long long)accum.wins_x2, win_pct, mean_spread);
+
+  endgame_ctx_destroy(eg_ctx);
+  endgame_results_destroy(eg_results);
+  validated_moves_destroy(vms);
+  error_stack_destroy(parse_err);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// Pessimistic full eval — Phase 2 port of macondo's recursive PEG solver.
+//
+// Mirrors macondo's peg_generic.recursiveSolve for non-emptier cands. At
+// each node:
+//   - Base case (game over OR bag empty): run endgame_solve, classify the
+//     spread as W/L/D for mover.
+//   - Bag non-empty, opp's turn: enumerate ALL legal opp moves, recurse.
+//     Take the WORST outcome (opp picks the move that hurts mover most).
+//     First-loss cutoff: as soon as some opp reply gives mover a loss,
+//     return loss (subsequent replies can't make it worse).
+//   - Bag non-empty, mover's turn: enumerate ALL legal mover moves, recurse.
+//     Take the BEST outcome (mover plays optimally). First-win cutoff: if
+//     some reply gives a win, return win.
+//
+// For each (cand, bag-ordering) pair, accumulate W/L/D. Report per-cand
+// win% = (wins + 0.5*draws) / total_orderings.
+//
+// Env vars (all required for the test):
+//   PASSPEG_PESSFULL_CGP       CGP string (with -lex)
+//   PASSPEG_PESSFULL_MOVE      mover's cand in MAGPIE notation
+//   PASSPEG_PESSFULL_PLIES     endgame_solve plies at the bag-empty leaf
+//                              (default 12)
+//   PASSPEG_PESSFULL_TIME      per-solve time budget (default 5)
+//   PASSPEG_PESSFULL_MAX_OPP_K cap opp move enumeration at top-K by score
+//                              (default 0 = no cap). Loose pessimistic if
+//                              set — opp may not be playing globally-best.
+// ---------------------------------------------------------------------------
+
+typedef enum {
+  PEG_OUT_LOSS = 0,
+  PEG_OUT_DRAW = 1,
+  PEG_OUT_WIN = 2,
+} PegPessOut;
+
+// Endgame-position cache. At the bag-empty leaf, multiple recursion paths can
+// converge to identical (board, racks, on-turn, lead, scoreless) states. The
+// endgame_solve at the leaf is expensive (~ms each) and deterministic in that
+// state, so caching by hash-of-state is correct and high-leverage.
+typedef struct PegPessCacheEntry {
+  uint64_t key;
+  PegPessOut outcome;
+  bool valid;
+} PegPessCacheEntry;
+
+typedef struct PegPessCache {
+  PegPessCacheEntry *entries;
+  size_t capacity;    // power of 2
+  size_t mask;
+  cpthread_mutex_t mutex;
+  atomic_long hits;
+  atomic_long misses;
+} PegPessCache;
+
+typedef struct PegPessSolver {
+  Game *game;
+  int mover_idx;
+  int opp_idx;
+  int ld_size;
+  ThreadControl *thread_control;
+  int endgame_plies;
+  double endgame_time;
+  int max_opp_k;            // 0 = no cap
+  EndgameCtx **eg_ctx_p;    // caller-owned slot; endgame_solve_inline may alloc
+  EndgameResults *eg_results;
+  PegPessCache *cache;      // shared across workers; NULL = disabled
+  int64_t n_endgame_solves;
+  int64_t n_recursive_calls;
+  int64_t n_first_loss_cutoffs;
+  int64_t n_first_win_cutoffs;
+} PegPessSolver;
+
+static PegPessCache *peg_pess_cache_create(size_t cap_request) {
+  size_t cap = 1;
+  while (cap < cap_request) cap *= 2;
+  PegPessCache *c = malloc_or_die(sizeof(*c));
+  c->entries = calloc_or_die(cap, sizeof(PegPessCacheEntry));
+  c->capacity = cap;
+  c->mask = cap - 1;
+  cpthread_mutex_init(&c->mutex);
+  atomic_init(&c->hits, 0);
+  atomic_init(&c->misses, 0);
+  return c;
+}
+
+static void peg_pess_cache_destroy(PegPessCache *c) {
+  if (!c) return;
+  free(c->entries);
+  free(c);
+}
+
+static inline uint64_t peg_pess_fnv1a(uint64_t hash, const void *data,
+                                       size_t len) {
+  const uint8_t *bytes = (const uint8_t *)data;
+  for (size_t i = 0; i < len; i++) {
+    hash ^= bytes[i];
+    hash *= 0x100000001b3ULL;
+  }
+  return hash;
+}
+
+// Hash the bag-empty game state. Called only when bag is empty, so bag
+// layout is irrelevant. Includes lead (mover - opp) and scoreless turns.
+static uint64_t peg_pess_hash_endgame_state(const Game *g, int mover_idx,
+                                             int opp_idx) {
+  uint64_t hash = 0xcbf29ce484222325ULL;
+  const Board *b = game_get_board(g);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter ml = board_get_letter(b, row, col);
+      hash = peg_pess_fnv1a(hash, &ml, sizeof(ml));
+    }
+  }
+  const Rack *mr = player_get_rack(game_get_player(g, mover_idx));
+  const Rack *opp_r = player_get_rack(game_get_player(g, opp_idx));
+  const int dist_size = ld_get_size(game_get_ld(g));
+  for (int i = 0; i < dist_size; i++) {
+    uint8_t mc = rack_get_letter(mr, i);
+    uint8_t oc = rack_get_letter(opp_r, i);
+    hash = peg_pess_fnv1a(hash, &mc, sizeof(mc));
+    hash = peg_pess_fnv1a(hash, &oc, sizeof(oc));
+  }
+  const int32_t lead =
+      equity_to_int(player_get_score(game_get_player(g, mover_idx))) -
+      equity_to_int(player_get_score(game_get_player(g, opp_idx)));
+  hash = peg_pess_fnv1a(hash, &lead, sizeof(lead));
+  const int turn = game_get_player_on_turn_index(g);
+  hash = peg_pess_fnv1a(hash, &turn, sizeof(turn));
+  // Avoid 0 as a sentinel.
+  if (hash == 0) hash = 1;
+  return hash;
+}
+
+// Returns true on hit (and writes *out). Mutex-protected.
+static bool peg_pess_cache_lookup(PegPessCache *c, uint64_t key,
+                                   PegPessOut *out) {
+  if (!c) return false;
+  cpthread_mutex_lock(&c->mutex);
+  size_t idx = (size_t)key & c->mask;
+  for (size_t probe = 0; probe < c->capacity; probe++) {
+    PegPessCacheEntry *e = &c->entries[(idx + probe) & c->mask];
+    if (!e->valid) {
+      cpthread_mutex_unlock(&c->mutex);
+      atomic_fetch_add(&c->misses, 1);
+      return false;
+    }
+    if (e->key == key) {
+      *out = e->outcome;
+      cpthread_mutex_unlock(&c->mutex);
+      atomic_fetch_add(&c->hits, 1);
+      return true;
+    }
+  }
+  cpthread_mutex_unlock(&c->mutex);
+  return false;
+}
+
+static void peg_pess_cache_store(PegPessCache *c, uint64_t key,
+                                  PegPessOut outcome) {
+  if (!c) return;
+  cpthread_mutex_lock(&c->mutex);
+  size_t idx = (size_t)key & c->mask;
+  for (size_t probe = 0; probe < c->capacity; probe++) {
+    PegPessCacheEntry *e = &c->entries[(idx + probe) & c->mask];
+    if (!e->valid || e->key == key) {
+      e->key = key;
+      e->outcome = outcome;
+      e->valid = true;
+      cpthread_mutex_unlock(&c->mutex);
+      return;
+    }
+  }
+  cpthread_mutex_unlock(&c->mutex);
+}
+
+static PegPessOut peg_pess_classify_spread(int32_t spread) {
+  if (spread > 0) return PEG_OUT_WIN;
+  if (spread < 0) return PEG_OUT_LOSS;
+  return PEG_OUT_DRAW;
+}
+
+// Forward decl for recursion.
+static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
+
+// Evaluate at a base case: bag empty or game over. Returns mover's outcome.
+static PegPessOut peg_pess_base_case(PegPessSolver *s) {
+  Game *g = s->game;
+  if (game_get_game_end_reason(g) != GAME_END_REASON_NONE) {
+    const int32_t mover_score = equity_to_int(player_get_score(
+        game_get_player(g, s->mover_idx)));
+    const int32_t opp_score = equity_to_int(player_get_score(
+        game_get_player(g, s->opp_idx)));
+    return peg_pess_classify_spread(mover_score - opp_score);
+  }
+  // Cache lookup: same endgame position from different recursion paths
+  // produces the same outcome — endgame_solve is deterministic in
+  // (board, racks, on-turn, lead).
+  uint64_t cache_key = 0;
+  if (s->cache) {
+    cache_key = peg_pess_hash_endgame_state(g, s->mover_idx, s->opp_idx);
+    PegPessOut cached;
+    if (peg_pess_cache_lookup(s->cache, cache_key, &cached)) {
+      return cached;
+    }
+  }
+
+  // Bag empty, game still on. Run endgame_solve on a duplicate — that call
+  // dirties the game's backup stack, so without copying we'd leak backup
+  // depth across recursive returns and eventually segfault in game_backup.
+  Game *scratch = game_duplicate(g);
+  game_set_endgame_solving_mode(scratch);
+  game_set_backup_mode(scratch, BACKUP_MODE_OFF);
+  EndgameArgs ea = {
+      .thread_control = s->thread_control,
+      .game = scratch,
+      .plies = s->endgame_plies,
+      .shared_tt = NULL,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = 1,
+      .use_heuristics = true,
+      .num_top_moves = 1,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .skip_word_pruning = false,
+      .thread_index_offset = 0,
+      .soft_time_limit = s->endgame_time,
+      .hard_time_limit = s->endgame_time,
+  };
+  endgame_results_reset(s->eg_results);
+  endgame_solve_inline(s->eg_ctx_p, &ea, s->eg_results);
+  s->n_endgame_solves++;
+  const int eg_val =
+      endgame_results_get_value(s->eg_results, ENDGAME_RESULT_BEST);
+  const int turn = game_get_player_on_turn_index(scratch);
+  const int32_t mover_lead =
+      equity_to_int(player_get_score(game_get_player(scratch, s->mover_idx))) -
+      equity_to_int(player_get_score(game_get_player(scratch, s->opp_idx)));
+  const int32_t mover_total =
+      (turn == s->mover_idx) ? mover_lead + eg_val : mover_lead - eg_val;
+  game_destroy(scratch);
+  const PegPessOut out = peg_pess_classify_spread(mover_total);
+  if (s->cache) {
+    peg_pess_cache_store(s->cache, cache_key, out);
+  }
+  return out;
+}
+
+// Recursively solve from the current game state.
+static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
+  Game *g = s->game;
+  s->n_recursive_calls++;
+
+  if (game_get_game_end_reason(g) != GAME_END_REASON_NONE ||
+      bag_get_letters(game_get_bag(g)) == 0) {
+    return peg_pess_base_case(s);
+  }
+
+  // Generate all legal moves for the player on turn.
+  MoveList *ml = move_list_create(16384);
+  const MoveGenArgs ga = {
+      .game = g,
+      .move_list = ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&ga);
+  const int n_moves = move_list_get_count(ml);
+  const int turn = game_get_player_on_turn_index(g);
+  const bool our_turn = (turn == s->mover_idx);
+
+  // Build an explicit move-index order, sorted by score descending. The
+  // generator's MOVE_SORT_EQUITY ordering puts pass at index 0; macondo
+  // sorts replies by score before iterating, so we mirror that.
+  int *order = malloc_or_die((size_t)n_moves * sizeof(int));
+  for (int i = 0; i < n_moves; i++) order[i] = i;
+  // Selection sort over the top max_opp_k positions (or all when no cap).
+  int cand_n = n_moves;
+  if (!our_turn && s->max_opp_k > 0 && s->max_opp_k < cand_n) {
+    cand_n = s->max_opp_k;
+  }
+  for (int i = 0; i < cand_n; i++) {
+    int best = i;
+    int best_score = (int)equity_to_int(
+        move_get_score(move_list_get_move(ml, order[i])));
+    for (int j = i + 1; j < n_moves; j++) {
+      const int js =
+          (int)equity_to_int(move_get_score(move_list_get_move(ml, order[j])));
+      if (js > best_score) {
+        best = j;
+        best_score = js;
+      }
+    }
+    if (best != i) {
+      const int tmp = order[i];
+      order[i] = order[best];
+      order[best] = tmp;
+    }
+  }
+
+  PegPessOut best_or_worst;
+  if (our_turn) {
+    best_or_worst = PEG_OUT_LOSS;
+  } else {
+    best_or_worst = PEG_OUT_WIN;
+  }
+  bool cutoff = false;
+
+  for (int mi = 0; mi < cand_n; mi++) {
+    const Move *m = move_list_get_move(ml, order[mi]);
+    Game *next = game_duplicate(g);
+    game_set_backup_mode(next, BACKUP_MODE_OFF);
+    play_move(m, next, NULL);
+    game_set_game_end_reason(next, GAME_END_REASON_NONE);
+    Game *saved = s->game;
+    s->game = next;
+    PegPessOut sub = peg_pess_recursive_solve(s);
+    s->game = saved;
+    game_destroy(next);
+
+    if (our_turn) {
+      if (sub > best_or_worst) best_or_worst = sub;
+      if (best_or_worst == PEG_OUT_WIN) {
+        s->n_first_win_cutoffs++;
+        cutoff = true;
+      }
+    } else {
+      if (sub < best_or_worst) best_or_worst = sub;
+      if (best_or_worst == PEG_OUT_LOSS) {
+        s->n_first_loss_cutoffs++;
+        cutoff = true;
+      }
+    }
+    if (cutoff) break;
+  }
+
+  free(order);
+  move_list_destroy(ml);
+  return best_or_worst;
+}
+
+typedef struct PegPessFullAccum {
+  int64_t wins;
+  int64_t losses;
+  int64_t draws;
+  int64_t total;
+} PegPessFullAccum;
+
+// One materialized bag-draw permutation: the ordered tile sequence, its
+// weight (# of distinguishable-tile orderings it represents), and after
+// processing, the recursive solver's outcome.
+typedef struct PegPessOrdering {
+  MachineLetter draw[16];
+  int n;
+  int64_t weight;
+  int opp_top_score;   // pre-computed for sorting (opp's best score after cand)
+  PegPessOut outcome;  // filled in by worker
+} PegPessOrdering;
+
+// Materialize all orderings via the existing enum.
+typedef struct PessMaterializeCtx {
+  PegPessOrdering *orderings;
+  int n_orderings;
+  int capacity;
+} PessMaterializeCtx;
+
+static void peg_pess_materialize_cb(const MachineLetter *draw, int n,
+                                     int64_t weight, void *user) {
+  PessMaterializeCtx *mc = (PessMaterializeCtx *)user;
+  if (mc->n_orderings >= mc->capacity) {
+    log_fatal("pessfull: ordering buffer too small (cap=%d)", mc->capacity);
+  }
+  PegPessOrdering *o = &mc->orderings[mc->n_orderings++];
+  for (int i = 0; i < n; i++) o->draw[i] = draw[i];
+  o->n = n;
+  o->weight = weight;
+  o->opp_top_score = 0;
+  o->outcome = PEG_OUT_DRAW;
+}
+
+// Build the scenario for a given ordering. Caller owns the returned Game.
+static Game *peg_pess_build_scenario(const Game *base_game,
+                                      const PegPessOrdering *o,
+                                      const uint8_t *unseen, int ld_size,
+                                      int opp_idx, const Move *cand) {
+  Game *scenario = game_duplicate(base_game);
+  game_set_backup_mode(scenario, BACKUP_MODE_OFF);
+  Bag *bag = game_get_bag(scenario);
+  for (int ml = 0; ml < ld_size; ml++) {
+    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
+      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
+    }
+  }
+  for (int i = o->n - 1; i >= 0; i--) {
+    bag_add_letter(bag, o->draw[i], 0);
+  }
+  Rack *opp_rack = player_get_rack(game_get_player(scenario, opp_idx));
+  rack_reset(opp_rack);
+  uint8_t leftover[MAX_ALPHABET_SIZE];
+  memcpy(leftover, unseen, (size_t)ld_size);
+  for (int i = 0; i < o->n; i++) leftover[o->draw[i]]--;
+  for (int ml = 0; ml < ld_size; ml++) {
+    for (int k = 0; k < (int)leftover[ml]; k++) {
+      rack_add_letter(opp_rack, (MachineLetter)ml);
+    }
+  }
+  play_move(cand, scenario, NULL);
+  game_set_game_end_reason(scenario, GAME_END_REASON_NONE);
+  return scenario;
+}
+
+// Per-worker job + state shared by ordering. Each worker also owns its own
+// EndgameCtx + EndgameResults to avoid races inside endgame_solve_inline.
+typedef struct PessJob {
+  const Game *base_game;
+  const Move *cand;
+  const uint8_t *unseen;
+  int ld_size;
+  int mover_idx;
+  int opp_idx;
+  ThreadControl *thread_control;
+  int endgame_plies;
+  double endgame_time;
+  int max_opp_k;
+  PegPessOrdering *ordering;
+  // Per-worker scratch (each worker_idx gets its own slot).
+  EndgameCtx **eg_ctxs;    // length = num_workers + 1 (helper)
+  EndgameResults **eg_results;
+  PegPessSolver *solvers;  // length = num_workers + 1 (helper)
+  int n_worker_slots;
+  // Shared atomic counters for diagnostics.
+  atomic_long *shared_n_solves;
+  atomic_long *shared_n_recursive;
+  atomic_long *shared_n_loss_cutoffs;
+  atomic_long *shared_n_win_cutoffs;
+  PegPessCache *cache;  // shared endgame-state cache (may be NULL)
+} PessJob;
+
+// Map worker_idx → slot. peg_pool hands in worker_idx in
+// [thread_index_offset, thread_index_offset + num_workers); the calling thread
+// uses helper_worker_idx (we map all worker_idxs into the per-worker scratch
+// array with modulo).
+static int peg_pess_worker_slot(const PessJob *j, int worker_idx) {
+  // worker_idxs come from the pool [100, 100+num_workers) or the helper (=0);
+  // map negative or out-of-range to 0.
+  int slot = worker_idx - 100;
+  if (slot < 0 || slot >= j->n_worker_slots) {
+    slot = j->n_worker_slots - 1;  // last slot = helper
+  }
+  return slot;
+}
+
+static void peg_pess_worker_fn(void *arg, int worker_idx) {
+  PessJob *j = (PessJob *)arg;
+  PegPessOrdering *o = j->ordering;
+  const int slot = peg_pess_worker_slot(j, worker_idx);
+  PegPessSolver *solver = &j->solvers[slot];
+  solver->game = NULL;  // will be set per-call
+  solver->mover_idx = j->mover_idx;
+  solver->opp_idx = j->opp_idx;
+  solver->ld_size = j->ld_size;
+  solver->thread_control = j->thread_control;
+  solver->endgame_plies = j->endgame_plies;
+  solver->endgame_time = j->endgame_time;
+  solver->max_opp_k = j->max_opp_k;
+  solver->eg_ctx_p = &j->eg_ctxs[slot];
+  solver->eg_results = j->eg_results[slot];
+  solver->cache = j->cache;
+  solver->n_endgame_solves = 0;
+  solver->n_recursive_calls = 0;
+  solver->n_first_loss_cutoffs = 0;
+  solver->n_first_win_cutoffs = 0;
+
+  Game *scenario = peg_pess_build_scenario(j->base_game, o, j->unseen,
+                                            j->ld_size, j->opp_idx, j->cand);
+  solver->game = scenario;
+  o->outcome = peg_pess_recursive_solve(solver);
+  game_destroy(scenario);
+
+  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
+  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
+  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
+  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
+}
+
+// Pre-compute opp's top-score response for a given ordering. Single-threaded;
+// runs before the parallel solve. Used to sort orderings (hardest first) so
+// that first-loss style cutoffs fire sooner for callers that want them.
+static int peg_pess_compute_opp_top_score(
+    const Game *base_game, const PegPessOrdering *o, const uint8_t *unseen,
+    int ld_size, int opp_idx, const Move *cand) {
+  Game *scenario =
+      peg_pess_build_scenario(base_game, o, unseen, ld_size, opp_idx, cand);
+  MoveList *ml = move_list_create(16384);
+  const MoveGenArgs ga = {
+      .game = scenario,
+      .move_list = ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&ga);
+  int top = 0;
+  const int n = move_list_get_count(ml);
+  for (int i = 0; i < n; i++) {
+    const Move *m = move_list_get_move(ml, i);
+    if (move_get_type(m) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      const int s = (int)equity_to_int(move_get_score(m));
+      if (s > top) top = s;
+    }
+  }
+  move_list_destroy(ml);
+  game_destroy(scenario);
+  return top;
+}
+
+void test_pass_peg_pessimistic_full_eval(void) {
+  const char *cgp = getenv("PASSPEG_PESSFULL_CGP");
+  if (!cgp || !*cgp) log_fatal("PASSPEG_PESSFULL_CGP must be set");
+  const char *move_str = getenv("PASSPEG_PESSFULL_MOVE");
+  if (!move_str || !*move_str) log_fatal("PASSPEG_PESSFULL_MOVE must be set");
+  const char *plies_env = getenv("PASSPEG_PESSFULL_PLIES");
+  const int plies = plies_env && *plies_env ? atoi(plies_env) : 12;
+  const char *time_env = getenv("PASSPEG_PESSFULL_TIME");
+  const double per_solve_time =
+      time_env && *time_env ? atof(time_env) : 5.0;
+  const char *opp_k_env = getenv("PASSPEG_PESSFULL_MAX_OPP_K");
+  const int max_opp_k = opp_k_env && *opp_k_env ? atoi(opp_k_env) : 0;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  char load_cmd[10240];
+  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  load_and_exec_config_or_die(config, load_cmd);
+  Game *game = config_get_game(config);
+
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int opp_idx = 1 - mover_idx;
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  const int bag_size = bag_get_letters(game_get_bag(game));
+
+  uint8_t unseen[MAX_ALPHABET_SIZE] = {0};
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] = (uint8_t)ld_get_dist(ld, ml);
+  }
+  const Rack *mr = player_get_rack(game_get_player(game, mover_idx));
+  for (int ml = 0; ml < ld_size; ml++) {
+    unseen[ml] -= (uint8_t)rack_get_letter(mr, (MachineLetter)ml);
+  }
+  const Board *board = game_get_board(game);
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      MachineLetter on_board = board_get_letter(board, row, col);
+      if (on_board == 0 || on_board == ALPHABET_EMPTY_SQUARE_MARKER) continue;
+      MachineLetter eff =
+          get_is_blanked(on_board) ? BLANK_MACHINE_LETTER : on_board;
+      if (unseen[eff] > 0) unseen[eff]--;
+    }
+  }
+
+  int total_unseen = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    total_unseen += unseen[ml];
+  }
+  if (total_unseen != RACK_SIZE + bag_size) {
+    log_fatal("pessfull: expected %d unseen, got %d", RACK_SIZE + bag_size,
+              total_unseen);
+  }
+
+  ErrorStack *parse_err = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(
+      game, mover_idx, move_str, false, true, parse_err);
+  if (!error_stack_is_empty(parse_err)) {
+    log_fatal("pessfull: failed to parse move %s", move_str);
+  }
+  const Move *move = validated_moves_get_move(vms, 0);
+
+  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  int tile_counts[MAX_ALPHABET_SIZE];
+  int num_types = 0;
+  for (int ml = 0; ml < ld_size; ml++) {
+    if (unseen[ml] > 0) {
+      tile_types[num_types] = (MachineLetter)ml;
+      tile_counts[num_types] = (int)unseen[ml];
+      num_types++;
+    }
+  }
+
+  fprintf(stderr,
+          "[pessfull] move=%s plies=%d soft_time=%.1fs bag=%d unseen=%d "
+          "max_opp_k=%d\n",
+          move_str, plies, per_solve_time, bag_size, total_unseen, max_opp_k);
+
+  const char *threads_env = getenv("PASSPEG_PESSFULL_THREADS");
+  const int n_threads = threads_env && *threads_env ? atoi(threads_env) : 18;
+  const char *sort_env = getenv("PASSPEG_PESSFULL_SORT");
+  const bool do_sort = sort_env && *sort_env ? atoi(sort_env) > 0 : true;
+
+  // Phase 1: materialize all orderings.
+  // Upper bound on count: 10! at worst (4-peg with 11 unseen types). 1M slack.
+  const int cap = 1 << 16;
+  PegPessOrdering *orderings =
+      malloc_or_die((size_t)cap * sizeof(PegPessOrdering));
+  PessMaterializeCtx mc = {.orderings = orderings, .n_orderings = 0, .capacity = cap};
+  Timer t;
+  ctimer_start(&t);
+  MachineLetter draw_buf[16];
+  peg_pess_enum_ordered_draws(tile_types, tile_counts, num_types, bag_size,
+                               draw_buf, 0, /*multiplicity=*/1,
+                               peg_pess_materialize_cb, &mc);
+  fprintf(stderr, "[pessfull] materialized %d orderings (%.2fs)\n",
+          mc.n_orderings, ctimer_elapsed_seconds(&t));
+
+  // Phase 2: optional pre-pass to estimate opp's best response, sort.
+  if (do_sort) {
+    Timer sort_t;
+    ctimer_start(&sort_t);
+    for (int oi = 0; oi < mc.n_orderings; oi++) {
+      orderings[oi].opp_top_score = peg_pess_compute_opp_top_score(
+          game, &orderings[oi], unseen, ld_size, opp_idx, move);
+    }
+    // Sort by opp_top_score desc (insertion sort — fine for <= a few thousand).
+    for (int i = 1; i < mc.n_orderings; i++) {
+      const PegPessOrdering key = orderings[i];
+      int j = i - 1;
+      while (j >= 0 && orderings[j].opp_top_score < key.opp_top_score) {
+        orderings[j + 1] = orderings[j];
+        j--;
+      }
+      orderings[j + 1] = key;
+    }
+    fprintf(stderr, "[pessfull] sorted by opp_top_score (%.2fs); top=%d bottom=%d\n",
+            ctimer_elapsed_seconds(&sort_t),
+            mc.n_orderings > 0 ? orderings[0].opp_top_score : 0,
+            mc.n_orderings > 0 ? orderings[mc.n_orderings - 1].opp_top_score : 0);
+  }
+
+  // Shared endgame-state cache. 2^20 entries × 16 bytes = ~16 MB.
+  const char *cache_env = getenv("PASSPEG_PESSFULL_CACHE");
+  const bool use_cache = !cache_env || atoi(cache_env) > 0;  // default on
+  PegPessCache *cache = use_cache ? peg_pess_cache_create(1u << 20) : NULL;
+
+  // Phase 3: per-worker scratch + parallel solve via peg_pool.
+  PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
+  const int n_slots = n_threads + 1;  // workers + helper
+  EndgameCtx **eg_ctxs = calloc_or_die((size_t)n_slots, sizeof(EndgameCtx *));
+  EndgameResults **eg_results =
+      malloc_or_die((size_t)n_slots * sizeof(EndgameResults *));
+  PegPessSolver *solvers =
+      malloc_or_die((size_t)n_slots * sizeof(PegPessSolver));
+  for (int i = 0; i < n_slots; i++) {
+    eg_results[i] = endgame_results_create();
+  }
+  atomic_long total_solves = ATOMIC_VAR_INIT(0);
+  atomic_long total_recursive = ATOMIC_VAR_INIT(0);
+  atomic_long total_loss_cutoffs = ATOMIC_VAR_INIT(0);
+  atomic_long total_win_cutoffs = ATOMIC_VAR_INIT(0);
+
+  PessJob *jobs = malloc_or_die((size_t)mc.n_orderings * sizeof(PessJob));
+  void **job_ptrs = malloc_or_die((size_t)mc.n_orderings * sizeof(void *));
+  for (int oi = 0; oi < mc.n_orderings; oi++) {
+    jobs[oi] = (PessJob){
+        .base_game = game,
+        .cand = move,
+        .unseen = unseen,
+        .ld_size = ld_size,
+        .mover_idx = mover_idx,
+        .opp_idx = opp_idx,
+        .thread_control = config_get_thread_control(config),
+        .endgame_plies = plies,
+        .endgame_time = per_solve_time,
+        .max_opp_k = max_opp_k,
+        .ordering = &orderings[oi],
+        .eg_ctxs = eg_ctxs,
+        .eg_results = eg_results,
+        .solvers = solvers,
+        .n_worker_slots = n_slots,
+        .shared_n_solves = &total_solves,
+        .shared_n_recursive = &total_recursive,
+        .shared_n_loss_cutoffs = &total_loss_cutoffs,
+        .shared_n_win_cutoffs = &total_win_cutoffs,
+        .cache = cache,
+    };
+    job_ptrs[oi] = &jobs[oi];
+  }
+
+  Timer solve_t;
+  ctimer_start(&solve_t);
+  if (pool) {
+    peg_pool_submit_and_wait(pool, peg_pess_worker_fn, job_ptrs,
+                              mc.n_orderings, /*helper=*/0);
+  } else {
+    for (int oi = 0; oi < mc.n_orderings; oi++) {
+      peg_pess_worker_fn(&jobs[oi], 0);
+    }
+  }
+  const double solve_elapsed = ctimer_elapsed_seconds(&solve_t);
+
+  // Phase 4: aggregate outcomes.
+  PegPessFullAccum acc = {0};
+  for (int oi = 0; oi < mc.n_orderings; oi++) {
+    const PegPessOrdering *o = &orderings[oi];
+    if (o->outcome == PEG_OUT_WIN) {
+      acc.wins += o->weight;
+    } else if (o->outcome == PEG_OUT_LOSS) {
+      acc.losses += o->weight;
+    } else {
+      acc.draws += o->weight;
+    }
+    acc.total += o->weight;
+  }
+
+  const double win_pct =
+      acc.total > 0 ? (double)(acc.wins * 2 + acc.draws) / (2.0 * acc.total)
+                    : 0.0;
+
+  printf("\n=== Pessimistic full eval ===\n");
+  printf("CGP:  %s\n", cgp);
+  printf("Move: %s   plies=%d  threads=%d  sort=%d\n", move_str, plies,
+         n_threads, do_sort ? 1 : 0);
+  printf("W/L/D = %lld/%lld/%lld   total=%lld   win%%=%.4f\n",
+         (long long)acc.wins, (long long)acc.losses, (long long)acc.draws,
+         (long long)acc.total, win_pct);
+  printf("solves=%ld  recursive=%ld  cutoffs(loss=%ld,win=%ld)  solve_wall=%.2fs\n",
+         atomic_load(&total_solves), atomic_load(&total_recursive),
+         atomic_load(&total_loss_cutoffs), atomic_load(&total_win_cutoffs),
+         solve_elapsed);
+  if (cache) {
+    long h = atomic_load(&cache->hits);
+    long m = atomic_load(&cache->misses);
+    long total_lookups = h + m;
+    printf("cache: hits=%ld misses=%ld (hit_rate=%.1f%%)\n", h, m,
+           total_lookups > 0 ? (100.0 * h) / total_lookups : 0.0);
+  }
+
+  for (int i = 0; i < n_slots; i++) {
+    endgame_ctx_destroy(eg_ctxs[i]);
+    endgame_results_destroy(eg_results[i]);
+  }
+  free(eg_ctxs);
+  free(eg_results);
+  free(solvers);
+  free(jobs);
+  free(job_ptrs);
+  free(orderings);
+  peg_pess_cache_destroy(cache);
+  if (pool) peg_pool_destroy(pool);
+  validated_moves_destroy(vms);
+  error_stack_destroy(parse_err);
+  config_destroy(config);
 }

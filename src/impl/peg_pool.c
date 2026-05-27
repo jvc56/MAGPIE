@@ -206,15 +206,19 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
   //
   // PEG_POOL_STUCK_TIMEOUT_S overrides the total no-progress budget
   // (default 60s). Split into 6 iterations, so each timed wake-up is
-  // timeout/6 seconds.
+  // timeout/6 seconds. PEG_POOL_STUCK_TIMEOUT_S=0 disables the watchdog —
+  // the calling thread still helps drain the queue but never aborts.
   const int n_total = n;
   const int debug_on = getenv("PEG_POOL_DEBUG") != NULL;
   const char *to_env = getenv("PEG_POOL_STUCK_TIMEOUT_S");
   int stuck_timeout_s = to_env ? atoi(to_env) : 60;
-  if (stuck_timeout_s < 6) {
+  const bool watchdog_on = stuck_timeout_s > 0;
+  if (watchdog_on && stuck_timeout_s < 6) {
     stuck_timeout_s = 6;
   }
-  const int iter_s = stuck_timeout_s / 6;
+  // Iteration wakeup. When the watchdog is disabled, still wake up periodically
+  // so the help-while-waiting drain stays responsive — every 60s is fine.
+  const int iter_s = watchdog_on ? stuck_timeout_s / 6 : 60;
   int last_logged_pending = -1;
   int stuck_iterations = 0;
   while (true) {
@@ -243,7 +247,7 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
       const int q_count = pool->q_count;
       const bool q_shutdown = pool->shutdown;
       cpthread_mutex_unlock(&pool->q_mutex);
-      if (debug_on || p_after == last_logged_pending) {
+      if (watchdog_on && (debug_on || p_after == last_logged_pending)) {
         stuck_iterations++;
         fprintf(stderr,
                 "[peg_pool WAIT-STUCK] pending=%d/%d, q_count=%d, "
@@ -253,7 +257,7 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
         fflush(stderr);
       }
       last_logged_pending = p_after;
-      if (stuck_iterations >= 6) {
+      if (watchdog_on && stuck_iterations >= 6) {
         fprintf(stderr,
                 "[peg_pool FATAL] deadlock detected: pending=%d/%d,"
                 " q_count=%d, no progress for %ds\n",
