@@ -1737,7 +1737,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "none";
       examples[1] = "ansi";
       examples[2] = "xterm";
-      examples[3] = "truecolour";
+      examples[3] = "truecolor";
       text = "Specifies the color of the board.";
       break;
     case ARG_TOKEN_BOARD_TILE_GLYPHS:
