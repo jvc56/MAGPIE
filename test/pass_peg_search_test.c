@@ -7009,6 +7009,10 @@ typedef struct PegPessSolver {
   int endgame_plies;
   double endgame_time;
   int max_opp_k;            // 0 = no cap
+  bool nested_our_turn;     // imperfect-info mover at mid-bag nodes
+  int nested_depth_limit;   // -1 = unbounded; 0 = no nesting; 1 = first only; ...
+  int nested_depth;         // current nested-recursion depth
+  int nested_mover_k;       // cap on mover cand enumeration inside nested (0 = no cap)
   EndgameCtx **eg_ctx_p;    // caller-owned slot; endgame_solve_inline may alloc
   EndgameResults *eg_results;
   PegPessCache *cache;      // shared across workers; NULL = disabled
@@ -7016,6 +7020,7 @@ typedef struct PegPessSolver {
   int64_t n_recursive_calls;
   int64_t n_first_loss_cutoffs;
   int64_t n_first_win_cutoffs;
+  int64_t n_nested_calls;   // diagnostic
 } PegPessSolver;
 
 static PegPessCache *peg_pess_cache_create(size_t cap_request) {
@@ -7192,6 +7197,127 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   return out;
 }
 
+// State for nested-our-turn enumeration: counts wins/draws per mover cand
+// across all consistent (alt_opp_rack, alt_bag) splits of the unseen multiset.
+typedef struct NestedCandTally {
+  int64_t score;      // 2 * wins + draws (so we can compare ints)
+} NestedCandTally;
+
+typedef struct NestedCtx {
+  PegPessSolver *s;
+  const Game *base_state;  // current actual position (before nested pick)
+  // Cands to score (move-list indices into `ml`).
+  MoveList *ml;
+  const int *order;
+  int n_cands;
+  NestedCandTally *tallies;
+  // Setup support.
+  const uint8_t *unseen;   // multiset (opp_rack + bag), size ld_size
+  int opp_idx;
+  int mover_idx;
+  int ld_size;
+} NestedCtx;
+
+// For each (alt_opp_rack, alt_bag) split: for each cand, set up alt-state,
+// apply cand, recursive_solve, tally.
+static void peg_pess_nested_eval_split(const MachineLetter *bag_draw, int n,
+                                        int64_t weight, void *user) {
+  NestedCtx *nc = (NestedCtx *)user;
+  PegPessSolver *s = nc->s;
+  // Build alt-state: clone current actual, then replace bag + opp_rack.
+  for (int ci = 0; ci < nc->n_cands; ci++) {
+    Game *alt = game_duplicate(nc->base_state);
+    game_set_backup_mode(alt, BACKUP_MODE_OFF);
+    Bag *bag = game_get_bag(alt);
+    for (int ml_i = 0; ml_i < nc->ld_size; ml_i++) {
+      while (bag_get_letter(bag, (MachineLetter)ml_i) > 0) {
+        (void)bag_draw_letter(bag, (MachineLetter)ml_i, 0);
+      }
+    }
+    for (int i = n - 1; i >= 0; i--) {
+      bag_add_letter(bag, bag_draw[i], 0);
+    }
+    Rack *opp_rack = player_get_rack(game_get_player(alt, nc->opp_idx));
+    rack_reset(opp_rack);
+    uint8_t leftover[MAX_ALPHABET_SIZE];
+    memcpy(leftover, nc->unseen, (size_t)nc->ld_size);
+    for (int i = 0; i < n; i++) leftover[bag_draw[i]]--;
+    for (int ml_i = 0; ml_i < nc->ld_size; ml_i++) {
+      for (int k = 0; k < (int)leftover[ml_i]; k++) {
+        rack_add_letter(opp_rack, (MachineLetter)ml_i);
+      }
+    }
+    const Move *m = move_list_get_move(nc->ml, nc->order[ci]);
+    play_move(m, alt, NULL);
+    game_set_game_end_reason(alt, GAME_END_REASON_NONE);
+    Game *saved = s->game;
+    s->game = alt;
+    PegPessOut out = peg_pess_recursive_solve(s);
+    s->game = saved;
+    game_destroy(alt);
+    if (out == PEG_OUT_WIN) {
+      nc->tallies[ci].score += 2 * weight;
+    } else if (out == PEG_OUT_DRAW) {
+      nc->tallies[ci].score += weight;
+    }
+  }
+}
+
+// Returns the index (into the order[] / move-list space) of the cand mover
+// would pick under imperfect info — the cand with the highest score across
+// all consistent splits of the unseen multiset.
+static int peg_pess_nested_pick_cand(PegPessSolver *s, MoveList *ml,
+                                      const int *order, int n_cands) {
+  s->n_nested_calls++;
+  Game *g = s->game;
+  const Rack *opp_r = player_get_rack(game_get_player(g, s->opp_idx));
+  Bag *bag = game_get_bag(g);
+  const int bag_size = bag_get_letters(bag);
+
+  uint8_t unseen[MAX_ALPHABET_SIZE] = {0};
+  for (int ml_i = 0; ml_i < s->ld_size; ml_i++) {
+    unseen[ml_i] = rack_get_letter(opp_r, ml_i) +
+                   bag_get_letter(bag, (MachineLetter)ml_i);
+  }
+  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  int tile_counts[MAX_ALPHABET_SIZE];
+  int num_types = 0;
+  for (int ml_i = 0; ml_i < s->ld_size; ml_i++) {
+    if (unseen[ml_i] > 0) {
+      tile_types[num_types] = (MachineLetter)ml_i;
+      tile_counts[num_types] = (int)unseen[ml_i];
+      num_types++;
+    }
+  }
+
+  NestedCtx nc = {
+      .s = s,
+      .base_state = g,
+      .ml = ml,
+      .order = order,
+      .n_cands = n_cands,
+      .tallies = calloc_or_die((size_t)n_cands, sizeof(NestedCandTally)),
+      .unseen = unseen,
+      .opp_idx = s->opp_idx,
+      .mover_idx = s->mover_idx,
+      .ld_size = s->ld_size,
+  };
+
+  MachineLetter draw_buf[16];
+  peg_pess_enum_ordered_draws(tile_types, tile_counts, num_types, bag_size,
+                               draw_buf, 0, /*multiplicity=*/1,
+                               peg_pess_nested_eval_split, &nc);
+
+  int best = 0;
+  for (int i = 1; i < n_cands; i++) {
+    if (nc.tallies[i].score > nc.tallies[best].score) {
+      best = i;
+    }
+  }
+  free(nc.tallies);
+  return best;
+}
+
 // Recursively solve from the current game state.
 static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   Game *g = s->game;
@@ -7247,6 +7373,39 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
       order[i] = order[best];
       order[best] = tmp;
     }
+  }
+
+  // Imperfect-info our-turn: mover doesn't know which tiles are in the bag.
+  // Pick the cand that wins most across consistent splits of the unseen
+  // multiset, then return that cand's outcome at the ACTUAL bag. Bounded by
+  // nested_depth_limit (-1 = unbounded; 0 = disabled; N = only at depths < N).
+  const bool nested_eligible =
+      our_turn && s->nested_our_turn &&
+      (s->nested_depth_limit < 0 ||
+       s->nested_depth < s->nested_depth_limit);
+  if (nested_eligible) {
+    // Cap mover cand enumeration inside nested if requested.
+    int nested_cand_n = cand_n;
+    if (s->nested_mover_k > 0 && s->nested_mover_k < nested_cand_n) {
+      nested_cand_n = s->nested_mover_k;
+    }
+    s->nested_depth++;
+    const int picked =
+        peg_pess_nested_pick_cand(s, ml, order, nested_cand_n);
+    s->nested_depth--;
+    const Move *m = move_list_get_move(ml, order[picked]);
+    Game *next = game_duplicate(g);
+    game_set_backup_mode(next, BACKUP_MODE_OFF);
+    play_move(m, next, NULL);
+    game_set_game_end_reason(next, GAME_END_REASON_NONE);
+    Game *saved = s->game;
+    s->game = next;
+    PegPessOut out = peg_pess_recursive_solve(s);
+    s->game = saved;
+    game_destroy(next);
+    free(order);
+    move_list_destroy(ml);
+    return out;
   }
 
   PegPessOut best_or_worst;
@@ -7384,7 +7543,11 @@ typedef struct PessJob {
   atomic_long *shared_n_recursive;
   atomic_long *shared_n_loss_cutoffs;
   atomic_long *shared_n_win_cutoffs;
+  atomic_long *shared_n_nested_calls;
   PegPessCache *cache;  // shared endgame-state cache (may be NULL)
+  bool nested_our_turn;
+  int nested_depth_limit;
+  int nested_mover_k;
 } PessJob;
 
 // Map worker_idx → slot. peg_pool hands in worker_idx in
@@ -7414,6 +7577,10 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->endgame_plies = j->endgame_plies;
   solver->endgame_time = j->endgame_time;
   solver->max_opp_k = j->max_opp_k;
+  solver->nested_our_turn = j->nested_our_turn;
+  solver->nested_depth_limit = j->nested_depth_limit;
+  solver->nested_depth = 0;
+  solver->nested_mover_k = j->nested_mover_k;
   solver->eg_ctx_p = &j->eg_ctxs[slot];
   solver->eg_results = j->eg_results[slot];
   solver->cache = j->cache;
@@ -7421,6 +7588,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->n_recursive_calls = 0;
   solver->n_first_loss_cutoffs = 0;
   solver->n_first_win_cutoffs = 0;
+  solver->n_nested_calls = 0;
 
   Game *scenario = peg_pess_build_scenario(j->base_game, o, j->unseen,
                                             j->ld_size, j->opp_idx, j->cand);
@@ -7432,6 +7600,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
   atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
   atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
+  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
 }
 
 // Pre-compute opp's top-score response for a given ordering. Single-threaded;
@@ -7550,6 +7719,15 @@ void test_pass_peg_pessimistic_full_eval(void) {
   const int n_threads = threads_env && *threads_env ? atoi(threads_env) : 18;
   const char *sort_env = getenv("PASSPEG_PESSFULL_SORT");
   const bool do_sort = sort_env && *sort_env ? atoi(sort_env) > 0 : true;
+  const char *nested_env = getenv("PASSPEG_PESSFULL_NESTED");
+  const bool nested_our_turn =
+      nested_env && *nested_env ? atoi(nested_env) > 0 : false;
+  const char *nested_depth_env = getenv("PASSPEG_PESSFULL_NESTED_DEPTH");
+  const int nested_depth_limit =
+      nested_depth_env && *nested_depth_env ? atoi(nested_depth_env) : 1;
+  const char *nested_k_env = getenv("PASSPEG_PESSFULL_NESTED_K");
+  const int nested_mover_k =
+      nested_k_env && *nested_k_env ? atoi(nested_k_env) : 20;
 
   // Phase 1: materialize all orderings.
   // Upper bound on count: 10! at worst (4-peg with 11 unseen types). 1M slack.
@@ -7610,6 +7788,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   atomic_long total_recursive = ATOMIC_VAR_INIT(0);
   atomic_long total_loss_cutoffs = ATOMIC_VAR_INIT(0);
   atomic_long total_win_cutoffs = ATOMIC_VAR_INIT(0);
+  atomic_long total_nested_calls = ATOMIC_VAR_INIT(0);
 
   PessJob *jobs = malloc_or_die((size_t)mc.n_orderings * sizeof(PessJob));
   void **job_ptrs = malloc_or_die((size_t)mc.n_orderings * sizeof(void *));
@@ -7634,7 +7813,11 @@ void test_pass_peg_pessimistic_full_eval(void) {
         .shared_n_recursive = &total_recursive,
         .shared_n_loss_cutoffs = &total_loss_cutoffs,
         .shared_n_win_cutoffs = &total_win_cutoffs,
+        .shared_n_nested_calls = &total_nested_calls,
         .cache = cache,
+        .nested_our_turn = nested_our_turn,
+        .nested_depth_limit = nested_depth_limit,
+        .nested_mover_k = nested_mover_k,
     };
     job_ptrs[oi] = &jobs[oi];
   }
@@ -7671,15 +7854,16 @@ void test_pass_peg_pessimistic_full_eval(void) {
 
   printf("\n=== Pessimistic full eval ===\n");
   printf("CGP:  %s\n", cgp);
-  printf("Move: %s   plies=%d  threads=%d  sort=%d\n", move_str, plies,
-         n_threads, do_sort ? 1 : 0);
+  printf("Move: %s   plies=%d  threads=%d  sort=%d  nested=%d (depth_limit=%d, mover_k=%d)\n",
+         move_str, plies, n_threads, do_sort ? 1 : 0,
+         nested_our_turn ? 1 : 0, nested_depth_limit, nested_mover_k);
   printf("W/L/D = %lld/%lld/%lld   total=%lld   win%%=%.4f\n",
          (long long)acc.wins, (long long)acc.losses, (long long)acc.draws,
          (long long)acc.total, win_pct);
-  printf("solves=%ld  recursive=%ld  cutoffs(loss=%ld,win=%ld)  solve_wall=%.2fs\n",
+  printf("solves=%ld  recursive=%ld  cutoffs(loss=%ld,win=%ld)  nested_calls=%ld  solve_wall=%.2fs\n",
          atomic_load(&total_solves), atomic_load(&total_recursive),
          atomic_load(&total_loss_cutoffs), atomic_load(&total_win_cutoffs),
-         solve_elapsed);
+         atomic_load(&total_nested_calls), solve_elapsed);
   if (cache) {
     long h = atomic_load(&cache->hits);
     long m = atomic_load(&cache->misses);
