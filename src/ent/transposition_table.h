@@ -77,10 +77,11 @@ typedef struct TranspositionTable {
   int size_power_of_2;
   uint64_t size_mask;
   Zobrist *zobrist;
-  atomic_int created;
-  atomic_int hits;
-  atomic_int lookups;
-  atomic_int t2_collisions;
+  // 64-bit counters: long-running solves (hours) exceed INT_MAX lookups.
+  atomic_llong created;
+  atomic_llong hits;
+  atomic_llong lookups;
+  atomic_llong t2_collisions;
 } TranspositionTable;
 
 static inline TranspositionTable *

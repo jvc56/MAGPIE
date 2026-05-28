@@ -22,6 +22,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/ent/move_undo.h"
+#include "../src/ent/transposition_table.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
@@ -5864,11 +5865,13 @@ void test_pass_peg_greedy_bench(void) {
         }
         if (cand_shared_eg_tt) {
           if (getenv("PASSPEG_OPP_POV_CACHE_STATS")) {
-            const int tt_created = atomic_load(&cand_shared_eg_tt->created);
-            const int tt_lookups = atomic_load(&cand_shared_eg_tt->lookups);
-            const int tt_hits = atomic_load(&cand_shared_eg_tt->hits);
+            const long long tt_created =
+                atomic_load(&cand_shared_eg_tt->created);
+            const long long tt_lookups =
+                atomic_load(&cand_shared_eg_tt->lookups);
+            const long long tt_hits = atomic_load(&cand_shared_eg_tt->hits);
             fprintf(stderr,
-                    "[shared_eg_tt] %s: created=%d lookups=%d hits=%d "
+                    "[shared_eg_tt] %s: created=%lld lookups=%lld hits=%lld "
                     "(%.1f%% hit rate)\n",
                     cand_txt, tt_created, tt_lookups, tt_hits,
                     tt_lookups > 0 ? tt_hits * 100.0 / tt_lookups : 0.0);
@@ -7015,6 +7018,7 @@ typedef struct PegPessSolver {
   int endgame_plies;
   double endgame_time;
   double tt_fraction_of_mem;  // per-worker endgame TT size (0 = disabled)
+  TranspositionTable *shared_tt;  // if set, all workers share this TT
   int max_opp_k;            // 0 = no cap
   bool nested_our_turn;     // imperfect-info mover at mid-bag nodes
   int nested_depth_limit;   // -1 = unbounded; 0 = no nesting; 1 = first only; ...
@@ -7180,10 +7184,11 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       .thread_control = s->thread_control,
       .game = scratch,
       .plies = s->endgame_plies,
-      .shared_tt = NULL,
-      // Per-worker TT: each eg_ctx slot retains its own TT across calls (see
-      // endgame.c:651-668). Same fraction every call → no destroy/recreate.
-      .tt_fraction_of_mem = s->tt_fraction_of_mem,
+      // If a shared TT is provided, all workers use it (lockless Hyatt-XOR,
+      // so concurrent access is safe). Otherwise fall back to a per-worker TT
+      // sized by tt_fraction_of_mem (0 = no TT). shared_tt wins when both set.
+      .shared_tt = s->shared_tt,
+      .tt_fraction_of_mem = s->shared_tt ? 0.0 : s->tt_fraction_of_mem,
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
       .num_threads = 1,
       .use_heuristics = true,
@@ -7807,6 +7812,7 @@ typedef struct PessJob {
   int endgame_plies;
   double endgame_time;
   double tt_fraction_of_mem;
+  TranspositionTable *shared_tt;  // if set, all workers share this TT
   int max_opp_k;
   PegPessOrdering *ordering;  // start of contiguous slice this job owns
   int n_orderings;            // 1 = single, >1 = group of consecutive orderings
@@ -7863,6 +7869,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->endgame_plies = j->endgame_plies;
   solver->endgame_time = j->endgame_time;
   solver->tt_fraction_of_mem = j->tt_fraction_of_mem;
+  solver->shared_tt = j->shared_tt;
   solver->max_opp_k = j->max_opp_k;
   solver->nested_our_turn = j->nested_our_turn;
   solver->nested_depth_limit = j->nested_depth_limit;
@@ -7977,12 +7984,21 @@ void test_pass_peg_pessimistic_full_eval(void) {
       time_env && *time_env ? atof(time_env) : 5.0;
   const char *opp_k_env = getenv("PASSPEG_PESSFULL_MAX_OPP_K");
   const int max_opp_k = opp_k_env && *opp_k_env ? atoi(opp_k_env) : 0;
-  // Per-worker endgame TT size in MB. Default 1024 MB. 0 = disabled.
+  // Endgame TT size in MB. Default 1024 MB. 0 = disabled.
   const char *tt_env = getenv("PASSPEG_PESSFULL_TT_MB");
   const int tt_mb = tt_env && *tt_env ? atoi(tt_env) : 1024;
   const uint64_t total_mem = get_total_memory();
   const double tt_fraction_of_mem =
       tt_mb > 0 ? ((double)tt_mb * 1024.0 * 1024.0) / (double)total_mem : 0.0;
+  // PASSPEG_PESSFULL_TT_SHARED: when set, allocate ONE TT of tt_mb total and
+  // share it across all workers (lockless). Otherwise each worker gets its
+  // own tt_mb-sized TT. Shared captures cross-ordering reuse without tying
+  // it to worker assignment, so per-ordering dispatch stays load-balanced.
+  const char *tt_shared_env = getenv("PASSPEG_PESSFULL_TT_SHARED");
+  const bool tt_shared = tt_shared_env && atoi(tt_shared_env) > 0;
+  TranspositionTable *shared_tt =
+      (tt_shared && tt_mb > 0) ? transposition_table_create(tt_fraction_of_mem)
+                               : NULL;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
@@ -8045,9 +8061,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
 
   fprintf(stderr,
           "[pessfull] move=%s plies=%d soft_time=%.1fs bag=%d unseen=%d "
-          "max_opp_k=%d tt_mb=%d (frac=%.6f)\n",
+          "max_opp_k=%d tt_mb=%d (frac=%.6f) tt_mode=%s\n",
           move_str, plies, per_solve_time, bag_size, total_unseen, max_opp_k,
-          tt_mb, tt_fraction_of_mem);
+          tt_mb, tt_fraction_of_mem,
+          shared_tt ? "shared" : (tt_mb > 0 ? "per-worker" : "off"));
 
   const char *threads_env = getenv("PASSPEG_PESSFULL_THREADS");
   const int n_threads = threads_env && *threads_env ? atoi(threads_env) : 18;
@@ -8200,7 +8217,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .ld_size = ld_size, .mover_idx = mover_idx, .opp_idx = opp_idx,
             .thread_control = config_get_thread_control(config),
             .endgame_plies = plies, .endgame_time = per_solve_time,
-            .tt_fraction_of_mem = tt_fraction_of_mem,
+            .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
             .n_orderings = slice_n, .eg_ctxs = eg_ctxs,
             .eg_results = eg_results, .solvers = solvers,
@@ -8238,7 +8255,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .ld_size = ld_size, .mover_idx = mover_idx, .opp_idx = opp_idx,
           .thread_control = config_get_thread_control(config),
           .endgame_plies = plies, .endgame_time = per_solve_time,
-          .tt_fraction_of_mem = tt_fraction_of_mem,
+          .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
           .n_orderings = 1, .eg_ctxs = eg_ctxs,
           .eg_results = eg_results, .solvers = solvers,
@@ -8328,7 +8345,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   printf("\nper-worker telemetry (slot/orderings/recursive/solves/nested/busy_s/TT_hits/TT_lookups/TT_hit_rate):\n");
   for (int i = 0; i < n_slots; i++) {
     if (pw_orderings[i] == 0 && i != n_slots - 1) continue;
-    int tt_hits = -1, tt_lookups = -1;
+    long long tt_hits = -1, tt_lookups = -1;
     double tt_hr = 0.0;
     if (eg_ctxs[i]) {
       const TranspositionTable *tt =
@@ -8336,7 +8353,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
       if (tt) {
         tt_hits = atomic_load(&((TranspositionTable *)tt)->hits);
         tt_lookups = atomic_load(&((TranspositionTable *)tt)->lookups);
-        if (tt_lookups > 0) tt_hr = (100.0 * tt_hits) / tt_lookups;
+        if (tt_lookups > 0) tt_hr = (100.0 * (double)tt_hits) / (double)tt_lookups;
       }
     }
     printf("  slot=%-3d ord=%-4lld rec=%-9lld solves=%-8lld nested=%-7lld busy=%.2fs",
@@ -8344,11 +8361,18 @@ void test_pass_peg_pessimistic_full_eval(void) {
            (long long)pw_solves[i], (long long)pw_nested[i],
            (double)pw_busy_ns[i] / 1e9);
     if (tt_hits >= 0) {
-      printf(" tt_hits=%d tt_lookups=%d hr=%.1f%%", tt_hits, tt_lookups, tt_hr);
+      printf(" tt_hits=%lld tt_lookups=%lld hr=%.1f%%", tt_hits, tt_lookups,
+             tt_hr);
     } else {
       printf(" tt=disabled");
     }
     printf("\n");
+  }
+  if (shared_tt) {
+    const long long h = atomic_load(&shared_tt->hits);
+    const long long l = atomic_load(&shared_tt->lookups);
+    printf("shared-TT: hits=%lld lookups=%lld (hit_rate=%.1f%%)\n", h, l,
+           l > 0 ? (100.0 * (double)h) / (double)l : 0.0);
   }
 
   for (int i = 0; i < n_slots; i++) {
@@ -8366,6 +8390,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   free(orderings);
   peg_pess_cache_destroy(cache);
   peg_nested_cache_destroy(nested_cache);
+  if (shared_tt) transposition_table_destroy(shared_tt);
   free(pw_orderings);
   free(pw_solves);
   free(pw_recursive);
