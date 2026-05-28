@@ -32,6 +32,21 @@ int bag_get_letters(const Bag *bag) {
   return bag->end_tile_index - bag->start_tile_index;
 }
 
+int bag_peek_tiles(const Bag *bag, MachineLetter *out) {
+  const int n = bag->end_tile_index - bag->start_tile_index;
+  for (int i = 0; i < n; i++) {
+    out[i] = bag->letters[bag->start_tile_index + i];
+  }
+  return n;
+}
+
+int bag_get_start_cursor(const Bag *bag) { return bag->start_tile_index; }
+int bag_get_end_cursor(const Bag *bag) { return bag->end_tile_index; }
+void bag_set_cursors(Bag *bag, int start, int end) {
+  bag->start_tile_index = start;
+  bag->end_tile_index = end;
+}
+
 void bag_shuffle(Bag *bag) {
   int tiles_remaining = bag_get_letters(bag);
   if (tiles_remaining > 1) {

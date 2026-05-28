@@ -19,6 +19,21 @@ int bag_get_letters(const Bag *bag);
 int bag_get_letter(const Bag *bag, MachineLetter ml);
 bool bag_is_empty(const Bag *bag);
 
+// Copies the bag's ordered tile content into `out`, returning the number of
+// tiles. `out` must be at least bag_get_letters(bag) in length. Order matches
+// the bag's internal layout: out[0] is the tile player 1 (start side) would
+// draw next; out[bag_get_letters(bag)-1] is the tile player 0 (end side)
+// would draw next.
+int bag_peek_tiles(const Bag *bag, MachineLetter *out);
+
+// Cursor accessors for incremental play/unplay. The cursor is the pair of
+// (start_tile_index, end_tile_index); together they define the live window of
+// bag->letters. Saving and restoring the cursor undoes any sequence of draws
+// that did not mutate bag->letters (i.e. bag_draw_random_letter).
+int bag_get_start_cursor(const Bag *bag);
+int bag_get_end_cursor(const Bag *bag);
+void bag_set_cursors(Bag *bag, int start, int end);
+
 void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 

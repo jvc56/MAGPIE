@@ -747,8 +747,17 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
 
     player_add_to_score(player_on_turn, move_get_score(move));
 
-    // Note: No tile drawing needed - incremental play/unplay is only used
-    // during endgame when the bag is empty.
+    // Save bag cursor and (when bag is non-empty) refill the rack. At empty
+    // bag this collapses to a no-op so existing endgame call sites are
+    // bit-for-bit unchanged. bag_draw_random_letter (used by
+    // draw_to_full_rack) only advances cursors without mutating
+    // bag->letters, so saving the cursors is sufficient for unplay.
+    Bag *bag = game_get_bag(game);
+    undo->old_bag_start_cursor = bag_get_start_cursor(bag);
+    undo->old_bag_end_cursor = bag_get_end_cursor(bag);
+    if (!bag_is_empty(bag)) {
+      draw_to_full_rack(game, undo->player_on_turn_index);
+    }
 
     if (rack_is_empty(player_on_turn_rack)) {
       const LetterDistribution *ld = game_get_ld(game);
@@ -795,8 +804,10 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo) {
   player_set_score(game_get_player(game, 0), undo->old_scores[0]);
   player_set_score(game_get_player(game, 1), undo->old_scores[1]);
 
-  // Note: No bag state restoration needed - incremental play/unplay is only
-  // used during endgame when the bag is empty.
+  // Restore bag cursors saved by play_move_incremental. At empty bag this is
+  // a same-value write — no-op for existing endgame call sites.
+  Bag *bag = game_get_bag(game);
+  bag_set_cursors(bag, undo->old_bag_start_cursor, undo->old_bag_end_cursor);
 
   // Restore board
   Board *board = game_get_board(game);

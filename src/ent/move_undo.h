@@ -49,6 +49,12 @@ typedef struct MoveUndo {
   int old_consecutive_scoreless_turns;
   game_end_reason_t old_game_end_reason;
 
+  // Bag cursor state (start_tile_index, end_tile_index) saved before any
+  // draws so unplay can rewind them. Valid only when play_move_incremental
+  // is called with a non-empty bag; harmless to save at empty bag.
+  int old_bag_start_cursor;
+  int old_bag_end_cursor;
+
   // Minimal move info for lazy cross-set updates
   // Only valid if tiles were placed (not pass/exchange)
   uint8_t move_row_start;
