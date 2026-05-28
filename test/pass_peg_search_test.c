@@ -7033,6 +7033,10 @@ typedef struct PegPessSolver {
   // expected max recursion depth.
   MoveList *ml_pool[16];
   int ml_pool_count;
+  // Reusable scratch game for endgame_solve at the base case. Allocated once
+  // per worker (lazily), refreshed with game_copy each solve — avoids a
+  // game_duplicate/game_destroy per leaf (hundreds of thousands on big runs).
+  Game *eg_scratch;
   int64_t n_endgame_solves;
   int64_t n_recursive_calls;
   int64_t n_first_loss_cutoffs;
@@ -7174,12 +7178,19 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
     }
   }
 
-  // Bag empty, game still on. Run endgame_solve on a duplicate — that call
-  // dirties the game's backup stack, so without copying we'd leak backup
-  // depth across recursive returns and eventually segfault in game_backup.
-  Game *scratch = game_duplicate(g);
+  // Bag empty, game still on. endgame_solve_inline works off its own internal
+  // worker game copy and only reads our input as a template, but we still
+  // isolate it from the live recursion game `g` via a scratch copy. Reuse a
+  // per-worker scratch (game_copy = memcpy-ish) instead of game_duplicate so
+  // we don't malloc/free a whole Game per leaf. game_copy already resets
+  // backup_mode to OFF.
+  if (!s->eg_scratch) {
+    s->eg_scratch = game_duplicate(g);  // one-time structural alloc per worker
+  } else {
+    game_copy(s->eg_scratch, g);
+  }
+  Game *scratch = s->eg_scratch;
   game_set_endgame_solving_mode(scratch);
-  game_set_backup_mode(scratch, BACKUP_MODE_OFF);
   EndgameArgs ea = {
       .thread_control = s->thread_control,
       .game = scratch,
@@ -7210,7 +7221,8 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       equity_to_int(player_get_score(game_get_player(scratch, s->opp_idx)));
   const int32_t mover_total =
       (turn == s->mover_idx) ? mover_lead + eg_val : mover_lead - eg_val;
-  game_destroy(scratch);
+  // No game_destroy: scratch is the reused per-worker eg_scratch, freed at
+  // teardown.
   const PegPessOut out = peg_pess_classify_spread(mover_total);
   if (s->cache) {
     peg_pess_cache_store(s->cache, cache_key, out);
@@ -8381,6 +8393,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
     for (int p = 0; p < solvers[i].ml_pool_count; p++) {
       move_list_destroy(solvers[i].ml_pool[p]);
     }
+    if (solvers[i].eg_scratch) game_destroy(solvers[i].eg_scratch);
   }
   free(eg_ctxs);
   free(eg_results);
