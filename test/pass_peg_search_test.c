@@ -7734,6 +7734,40 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
   return verdict;
 }
 
+// Fill order[0..n_moves-1] with move indices sorted descending by the turn's
+// ordering key (peg_pess_opp_sort_key; mover_sort_mode on our turn, opp_sort_
+// mode on opp turn). Returns cand_n = the number of candidates to consider
+// (max_opp_k cap on opp turns, else all). Shared by recursive_solve and the
+// opp-split worker so their candidate ordering can never diverge.
+static int peg_pess_sort_order(const PegPessSolver *s, const MoveList *ml,
+                               int n_moves, bool our_turn, int *order) {
+  for (int i = 0; i < n_moves; i++) order[i] = i;
+  int cand_n = n_moves;
+  if (!our_turn && s->max_opp_k > 0 && s->max_opp_k < cand_n) {
+    cand_n = s->max_opp_k;
+  }
+  const int sort_mode = our_turn ? s->mover_sort_mode : s->opp_sort_mode;
+  for (int i = 0; i < cand_n; i++) {
+    int best = i;
+    int64_t best_key =
+        peg_pess_opp_sort_key(move_list_get_move(ml, order[i]), sort_mode);
+    for (int j = i + 1; j < n_moves; j++) {
+      const int64_t kj =
+          peg_pess_opp_sort_key(move_list_get_move(ml, order[j]), sort_mode);
+      if (kj > best_key) {
+        best = j;
+        best_key = kj;
+      }
+    }
+    if (best != i) {
+      const int tmp = order[i];
+      order[i] = order[best];
+      order[best] = tmp;
+    }
+  }
+  return cand_n;
+}
+
 // Recursively solve from the current game state.
 static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   Game *g = s->game;
@@ -7769,36 +7803,11 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   const int turn = game_get_player_on_turn_index(g);
   const bool our_turn = (turn == s->mover_idx);
 
-  // Build an explicit move-index order, sorted descending by the chosen key
-  // (peg_pess_opp_sort_key). our-turn uses mover_sort_mode, opp-turn uses
-  // opp_sort_mode. Default mode 0 = score (macondo parity). Ordering only
-  // affects cutoff/leaf-reach timing, never the W/L/D verdict.
+  // Build an explicit move-index order, sorted descending by the turn's key.
+  // Shared with the opp-split worker via peg_pess_sort_order so candidate
+  // ordering can never diverge between the two paths.
   int *order = malloc_or_die((size_t)n_moves * sizeof(int));
-  for (int i = 0; i < n_moves; i++) order[i] = i;
-  // Selection sort over the top max_opp_k positions (or all when no cap).
-  int cand_n = n_moves;
-  if (!our_turn && s->max_opp_k > 0 && s->max_opp_k < cand_n) {
-    cand_n = s->max_opp_k;
-  }
-  const int sort_mode = our_turn ? s->mover_sort_mode : s->opp_sort_mode;
-  for (int i = 0; i < cand_n; i++) {
-    int best = i;
-    int64_t best_key =
-        peg_pess_opp_sort_key(move_list_get_move(ml, order[i]), sort_mode);
-    for (int j = i + 1; j < n_moves; j++) {
-      const int64_t kj =
-          peg_pess_opp_sort_key(move_list_get_move(ml, order[j]), sort_mode);
-      if (kj > best_key) {
-        best = j;
-        best_key = kj;
-      }
-    }
-    if (best != i) {
-      const int tmp = order[i];
-      order[i] = order[best];
-      order[best] = tmp;
-    }
-  }
+  const int cand_n = peg_pess_sort_order(s, ml, n_moves, our_turn, order);
 
   // Imperfect-info our-turn: mover doesn't know which tiles are in the bag.
   // Pick the cand that wins most across consistent splits of the unseen
