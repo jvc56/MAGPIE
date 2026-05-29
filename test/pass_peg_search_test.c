@@ -7952,6 +7952,37 @@ static Game *peg_pess_build_scenario(const Game *base_game,
   return scenario;
 }
 
+// Solver-scratch arena. Decouples scratch (solver state, eg_ctx, eg_results,
+// ml_pool, eg_scratch) from worker_idx so a task can acquire a FRESH slot on
+// entry and release on exit. This is the safety foundation for recursive
+// splitting: the pool's help-while-waiting means a worker can run a nested
+// task while its own frame is suspended — both must use DIFFERENT scratch, or
+// they corrupt each other. Acquiring per-task (not per-pthread) guarantees
+// that. Slots' ml_pool/eg_scratch persist across acquisitions (reused scratch);
+// per-task counters are reset by the caller. Sized larger than the max number
+// of concurrently-active tasks (n_threads * (fork_depth+1) + margin).
+typedef struct PessSlotArena {
+  int n_slots;
+  int *free_stack;   // indices of currently-free slots
+  int free_top;      // count of free slots on the stack
+  cpthread_mutex_t mutex;
+} PessSlotArena;
+
+// Returns a free slot index, or -1 if exhausted (caller must handle; sizing
+// should make this impossible for the configured fork depth).
+static int pess_arena_acquire(PessSlotArena *a) {
+  cpthread_mutex_lock(&a->mutex);
+  const int idx = (a->free_top > 0) ? a->free_stack[--a->free_top] : -1;
+  cpthread_mutex_unlock(&a->mutex);
+  return idx;
+}
+
+static void pess_arena_release(PessSlotArena *a, int idx) {
+  cpthread_mutex_lock(&a->mutex);
+  a->free_stack[a->free_top++] = idx;
+  cpthread_mutex_unlock(&a->mutex);
+}
+
 // Per-worker job + state shared by ordering. Each worker also owns its own
 // EndgameCtx + EndgameResults to avoid races inside endgame_solve_inline.
 typedef struct PessJob {
@@ -7981,6 +8012,10 @@ typedef struct PessJob {
   EndgameResults **eg_results;
   PegPessSolver *solvers;  // length = num_workers + 1 (helper)
   int n_worker_slots;
+  // Scratch arena (split path only). When set, the split worker acquires a
+  // slot from here instead of worker_idx→slot, so recursive forking can run
+  // nested tasks on distinct slots without colliding with a suspended frame.
+  PessSlotArena *arena;
   // Shared atomic counters for diagnostics.
   atomic_long *shared_n_solves;
   atomic_long *shared_n_leaf_visits;
@@ -8220,7 +8255,15 @@ static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
   // this reply can't change the verdict. (Verdict-safe: min stays LOSS.)
   if (atomic_load(&u->agg->has_loss)) return;
 
-  const int slot = peg_pess_worker_slot(j, worker_idx);
+  // Acquire a scratch slot from the arena (not worker_idx→slot): under the
+  // pool's help-while-waiting, this task may run while another frame on this
+  // pthread is suspended, so it needs its own slot. Falls back to the
+  // worker_idx mapping if no arena (shouldn't happen in split mode).
+  const int slot = j->arena ? pess_arena_acquire(j->arena)
+                            : peg_pess_worker_slot(j, worker_idx);
+  if (slot < 0) {
+    log_fatal("pessfull: scratch arena exhausted (increase arena size)");
+  }
   PegPessSolver *solver = &j->solvers[slot];
   peg_pess_init_solver_from_job(solver, j, slot);
   solver->nested_depth = 0;
@@ -8263,6 +8306,7 @@ static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
       free(order);
       move_list_destroy(ml);
       game_destroy(scenario);
+      if (j->arena) pess_arena_release(j->arena, slot);
       return;
     }
     const Move *reply = move_list_get_move(ml, order[u->reply_idx]);
@@ -8284,6 +8328,17 @@ static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
   atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
   atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
   atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
+
+  // Progress: log every 5000 completed units (reuses shared_orderings_done as
+  // a units-done counter in split mode; total is printed in the dispatch line).
+  const int done = (int)atomic_fetch_add(j->shared_orderings_done, 1) + 1;
+  if (done % 5000 == 0) {
+    fprintf(stderr, "[pessfull] split progress: %d / %d units\n", done,
+            j->total_orderings);
+    fflush(stderr);
+  }
+
+  if (j->arena) pess_arena_release(j->arena, slot);
 }
 
 void test_pass_peg_pessimistic_full_eval(void) {
@@ -8550,7 +8605,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
 
   // Phase 3: per-worker scratch + parallel solve via peg_pool.
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
-  const int n_slots = n_threads + 1;  // workers + helper
+  // Slots: the non-split path needs n_threads+1 (workers + helper). The split
+  // path acquires slots from an arena and, with recursive forking, may have
+  // several concurrently-active tasks per pthread, so size generously.
+  const int n_slots = n_threads * 4 + 4;
   EndgameCtx **eg_ctxs = calloc_or_die((size_t)n_slots, sizeof(EndgameCtx *));
   EndgameResults **eg_results =
       malloc_or_die((size_t)n_slots * sizeof(EndgameResults *));
@@ -8562,6 +8620,14 @@ void test_pass_peg_pessimistic_full_eval(void) {
   for (int i = 0; i < n_slots; i++) {
     eg_results[i] = endgame_results_create();
   }
+  // Scratch arena over all slots (split path). free_stack holds every slot
+  // index; acquire/release hand them out per task.
+  PessSlotArena arena;
+  arena.n_slots = n_slots;
+  arena.free_stack = malloc_or_die((size_t)n_slots * sizeof(int));
+  for (int i = 0; i < n_slots; i++) arena.free_stack[i] = i;
+  arena.free_top = n_slots;
+  cpthread_mutex_init(&arena.mutex);
   atomic_long total_solves = ATOMIC_VAR_INIT(0);
   atomic_long total_leaf_visits = ATOMIC_VAR_INIT(0);
   atomic_long total_recursive = ATOMIC_VAR_INIT(0);
@@ -8607,7 +8673,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
             .n_orderings = slice_n, .eg_ctxs = eg_ctxs,
             .eg_results = eg_results, .solvers = solvers,
-            .n_worker_slots = n_slots,
+            .n_worker_slots = n_slots, .arena = &arena,
             .shared_n_solves = &total_solves,
             .shared_n_leaf_visits = &total_leaf_visits,
             .shared_n_recursive = &total_recursive,
@@ -8717,6 +8783,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
     }
     fprintf(stderr, "[pessfull] split-opp: %d orderings → %lld work units\n",
             mc.n_orderings, (long long)total_units);
+    // Reset the shared counter and set total to units (the split worker uses
+    // shared_orderings_done / total_orderings for its progress line).
+    atomic_store(&orderings_done, 0);
+    shared->total_orderings = (int)total_units;
     if (pool) {
       peg_pool_submit_and_wait(pool, peg_pess_split_worker_fn, unit_ptrs,
                                 (int)total_units, /*helper=*/0);
@@ -8838,6 +8908,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   free(eg_ctxs);
   free(eg_results);
   free(solvers);
+  free(arena.free_stack);
   free(jobs);
   free(job_ptrs);
   free(orderings);
