@@ -7024,8 +7024,8 @@ typedef struct PegPessSolver {
   int opp_sort_mode;        // opp-turn nodes (first-loss cutoff on LOSS orderings)
   int mover_sort_mode;      // our-turn nodes (first-win cutoff on WIN orderings)
   bool subperm_sort;        // sort nested sub-perms by opp danger (hardest first)
-  bool cap_bail;            // at nested cap, return non-win vs perfect-info recurse
   double slow_solve_log_s;  // log CGP when one endgame_solve exceeds this (0=off)
+  bool first_win;           // endgame [-1,+1] window: resolve sign only (verdict-safe)
   bool skip_word_pruning;   // pass-through to endgame_solve_inline
   int max_opp_k;            // 0 = no cap
   bool nested_our_turn;     // imperfect-info mover at mid-bag nodes
@@ -7236,11 +7236,20 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       .num_threads = 1,
       .use_heuristics = true,
       .num_top_moves = 1,
+      .first_win = s->first_win,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
       .skip_word_pruning = s->skip_word_pruning,
       .thread_index_offset = 0,
       .soft_time_limit = s->endgame_time,
       .hard_time_limit = s->endgame_time,
+      // Strict mid-search interruption: soft/hard_time_limit only gate between
+      // IDS depth iterations, so a single pathological iteration can run
+      // unbounded. external_deadline_ns is checked inside alpha-beta, giving a
+      // hard wall-clock cap per solve.
+      .external_deadline_ns =
+          s->endgame_time > 0.0
+              ? ctimer_monotonic_ns() + (int64_t)(s->endgame_time * 1.0e9)
+              : 0,
   };
   endgame_results_reset(s->eg_results);
   Timer slow_t;
@@ -7803,21 +7812,6 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
     return out;
   }
 
-  // Cap-bail (macondo parity): past the nested depth cap at an our-turn
-  // mid-bag node, macondo stops and leaves the line unfinalized (not a proven
-  // win). We mirror with a conservative non-win (LOSS) instead of recursing
-  // perfect-info — avoids the perfect-info subtree explosion on WIN orderings.
-  if (our_turn && s->nested_our_turn && s->cap_bail &&
-      s->nested_depth_limit >= 0 && s->nested_depth >= s->nested_depth_limit) {
-    free(order);
-    if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
-      s->ml_pool[s->ml_pool_count++] = ml;
-    } else {
-      move_list_destroy(ml);
-    }
-    return PEG_OUT_LOSS;
-  }
-
   PegPessOut best_or_worst;
   if (our_turn) {
     best_or_worst = PEG_OUT_LOSS;
@@ -7957,8 +7951,8 @@ typedef struct PessJob {
   int opp_sort_mode;
   int mover_sort_mode;
   bool subperm_sort;
-  bool cap_bail;
   double slow_solve_log_s;
+  bool first_win;
   bool skip_word_pruning;
   int max_opp_k;
   PegPessOrdering *ordering;  // start of contiguous slice this job owns
@@ -8021,8 +8015,8 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->opp_sort_mode = j->opp_sort_mode;
   solver->mover_sort_mode = j->mover_sort_mode;
   solver->subperm_sort = j->subperm_sort;
-  solver->cap_bail = j->cap_bail;
   solver->slow_solve_log_s = j->slow_solve_log_s;
+  solver->first_win = j->first_win;
   solver->skip_word_pruning = j->skip_word_pruning;
   solver->max_opp_k = j->max_opp_k;
   solver->nested_our_turn = j->nested_our_turn;
@@ -8156,21 +8150,23 @@ void test_pass_peg_pessimistic_full_eval(void) {
       (tt_shared && tt_mb > 0) ? transposition_table_create(tt_fraction_of_mem)
                                : NULL;
   // Move-ordering keys (0=score default, 1=equity, 2=tiles-then-score,
-  // 3=tiles-then-equity), nested sub-perm sort, cap-bail, word-prune skip,
-  // slow-solve CGP logging. All verdict-safe except cap_bail (intentionally
-  // pessimistic) and skip_word_pruning (no verdict effect).
+  // 3=tiles-then-equity), nested sub-perm sort, word-prune skip, first_win,
+  // slow-solve CGP logging. All verdict-invariant (skip_word_pruning has no
+  // verdict effect).
   const char *opp_sort_env = getenv("PASSPEG_PESSFULL_OPP_SORT");
   const int opp_sort_mode = opp_sort_env ? atoi(opp_sort_env) : 0;
   const char *mover_sort_env = getenv("PASSPEG_PESSFULL_MOVER_SORT");
   const int mover_sort_mode = mover_sort_env ? atoi(mover_sort_env) : 0;
   const char *subperm_env = getenv("PASSPEG_PESSFULL_SUBPERM_SORT");
   const bool subperm_sort = subperm_env && atoi(subperm_env) > 0;
-  const char *cap_bail_env = getenv("PASSPEG_PESSFULL_CAP_BAIL");
-  const bool cap_bail = cap_bail_env && atoi(cap_bail_env) > 0;
   const char *skip_wp_env = getenv("PASSPEG_PESSFULL_SKIP_WORD_PRUNE");
   const bool skip_word_pruning = skip_wp_env && atoi(skip_wp_env) > 0;
   const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
   const double slow_solve_log_s = slow_env ? atof(slow_env) : 0.0;
+  // first_win: endgame solves use a narrow [-1,+1] window (sign only). Correct
+  // for guaranteed-win (we only consume the sign) and verdict-invariant.
+  const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
+  const bool first_win = first_win_env && atoi(first_win_env) > 0;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
@@ -8429,8 +8425,8 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .endgame_plies = plies, .endgame_time = per_solve_time,
             .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
             .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
-            .subperm_sort = subperm_sort, .cap_bail = cap_bail,
-            .slow_solve_log_s = slow_solve_log_s,
+            .subperm_sort = subperm_sort,
+            .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
             .skip_word_pruning = skip_word_pruning,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
             .n_orderings = slice_n, .eg_ctxs = eg_ctxs,
@@ -8472,8 +8468,8 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .endgame_plies = plies, .endgame_time = per_solve_time,
           .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
           .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
-          .subperm_sort = subperm_sort, .cap_bail = cap_bail,
-          .slow_solve_log_s = slow_solve_log_s,
+          .subperm_sort = subperm_sort,
+          .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
           .skip_word_pruning = skip_word_pruning,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
           .n_orderings = 1, .eg_ctxs = eg_ctxs,
