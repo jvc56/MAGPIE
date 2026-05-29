@@ -7019,6 +7019,14 @@ typedef struct PegPessSolver {
   double endgame_time;
   double tt_fraction_of_mem;  // per-worker endgame TT size (0 = disabled)
   TranspositionTable *shared_tt;  // if set, all workers share this TT
+  // Move order key: 0=score, 1=equity, 2=tiles-then-score, 3=tiles-then-equity.
+  // Ordering affects cutoff/leaf-reach speed only, never the W/L/D verdict.
+  int opp_sort_mode;        // opp-turn nodes (first-loss cutoff on LOSS orderings)
+  int mover_sort_mode;      // our-turn nodes (first-win cutoff on WIN orderings)
+  bool subperm_sort;        // sort nested sub-perms by opp danger (hardest first)
+  bool cap_bail;            // at nested cap, return non-win vs perfect-info recurse
+  double slow_solve_log_s;  // log CGP when one endgame_solve exceeds this (0=off)
+  bool skip_word_pruning;   // pass-through to endgame_solve_inline
   int max_opp_k;            // 0 = no cap
   bool nested_our_turn;     // imperfect-info mover at mid-bag nodes
   int nested_depth_limit;   // -1 = unbounded; 0 = no nesting; 1 = first only; ...
@@ -7038,6 +7046,7 @@ typedef struct PegPessSolver {
   // game_duplicate/game_destroy per leaf (hundreds of thousands on big runs).
   Game *eg_scratch;
   int64_t n_endgame_solves;
+  int64_t n_leaf_visits;  // bag-empty-game-on leaves, counted even on cache hit
   int64_t n_recursive_calls;
   int64_t n_first_loss_cutoffs;
   int64_t n_first_win_cutoffs;
@@ -7153,6 +7162,26 @@ static PegPessOut peg_pess_classify_spread(int32_t spread) {
   return PEG_OUT_DRAW;
 }
 
+// Move ordering key. Higher = tried first. Modes 2/3 pack tiles_played into
+// the high bits so longer plays sort first (shallower cascades), score/equity
+// as the low-bits tiebreak (offset to unsigned for negative equities).
+static int64_t peg_pess_opp_sort_key(const Move *m, int mode) {
+  const int32_t score = (int32_t)move_get_score(m);
+  const int32_t eq = (int32_t)move_get_equity(m);
+  switch (mode) {
+  case 1:
+    return (int64_t)eq;
+  case 2:
+    return ((int64_t)move_get_tiles_played(m) << 32) +
+           ((int64_t)score + 0x80000000LL);
+  case 3:
+    return ((int64_t)move_get_tiles_played(m) << 32) +
+           ((int64_t)eq + 0x80000000LL);
+  default:
+    return (int64_t)score;
+  }
+}
+
 // Forward decl for recursion.
 static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
 
@@ -7169,6 +7198,9 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   // Cache lookup: same endgame position from different recursion paths
   // produces the same outcome — endgame_solve is deterministic in
   // (board, racks, on-turn, lead).
+  // Count every bag-empty-game-on leaf, including cache hits — mirrors
+  // macondo's numEndgamesSolved counting point so the total is comparable.
+  s->n_leaf_visits++;
   uint64_t cache_key = 0;
   if (s->cache) {
     cache_key = peg_pess_hash_endgame_state(g, s->mover_idx, s->opp_idx);
@@ -7205,13 +7237,24 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       .use_heuristics = true,
       .num_top_moves = 1,
       .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-      .skip_word_pruning = false,
+      .skip_word_pruning = s->skip_word_pruning,
       .thread_index_offset = 0,
       .soft_time_limit = s->endgame_time,
       .hard_time_limit = s->endgame_time,
   };
   endgame_results_reset(s->eg_results);
+  Timer slow_t;
+  if (s->slow_solve_log_s > 0.0) ctimer_start(&slow_t);
   endgame_solve_inline(s->eg_ctx_p, &ea, s->eg_results);
+  if (s->slow_solve_log_s > 0.0) {
+    const double solve_s = ctimer_elapsed_seconds(&slow_t);
+    if (solve_s >= s->slow_solve_log_s) {
+      char *eg_cgp = game_get_cgp(scratch, true);
+      fprintf(stderr, "[pessfull] SLOW ENDGAME %.2fs plies=%d: %s\n", solve_s,
+              s->endgame_plies, eg_cgp);
+      free(eg_cgp);
+    }
+  }
   s->n_endgame_solves++;
   const int eg_val =
       endgame_results_get_value(s->eg_results, ENDGAME_RESULT_BEST);
@@ -7395,6 +7438,7 @@ typedef struct NestedPerm {
   MachineLetter draw[16];
   int n;
   int64_t weight;
+  int64_t est;  // opp danger estimate (top opp-move equity), for sub-perm sort
 } NestedPerm;
 
 typedef struct NestedPermCollect {
@@ -7521,6 +7565,74 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
                                draw_buf, 0, /*multiplicity=*/1,
                                peg_pess_nested_collect_perm_cb, &pc);
 
+  // Optional sub-perm ordering (macondo parity): estimate each perm's danger
+  // by opp's top-move equity given opp's rack = leftover, sort hardest-first
+  // so minLossesSoFar prunes losing cands after fewer perms. generate_moves
+  // only reads board/rack/on-turn (cross-sets valid here), so save/restore on
+  // g rather than duplicate. Pure speed heuristic; verdict is perm-invariant.
+  if (s->subperm_sort && pc.count > 1) {
+    const int saved_turn = game_get_player_on_turn_index(g);
+    Rack *opp_rack = player_get_rack(game_get_player(g, s->opp_idx));
+    Rack saved_opp;
+    rack_copy(&saved_opp, opp_rack);
+    game_set_player_on_turn_index(g, s->opp_idx);
+    MoveList *est_ml;
+    if (s->ml_pool_count > 0) {
+      est_ml = s->ml_pool[--s->ml_pool_count];
+      move_list_reset(est_ml);
+    } else {
+      est_ml = move_list_create(16384);
+    }
+    for (int pi = 0; pi < pc.count; pi++) {
+      uint8_t leftover[MAX_ALPHABET_SIZE];
+      memcpy(leftover, unseen, (size_t)s->ld_size);
+      for (int i = 0; i < pc.perms[pi].n; i++) leftover[pc.perms[pi].draw[i]]--;
+      rack_reset(opp_rack);
+      for (int ml_i = 0; ml_i < s->ld_size; ml_i++) {
+        for (int k = 0; k < (int)leftover[ml_i]; k++) {
+          rack_add_letter(opp_rack, (MachineLetter)ml_i);
+        }
+      }
+      move_list_reset(est_ml);
+      const MoveGenArgs est_ga = {
+          .game = g,
+          .move_list = est_ml,
+          .move_record_type = MOVE_RECORD_ALL,
+          .move_sort_type = MOVE_SORT_EQUITY,
+          .override_kwg = NULL,
+          .thread_index = 0,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&est_ga);
+      int64_t top = INT64_MIN;
+      const int nm = move_list_get_count(est_ml);
+      for (int i = 0; i < nm; i++) {
+        const int64_t e = move_get_equity(move_list_get_move(est_ml, i));
+        if (e > top) top = e;
+      }
+      pc.perms[pi].est = top;
+    }
+    if (s->ml_pool_count <
+        (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
+      s->ml_pool[s->ml_pool_count++] = est_ml;
+    } else {
+      move_list_destroy(est_ml);
+    }
+    rack_copy(opp_rack, &saved_opp);
+    game_set_player_on_turn_index(g, saved_turn);
+    for (int i = 1; i < pc.count; i++) {
+      const NestedPerm key = pc.perms[i];
+      int j = i - 1;
+      while (j >= 0 && pc.perms[j].est < key.est) {
+        pc.perms[j + 1] = pc.perms[j];
+        j--;
+      }
+      pc.perms[j + 1] = key;
+    }
+  }
+
   // Per-perm outcome row for the current leader (the only cand we'd cache).
   // Rebuilt every time we adopt a new leader so the row matches that cand.
   PegPessOut *leader_outcomes = NULL;
@@ -7633,9 +7745,10 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   const int turn = game_get_player_on_turn_index(g);
   const bool our_turn = (turn == s->mover_idx);
 
-  // Build an explicit move-index order, sorted by score descending. The
-  // generator's MOVE_SORT_EQUITY ordering puts pass at index 0; macondo
-  // sorts replies by score before iterating, so we mirror that.
+  // Build an explicit move-index order, sorted descending by the chosen key
+  // (peg_pess_opp_sort_key). our-turn uses mover_sort_mode, opp-turn uses
+  // opp_sort_mode. Default mode 0 = score (macondo parity). Ordering only
+  // affects cutoff/leaf-reach timing, never the W/L/D verdict.
   int *order = malloc_or_die((size_t)n_moves * sizeof(int));
   for (int i = 0; i < n_moves; i++) order[i] = i;
   // Selection sort over the top max_opp_k positions (or all when no cap).
@@ -7643,16 +7756,17 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   if (!our_turn && s->max_opp_k > 0 && s->max_opp_k < cand_n) {
     cand_n = s->max_opp_k;
   }
+  const int sort_mode = our_turn ? s->mover_sort_mode : s->opp_sort_mode;
   for (int i = 0; i < cand_n; i++) {
     int best = i;
-    int best_score = (int)equity_to_int(
-        move_get_score(move_list_get_move(ml, order[i])));
+    int64_t best_key =
+        peg_pess_opp_sort_key(move_list_get_move(ml, order[i]), sort_mode);
     for (int j = i + 1; j < n_moves; j++) {
-      const int js =
-          (int)equity_to_int(move_get_score(move_list_get_move(ml, order[j])));
-      if (js > best_score) {
+      const int64_t kj =
+          peg_pess_opp_sort_key(move_list_get_move(ml, order[j]), sort_mode);
+      if (kj > best_key) {
         best = j;
-        best_score = js;
+        best_key = kj;
       }
     }
     if (best != i) {
@@ -7687,6 +7801,21 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
       move_list_destroy(ml);
     }
     return out;
+  }
+
+  // Cap-bail (macondo parity): past the nested depth cap at an our-turn
+  // mid-bag node, macondo stops and leaves the line unfinalized (not a proven
+  // win). We mirror with a conservative non-win (LOSS) instead of recursing
+  // perfect-info — avoids the perfect-info subtree explosion on WIN orderings.
+  if (our_turn && s->nested_our_turn && s->cap_bail &&
+      s->nested_depth_limit >= 0 && s->nested_depth >= s->nested_depth_limit) {
+    free(order);
+    if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
+      s->ml_pool[s->ml_pool_count++] = ml;
+    } else {
+      move_list_destroy(ml);
+    }
+    return PEG_OUT_LOSS;
   }
 
   PegPessOut best_or_worst;
@@ -7825,6 +7954,12 @@ typedef struct PessJob {
   double endgame_time;
   double tt_fraction_of_mem;
   TranspositionTable *shared_tt;  // if set, all workers share this TT
+  int opp_sort_mode;
+  int mover_sort_mode;
+  bool subperm_sort;
+  bool cap_bail;
+  double slow_solve_log_s;
+  bool skip_word_pruning;
   int max_opp_k;
   PegPessOrdering *ordering;  // start of contiguous slice this job owns
   int n_orderings;            // 1 = single, >1 = group of consecutive orderings
@@ -7835,6 +7970,7 @@ typedef struct PessJob {
   int n_worker_slots;
   // Shared atomic counters for diagnostics.
   atomic_long *shared_n_solves;
+  atomic_long *shared_n_leaf_visits;
   atomic_long *shared_n_recursive;
   atomic_long *shared_n_loss_cutoffs;
   atomic_long *shared_n_win_cutoffs;
@@ -7882,6 +8018,12 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->endgame_time = j->endgame_time;
   solver->tt_fraction_of_mem = j->tt_fraction_of_mem;
   solver->shared_tt = j->shared_tt;
+  solver->opp_sort_mode = j->opp_sort_mode;
+  solver->mover_sort_mode = j->mover_sort_mode;
+  solver->subperm_sort = j->subperm_sort;
+  solver->cap_bail = j->cap_bail;
+  solver->slow_solve_log_s = j->slow_solve_log_s;
+  solver->skip_word_pruning = j->skip_word_pruning;
   solver->max_opp_k = j->max_opp_k;
   solver->nested_our_turn = j->nested_our_turn;
   solver->nested_depth_limit = j->nested_depth_limit;
@@ -7900,6 +8042,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
     solver->game = NULL;
     solver->nested_depth = 0;
     solver->n_endgame_solves = 0;
+    solver->n_leaf_visits = 0;
     solver->n_recursive_calls = 0;
     solver->n_first_loss_cutoffs = 0;
     solver->n_first_win_cutoffs = 0;
@@ -7936,6 +8079,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
     fflush(stderr);
 
     atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
+    atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
     atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
     atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
     atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
@@ -8011,6 +8155,22 @@ void test_pass_peg_pessimistic_full_eval(void) {
   TranspositionTable *shared_tt =
       (tt_shared && tt_mb > 0) ? transposition_table_create(tt_fraction_of_mem)
                                : NULL;
+  // Move-ordering keys (0=score default, 1=equity, 2=tiles-then-score,
+  // 3=tiles-then-equity), nested sub-perm sort, cap-bail, word-prune skip,
+  // slow-solve CGP logging. All verdict-safe except cap_bail (intentionally
+  // pessimistic) and skip_word_pruning (no verdict effect).
+  const char *opp_sort_env = getenv("PASSPEG_PESSFULL_OPP_SORT");
+  const int opp_sort_mode = opp_sort_env ? atoi(opp_sort_env) : 0;
+  const char *mover_sort_env = getenv("PASSPEG_PESSFULL_MOVER_SORT");
+  const int mover_sort_mode = mover_sort_env ? atoi(mover_sort_env) : 0;
+  const char *subperm_env = getenv("PASSPEG_PESSFULL_SUBPERM_SORT");
+  const bool subperm_sort = subperm_env && atoi(subperm_env) > 0;
+  const char *cap_bail_env = getenv("PASSPEG_PESSFULL_CAP_BAIL");
+  const bool cap_bail = cap_bail_env && atoi(cap_bail_env) > 0;
+  const char *skip_wp_env = getenv("PASSPEG_PESSFULL_SKIP_WORD_PRUNE");
+  const bool skip_word_pruning = skip_wp_env && atoi(skip_wp_env) > 0;
+  const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
+  const double slow_solve_log_s = slow_env ? atof(slow_env) : 0.0;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
@@ -8167,6 +8327,43 @@ void test_pass_peg_pessimistic_full_eval(void) {
     return;
   }
 
+  // Optional: solve only ONE ordering, selected by its draw signature
+  // (underscore-joined two-digit machine letters, e.g. "05_09_01"). Lets us
+  // reproduce/inspect a single straggler in isolation.
+  const char *only_draw_env = getenv("PASSPEG_PESSFULL_ONLY_DRAW");
+  if (only_draw_env && *only_draw_env) {
+    MachineLetter want[16];
+    int want_n = 0;
+    const char *p = only_draw_env;
+    while (*p && want_n < 16) {
+      want[want_n++] = (MachineLetter)atoi(p);
+      const char *us = strchr(p, '_');
+      if (!us) break;
+      p = us + 1;
+    }
+    int found = -1;
+    for (int oi = 0; oi < mc.n_orderings && found < 0; oi++) {
+      if (orderings[oi].n != want_n) continue;
+      bool eq = true;
+      for (int i = 0; i < want_n; i++) {
+        if (orderings[oi].draw[i] != want[i]) {
+          eq = false;
+          break;
+        }
+      }
+      if (eq) found = oi;
+    }
+    if (found < 0) {
+      log_fatal("PASSPEG_PESSFULL_ONLY_DRAW=%s matched no ordering",
+                only_draw_env);
+    }
+    orderings[0] = orderings[found];
+    mc.n_orderings = 1;
+    fprintf(stderr,
+            "[pessfull] ONLY_DRAW=%s → solving 1 ordering in isolation\n",
+            only_draw_env);
+  }
+
   // Shared endgame-state cache. 2^20 entries × 16 bytes = ~16 MB.
   const char *cache_env = getenv("PASSPEG_PESSFULL_CACHE");
   const bool use_cache = !cache_env || atoi(cache_env) > 0;  // default on
@@ -8195,6 +8392,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
     eg_results[i] = endgame_results_create();
   }
   atomic_long total_solves = ATOMIC_VAR_INIT(0);
+  atomic_long total_leaf_visits = ATOMIC_VAR_INIT(0);
   atomic_long total_recursive = ATOMIC_VAR_INIT(0);
   atomic_long total_loss_cutoffs = ATOMIC_VAR_INIT(0);
   atomic_long total_win_cutoffs = ATOMIC_VAR_INIT(0);
@@ -8230,11 +8428,16 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .thread_control = config_get_thread_control(config),
             .endgame_plies = plies, .endgame_time = per_solve_time,
             .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
+            .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
+            .subperm_sort = subperm_sort, .cap_bail = cap_bail,
+            .slow_solve_log_s = slow_solve_log_s,
+            .skip_word_pruning = skip_word_pruning,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
             .n_orderings = slice_n, .eg_ctxs = eg_ctxs,
             .eg_results = eg_results, .solvers = solvers,
             .n_worker_slots = n_slots,
             .shared_n_solves = &total_solves,
+            .shared_n_leaf_visits = &total_leaf_visits,
             .shared_n_recursive = &total_recursive,
             .shared_n_loss_cutoffs = &total_loss_cutoffs,
             .shared_n_win_cutoffs = &total_win_cutoffs,
@@ -8268,11 +8471,16 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .thread_control = config_get_thread_control(config),
           .endgame_plies = plies, .endgame_time = per_solve_time,
           .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
+          .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
+          .subperm_sort = subperm_sort, .cap_bail = cap_bail,
+          .slow_solve_log_s = slow_solve_log_s,
+          .skip_word_pruning = skip_word_pruning,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
           .n_orderings = 1, .eg_ctxs = eg_ctxs,
           .eg_results = eg_results, .solvers = solvers,
           .n_worker_slots = n_slots,
           .shared_n_solves = &total_solves,
+          .shared_n_leaf_visits = &total_leaf_visits,
           .shared_n_recursive = &total_recursive,
           .shared_n_loss_cutoffs = &total_loss_cutoffs,
           .shared_n_win_cutoffs = &total_win_cutoffs,
@@ -8336,6 +8544,9 @@ void test_pass_peg_pessimistic_full_eval(void) {
          atomic_load(&total_solves), atomic_load(&total_recursive),
          atomic_load(&total_loss_cutoffs), atomic_load(&total_win_cutoffs),
          atomic_load(&total_nested_calls), solve_elapsed);
+  printf("endgame_leaf_visits=%ld (counts cached too; comparable to macondo's "
+         "endgame count)\n",
+         atomic_load(&total_leaf_visits));
   if (cache) {
     long h = atomic_load(&cache->hits);
     long m = atomic_load(&cache->misses);
