@@ -47,6 +47,21 @@ void bag_set_cursors(Bag *bag, int start, int end) {
   bag->end_tile_index = end;
 }
 
+void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n) {
+  // Deterministically set the bag to exactly `tiles[0..n-1]` in order, with no
+  // PRNG involvement. After this, bag_peek_tiles returns `tiles` unchanged, and
+  // draws are a fixed function of the order. Used by exact (pre)endgame
+  // enumerators that already know the bag contents and must NOT randomize them
+  // (bag_add_letter's random insertion would re-permute the multiset, which is
+  // both non-deterministic and breaks per-ordering enumeration). `n` must not
+  // exceed the bag's backing capacity (the full letter distribution).
+  for (int i = 0; i < n; i++) {
+    bag->letters[i] = tiles[i];
+  }
+  bag->start_tile_index = 0;
+  bag->end_tile_index = n;
+}
+
 void bag_shuffle(Bag *bag) {
   int tiles_remaining = bag_get_letters(bag);
   if (tiles_remaining > 1) {

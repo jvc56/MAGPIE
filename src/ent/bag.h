@@ -34,6 +34,11 @@ int bag_get_start_cursor(const Bag *bag);
 int bag_get_end_cursor(const Bag *bag);
 void bag_set_cursors(Bag *bag, int start, int end);
 
+// Deterministically set the bag to exactly tiles[0..n-1] in order (no PRNG).
+// For exact (pre)endgame enumerators that know the bag contents and must not
+// randomize them. n must not exceed the bag's backing capacity.
+void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n);
+
 void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 

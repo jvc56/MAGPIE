@@ -1670,15 +1670,13 @@ static int peg_compute_unseen(const Game *game, int mover_idx,
   return total;
 }
 
-// Drain bag, then add the listed N tiles (insert_point=0).
+// Deterministically set the bag to exactly the listed N tiles (no PRNG).
+// bag_add_letter would randomize order via the bag's time-seeded PRNG, which
+// is wrong for an exact enumerator and non-deterministic across processes.
 static void peg_set_bag_tiles(Bag *bag, const MachineLetter *tiles,
                                int n_tiles, int ld_size) {
-  for (int ml = 0; ml < ld_size; ml++) {
-    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
-      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
-    }
-  }
-  for (int i = 0; i < n_tiles; i++) bag_add_letter(bag, tiles[i], 0);
+  (void)ld_size;
+  bag_set_to_tiles(bag, tiles, n_tiles);
 }
 
 // Reset opp's rack to (unseen MINUS drawn) tiles.
@@ -4618,7 +4616,11 @@ static void peg_opp_inner_worker_fn(void *arg, int worker_idx) {
     }
   }
   rack_reset(opp_pov_mover_rack);
-  bag_add_letter(opp_pov_bag, j->bag_ml, 0);
+  // Single bag tile, set deterministically (no PRNG).
+  {
+    const MachineLetter one = j->bag_ml;
+    bag_set_to_tiles(opp_pov_bag, &one, 1);
+  }
   for (int t = 0; t < j->n_opp_types; t++) {
     int copies = j->opp_type_counts[t] - (t == j->ti ? 1 : 0);
     for (int k = 0; k < copies; k++) {
@@ -4723,11 +4725,17 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
     }
   }
   rack_reset(opp_pov_mover_rack);
-  // Bag = opp_pov_bag_counts.
-  for (int t = 0; t < j->n_opp_types; t++) {
-    for (int k = 0; k < j->opp_pov_bag_counts[t]; k++) {
-      bag_add_letter(opp_pov_bag, j->opp_types[t], 0);
+  // Bag = opp_pov_bag_counts, set deterministically (no PRNG). bag_add_letter
+  // would randomize order via the time-seeded PRNG.
+  {
+    MachineLetter bag_tiles[MAX_BAG_SIZE];
+    int n_bag = 0;
+    for (int t = 0; t < j->n_opp_types; t++) {
+      for (int k = 0; k < j->opp_pov_bag_counts[t]; k++) {
+        bag_tiles[n_bag++] = j->opp_types[t];
+      }
     }
+    bag_set_to_tiles(opp_pov_bag, bag_tiles, n_bag);
   }
   // Mover rack = total - opp_pov_bag_counts.
   for (int t = 0; t < j->n_opp_types; t++) {
@@ -6734,20 +6742,10 @@ static void peg_pess_eval_one(const MachineLetter *draw, int n,
   game_set_endgame_solving_mode(scenario);
   game_set_backup_mode(scenario, BACKUP_MODE_OFF);
 
-  // Empty the bag (was loaded with N unseen tiles in some default order).
+  // Deterministically set the bag to exactly the drawn tiles (no PRNG).
+  // bag_add_letter would randomize the order via the bag's time-seeded PRNG.
   Bag *bag = game_get_bag(scenario);
-  for (int ml = 0; ml < pc->ld_size; ml++) {
-    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
-      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
-    }
-  }
-
-  // Set bag to the drawn tiles, in REVERSE order so bag_draw_letter pulls
-  // them in the requested order (MAGPIE's bag pops the most-recently-added
-  // tile first per the LIFO add/draw convention).
-  for (int i = n - 1; i >= 0; i--) {
-    bag_add_letter(bag, draw[i], 0);
-  }
+  bag_set_to_tiles(bag, draw, n);
 
   // Set opp's rack = unseen - drawn tiles.
   Rack *opp_rack = player_get_rack(game_get_player(scenario, pc->opp_idx));
@@ -7026,6 +7024,7 @@ typedef struct PegPessSolver {
   bool subperm_sort;        // sort nested sub-perms by opp danger (hardest first)
   double slow_solve_log_s;  // log CGP when one endgame_solve exceeds this (0=off)
   bool first_win;           // endgame [-1,+1] window: resolve sign only (verdict-safe)
+  int endgame_threads;      // per-solve thread count (1=default; >1 for ONLY_DRAW)
   bool skip_word_pruning;   // pass-through to endgame_solve_inline
   int max_opp_k;            // 0 = no cap
   bool nested_our_turn;     // imperfect-info mover at mid-bag nodes
@@ -7233,7 +7232,12 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       .shared_tt = s->shared_tt,
       .tt_fraction_of_mem = s->shared_tt ? 0.0 : s->tt_fraction_of_mem,
       .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      .num_threads = 1,
+      // Per-solve thread count. Default 1: the full run parallelizes across
+      // orderings (one solve per worker). For single-ordering investigation
+      // (ONLY_DRAW) set endgame_threads >1 to parallelize each solve across
+      // cores. NOTE: >1 uses ABDADA (timing-dependent, non-deterministic) and
+      // assumes a single active pess worker (thread_index_offset=0).
+      .num_threads = s->endgame_threads,
       .use_heuristics = true,
       .num_top_moves = 1,
       .first_win = s->first_win,
@@ -7253,7 +7257,22 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   };
   endgame_results_reset(s->eg_results);
   Timer slow_t;
-  if (s->slow_solve_log_s > 0.0) ctimer_start(&slow_t);
+  if (s->slow_solve_log_s > 0.0) {
+    ctimer_start(&slow_t);
+    // Pre-solve capture: overwrite a temp file with the CGP we're about to
+    // solve. If a solve hangs (never returns), this file holds the culprit
+    // position. PASSPEG_PESSFULL_PRESOLVE_FILE selects the path.
+    const char *presolve_file = getenv("PASSPEG_PESSFULL_PRESOLVE_FILE");
+    if (presolve_file) {
+      char *pre_cgp = game_get_cgp(scratch, true);
+      FILE *pf = fopen(presolve_file, "w");
+      if (pf) {
+        fprintf(pf, "%s\n", pre_cgp);
+        fclose(pf);
+      }
+      free(pre_cgp);
+    }
+  }
   endgame_solve_inline(s->eg_ctx_p, &ea, s->eg_results);
   if (s->slow_solve_log_s > 0.0) {
     const double solve_s = ctimer_elapsed_seconds(&slow_t);
@@ -7480,14 +7499,10 @@ static PegPessOut peg_pess_nested_run_scenario(PegPessSolver *s,
   Game *alt = game_duplicate(base_state);
   game_set_backup_mode(alt, BACKUP_MODE_OFF);
   Bag *bag = game_get_bag(alt);
-  for (int ml_i = 0; ml_i < s->ld_size; ml_i++) {
-    while (bag_get_letter(bag, (MachineLetter)ml_i) > 0) {
-      (void)bag_draw_letter(bag, (MachineLetter)ml_i, 0);
-    }
-  }
-  for (int i = n_drawn - 1; i >= 0; i--) {
-    bag_add_letter(bag, draw[i], 0);
-  }
+  // Deterministically place the perm's bag tiles (no PRNG). bag_add_letter
+  // would randomize the order via the bag's time-seeded PRNG, which is both
+  // non-deterministic across processes and breaks per-ordering enumeration.
+  bag_set_to_tiles(bag, draw, n_drawn);
   Rack *opp_rack = player_get_rack(game_get_player(alt, s->opp_idx));
   rack_reset(opp_rack);
   uint8_t leftover[MAX_ALPHABET_SIZE];
@@ -7910,15 +7925,9 @@ static Game *peg_pess_build_scenario(const Game *base_game,
                                       int opp_idx, const Move *cand) {
   Game *scenario = game_duplicate(base_game);
   game_set_backup_mode(scenario, BACKUP_MODE_OFF);
+  // Deterministically set the bag to exactly the ordering's tiles (no PRNG).
   Bag *bag = game_get_bag(scenario);
-  for (int ml = 0; ml < ld_size; ml++) {
-    while (bag_get_letter(bag, (MachineLetter)ml) > 0) {
-      (void)bag_draw_letter(bag, (MachineLetter)ml, 0);
-    }
-  }
-  for (int i = o->n - 1; i >= 0; i--) {
-    bag_add_letter(bag, o->draw[i], 0);
-  }
+  bag_set_to_tiles(bag, o->draw, o->n);
   Rack *opp_rack = player_get_rack(game_get_player(scenario, opp_idx));
   rack_reset(opp_rack);
   uint8_t leftover[MAX_ALPHABET_SIZE];
@@ -7953,6 +7962,7 @@ typedef struct PessJob {
   bool subperm_sort;
   double slow_solve_log_s;
   bool first_win;
+  int endgame_threads;
   bool skip_word_pruning;
   int max_opp_k;
   PegPessOrdering *ordering;  // start of contiguous slice this job owns
@@ -8017,6 +8027,7 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->subperm_sort = j->subperm_sort;
   solver->slow_solve_log_s = j->slow_solve_log_s;
   solver->first_win = j->first_win;
+  solver->endgame_threads = j->endgame_threads;
   solver->skip_word_pruning = j->skip_word_pruning;
   solver->max_opp_k = j->max_opp_k;
   solver->nested_our_turn = j->nested_our_turn;
@@ -8167,6 +8178,12 @@ void test_pass_peg_pessimistic_full_eval(void) {
   // for guaranteed-win (we only consume the sign) and verdict-invariant.
   const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
   const bool first_win = first_win_env && atoi(first_win_env) > 0;
+  // Per-solve endgame thread count. Default 1. For single-ordering (ONLY_DRAW)
+  // investigation, set >1 to parallelize each endgame solve across cores.
+  const char *eg_threads_env = getenv("PASSPEG_PESSFULL_ENDGAME_THREADS");
+  const int endgame_threads = eg_threads_env && atoi(eg_threads_env) > 0
+                                  ? atoi(eg_threads_env)
+                                  : 1;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
@@ -8427,6 +8444,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
             .subperm_sort = subperm_sort,
             .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
+            .endgame_threads = endgame_threads,
             .skip_word_pruning = skip_word_pruning,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
             .n_orderings = slice_n, .eg_ctxs = eg_ctxs,
@@ -8470,6 +8488,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
           .subperm_sort = subperm_sort,
           .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
+          .endgame_threads = endgame_threads,
           .skip_word_pruning = skip_word_pruning,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
           .n_orderings = 1, .eg_ctxs = eg_ctxs,
@@ -8619,5 +8638,68 @@ void test_pass_peg_pessimistic_full_eval(void) {
   if (pool) peg_pool_destroy(pool);
   validated_moves_destroy(vms);
   error_stack_destroy(parse_err);
+  config_destroy(config);
+}
+
+// Debug harness: solve a single endgame from a CGP and report timing. Used to
+// reproduce/diagnose pathological endgames captured by the pessimistic
+// solver's pre-solve logging. Env:
+//   PASSPEG_ENDGAME_CGP      (required) full cgp string incl. -lex
+//   PASSPEG_ENDGAME_PLIES    (default 2)
+//   PASSPEG_ENDGAME_TIME     (default 0 = no limit)
+//   PASSPEG_ENDGAME_THREADS  (default 1)
+//   PASSPEG_ENDGAME_FIRST_WIN (default 0)
+void test_pass_peg_endgame_one(void) {
+  const char *cgp = getenv("PASSPEG_ENDGAME_CGP");
+  if (!cgp || !*cgp) log_fatal("PASSPEG_ENDGAME_CGP must be set");
+  const char *plies_env = getenv("PASSPEG_ENDGAME_PLIES");
+  const int plies = plies_env && *plies_env ? atoi(plies_env) : 2;
+  const char *time_env = getenv("PASSPEG_ENDGAME_TIME");
+  const double tlimit = time_env && *time_env ? atof(time_env) : 0.0;
+  const char *threads_env = getenv("PASSPEG_ENDGAME_THREADS");
+  const int threads = threads_env && atoi(threads_env) > 0 ? atoi(threads_env) : 1;
+  const char *fw_env = getenv("PASSPEG_ENDGAME_FIRST_WIN");
+  const bool first_win = fw_env && atoi(fw_env) > 0;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  char load_cmd[10240];
+  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  load_and_exec_config_or_die(config, load_cmd);
+  Game *game = config_get_game(config);
+  game_set_endgame_solving_mode(game);
+  game_set_backup_mode(game, BACKUP_MODE_OFF);
+
+  EndgameCtx *ctx = NULL;
+  EndgameResults *results = endgame_results_create();
+  fprintf(stderr, "[pegendgame] plies=%d time=%.1fs threads=%d first_win=%d\n",
+          plies, tlimit, threads, first_win ? 1 : 0);
+  fflush(stderr);
+  EndgameArgs ea = {
+      .thread_control = config_get_thread_control(config),
+      .game = game,
+      .plies = plies,
+      .shared_tt = NULL,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = threads,
+      .use_heuristics = true,
+      .num_top_moves = 1,
+      .first_win = first_win,
+      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
+      .skip_word_pruning = false,
+      .thread_index_offset = 0,
+      .soft_time_limit = tlimit,
+      .hard_time_limit = tlimit,
+      .external_deadline_ns =
+          tlimit > 0.0 ? ctimer_monotonic_ns() + (int64_t)(tlimit * 1.0e9) : 0,
+  };
+  Timer t;
+  ctimer_start(&t);
+  endgame_solve_inline(&ctx, &ea, results);
+  const double elapsed = ctimer_elapsed_seconds(&t);
+  const int eg_val = endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+  printf("[pegendgame] value=%d  wall=%.3fs\n", eg_val, elapsed);
+
+  endgame_ctx_destroy(ctx);
+  endgame_results_destroy(results);
   config_destroy(config);
 }
