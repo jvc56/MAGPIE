@@ -159,6 +159,7 @@ static TestEntry on_demand_test_table[] = {
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {"pegpessimistic", test_pass_peg_pessimistic_eval},
     {"pegpessfull", test_pass_peg_pessimistic_full_eval},
+    {"pegendgame", test_pass_peg_endgame_one},
     {"peggreedy", test_pass_peg_greedy_bench},
     {"pegcascade", test_pass_peg_cascade},
     {"viamover", test_via_mover_must_bingo_every_depth},

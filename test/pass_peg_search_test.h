@@ -105,3 +105,6 @@ void test_pass_peg_pessimistic_eval(void);
 // PASSPEG_PESSFULL_PLIES (default 12), PASSPEG_PESSFULL_TIME (default 5),
 // PASSPEG_PESSFULL_MAX_OPP_K (default 0 = no cap).
 void test_pass_peg_pessimistic_full_eval(void);
+
+// Debug harness: solve one endgame from PASSPEG_ENDGAME_CGP and report timing.
+void test_pass_peg_endgame_one(void);
