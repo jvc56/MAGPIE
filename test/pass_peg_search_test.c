@@ -8019,10 +8019,12 @@ static int peg_pess_worker_slot(const PessJob *j, int worker_idx) {
   return slot;
 }
 
-static void peg_pess_worker_fn(void *arg, int worker_idx) {
-  PessJob *j = (PessJob *)arg;
-  const int slot = peg_pess_worker_slot(j, worker_idx);
-  PegPessSolver *solver = &j->solvers[slot];
+// Initialize a worker's solver scratch slot from the shared job config. Shared
+// by worker_fn and the opp-split worker so neither can miss a field when PessJob
+// grows. Does NOT touch per-call counters (n_*) or game/nested_depth — caller
+// resets those per ordering/unit.
+static void peg_pess_init_solver_from_job(PegPessSolver *solver,
+                                           const PessJob *j, int slot) {
   solver->mover_idx = j->mover_idx;
   solver->opp_idx = j->opp_idx;
   solver->ld_size = j->ld_size;
@@ -8046,6 +8048,13 @@ static void peg_pess_worker_fn(void *arg, int worker_idx) {
   solver->eg_results = j->eg_results[slot];
   solver->cache = j->cache;
   solver->nested_cache = j->nested_cache;
+}
+
+static void peg_pess_worker_fn(void *arg, int worker_idx) {
+  PessJob *j = (PessJob *)arg;
+  const int slot = peg_pess_worker_slot(j, worker_idx);
+  PegPessSolver *solver = &j->solvers[slot];
+  peg_pess_init_solver_from_job(solver, j, slot);
 
   // Iterate over the orderings in this job's slice. With n_orderings=1 this
   // is the legacy "one ordering per job" path. With n_orderings>1 the same
@@ -8142,6 +8151,141 @@ static int peg_pess_compute_opp_top_score(
   return top;
 }
 
+// ---- Opp-split parallelism (PASSPEG_PESSFULL_SPLIT_OPP) --------------------
+// build_scenario plays our cand P, leaving opp to move. An ordering's outcome
+// is the min (worst-for-us; LOSS=0<DRAW=1<WIN=2) over opp replies, with a
+// first-loss short-circuit. We make each (ordering, opp-reply) its own peg_pool
+// work unit: a single ordering then fans its replies across cores, and a full
+// solve pools all replies into one fine-grained queue (better load balance than
+// 1 unit per ordering). Each unit runs on its own pthread (own TLS movegen +
+// own solver scratch slot) and recurses sequentially within its subtree.
+typedef struct PessSplitAgg {
+  atomic_int worst;      // min PegPessOut seen so far (init WIN)
+  atomic_int has_loss;   // set once any reply is LOSS → cancel siblings
+} PessSplitAgg;
+
+typedef struct PessSplitUnit {
+  PessJob *job;              // shared config (solver setup, base game, counters)
+  PegPessOrdering *ordering; // the ordering this reply belongs to
+  PessSplitAgg *agg;         // per-ordering aggregation to fold into
+  int reply_idx;             // sorted opp-reply index; -1 = whole ordering
+} PessSplitUnit;
+
+// Atomic min-fold of an outcome into an ordering's aggregate.
+static void peg_pess_split_fold(PessSplitAgg *agg, PegPessOut out) {
+  int cur = atomic_load(&agg->worst);
+  while ((int)out < cur) {
+    if (atomic_compare_exchange_weak(&agg->worst, &cur, (int)out)) break;
+  }
+  if (out == PEG_OUT_LOSS) atomic_store(&agg->has_loss, 1);
+}
+
+// Count an ordering's splittable opp replies. Returns the number of opp-reply
+// work units to create (cand_n), or 0 if the post-P position is terminal /
+// bag-empty (→ caller makes a single whole-ordering unit, reply_idx=-1).
+static int peg_pess_count_opp_replies(const PessJob *j,
+                                      const PegPessOrdering *o) {
+  Game *scenario = peg_pess_build_scenario(j->base_game, o, j->unseen,
+                                           j->ld_size, j->opp_idx, j->cand);
+  if (game_get_game_end_reason(scenario) != GAME_END_REASON_NONE ||
+      bag_get_letters(game_get_bag(scenario)) == 0) {
+    game_destroy(scenario);
+    return 0;
+  }
+  MoveList *ml = move_list_create(16384);
+  const MoveGenArgs ga = {
+      .game = scenario,
+      .move_list = ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .thread_index = 0,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&ga);
+  const int n_moves = move_list_get_count(ml);
+  int cand_n = n_moves;
+  if (j->max_opp_k > 0 && j->max_opp_k < cand_n) cand_n = j->max_opp_k;
+  move_list_destroy(ml);
+  game_destroy(scenario);
+  return cand_n;
+}
+
+static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
+  PessSplitUnit *u = (PessSplitUnit *)arg;
+  PessJob *j = u->job;
+  // Cancel: a sibling reply already proved a loss → the ordering is LOSS, so
+  // this reply can't change the verdict. (Verdict-safe: min stays LOSS.)
+  if (atomic_load(&u->agg->has_loss)) return;
+
+  const int slot = peg_pess_worker_slot(j, worker_idx);
+  PegPessSolver *solver = &j->solvers[slot];
+  peg_pess_init_solver_from_job(solver, j, slot);
+  solver->nested_depth = 0;
+  solver->n_endgame_solves = 0;
+  solver->n_leaf_visits = 0;
+  solver->n_recursive_calls = 0;
+  solver->n_first_loss_cutoffs = 0;
+  solver->n_first_win_cutoffs = 0;
+  solver->n_nested_calls = 0;
+
+  Game *scenario = peg_pess_build_scenario(j->base_game, u->ordering, j->unseen,
+                                           j->ld_size, j->opp_idx, j->cand);
+  PegPessOut out;
+  if (u->reply_idx < 0) {
+    // Whole-ordering unit: post-P position is terminal/bag-empty (no opp node).
+    solver->game = scenario;
+    out = peg_pess_recursive_solve(solver);
+  } else {
+    // Generate + sort opp replies exactly as recursive_solve would, then play
+    // only this unit's reply and solve the resulting (our-turn) subtree.
+    MoveList *ml = move_list_create(16384);
+    const MoveGenArgs ga = {
+        .game = scenario,
+        .move_list = ml,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .thread_index = 0,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    generate_moves(&ga);
+    const int n_moves = move_list_get_count(ml);
+    int *order = malloc_or_die((size_t)n_moves * sizeof(int));
+    const int cand_n =
+        peg_pess_sort_order(solver, ml, n_moves, /*our_turn=*/false, order);
+    if (u->reply_idx >= cand_n) {
+      // Defensive: reply count shrank since the count pre-pass; nothing to do.
+      free(order);
+      move_list_destroy(ml);
+      game_destroy(scenario);
+      return;
+    }
+    const Move *reply = move_list_get_move(ml, order[u->reply_idx]);
+    // opp plays its reply (draws deterministically via bag_set_to_tiles bag);
+    // do NOT reset game_end_reason — a game-ending reply must reach base_case,
+    // exactly as the whole-ordering recursive_solve opp loop would see it.
+    play_move(reply, scenario, NULL);
+    solver->game = scenario;
+    out = peg_pess_recursive_solve(solver);
+    free(order);
+    move_list_destroy(ml);
+  }
+  game_destroy(scenario);
+  peg_pess_split_fold(u->agg, out);
+
+  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
+  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
+  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
+  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
+  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
+  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
+}
+
 void test_pass_peg_pessimistic_full_eval(void) {
   const char *cgp = getenv("PASSPEG_PESSFULL_CGP");
   if (!cgp || !*cgp) log_fatal("PASSPEG_PESSFULL_CGP must be set");
@@ -8183,6 +8327,11 @@ void test_pass_peg_pessimistic_full_eval(void) {
   const bool skip_word_pruning = skip_wp_env && atoi(skip_wp_env) > 0;
   const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
   const double slow_solve_log_s = slow_env ? atof(slow_env) : 0.0;
+  // SPLIT_OPP: dispatch each (ordering, opp-reply) as its own peg_pool unit
+  // instead of one unit per ordering. Finer-grained parallelism — a single
+  // ordering fans across cores; a full solve gets better load balance.
+  const char *split_opp_env = getenv("PASSPEG_PESSFULL_SPLIT_OPP");
+  const bool split_opp = split_opp_env && atoi(split_opp_env) > 0;
   // first_win: endgame solves use a narrow [-1,+1] window (sign only). Correct
   // for guaranteed-win (we only consume the sign) and verdict-invariant.
   const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
@@ -8528,7 +8677,63 @@ void test_pass_peg_pessimistic_full_eval(void) {
 
   Timer solve_t;
   ctimer_start(&solve_t);
-  if (pool) {
+  if (split_opp) {
+    // Opp-split dispatch: one work unit per (ordering, opp-reply). jobs[0]
+    // carries the shared config (base game, cand, slots, counters) — every
+    // job has identical shared fields, the split worker takes the ordering
+    // explicitly. Pre-pass (single-threaded) counts each ordering's replies.
+    PessJob *shared = &jobs[0];
+    PessSplitAgg *aggs =
+        malloc_or_die((size_t)mc.n_orderings * sizeof(PessSplitAgg));
+    // First count total units.
+    int *reply_counts = malloc_or_die((size_t)mc.n_orderings * sizeof(int));
+    int64_t total_units = 0;
+    for (int oi = 0; oi < mc.n_orderings; oi++) {
+      const int rc = peg_pess_count_opp_replies(shared, &orderings[oi]);
+      reply_counts[oi] = rc;
+      total_units += (rc > 0) ? rc : 1;  // 0 → one whole-ordering unit
+      atomic_init(&aggs[oi].worst, (int)PEG_OUT_WIN);
+      atomic_init(&aggs[oi].has_loss, 0);
+    }
+    PessSplitUnit *units =
+        malloc_or_die((size_t)total_units * sizeof(PessSplitUnit));
+    void **unit_ptrs = malloc_or_die((size_t)total_units * sizeof(void *));
+    int64_t ui = 0;
+    for (int oi = 0; oi < mc.n_orderings; oi++) {
+      const int rc = reply_counts[oi];
+      if (rc <= 0) {
+        units[ui] = (PessSplitUnit){.job = shared, .ordering = &orderings[oi],
+                                    .agg = &aggs[oi], .reply_idx = -1};
+        unit_ptrs[ui] = &units[ui];
+        ui++;
+      } else {
+        for (int r = 0; r < rc; r++) {
+          units[ui] = (PessSplitUnit){.job = shared, .ordering = &orderings[oi],
+                                      .agg = &aggs[oi], .reply_idx = r};
+          unit_ptrs[ui] = &units[ui];
+          ui++;
+        }
+      }
+    }
+    fprintf(stderr, "[pessfull] split-opp: %d orderings → %lld work units\n",
+            mc.n_orderings, (long long)total_units);
+    if (pool) {
+      peg_pool_submit_and_wait(pool, peg_pess_split_worker_fn, unit_ptrs,
+                                (int)total_units, /*helper=*/0);
+    } else {
+      for (int64_t k = 0; k < total_units; k++) {
+        peg_pess_split_worker_fn(&units[k], 0);
+      }
+    }
+    // Fold each ordering's aggregate into its outcome for Phase-4 aggregation.
+    for (int oi = 0; oi < mc.n_orderings; oi++) {
+      orderings[oi].outcome = (PegPessOut)atomic_load(&aggs[oi].worst);
+    }
+    free(aggs);
+    free(reply_counts);
+    free(units);
+    free(unit_ptrs);
+  } else if (pool) {
     peg_pool_submit_and_wait(pool, peg_pess_worker_fn, job_ptrs,
                               n_jobs, /*helper=*/0);
   } else {
