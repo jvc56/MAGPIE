@@ -209,7 +209,8 @@ void test_pass_peg_enumerate_bingo_racks(void) {
 
 // Bring mover's rack tile multiset out as a sorted A-Z signature like
 // "AEINRST". Caller's buffer must be at least 8 bytes.
-static void rack_to_sorted_sig(const Rack *rack, const LetterDistribution *ld,
+__attribute__((unused)) static void
+rack_to_sorted_sig(const Rack *rack, const LetterDistribution *ld,
                                int ld_size, char out[8]) {
   int idx = 0;
   for (int ml = 0; ml < ld_size && idx < 7; ml++) {
@@ -402,9 +403,6 @@ void test_pass_peg_search(void) {
   Game *game = config_get_game(config);
   MoveList *ml = move_list_create(20);
 
-  const LetterDistribution *ld = game_get_ld(game);
-  int ld_size = ld_get_size(ld);
-
   const char *target_env = getenv("PASSPEG_TARGET_COUNT");
   int target_count = target_env && *target_env ? atoi(target_env) : 1;
   if (target_count < 1) {
@@ -588,7 +586,8 @@ static int parse_rack_sig(const char *sig, const LetterDistribution *ld,
 
 // Plays best-by-equity until the bag is empty, both racks are empty, or
 // the consecutive-zero-turns end condition fires.
-static void play_until_natural_end(Game *game, MoveList *move_list) {
+__attribute__((unused)) static void
+play_until_natural_end(Game *game, MoveList *move_list) {
   while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
     const MoveGenArgs args = {
         .game = game,
@@ -1861,7 +1860,8 @@ static bool peg_next_perm(MachineLetter *arr, int n) {
 
 // Recursive enumerator over N-multisets from `counts[0..k_types-1]`. Calls
 // cb(picked, ctx) once per distinct multiset.
-static void peg_enum_multiset(int *picked, int idx, int remaining,
+__attribute__((unused)) static void
+peg_enum_multiset(int *picked, int idx, int remaining,
                                const int *counts, int k_types,
                                void (*cb)(const int *picked, void *ctx),
                                void *ctx) {
@@ -3205,15 +3205,15 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
         double win_x2_sum = 0.0;
         int64_t spread_sum = 0;
         for (int ti = 0; ti < n_opp_types; ti++) {
-          const int idx = pp * n_opp_types + ti;
-          const int32_t opp_pov_mover_total = inner_jobs[idx].mover_total;
-          const int weight = inner_jobs[idx].weight;
-          weight_sum += weight;
-          spread_sum += (int64_t)(-opp_pov_mover_total) * weight;
+          const int job_idx = pp * n_opp_types + ti;
+          const int32_t opp_pov_mover_total = inner_jobs[job_idx].mover_total;
+          const int job_weight = inner_jobs[job_idx].weight;
+          weight_sum += job_weight;
+          spread_sum += (int64_t)(-opp_pov_mover_total) * job_weight;
           if (opp_pov_mover_total < 0) {
-            win_x2_sum += 2.0 * weight;
+            win_x2_sum += 2.0 * job_weight;
           } else if (opp_pov_mover_total == 0) {
-            win_x2_sum += weight;
+            win_x2_sum += job_weight;
           }
         }
         const Move *opp_move = move_list_get_move(opp_ml, opp_rank);
@@ -7006,6 +7006,10 @@ typedef struct PegPessCache {
 // Forward declaration; full definition appears further down with the other
 // nested-cache helpers.
 typedef struct PegNestedCache PegNestedCache;
+// Forward decl: the solver holds a back-pointer to its job (for recursive
+// forking, which needs the pool/arena/slot arrays/config). Only a pointer is
+// stored here, so the incomplete type is fine; PessJob is defined later.
+typedef struct PessJob PessJob;
 
 typedef struct PegPessSolver {
   Game *game;
@@ -7044,6 +7048,13 @@ typedef struct PegPessSolver {
   // per worker (lazily), refreshed with game_copy each solve — avoids a
   // game_duplicate/game_destroy per leaf (hundreds of thousands on big runs).
   Game *eg_scratch;
+  // Recursive-split forking state. job back-pointer gives the fork helper the
+  // pool/arena/slots/config; recursive_split gates forking; fork_depth bounds
+  // it. Set by init_solver_from_job + the fork worker; the non-split path
+  // leaves recursive_split=false so it never forks.
+  const PessJob *job;
+  bool recursive_split;
+  int fork_depth;
   int64_t n_endgame_solves;
   int64_t n_leaf_visits;  // bag-empty-game-on leaves, counted even on cache hit
   int64_t n_recursive_calls;
@@ -7183,6 +7194,12 @@ static int64_t peg_pess_opp_sort_key(const Move *m, int mode) {
 
 // Forward decl for recursion.
 static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
+// Forward decl: parallel min-reduction over opp replies at an opp node, used
+// by recursive_solve when recursive_split is enabled. Defined after PessJob /
+// the fork worker (it needs the job's pool/arena/slots). Returns the opp
+// node's outcome (min over replies); the caller frees order/ml.
+static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
+                                         const int *order, int cand_n);
 
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
@@ -7836,6 +7853,23 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
     return out;
   }
 
+  // Recursive split: at an opp node with enough replies and below the fork
+  // depth cap, fan the opp replies out as parallel sub-tasks (min-reduction
+  // with first-loss cancel) instead of the sequential loop below. Same verdict
+  // (min over replies); just parallelized. The helper frees order + returns ml.
+  enum { PEG_FORK_MIN_CANDS = 8, PEG_FORK_MAX_DEPTH = 2 };
+  if (!our_turn && s->recursive_split && s->job &&
+      s->fork_depth < PEG_FORK_MAX_DEPTH && cand_n >= PEG_FORK_MIN_CANDS) {
+    const PegPessOut out = peg_pess_fork_opp_node(s, ml, order, cand_n);
+    free(order);
+    if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
+      s->ml_pool[s->ml_pool_count++] = ml;
+    } else {
+      move_list_destroy(ml);
+    }
+    return out;
+  }
+
   PegPessOut best_or_worst;
   if (our_turn) {
     best_or_worst = PEG_OUT_LOSS;
@@ -8000,6 +8034,8 @@ typedef struct PessJob {
   int opp_sort_mode;
   int mover_sort_mode;
   bool subperm_sort;
+  bool recursive_split;  // fork opp nodes across the pool (split path only)
+  PegPool *pool;         // set in the split path; needed for recursive forking
   double slow_solve_log_s;
   bool first_win;
   int endgame_threads;
@@ -8083,6 +8119,11 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   solver->eg_results = j->eg_results[slot];
   solver->cache = j->cache;
   solver->nested_cache = j->nested_cache;
+  // Recursive-split forking context. fork_depth defaults to 0 (top-level task);
+  // the fork worker overrides it for nested sub-tasks.
+  solver->job = j;
+  solver->recursive_split = j->recursive_split;
+  solver->fork_depth = 0;
 }
 
 static void peg_pess_worker_fn(void *arg, int worker_idx) {
@@ -8341,6 +8382,92 @@ static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
   if (j->arena) pess_arena_release(j->arena, slot);
 }
 
+// One forked opp-reply sub-task: solve `game` (the parent opp position with one
+// reply already played) and fold its outcome into the shared aggregate.
+typedef struct PessForkUnit {
+  const PessJob *job;
+  PessSplitAgg *agg;
+  Game *game;        // owned: this position, one opp reply played; freed here
+  int fork_depth;    // depth of THIS sub-task (parent fork_depth + 1)
+  int nested_depth;  // parent opp node's nested_depth, preserved for correctness
+} PessForkUnit;
+
+static void peg_pess_fork_worker_fn(void *arg, int worker_idx) {
+  (void)worker_idx;
+  PessForkUnit *u = (PessForkUnit *)arg;
+  const PessJob *j = u->job;
+  if (atomic_load(&u->agg->has_loss)) {
+    game_destroy(u->game);
+    return;
+  }
+  const int slot = pess_arena_acquire(j->arena);
+  if (slot < 0) {
+    log_fatal("pessfull: scratch arena exhausted in fork (increase size)");
+  }
+  PegPessSolver *solver = &j->solvers[slot];
+  peg_pess_init_solver_from_job(solver, j, slot);
+  solver->fork_depth = u->fork_depth;
+  solver->nested_depth = u->nested_depth;  // preserve parent's nested depth
+  solver->n_endgame_solves = 0;
+  solver->n_leaf_visits = 0;
+  solver->n_recursive_calls = 0;
+  solver->n_first_loss_cutoffs = 0;
+  solver->n_first_win_cutoffs = 0;
+  solver->n_nested_calls = 0;
+  solver->game = u->game;
+  const PegPessOut out = peg_pess_recursive_solve(solver);
+
+  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
+  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
+  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
+  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
+  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
+  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
+
+  game_destroy(u->game);
+  pess_arena_release(j->arena, slot);
+  peg_pess_split_fold(u->agg, out);
+}
+
+// Parallel min-reduction over opp replies at an opp node. Duplicates the game
+// per reply, plays it, and dispatches each as a fork sub-task. Same verdict as
+// the sequential opp loop (min over replies, LOSS<DRAW<WIN); first-loss cancel
+// via the shared aggregate. The caller owns/frees `order` and `ml`.
+static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
+                                         const int *order, int cand_n) {
+  const PessJob *j = s->job;
+  Game *g = s->game;
+  PessSplitAgg agg;
+  atomic_init(&agg.worst, (int)PEG_OUT_WIN);
+  atomic_init(&agg.has_loss, 0);
+
+  PessForkUnit *units = malloc_or_die((size_t)cand_n * sizeof(PessForkUnit));
+  void **ptrs = malloc_or_die((size_t)cand_n * sizeof(void *));
+  for (int mi = 0; mi < cand_n; mi++) {
+    const Move *m = move_list_get_move(ml, order[mi]);
+    Game *child = game_duplicate(g);
+    game_set_backup_mode(child, BACKUP_MODE_OFF);
+    // opp plays its reply (draws deterministically); do NOT reset
+    // game_end_reason — a game-ending reply must reach base_case, exactly as
+    // the sequential opp loop sees it.
+    play_move(m, child, NULL);
+    units[mi] = (PessForkUnit){.job = j, .agg = &agg, .game = child,
+                               .fork_depth = s->fork_depth + 1,
+                               .nested_depth = s->nested_depth};
+    ptrs[mi] = &units[mi];
+  }
+  // Nested submit on the shared pool. Help-while-waiting drains other tasks
+  // (each on its own arena slot), so this thread never pure-blocks → no
+  // deadlock. pool is guaranteed non-NULL here (recursive_split is only set in
+  // the multithreaded split path).
+  peg_pool_submit_and_wait(j->pool, peg_pess_fork_worker_fn, ptrs, cand_n,
+                            /*helper=*/0);
+  const PegPessOut out = (PegPessOut)atomic_load(&agg.worst);
+  free(units);
+  free(ptrs);
+  return out;
+}
+
 void test_pass_peg_pessimistic_full_eval(void) {
   const char *cgp = getenv("PASSPEG_PESSFULL_CGP");
   if (!cgp || !*cgp) log_fatal("PASSPEG_PESSFULL_CGP must be set");
@@ -8387,6 +8514,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
   // ordering fans across cores; a full solve gets better load balance.
   const char *split_opp_env = getenv("PASSPEG_PESSFULL_SPLIT_OPP");
   const bool split_opp = split_opp_env && atoi(split_opp_env) > 0;
+  // RECURSIVE_SPLIT: additionally fork deep opp nodes inside each unit across
+  // the pool (needs SPLIT_OPP + a pool). Default off.
+  const char *rsplit_env = getenv("PASSPEG_PESSFULL_RECURSIVE_SPLIT");
+  const bool recursive_split = rsplit_env && atoi(rsplit_env) > 0;
   // first_win: endgame solves use a narrow [-1,+1] window (sign only). Correct
   // for guaranteed-win (we only consume the sign) and verdict-invariant.
   const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
@@ -8628,13 +8759,13 @@ void test_pass_peg_pessimistic_full_eval(void) {
   for (int i = 0; i < n_slots; i++) arena.free_stack[i] = i;
   arena.free_top = n_slots;
   cpthread_mutex_init(&arena.mutex);
-  atomic_long total_solves = ATOMIC_VAR_INIT(0);
-  atomic_long total_leaf_visits = ATOMIC_VAR_INIT(0);
-  atomic_long total_recursive = ATOMIC_VAR_INIT(0);
-  atomic_long total_loss_cutoffs = ATOMIC_VAR_INIT(0);
-  atomic_long total_win_cutoffs = ATOMIC_VAR_INIT(0);
-  atomic_long total_nested_calls = ATOMIC_VAR_INIT(0);
-  atomic_int orderings_done = ATOMIC_VAR_INIT(0);
+  atomic_long total_solves = 0;
+  atomic_long total_leaf_visits = 0;
+  atomic_long total_recursive = 0;
+  atomic_long total_loss_cutoffs = 0;
+  atomic_long total_win_cutoffs = 0;
+  atomic_long total_nested_calls = 0;
+  atomic_int orderings_done = 0;
 
   // Per-worker telemetry arrays, zero-initialized.
   int64_t *pw_orderings = calloc_or_die((size_t)n_slots, sizeof(int64_t));
@@ -8717,7 +8848,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
           .n_orderings = 1, .eg_ctxs = eg_ctxs,
           .eg_results = eg_results, .solvers = solvers,
-          .n_worker_slots = n_slots,
+          .n_worker_slots = n_slots, .arena = &arena,
           .shared_n_solves = &total_solves,
           .shared_n_leaf_visits = &total_leaf_visits,
           .shared_n_recursive = &total_recursive,
@@ -8749,6 +8880,16 @@ void test_pass_peg_pessimistic_full_eval(void) {
     // job has identical shared fields, the split worker takes the ordering
     // explicitly. Pre-pass (single-threaded) counts each ordering's replies.
     PessJob *shared = &jobs[0];
+    // Enable recursive forking on the shared job (split units + their forked
+    // sub-tasks inherit it via init_solver_from_job). Needs a real pool.
+    // Set arena explicitly here too: jobs[0] may come from either build branch,
+    // and the split path (and forking) require the arena to be non-NULL.
+    shared->arena = &arena;
+    shared->recursive_split = recursive_split && pool != NULL;
+    shared->pool = pool;
+    if (recursive_split && pool != NULL) {
+      fprintf(stderr, "[pessfull] recursive-split ON (fork opp nodes)\n");
+    }
     PessSplitAgg *aggs =
         malloc_or_die((size_t)mc.n_orderings * sizeof(PessSplitAgg));
     // First count total units.
