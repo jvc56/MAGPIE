@@ -7201,6 +7201,14 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
 static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
                                          const int *order, int cand_n);
 
+// Per-pthread fork-nesting depth. The pool's help-while-waiting lets a forking
+// frame run OTHER units while waiting on its sub-tasks; each waiting forking
+// frame holds an arena slot, so without a bound the help-drain stack (and slot
+// demand) grows unboundedly. Cap nesting so each pthread holds a bounded number
+// of slots; beyond the cap a node runs the sequential opp loop instead.
+static __thread int g_peg_fork_nesting = 0;
+enum { PEG_MAX_FORK_NESTING = 2 };
+
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   Game *g = s->game;
@@ -7859,7 +7867,8 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   // (min over replies); just parallelized. The helper frees order + returns ml.
   enum { PEG_FORK_MIN_CANDS = 8, PEG_FORK_MAX_DEPTH = 2 };
   if (!our_turn && s->recursive_split && s->job &&
-      s->fork_depth < PEG_FORK_MAX_DEPTH && cand_n >= PEG_FORK_MIN_CANDS) {
+      s->fork_depth < PEG_FORK_MAX_DEPTH && cand_n >= PEG_FORK_MIN_CANDS &&
+      g_peg_fork_nesting < PEG_MAX_FORK_NESTING) {
     const PegPessOut out = peg_pess_fork_opp_node(s, ml, order, cand_n);
     free(order);
     if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
@@ -8459,9 +8468,13 @@ static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
   // Nested submit on the shared pool. Help-while-waiting drains other tasks
   // (each on its own arena slot), so this thread never pure-blocks → no
   // deadlock. pool is guaranteed non-NULL here (recursive_split is only set in
-  // the multithreaded split path).
+  // the multithreaded split path). Bump the per-pthread nesting counter so
+  // tasks help-drained during this wait won't fork past the cap (bounds the
+  // arena-slot stack on this pthread).
+  g_peg_fork_nesting++;
   peg_pool_submit_and_wait(j->pool, peg_pess_fork_worker_fn, ptrs, cand_n,
                             /*helper=*/0);
+  g_peg_fork_nesting--;
   const PegPessOut out = (PegPessOut)atomic_load(&agg.worst);
   free(units);
   free(ptrs);
@@ -8737,9 +8750,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
   // Phase 3: per-worker scratch + parallel solve via peg_pool.
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
   // Slots: the non-split path needs n_threads+1 (workers + helper). The split
-  // path acquires slots from an arena and, with recursive forking, may have
-  // several concurrently-active tasks per pthread, so size generously.
-  const int n_slots = n_threads * 4 + 4;
+  // path acquires slots from an arena; with recursive forking + help-while-
+  // waiting, each pthread holds up to PEG_MAX_FORK_NESTING+1 slots, so worst
+  // case is ~(n_threads+1)*(PEG_MAX_FORK_NESTING+1). Size generously past that.
+  const int n_slots = n_threads * 8 + 8;
   EndgameCtx **eg_ctxs = calloc_or_die((size_t)n_slots, sizeof(EndgameCtx *));
   EndgameResults **eg_results =
       malloc_or_die((size_t)n_slots * sizeof(EndgameResults *));
