@@ -86,6 +86,31 @@ static inline void cpthread_create(pthread_t *newthread,
   }
 }
 
+// Like cpthread_create, but requests a specific stack size (bytes) for the
+// new thread. The platform default secondary-thread stack is small (512 KB on
+// macOS); callers whose work recurses deeply on the worker stack — e.g. a
+// reentrant help-while-waiting thread pool — must request a larger stack to
+// avoid a guard-page fault (SIGBUS) that prints no diagnostic. stack_bytes is
+// rounded up to a page by the platform; pass a page-multiple to be explicit.
+static inline void cpthread_create_with_stack(pthread_t *newthread,
+                                              void *(*start_routine)(void *),
+                                              void *arg, size_t stack_bytes) {
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr)) {
+    log_fatal("thread attr init failed");
+  }
+  if (pthread_attr_setstacksize(&attr, stack_bytes)) {
+    log_fatal("thread attr setstacksize failed");
+  }
+  if (pthread_create(newthread, &attr, start_routine, arg)) {
+    log_fatal("thread create failed");
+  }
+  // attr is a value type with no embedded allocations on the platforms we
+  // target; destroying it releases any attr-internal state and is required by
+  // POSIX (this is an attr object, not a mutex/cond — see CLAUDE.md).
+  pthread_attr_destroy(&attr);
+}
+
 static inline void cpthread_join(cpthread_t th) {
   if (pthread_join(th, NULL)) {
     log_fatal("thread join failed");

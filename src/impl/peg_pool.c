@@ -13,6 +13,11 @@
 
 enum {
   PEG_POOL_QUEUE_INIT_CAP = 1024,
+  // Per-worker stack. Workers recurse into nested solves while help-draining
+  // the queue (bounded by the PEG fork-nesting cap), so the small default
+  // secondary-thread stack is not enough. 64 MiB is virtual address space,
+  // committed lazily, so only the nesting depth actually reached is paid for.
+  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
 };
 
 // ---------------------------------------------------------------------------
@@ -287,10 +292,17 @@ PegPool *peg_pool_create(int num_workers, int thread_index_offset) {
   cpthread_cond_init(&pool->q_cv_nonempty);
   pool->threads = malloc_or_die((size_t)num_workers * sizeof(cpthread_t));
   pool->worker_ctxs = malloc_or_die((size_t)num_workers * sizeof(PegPoolWorkerCtx));
+  // Workers help-drain the queue while blocked on a submitted batch, so a
+  // worker can recurse into nested solves on its own stack (bounded by the
+  // PEG fork-nesting cap). The 512 KB default secondary-thread stack overflows
+  // there; request a large stack (lazily committed, so only the depth actually
+  // used is paid for) to keep deep nesting stack-safe.
   for (int worker_idx = 0; worker_idx < num_workers; worker_idx++) {
     pool->worker_ctxs[worker_idx].pool = pool;
     pool->worker_ctxs[worker_idx].worker_idx = thread_index_offset + worker_idx;
-    cpthread_create(&pool->threads[worker_idx], pp_worker_main, &pool->worker_ctxs[worker_idx]);
+    cpthread_create_with_stack(&pool->threads[worker_idx], pp_worker_main,
+                               &pool->worker_ctxs[worker_idx],
+                               PEG_POOL_WORKER_STACK_BYTES);
   }
   return pool;
 }
