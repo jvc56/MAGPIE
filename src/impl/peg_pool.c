@@ -320,6 +320,16 @@ int peg_pool_thread_index_offset(const PegPool *pool) {
   return pool ? pool->thread_index_offset : 0;
 }
 
+int peg_pool_queue_count(PegPool *pool) {
+  if (!pool) {
+    return 0;
+  }
+  cpthread_mutex_lock(&pool->q_mutex);
+  const int n = pool->q_count;
+  cpthread_mutex_unlock(&pool->q_mutex);
+  return n;
+}
+
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
                               int n, int helper_worker_idx) {
   if (n <= 0) {

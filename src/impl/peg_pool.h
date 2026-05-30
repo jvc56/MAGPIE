@@ -35,6 +35,12 @@ void peg_pool_destroy(PegPool *pool);
 int peg_pool_num_workers(const PegPool *pool);
 int peg_pool_thread_index_offset(const PegPool *pool);
 
+// Current number of items queued (snapshot, taken under the queue mutex). Lets
+// a caller gauge spare capacity: if below num_workers, workers are about to
+// starve, so spawning more parallel sub-work is worthwhile (otherwise it's
+// just redundant work contending for already-busy cores).
+int peg_pool_queue_count(PegPool *pool);
+
 // Submit a batch of `n` items as `(fn, args[i])` pairs and block until all
 // complete. While blocked, the calling thread helps drain queue items so
 // nested submissions don't deadlock. `helper_worker_idx` is the index used

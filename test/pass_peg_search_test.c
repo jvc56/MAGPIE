@@ -7053,7 +7053,9 @@ typedef struct PegPessSolver {
   // it. Set by init_solver_from_job + the fork worker; the non-split path
   // leaves recursive_split=false so it never forks.
   const PessJob *job;
+  PegPool *pool;  // direct copy of job->pool (PessJob is incomplete in nested_solve)
   bool recursive_split;
+  bool force_nested_perm;  // debug: bypass the queue gate (tsan/testing only)
   int fork_depth;
   int64_t n_endgame_solves;
   int64_t n_leaf_visits;  // bag-empty-game-on leaves, counted even on cache hit
@@ -7208,6 +7210,19 @@ static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
 // of slots; beyond the cap a node runs the sequential opp loop instead.
 static __thread int g_peg_fork_nesting = 0;
 enum { PEG_MAX_FORK_NESTING = 2 };
+
+// Forward decl: evaluate one nested cand's sub-perms in parallel across the
+// pool. Fills out_arr[0..pc->count-1] with per-perm outcomes and sets
+// *cand_score (2*wins+draws) / *cand_losses (weighted). Defined after PessJob /
+// the perm worker. Verdict-invariant vs the sequential perm loop — it just
+// drops the within-cand minLossesSoFar early-break (computes all perms) to
+// parallelize, which never changes the leader or its outcome row.
+typedef struct NestedPermCollect NestedPermCollect;
+static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
+                                     int cand_move_idx, const uint8_t *unseen,
+                                     const NestedPermCollect *pc,
+                                     PegPessOut *out_arr, int64_t *cand_score,
+                                     int64_t *cand_losses);
 
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
@@ -7692,27 +7707,51 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
   int64_t best_score = INT64_MIN;
   bool best_set = false;
 
+  // Parallelize each cand's sub-perms across the pool when recursive_split is
+  // on (and enough perms / nesting headroom). The cand loop stays sequential so
+  // the cross-cand minLossesSoFar leader-finding + early-WIN exit are preserved
+  // exactly; only the within-cand perm loop is parallelized (and its early-
+  // break dropped — verdict-invariant, just more work traded for cores).
+  // Only parallelize perms when the pool has spare capacity. Parallel perms
+  // drop the within-cand early-break (extra work), so they only pay off when
+  // workers would otherwise idle. When the queue is backed up (capped runs, or
+  // early/middle of a full run where orderings + opp-forks keep cores busy),
+  // run sequentially and keep the cutoff. This self-tunes: nested-perm parallel
+  // engages exactly in the drained tail where the single-core collapse happened.
+  enum { PEG_NESTED_PERM_MIN = 4 };
+  const bool parallel_perms =
+      s->recursive_split && s->pool &&
+      pc.count >= PEG_NESTED_PERM_MIN &&
+      g_peg_fork_nesting < PEG_MAX_FORK_NESTING &&
+      (s->force_nested_perm ||
+       peg_pool_queue_count(s->pool) < peg_pool_num_workers(s->pool));
   for (int ci = 0; ci < n_cands; ci++) {
     int64_t cand_score = 0;   // 2*wins + draws
     int64_t cand_losses = 0;
     bool completed_all = true;
-    for (int pi = 0; pi < pc.count; pi++) {
-      const NestedPerm *p = &pc.perms[pi];
-      PegPessOut out = peg_pess_nested_run_scenario(
-          s, g, ml, order[ci], unseen, p->draw, p->n);
-      cur_outcomes[pi] = out;
-      if (out == PEG_OUT_WIN) {
-        cand_score += 2 * p->weight;
-      } else if (out == PEG_OUT_DRAW) {
-        cand_score += p->weight;
-      } else {
-        cand_losses += p->weight;
-      }
-      // Strict-greater: tied cands survive to the next perm so we don't lose
-      // info-state coverage for the across-tie pick.
-      if (cand_losses > min_losses) {
-        completed_all = false;
-        break;
+    if (parallel_perms) {
+      peg_pess_parallel_perms(s, ml, order[ci], unseen, &pc, cur_outcomes,
+                              &cand_score, &cand_losses);
+      // All perms computed (no within-cand break).
+    } else {
+      for (int pi = 0; pi < pc.count; pi++) {
+        const NestedPerm *p = &pc.perms[pi];
+        PegPessOut out = peg_pess_nested_run_scenario(
+            s, g, ml, order[ci], unseen, p->draw, p->n);
+        cur_outcomes[pi] = out;
+        if (out == PEG_OUT_WIN) {
+          cand_score += 2 * p->weight;
+        } else if (out == PEG_OUT_DRAW) {
+          cand_score += p->weight;
+        } else {
+          cand_losses += p->weight;
+        }
+        // Strict-greater: tied cands survive to the next perm so we don't lose
+        // info-state coverage for the across-tie pick.
+        if (cand_losses > min_losses) {
+          completed_all = false;
+          break;
+        }
       }
     }
     if (!completed_all) continue;  // cand was pruned mid-loop
@@ -8044,6 +8083,7 @@ typedef struct PessJob {
   int mover_sort_mode;
   bool subperm_sort;
   bool recursive_split;  // fork opp nodes across the pool (split path only)
+  bool force_nested_perm;  // debug: bypass nested-perm queue gate
   PegPool *pool;         // set in the split path; needed for recursive forking
   double slow_solve_log_s;
   bool first_win;
@@ -8131,7 +8171,9 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   // Recursive-split forking context. fork_depth defaults to 0 (top-level task);
   // the fork worker overrides it for nested sub-tasks.
   solver->job = j;
+  solver->pool = j->pool;
   solver->recursive_split = j->recursive_split;
+  solver->force_nested_perm = j->force_nested_perm;
   solver->fork_depth = 0;
 }
 
@@ -8481,6 +8523,101 @@ static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
   return out;
 }
 
+// One nested sub-perm sub-task: run the (cand, perm) scenario and record its
+// outcome + fold its weight into the cand's shared score/loss accumulators.
+typedef struct PessPermUnit {
+  const PessJob *job;
+  Game *base_game;        // nested node game; run_scenario duplicates it (RO)
+  MoveList *ml;           // parent's move list (read-only, shared)
+  int cand_move_idx;      // order[ci]
+  const uint8_t *unseen;
+  const MachineLetter *draw;
+  int draw_n;
+  int64_t weight;
+  int nested_depth;       // preserve the nested node's depth
+  PegPessOut *out_slot;   // distinct per task — no race
+  atomic_llong *score;    // 2*wins + draws
+  atomic_llong *losses;   // weighted losses
+} PessPermUnit;
+
+static void peg_pess_perm_worker_fn(void *arg, int worker_idx) {
+  (void)worker_idx;
+  PessPermUnit *u = (PessPermUnit *)arg;
+  const PessJob *j = u->job;
+  const int slot = pess_arena_acquire(j->arena);
+  if (slot < 0) {
+    log_fatal("pessfull: scratch arena exhausted in perm fork (increase size)");
+  }
+  PegPessSolver *solver = &j->solvers[slot];
+  peg_pess_init_solver_from_job(solver, j, slot);
+  solver->nested_depth = u->nested_depth;
+  solver->fork_depth = 0;  // fresh subtree root; opp nodes may fork under cap
+  solver->n_endgame_solves = 0;
+  solver->n_leaf_visits = 0;
+  solver->n_recursive_calls = 0;
+  solver->n_first_loss_cutoffs = 0;
+  solver->n_first_win_cutoffs = 0;
+  solver->n_nested_calls = 0;
+
+  const PegPessOut out = peg_pess_nested_run_scenario(
+      solver, u->base_game, u->ml, u->cand_move_idx, u->unseen, u->draw,
+      u->draw_n);
+  *u->out_slot = out;
+  if (out == PEG_OUT_WIN) {
+    atomic_fetch_add(u->score, 2 * u->weight);
+  } else if (out == PEG_OUT_DRAW) {
+    atomic_fetch_add(u->score, u->weight);
+  } else {
+    atomic_fetch_add(u->losses, u->weight);
+  }
+
+  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
+  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
+  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
+  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
+  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
+  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
+
+  pess_arena_release(j->arena, slot);
+}
+
+static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
+                                     int cand_move_idx, const uint8_t *unseen,
+                                     const NestedPermCollect *pc,
+                                     PegPessOut *out_arr, int64_t *cand_score,
+                                     int64_t *cand_losses) {
+  const PessJob *j = s->job;
+  atomic_llong score, losses;
+  atomic_init(&score, 0);
+  atomic_init(&losses, 0);
+  PessPermUnit *units =
+      malloc_or_die((size_t)pc->count * sizeof(PessPermUnit));
+  void **ptrs = malloc_or_die((size_t)pc->count * sizeof(void *));
+  for (int pi = 0; pi < pc->count; pi++) {
+    units[pi] = (PessPermUnit){.job = j,
+                               .base_game = s->game,
+                               .ml = ml,
+                               .cand_move_idx = cand_move_idx,
+                               .unseen = unseen,
+                               .draw = pc->perms[pi].draw,
+                               .draw_n = pc->perms[pi].n,
+                               .weight = pc->perms[pi].weight,
+                               .nested_depth = s->nested_depth,
+                               .out_slot = &out_arr[pi],
+                               .score = &score,
+                               .losses = &losses};
+    ptrs[pi] = &units[pi];
+  }
+  g_peg_fork_nesting++;
+  peg_pool_submit_and_wait(j->pool, peg_pess_perm_worker_fn, ptrs, pc->count,
+                            /*helper=*/0);
+  g_peg_fork_nesting--;
+  *cand_score = (int64_t)atomic_load(&score);
+  *cand_losses = (int64_t)atomic_load(&losses);
+  free(units);
+  free(ptrs);
+}
+
 void test_pass_peg_pessimistic_full_eval(void) {
   const char *cgp = getenv("PASSPEG_PESSFULL_CGP");
   if (!cgp || !*cgp) log_fatal("PASSPEG_PESSFULL_CGP must be set");
@@ -8531,6 +8668,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
   // the pool (needs SPLIT_OPP + a pool). Default off.
   const char *rsplit_env = getenv("PASSPEG_PESSFULL_RECURSIVE_SPLIT");
   const bool recursive_split = rsplit_env && atoi(rsplit_env) > 0;
+  // Debug: force nested-perm parallelism on (bypass the queue gate). For
+  // exercising the path under the thread sanitizer; not for production runs.
+  const char *force_np_env = getenv("PASSPEG_PESSFULL_FORCE_NESTED_PERM");
+  const bool force_nested_perm = force_np_env && atoi(force_np_env) > 0;
   // first_win: endgame solves use a narrow [-1,+1] window (sign only). Correct
   // for guaranteed-win (we only consume the sign) and verdict-invariant.
   const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
@@ -8900,6 +9041,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
     // and the split path (and forking) require the arena to be non-NULL.
     shared->arena = &arena;
     shared->recursive_split = recursive_split && pool != NULL;
+    shared->force_nested_perm = force_nested_perm;
     shared->pool = pool;
     if (recursive_split && pool != NULL) {
       fprintf(stderr, "[pessfull] recursive-split ON (fork opp nodes)\n");
