@@ -276,6 +276,68 @@ void test_pass_first(void) {
       0);
 }
 
+// The arbitrary-MoveGen-index API: a multithreaded endgame solve must return
+// the identical result whether its worker MoveGen slots are the contiguous
+// default block [offset, offset+threads) or an explicit, possibly
+// non-contiguous set (e.g. slots borrowed from whichever pool workers happen
+// to be idle). The slot number now only affects cleanup bookkeeping — the
+// master role and jitter are keyed by the worker ordinal — so the two solves
+// must agree exactly.
+void test_endgame_arbitrary_movegen_indices(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 4 -eplies 7");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+
+  Game *game = config_get_game(config);
+  EndgameResults *results = config_get_endgame_results(config);
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = game;
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 4;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+
+  // Contiguous default mapping (slots 0..3).
+  EndgameCtx *ctx_contiguous = NULL;
+  ErrorStack *error_stack = error_stack_create();
+  args.worker_movegen_indices = NULL;
+  endgame_solve(&ctx_contiguous, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int32_t value_contiguous =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+  // Explicit non-contiguous set: scrambled and sparse, and ordinal 0 (the
+  // master) deliberately does NOT map to slot 0 — proving the master role no
+  // longer depends on the slot number.
+  const int scattered_slots[4] = {9, 2, 14, 5};
+  EndgameCtx *ctx_scattered = NULL;
+  args.worker_movegen_indices = scattered_slots;
+  endgame_solve(&ctx_scattered, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int32_t value_scattered =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+  printf("arbitrary-movegen-indices: contiguous=%d scattered=%d\n",
+         value_contiguous, value_scattered);
+  assert(value_contiguous == value_scattered);
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx_contiguous);
+  endgame_ctx_destroy(ctx_scattered);
+  config_destroy(config);
+}
+
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",

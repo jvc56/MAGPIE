@@ -69,8 +69,19 @@ typedef struct EndgameArgs {
   TranspositionTable *shared_tt;
   // Offset added to worker thread indices. When multiple endgame_solve calls
   // run concurrently, each must use a distinct range to avoid collisions on
-  // the global per-thread MoveGen cache.
+  // the global per-thread MoveGen cache. Used as the contiguous mapping
+  // (worker idx → MoveGen slot thread_index_offset + idx) when
+  // worker_movegen_indices is NULL.
   int thread_index_offset;
+  // Optional explicit MoveGen cache slots, one per worker thread (length
+  // num_threads). When non-NULL, worker idx uses slot
+  // worker_movegen_indices[idx] instead of the contiguous
+  // thread_index_offset + idx mapping. This lets a caller hand the solve an
+  // arbitrary, possibly non-contiguous set of slots — e.g. a thread pool
+  // lending the MoveGen slots of whichever workers happen to be idle. Each
+  // slot must be globally unique against all other concurrent MoveGen users
+  // for the duration of the solve. NULL = contiguous mapping (back-compat).
+  const int *worker_movegen_indices;
   // First-win optimization: search a narrow [-1, +1] window so the solver
   // returns only win/loss/draw rather than exact spread. Faster (more
   // alpha-beta cutoffs) but exact spread is unknown when set.

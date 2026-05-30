@@ -125,6 +125,8 @@ struct EndgameCtx {
   int requested_plies;
   int threads;
   int thread_index_offset;
+  // Borrowed from EndgameArgs (see endgame.h). NULL = contiguous mapping.
+  const int *worker_movegen_indices;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
   bool tt_is_external; // true when using a caller-provided shared TT
@@ -177,7 +179,16 @@ struct EndgameCtx {
 };
 
 struct EndgameCtxWorker {
+  // MoveGen cache slot for this worker. Globally unique vs other concurrent
+  // MoveGen users, but otherwise arbitrary — may be non-contiguous when the
+  // caller supplies worker_movegen_indices. Reassigned every solve.
   int thread_index;
+  // Worker ordinal within this solve (0..threads-1, == position in the cached
+  // workers[] array, so stable across solves). ordinal 0 is the root master:
+  // it owns root move ordering, ply-2 tracking, the soft-time check, and PV
+  // display. Drives per-worker jitter parity. Kept separate from thread_index
+  // so the MoveGen slot can be any value without disturbing this role.
+  int ordinal;
   Game *game_copy;
   Arena *small_move_arena;
   MoveList *move_list;
@@ -571,6 +582,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
     es->threads = 1;
   }
   es->thread_index_offset = endgame_args->thread_index_offset;
+  es->worker_movegen_indices = endgame_args->worker_movegen_indices;
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -742,13 +754,22 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
 
 // Create a new worker, duplicating the given game state.
 // Called only when growing the worker pool.
+// MoveGen cache slot for worker ordinal `idx`: an explicit borrowed slot when
+// the caller supplied worker_movegen_indices, else the contiguous mapping.
+static inline int endgame_worker_movegen_slot(const EndgameCtx *solver,
+                                              int idx) {
+  return solver->worker_movegen_indices ? solver->worker_movegen_indices[idx]
+                                        : solver->thread_index_offset + idx;
+}
+
 static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
-                                                   int worker_index,
+                                                   int ordinal, int movegen_slot,
                                                    uint64_t base_seed,
                                                    const Game *template_game) {
   EndgameCtxWorker *solver_worker = malloc_or_die(sizeof(EndgameCtxWorker));
 
-  solver_worker->thread_index = worker_index;
+  solver_worker->ordinal = ordinal;
+  solver_worker->thread_index = movegen_slot;
   solver_worker->game_copy = game_duplicate(template_game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
@@ -762,7 +783,9 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->solver = solver;
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
 
-  solver_worker->prng = prng_create(base_seed + (uint64_t)worker_index * 12345);
+  // Seed by ordinal (stable across solves), not the MoveGen slot, so jitter is
+  // deterministic regardless of which slots were borrowed.
+  solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
   solver_worker->best_pv.num_moves = 0;
@@ -784,7 +807,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
   arena_reset(worker->small_move_arena);
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
-  prng_seed(worker->prng, base_seed + (uint64_t)worker->thread_index * 12345);
+  prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
   worker->best_pv.num_moves = 0;
   worker->best_pv_value = -LARGE_VALUE;
@@ -834,9 +857,18 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
                                         sizeof(cpthread_t) * solver->threads);
     for (int idx = solver->cap_workers; idx < solver->threads; idx++) {
       solver->workers[idx] = endgame_ctx_create_worker(
-          solver, solver->thread_index_offset + idx, base_seed, solver->game);
+          solver, idx, endgame_worker_movegen_slot(solver, idx), base_seed,
+          solver->game);
     }
     solver->cap_workers = solver->threads;
+  }
+  // Reassign MoveGen slots every solve: cached workers persist across solves,
+  // but the borrowed slot set (worker_movegen_indices) can differ each time.
+  // The ordinal is the array position and never changes.
+  for (int idx = 0; idx < solver->threads; idx++) {
+    solver->workers[idx]->ordinal = idx;
+    solver->workers[idx]->thread_index =
+        endgame_worker_movegen_slot(solver, idx);
   }
   // Copy worker 0's game state (with cross-sets) to workers 1..N-1
   for (int idx = 0; idx < solver->threads; idx++) {
@@ -1132,7 +1164,7 @@ static int compute_conservation_bonus(const SmallMove *sm,
 // based on tiles played. Odd threads favor aggressive play, even threads favor
 // conservative play. Returns 0 for single-threaded or thread 0.
 static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
-  int thread_idx = worker->thread_index;
+  int thread_idx = worker->ordinal;
   if (worker->solver->threads <= 1 || thread_idx == 0) {
     return 0;
   }
@@ -2000,7 +2032,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   const bool is_root = (worker->current_iterative_deepening_depth == depth);
   const bool is_ply2 =
       (worker->current_iterative_deepening_depth - 1 == depth) &&
-      worker->thread_index == 0 && worker->in_first_root_move;
+      worker->ordinal == 0 && worker->in_first_root_move;
   if (is_ply2) {
     atomic_store(&worker->solver->ply2_moves_total, nplays);
     atomic_store(&worker->solver->ply2_moves_completed, 0);
@@ -2061,7 +2093,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
           small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
       // Track whether thread 0 is inside root move #1's subtree
-      if (is_root && worker->thread_index == 0 && pass == 0) {
+      if (is_root && worker->ordinal == 0 && pass == 0) {
         worker->in_first_root_move = (idx == 0);
       }
 
@@ -2203,7 +2235,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // Track root move progress (thread 0 only, for external polling).
         // Count on any pass so ABDADA deferred moves that complete on pass 1+
         // are not missed.
-        if (worker->thread_index == 0) {
+        if (worker->ordinal == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
         }
       }
@@ -2363,7 +2395,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   // Half the threads use stuck-tile-aware root ordering (build chains +
   // conservation), the other half use score-based ordering for diversity.
-  float initial_opp_stuck_frac = (worker->thread_index % 2 == 0)
+  float initial_opp_stuck_frac = (worker->ordinal % 2 == 0)
                                      ? worker->solver->initial_opp_stuck_frac
                                      : 0.0F;
 
@@ -2387,7 +2419,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // as a depth-0 result. If the IDS is interrupted before depth-1 completes
   // even once, the caller gets the best-from-static-greedy answer instead
   // of the default "no result / pass / value=0".
-  if (worker->thread_index == 0) {
+  if (worker->ordinal == 0) {
     SmallMove *initial_moves =
         (SmallMove *)(worker->small_move_arena->memory);
     int32_t best_root_value = -LARGE_VALUE;
@@ -2459,11 +2491,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
   // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
   const int num_threads = worker->solver->threads;
-  if (num_threads > 1 && worker->thread_index > 0) {
+  if (num_threads > 1 && worker->ordinal > 0) {
     // Spread across up to 4 different starting depths to reduce contention.
     // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at
     // d5
-    int depth_offset = 1 + (worker->thread_index % MIN(4, plies - 1));
+    int depth_offset = 1 + (worker->ordinal % MIN(4, plies - 1));
     start = MIN(depth_offset, plies);
   }
 
@@ -2474,8 +2506,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    // Update root move progress counters (thread 0 only)
-    if (worker->thread_index == 0) {
+    // Update root move progress counters (master worker, ordinal 0, only)
+    if (worker->ordinal == 0) {
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
@@ -2564,8 +2596,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Call per-ply callback (only the first thread of this solver — not
     // necessarily global thread 0 — to avoid race conditions while still
     // firing when callers pass a non-zero thread_index_offset).
-    if (worker->thread_index == worker->solver->thread_index_offset &&
-        worker->solver->per_ply_callback) {
+    if (worker->ordinal == 0 && worker->solver->per_ply_callback) {
       // Extend PV from TT + greedy playout for display
       PVLine extended_pv = pv;
       if (worker->solver->transposition_table_optim) {
@@ -2592,7 +2623,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Callers using only hard_time_limit rely on the external timer thread
     // and check_depth_deadline instead; soft_time_limit = 0 disables this
     // block intentionally (e.g. baseline time_mode=0 via endgame_time.c).
-    if (worker->thread_index == 0 && worker->solver->soft_time_limit > 0) {
+    if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
       if (ply >= min_depth_for_time_mgmt) {

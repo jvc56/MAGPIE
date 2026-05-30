@@ -139,6 +139,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
     {"endgame_wasm", test_endgame_wasm},
+    {"endgameidx", test_endgame_arbitrary_movegen_indices},
     {"infercmp", test_infer_cmp},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
