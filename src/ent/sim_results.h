@@ -18,6 +18,16 @@ typedef enum {
   PLY_INFO_COUNT_EXCHANGE,
   PLY_INFO_COUNT_TILE_PLACEMENT,
   PLY_INFO_COUNT_BINGO,
+  // Exchange counts broken down by tile count (1 through 7). These let
+  // analysis tools render an exchange-size distribution per ply alongside
+  // the tile-placement heatmap. Indexed as PLY_INFO_COUNT_EXCHANGE_1 + (n-1).
+  PLY_INFO_COUNT_EXCHANGE_1,
+  PLY_INFO_COUNT_EXCHANGE_2,
+  PLY_INFO_COUNT_EXCHANGE_3,
+  PLY_INFO_COUNT_EXCHANGE_4,
+  PLY_INFO_COUNT_EXCHANGE_5,
+  PLY_INFO_COUNT_EXCHANGE_6,
+  PLY_INFO_COUNT_EXCHANGE_7,
   NUM_PLY_INFO_COUNT_TYPES,
 } ply_info_count_t;
 

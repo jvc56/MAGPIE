@@ -48,6 +48,17 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
   free(sim_ctx);
 }
 
+void sim_ctx_get_inner_diag(const SimCtx *sim_ctx, InnerDiag *out) {
+  if (!out) {
+    return;
+  }
+  if (!sim_ctx || !sim_ctx->rvs) {
+    *out = (InnerDiag){0};
+    return;
+  }
+  rvs_get_inner_diag(sim_ctx->rvs, out);
+}
+
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {

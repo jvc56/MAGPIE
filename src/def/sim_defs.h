@@ -25,9 +25,12 @@ typedef struct FidelityLevel {
   double time_limit_seconds; // per-level time budget (0 = no limit)
   ply_strategy_t ply_strategy;
   // Fields below only used when ply_strategy == PLY_STRATEGY_NESTED_SIM
-  int nested_candidates; // K: number of candidate moves to evaluate per ply
-  int nested_rollouts;   // N: mini-rollouts per candidate
-  int nested_plies;      // depth of each mini-rollout
+  int nested_candidates;   // K: number of candidate moves to evaluate per ply
+  int nested_rollouts;     // N: per-candidate floor (initial round-robin)
+  int nested_plies;        // depth of each mini-rollout
+  int nested_max_samples;  // total sample cap across all candidates (0 = K*N)
+  double nested_stop_z;    // early-stop z-score on top1 vs top2 Welch t-test
+                           // (e.g. 2.326 for ~99% one-sided; 0 disables)
   // Inner utility weights used by the nested ply chooser. Same semantics as
   // SimArgs.utility_w_{winpct,spread} / utility_spread_scale (see
   // sim_utility_blend in sim_args.h). Defaults (1.0, 0.0, 100.0) pick by

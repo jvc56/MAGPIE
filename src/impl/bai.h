@@ -61,6 +61,7 @@ typedef struct BAISyncData {
   int avoid_prune_count;    // remaining arms still needing top-up
   int avoid_prune_next_idx; // round-robin cursor
   int avoid_prune_best_arm_idx;
+  bool disable_similarity;  // skip rvs_are_similar() in update routines
 } BAISyncData;
 
 static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
@@ -89,6 +90,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->avoid_prune_arms = NULL;
   bai_sync_data->avoid_prune_count = 0;
   bai_sync_data->avoid_prune_next_idx = 0;
+  bai_sync_data->disable_similarity = false;
   return bai_sync_data;
 }
 
@@ -281,7 +283,8 @@ static inline void bai_update_threshold_and_challenger(
   }
   for (int i = 0; i < bai_sync_data->num_arms; i++) {
     if (i == bai_sync_data->astar_index ||
-        rvs_are_similar(rvs, bai_sync_data->astar_index, i)) {
+        (!bai_sync_data->disable_similarity &&
+         rvs_are_similar(rvs, bai_sync_data->astar_index, i))) {
       num_arms_at_threshold++;
       astar_arm_datum->Zs[i] = INFINITY;
       continue;
@@ -547,6 +550,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     sync_data->avoid_prune_count = bai_options->num_arm_avoid_prune;
     sync_data->avoid_prune_next_idx = 0;
   }
+  sync_data->disable_similarity = bai_options->disable_similarity;
 
   Checkpoint *avoid_prune_checkpoint =
       checkpoint_create(bai_options->num_threads, bai_avoid_prune_prebroadcast);

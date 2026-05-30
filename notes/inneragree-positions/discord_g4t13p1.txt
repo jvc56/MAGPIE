@@ -1,0 +1,41 @@
+g4 t13 p1 — P1 to move, rack AADNNOR, P1 up 243-197 by 46, bag=36 tiles.
+
+Top picks:
+- nested: 15B DONNAR(D)   wpct 0.823
+- flat:   C9 NAR(C)O      wpct 0.730
+
+Cross-variant wpct (same move, what each sim thinks of it):
+
+DONNAR(D)
+  nested 0.823  (n=52k)
+  flat   0.695  (n=651k)
+  nested favors by +0.128
+
+NAR(C)O
+  nested 0.783  (n=2.5k — small sample, BAI mostly pruned it)
+  flat   0.730  (n=14M)
+  nested favors by +0.053
+
+So both sims rank DONNAR(D) > NAR(C)O in nested's view (0.823 > 0.783), but flat picks NAR(C)O because in flat's view DONNAR(D) is only 0.695. The disagreement on which move is best comes from flat undervaluing DONNAR(D) by 13pp.
+
+Per-ply scores + opp bingo rate, after each move:
+
+DONNAR(D):
+  ply 0 (us):    nested 23.9  / flat 30.5
+  ply 1 (opp):   nested 16.9  / flat 27.9   bingo: nested 4.1% vs flat 12.0%
+  ply 2 (us):    nested 19.4  / flat 32.7
+  ply 3 (opp):   nested 22.8  / flat 35.0   bingo: nested 10.2% vs flat 23.7%
+
+NAR(C)O:
+  ply 0 (us):    nested 29.7  / flat 39.8
+  ply 1 (opp):   nested 25.4  / flat 49.5   bingo: nested 11.7% vs flat 28.9%
+  ply 2 (us):    nested 29.4  / flat 46.7
+  ply 3 (opp):   nested 28.3  / flat 42.0
+
+Same story as the VE(HM) position: flat hallucinates opp bingos. After DONNAR(D) nested sees opp bingoing 4.1% of the time (the board is essentially closed) while flat thinks 12%. After NAR(C)O, nested 11.7% / flat 28.9% — flat has opp bingoing nearly 1 in 3 turns.
+
+DONNAR(D) is the right play: lower scoring but it nukes opp's bingo chances. NAR(C)O scores higher but opens column-B scoring lanes. Nested sees the defensive value of DONNAR(D); flat doesn't.
+
+Per the heatmap-diff view in the report: in flat's rollouts after NAR(C)O, opp tiles land much more often in column B (the lane that runs up to the A-column TWS at A1/A15). Then on the follow-up our (P1's) tiles land much more at A8 — flat is rolling out opp playing through the new column-B tiles to threaten the A-column TWS, with us covering at A8. Nested doesn't see this scenario playing out because the actual rack-and-board state doesn't really enable it.
+
+Concrete actionable takeaway: this is exactly the population where a nested-sim outer would beat a flat-sim outer — closed-board midgame, defensive-vs-open trade-off, with flat over-valuing the higher-scoring open option because its rollouts can't tell that the board geometry won't actually let opp's bingos land.

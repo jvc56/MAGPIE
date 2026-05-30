@@ -4,5 +4,6 @@
 void test_gamepair_bai_benchmark(void);
 void test_gamepair_bai_late_game(void);
 void test_gamepair_bai_cutoff(void);
+void test_nested_convergence(void);
 
 #endif

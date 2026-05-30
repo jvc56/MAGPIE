@@ -30,6 +30,8 @@
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
+#include "inner_agreement_test.h"
+#include "inner_sweep_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -152,6 +154,12 @@ static TestEntry on_demand_test_table[] = {
     {"gamepairbai", test_gamepair_bai_benchmark},
     {"lategame", test_gamepair_bai_late_game},
     {"cutofftest", test_gamepair_bai_cutoff},
+    {"nestconv", test_nested_convergence},
+    {"innerswprun", test_inner_sweep_run},
+    {"inneragree", test_inner_agreement},
+    {"dumppos", test_dump_position_rankings},
+    {"debugstarter", test_debug_starter},
+    {"staticvsgold", test_static_vs_gold},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

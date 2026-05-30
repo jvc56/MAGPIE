@@ -36,6 +36,13 @@ typedef struct BAIOptions {
   // being preserved after bai() returns.
   int *arm_avoid_prune;
   int num_arm_avoid_prune;
+  // When true, BAI's similarity check (rvs_are_similar) is bypassed so that
+  // arms that produce equivalent moves (e.g., different anagrams of the same
+  // tile set placed at the same square — "epigons") each accumulate their
+  // own samples rather than being treated as already-at-threshold once one
+  // becomes astar. Useful when we want reliable cross-comparison wpcts for
+  // each individual arm.
+  bool disable_similarity;
 } BAIOptions;
 
 #endif

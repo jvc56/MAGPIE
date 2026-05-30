@@ -334,6 +334,28 @@ typedef struct SimmerWorker {
   Game *nested_game;             // scratch game for mini-rollouts
   MoveList *nested_move_list;    // capacity-1 list for inner movegen
   MoveList *candidate_move_list; // capacity-K list for outer candidate gen
+  // Common-Random-Numbers buffer: pre-allocated seeds, one per inner
+  // rollout. All K candidates in a single inner call reuse the same
+  // inner_seeds[n] for their n-th rollout so candidate comparison is
+  // paired (variance-reduced) instead of independent.
+  uint64_t *inner_seeds;
+  int inner_seeds_capacity;
+  // Per-candidate running stats for TOP_TWO inner sampling. Sized to
+  // candidate_move_list capacity (K). Reused across inner calls.
+  double *inner_sum_wpct;
+  double *inner_sum_spread;
+  double *inner_sum_u;
+  double *inner_sum_u_sq;
+  int *inner_n_samples;
+  int inner_stats_capacity;
+  // Diagnostic counters (test-only; reset per turn by simmer_reset_worker).
+  uint64_t inner_calls;
+  uint64_t inner_rollouts;
+  uint64_t inner_early_stops;
+  uint64_t inner_agree_count;
+  double inner_loss_sum;
+  double inner_loss_sum_sq;
+  double inner_loss_max;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -369,6 +391,8 @@ typedef struct Simmer {
   int nested_candidates;
   int nested_rollouts;
   int nested_plies;
+  int nested_max_samples;
+  double nested_stop_z;
   // Inner utility weights consumed by get_top_nested_sim_move (same semantics
   // as the outer utility_* triple above; see sim_utility_blend).
   double inner_w_winpct;
@@ -394,8 +418,28 @@ SimmerWorker *simmer_create_worker(const Game *game,
     simmer_worker->nested_move_list = NULL;
     simmer_worker->candidate_move_list = NULL;
   }
+  simmer_worker->inner_seeds = NULL;
+  simmer_worker->inner_seeds_capacity = 0;
+  simmer_worker->inner_sum_wpct = NULL;
+  simmer_worker->inner_sum_spread = NULL;
+  simmer_worker->inner_sum_u = NULL;
+  simmer_worker->inner_sum_u_sq = NULL;
+  simmer_worker->inner_n_samples = NULL;
+  simmer_worker->inner_stats_capacity = 0;
+  simmer_worker->inner_calls = 0;
+  simmer_worker->inner_rollouts = 0;
+  simmer_worker->inner_early_stops = 0;
+  simmer_worker->inner_agree_count = 0;
+  simmer_worker->inner_loss_sum = 0.0;
+  simmer_worker->inner_loss_sum_sq = 0.0;
+  simmer_worker->inner_loss_max = 0.0;
   (void)num_sim_threads;
   return simmer_worker;
+}
+
+void simmer_worker_seed_prng(SimmerWorker *worker, uint64_t seed) {
+  prng_destroy(worker->prng);
+  worker->prng = prng_create(seed);
 }
 
 void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
@@ -403,6 +447,13 @@ void simmer_reset_worker(SimmerWorker *simmer_worker, const Game *game) {
   if (simmer_worker->nested_game) {
     game_copy(simmer_worker->nested_game, game);
   }
+  simmer_worker->inner_calls = 0;
+  simmer_worker->inner_rollouts = 0;
+  simmer_worker->inner_early_stops = 0;
+  simmer_worker->inner_agree_count = 0;
+  simmer_worker->inner_loss_sum = 0.0;
+  simmer_worker->inner_loss_sum_sq = 0.0;
+  simmer_worker->inner_loss_max = 0.0;
 }
 
 // Lazily allocate nested sim resources if not already present.
@@ -426,6 +477,12 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   game_destroy(simmer_worker->nested_game);
   move_list_destroy(simmer_worker->nested_move_list);
   move_list_destroy(simmer_worker->candidate_move_list);
+  free(simmer_worker->inner_seeds);
+  free(simmer_worker->inner_sum_wpct);
+  free(simmer_worker->inner_sum_spread);
+  free(simmer_worker->inner_sum_u);
+  free(simmer_worker->inner_sum_u_sq);
+  free(simmer_worker->inner_n_samples);
   free(simmer_worker);
 }
 
@@ -433,23 +490,91 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
 static const Move *endgame_ply_solve(Game *game, int thread_index,
                                      SimmerWorker *worker);
 
-// Choose the best move by running mini-rollouts for each candidate.
-// Generates K candidates, runs N mini-rollouts per candidate using static
-// eval, and returns the candidate with the best win rate (ties broken by
-// average spread). If best_wpct_out is non-NULL, writes the best candidate's
-// average win% there. The returned Move* points into candidate_move_list and
-// remains valid until the next generate_moves call on that list.
-static Move *
-get_top_nested_sim_move(Game *game, int thread_index, SimmerWorker *worker,
-                        const WinPct *win_pcts, int num_rollouts, int num_plies,
-                        double inner_w_winpct, double inner_w_spread,
-                        double inner_spread_scale, double *best_wpct_out) {
-  MoveList *candidate_list = worker->candidate_move_list;
+// Run a single inner mini-rollout for the given candidate, sharing tile
+// draws via the provided seed (Common Random Numbers). Writes per-sample
+// wpct and spread to *wpct_out, *spread_out.
+void run_inner_rollout(Game *game, int thread_index, SimmerWorker *worker,
+                       const Move *candidate, const WinPct *win_pcts,
+                       int num_plies, int player_index, bool plies_are_odd,
+                       uint64_t seed, double *wpct_out, double *spread_out) {
   Game *nested_game = worker->nested_game;
   MoveList *nested_move_list = worker->nested_move_list;
+
+  game_copy(nested_game, game);
+  game_seed(nested_game, seed);
+  game_set_backup_mode(nested_game, BACKUP_MODE_OFF);
+  play_move(candidate, nested_game, NULL);
+
+  for (int ply = 0; ply < num_plies; ply++) {
+    if (game_over(nested_game)) {
+      break;
+    }
+    const Move *best;
+    if (bag_is_empty(game_get_bag(nested_game))) {
+      best = endgame_ply_solve(nested_game, thread_index, worker);
+    } else {
+      best = get_top_equity_move(nested_game, thread_index, nested_move_list);
+    }
+    play_move(best, nested_game, NULL);
+  }
+
+  const int spread =
+      equity_to_int(
+          player_get_score(game_get_player(nested_game, player_index))) -
+      equity_to_int(
+          player_get_score(game_get_player(nested_game, 1 - player_index)));
+  *spread_out = (double)spread;
+
+  double wpct;
+  if (game_over(nested_game)) {
+    wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
+  } else {
+    int lookup_spread = spread;
+    if (!plies_are_odd) {
+      lookup_spread = -lookup_spread;
+    }
+    unsigned int unseen =
+        bag_get_letters(game_get_bag(nested_game)) +
+        rack_get_total_letters(player_get_rack(
+            game_get_player(nested_game, 1 - player_index)));
+    if (unseen == 0) {
+      wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
+    } else {
+      wpct = (double)win_pct_get(win_pcts, lookup_spread, unseen);
+      if (!plies_are_odd) {
+        wpct = 1.0 - wpct;
+      }
+    }
+  }
+  *wpct_out = wpct;
+}
+
+// Splitmix64-style hash for deterministic per-index CRN seeds. Mixed from
+// the worker's per-call base seed so different inner calls use different
+// streams while sample-index pairing across candidates is preserved.
+static inline uint64_t inner_seed_from_index(uint64_t base, uint64_t idx) {
+  uint64_t z = base + idx * 0x9E3779B97F4A7C15ULL;
+  z = (z ^ (z >> 30)) * 0xBF58476D1CE4E5B9ULL;
+  z = (z ^ (z >> 27)) * 0x94D049BB133111EBULL;
+  return z ^ (z >> 31);
+}
+
+// Choose the best move by running inner mini-rollouts over K candidates.
+// Phase 1: each candidate gets `num_rollouts` round-robin samples (floor).
+// Phase 2: TOP_TWO adaptive sampling — current top1 (by blended utility) is
+// sampled with prob 0.5, else current top2 — until total samples reach
+// `max_samples` (0 = no cap beyond floor) or a Welch t-test on top1 vs top2
+// utility exceeds `stop_z` (0 = disabled).
+// Returns the candidate with the best final blended utility. Pointer into
+// candidate_move_list, valid until the next generate_moves on that list.
+Move *get_top_nested_sim_move(
+    Game *game, int thread_index, SimmerWorker *worker, const WinPct *win_pcts,
+    int num_rollouts, int num_plies, int max_samples, double stop_z,
+    double inner_w_winpct, double inner_w_spread, double inner_spread_scale,
+    double *best_wpct_out) {
+  MoveList *candidate_list = worker->candidate_move_list;
   XoshiroPRNG *prng = worker->prng;
 
-  // Generate top-K candidates by equity
   const MoveGenArgs gen_args = {
       .game = game,
       .move_list = candidate_list,
@@ -466,88 +591,159 @@ get_top_nested_sim_move(Game *game, int thread_index, SimmerWorker *worker,
 
   const int actual_candidates = move_list_get_count(candidate_list);
   if (actual_candidates <= 1 && !best_wpct_out) {
-    // Only one move and no win% needed — skip rollouts
     return move_list_get_move(candidate_list, 0);
   }
+  worker->inner_calls++;
 
   const int player_index = game_get_player_on_turn_index(game);
   const bool plies_are_odd = (num_plies % 2) != 0;
-  int best_candidate = 0;
-  double best_avg_wpct = -1.0;
-  double best_utility = -1.0;
 
+  // Ensure per-candidate stat arrays cover K.
+  if (worker->inner_stats_capacity < actual_candidates) {
+    worker->inner_sum_wpct = realloc_or_die(
+        worker->inner_sum_wpct, sizeof(double) * actual_candidates);
+    worker->inner_sum_spread = realloc_or_die(
+        worker->inner_sum_spread, sizeof(double) * actual_candidates);
+    worker->inner_sum_u = realloc_or_die(
+        worker->inner_sum_u, sizeof(double) * actual_candidates);
+    worker->inner_sum_u_sq = realloc_or_die(
+        worker->inner_sum_u_sq, sizeof(double) * actual_candidates);
+    worker->inner_n_samples = realloc_or_die(
+        worker->inner_n_samples, sizeof(int) * actual_candidates);
+    worker->inner_stats_capacity = actual_candidates;
+  }
+  double *sum_wpct = worker->inner_sum_wpct;
+  double *sum_spread = worker->inner_sum_spread;
+  double *sum_u = worker->inner_sum_u;
+  double *sum_u_sq = worker->inner_sum_u_sq;
+  int *n_samples = worker->inner_n_samples;
+  for (int k = 0; k < actual_candidates; k++) {
+    sum_wpct[k] = 0.0;
+    sum_spread[k] = 0.0;
+    sum_u[k] = 0.0;
+    sum_u_sq[k] = 0.0;
+    n_samples[k] = 0;
+  }
+
+  // Per-call CRN base seed: drives inner_seed_from_index(base, sample_idx)
+  // so candidate k's sample m and candidate k''s sample m share a tile-draw
+  // stream (paired comparison) without needing pre-allocated arrays.
+  const uint64_t base_seed = prng_next(prng);
+
+  // Phase 1: round-robin floor.
   for (int k = 0; k < actual_candidates; k++) {
     const Move *candidate = move_list_get_move(candidate_list, k);
-    double total_spread = 0.0;
-    double total_wpct = 0.0;
+    for (int m = 0; m < num_rollouts; m++) {
+      double wpct, spread;
+      run_inner_rollout(game, thread_index, worker, candidate, win_pcts,
+                        num_plies, player_index, plies_are_odd,
+                        inner_seed_from_index(base_seed, (uint64_t)m), &wpct,
+                        &spread);
+      const double u =
+          sim_utility_blend(wpct, double_to_equity(spread), inner_w_winpct,
+                            inner_w_spread, inner_spread_scale);
+      sum_wpct[k] += wpct;
+      sum_spread[k] += spread;
+      sum_u[k] += u;
+      sum_u_sq[k] += u * u;
+      n_samples[k]++;
+      worker->inner_rollouts++;
+    }
+  }
 
-    for (int n = 0; n < num_rollouts; n++) {
-      // Copy game state and re-seed for different tile draw order
-      game_copy(nested_game, game);
-      game_seed(nested_game, prng_next(prng));
-
-      // Play candidate move (no backup needed, we discard this state)
-      game_set_backup_mode(nested_game, BACKUP_MODE_OFF);
-      play_move(candidate, nested_game, NULL);
-
-      // Rollout using static eval (or endgame solver when bag empty)
-      for (int ply = 0; ply < num_plies; ply++) {
-        if (game_over(nested_game)) {
-          break;
-        }
-        const Move *best;
-        if (bag_is_empty(game_get_bag(nested_game))) {
-          best = endgame_ply_solve(nested_game, thread_index, worker);
-        } else {
-          best =
-              get_top_equity_move(nested_game, thread_index, nested_move_list);
-        }
-        play_move(best, nested_game, NULL);
+  // Phase 2: TOP_TWO adaptive sampling up to max_samples (total).
+  const int floor_total = actual_candidates * num_rollouts;
+  const int cap = (max_samples > floor_total) ? max_samples : floor_total;
+  int total_samples = floor_total;
+  while (total_samples < cap) {
+    double best_u = -1e9, second_u = -1e9;
+    int top1 = -1, top2 = -1;
+    for (int k = 0; k < actual_candidates; k++) {
+      const double mean_u = sum_u[k] / n_samples[k];
+      if (mean_u > best_u) {
+        second_u = best_u;
+        top2 = top1;
+        best_u = mean_u;
+        top1 = k;
+      } else if (mean_u > second_u) {
+        second_u = mean_u;
+        top2 = k;
       }
-
-      // Compute spread from perspective of the player making this decision
-      const int spread =
-          equity_to_int(
-              player_get_score(game_get_player(nested_game, player_index))) -
-          equity_to_int(
-              player_get_score(game_get_player(nested_game, 1 - player_index)));
-      total_spread += (double)spread;
-
-      // Convert spread to win probability using win_pct table
-      double wpct;
-      if (game_over(nested_game)) {
-        wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
-      } else {
-        int lookup_spread = spread;
-        if (!plies_are_odd) {
-          lookup_spread = -lookup_spread;
-        }
-        unsigned int unseen =
-            bag_get_letters(game_get_bag(nested_game)) +
-            rack_get_total_letters(player_get_rack(
-                game_get_player(nested_game, 1 - player_index)));
-        if (unseen == 0) {
-          wpct = (spread > 0) ? 1.0 : (spread == 0) ? 0.5 : 0.0;
-        } else {
-          wpct = (double)win_pct_get(win_pcts, lookup_spread, unseen);
-          if (!plies_are_odd) {
-            wpct = 1.0 - wpct;
-          }
-        }
-      }
-      total_wpct += wpct;
+    }
+    if (top1 < 0) {
+      break;
     }
 
-    const double avg_wpct = total_wpct / num_rollouts;
-    const double avg_spread = total_spread / num_rollouts;
+    // 99%-style early stop: Welch t on top1 vs top2 utility means.
+    if (stop_z > 0.0 && top2 >= 0 && actual_candidates > 1) {
+      const double n1 = (double)n_samples[top1];
+      const double n2 = (double)n_samples[top2];
+      const double m1 = sum_u[top1] / n1;
+      const double m2 = sum_u[top2] / n2;
+      const double v1 = sum_u_sq[top1] / n1 - m1 * m1;
+      const double v2 = sum_u_sq[top2] / n2 - m2 * m2;
+      const double se2 = (v1 > 0.0 ? v1 : 0.0) / n1 + (v2 > 0.0 ? v2 : 0.0) / n2;
+      if (se2 > 1e-12) {
+        const double z = (m1 - m2) / sqrt(se2);
+        if (z >= stop_z) {
+          worker->inner_early_stops++;
+          break;
+        }
+      }
+    }
+
+    const int chosen =
+        (top2 >= 0 && (prng_next(prng) & 1ULL)) ? top2 : top1;
+    const Move *candidate = move_list_get_move(candidate_list, chosen);
+    double wpct, spread;
+    run_inner_rollout(game, thread_index, worker, candidate, win_pcts,
+                      num_plies, player_index, plies_are_odd,
+                      inner_seed_from_index(base_seed,
+                                            (uint64_t)n_samples[chosen]),
+                      &wpct, &spread);
+    const double u =
+        sim_utility_blend(wpct, double_to_equity(spread), inner_w_winpct,
+                          inner_w_spread, inner_spread_scale);
+    sum_wpct[chosen] += wpct;
+    sum_spread[chosen] += spread;
+    sum_u[chosen] += u;
+    sum_u_sq[chosen] += u * u;
+    n_samples[chosen]++;
+    total_samples++;
+    worker->inner_rollouts++;
+  }
+
+  // Final pick.
+  int best_candidate = 0;
+  double best_avg_wpct = -1.0;
+  double best_utility = -1e9;
+  double util_at_0 = 0.0;
+  for (int k = 0; k < actual_candidates; k++) {
+    const double avg_wpct = sum_wpct[k] / n_samples[k];
+    const double avg_spread = sum_spread[k] / n_samples[k];
     const double utility =
         sim_utility_blend(avg_wpct, double_to_equity(avg_spread),
                           inner_w_winpct, inner_w_spread, inner_spread_scale);
+    if (k == 0) {
+      util_at_0 = utility;
+    }
     if (utility > best_utility) {
       best_utility = utility;
       best_avg_wpct = avg_wpct;
       best_candidate = k;
     }
+  }
+
+  // Tally per-call diagnostic: did BAI agree with top-equity, and what's the
+  // utility gap?  Cheap (uses sums we already computed).
+  if (best_candidate == 0) {
+    worker->inner_agree_count++;
+  }
+  const double loss = best_utility - util_at_0;
+  worker->inner_loss_sum += loss;
+  worker->inner_loss_sum_sq += loss * loss;
+  if (loss > worker->inner_loss_max) {
+    worker->inner_loss_max = loss;
   }
 
   if (best_wpct_out) {
@@ -653,8 +849,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       double this_wpct;
       best_play = get_top_nested_sim_move(
           game, thread_index, simmer_worker, simmer->win_pcts,
-          simmer->nested_rollouts, simmer->nested_plies, simmer->inner_w_winpct,
-          simmer->inner_w_spread, simmer->inner_spread_scale, &this_wpct);
+          simmer->nested_rollouts, simmer->nested_plies,
+          simmer->nested_max_samples, simmer->nested_stop_z,
+          simmer->inner_w_winpct, simmer->inner_w_spread,
+          simmer->inner_spread_scale, &this_wpct);
       inner_wpct = this_wpct;
       inner_wpct_valid = true;
       last_ply_player = player_on_turn_index;
@@ -787,6 +985,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
     simmer->nested_candidates = l0->nested_candidates;
     simmer->nested_rollouts = l0->nested_rollouts;
     simmer->nested_plies = l0->nested_plies;
+    simmer->nested_max_samples = l0->nested_max_samples;
+    simmer->nested_stop_z = l0->nested_stop_z;
     simmer->inner_w_winpct = l0->inner_w_winpct;
     simmer->inner_w_spread = l0->inner_w_spread;
     simmer->inner_spread_scale = l0->inner_spread_scale;
@@ -795,6 +995,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
     simmer->nested_candidates = 0;
     simmer->nested_rollouts = 0;
     simmer->nested_plies = 0;
+    simmer->nested_max_samples = 0;
+    simmer->nested_stop_z = 0.0;
     simmer->inner_w_winpct = 1.0;
     simmer->inner_w_spread = 0.0;
     simmer->inner_spread_scale = 100.0;
@@ -889,6 +1091,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
     simmer->nested_candidates = l0->nested_candidates;
     simmer->nested_rollouts = l0->nested_rollouts;
     simmer->nested_plies = l0->nested_plies;
+    simmer->nested_max_samples = l0->nested_max_samples;
+    simmer->nested_stop_z = l0->nested_stop_z;
     simmer->inner_w_winpct = l0->inner_w_winpct;
     simmer->inner_w_spread = l0->inner_w_spread;
     simmer->inner_spread_scale = l0->inner_spread_scale;
@@ -905,12 +1109,34 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
                     sim_args->use_heat_map);
 }
 
+void rvs_get_inner_diag(const RandomVariables *rvs, InnerDiag *out) {
+  if (!out) {
+    return;
+  }
+  *out = (InnerDiag){0};
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  for (int i = 0; i < simmer->num_threads; i++) {
+    const SimmerWorker *w = simmer->workers[i];
+    out->calls += w->inner_calls;
+    out->rollouts += w->inner_rollouts;
+    out->early_stops += w->inner_early_stops;
+    out->agree_count += w->inner_agree_count;
+    out->loss_sum += w->inner_loss_sum;
+    out->loss_sum_sq += w->inner_loss_sum_sq;
+    if (w->inner_loss_max > out->loss_max) {
+      out->loss_max = w->inner_loss_max;
+    }
+  }
+}
+
 void rvs_set_fidelity_level(RandomVariables *rvs, const FidelityLevel *level) {
   Simmer *simmer = (Simmer *)rvs->data;
   simmer->ply_strategy = level->ply_strategy;
   simmer->nested_candidates = level->nested_candidates;
   simmer->nested_rollouts = level->nested_rollouts;
   simmer->nested_plies = level->nested_plies;
+  simmer->nested_max_samples = level->nested_max_samples;
+  simmer->nested_stop_z = level->nested_stop_z;
   simmer->inner_w_winpct = level->inner_w_winpct;
   simmer->inner_w_spread = level->inner_w_spread;
   simmer->inner_spread_scale = level->inner_spread_scale;

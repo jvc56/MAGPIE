@@ -451,6 +451,13 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   simmed_play->ply_infos[ply_index].ply_info_counts[count_type]++;
   simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
       (uint64_t)is_bingo;
+  if (count_type == PLY_INFO_COUNT_EXCHANGE) {
+    const int n = move_get_tiles_played(move);
+    if (n >= 1 && n <= RACK_SIZE) {
+      simmed_play->ply_infos[ply_index]
+          .ply_info_counts[PLY_INFO_COUNT_EXCHANGE_1 + (n - 1)]++;
+    }
+  }
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 

@@ -15,6 +15,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 void simulate_without_ctx(SimArgs *sim_args, SimResults *sim_results,
                           ErrorStack *error_stack);
 void sim_ctx_destroy(SimCtx *sim_ctx);
+void sim_ctx_get_inner_diag(const SimCtx *sim_ctx, InnerDiag *out);
 const Move *get_top_simming_move(Game *game, int movegen_index,
                                  MoveList *move_list, SimArgs *sim_args,
                                  SimCtx **sim_ctx, SimResults *sim_results,

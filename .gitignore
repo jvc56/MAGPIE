@@ -37,3 +37,5 @@ venv/
 PR_DESCRIPTION.md
 PR_TITLE.txt
 SPEEDUP_NOTES.md
+.claude
+notes/hybrid-ab/*.log
