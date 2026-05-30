@@ -7010,6 +7010,10 @@ typedef struct PegNestedCache PegNestedCache;
 // forking, which needs the pool/arena/slot arrays/config). Only a pointer is
 // stored here, so the incomplete type is fine; PessJob is defined later.
 typedef struct PessJob PessJob;
+// Forward decls: the solver holds an arena pointer and the fork/parallel gates
+// query free-slot availability (defined later, with the arena helpers).
+typedef struct PessSlotArena PessSlotArena;
+static int pess_arena_free(PessSlotArena *a);
 
 typedef struct PegPessSolver {
   Game *game;
@@ -7054,6 +7058,7 @@ typedef struct PegPessSolver {
   // leaves recursive_split=false so it never forks.
   const PessJob *job;
   PegPool *pool;  // direct copy of job->pool (PessJob is incomplete in nested_solve)
+  PessSlotArena *arena;  // direct copy of job->arena, for the fork/parallel gate
   bool recursive_split;
   bool force_nested_perm;  // debug: bypass the queue gate (tsan/testing only)
   int fork_depth;
@@ -7203,13 +7208,17 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
 static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
                                          const int *order, int cand_n);
 
-// Per-pthread fork-nesting depth. The pool's help-while-waiting lets a forking
-// frame run OTHER units while waiting on its sub-tasks; each waiting forking
-// frame holds an arena slot, so without a bound the help-drain stack (and slot
-// demand) grows unboundedly. Cap nesting so each pthread holds a bounded number
-// of slots; beyond the cap a node runs the sequential opp loop instead.
+// Per-pthread fork-nesting depth, incremented around each nested submit-and-
+// wait. Two independent bounds govern forking (see the gates): the arena-free
+// check manages *slots* (resource/capacity, dynamic), while this counter caps
+// *C-stack depth* — cross-unit help-draining can stack many forking frames on
+// one pthread, and without a depth bound a deep tail could overflow a worker
+// thread's stack. The cap is set high (PEG_MAX_FORK_NESTING) so it never
+// constrains the real search depth (~10-20); it's purely a stack-overflow
+// backstop. The earlier value of 2 was the bug — it throttled the tail.
 static __thread int g_peg_fork_nesting = 0;
-enum { PEG_MAX_FORK_NESTING = 2 };
+enum { PEG_MAX_FORK_NESTING = 32 };
+
 
 // Forward decl: evaluate one nested cand's sub-perms in parallel across the
 // pool. Fills out_arr[0..pc->count-1] with per-perm outcomes and sets
@@ -7718,11 +7727,22 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
   // early/middle of a full run where orderings + opp-forks keep cores busy),
   // run sequentially and keep the cutoff. This self-tunes: nested-perm parallel
   // engages exactly in the drained tail where the single-core collapse happened.
+  // Two signals, both required: queue_count < num_workers means cores would
+  // otherwise idle (so the redundant perm work pays off — this keeps nested-
+  // perm OFF mid-run when the queue is backed up), and arena_free >= num_workers
+  // means there's slot headroom to nest safely. Together they engage nested-
+  // perm exactly in the drained tail, and let it nest as deep as slots allow
+  // (no fixed cap), which is what fixes the single-core tail collapse.
+  // arena_free >= num_workers is a SAFETY invariant (slot headroom) — always
+  // required, never bypassed. queue_count < num_workers is the capacity
+  // heuristic (only worth the redundant perm work when cores would idle) —
+  // force_nested_perm bypasses just that, for tsan/testing.
   enum { PEG_NESTED_PERM_MIN = 4 };
   const bool parallel_perms =
-      s->recursive_split && s->pool &&
+      s->recursive_split && s->pool && s->arena &&
       pc.count >= PEG_NESTED_PERM_MIN &&
       g_peg_fork_nesting < PEG_MAX_FORK_NESTING &&
+      pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool) &&
       (s->force_nested_perm ||
        peg_pool_queue_count(s->pool) < peg_pool_num_workers(s->pool));
   for (int ci = 0; ci < n_cands; ci++) {
@@ -7900,14 +7920,18 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
     return out;
   }
 
-  // Recursive split: at an opp node with enough replies and below the fork
-  // depth cap, fan the opp replies out as parallel sub-tasks (min-reduction
-  // with first-loss cancel) instead of the sequential loop below. Same verdict
-  // (min over replies); just parallelized. The helper frees order + returns ml.
-  enum { PEG_FORK_MIN_CANDS = 8, PEG_FORK_MAX_DEPTH = 2 };
-  if (!our_turn && s->recursive_split && s->job &&
-      s->fork_depth < PEG_FORK_MAX_DEPTH && cand_n >= PEG_FORK_MIN_CANDS &&
-      g_peg_fork_nesting < PEG_MAX_FORK_NESTING) {
+  // Recursive split: at an opp node with enough replies, fan the opp replies
+  // out as parallel sub-tasks (min-reduction with first-loss cancel) instead of
+  // the sequential loop below. Same verdict (min over replies); just
+  // parallelized. The helper frees order + returns ml. Gate purely on arena
+  // slot headroom (arena_free >= num_workers): forking is safe and useful
+  // whenever slots are available, and the gate throttles nesting as slots
+  // deplete under load — no fixed depth cap (which over-constrained the tail).
+  enum { PEG_FORK_MIN_CANDS = 8 };
+  if (!our_turn && s->recursive_split && s->job && s->arena && s->pool &&
+      cand_n >= PEG_FORK_MIN_CANDS &&
+      g_peg_fork_nesting < PEG_MAX_FORK_NESTING &&
+      pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool)) {
     const PegPessOut out = peg_pess_fork_opp_node(s, ml, order, cand_n);
     free(order);
     if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
@@ -8065,6 +8089,20 @@ static void pess_arena_release(PessSlotArena *a, int idx) {
   cpthread_mutex_unlock(&a->mutex);
 }
 
+// Current free-slot count (snapshot under the mutex). The fork/parallel gates
+// use this to decide whether there's headroom to spawn more sub-tasks: forking
+// makes a frame hold its slot while help-draining nested tasks (each holding
+// theirs), so demand tracks fork nesting. Gating on free slots >= num_workers
+// self-balances — deep nesting is fine when slots are plentiful (the drained
+// tail), and forking throttles as slots deplete under load (no exhaustion),
+// without a fixed nesting cap that over-constrains the tail.
+static int pess_arena_free(PessSlotArena *a) {
+  cpthread_mutex_lock(&a->mutex);
+  const int n = a->free_top;
+  cpthread_mutex_unlock(&a->mutex);
+  return n;
+}
+
 // Per-worker job + state shared by ordering. Each worker also owns its own
 // EndgameCtx + EndgameResults to avoid races inside endgame_solve_inline.
 typedef struct PessJob {
@@ -8172,6 +8210,7 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   // the fork worker overrides it for nested sub-tasks.
   solver->job = j;
   solver->pool = j->pool;
+  solver->arena = j->arena;
   solver->recursive_split = j->recursive_split;
   solver->force_nested_perm = j->force_nested_perm;
   solver->fork_depth = 0;
@@ -8510,9 +8549,9 @@ static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
   // Nested submit on the shared pool. Help-while-waiting drains other tasks
   // (each on its own arena slot), so this thread never pure-blocks → no
   // deadlock. pool is guaranteed non-NULL here (recursive_split is only set in
-  // the multithreaded split path). Bump the per-pthread nesting counter so
-  // tasks help-drained during this wait won't fork past the cap (bounds the
-  // arena-slot stack on this pthread).
+  // the multithreaded split path). Bump the C-stack nesting counter so tasks
+  // help-drained during this wait observe the deeper level and stop forking at
+  // the stack-safety cap.
   g_peg_fork_nesting++;
   peg_pool_submit_and_wait(j->pool, peg_pess_fork_worker_fn, ptrs, cand_n,
                             /*helper=*/0);
@@ -8891,9 +8930,10 @@ void test_pass_peg_pessimistic_full_eval(void) {
   // Phase 3: per-worker scratch + parallel solve via peg_pool.
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
   // Slots: the non-split path needs n_threads+1 (workers + helper). The split
-  // path acquires slots from an arena; with recursive forking + help-while-
-  // waiting, each pthread holds up to PEG_MAX_FORK_NESTING+1 slots, so worst
-  // case is ~(n_threads+1)*(PEG_MAX_FORK_NESTING+1). Size generously past that.
+  // path acquires slots from an arena; forking nests as deep as free slots
+  // allow, gated to stop when free < num_workers. So the bound is the arena
+  // size itself — size it well past num_workers so the tail can nest deep
+  // (one active pthread) while load throttles via the gate.
   const int n_slots = n_threads * 8 + 8;
   EndgameCtx **eg_ctxs = calloc_or_die((size_t)n_slots, sizeof(EndgameCtx *));
   EndgameResults **eg_results =
