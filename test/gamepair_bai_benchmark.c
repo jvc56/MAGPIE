@@ -408,7 +408,7 @@ static const Move *run_sim_only(Game *game, MoveList *move_list,
   return simmed_play_get_move(sim_results_get_simmed_play(sim_results, best_arm));
 }
 
-// Count tiles placed on the board (CSW21 has 100 total tiles in the bag at
+// Count tiles placed on the board (CSW24 has 100 total tiles in the bag at
 // game start).
 static int count_tiles_on_board(const Game *game) {
   const int bag_count = bag_get_letters(game_get_bag(game));
@@ -859,7 +859,7 @@ void test_gamepair_bai_benchmark(void) {
 
   // Create config and load game data via a CGP
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW24 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 15 -plies 2 -threads 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
@@ -1174,7 +1174,7 @@ void test_nested_convergence(void) {
   printf("================================================\n");
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW24 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 15 -plies 2 -threads 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   ErrorStack *load_es = error_stack_create();
@@ -1250,12 +1250,12 @@ void test_nested_convergence(void) {
 #define LATE_GAME_TEST_CGP                                                     \
   "15/1G3NIQAB5/1A7R5/1ZEL1AGILItY3/PORISM3COOED1/1N2HUIA1K5/2WHO10/"          \
   "1TOMENTA2W1FEU/VOX4TAPERER1/3G6NERAL/3UNSUITED4/3V11/15/15/15 "             \
-  "ACEFNOT/BEEIRST 306/324 0 -lex CSW21;"
+  "ACEFNOT/BEEIRST 306/324 0 -lex CSW24;"
 
 // Pair 11 turn 2: CEIMRTZ on turn after PURELY at 8G, trailing 0-30.
 #define PAIR11_TURN2_CGP                                                       \
   "15/15/15/15/15/15/15/6PURELY3/15/15/15/15/15/15/15 "                        \
-  "CEIMRTZ/AEEFGSU 0/30 0 -lex CSW21;"
+  "CEIMRTZ/AEEFGSU 0/30 0 -lex CSW24;"
 
 // Pair 23 turn 18: EINNOTW trailing 305-340, 20 tiles unseen (13 in bag).
 // Late-game position that triggered premature win percentage cutoff with
@@ -1263,7 +1263,7 @@ void test_nested_convergence(void) {
 #define PAIR23_TURN18_CGP                                                      \
   "B2VAGUS7/IF1O1I3C5/BO1CHEQUER5/1L1E1DIGLOT4/PEHS5OY4/AYE6NED3/"             \
   "T1R1DUX4I3/1MOKIhIS3L3/2I7PA3/2ZA6AT3/1GEE6WE3/1ISO7R3/1F1N11/"             \
-  "1T13/15 DENORU?/EINNOTW 340/305 1 -lex CSW21;"
+  "1T13/15 DENORU?/EINNOTW 340/305 1 -lex CSW24;"
 
 void test_gamepair_bai_late_game(void) {
   setbuf(stdout, NULL);
@@ -1275,7 +1275,7 @@ void test_gamepair_bai_late_game(void) {
   printf("================================================\n");
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW24 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 15 -plies 2 -threads 10");
   load_and_exec_config_or_die(config, "cgp " PAIR11_TURN2_CGP);
 
@@ -1370,7 +1370,7 @@ void test_gamepair_bai_cutoff(void) {
   printf("================================================\n");
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
+      "set -lex CSW24 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 all "
       "-numplays 15 -plies 2 -threads 10");
   load_and_exec_config_or_die(config, "cgp " PAIR23_TURN18_CGP);
 

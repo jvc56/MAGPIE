@@ -231,7 +231,7 @@ void test_inner_agreement(void) {
   printf("================================================\n\n");
 
   Config *config = config_create_or_die(
-      "set -lex CSW21 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 "
+      "set -lex CSW24 -wmp true -rit true -s1 equity -s2 equity -r1 all -r2 "
       "all -numplays 15 -plies 2 -threads 10");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
