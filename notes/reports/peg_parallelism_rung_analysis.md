@@ -34,6 +34,25 @@ rung5-probe (leaf solves   >= 10ms): slow=694,377,  with>=2 idle cores=22.4%, av
 rung4-probe (nested cand loops>= 10ms): slow=552,   with>=2 idle cores=17.0%, avg idle=1.14, avg cands=2680
 ```
 
+### Final clean number (probes disabled)
+
+Re-run with both probe env vars unset (instrumentation fully inert) to get the
+definitive figure and a clean wall time:
+
+```
+W/L/D = 195/491/34  (29.44%)   <- 3rd independent reproduction; locked in
+solve_wall = 6281.55s (~1h 45m, no instrumentation)
+solves = 664,748    leaf_visits = 3.18M    TT hit rate = 49.8%
+```
+
+Probe overhead was only ~5% (6605.80s -> 6281.55s), not the ~33% feared earlier —
+the per-leaf `clock_gettime` cost was small; most of the earlier "slower"
+impression was run-to-run variance. (Solve count drifts run-to-run, 695k vs 665k,
+because parallel evaluation order shifts caching/cutoffs; the verdict is
+invariant.) The clean run was *faster* than the probe run and never collapsed —
+sustained parallelism end to end. The 1.5pp gap to macondo's 27.92% is the known
+leaf-eval-depth difference (2-ply + greedy vs 4-ply + truncation), not a bug.
+
 ## Conclusion: for the uncapped pessimistic PAH, neither rung is worth building
 
 - The coarse opp-split fan-out (170,937 work units across 358 orderings) keeps
