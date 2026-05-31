@@ -41,6 +41,13 @@ int peg_pool_thread_index_offset(const PegPool *pool);
 // just redundant work contending for already-busy cores).
 int peg_pool_queue_count(PegPool *pool);
 
+// Snapshot of how many workers are currently blocked waiting for work (idle
+// cores). Lets a caller decide when to lend spare cores to other work — e.g.
+// inject an additional ABDADA worker into a long-running endgame solve. The
+// value is a racy snapshot (workers come and go), which is fine for a
+// scheduling heuristic.
+int peg_pool_idle_workers(PegPool *pool);
+
 // Submit a batch of `n` items as `(fn, args[i])` pairs and block until all
 // complete. While blocked, the calling thread helps drain queue items so
 // nested submissions don't deadlock. `helper_worker_idx` is the index used

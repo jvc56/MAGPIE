@@ -63,6 +63,11 @@ struct PegPool {
   cpthread_mutex_t q_mutex;
   cpthread_cond_t q_cv_nonempty;
   bool shutdown;
+  // Workers currently blocked in pp_pop_or_shutdown waiting for work — i.e.
+  // genuinely idle cores. A snapshot read by peg_pool_idle_workers lets a
+  // caller decide when to hand spare cores to other work (e.g. inject an
+  // ABDADA worker into a long-running endgame solve).
+  atomic_int idle_workers;
 };
 
 static void pp_batch_init(PegPoolBatch *batch, int n) {
@@ -111,8 +116,13 @@ static bool pp_try_pop(PegPool *pool, PegPoolItem *out) {
 // shutdown with no item.
 static bool pp_pop_or_shutdown(PegPool *pool, PegPoolItem *out) {
   cpthread_mutex_lock(&pool->q_mutex);
-  while (pool->q_count == 0 && !pool->shutdown) {
-    cpthread_cond_wait(&pool->q_cv_nonempty, &pool->q_mutex);
+  if (pool->q_count == 0 && !pool->shutdown) {
+    // Count this worker as idle for exactly the span it blocks on the queue.
+    atomic_fetch_add(&pool->idle_workers, 1);
+    while (pool->q_count == 0 && !pool->shutdown) {
+      cpthread_cond_wait(&pool->q_cv_nonempty, &pool->q_mutex);
+    }
+    atomic_fetch_sub(&pool->idle_workers, 1);
   }
   if (pool->q_count == 0) {
     cpthread_mutex_unlock(&pool->q_mutex);
@@ -288,6 +298,7 @@ PegPool *peg_pool_create(int num_workers, int thread_index_offset) {
   pool->q_head = 0;
   pool->q_count = 0;
   pool->shutdown = false;
+  atomic_init(&pool->idle_workers, 0);
   cpthread_mutex_init(&pool->q_mutex);
   cpthread_cond_init(&pool->q_cv_nonempty);
   pool->threads = malloc_or_die((size_t)num_workers * sizeof(cpthread_t));
@@ -340,6 +351,13 @@ int peg_pool_queue_count(PegPool *pool) {
   const int n = pool->q_count;
   cpthread_mutex_unlock(&pool->q_mutex);
   return n;
+}
+
+int peg_pool_idle_workers(PegPool *pool) {
+  if (!pool) {
+    return 0;
+  }
+  return atomic_load(&pool->idle_workers);
 }
 
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
