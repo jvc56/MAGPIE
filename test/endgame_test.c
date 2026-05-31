@@ -338,6 +338,97 @@ void test_endgame_arbitrary_movegen_indices(void) {
   config_destroy(config);
 }
 
+// Drives endgame_add_worker from inside the running solve: the per-ply
+// callback fires on the master worker after each completed depth, and injects
+// one extra ABDADA worker per ply (on a scattered MoveGen slot) until the slot
+// list is exhausted.
+typedef struct WorkerInjector {
+  EndgameCtx **solver_ptr; // address of the caller's ctx (set by endgame_solve)
+  const int *slots;
+  int n_slots;
+  int next;  // next slot to hand out
+  int added; // successful injections
+} WorkerInjector;
+
+static void inject_worker_per_ply(int depth, int32_t value,
+                                  const PVLine *pv_line, const Game *game,
+                                  const PVLine *ranked_pvs, int num_ranked_pvs,
+                                  void *user_data) {
+  (void)depth;
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  WorkerInjector *injector = (WorkerInjector *)user_data;
+  EndgameCtx *solver = *injector->solver_ptr;
+  if (solver == NULL || injector->next >= injector->n_slots) {
+    return;
+  }
+  if (endgame_add_worker(solver, injector->slots[injector->next])) {
+    injector->added++;
+  }
+  injector->next++;
+}
+
+// Dynamic worker injection: a solve started with one thread must absorb extra
+// ABDADA workers injected mid-search (as cores free up) and still return the
+// exact single-threaded value. ABDADA is value-deterministic regardless of
+// thread count or when workers join, so the result must equal the known -63.
+void test_endgame_dynamic_worker_injection(void) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 7");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+
+  Game *game = config_get_game(config);
+  EndgameResults *results = config_get_endgame_results(config);
+
+  EndgameCtx *ctx = NULL;
+  // Scattered, non-contiguous slots, none of them 0 (the master holds ordinal
+  // 0 on its own slot); these are the cores a pool would lend mid-search.
+  const int borrowed_slots[4] = {6, 11, 3, 8};
+  WorkerInjector injector = {.solver_ptr = &ctx,
+                             .slots = borrowed_slots,
+                             .n_slots = 4,
+                             .next = 0,
+                             .added = 0};
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = game;
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;   // start single-threaded...
+  args.max_workers = 5;   // ...and allow growth to 1 + 4 injected
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.per_ply_callback = inject_worker_per_ply;
+  args.per_ply_callback_data = &injector;
+
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const int32_t value =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+  printf("dynamic-worker-injection: value=%d workers_added=%d\n", value,
+         injector.added);
+  assert(value == -63);
+  assert(injector.added > 0); // at least one helper joined mid-search
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",

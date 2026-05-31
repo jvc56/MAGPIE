@@ -174,8 +174,16 @@ struct EndgameCtx {
   // bag_copy into incompatibly-sized allocations.
   EndgameCtxWorker **workers;
   cpthread_t *worker_ids;
-  int cap_workers; // allocated size of workers[] and worker_ids[]
+  int cap_workers; // number of created worker structs (workers[0..cap_workers))
+  int arr_cap;     // allocated length of workers[]/worker_ids[] (>= cap_workers)
   const LetterDistribution *workers_ld;
+  // Dynamic worker injection (endgame_add_worker): grow an in-flight solve's
+  // worker count up to arr_cap as cores free up. All guarded by add_mutex.
+  int max_workers;           // ceiling for live_workers; 0 => no growth
+  uint64_t worker_base_seed; // ABDADA jitter seed, reused for late workers
+  atomic_int live_workers;   // worker threads spawned this solve (initial+late)
+  atomic_int adding_closed;  // 1 = injection window shut (between/ending solves)
+  cpthread_mutex_t add_mutex; // serializes add vs the close+snapshot in solve
 };
 
 struct EndgameCtxWorker {
@@ -581,6 +589,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   if (es->threads < 1) {
     es->threads = 1;
   }
+  es->max_workers = endgame_args->max_workers;
+  // Injection window starts shut: endgame_solve opens it once the initial
+  // workers are spawned, and shuts it again before the join. live_workers
+  // counts the initial set until adds bump it.
+  atomic_store(&es->adding_closed, 1);
+  atomic_store(&es->live_workers, es->threads);
   es->thread_index_offset = endgame_args->thread_index_offset;
   es->worker_movegen_indices = endgame_args->worker_movegen_indices;
   es->requested_plies = endgame_args->plies;
@@ -704,7 +718,9 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 }
 
 static EndgameCtx *endgame_ctx_create(void) {
-  return calloc_or_die(1, sizeof(EndgameCtx));
+  EndgameCtx *solver = calloc_or_die(1, sizeof(EndgameCtx));
+  cpthread_mutex_init(&solver->add_mutex);
+  return solver;
 }
 
 const TranspositionTable *
@@ -836,6 +852,8 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
                                         uint64_t base_seed) {
   const LetterDistribution *ld = game_get_ld(solver->game);
 
+  solver->worker_base_seed = base_seed;
+
   // If the letter distribution changed (e.g., different lexicon), the worker
   // game copies have incompatibly-sized bags/racks. Destroy and rebuild.
   if (solver->workers_ld != NULL && solver->workers_ld != ld) {
@@ -847,19 +865,33 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
     solver->workers = NULL;
     solver->worker_ids = NULL;
     solver->cap_workers = 0;
+    solver->arr_cap = 0;
   }
   solver->workers_ld = ld;
 
-  if (solver->cap_workers < solver->threads) {
+  // Size the arrays to the injection ceiling so endgame_add_worker can append
+  // late workers without reallocating the arrays while threads are running.
+  const int needed_cap =
+      solver->max_workers > solver->threads ? solver->max_workers
+                                            : solver->threads;
+  if (solver->arr_cap < needed_cap) {
     solver->workers = realloc_or_die(
-        solver->workers, sizeof(EndgameCtxWorker *) * solver->threads);
+        solver->workers, sizeof(EndgameCtxWorker *) * needed_cap);
     solver->worker_ids = realloc_or_die(solver->worker_ids,
-                                        sizeof(cpthread_t) * solver->threads);
-    for (int idx = solver->cap_workers; idx < solver->threads; idx++) {
-      solver->workers[idx] = endgame_ctx_create_worker(
-          solver, idx, endgame_worker_movegen_slot(solver, idx), base_seed,
-          solver->game);
+                                        sizeof(cpthread_t) * needed_cap);
+    for (int idx = solver->arr_cap; idx < needed_cap; idx++) {
+      solver->workers[idx] = NULL;
     }
+    solver->arr_cap = needed_cap;
+  }
+  // Create the initial worker structs lazily (reused across solves). Late
+  // workers beyond solver->threads are created on demand by endgame_add_worker.
+  for (int idx = solver->cap_workers; idx < solver->threads; idx++) {
+    solver->workers[idx] = endgame_ctx_create_worker(
+        solver, idx, endgame_worker_movegen_slot(solver, idx), base_seed,
+        solver->game);
+  }
+  if (solver->cap_workers < solver->threads) {
     solver->cap_workers = solver->threads;
   }
   // Reassign MoveGen slots every solve: cached workers persist across solves,
@@ -2807,8 +2839,29 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                     solver->workers[thread_index]);
   }
 
-  // Wait for all threads to complete
+  // Open the injection window now that the initial workers exist and the solve
+  // state is fully published. endgame_add_worker may now grow the worker count.
+  if (solver->max_workers > solver->threads) {
+    cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->adding_closed, 0);
+    cpthread_mutex_unlock(&solver->add_mutex);
+  }
+
+  // Wait for the initial workers. The master (ordinal 0) drives completion, so
+  // once these exit the search has finished (or interrupted/timed out).
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    cpthread_join(solver->worker_ids[thread_index]);
+  }
+
+  // Shut the injection window and join any workers added mid-search. Under the
+  // lock so no add is half-spawned when we snapshot the count; late workers
+  // also exit on search_complete, so they are done or finishing.
+  cpthread_mutex_lock(&solver->add_mutex);
+  atomic_store(&solver->adding_closed, 1);
+  const int total_workers = atomic_load(&solver->live_workers);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  for (int thread_index = solver->threads; thread_index < total_workers;
+       thread_index++) {
     cpthread_join(solver->worker_ids[thread_index]);
   }
 
@@ -2844,8 +2897,8 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       // arena.
       int best_thread = 0;
       int best_depth = solver->workers[0]->completed_depth;
-      for (int thread_index = 1; thread_index < solver->threads;
-           thread_index++) {
+      const int live = atomic_load(&solver->live_workers);
+      for (int thread_index = 1; thread_index < live; thread_index++) {
         int thread_depth = solver->workers[thread_index]->completed_depth;
         if (thread_depth > best_depth) {
           best_depth = thread_depth;
@@ -2866,4 +2919,39 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       results, NULL, endgame_results_get_solving_player(results),
       endgame_results_get_max_depth(results));
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+}
+
+bool endgame_add_worker(EndgameCtx *solver, int movegen_slot) {
+  cpthread_mutex_lock(&solver->add_mutex);
+  // Decline if the window is shut (between solves, or the join has begun) or
+  // the max_workers ceiling (== arr_cap) is reached.
+  if (atomic_load(&solver->adding_closed)) {
+    cpthread_mutex_unlock(&solver->add_mutex);
+    return false;
+  }
+  const int ordinal = atomic_load(&solver->live_workers);
+  if (ordinal >= solver->arr_cap) {
+    cpthread_mutex_unlock(&solver->add_mutex);
+    return false;
+  }
+
+  // Create the worker struct on first use at this slot; reuse it on later
+  // solves. Either way, stamp this solve's ordinal and borrowed MoveGen slot.
+  if (ordinal >= solver->cap_workers) {
+    solver->workers[ordinal] = endgame_ctx_create_worker(
+        solver, ordinal, movegen_slot, solver->worker_base_seed, solver->game);
+    solver->cap_workers = ordinal + 1;
+  } else {
+    solver->workers[ordinal]->ordinal = ordinal;
+    solver->workers[ordinal]->thread_index = movegen_slot;
+  }
+  // Prep the late worker's game from the read-only root inputs (solver->game +
+  // pruned KWGs + fresh cross-sets) — NOT from worker 0, whose game_copy is
+  // mid-traversal. Seeds the worker PRNG by its ordinal.
+  endgame_ctx_reset_worker_and_game(solver, solver->worker_base_seed, ordinal);
+  cpthread_create(&solver->worker_ids[ordinal], solver_worker_start,
+                  solver->workers[ordinal]);
+  atomic_store(&solver->live_workers, ordinal + 1);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  return true;
 }

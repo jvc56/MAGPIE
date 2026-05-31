@@ -82,6 +82,13 @@ typedef struct EndgameArgs {
   // slot must be globally unique against all other concurrent MoveGen users
   // for the duration of the solve. NULL = contiguous mapping (back-compat).
   const int *worker_movegen_indices;
+  // Ceiling on the worker count for dynamic injection. When > num_threads the
+  // solve starts with num_threads workers but endgame_add_worker may grow it
+  // up to max_workers mid-search (e.g. a pool lending cores as they free up).
+  // The workers[]/worker_ids[] arrays are sized to this ceiling so growth
+  // never reallocates them out from under the running threads. 0 (or <=
+  // num_threads) disables growth — the solve runs with exactly num_threads.
+  int max_workers;
   // First-win optimization: search a narrow [-1, +1] window so the solver
   // returns only win/loss/draw rather than exact spread. Faster (more
   // alpha-beta cutoffs) but exact spread is unknown when set.
@@ -109,6 +116,18 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
+// Inject one additional ABDADA worker into an in-flight multithreaded
+// endgame_solve, running on MoveGen cache slot `movegen_slot`. Intended to be
+// called from another thread while endgame_solve is blocked in its join phase
+// — e.g. a pool that lends an idle core to a long-running leaf solve. The new
+// worker gets the next free ordinal (> 0, never the root master), its own
+// ABDADA jitter from that ordinal, and a game copy from the (read-only) root
+// inputs; it cooperates with the running workers purely through the shared TT
+// and self-exits when the search completes. Returns true if a worker was
+// spawned, false if the injection window is shut or the max_workers ceiling is
+// reached. Only valid against a ctx whose current solve was launched with
+// max_workers > num_threads.
+bool endgame_add_worker(EndgameCtx *ctx, int movegen_slot);
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads
 // when each thread uses a distinct thread_index_offset in EndgameArgs.
