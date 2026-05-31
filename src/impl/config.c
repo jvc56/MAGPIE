@@ -46,6 +46,7 @@
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
 #include "../str/move_string.h"
+#include "../str/peg_string.h"
 #include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../str/validated_moves_string.h"
@@ -57,6 +58,7 @@
 #include "convert.h"
 #include "endgame.h"
 #include "gameplay.h"
+#include "peg.h"
 #include "gcg.h"
 #include "get_gcg.h"
 #include "inference.h"
@@ -92,6 +94,7 @@ typedef enum {
   ARG_TOKEN_RACK_AND_GEN_AND_SIM,
   ARG_TOKEN_INFER,
   ARG_TOKEN_ENDGAME,
+  ARG_TOKEN_PEG,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
   ARG_TOKEN_P1_NAME,
@@ -308,6 +311,7 @@ struct Config {
   SimResults *sim_results;
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
+  PegResult peg_result;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -1022,6 +1026,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_ENDGAME:
       usages[0] = "";
       text = "Runs the endgame solver.";
+      break;
+    case ARG_TOKEN_PEG:
+      usages[0] = "";
+      text = "Runs the pre-endgame (PEG) solver.";
       break;
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
@@ -2886,6 +2894,45 @@ char *status_endgame(Config *config) {
   }
   return endgame_results_get_string(config->endgame_results, config->game,
                                     config->game_history);
+}
+
+void config_fill_peg_args(Config *config, PegArgs *peg_args) {
+  memset(peg_args, 0, sizeof(*peg_args));
+  peg_args->game = config->game;
+  peg_args->thread_control = config->thread_control;
+  peg_args->num_threads = config->num_threads;
+  peg_args->time_budget_seconds = config->time_limit_seconds;
+  // 0 = run all implemented stages; the remaining knobs use solver defaults
+  // until they are promoted to CLI args.
+  peg_args->max_stage = 0;
+  peg_args->inner_top_k = 0;
+  peg_args->scenario_stride = 0;
+  peg_args->include_per_scenario = false;
+}
+
+void config_peg(Config *config, ErrorStack *error_stack) {
+  // Free any prior ranking before overwriting it.
+  peg_result_destroy(&config->peg_result);
+  PegArgs peg_args;
+  config_fill_peg_args(config, &peg_args);
+  peg_solve(&peg_args, &config->peg_result, error_stack);
+}
+
+void impl_peg(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+                     string_duplicate("cannot run peg without lexicon"));
+    return;
+  }
+  config_init_game(config);
+  config_peg(config, error_stack);
+}
+
+char *status_peg(Config *config) {
+  if (config->peg_result.last_completed_stage < 0) {
+    return string_duplicate("peg results are not yet initialized.\n");
+  }
+  return peg_result_get_string(&config->peg_result, config->game);
 }
 
 // Autoplay
@@ -7107,6 +7154,21 @@ char *str_api_endgame(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_peg(Config *config, ErrorStack *error_stack) {
+  impl_peg(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  char *result = peg_result_get_string(&config->peg_result, config->game);
+  thread_control_print(config->thread_control, result);
+  free(result);
+}
+
+char *str_api_peg(Config *config, ErrorStack *error_stack) {
+  impl_peg(config, error_stack);
+  return empty_string();
+}
+
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
   impl_autoplay(config, error_stack);
 }
@@ -7515,6 +7577,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
       rack_and_gen_and_sim, false);
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
+  cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
@@ -7650,6 +7713,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->shplies = 2;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
+  // PEG result starts empty; -1 = "no solve yet" (distinct from stage 0 done).
+  memset(&config->peg_result, 0, sizeof(config->peg_result));
+  config->peg_result.last_completed_stage = -1;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -7741,6 +7807,7 @@ void config_destroy(Config *config) {
   sim_results_destroy(config->sim_results);
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
+  peg_result_destroy(&config->peg_result);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
@@ -7812,6 +7879,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_RACK_AND_GEN_AND_SIM:
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
+    case ARG_TOKEN_PEG:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
