@@ -9,19 +9,23 @@
 #include "../def/move_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
+#include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
-#include "../ent/transposition_table.h"
 #include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "endgame.h"
 #include "gameplay.h"
+#include "kwg_maker.h"
 #include "move_gen.h"
 #include "peg_pool.h"
+#include "word_prune.h"
 
 // Stage table (see peg.h). Stage 0 is the greedy seed (top-K = all, greedy
 // leaf); the halving stages narrow the surviving set while adding a ply of
@@ -47,8 +51,12 @@ typedef struct PegWorker {
   MoveList *playout_ml;
   EndgameCtx *eg_ctx;
   EndgameResults *eg_results;
-  // Reused per-scenario game: game_copy into it instead of game_duplicate, so
-  // we don't malloc/free a whole Game per leaf. Lazily allocated.
+  // Per-candidate template: the post-cand board with cross-sets generated once
+  // (the board is identical across all of a cand's scenarios), so the cand play
+  // and cross-set generation are hoisted out of the per-scenario loop.
+  Game *template_game;
+  // Reused per-scenario game: game_copy from the template, then only the racks
+  // and bag are reset (no cand replay, no cross-set work).
   Game *scratch_game;
   // Shared endgame TT, reused across every leaf solve this worker runs. Many
   // scenarios reach identical board states, so cross-scenario reuse is the
@@ -171,25 +179,44 @@ static void peg_set_opp_rack(Rack *opp_rack,
   }
 }
 
-// Build the post-cand game for one (mover_drawn, bag_remaining) split into the
-// worker's reused scratch game: bag holds (mover_drawn ++ bag_remaining), opp
-// rack is unseen minus the bag, cand is played, then the mover draws their
-// k_drawn tiles. Returns the scratch game (owned by the worker; not destroyed
-// per call).
-static Game *peg_make_post_cand_game(PegWorker *worker, const Game *base_game,
-                                     int mover_idx, const uint8_t *unseen,
-                                     int ld_size, const Move *cand, int k_drawn,
+// Build the per-candidate template once: copy the prepared base (which carries
+// the root pruned KWG override), play the cand, and generate cross-sets for the
+// post-cand board with that pruned KWG — fast, and shared by all of this cand's
+// scenarios (the board, hence the cross-sets, is identical across them). This
+// keeps both the cand play and the cross-set generation out of the per-scenario
+// loop. Leaves the mover's leave on its rack; per-scenario draws are added
+// later.
+static void peg_build_template(PegWorker *worker, const Game *prepared_base,
+                               const Move *cand) {
+  if (worker->template_game == NULL) {
+    worker->template_game = game_duplicate(prepared_base);
+  } else {
+    game_copy(worker->template_game, prepared_base);
+  }
+  Game *template_game = worker->template_game;
+  play_move_without_drawing_tiles(cand, template_game);
+  game_gen_all_cross_sets(template_game);
+}
+
+// Build the post-cand game for one (mover_drawn, bag_remaining) split by copying
+// the per-cand template (which already has the cand played, cross-sets, and the
+// pruned-KWG override) and resetting only the racks/bag: bag holds (mover_drawn
+// ++ bag_remaining), opp rack is unseen minus the bag, and the mover draws their
+// k_drawn tiles onto the leave. Returns the scratch game (worker-owned; not
+// destroyed per call). Racks/bag don't affect cross-sets, so the copied ones
+// stay valid and the leaf endgame can skip regenerating them.
+static Game *peg_make_post_cand_game(PegWorker *worker, int mover_idx,
+                                     const uint8_t *unseen, int ld_size,
+                                     int k_drawn,
                                      const MachineLetter *mover_drawn,
                                      int n_bag_remaining,
                                      const MachineLetter *bag_remaining) {
   if (worker->scratch_game == NULL) {
-    worker->scratch_game = game_duplicate(base_game);
+    worker->scratch_game = game_duplicate(worker->template_game);
   } else {
-    game_copy(worker->scratch_game, base_game);
+    game_copy(worker->scratch_game, worker->template_game);
   }
   Game *game = worker->scratch_game;
-  game_set_endgame_solving_mode(game);
-  game_set_backup_mode(game, BACKUP_MODE_OFF);
   Bag *bag = game_get_bag(game);
   Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
   Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
@@ -204,15 +231,14 @@ static Game *peg_make_post_cand_game(PegWorker *worker, const Game *base_game,
   }
   bag_set_to_tiles(bag, all_bag, n_bag);
   peg_set_opp_rack(opp_rack, unseen, ld_size, all_bag, n_bag);
-  play_move_without_drawing_tiles(cand, game);
+  // The template's mover rack holds the leave; add this scenario's draws.
   for (int i = 0; i < k_drawn; i++) {
     rack_add_letter(mover_rack, mover_drawn[i]);
     (void)bag_draw_letter(bag, mover_drawn[i], 0);
   }
-  // play_move_without_drawing_tiles may flag GAME_END_REASON_STANDARD when the
-  // rack empties post-placement (the no-draw endgame world). We re-stock the
-  // rack right after, so clear the stale flag unless the rack is genuinely
-  // empty — otherwise the greedy playout bails before simulating anything.
+  // Playing the cand in the template may have flagged GAME_END_REASON_STANDARD
+  // (rack emptied in the no-draw world). We re-stock here, so clear the stale
+  // flag unless the rack is genuinely empty.
   if (!rack_is_empty(mover_rack)) {
     game_set_game_end_reason(game, GAME_END_REASON_NONE);
   }
@@ -306,6 +332,11 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.thread_index_offset = ctx->worker->thread_index_offset;
   ea.external_deadline_ns = ctx->deadline_ns;
   ea.shared_tt = ctx->worker->eg_tt;
+  // The scratch game already carries the root pruned KWG (override) and valid
+  // cross-sets (copied from the prepared base, incrementally updated by the
+  // cand play), so the endgame must not rebuild a pruned KWG or regenerate all
+  // cross-sets per solve — that regeneration was the profiled bottleneck.
+  ea.skip_word_pruning = true;
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
@@ -340,8 +371,8 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   int n_orderings = 0;
   do {
     Game *game = peg_make_post_cand_game(
-        ctx->worker, ctx->base_game, ctx->mover_idx, ctx->unseen, ctx->ld_size,
-        ctx->cand, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_remaining);
+        ctx->worker, ctx->mover_idx, ctx->unseen, ctx->ld_size, ctx->k_drawn,
+        mover_drawn, n_bag_remaining, bag_remaining);
     const int32_t value = peg_eval_leaf(ctx, game);
     ordering_win += (value > 0) ? 1.0 : ((value == 0) ? 0.5 : 0.0);
     ordering_spread += (double)value;
@@ -425,6 +456,9 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   ctx.deadline_ns = job->deadline_ns;
   ctx.thread_control = job->thread_control;
   ctx.worker = &job->workers[worker_idx];
+  // Post-cand board + cross-sets, built once for all this cand's scenarios
+  // (job->base_game is the pruned prepared base).
+  peg_build_template(ctx.worker, job->base_game, job->cand);
   const int tiles_played = move_get_tiles_played(job->cand);
   ctx.k_drawn = tiles_played < job->bag_size ? tiles_played : job->bag_size;
   const int n_bag_remaining = job->bag_size - ctx.k_drawn;
@@ -534,6 +568,26 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   uint8_t unseen[MAX_ALPHABET_SIZE];
   peg_compute_unseen(game, mover_idx, unseen);
 
+  // Build the root pruned KWG once and install it on a prepared base game with
+  // cross-sets generated a single time. The pre-cand board's playable words are
+  // a superset of any post-cand position's, so this one pruned KWG is valid for
+  // every (cand, scenario) leaf. Each leaf game_copy's this prepared base —
+  // carrying the override KWG and pruned cross-sets — and play_move only
+  // incrementally updates the cross-sets, so no leaf rebuilds a pruned KWG or
+  // regenerates all cross-sets (the profiled hotspot).
+  DictionaryWordList *word_list = dictionary_word_list_create();
+  const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
+  generate_possible_words(game, full_kwg, word_list);
+  KWG *pruned_kwg = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                              KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(word_list);
+  Game *prepared_base = game_duplicate(game);
+  game_set_endgame_solving_mode(prepared_base);
+  game_set_backup_mode(prepared_base, BACKUP_MODE_OFF);
+  game_set_override_kwgs(prepared_base, pruned_kwg, NULL,
+                         DUAL_LEXICON_MODE_IGNORANT);
+  game_gen_all_cross_sets(prepared_base);
+
   // Per-stage halving counts: the override, else the built-in table tail.
   const int default_counts[PEG_NUM_STAGES - 1] = {32, 16, 8, 4, 2};
   const int *counts = (args->stage_top_k && args->num_stages > 0)
@@ -568,6 +622,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[w].playout_ml = move_list_create(1);
     workers[w].eg_ctx = NULL;
     workers[w].eg_results = endgame_results_create();
+    workers[w].template_game = NULL;
     workers[w].scratch_game = NULL;
     workers[w].eg_tt = transposition_table_create(tt_fraction);
     // Distinct MoveGen cleanup slots per worker; the +2 clears the endgame
@@ -602,8 +657,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     for (int i = 0; i < n_cands; i++) {
       moves[i] = move_list_get_move(cand_ml, i);
     }
-    peg_eval_candidates(pool, workers, game, mover_idx, unseen, ld_size,
-                        bag_size, moves, n_cands, /*fidelity_plies=*/0,
+    peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
+                        ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
                         deadline_ns, args->thread_control, ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     int survivors = n_cands < counts[0] ? n_cands : counts[0];
@@ -628,9 +683,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // it.
       PegRankedCand *restaged =
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
-      peg_eval_candidates(pool, workers, game, mover_idx, unseen, ld_size,
-                          bag_size, moves, eval_count, /*fidelity_plies=*/s + 1,
-                          deadline_ns, args->thread_control, restaged);
+      peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
+                          ld_size, bag_size, moves, eval_count,
+                          /*fidelity_plies=*/s + 1, deadline_ns,
+                          args->thread_control, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
@@ -646,6 +702,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     move_list_destroy(workers[w].playout_ml);
     endgame_ctx_destroy(workers[w].eg_ctx);
     endgame_results_destroy(workers[w].eg_results);
+    if (workers[w].template_game) {
+      game_destroy(workers[w].template_game);
+    }
     if (workers[w].scratch_game) {
       game_destroy(workers[w].scratch_game);
     }
@@ -655,6 +714,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (pool) {
     peg_pool_destroy(pool);
   }
+  // Destroy the games that reference the pruned KWG (override pointer) before
+  // freeing the KWG itself.
+  game_destroy(prepared_base);
+  kwg_destroy(pruned_kwg);
   out->elapsed_seconds = ctimer_elapsed_seconds(&timer);
 }
 
