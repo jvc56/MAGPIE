@@ -556,6 +556,320 @@ void test_inner_agreement(void) {
     return;
   }
 
+  // ---- Golden corpus modes ------------------------------------------------
+  //
+  // GOLDEN BUILD: read positions CSV, run a long-budget nested-only sim per
+  // position with disable_similarity=true and no heat-map, emit per-position
+  // JSONL with per-arm (move, win_pct, sample_count, per-ply score+bingo).
+  // Output is light vs the augment JSONL (no 225-cell heatmaps).
+  //
+  // Env: INNERAGREE_GOLDEN_BUILD_CSV (input), INNERAGREE_GOLDEN_BUILD_OUT
+  // (output JSONL). Per-position budget = INNERAGREE_TLIM seconds.
+  const char *gb_csv_path = getenv("INNERAGREE_GOLDEN_BUILD_CSV");
+  if (gb_csv_path && *gb_csv_path) {
+    const char *gb_out_path = getenv("INNERAGREE_GOLDEN_BUILD_OUT");
+    if (!gb_out_path || !*gb_out_path) {
+      printf("error: INNERAGREE_GOLDEN_BUILD_CSV requires "
+             "INNERAGREE_GOLDEN_BUILD_OUT\n");
+    } else {
+      MoveList *gb_move_list = move_list_create(outer_K);
+      SimResults *gb_sim_results = sim_results_create(0.0);
+      SimCtx *gb_sim_ctx = NULL;
+      FILE *in = fopen(gb_csv_path, "r");
+      FILE *out = fopen(gb_out_path, "w");
+      if (!in || !out) {
+        printf("error: could not open golden-build files (%s -> %s)\n",
+               gb_csv_path, gb_out_path);
+      } else {
+        char *line = NULL;
+        size_t cap = 0;
+        ssize_t got = getline(&line, &cap, in); // skip header
+        (void)got;
+        int processed = 0;
+        while ((got = getline(&line, &cap, in)) != -1) {
+          while (got > 0 && (line[got - 1] == '\n' || line[got - 1] == '\r')) {
+            line[--got] = '\0';
+          }
+          int game_id = 0, turn = 0, on_turn_player = 0;
+          {
+            char *p = line;
+            game_id = atoi(p);
+            p = strchr(p, ','); if (!p) continue; p++;
+            turn = atoi(p);
+            p = strchr(p, ','); if (!p) continue; p++;
+            on_turn_player = atoi(p);
+          }
+          char *last_comma = strrchr(line, ',');
+          if (!last_comma) {
+            continue;
+          }
+          const char *cgp = last_comma + 1;
+          ErrorStack *load_err = error_stack_create();
+          game_load_cgp(game, cgp, load_err);
+          if (!error_stack_is_empty(load_err)) {
+            error_stack_print_and_reset(load_err);
+            error_stack_destroy(load_err);
+            continue;
+          }
+          error_stack_destroy(load_err);
+          char *cgp_copy = string_duplicate(cgp);
+
+          run_outer_nested(game, gb_move_list, gb_sim_results, &gb_sim_ctx,
+                           win_pcts, tc, outer_K, outer_min_iter, outer_plies,
+                           num_threads, tlim, /*use_heat_map=*/false, inner_K,
+                           inner_floor, inner_max, inner_plies, inner_stop_z,
+                           w_winpct, w_spread, spread_scale, err);
+          if (!error_stack_is_empty(err)) {
+            error_stack_print_and_reset(err);
+            free(cgp_copy);
+            continue;
+          }
+
+          // Re-load CGP so move strings reference the root board.
+          ErrorStack *re = error_stack_create();
+          game_load_cgp(game, cgp_copy, re);
+          error_stack_destroy(re);
+
+          fprintf(out, "{\"game\":%d,\"turn\":%d,\"on_turn_player\":%d,",
+                  game_id, turn, on_turn_player);
+          fprintf(out, "\"cgp\":\"%s\",\"tlim\":%g,\"arms\":[", cgp_copy, tlim);
+          const int num_arms = sim_results_get_number_of_plays(gb_sim_results);
+          const int num_plies = sim_results_get_num_plies(gb_sim_results);
+          bool first = true;
+          for (int arm = 0; arm < num_arms; arm++) {
+            SimmedPlay *sp = sim_results_get_simmed_play(gb_sim_results, arm);
+            const Stat *wp = simmed_play_get_win_pct_stat(sp);
+            const uint64_t n = stat_get_num_samples(wp);
+            if (n == 0) {
+              continue;
+            }
+            const Move *m = simmed_play_get_move(sp);
+            string_builder_clear(sb);
+            string_builder_add_move(sb, game_get_board(game), m, ld, false);
+            fprintf(out, "%s{\"move\":\"%s\",\"win_pct\":%.6f,\"n\":%" PRIu64
+                         ",\"plies\":[",
+                    first ? "" : ",", string_builder_peek(sb),
+                    stat_get_mean(wp), n);
+            first = false;
+            for (int p = 0; p < num_plies; p++) {
+              const Stat *ss_ = simmed_play_get_score_stat(sp, p);
+              const Stat *bs_ = simmed_play_get_bingo_stat(sp, p);
+              fprintf(out,
+                      "%s{\"s\":%.4f,\"sn\":%" PRIu64 ",\"b\":%.4f}",
+                      p == 0 ? "" : ",", stat_get_mean(ss_),
+                      stat_get_num_samples(ss_), stat_get_mean(bs_));
+            }
+            fprintf(out, "]}");
+          }
+          fprintf(out, "]}\n");
+          fflush(out);
+          free(cgp_copy);
+          processed++;
+          if (processed % 5 == 0) {
+            printf("golden_build: %d positions done → %s\n", processed,
+                   gb_out_path);
+          }
+        }
+        printf("golden_build: %d positions total → %s\n", processed,
+               gb_out_path);
+        free(line);
+        fclose(in);
+        fclose(out);
+      }
+      sim_ctx_destroy(gb_sim_ctx);
+      sim_results_destroy(gb_sim_results);
+      move_list_destroy(gb_move_list);
+      string_builder_destroy(sb);
+      error_stack_destroy(err);
+      sim_ctx_destroy(nested_sim_ctx);
+      sim_results_destroy(nested_sim_results);
+      move_list_destroy(nested_move_list);
+      win_pct_destroy(win_pcts);
+      game_destroy(game);
+      config_destroy(config);
+      return;
+    }
+  }
+
+  // GOLDEN EVAL: read golden JSONL and a strategy spec, run the strategy at
+  // each position, look up the strategy's pick in golden's arms, emit per-
+  // position CSV with (golden_top_pick, golden_top_wpct, strat_pick,
+  // strat_wpct_in_golden, loss_vs_golden, agree).
+  //
+  // Strategy is selected via INNERAGREE_GOLDEN_EVAL_STRATEGY = "flat" or
+  // "nested" (default flat). Time budget = INNERAGREE_TLIM seconds.
+  const char *ge_path = getenv("INNERAGREE_GOLDEN_EVAL_GOLDEN");
+  if (ge_path && *ge_path) {
+    const char *ge_out_path = getenv("INNERAGREE_GOLDEN_EVAL_OUT");
+    const char *strat = getenv("INNERAGREE_GOLDEN_EVAL_STRATEGY");
+    const bool use_nested = strat && strcmp(strat, "nested") == 0;
+    if (!ge_out_path || !*ge_out_path) {
+      printf("error: INNERAGREE_GOLDEN_EVAL_GOLDEN requires "
+             "INNERAGREE_GOLDEN_EVAL_OUT\n");
+    } else {
+      MoveList *ge_move_list = move_list_create(outer_K);
+      SimResults *ge_sim_results = sim_results_create(0.0);
+      SimCtx *ge_sim_ctx = NULL;
+      FILE *in = fopen(ge_path, "r");
+      FILE *out = fopen(ge_out_path, "w");
+      if (!in || !out) {
+        printf("error: could not open golden-eval files (%s -> %s)\n",
+               ge_path, ge_out_path);
+      } else {
+        fprintf(out,
+                "game,turn,on_turn_player,strategy,tlim,"
+                "golden_top_pick,golden_top_wpct,strat_pick,"
+                "strat_wpct_in_golden,loss_vs_golden,agree,found_in_golden\n");
+        char *line = NULL;
+        size_t cap = 0;
+        int processed = 0;
+        while (getline(&line, &cap, in) != -1) {
+          // Parse only the fields we need from each JSONL line.
+          int game_id = 0, turn = 0, on_turn_player = 0;
+          char *p;
+          p = strstr(line, "\"game\":"); if (!p) continue; game_id = atoi(p+7);
+          p = strstr(line, "\"turn\":"); if (!p) continue; turn = atoi(p+7);
+          p = strstr(line, "\"on_turn_player\":"); if (!p) continue;
+          on_turn_player = atoi(p + strlen("\"on_turn_player\":"));
+          // Extract CGP string (between "cgp":"...")
+          p = strstr(line, "\"cgp\":\""); if (!p) continue;
+          p += strlen("\"cgp\":\"");
+          char *q = strchr(p, '"'); if (!q) continue;
+          *q = '\0';
+          char *cgp = string_duplicate(p);
+          *q = '"';
+          // Find golden's top arm (highest win_pct) by parsing arm objects.
+          char *arms_start = strstr(line, "\"arms\":[");
+          if (!arms_start) { free(cgp); continue; }
+          char *cursor = arms_start;
+          double best_wp = -1.0;
+          char *best_move = NULL;
+          // Build a quick (move, wpct) map for lookup later.
+          // We do a simple scan: for each "move":"..." and "win_pct":N pair.
+          char *m_p = cursor;
+          // Reset
+          best_wp = -1.0;
+          if (best_move) { free(best_move); best_move = NULL; }
+          while ((m_p = strstr(m_p, "\"move\":\"")) != NULL) {
+            m_p += strlen("\"move\":\"");
+            char *mq = strchr(m_p, '"');
+            if (!mq) break;
+            *mq = '\0';
+            char *this_move = string_duplicate(m_p);
+            *mq = '"';
+            char *wp_p = strstr(mq, "\"win_pct\":");
+            if (!wp_p) { free(this_move); break; }
+            wp_p += strlen("\"win_pct\":");
+            double this_wp = atof(wp_p);
+            if (this_wp > best_wp) {
+              best_wp = this_wp;
+              if (best_move) free(best_move);
+              best_move = this_move;
+            } else {
+              free(this_move);
+            }
+            m_p = wp_p;
+          }
+          if (!best_move) { free(cgp); continue; }
+
+          // Load CGP and run the chosen strategy.
+          ErrorStack *load_err = error_stack_create();
+          game_load_cgp(game, cgp, load_err);
+          if (!error_stack_is_empty(load_err)) {
+            error_stack_print_and_reset(load_err);
+            error_stack_destroy(load_err);
+            free(cgp); free(best_move); continue;
+          }
+          error_stack_destroy(load_err);
+
+          if (use_nested) {
+            run_outer_nested(game, ge_move_list, ge_sim_results, &ge_sim_ctx,
+                             win_pcts, tc, outer_K, outer_min_iter, outer_plies,
+                             num_threads, tlim, /*use_heat_map=*/false, inner_K,
+                             inner_floor, inner_max, inner_plies, inner_stop_z,
+                             w_winpct, w_spread, spread_scale, err);
+          } else {
+            run_outer_flat(game, ge_move_list, ge_sim_results, &ge_sim_ctx,
+                           win_pcts, tc, outer_K, outer_min_iter, outer_plies,
+                           num_threads, tlim, /*use_heat_map=*/false, w_winpct,
+                           w_spread, spread_scale, err);
+          }
+          if (!error_stack_is_empty(err)) {
+            error_stack_print_and_reset(err);
+            free(cgp); free(best_move); continue;
+          }
+          BAIResult *br = sim_results_get_bai_result(ge_sim_results);
+          int top_arm = bai_result_get_best_arm(br);
+          if (top_arm < 0) top_arm = 0;
+          string_builder_clear(sb);
+          string_builder_add_move(
+              sb, game_get_board(game),
+              simmed_play_get_move(
+                  sim_results_get_simmed_play(ge_sim_results, top_arm)),
+              ld, false);
+          char *strat_pick = string_duplicate(string_builder_peek(sb));
+
+          // Look up strat_pick's win_pct inside the golden arms (re-scan).
+          double strat_wp_in_golden = -1.0;
+          bool found = false;
+          m_p = arms_start;
+          while ((m_p = strstr(m_p, "\"move\":\"")) != NULL) {
+            m_p += strlen("\"move\":\"");
+            char *mq = strchr(m_p, '"');
+            if (!mq) break;
+            *mq = '\0';
+            if (strcmp(m_p, strat_pick) == 0) {
+              char *wp_p = strstr(mq + 1, "\"win_pct\":");
+              if (wp_p) {
+                strat_wp_in_golden = atof(wp_p + strlen("\"win_pct\":"));
+                found = true;
+              }
+              *mq = '"';
+              break;
+            }
+            *mq = '"';
+            m_p = mq + 1;
+          }
+
+          const bool agree = strcmp(best_move, strat_pick) == 0;
+          const double loss =
+              found ? (best_wp - strat_wp_in_golden) : -1.0;
+          fprintf(out,
+                  "%d,%d,%d,%s,%g,%s,%.6f,%s,%.6f,%.6f,%d,%d\n",
+                  game_id, turn, on_turn_player,
+                  use_nested ? "nested" : "flat", tlim, best_move, best_wp,
+                  strat_pick, strat_wp_in_golden, loss, agree ? 1 : 0,
+                  found ? 1 : 0);
+          fflush(out);
+          free(cgp);
+          free(best_move);
+          free(strat_pick);
+          processed++;
+          if (processed % 10 == 0) {
+            printf("golden_eval: %d positions done\n", processed);
+          }
+        }
+        printf("golden_eval: %d positions total → %s\n", processed,
+               ge_out_path);
+        free(line);
+        fclose(in);
+        fclose(out);
+      }
+      sim_ctx_destroy(ge_sim_ctx);
+      sim_results_destroy(ge_sim_results);
+      move_list_destroy(ge_move_list);
+      string_builder_destroy(sb);
+      error_stack_destroy(err);
+      sim_ctx_destroy(nested_sim_ctx);
+      sim_results_destroy(nested_sim_results);
+      move_list_destroy(nested_move_list);
+      win_pct_destroy(win_pcts);
+      game_destroy(game);
+      config_destroy(config);
+      return;
+    }
+  }
+
   // Augment mode: read an existing inneragree CSV (with cgp + game/turn/
   // on_turn_player), re-run BOTH flat and nested outer sims at each CGP with
   // use_heat_map=true, extract per-arm/per-ply (win_pct, score_mean,

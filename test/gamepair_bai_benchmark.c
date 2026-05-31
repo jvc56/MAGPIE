@@ -892,9 +892,18 @@ void test_gamepair_bai_benchmark(void) {
   Move *history_a = malloc_or_die(sizeof(Move) * MAX_TRACKED_TURNS);
   Move *history_b = malloc_or_die(sizeof(Move) * MAX_TRACKED_TURNS);
 
+  // Base seed for the per-pair seed sequence. Default 9 for backward
+  // compatibility; override with GAMEPAIRBAI_SEED_BASE for fresh draws.
+  uint64_t seed_base = 9;
+  const char *env_seed = getenv("GAMEPAIRBAI_SEED_BASE");
+  if (env_seed && *env_seed) {
+    seed_base = (uint64_t)strtoull(env_seed, NULL, 10);
+  }
+  printf("  seed base: %" PRIu64 "\n", seed_base);
+
   printf("\n--- Games ---\n");
   for (int pair = 0; pair < num_game_pairs; pair++) {
-    uint64_t seed = 9 + (uint64_t)pair;
+    uint64_t seed = seed_base + (uint64_t)pair;
     int num_turns_a = 0;
     int num_turns_b = 0;
 
