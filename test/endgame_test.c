@@ -375,7 +375,10 @@ static void inject_worker_per_ply(int depth, int32_t value,
 // ABDADA workers injected mid-search (as cores free up) and still return the
 // exact single-threaded value. ABDADA is value-deterministic regardless of
 // thread count or when workers join, so the result must equal the known -63.
-void test_endgame_dynamic_worker_injection(void) {
+// Exercised for both endgame_solve (master is a spawned thread) and
+// endgame_solve_inline (master runs in the calling thread — the path PEG uses,
+// where injected helpers cooperate while the caller's own core keeps solving).
+static void run_injection_case(bool use_inline) {
   Config *config =
       config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 7");
   load_and_exec_config_or_die(
@@ -414,19 +417,28 @@ void test_endgame_dynamic_worker_injection(void) {
   args.per_ply_callback_data = &injector;
 
   ErrorStack *error_stack = error_stack_create();
-  endgame_solve(&ctx, &args, results, error_stack);
+  if (use_inline) {
+    endgame_solve_inline(&ctx, &args, results);
+  } else {
+    endgame_solve(&ctx, &args, results, error_stack);
+  }
   assert(error_stack_is_empty(error_stack));
   const int32_t value =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
 
-  printf("dynamic-worker-injection: value=%d workers_added=%d\n", value,
-         injector.added);
+  printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
+         use_inline ? "inline" : "spawned", value, injector.added);
   assert(value == -63);
   assert(injector.added > 0); // at least one helper joined mid-search
 
   error_stack_destroy(error_stack);
   endgame_ctx_destroy(ctx);
   config_destroy(config);
+}
+
+void test_endgame_dynamic_worker_injection(void) {
+  run_injection_case(/*use_inline=*/false);
+  run_injection_case(/*use_inline=*/true);
 }
 
 void test_nonempty_bag(void) {

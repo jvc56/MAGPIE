@@ -2804,8 +2804,29 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // Suppress stuck-tile log to avoid localtime thread safety issues.
   atomic_store(&solver->stuck_tile_logged, 1);
 
+  // Open the injection window so helpers can be added mid-search via
+  // endgame_add_worker while this thread runs the master (ordinal 0). The
+  // calling thread is the master, so unlike endgame_solve there is no spawned
+  // thread for ordinal 0 — only injected helpers (ordinals > 0) are joined.
+  if (solver->max_workers > solver->threads) {
+    cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->adding_closed, 0);
+    cpthread_mutex_unlock(&solver->add_mutex);
+  }
+
   // Run IDS directly in the calling thread.
   iterative_deepening(solver->workers[0], solver->requested_plies);
+
+  // Shut the window and join any injected helpers. live_workers counts the
+  // in-thread master (solver->threads, normally 1) plus any added workers, so
+  // the spawned pthreads are [solver->threads, live_workers).
+  cpthread_mutex_lock(&solver->add_mutex);
+  atomic_store(&solver->adding_closed, 1);
+  const int total_workers = atomic_load(&solver->live_workers);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  for (int idx = solver->threads; idx < total_workers; idx++) {
+    cpthread_join(solver->worker_ids[idx]);
+  }
 
   const PVLine *best_pv =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
