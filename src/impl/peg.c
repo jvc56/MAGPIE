@@ -32,8 +32,6 @@ enum {
   PEG_CAND_LIST_CAP = 16384,
   // Greedy playout depth ceiling (a PEG playout terminates well before this).
   PEG_PLAYOUT_MAX_PLIES = 40,
-  // How many ranked candidates the result carries (stage-1 input width).
-  PEG_RESULT_TOP_K = 32,
 };
 
 // ----- combinatorics -------------------------------------------------------
@@ -422,7 +420,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
   qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
 
-  const int top_k = n_cands < PEG_RESULT_TOP_K ? n_cands : PEG_RESULT_TOP_K;
+  // The result carries the first halving stage's candidate count (stage 1's
+  // top-K) to seed it — overridable via args->stage_top_k, else the built-in
+  // table. (Once the halving stages run, this becomes the cascade's input.)
+  const int seed_width = (args->stage_top_k && args->num_stages > 0)
+                             ? args->stage_top_k[0]
+                             : PEG_STAGE_TOP_K[1];
+  const int top_k = n_cands < seed_width ? n_cands : seed_width;
   if (top_k > 0) {
     out->top_cands = malloc_or_die((size_t)top_k * sizeof(PegRankedCand));
     memcpy(out->top_cands, ranked, (size_t)top_k * sizeof(PegRankedCand));

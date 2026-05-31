@@ -53,6 +53,10 @@
 // Stages 1..5 evaluate the top 32, 16, 8, 4, 2 respectively.
 #define PEG_NUM_STAGES 6
 
+// Upper bound on the number of halving stages a caller may request via the
+// PegArgs.stage_top_k override.
+#define PEG_MAX_STAGES 16
+
 // Stage table — top-K cand count and inner depth per stage. Read-only.
 // Stage 0 is greedy (top-K is "all", inner depth 0, greedy leaf); stages 1..5
 // use the table entries. The tail is top-2, never top-1 (see design above).
@@ -101,6 +105,16 @@ typedef struct PegArgs {
   // Last stage index to run, inclusive (0..PEG_NUM_STAGES-1). Lets the caller
   // cap depth below the full cascade. <= 0 is treated as "run all stages".
   int max_stage;
+
+  // Optional per-stage candidate counts for the halving stages (stage 1
+  // onward), overriding the built-in PEG_STAGE_TOP_K table. NULL = use the
+  // default. When set, num_stages is the array length and defines how many
+  // halving stages run; stage 0 (greedy) always evaluates all candidates.
+  // Each entry should be >= 2 (a stage re-ranks a set, so a top-1 stage is
+  // meaningless) and is normally non-increasing. Powers of two are
+  // conventional but not required.
+  const int *stage_top_k;
+  int num_stages;
 
   // Inner top-K cap: when running nested PEG for a non-emptier cand, only
   // evaluate the inner_top_k highest-equity opp moves per opp_rack. 0 = no cap

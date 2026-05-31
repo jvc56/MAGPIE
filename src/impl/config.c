@@ -129,6 +129,7 @@ typedef enum {
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
+  ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -246,6 +247,10 @@ struct Config {
   int shplies;
   int endgame_plies;
   int endgame_top_k;
+  // PEG per-stage candidate counts (halving stages 1..N). peg_num_stages == 0
+  // means "use the built-in PEG_STAGE_TOP_K default".
+  int peg_stage_top_k[PEG_MAX_STAGES];
+  int peg_num_stages;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
@@ -1460,6 +1465,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "1";
       examples[1] = "5";
       text = "Number of top moves to return with full PVs from endgame solver.";
+      break;
+    case ARG_TOKEN_PEG_TOP_K:
+      usages[0] = "<count1>,<count2>,...";
+      examples[0] = "32,16,8,4,2";
+      examples[1] = "30,12,6,2";
+      text = "Per-stage candidate counts for the PEG halving stages, overriding "
+             "the default 32,16,8,4,2. Each count must be >= 2; powers of two "
+             "are conventional but not required.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2896,6 +2909,48 @@ char *status_endgame(Config *config) {
                                     config->game_history);
 }
 
+// Parse the -pegtopk override (comma-separated per-stage candidate counts) into
+// config->peg_stage_top_k. Absent => leave the existing value (default 0 =
+// built-in table). Each count must be >= 2 (a stage re-ranks a set, so a top-1
+// stage is meaningless).
+static void config_load_peg_stage_top_k(Config *config,
+                                        ErrorStack *error_stack) {
+  const char *value = config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0);
+  if (!value) {
+    return;
+  }
+  StringSplitter *split = split_string(value, ',', true);
+  const int n = string_splitter_get_number_of_items(split);
+  if (n < 1 || n > PEG_MAX_STAGES) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_PEG_INVALID_STAGE_COUNTS,
+        get_formatted_string(
+            "pegtopk needs 1..%d comma-separated counts, got %d",
+            PEG_MAX_STAGES, n));
+    string_splitter_destroy(split);
+    return;
+  }
+  int counts[PEG_MAX_STAGES];
+  for (int i = 0; i < n; i++) {
+    const int count = atoi(string_splitter_get_item(split, i));
+    if (count < 2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_STAGE_COUNTS,
+          get_formatted_string("pegtopk stage counts must be >= 2 (a stage "
+                               "re-ranks a set); got %d",
+                               count));
+      string_splitter_destroy(split);
+      return;
+    }
+    counts[i] = count;
+  }
+  string_splitter_destroy(split);
+  for (int i = 0; i < n; i++) {
+    config->peg_stage_top_k[i] = counts[i];
+  }
+  config->peg_num_stages = n;
+}
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   memset(peg_args, 0, sizeof(*peg_args));
   peg_args->game = config->game;
@@ -2908,6 +2963,10 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->inner_top_k = 0;
   peg_args->scenario_stride = 0;
   peg_args->include_per_scenario = false;
+  // Per-stage candidate-count override (NULL = built-in default table).
+  peg_args->stage_top_k =
+      config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
+  peg_args->num_stages = config->peg_num_stages;
 }
 
 void config_peg(Config *config, ErrorStack *error_stack) {
@@ -6185,6 +6244,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_peg_stage_top_k(config, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7617,6 +7681,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
+  arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -7716,6 +7781,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   // PEG result starts empty; -1 = "no solve yet" (distinct from stage 0 done).
   memset(&config->peg_result, 0, sizeof(config->peg_result));
   config->peg_result.last_completed_stage = -1;
+  // 0 stages = use the built-in per-stage candidate counts.
+  config->peg_num_stages = 0;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -8058,6 +8125,11 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_top_k);
+      break;
+    case ARG_TOKEN_PEG_TOP_K:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0));
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
