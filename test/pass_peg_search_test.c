@@ -7033,6 +7033,8 @@ typedef struct PegPessSolver {
   double slow_solve_log_s;  // log CGP when one endgame_solve exceeds this (0=off)
   double idle_probe_s;      // sample pool idle count when a leaf solve exceeds
                             // this many seconds (0=off); rung-5 instrumentation
+  double rung4_probe_s;     // sample idle count when a nested cand loop exceeds
+                            // this many seconds (0=off); rung-4 instrumentation
   bool first_win;           // endgame [-1,+1] window: resolve sign only (verdict-safe)
   int endgame_threads;      // per-solve thread count (1=default; >1 for ONLY_DRAW)
   bool skip_word_pruning;   // pass-through to endgame_solve_inline
@@ -7245,6 +7247,22 @@ static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
 static atomic_llong g_probe_slow_solves = 0;
 static atomic_llong g_probe_slow_idle_sum = 0;  // sum of idle counts at slow solves
 static atomic_llong g_probe_slow_with_idle = 0; // slow solves with idle >= 2
+
+// --- Rung-4 probe: "heavy sequential candidate loop while cores idle" -------
+// Rung 4 would parallelize nested_solve's candidate loop. It is unbuilt
+// because the loop carries the cross-cand minLossesSoFar leader + early-WIN
+// cutoff. To decide whether it is worth the (pruning-delicate) build, time
+// each cand loop; when one exceeds rung4_probe_s, record whether it ran with
+// NO parallelism at this level (parallel_perms == false — a rung-4 opportunity)
+// and how many cores were idle. If heavy sequential cand loops frequently
+// coincide with idle cores, rung 4 matters. Counts overlap across nesting
+// (an outer slow loop contains inner ones); the idle-coincidence ratio is the
+// distortion-free signal. Reporting only; never affects the verdict.
+static atomic_llong g_rung4_slow = 0;          // cand loops >= threshold
+static atomic_llong g_rung4_slow_seq = 0;      // ...with parallel_perms == false
+static atomic_llong g_rung4_seq_idle_sum = 0;  // sum idle at slow-seq loops
+static atomic_llong g_rung4_seq_with_idle = 0; // slow-seq loops with idle >= 2
+static atomic_llong g_rung4_seq_cands_sum = 0; // sum n_cands at slow-seq loops
 
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
@@ -7775,6 +7793,10 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
       pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool) &&
       (s->force_nested_perm ||
        peg_pool_queue_count(s->pool) < peg_pool_num_workers(s->pool));
+  Timer rung4_t;
+  if (s->rung4_probe_s > 0.0) {
+    ctimer_start(&rung4_t);
+  }
   for (int ci = 0; ci < n_cands; ci++) {
     int64_t cand_score = 0;   // 2*wins + draws
     int64_t cand_losses = 0;
@@ -7818,6 +7840,24 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
                          : malloc_or_die((size_t)pc.count * sizeof(PegPessOut));
       // Early-WIN exit: leader has zero losses → cannot be beaten.
       if (cand_losses == 0) break;
+    }
+  }
+  if (s->rung4_probe_s > 0.0) {
+    const double loop_s = ctimer_elapsed_seconds(&rung4_t);
+    if (loop_s >= s->rung4_probe_s) {
+      const int idle_now = s->pool ? peg_pool_idle_workers(s->pool) : 0;
+      atomic_fetch_add(&g_rung4_slow, 1);
+      // parallel_perms == false means this cand loop ran with no parallelism at
+      // this level — the entire cand x perm subtree was sequential. If cores
+      // were idle, parallelizing the cand loop (rung 4) would have filled them.
+      if (!parallel_perms) {
+        atomic_fetch_add(&g_rung4_slow_seq, 1);
+        atomic_fetch_add(&g_rung4_seq_idle_sum, (long long)idle_now);
+        atomic_fetch_add(&g_rung4_seq_cands_sum, (long long)n_cands);
+        if (idle_now >= 2) {
+          atomic_fetch_add(&g_rung4_seq_with_idle, 1);
+        }
+      }
     }
   }
 
@@ -8155,6 +8195,7 @@ typedef struct PessJob {
   PegPool *pool;         // set in the split path; needed for recursive forking
   double slow_solve_log_s;
   double idle_probe_s; // rung-5 instrumentation threshold (0=off)
+  double rung4_probe_s; // rung-4 instrumentation threshold (0=off)
   bool first_win;
   int endgame_threads;
   bool skip_word_pruning;
@@ -8227,6 +8268,7 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   solver->subperm_sort = j->subperm_sort;
   solver->slow_solve_log_s = j->slow_solve_log_s;
   solver->idle_probe_s = j->idle_probe_s;
+  solver->rung4_probe_s = j->rung4_probe_s;
   solver->first_win = j->first_win;
   solver->endgame_threads = j->endgame_threads;
   solver->skip_word_pruning = j->skip_word_pruning;
@@ -8737,6 +8779,15 @@ void test_pass_peg_pessimistic_full_eval(void) {
   atomic_store(&g_probe_slow_solves, 0);
   atomic_store(&g_probe_slow_idle_sum, 0);
   atomic_store(&g_probe_slow_with_idle, 0);
+  // Rung-4 probe threshold: nested cand loops exceeding this many seconds
+  // sample the pool idle count (see g_rung4_* counters). 0 = off.
+  const char *rung4_probe_env = getenv("PASSPEG_PESSFULL_RUNG4_PROBE_S");
+  const double rung4_probe_s = rung4_probe_env ? atof(rung4_probe_env) : 0.0;
+  atomic_store(&g_rung4_slow, 0);
+  atomic_store(&g_rung4_slow_seq, 0);
+  atomic_store(&g_rung4_seq_idle_sum, 0);
+  atomic_store(&g_rung4_seq_with_idle, 0);
+  atomic_store(&g_rung4_seq_cands_sum, 0);
   // SPLIT_OPP: dispatch each (ordering, opp-reply) as its own peg_pool unit
   // instead of one unit per ordering. Finer-grained parallelism — a single
   // ordering fans across cores; a full solve gets better load balance.
@@ -9033,7 +9084,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
             .subperm_sort = subperm_sort,
             .slow_solve_log_s = slow_solve_log_s, .idle_probe_s = idle_probe_s,
-            .first_win = first_win,
+            .rung4_probe_s = rung4_probe_s, .first_win = first_win,
             .endgame_threads = endgame_threads,
             .skip_word_pruning = skip_word_pruning,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
@@ -9078,7 +9129,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
           .subperm_sort = subperm_sort,
           .slow_solve_log_s = slow_solve_log_s, .idle_probe_s = idle_probe_s,
-          .first_win = first_win,
+          .rung4_probe_s = rung4_probe_s, .first_win = first_win,
           .endgame_threads = endgame_threads,
           .skip_word_pruning = skip_word_pruning,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
@@ -9233,6 +9284,20 @@ void test_pass_peg_pessimistic_full_eval(void) {
            idle_probe_s, slow, with_idle,
            slow > 0 ? (100.0 * (double)with_idle) / (double)slow : 0.0,
            slow > 0 ? (double)idle_sum / (double)slow : 0.0);
+  }
+  if (rung4_probe_s > 0.0) {
+    const long long slow = atomic_load(&g_rung4_slow);
+    const long long seq = atomic_load(&g_rung4_slow_seq);
+    const long long seq_idle = atomic_load(&g_rung4_seq_idle_sum);
+    const long long seq_with_idle = atomic_load(&g_rung4_seq_with_idle);
+    const long long seq_cands = atomic_load(&g_rung4_seq_cands_sum);
+    printf("rung4-probe (nested cand loops >= %.3fs): slow=%lld, "
+           "sequential(unparallelized)=%lld; of those: with>=2 idle "
+           "cores=%lld (%.1f%%), avg idle=%.2f, avg cands=%.1f\n",
+           rung4_probe_s, slow, seq, seq_with_idle,
+           seq > 0 ? (100.0 * (double)seq_with_idle) / (double)seq : 0.0,
+           seq > 0 ? (double)seq_idle / (double)seq : 0.0,
+           seq > 0 ? (double)seq_cands / (double)seq : 0.0);
   }
   if (cache) {
     long h = atomic_load(&cache->hits);
