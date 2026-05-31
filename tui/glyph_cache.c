@@ -11,7 +11,14 @@
 #include <unistd.h>
 
 enum {
-  GLYPH_CACHE_CAPACITY = 256, // ASCII + a little headroom is plenty
+  // ASCII (0-127) covers letters/digits; the bump to 8704 reaches
+  // through the Arrows block (U+2190-U+21FF) so we can rasterize
+  // → / ↓ for the annotation cursor. Pointer array cost: 8704 * 8
+  // = 68 KB per cache; with 4 caches * 2 (regular + bold) that's
+  // ~545 KB total — fine. A real hash table would be lower memory
+  // but most slots stay NULL and we only ever look up a handful
+  // of codepoints, so a flat array is the simpler win.
+  GLYPH_CACHE_CAPACITY = 8704,
 };
 
 struct TuiGlyphCache {
@@ -154,11 +161,15 @@ static const TuiGlyph *cache_get_styled(TuiGlyphCache *cache,
     return slots[codepoint];
   }
 
-  // FT_LOAD_DEFAULT lets FreeType use bytecode hints if the font has
-  // them and the auto-hinter otherwise — what most users would call
-  // "good defaults". The AA toggle picks NORMAL vs MONO rendering;
-  // MONO returns 1-bit-per-pixel bitmaps which we expand to 0/255
-  // alpha for a uniform compositing path.
+  // FT_LOAD_DEFAULT: hint via the font's bytecode if present,
+  // autohinter otherwise. Hinting snaps stems to integer pixel
+  // widths, giving uniform stroke thickness within a rendering —
+  // important for letters like A/Q/T where unhinted output has
+  // uneven stems after downsample. Tile rasterization happens
+  // in a supersampled buffer (SS=2), so the actual hint target
+  // is 2× the display size — well above the ~25-32px band where
+  // this font's hints landed badly. AA toggle picks NORMAL vs
+  // MONO rendering.
   FT_Int32 load_flags = FT_LOAD_DEFAULT;
   if (FT_Load_Char(cache->face, codepoint, load_flags) != 0) {
     return NULL;

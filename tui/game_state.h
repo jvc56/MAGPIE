@@ -121,17 +121,17 @@ typedef struct {
 
 typedef struct {
   int player_idx;
-  int score;          // points earned on this play
-  int total_after;    // running total after this play (excluding bonus)
-  int clock_at_start; // seconds remaining when this player's turn began
+  int score;              // points earned on this play
+  int total_after;        // running total after this play (excluding bonus)
+  int clock_at_start;     // seconds remaining when this player's turn began
   int opp_clock_at_start; // opponent's seconds remaining at the same moment
   // Seconds remaining when this player's move ended. Set by the bot
   // worker right after seconds_used is updated for the turn. For
   // loaded GCGs we don't have per-move clock data, so this stays at
   // clock_at_start (effectively unused outside the live-watch flow).
   int clock_at_end;
-  char move_str[48];  // "8H POND" or "exch DEFG" or "pass" (no score)
-  char rack_str[16];  // full rack the player had at the start of the turn
+  char move_str[48]; // "8H POND" or "exch DEFG" or "pass" (no score)
+  char rack_str[16]; // full rack the player had at the start of the turn
   char
       leave_str[16]; // tiles kept after the play (empty = outplay/exchange-all)
   // Going-out bonus, attached to the going-out player's last move so it
@@ -194,6 +194,19 @@ typedef struct {
   // alongside the on-turn rack panel and board. NULL until
   // populated by append_pending_history.
   struct Rack *opp_rack_before;
+
+  // Annotation revalidation error message — populated by
+  // tui_game_state_revalidate_history when the engine refuses to
+  // apply this turn's move against the (so-far-correct) running
+  // board. Examples: "tile collision", "disconnected play",
+  // "rack missing T". Rendered as an extra row below the entry
+  // in the History panel. Empty string ('\0') = no error.
+  // Caller-managed; cleared on every revalidation pass and
+  // re-populated for whatever turn (if any) trips validation
+  // first. Sized to hold several accumulated problems for one turn
+  // (e.g. "not enough P's …; Q's …") since a single play can
+  // overrun more than one letter at once.
+  char error_str[192];
 } TuiHistoryEntry;
 
 typedef struct {
@@ -309,10 +322,10 @@ typedef struct {
   TuiGlyphCache *pixel_glyph_cache_sub;
   struct TuiPixelRequest {
     bool pending;
-    struct Board *board;   // owned: board_duplicate'd by UI
-    const void *theme; // borrowed pointer to a Theme (theme.h);
-                       // declared as void* here to keep game_state.h free
-                       // of the notcurses dependency theme.h drags in.
+    struct Board *board; // owned: board_duplicate'd by UI
+    const void *theme;   // borrowed pointer to a Theme (theme.h);
+                         // declared as void* here to keep game_state.h free
+                         // of the notcurses dependency theme.h drags in.
     int scale;
     int cell_w, cell_h;
     unsigned cdy, cdx;
@@ -321,8 +334,8 @@ typedef struct {
     TuiPremiumLabels premium_labels;
     TuiScoreSubscripts score_subscripts;
     int border_thickness;
-    uint64_t version;     // render_version at request time
-    int history_cursor;   // -1 = live, else committed entry idx
+    uint64_t version;   // render_version at request time
+    int history_cursor; // -1 = live, else committed entry idx
   } pixel_request;
   struct TuiPixelResult {
     bool ready;
@@ -469,6 +482,28 @@ typedef struct {
   int edit_rack_len;
   int edit_rack_cursor;
   bool edit_rack_valid;
+  // Editable leave buffer — only reachable via mouse click on the
+  // leave column of a pending entry. Arrow-key nav skips it. When
+  // it has focus, typing appends to this buffer the same way the
+  // rack field does.
+  char edit_leave_buf[20];
+  int edit_leave_len;
+  int edit_leave_cursor;
+  // Carryover leave seeded onto a freshly-created turn (the same
+  // player's previous-turn leave). While the rack stays un-edited
+  // by the user, the effective rack auto-becomes carryover +
+  // the move's played tiles — so typing "KAM" on a turn carrying
+  // "ERST" forward yields the rack "AEKMRST" (no overlap = pure
+  // union). Cleared the moment the user types into the RACK field
+  // directly (edit_rack_user_modified), and reset on each new turn.
+  char edit_rack_carryover[20];
+  // True when the user has typed into the RACK field directly
+  // (i.e., the rack buffer is "their" content, not an auto-seed
+  // from the move's inferred tiles). While false, the rack panel
+  // and row-2 cell track the move's inferred rack live as the
+  // user edits the move. Cleared on edit-mode entry, on
+  // auto-seed from inferred, and on annotation game reset.
+  bool edit_rack_user_modified;
   // Result of parsing the move buffer. edit_move_kind classifies
   // what the buffer currently represents — drives both validity
   // coloring and the commit path:
@@ -500,11 +535,30 @@ typedef struct {
   // is missing or the subtraction can't be performed because
   // the rack doesn't contain all played letters.
   char edit_move_leave[16];
+  // Live preview Move object — owned, allocated at game init.
+  // Populated by tui_game_state_parse_edit_buf when the user's
+  // typed move text validates cleanly against the live board.
+  // `edit_preview_move_valid` flips true when the buffer's
+  // contents are this Move; the board renderer uses this to
+  // ghost the typed play onto the board as the user types.
+  struct Move *edit_preview_move;
+  bool edit_preview_move_valid;
+  // Which turn index the engine board is currently positioned for
+  // (pre-move) during annotation editing. The editor seeks the
+  // engine to the edited turn's pre-move board so move validation
+  // doesn't collide with that turn's own already-placed tiles.
+  // -2 = stale / unknown (force a re-seek on the next parse).
+  int engine_positioned_for_turn;
 } TuiGameState;
 
 enum {
   TUI_EDIT_FIELD_MOVE = 0,
   TUI_EDIT_FIELD_RACK = 1,
+  // Editable leave field — sits on the move row, right-aligned
+  // next to the score. Currently focus-only (clickable, walks
+  // through tab cycle); full edit support (typing, override of
+  // auto-derived leave) follows once basic placement is in.
+  TUI_EDIT_FIELD_LEAVE = 2,
 };
 
 typedef enum {
@@ -543,6 +597,27 @@ void tui_game_state_parse_edit_buf(TuiGameState *state);
 // starting racks. The annotator fills the racks in by hand as
 // the live game progresses.
 void tui_game_state_reset_game_for_annotation(TuiGameState *state);
+
+// Replays committed history entries from turn 1 forward on a
+// fresh engine state, validating each turn's move against the
+// running board + the entry's rack_str. The first turn whose
+// move can't be applied — tile collision, disconnected play,
+// rack missing letters, bag underflow, invalid notation —
+// gets a human-readable explanation written to its error_str
+// field; replay stops there and the engine state is left at
+// the position before the failing turn. Turns past the
+// failing one keep whatever error_str they had (cleared on
+// the next successful re-validation pass). On full success
+// the live game state matches the committed sequence and
+// every entry's error_str is empty.
+void tui_game_state_revalidate_history(TuiGameState *state);
+
+// Position the engine board at the START of turn `idx` (replays
+// committed turns [0, idx)). The annotation editor calls this so
+// re-validating a committed turn's move sees the board the player
+// actually faced, not the post-game board with that turn's tiles
+// already placed.
+void tui_game_state_seek_engine_to_turn(TuiGameState *state, int idx);
 
 // Frees everything inside an endgame snapshot (board, rack, moves,
 // values), zeros the fields, marks invalid. Safe on a zero-init or

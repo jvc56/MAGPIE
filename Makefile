@@ -139,14 +139,19 @@ ifeq ($(BUILD),debug)
     TUI_OPT := -O1
     TUI_LTO :=
     TUI_SAN := -fsanitize=address,undefined -fno-omit-frame-pointer
+    # Debug build leaves NDEBUG undefined so engine asserts (e.g.,
+    # rack_take_letter's underflow check) fire and produce a usable
+    # backtrace alongside ASAN/UBSan output.
+    TUI_NDEBUG :=
 else
     TUI_OPT := -O3
     TUI_LTO := -flto
     TUI_SAN :=
+    TUI_NDEBUG := -DNDEBUG
 endif
 
-TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
-TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g -DNDEBUG -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
+TUI_ENGINE_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
+TUI_CFLAGS := $(TUI_OPT) $(TUI_LTO) -march=native -g $(TUI_NDEBUG) -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(TUI_SAN) -MMD -MP
 TUI_LDFLAGS := -pthread $(TUI_LTO) $(TUI_SAN)
 
 .PHONY: all clean iwyu

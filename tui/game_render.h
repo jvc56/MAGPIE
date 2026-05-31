@@ -128,8 +128,7 @@ void tui_game_render_load_position(struct ncplane *plane, const Theme *theme,
 // path; the position is parsed live, with the final-state board
 // previewed behind the modal. Enter commits, Esc cancels.
 void tui_game_render_load_game(struct ncplane *plane, const Theme *theme,
-                               const char *buf, int cursor,
-                               const char *error);
+                               const char *buf, int cursor, const char *error);
 
 // Time-picker modal — opened from "New game" in the main menu.
 // Items come from time_picker.h's preset accessors.
@@ -264,12 +263,14 @@ int tui_analysis_cursor_column_at(int y, int x, TuiAnalysisColumn *out_column);
 void tui_capture_analysis_snapshot(const TuiGameState *state,
                                    TuiAnalysisSnapshot *out);
 
-void tui_game_render_settings(
-    struct ncplane *plane, const Theme *theme, int focus, int board_scale,
-    bool antialias, TuiScoreSubscripts score_subscripts, int border_thickness,
-    bool pixel_supported, bool font_available, TuiPremiumLabels premium_labels,
-    bool blank_uppercase, TuiRackSort rack_sort, const char *lexicon,
-    bool load_rit);
+void tui_game_render_settings(struct ncplane *plane, const Theme *theme,
+                              int focus, int board_scale, bool antialias,
+                              TuiScoreSubscripts score_subscripts,
+                              int border_thickness, bool pixel_supported,
+                              bool font_available,
+                              TuiPremiumLabels premium_labels,
+                              bool blank_uppercase, TuiRackSort rack_sort,
+                              const char *lexicon, bool load_rit);
 
 // Render just the board cells (no row/col labels) at (top, left). Each
 // cell is 2 columns wide; the rendered region is BOARD_DIM rows tall and
@@ -287,5 +288,15 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
 // doesn't linger under the in-game UI, and on resize so a font-size
 // change rebuilds them at the new cell-to-pixel ratio.
 void tui_game_render_reset_grids(void);
+
+// Alphagram-sort a rack-like input string according to the user's
+// rack_sort preference (vowels-first, blanks-first, etc.). Output is
+// the sorted form in a caller-owned buffer with a NUL terminator.
+// Public form of the in-renderer helper so the annotation editor can
+// canonicalize the rack buffer on focus-leave.
+void tui_format_alphagram_for_sort(const char *in,
+                                   const struct LetterDistribution *ld,
+                                   TuiRackSort sort, char *out,
+                                   size_t out_size);
 
 #endif

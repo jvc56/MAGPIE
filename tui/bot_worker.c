@@ -128,8 +128,8 @@ int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
   // Snapshot the opponent's clock too so the History-cursor view
   // can show both players' time-remaining as it stood at the
   // start of this turn.
-  entry->opp_clock_at_start = state->time_per_side_seconds -
-                              (int)state->seconds_used[1 - player_idx];
+  entry->opp_clock_at_start =
+      state->time_per_side_seconds - (int)state->seconds_used[1 - player_idx];
   entry->pending = true;
   // Snapshot the board AND rack NOW (pre-move) so the History
   // cursor can replay the position this player saw at the moment
@@ -403,8 +403,7 @@ static MoveList *generate_top_candidates(const Game *game, int n) {
 static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   const int requested_cands =
       state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
-  MoveList *candidates =
-      generate_top_candidates(state->game, requested_cands);
+  MoveList *candidates = generate_top_candidates(state->game, requested_cands);
   if (candidates == NULL) {
     return false;
   }
@@ -437,7 +436,8 @@ static bool run_sim(TuiGameState *state, double budget_sec, Move *out_move) {
   // sim is a no-op and a 0 candidate sim asks BAI to pick from
   // nothing.
   int s_plies = state->sim_plies > 0 ? state->sim_plies : 4;
-  int s_cands = state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
+  int s_cands =
+      state->sim_candidates > 0 ? state->sim_candidates : SIM_CANDIDATES;
   args.num_plies = s_plies;
   args.move_list = candidates;
   args.num_plays = move_list_get_count(candidates);
@@ -829,8 +829,8 @@ static void *bot_thread_main(void *arg) {
     rack_copy(&rack_at_start,
               player_get_rack(game_get_player(state->game, player_idx)));
 
-    pending_idx = tui_bot_worker_append_pending_history(state, player_idx, &rack_at_start,
-                                         clock_at_start);
+    pending_idx = tui_bot_worker_append_pending_history(
+        state, player_idx, &rack_at_start, clock_at_start);
     budget_sec = compute_budget_sec(state, player_idx);
     empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
     // Render the pending entry's spinner immediately.
@@ -893,7 +893,8 @@ static void *bot_thread_main(void *arg) {
           free(finalized->endgame_moves_saved);
         }
         const int n = state->endgame_snapshot.num_entries;
-        finalized->endgame_moves_saved = (Move *)malloc((size_t)n * sizeof(Move));
+        finalized->endgame_moves_saved =
+            (Move *)malloc((size_t)n * sizeof(Move));
         if (finalized->endgame_moves_saved != NULL) {
           for (int i = 0; i < n; i++) {
             if (state->endgame_snapshot.moves[i] != NULL) {
@@ -965,8 +966,7 @@ static void *bot_thread_main(void *arg) {
     // copy for the cursor preview).
     if (pending_idx >= 0 && pending_idx < state->history_count) {
       state->history[pending_idx].clock_at_end =
-          state->time_per_side_seconds -
-          (int)state->seconds_used[player_idx];
+          state->time_per_side_seconds - (int)state->seconds_used[player_idx];
     }
 
     // Surface end-of-game bonus on the same entry that just went out.
