@@ -7031,6 +7031,8 @@ typedef struct PegPessSolver {
   int mover_sort_mode;      // our-turn nodes (first-win cutoff on WIN orderings)
   bool subperm_sort;        // sort nested sub-perms by opp danger (hardest first)
   double slow_solve_log_s;  // log CGP when one endgame_solve exceeds this (0=off)
+  double idle_probe_s;      // sample pool idle count when a leaf solve exceeds
+                            // this many seconds (0=off); rung-5 instrumentation
   bool first_win;           // endgame [-1,+1] window: resolve sign only (verdict-safe)
   int endgame_threads;      // per-solve thread count (1=default; >1 for ONLY_DRAW)
   bool skip_word_pruning;   // pass-through to endgame_solve_inline
@@ -7233,6 +7235,17 @@ static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
                                      PegPessOut *out_arr, int64_t *cand_score,
                                      int64_t *cand_losses);
 
+// --- Rung-5 probe: "heavy leaf endgame while cores idle" -------------------
+// When idle_probe_s > 0, each leaf endgame_solve is timed; one exceeding the
+// threshold samples how many pool workers were idle at that moment. This
+// measures how often a single long leaf solve coincides with spare cores —
+// i.e. how much a multithreaded (injected-worker) endgame would have helped.
+// Counters are global (one solve per process) and affect only the summary,
+// never verdicts. Reset at the start of each run; printed at the end.
+static atomic_llong g_probe_slow_solves = 0;
+static atomic_llong g_probe_slow_idle_sum = 0;  // sum of idle counts at slow solves
+static atomic_llong g_probe_slow_with_idle = 0; // slow solves with idle >= 2
+
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   Game *g = s->game;
@@ -7306,8 +7319,12 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   };
   endgame_results_reset(s->eg_results);
   Timer slow_t;
-  if (s->slow_solve_log_s > 0.0) {
+  const bool time_this_solve =
+      s->slow_solve_log_s > 0.0 || s->idle_probe_s > 0.0;
+  if (time_this_solve) {
     ctimer_start(&slow_t);
+  }
+  if (s->slow_solve_log_s > 0.0) {
     // Pre-solve capture: overwrite a temp file with the CGP we're about to
     // solve. If a solve hangs (never returns), this file holds the culprit
     // position. PASSPEG_PESSFULL_PRESOLVE_FILE selects the path.
@@ -7323,13 +7340,26 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
     }
   }
   endgame_solve_inline(s->eg_ctx_p, &ea, s->eg_results);
-  if (s->slow_solve_log_s > 0.0) {
+  if (time_this_solve) {
     const double solve_s = ctimer_elapsed_seconds(&slow_t);
-    if (solve_s >= s->slow_solve_log_s) {
+    if (s->slow_solve_log_s > 0.0 && solve_s >= s->slow_solve_log_s) {
       char *eg_cgp = game_get_cgp(scratch, true);
       fprintf(stderr, "[pessfull] SLOW ENDGAME %.2fs plies=%d: %s\n", solve_s,
               s->endgame_plies, eg_cgp);
       free(eg_cgp);
+    }
+    // Rung-5 probe: a leaf solve that ran long is a candidate for a
+    // multithreaded (injected-worker) endgame — but only if cores were
+    // actually idle to lend. Sample the pool's idle count at this moment and
+    // accumulate, so the end-of-run summary shows how often "long leaf +
+    // spare cores" coincided. Reporting only; never affects the verdict.
+    if (s->idle_probe_s > 0.0 && solve_s >= s->idle_probe_s) {
+      const int idle_now = s->pool ? peg_pool_idle_workers(s->pool) : 0;
+      atomic_fetch_add(&g_probe_slow_solves, 1);
+      atomic_fetch_add(&g_probe_slow_idle_sum, (long long)idle_now);
+      if (idle_now >= 2) {
+        atomic_fetch_add(&g_probe_slow_with_idle, 1);
+      }
     }
   }
   s->n_endgame_solves++;
@@ -8124,6 +8154,7 @@ typedef struct PessJob {
   bool force_nested_perm;  // debug: bypass nested-perm queue gate
   PegPool *pool;         // set in the split path; needed for recursive forking
   double slow_solve_log_s;
+  double idle_probe_s; // rung-5 instrumentation threshold (0=off)
   bool first_win;
   int endgame_threads;
   bool skip_word_pruning;
@@ -8195,6 +8226,7 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   solver->mover_sort_mode = j->mover_sort_mode;
   solver->subperm_sort = j->subperm_sort;
   solver->slow_solve_log_s = j->slow_solve_log_s;
+  solver->idle_probe_s = j->idle_probe_s;
   solver->first_win = j->first_win;
   solver->endgame_threads = j->endgame_threads;
   solver->skip_word_pruning = j->skip_word_pruning;
@@ -8698,6 +8730,13 @@ void test_pass_peg_pessimistic_full_eval(void) {
   const bool skip_word_pruning = skip_wp_env && atoi(skip_wp_env) > 0;
   const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
   const double slow_solve_log_s = slow_env ? atof(slow_env) : 0.0;
+  // Rung-5 probe threshold: leaf solves exceeding this many seconds sample the
+  // pool idle count (see g_probe_* counters). 0 = off.
+  const char *idle_probe_env = getenv("PASSPEG_PESSFULL_IDLE_PROBE_S");
+  const double idle_probe_s = idle_probe_env ? atof(idle_probe_env) : 0.0;
+  atomic_store(&g_probe_slow_solves, 0);
+  atomic_store(&g_probe_slow_idle_sum, 0);
+  atomic_store(&g_probe_slow_with_idle, 0);
   // SPLIT_OPP: dispatch each (ordering, opp-reply) as its own peg_pool unit
   // instead of one unit per ordering. Finer-grained parallelism — a single
   // ordering fans across cores; a full solve gets better load balance.
@@ -8993,7 +9032,8 @@ void test_pass_peg_pessimistic_full_eval(void) {
             .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
             .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
             .subperm_sort = subperm_sort,
-            .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
+            .slow_solve_log_s = slow_solve_log_s, .idle_probe_s = idle_probe_s,
+            .first_win = first_win,
             .endgame_threads = endgame_threads,
             .skip_word_pruning = skip_word_pruning,
             .max_opp_k = max_opp_k, .ordering = &orderings[slice_start],
@@ -9037,7 +9077,8 @@ void test_pass_peg_pessimistic_full_eval(void) {
           .tt_fraction_of_mem = tt_fraction_of_mem, .shared_tt = shared_tt,
           .opp_sort_mode = opp_sort_mode, .mover_sort_mode = mover_sort_mode,
           .subperm_sort = subperm_sort,
-          .slow_solve_log_s = slow_solve_log_s, .first_win = first_win,
+          .slow_solve_log_s = slow_solve_log_s, .idle_probe_s = idle_probe_s,
+          .first_win = first_win,
           .endgame_threads = endgame_threads,
           .skip_word_pruning = skip_word_pruning,
           .max_opp_k = max_opp_k, .ordering = &orderings[oi],
@@ -9183,6 +9224,16 @@ void test_pass_peg_pessimistic_full_eval(void) {
   printf("endgame_leaf_visits=%ld (counts cached too; comparable to macondo's "
          "endgame count)\n",
          atomic_load(&total_leaf_visits));
+  if (idle_probe_s > 0.0) {
+    const long long slow = atomic_load(&g_probe_slow_solves);
+    const long long idle_sum = atomic_load(&g_probe_slow_idle_sum);
+    const long long with_idle = atomic_load(&g_probe_slow_with_idle);
+    printf("rung5-probe (leaf solves >= %.3fs): slow=%lld, with>=2 idle "
+           "cores=%lld (%.1f%%), avg idle cores at slow=%.2f\n",
+           idle_probe_s, slow, with_idle,
+           slow > 0 ? (100.0 * (double)with_idle) / (double)slow : 0.0,
+           slow > 0 ? (double)idle_sum / (double)slow : 0.0);
+  }
   if (cache) {
     long h = atomic_load(&cache->hits);
     long m = atomic_load(&cache->misses);
