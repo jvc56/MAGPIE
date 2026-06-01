@@ -52,6 +52,25 @@ Every command prints the PNG path (default `/tmp/magpie_tui_frame.png`).
    the CLI shows a path only).
 4. Describe the current screen and ask for / proceed to the next action.
 
+## Headless text-grid testing (CI-friendly, no GUI/graphics): `tui/headless.sh`
+For asserting on the **text layer** (menus, panels, `[1]Board`/`[2]Rack`/`[3]Bag`/
+`[4]History`/`[5]Plays`, player headers/scores/clocks, status bar) with no GUI
+terminal, no graphics, and no Accessibility — use `tui/headless.sh`. It runs the
+TUI under a termwright PTY and scrapes cell text. The board/rack **tiles are
+graphics pixels and do NOT appear here** (use the PNG dump for those).
+- `tui/headless.sh launch [args]` → start headless, print the screen.
+- `tui/headless.sh capture` → print current screen text.
+- `tui/headless.sh expect <substr>` → exit 0/1 (assertion primitive for tests).
+- `tui/headless.sh key <Name...>` / `type <text>` → input (termwright key names).
+- `tui/headless.sh stop` → tear down.
+
+The trick it bakes in: `notcurses_core_init` blocks interrogating the terminal
+(DA / cursor-position queries) and a display-only emulator never replies, so
+init hangs forever. `headless.sh` feeds the replies (a Device Attributes
+response is the terminator) so init completes — that's the only reason headless
+capture works at all. Pick `headless.sh` for fast text assertions in CI;
+`remote.sh` (Ghostty + PNG) when you need to see the actual rendered pixels.
+
 ## Notes
 - Verify each step's screenshot before committing irreversible actions (e.g.
   pressing Enter to start a game). Clear a prefilled text field with repeated
