@@ -609,6 +609,44 @@ static int peg_rank_cmp(const void *lhs, const void *rhs) {
   return 0;
 }
 
+// True if `move` matches one of the protected move-similarity keys (snoprune
+// analogue). Cheap linear scan: the protected set is tiny.
+static bool peg_move_protected(const Move *move, const Rack *rack,
+                               const uint64_t *protect_keys, int n_protect) {
+  if (n_protect <= 0) {
+    return false;
+  }
+  const uint64_t key = move_get_similarity_key(move, rack);
+  for (int protect_idx = 0; protect_idx < n_protect; protect_idx++) {
+    if (protect_keys[protect_idx] == key) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// In-place select of the candidates that advance from a sorted ranked[0..
+// live_count): the top `keep` entries plus any protected move below the cut,
+// compacted into [0, return) with descending order preserved. Returns the new
+// live count. With no protected stragglers this is just the plain top-`keep`.
+static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
+                                const Rack *rack, const uint64_t *protect_keys,
+                                int n_protect) {
+  if (keep >= live_count) {
+    return live_count;
+  }
+  int write = keep;
+  for (int read = keep; read < live_count; read++) {
+    if (peg_move_protected(&ranked[read].move, rack, protect_keys, n_protect)) {
+      if (read != write) {
+        ranked[write] = ranked[read];
+      }
+      write++;
+    }
+  }
+  return write;
+}
+
 // Evaluate `n` candidate moves at `fidelity_plies`, writing ranked[i] for each.
 // Parallel across candidates when a pool is present, else inline.
 static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
@@ -865,6 +903,19 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   uint8_t unseen[MAX_ALPHABET_SIZE];
   peg_compute_unseen(game, mover_idx, unseen);
 
+  // Protected ("never prune") moves: precompute their similarity keys against
+  // the mover's rack so each stage can carry them past its top-K cut.
+  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
+  const int n_protect = args->n_protect_moves;
+  uint64_t *protect_keys = NULL;
+  if (n_protect > 0) {
+    protect_keys = malloc_or_die((size_t)n_protect * sizeof(uint64_t));
+    for (int protect_idx = 0; protect_idx < n_protect; protect_idx++) {
+      protect_keys[protect_idx] =
+          move_get_similarity_key(args->protect_moves[protect_idx], mover_rack);
+    }
+  }
+
   // Build the root pruned KWG once and install it on a prepared base game with
   // cross-sets generated a single time. The pre-cand board's playable words are
   // a superset of any post-cand position's, so this one pruned KWG is valid for
@@ -1001,14 +1052,22 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
-    int survivors = n_cands < counts[0] ? n_cands : counts[0];
-    peg_publish(out, ranked, survivors, /*stage=*/0);
+    const int keep0 = n_cands < counts[0] ? n_cands : counts[0];
+    // Survivors carried forward = top-K plus any protected straggler. Tracked
+    // as a shrinking live_count so protected moves never leave a stale copy in
+    // the unscanned tail.
+    int live_count = peg_select_survivors(ranked, n_cands, keep0, mover_rack,
+                                          protect_keys, n_protect);
+    peg_publish(out, ranked, live_count, /*stage=*/0);
 
-    // Halving stages. Stage s re-evaluates the surviving top counts[s-1] at one
-    // more ply of fidelity, then re-ranks; a stage needs >= 2 candidates to be
-    // meaningful, and is skipped once the budget is spent.
+    // Halving stages. Stage s re-evaluates the surviving top counts[s-1] (plus
+    // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
+    // needs >= 2 candidates to be meaningful, and is skipped once the budget is
+    // spent.
     for (int s = 1; s <= num_stages; s++) {
-      const int eval_count = n_cands < counts[s - 1] ? n_cands : counts[s - 1];
+      const int keep = live_count < counts[s - 1] ? live_count : counts[s - 1];
+      const int eval_count = peg_select_survivors(
+          ranked, live_count, keep, mover_rack, protect_keys, n_protect);
       if (eval_count < 2) {
         break;
       }
@@ -1032,6 +1091,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
+      live_count = eval_count;
       peg_publish(out, ranked, eval_count, s);
     }
 
@@ -1048,6 +1108,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (cand_ml) {
     move_list_destroy(cand_ml);
   }
+  free(protect_keys);
   for (int w = 0; w < n_scratch; w++) {
     move_list_destroy(workers[w].playout_ml);
     endgame_ctx_destroy(workers[w].eg_ctx);

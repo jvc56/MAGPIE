@@ -135,6 +135,15 @@ typedef struct PegArgs {
   const Move *const *only_moves;
   int n_only_moves;
 
+  // Optional "protect from pruning" set (like the simmer's snoprune): moves
+  // that must survive every stage's top-K cut even when their win% rank falls
+  // below it. Each stage advances its top-K plus any of these protected moves
+  // not already in the top-K, carrying them to the deepest fidelity. Matched
+  // against the candidate set by move-similarity key. The pointed-to Move
+  // objects must outlive the solve. NULL / 0 = no protection (default).
+  const Move *const *protect_moves;
+  int n_protect_moves;
+
   // If true, fill PegResult.per_scenario detail for the final stage's top
   // cand. Default false (saves memory).
   bool include_per_scenario;

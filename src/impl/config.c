@@ -132,6 +132,7 @@ typedef enum {
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_PEG_ONLY,
+  ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -258,6 +259,9 @@ struct Config {
   // PEG "only solve" move list (space-free UCGI, comma-separated), persisted
   // across commands since pargs reset each parse. NULL = solve all moves.
   char *peg_only_str;
+  // PEG "never prune" move list (same format/persistence). NULL = no protected
+  // moves; otherwise these survive every stage's top-K cut.
+  char *peg_noprune_str;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
@@ -1499,6 +1503,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "Comma-separated UCGI moves with no spaces: coordinate and tiles "
              "joined by a period (e.g. 11J.MEH), exchanges as ex.<tiles>, and "
              "pass as pass. Each must be a legal play for the player on turn.";
+      break;
+    case ARG_TOKEN_PEG_NOPRUNE:
+      usages[0] = "<moves>";
+      examples[0] = "11J.MEH";
+      examples[1] = "8D.WORD,J11.BUM";
+      text = "Protects a set of moves from being pruned by the PEG cascade "
+             "(like the simmer's snoprune): each stage advances its top-K plus "
+             "any of these moves that fell below the cut, carrying them to the "
+             "deepest fidelity. Same space-free UCGI format as pegonly "
+             "(coordinate.tiles, comma-separated). Use '-' to clear.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2995,46 +3009,83 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->num_stages = config->peg_num_stages;
 }
 
+// Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
+// into a ValidatedMoves plus a borrowed Move-pointer array. The shared move
+// validator splits between moves on commas and within a move on whitespace, so
+// the in-move period separators are translated to spaces first. On success
+// returns the ValidatedMoves (caller frees with validated_moves_destroy),
+// writes the move-pointer array (caller free()s it) to *moves_out and the
+// count to *n_out. On parse error pushes onto error_stack and returns NULL with
+// no array allocated.
+static ValidatedMoves *config_parse_peg_move_list(const Config *config,
+                                                   const char *move_str,
+                                                   const Move ***moves_out,
+                                                   int *n_out,
+                                                   ErrorStack *error_stack) {
+  char *whitespace_form = string_duplicate(move_str);
+  for (char *cursor = whitespace_form; *cursor; cursor++) {
+    if (*cursor == '.') {
+      *cursor = ' ';
+    }
+  }
+  const int mover_idx = game_get_player_on_turn_index(config->game);
+  ValidatedMoves *vms = validated_moves_create(
+      config->game, mover_idx, whitespace_form, true, true, error_stack);
+  free(whitespace_form);
+  if (!error_stack_is_empty(error_stack)) {
+    validated_moves_destroy(vms);
+    return NULL;
+  }
+  const int num_moves = validated_moves_get_number_of_moves(vms);
+  const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
+  for (int i = 0; i < num_moves; i++) {
+    moves[i] = validated_moves_get_move(vms, i);
+  }
+  *moves_out = moves;
+  *n_out = num_moves;
+  return vms;
+}
+
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
 
-  // Optional "only solve" set: a fixed list of root candidate moves in
-  // space-free UCGI form (coord.tiles, comma-separated). The shared move
-  // validator splits between moves on commas and within a move on whitespace,
-  // so translate the in-move period separators to spaces before parsing.
+  // Optional "only solve" set: evaluate exactly these moves as the candidates.
   ValidatedMoves *only_vms = NULL;
   const Move **only_moves = NULL;
   if (config->peg_only_str) {
-    char *whitespace_form = string_duplicate(config->peg_only_str);
-    for (char *cursor = whitespace_form; *cursor; cursor++) {
-      if (*cursor == '.') {
-        *cursor = ' ';
-      }
-    }
-    const int mover_idx = game_get_player_on_turn_index(config->game);
-    only_vms = validated_moves_create(config->game, mover_idx, whitespace_form,
-                                      true, true, error_stack);
-    free(whitespace_form);
+    only_vms = config_parse_peg_move_list(
+        config, config->peg_only_str, &only_moves, &peg_args.n_only_moves,
+        error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    peg_args.only_moves = only_moves;
+  }
+
+  // Optional "never prune" set: protect these moves from each stage's top-K cut.
+  ValidatedMoves *protect_vms = NULL;
+  const Move **protect_moves = NULL;
+  if (config->peg_noprune_str) {
+    protect_vms = config_parse_peg_move_list(
+        config, config->peg_noprune_str, &protect_moves,
+        &peg_args.n_protect_moves, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(only_moves);
       validated_moves_destroy(only_vms);
       return;
     }
-    const int n_only = validated_moves_get_number_of_moves(only_vms);
-    only_moves = malloc_or_die((size_t)n_only * sizeof(Move *));
-    for (int i = 0; i < n_only; i++) {
-      only_moves[i] = validated_moves_get_move(only_vms, i);
-    }
-    peg_args.only_moves = only_moves;
-    peg_args.n_only_moves = n_only;
+    peg_args.protect_moves = protect_moves;
   }
 
   peg_solve(&peg_args, &config->peg_result, error_stack);
 
   free(only_moves);
   validated_moves_destroy(only_vms);
+  free(protect_moves);
+  validated_moves_destroy(protect_vms);
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
@@ -6328,6 +6379,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     }
   }
 
+  // PEG "never prune" list: same persist-and-clear semantics as pegonly.
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_NOPRUNE) > 0) {
+    const char *peg_noprune =
+        config_get_parg_value(config, ARG_TOKEN_PEG_NOPRUNE, 0);
+    free(config->peg_noprune_str);
+    config->peg_noprune_str = NULL;
+    if (peg_noprune && !is_string_empty_or_whitespace(peg_noprune) &&
+        !strings_equal(peg_noprune, "-")) {
+      config->peg_noprune_str = string_duplicate(peg_noprune);
+    }
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7763,6 +7826,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
+  arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -7868,6 +7932,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_scenario_stride = 0;
   // NULL = solve all moves (no "only solve" restriction).
   config->peg_only_str = NULL;
+  // NULL = no protected ("never prune") moves.
+  config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -7961,6 +8027,7 @@ void config_destroy(Config *config) {
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
   free(config->peg_only_str);
+  free(config->peg_noprune_str);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
@@ -8024,6 +8091,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
     case ARG_TOKEN_PEG_ONLY:
+    case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
