@@ -311,6 +311,13 @@ typedef struct PegEvalCtx {
   // Endgame max_workers ceiling: > num_threads opens the injection window so
   // the monitor can lend idle cores to this leaf's endgame solve. 0 disables.
   int injection_cap;
+  // Weight-stratified scenario sampling: keep ~1/scenario_stride of the splits
+  // (each survivor reweighted so the aggregate is preserved in expectation).
+  // 1 = full enumeration. Already bag-gated by the caller (1 for bag <= 2).
+  // sampled_weight_seen is the per-candidate running weight tally; valid only
+  // during a single enumeration (so it must not be shared across threads).
+  int scenario_stride;
+  int64_t sampled_weight_seen;
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *worker;
@@ -496,6 +503,22 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
       for (int f = 2; f <= ctx->k_drawn; f++) {
         full_weight *= f;
       }
+      // Weight-stratified sampling: this split covers the weight band
+      // [seen, seen + full_weight); keep it only if a stride boundary falls
+      // inside, and reweight by (boundaries x stride) so the expected aggregate
+      // weight is preserved. Applied once per enumeration (collect or stage 0);
+      // the scenario worker re-evaluates the already-sampled weight directly.
+      if (ctx->scenario_stride > 1) {
+        const int64_t stride = ctx->scenario_stride;
+        const int64_t old_seen = ctx->sampled_weight_seen;
+        ctx->sampled_weight_seen += full_weight;
+        const int64_t samples =
+            (old_seen + full_weight) / stride - old_seen / stride;
+        if (samples == 0) {
+          return; // no stride boundary in this split's weight band — skip it
+        }
+        full_weight = samples * stride;
+      }
       peg_eval_split(ctx, mover_drawn, n_bag_rem, bag_remaining, full_weight);
     }
     return;
@@ -530,6 +553,7 @@ typedef struct PegCandJob {
   const Move *cand;
   int bag_size;
   int fidelity_plies;
+  int scenario_stride;
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *workers; // array; indexed by worker_idx
@@ -547,6 +571,7 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   ctx.cand = job->cand;
   ctx.bag_size = job->bag_size;
   ctx.fidelity_plies = job->fidelity_plies;
+  ctx.scenario_stride = job->scenario_stride;
   ctx.deadline_ns = job->deadline_ns;
   ctx.thread_control = job->thread_control;
   ctx.worker = &job->workers[worker_idx];
@@ -590,7 +615,8 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
                                 const Game *game, int mover_idx,
                                 const uint8_t *unseen, int ld_size, int bag_size,
                                 const Move *const *cands, int n,
-                                int fidelity_plies, int64_t deadline_ns,
+                                int fidelity_plies, int scenario_stride,
+                                int64_t deadline_ns,
                                 ThreadControl *thread_control,
                                 PegRankedCand *ranked) {
   PegCandJob *jobs = malloc_or_die((size_t)n * sizeof(PegCandJob));
@@ -602,6 +628,7 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
     jobs[i].cand = cands[i];
     jobs[i].bag_size = bag_size;
     jobs[i].fidelity_plies = fidelity_plies;
+    jobs[i].scenario_stride = scenario_stride;
     jobs[i].deadline_ns = deadline_ns;
     jobs[i].thread_control = thread_control;
     jobs[i].workers = workers;
@@ -659,7 +686,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
 static void peg_eval_candidates_scenario(
     PegPool *pool, PegWorker *workers, const Game *prepared_base, int mover_idx,
     const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
-    int n, int fidelity_plies, int64_t deadline_ns,
+    int n, int fidelity_plies, int scenario_stride, int64_t deadline_ns,
     ThreadControl *thread_control, PegRankedCand *ranked) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
@@ -683,6 +710,7 @@ static void peg_eval_candidates_scenario(
     ctx.ld_size = ld_size;
     ctx.fidelity_plies = fidelity_plies;
     ctx.injection_cap = injection_cap;
+    ctx.scenario_stride = scenario_stride;
     ctx.deadline_ns = deadline_ns;
     ctx.thread_control = thread_control;
     ctx.workers = workers;
@@ -869,6 +897,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     num_stages = args->max_stage;
   }
 
+  // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
+  // (the bag <= 2 scenario space is too small to sample without destroying
+  // coverage). Default (<= 1) is full enumeration — exact, just slower.
+  // Applied to every stage including the greedy seed (stage 0), whose full
+  // bag-3+ enumeration over thousands of candidates is the dominant cost.
+  const int scenario_stride =
+      (bag_size >= 3 && args->scenario_stride > 1) ? args->scenario_stride : 1;
+
   // Wall-clock deadline (0 = unbounded). Each endgame leaf is also capped by
   // this so a single deep solve cannot overrun the budget.
   const double budget = args->time_budget_seconds;
@@ -953,7 +989,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     }
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
                         ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
-                        deadline_ns, args->thread_control, ranked);
+                        scenario_stride, deadline_ns, args->thread_control,
+                        ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     int survivors = n_cands < counts[0] ? n_cands : counts[0];
     peg_publish(out, ranked, survivors, /*stage=*/0);
@@ -981,8 +1018,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // splitting each into its scenarios keeps all cores busy.
       peg_eval_candidates_scenario(pool, workers, prepared_base, mover_idx,
                                    unseen, ld_size, bag_size, moves, eval_count,
-                                   /*fidelity_plies=*/s + 1, deadline_ns,
-                                   args->thread_control, restaged);
+                                   /*fidelity_plies=*/s + 1, scenario_stride,
+                                   deadline_ns, args->thread_control, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);

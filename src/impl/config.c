@@ -130,6 +130,7 @@ typedef enum {
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_PEG_TOP_K,
+  ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -251,6 +252,8 @@ struct Config {
   // means "use the built-in PEG_STAGE_TOP_K default".
   int peg_stage_top_k[PEG_MAX_STAGES];
   int peg_num_stages;
+  // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver default.
+  int peg_scenario_stride;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
@@ -1473,6 +1476,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Per-stage candidate counts for the PEG halving stages, overriding "
              "the default 32,16,8,4,2. Each count must be >= 2; powers of two "
              "are conventional but not required.";
+      break;
+    case ARG_TOKEN_PEG_STRIDE:
+      usages[0] = "<stride>";
+      examples[0] = "7";
+      examples[1] = "1";
+      text = "PEG scenario-sampling stride for the halving stages (bag >= 3): "
+             "set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
+             "preserve the expected aggregate (faster, approximate). Default "
+             "(<= 1) is full enumeration. Ignored for bag <= 2.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2961,7 +2973,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   // until they are promoted to CLI args.
   peg_args->max_stage = 0;
   peg_args->inner_top_k = 0;
-  peg_args->scenario_stride = 0;
+  peg_args->scenario_stride = config->peg_scenario_stride;
   peg_args->include_per_scenario = false;
   // Per-stage candidate-count override (NULL = built-in default table).
   peg_args->stage_top_k =
@@ -6249,6 +6261,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_PEG_STRIDE, 0, INT_MAX,
+                  &config->peg_scenario_stride, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7682,6 +7700,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
+  arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -7783,6 +7802,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_result.last_completed_stage = -1;
   // 0 stages = use the built-in per-stage candidate counts.
   config->peg_num_stages = 0;
+  // 0 = use the solver's default scenario stride (bag-gated).
+  config->peg_scenario_stride = 0;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -8130,6 +8151,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_string_setting_to_string_builder(
           config, sb, arg_token,
           config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0));
+      break;
+    case ARG_TOKEN_PEG_STRIDE:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_scenario_stride);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
