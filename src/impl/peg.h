@@ -126,6 +126,15 @@ typedef struct PegArgs {
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
 
+  // Optional "only solve" set: a fixed list of root candidate moves to
+  // evaluate instead of generating the full move list. When n_only_moves > 0,
+  // the solver skips move generation and uses exactly these moves as the
+  // stage-0 candidates (still ranked and cascaded normally). Each must be a
+  // legal play for the mover on the root board; the pointed-to Move objects
+  // must outlive the solve. NULL / 0 = generate all moves (default).
+  const Move *const *only_moves;
+  int n_only_moves;
+
   // If true, fill PegResult.per_scenario detail for the final stage's top
   // cand. Default false (saves memory).
   bool include_per_scenario;

@@ -960,23 +960,31 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     injector_running = true;
   }
 
-  // Candidate generation (full list, equity-sorted).
-  MoveList *cand_ml = move_list_create(PEG_CAND_LIST_CAP);
-  const MoveGenArgs gen_args = {
-      .game = game,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .thread_index = 0,
-      .move_list = cand_ml,
-      .tiles_played_bv = NULL,
-      .initial_tiles_bv = 0,
-  };
-  generate_moves(&gen_args);
-  const int n_cands = move_list_get_count(cand_ml);
+  // Candidate set: either the caller-supplied "only solve" list (used as-is),
+  // or the full generated, equity-sorted move list. Stage 0 re-ranks by win%
+  // regardless, so the only-solve input order does not matter.
+  MoveList *cand_ml = NULL;
+  int n_cands;
+  if (args->n_only_moves > 0) {
+    n_cands = args->n_only_moves;
+  } else {
+    cand_ml = move_list_create(PEG_CAND_LIST_CAP);
+    const MoveGenArgs gen_args = {
+        .game = game,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = MOVE_SORT_EQUITY,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .thread_index = 0,
+        .move_list = cand_ml,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves(&gen_args);
+    n_cands = move_list_get_count(cand_ml);
+  }
 
   if (n_cands > 0) {
     PegRankedCand *ranked =
@@ -985,7 +993,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
     // Stage 0: greedy evaluation of every candidate.
     for (int i = 0; i < n_cands; i++) {
-      moves[i] = move_list_get_move(cand_ml, i);
+      moves[i] = args->n_only_moves > 0 ? args->only_moves[i]
+                                        : move_list_get_move(cand_ml, i);
     }
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
                         ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
@@ -1036,7 +1045,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     cpthread_join(injector_thread);
   }
 
-  move_list_destroy(cand_ml);
+  if (cand_ml) {
+    move_list_destroy(cand_ml);
+  }
   for (int w = 0; w < n_scratch; w++) {
     move_list_destroy(workers[w].playout_ml);
     endgame_ctx_destroy(workers[w].eg_ctx);

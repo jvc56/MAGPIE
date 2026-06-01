@@ -131,6 +131,7 @@ typedef enum {
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_STRIDE,
+  ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -254,6 +255,9 @@ struct Config {
   int peg_num_stages;
   // PEG scenario-sampling stride (halving stages, bag >= 3). 0 = solver default.
   int peg_scenario_stride;
+  // PEG "only solve" move list (space-free UCGI, comma-separated), persisted
+  // across commands since pargs reset each parse. NULL = solve all moves.
+  char *peg_only_str;
   uint64_t max_iterations;
   uint64_t min_play_iterations;
   double stop_cond_pct;
@@ -1485,6 +1489,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "set > 1 to evaluate ~1/stride of the scenarios, reweighted to "
              "preserve the expected aggregate (faster, approximate). Default "
              "(<= 1) is full enumeration. Ignored for bag <= 2.";
+      break;
+    case ARG_TOKEN_PEG_ONLY:
+      usages[0] = "<moves>";
+      examples[0] = "11J.MEH,1F.VENeY";
+      examples[1] = "8D.WORD,ex.AEI,pass";
+      text = "Restricts the PEG solver to a fixed set of root candidate moves "
+             "(like Macondo's only_solve) instead of generating all moves. "
+             "Comma-separated UCGI moves with no spaces: coordinate and tiles "
+             "joined by a period (e.g. 11J.MEH), exchanges as ex.<tiles>, and "
+             "pass as pass. Each must be a legal play for the player on turn.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2986,7 +3000,41 @@ void config_peg(Config *config, ErrorStack *error_stack) {
   peg_result_destroy(&config->peg_result);
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
+
+  // Optional "only solve" set: a fixed list of root candidate moves in
+  // space-free UCGI form (coord.tiles, comma-separated). The shared move
+  // validator splits between moves on commas and within a move on whitespace,
+  // so translate the in-move period separators to spaces before parsing.
+  ValidatedMoves *only_vms = NULL;
+  const Move **only_moves = NULL;
+  if (config->peg_only_str) {
+    char *whitespace_form = string_duplicate(config->peg_only_str);
+    for (char *cursor = whitespace_form; *cursor; cursor++) {
+      if (*cursor == '.') {
+        *cursor = ' ';
+      }
+    }
+    const int mover_idx = game_get_player_on_turn_index(config->game);
+    only_vms = validated_moves_create(config->game, mover_idx, whitespace_form,
+                                      true, true, error_stack);
+    free(whitespace_form);
+    if (!error_stack_is_empty(error_stack)) {
+      validated_moves_destroy(only_vms);
+      return;
+    }
+    const int n_only = validated_moves_get_number_of_moves(only_vms);
+    only_moves = malloc_or_die((size_t)n_only * sizeof(Move *));
+    for (int i = 0; i < n_only; i++) {
+      only_moves[i] = validated_moves_get_move(only_vms, i);
+    }
+    peg_args.only_moves = only_moves;
+    peg_args.n_only_moves = n_only;
+  }
+
   peg_solve(&peg_args, &config->peg_result, error_stack);
+
+  free(only_moves);
+  validated_moves_destroy(only_vms);
 }
 
 void impl_peg(Config *config, ErrorStack *error_stack) {
@@ -6267,6 +6315,19 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // PEG "only solve" list: persist across commands (pargs reset each parse).
+  // Update only when -pegonly is given this parse; an empty value or "-"
+  // clears the restriction (solve all moves again).
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PEG_ONLY) > 0) {
+    const char *peg_only = config_get_parg_value(config, ARG_TOKEN_PEG_ONLY, 0);
+    free(config->peg_only_str);
+    config->peg_only_str = NULL;
+    if (peg_only && !is_string_empty_or_whitespace(peg_only) &&
+        !strings_equal(peg_only, "-")) {
+      config->peg_only_str = string_duplicate(peg_only);
+    }
+  }
+
   config_load_int(config, ARG_TOKEN_NUMBER_OF_PLAYS, 1, INT_MAX,
                   &config->num_plays, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7701,6 +7762,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
+  arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -7804,6 +7866,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   // 0 = use the solver's default scenario stride (bag-gated).
   config->peg_scenario_stride = 0;
+  // NULL = solve all moves (no "only solve" restriction).
+  config->peg_only_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
   config->min_play_iterations = 500;
@@ -7896,6 +7960,7 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
+  free(config->peg_only_str);
   autoplay_results_destroy(config->autoplay_results);
   conversion_results_destroy(config->conversion_results);
   game_string_options_destroy(config->game_string_options);
@@ -7958,6 +8023,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
+    case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_RACK:
     case ARG_TOKEN_RANDOM_RACK:
     case ARG_TOKEN_GEN:
