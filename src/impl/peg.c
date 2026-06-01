@@ -1,8 +1,12 @@
 #include "peg.h"
 
+#include <limits.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+#include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
@@ -304,6 +308,9 @@ typedef struct PegEvalCtx {
   // 0 = greedy leaf (Stage 0); > 0 = emptier scenarios solved exactly with an
   // endgame_solve at this ply depth (non-emptier still uses the greedy leaf).
   int fidelity_plies;
+  // Endgame max_workers ceiling: > num_threads opens the injection window so
+  // the monitor can lend idle cores to this leaf's endgame solve. 0 disables.
+  int injection_cap;
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *worker;
@@ -336,6 +343,7 @@ typedef struct PegScenarioJob {
   MachineLetter bag_remaining[PEG_MAX_BAG + 1];
   int64_t weight;
   int fidelity_plies;
+  int injection_cap;
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *workers;
@@ -383,6 +391,9 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.plies = ctx->fidelity_plies;
   ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   ea.num_threads = 1;
+  // > num_threads (1) opens the injection window so the monitor can lend idle
+  // cores to this (potentially long) endgame mid-solve.
+  ea.max_workers = ctx->injection_cap;
   ea.use_heuristics = true;
   ea.num_top_moves = 1;
   ea.thread_index_offset = ctx->worker->thread_index_offset;
@@ -431,6 +442,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     }
     job.weight = weight;
     job.fidelity_plies = ctx->fidelity_plies;
+    job.injection_cap = ctx->injection_cap;
     job.deadline_ns = ctx->deadline_ns;
     job.thread_control = ctx->thread_control;
     job.workers = ctx->workers;
@@ -624,6 +636,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   ctx.ld_size = job->ld_size;
   ctx.k_drawn = job->k_drawn;
   ctx.fidelity_plies = job->fidelity_plies;
+  ctx.injection_cap = job->injection_cap;
   ctx.deadline_ns = job->deadline_ns;
   ctx.thread_control = job->thread_control;
   ctx.worker = &job->workers[worker_idx];
@@ -657,7 +670,9 @@ static void peg_eval_candidates_scenario(
     game_gen_all_cross_sets(templates[i]);
   }
 
-  // Expand all (cand, split) jobs.
+  // Expand all (cand, split) jobs. The injection cap (== pool size) opens each
+  // leaf endgame's window so the monitor can lend idle cores to the long ones.
+  const int injection_cap = pool ? peg_pool_num_workers(pool) : 0;
   PegScenarioJobList list = {0};
   for (int i = 0; i < n; i++) {
     PegEvalCtx ctx;
@@ -667,6 +682,7 @@ static void peg_eval_candidates_scenario(
     ctx.unseen = unseen;
     ctx.ld_size = ld_size;
     ctx.fidelity_plies = fidelity_plies;
+    ctx.injection_cap = injection_cap;
     ctx.deadline_ns = deadline_ns;
     ctx.thread_control = thread_control;
     ctx.workers = workers;
@@ -742,6 +758,60 @@ static void peg_publish(PegResult *out, const PegRankedCand *ranked, int count,
   out->last_completed_stage = stage;
 }
 
+// ----- injection monitor (rung 5) ------------------------------------------
+
+typedef struct PegInjector {
+  PegPool *pool;
+  PegWorker *workers;
+  int n_workers;
+  int core_target; // cap on total live ABDADA workers across active endgames
+  atomic_int stop;
+  atomic_int slot_counter;
+} PegInjector;
+
+// Background monitor: while pool workers are idle, lend a core to the
+// least-parallelized in-flight leaf endgame by injecting an ABDADA helper.
+// Keeps the total live ABDADA worker count (masters + helpers) near the core
+// target, so the few long deep-stage endgames soak up the otherwise-idle cores.
+static void *peg_injector_main(void *arg) {
+  // Only help endgames that have been running at least this long: the many
+  // sub-millisecond leaf solves close before this, so we never pay ABDADA
+  // spawn/coordination overhead on them — only the few long "monster" endgames
+  // (the deep-stage realized lines) get helpers.
+  const int64_t min_age_ns = 30 * 1000 * 1000; // 30 ms
+  PegInjector *inj = (PegInjector *)arg;
+  while (!atomic_load(&inj->stop)) {
+    if (peg_pool_idle_workers(inj->pool) > 0) {
+      const int64_t now = ctimer_monotonic_ns();
+      int total_live = 0;
+      EndgameCtx *least = NULL;
+      int least_live = INT_MAX;
+      for (int w = 0; w < inj->n_workers; w++) {
+        EndgameCtx *ctx = inj->workers[w].eg_ctx;
+        if (ctx == NULL || !endgame_injecting(ctx)) {
+          continue;
+        }
+        const int live = endgame_live_workers(ctx);
+        total_live += live;
+        if (live < least_live &&
+            now - endgame_window_open_ns(ctx) >= min_age_ns) {
+          least_live = live;
+          least = ctx;
+        }
+      }
+      if (least != NULL && total_live < inj->core_target) {
+        // Borrow a scattered MoveGen slot (gen is thread-local, so the value is
+        // bookkeeping only); keep it clear of the pool workers' low slots.
+        const int slot = 256 + (atomic_fetch_add(&inj->slot_counter, 1) % 240);
+        endgame_add_worker(least, slot);
+      }
+    }
+    const struct timespec nap = {0, 2 * 1000 * 1000}; // 2 ms
+    nanosleep(&nap, NULL);
+  }
+  return NULL;
+}
+
 // ----- public entry --------------------------------------------------------
 
 void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
@@ -809,6 +879,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // pool drain the queue (helper index == num_workers).
   const int n_threads = args->num_threads > 1 ? args->num_threads : 1;
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 0) : NULL;
+  if (pool) {
+    // Leaf endgames at the deep stages legitimately run for minutes; the
+    // no-progress watchdog would false-positive on them (work proceeds, but a
+    // single job doesn't complete within the window). Disable it for peg.
+    peg_pool_set_stuck_timeout_seconds(pool, 0);
+  }
   const int n_scratch = pool ? n_threads + 1 : 1;
   // Per-worker endgame TT. Shallow PEG endgames need little, and the total
   // across workers stays well under the 50%-RAM ceiling.
@@ -819,14 +895,33 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int w = 0; w < n_scratch; w++) {
     workers[w].playout_ml = move_list_create(1);
-    workers[w].eg_ctx = NULL;
     workers[w].eg_results = endgame_results_create();
+    // Pre-created so the injection monitor reads a stable, non-NULL ctx pointer
+    // (no race with lazy creation inside endgame_solve_inline).
+    workers[w].eg_ctx = endgame_ctx_create();
     workers[w].template_game = NULL;
     workers[w].scratch_game = NULL;
     workers[w].eg_tt = transposition_table_create(tt_fraction);
     // Distinct MoveGen cleanup slots per worker; the +2 clears the endgame
     // display/solver reserved slots.
     workers[w].thread_index_offset = w * 4 + 2;
+  }
+
+  // Injection monitor: lends idle cores to in-flight leaf endgames (rung 5).
+  // Only meaningful with a pool; the deep stages have few candidates, so their
+  // long endgames would otherwise leave most cores idle.
+  PegInjector injector;
+  cpthread_t injector_thread;
+  bool injector_running = false;
+  if (pool) {
+    injector.pool = pool;
+    injector.workers = workers;
+    injector.n_workers = n_scratch;
+    injector.core_target = n_threads;
+    atomic_init(&injector.stop, 0);
+    atomic_init(&injector.slot_counter, 0);
+    cpthread_create(&injector_thread, peg_injector_main, &injector);
+    injector_running = true;
   }
 
   // Candidate generation (full list, equity-sorted).
@@ -896,6 +991,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
     free(moves);
     free(ranked);
+  }
+
+  // Stop the injection monitor before tearing down the workers it observes.
+  if (injector_running) {
+    atomic_store(&injector.stop, 1);
+    cpthread_join(injector_thread);
   }
 
   move_list_destroy(cand_ml);

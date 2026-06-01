@@ -113,6 +113,10 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,
                            int max_depth, int thread_index,
                            endgame_movegen_caller_t caller);
+// Allocate an empty endgame context (reused across solves). Lets a caller
+// pre-create per-worker contexts so their pointers are stable before any
+// concurrent observer (e.g. an injection monitor) reads them.
+EndgameCtx *endgame_ctx_create(void);
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
@@ -128,6 +132,16 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
 // reached. Only valid against a ctx whose current solve was launched with
 // max_workers > num_threads.
 bool endgame_add_worker(EndgameCtx *ctx, int movegen_slot);
+
+// Number of worker threads currently live in this solve (master + injected
+// helpers). Lets an injection monitor cap total threads near the core count.
+int endgame_live_workers(const EndgameCtx *ctx);
+// True while the solve is accepting injected workers (window open).
+bool endgame_injecting(const EndgameCtx *ctx);
+// Monotonic-ns timestamp when the injection window last opened. Lets a monitor
+// inject only into endgames that have run long enough to be worth helping
+// (skipping the many sub-millisecond leaf solves).
+int64_t endgame_window_open_ns(const EndgameCtx *ctx);
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads
 // when each thread uses a distinct thread_index_offset in EndgameArgs.

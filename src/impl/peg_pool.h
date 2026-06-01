@@ -48,6 +48,11 @@ int peg_pool_queue_count(PegPool *pool);
 // scheduling heuristic.
 int peg_pool_idle_workers(PegPool *pool);
 
+// Override the no-progress watchdog budget (seconds); 0 disables it. Use when
+// the pool runs legitimately long tasks (e.g. deep endgame solves) that would
+// otherwise trip the watchdog despite making progress.
+void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds);
+
 // Submit a batch of `n` items as `(fn, args[i])` pairs and block until all
 // complete. While blocked, the calling thread helps drain queue items so
 // nested submissions don't deadlock. `helper_worker_idx` is the index used

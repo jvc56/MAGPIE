@@ -183,6 +183,7 @@ struct EndgameCtx {
   uint64_t worker_base_seed; // ABDADA jitter seed, reused for late workers
   atomic_int live_workers;   // worker threads spawned this solve (initial+late)
   atomic_int adding_closed;  // 1 = injection window shut (between/ending solves)
+  _Atomic int64_t window_open_ns; // monotonic ns when the window last opened
   cpthread_mutex_t add_mutex; // serializes add vs the close+snapshot in solve
 };
 
@@ -717,9 +718,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   }
 }
 
-static EndgameCtx *endgame_ctx_create(void) {
+EndgameCtx *endgame_ctx_create(void) {
   EndgameCtx *solver = calloc_or_die(1, sizeof(EndgameCtx));
   cpthread_mutex_init(&solver->add_mutex);
+  // Closed until a solve opens the window; otherwise a never-solved ctx (calloc
+  // zeroes adding_closed) would look injectable to an external monitor.
+  atomic_store(&solver->adding_closed, 1);
   return solver;
 }
 
@@ -2810,6 +2814,7 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // thread for ordinal 0 — only injected helpers (ordinals > 0) are joined.
   if (solver->max_workers > solver->threads) {
     cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->window_open_ns, ctimer_monotonic_ns());
     atomic_store(&solver->adding_closed, 0);
     cpthread_mutex_unlock(&solver->add_mutex);
   }
@@ -2864,6 +2869,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // state is fully published. endgame_add_worker may now grow the worker count.
   if (solver->max_workers > solver->threads) {
     cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->window_open_ns, ctimer_monotonic_ns());
     atomic_store(&solver->adding_closed, 0);
     cpthread_mutex_unlock(&solver->add_mutex);
   }
@@ -2940,6 +2946,18 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       results, NULL, endgame_results_get_solving_player(results),
       endgame_results_get_max_depth(results));
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+}
+
+int endgame_live_workers(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->live_workers);
+}
+
+bool endgame_injecting(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->adding_closed) == 0;
+}
+
+int64_t endgame_window_open_ns(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->window_open_ns);
 }
 
 bool endgame_add_worker(EndgameCtx *solver, int movegen_slot) {

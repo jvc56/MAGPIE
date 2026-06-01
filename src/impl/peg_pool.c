@@ -68,6 +68,9 @@ struct PegPool {
   // caller decide when to hand spare cores to other work (e.g. inject an
   // ABDADA worker into a long-running endgame solve).
   atomic_int idle_workers;
+  // No-progress watchdog budget (seconds); 0 disables. Seeded from
+  // PEG_POOL_STUCK_TIMEOUT_S at create; override via the setter.
+  int stuck_timeout_s;
 };
 
 static void pp_batch_init(PegPoolBatch *batch, int n) {
@@ -225,8 +228,10 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
   // the calling thread still helps drain the queue but never aborts.
   const int n_total = n;
   const int debug_on = getenv("PEG_POOL_DEBUG") != NULL;
-  const char *to_env = getenv("PEG_POOL_STUCK_TIMEOUT_S");
-  int stuck_timeout_s = to_env ? atoi(to_env) : 60;
+  // Per-pool budget (seconds); the env still seeds the default at create, but a
+  // caller can disable the watchdog for legitimately long work (e.g. deep PEG
+  // endgames) via peg_pool_set_stuck_timeout_seconds(pool, 0).
+  int stuck_timeout_s = pool->stuck_timeout_s;
   const bool watchdog_on = stuck_timeout_s > 0;
   if (watchdog_on && stuck_timeout_s < 6) {
     stuck_timeout_s = 6;
@@ -299,6 +304,8 @@ PegPool *peg_pool_create(int num_workers, int thread_index_offset) {
   pool->q_count = 0;
   pool->shutdown = false;
   atomic_init(&pool->idle_workers, 0);
+  const char *to_env = getenv("PEG_POOL_STUCK_TIMEOUT_S");
+  pool->stuck_timeout_s = to_env ? atoi(to_env) : 60;
   cpthread_mutex_init(&pool->q_mutex);
   cpthread_cond_init(&pool->q_cv_nonempty);
   pool->threads = malloc_or_die((size_t)num_workers * sizeof(cpthread_t));
@@ -358,6 +365,12 @@ int peg_pool_idle_workers(PegPool *pool) {
     return 0;
   }
   return atomic_load(&pool->idle_workers);
+}
+
+void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds) {
+  if (pool) {
+    pool->stuck_timeout_s = seconds;
+  }
 }
 
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
