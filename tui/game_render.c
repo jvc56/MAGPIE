@@ -16,6 +16,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
+#include "frame_dump.h"
 #include "game_state.h"
 #include "glyph_cache.h"
 #include "mach_compat.h"
@@ -3093,6 +3094,7 @@ static void render_board_pixel(struct ncplane *plane, const Theme *theme,
       struct timespec blit_start;
       clock_gettime(CLOCK_MONOTONIC, &blit_start);
       ncblit_rgba(buf, tile_w * 4, &vopts);
+      tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
       struct timespec blit_end;
       clock_gettime(CLOCK_MONOTONIC, &blit_end);
       total_blit_us += (long)(blit_end.tv_sec - blit_start.tv_sec) * 1000000L +
@@ -3272,6 +3274,7 @@ static void render_board_grid_overlay(struct ncplane *parent,
   vopts.leny = (unsigned)buf_h;
   vopts.lenx = (unsigned)buf_w;
   ncblit_rgba(buf, buf_w * 4, &vopts);
+  tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
   free(buf);
 
   board_pixel_cache.valid = true;
@@ -3380,6 +3383,7 @@ static void render_board_labels_pixel(struct ncplane *plane, const Theme *theme,
     vopts.leny = (unsigned)buf_h;
     vopts.lenx = (unsigned)buf_w;
     ncblit_rgba(buf, buf_w * 4, &vopts);
+    tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
     free(buf);
   }
 
@@ -3440,6 +3444,7 @@ static void render_board_labels_pixel(struct ncplane *plane, const Theme *theme,
     vopts.leny = (unsigned)buf_h;
     vopts.lenx = (unsigned)buf_w;
     ncblit_rgba(buf, buf_w * 4, &vopts);
+    tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
     free(buf);
   }
 
@@ -3870,6 +3875,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     vopts.leny = (unsigned)tile_h;
     vopts.lenx = (unsigned)tile_w;
     ncblit_rgba(buf, tile_w * 4, &vopts);
+    tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
     free(buf);
     rc->letter = (int)ml;
     rc->player_idx = player_idx;
@@ -8290,6 +8296,8 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
                 vopts.leny = (unsigned)tile_h;
                 vopts.lenx = (unsigned)tile_w;
                 ncblit_rgba(buf, tile_w * 4, &vopts);
+                tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx,
+                                       (int)vopts.leny);
                 free(buf);
                 edit_arrow_cache.vertical = vertical;
                 edit_arrow_cache.player_idx = player_idx;

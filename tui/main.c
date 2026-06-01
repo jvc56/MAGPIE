@@ -13,6 +13,7 @@
 #include "../src/util/string_util.h"
 #include "bot_worker.h"
 #include "config.h"
+#include "frame_dump.h"
 #include "game_render.h"
 #include "game_state.h"
 #include "lexicon_picker.h"
@@ -136,6 +137,17 @@ static void crash_handler(int signo) {
   raise(signo);
 }
 
+// SIGUSR1 arms a one-shot off-terminal PNG screenshot. The main loop
+// services the request just after notcurses_render(). The handler only
+// stores to an atomic flag, so it is async-signal-safe. This is the
+// trigger for automated UI testing / remote inspection: drive input via
+// a PTY harness, then `kill -USR1 <pid>` to capture what the renderer
+// produced (the board + rack pixel planes the terminal never hands back).
+static void dump_handler(int signo) {
+  (void)signo;
+  tui_frame_dump_request();
+}
+
 static void install_crash_handlers(void) {
   struct sigaction sa = {0};
   sa.sa_handler = crash_handler;
@@ -146,6 +158,14 @@ static void install_crash_handlers(void) {
   sigaction(SIGBUS, &sa, NULL);
   sigaction(SIGFPE, &sa, NULL);
   sigaction(SIGILL, &sa, NULL);
+
+  // SIGUSR1: capture a PNG screenshot. SA_RESTART so it doesn't EINTR
+  // the input poll, and not SA_RESETHAND so repeated dumps work.
+  struct sigaction dump_sa = {0};
+  dump_sa.sa_handler = dump_handler;
+  dump_sa.sa_flags = SA_RESTART;
+  sigemptyset(&dump_sa.sa_mask);
+  sigaction(SIGUSR1, &dump_sa, NULL);
 
   // Touch the log file so we can verify the handler at least got
   // installed — if /tmp/magpie_crash.log doesn't exist post-crash,
@@ -1663,6 +1683,14 @@ int main(int argc, char *argv[]) {
                                        st->sprixelelisions);
         free(st);
       }
+    }
+
+    // Service a pending SIGUSR1 screenshot request. Done after the frame
+    // timing/stats so the (heavy) composite + PNG encode doesn't inflate
+    // the measured frame time. Composites the captured pixel planes off-
+    // terminal; see frame_dump.c.
+    if (tui_frame_dump_pending()) {
+      tui_frame_dump_write(nc, std_plane, theme, NULL);
     }
 
     // Input is polled non-blocking. Each frame, drain ALL pending

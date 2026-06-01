@@ -175,7 +175,7 @@ else ifeq ($(strip $(FREETYPE_CFLAGS)),)
 	@echo "magpie_tui: freetype not found. Install via 'brew install freetype' (macOS) or 'apt install libfreetype-dev' (Debian/Ubuntu)."
 	@exit 1
 else
-	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -o $(BIN_DIR)/$@
+	$(CC) $(TUI_LDFLAGS) $^ $(LDLIBS) $(NOTCURSES_LDLIBS) $(FREETYPE_LDLIBS) -lz -o $(BIN_DIR)/$@
 endif
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
