@@ -457,15 +457,25 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     peg_scenario_joblist_push(ctx->out_jobs, &job);
     return;
   }
-  // Sort bag_remaining ascending so next_perm enumerates distinct orderings.
+  // Permute a LOCAL copy: peg_next_perm reorders the whole array in place, and
+  // the caller's bag_remaining buffer is shared across the peg_enum_splits
+  // recursion (ancestor letter-branches own its earlier positions). Mutating it
+  // here would scramble those positions for subsequent sibling branches and
+  // corrupt their multisets. Copy first so the caller's buffer is untouched.
+  MachineLetter perm[PEG_MAX_BAG + 1];
+  for (int i = 0; i < n_bag_remaining; i++) {
+    perm[i] = bag_remaining[i];
+  }
+  MachineLetter *bag_perm = perm;
+  // Sort bag_perm ascending so next_perm enumerates distinct orderings.
   for (int i = 1; i < n_bag_remaining; i++) {
-    MachineLetter key = bag_remaining[i];
+    MachineLetter key = bag_perm[i];
     int j = i - 1;
-    while (j >= 0 && bag_remaining[j] > key) {
-      bag_remaining[j + 1] = bag_remaining[j];
+    while (j >= 0 && bag_perm[j] > key) {
+      bag_perm[j + 1] = bag_perm[j];
       j--;
     }
-    bag_remaining[j + 1] = key;
+    bag_perm[j + 1] = key;
   }
   double ordering_win = 0.0;
   double ordering_spread = 0.0;
@@ -473,12 +483,12 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   do {
     Game *game = peg_make_post_cand_game(
         ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
-        ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_remaining);
+        ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_perm);
     const int32_t value = peg_eval_leaf(ctx, game);
     ordering_win += (value > 0) ? 1.0 : ((value == 0) ? 0.5 : 0.0);
     ordering_spread += (double)value;
     n_orderings++;
-  } while (peg_next_perm(bag_remaining, n_bag_remaining));
+  } while (peg_next_perm(bag_perm, n_bag_remaining));
 
   // Each ordering is equally likely within this multiset, so the multiset's
   // weight is split evenly across its orderings.
@@ -562,6 +572,19 @@ typedef struct PegCandJob {
 
 static void peg_cand_worker_fn(void *arg, int worker_idx) {
   PegCandJob *job = (PegCandJob *)arg;
+  // Budget gate: once the wall-clock deadline has passed, skip this candidate's
+  // (potentially large) scenario enumeration and emit a sentinel that sorts
+  // last (win_pct < 0), so a heavy-rack stage 0 over thousands of candidates
+  // cannot blow past the time budget. Candidates dispatched before the deadline
+  // still evaluate and rank normally; the partial top-K is what gets published.
+  if (job->deadline_ns != 0 && ctimer_monotonic_ns() >= job->deadline_ns) {
+    job->out->move = *job->cand;
+    job->out->win_pct = -1.0;
+    job->out->mean_spread = 0.0;
+    job->out->weight_sum = 0;
+    job->out->n_scenarios = 0;
+    return;
+  }
   PegEvalCtx ctx;
   memset(&ctx, 0, sizeof(ctx));
   ctx.base_game = job->base_game;
@@ -1052,11 +1075,20 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         scenario_stride, deadline_ns, args->thread_control,
                         ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
-    const int keep0 = n_cands < counts[0] ? n_cands : counts[0];
+    // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
+    // sort to the bottom, so the real candidates occupy [0, n_real).
+    int n_real = 0;
+    while (n_real < n_cands && ranked[n_real].win_pct >= 0.0) {
+      n_real++;
+    }
+    if (n_real == 0) {
+      n_real = n_cands; // nothing finished in budget; keep what we have
+    }
+    const int keep0 = n_real < counts[0] ? n_real : counts[0];
     // Survivors carried forward = top-K plus any protected straggler. Tracked
     // as a shrinking live_count so protected moves never leave a stale copy in
     // the unscanned tail.
-    int live_count = peg_select_survivors(ranked, n_cands, keep0, mover_rack,
+    int live_count = peg_select_survivors(ranked, n_real, keep0, mover_rack,
                                           protect_keys, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
 
