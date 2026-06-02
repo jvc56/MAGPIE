@@ -34,6 +34,14 @@ ROWS="${MAGPIE_TUI_ROWS:-64}"
 # Interrogation replies notcurses waits for: cursor-position report,
 # secondary DA, primary DA (the terminator that ends interrogation).
 DA_B64="$(printf '\033[1;1R\033[>0;276;0c\033[?62;1;6c' | base64)"
+# Timing knobs (override for faster suites; defaults are robust). The DA
+# reply is injected DA_TRIES times spaced DA_DELAY apart, then we wait SETTLE
+# for the first render. KEY_DELAY/KEY_SETTLE pace input.
+DA_TRIES="${MAGPIE_TUI_DA_TRIES:-4}"
+DA_DELAY="${MAGPIE_TUI_DA_DELAY:-0.4}"
+SETTLE="${MAGPIE_TUI_SETTLE:-0.8}"
+KEY_DELAY="${MAGPIE_TUI_KEY_DELAY:-0.15}"
+KEY_SETTLE="${MAGPIE_TUI_KEY_SETTLE:-0.3}"
 
 die() {
   echo "headless.sh: $*" >&2
@@ -58,11 +66,12 @@ cmd_launch() {
   [ -S "$SOCK" ] || die "termwright daemon socket not created"
   # Feed notcurses its interrogation replies a few times (timing-robust;
   # bytes also wait in the PTY buffer until the input thread reads them).
-  for _ in 1 2 3 4; do
-    sleep 0.4
+  local n
+  for n in $(seq 1 "$DA_TRIES"); do
+    sleep "$DA_DELAY"
     _exec raw "{\"bytes_base64\":\"$DA_B64\"}" >/dev/null 2>&1 || true
   done
-  sleep 0.8
+  sleep "$SETTLE"
   cmd_capture
 }
 
@@ -81,15 +90,15 @@ cmd_key() {
   local k
   for k in "$@"; do
     _exec press "{\"key\":\"$k\"}" >/dev/null
-    sleep 0.15
+    sleep "$KEY_DELAY"
   done
-  sleep 0.3
+  sleep "$KEY_SETTLE"
 }
 
 cmd_type() {
   [ "$#" -ge 1 ] || die "usage: type <text>"
   _exec type "{\"text\":\"$*\"}" >/dev/null
-  sleep 0.3
+  sleep "$KEY_SETTLE"
 }
 
 cmd_stop() {
