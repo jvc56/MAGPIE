@@ -8,6 +8,7 @@
 #include "bag_test.h"
 #include "bai_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -148,6 +149,8 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"pegbench3", test_benchmark_peg_3},
+    {"pegbench4", test_benchmark_peg_4},
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
