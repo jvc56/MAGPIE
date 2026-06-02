@@ -97,8 +97,15 @@ typedef struct {
   bool load_rit_set;
 } TuiConfig;
 
-// Resolves config path: $XDG_CONFIG_HOME/magpie/tui.toml or
-// $HOME/.config/magpie/tui.toml. Returns false if neither is usable.
+// Override the config file path. When set to a non-NULL, non-empty path,
+// tui_config_resolve_path returns it verbatim instead of deriving a path
+// from $XDG_CONFIG_HOME/$HOME. Used by the --config CLI flag so tests can
+// point at an isolated config file. Pass NULL to clear the override.
+void tui_config_set_path_override(const char *path);
+
+// Resolves config path: the --config override if set; otherwise
+// $XDG_CONFIG_HOME/magpie/tui.toml or $HOME/.config/magpie/tui.toml.
+// Returns false if none is usable.
 bool tui_config_resolve_path(char *buf, size_t buf_size);
 
 // Loads config from disk into *config (zeroed first). Returns true if the

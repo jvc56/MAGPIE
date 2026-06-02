@@ -43,9 +43,31 @@ static bool ensure_parent_dirs(const char *file_path) {
   return true;
 }
 
+static char g_path_override[TUI_CONFIG_PATH_MAX];
+static bool g_path_override_set;
+
+void tui_config_set_path_override(const char *path) {
+  if (path == NULL || path[0] == '\0') {
+    g_path_override_set = false;
+    g_path_override[0] = '\0';
+    return;
+  }
+  const size_t len = strlen(path);
+  if (len + 1 > sizeof(g_path_override)) {
+    g_path_override_set = false;
+    return;
+  }
+  memcpy(g_path_override, path, len + 1);
+  g_path_override_set = true;
+}
+
 bool tui_config_resolve_path(char *buf, size_t buf_size) {
   if (buf == NULL || buf_size == 0) {
     return false;
+  }
+  if (g_path_override_set) {
+    const int written = snprintf(buf, buf_size, "%s", g_path_override);
+    return written > 0 && (size_t)written < buf_size;
   }
   const char *xdg = getenv("XDG_CONFIG_HOME");
   if (xdg != NULL && xdg[0] != '\0') {

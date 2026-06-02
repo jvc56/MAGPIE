@@ -179,6 +179,7 @@ static void install_crash_handlers(void) {
 
 typedef struct {
   const char *theme_arg;
+  const char *config_path;
   bool reconfigure;
   bool no_config;
   bool watch;
@@ -187,22 +188,25 @@ typedef struct {
 } CliArgs;
 
 static void print_usage(void) {
-  fputs("Usage: magpie_tui [options]\n"
-        "\n"
-        "Options:\n"
-        "  --theme <name>   one-shot theme override; one of:\n"
-        "                     dark, light, dim, high_contrast\n"
-        "  --reconfigure    re-run all setup pickers (theme, lexicon, time)\n"
-        "  --no-config      skip reading and writing the saved settings\n"
-        "  --watch          skip the startup menu and start watching the bots\n"
-        "                   play immediately with saved (or default) settings\n"
-        "  --help, -h       show this help and exit\n"
-        "\n"
-        "On first run interactive pickers ask for theme, lexicon, and time\n"
-        "control. Settings are saved to $XDG_CONFIG_HOME/magpie/tui.toml\n"
-        "(default ~/.config/magpie/tui.toml). Subsequent runs reuse those\n"
-        "settings unless --reconfigure is passed.\n",
-        stderr);
+  fputs(
+      "Usage: magpie_tui [options]\n"
+      "\n"
+      "Options:\n"
+      "  --theme <name>   one-shot theme override; one of:\n"
+      "                     dark, light, dim, high_contrast\n"
+      "  --reconfigure    re-run all setup pickers (theme, lexicon, time)\n"
+      "  --no-config      skip reading and writing the saved settings\n"
+      "  --config <path>  read and write settings at <path> instead of the\n"
+      "                   default location (for tests / alternate profiles)\n"
+      "  --watch          skip the startup menu and start watching the bots\n"
+      "                   play immediately with saved (or default) settings\n"
+      "  --help, -h       show this help and exit\n"
+      "\n"
+      "On first run interactive pickers ask for theme, lexicon, and time\n"
+      "control. Settings are saved to $XDG_CONFIG_HOME/magpie/tui.toml\n"
+      "(default ~/.config/magpie/tui.toml), or to --config <path> if given.\n"
+      "Subsequent runs reuse those settings unless --reconfigure is passed.\n",
+      stderr);
 }
 
 static CliArgs parse_args(int argc, char *argv[]) {
@@ -239,6 +243,13 @@ static CliArgs parse_args(int argc, char *argv[]) {
         return args;
       }
       args.theme_arg = theme_id;
+    } else if (strcmp(arg, "--config") == 0) {
+      if (idx + 1 >= argc) {
+        fputs("magpie_tui: --config requires a path argument\n", stderr);
+        args.error = true;
+        return args;
+      }
+      args.config_path = argv[++idx];
     } else {
       fprintf(stderr, "magpie_tui: unknown argument '%s'\n", arg);
       args.error = true;
@@ -532,6 +543,10 @@ int main(int argc, char *argv[]) {
     print_usage();
     return 0;
   }
+
+  // Redirect config load/save to the --config path (if given) before any
+  // config access below. No-op when NULL.
+  tui_config_set_path_override(args.config_path);
 
   setlocale(LC_ALL, "");
 
