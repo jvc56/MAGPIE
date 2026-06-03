@@ -69,6 +69,108 @@ typedef struct PegWorker {
   int thread_index_offset;
 } PegWorker;
 
+// ----- live poll -----------------------------------------------------------
+// Mutex-guarded leaderboard the solver refreshes while running; a separate
+// thread reads consistent snapshots via peg_poll_read. Caller-owned (see
+// peg.h). All update helpers are no-ops when poll == NULL.
+struct PegPoll {
+  cpthread_mutex_t mutex;
+  PegPollSnapshot s;
+};
+
+PegPoll *peg_poll_create(void) {
+  PegPoll *poll = malloc_or_die(sizeof(*poll));
+  cpthread_mutex_init(&poll->mutex);
+  memset(&poll->s, 0, sizeof(poll->s));
+  poll->s.stage = -1;
+  return poll;
+}
+
+void peg_poll_destroy(PegPoll *poll) {
+  // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
+  free(poll);
+}
+
+void peg_poll_read(PegPoll *poll, PegPollSnapshot *out) {
+  cpthread_mutex_lock(&poll->mutex);
+  *out = poll->s;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+static inline double peg_poll_key(const PegRankedCand *cand) {
+  return cand->win_pct + 1e-4 * cand->mean_spread;
+}
+
+// Stage-boundary metadata, set before a stage's evaluation begins.
+static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
+                                 int field_size) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  poll->s.stage = stage;
+  poll->s.fidelity_plies = fidelity_plies;
+  poll->s.field_size = field_size;
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Insert one finished candidate into the descending top-K (stage-0 liveness).
+// Called from worker threads, so it locks.
+static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  PegPollSnapshot *snap = &poll->s;
+  const double key = peg_poll_key(cand);
+  int i;
+  if (snap->n_entries < PEG_POLL_MAX_ENTRIES) {
+    i = snap->n_entries++;
+  } else if (key > peg_poll_key(&snap->entries[PEG_POLL_MAX_ENTRIES - 1])) {
+    i = PEG_POLL_MAX_ENTRIES - 1;
+  } else {
+    cpthread_mutex_unlock(&poll->mutex);
+    return; // full and no better than the worst kept entry
+  }
+  while (i > 0 && peg_poll_key(&snap->entries[i - 1]) < key) {
+    snap->entries[i] = snap->entries[i - 1];
+    i--;
+  }
+  snap->entries[i] = *cand;
+  snap->version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Replace the leaderboard with an authoritative ranking at a stage boundary.
+static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
+                             int stage, int fidelity_plies, int field_size) {
+  if (poll == NULL) {
+    return;
+  }
+  const int k = n < PEG_POLL_MAX_ENTRIES ? n : PEG_POLL_MAX_ENTRIES;
+  cpthread_mutex_lock(&poll->mutex);
+  for (int i = 0; i < k; i++) {
+    poll->s.entries[i] = ranked[i];
+  }
+  poll->s.n_entries = k;
+  poll->s.stage = stage;
+  poll->s.fidelity_plies = fidelity_plies;
+  poll->s.field_size = field_size;
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+static void peg_poll_finish(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  poll->s.done = true;
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
 // ----- combinatorics -------------------------------------------------------
 
 static int64_t peg_binomial(int n, int k) {
@@ -568,6 +670,7 @@ typedef struct PegCandJob {
   ThreadControl *thread_control;
   PegWorker *workers; // array; indexed by worker_idx
   PegRankedCand *out;
+  PegPoll *poll; // optional live leaderboard; NULL = no polling
 } PegCandJob;
 
 static void peg_cand_worker_fn(void *arg, int worker_idx) {
@@ -616,6 +719,9 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
       ctx.total_weight > 0 ? ctx.spread_weight / ctx.total_weight : 0.0;
   job->out->weight_sum = ctx.weight_sum;
   job->out->n_scenarios = ctx.n_scenarios;
+  // Live poll: surface this finished candidate into the leaderboard so a
+  // poller sees stage 0 fill in as candidates resolve.
+  peg_poll_upsert(job->poll, job->out);
 }
 
 static int peg_rank_cmp(const void *lhs, const void *rhs) {
@@ -678,7 +784,7 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
                                 const Move *const *cands, int n,
                                 int fidelity_plies, int scenario_stride,
                                 int64_t deadline_ns,
-                                ThreadControl *thread_control,
+                                ThreadControl *thread_control, PegPoll *poll,
                                 PegRankedCand *ranked) {
   PegCandJob *jobs = malloc_or_die((size_t)n * sizeof(PegCandJob));
   for (int i = 0; i < n; i++) {
@@ -694,6 +800,7 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
     jobs[i].thread_control = thread_control;
     jobs[i].workers = workers;
     jobs[i].out = &ranked[i];
+    jobs[i].poll = poll;
   }
   if (pool) {
     void **ptrs = malloc_or_die((size_t)n * sizeof(void *));
@@ -1070,10 +1177,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       moves[i] = args->n_only_moves > 0 ? args->only_moves[i]
                                         : move_list_get_move(cand_ml, i);
     }
+    peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
+                         n_cands);
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
                         ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
                         scenario_stride, deadline_ns, args->thread_control,
-                        ranked);
+                        args->poll, ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).
@@ -1091,6 +1200,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     int live_count = peg_select_survivors(ranked, n_real, keep0, mover_rack,
                                           protect_keys, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
+    peg_poll_replace(args->poll, ranked, live_count, /*stage=*/0,
+                     /*fidelity_plies=*/0, live_count);
 
     // Halving stages. Stage s re-evaluates the surviving top counts[s-1] (plus
     // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
@@ -1106,6 +1217,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
+      peg_poll_begin_stage(args->poll, s, /*fidelity_plies=*/s + 1, eval_count);
       for (int i = 0; i < eval_count; i++) {
         moves[i] = &ranked[i].move;
       }
@@ -1125,11 +1237,16 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       free(restaged);
       live_count = eval_count;
       peg_publish(out, ranked, eval_count, s);
+      peg_poll_replace(args->poll, ranked, eval_count, s,
+                       /*fidelity_plies=*/s + 1, eval_count);
     }
 
     free(moves);
     free(ranked);
   }
+
+  // Mark the live poll done so a poller's read loop can terminate.
+  peg_poll_finish(args->poll);
 
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {

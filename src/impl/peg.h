@@ -84,6 +84,9 @@ typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
 
 // ----- Solver inputs ----------------------------------------------------
 
+// Thread-safe, caller-owned live view of the in-progress ranking (see below).
+typedef struct PegPoll PegPoll;
+
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
   // PEG_MAX_BAG]. Caller retains ownership.
@@ -153,6 +156,12 @@ typedef struct PegArgs {
   PegOnCandDone on_cand_done;
   PegOnScenarioDone on_scenario_done;
   void *user_data;
+
+  // Optional live poll. NULL = no polling (zero overhead). When set, peg_solve
+  // updates it as candidates complete (stage 0) and at each stage boundary, so
+  // a separate thread (e.g. a TUI render loop) can read the current ranking
+  // concurrently via peg_poll_read. The caller owns the PegPoll.
+  PegPoll *poll;
 } PegArgs;
 
 // ----- Solver outputs ---------------------------------------------------
@@ -198,6 +207,38 @@ typedef struct PegPerScenario {
   int64_t weight;
   int32_t mover_total;
 } PegPerScenario;
+
+// ----- Live polling (optional) ------------------------------------------
+//
+// Sim-style pollable view: a mutex-guarded leaderboard the solver refreshes
+// while it runs, so a render thread can poll the current ranking at any rate
+// (e.g. 60fps) without the engine pushing callbacks. The caller creates a
+// PegPoll, passes it in PegArgs.poll, polls it via peg_poll_read on another
+// thread, and destroys it after peg_solve returns. peg_solve never owns it.
+//
+// Update cadence: the top-K leaderboard is upserted per candidate during the
+// stage-0 greedy seed (so it animates as thousands of candidates resolve), and
+// replaced authoritatively at every stage boundary along with the stage /
+// fidelity / field-size metadata. The deep halving stages refresh per stage
+// (a future refinement could poll per-scenario running win% for finer liveness
+// there). `done` flips true when the solve finishes.
+
+enum { PEG_POLL_MAX_ENTRIES = 64 };
+
+typedef struct PegPollSnapshot {
+  int stage;          // current stage (0 = greedy seed); -1 before stage 0
+  int fidelity_plies; // current stage's fidelity
+  int field_size;     // candidates being evaluated in the current stage
+  bool done;          // solve finished
+  uint64_t version;   // bumped on every update (skip redundant redraws)
+  int n_entries;      // populated leaderboard rows below
+  PegRankedCand entries[PEG_POLL_MAX_ENTRIES]; // current top-K, sorted desc
+} PegPollSnapshot;
+
+PegPoll *peg_poll_create(void);
+void peg_poll_destroy(PegPoll *poll);
+// Copy a consistent snapshot of the current live view into *out (under lock).
+void peg_poll_read(PegPoll *poll, PegPollSnapshot *out);
 
 // ----- Entry points -----------------------------------------------------
 
