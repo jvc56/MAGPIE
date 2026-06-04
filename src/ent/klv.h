@@ -36,6 +36,25 @@ typedef struct KLV {
 
 static inline const char *klv_get_name(const KLV *klv) { return klv->name; }
 
+// A value unique to this loaded KLV instance: a hash of the base addresses and
+// size of its freshly-allocated leave_values/word_counts arrays. Two different
+// loads (even of the same lexicon) produce different fingerprints, so MoveGen
+// caches that hold leave-derived data can detect that the backing KLV has been
+// replaced even when a new KLV is allocated at a freed one's address (ABA),
+// which the pointer comparison cannot see.
+static inline uint64_t klv_get_instance_fingerprint(const KLV *klv) {
+  uint64_t hash = 1469598103934665603ULL;
+  const uintptr_t parts[] = {(uintptr_t)klv->leave_values,
+                             (uintptr_t)klv->word_counts,
+                             (uintptr_t)klv->kwg,
+                             (uintptr_t)klv->number_of_leaves};
+  for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+    hash ^= (uint64_t)parts[i];
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
 static inline const KWG *klv_get_kwg(const KLV *klv) { return klv->kwg; }
 
 static inline uint32_t klv_get_number_of_leaves(const KLV *klv) {

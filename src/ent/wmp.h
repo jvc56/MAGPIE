@@ -491,6 +491,29 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
 
 static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 
+// A value that is unique to this loaded WMP instance: a hash of the base
+// addresses and entry counts of its freshly-allocated internal maps. Two
+// different loads of even the same lexicon produce different fingerprints
+// (their maps are malloc'd separately), so callers that cache pointers into a
+// WMP (e.g. the move_gen subrack cache) can detect that the WMP backing those
+// pointers has been replaced -- even when a new WMP is allocated at the same
+// struct address as a freed one (ABA), which a pointer comparison cannot see.
+static inline uint64_t wmp_get_instance_fingerprint(const WMP *wmp) {
+  uint64_t hash = 1469598103934665603ULL;
+  for (int len = 0; len <= BOARD_DIM; len++) {
+    const WMPForLength *wfl = &wmp->wfls[len];
+    const uintptr_t parts[] = {
+        (uintptr_t)wfl->word_map_entries, (uintptr_t)wfl->num_word_entries,
+        (uintptr_t)wfl->blank_map_entries,
+        (uintptr_t)wfl->double_blank_map_entries};
+    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
+      hash ^= (uint64_t)parts[i];
+      hash *= 1099511628211ULL;
+    }
+  }
+  return hash;
+}
+
 static inline const WMPEntry *
 wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {
   const WMPForLength *wfl = &wmp->wfls[word_length];
