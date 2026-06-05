@@ -2736,14 +2736,19 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const KLV *new_klv = player_get_klv(player);
   const uint64_t new_klv_mutation_counter =
       (new_klv != NULL) ? klv_get_mutation_counter(new_klv) : 0;
-  // Invalidate when the KLV pointer changes (player swap, lexicon change)
-  // OR the same KLV's leave_values have been mutated in place. The
-  // mutation-counter path catches test-only set_klv_leave_value calls
-  // between generate_moves invocations, which would otherwise leave stale
-  // leave_values cached in the subrack cache and anchor-cache upper-bound
-  // entries.
+  const uint64_t new_klv_instance_fp =
+      (new_klv != NULL) ? klv_get_instance_fingerprint(new_klv) : 0;
+  // Invalidate when the KLV pointer changes (player swap, lexicon change), the
+  // KLV instance fingerprint changes (catches a reloaded KLV the allocator
+  // placed at the freed KLV's address -- ABA -- which the pointer comparison
+  // misses because the move_gen cache outlives the Config that owned the old
+  // KLV), OR the same KLV's leave_values have been mutated in place. The
+  // mutation-counter path catches test-only set_klv_leave_value calls between
+  // generate_moves invocations, which would otherwise leave stale leave_values
+  // cached in the subrack cache and anchor-cache upper-bound entries.
   const bool klv_changed =
       (new_klv != gen->klv) ||
+      (new_klv_instance_fp != gen->klv_instance_fp_at_load) ||
       (new_klv_mutation_counter != gen->klv_mutation_counter_at_load);
   if (klv_changed) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
@@ -2763,6 +2768,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   }
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
+  gen->klv_instance_fp_at_load = new_klv_instance_fp;
   const RackInfoTable *new_rit = player_get_rack_info_table(player);
   if (new_rit != gen->rack_info_table) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
@@ -2800,13 +2806,24 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     // the override).
     gen->wmp_move_gen.wmp = NULL;
   }
-  // The subrack cache holds wmp_entry pointers derived from the WMP; a
-  // WMP swap (e.g., different player's lexicon) would make those stale.
-  if (gen->wmp_move_gen.wmp != previous_wmp) {
+  // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
+  // swap (different lexicon) makes those stale -- and "stale" means dangling,
+  // since the old WMP's Config may have been freed. Invalidate on a WMP
+  // pointer change OR an instance-fingerprint change. The fingerprint catches
+  // a reloaded WMP (even of the same lexicon) that the allocator placed at the
+  // freed WMP's struct address (ABA) but whose internal maps are at new
+  // addresses -- a pointer comparison alone would miss it because the move_gen
+  // cache outlives the Config that owned the old WMP.
+  const WMP *new_wmp = gen->wmp_move_gen.wmp;
+  const uint64_t new_wmp_instance_fp =
+      (new_wmp != NULL) ? wmp_get_instance_fingerprint(new_wmp) : 0;
+  if (new_wmp != previous_wmp ||
+      new_wmp_instance_fp != gen->wmp_instance_fp_at_load) {
     for (int i = 0; i < MOVEGEN_SUBRACK_CACHE_SIZE; i++) {
       gen->subrack_cache[i].valid = false;
     }
   }
+  gen->wmp_instance_fp_at_load = new_wmp_instance_fp;
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));

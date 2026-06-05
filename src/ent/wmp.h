@@ -6,6 +6,7 @@
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../util/fileproxy.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -490,6 +491,32 @@ wfl_get_double_blank_entry(const WMPForLength *wfl, const BitRack *bit_rack) {
 }
 
 static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
+
+// A value that is unique to this loaded WMP instance: a hash of the base
+// addresses and entry counts of its freshly-allocated internal maps. Two
+// different loads of even the same lexicon produce different fingerprints
+// (their maps are malloc'd separately), so callers that cache pointers into a
+// WMP (e.g. the move_gen subrack cache) can detect that the WMP backing those
+// pointers has been replaced -- even when a new WMP is allocated at the same
+// struct address as a freed one (ABA), which a pointer comparison cannot see.
+static inline uint64_t wmp_get_instance_fingerprint(const WMP *wmp) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  // Only lengths 2..board_dim hold loaded map data (see read_wmp_for_length);
+  // wfls[0]/wfls[1] are never populated and are indeterminate for WMPs built
+  // with make_wmp_from_words (which mallocs the struct), so skip them rather
+  // than hash uninitialized memory. board_dim is validated to equal BOARD_DIM
+  // at load.
+  for (int len = 2; len <= wmp->board_dim; len++) {
+    const WMPForLength *wfl = &wmp->wfls[len];
+    hash = fnv64a_step(hash, (uintptr_t)wfl->word_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_word_entries);
+    hash = fnv64a_step(hash, (uintptr_t)wfl->blank_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_blank_entries);
+    hash = fnv64a_step(hash, (uintptr_t)wfl->double_blank_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_double_blank_entries);
+  }
+  return hash;
+}
 
 static inline const WMPEntry *
 wmp_get_word_entry(const WMP *wmp, const BitRack *bit_rack, int word_length) {

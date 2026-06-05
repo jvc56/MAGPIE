@@ -101,7 +101,7 @@ async_token_t parse_async_command(const char *command, StringBuilder *sb) {
   async_token_t token = NUMBER_OF_ASYNC_COMMAND_TOKENS;
   string_builder_clear(sb);
   for (async_token_t i = 0; i < NUMBER_OF_ASYNC_COMMAND_TOKENS; i++) {
-    const char *token_to_eval_string;
+    const char *token_to_eval_string = NULL;
     switch (i) {
     case ASYNC_STOP_COMMAND_TOKEN:
       token_to_eval_string = ASYNC_STOP_COMMAND_STRING;
