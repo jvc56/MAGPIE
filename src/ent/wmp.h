@@ -506,7 +506,9 @@ static inline uint64_t wmp_get_instance_fingerprint(const WMP *wmp) {
     hash = fnv64a_step(hash, (uintptr_t)wfl->word_map_entries);
     hash = fnv64a_step(hash, (uint64_t)wfl->num_word_entries);
     hash = fnv64a_step(hash, (uintptr_t)wfl->blank_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_blank_entries);
     hash = fnv64a_step(hash, (uintptr_t)wfl->double_blank_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_double_blank_entries);
   }
   return hash;
 }
