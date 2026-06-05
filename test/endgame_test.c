@@ -11,6 +11,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -23,6 +24,7 @@
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,6 +165,7 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -308,6 +311,7 @@ void test_single_pv_display(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 5;
@@ -367,6 +371,7 @@ void test_ctx_reuse(void) {
         DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
     endgame_args.num_threads = thread_counts[solve_idx];
     endgame_args.use_heuristics = true;
+    endgame_args.enable_iterative_deepening = true;
     endgame_args.forced_pass_bypass = true;
     endgame_args.enable_pv_display = true;
     endgame_args.num_top_moves = 1;
@@ -467,6 +472,7 @@ void test_kue(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -529,6 +535,7 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .num_threads = 1,
       .num_top_moves = 1,
       .use_heuristics = false,
+      .enable_iterative_deepening = true,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
@@ -554,6 +561,869 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
+// Test that topk_fully_solved fires when the actual game is shorter than eplies
+// (all branches end before the depth limit), and does NOT fire when unfinished
+// leaves remain. Covers single-thread, multi-thread, single-PV, and etopk.
+void test_topk_fully_solved(void) {
+  // --- Case 1: game ends before eplies (early-stop must fire) ---
+  // BGIV/DEHILOR: 4+7=11 tiles. Score=11, confirmed by test_solve_standard
+  // at eplies=4. With eplies=10, early-stop fires at depth 7-8 (< 10),
+  // well before the depth limit. The search completes in seconds even
+  // single-threaded because the 11-tile game tree is small.
+  const char *short_cgp =
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+
+  typedef struct {
+    int threads;
+    int topk;
+  } EarlyStopCase;
+  const EarlyStopCase cases[] = {
+      {1, 1}, // single-thread, single-PV
+      {6, 1}, // multi-thread ABDADA, single-PV
+      {6, 3}, // multi-thread ABDADA, etopk
+  };
+  for (int ci = 0; ci < 3; ci++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(config, short_cgp);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 10;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = cases[ci].threads;
+    args.num_top_moves = cases[ci].topk;
+    args.use_heuristics = true;
+    args.enable_iterative_deepening = true;
+    args.forced_pass_bypass = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved early-stop (threads=%d topk=%d): "
+           "score=%d completed_depth=%d\n",
+           cases[ci].threads, cases[ci].topk, pv->score, completed_depth);
+    // Correct score: 11 (matches test_solve_standard at eplies=4).
+    assert(pv->score == 11);
+    // Early-stop must have fired (completed_depth < eplies=10).
+    assert(completed_depth > 0 && completed_depth < 10);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+
+  // --- Case 2: non-terminal horizon (early-stop must NOT fire) ---
+  // ?AEEKSU/BEIQUVW: 14 tiles. At eplies=2 most branches still have tiles
+  // in hand → any_leaf_game_unfinished is set → topk_fully_solved stays false.
+  // The solver must terminate via ply==plies, so completed_depth == 2.
+  {
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -ttfraction 0.5");
+    load_and_exec_config_or_die(
+        config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+                "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+                "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+                "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 2;
+    args.tt_fraction_of_mem = 0.5;
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 6;
+    args.num_top_moves = 3;
+    args.use_heuristics = false;
+    args.enable_iterative_deepening = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    int completed_depth =
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+    printf("topk_fully_solved non-terminal horizon: completed_depth=%d\n",
+           completed_depth);
+    // Early-stop must NOT have fired; solver must reach the eplies limit.
+    assert(completed_depth == 2);
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
+// Asserts the post-solve re-search produces TT_EXACT entries throughout each
+// multi-PV display PV: every PV's negamax_depth covers all of its moves so
+// the display never renders a "|" mid-PV. Uses BGIV/DEHILOR (the same
+// short-game position as test_topk_fully_solved); at eplies=4 the search
+// reaches game-end on the principal lines for all top-10 root moves, so
+// the walk-down re-search has room to populate EXACT entries throughout.
+void test_topk_full_solve_no_pipe(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 4;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 6;
+  args.num_top_moves = 10;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = true;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const int num_pvs = endgame_results_get_num_pvs(results);
+  assert(num_pvs > 1);
+  // For each PV whose game tree fits within the eplies budget, the post-solve
+  // re-search + walk-down should populate TT_EXACT entries the whole way down,
+  // so the display would render no "|" mid-PV. PVs that extend past eplies
+  // (long pass-heavy lines etc.) get greedy moves appended past the horizon
+  // and legitimately have negamax_depth < num_moves.
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    const PVLine *pv = endgame_results_get_multi_pvline(results, pv_idx);
+    if (pv->num_moves <= args.plies) {
+      assert(pv->negamax_depth >= pv->num_moves);
+    }
+  }
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Returns true if two PVLines describe the same first move in terms of
+// what hits the board (anchor + direction + tile sequence). Ignores
+// SmallMove.metadata.score because the engine's walk-down re-search
+// can update one PV's score while leaving an identical sibling PV's
+// score stale.
+static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
+  if (a->num_moves <= 0 || b->num_moves <= 0) {
+    return false;
+  }
+  const SmallMove *sa = &a->moves[0];
+  const SmallMove *sb = &b->moves[0];
+  // tiny_move encodes anchor + direction + tile placement; metadata
+  // holds the cached score and is what diverges between near-duplicate
+  // re-search outputs.
+  return sa->tiny_move == sb->tiny_move;
+}
+
+// Regression test for an etopk duplicate-PV bug: extract_multi_pvs could
+// land with two PVLines whose moves[0] was the same SmallMove. Cause:
+// solver->principal_variation was zero-initialized and never written, so
+// the swap that was meant to hoist the search-tracked best move into
+// root_moves[0] would instead swap a deep PASS into slot 0. With several
+// root moves tied on estimated_value (qsort is unstable), the actual best
+// move could be at root_moves[1..k-1] and get copied into multi_pvs[r] as
+// a duplicate of the multi_pvs[0] entry already set from
+// ENDGAME_RESULT_BEST. Reproduces only with multi-PV (num_top_moves >= 2)
+// and parallel threads, and only when ties exist among root moves.
+//
+// Pre-fix at this config (eplies=3, threads=2, etopk=5) the bug fired in
+// ~97% of solves, so 10 iterations gives ~1 - 0.03^10 ≈ certainty of
+// catching a regression. Total cost ≈ 3s.
+void test_topk_no_duplicates(void) {
+  static const int kIterations = 10;
+  for (int iter = 0; iter < kIterations; iter++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score");
+    load_and_exec_config_or_die(
+        config,
+        "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+        "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+        "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = config_get_game(config);
+    args.plies = 3;
+    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 2;
+    args.num_top_moves = 5;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.enable_iterative_deepening = true;
+    args.enable_pv_display = true;
+    args.seed = 42;
+
+    EndgameResults *results = config_get_endgame_results(config);
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const int num_pvs = endgame_results_get_num_pvs(results);
+    for (int i = 0; i < num_pvs; i++) {
+      const PVLine *pi = endgame_results_get_multi_pvline(results, i);
+      for (int j = i + 1; j < num_pvs; j++) {
+        const PVLine *pj = endgame_results_get_multi_pvline(results, j);
+        if (pvline_first_move_equivalent(pi, pj)) {
+          printf("iter=%d PV[%d] and PV[%d] share moves[0].tiny_move "
+                 "(0x%llx)\n",
+                 iter, i, j, (unsigned long long)pi->moves[0].tiny_move);
+          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score,
+                 pi->num_moves);
+          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score,
+                 pj->num_moves);
+          assert(0 && "duplicate first move in multi_pvs");
+        }
+      }
+    }
+
+    endgame_ctx_destroy(ctx);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// before_search_callback tests
+// ---------------------------------------------------------------------------
+
+typedef struct BeforeSearchCaptured {
+  int call_count;
+  int initial_move_count;
+  int initial_spread;
+  int solving_player;
+  // first move's tiny_move + estimated_value (lets us verify the array is
+  // sorted descending by static estimate at the moment of firing)
+  uint64_t first_move_tiny;
+  int32_t first_move_estimate;
+  // sortedness check across all received moves
+  bool sorted_desc_by_estimate;
+} BeforeSearchCaptured;
+
+static void capture_before_search_cb(const Game *game,
+                                     const SmallMove *initial_moves,
+                                     int initial_move_count, int initial_spread,
+                                     int solving_player, void *user_data) {
+  (void)game;
+  BeforeSearchCaptured *c = (BeforeSearchCaptured *)user_data;
+  c->call_count++;
+  c->initial_move_count = initial_move_count;
+  c->initial_spread = initial_spread;
+  c->solving_player = solving_player;
+  if (initial_move_count > 0) {
+    c->first_move_tiny = initial_moves[0].tiny_move;
+    c->first_move_estimate = small_move_get_estimated_value(&initial_moves[0]);
+  }
+  c->sorted_desc_by_estimate = true;
+  for (int i = 1; i < initial_move_count; i++) {
+    if (small_move_get_estimated_value(&initial_moves[i]) >
+        small_move_get_estimated_value(&initial_moves[i - 1])) {
+      c->sorted_desc_by_estimate = false;
+      break;
+    }
+  }
+}
+
+// Asserts the new before_search_callback fires exactly once per solve, with
+// initial_move_count > 0, sorted descending by estimated_value, and that the
+// polled progress atomics show root_moves_total == initial_move_count and
+// root_moves_completed == 0 immediately at callback time (so a UI polling
+// the atomics can render a coherent d=0 leaderboard from the same snapshot
+// the callback delivered).
+static atomic_int g_atomic_check_state_total;
+static atomic_int g_atomic_check_state_completed;
+static atomic_int g_atomic_check_state_depth;
+static EndgameCtx **g_atomic_check_ctx_pp;
+
+static void capture_and_poll_before_search_cb(
+    const Game *game, const SmallMove *initial_moves, int initial_move_count,
+    int initial_spread, int solving_player, void *user_data) {
+  capture_before_search_cb(game, initial_moves, initial_move_count,
+                           initial_spread, solving_player, user_data);
+  // Poll the public progress atomics from inside the callback so we can
+  // assert UI-visible state agrees with the callback args at the same
+  // moment in time.
+  int cur_depth = 0;
+  int done = 0;
+  int total = 0;
+  int dummy_a = 0;
+  int dummy_b = 0;
+  endgame_ctx_get_progress(*g_atomic_check_ctx_pp, &cur_depth, &done, &total,
+                           &dummy_a, &dummy_b);
+  atomic_store(&g_atomic_check_state_depth, cur_depth);
+  atomic_store(&g_atomic_check_state_completed, done);
+  atomic_store(&g_atomic_check_state_total, total);
+}
+
+void test_before_search_callback(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/"
+              "8WE2OBI/6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/"
+              "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 "
+              "-lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  BeforeSearchCaptured captured = {0};
+  atomic_store(&g_atomic_check_state_total, -1);
+  atomic_store(&g_atomic_check_state_completed, -1);
+  atomic_store(&g_atomic_check_state_depth, -1);
+  g_atomic_check_ctx_pp = &ctx;
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 3;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 4;
+  args.num_top_moves = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = true;
+  args.seed = 42;
+  args.before_search_callback = capture_and_poll_before_search_cb;
+  args.before_search_callback_data = &captured;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(captured.call_count == 1);
+  assert(captured.initial_move_count > 0);
+  assert(captured.solving_player == 0);
+  assert(captured.first_move_tiny != 0); // not PASS at slot 0
+  assert(captured.sorted_desc_by_estimate);
+
+  // Polled atomics seen from inside the callback must match the callback's
+  // own view of the candidate count, with no prior depth started.
+  const int polled_total = atomic_load(&g_atomic_check_state_total);
+  const int polled_completed = atomic_load(&g_atomic_check_state_completed);
+  const int polled_depth = atomic_load(&g_atomic_check_state_depth);
+  assert(polled_total == captured.initial_move_count);
+  assert(polled_completed == 0);
+  assert(polled_depth == 0);
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// On-demand: streaming-progress test
+// ---------------------------------------------------------------------------
+
+// Two streaming modes for the on-demand demo. Both share the same
+// reader/printer thread; the difference is which signal source the
+// reader includes in each frame.
+typedef enum {
+  // Poll the ply2 atomics that are already exposed by
+  // endgame_ctx_get_progress. Adds intra-root sub-progress for the
+  // first root move's children.
+  STREAM_MODE_POLL_PLY2,
+  // Use the per_root_move_callback to track the last root completed.
+  // Gives per-root resolution across the whole top level, so the
+  // reader can describe live root-by-root completions.
+  STREAM_MODE_CALLBACK_PER_ROOT,
+} StreamMode;
+
+// Shared state between the main solver thread and the reader/printer thread.
+// All cross-thread fields are either atomic_* or guarded by `mutex`.
+typedef struct ProgressStream {
+  EndgameCtx **ctx_pp;        // populated by endgame_solve when it creates ctx
+  StreamMode mode;            // selects which signal the reader prints
+  cpthread_mutex_t mutex;     // guards the snapshot fields below
+  bool seen_initial;          // before_search_callback has fired
+  int last_completed_depth;   // most recent per_ply_callback's depth (0 = none)
+  int32_t last_completed_val; // and value
+  int initial_move_count;     // from before_search_callback
+  // Per-root callback snapshot (mode == STREAM_MODE_CALLBACK_PER_ROOT)
+  int last_root_depth;
+  int last_root_idx;
+  int32_t last_root_value;
+  uint64_t last_root_tiny;
+  int per_root_calls;
+  int64_t solve_start_ns;
+  atomic_int should_stop;   // main thread sets to 1 when endgame_solve returns
+  int frames_printed;       // bumped by the reader; used so we can verify
+                            // the test actually streamed something
+  int live_pv_change_count; // distinct live PVs the reader observed
+  int live_top_k_change_count; // distinct top-K snapshots observed
+  uint64_t last_topk_hash;     // hash of last top-K snapshot seen
+} ProgressStream;
+
+static void stream_before_search_cb(const Game *game,
+                                    const SmallMove *initial_moves,
+                                    int initial_move_count, int initial_spread,
+                                    int solving_player, void *user_data) {
+  (void)game;
+  (void)initial_moves;
+  (void)initial_spread;
+  (void)solving_player;
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->seen_initial = true;
+  s->initial_move_count = initial_move_count;
+  // Start the elapsed-time clock here. Per-iteration setup before this
+  // point (TT memset, KWG pruning, worker pool spinup) is bookkeeping
+  // the user doesn't care about; only "time spent on actual estimates
+  // and search" is interesting to display.
+  s->solve_start_ns = ctimer_monotonic_ns();
+  cpthread_mutex_unlock(&s->mutex);
+}
+
+static void stream_per_ply_cb(int depth, int32_t value,
+                              const struct PVLine *pv_line,
+                              const struct Game *game,
+                              const struct PVLine *ranked_pvs,
+                              int num_ranked_pvs, void *user_data) {
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->last_completed_depth = depth;
+  s->last_completed_val = value;
+  cpthread_mutex_unlock(&s->mutex);
+}
+
+static void stream_per_root_cb(int depth, int root_index,
+                               const struct SmallMove *move, int32_t value,
+                               void *user_data) {
+  ProgressStream *s = (ProgressStream *)user_data;
+  cpthread_mutex_lock(&s->mutex);
+  s->last_root_depth = depth;
+  s->last_root_idx = root_index;
+  s->last_root_value = value;
+  s->last_root_tiny = move->tiny_move;
+  s->per_root_calls++;
+  cpthread_mutex_unlock(&s->mutex);
+}
+
+static void *stream_reader_thread(void *arg) {
+  ProgressStream *s = (ProgressStream *)arg;
+  uint64_t prev_nodes = 0;
+  int64_t prev_nodes_ns = 0;
+  // Track how often the live PV's content actually changes between
+  // poll frames (not just the seqlock seq, the displayed bytes).
+  uint64_t last_pv_hash = 0;
+  int live_pv_change_count = 0;
+  while (!atomic_load(&s->should_stop)) {
+    const EndgameCtx *ctx = *s->ctx_pp;
+    cpthread_mutex_lock(&s->mutex);
+    const bool seen_initial = s->seen_initial;
+    const int last_depth = s->last_completed_depth;
+    const int32_t last_val = s->last_completed_val;
+    const int initial_count = s->initial_move_count;
+    const int last_root_depth = s->last_root_depth;
+    const int last_root_idx = s->last_root_idx;
+    const int32_t last_root_value = s->last_root_value;
+    const uint64_t last_root_tiny = s->last_root_tiny;
+    const int per_root_calls = s->per_root_calls;
+    const int64_t solve_start_ns = s->solve_start_ns;
+    cpthread_mutex_unlock(&s->mutex);
+
+    int cur_depth = 0;
+    int done = 0;
+    int total = 0;
+    int ply2_done = 0;
+    int ply2_total = 0;
+    uint64_t nodes = 0;
+    uint64_t line[MAX_SEARCH_DEPTH];
+    int line_len = 0;
+    uint64_t live_pv[MAX_SEARCH_DEPTH];
+    int live_pv_len = 0;
+    int32_t live_pv_value = 0;
+    EndgameLivePvSnapshot live_top_k[10];
+    int live_top_k_n = 0;
+    if (ctx != NULL) {
+      endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
+                               &ply2_total);
+      nodes = endgame_ctx_get_nodes_searched(ctx);
+      line_len = endgame_ctx_get_current_line(ctx, 0, line, MAX_SEARCH_DEPTH);
+      live_pv_len = endgame_ctx_get_live_pv(ctx, 0, live_pv, MAX_SEARCH_DEPTH,
+                                            &live_pv_value);
+      live_top_k_n = endgame_ctx_get_live_top_k_pvs(ctx, 0, live_top_k, 10);
+    }
+    // Hash the live PV (length + moves + value) so we can count the
+    // number of distinct snapshots seen by the reader. This isn't the
+    // engine-side update count — it's "how often a polling display
+    // would observe a change."
+    uint64_t pv_hash = (uint64_t)live_pv_len * 0x9E3779B97F4A7C15ULL;
+    for (int i = 0; i < live_pv_len; i++) {
+      pv_hash ^=
+          live_pv[i] + 0x9E3779B97F4A7C15ULL + (pv_hash << 6) + (pv_hash >> 2);
+    }
+    pv_hash ^= (uint64_t)(uint32_t)live_pv_value;
+    if (pv_hash != last_pv_hash) {
+      live_pv_change_count++;
+      last_pv_hash = pv_hash;
+      s->live_pv_change_count = live_pv_change_count;
+    }
+    // Hash the multi-PV top-K snapshot (length + each entry's
+    // root_tiny + value + continuation) to count how often the
+    // observable leaderboard changes between polls.
+    uint64_t topk_hash = (uint64_t)live_top_k_n * 0x9E3779B97F4A7C15ULL;
+    for (int i = 0; i < live_top_k_n; i++) {
+      topk_hash ^=
+          live_top_k[i].root_tiny + (topk_hash << 6) + (topk_hash >> 2);
+      topk_hash ^= (uint64_t)(uint32_t)live_top_k[i].value;
+      for (int j = 0; j < live_top_k[i].continuation_len; j++) {
+        topk_hash ^= live_top_k[i].continuation_tiny[j] + (topk_hash << 6) +
+                     (topk_hash >> 2);
+      }
+    }
+    if (topk_hash != s->last_topk_hash) {
+      s->live_top_k_change_count++;
+      s->last_topk_hash = topk_hash;
+    }
+    const int64_t now_ns = ctimer_monotonic_ns();
+    double knodes_per_sec = 0.0;
+    if (prev_nodes_ns > 0 && now_ns > prev_nodes_ns && nodes >= prev_nodes) {
+      knodes_per_sec = (double)(nodes - prev_nodes) /
+                       ((double)(now_ns - prev_nodes_ns) / 1.0e6);
+    }
+    prev_nodes = nodes;
+    prev_nodes_ns = now_ns;
+
+    // Common prefix: timing + d=0 status + last completed depth + root
+    // counter. Mode-specific suffix appended below.  Pre-d=0 frames have
+    // no meaningful elapsed value (the timer is started by the d=0
+    // callback to exclude setup overhead like TT allocation).
+    char prefix[160];
+    if (!seen_initial) {
+      snprintf(prefix, sizeof(prefix),
+               "  [    --ms] (waiting for d=0 callback)");
+    } else {
+      const double elapsed_ms = (double)(now_ns - solve_start_ns) / 1.0e6;
+      if (last_depth == 0) {
+        snprintf(
+            prefix, sizeof(prefix),
+            "  [%6.0fms] d=0 published (n=%d) cur_depth=%d searching %d/%d",
+            elapsed_ms, initial_count, cur_depth, done, total);
+      } else {
+        snprintf(prefix, sizeof(prefix),
+                 "  [%6.0fms] last_completed=d%d val=%d "
+                 "cur_depth=%d searching %d/%d",
+                 elapsed_ms, last_depth, last_val, cur_depth, done, total);
+      }
+    }
+
+    // Format the live current-line as comma-separated tiny_moves.
+    char line_str[256];
+    int written = 0;
+    written += snprintf(line_str + written, sizeof(line_str) - written, "[");
+    for (int i = 0; i < line_len && written < (int)sizeof(line_str) - 32; i++) {
+      written +=
+          snprintf(line_str + written, sizeof(line_str) - written, "%s0x%llx",
+                   i == 0 ? "" : ",", (unsigned long long)line[i]);
+    }
+    snprintf(line_str + written, sizeof(line_str) - written, "]");
+
+    // Always-on signals appended to every frame: nodes/sec (smoothed
+    // across the last poll interval) and the live current-line snapshot
+    // from worker thread 0. Either alone is enough to prove the engine
+    // is alive during a long single-root subtree where no other signal
+    // updates.
+    char pv_str[256];
+    int pv_written = 0;
+    pv_written +=
+        snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "[");
+    for (int i = 0; i < live_pv_len && pv_written < (int)sizeof(pv_str) - 32;
+         i++) {
+      pv_written +=
+          snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "%s0x%llx",
+                   i == 0 ? "" : ",", (unsigned long long)live_pv[i]);
+    }
+    snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "]");
+
+    // Compact "top-K" tail: show first-move tiny + value for each slot,
+    // then "+continuation_len" for the longest continuation. Reader
+    // verifies the leaderboard fills in as roots complete.
+    char topk_str[128];
+    int topk_written = 0;
+    topk_written +=
+        snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written,
+                 "%d{", live_top_k_n);
+    for (int i = 0;
+         i < live_top_k_n && topk_written < (int)sizeof(topk_str) - 32; i++) {
+      topk_written +=
+          snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written,
+                   "%s0x%llx=%d+%d", i == 0 ? "" : ",",
+                   (unsigned long long)live_top_k[i].root_tiny,
+                   live_top_k[i].value, live_top_k[i].continuation_len);
+    }
+    snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written, "}");
+
+    if (s->mode == STREAM_MODE_POLL_PLY2) {
+      printf("%s | ply2 %d/%d | %.0fk nps | t0_line %s | "
+             "live_pv val=%d %s | top_k %s\n",
+             prefix, ply2_done, ply2_total, knodes_per_sec, line_str,
+             live_pv_value, pv_str, topk_str);
+    } else {
+      if (per_root_calls == 0) {
+        printf("%s | per_root: 0 calls | %.0fk nps | t0_line %s | "
+               "live_pv val=%d %s | top_k %s\n",
+               prefix, knodes_per_sec, line_str, live_pv_value, pv_str,
+               topk_str);
+      } else {
+        printf("%s | per_root: %d calls, last d%d idx=%d val=%d tiny=0x%llx | "
+               "%.0fk nps | t0_line %s | live_pv val=%d %s | top_k %s\n",
+               prefix, per_root_calls, last_root_depth, last_root_idx,
+               last_root_value, (unsigned long long)last_root_tiny,
+               knodes_per_sec, line_str, live_pv_value, pv_str, topk_str);
+      }
+    }
+    (void)fflush(stdout);
+    s->frames_printed++;
+    ctime_nap(0.016); // ~60fps
+  }
+  return NULL;
+}
+
+void test_endgame_progress_stream(void) {
+  // Hand-picked positions tuned so each solve runs for ~1-3 seconds with
+  // multiple completed depths visible in the stream.  Don't crank
+  // eplies higher: deep searches on a wide root (n>500) blow past 30s
+  // per iteration and the test stops being useful as a demo.
+  static const struct {
+    const char *cgp;
+    const char *lex;
+    int eplies;
+  } positions[] = {
+      // Tight 7-tile endgame, ~60-100 root moves, completes through d=5
+      // quickly enough to show many depth transitions in the stream.
+      {"9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+       "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+       "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0",
+       "NWL20", 6},
+      // Stuck-tile (Z) position, asymmetric racks, slower per-ply.
+      {"GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/"
+       "1E4N3c1BOK/1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/"
+       "1MOTIVATE1T1S2/1S2N5S4/3PERJURY5/15/15/15 FV/AADIZ 442/388 0",
+       "CSW21", 5},
+  };
+  static const int npos = (int)(sizeof(positions) / sizeof(positions[0]));
+  static const StreamMode modes[] = {STREAM_MODE_POLL_PLY2,
+                                     STREAM_MODE_CALLBACK_PER_ROOT};
+  static const int nmodes = (int)(sizeof(modes) / sizeof(modes[0]));
+  static const char *mode_labels[] = {"poll_ply2", "callback_per_root"};
+
+  // Use system time as the RNG seed only for choosing thread counts.
+  // (Position and mode are cycled deterministically so the test always
+  // exercises every combination.)
+  XoshiroPRNG *prng = prng_create((uint64_t)ctime_get_current_time());
+
+  // Allocate the EndgameCtx (and its transposition table) once, outside
+  // the iteration loop. Subsequent iterations reuse it, so the
+  // ~200ms one-off TT memset doesn't get counted into per-iteration
+  // streaming output. The elapsed-time clock in each iteration is
+  // started by stream_before_search_cb, so even the first iteration's
+  // streaming numbers exclude setup overhead.
+  EndgameCtx *ctx = NULL;
+  {
+    // Warmup: one quick solve with eplies=1 to force ctx + TT allocation.
+    // Its stream output is suppressed (no reader thread); we just care
+    // about getting the TT on the heap.
+    Config *warmup_config = config_create_or_die("set -s1 score -s2 score");
+    char warmup_cmd[1024];
+    snprintf(warmup_cmd, sizeof(warmup_cmd), "cgp %s -lex %s", positions[0].cgp,
+             positions[0].lex);
+    load_and_exec_config_or_die(warmup_config, warmup_cmd);
+    EndgameArgs warmup_args = {0};
+    warmup_args.thread_control = config_get_thread_control(warmup_config);
+    warmup_args.game = config_get_game(warmup_config);
+    warmup_args.plies = 1;
+    warmup_args.tt_fraction_of_mem =
+        config_get_tt_fraction_of_mem(warmup_config);
+    warmup_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    warmup_args.num_threads = 1;
+    warmup_args.num_top_moves = 1;
+    warmup_args.use_heuristics = true;
+    warmup_args.forced_pass_bypass = true;
+    warmup_args.enable_iterative_deepening = true;
+    warmup_args.enable_pv_display = true;
+    warmup_args.seed = 1;
+    EndgameResults *warmup_results = config_get_endgame_results(warmup_config);
+    ErrorStack *warmup_err = error_stack_create();
+    endgame_solve(&ctx, &warmup_args, warmup_results, warmup_err);
+    assert(error_stack_is_empty(warmup_err));
+    error_stack_destroy(warmup_err);
+    config_destroy(warmup_config);
+    printf("(warmup complete; TT pre-allocated)\n");
+  }
+
+  const int kIterations = npos * nmodes;
+  int iter = 0;
+  for (int pos_idx = 0; pos_idx < npos; pos_idx++) {
+    for (int mode_idx = 0; mode_idx < nmodes; mode_idx++) {
+      iter++;
+      const int threads = 2 + (int)prng_get_random_number(prng, 5); // 2..6
+      const StreamMode mode = modes[mode_idx];
+
+      Config *config = config_create_or_die("set -s1 score -s2 score");
+      char cmd[1024];
+      snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
+               positions[pos_idx].lex);
+      load_and_exec_config_or_die(config, cmd);
+
+      printf(
+          "\n=== iter %d/%d: pos=%d mode=%s threads=%d plies=%d lex=%s ===\n",
+          iter, kIterations, pos_idx, mode_labels[mode_idx], threads,
+          positions[pos_idx].eplies, positions[pos_idx].lex);
+
+      ProgressStream stream = {0};
+      cpthread_mutex_init(&stream.mutex);
+      atomic_store(&stream.should_stop, 0);
+      stream.ctx_pp = &ctx;
+      stream.mode = mode;
+      // solve_start_ns will be filled in by stream_before_search_cb.
+
+      EndgameArgs args = {0};
+      args.thread_control = config_get_thread_control(config);
+      args.game = config_get_game(config);
+      args.plies = positions[pos_idx].eplies;
+      args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+      args.initial_small_move_arena_size =
+          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+      args.num_threads = threads;
+      args.num_top_moves = 5;
+      args.use_heuristics = true;
+      args.forced_pass_bypass = true;
+      args.enable_iterative_deepening = true;
+      args.enable_pv_display = true;
+      args.seed = 42;
+      args.before_search_callback = stream_before_search_cb;
+      args.before_search_callback_data = &stream;
+      args.per_ply_callback = stream_per_ply_cb;
+      args.per_ply_callback_data = &stream;
+      // Only install the per-root callback when the mode actually wants it,
+      // so each mode runs with only its own signal active and the comparison
+      // is honest.
+      if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {
+        args.per_root_move_callback = stream_per_root_cb;
+        args.per_root_move_callback_data = &stream;
+      }
+
+      // Clear the TT before each timed iteration so each one searches
+      // from a cold cache. This costs a 2GB memset (~200ms) on this
+      // host but happens BEFORE the reader thread is spawned and before
+      // the timer is started by the d=0 callback, so it isn't counted
+      // in any displayed elapsed time.
+      endgame_ctx_clear_transposition_table(ctx);
+
+      cpthread_t reader;
+      cpthread_create(&reader, stream_reader_thread, &stream);
+
+      EndgameResults *results = config_get_endgame_results(config);
+      ErrorStack *error_stack = error_stack_create();
+      endgame_solve(&ctx, &args, results, error_stack);
+      assert(error_stack_is_empty(error_stack));
+
+      atomic_store(&stream.should_stop, 1);
+      cpthread_join(reader);
+
+      printf("  [done] frames_printed=%d final_completed_depth=%d "
+             "per_root_calls=%d live_pv_changes=%d "
+             "live_top_k_changes=%d\n",
+             stream.frames_printed, stream.last_completed_depth,
+             stream.per_root_calls, stream.live_pv_change_count,
+             stream.live_top_k_change_count);
+      assert(stream.frames_printed > 0);
+      assert(stream.seen_initial);
+      if (mode == STREAM_MODE_CALLBACK_PER_ROOT) {
+        // Should fire at least once per completed depth.
+        assert(stream.per_root_calls >= stream.last_completed_depth);
+      }
+
+      error_stack_destroy(error_stack);
+      config_destroy(config);
+    }
+  }
+  endgame_ctx_destroy(ctx);
+  prng_destroy(prng);
+}
+
+// Tight, search-bound benchmark: run the kue position at depth 4 N
+// times in a row on a single warmed EndgameCtx.  Prints wall-clock and
+// nodes/sec.  Used to measure the cost of always-on engine
+// instrumentation (node counter + current-line) by comparing builds
+// with and without it.
+void test_endgame_bench_kue(void) {
+  static const int kIterations = 5;
+  static const int kPlies = 4;
+
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
+              "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
+              "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
+              "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = kPlies;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 4;
+  args.num_top_moves = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.enable_iterative_deepening = true;
+  args.enable_pv_display = false;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Warmup so the TT is allocated outside the timed iterations.
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  for (int i = 0; i < kIterations; i++) {
+    endgame_ctx_clear_transposition_table(ctx);
+    const int64_t t0 = ctimer_monotonic_ns();
+    endgame_solve(&ctx, &args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const int64_t t1 = ctimer_monotonic_ns();
+    const double elapsed_s = (double)(t1 - t0) / 1.0e9;
+    printf("BENCH iter=%d plies=%d threads=%d elapsed=%.3fs\n", i, kPlies,
+           args.num_threads, elapsed_s);
+  }
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_endgame(void) {
   test_single_pv_display();
   test_ctx_reuse();
@@ -566,6 +1436,13 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
+  test_topk_fully_solved();
+  test_topk_full_solve_no_pipe();
+  test_topk_no_duplicates();
+  test_before_search_callback();
+  // test_endgame_progress_stream is on-demand (registered as
+  // "endgame_stream"); it prints live progress to stdout and isn't
+  // suitable for the silent CI run.
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
@@ -596,6 +1473,7 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -649,6 +1527,7 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
+  endgame_args.enable_iterative_deepening = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
   endgame_args.seed = 42;
@@ -714,4 +1593,45 @@ void test_endgame_wasm(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
+}
+
+// Regression test for stack-buffer-overflow in abdada_negamax: topk_values
+// was sized to MAX_VARIANT_LENGTH (25) but multi_pv_k can go up to
+// MAX_ENDGAME_DISPLAY_PVS (100) via -etopk. With -etopk > 25, topk_insert
+// writes past the array, clobbering topk_n and adjacent stack. ASAN catches
+// this on dev builds; release builds crash with SIGABRT from the stack
+// canary. Uses the same short BGIV/DEHILOR position as test_topk_fully_solved.
+void test_topk50_overflow_repro(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *ctx = NULL;
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = 4;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.num_top_moves = 50; // > MAX_VARIANT_LENGTH (25); pre-fix overflows
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  // Intentionally leave args.enable_iterative_deepening = false: this
+  // exercises the depth-jumps-to-plies path on thread 0, which (along with
+  // -etopk 50) is the configuration that originally tripped the overflow.
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  printf("topk50 overflow repro: solved\n");
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
