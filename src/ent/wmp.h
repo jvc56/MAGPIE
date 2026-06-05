@@ -501,7 +501,12 @@ static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 // struct address as a freed one (ABA), which a pointer comparison cannot see.
 static inline uint64_t wmp_get_instance_fingerprint(const WMP *wmp) {
   uint64_t hash = FNV_64_OFFSET_BASIS;
-  for (int len = 0; len <= BOARD_DIM; len++) {
+  // Only lengths 2..board_dim hold loaded map data (see read_wmp_for_length);
+  // wfls[0]/wfls[1] are never populated and are indeterminate for WMPs built
+  // with make_wmp_from_words (which mallocs the struct), so skip them rather
+  // than hash uninitialized memory. board_dim is validated to equal BOARD_DIM
+  // at load.
+  for (int len = 2; len <= wmp->board_dim; len++) {
     const WMPForLength *wfl = &wmp->wfls[len];
     hash = fnv64a_step(hash, (uintptr_t)wfl->word_map_entries);
     hash = fnv64a_step(hash, (uint64_t)wfl->num_word_entries);
