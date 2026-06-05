@@ -6,6 +6,7 @@
 #include "../def/wmp_defs.h"
 #include "../ent/bit_rack.h"
 #include "../util/fileproxy.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -499,17 +500,13 @@ static inline const char *wmp_get_name(const WMP *wmp) { return wmp->name; }
 // pointers has been replaced -- even when a new WMP is allocated at the same
 // struct address as a freed one (ABA), which a pointer comparison cannot see.
 static inline uint64_t wmp_get_instance_fingerprint(const WMP *wmp) {
-  uint64_t hash = 1469598103934665603ULL;
+  uint64_t hash = FNV_64_OFFSET_BASIS;
   for (int len = 0; len <= BOARD_DIM; len++) {
     const WMPForLength *wfl = &wmp->wfls[len];
-    const uintptr_t parts[] = {
-        (uintptr_t)wfl->word_map_entries, (uintptr_t)wfl->num_word_entries,
-        (uintptr_t)wfl->blank_map_entries,
-        (uintptr_t)wfl->double_blank_map_entries};
-    for (size_t i = 0; i < sizeof(parts) / sizeof(parts[0]); i++) {
-      hash ^= (uint64_t)parts[i];
-      hash *= 1099511628211ULL;
-    }
+    hash = fnv64a_step(hash, (uintptr_t)wfl->word_map_entries);
+    hash = fnv64a_step(hash, (uint64_t)wfl->num_word_entries);
+    hash = fnv64a_step(hash, (uintptr_t)wfl->blank_map_entries);
+    hash = fnv64a_step(hash, (uintptr_t)wfl->double_blank_map_entries);
   }
   return hash;
 }
