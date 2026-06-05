@@ -1601,7 +1601,45 @@ void wmp_blank_possibilities_bananas_5(void) {
   config_destroy(config);
 }
 
+// Regression guard for the move_gen subrack/KLV cache ABA fix (PR #542). A
+// loaded WMP/KLV exposes an instance fingerprint that gen_load_position uses to
+// invalidate the per-thread caches when a Config's WMP/KLV is freed and a new
+// one is loaded at the same struct address -- a pointer or lexicon-name
+// comparison cannot detect that reuse. The fingerprint must therefore (a) be
+// stable across calls for one instance and (b) differ between two independent
+// loads of the *same* lexicon. This is deterministic on every platform because
+// both instances are alive at once, so their internal arrays are necessarily
+// at distinct addresses; if the fingerprint were ever reverted to a
+// pointer/name basis, the distinct-instance assertions below would fail. (The
+// end-to-end crash this protects against reproduces only on macOS, where the
+// allocator hands a freed WMP's address straight back to the next load; see
+// the PR description.)
+void test_move_gen_instance_fingerprint(void) {
+  ErrorStack *error_stack = error_stack_create();
+
+  WMP *wmp_a = wmp_create(DEFAULT_TEST_DATA_PATH, "CSW21", error_stack);
+  WMP *wmp_b = wmp_create(DEFAULT_TEST_DATA_PATH, "CSW21", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(wmp_a != NULL && wmp_b != NULL);
+  const uint64_t wmp_fp_a = wmp_get_instance_fingerprint(wmp_a);
+  assert(wmp_fp_a == wmp_get_instance_fingerprint(wmp_a));
+  assert(wmp_fp_a != wmp_get_instance_fingerprint(wmp_b));
+  wmp_destroy(wmp_a);
+  wmp_destroy(wmp_b);
+
+  KLV *klv_a = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
+  KLV *klv_b = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
+  const uint64_t klv_fp_a = klv_get_instance_fingerprint(klv_a);
+  assert(klv_fp_a == klv_get_instance_fingerprint(klv_a));
+  assert(klv_fp_a != klv_get_instance_fingerprint(klv_b));
+  klv_destroy(klv_a);
+  klv_destroy(klv_b);
+
+  error_stack_destroy(error_stack);
+}
+
 void test_move_gen(void) {
+  test_move_gen_instance_fingerprint();
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();
