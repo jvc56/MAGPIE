@@ -1602,8 +1602,8 @@ void wmp_blank_possibilities_bananas_5(void) {
   config_destroy(config);
 }
 
-// Regression guard for the move_gen subrack/KLV cache ABA fix (PR #542). A
-// loaded WMP/KLV exposes an instance fingerprint that gen_load_position uses to
+// Regression guard for the move_gen subrack/KLV cache invalidation. A loaded
+// WMP/KLV exposes an instance fingerprint that gen_load_position uses to
 // invalidate the per-thread caches when a Config's WMP/KLV is freed and a new
 // one is loaded at the same struct address -- a pointer or lexicon-name
 // comparison cannot detect that reuse. The fingerprint must therefore (a) be
@@ -1611,10 +1611,7 @@ void wmp_blank_possibilities_bananas_5(void) {
 // loads of the *same* lexicon. This is deterministic on every platform because
 // both instances are alive at once, so their internal arrays are necessarily
 // at distinct addresses; if the fingerprint were ever reverted to a
-// pointer/name basis, the distinct-instance assertions below would fail. (The
-// end-to-end crash this protects against reproduces only on macOS, where the
-// allocator hands a freed WMP's address straight back to the next load; see
-// the PR description.)
+// pointer/name basis, the distinct-instance assertions below would fail.
 void test_move_gen_instance_fingerprint(void) {
   ErrorStack *error_stack = error_stack_create();
 
