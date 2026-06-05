@@ -5297,45 +5297,25 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     // (alphagrammed since RACK doesn't have focus yet).
     char display_buf[24];
     display_buf[0] = '\0';
-    // Pick the source the same way sync_player_rack_to_editor
-    // does: the buffer wins only when the user has typed in the
-    // RACK field; otherwise the move's inferred letters drive
-    // the display. That way editing the move (XiPHOID → XIPHOID)
-    // updates the row-2 rack in sync with the rack panel.
-    const bool prefer_buffer =
-        state->edit_rack_user_modified && state->edit_rack_len > 0;
-    if (prefer_buffer) {
-      char tmp[24];
-      const int copy = state->edit_rack_len < (int)sizeof(tmp) - 1
+    if (state->edit_field == TUI_EDIT_FIELD_RACK && state->edit_rack_len > 0) {
+      // While the RACK field is focused, show the live buffer in the user's
+      // typed order — even if it's not yet a valid rack — so editing is
+      // visible keystroke by keystroke.
+      const int copy = state->edit_rack_len < (int)sizeof(display_buf) - 1
                            ? state->edit_rack_len
-                           : (int)sizeof(tmp) - 1;
-      memcpy(tmp, state->edit_rack_buf, (size_t)copy);
-      tmp[copy] = '\0';
-      if (state->edit_field == TUI_EDIT_FIELD_RACK) {
-        snprintf(display_buf, sizeof(display_buf), "%s", tmp);
-      } else {
-        format_alphagram_for_sort(tmp, state->ld, state->rack_sort, display_buf,
-                                  sizeof(display_buf));
-      }
-    } else if (state->edit_move_inferred_rack[0] != '\0') {
-      // Live preview from the move buffer's played tiles.
-      format_alphagram_for_sort(state->edit_move_inferred_rack, state->ld,
-                                state->rack_sort, display_buf,
-                                sizeof(display_buf));
-    } else if (state->edit_rack_len > 0) {
-      // No inferred rack and no user-typed marker — fall back to
-      // whatever the buffer holds (e.g., the RACK field is the
-      // first thing the user is touching with no move typed).
-      char tmp[24];
-      const int copy = state->edit_rack_len < (int)sizeof(tmp) - 1
-                           ? state->edit_rack_len
-                           : (int)sizeof(tmp) - 1;
-      memcpy(tmp, state->edit_rack_buf, (size_t)copy);
-      tmp[copy] = '\0';
-      if (state->edit_field == TUI_EDIT_FIELD_RACK) {
-        snprintf(display_buf, sizeof(display_buf), "%s", tmp);
-      } else {
-        format_alphagram_for_sort(tmp, state->ld, state->rack_sort, display_buf,
+                           : (int)sizeof(display_buf) - 1;
+      memcpy(display_buf, state->edit_rack_buf, (size_t)copy);
+      display_buf[copy] = '\0';
+    } else {
+      // Otherwise mirror the pill exactly: the same effective-rack selection
+      // sync_player_rack_to_editor uses for the engine rack. This is the
+      // single source of truth, so the cell's rack row and the player pill
+      // can't disagree (the bug where an invalid-but-present buffer showed
+      // in one place but not the other).
+      char eff[24];
+      if (tui_game_state_effective_editor_rack(state, eff, sizeof(eff), NULL) >
+          0) {
+        format_alphagram_for_sort(eff, state->ld, state->rack_sort, display_buf,
                                   sizeof(display_buf));
       }
     }

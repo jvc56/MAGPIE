@@ -591,6 +591,19 @@ void tui_game_state_destroy(TuiGameState *state);
 // "<coord> <word>"; rack parses as 1-7 chars of A-Z/?.
 void tui_game_state_parse_edit_buf(TuiGameState *state);
 
+// Single source of truth for the editor's effective rack — the letters that
+// should appear in BOTH the player pill (engine rack, set by
+// sync_player_rack_to_editor) and the history cell's rack row (rendered in
+// game_render.c). Centralizing the selection keeps those two paths from
+// drifting. Pure read of editor state; does not mutate. Writes the rack
+// (NUL-terminated, unsorted "source" order) to `out`. `out_from_buffer`, if
+// non-NULL, is set true when the result came from the live edit_rack_buf
+// (so a caller may preserve the user's typed order; every other source is
+// alphagram-sorted for display). Returns the number of letters written.
+size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
+                                            char *out, size_t out_size,
+                                            bool *out_from_buffer);
+
 // Annotation-mode reset: same per-entry cleanup and clock /
 // cursor reset as tui_game_state_reset_game, but resets the
 // game to an empty board with full bag and DOES NOT draw

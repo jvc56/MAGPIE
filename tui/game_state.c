@@ -500,10 +500,60 @@ static bool tok_is_all_uppercase(const char *s, int n) {
   return true;
 }
 
-// Set the on-turn player's rack to mirror the live editor:
-// rack buffer takes precedence (the user is typing tiles
-// directly); otherwise fall back to whatever the move buffer
-// inferred from its played letters; otherwise empty.
+size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
+                                            char *out, size_t out_size,
+                                            bool *out_from_buffer) {
+  if (out == NULL || out_size == 0) {
+    if (out_from_buffer != NULL) {
+      *out_from_buffer = false;
+    }
+    return 0;
+  }
+  out[0] = '\0';
+  bool from_buffer = false;
+  // Selection order (must match the engine-rack assignment in
+  // sync_player_rack_to_editor):
+  //   1. carryover-leave + the move's inferred played tiles (freshly-seeded
+  //      turn, user hasn't typed into RACK), alphagrammed;
+  //   2. the rack buffer, but ONLY when user-typed AND currently valid;
+  //   3. the move's inferred rack;
+  //   4. the rack buffer as a last resort, again only when valid.
+  if (!state->edit_rack_user_modified &&
+      state->edit_rack_carryover[0] != '\0') {
+    char combined[32];
+    int oi = 0;
+    for (const char *p = state->edit_rack_carryover;
+         *p != '\0' && oi < (int)sizeof(combined) - 1; p++) {
+      combined[oi++] = *p;
+    }
+    for (const char *p = state->edit_move_inferred_rack;
+         *p != '\0' && oi < (int)sizeof(combined) - 1; p++) {
+      combined[oi++] = *p;
+    }
+    combined[oi] = '\0';
+    if (oi > 1) {
+      qsort(combined, (size_t)oi, 1, char_cmp);
+    }
+    snprintf(out, out_size, "%s", combined);
+  } else if (state->edit_rack_user_modified && state->edit_rack_len > 0 &&
+             state->edit_rack_valid) {
+    snprintf(out, out_size, "%.*s", state->edit_rack_len, state->edit_rack_buf);
+    from_buffer = true;
+  } else if (state->edit_move_inferred_rack[0] != '\0') {
+    snprintf(out, out_size, "%s", state->edit_move_inferred_rack);
+  } else if (state->edit_rack_len > 0 && state->edit_rack_valid) {
+    snprintf(out, out_size, "%.*s", state->edit_rack_len, state->edit_rack_buf);
+    from_buffer = true;
+  }
+  if (out_from_buffer != NULL) {
+    *out_from_buffer = from_buffer;
+  }
+  return strlen(out);
+}
+
+// Set the on-turn player's rack to mirror the live editor, using the shared
+// tui_game_state_effective_editor_rack selection so the pill and the history
+// cell's rack row never disagree.
 // Caller must hold state->mutex.
 static void sync_player_rack_to_editor(TuiGameState *state) {
   if (state->game == NULL || state->edit_history_idx < 0 ||
@@ -519,19 +569,12 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
   if (rack == NULL) {
     return;
   }
-  // Prefer the rack buffer ONLY when the user has explicitly
-  // typed in the RACK field — otherwise the move's inferred
-  // rack wins, even if the buffer happens to be non-empty from
-  // an earlier auto-seed. This makes the rack track the move
-  // as the user edits, instead of getting stuck on a snapshot
-  // from a prior move that's since been changed.
-  const char *source = NULL;
-  // Carryover-leave merge: on a freshly-seeded turn (carryover set,
-  // user hasn't typed into RACK), the effective rack is the
-  // carryover leave PLUS the move's played tiles. Typing "KAM" on
-  // a turn carrying "ERST" forward gives "AEKMRST"; the leave then
-  // recomputes back to "ERST". Mirrored into edit_rack_buf so the
-  // RACK field shows the combined rack live.
+  // On a freshly-seeded turn (carryover-leave set, user hasn't typed into
+  // RACK), mirror the carryover leave PLUS the move's played tiles into
+  // edit_rack_buf so the RACK field shows the combined rack live (typing
+  // "KAM" on a turn carrying "ERST" forward gives "AEKMRST"; the leave then
+  // recomputes back to "ERST"). The effective-rack helper below computes the
+  // identical combination for the engine rack.
   char carryover_combined[32];
   if (!state->edit_rack_user_modified &&
       state->edit_rack_carryover[0] != '\0') {
@@ -548,23 +591,17 @@ static void sync_player_rack_to_editor(TuiGameState *state) {
     if (oi > 1) {
       qsort(carryover_combined, (size_t)oi, 1, char_cmp);
     }
-    source = carryover_combined;
     snprintf(state->edit_rack_buf, sizeof(state->edit_rack_buf), "%s",
              carryover_combined);
     state->edit_rack_len = (int)strlen(state->edit_rack_buf);
     state->edit_rack_cursor = state->edit_rack_len;
-  } else if (state->edit_rack_user_modified && state->edit_rack_len > 0 &&
-             state->edit_rack_valid) {
-    source = state->edit_rack_buf;
-  } else if (state->edit_move_inferred_rack[0] != '\0') {
-    source = state->edit_move_inferred_rack;
-  } else if (state->edit_rack_len > 0 && state->edit_rack_valid) {
-    // No inferred rack from move (e.g., user is editing the
-    // RACK field with no move typed yet). Fall back to the
-    // buffer so the rack panel shows what the user typed.
-    source = state->edit_rack_buf;
   }
-  if (source != NULL) {
+  // Single source of truth for which rack the pill shows — shared with the
+  // renderer's history-cell rack row so the two can't drift.
+  char source[32];
+  const size_t source_len =
+      tui_game_state_effective_editor_rack(state, source, sizeof(source), NULL);
+  if (source_len > 0) {
     rack_set_to_string(state->ld, rack, source);
   } else {
     // Empty editor buffer + no inferred rack: only clobber the
