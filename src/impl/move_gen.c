@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/board_defs.h"
+#include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
@@ -48,7 +49,12 @@
 // be expensive. The infer and sim functions
 // don't have this problem since they are
 // only called once per command.
+// Pool of reusable MoveGens. cached_gens[slot] is allocated lazily and kept
+// for the whole process (freed only at shutdown) so the expensive MoveGen
+// allocation is amortized across solves; slot_in_use[slot] marks whether a
+// live thread currently owns that slot. See get_movegen below.
 static MoveGen *cached_gens[MAX_THREADS];
+static bool slot_in_use[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
 #ifdef ANCHOR_CACHE_ENABLE
@@ -117,20 +123,101 @@ void generator_destroy(MoveGen *gen) {
   free(gen);
 }
 
-MoveGen *get_movegen(int thread_index) {
-  if (!cached_gens[thread_index]) {
-    cached_gens[thread_index] = calloc_or_die(1, sizeof(MoveGen));
+// MoveGen pool keyed by a per-thread slot, not by the caller-supplied
+// thread_index. Each live pthread acquires a distinct free slot on its first
+// generate_moves and holds it for the thread's lifetime, so two threads can
+// never share a MoveGen and corrupt each other's state — regardless of what
+// thread_index they pass. This lets callers run many concurrent solves without
+// having to partition thread_index ranges (the previous
+// cached_gens[thread_index] scheme handed two callers that passed the same
+// index the same gen).
+//
+// A slot's MoveGen is allocated lazily and reused for the whole process, so the
+// expensive allocation is amortized across solves exactly as the old
+// thread_index-keyed cache did. The pthread key's destructor only *releases the
+// slot* on thread exit (it does not free the gen), so a future thread reuses
+// both the slot and its already-allocated gen — bounded memory, no per-thread
+// reallocation, and no leak. All gens are freed once at shutdown.
+//
+// A reused gen carries stale per-call scratch, which is fine: generate_moves
+// resets the state it reads each call and the anchor cache validates by key —
+// the same reuse the old cross-solve slot sharing relied on.
+static cpthread_key_t gen_key;
+static cpthread_once_t gen_key_once = CPTHREAD_ONCE_INIT;
+
+// Thread-exit destructor: return this thread's slot to the pool (keep the gen).
+static void gen_release_slot(void *ptr) {
+  if (ptr == NULL) {
+    return;
   }
-  return cached_gens[thread_index];
+  cpthread_mutex_lock(&cache_mutex);
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (cached_gens[i] == ptr) {
+      slot_in_use[i] = false;
+      break;
+    }
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+}
+
+static void gen_key_init(void) {
+  cpthread_key_create(&gen_key, gen_release_slot);
+}
+
+MoveGen *get_movegen(int thread_index) {
+  // thread_index is vestigial: each live thread owns a distinct slot.
+  (void)thread_index;
+  cpthread_once(&gen_key_once, gen_key_init);
+  MoveGen *gen = cpthread_getspecific(gen_key);
+  if (gen != NULL) {
+    return gen;
+  }
+  // First touch on this thread: acquire a free slot, reusing its gen if one was
+  // allocated by an earlier thread that has since released the slot.
+  cpthread_mutex_lock(&cache_mutex);
+  int slot = -1;
+  for (int i = 0; i < MAX_THREADS; i++) {
+    if (!slot_in_use[i]) {
+      slot = i;
+      slot_in_use[i] = true;
+      break;
+    }
+  }
+  if (slot < 0) {
+    cpthread_mutex_unlock(&cache_mutex);
+    log_fatal("movegen pool exhausted: more than %d concurrent threads",
+              MAX_THREADS);
+  }
+  // cppcheck-suppress negativeIndex ; slot >= 0 here (log_fatal above is
+  // noreturn)
+  gen = cached_gens[slot];
+  if (gen == NULL) {
+    gen = calloc_or_die(1, sizeof(MoveGen));
+    cached_gens[slot] = gen;
+  }
+  cpthread_mutex_unlock(&cache_mutex);
+  cpthread_setspecific(gen_key, gen);
+  return gen;
 }
 
 void gen_destroy_cache(void) {
+  // May run mid-process, not only at shutdown: caches_destroy() calls this
+  // after a CLI command completes (and again at exit). It runs on a single
+  // thread after every worker has been joined, so no slot-release destructor
+  // can race it.
   cpthread_mutex_lock(&cache_mutex);
   for (int i = 0; i < (MAX_THREADS); i++) {
     generator_destroy(cached_gens[i]);
     cached_gens[i] = NULL;
+    slot_in_use[i] = false;
   }
   cpthread_mutex_unlock(&cache_mutex);
+  // The calling thread's key still points at the gen we just freed (key
+  // destructors don't fire for a thread that keeps running), so clear it.
+  // Otherwise the next get_movegen on this thread takes the fast path and
+  // returns that dangling pointer instead of acquiring a fresh slot/gen.
+  cpthread_once(&gen_key_once, gen_key_init);
+  cpthread_setspecific(gen_key, NULL);
 }
 
 // Cache getter functions

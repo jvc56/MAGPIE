@@ -104,4 +104,29 @@ static inline void cpthread_cancel(cpthread_t thread) {
   }
 }
 
+static inline void cpthread_key_create(cpthread_key_t *key,
+                                       void (*destructor)(void *)) {
+  if (pthread_key_create(key, destructor)) {
+    log_fatal("thread key create failed");
+  }
+}
+
+static inline void cpthread_once(cpthread_once_t *once_control,
+                                 void (*init_routine)(void)) {
+  if (pthread_once(once_control, init_routine)) {
+    log_fatal("thread once failed");
+  }
+}
+
+static inline void *cpthread_getspecific(cpthread_key_t key) {
+  return pthread_getspecific(key);
+}
+
+static inline void cpthread_setspecific(cpthread_key_t key,
+                                        const void *value) {
+  if (pthread_setspecific(key, value)) {
+    log_fatal("thread setspecific failed");
+  }
+}
+
 #endif
