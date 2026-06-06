@@ -218,6 +218,16 @@ static inline void traverse_backwards_add_to_rack(const Board *board, int row,
   }
 }
 
+const KWG *game_get_effective_kwg(const Game *game, int player_index) {
+  if (game->override_kwgs[0] != NULL) {
+    if (game->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+      return game->override_kwgs[0];
+    }
+    return game->override_kwgs[player_index];
+  }
+  return player_get_kwg(game_get_player(game, player_index));
+}
+
 void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
                             dual_lexicon_mode_t mode) {
   game->override_kwgs[0] = kwg0;
