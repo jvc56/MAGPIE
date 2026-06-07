@@ -312,7 +312,6 @@ typedef struct MoveGenArgs {
   // from move generation based on alternate exchange sizes. Value is
   // UNSET_LEAVE_SIZE for non-exchange scenarios.
   int target_leave_size_for_exchange_cutoff;
-  int thread_index;
   MoveList *move_list;
   // Output: bitvector of machine letters that appear in any valid move.
   // Only used with MOVE_RECORD_TILES_PLAYED. Caller provides pointer; callee
@@ -331,7 +330,7 @@ void gen_destroy_cache(void);
 // solving.
 void generate_moves(const MoveGenArgs *args);
 
-MoveGen *get_movegen(int thread_index);
+MoveGen *get_movegen(void);
 
 void gen_load_position(MoveGen *gen, const MoveGenArgs *args);
 

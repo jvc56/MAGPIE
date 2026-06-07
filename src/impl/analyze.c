@@ -722,7 +722,6 @@ analyze_gen_moves_with_actual(AnalyzeCtx *ctx, const ValidatedMoves *vms,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .thread_index = 0,
       .move_list = ctx->move_list,
   };
   generate_moves(&gen_args);

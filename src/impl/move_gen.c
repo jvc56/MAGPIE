@@ -123,21 +123,18 @@ void generator_destroy(MoveGen *gen) {
   free(gen);
 }
 
-// MoveGen pool keyed by a per-thread slot, not by the caller-supplied
-// thread_index. Each live pthread acquires a distinct free slot on its first
-// generate_moves and holds it for the thread's lifetime, so two threads can
-// never share a MoveGen and corrupt each other's state — regardless of what
-// thread_index they pass. This lets callers run many concurrent solves without
-// having to partition thread_index ranges (the previous
-// cached_gens[thread_index] scheme handed two callers that passed the same
-// index the same gen).
+// MoveGen pool keyed by a per-thread slot. Each live pthread acquires a
+// distinct free slot on its first generate_moves and holds it for the thread's
+// lifetime, so two threads can never share a MoveGen and corrupt each other's
+// state.
 //
 // A slot's MoveGen is allocated lazily and reused for the whole process, so the
-// expensive allocation is amortized across solves exactly as the old
-// thread_index-keyed cache did. The pthread key's destructor only *releases the
-// slot* on thread exit (it does not free the gen), so a future thread reuses
+// expensive allocation is amortized across solves. The pthread key's destructor
+// only *releases the slot* on thread exit (it does not free the gen), so a
+// future thread reuses
 // both the slot and its already-allocated gen — bounded memory, no per-thread
-// reallocation, and no leak. All gens are freed once at shutdown.
+// reallocation, and no leak. Gens are freed when gen_destroy_cache runs
+// (typically at shutdown or after CLI commands complete).
 //
 // A reused gen carries stale per-call scratch, which is fine: generate_moves
 // resets the state it reads each call and the anchor cache validates by key —
@@ -164,9 +161,7 @@ static void gen_key_init(void) {
   cpthread_key_create(&gen_key, gen_release_slot);
 }
 
-MoveGen *get_movegen(int thread_index) {
-  // thread_index is vestigial: each live thread owns a distinct slot.
-  (void)thread_index;
+MoveGen *get_movegen(void) {
   cpthread_once(&gen_key_once, gen_key_init);
   MoveGen *gen = cpthread_getspecific(gen_key);
   if (gen != NULL) {
@@ -3268,7 +3263,7 @@ void gen_record_pass(MoveGen *gen) {
 }
 
 void generate_moves(const MoveGenArgs *args) {
-  MoveGen *gen = get_movegen(args->thread_index);
+  MoveGen *gen = get_movegen();
   gen_load_position(gen, args);
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
