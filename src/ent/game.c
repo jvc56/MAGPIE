@@ -231,6 +231,16 @@ void game_clear_override_kwgs(Game *game) {
   game->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
 }
 
+const KWG *game_get_effective_kwg(const Game *game, int player_index) {
+  if (game->override_kwgs[0] != NULL) {
+    if (game->dual_lexicon_mode == DUAL_LEXICON_MODE_IGNORANT) {
+      return game->override_kwgs[0];
+    }
+    return game->override_kwgs[player_index];
+  }
+  return player_get_kwg(game_get_player(game, player_index));
+}
+
 // Returns the KWG to use for cross-set generation at the given cross_set_index.
 // If override KWGs are set, uses those (respecting dual-lexicon mode).
 // Otherwise falls back to the player's standard KWG.
