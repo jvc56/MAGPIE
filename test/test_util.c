@@ -373,7 +373,6 @@ void play_top_n_equity_move(Game *game, int n) {
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -727,7 +726,6 @@ void assert_validated_and_generated_moves(Game *game, const char *rack_string,
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1013,14 +1011,13 @@ void generate_anchors_for_test(Game *game) {
   // We don't care about them, but exchanges will be recorded while
   // looking up leave values and it is not adding a parameter to prevent this.
   MoveList *move_list = move_list_create(1000);
-  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  MoveGen *gen = get_movegen();
   const MoveGenArgs args = {
       .game = game,
       .move_list = move_list,
       .move_record_type = player_get_move_record_type(player_on_turn),
       .move_sort_type = player_get_move_sort_type(player_on_turn),
       .override_kwg = NULL,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1040,7 +1037,7 @@ void generate_anchors_for_test(Game *game) {
 }
 
 void extract_sorted_anchors_for_test(AnchorHeap *sorted_anchors) {
-  MoveGen *gen = get_movegen(/*thread_index=*/0);
+  MoveGen *gen = get_movegen();
   anchor_heap_reset(sorted_anchors);
   while (gen->anchor_heap.count > 0) {
     sorted_anchors->anchors[sorted_anchors->count++] =
