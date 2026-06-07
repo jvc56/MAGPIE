@@ -19,6 +19,18 @@
 #define TT_MIN_SIZE_POWER 24 // 2^24 minimum (256 MB) for performance
 #endif
 
+// Number of low hash bits stored per entry as a verification tag. fastrange
+// indexing (see tt_bucket_index) derives the bucket from the HIGH hash bits, so
+// the LOW bits are what discriminate distinct positions within a bucket. As
+// long as the table has at least 2^(64 - TT_TAG_BITS) entries, every bucket
+// spans at most 2^TT_TAG_BITS hashes, so two distinct hashes in the same bucket
+// cannot share a tag -- verification is exact, matching the old power-of-2 +
+// index-reconstruction scheme. With TT_TAG_BITS == 40 that threshold is 2^24,
+// i.e. TT_MIN_SIZE_POWER on native builds (WASM's 2^21 minimum loses a few high
+// bits, the same tradeoff the old scheme accepted on small tables).
+#define TT_TAG_BITS 40
+#define TT_TAG_MASK ((UINT64_C(1) << TT_TAG_BITS) - 1)
+
 enum {
   TT_EXACT = 0x01,
   TT_LOWER = 0x02,
@@ -32,9 +44,12 @@ enum {
 };
 
 typedef struct TTEntry {
-  uint32_t top_4_bytes; // Bits [63:32] of hash
+  // top_4_bytes and fifth_byte together hold the 40-bit verification tag: the
+  // low TT_TAG_BITS bits of the hash (top_4_bytes = tag bits [39:8],
+  // fifth_byte = tag bits [7:0]).
+  uint32_t top_4_bytes;
   int16_t score;
-  uint8_t fifth_byte; // Bits [31:24] of hash (40 stored bits total)
+  uint8_t fifth_byte;
   uint8_t flag_and_depth;
   uint64_t tiny_move;
 } TTEntry;
@@ -42,13 +57,17 @@ typedef struct TTEntry {
 static_assert(sizeof(TTEntry) == TTENTRY_SIZE_BYTES,
               "TTEntry must be exactly 16 bytes for lockless hashing");
 
-inline static uint64_t ttentry_full_hash(TTEntry t, uint64_t index,
-                                         int size_power) {
-  // Reconstruct hash from 40 stored bits + index bits.
-  // On large tables (size_power >= 24) all 64 bits are recovered.
-  // On smaller tables a few high bits are lost, which is acceptable.
-  uint64_t stored_hash = ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
-  return (stored_hash << size_power) | index;
+// The 40-bit verification tag stored in an entry (low TT_TAG_BITS hash bits).
+inline static uint64_t ttentry_tag(TTEntry t) {
+  return ((uint64_t)(t.top_4_bytes) << 8) | t.fifth_byte;
+}
+
+// Lemire's fastrange (multiply-shift) reduction: map a uniformly distributed
+// 64-bit hash into [0, num_entries) without requiring num_entries to be a power
+// of two -- floor(zval * num_entries / 2^64), one 64x64->128 multiply + shift.
+// https://lemire.me/blog/2016/06/27/a-fast-alternative-to-the-modulo-reduction/
+inline static uint64_t tt_bucket_index(uint64_t zval, uint64_t num_entries) {
+  return (uint64_t)(((__uint128_t)zval * (__uint128_t)num_entries) >> 64);
 }
 
 inline static uint8_t ttentry_flag(TTEntry t) { return t.flag_and_depth >> 6; }
@@ -74,8 +93,10 @@ inline static void ttentry_reset(TTEntry *t) {
 typedef struct TranspositionTable {
   _Atomic uint64_t *table; // Pairs of uint64_t for lockless hashing
   atomic_uchar *nproc; // ABDADA: small table for tracking concurrent searches
-  int size_power_of_2;
-  uint64_t size_mask;
+  // Number of entries; NOT required to be a power of two thanks to fastrange
+  // indexing, so the table fills the requested memory fraction exactly instead
+  // of rounding down to the nearest power of two.
+  uint64_t num_entries;
   Zobrist *zobrist;
   atomic_int created;
   atomic_int hits;
@@ -91,37 +112,35 @@ transposition_table_create(double fraction_of_memory) {
   uint64_t desired_n_elems =
       (uint64_t)(fraction_of_memory *
                  ((double)(total_memory) / (double)TTENTRY_SIZE_BYTES));
-  // find biggest power of 2 lower than desired.
-  int size_required = 0;
-  while (desired_n_elems >>= 1) {
-    size_required++;
+
+  // Platform-specific minimum table size.
+  const uint64_t min_entries = UINT64_C(1) << TT_MIN_SIZE_POWER;
+  if (desired_n_elems < min_entries) {
+    if (desired_n_elems > 0) {
+      log_warn("TT size clamped to minimum: %llu elements (%llu MB)",
+               (unsigned long long)min_entries,
+               (unsigned long long)(min_entries * TTENTRY_SIZE_BYTES /
+                                    (1024 * 1024)));
+    }
+    desired_n_elems = min_entries;
   }
 
-  tt->size_power_of_2 = size_required;
-
-  // Platform-specific minimum table size
-  if (tt->size_power_of_2 < TT_MIN_SIZE_POWER) {
-    tt->size_power_of_2 = TT_MIN_SIZE_POWER;
-    log_warn("TT size clamped to minimum: 2^%d elements (%d MB)",
-             TT_MIN_SIZE_POWER,
-             (1 << TT_MIN_SIZE_POWER) * TTENTRY_SIZE_BYTES / (1024 * 1024));
-  }
-  int num_elems = 1 << tt->size_power_of_2;
-  size_t memory_mb = ((size_t)TTENTRY_SIZE_BYTES * num_elems) / (1024 * 1024);
-  log_info("Creating transposition table. System memory: %llu, TT size: 2^%d "
-           "(elements: %d, memory: %zu MB)",
-           (unsigned long long)total_memory, tt->size_power_of_2, num_elems,
-           memory_mb);
+  tt->num_entries = desired_n_elems;
+  size_t memory_mb =
+      (size_t)(TTENTRY_SIZE_BYTES * tt->num_entries) / (1024 * 1024);
+  log_info("Creating transposition table. System memory: %llu, TT entries: "
+           "%llu (memory: %zu MB)",
+           (unsigned long long)total_memory,
+           (unsigned long long)tt->num_entries, memory_mb);
   tt->table =
-      (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * num_elems);
-  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
+      (_Atomic uint64_t *)malloc_or_die(sizeof(uint64_t) * 2 * tt->num_entries);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * tt->num_entries);
   // ABDADA: allocate smaller nproc table for tracking concurrent searches
   // Using a smaller table (256K vs millions) improves cache locality
   tt->nproc = (atomic_uchar *)malloc_or_die(sizeof(atomic_uchar) * NPROC_SIZE);
   for (int i = 0; i < NPROC_SIZE; i++) {
     atomic_init(&tt->nproc[i], 0);
   }
-  tt->size_mask = num_elems - 1;
   tt->zobrist = zobrist_create(12345); // Fixed seed for determinism
   atomic_init(&tt->created, 0);
   atomic_init(&tt->hits, 0);
@@ -133,8 +152,7 @@ transposition_table_create(double fraction_of_memory) {
 static inline void transposition_table_reset(TranspositionTable *tt) {
   // This function resets the transposition table. If you want to reallocate
   // space for it, destroy and recreate it with the new space.
-  uint64_t num_elems = tt->size_mask + 1;
-  memset(tt->table, 0, sizeof(uint64_t) * 2 * num_elems);
+  memset(tt->table, 0, sizeof(uint64_t) * 2 * tt->num_entries);
   // ABDADA: reset nproc counters (smaller table)
   for (int i = 0; i < NPROC_SIZE; i++) {
     atomic_store_explicit(&tt->nproc[i], 0, memory_order_relaxed);
@@ -147,7 +165,7 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
 
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
-  uint64_t idx = zval & tt->size_mask;
+  uint64_t idx = tt_bucket_index(zval, tt->num_entries);
   atomic_fetch_add(&tt->lookups, 1);
 
   // Lockless hashing (Hyatt 1999): each TTEntry is stored as two 8-byte
@@ -165,8 +183,7 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
   memcpy(&entry, &key_half, 8);
   entry.tiny_move = data;
 
-  uint64_t full_hash = ttentry_full_hash(entry, idx, tt->size_power_of_2);
-  if (full_hash != zval) {
+  if (ttentry_tag(entry) != (zval & TT_TAG_MASK)) {
     if (ttentry_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
@@ -185,11 +202,12 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
 
 static inline void transposition_table_store(TranspositionTable *tt,
                                              uint64_t zval, TTEntry tentry) {
-  uint64_t idx = zval & tt->size_mask;
-  // Store top 40 bits of hash (shift right by size_power to remove index bits)
-  uint64_t stored_hash = zval >> tt->size_power_of_2;
-  tentry.top_4_bytes = (uint32_t)(stored_hash >> 8);
-  tentry.fifth_byte = (uint8_t)(stored_hash & 0xFF);
+  uint64_t idx = tt_bucket_index(zval, tt->num_entries);
+  // Store the low TT_TAG_BITS of the hash as the verification tag (the high
+  // bits are encoded by the bucket index under fastrange).
+  uint64_t tag = zval & TT_TAG_MASK;
+  tentry.top_4_bytes = (uint32_t)(tag >> 8);
+  tentry.fifth_byte = (uint8_t)(tag & 0xFF);
   atomic_fetch_add(&tt->created, 1);
 
   // Lockless hashing: XOR key half with data half so torn reads

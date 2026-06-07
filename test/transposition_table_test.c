@@ -6,10 +6,8 @@
 void test_transposition_table(void) {
   // Passing 0 clamps to the platform minimum: 2^24 native, 2^21 WASM.
   TranspositionTable *tt = transposition_table_create(0);
-  assert(tt->size_power_of_2 == TT_MIN_SIZE_POWER);
+  assert(tt->num_entries == (UINT64_C(1) << TT_MIN_SIZE_POWER));
 
-  // Use a hash < 2^61 so all stored bits survive the round-trip on both
-  // native (size_power=24, 0 bits lost) and WASM (size_power=21, 3 bits lost).
   const uint64_t base_hash = 1234567890123456789ULL;
 
   TTEntry entry;
@@ -24,9 +22,13 @@ void test_transposition_table(void) {
   assert(ttentry_score(lu_entry) == 12);
 
   assert(atomic_load(&tt->t2_collisions) == 0);
-  // Create a type-2 collision: same index bits, different stored hash.
-  // Offset by 2^size_power so the index wraps to the same slot.
-  const uint64_t collision_hash = base_hash + (1ULL << tt->size_power_of_2);
+  // Type-2 collision: a hash that lands in the same fastrange bucket (shared
+  // high bits) but carries a different verification tag (low bits). For a
+  // power-of-two table fastrange(zval) == zval >> (64 - TT_MIN_SIZE_POWER), so
+  // bumping only the low bits keeps the bucket and changes the tag.
+  const uint64_t collision_hash = base_hash + 1;
+  assert(tt_bucket_index(collision_hash, tt->num_entries) ==
+         tt_bucket_index(base_hash, tt->num_entries));
   TTEntry te = transposition_table_lookup(tt, collision_hash);
   assert(te.fifth_byte == 0);
   assert(te.top_4_bytes == 0);
@@ -35,8 +37,12 @@ void test_transposition_table(void) {
   assert(te.tiny_move == 0);
   assert(atomic_load(&tt->t2_collisions) == 1);
 
-  // Another lookup, but not a collision (different index).
-  TTEntry te2 = transposition_table_lookup(tt, base_hash + 1);
+  // A lookup that lands in a different (empty) bucket is not a collision.
+  // Adding 2^TT_TAG_BITS changes the high (index) bits.
+  const uint64_t other_hash = base_hash + (UINT64_C(1) << TT_TAG_BITS);
+  assert(tt_bucket_index(other_hash, tt->num_entries) !=
+         tt_bucket_index(base_hash, tt->num_entries));
+  TTEntry te2 = transposition_table_lookup(tt, other_hash);
   assert(te2.fifth_byte == 0);
   assert(te2.top_4_bytes == 0);
   assert(te2.flag_and_depth == 0);
