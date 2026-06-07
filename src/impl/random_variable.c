@@ -221,8 +221,13 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
   }
   cpthread_mutex_unlock(arm_mutex);
   s = sqrt(-2.0 * log(s) / s);
-  return rv_normal->means_and_vars[k * 2] +
-         rv_normal->means_and_vars[k * 2 + 1] * u * s;
+  // means_and_vars holds {mean, variance} per arm, so scale the unit normal
+  // (u * s) by the standard deviation. This matches the variance semantics used
+  // by rv_normal_predetermined_sample (which multiplies its unit sample by
+  // sqrt(sigma2)); without the sqrt the arm's variance would be variance^2.
+  const double mean = rv_normal->means_and_vars[k * 2];
+  const double variance = rv_normal->means_and_vars[k * 2 + 1];
+  return mean + sqrt(variance) * u * s;
 }
 
 bool rv_normal_are_similar(RandomVariables *rvs, const int i, const int j) {
