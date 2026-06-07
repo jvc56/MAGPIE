@@ -387,8 +387,8 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
   // effects) and TT entries were overwritten.
-  num_moves += greedy_playout_for_display(pv_line, num_moves, game_copy,
-                                          move_list);
+  num_moves +=
+      greedy_playout_for_display(pv_line, num_moves, game_copy, move_list);
 
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
@@ -2175,9 +2175,9 @@ static bool iterative_deepening_should_stop(EndgameCtx *solver) {
 // Prepare solver->ext_game (lazy init or reset) then extend pv_line from TT.
 // Consolidates the repeated "prepare ext_game, then call pvline_extend_from_tt"
 // pattern used at all solver call sites.
-static inline void
-solver_pvline_extend_from_tt(PVLine *pv_line, EndgameCtx *solver,
-                             const Game *source_game) {
+static inline void solver_pvline_extend_from_tt(PVLine *pv_line,
+                                                EndgameCtx *solver,
+                                                const Game *source_game) {
   if (!solver->ext_game) {
     solver->ext_game = game_duplicate(source_game);
   } else {
@@ -2490,8 +2490,7 @@ void *solver_worker_start(void *uncasted_solver_worker) {
 // build PVLines with TT extension for non-best root moves. Returns number
 // of PVs filled. multi_pvs[0] must already be set by caller.
 static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
-                             const Game *game, PVLine *multi_pvs,
-                             int num_top) {
+                             const Game *game, PVLine *multi_pvs, int num_top) {
   int n_root = best_worker->n_initial_moves;
   int k = (num_top < n_root) ? num_top : n_root;
   SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
@@ -2601,9 +2600,9 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
           best_thread = thread_index;
         }
       }
-      num_pvs = extract_multi_pvs(
-          solver, solver->workers[best_thread], endgame_args->game, multi_pvs,
-          solver->num_top_moves);
+      num_pvs = extract_multi_pvs(solver, solver->workers[best_thread],
+                                  endgame_args->game, multi_pvs,
+                                  solver->num_top_moves);
     }
     endgame_results_set_num_pvs(results, num_pvs);
   }
