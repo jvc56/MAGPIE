@@ -578,8 +578,8 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
 
   ErrorStack *error_stack = autoplay_worker->error_stack;
   const Move *move = get_top_simming_move(
-      game, autoplay_worker->worker_index, move_list, sim_args,
-      &autoplay_worker->sim_ctx, autoplay_worker->sim_results, error_stack);
+      game, move_list, sim_args, &autoplay_worker->sim_ctx,
+      autoplay_worker->sim_results, error_stack);
   if (autoplay_worker->sim_results != NULL) {
     atomic_fetch_add_explicit(
         &autoplay_total_sim_iterations,
@@ -613,9 +613,8 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
-    return get_top_equity_move(
-        game_runner->game, autoplay_worker->worker_index,
-        autoplay_worker->move_lists[player_on_turn_index]);
+    return get_top_equity_move(game_runner->game,
+                               autoplay_worker->move_lists[player_on_turn_index]);
   }
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }

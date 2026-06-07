@@ -112,7 +112,6 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -167,7 +166,6 @@ void macondo_tests(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -423,7 +421,6 @@ void unfound_leave_lookup_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -469,7 +466,6 @@ void exchange_tests(void) {
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -510,7 +506,6 @@ void movegen_many_moves(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -538,7 +533,6 @@ void equity_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -591,7 +585,6 @@ void top_equity_play_recorder_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -630,7 +623,6 @@ void small_play_recorder_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -701,7 +693,6 @@ void best_small_play_recorder_test(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -731,7 +722,6 @@ void best_small_play_recorder_test(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -758,7 +748,6 @@ void distinct_lexica_test(bool w1) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -892,7 +881,6 @@ void consistent_tiebreaking_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1070,7 +1058,6 @@ void movegen_within_x_of_best_test(bool use_wmp) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1264,7 +1251,6 @@ void movegen_does_not_return_early_from_anchor(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1316,7 +1302,6 @@ void movegen_one_tile_nonwmp(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1361,7 +1346,6 @@ void movegen_one_tile_wmp(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1399,7 +1383,7 @@ void wmp_blank_possibilities_natural(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
   gen->wmp_move_gen.word_length = 7;
 
@@ -1431,7 +1415,7 @@ void wmp_blank_possibilities_blanked(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   // No playthrough tiles. All of these tiles are newly placed.
@@ -1466,7 +1450,7 @@ void wmp_blank_possibilities_bananas_1(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BANANAS");
@@ -1494,7 +1478,7 @@ void wmp_blank_possibilities_bananas_2(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNANAS");
@@ -1523,7 +1507,7 @@ void wmp_blank_possibilities_bananas_3(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNaNAS");
@@ -1551,7 +1535,7 @@ void wmp_blank_possibilities_bananas_4(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "B.NaNAS");
@@ -1579,7 +1563,7 @@ void wmp_blank_possibilities_bananas_5(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BA.ANAS");

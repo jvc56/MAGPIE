@@ -60,19 +60,9 @@ typedef struct EndgameArgs {
   uint64_t seed;
 } EndgameArgs;
 
-// Selects the movegen cache slot to avoid races between concurrent callers.
-// RESULT_DISPLAY (slot 0) and SOLVER (slot 1) can run simultaneously during
-// a solve; WORKER threads use slot thread_index + 2.
-typedef enum {
-  ENDGAME_MOVEGEN_RESULT_DISPLAY,
-  ENDGAME_MOVEGEN_SOLVER,
-  ENDGAME_MOVEGEN_WORKER,
-} endgame_movegen_caller_t;
-
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,
-                           int max_depth, int thread_index,
-                           endgame_movegen_caller_t caller);
+                           int max_depth);
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
