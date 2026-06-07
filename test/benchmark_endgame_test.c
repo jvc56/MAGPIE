@@ -14,6 +14,7 @@
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/transposition_table.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
@@ -457,6 +458,120 @@ static void run_ab_benchmark(const char *cgp_file, const char *label,
   endgame_results_destroy(results);
   endgame_ctx_destroy(solver_old);
   endgame_ctx_destroy(solver_new);
+  config_destroy(config);
+}
+
+// Transposition-table benchmark: solve a batch of endgame positions against a
+// single reused (warm) TT and report cumulative TT activity -- lookups (~ nodes
+// visited), hit rate, type-2 collision rate -- plus nodes/sec. Used to compare
+// TT indexing schemes (power-of-2 mask vs fastrange multiply-shift) and the
+// effect of the resulting table size on hit rate. Reads CGPs from a file;
+// configure via env: TT_BENCH_FILE, TT_BENCH_PLIES, TT_BENCH_FRACTION,
+// TT_BENCH_MAX. Only uses TT stat fields common to both indexing schemes so the
+// same test compiles on either branch for an A/B.
+void test_tt_benchmark(void) {
+  log_set_level(LOG_FATAL);
+  const char *cgp_file = getenv("TT_BENCH_FILE");
+  if (!cgp_file) {
+    cgp_file = "/tmp/nonstuck_cgps.txt";
+  }
+  const char *plies_env = getenv("TT_BENCH_PLIES");
+  const int plies = plies_env ? atoi(plies_env) : 4;
+  const char *frac_env = getenv("TT_BENCH_FRACTION");
+  const double ttfraction = frac_env ? atof(frac_env) : 0.05;
+  const char *max_env = getenv("TT_BENCH_MAX");
+  const int max_positions = max_env ? atoi(max_env) : 200;
+
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("No CGP file at %s — run gennonstuck first.\n", cgp_file);
+    return;
+  }
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 6 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  Timer timer;
+  ctimer_start(&timer);
+  int solved = 0;
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = plies,
+                        .tt_fraction_of_mem = ttfraction,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = 8,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .forced_pass_bypass = true,
+                        .enable_pv_display = false,
+                        .seed = 42};
+    err = error_stack_create();
+    endgame_solve(&solver, &args, results, err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    solved++;
+  }
+  const double elapsed = ctimer_elapsed_seconds(&timer);
+
+  // Cumulative TT stats (atomic_int; reinterpret as uint32 so counts up to 2^32
+  // are exact -- keep TT_BENCH_MAX/plies modest to avoid wrapping past that).
+  const TranspositionTable *tt =
+      solver ? endgame_ctx_get_transposition_table(solver) : NULL;
+  const uint64_t lookups =
+      tt ? (uint32_t)atomic_load(&tt->lookups) : (uint64_t)0;
+  const uint64_t hits = tt ? (uint32_t)atomic_load(&tt->hits) : (uint64_t)0;
+  const uint64_t created =
+      tt ? (uint32_t)atomic_load(&tt->created) : (uint64_t)0;
+  const uint64_t t2 =
+      tt ? (uint32_t)atomic_load(&tt->t2_collisions) : (uint64_t)0;
+
+  printf("\n=== TT benchmark ===\n");
+  printf("  positions:         %d (plies=%d, ttfraction=%.4f, threads=8)\n",
+         solved, plies, ttfraction);
+  printf("  wall time:         %.3fs\n", elapsed);
+  if (lookups > 0 && elapsed > 0) {
+    printf("  TT lookups (~nodes): %llu  (%.2f M lookups/s)\n",
+           (unsigned long long)lookups, (double)lookups / elapsed / 1e6);
+    printf("  TT hit rate:       %.2f%%  (%llu hits)\n",
+           100.0 * (double)hits / (double)lookups, (unsigned long long)hits);
+    printf("  TT stores:         %llu\n", (unsigned long long)created);
+    printf("  type-2 collisions: %llu  (%.4f%% of lookups)\n",
+           (unsigned long long)t2, 100.0 * (double)t2 / (double)lookups);
+  }
+  printf("====================\n");
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_ctx_destroy(solver);
   config_destroy(config);
 }
 

@@ -141,6 +141,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"ttbench", test_tt_benchmark},
     {"multipv", test_multi_pv},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
