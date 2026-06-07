@@ -2365,7 +2365,6 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // even once, the caller gets the best-from-static-greedy answer instead
   // of the default "no result / pass / value=0".
   if (worker->ordinal == 0) {
-    SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     int32_t best_root_value = -LARGE_VALUE;
     SmallMove best_root_move;
     bool have_root_best = false;
@@ -2378,8 +2377,14 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       if (iterative_deepening_should_stop(worker->solver)) {
         break;
       }
-      const SmallMove *sm = &initial_moves[i];
-      small_move_to_move(worker->move_list->spare_move, sm,
+      // negamax_greedy_leaf_playout below can grow (realloc) small_move_arena,
+      // which moves its backing buffer. Re-read the base each iteration and
+      // copy the candidate by value so nothing dereferences a pointer into a
+      // freed buffer after the leaf call.
+      const SmallMove *initial_moves =
+          (const SmallMove *)(worker->small_move_arena->memory);
+      const SmallMove sm = initial_moves[i];
+      small_move_to_move(worker->move_list->spare_move, &sm,
                          game_get_board(worker->game_copy));
       // Slot 0 — the root play. Negamax's IDS will reuse this slot for
       // its own play at depth=requested_plies; the depth-0 sweep finishes
@@ -2407,8 +2412,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       int32_t opp_val = -leaf_val;
       if (opp_val > best_root_value) {
         best_root_value = opp_val;
-        best_root_move = *sm;
-        d0_pv.moves[0] = *sm;
+        best_root_move = sm;
+        d0_pv.moves[0] = sm;
         for (int j = 0; j < child_pv.num_moves && j + 1 < MAX_VARIANT_LENGTH;
              j++) {
           d0_pv.moves[j + 1] = child_pv.moves[j];
