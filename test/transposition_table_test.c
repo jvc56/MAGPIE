@@ -38,8 +38,10 @@ void test_transposition_table(void) {
   assert(atomic_load(&tt->t2_collisions) == 1);
 
   // A lookup that lands in a different (empty) bucket is not a collision.
-  // Adding 2^TT_TAG_BITS changes the high (index) bits.
-  const uint64_t other_hash = base_hash + (UINT64_C(1) << TT_TAG_BITS);
+  // Flipping the top hash bit moves the fastrange bucket by ~num_entries/2 for
+  // any table size (the index is a function of the high bits), so this holds on
+  // both the native 2^24 and WASM 2^21 minimums.
+  const uint64_t other_hash = base_hash ^ (UINT64_C(1) << 63);
   assert(tt_bucket_index(other_hash, tt->num_entries) !=
          tt_bucket_index(base_hash, tt->num_entries));
   TTEntry te2 = transposition_table_lookup(tt, other_hash);
