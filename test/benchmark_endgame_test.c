@@ -541,17 +541,16 @@ void test_tt_benchmark(void) {
   }
   const double elapsed = ctimer_elapsed_seconds(&timer);
 
-  // Cumulative TT stats (atomic_int; reinterpret as uint32 so counts up to 2^32
-  // are exact -- keep TT_BENCH_MAX/plies modest to avoid wrapping past that).
+  // Cumulative TT stats (64-bit counters).
   const TranspositionTable *tt =
       solver ? endgame_ctx_get_transposition_table(solver) : NULL;
   const uint64_t lookups =
-      tt ? (uint32_t)atomic_load(&tt->lookups) : (uint64_t)0;
-  const uint64_t hits = tt ? (uint32_t)atomic_load(&tt->hits) : (uint64_t)0;
+      tt ? (uint64_t)atomic_load(&tt->lookups) : (uint64_t)0;
+  const uint64_t hits = tt ? (uint64_t)atomic_load(&tt->hits) : (uint64_t)0;
   const uint64_t created =
-      tt ? (uint32_t)atomic_load(&tt->created) : (uint64_t)0;
+      tt ? (uint64_t)atomic_load(&tt->created) : (uint64_t)0;
   const uint64_t t2 =
-      tt ? (uint32_t)atomic_load(&tt->t2_collisions) : (uint64_t)0;
+      tt ? (uint64_t)atomic_load(&tt->t2_collisions) : (uint64_t)0;
 
   printf("\n=== TT benchmark ===\n");
   printf("  positions:         %d (plies=%d, ttfraction=%.4f, threads=8)\n",

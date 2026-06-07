@@ -98,10 +98,12 @@ typedef struct TranspositionTable {
   // of rounding down to the nearest power of two.
   uint64_t num_entries;
   Zobrist *zobrist;
-  atomic_int created;
-  atomic_int hits;
-  atomic_int lookups;
-  atomic_int t2_collisions;
+  // 64-bit so they don't overflow on long searches (a deep solve can do
+  // billions of lookups, well past the old atomic_int range).
+  atomic_uint_fast64_t created;
+  atomic_uint_fast64_t hits;
+  atomic_uint_fast64_t lookups;
+  atomic_uint_fast64_t t2_collisions;
 } TranspositionTable;
 
 static inline TranspositionTable *
