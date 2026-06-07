@@ -583,8 +583,8 @@ void test_via_mover_must_bingo_every_depth(void) {
   // Mover MUST play DISCO(U)nT 167 going out, value +181, at every depth.
   // The bingo terminates the game so depth-1 already suffices; depths 4-6
   // search the same tree but get pruned quickly when the leaf finds the
-  // going-out bonus. Test plies 1..4 (5-6 just confirm the same answer
-  // at much higher wall-time cost).
+  // going-out bonus. Test plies 1..3 (deeper plies just confirm the same
+  // answer at much higher wall-time cost).
   for (int plies = 1; plies <= 3; plies++) {
     char settings[128];
     (void)snprintf(settings, sizeof(settings),
@@ -707,7 +707,7 @@ void test_via_opp_must_block_every_depth(void) {
   // at 2B forming "IO" below 1B and blocking the bingo column. Mover then
   // finds B7 STICc(A)DO 82 bingo instead (blank as c). Value from opp's
   // POV is -78, opp's first move scores 10 and is not pass. Test plies
-  // 1..4 (deeper plies confirm the same answer at much higher cost).
+  // 1..3 (deeper plies confirm the same answer at much higher cost).
   for (int plies = 1; plies <= 3; plies++) {
     char settings[128];
     (void)snprintf(settings, sizeof(settings),
@@ -732,11 +732,9 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
-  // Mover-must-bingo / opp-must-block at every depth (Pos 28 VIA scenario).
-  test_via_mover_must_bingo_every_depth();
-  test_via_opp_must_block_every_depth();
-  // Stress test: same position with random short tlims; assert no glitch.
-  test_via_interrupted_reasonable_under_time_pressure();
+  // The VIA depth/stress regressions (viamover / viaopp / viastress) are
+  // on-demand only — viastress runs 100 timed iterations — so they are not
+  // invoked here from the default run_all suite.
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();

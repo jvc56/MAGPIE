@@ -2694,6 +2694,10 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                           EndgameResults *results) {
   assert(ctx);
   assert(results);
+  // Same precondition as endgame_solve. This entry point takes no ErrorStack
+  // (it's the hot path PEG drives on known-empty-bag leaves), so a non-empty
+  // bag is a caller bug rather than a recoverable input error.
+  assert(bag_get_letters(game_get_bag(endgame_args->game)) == 0);
   if (*ctx == NULL) {
     *ctx = endgame_ctx_create();
   }
@@ -2715,6 +2719,22 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   const PVLine *best_pv =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   solver->principal_variation = *best_pv;
+
+  // Finalize results like endgame_solve does: stop the timer, record terminal
+  // status, and drop the TT reference that endgame_ctx_reset stored in the
+  // results' pvline-extend args. Without the last step a post-solve
+  // string_builder_endgame_results would dereference the ctx's TT, which is a
+  // use-after-free once the caller destroys the ctx (and its owned TT).
+  endgame_results_stop_ctimer(results);
+  if (thread_control_get_status(endgame_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
+  }
+  endgame_results_set_pvline_extend_args(
+      results, NULL, endgame_results_get_solving_player(results),
+      endgame_results_get_max_depth(results));
 }
 
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
