@@ -46,9 +46,15 @@ struct RandomVariables {
   void *data;
 };
 
+// Draws a uniform value in [0, 1) from prng. Caller must hold whatever mutex
+// guards prng (see uniform_sample for the self-locking variant).
+static inline double uniform_sample_while_locked(XoshiroPRNG *prng) {
+  return (double)prng_next(prng) / ((double)UINT64_MAX);
+}
+
 double uniform_sample(XoshiroPRNG *prng, cpthread_mutex_t *mutex) {
   cpthread_mutex_lock(mutex);
-  double result = (double)prng_next(prng) / ((double)UINT64_MAX);
+  double result = uniform_sample_while_locked(prng);
   cpthread_mutex_unlock(mutex);
   return result;
 }
@@ -204,9 +210,8 @@ double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
   double s = 2.0;
   cpthread_mutex_lock(arm_mutex);
   while (s >= 1.0 || s == 0.0) {
-    u = 2.0 * ((double)prng_next(arm_prng) / (double)UINT64_MAX) - 1.0;
-    const double v =
-        2.0 * ((double)prng_next(arm_prng) / (double)UINT64_MAX) - 1.0;
+    u = 2.0 * uniform_sample_while_locked(arm_prng) - 1.0;
+    const double v = 2.0 * uniform_sample_while_locked(arm_prng) - 1.0;
     s = u * u + v * v;
   }
   cpthread_mutex_unlock(arm_mutex);
