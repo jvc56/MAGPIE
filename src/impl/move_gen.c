@@ -133,7 +133,8 @@ void generator_destroy(MoveGen *gen) {
 // only *releases the slot* on thread exit (it does not free the gen), so a
 // future thread reuses
 // both the slot and its already-allocated gen — bounded memory, no per-thread
-// reallocation, and no leak. Gens are freed when gen_destroy_cache runs (typically at shutdown or after CLI commands complete).
+// reallocation, and no leak. Gens are freed when gen_destroy_cache runs
+// (typically at shutdown or after CLI commands complete).
 //
 // A reused gen carries stale per-call scratch, which is fine: generate_moves
 // resets the state it reads each call and the anchor cache validates by key —
