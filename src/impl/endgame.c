@@ -2280,6 +2280,12 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                      ? initial_move_count
                      : MAX_RANKED_CALLBACK_PVS;
   PVLine ranked_pvs[MAX_RANKED_CALLBACK_PVS];
+  // Seed each ranked PV from its root SmallMove first, while the arena is
+  // stable. solver_pvline_extend_from_tt below runs a greedy playout that can
+  // grow (realloc) small_move_arena, so it must not run while we still need to
+  // read initial_moves — otherwise a later iteration would index a freed
+  // buffer. Splitting the loops keeps all initial_moves reads before any
+  // possible realloc.
   for (int r = 0; r < n_ranked; r++) {
     PVLine *rpv = &ranked_pvs[r];
     rpv->moves[0] = initial_moves[r];
@@ -2288,9 +2294,11 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                  worker->solver->initial_spread;
     rpv->negamax_depth = 1;
     rpv->game = NULL;
-    // Extend from TT
-    if (worker->solver->transposition_table_optim) {
-      solver_pvline_extend_from_tt(rpv, worker->solver, worker->game_copy);
+  }
+  if (worker->solver->transposition_table_optim) {
+    for (int r = 0; r < n_ranked; r++) {
+      solver_pvline_extend_from_tt(&ranked_pvs[r], worker->solver,
+                                   worker->game_copy);
     }
   }
 
