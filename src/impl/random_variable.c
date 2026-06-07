@@ -187,11 +187,16 @@ typedef struct RVNormal {
 // after N draws -- a function of N alone, not of how worker threads interleave
 // across arms, which keeps BAI results reproducible across thread counts.
 static void rv_normal_seed_arm_prngs(RVNormal *rv_normal, const uint64_t seed) {
-  for (uint64_t arm = 0; arm < rv_normal->num_arms; arm++) {
-    prng_seed(rv_normal->xoshiro_prngs[arm], seed);
-    for (uint64_t jump = 0; jump < arm; jump++) {
-      prng_jump(rv_normal->xoshiro_prngs[arm]);
-    }
+  if (rv_normal->num_arms == 0) {
+    return;
+  }
+  // Arm k's stream is the base stream jumped k times. Build them in O(num_arms)
+  // jumps by seeding arm 0, then copying the previous arm and advancing it one
+  // jump, rather than re-seeding and jumping k times per arm (O(num_arms^2)).
+  prng_seed(rv_normal->xoshiro_prngs[0], seed);
+  for (uint64_t arm = 1; arm < rv_normal->num_arms; arm++) {
+    prng_copy(rv_normal->xoshiro_prngs[arm], rv_normal->xoshiro_prngs[arm - 1]);
+    prng_jump(rv_normal->xoshiro_prngs[arm]);
   }
 }
 
