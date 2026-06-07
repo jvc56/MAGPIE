@@ -597,6 +597,43 @@ void test_via_mover_must_bingo_every_depth(void) {
   }
 }
 
+// Cheap in-suite smoke for the VIA mover-must-bingo regression: a single 1-ply
+// solve (1 thread, no PV display) of the mover-on-turn position. The going-out
+// DISCO(U)nT bingo terminates the game at depth 1, so this is sub-second and
+// safe for run_all; the full plies-1..3 sweep with display stays on-demand
+// (viamover).
+void test_via_mover_bingo_one_ply(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 1 -eplies 1 -ttfraction 0.05");
+  load_and_exec_config_or_die(config, VIA_IS_MOVER_TURN_CGP);
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = config_get_game(config);
+  args.plies = config_get_endgame_plies(config);
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *ctx = NULL;
+  endgame_solve(&ctx, &args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->score == 181); // mover plays DISCO(U)nT going out, value +181
+  assert(!small_move_is_pass(&pv->moves[0]));
+
+  endgame_ctx_destroy(ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Stress test: post-VIA opp-on-turn position with many randomized short
 // time cutoffs. Asserts that even when IDS is interrupted mid-iteration,
 // the returned result is "reasonable" — concretely, opp's value must not
@@ -732,9 +769,11 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
-  // The VIA depth/stress regressions (viamover / viaopp / viastress) are
-  // on-demand only — viastress runs 100 timed iterations — so they are not
-  // invoked here from the default run_all suite.
+  // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
+  // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
+  // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100
+  // timed iterations — so they are not invoked here from the run_all suite.
+  test_via_mover_bingo_one_ply();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
