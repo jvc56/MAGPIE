@@ -1,6 +1,7 @@
 #ifndef PEG_H
 #define PEG_H
 
+#include "../def/letter_distribution_defs.h"
 #include "../def/peg_defs.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
@@ -117,6 +118,19 @@ typedef struct PegArgs {
   // k > 1 = sample one multiset per k weight-units, scaled accordingly.
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
+
+  // Optional: pin scenario evaluation to a single bag ordering instead of
+  // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
+  // evaluated against exactly one scenario: the bag is set to
+  // eval_bag_order[0..len-1] in that order (the mover draws the first
+  // tiles_played of them; the rest stay in the bag), and the opponent gets the
+  // remaining unseen tiles. The length must equal the position's bag size and
+  // the tiles must be drawable from the unseen pool, else peg_solve fails with
+  // ERROR_STATUS_PEG_INVALID_BAG_ORDER. Only the greedy stage 0 runs — a single
+  // pinned scenario has nothing for the halving stages to re-rank. The
+  // pointed-to tiles must outlive the solve. NULL / 0 = enumerate (default).
+  const MachineLetter *eval_bag_order;
+  int eval_bag_order_len;
 
   // Optional "only solve" set: a fixed list of root candidate moves to
   // evaluate instead of generating the full move list. When n_only_moves > 0,

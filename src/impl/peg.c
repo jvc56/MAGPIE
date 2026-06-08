@@ -529,8 +529,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
 // of bag_remaining (each equally likely), evaluate each leaf, and fold the
 // multiset weight into the accumulator.
 static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
-                           int n_bag_remaining, MachineLetter *bag_remaining,
-                           int64_t weight) {
+                           int n_bag_remaining,
+                           const MachineLetter *bag_remaining, int64_t weight) {
   // Collect mode: emit this split as its own job for scenario-level parallelism
   // instead of evaluating it inline.
   if (ctx->out_jobs != NULL) {
@@ -670,7 +670,38 @@ typedef struct PegCandJob {
   PegWorker *workers; // array; indexed by worker_idx
   PegRankedCand *out;
   PegPoll *poll; // optional live leaderboard; NULL = no polling
+  // When eval_bag_order_len > 0, evaluate exactly this one bag ordering instead
+  // of enumerating scenarios (see PegArgs.eval_bag_order).
+  const MachineLetter *eval_bag_order;
+  int eval_bag_order_len;
 } PegCandJob;
+
+// Evaluate exactly one bag ordering for the cand (no enumeration): the mover
+// draws the first ctx->k_drawn tiles of bag_order, the rest stay in the bag,
+// and the opponent gets the remaining unseen tiles. Fills the ctx accumulators
+// for a single scenario of weight 1. Used by the eval_bag_order path.
+static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
+                                    const MachineLetter *bag_order, int n_bag) {
+  const int k_drawn = ctx->k_drawn;
+  const int n_bag_remaining = n_bag - k_drawn;
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1] = {0};
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1] = {0};
+  for (int i = 0; i < k_drawn; i++) {
+    mover_drawn[i] = bag_order[i];
+  }
+  for (int i = 0; i < n_bag_remaining; i++) {
+    bag_remaining[i] = bag_order[k_drawn + i];
+  }
+  Game *game = peg_make_post_cand_game(
+      ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen, ctx->ld_size,
+      k_drawn, mover_drawn, n_bag_remaining, bag_remaining);
+  const int32_t value = peg_eval_leaf(ctx, game);
+  ctx->total_weight = 1.0;
+  ctx->win_weight = (value > 0) ? 1.0 : ((value == 0) ? 0.5 : 0.0);
+  ctx->spread_weight = (double)value;
+  ctx->weight_sum = 1;
+  ctx->n_scenarios = 1;
+}
 
 static void peg_cand_worker_fn(void *arg, int worker_idx) {
   PegCandJob *job = (PegCandJob *)arg;
@@ -707,10 +738,15 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   const int tiles_played = move_get_tiles_played(job->cand);
   ctx.k_drawn = tiles_played < job->bag_size ? tiles_played : job->bag_size;
   const int n_bag_remaining = job->bag_size - ctx.k_drawn;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
-  peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
-                  mover_drawn, 0, bag_remaining, 0);
+  if (job->eval_bag_order_len > 0) {
+    // Pinned single scenario: evaluate exactly the caller's bag ordering.
+    peg_eval_fixed_ordering(&ctx, job->eval_bag_order, job->eval_bag_order_len);
+  } else {
+    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
+                    mover_drawn, 0, bag_remaining, 0);
+  }
   job->out->move = *job->cand;
   job->out->win_pct =
       ctx.total_weight > 0 ? ctx.win_weight / ctx.total_weight : 0.0;
@@ -777,11 +813,15 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
 
 // Evaluate `n` candidate moves at `fidelity_plies`, writing ranked[i] for each.
 // Parallel across candidates when a pool is present, else inline.
-static void peg_eval_candidates(
-    PegPool *pool, PegWorker *workers, const Game *game, int mover_idx,
-    const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
-    int n, int fidelity_plies, int scenario_stride, int64_t deadline_ns,
-    ThreadControl *thread_control, PegPoll *poll, PegRankedCand *ranked) {
+static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
+                                const Game *game, int mover_idx,
+                                const uint8_t *unseen, int ld_size,
+                                int bag_size, const Move *const *cands, int n,
+                                int fidelity_plies, int scenario_stride,
+                                int64_t deadline_ns,
+                                ThreadControl *thread_control, PegPoll *poll,
+                                const MachineLetter *eval_bag_order,
+                                int eval_bag_order_len, PegRankedCand *ranked) {
   PegCandJob *jobs = malloc_or_die((size_t)n * sizeof(PegCandJob));
   for (int i = 0; i < n; i++) {
     jobs[i].base_game = game;
@@ -797,6 +837,8 @@ static void peg_eval_candidates(
     jobs[i].workers = workers;
     jobs[i].out = &ranked[i];
     jobs[i].poll = poll;
+    jobs[i].eval_bag_order = eval_bag_order;
+    jobs[i].eval_bag_order_len = eval_bag_order_len;
   }
   if (pool) {
     void **ptrs = malloc_or_die((size_t)n * sizeof(void *));
@@ -831,8 +873,8 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   ctx.deadline_ns = job->deadline_ns;
   ctx.thread_control = job->thread_control;
   ctx.worker = &job->workers[worker_idx];
-  // peg_eval_split mutates bag_remaining (sorts/permutes); the job owns its
-  // copy and is processed once, so passing it directly is fine.
+  // peg_eval_split reads bag_remaining (permuting a local copy), so passing the
+  // job's own copy directly is fine.
   peg_eval_split(&ctx, job->mover_drawn, job->n_bag_remaining,
                  job->bag_remaining, job->weight);
   job->total_weight = ctx.total_weight;
@@ -1027,6 +1069,27 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   uint8_t unseen[MAX_ALPHABET_SIZE];
   peg_compute_unseen(game, mover_idx, unseen);
 
+  // Validate an optional pinned bag ordering: it must list exactly bag_size
+  // tiles, all drawable from the unseen pool (the opponent gets the remainder).
+  if (args->eval_bag_order_len > 0) {
+    bool order_ok = args->eval_bag_order_len == bag_size;
+    int order_counts[MAX_ALPHABET_SIZE] = {0};
+    for (int i = 0; order_ok && i < args->eval_bag_order_len; i++) {
+      const MachineLetter ml = args->eval_bag_order[i];
+      if (ml >= MAX_ALPHABET_SIZE || ++order_counts[ml] > unseen[ml]) {
+        order_ok = false;
+      }
+    }
+    if (!order_ok) {
+      error_stack_push(error_stack, ERROR_STATUS_PEG_INVALID_BAG_ORDER,
+                       get_formatted_string(
+                           "PEG eval_bag_order must list exactly the %d bag "
+                           "tiles, all drawable from the unseen pool",
+                           bag_size));
+      return;
+    }
+  }
+
   // Protected ("never prune") moves: precompute their similarity keys against
   // the mover's rack so each stage can carry them past its top-K cut.
   const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
@@ -1073,6 +1136,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                        : default_num_stages;
   if (args->max_stage > 0 && args->max_stage < num_stages) {
     num_stages = args->max_stage;
+  }
+  if (args->eval_bag_order_len > 0) {
+    // A pinned single scenario has nothing for the halving stages to re-rank.
+    num_stages = 0;
   }
 
   // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
@@ -1174,7 +1241,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
                         ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
                         scenario_stride, deadline_ns, args->thread_control,
-                        args->poll, ranked);
+                        args->poll, args->eval_bag_order,
+                        args->eval_bag_order_len, ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).

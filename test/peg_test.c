@@ -1,7 +1,9 @@
 #include "peg_test.h"
 
 #include "../src/def/equity_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/validated_move.h"
@@ -25,10 +27,13 @@
 // this exercises just the deterministic stage-0 greedy evaluation — fast enough
 // for the main suite.
 //
-// scenario_stride > 1 (only honored for bag >= 3) keeps the 3- and 4-in-bag
-// scenario enumeration to a single split so those stay cheap.
+// When single_bag_ordering is set, the candidate is evaluated against exactly
+// one scenario — the position's actual bag ordering — via
+// PegArgs.eval_bag_order (no enumeration), which keeps the 3- and 4-in-bag
+// cases cheap.
 static void peg_assert_single_cand(const char *name, const char *cgp,
-                                   const char *move_str, int scenario_stride,
+                                   const char *move_str,
+                                   bool single_bag_ordering,
                                    int max_scenarios) {
   Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
   load_and_exec_config_or_die(config, cgp);
@@ -79,7 +84,26 @@ static void peg_assert_single_cand(const char *name, const char *cgp,
   args.time_budget_seconds = 10.0; // generous cap; a single cand is far quicker
   args.only_moves = only_moves;
   args.n_only_moves = 1;
-  args.scenario_stride = scenario_stride;
+
+  // Pin the evaluation to a single bag ordering (one scenario) for the 3-/4-in-
+  // bag cases, so they stay cheap. The position fixes the bag's multiset, but a
+  // CGP load shuffles its order with a time seed, so sort to a deterministic
+  // ordering — the test is then fully reproducible run-to-run.
+  MachineLetter bag_order[MAX_BAG_SIZE];
+  if (single_bag_ordering) {
+    const int n_bag = bag_peek_tiles(game_get_bag(game), bag_order);
+    for (int i = 1; i < n_bag; i++) {
+      const MachineLetter key = bag_order[i];
+      int j = i - 1;
+      while (j >= 0 && bag_order[j] > key) {
+        bag_order[j + 1] = bag_order[j];
+        j--;
+      }
+      bag_order[j + 1] = key;
+    }
+    args.eval_bag_order = bag_order;
+    args.eval_bag_order_len = n_bag;
+  }
 
   PegResult result;
   memset(&result, 0, sizeof(result));
@@ -128,8 +152,8 @@ static void test_peg_main_1bag_pass(void) {
       "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
       "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
       "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
-  peg_assert_single_cand("peg_1bag_pass", cgp, "pass", /*stride=*/1,
-                         /*max_scen=*/0);
+  peg_assert_single_cand("peg_1bag_pass", cgp, "pass",
+                         /*single_bag_ordering=*/false, /*max_scen=*/0);
 }
 
 // 1-in-bag, scoring candidate: the highest-equity play on macondo's
@@ -139,8 +163,8 @@ static void test_peg_main_1bag_score(void) {
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
-  peg_assert_single_cand("peg_1bag_score", cgp, NULL, /*stride=*/1,
-                         /*max_scen=*/0);
+  peg_assert_single_cand("peg_1bag_score", cgp, NULL,
+                         /*single_bag_ordering=*/false, /*max_scen=*/0);
 }
 
 // 2-in-bag, single candidate (highest-equity play) over the full 2-in-bag
@@ -150,35 +174,32 @@ static void test_peg_main_2bag_single(void) {
       "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1V3/5N3L1E3/5G2VELDT2/5E3S5/"
       "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
       "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
-  peg_assert_single_cand("peg_2bag_single", cgp, NULL, /*stride=*/1,
-                         /*max_scen=*/0);
+  peg_assert_single_cand("peg_2bag_single", cgp, NULL,
+                         /*single_bag_ordering=*/false, /*max_scen=*/0);
 }
 
 // 3-in-bag, single scenario of a single candidate (a genuine random 3-in-bag
-// position with both racks full). The scenario_stride equals the candidate's
-// total scenario weight, so weight-stratified sampling keeps exactly one
-// multiset split — a single scenario — which keeps the test cheap. (If the
-// generated top-equity candidate ever changes, the n_scenarios bounds below
-// catch a mis-sized stride.)
+// position with both racks full). eval_bag_order pins the evaluation to the
+// position's actual 3-tile bag ordering, so exactly one scenario runs.
 static void test_peg_main_3bag_single(void) {
   const char *cgp =
       "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
       "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
       "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
-  peg_assert_single_cand("peg_3bag_single", cgp, NULL, /*stride=*/360,
-                         /*max_scen=*/8);
+  peg_assert_single_cand("peg_3bag_single", cgp, NULL,
+                         /*single_bag_ordering=*/true, /*max_scen=*/1);
 }
 
 // 4-in-bag, single scenario of a single candidate (a genuine random 4-in-bag
-// position with both racks full). As above, the scenario_stride equals the
-// candidate's total scenario weight so a single multiset split is sampled.
+// position with both racks full). As above, eval_bag_order pins the evaluation
+// to the position's actual 4-tile bag ordering.
 static void test_peg_main_4bag_single(void) {
   const char *cgp =
       "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
       "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
       "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24";
-  peg_assert_single_cand("peg_4bag_single", cgp, NULL, /*stride=*/7920,
-                         /*max_scen=*/8);
+  peg_assert_single_cand("peg_4bag_single", cgp, NULL,
+                         /*single_bag_ordering=*/true, /*max_scen=*/1);
 }
 
 void test_peg(void) {
