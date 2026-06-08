@@ -325,6 +325,42 @@ magpie> goto 3
 magpie> infer
 ```
 
+### Solving a pre-endgame
+
+The `peg` command solves a pre-endgame (1 to 4 tiles in the bag): for each
+candidate move it enumerates the possible bag/opponent-rack orderings, solves
+the resulting endgames, and reports each move's win percentage and spread.
+
+Load a position with `cgp` and run `peg`:
+
+```
+magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20
+magpie> peg
+```
+
+By default the solver generates all root moves and assumes a **rational**
+opponent (it replies with its best-equity move). Several settings tune the
+search; see `help peg`, `help pegonly`, etc. for full descriptions:
+
+- `-pegpess true` switches to the **pessimistic** opponent model (the opponent
+  plays the worst-for-you reply), matching Macondo's guaranteed-win semantics.
+- `-pegonly <moves>` restricts the search to a fixed set of root candidates
+  (like Macondo's `only_solve`) instead of generating all moves. Moves are
+  comma-separated UCGI with no spaces — coordinate and tiles joined by a period,
+  exchanges as `ex.<tiles>`, pass as `pass`:
+
+  ```
+  magpie> peg -pegonly 13L.ONYX,13L.OXY
+  ```
+
+- `-pnoprune <moves>` protects moves from being cut by the halving cascade so
+  they are evaluated at full fidelity even if their win% rank falls below the cut.
+- `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
+  (default `32,16,8,4,2`).
+- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
+
+Use `-` to clear `pegonly` or `pnoprune`.
+
 ### Comparing lexica
 
 To play two lexica against each other to see which is stronger, you can create the required lexical data from text files and run the autoplay command. First, set the letter distribution:

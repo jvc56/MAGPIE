@@ -4,7 +4,9 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/board.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
@@ -187,7 +189,7 @@ static void test_peg_main_1bag_pass(void) {
       "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
       "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
   peg_assert_single_cand("peg_1bag_pass", cgp, "pass",
-                         /*single_bag_ordering=*/false, /*max_scen=*/0,
+                         /*single_bag_ordering=*/false, /*max_scenarios=*/0,
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
@@ -199,7 +201,7 @@ static void test_peg_main_2bag_single(void) {
       "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
       "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
   peg_assert_single_cand("peg_2bag_single", cgp, NULL,
-                         /*single_bag_ordering=*/false, /*max_scen=*/0,
+                         /*single_bag_ordering=*/false, /*max_scenarios=*/0,
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
@@ -212,7 +214,7 @@ static void test_peg_main_3bag_single(void) {
       "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
       "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
   peg_assert_single_cand("peg_3bag_single", cgp, NULL,
-                         /*single_bag_ordering=*/true, /*max_scen=*/1,
+                         /*single_bag_ordering=*/true, /*max_scenarios=*/1,
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
@@ -225,7 +227,7 @@ static void test_peg_main_4bag_single(void) {
       "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
       "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24";
   peg_assert_single_cand("peg_4bag_single", cgp, NULL,
-                         /*single_bag_ordering=*/true, /*max_scen=*/1,
+                         /*single_bag_ordering=*/true, /*max_scenarios=*/1,
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
@@ -243,10 +245,10 @@ static void test_peg_main_opp_models(void) {
   double rational = 0.0;
   double pessimistic = 0.0;
   peg_assert_single_cand("peg_opp_rational", cgp, NULL,
-                         /*single_bag_ordering=*/true, /*max_scen=*/1,
+                         /*single_bag_ordering=*/true, /*max_scenarios=*/1,
                          PEG_OPP_RATIONAL, &rational);
   peg_assert_single_cand("peg_opp_pessimistic", cgp, NULL,
-                         /*single_bag_ordering=*/true, /*max_scen=*/1,
+                         /*single_bag_ordering=*/true, /*max_scenarios=*/1,
                          PEG_OPP_PESSIMISTIC, &pessimistic);
   // A pessimistic opponent never helps the mover relative to a rational one.
   assert(pessimistic <= rational + 1e-6);
@@ -402,7 +404,7 @@ static void test_peg_macondo_only_onyx(void) {
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
                    PEG_OPP_RATIONAL, /*time_budget=*/5.0,
                    /*expect_best=*/"13L ONYX", &win, /*out_spread=*/NULL);
-  assert(win >= 7.5 / 8.0 - 0.005 && win <= 7.5 / 8.0 + 0.005); // 0.9375
+  assert(win >= (7.5 / 8.0) - 0.005 && win <= (7.5 / 8.0) + 0.005); // 0.9375
 }
 
 // macondo Test1PEGPass: a French (FRA20) 1-in-bag where passing is best (W-L-D
@@ -434,7 +436,7 @@ static void test_peg_macondo_axe(void) {
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
                    PEG_OPP_RATIONAL, /*time_budget=*/5.0, /*expect_best=*/NULL,
                    &win, /*out_spread=*/NULL);
-  assert(win >= 70.0 / 72.0 - 0.005 && win <= 70.0 / 72.0 + 0.005);
+  assert(win >= (70.0 / 72.0) - 0.005 && win <= (70.0 / 72.0) + 0.005);
 }
 
 // macondo manual Position #2: 13M P(AH). A single (candidate, scenario) slice —
@@ -574,6 +576,44 @@ static void test_peg_main_pnoprune(void) {
   config_destroy(config);
 }
 
+// Drives the `peg` CLI command end to end through the config command path
+// (load_and_exec_config_or_die), exercising the -pegonly / -pegpess /
+// -pegstride knobs and config_get_peg_result. The onyx board with -pegonly
+// restricted to ONYX + OXY must publish 13L ONYX (the studied 7.5/8 = 0.9375
+// verdict).
+static void test_peg_main_cli(void) {
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  // -pegonly takes space-free UCGI moves; the period is the in-move separator.
+  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX,13L.OXY");
+  load_and_exec_config_or_die(config, "peg");
+
+  const Game *game = config_get_game(config);
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->last_completed_stage >= 0);
+  StringBuilder *best = string_builder_create();
+  string_builder_add_move(best, game_get_board(game), &result->best_move,
+                          game_get_ld(game), false);
+  assert(strings_equal(string_builder_peek(best), "13L ONYX"));
+  string_builder_destroy(best);
+  const double onyx_win = result->best_win;
+  assert(onyx_win >= 0.9); // 7.5/8 = 0.9375
+
+  // The -pegpess / -pegstride / -pegtopk knobs parse and run (still restricted
+  // to the two pegonly candidates, so this stays fast).
+  load_and_exec_config_or_die(config,
+                              "set -pegpess true -pegstride 1 -pegtopk 4,2");
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+
+  printf("[peg_cli] pegonly best=13L ONYX win=%.4f\n", onyx_win);
+  config_destroy(config);
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();
@@ -588,4 +628,5 @@ void test_peg(void) {
   test_peg_macondo_axe();
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
+  test_peg_main_cli();
 }
