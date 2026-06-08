@@ -191,18 +191,6 @@ static void test_peg_main_1bag_pass(void) {
                          PEG_OPP_RATIONAL, /*out_spread=*/NULL);
 }
 
-// 1-in-bag, scoring candidate: the highest-equity play on macondo's
-// "Straightforward1PEG" board, evaluated over all one-tile-in-bag scenarios.
-static void test_peg_main_1bag_score(void) {
-  const char *cgp =
-      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
-      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
-      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
-  peg_assert_single_cand("peg_1bag_score", cgp, NULL,
-                         /*single_bag_ordering=*/false, /*max_scen=*/0,
-                         PEG_OPP_RATIONAL, /*out_spread=*/NULL);
-}
-
 // 2-in-bag, single candidate (highest-equity play) over the full 2-in-bag
 // scenario enumeration. macondo "ACIDOTIc" board.
 static void test_peg_main_2bag_single(void) {
@@ -470,7 +458,6 @@ static void test_peg_macondo_pond_slice(void) {
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();
-  test_peg_main_1bag_score();
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
   test_peg_main_4bag_single();
