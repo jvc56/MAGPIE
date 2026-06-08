@@ -550,8 +550,7 @@ void test_pass_peg_search(void) {
     (void)fprintf(
         stderr,
         "[passpegsearch] HIT seed=%llu mover_rack=%s unseen=%s lead=%+d\n",
-        (unsigned long long)(seed_offset + (uint64_t)attempt), mover_sig,
-        unseen_sig, lead);
+        (unsigned long long)seed_offset + attempt, mover_sig, unseen_sig, lead);
     (void)fprintf(stderr, "  CGP: %s\n", cgp);
     (void)fflush(stderr);
     free(cgp);
@@ -1078,8 +1077,8 @@ void test_pass_peg_engineered_search(void) {
     (void)fprintf(stderr,
                   "[passpegengineered] HIT seed=%llu R=%s lead=%+d bingos=%d "
                   "(mover=%d opp=%d)\n",
-                  (unsigned long long)(seed_offset + (uint64_t)attempt),
-                  target_rack, lead, bingo_count, mover_score, opp_score);
+                  (unsigned long long)seed_offset + attempt, target_rack, lead,
+                  bingo_count, mover_score, opp_score);
     (void)fprintf(stderr, "  CGP: %s\n", cgp);
     (void)fflush(stderr);
     // Append candidate to /tmp/passpeg_candidates.txt (one row each).
@@ -1167,9 +1166,9 @@ void test_generate_peg_cgps(void) {
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[256];
-  snprintf(load_cmd, sizeof(load_cmd),
-           "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex %s",
-           lex);
+  (void)snprintf(
+      load_cmd, sizeof(load_cmd),
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 / 0/0 0 -lex %s", lex);
   load_and_exec_config_or_die(config, load_cmd);
   Game *game = config_get_game(config);
   MoveList *ml = move_list_create(20);
@@ -1345,7 +1344,7 @@ static void print_position_to_report(FILE *report, Config *config,
                                      const BenchOutcomeRow *rows,
                                      int num_rows) {
   char load_cmd[10240];
-  snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
   load_and_exec_config_or_die(config, load_cmd);
   const Game *game = config_get_game(config);
 
@@ -1458,7 +1457,7 @@ void test_pass_peg_oracle_eval_move(void) {
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
-  snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
   load_and_exec_config_or_die(config, load_cmd);
   const Game *game = config_get_game(config);
 
@@ -1827,28 +1826,29 @@ peg_greedy_playout_pv(Game *game, int mover_idx, MoveList *playout_ml,
     n_plies++;
   }
   if (pv_sb) {
-    snprintf(out_pv_text, out_pv_text_cap, "%s", string_builder_peek(pv_sb));
+    (void)snprintf(out_pv_text, out_pv_text_cap, "%s",
+                   string_builder_peek(pv_sb));
     string_builder_destroy(pv_sb);
   }
   if (out_mover_rack_end && out_mover_rack_end_cap > 0) {
     StringBuilder *rsb = string_builder_create();
     string_builder_add_rack(
         rsb, player_get_rack(game_get_player(game, mover_idx)), ld, false);
-    snprintf(out_mover_rack_end, out_mover_rack_end_cap, "%s",
-             string_builder_peek(rsb));
+    (void)snprintf(out_mover_rack_end, out_mover_rack_end_cap, "%s",
+                   string_builder_peek(rsb));
     string_builder_destroy(rsb);
   }
   if (out_opp_rack_end && out_opp_rack_end_cap > 0) {
     StringBuilder *rsb = string_builder_create();
     string_builder_add_rack(
         rsb, player_get_rack(game_get_player(game, 1 - mover_idx)), ld, false);
-    snprintf(out_opp_rack_end, out_opp_rack_end_cap, "%s",
-             string_builder_peek(rsb));
+    (void)snprintf(out_opp_rack_end, out_opp_rack_end_cap, "%s",
+                   string_builder_peek(rsb));
     string_builder_destroy(rsb);
   }
   if (out_final_cgp && out_final_cgp_cap > 0) {
     char *cgp = game_get_cgp(game, true);
-    snprintf(out_final_cgp, out_final_cgp_cap, "%s", cgp ? cgp : "");
+    (void)snprintf(out_final_cgp, out_final_cgp_cap, "%s", cgp ? cgp : "");
     free(cgp);
   }
   const Player *me = game_get_player(game, mover_idx);
@@ -2136,9 +2136,9 @@ static bool peg_scenario_filter_match(const char *filter, const char *drawn_str,
     return true;
   }
   char joined[64];
-  snprintf(joined, sizeof(joined), "%s/%s", drawn_str, remaining_str);
+  (void)snprintf(joined, sizeof(joined), "%s/%s", drawn_str, remaining_str);
   char tmp[2048];
-  snprintf(tmp, sizeof(tmp), "%s", filter);
+  (void)snprintf(tmp, sizeof(tmp), "%s", filter);
   const char *tok = strtok(tmp, ";");
   while (tok != NULL) {
     if (strcmp(tok, joined) == 0) {
@@ -2502,7 +2502,7 @@ static void peg_eval_d0_ordering(const PegEnumCtx *ctx,
   char perm_post_cgp[512] = {0};
   if (ctx->tsv_f) {
     char *cgp = game_get_cgp(perm_game, true);
-    snprintf(perm_post_cgp, sizeof(perm_post_cgp), "%s", cgp ? cgp : "");
+    (void)snprintf(perm_post_cgp, sizeof(perm_post_cgp), "%s", cgp ? cgp : "");
     free(cgp);
   }
   char perm_pv[1024] = {0};
@@ -2581,7 +2581,8 @@ static void peg_eval_d0_ordering(const PegEnumCtx *ctx,
                                   game_get_ld(pv_g), true);
           play_move(&mf, pv_g, NULL);
         }
-        snprintf(perm_pv, sizeof(perm_pv), "%s", string_builder_peek(psb));
+        (void)snprintf(perm_pv, sizeof(perm_pv), "%s",
+                       string_builder_peek(psb));
         string_builder_destroy(psb);
         game_destroy(pv_g);
       }
@@ -2783,7 +2784,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
         ctx->k_drawn, mover_drawn, ctx->n_bag_remaining, bag_remaining);
     if (ctx->tsv_f) {
       char *cgp = game_get_cgp(game, true);
-      snprintf(post_cand_cgp, sizeof(post_cand_cgp), "%s", cgp ? cgp : "");
+      (void)snprintf(post_cand_cgp, sizeof(post_cand_cgp), "%s",
+                     cgp ? cgp : "");
       free(cgp);
     }
   }
@@ -3026,8 +3028,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
                                       game_get_ld(pv_g), true);
               play_move(&mf, pv_g, NULL);
             }
-            snprintf(kn_pv_text, sizeof(kn_pv_text), "%s",
-                     string_builder_peek(psb));
+            (void)snprintf(kn_pv_text, sizeof(kn_pv_text), "%s",
+                           string_builder_peek(psb));
             string_builder_destroy(psb);
             game_destroy(pv_g);
           }
@@ -3050,8 +3052,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           string_builder_add_rack(
               rsb, player_get_rack(game_get_player(game, ctx->mover_idx)), ld,
               false);
-          snprintf(kn_mover_rack, sizeof(kn_mover_rack), "%s",
-                   string_builder_peek(rsb));
+          (void)snprintf(kn_mover_rack, sizeof(kn_mover_rack), "%s",
+                         string_builder_peek(rsb));
           string_builder_destroy(rsb);
         }
         peg_lock(ctx->inner_tsv_mutex);
@@ -3093,25 +3095,26 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
                                     game_get_ld(pv_game), true);
             play_move(&m_full, pv_game, NULL);
           }
-          snprintf(pv_text, sizeof(pv_text), "%s", string_builder_peek(pv_sb));
+          (void)snprintf(pv_text, sizeof(pv_text), "%s",
+                         string_builder_peek(pv_sb));
           string_builder_destroy(pv_sb);
           char *cgp = game_get_cgp(pv_game, true);
-          snprintf(final_cgp, sizeof(final_cgp), "%s", cgp ? cgp : "");
+          (void)snprintf(final_cgp, sizeof(final_cgp), "%s", cgp ? cgp : "");
           free(cgp);
           StringBuilder *rsb = string_builder_create();
           string_builder_add_rack(
               rsb, player_get_rack(game_get_player(pv_game, ctx->mover_idx)),
               game_get_ld(pv_game), false);
-          snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
-                   string_builder_peek(rsb));
+          (void)snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                         string_builder_peek(rsb));
           string_builder_destroy(rsb);
           StringBuilder *rsb2 = string_builder_create();
           string_builder_add_rack(
               rsb2,
               player_get_rack(game_get_player(pv_game, 1 - ctx->mover_idx)),
               game_get_ld(pv_game), false);
-          snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
-                   string_builder_peek(rsb2));
+          (void)snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
+                         string_builder_peek(rsb2));
           string_builder_destroy(rsb2);
           game_destroy(pv_game);
         }
@@ -3201,11 +3204,11 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           StringBuilder *sb_m = string_builder_create();
           string_builder_add_move(sb_m, game_get_board(game), opp_move,
                                   game_get_ld(game), true);
-          snprintf(text, sizeof(text), "%s", string_builder_peek(sb_m));
+          (void)snprintf(text, sizeof(text), "%s", string_builder_peek(sb_m));
           string_builder_destroy(sb_m);
           bool match = false;
           char tmp[2048];
-          snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+          (void)snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
           const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
@@ -3459,7 +3462,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
         const char *walk_k_env = getenv("PASSPEG_GREEDY_WALK_K");
         if (walk_k_env && *walk_k_env) {
           char tmp[256];
-          snprintf(tmp, sizeof(tmp), "%s", walk_k_env);
+          (void)snprintf(tmp, sizeof(tmp), "%s", walk_k_env);
           int i = 0;
           const char *tok = strtok(tmp, ",");
           while (tok != NULL && i < 16) {
@@ -3733,8 +3736,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
                 StringBuilder *sb = string_builder_create();
                 string_builder_add_move(sb, game_get_board(walker), m,
                                         game_get_ld(walker), true);
-                snprintf(opp_move_text, sizeof(opp_move_text), "%s",
-                         string_builder_peek(sb));
+                (void)snprintf(opp_move_text, sizeof(opp_move_text), "%s",
+                               string_builder_peek(sb));
                 string_builder_destroy(sb);
                 opp_move_score = equity_to_int(move_get_score(m));
               }
@@ -3890,10 +3893,11 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
             }
             string_builder_add_string(walker_pv, final_pv);
           }
-          snprintf(pv_text, sizeof(pv_text), "%s",
-                   string_builder_peek(walker_pv));
-          snprintf(mover_rack_end, sizeof(mover_rack_end), "%s", final_mr);
-          snprintf(opp_rack_end, sizeof(opp_rack_end), "%s", final_or);
+          (void)snprintf(pv_text, sizeof(pv_text), "%s",
+                         string_builder_peek(walker_pv));
+          (void)snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                         final_mr);
+          (void)snprintf(opp_rack_end, sizeof(opp_rack_end), "%s", final_or);
           string_builder_destroy(walker_pv);
         }
         game_destroy(walker);
@@ -3945,11 +3949,11 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           StringBuilder *sb_chk = string_builder_create();
           string_builder_add_move(sb_chk, game_get_board(game), opp_move_chk,
                                   game_get_ld(game), true);
-          snprintf(text, sizeof(text), "%s", string_builder_peek(sb_chk));
+          (void)snprintf(text, sizeof(text), "%s", string_builder_peek(sb_chk));
           string_builder_destroy(sb_chk);
           bool match = false;
           char tmp[2048];
-          snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+          (void)snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
           const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
@@ -4124,8 +4128,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
             StringBuilder *sb_p = string_builder_create();
             string_builder_add_move(sb_p, game_get_board(game), picked_move,
                                     game_get_ld(game), true);
-            snprintf(picked_text, sizeof(picked_text), "%s",
-                     string_builder_peek(sb_p));
+            (void)snprintf(picked_text, sizeof(picked_text), "%s",
+                           string_builder_peek(sb_p));
             string_builder_destroy(sb_p);
           }
           // Build the realized opp_pov_game game (same as
@@ -4191,26 +4195,27 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
               play_move(&m_full, pv_game, NULL);
             }
             char *cgp = game_get_cgp(pv_game, true);
-            snprintf(final_cgp, sizeof(final_cgp), "%s", cgp ? cgp : "");
+            (void)snprintf(final_cgp, sizeof(final_cgp), "%s", cgp ? cgp : "");
             free(cgp);
             StringBuilder *rsb = string_builder_create();
             string_builder_add_rack(
                 rsb, player_get_rack(game_get_player(pv_game, ctx->mover_idx)),
                 bld, false);
-            snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
-                     string_builder_peek(rsb));
+            (void)snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                           string_builder_peek(rsb));
             string_builder_destroy(rsb);
             StringBuilder *rsb2 = string_builder_create();
             string_builder_add_rack(
                 rsb2,
                 player_get_rack(game_get_player(pv_game, 1 - ctx->mover_idx)),
                 bld, false);
-            snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
-                     string_builder_peek(rsb2));
+            (void)snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
+                           string_builder_peek(rsb2));
             string_builder_destroy(rsb2);
             game_destroy(pv_game);
           }
-          snprintf(pv_text, sizeof(pv_text), "%s", string_builder_peek(pv_sb));
+          (void)snprintf(pv_text, sizeof(pv_text), "%s",
+                         string_builder_peek(pv_sb));
           string_builder_destroy(pv_sb);
           endgame_ctx_destroy(eg_ctx);
           endgame_results_destroy(eg_results);
@@ -4248,11 +4253,11 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           StringBuilder *sb_chk = string_builder_create();
           string_builder_add_move(sb_chk, game_get_board(game), opp_move_chk,
                                   game_get_ld(game), true);
-          snprintf(text, sizeof(text), "%s", string_builder_peek(sb_chk));
+          (void)snprintf(text, sizeof(text), "%s", string_builder_peek(sb_chk));
           string_builder_destroy(sb_chk);
           bool match = false;
           char tmp[2048];
-          snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
+          (void)snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
           const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
@@ -4457,8 +4462,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           StringBuilder *opp_sb = string_builder_create();
           string_builder_add_move(opp_sb, game_get_board(branch), opp_move,
                                   game_get_ld(branch), true);
-          snprintf(opp_move_text, sizeof(opp_move_text), "%s",
-                   string_builder_peek(opp_sb));
+          (void)snprintf(opp_move_text, sizeof(opp_move_text), "%s",
+                         string_builder_peek(opp_sb));
           string_builder_destroy(opp_sb);
         }
         (void)opp_move_text;
@@ -4538,28 +4543,28 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
                                           &m_full, bld, true);
                   play_move(&m_full, pv_game, NULL);
                 }
-                snprintf(branch_pv, sizeof(branch_pv), "%s",
-                         string_builder_peek(pv_sb));
+                (void)snprintf(branch_pv, sizeof(branch_pv), "%s",
+                               string_builder_peek(pv_sb));
                 string_builder_destroy(pv_sb);
                 char *cgp = game_get_cgp(pv_game, true);
-                snprintf(branch_final_cgp, sizeof(branch_final_cgp), "%s",
-                         cgp ? cgp : "");
+                (void)snprintf(branch_final_cgp, sizeof(branch_final_cgp), "%s",
+                               cgp ? cgp : "");
                 free(cgp);
                 StringBuilder *rsb = string_builder_create();
                 string_builder_add_rack(
                     rsb,
                     player_get_rack(game_get_player(pv_game, ctx->mover_idx)),
                     bld, false);
-                snprintf(branch_mover_rack, sizeof(branch_mover_rack), "%s",
-                         string_builder_peek(rsb));
+                (void)snprintf(branch_mover_rack, sizeof(branch_mover_rack),
+                               "%s", string_builder_peek(rsb));
                 string_builder_destroy(rsb);
                 StringBuilder *rsb2 = string_builder_create();
                 string_builder_add_rack(rsb2,
                                         player_get_rack(game_get_player(
                                             pv_game, 1 - ctx->mover_idx)),
                                         bld, false);
-                snprintf(branch_opp_rack, sizeof(branch_opp_rack), "%s",
-                         string_builder_peek(rsb2));
+                (void)snprintf(branch_opp_rack, sizeof(branch_opp_rack), "%s",
+                               string_builder_peek(rsb2));
                 string_builder_destroy(rsb2);
                 game_destroy(pv_game);
               }
@@ -4572,17 +4577,20 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
 
         if (!have_any || branch_total < worst_for_mover) {
           worst_for_mover = branch_total;
-          snprintf(worst_opp_text, sizeof(worst_opp_text), "%s", opp_move_text);
+          (void)snprintf(worst_opp_text, sizeof(worst_opp_text), "%s",
+                         opp_move_text);
           if (pv_builder) {
             // Capture the FULL PV for the worst branch in the TSV row: opp's
             // move first, then the greedy continuation that peg_greedy_*
             // recorded.
-            snprintf(pv_text, sizeof(pv_text), "%s%s%s", opp_move_text,
-                     branch_pv[0] ? " | " : "", branch_pv);
-            snprintf(final_cgp, sizeof(final_cgp), "%s", branch_final_cgp);
-            snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
-                     branch_mover_rack);
-            snprintf(opp_rack_end, sizeof(opp_rack_end), "%s", branch_opp_rack);
+            (void)snprintf(pv_text, sizeof(pv_text), "%s%s%s", opp_move_text,
+                           branch_pv[0] ? " | " : "", branch_pv);
+            (void)snprintf(final_cgp, sizeof(final_cgp), "%s",
+                           branch_final_cgp);
+            (void)snprintf(mover_rack_end, sizeof(mover_rack_end), "%s",
+                           branch_mover_rack);
+            (void)snprintf(opp_rack_end, sizeof(opp_rack_end), "%s",
+                           branch_opp_rack);
           }
           have_any = true;
         }
@@ -4800,8 +4808,8 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
     const LetterDistribution *ld = game_get_ld(opp_pov_game);
     StringBuilder *rsb = string_builder_create();
     string_builder_add_rack(rsb, opp_pov_mover_rack, ld, false);
-    snprintf(opp_pov_mover_rack_str, sizeof(opp_pov_mover_rack_str), "%s",
-             string_builder_peek(rsb));
+    (void)snprintf(opp_pov_mover_rack_str, sizeof(opp_pov_mover_rack_str), "%s",
+                   string_builder_peek(rsb));
     string_builder_destroy(rsb);
   }
   play_move(j->opp_move, opp_pov_game, NULL);
@@ -4981,8 +4989,8 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
                                   game_get_ld(pv_game), true);
           play_move(&m_full, pv_game, NULL);
         }
-        snprintf(inner_pv_text, sizeof(inner_pv_text), "%s",
-                 string_builder_peek(pv_sb));
+        (void)snprintf(inner_pv_text, sizeof(inner_pv_text), "%s",
+                       string_builder_peek(pv_sb));
         string_builder_destroy(pv_sb);
         game_destroy(pv_game);
       }
@@ -5396,7 +5404,7 @@ void test_pass_peg_greedy_bench(void) {
   for (int pi = 0; pi < n_pos; pi++) {
     Config *config = config_create_or_die("set -s1 score -s2 score");
     char load_cmd[10240];
-    snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgps[pi]);
+    (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgps[pi]);
     load_and_exec_config_or_die(config, load_cmd);
     Game *game = config_get_game(config);
     int mover_idx = game_get_player_on_turn_index(game);
@@ -5589,7 +5597,7 @@ void test_pass_peg_greedy_bench(void) {
         const Move *m = move_list_get_move(ml_cands, cand_order[i]);
         StringBuilder *sb_m = string_builder_create();
         string_builder_add_move(sb_m, game_get_board(game), m, ld, true);
-        snprintf(cand_text[i], 256, "%s", string_builder_peek(sb_m));
+        (void)snprintf(cand_text[i], 256, "%s", string_builder_peek(sb_m));
         string_builder_destroy(sb_m);
       }
       int *new_order = malloc_or_die((size_t)cand_order_n * sizeof(int));
@@ -5598,7 +5606,7 @@ void test_pass_peg_greedy_bench(void) {
           (bool *)malloc_or_die((size_t)cand_order_n * sizeof(bool));
       memset(consumed, 0, (size_t)cand_order_n * sizeof(bool));
       char tmp_filter[4096];
-      snprintf(tmp_filter, sizeof(tmp_filter), "%s", only_moves);
+      (void)snprintf(tmp_filter, sizeof(tmp_filter), "%s", only_moves);
       const char *tok = strtok(tmp_filter, ";");
       while (tok) {
         // Skip leading spaces in the token.
@@ -5711,13 +5719,13 @@ void test_pass_peg_greedy_bench(void) {
       {
         StringBuilder *sb_m = string_builder_create();
         string_builder_add_move(sb_m, game_get_board(game), cand, ld, true);
-        snprintf(cand_txt, 256, "%s", string_builder_peek(sb_m));
+        (void)snprintf(cand_txt, 256, "%s", string_builder_peek(sb_m));
         string_builder_destroy(sb_m);
       }
       if (only_moves) {
         bool match = false;
         char tmp[2048];
-        snprintf(tmp, sizeof(tmp), "%s", only_moves);
+        (void)snprintf(tmp, sizeof(tmp), "%s", only_moves);
         const char *tok = strtok(tmp, ";");
         while (tok) {
           if (strstr(cand_txt, tok)) {
@@ -6403,14 +6411,14 @@ void test_pass_peg_cascade(void) {
     }
 
     char stage_file[512];
-    snprintf(stage_file, sizeof(stage_file), "%s_s%d.tsv", out_prefix,
-             stage_idx);
+    (void)snprintf(stage_file, sizeof(stage_file), "%s_s%d.tsv", out_prefix,
+                   stage_idx);
     char depth_str[16];
     char topk_str[16];
     char budget_str[32];
-    snprintf(depth_str, sizeof(depth_str), "%d", sp->depth);
-    snprintf(topk_str, sizeof(topk_str), "%d", sp->top_k);
-    snprintf(budget_str, sizeof(budget_str), "%.3f", remaining);
+    (void)snprintf(depth_str, sizeof(depth_str), "%d", sp->depth);
+    (void)snprintf(topk_str, sizeof(topk_str), "%d", sp->top_k);
+    (void)snprintf(budget_str, sizeof(budget_str), "%.3f", remaining);
 
     setenv("PASSPEG_GREEDY_PATH", path, 1);
     setenv("PASSPEG_GREEDY_DEPTH", depth_str, 1);
@@ -6585,7 +6593,7 @@ static void peg_assert_cand(const char *test_name,
   (void)fclose(cgp_f);
 
   char depth_buf[8];
-  snprintf(depth_buf, sizeof(depth_buf), "%d", depth);
+  (void)snprintf(depth_buf, sizeof(depth_buf), "%d", depth);
   setenv("PASSPEG_GREEDY_PATH", cgp_path, 1);
   setenv("PASSPEG_GREEDY_ONLY", cand_filter, 1);
   setenv("PASSPEG_GREEDY_DEPTH", depth_buf, 1);
@@ -6900,7 +6908,7 @@ void test_pass_peg_pessimistic_eval(void) {
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
-  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
   load_and_exec_config_or_die(config, load_cmd);
   Game *game = config_get_game(config);
 
@@ -7660,11 +7668,11 @@ typedef struct NestedPerm {
   int64_t est; // opp danger estimate (top opp-move equity), for sub-perm sort
 } NestedPerm;
 
-typedef struct NestedPermCollect {
+struct NestedPermCollect {
   NestedPerm *perms;
   int cap;
   int count;
-} NestedPermCollect;
+};
 
 static void peg_pess_nested_collect_perm_cb(const MachineLetter *draw, int n,
                                             int64_t weight, void *user) {
@@ -7890,7 +7898,7 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
       pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool) &&
       (s->force_nested_perm ||
        peg_pool_queue_count(s->pool) < peg_pool_num_workers(s->pool));
-  Timer rung4_t;
+  Timer rung4_t = {0};
   if (s->rung4_probe_s > 0.0) {
     ctimer_start(&rung4_t);
   }
@@ -8247,12 +8255,12 @@ static Game *peg_pess_build_scenario(const Game *base_game,
 // that. Slots' ml_pool/eg_scratch persist across acquisitions (reused scratch);
 // per-task counters are reset by the caller. Sized larger than the max number
 // of concurrently-active tasks (n_threads * (fork_depth+1) + margin).
-typedef struct PessSlotArena {
+struct PessSlotArena {
   int n_slots;
   int *free_stack; // indices of currently-free slots
   int free_top;    // count of free slots on the stack
   cpthread_mutex_t mutex;
-} PessSlotArena;
+};
 
 // Returns a free slot index, or -1 if exhausted (caller must handle; sizing
 // should make this impossible for the configured fork depth).
@@ -8288,7 +8296,7 @@ static int pess_arena_free(PessSlotArena *a) {
 // Fields are grouped for readability over packing; only a handful of these are
 // allocated, so the padding is immaterial.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
-typedef struct PessJob {
+struct PessJob {
   const Game *base_game;
   const Move *cand;
   const uint8_t *unseen;
@@ -8346,7 +8354,7 @@ typedef struct PessJob {
   int64_t *per_worker_recursive;
   int64_t *per_worker_nested;
   int64_t *per_worker_busy_ns; // wall ns spent in worker_fn body
-} PessJob;
+};
 
 // Map worker_idx → slot. peg_pool hands in worker_idx in
 // [thread_index_offset, thread_index_offset + num_workers); the calling thread
@@ -8962,7 +8970,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
-  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
   load_and_exec_config_or_die(config, load_cmd);
   Game *game = config_get_game(config);
 
@@ -9635,7 +9643,7 @@ void test_pass_peg_endgame_one(void) {
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
-  snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
+  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
   load_and_exec_config_or_die(config, load_cmd);
   Game *game = config_get_game(config);
   game_set_endgame_solving_mode(game);
