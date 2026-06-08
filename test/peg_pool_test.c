@@ -167,7 +167,7 @@ static void test_peg_pool_null_inline(void) {
     args[i] = &items[i];
   }
   peg_pool_submit_and_wait(NULL, add_fn, args, N, 7);
-  assert(atomic_load(&sum) == 2 * N);
+  assert(atomic_load(&sum) == 2L * N);
   assert(atomic_load(&bad_idx) == 0); // all ran inline with the helper idx
 }
 

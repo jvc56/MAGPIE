@@ -1,15 +1,15 @@
 #include "peg_pool.h"
 
 #include "../compat/cpthread.h"
+#include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include <errno.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdbool.h>
-#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <time.h>
 
 enum {
   PEG_POOL_QUEUE_INIT_CAP = 1024,
@@ -155,35 +155,14 @@ static bool pp_pop_or_shutdown(PegPool *pool, PegPoolItem *out) {
 //   waiter sees pending=0, returns, batch on stack invalidated
 //   worker=101 cpthread_mutex_lock -> FATAL
 static void pp_run_item(PegPoolItem *item, int worker_idx) {
-  const bool trace = getenv("PEG_POOL_TRACE") != NULL;
-  if (trace) {
-    fprintf(stderr, "[peg_pool TRACE] worker=%d START item=%p batch=%p fn=%p\n",
-            worker_idx, (void *)item, (void *)item->batch,
-            (void *)(uintptr_t)item->fn);
-    fflush(stderr);
-  }
   item->fn(item->arg, worker_idx);
-  if (trace) {
-    fprintf(stderr, "[peg_pool TRACE] worker=%d FN-DONE item=%p batch=%p\n",
-            worker_idx, (void *)item, (void *)item->batch);
-    fflush(stderr);
-  }
   if (item->batch) {
     cpthread_mutex_lock(&item->batch->mutex);
-    int prev = atomic_fetch_sub(&item->batch->pending, 1);
+    const int prev = atomic_fetch_sub(&item->batch->pending, 1);
     if (prev == 1) {
       cpthread_cond_broadcast(&item->batch->cv);
     }
     cpthread_mutex_unlock(&item->batch->mutex);
-    if (trace) {
-      fprintf(stderr, "[peg_pool TRACE] worker=%d DEC batch=%p prev=%d\n",
-              worker_idx, (void *)item->batch, prev);
-      fflush(stderr);
-    }
-  } else if (trace) {
-    fprintf(stderr, "[peg_pool TRACE] worker=%d NULL-BATCH item=%p\n",
-            worker_idx, (void *)item);
-    fflush(stderr);
   }
 }
 
@@ -256,8 +235,8 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
       cpthread_mutex_unlock(&batch.mutex);
       break;
     }
-    struct timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
+    TimeSpec ts;
+    ctimer_clock_gettime_realtime(&ts);
     ts.tv_sec += iter_s; // diagnostic wake-up
     int ret = pthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
     // ret == 0 is a normal wake (re-check pending at the loop top); ETIMEDOUT
@@ -275,20 +254,20 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
       cpthread_mutex_unlock(&pool->q_mutex);
       if (watchdog_on && (debug_on || p_after == last_logged_pending)) {
         stuck_iterations++;
-        fprintf(stderr,
-                "[peg_pool WAIT-STUCK] pending=%d/%d, q_count=%d, "
-                "shutdown=%d, helper_worker=%d, stuck_iters=%d\n",
-                p_after, n_total, q_count, q_shutdown ? 1 : 0,
-                helper_worker_idx, stuck_iterations);
-        fflush(stderr);
+        (void)fprintf(stderr,
+                      "[peg_pool WAIT-STUCK] pending=%d/%d, q_count=%d, "
+                      "shutdown=%d, helper_worker=%d, stuck_iters=%d\n",
+                      p_after, n_total, q_count, q_shutdown ? 1 : 0,
+                      helper_worker_idx, stuck_iterations);
+        (void)fflush(stderr);
       }
       last_logged_pending = p_after;
       if (watchdog_on && stuck_iterations >= 6) {
-        fprintf(stderr,
-                "[peg_pool FATAL] deadlock detected: pending=%d/%d,"
-                " q_count=%d, no progress for %ds\n",
-                p_after, n_total, q_count, stuck_timeout_s);
-        fflush(stderr);
+        (void)fprintf(stderr,
+                      "[peg_pool FATAL] deadlock detected: pending=%d/%d,"
+                      " q_count=%d, no progress for %ds\n",
+                      p_after, n_total, q_count, stuck_timeout_s);
+        (void)fflush(stderr);
         cpthread_mutex_unlock(&batch.mutex);
         abort();
       }
@@ -311,7 +290,7 @@ PegPool *peg_pool_create(int num_workers, int thread_index_offset) {
   pool->shutdown = false;
   atomic_init(&pool->idle_workers, 0);
   const char *to_env = getenv("PEG_POOL_STUCK_TIMEOUT_S");
-  pool->stuck_timeout_s = to_env ? atoi(to_env) : 60;
+  pool->stuck_timeout_s = to_env ? (int)strtol(to_env, NULL, 10) : 60;
   cpthread_mutex_init(&pool->q_mutex);
   cpthread_cond_init(&pool->q_cv_nonempty);
   pool->threads = malloc_or_die((size_t)num_workers * sizeof(cpthread_t));
