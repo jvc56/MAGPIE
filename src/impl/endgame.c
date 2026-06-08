@@ -560,12 +560,24 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   if (es->threads < 1) {
     es->threads = 1;
   }
+  // Normalize the injection ceiling so later logic has one interpretation:
+  // clamp to MAX_THREADS (injected workers draw MoveGen slots from a pool
+  // capped there, and the worker arrays are sized to it), and treat any
+  // ceiling <= threads as "no growth" (0).
   es->max_workers = endgame_args->max_workers;
+  if (es->max_workers > MAX_THREADS) {
+    es->max_workers = MAX_THREADS;
+  }
+  if (es->max_workers <= es->threads) {
+    es->max_workers = 0;
+  }
   // Injection window starts shut: endgame_solve opens it once the initial
   // workers are spawned, and shuts it again before the join. live_workers
-  // counts the initial set until adds bump it.
+  // counts the initial set until adds bump it. Clear window_open_ns so a
+  // monitor can't read a stale timestamp from a previous solve.
   atomic_store(&es->adding_closed, 1);
   atomic_store(&es->live_workers, es->threads);
+  atomic_store(&es->window_open_ns, (int64_t)0);
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -2756,6 +2768,13 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   EndgameCtx *solver = *ctx;
 
   endgame_ctx_reset(solver, results, endgame_args);
+  // The inline master runs in the calling thread, so the base worker count is
+  // always 1 regardless of the caller's num_threads — only injected helpers
+  // (ordinals > 0) are spawned. Force threads/live_workers to 1 so injection
+  // ordinals and join ranges stay consistent (otherwise helpers would start at
+  // ordinal == num_threads, leaving gaps).
+  solver->threads = 1;
+  atomic_store(&solver->live_workers, 1);
 
   uint64_t base_seed = endgame_args->seed != 0
                            ? endgame_args->seed

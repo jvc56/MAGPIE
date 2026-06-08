@@ -88,24 +88,26 @@ typedef struct EndgameArgs {
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,
                            int max_depth);
-// Allocate an empty endgame context (reused across solves). Lets a caller
-// pre-create per-worker contexts so their pointers are stable before any
-// concurrent observer (e.g. an injection monitor) reads them.
+// Allocate an empty endgame context (reused across solves). Returns a single
+// EndgameCtx; pre-creating it lets a caller hold a stable pointer before any
+// concurrent observer (e.g. an injection monitor) reads it.
 EndgameCtx *endgame_ctx_create(void);
 void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
-// Inject one additional ABDADA worker into an in-flight multithreaded
-// endgame_solve. Intended to be called from another thread while endgame_solve
-// is blocked in its join phase — e.g. a pool that lends an idle core to a
-// long-running leaf solve. The new worker gets the next free ordinal (> 0,
-// never the root master), its own ABDADA jitter from that ordinal, a game copy
-// from the (read-only) root inputs, and a MoveGen cache slot assigned on demand
-// by get_movegen(); it cooperates with the running workers purely through the
-// shared TT and self-exits when the search completes. Returns true if a worker
-// was spawned, false if the injection window is shut or the max_workers ceiling
-// is reached. Only valid against a ctx whose current solve was launched with
-// max_workers > num_threads.
+// Inject one additional ABDADA worker into an in-flight solve. Works against
+// both entry points: endgame_solve (spawned master) and endgame_solve_inline
+// (the calling thread is the master). It may be called from another thread
+// (e.g. a pool lending an idle core) or from the solving thread itself — the
+// injection test drives it from the master's per_ply_callback. The new worker
+// gets the next free ordinal (> 0, never the root master), its own ABDADA
+// jitter from that ordinal, a game copy from the (read-only) root inputs, and a
+// MoveGen cache slot assigned on demand by get_movegen(); it cooperates with
+// the running workers purely through the shared TT and self-exits when the
+// search completes. Returns true if a worker was spawned, false if the
+// injection window is shut or the max_workers ceiling is reached. Only valid
+// against a ctx whose current solve was launched with max_workers enabling
+// growth (max_workers > effective thread count after reset normalization).
 bool endgame_add_worker(EndgameCtx *ctx);
 
 // Number of worker threads currently live in this solve (master + injected
