@@ -1,7 +1,10 @@
 #include "peg_poll_test.h"
 
 #include "../src/compat/cpthread.h"
+#include "../src/def/cpthread_defs.h"
+#include "../src/ent/board.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/impl/config.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
@@ -55,7 +58,7 @@ static void *poller_main(void *arg) {
     if (snap.done) {
       break;
     }
-    const struct timespec nap = {0, 1 * 1000 * 1000}; // 1 ms
+    const struct timespec nap = {0, 1L * 1000 * 1000}; // 1 ms
     nanosleep(&nap, NULL);
   }
   return NULL;

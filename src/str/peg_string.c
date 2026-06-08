@@ -6,6 +6,7 @@
 #include "../impl/peg.h"
 #include "../util/string_util.h"
 #include "move_string.h"
+#include <stddef.h>
 
 char *peg_result_get_string(const PegResult *result, const Game *game) {
   StringBuilder *sb = string_builder_create();

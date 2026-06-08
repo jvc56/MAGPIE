@@ -2,7 +2,11 @@
 
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
+#include "../def/board_defs.h"
+#include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
+#include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
@@ -17,6 +21,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../util/io_util.h"
 #include "endgame.h"
@@ -278,6 +283,9 @@ static void peg_set_opp_rack(Rack *opp_rack,
     remaining[ml] = unseen[ml];
   }
   for (int i = 0; i < n_bag; i++) {
+    // bag_tiles[0..n_bag) are machine letters in [0, ld_size); remaining[] is
+    // initialized for that range by the loop above.
+    // NOLINTNEXTLINE(clang-analyzer-core.uninitialized.ArraySubscript)
     if (remaining[bag_tiles[i]] > 0) {
       remaining[bag_tiles[i]]--;
     }
@@ -693,7 +701,11 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
         ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
         ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_perm);
     const int32_t value = peg_eval_leaf(ctx, game);
-    ordering_win += (value > 0) ? 1.0 : ((value == 0) ? 0.5 : 0.0);
+    if (value > 0) {
+      ordering_win += 1.0;
+    } else if (value == 0) {
+      ordering_win += 0.5;
+    }
     ordering_spread += (double)value;
     n_orderings++;
   } while (peg_next_perm(bag_perm, n_bag_remaining));
@@ -805,7 +817,13 @@ static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
       k_drawn, mover_drawn, n_bag_remaining, bag_remaining);
   const int32_t value = peg_eval_leaf(ctx, game);
   ctx->total_weight = 1.0;
-  ctx->win_weight = (value > 0) ? 1.0 : ((value == 0) ? 0.5 : 0.0);
+  if (value > 0) {
+    ctx->win_weight = 1.0;
+  } else if (value == 0) {
+    ctx->win_weight = 0.5;
+  } else {
+    ctx->win_weight = 0.0;
+  }
   ctx->spread_weight = (double)value;
   ctx->weight_sum = 1;
   ctx->n_scenarios = 1;
@@ -1123,7 +1141,7 @@ static void *peg_injector_main(void *arg) {
   // sub-millisecond leaf solves close before this, so we never pay ABDADA
   // spawn/coordination overhead on them — only the few long "monster" endgames
   // (the deep-stage realized lines) get helpers.
-  const int64_t min_age_ns = 30 * 1000 * 1000; // 30 ms
+  const int64_t min_age_ns = 30LL * 1000 * 1000; // 30 ms
   PegInjector *inj = (PegInjector *)arg;
   while (!atomic_load(&inj->stop)) {
     if (peg_pool_idle_workers(inj->pool) > 0) {
@@ -1150,7 +1168,7 @@ static void *peg_injector_main(void *arg) {
         endgame_add_worker(least);
       }
     }
-    const struct timespec nap = {0, 2 * 1000 * 1000}; // 2 ms
+    const struct timespec nap = {0, 2L * 1000 * 1000}; // 2 ms
     nanosleep(&nap, NULL);
   }
   return NULL;

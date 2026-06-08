@@ -547,7 +547,8 @@ static void test_peg_main_pnoprune(void) {
     string_builder_add_move(sb, board, m, ld, false);
     if (!peg_top_cands_contains(&plain, board, ld, string_builder_peek(sb))) {
       weak = m;
-      snprintf(weak_text, sizeof(weak_text), "%s", string_builder_peek(sb));
+      (void)snprintf(weak_text, sizeof(weak_text), "%s",
+                     string_builder_peek(sb));
     }
   }
   string_builder_destroy(sb);

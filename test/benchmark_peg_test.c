@@ -1,6 +1,7 @@
 #include "benchmark_peg_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/thread_control.h"
@@ -107,7 +108,7 @@ static void move_to_string(const Game *game, const Move *move, char *out,
   StringBuilder *sb = string_builder_create();
   string_builder_add_move(sb, game_get_board(game), move, game_get_ld(game),
                           false);
-  snprintf(out, out_size, "%s", string_builder_peek(sb));
+  (void)snprintf(out, out_size, "%s", string_builder_peek(sb));
   string_builder_destroy(sb);
 }
 
@@ -287,12 +288,12 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
     char bwin[8];
     char lossa[8];
     char lossb[8];
-    snprintf(awin, sizeof(awin), o.win_a >= 0 ? "%.1f" : "  -",
-             100.0 * o.win_a);
-    snprintf(bwin, sizeof(bwin), o.win_b >= 0 ? "%.1f" : "  -",
-             100.0 * o.win_b);
-    snprintf(lossa, sizeof(lossa), loss_a >= 0 ? "%.1f" : "  ?", loss_a);
-    snprintf(lossb, sizeof(lossb), loss_b >= 0 ? "%.1f" : "  ?", loss_b);
+    (void)snprintf(awin, sizeof(awin), o.win_a >= 0 ? "%.1f" : "  -",
+                   100.0 * o.win_a);
+    (void)snprintf(bwin, sizeof(bwin), o.win_b >= 0 ? "%.1f" : "  -",
+                   100.0 * o.win_b);
+    (void)snprintf(lossa, sizeof(lossa), loss_a >= 0 ? "%.1f" : "  ?", loss_a);
+    (void)snprintf(lossb, sizeof(lossb), loss_b >= 0 ? "%.1f" : "  ?", loss_b);
     printf("  %4d  %-13s%6.1f   %-13s%6s%7s   %-13s%6s%7s\n", ci + 1,
            o.best_str, 100.0 * o.best_win, a.move_str, awin, lossa, b.move_str,
            bwin, lossb);
