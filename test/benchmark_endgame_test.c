@@ -476,11 +476,11 @@ void test_tt_benchmark(void) {
     cgp_file = "/tmp/nonstuck_cgps.txt";
   }
   const char *plies_env = getenv("TT_BENCH_PLIES");
-  const int plies = plies_env ? atoi(plies_env) : 4;
+  const int plies = plies_env ? (int)strtol(plies_env, NULL, 10) : 4;
   const char *frac_env = getenv("TT_BENCH_FRACTION");
-  const double ttfraction = frac_env ? atof(frac_env) : 0.05;
+  const double ttfraction = frac_env ? strtod(frac_env, NULL) : 0.05;
   const char *max_env = getenv("TT_BENCH_MAX");
-  const int max_positions = max_env ? atoi(max_env) : 200;
+  const int max_positions = max_env ? (int)strtol(max_env, NULL, 10) : 200;
 
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
