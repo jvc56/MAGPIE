@@ -312,15 +312,16 @@ static void inject_worker_per_ply(int depth, int32_t value,
 // Dynamic worker injection: a solve started with one thread must absorb extra
 // ABDADA workers injected mid-search (as cores free up) and still return the
 // exact single-threaded value. ABDADA is value-deterministic regardless of
-// thread count or when workers join, so the result must equal the known -74.
+// thread count or when workers join, so the result must equal the known -63.
 // Exercised for both endgame_solve (master is a spawned thread) and
 // endgame_solve_inline (master runs in the calling thread — the path PEG uses,
 // where injected helpers cooperate while the caller's own core keeps solving).
-// 4 plies keeps it cheap enough for CI while still injecting one worker per IDS
-// depth; the value-determinism property is what matters, not the search depth.
+// 6 plies is the shallowest depth that reaches the converged -63 (5 gives -60),
+// and still injects one worker per IDS depth — the value-determinism property
+// is what the test checks, not the search depth.
 static void run_injection_case(bool use_inline) {
   Config *config =
-      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 4");
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -367,7 +368,7 @@ static void run_injection_case(bool use_inline) {
 
   printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
          use_inline ? "inline" : "spawned", value, injector.added);
-  assert(value == -74);
+  assert(value == -63);
   assert(injector.added > 0); // at least one helper joined mid-search
 
   error_stack_destroy(error_stack);
