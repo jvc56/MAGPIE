@@ -1744,6 +1744,10 @@ peg_greedy_playout_pv(Game *game, int mover_idx, MoveList *playout_ml,
                       size_t out_mover_rack_end_cap, char *out_opp_rack_end,
                       size_t out_opp_rack_end_cap, char *out_final_cgp,
                       size_t out_final_cgp_cap) {
+  // thread_index is vestigial since get_movegen() selects the per-pthread
+  // MoveGen automatically; kept in the signature until the call sites are
+  // cleaned up. Cast to silence -Wunused-parameter under the dev build.
+  (void)thread_index;
   const LetterDistribution *ld = game_get_ld(game);
   StringBuilder *pv_sb = NULL;
   if (out_pv_text && out_pv_text_cap > 0) {
