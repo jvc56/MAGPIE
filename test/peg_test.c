@@ -469,6 +469,111 @@ static void test_peg_macondo_pond_slice(void) {
                    /*out_spread=*/NULL);
 }
 
+// True if any of the result's top candidates renders as `text`.
+static bool peg_top_cands_contains(const PegResult *result, const Board *board,
+                                   const LetterDistribution *ld,
+                                   const char *text) {
+  StringBuilder *sb = string_builder_create();
+  bool found = false;
+  for (int i = 0; i < result->n_top_cands && !found; i++) {
+    string_builder_clear(sb);
+    string_builder_add_move(sb, board, &result->top_cands[i].move, ld, false);
+    found = strings_equal(string_builder_peek(sb), text);
+  }
+  string_builder_destroy(sb);
+  return found;
+}
+
+// Exercises PegArgs.protect_moves ("pnoprune", like the simmer's snoprune): a
+// candidate the cascade's top-K cut would normally drop is force-carried into
+// the final ranking when listed as protected. Runs the same short {2}-cascade
+// solve twice on a candidate-rich 1-in-bag board — once plain, once protecting
+// a move that the plain solve pruned — and asserts the move is absent without
+// protection and present with it.
+static void test_peg_main_pnoprune(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Every legal play, equity-sorted, to draw a protectable straggler from.
+  MoveList *gen_ml = move_list_create(4096);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  const int n_gen = move_list_get_count(gen_ml);
+  assert(n_gen > 3);
+
+  // Keep only the top 2 candidates each stage, so most plays are pruned.
+  static const int stage_top_k[] = {2};
+  PegArgs base;
+  memset(&base, 0, sizeof(base));
+  base.game = game;
+  base.thread_control = config_get_thread_control(config);
+  base.num_threads = 4;
+  base.time_budget_seconds = 10.0;
+  base.stage_top_k = stage_top_k;
+  base.num_stages = 1;
+
+  // Plain solve (no protection): its top_cands are the un-protected survivors.
+  PegResult plain;
+  memset(&plain, 0, sizeof(plain));
+  peg_solve(&base, &plain, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  // Pick a generated move that the plain solve pruned (not in its top_cands).
+  char weak_text[64] = {0};
+  const Move *weak = NULL;
+  StringBuilder *sb = string_builder_create();
+  for (int i = 0; i < n_gen && weak == NULL; i++) {
+    const Move *m = move_list_get_move(gen_ml, i);
+    string_builder_clear(sb);
+    string_builder_add_move(sb, board, m, ld, false);
+    if (!peg_top_cands_contains(&plain, board, ld, string_builder_peek(sb))) {
+      weak = m;
+      snprintf(weak_text, sizeof(weak_text), "%s", string_builder_peek(sb));
+    }
+  }
+  string_builder_destroy(sb);
+  assert(weak != NULL);
+
+  // Same solve, now protecting the pruned move.
+  const Move *protect[1] = {weak};
+  PegArgs prot = base;
+  prot.protect_moves = protect;
+  prot.n_protect_moves = 1;
+  PegResult protected_result;
+  memset(&protected_result, 0, sizeof(protected_result));
+  peg_solve(&prot, &protected_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  // Pruned without protection, carried into the final ranking with it.
+  assert(!peg_top_cands_contains(&plain, board, ld, weak_text));
+  assert(peg_top_cands_contains(&protected_result, board, ld, weak_text));
+  printf("[peg_pnoprune] protected '%s' carried: plain n=%d, protected n=%d\n",
+         weak_text, plain.n_top_cands, protected_result.n_top_cands);
+
+  peg_result_destroy(&plain);
+  peg_result_destroy(&protected_result);
+  move_list_destroy(gen_ml);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();
@@ -476,6 +581,7 @@ void test_peg(void) {
   test_peg_main_3bag_single();
   test_peg_main_4bag_single();
   test_peg_main_opp_models();
+  test_peg_main_pnoprune();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
   test_peg_macondo_french_pass();
