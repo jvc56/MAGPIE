@@ -254,18 +254,21 @@ static void test_peg_main_opp_models(void) {
          rational, pessimistic);
 }
 
-// Run a macondo PEG position. move_str != NULL restricts the solve to that one
-// candidate (only_moves); NULL runs full move generation. redistribute_bag > 0
-// first converts an empty-opponent-rack macondo CGP into a genuine N-in-bag
-// position. single_ordering pins the position's (sorted) bag as the only
-// scenario — a single (candidate, scenario) slice. expect_best, when non-NULL,
-// must be a substring of the published best move's text. The top candidate's
-// win/spread are returned via the out params (NULL to ignore).
+// Run a macondo PEG position. move_str != NULL restricts the solve to that
+// candidate (only_moves), found by matching its rendered text; move_str2 adds a
+// second only-solve candidate (so the halving stages can run, which a lone
+// candidate skips). move_str == NULL runs full move generation.
+// redistribute_bag > 0 first converts an empty-opponent-rack macondo CGP into a
+// genuine N-in-bag position. single_ordering pins the position's (sorted) bag
+// as the only scenario — a single (candidate, scenario) slice. expect_best,
+// when non-NULL, must be a substring of the published best move's text. The top
+// candidate's win/spread are returned via the out params (NULL to ignore).
 static void peg_macondo_case(const char *name, const char *cgp,
-                             const char *move_str, int redistribute_bag,
-                             bool single_ordering, PegOppModel opp_model,
-                             double time_budget, const char *expect_best,
-                             double *out_win, double *out_spread) {
+                             const char *move_str, const char *move_str2,
+                             int redistribute_bag, bool single_ordering,
+                             PegOppModel opp_model, double time_budget,
+                             const char *expect_best, double *out_win,
+                             double *out_spread) {
   Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
   load_and_exec_config_or_die(config, cgp);
   Game *game = config_get_game(config);
@@ -278,7 +281,7 @@ static void peg_macondo_case(const char *name, const char *cgp,
 
   ErrorStack *error_stack = error_stack_create();
   MoveList *gen_ml = NULL;
-  const Move *only_moves[1];
+  const Move *only_moves[2];
   PegArgs args;
   memset(&args, 0, sizeof(args));
   args.game = game;
@@ -311,23 +314,27 @@ static void peg_macondo_case(const char *name, const char *cgp,
     };
     generate_moves(&gen_args);
     const int n_gen = move_list_get_count(gen_ml);
-    const Move *found = NULL;
+    const char *targets[2] = {move_str, move_str2};
+    const int n_targets = (move_str2 != NULL) ? 2 : 1;
     StringBuilder *msb = string_builder_create();
-    for (int i = 0; i < n_gen && found == NULL; i++) {
-      const Move *m = move_list_get_move(gen_ml, i);
-      string_builder_clear(msb);
-      string_builder_add_move(msb, board, m, ld, false);
-      if (strings_equal(string_builder_peek(msb), move_str)) {
-        found = m;
+    for (int t = 0; t < n_targets; t++) {
+      const Move *found = NULL;
+      for (int i = 0; i < n_gen && found == NULL; i++) {
+        const Move *m = move_list_get_move(gen_ml, i);
+        string_builder_clear(msb);
+        string_builder_add_move(msb, board, m, ld, false);
+        if (strings_equal(string_builder_peek(msb), targets[t])) {
+          found = m;
+        }
       }
+      if (found == NULL) {
+        log_fatal("[%s] candidate '%s' was not generated", name, targets[t]);
+      }
+      only_moves[t] = found;
     }
     string_builder_destroy(msb);
-    if (found == NULL) {
-      log_fatal("[%s] candidate '%s' was not generated", name, move_str);
-    }
-    only_moves[0] = found;
     args.only_moves = only_moves;
-    args.n_only_moves = 1;
+    args.n_only_moves = n_targets;
   }
   MachineLetter bag_order[MAX_BAG_SIZE];
   if (single_ordering) {
@@ -377,21 +384,25 @@ static void peg_macondo_case(const char *name, const char *cgp,
   config_destroy(config);
 }
 
-// macondo TestStraightforward1PEG: 1-in-bag, 13L ONYX wins 7.5/8 endgames. ONYX
-// empties the one-tile bag, so each scenario reduces to an exact endgame — the
-// one macondo number peg_solve reproduces exactly. Full solve; assert the
-// solver's best move is 13L ONYX with a high win%.
-static void test_peg_macondo_onyx(void) {
+// macondo TestStraightforward1PEG: the well-studied 1-in-bag where 13L ONYX
+// wins 7.5/8 endgames (ties only when the bag tile is the Y), beating the
+// higher-scoring 13L OXY. Only-solve those two candidates (macondo's multi
+// `-only-solve` workflow); two candidates let the halving stages evaluate ONYX
+// at exact endgame fidelity (a lone only-move would fall back to the greedy
+// stage-0 leaf and report ~0.625, not the studied 7.5/8). ONYX empties the
+// one-tile bag, so its scenarios are exact endgames and the win matches
+// macondo's 7.5/8 = 0.9375 exactly.
+static void test_peg_macondo_only_onyx(void) {
   const char *cgp =
       "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
   double win = 0.0;
-  peg_macondo_case("peg_macondo_onyx", cgp, /*move_str=*/NULL,
+  peg_macondo_case("peg_macondo_only_onyx", cgp, "13L ONYX", "13L OXY",
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
                    PEG_OPP_RATIONAL, /*time_budget=*/5.0,
                    /*expect_best=*/"13L ONYX", &win, /*out_spread=*/NULL);
-  assert(win >= 0.9); // macondo: 7.5/8 = 0.9375
+  assert(win >= 7.5 / 8.0 - 0.005 && win <= 7.5 / 8.0 + 0.005); // 0.9375
 }
 
 // macondo Test1PEGPass: a French (FRA20) 1-in-bag where passing is best (W-L-D
@@ -403,8 +414,9 @@ static void test_peg_macondo_french_pass(void) {
       "7WOKS2ET/6DUR6/5G2N1M4/4HALLALiS3/1G1P1P1OM1XI3/VIVONS1BETEL3/"
       "IF1N3AS1RYAL1/ETUDIAIS7 AEINRST/ 301/300 0 -lex FRA20";
   peg_macondo_case("peg_macondo_french_pass", cgp, /*move_str=*/NULL,
-                   /*redistribute_bag=*/1, /*single_ordering=*/false,
-                   PEG_OPP_RATIONAL, /*time_budget=*/5.0,
+                   /*move_str2=*/NULL, /*redistribute_bag=*/1,
+                   /*single_ordering=*/false, PEG_OPP_RATIONAL,
+                   /*time_budget=*/5.0,
                    /*expect_best=*/"pass", /*out_win=*/NULL,
                    /*out_spread=*/NULL);
 }
@@ -418,7 +430,7 @@ static void test_peg_macondo_axe(void) {
       "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
       "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
   double win = 0.0;
-  peg_macondo_case("peg_macondo_axe", cgp, "6F (A)X(E)",
+  peg_macondo_case("peg_macondo_axe", cgp, "6F (A)X(E)", /*move_str2=*/NULL,
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
                    PEG_OPP_RATIONAL, /*time_budget=*/5.0, /*expect_best=*/NULL,
                    &win, /*out_spread=*/NULL);
@@ -434,8 +446,9 @@ static void test_peg_macondo_pah_slice(void) {
       "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
       "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
   peg_macondo_case("peg_macondo_pah_slice", cgp, "13M P(AH)",
-                   /*redistribute_bag=*/0, /*single_ordering=*/true,
-                   PEG_OPP_PESSIMISTIC, /*time_budget=*/5.0,
+                   /*move_str2=*/NULL, /*redistribute_bag=*/0,
+                   /*single_ordering=*/true, PEG_OPP_PESSIMISTIC,
+                   /*time_budget=*/5.0,
                    /*expect_best=*/"P(AH)", /*out_win=*/NULL,
                    /*out_spread=*/NULL);
 }
@@ -449,8 +462,9 @@ static void test_peg_macondo_pond_slice(void) {
       "1TED3E1BYWORD/2Q4N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"
       "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20";
   peg_macondo_case("peg_macondo_pond_slice", cgp, "2L P(O)ND",
-                   /*redistribute_bag=*/4, /*single_ordering=*/true,
-                   PEG_OPP_PESSIMISTIC, /*time_budget=*/5.0,
+                   /*move_str2=*/NULL, /*redistribute_bag=*/4,
+                   /*single_ordering=*/true, PEG_OPP_PESSIMISTIC,
+                   /*time_budget=*/5.0,
                    /*expect_best=*/"P(O)ND", /*out_win=*/NULL,
                    /*out_spread=*/NULL);
 }
@@ -463,7 +477,7 @@ void test_peg(void) {
   test_peg_main_4bag_single();
   test_peg_main_opp_models();
   // Cases drawn from the macondo codebase + pre-endgame manual.
-  test_peg_macondo_onyx();
+  test_peg_macondo_only_onyx();
   test_peg_macondo_french_pass();
   test_peg_macondo_axe();
   test_peg_macondo_pah_slice();
