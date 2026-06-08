@@ -147,8 +147,33 @@ static void test_peg_pool_single_worker(void) {
   peg_pool_destroy(pool);
 }
 
+// A NULL pool runs the batch inline on the calling thread.
+static void test_peg_pool_null_inline(void) {
+  enum { N = 64 };
+  atomic_long sum;
+  atomic_init(&sum, 0);
+  atomic_int bad_idx;
+  atomic_init(&bad_idx, 0);
+  AddItem items[N];
+  void *args[N];
+  for (int i = 0; i < N; i++) {
+    // num_workers 0 + helper_idx 7 means "valid only if it ran on idx 7".
+    items[i] = (AddItem){.sum = &sum,
+                         .value = 2,
+                         .offset = 0,
+                         .num_workers = 0,
+                         .helper_idx = 7,
+                         .bad_idx = &bad_idx};
+    args[i] = &items[i];
+  }
+  peg_pool_submit_and_wait(NULL, add_fn, args, N, 7);
+  assert(atomic_load(&sum) == 2 * N);
+  assert(atomic_load(&bad_idx) == 0); // all ran inline with the helper idx
+}
+
 void test_peg_pool(void) {
   test_peg_pool_basic();
   test_peg_pool_nested();
   test_peg_pool_single_worker();
+  test_peg_pool_null_inline();
 }

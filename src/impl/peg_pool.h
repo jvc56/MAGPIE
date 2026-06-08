@@ -58,7 +58,9 @@ void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds);
 // nested submissions don't deadlock. `helper_worker_idx` is the index used
 // for cache keying when the helper runs items; pass the calling worker's
 // idx if invoked from inside a worker, otherwise any idx outside the
-// pool's [offset, offset + num_workers) range.
+// pool's [offset, offset + num_workers) range. A NULL `pool` runs the batch
+// inline on the calling thread (so callers can treat "no pool" as "run
+// inline" without a separate code path).
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
                               int n, int helper_worker_idx);
 

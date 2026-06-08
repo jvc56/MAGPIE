@@ -260,6 +260,13 @@ static void pp_submit_and_wait(PegPool *pool, PegPoolItem *items, int n,
     clock_gettime(CLOCK_REALTIME, &ts);
     ts.tv_sec += iter_s; // diagnostic wake-up
     int ret = pthread_cond_timedwait(&batch.cv, &batch.mutex, &ts);
+    // ret == 0 is a normal wake (re-check pending at the loop top); ETIMEDOUT
+    // drives the diagnostic watchdog below. Any other return is a real error
+    // (e.g. EINVAL) that would otherwise spin here forever with no diagnostic.
+    if (ret != 0 && ret != ETIMEDOUT) {
+      cpthread_mutex_unlock(&batch.mutex);
+      log_fatal("pthread_cond_timedwait failed: %d", ret);
+    }
     if (ret == ETIMEDOUT) {
       const int p_after = atomic_load(&batch.pending);
       cpthread_mutex_lock(&pool->q_mutex);
@@ -376,6 +383,16 @@ void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds) {
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
                               int n, int helper_worker_idx) {
   if (n <= 0) {
+    return;
+  }
+  if (pool == NULL) {
+    // No pool: run the batch inline on the calling thread. Consistent with the
+    // NULL-tolerant accessors above, this lets a caller conditionally use a
+    // pool (NULL => run inline) without a separate code path, and the work
+    // still executes (rather than crashing or being silently dropped).
+    for (int item_idx = 0; item_idx < n; item_idx++) {
+      fn(args[item_idx], helper_worker_idx);
+    }
     return;
   }
   PegPoolItem *items = malloc_or_die((size_t)n * sizeof(*items));
