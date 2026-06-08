@@ -2721,7 +2721,9 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
   }
 
   int32_t mover_total = 0;
-  char pv_text[1024] = {0};
+  // Large enough to hold opp_move_text (<=63) + " | " + a full branch_pv
+  // (<=1023) without truncation; see the snprintf into pv_text below.
+  char pv_text[1280] = {0};
   char final_cgp[512] = {0};
   char mover_rack_end[32] = {0};
   char opp_rack_end[32] = {0};
@@ -5843,6 +5845,9 @@ void test_pass_peg_greedy_bench(void) {
       free(enum_ctxs);
       free(cand_txts);
     }
+    // Capture the top-priority candidate index before freeing cand_order: the
+    // static fallback below (when n_ranked == 0) needs it after this free.
+    const int fallback_ci = cand_order_n > 0 ? cand_order[0] : -1;
     free(cand_order);
 
     double wall = ctimer_elapsed_seconds(&t);
@@ -5926,8 +5931,7 @@ void test_pass_peg_greedy_bench(void) {
     // Static fallback: if budget expired before ANY cand completed a
     // scenario (n_ranked == 0), emit the single highest-static-equity
     // cand so downstream consumers always get a play.
-    if (n_ranked == 0 && cand_iter_n > 0) {
-      const int fallback_ci = cand_order[0];
+    if (n_ranked == 0 && cand_iter_n > 0 && fallback_ci >= 0) {
       const Move *fallback_m = move_list_get_move(ml_cands, fallback_ci);
       StringBuilder *sb = string_builder_create();
       string_builder_add_move(sb, game_get_board(game), fallback_m, ld, true);
