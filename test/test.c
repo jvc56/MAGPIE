@@ -9,6 +9,7 @@
 #include "bai_test.h"
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -39,6 +40,8 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "pass_peg_search_test.h"
+#include "peg_poll_test.h"
 #include "peg_pool_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
@@ -153,6 +156,26 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    // Pre-endgame (PEG) solver
+    {"peg1pb", test_peg_1bag_pass_best},
+    {"peg1onyx", test_peg_1bag_onyx},
+    {"peg2axe", test_peg_2bag_axe},
+    {"peg2acid", test_peg_2bag_acidotic},
+    {"peg3pah", test_peg_3bag_pah},
+    {"peg4pond", test_peg_4bag_pond},
+    {"pegbench3", test_benchmark_peg_3},
+    {"pegbench4", test_benchmark_peg_4},
+    {"pegpoll", test_peg_poll},
+    {"passpegracks", test_pass_peg_enumerate_bingo_racks},
+    {"passpegsearch", test_pass_peg_search},
+    {"passpegengineered", test_pass_peg_engineered_search},
+    {"passpegreport", test_pass_peg_print_report},
+    {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"pegpessimistic", test_pass_peg_pessimistic_eval},
+    {"pegpessfull", test_pass_peg_pessimistic_full_eval},
+    {"pegendgame", test_pass_peg_endgame_one},
+    {"peggreedy", test_pass_peg_greedy_bench},
+    {"pegcascade", test_pass_peg_cascade},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

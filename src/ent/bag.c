@@ -199,6 +199,27 @@ void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
   bag->letters[insert_index] = letter;
 }
 
+void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n) {
+  // Deterministically set the bag to exactly tiles[0..n-1] in order, with no
+  // PRNG involvement, so draws are a fixed function of the order. Used by exact
+  // (pre)endgame enumerators that already know the bag contents and must NOT
+  // randomize them (bag_add_letter's random insertion would re-permute the
+  // multiset). n must not exceed the bag's backing capacity.
+  for (int i = 0; i < n; i++) {
+    bag->letters[i] = tiles[i];
+  }
+  bag->start_tile_index = 0;
+  bag->end_tile_index = n;
+}
+
+int bag_peek_tiles(const Bag *bag, MachineLetter *out) {
+  const int n = bag->end_tile_index - bag->start_tile_index;
+  for (int i = 0; i < n; i++) {
+    out[i] = bag->letters[bag->start_tile_index + i];
+  }
+  return n;
+}
+
 // Gets the number of a letters 'ml' in the bag. For drawing letters
 // to get the tile itself and update the bag, see
 // the bag_draw* functions.
