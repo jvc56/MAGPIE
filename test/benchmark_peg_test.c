@@ -90,7 +90,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   close(saved_stdout);
 }
 
-static void fill_peg_args(PegArgs *args, Config *config,
+static void fill_peg_args(PegArgs *args, const Config *config,
                           const PegBenchConfig *cfg) {
   memset(args, 0, sizeof(*args));
   args->game = config_get_game(config);
@@ -111,7 +111,8 @@ static void move_to_string(const Game *game, const Move *move, char *out,
   string_builder_destroy(sb);
 }
 
-static PegBenchOutcome run_one_peg(Config *config, const PegBenchConfig *cfg) {
+static PegBenchOutcome run_one_peg(const Config *config,
+                                   const PegBenchConfig *cfg) {
   PegArgs args;
   fill_peg_args(&args, config, cfg);
   PegResult result;
@@ -137,7 +138,7 @@ static PegBenchOutcome run_one_peg(Config *config, const PegBenchConfig *cfg) {
 // Full-field oracle with pnoprune protecting A's and B's moves so both are
 // carried to the deepest stage and scored. Returns the oracle's best move/win
 // and its value of each protected move.
-static OracleResult run_oracle(Config *config, const PegBenchConfig *cfg,
+static OracleResult run_oracle(const Config *config, const PegBenchConfig *cfg,
                                const PegBenchOutcome *a,
                                const PegBenchOutcome *b) {
   const bool same = strcmp(a->move_str, b->move_str) == 0;

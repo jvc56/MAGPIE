@@ -80,12 +80,7 @@ void test_pass_peg_enumerate_bingo_racks(void) {
   fprintf(stderr, "[passpegracks] starting\n");
   fflush(stderr);
   const char *path = "data/lexica/TWL98.txt";
-  FILE *f = fopen(path, "re");
-  if (!f) {
-    fprintf(stderr, "[passpegracks] cannot open %s\n", path);
-    fflush(stderr);
-    log_fatal("cannot open %s", path);
-  }
+  FILE *f = fopen_or_die(path, "re");
   fprintf(stderr, "[passpegracks] opened %s\n", path);
   fflush(stderr);
 
@@ -571,7 +566,7 @@ static int parse_rack_sig(const char *sig, const LetterDistribution *ld,
       return -1;
     }
     letter_counts_out[c - 'A']++;
-    char hl[2] = {c, '\0'};
+    const char hl[2] = {c, '\0'};
     MachineLetter mls[1];
     int m = ld_str_to_mls(ld, hl, false, mls, 1);
     if (m != 1) {
@@ -649,6 +644,9 @@ static bool condition_q_unplayable(Game *game, int mover_idx,
         .initial_tiles_bv = 0,
     };
     generate_moves(&args);
+    // cppcheck-suppress knownConditionTrueFalse ; generate_moves sets
+    // tiles_played_bv through the MoveGenArgs pointer, which cppcheck can't
+    // see.
     if (tiles_played_bv & q_bit) {
       q_playable = true;
     }
@@ -679,7 +677,8 @@ static int gen_bingos_for_current_rack(Game *game, MoveList *ml) {
 
 // Returns true if every 7-tile bingo in `ml` shares the same (row_start,
 // col_start, dir). The bingo count is also written to *out_bingo_count.
-static bool condition_single_bingo_lane(MoveList *ml, int *out_bingo_count) {
+static bool condition_single_bingo_lane(const MoveList *ml,
+                                        int *out_bingo_count) {
   int n = move_list_get_count(ml);
   int row0 = -1;
   int col0 = -1;
@@ -707,8 +706,8 @@ static bool condition_single_bingo_lane(MoveList *ml, int *out_bingo_count) {
 // For each mover bingo, check that opp (with rack already set to R) can
 // also play a 7-tile bingo on the resulting board. Returns true iff every
 // mover bingo has at least one opp bingo response.
-static bool condition_all_bingos_answerable(const Game *game, MoveList *ml,
-                                            int opp_idx) {
+static bool condition_all_bingos_answerable(const Game *game,
+                                            const MoveList *ml, int opp_idx) {
   // Snapshot mover bingos.
   int n = move_list_get_count(ml);
   Move bingos[64];
@@ -771,15 +770,15 @@ static bool play_85_system_to_drain(Game *game, MoveList *ml) {
   // unplayable racks.
   const int max_iters = 200;
   for (int iter = 0; iter < max_iters; iter++) {
-    Rack *r0 = player_get_rack(game_get_player(game, 0));
-    Rack *r1 = player_get_rack(game_get_player(game, 1));
+    const Rack *r0 = player_get_rack(game_get_player(game, 0));
+    const Rack *r1 = player_get_rack(game_get_player(game, 1));
     int bag_n = bag_get_letters(game_get_bag(game));
     if (rack_get_total_letters(r0) == 0 && rack_get_total_letters(r1) == 0 &&
         bag_n == 0) {
       return true;
     }
     int turn = game_get_player_on_turn_index(game);
-    Rack *cur_rack = player_get_rack(game_get_player(game, turn));
+    const Rack *cur_rack = player_get_rack(game_get_player(game, turn));
 
     const MoveGenArgs args = {
         .game = game,
@@ -878,7 +877,7 @@ void test_pass_peg_engineered_search(void) {
   // The Q ML.
   MachineLetter q_ml = (MachineLetter)0;
   {
-    char hl[2] = {'Q', '\0'};
+    const char hl[2] = {'Q', '\0'};
     MachineLetter mls[1];
     int m = ld_str_to_mls(ld, hl, false, mls, 1);
     if (m != 1) {
@@ -929,7 +928,7 @@ void test_pass_peg_engineered_search(void) {
       if (n_to_drain == 0) {
         continue;
       }
-      char hl[2] = {(char)('A' + li), '\0'};
+      const char hl[2] = {(char)('A' + li), '\0'};
       MachineLetter mls[1];
       if (ld_str_to_mls(ld, hl, false, mls, 1) != 1) {
         drain_ok = false;
@@ -1142,10 +1141,7 @@ void test_generate_peg_cgps(void) {
   Game *game = config_get_game(config);
   MoveList *ml = move_list_create(20);
 
-  FILE *f = fopen(out_path, "we");
-  if (!f) {
-    log_fatal("cannot open %s", out_path);
-  }
+  FILE *f = fopen_or_die(out_path, "we");
   int found = 0;
   int attempt = 0;
   fprintf(stderr,
@@ -1312,7 +1308,7 @@ static void print_position_to_report(FILE *report, Config *config,
   char load_cmd[10240];
   snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
   load_and_exec_config_or_die(config, load_cmd);
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
 
   fprintf(report, "================================================\n");
   fprintf(report, " %s position %d\n", source, pos_id);
@@ -1357,10 +1353,7 @@ void test_pass_peg_print_report(void) {
           n_pass, n_rand, n_bench);
 
   const char *out_path = "/tmp/passpeg_report.txt";
-  FILE *report = fopen(out_path, "we");
-  if (!report) {
-    log_fatal("cannot open %s for writing", out_path);
-  }
+  FILE *report = fopen_or_die(out_path, "we");
 
   fprintf(report, "PEG bench position report\n");
   fprintf(report, "Generated from /tmp/passpeg_candidates.txt + "
@@ -1427,7 +1420,7 @@ void test_pass_peg_oracle_eval_move(void) {
   char load_cmd[10240];
   snprintf(load_cmd, sizeof(load_cmd), "cgp %s -lex TWL98", cgp);
   load_and_exec_config_or_die(config, load_cmd);
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
 
   const int mover_idx = game_get_player_on_turn_index(game);
   const int opp_idx = 1 - mover_idx;
@@ -1461,7 +1454,7 @@ void test_pass_peg_oracle_eval_move(void) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       MachineLetter on_board = board_get_letter(board, row, col);
-      if (on_board == 0 || on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
+      if (on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
         continue;
       }
       MachineLetter eff =
@@ -1481,7 +1474,7 @@ void test_pass_peg_oracle_eval_move(void) {
   }
 
   // Build distinct tile list with multiplicities.
-  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  MachineLetter tile_types[MAX_ALPHABET_SIZE] = {0};
   int tile_counts[MAX_ALPHABET_SIZE];
   int num_tile_types = 0;
   for (int ml = 0; ml < ld_size; ml++) {
@@ -2084,7 +2077,7 @@ static bool peg_scenario_filter_match(const char *filter, const char *drawn_str,
   snprintf(joined, sizeof(joined), "%s/%s", drawn_str, remaining_str);
   char tmp[2048];
   snprintf(tmp, sizeof(tmp), "%s", filter);
-  char *tok = strtok(tmp, ";");
+  const char *tok = strtok(tmp, ";");
   while (tok != NULL) {
     if (strcmp(tok, joined) == 0) {
       return true;
@@ -2225,7 +2218,7 @@ static bool peg_opp_pov_cache_lookup(PegOppPovCache *cache, uint64_t key,
   size_t idx = (size_t)key & mask;
   cpthread_mutex_lock(&cache->mutex);
   for (size_t probe = 0; probe < cache->capacity; probe++) {
-    PegOppPovCacheEntry *entry = &cache->entries[(idx + probe) & mask];
+    const PegOppPovCacheEntry *entry = &cache->entries[(idx + probe) & mask];
     if (!entry->valid) {
       cpthread_mutex_unlock(&cache->mutex);
       atomic_fetch_add(&cache->misses, 1);
@@ -2767,7 +2760,6 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
         walk_stride_env && *walk_stride_env ? atoi(walk_stride_env) : 1;
     const bool sample_mode =
         ctx->n_bag_remaining >= 2 && (sample_count > 0 || walk_stride > 1);
-    int64_t n_full_orderings = 1;
     int64_t per_sample_weight = weight;
     int n_to_sample = 1;
     if (sample_mode) {
@@ -2787,7 +2779,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           prod_b_fact *= f;
         }
       }
-      n_full_orderings = k_fact / prod_b_fact;
+      const int64_t n_full_orderings = k_fact / prod_b_fact;
       if (sample_count > 0) {
         n_to_sample = sample_count < (int)n_full_orderings
                           ? sample_count
@@ -3122,7 +3114,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           bool match = false;
           char tmp[2048];
           snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
-          char *tok = strtok(tmp, ";");
+          const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
               match = true;
@@ -3371,7 +3363,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           char tmp[256];
           snprintf(tmp, sizeof(tmp), "%s", walk_k_env);
           int i = 0;
-          char *tok = strtok(tmp, ",");
+          const char *tok = strtok(tmp, ",");
           while (tok != NULL && i < 16) {
             walk_k_by_bag[i++] = atoi(tok);
             tok = strtok(NULL, ",");
@@ -3405,7 +3397,8 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
 
       do {
         char perm_remaining_str[32] = {0};
-        for (int i = 0; i < ctx->n_bag_remaining && i < 30; i++) {
+        const int n_perm = (int)(sizeof(perm) / sizeof(perm[0]));
+        for (int i = 0; i < ctx->n_bag_remaining && i < n_perm; i++) {
           perm_remaining_str[i] = ctx->ld->ld_ml_to_hl[perm[i]][0];
         }
 
@@ -3853,7 +3846,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           bool match = false;
           char tmp[2048];
           snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
-          char *tok = strtok(tmp, ";");
+          const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
               match = true;
@@ -4155,7 +4148,7 @@ static void peg_emit_split(const PegEnumCtx *ctx) {
           bool match = false;
           char tmp[2048];
           snprintf(tmp, sizeof(tmp), "%s", ctx->opp_move_filter);
-          char *tok = strtok(tmp, ";");
+          const char *tok = strtok(tmp, ";");
           while (tok != NULL) {
             if (strstr(text, tok) != NULL) {
               match = true;
@@ -4674,7 +4667,7 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
   // Bag = opp_pov_bag_counts, set deterministically (no PRNG). bag_add_letter
   // would randomize order via the time-seeded PRNG.
   {
-    MachineLetter bag_tiles[MAX_BAG_SIZE];
+    MachineLetter bag_tiles[MAX_BAG_SIZE] = {0};
     int n_bag = 0;
     for (int t = 0; t < j->n_opp_types; t++) {
       for (int k = 0; k < j->opp_pov_bag_counts[t]; k++) {
@@ -4820,6 +4813,8 @@ static void peg_opp_pov_worker_fn(void *arg, int worker_idx) {
         .hard_time_limit = inner_eg_budget,
         .external_deadline_ns = peg_clamp_deadline_ns(
             ctimer_monotonic_ns() + (int64_t)(inner_eg_budget * 1.0e9),
+            // cppcheck-suppress knownConditionTrueFalse ; outer_ctx is non-NULL
+            // on the paths reaching here; the guard is kept as defensive code.
             j->outer_ctx ? j->outer_ctx->deadline_monotonic_ns : 0),
     };
     endgame_solve_inline(eg_ctx_pp, &ea, eg_results);
@@ -5253,9 +5248,7 @@ void test_pass_peg_greedy_bench(void) {
 
   FILE *tsv_f = NULL;
   if (tsv_path) {
-    tsv_f = fopen(tsv_path, "we");
-    if (!tsv_f)
-      log_fatal("cannot open TSV %s", tsv_path);
+    tsv_f = fopen_or_die(tsv_path, "we");
     fprintf(tsv_f, "pos\tcand\tcand_score\tN\tK_drawn\tdrawn\tremaining\tweight"
                    "\tmover_total\tpost_cand_cgp\tfinal_cgp\tpv_text"
                    "\tmover_rack_end\topp_rack_end\n");
@@ -5263,9 +5256,7 @@ void test_pass_peg_greedy_bench(void) {
 
   FILE *inner_tsv_f = NULL;
   if (inner_tsv_path) {
-    inner_tsv_f = fopen(inner_tsv_path, "we");
-    if (!inner_tsv_f)
-      log_fatal("cannot open INNER TSV %s", inner_tsv_path);
+    inner_tsv_f = fopen_or_die(inner_tsv_path, "we");
     fprintf(inner_tsv_f,
             "cand\tdrawn\tremaining\topp_move\topp_score\topp_pov_bag\topp_pov_"
             "weight"
@@ -5276,9 +5267,7 @@ void test_pass_peg_greedy_bench(void) {
 
   FILE *result_f = NULL;
   if (result_path) {
-    result_f = fopen(result_path, "we");
-    if (!result_f)
-      log_fatal("cannot open RESULT %s", result_path);
+    result_f = fopen_or_die(result_path, "we");
     fprintf(result_f,
             "pos\trank\twin\tspread\tscen\tweight\ttiles_played\tbucket"
             "\tcand_text\n");
@@ -5488,7 +5477,7 @@ void test_pass_peg_greedy_bench(void) {
       memset(consumed, 0, (size_t)cand_order_n * sizeof(bool));
       char tmp_filter[4096];
       snprintf(tmp_filter, sizeof(tmp_filter), "%s", only_moves);
-      char *tok = strtok(tmp_filter, ";");
+      const char *tok = strtok(tmp_filter, ";");
       while (tok) {
         // Skip leading spaces in the token.
         while (*tok == ' ') {
@@ -5605,7 +5594,7 @@ void test_pass_peg_greedy_bench(void) {
         bool match = false;
         char tmp[2048];
         snprintf(tmp, sizeof(tmp), "%s", only_moves);
-        char *tok = strtok(tmp, ";");
+        const char *tok = strtok(tmp, ";");
         while (tok) {
           if (strstr(cand_txt, tok)) {
             match = true;
@@ -5772,6 +5761,8 @@ void test_pass_peg_greedy_bench(void) {
         enum_ctxs[cand_used].n_multiset = NULL;
         enum_ctxs[cand_used].mover_pick = NULL;
         enum_ctxs[cand_used].out_jobs = NULL;
+        // cppcheck-suppress knownConditionTrueFalse ; peg_enum_outer_multiset
+        // pushes jobs into all_jobs (raising .n) via the out_jobs pointer.
         if (cand_jobs_end > cand_jobs_start) {
           const int n_this_cand = cand_jobs_end - cand_jobs_start;
           void **args = malloc_or_die((size_t)n_this_cand * sizeof(void *));
@@ -5989,10 +5980,7 @@ typedef struct PegCascadeRank {
 // Allocates *out_arr; caller frees.
 static int peg_cascade_load_results(const char *path,
                                     PegCascadeRank **out_arr) {
-  FILE *f = fopen(path, "re");
-  if (!f) {
-    log_fatal("cannot open result file %s", path);
-  }
+  FILE *f = fopen_or_die(path, "re");
   char line[1024];
   // Skip header.
   if (!fgets(line, sizeof(line), f)) {
@@ -6446,10 +6434,7 @@ static void peg_assert_cand(const char *test_name,
   const char *cgp_path = "/tmp/magpie_peg_test_cgp.txt";
   const char *result_path = "/tmp/magpie_peg_test_result.tsv";
 
-  FILE *cgp_f = fopen(cgp_path, "we");
-  if (!cgp_f) {
-    log_fatal("[%s] cannot open %s for write", test_name, cgp_path);
-  }
+  FILE *cgp_f = fopen_or_die(cgp_path, "we");
   fprintf(cgp_f, "%s\n", cgp_line_with_lex);
   (void)fclose(cgp_f);
 
@@ -6476,10 +6461,7 @@ static void peg_assert_cand(const char *test_name,
 
   test_pass_peg_greedy_bench();
 
-  FILE *r = fopen(result_path, "re");
-  if (!r) {
-    log_fatal("[%s] result file %s not created", test_name, result_path);
-  }
+  FILE *r = fopen_or_die(result_path, "re");
   char hdr[512];
   if (!fgets(hdr, sizeof(hdr), r)) {
     log_fatal("[%s] missing result header", test_name);
@@ -6791,7 +6773,7 @@ void test_pass_peg_pessimistic_eval(void) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       MachineLetter on_board = board_get_letter(board, row, col);
-      if (on_board == 0 || on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
+      if (on_board == ALPHABET_EMPTY_SQUARE_MARKER) {
         continue;
       }
       MachineLetter eff =
@@ -6822,7 +6804,7 @@ void test_pass_peg_pessimistic_eval(void) {
   }
   const Move *move = validated_moves_get_move(vms, 0);
 
-  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  MachineLetter tile_types[MAX_ALPHABET_SIZE] = {0};
   int tile_counts[MAX_ALPHABET_SIZE];
   int num_types = 0;
   for (int ml = 0; ml < ld_size; ml++) {
@@ -7081,7 +7063,7 @@ static bool peg_pess_cache_lookup(PegPessCache *c, uint64_t key,
   cpthread_mutex_lock(&c->mutex);
   size_t idx = (size_t)key & c->mask;
   for (size_t probe = 0; probe < c->capacity; probe++) {
-    PegPessCacheEntry *e = &c->entries[(idx + probe) & c->mask];
+    const PegPessCacheEntry *e = &c->entries[(idx + probe) & c->mask];
     if (!e->valid) {
       cpthread_mutex_unlock(&c->mutex);
       atomic_fetch_add(&c->misses, 1);
@@ -7151,7 +7133,7 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
 // by recursive_solve when recursive_split is enabled. Defined after PessJob /
 // the fork worker (it needs the job's pool/arena/slots). Returns the opp
 // node's outcome (min over replies); the caller frees order/ml.
-static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
+static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, const MoveList *ml,
                                          const int *order, int cand_n);
 
 // Per-pthread fork-nesting depth, incremented around each nested submit-and-
@@ -7172,7 +7154,7 @@ enum { PEG_MAX_FORK_NESTING = 32 };
 // drops the within-cand minLossesSoFar early-break (computes all perms) to
 // parallelize, which never changes the leader or its outcome row.
 typedef struct NestedPermCollect NestedPermCollect;
-static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
+static void peg_pess_parallel_perms(const PegPessSolver *s, MoveList *ml,
                                     int cand_move_idx, const uint8_t *unseen,
                                     const NestedPermCollect *pc,
                                     PegPessOut *out_arr, int64_t *cand_score,
@@ -7208,7 +7190,7 @@ static atomic_llong g_rung4_seq_cands_sum = 0; // sum n_cands at slow-seq loops
 
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
-  Game *g = s->game;
+  const Game *g = s->game;
   if (game_get_game_end_reason(g) != GAME_END_REASON_NONE) {
     const int32_t mover_score =
         equity_to_int(player_get_score(game_get_player(g, s->mover_idx)));
@@ -7534,9 +7516,11 @@ static void peg_pess_nested_collect_perm_cb(const MachineLetter *draw, int n,
 
 // Run one (cand, perm) scenario: rebuild alt-game with the perm's bag/rack,
 // play the cand, recurse. Returns the outcome.
-static PegPessOut peg_pess_nested_run_scenario(
-    PegPessSolver *s, const Game *base_state, MoveList *ml, int cand_move_idx,
-    const uint8_t *unseen, const MachineLetter *draw, int n_drawn) {
+static PegPessOut
+peg_pess_nested_run_scenario(PegPessSolver *s, const Game *base_state,
+                             const MoveList *ml, int cand_move_idx,
+                             const uint8_t *unseen, const MachineLetter *draw,
+                             int n_drawn) {
   Game *alt = game_duplicate(base_state);
   game_set_backup_mode(alt, BACKUP_MODE_OFF);
   Bag *bag = game_get_bag(alt);
@@ -7582,7 +7566,7 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
   s->n_nested_calls++;
   Game *g = s->game;
   const Rack *opp_r = player_get_rack(game_get_player(g, s->opp_idx));
-  Bag *bag = game_get_bag(g);
+  const Bag *bag = game_get_bag(g);
   const int bag_size = bag_get_letters(bag);
 
   uint8_t unseen[MAX_ALPHABET_SIZE] = {0};
@@ -7613,7 +7597,7 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
     (void)info_hit;
   }
 
-  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  MachineLetter tile_types[MAX_ALPHABET_SIZE] = {0};
   int tile_counts[MAX_ALPHABET_SIZE];
   int num_types = 0;
   for (int ml_i = 0; ml_i < s->ld_size; ml_i++) {
@@ -8553,10 +8537,10 @@ static void peg_pess_fork_worker_fn(void *arg, int worker_idx) {
 // per reply, plays it, and dispatches each as a fork sub-task. Same verdict as
 // the sequential opp loop (min over replies, LOSS<DRAW<WIN); first-loss cancel
 // via the shared aggregate. The caller owns/frees `order` and `ml`.
-static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, MoveList *ml,
+static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, const MoveList *ml,
                                          const int *order, int cand_n) {
   const PessJob *j = s->job;
-  Game *g = s->game;
+  const Game *g = s->game;
   PessSplitAgg agg;
   atomic_init(&agg.worst, (int)PEG_OUT_WIN);
   atomic_init(&agg.has_loss, 0);
@@ -8652,7 +8636,7 @@ static void peg_pess_perm_worker_fn(void *arg, int worker_idx) {
   pess_arena_release(j->arena, slot);
 }
 
-static void peg_pess_parallel_perms(PegPessSolver *s, MoveList *ml,
+static void peg_pess_parallel_perms(const PegPessSolver *s, MoveList *ml,
                                     int cand_move_idx, const uint8_t *unseen,
                                     const NestedPermCollect *pc,
                                     PegPessOut *out_arr, int64_t *cand_score,
@@ -8793,7 +8777,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       MachineLetter on_board = board_get_letter(board, row, col);
-      if (on_board == 0 || on_board == ALPHABET_EMPTY_SQUARE_MARKER)
+      if (on_board == ALPHABET_EMPTY_SQUARE_MARKER)
         continue;
       MachineLetter eff =
           get_is_blanked(on_board) ? BLANK_MACHINE_LETTER : on_board;
@@ -8819,7 +8803,7 @@ void test_pass_peg_pessimistic_full_eval(void) {
   }
   const Move *move = validated_moves_get_move(vms, 0);
 
-  MachineLetter tile_types[MAX_ALPHABET_SIZE];
+  MachineLetter tile_types[MAX_ALPHABET_SIZE] = {0};
   int tile_counts[MAX_ALPHABET_SIZE];
   int num_types = 0;
   for (int ml = 0; ml < ld_size; ml++) {

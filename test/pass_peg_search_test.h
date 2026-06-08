@@ -71,8 +71,6 @@ void test_pass_peg_print_report(void);
 //   PASSPEG_ORACLE_TIME   — soft seconds-per-scenario cap (default: 30).
 void test_pass_peg_oracle_eval_move(void);
 
-#endif
-
 void test_pass_peg_greedy_bench(void);
 void test_pass_peg_cascade(void);
 
@@ -108,3 +106,5 @@ void test_pass_peg_pessimistic_full_eval(void);
 
 // Debug harness: solve one endgame from PASSPEG_ENDGAME_CGP and report timing.
 void test_pass_peg_endgame_one(void);
+
+#endif
