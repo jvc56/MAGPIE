@@ -276,6 +276,111 @@ void test_pass_first(void) {
       0);
 }
 
+// Drives endgame_add_worker from inside the running solve: the per-ply
+// callback fires on the master worker after each completed depth, and injects
+// one extra ABDADA worker per ply (up to max_attempts) — modeling a pool that
+// lends idle cores mid-search. Each injected worker draws its own MoveGen cache
+// slot from get_movegen() (per-pthread), so the injector hands out no slots.
+typedef struct WorkerInjector {
+  EndgameCtx **solver_ptr; // address of the caller's ctx (set by endgame_solve)
+  int max_attempts;        // cap on injection attempts (one per ply)
+  int attempts;            // attempts made so far
+  int added;               // successful injections
+} WorkerInjector;
+
+static void inject_worker_per_ply(int depth, int32_t value,
+                                  const PVLine *pv_line, const Game *game,
+                                  const PVLine *ranked_pvs, int num_ranked_pvs,
+                                  void *user_data) {
+  (void)depth;
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  WorkerInjector *injector = (WorkerInjector *)user_data;
+  EndgameCtx *solver = *injector->solver_ptr;
+  if (solver == NULL || injector->attempts >= injector->max_attempts) {
+    return;
+  }
+  if (endgame_add_worker(solver)) {
+    injector->added++;
+  }
+  injector->attempts++;
+}
+
+// Dynamic worker injection: a solve started with one thread must absorb extra
+// ABDADA workers injected mid-search (as cores free up) and still return the
+// exact single-threaded value. ABDADA is value-deterministic regardless of
+// thread count or when workers join, so the result must equal the known -63.
+// Exercised for both endgame_solve (master is a spawned thread) and
+// endgame_solve_inline (master runs in the calling thread — the path PEG uses,
+// where injected helpers cooperate while the caller's own core keeps solving).
+// 6 plies is the shallowest depth that reaches the converged -63 (5 gives -60),
+// and still injects one worker per IDS depth — the value-determinism property
+// is what the test checks, not the search depth.
+static void run_injection_case(bool use_inline) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+
+  Game *game = config_get_game(config);
+  EndgameResults *results = config_get_endgame_results(config);
+
+  EndgameCtx *ctx = NULL;
+  // Model a pool lending up to 4 idle cores mid-search (one per ply).
+  WorkerInjector injector = {
+      .solver_ptr = &ctx, .max_attempts = 4, .attempts = 0, .added = 0};
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = game;
+  args.plies = config_get_endgame_plies(config);
+  // Tiny TT (clamps to the 2^24 minimum) instead of the 0.25 default: this
+  // small endgame needs almost no TT, and allocating + zeroing a multi-GB
+  // table twice (once per case) dominated the test's runtime. The solved value
+  // is exact regardless of TT size, so this only affects speed.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1; // start single-threaded...
+  args.max_workers = 5; // ...and allow growth to 1 + 4 injected
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.per_ply_callback = inject_worker_per_ply;
+  args.per_ply_callback_data = &injector;
+
+  ErrorStack *error_stack = error_stack_create();
+  if (use_inline) {
+    endgame_solve_inline(&ctx, &args, results);
+  } else {
+    endgame_solve(&ctx, &args, results, error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  const int32_t value =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+  printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
+         use_inline ? "inline" : "spawned", value, injector.added);
+  assert(value == -63);
+  assert(injector.added > 0); // at least one helper joined mid-search
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
+void test_endgame_dynamic_worker_injection(void) {
+  run_injection_case(/*use_inline=*/false);
+  run_injection_case(/*use_inline=*/true);
+}
+
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",

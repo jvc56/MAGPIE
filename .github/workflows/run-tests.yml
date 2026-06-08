@@ -91,7 +91,7 @@ jobs:
           - shard: sim
             tests: "sim endgame klv"
           - shard: eldar_v
-            tests: "eldar_v"
+            tests: "eldar_v endgameinject"
           - shard: analyze_sim
             tests: "analyze_sim"
           - shard: config
