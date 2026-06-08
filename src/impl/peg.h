@@ -1,6 +1,7 @@
 #ifndef PEG_H
 #define PEG_H
 
+#include "../def/peg_defs.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
@@ -19,10 +20,12 @@
 //   per-cand greedy d=0 playout over the mover-draw scenarios. Cands processed
 //   top-equity-first, so interruption returns the partial top-K by
 //   greedy-evaluated-so-far. Seeds the ranking the halving stages refine.
-// - Stages 1..5: halving (32 -> 16 -> 8 -> 4 -> 2). Each stage re-ranks the
-//   surviving top-K from the previous stage at one more ply of fidelity
-//   (non-emptier inner depth d, emptier endgame plies). Stage 1 = d=0/plies=2;
-//   Stage 5 = d=4/plies=6.
+// - Halving stages 1..N: by default 32 -> 16 -> 8 -> 4 -> 2 (five stages).
+//   Each stage re-ranks the surviving top-K from the previous stage at one
+//   more ply of fidelity (non-emptier inner depth d, emptier endgame plies):
+//   stage 1 = d=0/plies=2, ascending. The schedule (and thus N) is the default
+//   table length but is fully caller-overridable via PegArgs.stage_top_k, with
+//   no fixed upper bound.
 //
 //   A stage exists to RE-RANK a candidate set at higher fidelity, so its output
 //   is only meaningful with >= 2 candidates to compare — there is deliberately
@@ -43,26 +46,11 @@
 // All tuning is via PegArgs (CLI-driven). No environment-variable knobs.
 // ============================================================================
 
-// Hard caps. PEG rejects positions outside these.
-#define PEG_MIN_BAG 1
-#define PEG_MAX_BAG 4
-// = full distribution count - mover rack - board, exclusive cap.
-#define PEG_MAX_UNSEEN 11
-
-// Number of stages: Stage 0 (greedy seed) + halving stages 1..5.
-// Stages 1..5 evaluate the top 32, 16, 8, 4, 2 respectively.
-#define PEG_NUM_STAGES 6
-
-// Upper bound on the number of halving stages a caller may request via the
-// PegArgs.stage_top_k override.
-#define PEG_MAX_STAGES 16
-
-// Stage table — top-K cand count and inner depth per stage. Read-only.
-// Stage 0 is greedy (top-K is "all", inner depth 0, greedy leaf); stages 1..5
-// use the table entries. The tail is top-2, never top-1 (see design above).
-extern const int PEG_STAGE_TOP_K[PEG_NUM_STAGES];
-extern const int PEG_STAGE_NONEMPTY_INNER_D[PEG_NUM_STAGES];
-extern const int PEG_STAGE_EMPTIER_PLIES[PEG_NUM_STAGES];
+// The bag-size caps (PEG_MIN_BAG, PEG_MAX_BAG) and PEG_MAX_UNSEEN live in
+// peg_defs.h. The cascade's default halving schedule (top 32, 16, 8, 4, 2)
+// is internal to peg.c; its length sets the default number of halving stages.
+// There is no fixed upper bound on stages — a caller may supply a longer
+// schedule via PegArgs.stage_top_k.
 
 // ----- Progress callbacks -----------------------------------------------
 //
@@ -105,8 +93,9 @@ typedef struct PegArgs {
   // is discarded for the published ranking.
   double time_budget_seconds;
 
-  // Last stage index to run, inclusive (0..PEG_NUM_STAGES-1). Lets the caller
-  // cap depth below the full cascade. <= 0 is treated as "run all stages".
+  // Last halving stage to run, inclusive (1-based; stage 0 is the greedy seed).
+  // Lets the caller cap depth below the full cascade. <= 0 is treated as "run
+  // all stages".
   int max_stage;
 
   // Optional per-stage candidate counts for the halving stages (stage 1
@@ -180,8 +169,8 @@ typedef struct PegResult {
   double best_win;
   double best_spread;
 
-  // Index of the last stage that completed (0 = greedy only, up to
-  // PEG_NUM_STAGES-1 = final).
+  // Index of the last stage that completed (0 = greedy only; the final halving
+  // stage = the deepest stage actually run).
   int last_completed_stage;
 
   // Wall time used (seconds).

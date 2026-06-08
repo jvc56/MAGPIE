@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/peg_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -31,13 +32,13 @@
 #include <string.h>
 #include <time.h>
 
-// Stage table (see peg.h). Stage 0 is the greedy seed (top-K = all, greedy
-// leaf); the halving stages narrow the surviving set while adding a ply of
-// fidelity. The tail is top-2, never top-1 — a stage re-ranks a set, so its
-// output needs >= 2 candidates to compare.
-const int PEG_STAGE_TOP_K[PEG_NUM_STAGES] = {INT32_MAX, 32, 16, 8, 4, 2};
-const int PEG_STAGE_NONEMPTY_INNER_D[PEG_NUM_STAGES] = {0, 0, 1, 2, 3, 4};
-const int PEG_STAGE_EMPTIER_PLIES[PEG_NUM_STAGES] = {0, 2, 3, 4, 5, 6};
+// Default halving schedule for the cascade's stages 1..N. Stage 0 is the
+// greedy seed (top-K = all); each halving stage narrows the surviving set
+// while adding a ply of fidelity. The tail is top-2, never top-1 — a stage
+// re-ranks a set, so its output needs >= 2 candidates to compare. The length
+// of this table is the default number of halving stages; there is no fixed
+// cap, so a caller may pass a longer schedule via PegArgs.stage_top_k.
+static const int PEG_DEFAULT_HALVING_COUNTS[] = {32, 16, 8, 4, 2};
 
 enum {
   // Candidate move-list capacity for the root generate_moves.
@@ -1059,14 +1060,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                          DUAL_LEXICON_MODE_IGNORANT);
   game_gen_all_cross_sets(prepared_base);
 
-  // Per-stage halving counts: the override, else the built-in table tail.
-  const int default_counts[PEG_NUM_STAGES - 1] = {32, 16, 8, 4, 2};
+  // Per-stage halving counts: the caller override, else the built-in default
+  // schedule. The number of stages is just the schedule length — there is no
+  // fixed cap, so a caller may pass a longer stage_top_k.
+  const int default_num_stages = (int)(sizeof(PEG_DEFAULT_HALVING_COUNTS) /
+                                       sizeof(PEG_DEFAULT_HALVING_COUNTS[0]));
   const int *counts = (args->stage_top_k && args->num_stages > 0)
                           ? args->stage_top_k
-                          : default_counts;
+                          : PEG_DEFAULT_HALVING_COUNTS;
   int num_stages = (args->stage_top_k && args->num_stages > 0)
                        ? args->num_stages
-                       : PEG_NUM_STAGES - 1;
+                       : default_num_stages;
   if (args->max_stage > 0 && args->max_stage < num_stages) {
     num_stages = args->max_stage;
   }
