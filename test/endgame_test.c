@@ -312,13 +312,15 @@ static void inject_worker_per_ply(int depth, int32_t value,
 // Dynamic worker injection: a solve started with one thread must absorb extra
 // ABDADA workers injected mid-search (as cores free up) and still return the
 // exact single-threaded value. ABDADA is value-deterministic regardless of
-// thread count or when workers join, so the result must equal the known -63.
+// thread count or when workers join, so the result must equal the known -74.
 // Exercised for both endgame_solve (master is a spawned thread) and
 // endgame_solve_inline (master runs in the calling thread — the path PEG uses,
 // where injected helpers cooperate while the caller's own core keeps solving).
+// 4 plies keeps it cheap enough for CI while still injecting one worker per IDS
+// depth; the value-determinism property is what matters, not the search depth.
 static void run_injection_case(bool use_inline) {
   Config *config =
-      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 7");
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 4");
   load_and_exec_config_or_die(
       config,
       "cgp "
@@ -338,7 +340,11 @@ static void run_injection_case(bool use_inline) {
   args.thread_control = config_get_thread_control(config);
   args.game = game;
   args.plies = config_get_endgame_plies(config);
-  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  // Tiny TT (clamps to the 2^24 minimum) instead of the 0.25 default: this
+  // small endgame needs almost no TT, and allocating + zeroing a multi-GB
+  // table twice (once per case) dominated the test's runtime. The solved value
+  // is exact regardless of TT size, so this only affects speed.
+  args.tt_fraction_of_mem = 0.0001;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   args.num_threads = 1; // start single-threaded...
   args.max_workers = 5; // ...and allow growth to 1 + 4 injected
@@ -361,7 +367,7 @@ static void run_injection_case(bool use_inline) {
 
   printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
          use_inline ? "inline" : "spawned", value, injector.added);
-  assert(value == -63);
+  assert(value == -74);
   assert(injector.added > 0); // at least one helper joined mid-search
 
   error_stack_destroy(error_stack);
