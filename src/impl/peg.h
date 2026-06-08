@@ -53,6 +53,22 @@
 // There is no fixed upper bound on stages — a caller may supply a longer
 // schedule via PegArgs.stage_top_k.
 
+// How the solver models the opponent when scoring a candidate's scenarios.
+// Both models solve emptier (post-cand bag-empty) scenarios with the same exact
+// endgame — in a zero-sum endgame an optimal opponent already plays the worst
+// line for the mover — so they differ only on non-emptier scenarios, where the
+// opponent still has tiles to draw:
+//   PEG_OPP_RATIONAL    — the opponent plays its highest-equity reply (a
+//                         self-interested, "realistic" opponent). Default.
+//   PEG_OPP_PESSIMISTIC — the opponent plays the reply that minimizes the
+//                         mover's result (macondo-style worst-case / guaranteed
+//                         wins). The mover's spread under this model is always
+//                         <= the rational model's.
+typedef enum {
+  PEG_OPP_RATIONAL = 0,
+  PEG_OPP_PESSIMISTIC,
+} PegOppModel;
+
 // ----- Progress callbacks -----------------------------------------------
 //
 // All callbacks are optional (set to NULL to skip). They are invoked from
@@ -113,6 +129,10 @@ typedef struct PegArgs {
   // evaluate the inner_top_k highest-equity opp moves per opp_rack. 0 = no cap
   // (evaluate all opp cands).
   int inner_top_k;
+
+  // Opponent model for scoring scenarios (see PegOppModel). Defaults to
+  // PEG_OPP_RATIONAL (the zero value).
+  PegOppModel opp_model;
 
   // Scenario stride: weight-stratified sampling. 1 = full enumeration.
   // k > 1 = sample one multiset per k weight-units, scaled accordingly.

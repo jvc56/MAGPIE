@@ -47,6 +47,11 @@ enum {
   PEG_PLAYOUT_MAX_PLIES = 40,
   // Fixed endgame seed for deterministic leaf solves.
   PEG_ENDGAME_SEED = 1,
+  // Pessimistic playout: capacity of the opponent reply list. The adversarial
+  // 1-ply lookahead tries every generated reply (a late-game PEG position has
+  // far fewer than this), so the opponent's true worst-for-mover reply — which
+  // includes the rational best-equity one — is always considered.
+  PEG_PESSIMISTIC_OPP_LIST_CAP = 1024,
 };
 
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
@@ -391,6 +396,97 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
   return spread;
 }
 
+// Pessimistic playout: the mover plays greedily, but at each opponent turn the
+// opponent plays the reply that minimizes the mover's final spread — a 1-ply
+// adversarial choice scored by a greedy rollout of the remainder. This is the
+// PEG_OPP_PESSIMISTIC leaf for non-emptier scenarios; its mover spread is
+// always
+// <= the greedy (rational) playout's. Returns the signed mover spread with the
+// same rack-leave adjustment as peg_greedy_playout.
+static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
+                                       MoveList *playout_ml) {
+  const LetterDistribution *ld = game_get_ld(game);
+  Game *branch = NULL;         // lazily created scratch for opp-reply trials
+  MoveList *opp_ml = NULL;     // opponent's candidate replies
+  MoveList *rollout_ml = NULL; // greedy rollout of each trial
+  for (int ply = 0; ply < PEG_PLAYOUT_MAX_PLIES; ply++) {
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      break;
+    }
+    const bool bag_has_tiles = bag_get_letters(game_get_bag(game)) > 0;
+    const move_sort_t sort = bag_has_tiles ? MOVE_SORT_EQUITY : MOVE_SORT_SCORE;
+    if (game_get_player_on_turn_index(game) == mover_idx) {
+      // Mover: greedy best move.
+      const MoveGenArgs ga = {
+          .game = game,
+          .move_record_type = MOVE_RECORD_BEST,
+          .move_sort_type = sort,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+          .move_list = playout_ml,
+          .tiles_played_bv = NULL,
+          .initial_tiles_bv = 0,
+      };
+      generate_moves(&ga);
+      if (move_list_get_count(playout_ml) == 0) {
+        break;
+      }
+      play_move(move_list_get_move(playout_ml, 0), game, NULL);
+      continue;
+    }
+    // Opponent: enumerate replies and pick the one worst for the mover.
+    if (opp_ml == NULL) {
+      opp_ml = move_list_create(PEG_PESSIMISTIC_OPP_LIST_CAP);
+      rollout_ml = move_list_create(1);
+      branch = game_duplicate(game);
+    }
+    const MoveGenArgs ga = {
+        .game = game,
+        .move_record_type = MOVE_RECORD_ALL,
+        .move_sort_type = sort,
+        .override_kwg = NULL,
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        .move_list = opp_ml,
+        .tiles_played_bv = NULL,
+        .initial_tiles_bv = 0,
+    };
+    generate_moves(&ga);
+    const int n_opp = move_list_get_count(opp_ml);
+    if (n_opp == 0) {
+      break;
+    }
+    int worst_idx = 0;
+    int32_t worst_for_mover = INT32_MAX;
+    for (int i = 0; i < n_opp; i++) {
+      game_copy(branch, game);
+      play_move(move_list_get_move(opp_ml, i), branch, NULL);
+      const int32_t mt = peg_greedy_playout(branch, mover_idx, rollout_ml);
+      if (mt < worst_for_mover) {
+        worst_for_mover = mt;
+        worst_idx = i;
+      }
+    }
+    play_move(move_list_get_move(opp_ml, worst_idx), game, NULL);
+  }
+  const Player *me = game_get_player(game, mover_idx);
+  const Player *op = game_get_player(game, 1 - mover_idx);
+  int32_t spread = equity_to_int(player_get_score(me) - player_get_score(op));
+  if (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    spread -= equity_to_int(rack_get_score(ld, player_get_rack(me)));
+    spread += equity_to_int(rack_get_score(ld, player_get_rack(op)));
+  }
+  if (branch != NULL) {
+    game_destroy(branch);
+    move_list_destroy(opp_ml);
+    move_list_destroy(rollout_ml);
+  }
+  return spread;
+}
+
 // ----- per-candidate scenario evaluation -----------------------------------
 
 typedef struct PegScenarioJobList PegScenarioJobList;
@@ -407,6 +503,8 @@ typedef struct PegEvalCtx {
   const Move *cand;
   int bag_size;
   int k_drawn;
+  // Opponent model for non-emptier leaves (see PegOppModel).
+  PegOppModel opp_model;
   // 0 = greedy leaf (Stage 0); > 0 = emptier scenarios solved exactly with an
   // endgame_solve at this ply depth (non-emptier still uses the greedy leaf).
   int fidelity_plies;
@@ -451,6 +549,7 @@ typedef struct PegScenarioJob {
   MachineLetter mover_drawn[PEG_MAX_BAG + 1];
   MachineLetter bag_remaining[PEG_MAX_BAG + 1];
   int64_t weight;
+  PegOppModel opp_model;
   int fidelity_plies;
   int injection_cap;
   int64_t deadline_ns;
@@ -488,6 +587,13 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   const bool emptier = bag_get_letters(game_get_bag(game)) == 0 &&
                        game_get_game_end_reason(game) == GAME_END_REASON_NONE;
   if (ctx->fidelity_plies <= 0 || !emptier) {
+    // Non-emptier (or stage-0) leaf: the opponent still draws, so the model
+    // matters. Emptier leaves fall through to the exact endgame below, which is
+    // already adversarial-optimal and thus identical for both models.
+    if (ctx->opp_model == PEG_OPP_PESSIMISTIC) {
+      return peg_pessimistic_playout(game, ctx->mover_idx,
+                                     ctx->worker->playout_ml);
+    }
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
   }
   // Exact endgame leaf. After the mover plays and draws it is the opponent's
@@ -549,6 +655,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
       job.bag_remaining[i] = bag_remaining[i];
     }
     job.weight = weight;
+    job.opp_model = ctx->opp_model;
     job.fidelity_plies = ctx->fidelity_plies;
     job.injection_cap = ctx->injection_cap;
     job.deadline_ns = ctx->deadline_ns;
@@ -663,6 +770,7 @@ typedef struct PegCandJob {
   int ld_size;
   const Move *cand;
   int bag_size;
+  PegOppModel opp_model;
   int fidelity_plies;
   int scenario_stride;
   int64_t deadline_ns;
@@ -726,6 +834,7 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   ctx.ld_size = job->ld_size;
   ctx.cand = job->cand;
   ctx.bag_size = job->bag_size;
+  ctx.opp_model = job->opp_model;
   ctx.fidelity_plies = job->fidelity_plies;
   ctx.scenario_stride = job->scenario_stride;
   ctx.deadline_ns = job->deadline_ns;
@@ -817,8 +926,8 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
                                 const Game *game, int mover_idx,
                                 const uint8_t *unseen, int ld_size,
                                 int bag_size, const Move *const *cands, int n,
-                                int fidelity_plies, int scenario_stride,
-                                int64_t deadline_ns,
+                                PegOppModel opp_model, int fidelity_plies,
+                                int scenario_stride, int64_t deadline_ns,
                                 ThreadControl *thread_control, PegPoll *poll,
                                 const MachineLetter *eval_bag_order,
                                 int eval_bag_order_len, PegRankedCand *ranked) {
@@ -830,6 +939,7 @@ static void peg_eval_candidates(PegPool *pool, PegWorker *workers,
     jobs[i].ld_size = ld_size;
     jobs[i].cand = cands[i];
     jobs[i].bag_size = bag_size;
+    jobs[i].opp_model = opp_model;
     jobs[i].fidelity_plies = fidelity_plies;
     jobs[i].scenario_stride = scenario_stride;
     jobs[i].deadline_ns = deadline_ns;
@@ -868,6 +978,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   ctx.unseen = job->unseen;
   ctx.ld_size = job->ld_size;
   ctx.k_drawn = job->k_drawn;
+  ctx.opp_model = job->opp_model;
   ctx.fidelity_plies = job->fidelity_plies;
   ctx.injection_cap = job->injection_cap;
   ctx.deadline_ns = job->deadline_ns;
@@ -892,8 +1003,8 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
 static void peg_eval_candidates_scenario(
     PegPool *pool, PegWorker *workers, const Game *prepared_base, int mover_idx,
     const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
-    int n, int fidelity_plies, int scenario_stride, int64_t deadline_ns,
-    ThreadControl *thread_control, PegRankedCand *ranked) {
+    int n, PegOppModel opp_model, int fidelity_plies, int scenario_stride,
+    int64_t deadline_ns, ThreadControl *thread_control, PegRankedCand *ranked) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -914,6 +1025,7 @@ static void peg_eval_candidates_scenario(
     ctx.mover_idx = mover_idx;
     ctx.unseen = unseen;
     ctx.ld_size = ld_size;
+    ctx.opp_model = opp_model;
     ctx.fidelity_plies = fidelity_plies;
     ctx.injection_cap = injection_cap;
     ctx.scenario_stride = scenario_stride;
@@ -1239,9 +1351,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
-                        ld_size, bag_size, moves, n_cands, /*fidelity_plies=*/0,
-                        scenario_stride, deadline_ns, args->thread_control,
-                        args->poll, args->eval_bag_order,
+                        ld_size, bag_size, moves, n_cands, args->opp_model,
+                        /*fidelity_plies=*/0, scenario_stride, deadline_ns,
+                        args->thread_control, args->poll, args->eval_bag_order,
                         args->eval_bag_order_len, ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
@@ -1288,10 +1400,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       // Scenario-level parallelism: a halving stage has few candidates, so
       // splitting each into its scenarios keeps all cores busy.
-      peg_eval_candidates_scenario(pool, workers, prepared_base, mover_idx,
-                                   unseen, ld_size, bag_size, moves, eval_count,
-                                   /*fidelity_plies=*/s + 1, scenario_stride,
-                                   deadline_ns, args->thread_control, restaged);
+      peg_eval_candidates_scenario(
+          pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
+          moves, eval_count, args->opp_model, /*fidelity_plies=*/s + 1,
+          scenario_stride, deadline_ns, args->thread_control, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
