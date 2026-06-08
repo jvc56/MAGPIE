@@ -2071,6 +2071,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SHOW_HEAT_MAP,        /* heatmap */
         ARG_TOKEN_INFER,                /* infer */
         ARG_TOKEN_LEAVE_GEN,            /* leavegen */
+        ARG_TOKEN_PEG,                  /* peg */
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
@@ -2135,9 +2136,14 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_PEG_ONLY,                /* pegonly */
+        ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
+        ARG_TOKEN_PEG_STRIDE,              /* pegstride */
+        ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
         ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
         ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
         ARG_TOKEN_PLIES,                   /* plies */
+        ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
         ARG_TOKEN_STOP_COND_PCT,           /* scondition */
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
