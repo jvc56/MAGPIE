@@ -823,6 +823,225 @@ static void test_peg_main_inner_top_k(void) {
   config_destroy(config);
 }
 
+// ---------------------------------------------------------------------------
+// On-demand deep anchors (test.c keys peg1pb / peg1onyx / peg2axe / peg2acid /
+// peg3pah / peg4pond): production peg_solve regression pins on studied boards.
+//
+// Each runs the cascade (full candidate generation, full scenario enumeration,
+// default halving schedule capped by max_stage) with the studied move
+// pnoprune-protected (PegArgs.protect_moves) so it is carried to the deepest
+// stage and scored even when production ranks another move higher — then pins
+// THAT move's win%/spread. These are production's own deep values, not
+// macondo's guaranteed-win numbers (production's non-emptier leaves are a
+// shallow rational playout); the macondo/GillesB move values are cross-checked
+// separately in the fast main-suite macondo cases and in peg_pess_test.
+//
+// macondo CGPs that store an empty opponent rack load the whole unseen pool
+// into the bag; redistribute_bag > 0 first repacks it to an N-in-bag position
+// (deterministically: smallest N tiles to the bag, the rest to the opponent).
+// ---------------------------------------------------------------------------
+static void peg_anchor_protected_move(const char *name, const char *cgp,
+                                      const char *move_str,
+                                      int redistribute_bag, int max_stage,
+                                      double budget_seconds,
+                                      double expected_win,
+                                      double expected_spread, double win_tol,
+                                      double spread_tol) {
+  Config *config = config_create_or_die("set -threads 8 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
+  ErrorStack *error_stack = error_stack_create();
+
+  if (redistribute_bag > 0) {
+    peg_redistribute_bag_to_opp(game, mover_idx, redistribute_bag);
+  }
+
+  // Find the studied move by its rendered text rather than parsing a move
+  // string — robust to playthrough/coordinate input quirks (e.g. a move that
+  // opens with a played-through tile like "6F (A)X(E)"). The Move lives in
+  // gen_ml, which outlives the solve below.
+  MoveList *gen_ml = move_list_create(4096);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  const int n_gen = move_list_get_count(gen_ml);
+  const Move *studied = NULL;
+  StringBuilder *find_sb = string_builder_create();
+  for (int i = 0; i < n_gen && studied == NULL; i++) {
+    const Move *m = move_list_get_move(gen_ml, i);
+    string_builder_clear(find_sb);
+    string_builder_add_move(find_sb, board, m, ld, false);
+    if (strings_equal(string_builder_peek(find_sb), move_str)) {
+      studied = m;
+    }
+  }
+  string_builder_destroy(find_sb);
+  if (studied == NULL) {
+    log_fatal("[%s] studied move '%s' not generated on this board", name,
+              move_str);
+  }
+  const Move *protect[1] = {studied};
+
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 8;
+  args.time_budget_seconds = budget_seconds;
+  args.max_stage = max_stage;
+  args.protect_moves = protect;
+  args.n_protect_moves = 1;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(result.n_top_cands >= 1);
+
+  // The protected studied move is guaranteed to survive every cut; find it in
+  // the ranking and read its evaluated win%/spread.
+  StringBuilder *studied_sb = string_builder_create();
+  string_builder_add_move(studied_sb, board, studied, ld, false);
+  const char *studied_text = string_builder_peek(studied_sb);
+  double win = -1.0;
+  double spread = 0.0;
+  StringBuilder *cand_sb = string_builder_create();
+  for (int i = 0; i < result.n_top_cands; i++) {
+    string_builder_clear(cand_sb);
+    string_builder_add_move(cand_sb, board, &result.top_cands[i].move, ld,
+                            false);
+    if (strings_equal(string_builder_peek(cand_sb), studied_text)) {
+      win = result.top_cands[i].win_pct;
+      spread = result.top_cands[i].mean_spread;
+      break;
+    }
+  }
+  StringBuilder *best_sb = string_builder_create();
+  string_builder_add_move(best_sb, board, &result.best_move, ld, false);
+  printf("[%s] %s: win=%.4f spread=%+.3f (field best %s, stage %d, %.1fs)\n",
+         name, studied_text, win, spread, string_builder_peek(best_sb),
+         result.last_completed_stage, result.elapsed_seconds);
+  if (win < 0.0) {
+    log_fatal("[%s] protected move '%s' missing from ranking", name,
+              studied_text);
+  }
+  const double win_diff = win - expected_win;
+  const double abs_win_diff = win_diff < 0.0 ? -win_diff : win_diff;
+  if (abs_win_diff > win_tol) {
+    log_fatal("[%s] win %.4f outside tolerance %.4f of expected %.4f", name,
+              win, win_tol, expected_win);
+  }
+  const double spread_diff = spread - expected_spread;
+  const double abs_spread_diff = spread_diff < 0.0 ? -spread_diff : spread_diff;
+  if (abs_spread_diff > spread_tol) {
+    log_fatal("[%s] spread %.3f outside tolerance %.3f of expected %.3f", name,
+              spread, spread_tol, expected_spread);
+  }
+
+  string_builder_destroy(studied_sb);
+  string_builder_destroy(cand_sb);
+  string_builder_destroy(best_sb);
+  move_list_destroy(gen_ml);
+  error_stack_destroy(error_stack);
+  peg_result_destroy(&result);
+  config_destroy(config);
+}
+
+// 1-in-bag: engineered position where passing is strictly best (mover and opp
+// both hold the same bingo rack with a Q stranded in the bag; any bingo opens
+// an opp counter-bingo, while passing wins every one-tile-bag scenario).
+void test_peg_1bag_pass_best(void) {
+  const char *cgp =
+      "cgp 7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
+      "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
+      "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
+  peg_anchor_protected_move("peg1pb", cgp, "pass", /*redistribute_bag=*/0,
+                            /*max_stage=*/0, /*budget_seconds=*/120.0,
+                            /*expected_win=*/1.0, /*expected_spread=*/51.375,
+                            /*win_tol=*/0.005, /*spread_tol=*/8.0);
+}
+
+// 1-in-bag: macondo TestStraightforward1PEG board (studied play 13L ONYX,
+// 7.5/8 = 0.9375 in macondo); here we pin production's value for ONYX.
+void test_peg_1bag_onyx(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  peg_anchor_protected_move("peg1onyx", cgp, "13L ONYX", /*redistribute_bag=*/0,
+                            /*max_stage=*/0, /*budget_seconds=*/120.0,
+                            /*expected_win=*/0.9375, /*expected_spread=*/8.75,
+                            /*win_tol=*/0.005, /*spread_tol=*/5.0);
+}
+
+// 2-in-bag: macondo TestTwoInBagSingleMove board (studied play 6F (A)X(E),
+// 70/72 = 0.9722 in macondo); pin production's value for (A)X(E).
+void test_peg_2bag_axe(void) {
+  const char *cgp =
+      "cgp 1T13/1W3Q9/VERB1U9/1E1OPIUM5C1/1LAWIN1I5O1/1Y3A1E5R1/7V4NO1/"
+      "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
+      "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
+  peg_anchor_protected_move("peg2axe", cgp, "6F (A)X(E)",
+                            /*redistribute_bag=*/0, /*max_stage=*/0,
+                            /*budget_seconds=*/120.0, /*expected_win=*/0.9722,
+                            /*expected_spread=*/37.431, /*win_tol=*/0.005,
+                            /*spread_tol=*/8.0);
+}
+
+// 2-in-bag: GillesB CSW24 board (studied play C6 ACIDOT(I)c, 72/72 in
+// GillesB's solver); pin production's value for ACIDOT(I)c.
+void test_peg_2bag_acidotic(void) {
+  const char *cgp =
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1V3/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
+      "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
+  peg_anchor_protected_move("peg2acid", cgp, "C6 ACIDOT(I)c",
+                            /*redistribute_bag=*/0, /*max_stage=*/0,
+                            /*budget_seconds=*/120.0, /*expected_win=*/1.0,
+                            /*expected_spread=*/112.444, /*win_tol=*/0.005,
+                            /*spread_tol=*/10.0);
+}
+
+// 3-in-bag: macondo manual position #2 (Tunnicliffe v Brennan, CSW21); studied
+// play 13M P(AH). max_stage bounds the 3-bag scenario space.
+void test_peg_3bag_pah(void) {
+  const char *cgp =
+      "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+      "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+      "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
+  peg_anchor_protected_move("peg3pah", cgp, "13M P(AH)", /*redistribute_bag=*/0,
+                            /*max_stage=*/2, /*budget_seconds=*/240.0,
+                            /*expected_win=*/0.6625, /*expected_spread=*/21.532,
+                            /*win_tol=*/0.06, /*spread_tol=*/12.0);
+}
+
+// 4-in-bag: macondo manual position #1 (Sokol v Walton); studied play
+// 2L P(O)ND. The macondo CGP stores an empty opponent rack, so repack the
+// unseen pool to a genuine 4-in-bag position first. max_stage bounds the
+// 4-bag scenario space.
+void test_peg_4bag_pond(void) {
+  const char *cgp =
+      "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E3Z2C1LOO/"
+      "1TED3E1BYWORD/2Q4N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"
+      "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20";
+  peg_anchor_protected_move("peg4pond", cgp, "2L P(O)ND",
+                            /*redistribute_bag=*/4, /*max_stage=*/2,
+                            /*budget_seconds=*/240.0, /*expected_win=*/1.0,
+                            /*expected_spread=*/46.892, /*win_tol=*/0.01,
+                            /*spread_tol=*/10.0);
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();

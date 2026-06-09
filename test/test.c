@@ -40,7 +40,9 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
-#include "pass_peg_search_test.h"
+#include "peg_greedy_bench_test.h"
+#include "peg_oracle_test.h"
+#include "peg_pess_test.h"
 #include "peg_poll_test.h"
 #include "peg_pool_test.h"
 #include "peg_test.h"
@@ -168,16 +170,10 @@ static TestEntry on_demand_test_table[] = {
     {"pegbench3", test_benchmark_peg_3},
     {"pegbench4", test_benchmark_peg_4},
     {"pegpoll", test_peg_poll},
-    {"passpegracks", test_pass_peg_enumerate_bingo_racks},
-    {"passpegsearch", test_pass_peg_search},
-    {"passpegengineered", test_pass_peg_engineered_search},
-    {"passpegreport", test_pass_peg_print_report},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
-    {"pegpessimistic", test_pass_peg_pessimistic_eval},
     {"pegpessfull", test_pass_peg_pessimistic_full_eval},
     {"pegendgame", test_pass_peg_endgame_one},
     {"peggreedy", test_pass_peg_greedy_bench},
-    {"pegcascade", test_pass_peg_cascade},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
