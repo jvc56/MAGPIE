@@ -556,6 +556,14 @@ size_t tui_game_state_effective_editor_rack(const TuiGameState *state,
 // cell's rack row never disagree.
 // Caller must hold state->mutex.
 static void sync_player_rack_to_editor(TuiGameState *state) {
+  // Play-vs-computer: the human's rack is the real bag-drawn rack, not
+  // something inferred from the typed move. Mirroring the editor rack into
+  // it here would erase the actual tiles (and empty it entirely once the
+  // typed word uses them all, surfacing the "(no rack)" placeholder). The
+  // board-entry preview never needs to touch the engine rack.
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    return;
+  }
   if (state->game == NULL || state->edit_history_idx < 0 ||
       state->edit_history_idx >= state->history_count) {
     return;
@@ -748,7 +756,14 @@ void tui_game_state_parse_edit_buf(TuiGameState *state) {
   // this turn's tiles, causing self-collisions and red text on a
   // perfectly legal committed move). Cached by turn index so we
   // only replay when switching turns, not on every keystroke.
-  if (state->game != NULL && state->edit_history_idx >= 0 &&
+  // Play-vs-computer edits the live current turn only, and the engine
+  // is already positioned there with the real bag-drawn racks. Seeking
+  // (which replays committed history and rebuilds racks from text, with
+  // no bag draws) would desync the human's rack and the bag — so skip
+  // it entirely in that mode. Annotation still seeks so validation sees
+  // the board the edited player faced rather than the post-game board.
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
+      state->edit_history_idx >= 0 &&
       state->engine_positioned_for_turn != state->edit_history_idx) {
     tui_game_state_seek_engine_to_turn(state, state->edit_history_idx);
   }
@@ -1118,6 +1133,10 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
   }
+  // Drop any in-progress board move-entry so a stale anchor doesn't
+  // leak into the next game.
+  state->board_entry_active = false;
+  state->edit_history_idx = -1;
   atomic_fetch_add(&state->render_version, 1);
 }
 
@@ -1430,6 +1449,10 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
   }
+  // Drop any in-progress board move-entry so a stale anchor doesn't
+  // leak into the next game.
+  state->board_entry_active = false;
+  state->edit_history_idx = -1;
   atomic_fetch_add(&state->render_version, 1);
 }
 

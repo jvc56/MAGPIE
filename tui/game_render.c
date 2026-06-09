@@ -405,7 +405,13 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   // because the leftover slice still has to be wide enough to host a
   // useful analysis panel.
   L.analysis_placement = ANALYSIS_NONE;
-  if (state != NULL) {
+  // Play-vs-computer hides the Analysis panel during the game so the
+  // human can't see the bot's candidate plays (which would reveal its
+  // rack). The panel returns once the game is over, for post-game study.
+  const bool pvc_in_progress =
+      state != NULL && state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      state->game != NULL && !game_over(state->game);
+  if (state != NULL && !pvc_in_progress) {
     if (L.right_col_width >= ANALYSIS_THREE_COL_THRESHOLD) {
       L.analysis_placement = ANALYSIS_RIGHT_OF_HISTORY;
     } else if (L.right_col_width >= HISTORY_TWO_COL_HALFWIDTH_THRESHOLD) {
@@ -1136,6 +1142,12 @@ void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides) {
   last_elides = elides;
 }
 
+int tui_debug_last_tile_blits(void) { return atomic_load(&g_last_tile_blits); }
+
+// Last measured keypress-to-pixels latency (microseconds). -1 = none yet.
+static _Atomic long g_input_lag_us = -1;
+void tui_debug_set_input_lag_us(long us) { atomic_store(&g_input_lag_us, us); }
+
 void tui_debug_record_frame_us(long frame_us) {
   static long max_in_window;
   static struct timespec window_start;
@@ -1221,6 +1233,7 @@ typedef struct {
   int score;
   bool antialias;
   bool ghost;
+  bool empty; // concealed opponent tile (no letter)
   int score_subscripts;
   unsigned cdy, cdx;
   int scale;
@@ -1429,6 +1442,16 @@ static const TuiHistoryEntry *pick_history_view(const TuiGameState *state) {
 // shows the rack they faced, and the opposite pill shows what
 // their opponent was holding at the same moment.
 static const Rack *pick_render_rack(const TuiGameState *state, int player_idx) {
+  // In play-vs-computer, conceal the computer's tiles from the human
+  // until the game is over (when the final position is fully revealed).
+  // Gate this before the history-snapshot block so cursoring back
+  // through committed turns doesn't leak the computer's past racks
+  // either.
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      player_idx != state->human_player_idx && state->game != NULL &&
+      !game_over(state->game)) {
+    return NULL;
+  }
   const TuiHistoryEntry *entry = pick_history_view(state);
   if (entry != NULL) {
     if (entry->player_idx == player_idx && entry->rack_before != NULL) {
@@ -1532,6 +1555,17 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
       *out_player_idx = state->history[state->edit_history_idx].player_idx;
     }
     return state->edit_preview_move;
+  }
+  // Play-vs-computer: during the live game the only board/rack preview
+  // is the human's own in-progress move (handled by the edit-preview
+  // branch above). Suppress every other analysis candidate — both the
+  // computer's live sim (which would reveal its move) and any stale sim
+  // results left over from the computer's previous turn (which were
+  // ghosting tiles on the human's rack). Analysis previews return at
+  // game over for post-game review.
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
+      !game_over(state->game)) {
+    return NULL;
   }
   const int idx = effective_analysis_cursor(state);
   if (idx < 0) {
@@ -2001,6 +2035,40 @@ int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
     }
   }
   return -1;
+}
+
+bool tui_board_cell_at(struct ncplane *plane, const TuiGameState *state, int y,
+                       int x, int *out_row, int *out_col) {
+  if (plane == NULL || state == NULL || y < 0 || x < 0) {
+    return false;
+  }
+  // Recompute the on-screen layout the same way tui_game_panel_at does
+  // so the inverse cell mapping matches the rendered geometry.
+  struct notcurses *render_nc = ncplane_notcurses(plane);
+  const bool pixel_ok = render_nc != NULL && notcurses_canpixel(render_nc);
+  const int user_pref =
+      (state->board_scale >= 2 && pixel_ok && state->glyph_cache != NULL) ? 2
+                                                                          : 1;
+  const Layout L = compute_layout(plane, user_pref, state);
+  if (L.scale < 0) {
+    return false;
+  }
+  const int rel_y = y - CELL_ROW_BASE;
+  const int rel_x = x - CELL_COL_BASE;
+  if (rel_y < 0 || rel_x < 0) {
+    return false;
+  }
+  // board_cell_w / board_cell_h already encode the active scale (2/1 cols
+  // and 2/1 rows per cell), so integer division collapses any sub-cell
+  // click to the cell it lands in for both 1x and 2x.
+  const int row = rel_y / L.board_cell_h;
+  const int col = rel_x / L.board_cell_w;
+  if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM) {
+    return false;
+  }
+  *out_row = row;
+  *out_col = col;
+  return true;
 }
 
 int tui_analysis_cursor_at(int y, int x) {
@@ -3628,13 +3696,11 @@ void tui_render_board_at(struct ncplane *plane, int top, int left,
 // buffer. Returns NULL on failure. The rack uses its own
 // palette (rack_tile1_*, rack_tile2_*) rather than the board's
 // tile colors; blanks render as "?" with subscript 0.
-static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
-                                         bool ghost, int tile_w, int tile_h,
-                                         TuiGlyphCache *glyph_cache,
-                                         TuiGlyphCache *glyph_cache_sub,
-                                         TuiScoreSubscripts score_subscripts,
-                                         bool antialias, const Theme *theme,
-                                         const LetterDistribution *ld) {
+static uint8_t *compose_rack_tile_pixels(
+    MachineLetter ml, int player_idx, bool ghost, int tile_w, int tile_h,
+    TuiGlyphCache *glyph_cache, TuiGlyphCache *glyph_cache_sub,
+    TuiScoreSubscripts score_subscripts, bool antialias, const Theme *theme,
+    const LetterDistribution *ld, bool empty) {
   // Supersample: rasterize the glyph + composite the tile at SSx
   // the target pixel size, then box-average 2x2 down to the cell
   // pixel size the terminal expects. Sidesteps FT hinting that
@@ -3662,7 +3728,22 @@ static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
   const ThemeRgb fg =
       ghost ? (ThemeRgb){.r = 102, .g = 102, .b = 102}
             : (player_idx == 1 ? theme->rack_tile2_fg : theme->rack_tile1_fg);
-  fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
+  if (empty) {
+    // Concealed opponent tiles: a full-size tile-color square (matching
+    // the board / face-up rack tiles) framed by a thin panel-bg border
+    // on all four edges so a row of them reads as separate square tiles.
+    fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
+    int line = th / 24;
+    if (line < SS) {
+      line = SS;
+    }
+    fill_tile_rect(buf_ss, tw, 0, 0, tw, line, theme->bg);         // top
+    fill_tile_rect(buf_ss, tw, 0, th - line, tw, line, theme->bg); // bottom
+    fill_tile_rect(buf_ss, tw, 0, 0, line, th, theme->bg);         // left
+    fill_tile_rect(buf_ss, tw, tw - line, 0, line, th, theme->bg); // right
+  } else {
+    fill_tile_rect(buf_ss, tw, 0, 0, tw, th, bg);
+  }
 
   const int sub_mode = (int)score_subscripts;
   const bool subs_on =
@@ -3674,7 +3755,9 @@ static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
     tui_glyph_cache_set_size(glyph_cache_sub, sub_px, antialias);
   }
 
-  const char *ascii = (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
+  // Concealed (opponent's hidden) tiles render as a bare tile box: the
+  // player-hued bg fill above, with no letter glyph and no score.
+  const char *ascii = empty ? "" : (ml == 0) ? "?" : ld->ld_ml_to_hl[ml];
   const TuiGlyph *g =
       (ascii != NULL && ascii[0] != '\0' && (unsigned char)ascii[0] < 0x80)
           ? tui_glyph_cache_get(glyph_cache, (uint32_t)ascii[0])
@@ -3693,7 +3776,7 @@ static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
       blit_glyph_into_buf(buf_ss, tw, th, 0, 0, tw, th, g, fg, bg);
     }
   }
-  if (subs_on && !ghost) {
+  if (subs_on && !ghost && !empty) {
     // Blanks always get a "0" subscript so their value is explicit.
     const bool show_subscript = (ml == 0) ||
                                 (sub_mode == TUI_SCORE_SUBSCRIPTS_ALL) ||
@@ -3753,7 +3836,8 @@ static uint8_t *compose_rack_tile_pixels(MachineLetter ml, int player_idx,
 
 static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
                                     const TuiGameState *state, const Layout *L,
-                                    int start_col, int tile_count) {
+                                    int start_col, int tile_count,
+                                    bool conceal) {
   struct notcurses *nc = ncplane_notcurses(plane);
   if (nc == NULL || !notcurses_canpixel(nc) || state->glyph_cache == NULL) {
     return;
@@ -3793,18 +3877,25 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   // committed turn rewinds the rack panel to that turn's player
   // + rack.
   const int player_idx = pick_render_on_turn(state);
-  const Rack *rack = pick_render_rack(state, player_idx);
   MachineLetter slot_letters[RACK_SIZE];
   for (int i = 0; i < RACK_SIZE; i++) {
     slot_letters[i] = ALPHABET_EMPTY_SQUARE_MARKER;
   }
-  const int slot_max = tile_count < RACK_SIZE ? tile_count : RACK_SIZE;
-  int slot_idx = sort_rack_for_display(rack, state->ld, state->rack_sort,
-                                       slot_letters, slot_max);
   bool slot_ghost[RACK_SIZE];
-  compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
-  for (int i = slot_idx; i < RACK_SIZE; i++) {
+  for (int i = 0; i < RACK_SIZE; i++) {
     slot_ghost[i] = false;
+  }
+  // Concealed mode draws `tile_count` bare tile boxes (no letters) for
+  // the on-turn opponent; skip all the real-rack expansion.
+  if (!conceal) {
+    const Rack *rack = pick_render_rack(state, player_idx);
+    const int slot_max = tile_count < RACK_SIZE ? tile_count : RACK_SIZE;
+    const int slot_idx = sort_rack_for_display(
+        rack, state->ld, state->rack_sort, slot_letters, slot_max);
+    compute_rack_ghost_mask(state, slot_letters, slot_idx, slot_ghost);
+    for (int i = slot_idx; i < RACK_SIZE; i++) {
+      slot_ghost[i] = false;
+    }
   }
 
   // Drop any cached tile plane beyond the visible rack length so
@@ -3818,8 +3909,9 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
   }
 
   for (int i = 0; i < tile_count && i < RACK_SIZE; i++) {
-    const MachineLetter ml = slot_letters[i];
-    const bool ghost = slot_ghost[i];
+    const MachineLetter ml = conceal ? 0 : slot_letters[i];
+    const bool ghost = conceal ? false : slot_ghost[i];
+    const bool empty = conceal;
     RackTileCache *rc = &rack_tile_cache[i];
     const int tile_score =
         (ml == 0) ? 0 : equity_to_int(ld_get_score(state->ld, ml));
@@ -3844,7 +3936,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     }
     if (rc->valid && rc->letter == (int)ml && rc->player_idx == player_idx &&
         rc->score == tile_score && rc->antialias == state->antialias &&
-        rc->ghost == ghost &&
+        rc->ghost == ghost && rc->empty == empty &&
         rc->score_subscripts == (int)state->score_subscripts &&
         rc->cdy == cdy && rc->cdx == cdx && rc->scale == L->scale &&
         rack_tile_planes[i] != NULL) {
@@ -3865,7 +3957,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     uint8_t *buf = compose_rack_tile_pixels(
         ml, player_idx, ghost, tile_w, tile_h, state->glyph_cache,
         state->glyph_cache_sub, state->score_subscripts, state->antialias,
-        theme, state->ld);
+        theme, state->ld, empty);
     if (buf == NULL) {
       continue;
     }
@@ -3882,6 +3974,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     rc->score = tile_score;
     rc->antialias = state->antialias;
     rc->ghost = ghost;
+    rc->empty = empty;
     rc->score_subscripts = (int)state->score_subscripts;
     rc->cdy = cdy;
     rc->cdx = cdx;
@@ -3909,12 +4002,46 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   // cursor is on the label or a pending entry.
   const int player_idx = pick_render_on_turn(state);
   const Rack *rack = pick_render_rack(state, player_idx);
+  const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
+  // Play-vs-computer: while it's the computer's turn its rack is concealed
+  // (pick_render_rack returned NULL). Rather than blank the panel, show a
+  // row of empty tile slots so the human sees "opponent's tiles hidden."
+  const bool concealed = state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+                         player_idx != state->human_player_idx &&
+                         state->game != NULL && !game_over(state->game);
+  if (concealed) {
+    draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
+                    "Rack", TUI_FOCUS_RACK, rack_focused);
+    const int cell_w = L->board_cell_w;
+    const int board_center = CELL_COL_BASE + (BOARD_DIM * cell_w) / 2;
+    int slot_col = board_center - (RACK_SIZE * cell_w) / 2;
+    if (slot_col < 1) {
+      slot_col = 1;
+    }
+    if (L->scale >= 2 && state->glyph_cache != NULL) {
+      // Real tile-shaped boxes in the opponent's color, no letters.
+      render_rack_panel_pixel(plane, theme, state, L, slot_col, RACK_SIZE,
+                              true);
+    } else {
+      // 1x: tile-colored blanks (bg fill, no glyph). Clear any stale 2x
+      // planes first in case the scale just changed.
+      render_rack_panel_pixel(plane, theme, state, L, slot_col, 0, false);
+      theme_apply_fg(plane, player_idx == 1 ? theme->rack_tile2_fg
+                                            : theme->rack_tile1_fg);
+      theme_apply_bg(plane, player_idx == 1 ? theme->rack_tile2_bg
+                                            : theme->rack_tile1_bg);
+      for (int i = 0; i < RACK_SIZE; i++) {
+        ncplane_putstr_yx(plane, L->rack_top + 1, slot_col + i * cell_w,
+                          cell_w == 1 ? " " : "  ");
+      }
+    }
+    return;
+  }
   if (rack == NULL) {
     return;
   }
   char title[32];
   snprintf(title, sizeof(title), "Rack (%d)", rack_get_total_letters(rack));
-  const bool rack_focused = state->focused_panel == TUI_FOCUS_RACK;
   draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
                   title, TUI_FOCUS_RACK, rack_focused);
   const LetterDistribution *ld = state->ld;
@@ -3948,7 +4075,8 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   }
 
   if (L->scale >= 2 && state->glyph_cache != NULL) {
-    render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters);
+    render_rack_panel_pixel(plane, theme, state, L, start_col, total_letters,
+                            false);
     return;
   }
 
@@ -4731,6 +4859,13 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // edit_history_idx here but rendered no input zones / cursor,
   // so re-editing prior turns looked broken.)
   const bool editing = state != NULL && state->edit_history_idx == idx;
+  // Play-vs-computer conceals the computer's private tiles (rack + leave)
+  // in the History panel until the game ends — the played move and score
+  // are public, but the rack/leave are not. Revealed at game over.
+  const bool conceal_tiles = state != NULL &&
+                             state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+                             e->player_idx != state->human_player_idx &&
+                             state->game != NULL && !game_over(state->game);
   // Pick the player-specific text-color pair so the entry reads as
   // belonging to whichever player made the move.
   const ThemeRgb player_fg =
@@ -5091,7 +5226,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
       } else {
         sorted_leave[0] = '\0';
       }
-      const char *leave_text = empty ? "\xc2\xb7" : sorted_leave;
+      const char *leave_text =
+          (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
       const int leave_w = empty ? 1 : (int)strlen(leave_text);
       int leave_right_edge = interior_right - 4;
       if (leave_right_edge >= delta_col) {
@@ -5113,7 +5249,12 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     //
     // Skip the spinner in CGP / non-bot mode: no one is "thinking,"
     // and showing a perpetual spinner reads as the app being busy.
-    if (clocks_active) {
+    // Also skip it on the human's own pending turn in play-vs-computer —
+    // it's the human's move to make, not the bot computing.
+    const bool human_pending =
+        state != NULL && state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+        e->player_idx == state->human_player_idx;
+    if (clocks_active && !human_pending) {
       static const char *const spinner_frames[] = {
           "\xe2\xa0\x8b", "\xe2\xa0\x99", "\xe2\xa0\xb9", "\xe2\xa0\xb8",
           "\xe2\xa0\xbc", "\xe2\xa0\xb4", "\xe2\xa0\xa6", "\xe2\xa0\xa7",
@@ -5133,9 +5274,29 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     // newly-played blank — newly-played blanks render as lowercase
     // letters with no parens). Drop them all and render the content
     // non-bold so playthrough tiles read as background context.
-    render_move_styled(plane, row, interior_left + (int)strlen(prefix),
-                       e->move_str, /*hide_parens=*/true,
-                       /*hide_playthrough_parens=*/false);
+    if (conceal_tiles && e->move_str[0] == '-') {
+      // Concealed exchange: hide which tiles were swapped, showing one
+      // dot per tile (the count matches the rack-concealment style).
+      char masked[48];
+      int p = 0;
+      masked[p++] = '-';
+      for (int i = 1; e->move_str[i] != '\0' && p + 4 < (int)sizeof(masked);
+           i++) {
+        masked[p++] = '\xe2';
+        masked[p++] = '\x80';
+        masked[p++] = '\xa2'; // U+2022 BULLET
+      }
+      masked[p] = '\0';
+      theme_apply_fg(plane, player_fg);
+      theme_apply_bg(plane, theme->bg);
+      ncplane_set_styles(plane, 0);
+      ncplane_putstr_yx(plane, row, interior_left + (int)strlen(prefix),
+                        masked);
+    } else {
+      render_move_styled(plane, row, interior_left + (int)strlen(prefix),
+                         e->move_str, /*hide_parens=*/true,
+                         /*hide_playthrough_parens=*/false);
+    }
 
     char delta_str[16];
     snprintf(delta_str, sizeof(delta_str), "+%d", e->score);
@@ -5161,7 +5322,8 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
       } else {
         sorted_leave[0] = '\0';
       }
-      const char *leave_text = empty ? "\xc2\xb7" : sorted_leave;
+      const char *leave_text =
+          (empty || conceal_tiles) ? "\xc2\xb7" : sorted_leave;
       // Visual width: "·" (U+00B7) is 2 bytes but renders as 1 cell.
       // strlen would over-shift the right-alignment by a column.
       const int leave_w = empty ? 1 : (int)strlen(leave_text);
@@ -5203,9 +5365,12 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // rack yet) just leave the cell empty — once a block cursor
   // lives in this cell during editing, the cursor itself will
   // be the only visible mark.
-  const char *rack_disp = sorted_rack[0] != '\0' ? sorted_rack
-                          : e->pending           ? ""
-                                                 : "\xe2\x80\x94";
+  const char *rack_disp = conceal_tiles ? "\xe2\x80\xa2\xe2\x80\xa2\xe2\x80"
+                                          "\xa2\xe2\x80\xa2\xe2\x80\xa2\xe2"
+                                          "\x80\xa2\xe2\x80\xa2"
+                          : sorted_rack[0] != '\0' ? sorted_rack
+                          : e->pending             ? ""
+                                                   : "\xe2\x80\x94";
   // Row 2 indent matches the prefix length so the secondary
   // info (clock + rack, or just rack in CGP mode) aligns with
   // where the move started on row 1 ("4. 14F XU" → "   2:45 EGIPS").
@@ -5266,6 +5431,16 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
       row_bg.g = (uint8_t)gg;
       row_bg.b = (uint8_t)bb;
     }
+    // Play-vs-computer: the rack row is a read-only display of the
+    // human's full rack, not an editable field. Paint the whole row
+    // black so it reads as "not editable" (vs the player-tinted
+    // editable rack row in annotation mode).
+    const bool pvc_readonly = state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
+    if (pvc_readonly) {
+      row_bg.r = 0;
+      row_bg.g = 0;
+      row_bg.b = 0;
+    }
     const ThemeRgb zone_bg = {0, 0, 0};
     const ThemeRgb white_bg = {255, 255, 255};
     const int rack_zone_left = rack_col;
@@ -5297,7 +5472,16 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     // (alphagrammed since RACK doesn't have focus yet).
     char display_buf[24];
     display_buf[0] = '\0';
-    if (state->edit_field == TUI_EDIT_FIELD_RACK && state->edit_rack_len > 0) {
+    if (pvc_readonly) {
+      // Read-only: always show the human's full real rack (set on the
+      // pending entry at turn start), alphagrammed, regardless of what's
+      // typed on the board.
+      if (e->rack_str[0] != '\0' && ld != NULL) {
+        format_alphagram_for_sort(e->rack_str, state->ld, state->rack_sort,
+                                  display_buf, sizeof(display_buf));
+      }
+    } else if (state->edit_field == TUI_EDIT_FIELD_RACK &&
+               state->edit_rack_len > 0) {
       // While the RACK field is focused, show the live buffer in the user's
       // typed order — even if it's not yet a valid rack — so editing is
       // visible keystroke by keystroke.
@@ -5332,7 +5516,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
       char ch[2] = {display_buf[j], '\0'};
       ncplane_putstr_yx(plane, row2, col, ch);
     }
-    if (state->edit_field == TUI_EDIT_FIELD_RACK) {
+    if (state->edit_field == TUI_EDIT_FIELD_RACK && !pvc_readonly) {
       // Cursor sits at the buffer's end position. With input
       // capped at 7 tiles, the cursor reaches column 7 (the
       // 8th cell) when the rack is full — a visual signal that
@@ -7513,37 +7697,25 @@ static double measure_nps(uint64_t nodes_now) {
   return ema;
 }
 
+// Render-health "fps": derived from the peak notcurses_render duration
+// over the recent window (g_max_frame_us), NOT the frame-to-frame
+// interval. The main loop now renders conditionally — it deliberately
+// idles when nothing on screen changed — so an interval-based rate would
+// read a misleading 1-2 fps on a static screen even though every render
+// is instant. Reporting 1 / worst-recent-render-time (capped at the 60fps
+// target) answers the question that actually matters — "are renders fast
+// enough to feel smooth" — and only dips when a frame genuinely takes a
+// long time to emit (e.g. a heavy 2x pixel-board re-blit).
 static double measure_fps(void) {
-  static double ema = 0.0;
-  static struct timespec last;
-  static bool inited = false;
-  struct timespec now;
-  clock_gettime(CLOCK_MONOTONIC, &now);
-  if (!inited) {
-    last = now;
-    inited = true;
-    return 0.0;
+  const long peak_us = atomic_load(&g_max_frame_us);
+  if (peak_us <= 0) {
+    return 60.0; // no slow frame measured yet — renders are instant
   }
-  const double dt = (double)(now.tv_sec - last.tv_sec) +
-                    (double)(now.tv_nsec - last.tv_nsec) / 1e9;
-  last = now;
-  // Skip pathological intervals: clock jumps / long pauses (dt > 5s)
-  // and the "unslept frame after a long frame" case where the main
-  // loop's overrun-recovery branch runs the next render immediately
-  // without sleeping, so the gap between measure_fps calls collapses
-  // and 1/dt blows up to 200+ fps. The render loop targets 60 fps,
-  // so any reading above 120 is a measurement artifact, not a real
-  // frame rate — drop it rather than let it poison the EMA.
-  if (dt <= 0.0 || dt > 5.0 || dt < 1.0 / 120.0) {
-    return ema;
+  double fps = 1e6 / (double)peak_us;
+  if (fps > 60.0) {
+    fps = 60.0;
   }
-  const double instant = 1.0 / dt;
-  if (ema <= 0.0) {
-    ema = instant;
-  } else {
-    ema = ema * 0.9 + instant * 0.1;
-  }
-  return ema;
+  return fps;
 }
 
 // ── Status bar ────────────────────────────────────────────────────────────
@@ -7621,6 +7793,7 @@ static void render_command_palette(struct ncplane *plane, const Theme *theme,
     const char *desc;
   };
   static const struct Cmd cmds[] = {
+      {"copy", "Copy current position to clipboard as CGP"},
       {"exit", "Quit MAGPIE TUI (alias for /quit)"},
       {"new", "Start a new game"},
       {"quit", "Quit MAGPIE TUI"},
@@ -7940,7 +8113,13 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     bot_nodes = iters * (uint64_t)(plies + 1);
   }
   const double nps = measure_nps(bot_nodes);
-  const bool show_nps = nps >= 1.0;
+  // Hide nps while the human is on turn in play-vs-computer — there's no
+  // bot search running, so a lingering/decaying nps readout is just noise.
+  const bool human_on_turn =
+      state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
+      !game_over(state->game) &&
+      game_get_player_on_turn_index(state->game) == state->human_player_idx;
+  const bool show_nps = nps >= 1.0 && !human_on_turn;
 
   ncplane_putstr_yx(plane, row, 0, left_buf);
   if (show_fps) {
@@ -7961,6 +8140,35 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
     char nps_buf[32];
     snprintf(nps_buf, sizeof(nps_buf), " \xc2\xb7 %s nps", nps_str);
     ncplane_putstr(plane, nps_buf);
+  }
+  // Keypress-to-pixels latency (the time from a keystroke dirtying a
+  // frame to that frame rendering). Shown in ms once we've measured one.
+  const long input_lag_us = atomic_load(&g_input_lag_us);
+  if (input_lag_us >= 0) {
+    char lag_buf[32];
+    snprintf(lag_buf, sizeof(lag_buf), " \xc2\xb7 %ld ms lag",
+             (input_lag_us + 500) / 1000);
+    ncplane_putstr(plane, lag_buf);
+  }
+  // Transient notice (e.g. "Copied CGP"). Expires via notice_expires_at;
+  // the once-a-second clock render tick repaints the bar without it
+  // within a second of expiry.
+  if (state->notice_buf[0] != '\0' && (state->notice_expires_at.tv_sec != 0 ||
+                                       state->notice_expires_at.tv_nsec != 0)) {
+    struct timespec notice_now;
+    clock_gettime(CLOCK_MONOTONIC, &notice_now);
+    const bool notice_live =
+        notice_now.tv_sec < state->notice_expires_at.tv_sec ||
+        (notice_now.tv_sec == state->notice_expires_at.tv_sec &&
+         notice_now.tv_nsec < state->notice_expires_at.tv_nsec);
+    if (notice_live) {
+      char notice_seg[80];
+      snprintf(notice_seg, sizeof(notice_seg), " \xc2\xb7 %s",
+               state->notice_buf);
+      ncplane_set_styles(plane, NCSTYLE_BOLD);
+      ncplane_putstr(plane, notice_seg);
+      ncplane_set_styles(plane, 0);
+    }
   }
   ncplane_putstr(plane, right_buf);
 
@@ -8046,8 +8254,15 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
       prev_dim_y != dim_y || prev_dim_x != dim_x;
   prev_dim_y = dim_y;
   prev_dim_x = dim_x;
-  const bool resized =
-      tui_sync_plane_to_terminal(plane) || plane_resized_externally;
+  // Keep the plane synced to the terminal, but DON'T let this call's
+  // return value drive the (expensive) full repaint below. On terminals
+  // where the ioctl size and notcurses' clamped plane size persistently
+  // disagree, tui_sync_plane_to_terminal returns true every frame; using
+  // it to trigger the repaint re-rasterized all ~225 board sprixels each
+  // frame (~250ms — the 4fps). A genuine resize still shows up as a
+  // dimension change (plane_resized_externally) on the next frame.
+  tui_sync_plane_to_terminal(plane);
+  const bool resized = plane_resized_externally;
   if (resized) {
     // Pixel-graphics planes cache an image at a specific cell offset; a
     // font-size change keeps the cell count but moves the underlying
@@ -8113,7 +8328,6 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   }
 
   theme_apply_base(plane, theme);
-  ncplane_erase(plane);
 
   // 2x mode is only honored when the host terminal supports pixel
   // graphics AND the bundled TTF actually loaded; otherwise we cap the
@@ -8128,7 +8342,45 @@ void tui_game_render(struct ncplane *plane, const Theme *theme,
   const Layout L = compute_layout(plane, user_pref, state);
   if (L.scale < 0) {
     render_too_small(plane, theme);
+    ncplane_erase(plane);
     return;
+  }
+
+  // Clear the plane before redrawing. At 2x the board widget (box,
+  // labels, and the 15x15 grid) is painted with per-cell pixel
+  // sprixels; a blanket ncplane_erase would mark the cells UNDER those
+  // sprixels dirty every frame, forcing notcurses to re-emit all ~225
+  // board sprixels (~250ms — the source of input lag in 2x mode).
+  // Instead erase only the regions OUTSIDE the board widget so its
+  // cells stay unchanged and the sprixels elide; the board renderers
+  // overwrite the box / labels with identical content, leaving nothing
+  // under the board dirty. At 1x there are no sprixels, so a plain
+  // full erase is both correct and cheap.
+  if (L.scale >= 2) {
+    unsigned total_rows = 0;
+    unsigned total_cols = 0;
+    ncplane_dim_yx(plane, &total_rows, &total_cols);
+    // The board widget AND the rack panel (directly below it) are the
+    // two big pixel-sprixel clusters in the left column. Protect both
+    // from the erase so their sprixels elide; the box / title / tiles
+    // are overwritten in place by their renderers. The bag panel below
+    // the rack is plain text (changes as tiles are drawn) so it stays
+    // in the erased zone.
+    const int widget_w = L.board_width;
+    const int widget_last_row = L.rack_bottom;
+    // Right of the board + rack column (rows 0..widget_last_row).
+    if ((int)total_cols > widget_w) {
+      ncplane_erase_region(plane, 0, widget_w, widget_last_row + 1,
+                           (int)total_cols - widget_w);
+    }
+    // Everything below the rack (bag panel, status/command bars).
+    if ((int)total_rows > widget_last_row + 1) {
+      ncplane_erase_region(plane, widget_last_row + 1, 0,
+                           (int)total_rows - (widget_last_row + 1),
+                           (int)total_cols);
+    }
+  } else {
+    ncplane_erase(plane);
   }
 
   // Prepare the analysis rows once per frame, BEFORE rendering
@@ -8791,13 +9043,12 @@ void tui_game_render_startup_menu(struct ncplane *plane, const Theme *theme,
       "Annotate a live game", "Play against the computer",
   };
   const char *shortcut_chars[TUI_STARTUP_ITEM_COUNT] = {"W", "P", "G", "A",
-                                                        "V"};
-  // Only "Watch computer play" is wired up today; the others
-  // render dimmed with a "(coming soon)" tag and cursor skips
-  // past them. As each mode ships, flip the corresponding entry
-  // to enabled and add an Enter handler in main.c.
+                                                        "C"};
+  // All modes are wired up. Any future unbuilt mode would render
+  // dimmed with a "(coming soon)" tag and the cursor would skip past
+  // it — flip its entry to true to do so.
   const bool item_disabled[TUI_STARTUP_ITEM_COUNT] = {
-      false, false, false, false, true,
+      false, false, false, false, false,
   };
   for (int i = 0; i < TUI_STARTUP_ITEM_COUNT; i++) {
     if (item_disabled[i]) {
@@ -9232,6 +9483,99 @@ void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
   const char *items[2] = {"No", "Yes"};
   const char *shortcuts[2] = {"N", "Y"};
   render_modal(plane, theme, "Quit?", items, shortcuts, 2, focus, 24);
+}
+
+void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
+                                int focus, const char *human_name,
+                                const char *computer_name, int first_move,
+                                int name_edit_pos, int time_seconds,
+                                const char *language, const char *lexicon,
+                                int sim_plies, int sim_candidates) {
+  if (plane == NULL || theme == NULL) {
+    return;
+  }
+  enum {
+    MODAL_WIDTH = 56,
+    CONTENT_W = MODAL_WIDTH - 4,
+    ROW_BUF = 96,
+    NAME_ZONE_W = 24,
+    NAME_ZONE_START = CONTENT_W - NAME_ZONE_W,
+  };
+  static char buf[TUI_PLAY_SETUP_ITEM_COUNT][ROW_BUF];
+  const char *items[TUI_PLAY_SETUP_ITEM_COUNT];
+  int cursor_cols[TUI_PLAY_SETUP_ITEM_COUNT];
+  int zone_starts[TUI_PLAY_SETUP_ITEM_COUNT];
+  int zone_widths[TUI_PLAY_SETUP_ITEM_COUNT];
+  const bool focus_human = (focus == TUI_PLAY_SETUP_HUMAN_NAME);
+  const bool focus_comp = (focus == TUI_PLAY_SETUP_COMPUTER_NAME);
+
+  format_setup_text_row(buf[TUI_PLAY_SETUP_HUMAN_NAME], ROW_BUF, CONTENT_W,
+                        NAME_ZONE_W, "Your name",
+                        human_name != NULL ? human_name : "");
+  format_setup_text_row(buf[TUI_PLAY_SETUP_COMPUTER_NAME], ROW_BUF, CONTENT_W,
+                        NAME_ZONE_W, "Computer name",
+                        computer_name != NULL ? computer_name : "");
+  const char *first_value = first_move == TUI_PLAY_FIRST_HUMAN      ? "Human"
+                            : first_move == TUI_PLAY_FIRST_COMPUTER ? "Computer"
+                                                                    : "Random";
+  format_setup_row(buf[TUI_PLAY_SETUP_FIRST_MOVE], ROW_BUF, CONTENT_W,
+                   "First move", first_value,
+                   focus == TUI_PLAY_SETUP_FIRST_MOVE);
+
+  // Time control — same preset resolution as the Watch-setup modal.
+  const int preset_idx = tui_time_picker_closest_index(time_seconds);
+  const char *time_label =
+      tui_time_picker_preset_seconds(preset_idx) == time_seconds
+          ? tui_time_picker_preset_label(preset_idx)
+          : NULL;
+  char time_value[24];
+  if (time_label != NULL) {
+    snprintf(time_value, sizeof(time_value), "%s", time_label);
+  } else if (time_seconds <= 0) {
+    snprintf(time_value, sizeof(time_value), "untimed");
+  } else if (time_seconds % 60 == 0) {
+    snprintf(time_value, sizeof(time_value), "%d min", time_seconds / 60);
+  } else {
+    snprintf(time_value, sizeof(time_value), "%ds", time_seconds);
+  }
+  format_setup_row(buf[TUI_PLAY_SETUP_TIME], ROW_BUF, CONTENT_W, "Time",
+                   time_value, focus == TUI_PLAY_SETUP_TIME);
+  format_setup_row(buf[TUI_PLAY_SETUP_LANGUAGE], ROW_BUF, CONTENT_W, "Language",
+                   language != NULL && language[0] != '\0' ? language
+                                                           : "(none)",
+                   focus == TUI_PLAY_SETUP_LANGUAGE);
+  format_setup_row(buf[TUI_PLAY_SETUP_LEXICON], ROW_BUF, CONTENT_W, "Lexicon",
+                   lexicon != NULL && lexicon[0] != '\0' ? lexicon : "(none)",
+                   focus == TUI_PLAY_SETUP_LEXICON);
+  char plies_str[8];
+  snprintf(plies_str, sizeof(plies_str), "%d", sim_plies);
+  format_setup_row(buf[TUI_PLAY_SETUP_SIM_PLIES], ROW_BUF, CONTENT_W,
+                   "Sim plies", plies_str, focus == TUI_PLAY_SETUP_SIM_PLIES);
+  char cands_str[8];
+  snprintf(cands_str, sizeof(cands_str), "%d", sim_candidates);
+  format_setup_row(buf[TUI_PLAY_SETUP_SIM_CANDIDATES], ROW_BUF, CONTENT_W,
+                   "Sim candidates", cands_str,
+                   focus == TUI_PLAY_SETUP_SIM_CANDIDATES);
+  snprintf(buf[TUI_PLAY_SETUP_START], ROW_BUF, "Start");
+  for (int i = 0; i < TUI_PLAY_SETUP_ITEM_COUNT; i++) {
+    items[i] = buf[i];
+    cursor_cols[i] = -1;
+    zone_starts[i] = -1;
+    zone_widths[i] = 0;
+  }
+  zone_starts[TUI_PLAY_SETUP_HUMAN_NAME] = NAME_ZONE_START;
+  zone_widths[TUI_PLAY_SETUP_HUMAN_NAME] = NAME_ZONE_W;
+  zone_starts[TUI_PLAY_SETUP_COMPUTER_NAME] = NAME_ZONE_START;
+  zone_widths[TUI_PLAY_SETUP_COMPUTER_NAME] = NAME_ZONE_W;
+  if (focus_human) {
+    cursor_cols[TUI_PLAY_SETUP_HUMAN_NAME] = NAME_ZONE_START + name_edit_pos;
+  }
+  if (focus_comp) {
+    cursor_cols[TUI_PLAY_SETUP_COMPUTER_NAME] = NAME_ZONE_START + name_edit_pos;
+  }
+  render_modal_ex(plane, theme, "Play vs computer", items, /*shortcuts=*/NULL,
+                  /*disabled=*/NULL, cursor_cols, zone_starts, zone_widths,
+                  TUI_PLAY_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
 }
 
 // Helper for an arrow-adjusted Settings row. Renders

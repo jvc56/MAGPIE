@@ -824,17 +824,45 @@ static void *bot_thread_main(void *arg) {
     const int clock_at_start =
         state->time_per_side_seconds - (int)state->seconds_used[player_idx];
 
-    Rack rack_at_start;
-    rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
-    rack_copy(&rack_at_start,
-              player_get_rack(game_get_player(state->game, player_idx)));
+    // Single-appender discipline: the bot worker is the ONLY place that
+    // appends a pending history entry. Append only when the last entry
+    // isn't already a pending one for this player — otherwise we'd add a
+    // fresh entry on every poll while idling on the human's turn (and the
+    // human-commit path, which finalizes this same pending entry, would
+    // double up with the bot). The first poll of each turn does the
+    // append; subsequent polls reuse history_count-1.
+    const bool need_append =
+        state->history_count == 0 ||
+        !state->history[state->history_count - 1].pending ||
+        state->history[state->history_count - 1].player_idx != player_idx;
+    if (need_append) {
+      Rack rack_at_start;
+      rack_set_dist_size(&rack_at_start, ld_get_size(state->ld));
+      rack_copy(&rack_at_start,
+                player_get_rack(game_get_player(state->game, player_idx)));
+      pending_idx = tui_bot_worker_append_pending_history(
+          state, player_idx, &rack_at_start, clock_at_start);
+      // Render the pending entry's spinner immediately.
+      atomic_fetch_add(&state->render_version, 1);
+    } else {
+      pending_idx = state->history_count - 1;
+    }
 
-    pending_idx = tui_bot_worker_append_pending_history(
-        state, player_idx, &rack_at_start, clock_at_start);
+    // In play-vs-computer, the human enters their own move through the
+    // board move-entry / commit path. The bot leaves the pending entry
+    // visible and idles (short poll) until the turn passes back to it.
+    // Never sleep holding the mutex — the render thread and the commit
+    // path need it.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+        player_idx == state->human_player_idx) {
+      pthread_mutex_unlock(&state->mutex);
+      const struct timespec idle = {.tv_sec = 0, .tv_nsec = 30 * 1000 * 1000L};
+      nanosleep(&idle, NULL);
+      continue;
+    }
+
     budget_sec = compute_budget_sec(state, player_idx);
     empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
-    // Render the pending entry's spinner immediately.
-    atomic_fetch_add(&state->render_version, 1);
     pthread_mutex_unlock(&state->mutex);
 
     // ── Run the engine with the mutex released ───────────────────────

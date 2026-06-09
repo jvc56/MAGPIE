@@ -459,6 +459,13 @@ typedef struct {
   char pending_lexicon[32];
   bool pending_load_rit;
 
+  // Transient status-bar notice (e.g. "Copied CGP"). Rendered until
+  // notice_expires_at (CLOCK_MONOTONIC); an all-zero timespec means
+  // no notice. The once-a-second clock render tick repaints the bar
+  // within a second of expiry, so no extra invalidation is needed.
+  char notice_buf[64];
+  struct timespec notice_expires_at;
+
   // Annotation edit state. edit_history_idx == -1 means we're
   // not editing anything; otherwise it's the index of the
   // pending entry being edited and edit_field selects which
@@ -549,7 +556,37 @@ typedef struct {
   // doesn't collide with that turn's own already-placed tiles.
   // -2 = stale / unknown (force a re-seek on the next parse).
   int engine_positioned_for_turn;
+
+  // App mode — makes the "who controls each seat" distinction explicit
+  // instead of inferring it from bot_started + whether racks were drawn.
+  // The bot worker, commit paths, and rack concealment all branch on it.
+  //   WATCH           — both seats are the bot (the original default).
+  //   ANNOTATE        — human fills both racks by hand; no bot runs.
+  //   PLAY_VS_COMPUTER— one human seat (human_player_idx), bot plays the
+  //                     other. Board move-entry submits the human's turn;
+  //                     the bot idles while the human is on turn.
+  int app_mode; // TuiAppMode
+  // Seat the human controls in PLAY_VS_COMPUTER (0 or 1). Unused in
+  // WATCH / ANNOTATE.
+  int human_player_idx;
+
+  // Board move-builder. Active only while board_entry_active is true.
+  // The play's letters/blanks live in edit_move_buf's word token (exactly
+  // as typed annotation stores them); the builder only owns the anchor +
+  // direction. The on-board cursor (next empty square) and the ghosted
+  // tiles are DERIVED from edit_preview_move at render time, so no
+  // separate placement list or cursor field is stored.
+  bool board_entry_active;
+  int board_anchor_row;
+  int board_anchor_col;
+  int board_dir; // BOARD_HORIZONTAL_DIRECTION / BOARD_VERTICAL_DIRECTION
 } TuiGameState;
+
+typedef enum {
+  TUI_APP_MODE_WATCH = 0,
+  TUI_APP_MODE_ANNOTATE = 1,
+  TUI_APP_MODE_PLAY_VS_COMPUTER = 2,
+} TuiAppMode;
 
 enum {
   TUI_EDIT_FIELD_MOVE = 0,

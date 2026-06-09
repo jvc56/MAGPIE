@@ -1,6 +1,7 @@
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game_history.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_results.h"
@@ -288,6 +289,98 @@ static void render_init_error(struct ncplane *plane, const Theme *theme,
   ncplane_putstr_yx(plane, (int)plane_rows - 2, 4, "Press any key to exit.");
 }
 
+// Copy `text` to the system clipboard. Primary mechanism is OSC 52,
+// written straight to the tty the same way the focus-reporting
+// toggles are: supported by Ghostty / Kitty / WezTerm / iTerm2 (with
+// the pref enabled) and works over SSH. On macOS, also pipe through
+// pbcopy as a fallback for terminals without OSC 52 (Terminal.app).
+static void tui_copy_to_clipboard(const char *text) {
+  if (text == NULL) {
+    return;
+  }
+  const size_t text_len = strlen(text);
+  // Base64-encode for OSC 52: ESC ] 52 ; c ; <base64> BEL.
+  static const char b64_alphabet[] =
+      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+  static const char osc_prefix[] = "\x1b]52;c;";
+  const size_t prefix_len = sizeof(osc_prefix) - 1;
+  const size_t b64_len = 4 * ((text_len + 2) / 3);
+  char *seq = malloc(prefix_len + b64_len + 2);
+  if (seq == NULL) {
+    return;
+  }
+  memcpy(seq, osc_prefix, prefix_len);
+  char *out = seq + prefix_len;
+  size_t in_idx = 0;
+  while (in_idx < text_len) {
+    const uint32_t byte0 = (uint8_t)text[in_idx];
+    const uint32_t byte1 =
+        in_idx + 1 < text_len ? (uint8_t)text[in_idx + 1] : 0;
+    const uint32_t byte2 =
+        in_idx + 2 < text_len ? (uint8_t)text[in_idx + 2] : 0;
+    const uint32_t chunk = (byte0 << 16) | (byte1 << 8) | byte2;
+    *out++ = b64_alphabet[(chunk >> 18) & 0x3f];
+    *out++ = b64_alphabet[(chunk >> 12) & 0x3f];
+    *out++ = in_idx + 1 < text_len ? b64_alphabet[(chunk >> 6) & 0x3f] : '=';
+    *out++ = in_idx + 2 < text_len ? b64_alphabet[chunk & 0x3f] : '=';
+    in_idx += 3;
+  }
+  *out++ = '\x07';
+  (void)!write(STDOUT_FILENO, seq, (size_t)(out - seq));
+  free(seq);
+#ifdef __APPLE__
+  FILE *clip_pipe = popen("pbcopy", "w");
+  if (clip_pipe != NULL) {
+    fwrite(text, 1, text_len, clip_pipe);
+    pclose(clip_pipe);
+  }
+#endif
+}
+
+// Copy the current live position to the clipboard as a CGP string
+// and flash a status-bar notice. In a live play-vs-computer game the
+// computer's rack is blanked out of the CGP — consistent with the
+// rack-panel / history concealment, the clipboard must not leak the
+// computer's tiles; once the game is over the full position is
+// copied. Caller must hold gs->mutex.
+static void tui_copy_position_cgp(TuiGameState *gs) {
+  if (gs->game == NULL) {
+    return;
+  }
+  char *cgp = game_get_cgp(gs->game, true);
+  if (cgp == NULL) {
+    return;
+  }
+  const bool conceal =
+      gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && !game_over(gs->game);
+  if (conceal) {
+    // CGP is "<board> <rack_on_turn>/<rack_other> <scores> <zeros>".
+    // Blank the computer's side of the racks token by splicing the
+    // string — the real Game is left untouched.
+    const int on_turn_idx = game_get_player_on_turn_index(gs->game);
+    const bool computer_on_turn = on_turn_idx != gs->human_player_idx;
+    char *racks = strchr(cgp, ' ');
+    if (racks != NULL) {
+      racks++;
+      char *rack_slash = strchr(racks, '/');
+      const char *racks_end = strchr(racks, ' ');
+      if (rack_slash != NULL && racks_end != NULL && rack_slash < racks_end) {
+        if (computer_on_turn) {
+          memmove(racks, rack_slash, strlen(rack_slash) + 1);
+        } else {
+          memmove(rack_slash + 1, racks_end, strlen(racks_end) + 1);
+        }
+      }
+    }
+  }
+  tui_copy_to_clipboard(cgp);
+  free(cgp);
+  snprintf(gs->notice_buf, sizeof(gs->notice_buf), "Copied CGP%s",
+           conceal ? " (computer rack hidden)" : "");
+  clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
+  gs->notice_expires_at.tv_sec += 2;
+}
+
 // Apply readline / emacs-style cursor and kill bindings to a
 // multi-line text buffer. Returns true if the key was consumed,
 // in which case the caller should continue past the rest of its
@@ -468,6 +561,16 @@ static void tui_commit_edit_and_revalidate(TuiGameState *gs) {
   if (gs->edit_history_idx < 0) {
     return;
   }
+  // Play-vs-computer: blur (Esc / turn-nav / click-away) ABANDONS the
+  // typed text instead of committing it — moves only land through the
+  // explicit PvC commit (Enter), which plays them for real. The
+  // annotation commit would stamp unplayed text onto the live pending
+  // entry, and revalidate_history's full no-draw replay rebuilds racks
+  // from entry text — wiping the real bag-drawn racks (the "(no rack)"
+  // pill + empty-racks CGP bug).
+  if (gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    return;
+  }
   tui_commit_edit_to_entry(gs);
   tui_game_state_revalidate_history(gs);
 }
@@ -532,6 +635,567 @@ static void tui_autofill_playthrough(TuiGameState *gs) {
   if (changed) {
     tui_game_state_parse_edit_buf(gs);
   }
+}
+
+// ── Board move-entry builder ────────────────────────────────────────
+// Board-driven move entry (click a square, type, arrows to navigate,
+// backspace to retract, Enter to submit) reuses the annotation edit
+// pipeline. The builder owns only the anchor + direction; the play's
+// letters live in edit_move_buf's word token exactly as typed annotation
+// stores them. Regenerating edit_move_buf and re-parsing keeps the board
+// ghost, the on-board cursor arrow, the inferred rack, and the History
+// cell all in sync for free.
+
+// Format the coordinate token for the current anchor + direction. Across
+// is "<row+1><col-letter>" (e.g. "8H"); down is "<col-letter><row+1>"
+// (e.g. "H8") — the engine infers direction from the token order.
+static void tui_board_builder_coord_token(const TuiGameState *gs, char *out,
+                                          size_t out_cap) {
+  const int row1 = gs->board_anchor_row + 1;
+  const char col_letter = (char)('A' + gs->board_anchor_col);
+  if (board_is_dir_vertical(gs->board_dir)) {
+    snprintf(out, out_cap, "%c%d", col_letter, row1);
+  } else {
+    snprintf(out, out_cap, "%d%c", row1, col_letter);
+  }
+}
+
+// Copy the word token (everything after the first space) of edit_move_buf
+// into `out`. Empty string when no word has been typed yet.
+static void tui_board_builder_extract_word(const TuiGameState *gs, char *out,
+                                           size_t out_cap) {
+  out[0] = '\0';
+  const char *space = strchr(gs->edit_move_buf, ' ');
+  if (space != NULL && space[1] != '\0') {
+    snprintf(out, out_cap, "%s", space + 1);
+  }
+}
+
+// Rebuild edit_move_buf from the anchor + direction. When keep_word is
+// true the existing word token (placed tiles + played-through letters)
+// is preserved; otherwise the word is dropped (placed tiles returned to
+// the rack). Re-parses so every derived view updates, then absorbs any
+// board tiles the play now butts into. Caller holds the mutex.
+static void tui_board_builder_rebuild(TuiGameState *gs, bool keep_word) {
+  char coord[8];
+  tui_board_builder_coord_token(gs, coord, sizeof(coord));
+  char word[64];
+  word[0] = '\0';
+  if (keep_word) {
+    tui_board_builder_extract_word(gs, word, sizeof(word));
+  }
+  if (word[0] != '\0') {
+    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s %s", coord,
+             word);
+  } else {
+    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", coord);
+  }
+  gs->edit_move_len = (int)strlen(gs->edit_move_buf);
+  gs->edit_move_cursor = gs->edit_move_len;
+  tui_game_state_parse_edit_buf(gs);
+  if (keep_word && word[0] != '\0') {
+    tui_autofill_playthrough(gs);
+  }
+}
+
+// Default direction heuristic for a fresh anchor: whichever of "across"
+// (empty run to the right) or "down" (empty run below) is longer. Ties
+// favor across.
+static int tui_board_builder_default_dir(const TuiGameState *gs, int row,
+                                         int col) {
+  const Board *brd = game_get_board(gs->game);
+  if (brd == NULL) {
+    return BOARD_HORIZONTAL_DIRECTION;
+  }
+  int right = 0;
+  for (int c = col; c < BOARD_DIM && board_get_letter(brd, row, c) ==
+                                         ALPHABET_EMPTY_SQUARE_MARKER;
+       c++) {
+    right++;
+  }
+  int down = 0;
+  for (int r = row; r < BOARD_DIM && board_get_letter(brd, r, col) ==
+                                         ALPHABET_EMPTY_SQUARE_MARKER;
+       r++) {
+    down++;
+  }
+  return (down > right) ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
+}
+
+// Begin (or relocate) board move-entry at (row, col) with the given
+// direction. Opens the editor on the current pending entry so the cell +
+// board pipeline lights up. Drops any previously-placed tiles. Caller
+// holds the mutex.
+static void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col,
+                                         int dir) {
+  // Absorb any contiguous on-board tiles immediately BEFORE the clicked
+  // cell (in the play direction) so a word that plays through them is
+  // anchored at the true word start. e.g. clicking the empty cell right
+  // after an existing "O" and typing "WNER" yields "OWNER" anchored at
+  // the O's square, not the invalid "WNER" anchored after it.
+  const Board *brd = gs->game != NULL ? game_get_board(gs->game) : NULL;
+  const bool vertical = board_is_dir_vertical(dir);
+  int anchor_row = row;
+  int anchor_col = col;
+  while (brd != NULL) {
+    const int pr = vertical ? anchor_row - 1 : anchor_row;
+    const int pc = vertical ? anchor_col : anchor_col - 1;
+    if (pr < 0 || pc < 0 ||
+        board_get_letter(brd, pr, pc) == ALPHABET_EMPTY_SQUARE_MARKER) {
+      break;
+    }
+    anchor_row = pr;
+    anchor_col = pc;
+  }
+  gs->board_anchor_row = anchor_row;
+  gs->board_anchor_col = anchor_col;
+  gs->board_dir = dir;
+  gs->board_entry_active = true;
+  // The pending entry (last in history) is the turn being entered.
+  if (gs->history_count > 0) {
+    gs->edit_history_idx = gs->history_count - 1;
+  }
+  gs->edit_field = TUI_EDIT_FIELD_MOVE;
+  gs->edit_rack_user_modified = false;
+  gs->edit_leave_buf[0] = '\0';
+  gs->edit_leave_len = 0;
+  gs->edit_leave_cursor = 0;
+  // Seed the word with the leading playthrough letters (from the true
+  // anchor up to — but excluding — the clicked empty cell) so the typing
+  // cursor starts on the clicked cell.
+  char coord[8];
+  tui_board_builder_coord_token(gs, coord, sizeof(coord));
+  char leading[48];
+  int li = 0;
+  {
+    int r = anchor_row;
+    int c = anchor_col;
+    while (!(r == row && c == col) && brd != NULL &&
+           li < (int)sizeof(leading) - 4) {
+      const MachineLetter ml = board_get_letter(brd, r, c);
+      const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[ml] : NULL;
+      for (int k = 0;
+           hl != NULL && hl[k] != '\0' && li < (int)sizeof(leading) - 1; k++) {
+        leading[li++] = hl[k];
+      }
+      if (vertical) {
+        r++;
+      } else {
+        c++;
+      }
+    }
+  }
+  leading[li] = '\0';
+  if (li > 0) {
+    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s %s", coord,
+             leading);
+  } else {
+    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", coord);
+  }
+  gs->edit_move_len = (int)strlen(gs->edit_move_buf);
+  gs->edit_move_cursor = gs->edit_move_len;
+  tui_game_state_parse_edit_buf(gs);
+  tui_autofill_playthrough(gs);
+}
+
+// Cancel board move-entry: return placed tiles to the rack and exit edit
+// mode. Caller holds the mutex.
+static void tui_board_builder_cancel(TuiGameState *gs) {
+  gs->board_entry_active = false;
+  gs->edit_move_buf[0] = '\0';
+  gs->edit_move_len = 0;
+  gs->edit_move_cursor = 0;
+  gs->edit_history_idx = -1;
+  tui_game_state_parse_edit_buf(gs);
+}
+
+// Machine letter for a single uppercase A-Z letter, or 0 if not found.
+static MachineLetter tui_ml_for_upper(const TuiGameState *gs, char up) {
+  if (gs->ld == NULL) {
+    return 0;
+  }
+  for (MachineLetter ml = 1; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    const char *hl = gs->ld->ld_ml_to_hl[ml];
+    if (hl != NULL && hl[0] == up && hl[1] == '\0') {
+      return ml;
+    }
+  }
+  return 0;
+}
+
+// Type one tile letter into the board move-entry word. Casing mirrors the
+// history-cell MOVE editor: Shift+letter designates a blank (stored
+// lowercase). In play-vs-computer the human's rack is known, so a plain
+// letter that isn't in the rack — but for which a blank is available — is
+// treated as a blank without Shift. Appends to the word token, re-parses,
+// and absorbs any played-through board tiles. Caller holds the mutex.
+// Resolve a typed letter against the human's live rack in
+// play-vs-computer: real tile, blank, or rejected. The rack is finite
+// and known — only allow a tile the rack still has AFTER accounting for
+// tiles the in-progress move already placed (so you can't type a second
+// E when you hold one E; the played-through E on the board is not yours
+// to retype). Unshifted letters fall back to a blank when the real tile
+// is exhausted but a blank remains; Shift+letter explicitly requests a
+// blank. Returns false to reject the keystroke (neither available).
+// Caller holds the mutex.
+static bool tui_pvc_resolve_typed_letter(const TuiGameState *gs, char up,
+                                         bool shift, bool *out_blank) {
+  const MachineLetter ml = tui_ml_for_upper(gs, up);
+  const Rack *rack =
+      gs->game != NULL
+          ? player_get_rack(game_get_player(gs->game, gs->human_player_idx))
+          : NULL;
+  int placed_real = 0;
+  int placed_blank = 0;
+  for (const char *p = gs->edit_move_inferred_rack; *p != '\0'; p++) {
+    if (*p == up) {
+      placed_real++;
+    } else if (*p == '?') {
+      placed_blank++;
+    }
+  }
+  const int avail_real = (rack != NULL && ml != 0)
+                             ? (int)rack_get_letter(rack, ml) - placed_real
+                             : 0;
+  const int avail_blank =
+      rack != NULL
+          ? (int)rack_get_letter(rack, BLANK_MACHINE_LETTER) - placed_blank
+          : 0;
+  if (shift) {
+    if (avail_blank <= 0) {
+      return false; // explicit blank requested but none left
+    }
+    *out_blank = true;
+  } else if (avail_real > 0) {
+    *out_blank = false;
+  } else if (avail_blank > 0) {
+    *out_blank = true; // out of the real tile — use a blank
+  } else {
+    return false; // no real tile and no blank — reject the keystroke
+  }
+  return true;
+}
+
+// For the cell editor's MOVE buffer, compute the board square the next
+// typed WORD letter would land on: the coord token's square advanced
+// along the play direction by the number of word letters before the
+// cursor (played-through letters already absorbed into the buffer count,
+// which is what keeps the position aligned with the board). Returns
+// false when the buffer has no parseable coord token yet.
+static bool tui_cell_word_landing_square(const TuiGameState *gs, int *out_row,
+                                         int *out_col) {
+  const char *buf = gs->edit_move_buf;
+  const char *space = strchr(buf, ' ');
+  if (space == NULL) {
+    return false;
+  }
+  // Coord token: digits-then-letter = horizontal; letter-then-digits =
+  // vertical. Same convention as parse_coord_token / the CGP notation.
+  int row = -1;
+  int col = -1;
+  bool vertical = false;
+  const char c0 = buf[0];
+  if (c0 >= '0' && c0 <= '9') {
+    int digits = 0;
+    const char *p = buf;
+    while (*p >= '0' && *p <= '9') {
+      digits = digits * 10 + (*p - '0');
+      p++;
+    }
+    if (!((*p >= 'A' && *p <= 'O') || (*p >= 'a' && *p <= 'o'))) {
+      return false;
+    }
+    row = digits - 1;
+    col = (*p >= 'a') ? *p - 'a' : *p - 'A';
+    vertical = false;
+  } else if ((c0 >= 'A' && c0 <= 'O') || (c0 >= 'a' && c0 <= 'o')) {
+    col = (c0 >= 'a') ? c0 - 'a' : c0 - 'A';
+    int digits = 0;
+    const char *p = buf + 1;
+    while (*p >= '0' && *p <= '9') {
+      digits = digits * 10 + (*p - '0');
+      p++;
+    }
+    if (digits == 0) {
+      return false;
+    }
+    row = digits - 1;
+    vertical = true;
+  } else {
+    return false;
+  }
+  if (row < 0 || row >= BOARD_DIM || col < 0 || col >= BOARD_DIM) {
+    return false;
+  }
+  // Count word letters before the cursor.
+  int word_letters = 0;
+  const int word_start = (int)(space - buf) + 1;
+  for (int i = word_start; i < gs->edit_move_cursor && buf[i] != '\0'; i++) {
+    const char wc = buf[i];
+    if ((wc >= 'a' && wc <= 'z') || (wc >= 'A' && wc <= 'Z')) {
+      word_letters++;
+    }
+  }
+  *out_row = vertical ? row + word_letters : row;
+  *out_col = vertical ? col : col + word_letters;
+  return *out_row < BOARD_DIM && *out_col < BOARD_DIM;
+}
+
+static void tui_board_entry_type_letter(TuiGameState *gs, char ch, bool shift,
+                                        bool is_pvc) {
+  if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z'))) {
+    return;
+  }
+  const char up = (ch >= 'a' && ch <= 'z') ? (char)(ch - 'a' + 'A') : ch;
+  bool blank = shift; // Shift+letter is always a blank.
+  if (is_pvc && !tui_pvc_resolve_typed_letter(gs, up, shift, &blank)) {
+    return;
+  }
+  const char glyph = blank ? (char)(up - 'A' + 'a') : up;
+  // Insert a space before the first word character (buffer is just the
+  // coord token after anchoring).
+  const bool need_space = strchr(gs->edit_move_buf, ' ') == NULL;
+  const int extra = need_space ? 2 : 1;
+  if (gs->edit_move_len + extra >= (int)sizeof(gs->edit_move_buf)) {
+    return;
+  }
+  if (need_space) {
+    gs->edit_move_buf[gs->edit_move_len++] = ' ';
+  }
+  gs->edit_move_buf[gs->edit_move_len++] = glyph;
+  gs->edit_move_buf[gs->edit_move_len] = '\0';
+  gs->edit_move_cursor = gs->edit_move_len;
+  tui_game_state_parse_edit_buf(gs);
+  tui_autofill_playthrough(gs);
+}
+
+// Retract the last placed tile from the board move-entry word, skipping
+// back over any trailing played-through (board) tiles. With nothing
+// placed, step the anchor back one cell. Caller holds the mutex.
+static void tui_board_entry_backspace(TuiGameState *gs) {
+  const char *space = strchr(gs->edit_move_buf, ' ');
+  const int word_off =
+      space != NULL ? (int)(space - gs->edit_move_buf) + 1 : -1;
+  int word_len = (word_off >= 0) ? gs->edit_move_len - word_off : 0;
+  if (word_len > 0) {
+    const Board *brd = game_get_board(gs->game);
+    const bool vertical = board_is_dir_vertical(gs->board_dir);
+    // Each word char maps to cell anchor + index along the direction.
+    // Pop trailing played-through cells (occupied on the board), then
+    // pop one placed tile.
+    while (word_len > 0) {
+      const int r = gs->board_anchor_row + (vertical ? (word_len - 1) : 0);
+      const int c = gs->board_anchor_col + (vertical ? 0 : (word_len - 1));
+      const bool occupied =
+          brd != NULL && r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
+          board_get_letter(brd, r, c) != ALPHABET_EMPTY_SQUARE_MARKER;
+      word_len--; // drop this char
+      if (!occupied) {
+        break; // it was a placed tile — stop here
+      }
+    }
+    if (word_len <= 0) {
+      gs->edit_move_buf[word_off - 1] = '\0'; // drop the space too
+      gs->edit_move_len = word_off - 1;
+    } else {
+      gs->edit_move_buf[word_off + word_len] = '\0';
+      gs->edit_move_len = word_off + word_len;
+    }
+    gs->edit_move_cursor = gs->edit_move_len;
+    tui_game_state_parse_edit_buf(gs);
+    tui_autofill_playthrough(gs);
+  } else {
+    int nr = gs->board_anchor_row;
+    int nc = gs->board_anchor_col;
+    if (board_is_dir_vertical(gs->board_dir)) {
+      if (nr > 0) {
+        nr--;
+      }
+    } else if (nc > 0) {
+      nc--;
+    }
+    tui_board_builder_set_anchor(gs, nr, nc, gs->board_dir);
+  }
+}
+
+// Tag placed-tile squares with the player's index so the renderer colors
+// them. Mirrors the bot worker's owner-tagging loop.
+static void tui_tag_move_owners(Board *board, const Move *move,
+                                int player_idx) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  const int dir = move_get_dir(move);
+  int r = move_get_row_start(move);
+  int c = move_get_col_start(move);
+  const int n = move_get_tiles_length(move);
+  for (int t = 0; t < n; t++) {
+    if (move_get_tile(move, t) != PLAYED_THROUGH_MARKER) {
+      board_set_square_owner(board, r, c, player_idx);
+    }
+    if (board_is_dir_vertical(dir)) {
+      r++;
+    } else {
+      c++;
+    }
+  }
+}
+
+// Commit the current edit-buffer preview move as the human's play in a
+// live play-vs-computer game: play with drawing (real bag-backed rack),
+// finalize the pending history entry, charge the clock, and clear the
+// editor so the bot's next poll sees the computer on turn. Shared by the
+// board-entry Enter and the history-cell Enter — the cell is an alternate
+// move-entry surface in play-vs-computer ("8D WORD" typed directly).
+// Returns true when a move was committed. Caller holds the mutex.
+static bool tui_pvc_commit_preview_move(TuiGameState *gs) {
+  if (gs->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER || gs->game == NULL ||
+      game_over(gs->game)) {
+    return false;
+  }
+  tui_game_state_parse_edit_buf(gs);
+  if (!gs->edit_preview_move_valid || gs->edit_preview_move == NULL ||
+      gs->edit_move_score < 0 ||
+      gs->edit_move_kind != TUI_EDIT_MOVE_KIND_PLACEMENT) {
+    return false; // not a legal placement yet — keep editing
+  }
+  const int idx = gs->edit_history_idx;
+  if (idx < 0 || idx >= gs->history_count) {
+    return false;
+  }
+  TuiHistoryEntry *e = &gs->history[idx];
+  const int player_idx = e->player_idx;
+  // Only the human's own live pending turn is committable. Without the
+  // player/on-turn guards, opening the COMPUTER's pending entry (it exists
+  // while the bot is thinking) and pressing Enter would play a move as the
+  // computer and race the bot thread's own commit.
+  if (!e->pending || player_idx != gs->human_player_idx ||
+      game_get_player_on_turn_index(gs->game) != gs->human_player_idx) {
+    return false;
+  }
+
+  Rack leave;
+  rack_set_dist_size(&leave, ld_get_size(gs->ld));
+  play_move(gs->edit_preview_move, gs->game, &leave);
+  tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
+                      player_idx);
+  snprintf(e->move_str, sizeof(e->move_str), "%s", gs->edit_move_canonical);
+  e->score = gs->edit_move_score;
+  {
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_rack(sb, &leave, gs->ld, false);
+    char *dump = string_builder_dump(sb, NULL);
+    snprintf(e->leave_str, sizeof(e->leave_str), "%s", dump);
+    free(dump);
+    string_builder_destroy(sb);
+  }
+  const int post =
+      equity_to_int(player_get_score(game_get_player(gs->game, player_idx)));
+  int bonus = 0;
+  if (game_over(gs->game)) {
+    const Rack *opp =
+        player_get_rack(game_get_player(gs->game, 1 - player_idx));
+    if (opp != NULL && !rack_is_empty(opp)) {
+      bonus = equity_to_int(calculate_end_rack_points(opp, gs->ld));
+      e->end_bonus = bonus;
+      StringBuilder *sb = string_builder_create();
+      string_builder_add_rack(sb, opp, gs->ld, false);
+      char *dump = string_builder_dump(sb, NULL);
+      snprintf(e->end_rack_str, sizeof(e->end_rack_str), "%s", dump);
+      free(dump);
+      string_builder_destroy(sb);
+    }
+  }
+  e->total_after = post - bonus;
+  e->pending = false;
+  // Charge wall time to the human, clamping clock skew to 0.
+  struct timespec now;
+  clock_gettime(CLOCK_MONOTONIC, &now);
+  double elapsed = (double)(now.tv_sec - gs->turn_started.tv_sec) +
+                   (double)(now.tv_nsec - gs->turn_started.tv_nsec) / 1e9;
+  if (elapsed < 0.0) {
+    elapsed = 0.0;
+  }
+  gs->seconds_used[player_idx] += elapsed;
+  gs->turn_started = now;
+  e->clock_at_end =
+      gs->time_per_side_seconds - (int)gs->seconds_used[player_idx];
+  gs->board_entry_active = false;
+  gs->edit_history_idx = -1;
+  gs->edit_move_buf[0] = '\0';
+  gs->edit_move_len = 0;
+  gs->edit_move_cursor = 0;
+  if (game_over(gs->game) && gs->history_count > 0) {
+    gs->history_cursor = gs->history_count - 1;
+    gs->analysis_cursor = 0;
+  } else {
+    // Keep following the live game so the next (computer) turn shows.
+    gs->history_cursor = -1;
+  }
+  tui_game_state_parse_edit_buf(gs);
+  atomic_fetch_add(&gs->render_version, 1);
+  return true;
+}
+
+// Submit the in-progress board move. Play-vs-computer plays the move with
+// drawing (real game) and hands the turn to the bot; annotation plays it
+// without drawing and seeds the next pending turn. No-op unless the
+// buffer is a legal placement. Caller holds the mutex.
+static void tui_board_entry_submit(TuiGameState *gs) {
+  if (!gs->board_entry_active) {
+    return;
+  }
+  if (gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    tui_pvc_commit_preview_move(gs);
+    return;
+  }
+  tui_game_state_parse_edit_buf(gs);
+  if (!gs->edit_preview_move_valid || gs->edit_preview_move == NULL ||
+      gs->edit_move_score < 0 ||
+      gs->edit_move_kind != TUI_EDIT_MOVE_KIND_PLACEMENT) {
+    return; // not a legal placement yet — keep editing
+  }
+  const int idx = gs->edit_history_idx;
+  if (idx < 0 || idx >= gs->history_count) {
+    return;
+  }
+  const int player_idx = gs->history[idx].player_idx;
+  TuiHistoryEntry *e = &gs->history[idx];
+
+  // Annotation: place tiles without drawing; the annotator owns racks.
+  // Mirrors the history-cell RACK-Enter commit (no revalidate — the
+  // incremental engine state advanced by play_move_without_drawing_tiles
+  // is authoritative for a forward move).
+  play_move_without_drawing_tiles(gs->edit_preview_move, gs->game);
+  tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
+                      player_idx);
+  snprintf(e->move_str, sizeof(e->move_str), "%s", gs->edit_move_canonical);
+  e->score = gs->edit_move_score;
+  // Seed the rack from the move's played tiles when the annotator
+  // hasn't typed a fuller rack — matches the cell editor's behavior.
+  if (e->rack_str[0] == '\0' && gs->edit_move_inferred_rack[0] != '\0') {
+    snprintf(e->rack_str, sizeof(e->rack_str), "%s",
+             gs->edit_move_inferred_rack);
+  }
+  if (gs->edit_move_leave[0] != '\0') {
+    snprintf(e->leave_str, sizeof(e->leave_str), "%s", gs->edit_move_leave);
+  }
+  e->pending = false;
+  e->total_after =
+      equity_to_int(player_get_score(game_get_player(gs->game, player_idx)));
+  const int next_player = game_get_player_on_turn_index(gs->game);
+  if (idx + 1 >= gs->history_count) {
+    tui_bot_worker_append_pending_history(gs, next_player, NULL,
+                                          gs->time_per_side_seconds);
+  }
+  gs->board_entry_active = false;
+  gs->edit_history_idx = -1;
+  gs->edit_move_buf[0] = '\0';
+  gs->edit_move_len = 0;
+  gs->edit_move_cursor = 0;
+  gs->history_cursor = gs->history_count - 1;
+  tui_game_state_parse_edit_buf(gs);
+  atomic_fetch_add(&gs->render_version, 1);
 }
 
 int main(int argc, char *argv[]) {
@@ -787,6 +1451,14 @@ int main(int argc, char *argv[]) {
   // game". Esc closes the modal and the locals are abandoned.
   char watch_setup_lexicon[TUI_LEXICON_NAME_MAX] = "";
   int watch_setup_time = 0;
+  // Play-vs-computer setup: editable player names, who moves first, and
+  // the focused row / name caret. Defaults focus to Start so a quick
+  // Enter launches with the defaults.
+  int play_setup_focus = TUI_PLAY_SETUP_START;
+  char play_setup_human_name[32] = "You";
+  char play_setup_computer_name[32] = "Computer";
+  int play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+  int play_setup_name_cursor = 0;
   // Annotate setup: lexicon (◀/▶ cycled, language-scoped) plus
   // two free-form player names. Same modal-local pattern as
   // Watch setup — commits to the session only on Start.
@@ -850,6 +1522,22 @@ int main(int argc, char *argv[]) {
   // the throttle the way they did with a bottom-of-loop sleep.
   struct timespec next_frame_deadline;
   clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
+  // Conditional-render bookkeeping. The 2x pixel board is drawn as ~225
+  // per-cell sprixels; notcurses_render re-emits them on every frame
+  // even when nothing changed, which pins a static screen (e.g. waiting
+  // on the human in play-vs-computer) at a few fps and burns CPU. So we
+  // only run the render path when something actually changed: input was
+  // processed, the bot bumped render_version, a modal is open, the
+  // wall-clock second ticked (live clock countdown), or the bot is
+  // animating a spinner. Otherwise the last frame stays on screen
+  // untouched.
+  bool frame_dirty = true; // render the first frame
+  // Input→display latency probe: timestamp when input first dirtied the
+  // current (not-yet-rendered) frame, so we can measure keypress-to-pixels.
+  struct timespec input_dirty_ts = {0, 0};
+  bool input_dirty_pending = false;
+  uint64_t rendered_version = ~(uint64_t)0;
+  long rendered_wall_sec = -1;
   while (running) {
     {
       struct timespec now;
@@ -1618,87 +2306,183 @@ int main(int argc, char *argv[]) {
       free(gcg_payload);
     }
 
+    // Decide whether this frame needs a render at all (see the
+    // conditional-render note above the loop). Skipping the render path
+    // on an unchanged frame avoids re-emitting the ~225-sprixel 2x board
+    // every tick, which is what pinned a static screen at a few fps.
+    struct timespec render_now;
+    clock_gettime(CLOCK_MONOTONIC, &render_now);
+    const uint64_t cur_render_version = atomic_load(&game_state.render_version);
+    bool bot_animating = false;
     pthread_mutex_lock(&game_state.mutex);
-    tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
+    if (game_state.history_count > 0) {
+      const TuiHistoryEntry *last_entry =
+          &game_state.history[game_state.history_count - 1];
+      // A pending bot turn shows an animated spinner — keep rendering so
+      // it animates. The human's own pending turn has no spinner, so it
+      // doesn't force renders (that's the static idle case we optimize).
+      bot_animating = last_entry->pending &&
+                      !(game_state.app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+                        last_entry->player_idx == game_state.human_player_idx);
+    }
     pthread_mutex_unlock(&game_state.mutex);
-    if (modal == TUI_MODAL_MAIN_MENU) {
-      tui_game_render_menu(std_plane, theme, main_menu_focus);
-    } else if (modal == TUI_MODAL_SETTINGS) {
-      const char *current_lexicon =
-          to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
-      const bool current_load_rit =
-          to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
-      tui_game_render_settings(
-          std_plane, theme, settings_focus, game_state.board_scale,
-          game_state.antialias, game_state.score_subscripts,
-          game_state.border_thickness, pixel_supported, font_available,
-          game_state.premium_labels, game_state.blank_uppercase,
-          game_state.rack_sort, current_lexicon, current_load_rit);
-    } else if (modal == TUI_MODAL_TIME_PICKER) {
-      tui_game_render_time_picker(std_plane, theme, time_focus);
-    } else if (modal == TUI_MODAL_LEXICON_PICKER && lexicon_list != NULL) {
-      tui_game_render_lexicon_picker(std_plane, theme, lexicon_list,
-                                     lexicon_focus);
-    } else if (modal == TUI_MODAL_QUIT_CONFIRM) {
-      tui_game_render_quit_confirm(std_plane, theme, quit_confirm_focus);
-    } else if (modal == TUI_MODAL_STARTUP_MENU) {
-      tui_game_render_startup_menu(std_plane, theme, startup_menu_focus);
-    } else if (modal == TUI_MODAL_WATCH_SETUP) {
-      // Render from the modal's own local copy of lexicon + time
-      // so adjusters preview against the in-modal value, not the
-      // live session value.
-      if (lexicon_list == NULL) {
-        lexicon_list = tui_lexicon_list_load();
+    const bool need_render = frame_dirty || modal != TUI_MODAL_NONE ||
+                             cur_render_version != rendered_version ||
+                             render_now.tv_sec != rendered_wall_sec ||
+                             bot_animating;
+    if (need_render) {
+      // Time the FULL render path (cell composition + pixel ncblits AND
+      // the notcurses_render emit) so the fps readout reflects the real
+      // per-frame cost, not just the graphics emit.
+      struct timespec render_begin;
+      clock_gettime(CLOCK_MONOTONIC, &render_begin);
+      pthread_mutex_lock(&game_state.mutex);
+      tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
+      pthread_mutex_unlock(&game_state.mutex);
+      if (modal == TUI_MODAL_MAIN_MENU) {
+        tui_game_render_menu(std_plane, theme, main_menu_focus);
+      } else if (modal == TUI_MODAL_SETTINGS) {
+        const char *current_lexicon =
+            to_save.lexicon_set ? to_save.lexicon : chosen_lexicon;
+        const bool current_load_rit =
+            to_save.load_rit_set ? to_save.load_rit : initial_load_rit;
+        tui_game_render_settings(
+            std_plane, theme, settings_focus, game_state.board_scale,
+            game_state.antialias, game_state.score_subscripts,
+            game_state.border_thickness, pixel_supported, font_available,
+            game_state.premium_labels, game_state.blank_uppercase,
+            game_state.rack_sort, current_lexicon, current_load_rit);
+      } else if (modal == TUI_MODAL_TIME_PICKER) {
+        tui_game_render_time_picker(std_plane, theme, time_focus);
+      } else if (modal == TUI_MODAL_LEXICON_PICKER && lexicon_list != NULL) {
+        tui_game_render_lexicon_picker(std_plane, theme, lexicon_list,
+                                       lexicon_focus);
+      } else if (modal == TUI_MODAL_QUIT_CONFIRM) {
+        tui_game_render_quit_confirm(std_plane, theme, quit_confirm_focus);
+      } else if (modal == TUI_MODAL_STARTUP_MENU) {
+        tui_game_render_startup_menu(std_plane, theme, startup_menu_focus);
+      } else if (modal == TUI_MODAL_WATCH_SETUP) {
+        // Render from the modal's own local copy of lexicon + time
+        // so adjusters preview against the in-modal value, not the
+        // live session value.
+        if (lexicon_list == NULL) {
+          lexicon_list = tui_lexicon_list_load();
+        }
+        char lang_buf[32] = "(unknown)";
+        if (lexicon_list != NULL) {
+          const int idx =
+              tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+          if (idx >= 0) {
+            tui_lexicon_list_language_name(lexicon_list, idx, lang_buf,
+                                           sizeof(lang_buf));
+          }
+        }
+        tui_game_render_watch_setup(std_plane, theme, watch_setup_focus,
+                                    watch_setup_time, lang_buf,
+                                    watch_setup_lexicon, game_state.sim_plies,
+                                    game_state.sim_candidates);
+      } else if (modal == TUI_MODAL_LOAD_POSITION) {
+        tui_game_render_load_position(std_plane, theme, load_position_buf,
+                                      load_position_cursor,
+                                      load_position_error);
+      } else if (modal == TUI_MODAL_LOAD_GAME) {
+        tui_game_render_load_game(std_plane, theme, load_game_buf,
+                                  load_game_cursor, load_game_error);
+      } else if (modal == TUI_MODAL_ANNOTATE_SETUP) {
+        tui_game_render_annotate_setup(
+            std_plane, theme, annotate_setup_focus, annotate_setup_lexicon,
+            annotate_setup_p1_name, annotate_setup_p2_name,
+            annotate_setup_name_cursor);
+      } else if (modal == TUI_MODAL_PLAY_SETUP) {
+        if (lexicon_list == NULL) {
+          lexicon_list = tui_lexicon_list_load();
+        }
+        char play_lang_buf[32] = "(unknown)";
+        if (lexicon_list != NULL) {
+          const int idx =
+              tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+          if (idx >= 0) {
+            tui_lexicon_list_language_name(lexicon_list, idx, play_lang_buf,
+                                           sizeof(play_lang_buf));
+          }
+        }
+        tui_game_render_play_setup(
+            std_plane, theme, play_setup_focus, play_setup_human_name,
+            play_setup_computer_name, play_setup_first_move,
+            play_setup_name_cursor, watch_setup_time, play_lang_buf,
+            watch_setup_lexicon, game_state.sim_plies,
+            game_state.sim_candidates);
       }
-      char lang_buf[32] = "(unknown)";
-      if (lexicon_list != NULL) {
-        const int idx =
-            tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
-        if (idx >= 0) {
-          tui_lexicon_list_language_name(lexicon_list, idx, lang_buf,
-                                         sizeof(lang_buf));
+      // Time the UI thread's full render path so the debug overlay
+      // can surface the worst-case frame in the last second. Captures
+      // notcurses_render too, where the Kitty graphics emit lives.
+      extern void tui_debug_record_frame_us(long);
+      extern void tui_debug_record_sprixel_stats(uint64_t emits,
+                                                 uint64_t elides);
+      struct timespec frame_start;
+      clock_gettime(CLOCK_MONOTONIC, &frame_start);
+      notcurses_render(nc);
+      struct timespec frame_end;
+      clock_gettime(CLOCK_MONOTONIC, &frame_end);
+      // Full render time (compose + blit + emit) drives the fps readout.
+      const long frame_us =
+          (long)(frame_end.tv_sec - render_begin.tv_sec) * 1000000L +
+          (long)(frame_end.tv_nsec - render_begin.tv_nsec) / 1000L;
+      // notcurses_render (graphics emit) time, for the perf trace only.
+      const long emit_us =
+          (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
+          (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
+      tui_debug_record_frame_us(frame_us);
+      // Keypress-to-pixels latency: from when input first dirtied this
+      // frame to when its render finished. -1 when this render wasn't
+      // triggered by input (e.g. a clock tick).
+      long input_lag_us = -1;
+      if (input_dirty_pending) {
+        input_lag_us =
+            (long)(frame_end.tv_sec - input_dirty_ts.tv_sec) * 1000000L +
+            (long)(frame_end.tv_nsec - input_dirty_ts.tv_nsec) / 1000L;
+        input_dirty_pending = false;
+      }
+      // Publish the latest measured keypress latency to the status bar.
+      // Only update on input-triggered frames so the last value persists
+      // (clock-tick frames carry no latency and would otherwise blank it).
+      if (input_lag_us >= 0) {
+        extern void tui_debug_set_input_lag_us(long us);
+        tui_debug_set_input_lag_us(input_lag_us);
+      }
+      // Snapshot notcurses' sprixel emission counters so the debug
+      // overlay can show whether re-emits happen on idle frames.
+      {
+        ncstats *st = notcurses_stats_alloc(nc);
+        if (st != NULL) {
+          notcurses_stats(nc, st);
+          tui_debug_record_sprixel_stats(st->sprixelemissions,
+                                         st->sprixelelisions);
+          // Opt-in perf trace (MAGPIE_FPS_DEBUG=1) — logged to
+          // /tmp/magpie_stderr.log. For each rendered frame: notcurses_render
+          // wall time, sprixels emitted vs elided this frame (high emit = the
+          // board planes are NOT eliding), and board tile blits this frame.
+          if (getenv("MAGPIE_FPS_DEBUG") != NULL) {
+            static uint64_t dbg_emit;
+            static uint64_t dbg_elide;
+            extern int tui_debug_last_tile_blits(void);
+            fprintf(stderr,
+                    "[fps] full_us=%ld emit_us=%ld emit+=%llu elide+=%llu "
+                    "blits=%d input_lag_us=%ld\n",
+                    frame_us, emit_us,
+                    (unsigned long long)(st->sprixelemissions - dbg_emit),
+                    (unsigned long long)(st->sprixelelisions - dbg_elide),
+                    tui_debug_last_tile_blits(), input_lag_us);
+            dbg_emit = st->sprixelemissions;
+            dbg_elide = st->sprixelelisions;
+          }
+          free(st);
         }
       }
-      tui_game_render_watch_setup(
-          std_plane, theme, watch_setup_focus, watch_setup_time, lang_buf,
-          watch_setup_lexicon, game_state.sim_plies, game_state.sim_candidates);
-    } else if (modal == TUI_MODAL_LOAD_POSITION) {
-      tui_game_render_load_position(std_plane, theme, load_position_buf,
-                                    load_position_cursor, load_position_error);
-    } else if (modal == TUI_MODAL_LOAD_GAME) {
-      tui_game_render_load_game(std_plane, theme, load_game_buf,
-                                load_game_cursor, load_game_error);
-    } else if (modal == TUI_MODAL_ANNOTATE_SETUP) {
-      tui_game_render_annotate_setup(
-          std_plane, theme, annotate_setup_focus, annotate_setup_lexicon,
-          annotate_setup_p1_name, annotate_setup_p2_name,
-          annotate_setup_name_cursor);
-    }
-    // Time the UI thread's full render path so the debug overlay
-    // can surface the worst-case frame in the last second. Captures
-    // notcurses_render too, where the Kitty graphics emit lives.
-    extern void tui_debug_record_frame_us(long);
-    extern void tui_debug_record_sprixel_stats(uint64_t emits, uint64_t elides);
-    struct timespec frame_start;
-    clock_gettime(CLOCK_MONOTONIC, &frame_start);
-    notcurses_render(nc);
-    struct timespec frame_end;
-    clock_gettime(CLOCK_MONOTONIC, &frame_end);
-    const long frame_us =
-        (long)(frame_end.tv_sec - frame_start.tv_sec) * 1000000L +
-        (long)(frame_end.tv_nsec - frame_start.tv_nsec) / 1000L;
-    tui_debug_record_frame_us(frame_us);
-    // Snapshot notcurses' sprixel emission counters so the debug
-    // overlay can show whether re-emits happen on idle frames.
-    {
-      ncstats *st = notcurses_stats_alloc(nc);
-      if (st != NULL) {
-        notcurses_stats(nc, st);
-        tui_debug_record_sprixel_stats(st->sprixelemissions,
-                                       st->sprixelelisions);
-        free(st);
-      }
-    }
+      rendered_version = cur_render_version;
+      rendered_wall_sec = render_now.tv_sec;
+      frame_dirty = false;
+    } // end if (need_render)
 
     // Service a pending SIGUSR1 screenshot request. Done after the frame
     // timing/stats so the (heavy) composite + PNG encode doesn't inflate
@@ -1761,6 +2545,13 @@ int main(int argc, char *argv[]) {
         // No more input this frame — drop out of the drain loop so
         // the outer while re-renders.
         break;
+      }
+      // A real key/mouse event arrived — mark the frame dirty so the
+      // conditional-render gate above renders the result next tick.
+      frame_dirty = true;
+      if (!input_dirty_pending) {
+        clock_gettime(CLOCK_MONOTONIC, &input_dirty_ts);
+        input_dirty_pending = true;
       }
       // Focus-event detection. We buffer ESC and ESC '[' silently
       // (the existing handlers never reach them while the sequence
@@ -1858,6 +2649,83 @@ int main(int argc, char *argv[]) {
             field_move ? sizeof(game_state.edit_move_buf)
                        : (field_leave ? sizeof(game_state.edit_leave_buf)
                                       : sizeof(game_state.edit_rack_buf));
+
+        // ── Board move-entry sub-mode ───────────────────────────────
+        // When a board anchor is active, keystrokes drive the on-board
+        // move builder rather than the history-cell text editor. The
+        // builder keeps edit_move_buf in sync so the board ghost, the
+        // on-board cursor arrow, and the History cell all track what's
+        // being typed. Space toggles direction (keyboard parallel to
+        // clicking the anchor); arrows relocate the anchor; Backspace
+        // retracts a tile; Enter submits; Esc cancels.
+        if (game_state.board_entry_active) {
+          const bool is_pvc =
+              game_state.app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
+          if (key == NCKEY_ESC) {
+            pthread_mutex_lock(&game_state.mutex);
+            tui_board_builder_cancel(&game_state);
+            pthread_mutex_unlock(&game_state.mutex);
+            continue;
+          }
+          if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+            pthread_mutex_lock(&game_state.mutex);
+            tui_board_entry_submit(&game_state);
+            pthread_mutex_unlock(&game_state.mutex);
+            continue;
+          }
+          if (key == ' ' || key == NCKEY_TAB || key == '\t') {
+            // Space or Tab toggles direction (keyboard parallel to
+            // clicking the anchor again).
+            pthread_mutex_lock(&game_state.mutex);
+            game_state.board_dir = board_is_dir_vertical(game_state.board_dir)
+                                       ? BOARD_HORIZONTAL_DIRECTION
+                                       : BOARD_VERTICAL_DIRECTION;
+            tui_board_builder_rebuild(&game_state, true);
+            pthread_mutex_unlock(&game_state.mutex);
+            continue;
+          }
+          if (key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_UP ||
+              key == NCKEY_DOWN) {
+            pthread_mutex_lock(&game_state.mutex);
+            int anchor_r = game_state.board_anchor_row;
+            int anchor_c = game_state.board_anchor_col;
+            if (key == NCKEY_LEFT && anchor_c > 0) {
+              anchor_c--;
+            } else if (key == NCKEY_RIGHT && anchor_c < BOARD_DIM - 1) {
+              anchor_c++;
+            } else if (key == NCKEY_UP && anchor_r > 0) {
+              anchor_r--;
+            } else if (key == NCKEY_DOWN && anchor_r < BOARD_DIM - 1) {
+              anchor_r++;
+            }
+            // Re-anchoring drops any in-progress tiles back to the rack
+            // and keeps the current direction.
+            tui_board_builder_set_anchor(&game_state, anchor_r, anchor_c,
+                                         game_state.board_dir);
+            pthread_mutex_unlock(&game_state.mutex);
+            continue;
+          }
+          if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
+            pthread_mutex_lock(&game_state.mutex);
+            tui_board_entry_backspace(&game_state);
+            pthread_mutex_unlock(&game_state.mutex);
+            continue;
+          }
+          if (key >= 0x20 && key < 0x7f) {
+            const char ch = (char)key;
+            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z')) {
+              pthread_mutex_lock(&game_state.mutex);
+              tui_board_entry_type_letter(&game_state, ch,
+                                          ncinput_shift_p(&input), is_pvc);
+              pthread_mutex_unlock(&game_state.mutex);
+            }
+            // Swallow other printables (digits, punctuation) in board
+            // mode so they don't leak into the coord token.
+            continue;
+          }
+          // Swallow anything else while board entry is active.
+          continue;
+        }
 
         if (key == NCKEY_ESC) {
           pthread_mutex_lock(&game_state.mutex);
@@ -1966,6 +2834,29 @@ int main(int argc, char *argv[]) {
           }
           game_state.edit_field = TUI_EDIT_FIELD_MOVE;
           pthread_mutex_unlock(&game_state.mutex);
+          continue;
+        }
+
+        // Play-vs-computer: the history cell doubles as a keyboard
+        // move-entry surface for the human's live pending turn — type
+        // "8D WORD" and press Enter. Enter routes through the same
+        // commit as board entry (real bag draw, clock charge, bot
+        // handoff). The annotation commit paths below must stay
+        // unreachable in this mode: they play WITHOUT drawing, which
+        // desyncs the bag and never hands the turn to the bot. Tab /
+        // Down field switches from MOVE are swallowed too — the rack
+        // row is read-only in play-vs-computer (racks come from the
+        // bag). All other keys (typing, Backspace, arrows, Esc) fall
+        // through to the normal editor handlers.
+        if (game_state.app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+            ((key == NCKEY_ENTER || key == '\r' || key == '\n') ||
+             ((key == NCKEY_TAB || key == '\t' || key == NCKEY_DOWN) &&
+              field_move))) {
+          if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+            pthread_mutex_lock(&game_state.mutex);
+            tui_pvc_commit_preview_move(&game_state);
+            pthread_mutex_unlock(&game_state.mutex);
+          }
           continue;
         }
 
@@ -2502,7 +3393,55 @@ int main(int argc, char *argv[]) {
             }
             const bool is_letter =
                 (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
-            if (field_move && is_letter && ncinput_shift_p(&input)) {
+            // Coord-token letters (before the first space, e.g. the F
+            // in "8F ...") are positions, not tiles — only letters in
+            // the word part go through rack resolution.
+            const bool typing_word =
+                *pcur > 0 && memchr(buf, ' ', (size_t)*pcur) != NULL;
+            if (field_move && is_letter && typing_word &&
+                game_state.app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+              // Play-vs-computer: racks are known, so resolve the
+              // letter against the human's live rack — same rule as
+              // board entry. An unshifted letter the rack doesn't
+              // hold becomes a blank when one is available (no Shift
+              // required); a letter with neither a real tile nor a
+              // blank left is rejected outright. EXCEPT when the
+              // letter lands on an occupied square: typing the board's
+              // own letter there is playthrough spelling (e.g. the C
+              // in "1A COMBINES" over an existing C) — pass it through
+              // verbatim; any other letter would collide, so reject.
+              const char up_ch =
+                  (ch >= 'a' && ch <= 'z') ? (char)(ch - 'a' + 'A') : ch;
+              int land_row = -1;
+              int land_col = -1;
+              bool resolved = false;
+              if (game_state.game != NULL &&
+                  tui_cell_word_landing_square(&game_state, &land_row,
+                                               &land_col)) {
+                const MachineLetter board_ml = board_get_letter(
+                    game_get_board(game_state.game), land_row, land_col);
+                if (board_ml != ALPHABET_EMPTY_SQUARE_MARKER) {
+                  if (get_unblanked_machine_letter(board_ml) ==
+                      tui_ml_for_upper(&game_state, up_ch)) {
+                    ch = up_ch; // playthrough: spell the board letter
+                    resolved = true;
+                  } else {
+                    pthread_mutex_unlock(&game_state.mutex);
+                    continue; // collides with a different board letter
+                  }
+                }
+              }
+              if (!resolved) {
+                bool as_blank = false;
+                if (!tui_pvc_resolve_typed_letter(&game_state, up_ch,
+                                                  ncinput_shift_p(&input),
+                                                  &as_blank)) {
+                  pthread_mutex_unlock(&game_state.mutex);
+                  continue;
+                }
+                ch = as_blank ? (char)(up_ch - 'A' + 'a') : up_ch;
+              }
+            } else if (field_move && is_letter && ncinput_shift_p(&input)) {
               // Shift+letter on MOVE → played blank (lowercase).
               if (ch >= 'A' && ch <= 'Z') {
                 ch = (char)(ch - 'A' + 'a');
@@ -2663,7 +3602,13 @@ int main(int argc, char *argv[]) {
           // primary input surface in annotation mode; needing to
           // click twice to start typing felt broken in testing.
           bool pending_edit_handled = false;
-          if (hit == TUI_FOCUS_HISTORY) {
+          // Play-vs-computer never opens the history-cell text editor:
+          // the human enters moves on the board, and the cell editor's
+          // blur-revalidation replays committed history from text, which
+          // would desync the live bag-drawn racks. Clicks on History in
+          // that mode just move the browse cursor (handled below).
+          if (hit == TUI_FOCUS_HISTORY &&
+              game_state.app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER) {
             int entry_row_off = 0;
             const int target =
                 tui_history_cursor_field_at(input.y, input.x, &entry_row_off);
@@ -2733,6 +3678,10 @@ int main(int argc, char *argv[]) {
               game_state.analysis_anchored_move[0] = '\0';
               game_state.edit_history_idx = target;
               game_state.edit_field = field;
+              // Clicking into the history-cell text editor takes over
+              // from any in-progress board move-entry so keystrokes go
+              // to the cell, not the board.
+              game_state.board_entry_active = false;
               tui_game_state_parse_edit_buf(&game_state);
               pending_edit_handled = true;
             }
@@ -2776,6 +3725,36 @@ int main(int argc, char *argv[]) {
                 game_state.analysis_anchored_move[0] = '\0';
               }
             }
+          } else if (hit == TUI_FOCUS_BOARD &&
+                     game_state.app_mode != TUI_APP_MODE_WATCH) {
+            // Board move-entry: click an empty cell to anchor and start
+            // typing; click the same anchor again to toggle direction.
+            // A click on an occupied cell (that isn't the anchor) just
+            // focuses the board.
+            int cell_row = -1;
+            int cell_col = -1;
+            if (tui_board_cell_at(std_plane, &game_state, input.y, input.x,
+                                  &cell_row, &cell_col)) {
+              const Board *brd = game_get_board(game_state.game);
+              const bool empty_cell =
+                  brd != NULL && board_get_letter(brd, cell_row, cell_col) ==
+                                     ALPHABET_EMPTY_SQUARE_MARKER;
+              if (game_state.board_entry_active &&
+                  cell_row == game_state.board_anchor_row &&
+                  cell_col == game_state.board_anchor_col) {
+                game_state.board_dir =
+                    board_is_dir_vertical(game_state.board_dir)
+                        ? BOARD_HORIZONTAL_DIRECTION
+                        : BOARD_VERTICAL_DIRECTION;
+                tui_board_builder_rebuild(&game_state, true);
+              } else if (empty_cell) {
+                const int dir = tui_board_builder_default_dir(
+                    &game_state, cell_row, cell_col);
+                tui_board_builder_set_anchor(&game_state, cell_row, cell_col,
+                                             dir);
+              }
+            }
+            game_state.focused_panel = TUI_FOCUS_BOARD;
           } else {
             game_state.focused_panel = hit;
           }
@@ -3337,6 +4316,9 @@ int main(int argc, char *argv[]) {
               tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
               pthread_mutex_unlock(&game_state.mutex);
             }
+            pthread_mutex_lock(&game_state.mutex);
+            game_state.app_mode = TUI_APP_MODE_WATCH;
+            pthread_mutex_unlock(&game_state.mutex);
             tui_bot_worker_start(&game_state);
             modal = TUI_MODAL_NONE;
           }
@@ -3577,6 +4559,7 @@ int main(int argc, char *argv[]) {
             tui_game_state_set_time_per_side(&game_state, chosen_time);
           }
           pthread_mutex_lock(&game_state.mutex);
+          game_state.app_mode = TUI_APP_MODE_ANNOTATE;
           tui_game_state_reset_game_for_annotation(&game_state);
           // Tear down all cached tile / arrow planes from the prior
           // game so the next render rebuilds them fresh against the
@@ -3617,6 +4600,320 @@ int main(int argc, char *argv[]) {
         continue;
       }
 
+      if (modal == TUI_MODAL_PLAY_SETUP) {
+        if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
+          const int hit = tui_modal_item_at(input.y, input.x);
+          if (hit >= 0 && hit < TUI_PLAY_SETUP_ITEM_COUNT) {
+            const TuiModalChevron chev = tui_modal_chevron_at(input.y, input.x);
+            if (hit != play_setup_focus) {
+              if (hit == TUI_PLAY_SETUP_HUMAN_NAME) {
+                play_setup_name_cursor = (int)strlen(play_setup_human_name);
+              } else if (hit == TUI_PLAY_SETUP_COMPUTER_NAME) {
+                play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+              }
+            }
+            play_setup_focus = hit;
+            if (hit == TUI_PLAY_SETUP_FIRST_MOVE &&
+                chev == TUI_MODAL_CHEVRON_LEFT) {
+              key = NCKEY_LEFT;
+            } else if (hit == TUI_PLAY_SETUP_FIRST_MOVE &&
+                       chev == TUI_MODAL_CHEVRON_RIGHT) {
+              key = NCKEY_RIGHT;
+            } else if (hit == TUI_PLAY_SETUP_START) {
+              key = NCKEY_ENTER;
+            } else {
+              continue;
+            }
+          } else {
+            continue;
+          }
+        }
+
+        const bool focus_human = play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME;
+        const bool focus_comp =
+            play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME;
+        const bool focus_name = focus_human || focus_comp;
+        char *name_buf = focus_human
+                             ? play_setup_human_name
+                             : (focus_comp ? play_setup_computer_name : NULL);
+        const size_t name_cap = focus_human ? sizeof(play_setup_human_name)
+                                            : sizeof(play_setup_computer_name);
+
+        if (key == NCKEY_ESC) {
+          modal = TUI_MODAL_STARTUP_MENU;
+          startup_menu_focus = TUI_STARTUP_PLAY_VS_COMPUTER;
+          continue;
+        }
+        if (key == NCKEY_UP || key == NCKEY_DOWN) {
+          const int delta = key == NCKEY_UP ? -1 : 1;
+          int next = play_setup_focus + delta;
+          if (next < 0) {
+            next = 0;
+          }
+          if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
+            next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
+          }
+          play_setup_focus = next;
+          if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
+            play_setup_name_cursor = (int)strlen(play_setup_human_name);
+          } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
+            play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+          }
+          continue;
+        }
+        if (key == NCKEY_TAB) {
+          const bool shift = ncinput_shift_p(&input);
+          int next = play_setup_focus + (shift ? -1 : 1);
+          if (next < 0) {
+            next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
+          }
+          if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
+            next = 0;
+          }
+          play_setup_focus = next;
+          if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
+            play_setup_name_cursor = (int)strlen(play_setup_human_name);
+          } else if (next == TUI_PLAY_SETUP_COMPUTER_NAME) {
+            play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+          }
+          continue;
+        }
+        if (!focus_name && (key == NCKEY_LEFT || key == NCKEY_RIGHT)) {
+          const int dir = key == NCKEY_RIGHT ? 1 : -1;
+          if (play_setup_focus == TUI_PLAY_SETUP_FIRST_MOVE) {
+            play_setup_first_move =
+                (play_setup_first_move + dir + TUI_PLAY_FIRST_COUNT) %
+                TUI_PLAY_FIRST_COUNT;
+          } else if (play_setup_focus == TUI_PLAY_SETUP_TIME) {
+            const int n = tui_time_picker_preset_count();
+            const int cur = tui_time_picker_closest_index(watch_setup_time);
+            int next = cur + dir;
+            if (next < 0) {
+              next = 0;
+            }
+            if (next >= n) {
+              next = n - 1;
+            }
+            watch_setup_time = tui_time_picker_preset_seconds(next);
+          } else if (play_setup_focus == TUI_PLAY_SETUP_LANGUAGE) {
+            if (lexicon_list == NULL) {
+              lexicon_list = tui_lexicon_list_load();
+            }
+            if (lexicon_list != NULL) {
+              int cur =
+                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+              if (cur < 0) {
+                cur = 0;
+              }
+              const int next =
+                  tui_lexicon_list_step_language(lexicon_list, cur, dir);
+              char namebuf[TUI_LEXICON_NAME_MAX];
+              if (next != cur &&
+                  tui_lexicon_list_name(lexicon_list, next, namebuf,
+                                        sizeof(namebuf))) {
+                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+                         namebuf);
+              }
+            }
+          } else if (play_setup_focus == TUI_PLAY_SETUP_LEXICON) {
+            if (lexicon_list == NULL) {
+              lexicon_list = tui_lexicon_list_load();
+            }
+            if (lexicon_list != NULL) {
+              int cur =
+                  tui_lexicon_list_find(lexicon_list, watch_setup_lexicon);
+              if (cur < 0) {
+                cur = 0;
+              }
+              const int next =
+                  tui_lexicon_list_step_same_language(lexicon_list, cur, dir);
+              char namebuf[TUI_LEXICON_NAME_MAX];
+              if (next != cur &&
+                  tui_lexicon_list_name(lexicon_list, next, namebuf,
+                                        sizeof(namebuf))) {
+                snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+                         namebuf);
+              }
+            }
+          } else if (play_setup_focus == TUI_PLAY_SETUP_SIM_PLIES) {
+            pthread_mutex_lock(&game_state.mutex);
+            int v = game_state.sim_plies + dir;
+            if (v < 1) {
+              v = 1;
+            }
+            if (v > 1024) {
+              v = 1024;
+            }
+            game_state.sim_plies = v;
+            pthread_mutex_unlock(&game_state.mutex);
+          } else if (play_setup_focus == TUI_PLAY_SETUP_SIM_CANDIDATES) {
+            pthread_mutex_lock(&game_state.mutex);
+            int v = game_state.sim_candidates + dir * 10;
+            if (v < 2) {
+              v = 2;
+            }
+            if (v > 1024) {
+              v = 1024;
+            }
+            game_state.sim_candidates = v;
+            pthread_mutex_unlock(&game_state.mutex);
+          }
+          continue;
+        }
+        if (focus_name && name_buf != NULL) {
+          const int len = (int)strlen(name_buf);
+          if (key == NCKEY_LEFT) {
+            if (play_setup_name_cursor > 0) {
+              play_setup_name_cursor--;
+            }
+            continue;
+          }
+          if (key == NCKEY_RIGHT) {
+            if (play_setup_name_cursor < len) {
+              play_setup_name_cursor++;
+            }
+            continue;
+          }
+          if (key == NCKEY_HOME) {
+            play_setup_name_cursor = 0;
+            continue;
+          }
+          if (key == NCKEY_END) {
+            play_setup_name_cursor = len;
+            continue;
+          }
+          if (key == NCKEY_BACKSPACE || key == 0x7f || key == 0x08) {
+            if (play_setup_name_cursor > 0) {
+              memmove(name_buf + play_setup_name_cursor - 1,
+                      name_buf + play_setup_name_cursor,
+                      (size_t)(len - play_setup_name_cursor + 1));
+              play_setup_name_cursor--;
+            }
+            continue;
+          }
+          if (key == NCKEY_DEL) {
+            if (play_setup_name_cursor < len) {
+              memmove(name_buf + play_setup_name_cursor,
+                      name_buf + play_setup_name_cursor + 1,
+                      (size_t)(len - play_setup_name_cursor));
+            }
+            continue;
+          }
+          if (key >= 0x20 && key < 0x7f && len + 1 < (int)name_cap) {
+            memmove(name_buf + play_setup_name_cursor + 1,
+                    name_buf + play_setup_name_cursor,
+                    (size_t)(len - play_setup_name_cursor + 1));
+            name_buf[play_setup_name_cursor] = (char)key;
+            play_setup_name_cursor++;
+            continue;
+          }
+        }
+        if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
+          // Enter on a non-Start row advances to the next field; Enter
+          // on Start launches the game.
+          if (play_setup_focus != TUI_PLAY_SETUP_START) {
+            play_setup_focus++;
+            if (play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME) {
+              play_setup_name_cursor = (int)strlen(play_setup_human_name);
+            } else if (play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME) {
+              play_setup_name_cursor = (int)strlen(play_setup_computer_name);
+            }
+            continue;
+          }
+          // The engine always seats P1 on turn first, so "Human" means
+          // the human is P1 (index 0); "Computer" makes the human P2;
+          // "Random" flips a coin.
+          int human_idx;
+          if (play_setup_first_move == TUI_PLAY_FIRST_HUMAN) {
+            human_idx = 0;
+          } else if (play_setup_first_move == TUI_PLAY_FIRST_COMPUTER) {
+            human_idx = 1;
+          } else {
+            human_idx = (int)((uint64_t)time(NULL) & 1ULL);
+          }
+          const char *hn =
+              play_setup_human_name[0] != '\0' ? play_setup_human_name : "You";
+          const char *cn = play_setup_computer_name[0] != '\0'
+                               ? play_setup_computer_name
+                               : "Computer";
+          // Commit the modal's scratch time / lexicon into the session.
+          chosen_time = watch_setup_time;
+          snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
+                   watch_setup_lexicon);
+          pthread_mutex_lock(&game_state.mutex);
+          snprintf(game_state.pending_lexicon,
+                   sizeof(game_state.pending_lexicon), "%s",
+                   watch_setup_lexicon);
+          pthread_mutex_unlock(&game_state.mutex);
+          // Stop any running bot before reconfiguring the game.
+          if (game_state.bot_started) {
+            atomic_store(&game_state.bot_stop, true);
+            pthread_join(game_state.bot_thread, NULL);
+            game_state.bot_started = false;
+            atomic_store(&game_state.bot_stop, false);
+          }
+          if (!args.no_config) {
+            to_save.time_per_side_seconds = chosen_time;
+            to_save.time_per_side_set = true;
+            strncpy(to_save.lexicon, chosen_lexicon,
+                    sizeof(to_save.lexicon) - 1);
+            to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
+            to_save.lexicon_set = true;
+            tui_config_save(&to_save);
+          }
+          const bool play_needs_reinit =
+              strcmp(game_state.pending_lexicon, game_state.active_lexicon) !=
+                  0 ||
+              game_state.pending_load_rit != game_state.active_load_rit;
+          if (play_needs_reinit) {
+            char new_lexicon[TUI_LEXICON_NAME_MAX];
+            snprintf(new_lexicon, sizeof(new_lexicon), "%s",
+                     game_state.pending_lexicon);
+            const bool new_load_rit = game_state.pending_load_rit;
+            const int saved_sim_plies = game_state.sim_plies;
+            const int saved_sim_candidates = game_state.sim_candidates;
+            tui_game_state_destroy(&game_state);
+            char reinit_error[256] = {0};
+            if (!tui_game_state_init(new_lexicon, (uint64_t)time(NULL),
+                                     new_load_rit, &game_state, reinit_error,
+                                     sizeof(reinit_error))) {
+              if (!tui_game_state_init(chosen_lexicon, (uint64_t)time(NULL),
+                                       initial_load_rit, &game_state,
+                                       reinit_error, sizeof(reinit_error))) {
+                running = false;
+                modal = TUI_MODAL_NONE;
+                continue;
+              }
+            } else {
+              snprintf(chosen_lexicon, sizeof(chosen_lexicon), "%s",
+                       new_lexicon);
+            }
+            game_state.sim_plies = saved_sim_plies;
+            game_state.sim_candidates = saved_sim_candidates;
+          }
+          pthread_mutex_lock(&game_state.mutex);
+          tui_game_state_set_time_per_side(&game_state, chosen_time);
+          tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
+          game_state.app_mode = TUI_APP_MODE_PLAY_VS_COMPUTER;
+          game_state.human_player_idx = human_idx;
+          snprintf(game_state.player_names[human_idx],
+                   sizeof(game_state.player_names[human_idx]), "%s", hn);
+          snprintf(game_state.player_names[1 - human_idx],
+                   sizeof(game_state.player_names[1 - human_idx]), "%s", cn);
+          game_state.history_cursor = -1;
+          game_state.focused_panel = TUI_FOCUS_BOARD;
+          pthread_mutex_unlock(&game_state.mutex);
+          // Rebuild cached tile / arrow planes against the fresh board.
+          tui_game_render_reset_grids();
+          // Start the bot — it idles on the human's turn and plays the
+          // computer's.
+          tui_bot_worker_start(&game_state);
+          modal = TUI_MODAL_NONE;
+          continue;
+        }
+        continue;
+      }
+
       if (modal == TUI_MODAL_STARTUP_MENU) {
         // Helper: which menu items are currently selectable. Only
         // "Watch computer play" is wired up; others render dimmed
@@ -3627,7 +4924,7 @@ int main(int argc, char *argv[]) {
         su_enabled[TUI_STARTUP_LOAD_POSITION] = true;
         su_enabled[TUI_STARTUP_LOAD_GAME] = true;
         su_enabled[TUI_STARTUP_ANNOTATE] = true;
-        su_enabled[TUI_STARTUP_PLAY_VS_COMPUTER] = false;
+        su_enabled[TUI_STARTUP_PLAY_VS_COMPUTER] = true;
         if (key == NCKEY_BUTTON1 && input.evtype != NCTYPE_RELEASE) {
           const int hit = tui_modal_item_at(input.y, input.x);
           if (hit >= 0 && hit < TUI_STARTUP_ITEM_COUNT && su_enabled[hit]) {
@@ -3691,6 +4988,17 @@ int main(int argc, char *argv[]) {
                    "Player 2");
           annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
           annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
+        } else if (key == 'c' || key == 'C') {
+          modal = TUI_MODAL_PLAY_SETUP;
+          play_setup_focus = TUI_PLAY_SETUP_START;
+          snprintf(play_setup_human_name, sizeof(play_setup_human_name), "You");
+          snprintf(play_setup_computer_name, sizeof(play_setup_computer_name),
+                   "Computer");
+          play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+          play_setup_name_cursor = 0;
+          snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+                   chosen_lexicon);
+          watch_setup_time = chosen_time;
         } else if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
           if (startup_menu_focus == TUI_STARTUP_WATCH) {
             modal = TUI_MODAL_WATCH_SETUP;
@@ -3723,6 +5031,22 @@ int main(int argc, char *argv[]) {
                      "Player 2");
             annotate_setup_focus = TUI_ANNOTATE_SETUP_P1_NAME;
             annotate_setup_name_cursor = (int)strlen(annotate_setup_p1_name);
+          } else if (startup_menu_focus == TUI_STARTUP_PLAY_VS_COMPUTER) {
+            // Single play-vs-computer setup modal: names, who moves
+            // first, time, lexicon, and sim (computer-strength) params.
+            // Reuses watch_setup_time / watch_setup_lexicon as the scratch
+            // copies for the time / lexicon adjusters.
+            modal = TUI_MODAL_PLAY_SETUP;
+            play_setup_focus = TUI_PLAY_SETUP_START;
+            snprintf(play_setup_human_name, sizeof(play_setup_human_name),
+                     "You");
+            snprintf(play_setup_computer_name, sizeof(play_setup_computer_name),
+                     "Computer");
+            play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
+            play_setup_name_cursor = 0;
+            snprintf(watch_setup_lexicon, sizeof(watch_setup_lexicon), "%s",
+                     chosen_lexicon);
+            watch_setup_time = chosen_time;
           }
           // Disabled items are no-op for now. As each mode ships,
           // add its branch here and flip su_enabled[i] true above.
@@ -4136,6 +5460,9 @@ int main(int argc, char *argv[]) {
               tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
               pthread_mutex_unlock(&game_state.mutex);
             }
+            pthread_mutex_lock(&game_state.mutex);
+            game_state.app_mode = TUI_APP_MODE_WATCH;
+            pthread_mutex_unlock(&game_state.mutex);
             tui_bot_worker_start(&game_state);
           }
           modal = TUI_MODAL_NONE;
@@ -4256,9 +5583,14 @@ int main(int argc, char *argv[]) {
         game_state.edit_history_idx = target;
         // ↓ lands on the RACK row (mirrors the inside-edit
         // semantics where ↓ in MOVE switches to RACK). Everything
-        // else opens the MOVE field.
+        // else opens the MOVE field. In play-vs-computer the rack
+        // row is read-only (racks come from the bag), so ↓ opens
+        // MOVE like everything else.
         game_state.edit_field =
-            (key == NCKEY_DOWN) ? TUI_EDIT_FIELD_RACK : TUI_EDIT_FIELD_MOVE;
+            (key == NCKEY_DOWN &&
+             game_state.app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER)
+                ? TUI_EDIT_FIELD_RACK
+                : TUI_EDIT_FIELD_MOVE;
         tui_game_state_parse_edit_buf(&game_state);
         pthread_mutex_unlock(&game_state.mutex);
         continue;
@@ -4312,6 +5644,14 @@ int main(int argc, char *argv[]) {
         game_state.slash_len = 0;
         game_state.slash_cursor = 0;
         game_state.slash_buf[0] = '\0';
+        pthread_mutex_unlock(&game_state.mutex);
+      } else if ((key == 'c' || key == 'C') && !game_state.slash_active) {
+        // Global copy hotkey: current position → clipboard as CGP.
+        // Works from any panel focus; editing contexts (board entry,
+        // history cells, slash input, modals) consume their keys
+        // before this chain so a typed 'c' never lands here.
+        pthread_mutex_lock(&game_state.mutex);
+        tui_copy_position_cgp(&game_state);
         pthread_mutex_unlock(&game_state.mutex);
       } else if (game_state.focused_panel == TUI_FOCUS_ANALYSIS &&
                  (key == NCKEY_UP || key == NCKEY_DOWN || key == NCKEY_LEFT ||
@@ -4393,6 +5733,24 @@ int main(int argc, char *argv[]) {
                      game_state.last_rendered_analysis_rows[idx].move);
             game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_MOVE;
           }
+        }
+        pthread_mutex_unlock(&game_state.mutex);
+      } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
+                 (key == NCKEY_HOME || key == NCKEY_END)) {
+        // Home/End jump the cursor to the first / newest entry without
+        // stepping through every turn — End is the quick "take me to
+        // the live pending turn" gesture (and what a scripted driver
+        // uses to reach the human's pending cell in play-vs-computer).
+        pthread_mutex_lock(&game_state.mutex);
+        const int prev_cursor = game_state.history_cursor;
+        if (game_state.history_count > 0) {
+          game_state.history_cursor =
+              (key == NCKEY_HOME) ? 0 : game_state.history_count - 1;
+        }
+        if (game_state.history_cursor != prev_cursor) {
+          game_state.analysis_cursor = 0;
+          game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
+          game_state.analysis_anchored_move[0] = '\0';
         }
         pthread_mutex_unlock(&game_state.mutex);
       } else if (game_state.focused_panel == TUI_FOCUS_HISTORY &&
@@ -4535,7 +5893,7 @@ int main(int argc, char *argv[]) {
             pthread_mutex_unlock(&game_state.mutex);
           } else if (key == NCKEY_TAB || key == '\t') {
             // Tab completes against the unique prefix match.
-            static const char *cmd_names[] = {"exit", "new", "quit",
+            static const char *cmd_names[] = {"copy", "exit", "new", "quit",
                                               "settings"};
             static const int n_cmds =
                 (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
@@ -4575,9 +5933,13 @@ int main(int argc, char *argv[]) {
               modal = TUI_MODAL_QUIT_CONFIRM;
               quit_confirm_focus = 0;
               quit_confirm_return = TUI_MODAL_NONE;
+            } else if (strcmp(cmd, "copy") == 0) {
+              pthread_mutex_lock(&game_state.mutex);
+              tui_copy_position_cgp(&game_state);
+              pthread_mutex_unlock(&game_state.mutex);
             } else {
               // Try a unique prefix match.
-              static const char *cmd_names[] = {"exit", "new", "quit",
+              static const char *cmd_names[] = {"copy", "exit", "new", "quit",
                                                 "settings"};
               static const int n_cmds =
                   (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
@@ -4605,6 +5967,10 @@ int main(int argc, char *argv[]) {
                   modal = TUI_MODAL_QUIT_CONFIRM;
                   quit_confirm_focus = 0;
                   quit_confirm_return = TUI_MODAL_NONE;
+                } else if (strcmp(match, "copy") == 0) {
+                  pthread_mutex_lock(&game_state.mutex);
+                  tui_copy_position_cgp(&game_state);
+                  pthread_mutex_unlock(&game_state.mutex);
                 }
               }
             }
@@ -4647,6 +6013,18 @@ int main(int argc, char *argv[]) {
         }
       }
     } while (running);
+
+    // If this frame's input drain dirtied the frame, render it ASAP instead
+    // of sleeping a full pacing interval first. The top-of-loop sleep would
+    // otherwise add ~1 frame (~16ms) of keypress-to-pixels latency on top of
+    // the (sub-millisecond) render — measured as the dominant input lag at
+    // 1x, where the render itself is negligible. Collapsing the deadline to
+    // "now" makes the next iteration skip the sleep and render immediately;
+    // frame_dirty is always cleared by the render block, so steady-state
+    // frames with no input still pace normally via the deadline advance.
+    if (frame_dirty) {
+      clock_gettime(CLOCK_MONOTONIC, &next_frame_deadline);
+    }
   }
 
   tui_game_state_destroy(&game_state);

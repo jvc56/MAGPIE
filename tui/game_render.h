@@ -23,7 +23,40 @@ typedef enum {
   TUI_MODAL_LOAD_POSITION = 8,
   TUI_MODAL_LOAD_GAME = 9,
   TUI_MODAL_ANNOTATE_SETUP = 10,
+  TUI_MODAL_PLAY_SETUP = 11,
 } TuiModalState;
+
+// Play-vs-computer setup modal. A single modal with everything: editable
+// human + computer names, who moves first, time control, language /
+// lexicon, and the simmer (computer-strength) params, then Start. The
+// human's seat is derived from the first-move choice.
+typedef enum {
+  TUI_PLAY_SETUP_HUMAN_NAME = 0,
+  TUI_PLAY_SETUP_COMPUTER_NAME = 1,
+  TUI_PLAY_SETUP_FIRST_MOVE = 2,
+  TUI_PLAY_SETUP_TIME = 3,
+  TUI_PLAY_SETUP_LANGUAGE = 4,
+  TUI_PLAY_SETUP_LEXICON = 5,
+  TUI_PLAY_SETUP_SIM_PLIES = 6,
+  TUI_PLAY_SETUP_SIM_CANDIDATES = 7,
+  TUI_PLAY_SETUP_START = 8,
+  TUI_PLAY_SETUP_ITEM_COUNT = 9,
+} TuiPlaySetupItem;
+
+// First-move choice on the play-setup modal.
+typedef enum {
+  TUI_PLAY_FIRST_RANDOM = 0,
+  TUI_PLAY_FIRST_HUMAN = 1,
+  TUI_PLAY_FIRST_COMPUTER = 2,
+  TUI_PLAY_FIRST_COUNT = 3,
+} TuiPlayFirstMove;
+
+void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
+                                int focus, const char *human_name,
+                                const char *computer_name, int first_move,
+                                int name_edit_pos, int time_seconds,
+                                const char *language, const char *lexicon,
+                                int sim_plies, int sim_candidates);
 
 // Annotate-game setup modal. Lets the user pick the lexicon and
 // both player names before entering annotation mode (where the
@@ -179,6 +212,15 @@ tui_game_render_get_or_create_modal_plane(struct ncplane *parent, int top,
 // or -1 if the click misses every panel.
 int tui_game_panel_at(struct ncplane *plane, const TuiGameState *state, int y,
                       int x);
+
+// Map a screen (y, x) cell coordinate to a board cell. Returns true and
+// fills *out_row / *out_col (both 0-based, 0..BOARD_DIM-1) when the point
+// lands inside the 15x15 grid; false otherwise. Uses the same layout /
+// scale selection as tui_game_panel_at, so it handles both 1x text and
+// 2x pixel board rendering. Only meaningful right after tui_game_render
+// has run on the same plane geometry.
+bool tui_board_cell_at(struct ncplane *plane, const TuiGameState *state, int y,
+                       int x, int *out_row, int *out_col);
 
 // Hit-test (y, x) against the most-recently-rendered modal (one
 // of the modals routed through render_modal[_ex]: main menu,
