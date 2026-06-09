@@ -19,7 +19,9 @@
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <stdatomic.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -615,6 +617,212 @@ static void test_peg_main_cli(void) {
   config_destroy(config);
 }
 
+// ----- progress callbacks + per-scenario detail -----------------------------
+
+// user_data for the progress callbacks: thread-safe event counters, since the
+// solver may fire the callbacks concurrently from worker threads.
+typedef struct PegCallbackCounters {
+  atomic_int stage_starts;
+  atomic_int cand_dones;
+  atomic_int scenario_dones;
+  atomic_int max_stage_seen;
+} PegCallbackCounters;
+
+static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
+                                    int emptier_plies, void *user_data) {
+  (void)inner_d;
+  (void)emptier_plies;
+  assert(k_cands >= 1);
+  PegCallbackCounters *counters = user_data;
+  atomic_fetch_add(&counters->stage_starts, 1);
+  int prev = atomic_load(&counters->max_stage_seen);
+  while (stage_idx > prev && !atomic_compare_exchange_weak(
+                                 &counters->max_stage_seen, &prev, stage_idx)) {
+  }
+}
+
+static void peg_test_on_cand_done(int stage_idx, int cand_rank,
+                                  const Move *cand, double win_pct,
+                                  double mean_spread, int scen_done,
+                                  void *user_data) {
+  (void)stage_idx;
+  (void)cand_rank;
+  (void)mean_spread;
+  assert(cand != NULL);
+  assert(scen_done >= 1);
+  assert(win_pct >= 0.0 && win_pct <= 1.0);
+  PegCallbackCounters *counters = user_data;
+  atomic_fetch_add(&counters->cand_dones, 1);
+}
+
+static void peg_test_on_scenario_done(int stage_idx, int cand_rank,
+                                      int scenario_idx, int32_t mover_total,
+                                      int64_t weight, void *user_data) {
+  (void)stage_idx;
+  (void)cand_rank;
+  (void)scenario_idx;
+  (void)mover_total;
+  assert(weight > 0);
+  PegCallbackCounters *counters = user_data;
+  atomic_fetch_add(&counters->scenario_dones, 1);
+}
+
+// Exercises the PegArgs progress callbacks (on_stage_start / on_cand_done /
+// on_scenario_done) and include_per_scenario on the candidate-rich onyx board
+// with a {2}-cascade, so stage 0 and one halving stage both run. Asserts every
+// callback fired and the per-scenario breakdown for the best cand is populated.
+static void test_peg_main_progress_detail(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  PegCallbackCounters counters;
+  atomic_init(&counters.stage_starts, 0);
+  atomic_init(&counters.cand_dones, 0);
+  atomic_init(&counters.scenario_dones, 0);
+  atomic_init(&counters.max_stage_seen, 0);
+
+  static const int stage_top_k[] = {2};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 10.0;
+  args.stage_top_k = stage_top_k;
+  args.num_stages = 1;
+  args.include_per_scenario = true;
+  args.on_stage_start = peg_test_on_stage_start;
+  args.on_cand_done = peg_test_on_cand_done;
+  args.on_scenario_done = peg_test_on_scenario_done;
+  args.user_data = &counters;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  // Stage 0 plus at least one halving stage started.
+  assert(atomic_load(&counters.stage_starts) >= 2);
+  assert(atomic_load(&counters.max_stage_seen) >= 1);
+  // Every candidate and every scenario was reported.
+  assert(atomic_load(&counters.cand_dones) >= 2);
+  assert(atomic_load(&counters.scenario_dones) >= 1);
+
+  // include_per_scenario populated the best cand's per-scenario breakdown.
+  assert(result.per_scenario != NULL);
+  assert(result.n_per_scenario >= 1);
+  int64_t row_weight_sum = 0;
+  for (int i = 0; i < result.n_per_scenario; i++) {
+    const PegPerScenario *row = &result.per_scenario[i];
+    assert(row->scenario_idx == i);
+    assert(row->weight > 0);
+    // A 1-in-bag board leaves at least one of drawn / remaining non-empty.
+    assert(row->drawn[0] != '\0' || row->remaining[0] != '\0');
+    row_weight_sum += row->weight;
+  }
+  assert(row_weight_sum > 0);
+  printf("[peg_progress] stages=%d cands=%d scenarios=%d per_scenario=%d\n",
+         atomic_load(&counters.stage_starts), atomic_load(&counters.cand_dones),
+         atomic_load(&counters.scenario_dones), result.n_per_scenario);
+
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Exercises PegArgs.inner_top_k. On a 2-in-bag board (so non-emptying cands
+// leave the opponent tiles to draw, where the model and its cap actually bite),
+// solve one candidate pessimistically with the cap off (k=0, the unbounded
+// worst-case opponent) and on (k=1, the opponent weighs only its best-equity
+// reply). Capping the opponent can only help the mover, so the capped win% must
+// be >= the uncapped win%.
+static void test_peg_main_inner_top_k(void) {
+  const char *cgp =
+      "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1V3/5N3L1E3/5G2VELDT2/5E3S5/"
+      "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
+      "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Pick a one-tile play: with 2 in the bag the mover then draws only one, so
+  // the opponent still has a tile to draw and every leaf is non-emptier — the
+  // case where the pessimistic model and its inner_top_k cap actually run.
+  MoveList *gen_ml = move_list_create(4096);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  const int n_gen = move_list_get_count(gen_ml);
+  assert(n_gen >= 1);
+  const Move *cand = NULL;
+  for (int i = 0; i < n_gen; i++) {
+    const Move *m = move_list_get_move(gen_ml, i);
+    if (move_get_tiles_played(m) == 1) {
+      cand = m;
+      break;
+    }
+  }
+  assert(cand != NULL);
+  const Move *only[1] = {cand};
+
+  PegArgs base;
+  memset(&base, 0, sizeof(base));
+  base.game = game;
+  base.thread_control = config_get_thread_control(config);
+  base.num_threads = 4;
+  base.time_budget_seconds = 30.0;
+  base.opp_model = PEG_OPP_PESSIMISTIC;
+  base.only_moves = only;
+  base.n_only_moves = 1;
+
+  PegResult uncapped;
+  PegResult capped;
+  memset(&uncapped, 0, sizeof(uncapped));
+  memset(&capped, 0, sizeof(capped));
+
+  base.inner_top_k = 0; // unbounded worst-case opponent
+  peg_solve(&base, &uncapped, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  base.inner_top_k = 1; // opponent weighs only its best-equity reply
+  peg_solve(&base, &capped, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(uncapped.n_top_cands == 1 && capped.n_top_cands == 1);
+  const double win_uncapped = uncapped.top_cands[0].win_pct;
+  const double win_capped = capped.top_cands[0].win_pct;
+  const double spread_uncapped = uncapped.top_cands[0].mean_spread;
+  const double spread_capped = capped.top_cands[0].mean_spread;
+  // Capping the opponent can only help (or not change) the mover, on both the
+  // win bucket and the more sensitive spread.
+  assert(win_capped >= win_uncapped - 0.0005);
+  assert(spread_capped >= spread_uncapped - 0.0005);
+  printf("[peg_inner_top_k] pessimistic win %.4f->%.4f spread %.3f->%.3f "
+         "(uncapped->capped k=1)\n",
+         win_uncapped, win_capped, spread_uncapped, spread_capped);
+
+  peg_result_destroy(&uncapped);
+  peg_result_destroy(&capped);
+  move_list_destroy(gen_ml);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();
@@ -623,6 +831,8 @@ void test_peg(void) {
   test_peg_main_4bag_single();
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
+  test_peg_main_progress_detail();
+  test_peg_main_inner_top_k();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
   test_peg_macondo_french_pass();
