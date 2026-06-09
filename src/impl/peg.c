@@ -97,6 +97,9 @@ PegPoll *peg_poll_create(void) {
 }
 
 void peg_poll_destroy(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
   // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
   free(poll);
 }
@@ -1199,10 +1202,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   uint8_t unseen[MAX_ALPHABET_SIZE];
   peg_compute_unseen(game, mover_idx, unseen);
 
-  // Validate an optional pinned bag ordering: it must list exactly bag_size
-  // tiles, all drawable from the unseen pool (the opponent gets the remainder).
+  // Validate an optional pinned bag ordering: it must be a non-NULL array of
+  // exactly bag_size tiles, all drawable from the unseen pool (the opponent
+  // gets the remainder).
   if (args->eval_bag_order_len > 0) {
-    bool order_ok = args->eval_bag_order_len == bag_size;
+    bool order_ok =
+        args->eval_bag_order != NULL && args->eval_bag_order_len == bag_size;
     int order_counts[MAX_ALPHABET_SIZE] = {0};
     for (int i = 0; order_ok && i < args->eval_bag_order_len; i++) {
       const MachineLetter ml = args->eval_bag_order[i];
@@ -1216,6 +1221,25 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                            "PEG eval_bag_order must list exactly the %d bag "
                            "tiles, all drawable from the unseen pool",
                            bag_size));
+      return;
+    }
+  }
+
+  // Validate an optional stage schedule. Each halving stage re-ranks a set, so
+  // a top-K below 2 is meaningless; the array length must be a positive
+  // num_stages.
+  if (args->stage_top_k != NULL) {
+    bool counts_ok = args->num_stages > 0;
+    for (int i = 0; counts_ok && i < args->num_stages; i++) {
+      if (args->stage_top_k[i] < 2) {
+        counts_ok = false;
+      }
+    }
+    if (!counts_ok) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_STAGE_COUNTS,
+          get_formatted_string("PEG stage_top_k must list num_stages (> 0) "
+                               "per-stage counts, each >= 2"));
       return;
     }
   }

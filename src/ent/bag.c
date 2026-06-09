@@ -205,6 +205,10 @@ void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n) {
   // (pre)endgame enumerators that already know the bag contents and must NOT
   // randomize them (bag_add_letter's random insertion would re-permute the
   // multiset). n must not exceed the bag's backing capacity.
+  if (n < 0 || n > bag->size) {
+    log_fatal("bag_set_to_tiles: n=%d out of range for bag capacity %d", n,
+              bag->size);
+  }
   for (int i = 0; i < n; i++) {
     bag->letters[i] = tiles[i];
   }
