@@ -167,6 +167,8 @@ static TestEntry on_demand_test_table[] = {
     {"peg2acid", test_peg_2bag_acidotic},
     {"peg3pah", test_peg_3bag_pah},
     {"peg4pond", test_peg_4bag_pond},
+    {"peg3pahpess", test_peg_3bag_pah_pessimistic},
+    {"peg4pondpess", test_peg_4bag_pond_pessimistic},
     {"pegbench3", test_benchmark_peg_3},
     {"pegbench4", test_benchmark_peg_4},
     {"pegpoll", test_peg_poll},

@@ -840,13 +840,12 @@ static void test_peg_main_inner_top_k(void) {
 // into the bag; redistribute_bag > 0 first repacks it to an N-in-bag position
 // (deterministically: smallest N tiles to the bag, the rest to the opponent).
 // ---------------------------------------------------------------------------
-static void peg_anchor_protected_move(const char *name, const char *cgp,
-                                      const char *move_str,
-                                      int redistribute_bag, int max_stage,
-                                      double budget_seconds,
-                                      double expected_win,
-                                      double expected_spread, double win_tol,
-                                      double spread_tol) {
+static void peg_anchor_protected_move(
+    const char *name, const char *cgp, const char *move_str,
+    int redistribute_bag, PegOppModel opp_model, int inner_top_k,
+    int scenario_stride, int max_stage, double budget_seconds,
+    double expected_win, double expected_spread, double win_tol,
+    double spread_tol) {
   Config *config = config_create_or_die("set -threads 8 -s1 score -s2 score");
   load_and_exec_config_or_die(config, cgp);
   Game *game = config_get_game(config);
@@ -900,6 +899,9 @@ static void peg_anchor_protected_move(const char *name, const char *cgp,
   args.num_threads = 8;
   args.time_budget_seconds = budget_seconds;
   args.max_stage = max_stage;
+  args.opp_model = opp_model;
+  args.inner_top_k = inner_top_k;
+  args.scenario_stride = scenario_stride;
   args.protect_moves = protect;
   args.n_protect_moves = 1;
 
@@ -967,9 +969,11 @@ void test_peg_1bag_pass_best(void) {
       "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/2WED5F1T2/"
       "1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 -lex CSW24";
   peg_anchor_protected_move("peg1pb", cgp, "pass", /*redistribute_bag=*/0,
-                            /*max_stage=*/0, /*budget_seconds=*/120.0,
-                            /*expected_win=*/1.0, /*expected_spread=*/51.375,
-                            /*win_tol=*/0.005, /*spread_tol=*/8.0);
+                            PEG_OPP_RATIONAL, /*inner_top_k=*/0,
+                            /*scenario_stride=*/1, /*max_stage=*/0,
+                            /*budget_seconds=*/120.0, /*expected_win=*/1.0,
+                            /*expected_spread=*/51.375, /*win_tol=*/0.005,
+                            /*spread_tol=*/8.0);
 }
 
 // 1-in-bag: macondo TestStraightforward1PEG board (studied play 13L ONYX,
@@ -980,9 +984,11 @@ void test_peg_1bag_onyx(void) {
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
   peg_anchor_protected_move("peg1onyx", cgp, "13L ONYX", /*redistribute_bag=*/0,
-                            /*max_stage=*/0, /*budget_seconds=*/120.0,
-                            /*expected_win=*/0.9375, /*expected_spread=*/8.75,
-                            /*win_tol=*/0.005, /*spread_tol=*/5.0);
+                            PEG_OPP_RATIONAL, /*inner_top_k=*/0,
+                            /*scenario_stride=*/1, /*max_stage=*/0,
+                            /*budget_seconds=*/120.0, /*expected_win=*/0.9375,
+                            /*expected_spread=*/8.75, /*win_tol=*/0.005,
+                            /*spread_tol=*/5.0);
 }
 
 // 2-in-bag: macondo TestTwoInBagSingleMove board (studied play 6F (A)X(E),
@@ -993,10 +999,11 @@ void test_peg_2bag_axe(void) {
       "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
       "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
   peg_anchor_protected_move("peg2axe", cgp, "6F (A)X(E)",
-                            /*redistribute_bag=*/0, /*max_stage=*/0,
-                            /*budget_seconds=*/120.0, /*expected_win=*/0.9722,
-                            /*expected_spread=*/37.431, /*win_tol=*/0.005,
-                            /*spread_tol=*/8.0);
+                            /*redistribute_bag=*/0, PEG_OPP_RATIONAL,
+                            /*inner_top_k=*/0, /*scenario_stride=*/1,
+                            /*max_stage=*/0, /*budget_seconds=*/120.0,
+                            /*expected_win=*/0.9722, /*expected_spread=*/37.431,
+                            /*win_tol=*/0.005, /*spread_tol=*/8.0);
 }
 
 // 2-in-bag: GillesB CSW24 board (studied play C6 ACIDOT(I)c, 72/72 in
@@ -1007,10 +1014,11 @@ void test_peg_2bag_acidotic(void) {
       "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/"
       "3QUOIT1PINNER/4RENEGADE2P ACDIOT?/AIIIOSU 431/392 0 -lex CSW24";
   peg_anchor_protected_move("peg2acid", cgp, "C6 ACIDOT(I)c",
-                            /*redistribute_bag=*/0, /*max_stage=*/0,
-                            /*budget_seconds=*/120.0, /*expected_win=*/1.0,
-                            /*expected_spread=*/112.444, /*win_tol=*/0.005,
-                            /*spread_tol=*/10.0);
+                            /*redistribute_bag=*/0, PEG_OPP_RATIONAL,
+                            /*inner_top_k=*/0, /*scenario_stride=*/1,
+                            /*max_stage=*/0, /*budget_seconds=*/120.0,
+                            /*expected_win=*/1.0, /*expected_spread=*/112.444,
+                            /*win_tol=*/0.005, /*spread_tol=*/10.0);
 }
 
 // 3-in-bag: macondo manual position #2 (Tunnicliffe v Brennan, CSW21); studied
@@ -1021,9 +1029,11 @@ void test_peg_3bag_pah(void) {
       "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
       "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
   peg_anchor_protected_move("peg3pah", cgp, "13M P(AH)", /*redistribute_bag=*/0,
-                            /*max_stage=*/2, /*budget_seconds=*/240.0,
-                            /*expected_win=*/0.6625, /*expected_spread=*/21.532,
-                            /*win_tol=*/0.06, /*spread_tol=*/12.0);
+                            PEG_OPP_RATIONAL, /*inner_top_k=*/0,
+                            /*scenario_stride=*/1, /*max_stage=*/2,
+                            /*budget_seconds=*/240.0, /*expected_win=*/0.6625,
+                            /*expected_spread=*/21.532, /*win_tol=*/0.06,
+                            /*spread_tol=*/12.0);
 }
 
 // 4-in-bag: macondo manual position #1 (Sokol v Walton); studied play
@@ -1036,10 +1046,47 @@ void test_peg_4bag_pond(void) {
       "1TED3E1BYWORD/2Q4N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"
       "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20";
   peg_anchor_protected_move("peg4pond", cgp, "2L P(O)ND",
-                            /*redistribute_bag=*/4, /*max_stage=*/2,
-                            /*budget_seconds=*/240.0, /*expected_win=*/1.0,
-                            /*expected_spread=*/46.892, /*win_tol=*/0.01,
-                            /*spread_tol=*/10.0);
+                            /*redistribute_bag=*/4, PEG_OPP_RATIONAL,
+                            /*inner_top_k=*/0, /*scenario_stride=*/1,
+                            /*max_stage=*/2, /*budget_seconds=*/240.0,
+                            /*expected_win=*/1.0, /*expected_spread=*/46.892,
+                            /*win_tol=*/0.01, /*spread_tol=*/10.0);
+}
+
+// 3-in-bag pessimistic variant of peg3pah: same P(AH) candidate scored under
+// the worst-case opponent model, but bounded so it stays tractable — the
+// opponent weighs only its inner_top_k highest-equity replies, and the bag
+// orderings are weight-stratified down to ~1/scenario_stride. Pins production's
+// bounded-pessimistic value for P(AH) as a regression anchor.
+void test_peg_3bag_pah_pessimistic(void) {
+  const char *cgp =
+      "cgp BEDEL10/R1R9U2/O1IT1Q5OM2/W1BIDI4YUM2/N2XI5AT3/E3G4T1R3/"
+      "S1VOILE2OKA3/T3T1DISPACED1/9AWE1O1/9Z1s1FA/14R/13GO/13AH/"
+      "3JUVIE4UTA/INRO3FLENCHES ?ANNOPY/AEGILNS 344/368 0 -lex CSW21";
+  peg_anchor_protected_move("peg3pahpess", cgp, "13M P(AH)",
+                            /*redistribute_bag=*/0, PEG_OPP_PESSIMISTIC,
+                            /*inner_top_k=*/8, /*scenario_stride=*/7,
+                            /*max_stage=*/2, /*budget_seconds=*/300.0,
+                            /*expected_win=*/0.1765,
+                            /*expected_spread=*/-17.216,
+                            /*win_tol=*/0.05, /*spread_tol=*/12.0);
+}
+
+// 4-in-bag pessimistic variant of peg4pond: same bounded-pessimistic treatment
+// (top-8 opponent replies, ~1/7 bag orderings) on the empty-opp pond board
+// (repacked to 4-in-bag). Pins production's bounded-pessimistic value for
+// P(O)ND.
+void test_peg_4bag_pond_pessimistic(void) {
+  const char *cgp =
+      "cgp 12D2/1U10O2/1p10L2/1R1C3KANJIS2/1I1O3A2U4/1G1T3I2I4/1H1E3Z2C1LOO/"
+      "1TED3E1BYWORD/2Q4N3AXE1/1RuBIGOS3I3/F1A5WEAVE2/O1T8E3/V1E5LOURY2/"
+      "ENSNARL2HM4/A6TEMP4 DEFNNPT/ 394/365 0 -lex NWL20";
+  peg_anchor_protected_move("peg4pondpess", cgp, "2L P(O)ND",
+                            /*redistribute_bag=*/4, PEG_OPP_PESSIMISTIC,
+                            /*inner_top_k=*/8, /*scenario_stride=*/7,
+                            /*max_stage=*/2, /*budget_seconds=*/240.0,
+                            /*expected_win=*/0.9876, /*expected_spread=*/31.082,
+                            /*win_tol=*/0.02, /*spread_tol=*/12.0);
 }
 
 void test_peg(void) {

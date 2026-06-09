@@ -20,4 +20,11 @@ void test_peg_2bag_acidotic(void);
 void test_peg_3bag_pah(void);
 void test_peg_4bag_pond(void);
 
+// Pessimistic (worst-case opponent) variants of the 3-/4-bag anchors
+// (test.c keys peg3pahpess / peg4pondpess), bounded by inner_top_k (opponent
+// replies weighed) and scenario_stride (bag orderings sampled) so they stay
+// tractable. Pin production's bounded-pessimistic win%/spread for the move.
+void test_peg_3bag_pah_pessimistic(void);
+void test_peg_4bag_pond_pessimistic(void);
+
 #endif
