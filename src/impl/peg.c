@@ -28,6 +28,7 @@
 #include "gameplay.h"
 #include "kwg_maker.h"
 #include "move_gen.h"
+#include "peg_combinatorics.h"
 #include "peg_pool.h"
 #include "word_prune.h"
 #include <limits.h>
@@ -182,58 +183,6 @@ static void peg_poll_finish(PegPoll *poll) {
   poll->s.done = true;
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
-}
-
-// ----- combinatorics -------------------------------------------------------
-
-static int64_t peg_binomial(int n, int k) {
-  if (k < 0 || k > n) {
-    return 0;
-  }
-  if (k == 0 || k == n) {
-    return 1;
-  }
-  if (k > n - k) {
-    k = n - k;
-  }
-  int64_t result = 1;
-  for (int i = 0; i < k; i++) {
-    result = result * (n - i) / (i + 1);
-  }
-  return result;
-}
-
-// In-place lexicographic next-permutation; only enumerates distinct orderings
-// (skips duplicates). Caller sorts ascending before the first call. Returns
-// false at the last permutation.
-static bool peg_next_perm(MachineLetter *arr, int n) {
-  if (n <= 1) {
-    return false;
-  }
-  int pivot = n - 2;
-  while (pivot >= 0 && arr[pivot] >= arr[pivot + 1]) {
-    pivot--;
-  }
-  if (pivot < 0) {
-    return false;
-  }
-  int swap_idx = n - 1;
-  while (arr[pivot] >= arr[swap_idx]) {
-    swap_idx--;
-  }
-  MachineLetter tmp = arr[pivot];
-  arr[pivot] = arr[swap_idx];
-  arr[swap_idx] = tmp;
-  int lo = pivot + 1;
-  int hi = n - 1;
-  while (lo < hi) {
-    tmp = arr[lo];
-    arr[lo] = arr[hi];
-    arr[hi] = tmp;
-    lo++;
-    hi--;
-  }
-  return true;
 }
 
 // ----- position setup ------------------------------------------------------

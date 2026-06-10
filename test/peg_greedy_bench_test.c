@@ -30,6 +30,7 @@
 #include "../src/impl/gameplay.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/peg_combinatorics.h"
 #include "../src/impl/peg_pool.h"
 #include "../src/impl/word_prune.h"
 #include "../src/str/move_string.h"
@@ -314,57 +315,6 @@ peg_greedy_playout_pv(Game *game, int mover_idx, MoveList *playout_ml,
     spread += (int32_t)equity_to_int(rack_get_score(ld, player_get_rack(op)));
   }
   return spread;
-}
-
-static int64_t peg_binomial(int n, int k) {
-  if (k < 0 || k > n) {
-    return 0;
-  }
-  if (k == 0 || k == n) {
-    return 1;
-  }
-  if (k > n - k) {
-    k = n - k;
-  }
-  int64_t r = 1;
-  for (int i = 0; i < k; i++) {
-    r = r * (n - i) / (i + 1);
-  }
-  return r;
-}
-
-// In-place lexicographic next-permutation over MachineLetter arrays.
-// Skips duplicates naturally (only enumerates distinct orderings).
-// Caller should sort the array ascending before the first iteration.
-// Returns false when the array is at the last permutation.
-static bool peg_next_perm(MachineLetter *arr, int n) {
-  if (n <= 1) {
-    return false;
-  }
-  int k = n - 2;
-  while (k >= 0 && arr[k] >= arr[k + 1]) {
-    k--;
-  }
-  if (k < 0) {
-    return false;
-  }
-  int l = n - 1;
-  while (arr[k] >= arr[l]) {
-    l--;
-  }
-  MachineLetter tmp = arr[k];
-  arr[k] = arr[l];
-  arr[l] = tmp;
-  int i = k + 1;
-  int j = n - 1;
-  while (i < j) {
-    tmp = arr[i];
-    arr[i] = arr[j];
-    arr[j] = tmp;
-    i++;
-    j--;
-  }
-  return true;
 }
 
 // Recursive enumerator over N-multisets from `counts[0..k_types-1]`. Calls
