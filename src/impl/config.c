@@ -1556,12 +1556,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_ONLY:
       usages[0] = "<moves>";
       examples[0] = "11J.MEH,1F.VENeY";
-      examples[1] = "8D.WORD,ex.AEI,pass";
+      examples[1] = "8D.WORD,pass";
       text =
           "Restricts the PEG solver to a fixed set of root candidate moves "
           "instead of generating all moves. Comma-separated UCGI moves with "
           "no spaces: coordinate and tiles joined by a period (e.g. 11J.MEH), "
-          "exchanges as ex.<tiles>, and pass as pass. Use '-' to clear.";
+          "and pass as pass. Exchanges are not valid PEG moves. Use '-' to "
+          "clear.";
       break;
     case ARG_TOKEN_PEG_NOPRUNE:
       usages[0] = "<moves>";
@@ -3153,6 +3154,9 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
     validated_moves_destroy(vms);
     return NULL;
   }
+  // Exchanges need >= 7 tiles in the bag, so validated_moves_create above
+  // already rejects them in any PEG position (bag <= PEG_MAX_BAG); tile plays
+  // and the pass parse through.
   const int num_moves = validated_moves_get_number_of_moves(vms);
   const Move **moves = malloc_or_die((size_t)num_moves * sizeof(Move *));
   for (int i = 0; i < num_moves; i++) {

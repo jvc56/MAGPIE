@@ -345,9 +345,9 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
 - `-pegpess true` switches to the **pessimistic** opponent model (the opponent
   plays the worst-for-you reply) — i.e. guaranteed-win analysis.
 - `-pegonly <moves>` restricts the search to a fixed set of root candidates
-  instead of generating all moves. Moves are
-  comma-separated UCGI with no spaces — coordinate and tiles joined by a period,
-  exchanges as `ex.<tiles>`, pass as `pass`:
+  instead of generating all moves. Moves are comma-separated UCGI with no
+  spaces — coordinate and tiles joined by a period, pass as `pass` (exchanges
+  are not valid PEG moves):
 
   ```
   magpie> peg -pegonly 13L.ONYX,13L.OXY
