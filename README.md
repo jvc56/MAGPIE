@@ -343,9 +343,9 @@ opponent (it replies with its best-equity move). Several settings tune the
 search; see `help peg`, `help pegonly`, etc. for full descriptions:
 
 - `-pegpess true` switches to the **pessimistic** opponent model (the opponent
-  plays the worst-for-you reply), matching Macondo's guaranteed-win semantics.
+  plays the worst-for-you reply) — i.e. guaranteed-win analysis.
 - `-pegonly <moves>` restricts the search to a fixed set of root candidates
-  (like Macondo's `only_solve`) instead of generating all moves. Moves are
+  instead of generating all moves. Moves are
   comma-separated UCGI with no spaces — coordinate and tiles joined by a period,
   exchanges as `ex.<tiles>`, pass as `pass`:
 

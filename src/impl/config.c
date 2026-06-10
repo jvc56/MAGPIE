@@ -1557,11 +1557,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<moves>";
       examples[0] = "11J.MEH,1F.VENeY";
       examples[1] = "8D.WORD,ex.AEI,pass";
-      text = "Restricts the PEG solver to a fixed set of root candidate moves "
-             "(like Macondo's only_solve) instead of generating all moves. "
-             "Comma-separated UCGI moves with no spaces: coordinate and tiles "
-             "joined by a period (e.g. 11J.MEH), exchanges as ex.<tiles>, and "
-             "pass as pass. Use '-' to clear.";
+      text =
+          "Restricts the PEG solver to a fixed set of root candidate moves "
+          "instead of generating all moves. Comma-separated UCGI moves with "
+          "no spaces: coordinate and tiles joined by a period (e.g. 11J.MEH), "
+          "exchanges as ex.<tiles>, and pass as pass. Use '-' to clear.";
       break;
     case ARG_TOKEN_PEG_NOPRUNE:
       usages[0] = "<moves>";
@@ -1576,7 +1576,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true/false>";
       examples[0] = "true";
       text = "PEG opponent model: true = pessimistic (the opponent plays the "
-             "worst-for-the-mover reply, macondo-style guaranteed wins); false "
+             "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
              "(default) = rational (the opponent plays its best-equity reply).";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
