@@ -617,9 +617,19 @@ static void tui_autofill_playthrough(TuiGameState *gs) {
     if (hl == NULL || hl[0] == '\0') {
       break;
     }
+    // The very first absorbed letter may arrive while the buffer is
+    // still just the coord token (typing "13A" with a tile sitting ON
+    // A13). Without the coord/word space the letter glues onto the
+    // coord — "13A" became "13AV", which then poisoned every
+    // subsequent parse of the move.
+    const bool need_space = strchr(gs->edit_move_buf, ' ') == NULL;
     const int hlen = (int)strlen(hl);
-    if (gs->edit_move_len + hlen >= (int)sizeof(gs->edit_move_buf)) {
+    if (gs->edit_move_len + hlen + (need_space ? 1 : 0) >=
+        (int)sizeof(gs->edit_move_buf)) {
       break;
+    }
+    if (need_space) {
+      gs->edit_move_buf[gs->edit_move_len++] = ' ';
     }
     memcpy(gs->edit_move_buf + gs->edit_move_len, hl, (size_t)hlen);
     gs->edit_move_len += hlen;
@@ -671,63 +681,31 @@ static void tui_board_builder_extract_word(const TuiGameState *gs, char *out,
   }
 }
 
-// Rebuild edit_move_buf from the anchor + direction. When keep_word is
-// true the existing word token (placed tiles + played-through letters)
-// is preserved; otherwise the word is dropped (placed tiles returned to
-// the rack). Re-parses so every derived view updates, then absorbs any
-// board tiles the play now butts into. Caller holds the mutex.
-static void tui_board_builder_rebuild(TuiGameState *gs, bool keep_word) {
-  char coord[8];
-  tui_board_builder_coord_token(gs, coord, sizeof(coord));
-  char word[64];
-  word[0] = '\0';
-  if (keep_word) {
-    tui_board_builder_extract_word(gs, word, sizeof(word));
-  }
-  if (word[0] != '\0') {
-    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s %s", coord,
-             word);
-  } else {
-    snprintf(gs->edit_move_buf, sizeof(gs->edit_move_buf), "%s", coord);
-  }
-  gs->edit_move_len = (int)strlen(gs->edit_move_buf);
-  gs->edit_move_cursor = gs->edit_move_len;
-  tui_game_state_parse_edit_buf(gs);
-  if (keep_word && word[0] != '\0') {
-    tui_autofill_playthrough(gs);
-  }
-}
-
-// Default direction heuristic for a fresh anchor: whichever of "across"
-// (empty run to the right) or "down" (empty run below) is longer. Ties
-// favor across.
+// A fresh anchor always starts ACROSS — matching Woogles and every
+// mainstream Scrabble UI, and predictability beats cleverness here: an
+// earlier "whichever direction has the longer empty run" heuristic
+// meant the same click could anchor differently depending on nearby
+// tiles, which read as random. Down is one toggle away (click the
+// cell again, or Space/Tab).
 static int tui_board_builder_default_dir(const TuiGameState *gs, int row,
                                          int col) {
-  const Board *brd = game_get_board(gs->game);
-  if (brd == NULL) {
-    return BOARD_HORIZONTAL_DIRECTION;
-  }
-  int right = 0;
-  for (int c = col; c < BOARD_DIM && board_get_letter(brd, row, c) ==
-                                         ALPHABET_EMPTY_SQUARE_MARKER;
-       c++) {
-    right++;
-  }
-  int down = 0;
-  for (int r = row; r < BOARD_DIM && board_get_letter(brd, r, col) ==
-                                         ALPHABET_EMPTY_SQUARE_MARKER;
-       r++) {
-    down++;
-  }
-  return (down > right) ? BOARD_VERTICAL_DIRECTION : BOARD_HORIZONTAL_DIRECTION;
+  (void)gs;
+  (void)row;
+  (void)col;
+  return BOARD_HORIZONTAL_DIRECTION;
 }
 
-// Begin (or relocate) board move-entry at (row, col) with the given
-// direction. Opens the editor on the current pending entry so the cell +
-// board pipeline lights up. Drops any previously-placed tiles. Caller
-// holds the mutex.
+// Begin (or relocate) board move-entry at origin (row, col) with the
+// given direction. Opens the editor on the current pending entry so the
+// cell + board pipeline lights up. Drops any previously-placed tiles.
+// Caller holds the mutex.
 static void tui_board_builder_set_anchor(TuiGameState *gs, int row, int col,
                                          int dir) {
+  // The clicked cell is the ORIGIN — remembered so direction toggles
+  // and arrow moves can re-derive everything from the user's cell. The
+  // walked-back anchor below is a derived value.
+  gs->board_origin_row = row;
+  gs->board_origin_col = col;
   // Absorb any contiguous on-board tiles immediately BEFORE the clicked
   // cell (in the play direction) so a word that plays through them is
   // anchored at the true word start. e.g. clicking the empty cell right
@@ -969,6 +947,63 @@ static void tui_board_entry_type_letter(TuiGameState *gs, char ch, bool shift,
   tui_autofill_playthrough(gs);
 }
 
+// Toggle the move-builder's direction, re-anchoring from the ORIGIN
+// (the cell the user clicked) so leading playthrough re-derives for the
+// new direction. The word token can't simply be carried over: it mixes
+// the user's placed tiles with absorbed played-through board letters
+// from the OLD direction, which are meaningless in the new one — that
+// was the "direction is stuck horizontal after playthrough" bug. So:
+// extract the user's tiles (skip word letters sitting on occupied
+// squares along the old direction), re-anchor, and retype them; the
+// typing path re-absorbs whatever the new direction plays through.
+// Caller holds the mutex.
+static void tui_board_builder_toggle_dir(TuiGameState *gs) {
+  const Board *brd = gs->game != NULL ? game_get_board(gs->game) : NULL;
+  char word[64];
+  tui_board_builder_extract_word(gs, word, sizeof(word));
+  char user_tiles[64];
+  int n_user = 0;
+  const bool old_vertical = board_is_dir_vertical(gs->board_dir);
+  int r = gs->board_anchor_row;
+  int c = gs->board_anchor_col;
+  for (int i = 0; word[i] != '\0' && n_user < (int)sizeof(user_tiles) - 1;) {
+    const bool on_board =
+        brd != NULL && r >= 0 && r < BOARD_DIM && c >= 0 && c < BOARD_DIM &&
+        board_get_letter(brd, r, c) != ALPHABET_EMPTY_SQUARE_MARKER;
+    if (on_board) {
+      // Played-through square: its human-readable letter may span
+      // multiple word chars — skip them all.
+      const MachineLetter ml = board_get_letter(brd, r, c);
+      const char *hl = gs->ld != NULL ? gs->ld->ld_ml_to_hl[ml] : NULL;
+      int skip = hl != NULL ? (int)strlen(hl) : 1;
+      while (skip-- > 0 && word[i] != '\0') {
+        i++;
+      }
+    } else {
+      user_tiles[n_user++] = word[i++];
+    }
+    if (old_vertical) {
+      r++;
+    } else {
+      c++;
+    }
+  }
+  user_tiles[n_user] = '\0';
+  const int new_dir =
+      old_vertical ? BOARD_HORIZONTAL_DIRECTION : BOARD_VERTICAL_DIRECTION;
+  tui_board_builder_set_anchor(gs, gs->board_origin_row, gs->board_origin_col,
+                               new_dir);
+  // Retype the user's tiles so they re-place along the new direction
+  // (lowercase in the buffer = blank, retyped as Shift+letter).
+  const bool is_pvc = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER;
+  for (int i = 0; i < n_user; i++) {
+    const char ch = user_tiles[i];
+    const bool was_blank = ch >= 'a' && ch <= 'z';
+    const char up = was_blank ? (char)(ch - 'a' + 'A') : ch;
+    tui_board_entry_type_letter(gs, up, was_blank, is_pvc);
+  }
+}
+
 // Retract the last placed tile from the board move-entry word, skipping
 // back over any trailing played-through (board) tiles. With nothing
 // placed, step the anchor back one cell. Caller holds the mutex.
@@ -1005,8 +1040,11 @@ static void tui_board_entry_backspace(TuiGameState *gs) {
     tui_game_state_parse_edit_buf(gs);
     tui_autofill_playthrough(gs);
   } else {
-    int nr = gs->board_anchor_row;
-    int nc = gs->board_anchor_col;
+    // Nothing placed: step the ORIGIN back one cell (the walked-back
+    // anchor re-derives; stepping the anchor itself got pinned against
+    // leading playthrough).
+    int nr = gs->board_origin_row;
+    int nc = gs->board_origin_col;
     if (board_is_dir_vertical(gs->board_dir)) {
       if (nr > 0) {
         nr--;
@@ -2694,32 +2732,33 @@ int main(int argc, char *argv[]) {
           }
           if (key == ' ' || key == NCKEY_TAB || key == '\t') {
             // Space or Tab toggles direction (keyboard parallel to
-            // clicking the anchor again).
+            // clicking the origin cell again).
             pthread_mutex_lock(&game_state.mutex);
-            game_state.board_dir = board_is_dir_vertical(game_state.board_dir)
-                                       ? BOARD_HORIZONTAL_DIRECTION
-                                       : BOARD_VERTICAL_DIRECTION;
-            tui_board_builder_rebuild(&game_state, true);
+            tui_board_builder_toggle_dir(&game_state);
             pthread_mutex_unlock(&game_state.mutex);
             continue;
           }
           if (key == NCKEY_LEFT || key == NCKEY_RIGHT || key == NCKEY_UP ||
               key == NCKEY_DOWN) {
+            // Arrows move the ORIGIN (the user's typing start cell);
+            // the walked-back anchor re-derives from it. Moving the
+            // anchor directly got stuck against leading playthrough:
+            // set_anchor immediately walked it back again.
             pthread_mutex_lock(&game_state.mutex);
-            int anchor_r = game_state.board_anchor_row;
-            int anchor_c = game_state.board_anchor_col;
-            if (key == NCKEY_LEFT && anchor_c > 0) {
-              anchor_c--;
-            } else if (key == NCKEY_RIGHT && anchor_c < BOARD_DIM - 1) {
-              anchor_c++;
-            } else if (key == NCKEY_UP && anchor_r > 0) {
-              anchor_r--;
-            } else if (key == NCKEY_DOWN && anchor_r < BOARD_DIM - 1) {
-              anchor_r++;
+            int origin_r = game_state.board_origin_row;
+            int origin_c = game_state.board_origin_col;
+            if (key == NCKEY_LEFT && origin_c > 0) {
+              origin_c--;
+            } else if (key == NCKEY_RIGHT && origin_c < BOARD_DIM - 1) {
+              origin_c++;
+            } else if (key == NCKEY_UP && origin_r > 0) {
+              origin_r--;
+            } else if (key == NCKEY_DOWN && origin_r < BOARD_DIM - 1) {
+              origin_r++;
             }
             // Re-anchoring drops any in-progress tiles back to the rack
             // and keeps the current direction.
-            tui_board_builder_set_anchor(&game_state, anchor_r, anchor_c,
+            tui_board_builder_set_anchor(&game_state, origin_r, origin_c,
                                          game_state.board_dir);
             pthread_mutex_unlock(&game_state.mutex);
             continue;
@@ -3410,6 +3449,15 @@ int main(int argc, char *argv[]) {
               pthread_mutex_unlock(&game_state.mutex);
               continue;
             }
+            // MOVE field: a second space is never meaningful (the one
+            // space separates coord from word), and autofill may have
+            // already supplied it when it absorbed a leading played-
+            // through letter right after the coord — swallow dupes so
+            // "8H<space>" out of habit can't split the word token.
+            if (field_move && ch == ' ' && strchr(buf, ' ') != NULL) {
+              pthread_mutex_unlock(&game_state.mutex);
+              continue;
+            }
             const bool is_letter =
                 (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
             // Coord-token letters (before the first space, e.g. the F
@@ -3707,8 +3755,13 @@ int main(int argc, char *argv[]) {
           }
           if (pending_edit_handled) {
             // Already entered edit mode; skip the focus-only fallback.
-          } else if (hit == TUI_FOCUS_HISTORY &&
-                     game_state.focused_panel == TUI_FOCUS_HISTORY) {
+          } else if (hit == TUI_FOCUS_HISTORY) {
+            // A click acts on the entry under the cursor IMMEDIATELY,
+            // focusing the panel as a side effect — no "first click
+            // focuses, second click selects" dance. (Two-step focus
+            // felt broken everywhere it existed; the board and the
+            // pending-cell click already worked this way.)
+            game_state.focused_panel = TUI_FOCUS_HISTORY;
             int entry_row_off = 0;
             const int target =
                 tui_history_cursor_field_at(input.y, input.x, &entry_row_off);
@@ -3717,18 +3770,17 @@ int main(int argc, char *argv[]) {
               game_state.analysis_cursor = 0;
               game_state.analysis_cursor_column = TUI_ANALYSIS_COLUMN_RANK;
               game_state.analysis_anchored_move[0] = '\0';
-              // Non-pending row clicked while History was already
-              // focused: just move the in-panel cursor.
+              // Non-pending row clicked: just move the in-panel cursor.
               game_state.edit_history_idx = -1;
             }
             (void)entry_row_off;
-          } else if (hit == TUI_FOCUS_ANALYSIS &&
-                     game_state.focused_panel == TUI_FOCUS_ANALYSIS) {
-            // Same routing as History: an already-focused click on
-            // the Analysis panel moves the in-panel cursor instead
-            // of re-focusing. The hit also reports which column was
-            // clicked (rank gutter vs move text) so the cursor lands
-            // in the right mode. Title / chrome clicks snap to -1.
+          } else if (hit == TUI_FOCUS_ANALYSIS) {
+            // Same single-click routing as History: focus + move the
+            // in-panel cursor in one click. The hit also reports which
+            // column was clicked (rank gutter vs move text) so the
+            // cursor lands in the right mode. Title / chrome clicks
+            // snap to -1.
+            game_state.focused_panel = TUI_FOCUS_ANALYSIS;
             TuiAnalysisColumn clicked_col = TUI_ANALYSIS_COLUMN_RANK;
             const int target =
                 tui_analysis_cursor_column_at(input.y, input.x, &clicked_col);
@@ -3759,13 +3811,13 @@ int main(int argc, char *argv[]) {
                   brd != NULL && board_get_letter(brd, cell_row, cell_col) ==
                                      ALPHABET_EMPTY_SQUARE_MARKER;
               if (game_state.board_entry_active &&
-                  cell_row == game_state.board_anchor_row &&
-                  cell_col == game_state.board_anchor_col) {
-                game_state.board_dir =
-                    board_is_dir_vertical(game_state.board_dir)
-                        ? BOARD_HORIZONTAL_DIRECTION
-                        : BOARD_VERTICAL_DIRECTION;
-                tui_board_builder_rebuild(&game_state, true);
+                  cell_row == game_state.board_origin_row &&
+                  cell_col == game_state.board_origin_col) {
+                // Re-click on the ORIGIN cell (the one the user
+                // clicked, not the playthrough-walked-back anchor —
+                // comparing against the anchor made the toggle
+                // unreachable whenever the walk-back had moved it).
+                tui_board_builder_toggle_dir(&game_state);
               } else if (empty_cell) {
                 const int dir = tui_board_builder_default_dir(
                     &game_state, cell_row, cell_col);

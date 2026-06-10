@@ -576,7 +576,18 @@ typedef struct {
   // direction. The on-board cursor (next empty square) and the ghosted
   // tiles are DERIVED from edit_preview_move at render time, so no
   // separate placement list or cursor field is stored.
+  //
+  // origin = the empty cell the user clicked (where typing starts);
+  // anchor = the true word start after walking back through any leading
+  // played-through tiles in the current direction. The anchor is
+  // DERIVED from origin + direction on every re-anchor; direction
+  // toggles and arrow-key moves operate on the origin (the user's
+  // cell), never the walked-back anchor — comparing clicks against the
+  // anchor made the same-cell direction toggle unreachable whenever a
+  // leading-playthrough walk-back had moved it.
   bool board_entry_active;
+  int board_origin_row;
+  int board_origin_col;
   int board_anchor_row;
   int board_anchor_col;
   int board_dir; // BOARD_HORIZONTAL_DIRECTION / BOARD_VERTICAL_DIRECTION

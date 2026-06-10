@@ -110,18 +110,14 @@ import sys, re
 
 def typed_form(coord, word):
     # Parenthesized runs are played-through board tiles. The cell
-    # editor AUTO-ABSORBS interior/trailing runs as you type (autofill
-    # appends board letters at the word's END), so typing those again
-    # would duplicate them ('PAN(E)LED' typed verbatim becomes
-    # PANEELED) — drop them and let autofill pad the buffer. A LEADING
-    # run is different: autofill never prepends, and the engine wants
-    # the canonical form spelled from the coord — so leading board
-    # letters are typed verbatim (typing onto an occupied square with
-    # the matching letter parses as playthrough, no duplication).
-    m = re.match(r'^\(([^)]*)\)(.*)$', word)
-    lead = m.group(1) if m else ''
-    rest = m.group(2) if m else word
-    return coord.lower(), lead + re.sub(r'\([^)]*\)', '', rest)
+    # editor AUTO-ABSORBS them as you type: interior/trailing runs as
+    # the word reaches them, and a LEADING run right after the coord
+    # (the canonical coord points at the occupied word-start square, so
+    # autofill pulls the whole run in, space included). Typing them
+    # again would duplicate ('PAN(E)LED' typed verbatim becomes
+    # PANEELED) — so type only the placed tiles. The driver's explicit
+    # space is swallowed by the editor when autofill already added one.
+    return coord.lower(), re.sub(r'\([^)]*\)', '', word)
 
 # Move rows render as a column to the RIGHT of the board art, so a row
 # shares its line with board glyphs / bag text. Regex out the

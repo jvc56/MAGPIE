@@ -103,6 +103,36 @@ What we're missing for full input parity:
 
 ---
 
+## Implementation vs Woogles — gap audit (June 2026)
+
+Status of the shipped board move-entry against the Woogles survey
+above. ✅ = matches Woogles (or deliberately better), ◐ = partial /
+deliberate divergence, ✗ = not implemented.
+
+| Interaction | Woogles | Ours | Status |
+| --- | --- | --- | --- |
+| Click empty cell → arrow | always across | always across (was a longest-run heuristic — removed; same click anchoring differently read as random) | ✅ |
+| Same-cell click | cycles across → down → hidden | toggles across ↔ down (Esc hides; toggle re-derives leading playthrough for the new direction) | ◐ two-state + Esc instead of three-state cycle |
+| Keyboard direction toggle | none (mouse only); arrows Left/Right flip the arrow | Space / Tab | ◐ ours is keyboard-first; arrows move the origin instead |
+| Typing over board tiles | cursor auto-SKIPS occupied squares (tiles never enter an input string) | playthrough letters ABSORB into the move text (canonical "8D W(OR)D" form builds itself, incl. a leading run absorbed right after the coord) | ✅ same felt behavior, different mechanism |
+| Blanks | Shift+letter = explicit blank; typed letter falls back to blank if no real tile | identical in play-vs-computer (board + cell paths); annotation requires Shift (racks are unknown there — deliberate) | ✅ |
+| Tile you don't hold | keystroke ignored | keystroke ignored (rack-aware gating, playthrough-aware) | ✅ |
+| Backspace | retract last tile, cursor steps back | same (skips back over playthrough); with nothing placed, steps the origin back | ✅ |
+| Enter / Esc | commit / cancel | commit / cancel | ✅ |
+| Space | advance cursor one square without placing | direction toggle (deliberate — see "Why not Woogles' spacebar behavior?") | ◐ |
+| Click rack tile → place at cursor | yes | no (rack panel is display-only) | ✗ |
+| Drag & drop tiles | yes | no (deliberate — see "Why no drag") | ✗ deliberate |
+| Right-click placed tile → return to rack | yes | no (Backspace only, last-tile-first) | ✗ |
+| Click blank on board → designation modal | yes | n/a (designation happens at type time via case) | ◐ |
+| Recall-all / shuffle / sort | buttons + Up/Down arrows | none | ✗ |
+| Pass / exchange / challenge | buttons + number hotkeys (2/3/4) | not implemented (placement-only scope) | ✗ known gap |
+| Click-into-panel | single click acts | single click acts everywhere (History/Analysis previously needed focus-then-click; removed) | ✅ |
+
+The biggest UX gaps to close next, in rough order of expected value:
+pass/exchange entry (game-completeness, not just UX), recall-all
+(Esc covers it but a dedicated gesture is friendlier mid-edit),
+right-click-to-retract a specific tile, and click-rack-tile-to-place.
+
 ## Hotkey discipline
 
 A rule that constrains every shortcut decision in this doc:
@@ -130,6 +160,22 @@ Practical consequences:
   panel focused but not in edit mode), prefer modifier-prefixed
   hotkeys anyway — users shouldn't have to remember that a key's
   meaning depends on whether they've clicked into an edit yet.
+
+---
+
+## Click-to-focus policy
+
+> **A click both focuses the panel AND acts on the element under the
+> cursor, in one click.** No "first click focuses, second click
+> selects" two-step.
+
+Every panel with inner elements (board cells, history entries,
+analysis rows) routes a click directly to the element and sets panel
+focus as a side effect. The two-step pattern shipped first for
+History/Analysis cursor moves and consistently read as "the click
+didn't work"; the board and the pending-history-cell click never had
+it, and the inconsistency made it worse. Clicks on panel chrome
+(title, borders) still just focus.
 
 ---
 
@@ -174,10 +220,25 @@ the Board panel is focused.
 
 - A board cursor lands on the clicked cell.
 - The cursor glyph is a directional arrow on the cursor cell:
-  `▶` (across) or `▼` (down). Default direction is the one with
-  more open space to the right / below — heuristic, override-able.
+  `▶` (across) or `▼` (down). Default direction is **always across**
+  (Woogles convention). We originally shipped a "whichever direction
+  has more open space" heuristic; it made the same click anchor
+  differently depending on nearby tiles, which played as random —
+  predictability won.
+- The builder tracks two cells: the **origin** (the cell the user
+  clicked — where typing starts) and the **anchor** (the true word
+  start, derived by walking back through leading played-through
+  tiles in the current direction). All user-facing operations —
+  same-cell toggle detection, arrow-key moves, backspace past the
+  word start — work on the ORIGIN; the anchor is recomputed from it.
+  The first implementation operated on the walked-back anchor, which
+  made the direction toggle unreachable after a playthrough walk-back
+  (re-clicking your cell no longer matched the anchor) and pinned
+  arrow keys against playthrough runs.
 - **Toggle direction**:
-  - Click the same cell again. (Woogles convention.)
+  - Click the same (origin) cell again. (Woogles convention.) A
+    toggle re-derives the leading playthrough for the new direction
+    and re-places the user's tiles along it.
   - **Space** — keyboard equivalent. Reads as natural: "flip the
     arrow." See "Why not Woogles' spacebar behavior?" below.
   - Tab — also accepted, for consistency with the rest of the
