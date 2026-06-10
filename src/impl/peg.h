@@ -13,38 +13,37 @@
 // ============================================================================
 // Unified pre-endgame (PEG) solver
 //
-// Handles 1, 2, 3, and 4 tiles in bag (unseen 8..11). Larger positions are
-// rejected — PEG is not for midgame.
+// Solves positions with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag; larger
+// positions are midgame and are rejected.
 //
-// Design:
-// - Stage 0 (greedy): movegen + sort by static equity descending, then a
-//   per-cand greedy d=0 playout over the mover-draw scenarios. Cands processed
-//   top-equity-first, so interruption returns the partial top-K by
-//   greedy-evaluated-so-far. Seeds the ranking the halving stages refine.
-// - Halving stages 1..N: by default 32 -> 16 -> 8 -> 4 -> 2 (five stages).
-//   Each stage re-ranks the surviving top-K from the previous stage at one
-//   more ply of fidelity (non-emptier inner depth d, emptier endgame plies):
-//   stage 1 = d=0/plies=2, ascending. The schedule (and thus N) is the default
-//   table length but is fully caller-overridable via PegArgs.stage_top_k, with
-//   no fixed upper bound.
+// The solver ranks candidate moves by their win% (and spread) over every way
+// the bag could be drawn, in a cascade of progressively-deeper stages:
 //
-//   A stage exists to RE-RANK a candidate set at higher fidelity, so its output
-//   is only meaningful with >= 2 candidates to compare — there is deliberately
-//   no "top-1" stage. The top two candidates of a stage are a parallel pair
-//   (the leader has no utility without a runner-up to compare against), not a
-//   serial dependency. Past those two, finishing one more candidate is the unit
-//   of incremental progress.
-// - Time budget (PegArgs.time_budget_seconds). Checked at each stage and each
-//   cand boundary. On exceeded: returns the last *fully-completed* stage's
-//   ranking; partial-stage data is discarded. A stage is not even started if
-//   the remaining budget cannot fit >= 2 candidates — a 1-candidate result is
-//   uncomparable, so banking that time for the rest of the game is strictly
-//   better.
-// - All scenario evaluation uses nested PEG (non-emptier) or
-//   endgame_solve(plies, use_heuristics=true) (emptier). No omniscient endgame
-//   at the PEG-analysis level.
+// - Stage 0 (greedy seed): generate moves, sort by static equity, then score
+//   each candidate with a greedy playout over its mover-draw scenarios.
+//   Candidates are evaluated top-equity-first, so an interrupted stage 0 still
+//   returns a sensible partial top-K. This seeds the ranking the halving stages
+//   refine.
+// - Halving stages 1..N: each re-ranks the surviving top-K from the previous
+//   stage at one more ply of fidelity (a deeper endgame_solve on the emptier
+//   scenarios), then cuts to a smaller K. The default schedule is
+//   32 -> 16 -> 8 -> 4 -> 2; a caller may override it (and thus N) via
+//   PegArgs.stage_top_k, with no fixed upper bound. A stage re-ranks a set, so
+//   it is only meaningful with >= 2 candidates: there is deliberately no
+//   "top-1" stage.
+// - Time budget (PegArgs.time_budget_seconds), checked at each stage and
+//   candidate boundary. When exceeded, the last *fully-completed* stage's
+//   ranking is returned and partial-stage work is discarded. A stage is not
+//   started unless the remaining budget can fit >= 2 candidates, since a
+//   1-candidate result is uncomparable and banking the time is strictly better.
 //
-// All tuning is via PegArgs (CLI-driven). No environment-variable knobs.
+// Scenario leaves: a non-emptier scenario (the opponent still has tiles to
+// draw) is scored by a playout to game end under the chosen opponent model
+// (see PegOppModel); an emptier scenario (the bag is empty after the candidate)
+// is scored by an exact endgame_solve. There is no omniscient endgame at the
+// PEG-analysis level.
+//
+// All tuning is via PegArgs.
 // ============================================================================
 
 // The bag-size caps (PEG_MIN_BAG, PEG_MAX_BAG) and PEG_MAX_UNSEEN live in
@@ -61,9 +60,9 @@
 //   PEG_OPP_RATIONAL    — the opponent plays its highest-equity reply (a
 //                         self-interested, "realistic" opponent). Default.
 //   PEG_OPP_PESSIMISTIC — the opponent plays the reply that minimizes the
-//                         mover's result (macondo-style worst-case / guaranteed
-//                         wins). The mover's spread under this model is always
-//                         <= the rational model's.
+//                         mover's result (worst-case / guaranteed-win
+//                         analysis). The mover's spread under this model is
+//                         always <= the rational model's.
 typedef enum {
   PEG_OPP_RATIONAL = 0,
   PEG_OPP_PESSIMISTIC,
@@ -71,10 +70,12 @@ typedef enum {
 
 // ----- Progress callbacks -----------------------------------------------
 //
-// All callbacks are optional (set to NULL to skip). They are invoked from
-// the solver thread that completed the event. Callbacks must be quick and
-// thread-safe — the solver may invoke them concurrently from worker
-// threads. `user_data` is the value passed in PegArgs.
+// All callbacks are optional (set to NULL to skip). They run on whichever
+// solver thread completed the event, possibly several worker threads at once,
+// so they must be quick and thread-safe. `user_data` is the value passed in
+// PegArgs. on_stage_start reports the stage's fidelity as inner_d (the
+// non-emptier playout depth, currently always 0) and emptier_plies (the
+// emptier-scenario endgame ply count for the stage).
 
 typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
                                 int emptier_plies, void *user_data);
@@ -116,18 +117,19 @@ typedef struct PegArgs {
   int max_stage;
 
   // Optional per-stage candidate counts for the halving stages (stage 1
-  // onward), overriding the built-in PEG_STAGE_TOP_K table. NULL = use the
-  // default. When set, num_stages is the array length and defines how many
-  // halving stages run; stage 0 (greedy) always evaluates all candidates.
-  // Each entry should be >= 2 (a stage re-ranks a set, so a top-1 stage is
-  // meaningless) and is normally non-increasing. Powers of two are
-  // conventional but not required.
+  // onward), overriding the built-in default schedule. NULL = use the default.
+  // When set, num_stages is the array length and defines how many halving
+  // stages run; stage 0 (greedy) always evaluates all candidates. Each entry
+  // should be >= 2 (a stage re-ranks a set, so a top-1 stage is meaningless)
+  // and is normally non-increasing. Powers of two are conventional but not
+  // required.
   const int *stage_top_k;
   int num_stages;
 
-  // Inner top-K cap: when running nested PEG for a non-emptier cand, only
-  // evaluate the inner_top_k highest-equity opp moves per opp_rack. 0 = no cap
-  // (evaluate all opp cands).
+  // Pessimistic-opponent cap: in the PEG_OPP_PESSIMISTIC playout, weigh only
+  // the inner_top_k highest-equity opponent replies at each opponent turn.
+  // 0 = weigh every reply (the unbounded worst case). No effect under
+  // PEG_OPP_RATIONAL.
   int inner_top_k;
 
   // Opponent model for scoring scenarios (see PegOppModel). Defaults to

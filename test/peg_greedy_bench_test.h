@@ -4,11 +4,10 @@
 // Deep-rational PEG reference evaluator ("greedy bench"): full scenario
 // enumeration with a configurable-depth rational walker on non-emptier
 // scenarios (RAT_WALK + OPP_RANK_BY_PLAYOUT + perception/walk strides) and
-// exact endgames on emptier ones, emitting per-candidate TSV results. This is
-// the research evaluator the production cascade (src/impl/peg.c) was distilled
-// from; it remains the only in-repo evaluator with depth > 0 on non-emptier
-// scenarios, so it serves as the deep-rational cross-check until production
-// grows nested inner depth.
+// exact endgames on emptier ones, emitting per-candidate TSV results. It is the
+// only in-repo evaluator with depth > 0 on non-emptier scenarios, so it serves
+// as a deep-rational cross-check for the production solver (src/impl/peg.c),
+// whose non-emptier leaves are a shallow playout.
 //
 // Positions come from a CGP file (PASSPEG_GREEDY_PATH, default
 // /tmp/peg_positions.txt). Key env knobs (PASSPEG_GREEDY_* unless noted):

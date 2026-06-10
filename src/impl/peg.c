@@ -672,7 +672,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // The scratch game already carries the root pruned KWG (override) and valid
   // cross-sets (copied from the prepared base, incrementally updated by the
   // cand play), so the endgame must not rebuild a pruned KWG or regenerate all
-  // cross-sets per solve — that regeneration was the profiled bottleneck.
+  // cross-sets per solve — that regeneration dominates the per-leaf cost.
   ea.skip_word_pruning = true;
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
@@ -1253,7 +1253,7 @@ static void peg_publish(PegResult *out, const PegRankedCand *ranked, int count,
   out->last_completed_stage = stage;
 }
 
-// ----- injection monitor (rung 5) ------------------------------------------
+// ----- injection monitor ---------------------------------------------------
 
 typedef struct PegInjector {
   PegPool *pool;
@@ -1391,7 +1391,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // every (cand, scenario) leaf. Each leaf game_copy's this prepared base —
   // carrying the override KWG and pruned cross-sets — and play_move only
   // incrementally updates the cross-sets, so no leaf rebuilds a pruned KWG or
-  // regenerates all cross-sets (the profiled hotspot).
+  // regenerates all cross-sets (the dominant per-leaf cost).
   DictionaryWordList *word_list = dictionary_word_list_create();
   const KWG *full_kwg = player_get_kwg(game_get_player(game, mover_idx));
   generate_possible_words(game, full_kwg, word_list);
@@ -1467,9 +1467,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[w].eg_tt = transposition_table_create(tt_fraction);
   }
 
-  // Injection monitor: lends idle cores to in-flight leaf endgames (rung 5).
-  // Only meaningful with a pool; the deep stages have few candidates, so their
-  // long endgames would otherwise leave most cores idle.
+  // Injection monitor: lends idle cores to in-flight leaf endgames. Only
+  // meaningful with a pool; the deep stages have few candidates, so their long
+  // endgames would otherwise leave most cores idle.
   PegInjector injector;
   cpthread_t injector_thread;
   bool injector_running = false;
