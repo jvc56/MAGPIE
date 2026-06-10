@@ -3,6 +3,7 @@
 #include <freetype/freetype.h>
 #include <freetype/ftsynth.h>
 #include <ft2build.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -150,6 +151,16 @@ void tui_glyph_cache_reset(TuiGlyphCache *cache) {
   cache->pixel_size = 0;
 }
 
+// Total FreeType rasterizations since start, for the MAGPIE_FPS_DEBUG
+// perf trace. A healthy steady state rasterizes each glyph once per
+// size change; this counter climbing during play means the cache is
+// thrashing (e.g., two panels alternating pixel sizes on one cache —
+// set_size drops every slot on a size change).
+static _Atomic unsigned long g_glyph_rasters;
+unsigned long tui_debug_glyph_rasters(void) {
+  return atomic_load(&g_glyph_rasters);
+}
+
 static const TuiGlyph *cache_get_styled(TuiGlyphCache *cache,
                                         uint32_t codepoint, bool bold) {
   if (cache == NULL || codepoint >= GLYPH_CACHE_CAPACITY ||
@@ -160,6 +171,7 @@ static const TuiGlyph *cache_get_styled(TuiGlyphCache *cache,
   if (slots[codepoint] != NULL) {
     return slots[codepoint];
   }
+  atomic_fetch_add(&g_glyph_rasters, 1);
 
   // FT_LOAD_DEFAULT: hint via the font's bytecode if present,
   // autohinter otherwise. Hinting snaps stems to integer pixel

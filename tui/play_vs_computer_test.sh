@@ -239,6 +239,8 @@ while [ "$turns" -lt "$MAX_TURNS" ]; do
     printf 'set -mode sync -lex %s -wmp true -numplays 15\ncgp %s\ngenerate\nquit\n' \
       "$LEXICON" "$CGP" | "$BIN_CONSOLE" 2>/dev/null |
       grep -oE '[0-9]+:\s+\S+\s+\S+.*' | head -6
+    echo "  --- pending cell at rejection ---"
+    cap | grep -E '[0-9]+>' -A 1 | cut -c34-130 | head -4
     echo "  --- history panel at rejection ---"
     cap | sed -n '1,8p' | cut -c34-130
     break

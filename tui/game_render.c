@@ -1285,10 +1285,27 @@ static void invalidate_rack_tile_planes(void) {
   }
 }
 
+// Count of full tile-plane invalidations since start, for the
+// MAGPIE_FPS_DEBUG perf trace: a slow frame with blits=~225 and this
+// counter ticking up means something (resize recovery, cdy/cdx drift,
+// scale flip) nuked the per-tile cache; a slow frame WITHOUT a tick
+// points at the emit path / terminal backpressure instead.
+static _Atomic unsigned long g_tile_invalidations;
+unsigned long tui_debug_tile_invalidations(void) {
+  return atomic_load(&g_tile_invalidations);
+}
+
+// Rack-panel tile blits since start (NOT included in the per-frame
+// board blits count) — surfaces a rack cache that re-composes every
+// frame.
+static _Atomic unsigned long g_rack_blits;
+unsigned long tui_debug_rack_blits(void) { return atomic_load(&g_rack_blits); }
+
 // Tear down every cached tile plane. Used when scale flips back
 // to 1x (planes would otherwise occlude the text-mode board) and
 // at game-reset / state-destroy.
 static void invalidate_tile_planes(void) {
+  atomic_fetch_add(&g_tile_invalidations, 1);
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
       if (board_tile_planes[row][col] != NULL) {
@@ -3967,6 +3984,7 @@ static void render_rack_panel_pixel(struct ncplane *plane, const Theme *theme,
     vopts.leny = (unsigned)tile_h;
     vopts.lenx = (unsigned)tile_w;
     ncblit_rgba(buf, tile_w * 4, &vopts);
+    atomic_fetch_add(&g_rack_blits, 1);
     tui_frame_dump_capture(vopts.n, buf, (int)vopts.lenx, (int)vopts.leny);
     free(buf);
     rc->letter = (int)ml;
@@ -7309,6 +7327,16 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
     return;
   }
   state->last_rendered_analysis_row_count = 0;
+  // Play-vs-computer hides the Analysis panel for the whole live game
+  // and the on-board candidate preview is disabled too — there is no
+  // consumer for these rows, so don't build them. This was the 4-5fps /
+  // 200-300ms input-lag stall: the sim row builder's per-letter string
+  // churn fights a heavily contended allocator while the bot's search
+  // threads hammer malloc, measured at ~280ms per frame in `sample`.
+  if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
+      !game_over(state->game)) {
+    return;
+  }
   const TuiAnalysisSnapshot *snap = NULL;
   if (state->history_cursor >= 0 &&
       state->history_cursor < state->history_count) {
@@ -7329,21 +7357,42 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
       state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
-  if (use_endgame) {
-    state->last_rendered_analysis_row_count = fill_analysis_rows_from_endgame(
-        state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
-  } else if (state->sim_results != NULL) {
-    // Gate sim row population on sim_results_turn_idx — the
-    // reset paths flip it to -1 to signal "the sim_results
-    // object's contents aren't valid for the current game".
-    // The engine doesn't zero sim_results itself, so without
-    // this check the prior game's leaderboard keeps rendering
-    // (and burning per-frame CPU) after annotation start.
-    const int sim_turn_idx = atomic_load(&state->sim_results_turn_idx);
-    if (sim_turn_idx >= 0) {
+  // Gate sim row population on sim_results_turn_idx — the
+  // reset paths flip it to -1 to signal "the sim_results
+  // object's contents aren't valid for the current game".
+  // The engine doesn't zero sim_results itself, so without
+  // this check the prior game's leaderboard keeps rendering
+  // (and burning per-frame CPU) after annotation start.
+  const bool live_sim = !use_endgame && state->sim_results != NULL &&
+                        atomic_load(&state->sim_results_turn_idx) >= 0;
+  if (use_endgame || live_sim) {
+    // Throttle live-leaderboard rebuilds to ~10Hz. Rebuilding the row
+    // strings at 60fps is pure waste — the leaderboard doesn't change
+    // meaningfully frame-to-frame — and it's expensive far beyond its
+    // size: each row's move/leave strings do per-letter strdup/free,
+    // and while a search is running those allocations contend with
+    // the engine threads' own malloc traffic (~280ms/frame measured).
+    // The previous rows persist in last_rendered_analysis_rows, so
+    // between rebuilds the panel simply keeps showing them.
+    static struct timespec last_build;
+    static int last_build_count;
+    struct timespec now;
+    clock_gettime(CLOCK_MONOTONIC, &now);
+    const long since_ms = (long)(now.tv_sec - last_build.tv_sec) * 1000L +
+                          (long)(now.tv_nsec - last_build.tv_nsec) / 1000000L;
+    if (last_build_count > 0 && since_ms >= 0 && since_ms < 100) {
+      state->last_rendered_analysis_row_count = last_build_count;
+      return;
+    }
+    if (use_endgame) {
+      state->last_rendered_analysis_row_count = fill_analysis_rows_from_endgame(
+          state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
+    } else {
       state->last_rendered_analysis_row_count = fill_analysis_rows_from_sim(
           state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
     }
+    last_build = now;
+    last_build_count = state->last_rendered_analysis_row_count;
   }
 
   // Fallback: nothing computed (loaded GCG turn that wasn't simmed

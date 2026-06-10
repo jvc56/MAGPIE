@@ -2333,10 +2333,17 @@ int main(int argc, char *argv[]) {
     if (need_render) {
       // Time the FULL render path (cell composition + pixel ncblits AND
       // the notcurses_render emit) so the fps readout reflects the real
-      // per-frame cost, not just the graphics emit.
+      // per-frame cost, not just the graphics emit. The mutex wait is
+      // timed separately for the perf trace — a slow frame whose time is
+      // all lock_us means contention with the bot worker, not rendering.
       struct timespec render_begin;
       clock_gettime(CLOCK_MONOTONIC, &render_begin);
       pthread_mutex_lock(&game_state.mutex);
+      struct timespec lock_acquired;
+      clock_gettime(CLOCK_MONOTONIC, &lock_acquired);
+      const long lock_us =
+          (long)(lock_acquired.tv_sec - render_begin.tv_sec) * 1000000L +
+          (long)(lock_acquired.tv_nsec - render_begin.tv_nsec) / 1000L;
       tui_game_render(std_plane, theme, &game_state, chosen_time, modal);
       pthread_mutex_unlock(&game_state.mutex);
       if (modal == TUI_MODAL_MAIN_MENU) {
@@ -2466,13 +2473,25 @@ int main(int argc, char *argv[]) {
             static uint64_t dbg_emit;
             static uint64_t dbg_elide;
             extern int tui_debug_last_tile_blits(void);
+            extern unsigned long tui_debug_tile_invalidations(void);
+            extern unsigned long tui_debug_rack_blits(void);
+            extern unsigned long tui_debug_glyph_rasters(void);
+            static unsigned long dbg_rack;
+            static unsigned long dbg_rasters;
+            const unsigned long cur_rack = tui_debug_rack_blits();
+            const unsigned long cur_rasters = tui_debug_glyph_rasters();
             fprintf(stderr,
-                    "[fps] full_us=%ld emit_us=%ld emit+=%llu elide+=%llu "
-                    "blits=%d input_lag_us=%ld\n",
-                    frame_us, emit_us,
+                    "[fps] full_us=%ld lock_us=%ld emit_us=%ld emit+=%llu "
+                    "elide+=%llu blits=%d rack+=%lu rast+=%lu inv=%lu "
+                    "input_lag_us=%ld\n",
+                    frame_us, lock_us, emit_us,
                     (unsigned long long)(st->sprixelemissions - dbg_emit),
                     (unsigned long long)(st->sprixelelisions - dbg_elide),
-                    tui_debug_last_tile_blits(), input_lag_us);
+                    tui_debug_last_tile_blits(), cur_rack - dbg_rack,
+                    cur_rasters - dbg_rasters, tui_debug_tile_invalidations(),
+                    input_lag_us);
+            dbg_rack = cur_rack;
+            dbg_rasters = cur_rasters;
             dbg_emit = st->sprixelemissions;
             dbg_elide = st->sprixelelisions;
           }
