@@ -200,11 +200,11 @@ void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index) {
 }
 
 void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n) {
-  // Deterministically set the bag to exactly tiles[0..n-1] in order, with no
-  // PRNG involvement, so draws are a fixed function of the order. Used by exact
-  // (pre)endgame enumerators that already know the bag contents and must NOT
-  // randomize them (bag_add_letter's random insertion would re-permute the
-  // multiset). n must not exceed the bag's backing capacity.
+  // Set the bag to tiles[0..n-1] in that exact order, with no PRNG involvement,
+  // so draws are a fixed function of the order. Used by (pre)endgame
+  // enumerators that already know the bag contents and must NOT randomize them
+  // (bag_add_letter's random insertion would re-permute the multiset). n must
+  // not exceed the bag's backing capacity.
   if (n < 0 || n > bag->size) {
     log_fatal("bag_set_to_tiles: n=%d out of range for bag capacity %d", n,
               bag->size);
