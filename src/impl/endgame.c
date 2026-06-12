@@ -949,6 +949,19 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
           board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
       uint64_t combined = h_cs & v_cs;
 
+      // Reject before touching bonus squares or scanning word extents:
+      // most candidate squares fail the cross-set test.
+      if (!is_blank) {
+        if (!(combined & ((uint64_t)1 << tile_ml))) {
+          continue;
+        }
+      } else {
+        // Any non-blank letter permitted by the combined cross-set is valid.
+        if (!(combined >> 1)) {
+          continue;
+        }
+      }
+
       BonusSquare bsq = board_get_bonus_square(board, row, col);
       int lm = bonus_square_get_letter_multiplier(bsq);
       int wm = bonus_square_get_word_multiplier(bsq);
@@ -959,12 +972,24 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       Equity v_nbr_score = board_get_cross_score(
           board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
 
+      // Blank has zero face value; its score depends only on position.
+      Equity tile_ls = is_blank ? 0 : ld_get_score(ld, tile_ml) * lm;
+      Equity score = 0;
+      if (has_h_nbrs) {
+        score += (tile_ls + h_nbr_score) * wm;
+      }
+      if (has_v_nbrs) {
+        score += (tile_ls + v_nbr_score) * wm;
+      }
+      if (found && score <= best_score) {
+        continue;
+      }
+
+      // New best: only now compute the word extent (for play_length and
+      // col_start/row_start encoding) and, for a blank, pick its letter.
       // Use vertical direction only when there are vertical neighbors and no
       // horizontal neighbors; otherwise label the play horizontal.
       bool dir_vertical = has_v_nbrs && !has_h_nbrs;
-
-      // Find word extent in the primary direction for play_length and
-      // col_start/row_start encoding.
       int word_start;
       int word_end;
       if (!dir_vertical) {
@@ -994,61 +1019,25 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         }
         word_end--;
       }
-      int play_length = word_end - word_start + 1;
 
-      if (!is_blank) {
-        if (!(combined & ((uint64_t)1 << tile_ml))) {
-          continue;
-        }
-        Equity tile_ls = ld_get_score(ld, tile_ml) * lm;
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += (tile_ls + h_nbr_score) * wm;
-        }
-        if (has_v_nbrs) {
-          score += (tile_ls + v_nbr_score) * wm;
-        }
-        if (!found || score > best_score) {
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = tile_ml;
-        }
-      } else {
-        // Blank has zero face value; score depends only on position.
-        // Any non-blank letter permitted by the combined cross-set is valid.
-        if (!(combined >> 1)) {
-          continue;
-        }
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += h_nbr_score * wm;
-        }
-        if (has_v_nbrs) {
-          score += v_nbr_score * wm;
-        }
-        if (!found || score > best_score) {
-          MachineLetter letter = 0;
-          for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
-            if ((combined >> L) & 1) {
-              letter = L;
-              break;
-            }
+      MachineLetter letter = tile_ml;
+      if (is_blank) {
+        letter = 0;
+        for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
+          if ((combined >> L) & 1) {
+            letter = L;
+            break;
           }
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = letter;
         }
       }
+      found = true;
+      best_score = score;
+      best_row = row;
+      best_col = col;
+      best_dir_vertical = dir_vertical;
+      best_start = word_start;
+      best_play_length = word_end - word_start + 1;
+      best_letter = letter;
     }
   }
 
