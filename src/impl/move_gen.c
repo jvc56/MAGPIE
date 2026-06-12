@@ -57,65 +57,6 @@ static MoveGen *cached_gens[MAX_THREADS];
 static bool slot_in_use[MAX_THREADS];
 static cpthread_mutex_t cache_mutex = PTHREAD_MUTEX_INITIALIZER; // NOLINT
 
-#ifdef ANCHOR_CACHE_ENABLE
-// Store an upper bound for this wordmap_gen call into the anchor cache.
-// For fully-searched anchors upper_bound is the max observed equity; for
-// partially-searched anchors it is max(max_observed, cutoff_at_exit),
-// which safely upper-bounds plays from any pruned subrack.
-static inline void anchor_cache_store(RackAnchorCacheEntry *entry, uint64_t key,
-                                      Equity upper_bound) {
-  entry->key_hash = key;
-  entry->upper_bound = upper_bound;
-}
-
-// splitmix64-style mixer used to hash the anchor cache key components.
-static inline uint64_t anchor_cache_mix(uint64_t x) {
-  x += 0x9e3779b97f4a7c15ULL;
-  x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ULL;
-  x = (x ^ (x >> 27)) * 0x94d049bb133111ebULL;
-  return x ^ (x >> 31);
-}
-
-// Compute a hash key for (player_rack, anchor, row_cache neighborhood).
-// Includes (row, dir, leftmost_start_col, rightmost_start_col,
-// word_length, tiles_to_play, playthrough_blocks) to pin the anchor's
-// board coordinates; bonus_square values are static per (row, col) so
-// they are implicit in those coordinates and do not need to be hashed.
-// Dynamic per-square state that wordmap_gen reads -- cross_set,
-// cross_score, letter, is_cross_word -- is folded in for every square
-// in the anchor's span.
-static inline uint64_t anchor_cache_compute_key(const MoveGen *gen,
-                                                const Anchor *anchor) {
-  const BitRack *rack = &gen->wmp_move_gen.player_bit_rack;
-  uint64_t h = anchor_cache_mix(bit_rack_get_low_64(rack));
-  h ^= anchor_cache_mix(bit_rack_get_high_64(rack));
-  const uint64_t anchor_desc =
-      ((uint64_t)anchor->word_length) | ((uint64_t)anchor->tiles_to_play << 8) |
-      ((uint64_t)anchor->playthrough_blocks << 16) |
-      ((uint64_t)anchor->leftmost_start_col << 24) |
-      ((uint64_t)anchor->rightmost_start_col << 32) |
-      ((uint64_t)gen->current_row_index << 40) | ((uint64_t)gen->dir << 48);
-  h ^= anchor_cache_mix(anchor_desc);
-  const int end_col = anchor->rightmost_start_col + anchor->word_length;
-  for (int col = anchor->leftmost_start_col; col < end_col && col < BOARD_DIM;
-       col++) {
-    const Square *sq = &gen->row_cache[col];
-    // Two 64-bit mixes per square: cross_set + cross_score, then letter
-    // + is_cross_word + col. Bonus squares intentionally omitted (static).
-    const uint64_t sq_bits1 =
-        ((uint64_t)square_get_cross_set(sq) & 0xFFFFFFFFFFULL) |
-        ((uint64_t)(uint32_t)square_get_cross_score(sq) << 40);
-    h ^= anchor_cache_mix(sq_bits1 ^ (uint64_t)col);
-    const uint64_t sq_bits2 =
-        ((uint64_t)square_get_letter(sq)) |
-        ((uint64_t)(square_get_is_cross_word(sq) ? 1U : 0U) << 8);
-    h ^= anchor_cache_mix(sq_bits2);
-  }
-  // Ensure the stored hash is never 0 (used as the empty-slot sentinel).
-  return h == 0 ? 1 : h;
-}
-#endif // ANCHOR_CACHE_ENABLE
-
 void generator_destroy(MoveGen *gen) {
   if (!gen) {
     return;
@@ -137,8 +78,8 @@ void generator_destroy(MoveGen *gen) {
 // (typically at shutdown or after CLI commands complete).
 //
 // A reused gen carries stale per-call scratch, which is fine: generate_moves
-// resets the state it reads each call and the anchor cache validates by key —
-// the same reuse the old cross-solve slot sharing relied on.
+// resets the state it reads each call — the same reuse the old cross-solve
+// slot sharing relied on.
 static cpthread_key_t gen_key;
 static cpthread_once_t gen_key_once = CPTHREAD_ONCE_INIT;
 
@@ -776,13 +717,6 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   if (need_to_update_best_move_equity_or_score) {
     gen_update_cutoff_equity_or_score(gen);
   }
-  // Track the max equity the currently-executing wordmap_gen call has
-  // produced, regardless of whether it beat the prior best move. The
-  // anchor cache stores this as a pruning bound on future calls with
-  // the same rack+anchor+board neighborhood.
-  if (move_equity_or_score > gen->current_anchor_max_equity) {
-    gen->current_anchor_max_equity = move_equity_or_score;
-  }
 
   if (gen->stop_on_threshold &&
       move_equity_or_score > gen->target_equity_cutoff) {
@@ -948,37 +882,6 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->tiles_to_play <= rack_get_total_letters(&gen->player_rack));
   WMPMoveGen *wgen = &gen->wmp_move_gen;
 
-  // Rack+Anchor pruning cache: if we've previously searched this
-  // (player_rack, anchor, local board state) and the stored upper bound
-  // on its output is already dominated by the current best, skip the
-  // anchor entirely.
-#ifdef ANCHOR_CACHE_ENABLE
-  const bool anchor_cache_eligible =
-      (anchor->word_length >= MOVEGEN_ANCHOR_CACHE_MIN_LENGTH &&
-       anchor->word_length <= MOVEGEN_ANCHOR_CACHE_MAX_LENGTH);
-  uint64_t anchor_key = 0;
-  RackAnchorCacheEntry *cache_entry = NULL;
-  if (anchor_cache_eligible) {
-    anchor_key = anchor_cache_compute_key(gen, anchor);
-    const uint32_t cache_slot =
-        (uint32_t)(anchor_key & (MOVEGEN_ANCHOR_CACHE_SIZE - 1));
-    cache_entry = &gen->anchor_cache[cache_slot];
-    if (cache_entry->key_hash == anchor_key) {
-      if (better_play_has_been_found(gen, cache_entry->upper_bound)) {
-        return;
-      }
-    }
-  }
-  // Capture the pre-call cutoff used for partial-search bound calculation.
-  // Subracks are pruned when leave + highest_possible_score < cutoff, so
-  // any pruned subrack's plays are bounded above by cutoff.
-  const Equity anchor_cache_entry_cutoff = gen->cutoff_equity_or_score;
-#endif
-  gen->current_anchor_max_equity = EQUITY_MIN_VALUE;
-#ifdef ANCHOR_CACHE_ENABLE
-  bool anchor_subrack_skipped = false;
-#endif
-
   // Inline bingo fast path: for nonplaythrough full-rack plays with
   // precomputed bingo words, skip subrack enumeration and WMP lookup.
   // Uses record_wmp_plays_for_word with subrack_idx=0 (the only subrack
@@ -1003,24 +906,11 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col)) {
             record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
             if (gen->threshold_exceeded) {
-              // Don't record in the cache: threshold_exceeded short-circuits
-              // before observing all subracks, so the stored equity would be
-              // incomplete and could wrongly prune future calls.
               return;
             }
           }
         }
       }
-      // Inline bingo path is a full enumeration of the 1-anagram bingo
-      // plus all valid start_col placements -- fully searched.
-#ifdef ANCHOR_CACHE_ENABLE
-      if (anchor_cache_eligible) {
-        // Inline bingo is an exhaustive enumeration (single anagram);
-        // the max observed equity is an exact upper bound.
-        anchor_cache_store(cache_entry, anchor_key,
-                           gen->current_anchor_max_equity);
-      }
-#endif
       return;
     }
   }
@@ -1040,9 +930,6 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
       if (better_play_has_been_found(gen, leave_value +
                                               anchor->highest_possible_score)) {
-#ifdef ANCHOR_CACHE_ENABLE
-        anchor_subrack_skipped = true;
-#endif
         continue;
       }
     }
@@ -1069,26 +956,12 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
                                                       start_col)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
           if (gen->threshold_exceeded) {
-            // threshold_exceeded short-circuited enumeration; don't pollute
-            // the cache with a partial best_equity.
             return;
           }
         }
       }
     }
   }
-#ifdef ANCHOR_CACHE_ENABLE
-  if (anchor_cache_eligible) {
-    // For partially-searched anchors, pruned subracks had plays bounded
-    // above by cutoff_at_exit. Take max with current_anchor_max_equity so
-    // the stored value is a safe upper bound on all subracks' plays.
-    Equity stored_bound = gen->current_anchor_max_equity;
-    if (anchor_subrack_skipped && anchor_cache_entry_cutoff > stored_bound) {
-      stored_bound = anchor_cache_entry_cutoff;
-    }
-    anchor_cache_store(cache_entry, anchor_key, stored_bound);
-  }
-#endif
 }
 
 void go_on(MoveGen *gen, int current_col, MachineLetter L,
@@ -2839,14 +2712,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     for (int i = 0; i < MOVEGEN_KLV_LEAVES_CACHE_SIZE; i++) {
       gen->klv_leaves_cache[i].valid = false;
     }
-#ifdef ANCHOR_CACHE_ENABLE
-    // Anchor-cache entries cache upper-bound equities computed from the
-    // current KLV's leave values; they become stale when leave_values are
-    // mutated.
-    for (int i = 0; i < MOVEGEN_ANCHOR_CACHE_SIZE; i++) {
-      gen->anchor_cache[i].key_hash = 0;
-    }
-#endif
   }
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
@@ -2861,16 +2726,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     }
   }
   gen->rack_info_table = new_rit;
-  // The anchor cache is NOT reset at movegen boundaries. Its key hashes in
-  // the player rack, anchor descriptor, and local row_cache state (cross
-  // sets, cross scores, bonuses, played letters), so a different board or
-  // different rack hashes to a different slot/key and can't false-hit a
-  // stale entry. This lets the cache accumulate across sim iterations.
-  if (new_rit == NULL || new_rit != gen->rack_info_table) {
-    // Defensive: only clear on a genuinely new MoveGen instance. This
-    // branch is effectively dead on hot paths since gen is persistent per
-    // thread, but it catches first-call state.
-  }
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
