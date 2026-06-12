@@ -62,6 +62,10 @@ typedef struct WMPMoveGen {
   int playthrough_blocks_copy;
 
   MachineLetter buffer[WMP_RESULT_BUFFER_SIZE];
+  // Points at the current subrack's contiguous word list: directly into the
+  // WMP's storage for blankless subracks (zero copy), or at `buffer` when
+  // blank designation required assembling the words.
+  const MachineLetter *words;
   int tiles_to_play;
   int word_length;
   int num_words;
@@ -635,12 +639,24 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   assert(wmp_move_gen->word_length >= MINIMUM_WORD_LENGTH);
   assert(wmp_move_gen->word_length <= BOARD_DIM);
 
+  if (bit_rack_get_letter(&subrack_info->subrack, BLANK_MACHINE_LETTER) == 0) {
+    // Blankless: point directly at the WMP's contiguous word storage
+    // instead of copying the words into the buffer.
+    wmp_move_gen->words = wmp_entry_get_blankless_words(
+        subrack_info->wmp_entry,
+        &wmp_move_gen->wmp->wfls[wmp_move_gen->word_length],
+        wmp_move_gen->word_length, &wmp_move_gen->num_words);
+    assert(wmp_move_gen->num_words > 0);
+    return true;
+  }
+
   const int result_bytes = wmp_entry_write_words_to_buffer(
       subrack_info->wmp_entry, wmp_move_gen->wmp, &subrack_info->subrack,
       wmp_move_gen->word_length, wmp_move_gen->buffer);
   assert(result_bytes > 0);
   assert(result_bytes % wmp_move_gen->word_length == 0);
   wmp_move_gen->num_words = result_bytes / wmp_move_gen->word_length;
+  wmp_move_gen->words = wmp_move_gen->buffer;
   return true;
 }
 
@@ -675,7 +691,7 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
 
 static inline const MachineLetter *
 wmp_move_gen_get_word(const WMPMoveGen *wmp_move_gen, int word_idx) {
-  return wmp_move_gen->buffer + word_idx * wmp_move_gen->word_length;
+  return wmp_move_gen->words + word_idx * wmp_move_gen->word_length;
 }
 
 static inline Equity wmp_move_gen_get_leave_value(WMPMoveGen *wmp_move_gen,
