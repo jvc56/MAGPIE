@@ -1407,10 +1407,9 @@ void assign_estimates(EndgameCtxWorker *worker, int move_count,
 void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
                                uint64_t tt_move, float opp_stuck_frac) {
   assign_estimates(worker, move_count, tt_move, opp_stuck_frac);
-  SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory +
-                    worker->small_move_arena->size -
-                    (sizeof(SmallMove) * move_count));
+  SmallMove *small_moves = (SmallMove *)(worker->small_move_arena->memory +
+                                         worker->small_move_arena->size -
+                                         (sizeof(SmallMove) * move_count));
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
@@ -1685,9 +1684,8 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
 // for non-root nodes (move ordering itself is done lazily by the caller).
 // Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
 static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
-                                               int depth,
-                                           uint64_t tt_move,
-                                           float *opp_stuck_frac) {
+                                               int depth, uint64_t tt_move,
+                                               float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
