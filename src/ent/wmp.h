@@ -360,6 +360,22 @@ static inline int wmp_entry_write_uninlined_blankless_words_to_buffer(
   return bytes_written;
 }
 
+// Returns a pointer to the contiguous word list for a blankless entry
+// (no copying) and writes the word count to num_words_out. Valid for
+// entries whose subrack contains no blanks; blank entries assemble their
+// words from multiple lookups and require a caller buffer instead.
+static inline const MachineLetter *
+wmp_entry_get_blankless_words(const WMPEntry *entry, const WMPForLength *wfl,
+                              int word_length, int *num_words_out) {
+  if (wmp_entry_is_inlined(entry)) {
+    *num_words_out =
+        wmp_entry_number_of_inlined_bytes(entry, word_length) / word_length;
+    return entry->bucket_or_inline;
+  }
+  *num_words_out = (int)entry->num_words;
+  return wfl->word_letters + entry->word_start;
+}
+
 static inline int
 wmp_entry_write_blankless_words_to_buffer(const WMPEntry *entry,
                                           const WMPForLength *wfl,

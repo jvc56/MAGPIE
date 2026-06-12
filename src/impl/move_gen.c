@@ -995,8 +995,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         rack_reset(&gen->leave);
       }
       for (int bingo_idx = 0; bingo_idx < num_bingos; bingo_idx++) {
-        // Point the WMP buffer at the inline word.
-        memcpy(wgen->buffer, gen->rit_entry->bingo_words[bingo_idx], RACK_SIZE);
+        // Point the word list at the RIT's inline word (no copy).
+        wgen->words = gen->rit_entry->bingo_words[bingo_idx];
         wgen->num_words = 1;
         for (int start_col = anchor->leftmost_start_col;
              start_col <= anchor->rightmost_start_col; start_col++) {
