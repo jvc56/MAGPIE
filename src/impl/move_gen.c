@@ -1922,15 +1922,13 @@ static inline void remove_score_from_descending_tile_scores(MoveGen *gen,
   }
 }
 
-// Returns false if the tile can not be restricted.
-// Otherwise it removes the tile from the rack and adds the score.
-static inline bool try_restrict_tile_and_accumulate_score(
-    MoveGen *gen, uint64_t possible_letters_here, int letter_multiplier,
-    int this_word_multiplier, int col) {
-  const bool restricted = is_single_bit_set(possible_letters_here);
-  if (!restricted) {
-    return false;
-  }
+// Removes the (single) tile in possible_letters_here from the rack and adds
+// the score. Callers must have already established that possible_letters_here
+// has exactly one bit set.
+static inline void
+restrict_tile_and_accumulate_score(MoveGen *gen, uint64_t possible_letters_here,
+                                   int letter_multiplier,
+                                   int this_word_multiplier, int col) {
   const MachineLetter ml = get_single_bit_index(possible_letters_here);
   rack_take_letter(&gen->player_rack, ml);
   if (rack_get_letter(&gen->player_rack, ml) == 0) {
@@ -1950,7 +1948,18 @@ static inline bool try_restrict_tile_and_accumulate_score(
   // But verified with godbolt that this compiles to faster code.
   gen->shadow_perpendicular_additional_score +=
       (lsm * this_word_multiplier) & (-(int)is_cross_word);
+}
 
+// Returns false if the tile can not be restricted.
+// Otherwise it removes the tile from the rack and adds the score.
+static inline bool try_restrict_tile_and_accumulate_score(
+    MoveGen *gen, uint64_t possible_letters_here, int letter_multiplier,
+    int this_word_multiplier, int col) {
+  if (!is_single_bit_set(possible_letters_here)) {
+    return false;
+  }
+  restrict_tile_and_accumulate_score(
+      gen, possible_letters_here, letter_multiplier, this_word_multiplier, col);
   return true;
 }
 
@@ -1961,28 +1970,25 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
   const int orig_wordmul = gen->shadow_word_multiplier;
 
-  // Save the rack with the tiles available before beginning shadow right. Any
-  // tiles restricted by unique hooks will be returned to the rack after
-  // exhausting rightward shadow.
-  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
-  rack_copy(&gen->bingo_alpha_rack_shadow_right_copy, &gen->bingo_alpha_rack);
+  // The rack with the tiles available before beginning shadow right is
+  // saved lazily: any tiles restricted by unique hooks modify the rack, so
+  // the rack (and the descending tile scores) are copied just before the
+  // first restriction and restored after exhausting rightward shadow.
   const uint64_t orig_rack_cross_set = gen->rack_cross_set;
-  memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
-         sizeof(gen->descending_tile_scores));
   // Only recopy the originals if a restriction modified the arrays above.
   bool restricted_any_tiles = false;
 
-  // Save the state of the unrestricted multiplier arrays so they can be
-  // restored after exhausting the rightward shadow plays. Shadowing right
-  // changes the values of multipliers found while shadowing left. We need to
-  // restore them to how they were before looking further left.
+  if (gen->is_wordsmog) {
+    rack_copy(&gen->bingo_alpha_rack_shadow_right_copy, &gen->bingo_alpha_rack);
+  }
+
+  // The state of the unrestricted multiplier arrays is saved lazily (just
+  // before the first modification) so they can be restored after exhausting
+  // the rightward shadow plays. Shadowing right changes the values of
+  // multipliers found while shadowing left. We need to restore them to how
+  // they were before looking further left.
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-         sizeof(gen->descending_cross_word_multipliers));
-  memcpy(gen->desc_eff_letter_muls_copy,
-         gen->descending_effective_letter_multipliers,
-         sizeof(gen->descending_effective_letter_multipliers));
   bool changed_any_restricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
@@ -2034,13 +2040,30 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
         cross_score * this_word_multiplier;
     gen->shadow_word_multiplier *= this_word_multiplier;
 
-    if (try_restrict_tile_and_accumulate_score(
-            gen, possible_letters_here, letter_multiplier, this_word_multiplier,
-            gen->current_right_col)) {
-      restricted_any_tiles = true;
+    if (is_single_bit_set(possible_letters_here)) {
+      if (!restricted_any_tiles) {
+        // First restriction in this rightward shadow: save the rack and
+        // descending tile scores so they can be restored on exit.
+        rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+        memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
+               sizeof(gen->descending_tile_scores));
+        restricted_any_tiles = true;
+      }
+      restrict_tile_and_accumulate_score(
+          gen, possible_letters_here, letter_multiplier, this_word_multiplier,
+          gen->current_right_col);
     } else {
+      if (!changed_any_restricted_multipliers) {
+        // First multiplier-array modification: save the arrays so they can
+        // be restored on exit.
+        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
+               sizeof(gen->descending_cross_word_multipliers));
+        memcpy(gen->desc_eff_letter_muls_copy,
+               gen->descending_effective_letter_multipliers,
+               sizeof(gen->descending_effective_letter_multipliers));
+        changed_any_restricted_multipliers = true;
+      }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
-      changed_any_restricted_multipliers = true;
     }
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
@@ -2055,7 +2078,11 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       found_playthrough_tile = true;
       const MachineLetter unblanked_playthrough_ml =
           get_unblanked_machine_letter(next_letter);
-      rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+      if (gen->is_wordsmog) {
+        // bingo_alpha_rack is only read by the wordsmog alphagram check in
+        // shadow_record, so skip maintaining it otherwise.
+        rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+      }
       // Adding a letter here would be unsafe if the LetterDistribution's
       // alphabet size exceeded BIT_RACK_MAX_ALPHABET_SIZE.
       if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
@@ -2105,7 +2132,9 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Restore state to undo other shadow progress
   gen->current_right_col = original_current_right_col;
   gen->tiles_played = original_tiles_played;
-  rack_copy(&gen->bingo_alpha_rack, &gen->bingo_alpha_rack_shadow_right_copy);
+  if (gen->is_wordsmog) {
+    rack_copy(&gen->bingo_alpha_rack, &gen->bingo_alpha_rack_shadow_right_copy);
+  }
   wmp_move_gen_restore_playthrough_state(&gen->wmp_move_gen);
 
   // The change of shadow_word_multiplier necessitates recalculating effective
@@ -2532,7 +2561,11 @@ static inline void shadow_start_playthrough(MoveGen *gen,
   for (;;) {
     const MachineLetter unblanked_playthrough_ml =
         get_unblanked_machine_letter(current_letter);
-    rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+    if (gen->is_wordsmog) {
+      // bingo_alpha_rack is only read by the wordsmog alphagram check in
+      // shadow_record, so skip maintaining it otherwise.
+      rack_add_letter(&gen->bingo_alpha_rack, unblanked_playthrough_ml);
+    }
     if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
       wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
                                           unblanked_playthrough_ml);
@@ -2584,7 +2617,9 @@ static inline void shadow_start(MoveGen *gen) {
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
   rack_copy(&gen->full_player_rack, &gen->player_rack);
-  rack_copy(&gen->bingo_alpha_rack, &gen->player_rack);
+  if (gen->is_wordsmog) {
+    rack_copy(&gen->bingo_alpha_rack, &gen->player_rack);
+  }
 
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
