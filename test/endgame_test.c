@@ -381,6 +381,63 @@ void test_endgame_dynamic_worker_injection(void) {
   run_injection_case(/*use_inline=*/true);
 }
 
+// first_win uses a narrow [-1,+1] window to resolve win/loss/draw cheaply (the
+// path pessimistic PEG uses), and caps the depth-0 interrupt fallback to the
+// top few root moves. It must agree in SIGN with the exact full-spread solve.
+// This position is a converged 63-point loss for the player on turn at 6 plies:
+// full-spread must report exactly -63, first_win a loss (strictly negative).
+void test_endgame_first_win_sign(void) {
+  const char *cgp =
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21";
+  // {first_win, first_win_fallback_moves}: full-spread, then first-win with the
+  // default fallback cap, then first-win skipping the fallback entirely (-1).
+  // first-win must agree in SIGN with the exact solve regardless of the
+  // (adjustable) fallback cap.
+  const struct {
+    bool first_win;
+    int fallback;
+  } cases[] = {{false, 0}, {true, 0}, {true, -1}};
+  for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+    load_and_exec_config_or_die(config, cgp);
+    Game *game = config_get_game(config);
+    EndgameResults *results = config_get_endgame_results(config);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = game;
+    args.plies = config_get_endgame_plies(config);
+    args.tt_fraction_of_mem = 0.0001;
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 1;
+    args.max_workers = 1;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.num_top_moves = 1;
+    args.seed = 42;
+    args.first_win = cases[ci].first_win;
+    args.first_win_fallback_moves = cases[ci].fallback;
+
+    endgame_solve_inline(&ctx, &args, results);
+    const int32_t value =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+    printf("endgame first_win=%d fallback=%d: value=%d\n", args.first_win,
+           args.first_win_fallback_moves, value);
+    if (args.first_win) {
+      assert(value < 0); // correct loss sign regardless of the fallback cap
+    } else {
+      assert(value == -63); // exact full-spread value
+    }
+    endgame_ctx_destroy(ctx);
+    config_destroy(config);
+  }
+}
+
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",
