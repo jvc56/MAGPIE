@@ -134,6 +134,7 @@ static TestEntry test_table[] = {
     {"load", test_load_gcg},
     {"pegpool", test_peg_pool},
     {"peg", test_peg},
+    {"pegpessdraw", test_peg_pessfull_draw_regression},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

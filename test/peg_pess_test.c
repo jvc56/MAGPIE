@@ -18,7 +18,6 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
-#include "../src/ent/move_undo.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
@@ -135,14 +134,6 @@ typedef struct PegPessCache {
 // Forward declaration; full definition appears further down with the other
 // nested-cache helpers.
 typedef struct PegNestedCache PegNestedCache;
-// Forward decl: the solver holds a back-pointer to its job (for recursive
-// forking, which needs the pool/arena/slot arrays/config). Only a pointer is
-// stored here, so the incomplete type is fine; PessJob is defined later.
-typedef struct PessJob PessJob;
-// Forward decls: the solver holds an arena pointer and the fork/parallel gates
-// query free-slot availability (defined later, with the arena helpers).
-typedef struct PessSlotArena PessSlotArena;
-static int pess_arena_free(PessSlotArena *a);
 
 typedef struct PegPessSolver {
   Game *game;
@@ -161,10 +152,6 @@ typedef struct PegPessSolver {
   bool subperm_sort;   // sort nested sub-perms by opp danger (hardest first)
   double
       slow_solve_log_s; // log CGP when one endgame_solve exceeds this (0=off)
-  double idle_probe_s;  // sample pool idle count when a leaf solve exceeds
-                        // this many seconds (0=off); rung-5 instrumentation
-  double rung4_probe_s; // sample idle count when a nested cand loop exceeds
-                        // this many seconds (0=off); rung-4 instrumentation
   bool first_win; // endgame [-1,+1] window: resolve sign only (verdict-safe)
   int endgame_threads; // per-solve thread count (1=default; >1 for ONLY_DRAW)
   bool skip_word_pruning; // pass-through to endgame_solve_inline
@@ -187,17 +174,6 @@ typedef struct PegPessSolver {
   // per worker (lazily), refreshed with game_copy each solve — avoids a
   // game_duplicate/game_destroy per leaf (hundreds of thousands on big runs).
   Game *eg_scratch;
-  // Recursive-split forking state. job back-pointer gives the fork helper the
-  // pool/arena/slots/config; recursive_split gates forking; fork_depth bounds
-  // it. Set by init_solver_from_job + the fork worker; the non-split path
-  // leaves recursive_split=false so it never forks.
-  const PessJob *job;
-  PegPool
-      *pool; // direct copy of job->pool (PessJob is incomplete in nested_solve)
-  PessSlotArena *arena; // direct copy of job->arena, for the fork/parallel gate
-  bool recursive_split;
-  bool force_nested_perm; // debug: bypass the queue gate (tsan/testing only)
-  int fork_depth;
   int64_t n_endgame_solves;
   int64_t n_leaf_visits; // bag-empty-game-on leaves, counted even on cache hit
   int64_t n_recursive_calls;
@@ -351,64 +327,6 @@ static int64_t peg_pess_opp_sort_key(const Move *m, int mode) {
 
 // Forward decl for recursion.
 static PegPessOut peg_pess_recursive_solve(PegPessSolver *s);
-// Forward decl: parallel min-reduction over opp replies at an opp node, used
-// by recursive_solve when recursive_split is enabled. Defined after PessJob /
-// the fork worker (it needs the job's pool/arena/slots). Returns the opp
-// node's outcome (min over replies); the caller frees order/ml.
-static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, const MoveList *ml,
-                                         const int *order, int cand_n);
-
-// Per-pthread fork-nesting depth, incremented around each nested submit-and-
-// wait. Two independent bounds govern forking (see the gates): the arena-free
-// check manages *slots* (resource/capacity, dynamic), while this counter caps
-// *C-stack depth* — cross-unit help-draining can stack many forking frames on
-// one pthread, and without a depth bound a deep tail could overflow a worker
-// thread's stack. The cap is set high (PEG_MAX_FORK_NESTING) so it never
-// constrains the real search depth (~10-20); it's purely a stack-overflow
-// backstop. The earlier value of 2 was the bug — it throttled the tail.
-static __thread int g_peg_fork_nesting = 0;
-enum { PEG_MAX_FORK_NESTING = 32 };
-
-// Forward decl: evaluate one nested cand's sub-perms in parallel across the
-// pool. Fills out_arr[0..pc->count-1] with per-perm outcomes and sets
-// *cand_score (2*wins+draws) / *cand_losses (weighted). Defined after PessJob /
-// the perm worker. Verdict-invariant vs the sequential perm loop — it just
-// drops the within-cand minLossesSoFar early-break (computes all perms) to
-// parallelize, which never changes the leader or its outcome row.
-typedef struct NestedPermCollect NestedPermCollect;
-static void peg_pess_parallel_perms(const PegPessSolver *s, MoveList *ml,
-                                    int cand_move_idx, const uint8_t *unseen,
-                                    const NestedPermCollect *pc,
-                                    PegPessOut *out_arr, int64_t *cand_score,
-                                    int64_t *cand_losses);
-
-// --- Rung-5 probe: "heavy leaf endgame while cores idle" -------------------
-// When idle_probe_s > 0, each leaf endgame_solve is timed; one exceeding the
-// threshold samples how many pool workers were idle at that moment. This
-// measures how often a single long leaf solve coincides with spare cores —
-// i.e. how much a multithreaded (injected-worker) endgame would have helped.
-// Counters are global (one solve per process) and affect only the summary,
-// never verdicts. Reset at the start of each run; printed at the end.
-static atomic_llong g_probe_slow_solves = 0;
-static atomic_llong g_probe_slow_idle_sum =
-    0; // sum of idle counts at slow solves
-static atomic_llong g_probe_slow_with_idle = 0; // slow solves with idle >= 2
-
-// --- Rung-4 probe: "heavy sequential candidate loop while cores idle" -------
-// Rung 4 would parallelize nested_solve's candidate loop. It is unbuilt
-// because the loop carries the cross-cand minLossesSoFar leader + early-WIN
-// cutoff. To decide whether it is worth the (pruning-delicate) build, time
-// each cand loop; when one exceeds rung4_probe_s, record whether it ran with
-// NO parallelism at this level (parallel_perms == false — a rung-4 opportunity)
-// and how many cores were idle. If heavy sequential cand loops frequently
-// coincide with idle cores, rung 4 matters. Counts overlap across nesting
-// (an outer slow loop contains inner ones); the idle-coincidence ratio is the
-// distortion-free signal. Reporting only; never affects the verdict.
-static atomic_llong g_rung4_slow = 0;         // cand loops >= threshold
-static atomic_llong g_rung4_slow_seq = 0;     // ...with parallel_perms == false
-static atomic_llong g_rung4_seq_idle_sum = 0; // sum idle at slow-seq loops
-static atomic_llong g_rung4_seq_with_idle = 0; // slow-seq loops with idle >= 2
-static atomic_llong g_rung4_seq_cands_sum = 0; // sum n_cands at slow-seq loops
 
 // Evaluate at a base case: bag empty or game over. Returns mover's outcome.
 static PegPessOut peg_pess_base_case(PegPessSolver *s) {
@@ -482,8 +400,7 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   };
   endgame_results_reset(s->eg_results);
   Timer slow_t;
-  const bool time_this_solve =
-      s->slow_solve_log_s > 0.0 || s->idle_probe_s > 0.0;
+  const bool time_this_solve = s->slow_solve_log_s > 0.0;
   if (time_this_solve) {
     ctimer_start(&slow_t);
   }
@@ -510,19 +427,6 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
       (void)fprintf(stderr, "[pessfull] SLOW ENDGAME %.2fs plies=%d: %s\n",
                     solve_s, s->endgame_plies, eg_cgp);
       free(eg_cgp);
-    }
-    // Rung-5 probe: a leaf solve that ran long is a candidate for a
-    // multithreaded (injected-worker) endgame — but only if cores were
-    // actually idle to lend. Sample the pool's idle count at this moment and
-    // accumulate, so the end-of-run summary shows how often "long leaf +
-    // spare cores" coincided. Reporting only; never affects the verdict.
-    if (s->idle_probe_s > 0.0 && solve_s >= s->idle_probe_s) {
-      const int idle_now = s->pool ? peg_pool_idle_workers(s->pool) : 0;
-      atomic_fetch_add(&g_probe_slow_solves, 1);
-      atomic_fetch_add(&g_probe_slow_idle_sum, (long long)idle_now);
-      if (idle_now >= 2) {
-        atomic_fetch_add(&g_probe_slow_with_idle, 1);
-      }
     }
   }
   s->n_endgame_solves++;
@@ -724,11 +628,11 @@ typedef struct NestedPerm {
   int64_t est; // opp danger estimate (top opp-move equity), for sub-perm sort
 } NestedPerm;
 
-struct NestedPermCollect {
+typedef struct NestedPermCollect {
   NestedPerm *perms;
   int cap;
   int count;
-};
+} NestedPermCollect;
 
 static void peg_pess_nested_collect_perm_cb(const MachineLetter *draw, int n,
                                             int64_t weight, void *user) {
@@ -772,6 +676,9 @@ peg_pess_nested_run_scenario(PegPessSolver *s, const Game *base_state,
   const Move *m = move_list_get_move(ml, cand_move_idx);
   play_move(m, alt, NULL);
   game_set_game_end_reason(alt, GAME_END_REASON_NONE);
+  // alt was duplicated in BACKUP_MODE_OFF; the recursive descent needs the
+  // simulation backup stack for play_move / game_unplay_last_move.
+  game_set_backup_mode(alt, BACKUP_MODE_SIMULATION);
   Game *saved = s->game;
   s->game = alt;
   PegPessOut out = peg_pess_recursive_solve(s);
@@ -925,66 +832,27 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
   int64_t best_score = INT64_MIN;
   bool best_set = false;
 
-  // Parallelize each cand's sub-perms across the pool when recursive_split is
-  // on (and enough perms / nesting headroom). The cand loop stays sequential so
-  // the cross-cand minLossesSoFar leader-finding + early-WIN exit are preserved
-  // exactly; only the within-cand perm loop is parallelized (and its early-
-  // break dropped — verdict-invariant, just more work traded for cores).
-  // Only parallelize perms when the pool has spare capacity. Parallel perms
-  // drop the within-cand early-break (extra work), so they only pay off when
-  // workers would otherwise idle. When the queue is backed up (capped runs, or
-  // early/middle of a full run where orderings + opp-forks keep cores busy),
-  // run sequentially and keep the cutoff. This self-tunes: nested-perm parallel
-  // engages exactly in the drained tail where the single-core collapse
-  // happened. Two signals, both required: queue_count < num_workers means cores
-  // would otherwise idle (so the redundant perm work pays off — this keeps
-  // nested- perm OFF mid-run when the queue is backed up), and arena_free >=
-  // num_workers means there's slot headroom to nest safely. Together they
-  // engage nested- perm exactly in the drained tail, and let it nest as deep as
-  // slots allow (no fixed cap), which is what fixes the single-core tail
-  // collapse. arena_free >= num_workers is a SAFETY invariant (slot headroom) —
-  // always required, never bypassed. queue_count < num_workers is the capacity
-  // heuristic (only worth the redundant perm work when cores would idle) —
-  // force_nested_perm bypasses just that, for tsan/testing.
-  enum { PEG_NESTED_PERM_MIN = 4 };
-  const bool parallel_perms =
-      s->recursive_split && s->pool && s->arena &&
-      pc.count >= PEG_NESTED_PERM_MIN &&
-      g_peg_fork_nesting < PEG_MAX_FORK_NESTING &&
-      pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool) &&
-      (s->force_nested_perm ||
-       peg_pool_queue_count(s->pool) < peg_pool_num_workers(s->pool));
-  Timer rung4_t = {0};
-  if (s->rung4_probe_s > 0.0) {
-    ctimer_start(&rung4_t);
-  }
   for (int ci = 0; ci < n_cands; ci++) {
     int64_t cand_score = 0; // 2*wins + draws
     int64_t cand_losses = 0;
     bool completed_all = true;
-    if (parallel_perms) {
-      peg_pess_parallel_perms(s, ml, order[ci], unseen, &pc, cur_outcomes,
-                              &cand_score, &cand_losses);
-      // All perms computed (no within-cand break).
-    } else {
-      for (int pi = 0; pi < pc.count; pi++) {
-        const NestedPerm *p = &pc.perms[pi];
-        PegPessOut out = peg_pess_nested_run_scenario(s, g, ml, order[ci],
-                                                      unseen, p->draw, p->n);
-        cur_outcomes[pi] = out;
-        if (out == PEG_OUT_WIN) {
-          cand_score += 2 * p->weight;
-        } else if (out == PEG_OUT_DRAW) {
-          cand_score += p->weight;
-        } else {
-          cand_losses += p->weight;
-        }
-        // Strict-greater: tied cands survive to the next perm so we don't lose
-        // info-state coverage for the across-tie pick.
-        if (cand_losses > min_losses) {
-          completed_all = false;
-          break;
-        }
+    for (int pi = 0; pi < pc.count; pi++) {
+      const NestedPerm *p = &pc.perms[pi];
+      PegPessOut out = peg_pess_nested_run_scenario(s, g, ml, order[ci], unseen,
+                                                    p->draw, p->n);
+      cur_outcomes[pi] = out;
+      if (out == PEG_OUT_WIN) {
+        cand_score += 2 * p->weight;
+      } else if (out == PEG_OUT_DRAW) {
+        cand_score += p->weight;
+      } else {
+        cand_losses += p->weight;
+      }
+      // Strict-greater: tied cands survive to the next perm so we don't lose
+      // info-state coverage for the across-tie pick.
+      if (cand_losses > min_losses) {
+        completed_all = false;
+        break;
       }
     }
     if (!completed_all) {
@@ -1004,24 +872,6 @@ static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
       // Early-WIN exit: leader has zero losses → cannot be beaten.
       if (cand_losses == 0) {
         break;
-      }
-    }
-  }
-  if (s->rung4_probe_s > 0.0) {
-    const double loop_s = ctimer_elapsed_seconds(&rung4_t);
-    if (loop_s >= s->rung4_probe_s) {
-      const int idle_now = s->pool ? peg_pool_idle_workers(s->pool) : 0;
-      atomic_fetch_add(&g_rung4_slow, 1);
-      // parallel_perms == false means this cand loop ran with no parallelism at
-      // this level — the entire cand x perm subtree was sequential. If cores
-      // were idle, parallelizing the cand loop (rung 4) would have filled them.
-      if (!parallel_perms) {
-        atomic_fetch_add(&g_rung4_slow_seq, 1);
-        atomic_fetch_add(&g_rung4_seq_idle_sum, (long long)idle_now);
-        atomic_fetch_add(&g_rung4_seq_cands_sum, (long long)n_cands);
-        if (idle_now >= 2) {
-          atomic_fetch_add(&g_rung4_seq_with_idle, 1);
-        }
       }
     }
   }
@@ -1154,28 +1004,6 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
     return out;
   }
 
-  // Recursive split: at an opp node with enough replies, fan the opp replies
-  // out as parallel sub-tasks (min-reduction with first-loss cancel) instead of
-  // the sequential loop below. Same verdict (min over replies); just
-  // parallelized. The helper frees order + returns ml. Gate purely on arena
-  // slot headroom (arena_free >= num_workers): forking is safe and useful
-  // whenever slots are available, and the gate throttles nesting as slots
-  // deplete under load — no fixed depth cap (which over-constrained the tail).
-  enum { PEG_FORK_MIN_CANDS = 8 };
-  if (!our_turn && s->recursive_split && s->job && s->arena && s->pool &&
-      cand_n >= PEG_FORK_MIN_CANDS &&
-      g_peg_fork_nesting < PEG_MAX_FORK_NESTING &&
-      pess_arena_free(s->arena) >= peg_pool_num_workers(s->pool)) {
-    const PegPessOut out = peg_pess_fork_opp_node(s, ml, order, cand_n);
-    free(order);
-    if (s->ml_pool_count < (int)(sizeof(s->ml_pool) / sizeof(s->ml_pool[0]))) {
-      s->ml_pool[s->ml_pool_count++] = ml;
-    } else {
-      move_list_destroy(ml);
-    }
-    return out;
-  }
-
   PegPessOut best_or_worst;
   if (our_turn) {
     best_or_worst = PEG_OUT_LOSS;
@@ -1184,24 +1012,20 @@ static PegPessOut peg_pess_recursive_solve(PegPessSolver *s) {
   }
   bool cutoff = false;
 
-  // Mutate-and-undo recursion: avoid game_duplicate on the hot path. The
-  // generated MoveUndo lives on the stack of this frame. After unplay the
-  // game state (board, racks, bag, scores, turn, game_end_reason, cross-set
-  // validity flag) is exactly as it was before this iteration's play.
-  MoveUndo undo;
+  // Backup-and-undo recursion. play_move draws replacement tiles from the
+  // scenario's fixed bag ordering (deterministically, from the on-turn
+  // player's end of the bag) and keeps cross-sets valid; game_unplay_last_move
+  // restores the full prior state (board, racks, bag, scores, turn, scoreless
+  // count, game_end_reason) from the simulation backup stack. Drawing is
+  // essential here: the pre-endgame descent walks a NON-empty bag, so a play
+  // that empties a rack must first draw from the bag, or the player spuriously
+  // "goes out" while tiles remain. The scenario is placed in
+  // BACKUP_MODE_SIMULATION by build_scenario (and the nested entry).
   for (int mi = 0; mi < cand_n; mi++) {
     const Move *m = move_list_get_move(ml, order[mi]);
-    play_move_incremental(m, g, &undo);
-    // Eagerly recompute cross-sets so the recursive call's generate_moves
-    // sees a valid board. The updates are tracked in `undo` and reversed by
-    // unplay_move_incremental.
-    Board *b = game_get_board(g);
-    if (!board_get_cross_sets_valid(b)) {
-      update_cross_set_for_move_from_undo(&undo, g);
-      board_set_cross_sets_valid(b, true);
-    }
+    play_move(m, g, NULL);
     PegPessOut sub = peg_pess_recursive_solve(s);
-    unplay_move_incremental(g, &undo);
+    game_unplay_last_move(g);
 
     if (our_turn) {
       if (sub > best_or_worst) {
@@ -1299,52 +1123,10 @@ static Game *peg_pess_build_scenario(const Game *base_game,
   }
   play_move(cand, scenario, NULL);
   game_set_game_end_reason(scenario, GAME_END_REASON_NONE);
+  // The recursive descent walks a non-empty bag via play_move /
+  // game_unplay_last_move, which need the simulation backup stack.
+  game_set_backup_mode(scenario, BACKUP_MODE_SIMULATION);
   return scenario;
-}
-
-// Solver-scratch arena. Decouples scratch (solver state, eg_ctx, eg_results,
-// ml_pool, eg_scratch) from worker_idx so a task can acquire a FRESH slot on
-// entry and release on exit. This is the safety foundation for recursive
-// splitting: the pool's help-while-waiting means a worker can run a nested
-// task while its own frame is suspended — both must use DIFFERENT scratch, or
-// they corrupt each other. Acquiring per-task (not per-pthread) guarantees
-// that. Slots' ml_pool/eg_scratch persist across acquisitions (reused scratch);
-// per-task counters are reset by the caller. Sized larger than the max number
-// of concurrently-active tasks (n_threads * (fork_depth+1) + margin).
-struct PessSlotArena {
-  int n_slots;
-  int *free_stack; // indices of currently-free slots
-  int free_top;    // count of free slots on the stack
-  cpthread_mutex_t mutex;
-};
-
-// Returns a free slot index, or -1 if exhausted (caller must handle; sizing
-// should make this impossible for the configured fork depth).
-static int pess_arena_acquire(PessSlotArena *a) {
-  cpthread_mutex_lock(&a->mutex);
-  const int idx = (a->free_top > 0) ? a->free_stack[--a->free_top] : -1;
-  cpthread_mutex_unlock(&a->mutex);
-  return idx;
-}
-
-static void pess_arena_release(PessSlotArena *a, int idx) {
-  cpthread_mutex_lock(&a->mutex);
-  a->free_stack[a->free_top++] = idx;
-  cpthread_mutex_unlock(&a->mutex);
-}
-
-// Current free-slot count (snapshot under the mutex). The fork/parallel gates
-// use this to decide whether there's headroom to spawn more sub-tasks: forking
-// makes a frame hold its slot while help-draining nested tasks (each holding
-// theirs), so demand tracks fork nesting. Gating on free slots >= num_workers
-// self-balances — deep nesting is fine when slots are plentiful (the drained
-// tail), and forking throttles as slots deplete under load (no exhaustion),
-// without a fixed nesting cap that over-constrains the tail.
-static int pess_arena_free(PessSlotArena *a) {
-  cpthread_mutex_lock(&a->mutex);
-  const int n = a->free_top;
-  cpthread_mutex_unlock(&a->mutex);
-  return n;
 }
 
 // Per-worker job + state shared by ordering. Each worker also owns its own
@@ -1352,7 +1134,7 @@ static int pess_arena_free(PessSlotArena *a) {
 // Fields are grouped for readability over packing; only a handful of these are
 // allocated, so the padding is immaterial.
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
-struct PessJob {
+typedef struct PessJob {
   const Game *base_game;
   const Move *cand;
   const uint8_t *unseen;
@@ -1367,12 +1149,7 @@ struct PessJob {
   int opp_sort_mode;
   int mover_sort_mode;
   bool subperm_sort;
-  bool recursive_split;   // fork opp nodes across the pool (split path only)
-  bool force_nested_perm; // debug: bypass nested-perm queue gate
-  PegPool *pool;          // set in the split path; needed for recursive forking
   double slow_solve_log_s;
-  double idle_probe_s;  // rung-5 instrumentation threshold (0=off)
-  double rung4_probe_s; // rung-4 instrumentation threshold (0=off)
   bool first_win;
   int endgame_threads;
   bool skip_word_pruning;
@@ -1384,10 +1161,6 @@ struct PessJob {
   EndgameResults **eg_results;
   PegPessSolver *solvers; // length = num_workers + 1 (helper)
   int n_worker_slots;
-  // Scratch arena (split path only). When set, the split worker acquires a
-  // slot from here instead of worker_idx→slot, so recursive forking can run
-  // nested tasks on distinct slots without colliding with a suspended frame.
-  PessSlotArena *arena;
   // Shared atomic counters for diagnostics.
   atomic_long *shared_n_solves;
   atomic_long *shared_n_leaf_visits;
@@ -1410,7 +1183,7 @@ struct PessJob {
   int64_t *per_worker_recursive;
   int64_t *per_worker_nested;
   int64_t *per_worker_busy_ns; // wall ns spent in worker_fn body
-};
+} PessJob;
 
 // Map worker_idx → slot. peg_pool hands in worker_idx in
 // [thread_index_offset, thread_index_offset + num_workers); the calling thread
@@ -1444,8 +1217,6 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   solver->mover_sort_mode = j->mover_sort_mode;
   solver->subperm_sort = j->subperm_sort;
   solver->slow_solve_log_s = j->slow_solve_log_s;
-  solver->idle_probe_s = j->idle_probe_s;
-  solver->rung4_probe_s = j->rung4_probe_s;
   solver->first_win = j->first_win;
   solver->endgame_threads = j->endgame_threads;
   solver->skip_word_pruning = j->skip_word_pruning;
@@ -1457,14 +1228,6 @@ static void peg_pess_init_solver_from_job(PegPessSolver *solver,
   solver->eg_results = j->eg_results[slot];
   solver->cache = j->cache;
   solver->nested_cache = j->nested_cache;
-  // Recursive-split forking context. fork_depth defaults to 0 (top-level task);
-  // the fork worker overrides it for nested sub-tasks.
-  solver->job = j;
-  solver->pool = j->pool;
-  solver->arena = j->arena;
-  solver->recursive_split = j->recursive_split;
-  solver->force_nested_perm = j->force_nested_perm;
-  solver->fork_depth = 0;
 }
 
 static void peg_pess_worker_fn(void *arg, int worker_idx) {
@@ -1576,453 +1339,274 @@ static int peg_pess_compute_opp_top_score(const Game *base_game,
   return top;
 }
 
-// ---- Opp-split parallelism (PASSPEG_PESSFULL_SPLIT_OPP) --------------------
-// build_scenario plays our cand P, leaving opp to move. An ordering's outcome
-// is the min (worst-for-us; LOSS=0<DRAW=1<WIN=2) over opp replies, with a
-// first-loss short-circuit. We make each (ordering, opp-reply) its own peg_pool
-// work unit: a single ordering then fans its replies across cores, and a full
-// solve pools all replies into one fine-grained queue (better load balance than
-// 1 unit per ordering). Each unit runs on its own pthread (own TLS movegen +
-// own solver scratch slot) and recurses sequentially within its subtree.
-typedef struct PessSplitAgg {
-  atomic_int worst;    // min PegPessOut seen so far (init WIN)
-  atomic_int has_loss; // set once any reply is LOSS → cancel siblings
-} PessSplitAgg;
+// All env-knob-derived configuration for test_pass_peg_pessimistic_full_eval.
+// Filled by pessfull_parse_args(); see that function for env var names and
+// defaults.
+typedef struct PessFullArgs {
+  const char *cgp;
+  const char *move_str;
+  const char *only_draw;
+  int plies;
+  double per_solve_time;
+  int max_opp_k;
+  int tt_mb;
+  double tt_fraction_of_mem;
+  bool tt_shared;
+  int opp_sort_mode;
+  int mover_sort_mode;
+  bool subperm_sort;
+  bool skip_word_pruning;
+  double slow_solve_log_s;
+  bool first_win;
+  int endgame_threads;
+  int n_threads;
+  bool do_sort;
+  bool nested_our_turn;
+  int nested_depth_limit;
+  int nested_mover_k;
+  bool use_cache;
+  bool use_nested_cache;
+} PessFullArgs;
 
-typedef struct PessSplitUnit {
-  PessJob *job; // shared config (solver setup, base game, counters)
-  PegPessOrdering *ordering; // the ordering this reply belongs to
-  PessSplitAgg *agg;         // per-ordering aggregation to fold into
-  int reply_idx;             // sorted opp-reply index; -1 = whole ordering
-} PessSplitUnit;
-
-// Atomic min-fold of an outcome into an ordering's aggregate.
-static void peg_pess_split_fold(PessSplitAgg *agg, PegPessOut out) {
-  int cur = atomic_load(&agg->worst);
-  while ((int)out < cur) {
-    if (atomic_compare_exchange_weak(&agg->worst, &cur, (int)out)) {
-      break;
-    }
-  }
-  if (out == PEG_OUT_LOSS) {
-    atomic_store(&agg->has_loss, 1);
-  }
-}
-
-// Count an ordering's splittable opp replies. Returns the number of opp-reply
-// work units to create (cand_n), or 0 if the post-P position is terminal /
-// bag-empty (→ caller makes a single whole-ordering unit, reply_idx=-1).
-static int peg_pess_count_opp_replies(const PessJob *j,
-                                      const PegPessOrdering *o) {
-  Game *scenario = peg_pess_build_scenario(j->base_game, o, j->unseen,
-                                           j->ld_size, j->opp_idx, j->cand);
-  if (game_get_game_end_reason(scenario) != GAME_END_REASON_NONE ||
-      bag_get_letters(game_get_bag(scenario)) == 0) {
-    game_destroy(scenario);
-    return 0;
-  }
-  MoveList *ml = move_list_create(16384);
-  const MoveGenArgs ga = {
-      .game = scenario,
-      .move_list = ml,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_EQUITY,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&ga);
-  const int n_moves = move_list_get_count(ml);
-  int cand_n = n_moves;
-  if (j->max_opp_k > 0 && j->max_opp_k < cand_n) {
-    cand_n = j->max_opp_k;
-  }
-  move_list_destroy(ml);
-  game_destroy(scenario);
-  return cand_n;
-}
-
-static void peg_pess_split_worker_fn(void *arg, int worker_idx) {
-  PessSplitUnit *u = (PessSplitUnit *)arg;
-  PessJob *j = u->job;
-  // Cancel: a sibling reply already proved a loss → the ordering is LOSS, so
-  // this reply can't change the verdict. (Verdict-safe: min stays LOSS.)
-  if (atomic_load(&u->agg->has_loss)) {
-    return;
-  }
-
-  // Acquire a scratch slot from the arena (not worker_idx→slot): under the
-  // pool's help-while-waiting, this task may run while another frame on this
-  // pthread is suspended, so it needs its own slot. Falls back to the
-  // worker_idx mapping if no arena (shouldn't happen in split mode).
-  const int slot = j->arena ? pess_arena_acquire(j->arena)
-                            : peg_pess_worker_slot(j, worker_idx);
-  if (slot < 0) {
-    log_fatal("pessfull: scratch arena exhausted (increase arena size)");
-  }
-  PegPessSolver *solver = &j->solvers[slot];
-  peg_pess_init_solver_from_job(solver, j, slot);
-  solver->nested_depth = 0;
-  solver->n_endgame_solves = 0;
-  solver->n_leaf_visits = 0;
-  solver->n_recursive_calls = 0;
-  solver->n_first_loss_cutoffs = 0;
-  solver->n_first_win_cutoffs = 0;
-  solver->n_nested_calls = 0;
-
-  Game *scenario = peg_pess_build_scenario(j->base_game, u->ordering, j->unseen,
-                                           j->ld_size, j->opp_idx, j->cand);
-  PegPessOut out;
-  if (u->reply_idx < 0) {
-    // Whole-ordering unit: post-P position is terminal/bag-empty (no opp node).
-    solver->game = scenario;
-    out = peg_pess_recursive_solve(solver);
-  } else {
-    // Generate + sort opp replies exactly as recursive_solve would, then play
-    // only this unit's reply and solve the resulting (our-turn) subtree.
-    MoveList *ml = move_list_create(16384);
-    const MoveGenArgs ga = {
-        .game = scenario,
-        .move_list = ml,
-        .move_record_type = MOVE_RECORD_ALL,
-        .move_sort_type = MOVE_SORT_EQUITY,
-        .override_kwg = NULL,
-        .eq_margin_movegen = 0,
-        .target_equity = EQUITY_MAX_VALUE,
-        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-    };
-    generate_moves(&ga);
-    const int n_moves = move_list_get_count(ml);
-    int *order = malloc_or_die((size_t)n_moves * sizeof(int));
-    const int cand_n =
-        peg_pess_sort_order(solver, ml, n_moves, /*our_turn=*/false, order);
-    if (u->reply_idx >= cand_n) {
-      // Defensive: reply count shrank since the count pre-pass; nothing to do.
-      free(order);
-      move_list_destroy(ml);
-      game_destroy(scenario);
-      if (j->arena) {
-        pess_arena_release(j->arena, slot);
-      }
-      return;
-    }
-    const Move *reply = move_list_get_move(ml, order[u->reply_idx]);
-    // opp plays its reply (draws deterministically via bag_set_to_tiles bag);
-    // do NOT reset game_end_reason — a game-ending reply must reach base_case,
-    // exactly as the whole-ordering recursive_solve opp loop would see it.
-    play_move(reply, scenario, NULL);
-    solver->game = scenario;
-    out = peg_pess_recursive_solve(solver);
-    free(order);
-    move_list_destroy(ml);
-  }
-  game_destroy(scenario);
-  peg_pess_split_fold(u->agg, out);
-
-  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
-  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
-  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
-  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
-  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
-  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
-
-  // Progress: log every 5000 completed units (reuses shared_orderings_done as
-  // a units-done counter in split mode; total is printed in the dispatch line).
-  const int done = atomic_fetch_add(j->shared_orderings_done, 1) + 1;
-  if (done % 5000 == 0) {
-    (void)fprintf(stderr, "[pessfull] split progress: %d / %d units\n", done,
-                  j->total_orderings);
-    (void)fflush(stderr);
-  }
-
-  if (j->arena) {
-    pess_arena_release(j->arena, slot);
-  }
-}
-
-// One forked opp-reply sub-task: solve `game` (the parent opp position with one
-// reply already played) and fold its outcome into the shared aggregate.
-typedef struct PessForkUnit {
-  const PessJob *job;
-  PessSplitAgg *agg;
-  Game *game;       // owned: this position, one opp reply played; freed here
-  int fork_depth;   // depth of THIS sub-task (parent fork_depth + 1)
-  int nested_depth; // parent opp node's nested_depth, preserved for correctness
-} PessForkUnit;
-
-static void peg_pess_fork_worker_fn(void *arg, int worker_idx) {
-  (void)worker_idx;
-  PessForkUnit *u = (PessForkUnit *)arg;
-  const PessJob *j = u->job;
-  if (atomic_load(&u->agg->has_loss)) {
-    game_destroy(u->game);
-    return;
-  }
-  const int slot = pess_arena_acquire(j->arena);
-  if (slot < 0) {
-    log_fatal("pessfull: scratch arena exhausted in fork (increase size)");
-  }
-  PegPessSolver *solver = &j->solvers[slot];
-  peg_pess_init_solver_from_job(solver, j, slot);
-  solver->fork_depth = u->fork_depth;
-  solver->nested_depth = u->nested_depth; // preserve parent's nested depth
-  solver->n_endgame_solves = 0;
-  solver->n_leaf_visits = 0;
-  solver->n_recursive_calls = 0;
-  solver->n_first_loss_cutoffs = 0;
-  solver->n_first_win_cutoffs = 0;
-  solver->n_nested_calls = 0;
-  solver->game = u->game;
-  const PegPessOut out = peg_pess_recursive_solve(solver);
-
-  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
-  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
-  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
-  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
-  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
-  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
-
-  game_destroy(u->game);
-  pess_arena_release(j->arena, slot);
-  peg_pess_split_fold(u->agg, out);
-}
-
-// Parallel min-reduction over opp replies at an opp node. Duplicates the game
-// per reply, plays it, and dispatches each as a fork sub-task. Same verdict as
-// the sequential opp loop (min over replies, LOSS<DRAW<WIN); first-loss cancel
-// via the shared aggregate. The caller owns/frees `order` and `ml`.
-static PegPessOut peg_pess_fork_opp_node(PegPessSolver *s, const MoveList *ml,
-                                         const int *order, int cand_n) {
-  const PessJob *j = s->job;
-  const Game *g = s->game;
-  PessSplitAgg agg;
-  atomic_init(&agg.worst, PEG_OUT_WIN);
-  atomic_init(&agg.has_loss, 0);
-
-  PessForkUnit *units = malloc_or_die((size_t)cand_n * sizeof(PessForkUnit));
-  void **ptrs = malloc_or_die((size_t)cand_n * sizeof(void *));
-  for (int mi = 0; mi < cand_n; mi++) {
-    const Move *m = move_list_get_move(ml, order[mi]);
-    Game *child = game_duplicate(g);
-    game_set_backup_mode(child, BACKUP_MODE_OFF);
-    // opp plays its reply (draws deterministically); do NOT reset
-    // game_end_reason — a game-ending reply must reach base_case, exactly as
-    // the sequential opp loop sees it.
-    play_move(m, child, NULL);
-    units[mi] = (PessForkUnit){.job = j,
-                               .agg = &agg,
-                               .game = child,
-                               .fork_depth = s->fork_depth + 1,
-                               .nested_depth = s->nested_depth};
-    ptrs[mi] = &units[mi];
-  }
-  // Nested submit on the shared pool. Help-while-waiting drains other tasks
-  // (each on its own arena slot), so this thread never pure-blocks → no
-  // deadlock. pool is guaranteed non-NULL here (recursive_split is only set in
-  // the multithreaded split path). Bump the C-stack nesting counter so tasks
-  // help-drained during this wait observe the deeper level and stop forking at
-  // the stack-safety cap.
-  g_peg_fork_nesting++;
-  peg_pool_submit_and_wait(j->pool, peg_pess_fork_worker_fn, ptrs, cand_n,
-                           /*helper_worker_idx=*/0);
-  g_peg_fork_nesting--;
-  const PegPessOut out = (PegPessOut)atomic_load(&agg.worst);
-  free(units);
-  free(ptrs);
-  return out;
-}
-
-// One nested sub-perm sub-task: run the (cand, perm) scenario and record its
-// outcome + fold its weight into the cand's shared score/loss accumulators.
-typedef struct PessPermUnit {
-  const PessJob *job;
-  Game *base_game;   // nested node game; run_scenario duplicates it (RO)
-  MoveList *ml;      // parent's move list (read-only, shared)
-  int cand_move_idx; // order[ci]
-  const uint8_t *unseen;
-  const MachineLetter *draw;
-  int draw_n;
-  int64_t weight;
-  int nested_depth;     // preserve the nested node's depth
-  PegPessOut *out_slot; // distinct per task — no race
-  atomic_llong *score;  // 2*wins + draws
-  atomic_llong *losses; // weighted losses
-} PessPermUnit;
-
-static void peg_pess_perm_worker_fn(void *arg, int worker_idx) {
-  (void)worker_idx;
-  PessPermUnit *u = (PessPermUnit *)arg;
-  const PessJob *j = u->job;
-  const int slot = pess_arena_acquire(j->arena);
-  if (slot < 0) {
-    log_fatal("pessfull: scratch arena exhausted in perm fork (increase size)");
-  }
-  PegPessSolver *solver = &j->solvers[slot];
-  peg_pess_init_solver_from_job(solver, j, slot);
-  solver->nested_depth = u->nested_depth;
-  solver->fork_depth = 0; // fresh subtree root; opp nodes may fork under cap
-  solver->n_endgame_solves = 0;
-  solver->n_leaf_visits = 0;
-  solver->n_recursive_calls = 0;
-  solver->n_first_loss_cutoffs = 0;
-  solver->n_first_win_cutoffs = 0;
-  solver->n_nested_calls = 0;
-
-  const PegPessOut out = peg_pess_nested_run_scenario(
-      solver, u->base_game, u->ml, u->cand_move_idx, u->unseen, u->draw,
-      u->draw_n);
-  *u->out_slot = out;
-  if (out == PEG_OUT_WIN) {
-    atomic_fetch_add(u->score, 2 * u->weight);
-  } else if (out == PEG_OUT_DRAW) {
-    atomic_fetch_add(u->score, u->weight);
-  } else {
-    atomic_fetch_add(u->losses, u->weight);
-  }
-
-  atomic_fetch_add(j->shared_n_solves, solver->n_endgame_solves);
-  atomic_fetch_add(j->shared_n_leaf_visits, solver->n_leaf_visits);
-  atomic_fetch_add(j->shared_n_recursive, solver->n_recursive_calls);
-  atomic_fetch_add(j->shared_n_loss_cutoffs, solver->n_first_loss_cutoffs);
-  atomic_fetch_add(j->shared_n_win_cutoffs, solver->n_first_win_cutoffs);
-  atomic_fetch_add(j->shared_n_nested_calls, solver->n_nested_calls);
-
-  pess_arena_release(j->arena, slot);
-}
-
-static void peg_pess_parallel_perms(
-    const PegPessSolver *s, MoveList *ml, int cand_move_idx,
-    const uint8_t *unseen, const NestedPermCollect *pc,
-    // out_arr elements are written via &out_arr[pi] stored in worker units;
-    // the indirect store is invisible to clang-tidy.
-    // NOLINTNEXTLINE(readability-non-const-parameter)
-    PegPessOut *out_arr, int64_t *cand_score, int64_t *cand_losses) {
-  const PessJob *j = s->job;
-  atomic_llong score;
-  atomic_llong losses;
-  atomic_init(&score, 0);
-  atomic_init(&losses, 0);
-  PessPermUnit *units = malloc_or_die((size_t)pc->count * sizeof(PessPermUnit));
-  void **ptrs = malloc_or_die((size_t)pc->count * sizeof(void *));
-  for (int pi = 0; pi < pc->count; pi++) {
-    units[pi] = (PessPermUnit){.job = j,
-                               .base_game = s->game,
-                               .ml = ml,
-                               .cand_move_idx = cand_move_idx,
-                               .unseen = unseen,
-                               .draw = pc->perms[pi].draw,
-                               .draw_n = pc->perms[pi].n,
-                               .weight = pc->perms[pi].weight,
-                               .nested_depth = s->nested_depth,
-                               .out_slot = &out_arr[pi],
-                               .score = &score,
-                               .losses = &losses};
-    ptrs[pi] = &units[pi];
-  }
-  g_peg_fork_nesting++;
-  peg_pool_submit_and_wait(j->pool, peg_pess_perm_worker_fn, ptrs, pc->count,
-                           /*helper_worker_idx=*/0);
-  g_peg_fork_nesting--;
-  *cand_score = (int64_t)atomic_load(&score);
-  *cand_losses = (int64_t)atomic_load(&losses);
-  free(units);
-  free(ptrs);
-}
-
-void test_pass_peg_pessimistic_full_eval(void) {
-  const char *cgp = getenv("PASSPEG_PESSFULL_CGP");
-  if (!cgp || !*cgp) {
+// Parse all PASSPEG_PESSFULL_* env vars into args, applying defaults. Pure
+// getenv parsing; no side effects beyond log_fatal on missing required vars.
+static void pessfull_parse_args(PessFullArgs *args) {
+  args->cgp = getenv("PASSPEG_PESSFULL_CGP");
+  if (!args->cgp || !*args->cgp) {
     log_fatal("PASSPEG_PESSFULL_CGP must be set");
   }
-  const char *move_str = getenv("PASSPEG_PESSFULL_MOVE");
-  if (!move_str || !*move_str) {
+  args->move_str = getenv("PASSPEG_PESSFULL_MOVE");
+  if (!args->move_str || !*args->move_str) {
     log_fatal("PASSPEG_PESSFULL_MOVE must be set");
   }
+  args->only_draw = getenv("PASSPEG_PESSFULL_ONLY_DRAW");
   const char *plies_env = getenv("PASSPEG_PESSFULL_PLIES");
-  const int plies =
-      plies_env && *plies_env ? passpeg_str_to_int(plies_env) : 12;
+  args->plies = plies_env && *plies_env ? passpeg_str_to_int(plies_env) : 12;
   const char *time_env = getenv("PASSPEG_PESSFULL_TIME");
-  const double per_solve_time =
+  args->per_solve_time =
       time_env && *time_env ? passpeg_str_to_double(time_env) : 5.0;
   const char *opp_k_env = getenv("PASSPEG_PESSFULL_MAX_OPP_K");
-  const int max_opp_k =
-      opp_k_env && *opp_k_env ? passpeg_str_to_int(opp_k_env) : 0;
+  args->max_opp_k = opp_k_env && *opp_k_env ? passpeg_str_to_int(opp_k_env) : 0;
   // Endgame TT size in MB. Default 1024 MB. 0 = disabled.
   const char *tt_env = getenv("PASSPEG_PESSFULL_TT_MB");
-  const int tt_mb = tt_env && *tt_env ? passpeg_str_to_int(tt_env) : 1024;
+  args->tt_mb = tt_env && *tt_env ? passpeg_str_to_int(tt_env) : 1024;
   const uint64_t total_mem = get_total_memory();
-  const double tt_fraction_of_mem =
-      tt_mb > 0 ? ((double)tt_mb * 1024.0 * 1024.0) / (double)total_mem : 0.0;
+  args->tt_fraction_of_mem =
+      args->tt_mb > 0
+          ? ((double)args->tt_mb * 1024.0 * 1024.0) / (double)total_mem
+          : 0.0;
   // PASSPEG_PESSFULL_TT_SHARED: when set, allocate ONE TT of tt_mb total and
   // share it across all workers (lockless). Otherwise each worker gets its
   // own tt_mb-sized TT. Shared captures cross-ordering reuse without tying
   // it to worker assignment, so per-ordering dispatch stays load-balanced.
   const char *tt_shared_env = getenv("PASSPEG_PESSFULL_TT_SHARED");
-  const bool tt_shared = tt_shared_env && passpeg_str_to_int(tt_shared_env) > 0;
-  TranspositionTable *shared_tt =
-      (tt_shared && tt_mb > 0) ? transposition_table_create(tt_fraction_of_mem)
-                               : NULL;
+  args->tt_shared = tt_shared_env && passpeg_str_to_int(tt_shared_env) > 0;
   // Move-ordering keys (0=score default, 1=equity, 2=tiles-then-score,
   // 3=tiles-then-equity), nested sub-perm sort, word-prune skip, first_win,
   // slow-solve CGP logging. All verdict-invariant (skip_word_pruning has no
   // verdict effect).
   const char *opp_sort_env = getenv("PASSPEG_PESSFULL_OPP_SORT");
-  const int opp_sort_mode = opp_sort_env ? passpeg_str_to_int(opp_sort_env) : 0;
+  args->opp_sort_mode = opp_sort_env ? passpeg_str_to_int(opp_sort_env) : 0;
   const char *mover_sort_env = getenv("PASSPEG_PESSFULL_MOVER_SORT");
-  const int mover_sort_mode =
+  args->mover_sort_mode =
       mover_sort_env ? passpeg_str_to_int(mover_sort_env) : 0;
   const char *subperm_env = getenv("PASSPEG_PESSFULL_SUBPERM_SORT");
-  const bool subperm_sort = subperm_env && passpeg_str_to_int(subperm_env) > 0;
+  args->subperm_sort = subperm_env && passpeg_str_to_int(subperm_env) > 0;
   const char *skip_wp_env = getenv("PASSPEG_PESSFULL_SKIP_WORD_PRUNE");
-  const bool skip_word_pruning =
-      skip_wp_env && passpeg_str_to_int(skip_wp_env) > 0;
+  args->skip_word_pruning = skip_wp_env && passpeg_str_to_int(skip_wp_env) > 0;
   const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
-  const double slow_solve_log_s =
-      slow_env ? passpeg_str_to_double(slow_env) : 0.0;
-  // Rung-5 probe threshold: leaf solves exceeding this many seconds sample the
-  // pool idle count (see g_probe_* counters). 0 = off.
-  const char *idle_probe_env = getenv("PASSPEG_PESSFULL_IDLE_PROBE_S");
-  const double idle_probe_s =
-      idle_probe_env ? passpeg_str_to_double(idle_probe_env) : 0.0;
-  atomic_store(&g_probe_slow_solves, 0);
-  atomic_store(&g_probe_slow_idle_sum, 0);
-  atomic_store(&g_probe_slow_with_idle, 0);
-  // Rung-4 probe threshold: nested cand loops exceeding this many seconds
-  // sample the pool idle count (see g_rung4_* counters). 0 = off.
-  const char *rung4_probe_env = getenv("PASSPEG_PESSFULL_RUNG4_PROBE_S");
-  const double rung4_probe_s =
-      rung4_probe_env ? passpeg_str_to_double(rung4_probe_env) : 0.0;
-  atomic_store(&g_rung4_slow, 0);
-  atomic_store(&g_rung4_slow_seq, 0);
-  atomic_store(&g_rung4_seq_idle_sum, 0);
-  atomic_store(&g_rung4_seq_with_idle, 0);
-  atomic_store(&g_rung4_seq_cands_sum, 0);
-  // SPLIT_OPP: dispatch each (ordering, opp-reply) as its own peg_pool unit
-  // instead of one unit per ordering. Finer-grained parallelism — a single
-  // ordering fans across cores; a full solve gets better load balance.
-  const char *split_opp_env = getenv("PASSPEG_PESSFULL_SPLIT_OPP");
-  const bool split_opp = split_opp_env && passpeg_str_to_int(split_opp_env) > 0;
-  // RECURSIVE_SPLIT: additionally fork deep opp nodes inside each unit across
-  // the pool (needs SPLIT_OPP + a pool). Default off.
-  const char *rsplit_env = getenv("PASSPEG_PESSFULL_RECURSIVE_SPLIT");
-  const bool recursive_split = rsplit_env && passpeg_str_to_int(rsplit_env) > 0;
-  // Debug: force nested-perm parallelism on (bypass the queue gate). For
-  // exercising the path under the thread sanitizer; not for production runs.
-  const char *force_np_env = getenv("PASSPEG_PESSFULL_FORCE_NESTED_PERM");
-  const bool force_nested_perm =
-      force_np_env && passpeg_str_to_int(force_np_env) > 0;
-  // first_win: endgame solves use a narrow [-1,+1] window (sign only). Correct
-  // for guaranteed-win (we only consume the sign) and verdict-invariant.
+  args->slow_solve_log_s = slow_env ? passpeg_str_to_double(slow_env) : 0.0;
+  // first_win: endgame solves use a narrow [-1,+1] window (sign only). This is
+  // correct for pessimistic W/L/D classification (we only consume the spread's
+  // sign, and the window still distinguishes win/loss/draw) and verdict-
+  // invariant vs a full-spread solve, but far cheaper — so it is the default.
+  // Set PASSPEG_PESSFULL_FIRST_WIN=0 to force full-spread endgame solves.
   const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
-  const bool first_win = first_win_env && passpeg_str_to_int(first_win_env) > 0;
+  args->first_win =
+      first_win_env ? passpeg_str_to_int(first_win_env) > 0 : true;
   // Per-solve endgame thread count. Default 1. For single-ordering (ONLY_DRAW)
   // investigation, set >1 to parallelize each endgame solve across cores.
   const char *eg_threads_env = getenv("PASSPEG_PESSFULL_ENDGAME_THREADS");
-  const int endgame_threads =
+  args->endgame_threads =
       eg_threads_env && passpeg_str_to_int(eg_threads_env) > 0
           ? passpeg_str_to_int(eg_threads_env)
           : 1;
+  const char *threads_env = getenv("PASSPEG_PESSFULL_THREADS");
+  args->n_threads =
+      threads_env && *threads_env ? passpeg_str_to_int(threads_env) : 18;
+  const char *sort_env = getenv("PASSPEG_PESSFULL_SORT");
+  args->do_sort =
+      sort_env && *sort_env ? passpeg_str_to_int(sort_env) > 0 : true;
+  const char *nested_env = getenv("PASSPEG_PESSFULL_NESTED");
+  args->nested_our_turn =
+      nested_env && *nested_env ? passpeg_str_to_int(nested_env) > 0 : false;
+  const char *nested_depth_env = getenv("PASSPEG_PESSFULL_NESTED_DEPTH");
+  args->nested_depth_limit = nested_depth_env && *nested_depth_env
+                                 ? passpeg_str_to_int(nested_depth_env)
+                                 : 1;
+  const char *nested_k_env = getenv("PASSPEG_PESSFULL_NESTED_K");
+  args->nested_mover_k =
+      nested_k_env && *nested_k_env ? passpeg_str_to_int(nested_k_env) : 0;
+  // Shared endgame-state cache toggle (default on).
+  const char *cache_env = getenv("PASSPEG_PESSFULL_CACHE");
+  args->use_cache = !cache_env || passpeg_str_to_int(cache_env) > 0;
+  // Macondo-style nested verdict-map cache toggle (default on).
+  const char *ncache_env = getenv("PASSPEG_PESSFULL_NESTED_CACHE");
+  args->use_nested_cache = !ncache_env || passpeg_str_to_int(ncache_env) > 0;
+}
+
+// Compute opp_top_score for each materialized ordering and insertion-sort them
+// by opp_top_score (desc) so first-loss-style cutoffs fire sooner. Logs timing
+// and the top/bottom opp_top_score. Single-threaded pre-pass.
+static void pessfull_sort_orderings(const Game *game,
+                                    PegPessOrdering *orderings, int n_orderings,
+                                    const uint8_t *unseen, int ld_size,
+                                    int opp_idx, const Move *move) {
+  Timer sort_t;
+  ctimer_start(&sort_t);
+  for (int oi = 0; oi < n_orderings; oi++) {
+    orderings[oi].opp_top_score = peg_pess_compute_opp_top_score(
+        game, &orderings[oi], unseen, ld_size, opp_idx, move);
+  }
+  // Insertion sort by opp_top_score desc.
+  for (int i = 1; i < n_orderings; i++) {
+    const PegPessOrdering key = orderings[i];
+    int j = i - 1;
+    while (j >= 0 && orderings[j].opp_top_score < key.opp_top_score) {
+      orderings[j + 1] = orderings[j];
+      j--;
+    }
+    orderings[j + 1] = key;
+  }
+  (void)fprintf(stderr,
+                "[pessfull] sorted (%.2fs) by opp_top desc; top opp=%d "
+                "bottom opp=%d\n",
+                ctimer_elapsed_seconds(&sort_t),
+                n_orderings > 0 ? orderings[0].opp_top_score : 0,
+                n_orderings > 0 ? orderings[n_orderings - 1].opp_top_score : 0);
+}
+
+// Print the final "=== Pessimistic full eval ===" summary block: verdict,
+// win%, aggregate counters, per-worker telemetry, and cache/nested-cache/
+// shared-TT hit rates. Pure reporting; mutates nothing.
+static void pessfull_print_report(
+    const PessFullArgs *args, const PegPessFullAccum *acc, double win_pct,
+    long total_solves, long total_recursive, long total_loss_cutoffs,
+    long total_win_cutoffs, long total_nested_calls, long total_leaf_visits,
+    double solve_elapsed, const PegPessCache *cache,
+    const PegNestedCache *nested_cache, const TranspositionTable *shared_tt,
+    EndgameCtx *const *eg_ctxs, int n_slots, const int64_t *pw_orderings,
+    const int64_t *pw_solves, const int64_t *pw_recursive,
+    const int64_t *pw_nested, const int64_t *pw_busy_ns) {
+  printf("\n=== Pessimistic full eval ===\n");
+  printf("CGP:  %s\n", args->cgp);
+  printf("Move: %s   plies=%d  threads=%d  sort=%d  nested=%d (depth_limit=%d, "
+         "mover_k=%d)\n",
+         args->move_str, args->plies, args->n_threads, args->do_sort ? 1 : 0,
+         args->nested_our_turn ? 1 : 0, args->nested_depth_limit,
+         args->nested_mover_k);
+  printf("W/L/D = %lld/%lld/%lld   total=%lld   win%%=%.4f\n",
+         (long long)acc->wins, (long long)acc->losses, (long long)acc->draws,
+         (long long)acc->total, win_pct);
+  printf("solves=%ld  recursive=%ld  cutoffs(loss=%ld,win=%ld)  "
+         "nested_calls=%ld  solve_wall=%.2fs\n",
+         total_solves, total_recursive, total_loss_cutoffs, total_win_cutoffs,
+         total_nested_calls, solve_elapsed);
+  printf("endgame_leaf_visits=%ld (counts cached too; comparable to macondo's "
+         "endgame count)\n",
+         total_leaf_visits);
+  if (cache) {
+    long h = atomic_load(&cache->hits);
+    long m = atomic_load(&cache->misses);
+    long total_lookups = h + m;
+    printf("cache: hits=%ld misses=%ld (hit_rate=%.1f%%)\n", h, m,
+           total_lookups > 0 ? (100.0 * (double)h) / (double)total_lookups
+                             : 0.0);
+  }
+  if (nested_cache) {
+    long h = atomic_load(&nested_cache->hits);
+    long m = atomic_load(&nested_cache->misses);
+    long bm = atomic_load(&nested_cache->bag_misses);
+    long total = h + m + bm;
+    printf(
+        "nested-cache: hits=%ld misses=%ld bag-misses=%ld (hit_rate=%.1f%%)\n",
+        h, m, bm, total > 0 ? (100.0 * (double)h) / (double)total : 0.0);
+  }
+
+  // Per-worker breakdown. Helps decide private vs shared TT and whether work
+  // is balanced. Slot n_slots-1 is the helper (main-thread fallback).
+  printf("\nper-worker telemetry "
+         "(slot/orderings/recursive/solves/nested/busy_s/TT_hits/TT_lookups/"
+         "TT_hit_rate):\n");
+  for (int i = 0; i < n_slots; i++) {
+    if (pw_orderings[i] == 0 && i != n_slots - 1) {
+      continue;
+    }
+    long long tt_hits = -1;
+    long long tt_lookups = -1;
+    double tt_hr = 0.0;
+    if (eg_ctxs[i]) {
+      const TranspositionTable *tt =
+          endgame_ctx_get_transposition_table(eg_ctxs[i]);
+      if (tt) {
+        tt_hits = atomic_load(&((TranspositionTable *)tt)->hits);
+        tt_lookups = atomic_load(&((TranspositionTable *)tt)->lookups);
+        if (tt_lookups > 0) {
+          tt_hr = (100.0 * (double)tt_hits) / (double)tt_lookups;
+        }
+      }
+    }
+    printf("  slot=%-3d ord=%-4lld rec=%-9lld solves=%-8lld nested=%-7lld "
+           "busy=%.2fs",
+           i, (long long)pw_orderings[i], (long long)pw_recursive[i],
+           (long long)pw_solves[i], (long long)pw_nested[i],
+           (double)pw_busy_ns[i] / 1e9);
+    if (tt_hits >= 0) {
+      printf(" tt_hits=%lld tt_lookups=%lld hr=%.1f%%", tt_hits, tt_lookups,
+             tt_hr);
+    } else {
+      printf(" tt=disabled");
+    }
+    printf("\n");
+  }
+  if (shared_tt) {
+    const long long h = atomic_load(&shared_tt->hits);
+    const long long l = atomic_load(&shared_tt->lookups);
+    printf("shared-TT: hits=%lld lookups=%lld (hit_rate=%.1f%%)\n", h, l,
+           l > 0 ? (100.0 * (double)h) / (double)l : 0.0);
+  }
+}
+
+// Core of the pessimistic full-eval harness. Runs one candidate move over
+// every ordered draw and returns the aggregate (wins/losses/draws/total).
+// Callable from both the env-driven on-demand entry and CI regression tests.
+static PegPessFullAccum pessfull_run(const PessFullArgs *args) {
+  const char *cgp = args->cgp;
+  const char *move_str = args->move_str;
+  const int plies = args->plies;
+  const double per_solve_time = args->per_solve_time;
+  const int max_opp_k = args->max_opp_k;
+  const int tt_mb = args->tt_mb;
+  const double tt_fraction_of_mem = args->tt_fraction_of_mem;
+  const bool tt_shared = args->tt_shared;
+  const int opp_sort_mode = args->opp_sort_mode;
+  const int mover_sort_mode = args->mover_sort_mode;
+  const bool subperm_sort = args->subperm_sort;
+  const bool skip_word_pruning = args->skip_word_pruning;
+  const double slow_solve_log_s = args->slow_solve_log_s;
+  const bool first_win = args->first_win;
+  const int endgame_threads = args->endgame_threads;
+  const int n_threads = args->n_threads;
+  const bool do_sort = args->do_sort;
+  const bool nested_our_turn = args->nested_our_turn;
+  const int nested_depth_limit = args->nested_depth_limit;
+  const int nested_mover_k = args->nested_mover_k;
+  const bool use_cache = args->use_cache;
+  const bool use_nested_cache = args->use_nested_cache;
+
+  TranspositionTable *shared_tt =
+      (tt_shared && tt_mb > 0) ? transposition_table_create(tt_fraction_of_mem)
+                               : NULL;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
@@ -2099,23 +1683,6 @@ void test_pass_peg_pessimistic_full_eval(void) {
                 move_str, plies, per_solve_time, bag_size, total_unseen,
                 max_opp_k, tt_mb, tt_fraction_of_mem, tt_mode_label);
 
-  const char *threads_env = getenv("PASSPEG_PESSFULL_THREADS");
-  const int n_threads =
-      threads_env && *threads_env ? passpeg_str_to_int(threads_env) : 18;
-  const char *sort_env = getenv("PASSPEG_PESSFULL_SORT");
-  const bool do_sort =
-      sort_env && *sort_env ? passpeg_str_to_int(sort_env) > 0 : true;
-  const char *nested_env = getenv("PASSPEG_PESSFULL_NESTED");
-  const bool nested_our_turn =
-      nested_env && *nested_env ? passpeg_str_to_int(nested_env) > 0 : false;
-  const char *nested_depth_env = getenv("PASSPEG_PESSFULL_NESTED_DEPTH");
-  const int nested_depth_limit = nested_depth_env && *nested_depth_env
-                                     ? passpeg_str_to_int(nested_depth_env)
-                                     : 1;
-  const char *nested_k_env = getenv("PASSPEG_PESSFULL_NESTED_K");
-  const int nested_mover_k =
-      nested_k_env && *nested_k_env ? passpeg_str_to_int(nested_k_env) : 0;
-
   // Phase 1: materialize all orderings.
   // Upper bound on count: 10! at worst (4-peg with 11 unseen types). 1M slack.
   const int cap = 1 << 16;
@@ -2132,50 +1699,11 @@ void test_pass_peg_pessimistic_full_eval(void) {
   (void)fprintf(stderr, "[pessfull] materialized %d orderings (%.2fs)\n",
                 mc.n_orderings, ctimer_elapsed_seconds(&t));
 
-  // Phase 2: optional pre-pass to estimate opp's best response, sort.
-  // PASSPEG_PESSFULL_GROUP_BY_FIRST_TILE: when set, sort primarily by
-  // first bag tile (asc) and secondarily by opp_top_score (desc). This puts
-  // same-first-tile orderings into contiguous slices so a worker can process
-  // them as a single coarse job, sharing endgame TT state across orderings.
-  const char *group_env = getenv("PASSPEG_PESSFULL_GROUP_BY_FIRST_TILE");
-  const bool group_by_first = group_env && passpeg_str_to_int(group_env) > 0;
+  // Phase 2: optional pre-pass to estimate opp's best response, sort by
+  // opp_top_score (desc) so first-loss-style cutoffs fire sooner.
   if (do_sort) {
-    Timer sort_t;
-    ctimer_start(&sort_t);
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      orderings[oi].opp_top_score = peg_pess_compute_opp_top_score(
-          game, &orderings[oi], unseen, ld_size, opp_idx, move);
-    }
-    // Insertion sort. With group_by_first: primary key = first bag tile asc,
-    // secondary = opp_top_score desc. Without: opp_top_score desc only.
-    for (int i = 1; i < mc.n_orderings; i++) {
-      const PegPessOrdering key = orderings[i];
-      int j = i - 1;
-      while (j >= 0) {
-        bool swap;
-        if (group_by_first) {
-          if (orderings[j].draw[0] != key.draw[0]) {
-            swap = orderings[j].draw[0] > key.draw[0];
-          } else {
-            swap = orderings[j].opp_top_score < key.opp_top_score;
-          }
-        } else {
-          swap = orderings[j].opp_top_score < key.opp_top_score;
-        }
-        if (!swap) {
-          break;
-        }
-        orderings[j + 1] = orderings[j];
-        j--;
-      }
-      orderings[j + 1] = key;
-    }
-    (void)fprintf(
-        stderr, "[pessfull] sorted (%.2fs) %s; top opp=%d bottom opp=%d\n",
-        ctimer_elapsed_seconds(&sort_t),
-        group_by_first ? "by (first_tile, opp_top desc)" : "by opp_top desc",
-        mc.n_orderings > 0 ? orderings[0].opp_top_score : 0,
-        mc.n_orderings > 0 ? orderings[mc.n_orderings - 1].opp_top_score : 0);
+    pessfull_sort_orderings(game, orderings, mc.n_orderings, unseen, ld_size,
+                            opp_idx, move);
   }
 
   // Optional: dump materialized orderings (idx, weight, opp_top_score, draw)
@@ -2193,13 +1721,13 @@ void test_pass_peg_pessimistic_full_eval(void) {
     }
     free(orderings);
     config_destroy(config);
-    return;
+    return (PegPessFullAccum){0};
   }
 
   // Optional: solve only ONE ordering, selected by its draw signature
   // (underscore-joined two-digit machine letters, e.g. "05_09_01"). Lets us
   // reproduce/inspect a single straggler in isolation.
-  const char *only_draw_env = getenv("PASSPEG_PESSFULL_ONLY_DRAW");
+  const char *only_draw_env = args->only_draw;
   if (only_draw_env && *only_draw_env) {
     MachineLetter want[16];
     int want_n = 0;
@@ -2240,28 +1768,18 @@ void test_pass_peg_pessimistic_full_eval(void) {
   }
 
   // Shared endgame-state cache. 2^20 entries × 16 bytes = ~16 MB.
-  const char *cache_env = getenv("PASSPEG_PESSFULL_CACHE");
-  const bool use_cache =
-      !cache_env || passpeg_str_to_int(cache_env) > 0; // default on
   PegPessCache *cache = use_cache ? peg_pess_cache_create(1U << 20) : NULL;
 
   // Macondo-style nested verdict-map cache. Key on info-state; value is the
   // leader cand's per-bag-sig outcome map. 2^18 entries with small dynamic
   // maps inside. Toggle via PASSPEG_PESSFULL_NESTED_CACHE (default on).
-  const char *ncache_env = getenv("PASSPEG_PESSFULL_NESTED_CACHE");
-  const bool use_nested_cache =
-      !ncache_env || passpeg_str_to_int(ncache_env) > 0;
   PegNestedCache *nested_cache =
       use_nested_cache ? peg_nested_cache_create(1U << 18) : NULL;
 
   // Phase 3: per-worker scratch + parallel solve via peg_pool.
   PegPool *pool = n_threads > 1 ? peg_pool_create(n_threads, 100) : NULL;
-  // Slots: the non-split path needs n_threads+1 (workers + helper). The split
-  // path acquires slots from an arena; forking nests as deep as free slots
-  // allow, gated to stop when free < num_workers. So the bound is the arena
-  // size itself — size it well past num_workers so the tail can nest deep
-  // (one active pthread) while load throttles via the gate.
-  const int n_slots = n_threads * 8 + 8;
+  // One slot per worker plus the helper (main-thread fallback).
+  const int n_slots = n_threads + 1;
   EndgameCtx **eg_ctxs = calloc_or_die((size_t)n_slots, sizeof(EndgameCtx *));
   EndgameResults **eg_results =
       malloc_or_die((size_t)n_slots * sizeof(EndgameResults *));
@@ -2273,16 +1791,6 @@ void test_pass_peg_pessimistic_full_eval(void) {
   for (int i = 0; i < n_slots; i++) {
     eg_results[i] = endgame_results_create();
   }
-  // Scratch arena over all slots (split path). free_stack holds every slot
-  // index; acquire/release hand them out per task.
-  PessSlotArena arena;
-  arena.n_slots = n_slots;
-  arena.free_stack = malloc_or_die((size_t)n_slots * sizeof(int));
-  for (int i = 0; i < n_slots; i++) {
-    arena.free_stack[i] = i;
-  }
-  arena.free_top = n_slots;
-  cpthread_mutex_init(&arena.mutex);
   atomic_long total_solves = 0;
   atomic_long total_leaf_visits = 0;
   atomic_long total_recursive = 0;
@@ -2298,216 +1806,62 @@ void test_pass_peg_pessimistic_full_eval(void) {
   int64_t *pw_nested = calloc_or_die((size_t)n_slots, sizeof(int64_t));
   int64_t *pw_busy_ns = calloc_or_die((size_t)n_slots, sizeof(int64_t));
 
-  // Build the job slices. With group_by_first enabled, orderings sharing the
-  // first bag tile become one job. Without, each ordering is its own job.
-  int n_jobs = 0;
-  PessJob *jobs;
-  void **job_ptrs;
-  if (group_by_first && mc.n_orderings > 0) {
-    // Worst case: every ordering has a different first tile → n_jobs =
-    // n_orderings.
-    jobs = malloc_or_die((size_t)mc.n_orderings * sizeof(PessJob));
-    job_ptrs = malloc_or_die((size_t)mc.n_orderings * sizeof(void *));
-    int slice_start = 0;
-    for (int oi = 1; oi <= mc.n_orderings; oi++) {
-      const bool at_end = (oi == mc.n_orderings);
-      const bool first_changed =
-          !at_end && (orderings[oi].draw[0] != orderings[slice_start].draw[0]);
-      if (at_end || first_changed) {
-        const int slice_n = oi - slice_start;
-        jobs[n_jobs] = (PessJob){
-            .base_game = game,
-            .cand = move,
-            .unseen = unseen,
-            .ld_size = ld_size,
-            .mover_idx = mover_idx,
-            .opp_idx = opp_idx,
-            .thread_control = config_get_thread_control(config),
-            .endgame_plies = plies,
-            .endgame_time = per_solve_time,
-            .tt_fraction_of_mem = tt_fraction_of_mem,
-            .shared_tt = shared_tt,
-            .opp_sort_mode = opp_sort_mode,
-            .mover_sort_mode = mover_sort_mode,
-            .subperm_sort = subperm_sort,
-            .slow_solve_log_s = slow_solve_log_s,
-            .idle_probe_s = idle_probe_s,
-            .rung4_probe_s = rung4_probe_s,
-            .first_win = first_win,
-            .endgame_threads = endgame_threads,
-            .skip_word_pruning = skip_word_pruning,
-            .max_opp_k = max_opp_k,
-            .ordering = &orderings[slice_start],
-            .n_orderings = slice_n,
-            .eg_ctxs = eg_ctxs,
-            .eg_results = eg_results,
-            .solvers = solvers,
-            .n_worker_slots = n_slots,
-            .arena = &arena,
-            .shared_n_solves = &total_solves,
-            .shared_n_leaf_visits = &total_leaf_visits,
-            .shared_n_recursive = &total_recursive,
-            .shared_n_loss_cutoffs = &total_loss_cutoffs,
-            .shared_n_win_cutoffs = &total_win_cutoffs,
-            .shared_n_nested_calls = &total_nested_calls,
-            .cache = cache,
-            .nested_cache = nested_cache,
-            .nested_our_turn = nested_our_turn,
-            .nested_depth_limit = nested_depth_limit,
-            .nested_mover_k = nested_mover_k,
-            .shared_orderings_done = &orderings_done,
-            .total_orderings = mc.n_orderings,
-            .per_worker_orderings = pw_orderings,
-            .per_worker_solves = pw_solves,
-            .per_worker_recursive = pw_recursive,
-            .per_worker_nested = pw_nested,
-            .per_worker_busy_ns = pw_busy_ns,
-        };
-        job_ptrs[n_jobs] = &jobs[n_jobs];
-        n_jobs++;
-        slice_start = oi;
-      }
-    }
-    (void)fprintf(
-        stderr,
-        "[pessfull] grouped %d orderings into %d (move, first_tile) jobs\n",
-        mc.n_orderings, n_jobs);
-  } else {
-    jobs = malloc_or_die((size_t)mc.n_orderings * sizeof(PessJob));
-    job_ptrs = malloc_or_die((size_t)mc.n_orderings * sizeof(void *));
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      jobs[oi] = (PessJob){
-          .base_game = game,
-          .cand = move,
-          .unseen = unseen,
-          .ld_size = ld_size,
-          .mover_idx = mover_idx,
-          .opp_idx = opp_idx,
-          .thread_control = config_get_thread_control(config),
-          .endgame_plies = plies,
-          .endgame_time = per_solve_time,
-          .tt_fraction_of_mem = tt_fraction_of_mem,
-          .shared_tt = shared_tt,
-          .opp_sort_mode = opp_sort_mode,
-          .mover_sort_mode = mover_sort_mode,
-          .subperm_sort = subperm_sort,
-          .slow_solve_log_s = slow_solve_log_s,
-          .idle_probe_s = idle_probe_s,
-          .rung4_probe_s = rung4_probe_s,
-          .first_win = first_win,
-          .endgame_threads = endgame_threads,
-          .skip_word_pruning = skip_word_pruning,
-          .max_opp_k = max_opp_k,
-          .ordering = &orderings[oi],
-          .n_orderings = 1,
-          .eg_ctxs = eg_ctxs,
-          .eg_results = eg_results,
-          .solvers = solvers,
-          .n_worker_slots = n_slots,
-          .arena = &arena,
-          .shared_n_solves = &total_solves,
-          .shared_n_leaf_visits = &total_leaf_visits,
-          .shared_n_recursive = &total_recursive,
-          .shared_n_loss_cutoffs = &total_loss_cutoffs,
-          .shared_n_win_cutoffs = &total_win_cutoffs,
-          .shared_n_nested_calls = &total_nested_calls,
-          .cache = cache,
-          .nested_cache = nested_cache,
-          .nested_our_turn = nested_our_turn,
-          .nested_depth_limit = nested_depth_limit,
-          .nested_mover_k = nested_mover_k,
-          .shared_orderings_done = &orderings_done,
-          .total_orderings = mc.n_orderings,
-          .per_worker_orderings = pw_orderings,
-          .per_worker_solves = pw_solves,
-          .per_worker_recursive = pw_recursive,
-          .per_worker_nested = pw_nested,
-          .per_worker_busy_ns = pw_busy_ns,
-      };
-      job_ptrs[oi] = &jobs[oi];
-    }
-    n_jobs = mc.n_orderings;
+  // Build the job slices: each ordering is its own job.
+  PessJob *jobs = malloc_or_die((size_t)mc.n_orderings * sizeof(PessJob));
+  void **job_ptrs = malloc_or_die((size_t)mc.n_orderings * sizeof(void *));
+  for (int oi = 0; oi < mc.n_orderings; oi++) {
+    jobs[oi] = (PessJob){
+        .base_game = game,
+        .cand = move,
+        .unseen = unseen,
+        .ld_size = ld_size,
+        .mover_idx = mover_idx,
+        .opp_idx = opp_idx,
+        .thread_control = config_get_thread_control(config),
+        .endgame_plies = plies,
+        .endgame_time = per_solve_time,
+        .tt_fraction_of_mem = tt_fraction_of_mem,
+        .shared_tt = shared_tt,
+        .opp_sort_mode = opp_sort_mode,
+        .mover_sort_mode = mover_sort_mode,
+        .subperm_sort = subperm_sort,
+        .slow_solve_log_s = slow_solve_log_s,
+        .first_win = first_win,
+        .endgame_threads = endgame_threads,
+        .skip_word_pruning = skip_word_pruning,
+        .max_opp_k = max_opp_k,
+        .ordering = &orderings[oi],
+        .n_orderings = 1,
+        .eg_ctxs = eg_ctxs,
+        .eg_results = eg_results,
+        .solvers = solvers,
+        .n_worker_slots = n_slots,
+        .shared_n_solves = &total_solves,
+        .shared_n_leaf_visits = &total_leaf_visits,
+        .shared_n_recursive = &total_recursive,
+        .shared_n_loss_cutoffs = &total_loss_cutoffs,
+        .shared_n_win_cutoffs = &total_win_cutoffs,
+        .shared_n_nested_calls = &total_nested_calls,
+        .cache = cache,
+        .nested_cache = nested_cache,
+        .nested_our_turn = nested_our_turn,
+        .nested_depth_limit = nested_depth_limit,
+        .nested_mover_k = nested_mover_k,
+        .shared_orderings_done = &orderings_done,
+        .total_orderings = mc.n_orderings,
+        .per_worker_orderings = pw_orderings,
+        .per_worker_solves = pw_solves,
+        .per_worker_recursive = pw_recursive,
+        .per_worker_nested = pw_nested,
+        .per_worker_busy_ns = pw_busy_ns,
+    };
+    job_ptrs[oi] = &jobs[oi];
   }
+  const int n_jobs = mc.n_orderings;
 
   Timer solve_t;
   ctimer_start(&solve_t);
-  if (split_opp) {
-    // Opp-split dispatch: one work unit per (ordering, opp-reply). jobs[0]
-    // carries the shared config (base game, cand, slots, counters) — every
-    // job has identical shared fields, the split worker takes the ordering
-    // explicitly. Pre-pass (single-threaded) counts each ordering's replies.
-    PessJob *shared = &jobs[0];
-    // Enable recursive forking on the shared job (split units + their forked
-    // sub-tasks inherit it via init_solver_from_job). Needs a real pool.
-    // Set arena explicitly here too: jobs[0] may come from either build branch,
-    // and the split path (and forking) require the arena to be non-NULL.
-    shared->arena = &arena;
-    shared->recursive_split = recursive_split && pool != NULL;
-    shared->force_nested_perm = force_nested_perm;
-    shared->pool = pool;
-    if (recursive_split && pool != NULL) {
-      (void)fprintf(stderr, "[pessfull] recursive-split ON (fork opp nodes)\n");
-    }
-    PessSplitAgg *aggs =
-        malloc_or_die((size_t)mc.n_orderings * sizeof(PessSplitAgg));
-    // First count total units.
-    int *reply_counts = malloc_or_die((size_t)mc.n_orderings * sizeof(int));
-    int64_t total_units = 0;
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      const int rc = peg_pess_count_opp_replies(shared, &orderings[oi]);
-      reply_counts[oi] = rc;
-      total_units += (rc > 0) ? rc : 1; // 0 → one whole-ordering unit
-      atomic_init(&aggs[oi].worst, PEG_OUT_WIN);
-      atomic_init(&aggs[oi].has_loss, 0);
-    }
-    PessSplitUnit *units =
-        malloc_or_die((size_t)total_units * sizeof(PessSplitUnit));
-    void **unit_ptrs = malloc_or_die((size_t)total_units * sizeof(void *));
-    int64_t ui = 0;
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      const int rc = reply_counts[oi];
-      if (rc <= 0) {
-        units[ui] = (PessSplitUnit){.job = shared,
-                                    .ordering = &orderings[oi],
-                                    .agg = &aggs[oi],
-                                    .reply_idx = -1};
-        unit_ptrs[ui] = &units[ui];
-        ui++;
-      } else {
-        for (int r = 0; r < rc; r++) {
-          units[ui] = (PessSplitUnit){.job = shared,
-                                      .ordering = &orderings[oi],
-                                      .agg = &aggs[oi],
-                                      .reply_idx = r};
-          unit_ptrs[ui] = &units[ui];
-          ui++;
-        }
-      }
-    }
-    (void)fprintf(stderr,
-                  "[pessfull] split-opp: %d orderings → %lld work units\n",
-                  mc.n_orderings, (long long)total_units);
-    // Reset the shared counter and set total to units (the split worker uses
-    // shared_orderings_done / total_orderings for its progress line).
-    atomic_store(&orderings_done, 0);
-    shared->total_orderings = (int)total_units;
-    if (pool) {
-      peg_pool_submit_and_wait(pool, peg_pess_split_worker_fn, unit_ptrs,
-                               (int)total_units, /*helper_worker_idx=*/0);
-    } else {
-      for (int64_t k = 0; k < total_units; k++) {
-        peg_pess_split_worker_fn(&units[k], 0);
-      }
-    }
-    // Fold each ordering's aggregate into its outcome for Phase-4 aggregation.
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      orderings[oi].outcome = (PegPessOut)atomic_load(&aggs[oi].worst);
-    }
-    free(aggs);
-    free(reply_counts);
-    free(units);
-    free(unit_ptrs);
-  } else if (pool) {
+  if (pool) {
     peg_pool_submit_and_wait(pool, peg_pess_worker_fn, job_ptrs, n_jobs,
                              /*helper_worker_idx=*/0);
   } else {
@@ -2535,107 +1889,13 @@ void test_pass_peg_pessimistic_full_eval(void) {
                                              (2.0 * (double)acc.total)
                                        : 0.0;
 
-  printf("\n=== Pessimistic full eval ===\n");
-  printf("CGP:  %s\n", cgp);
-  printf("Move: %s   plies=%d  threads=%d  sort=%d  nested=%d (depth_limit=%d, "
-         "mover_k=%d)\n",
-         move_str, plies, n_threads, do_sort ? 1 : 0, nested_our_turn ? 1 : 0,
-         nested_depth_limit, nested_mover_k);
-  printf("W/L/D = %lld/%lld/%lld   total=%lld   win%%=%.4f\n",
-         (long long)acc.wins, (long long)acc.losses, (long long)acc.draws,
-         (long long)acc.total, win_pct);
-  printf("solves=%ld  recursive=%ld  cutoffs(loss=%ld,win=%ld)  "
-         "nested_calls=%ld  solve_wall=%.2fs\n",
-         atomic_load(&total_solves), atomic_load(&total_recursive),
-         atomic_load(&total_loss_cutoffs), atomic_load(&total_win_cutoffs),
-         atomic_load(&total_nested_calls), solve_elapsed);
-  printf("endgame_leaf_visits=%ld (counts cached too; comparable to macondo's "
-         "endgame count)\n",
-         atomic_load(&total_leaf_visits));
-  if (idle_probe_s > 0.0) {
-    const long long slow = atomic_load(&g_probe_slow_solves);
-    const long long idle_sum = atomic_load(&g_probe_slow_idle_sum);
-    const long long with_idle = atomic_load(&g_probe_slow_with_idle);
-    printf("rung5-probe (leaf solves >= %.3fs): slow=%lld, with>=2 idle "
-           "cores=%lld (%.1f%%), avg idle cores at slow=%.2f\n",
-           idle_probe_s, slow, with_idle,
-           slow > 0 ? (100.0 * (double)with_idle) / (double)slow : 0.0,
-           slow > 0 ? (double)idle_sum / (double)slow : 0.0);
-  }
-  if (rung4_probe_s > 0.0) {
-    const long long slow = atomic_load(&g_rung4_slow);
-    const long long seq = atomic_load(&g_rung4_slow_seq);
-    const long long seq_idle = atomic_load(&g_rung4_seq_idle_sum);
-    const long long seq_with_idle = atomic_load(&g_rung4_seq_with_idle);
-    const long long seq_cands = atomic_load(&g_rung4_seq_cands_sum);
-    printf("rung4-probe (nested cand loops >= %.3fs): slow=%lld, "
-           "sequential(unparallelized)=%lld; of those: with>=2 idle "
-           "cores=%lld (%.1f%%), avg idle=%.2f, avg cands=%.1f\n",
-           rung4_probe_s, slow, seq, seq_with_idle,
-           seq > 0 ? (100.0 * (double)seq_with_idle) / (double)seq : 0.0,
-           seq > 0 ? (double)seq_idle / (double)seq : 0.0,
-           seq > 0 ? (double)seq_cands / (double)seq : 0.0);
-  }
-  if (cache) {
-    long h = atomic_load(&cache->hits);
-    long m = atomic_load(&cache->misses);
-    long total_lookups = h + m;
-    printf("cache: hits=%ld misses=%ld (hit_rate=%.1f%%)\n", h, m,
-           total_lookups > 0 ? (100.0 * (double)h) / (double)total_lookups
-                             : 0.0);
-  }
-  if (nested_cache) {
-    long h = atomic_load(&nested_cache->hits);
-    long m = atomic_load(&nested_cache->misses);
-    long bm = atomic_load(&nested_cache->bag_misses);
-    long total = h + m + bm;
-    printf(
-        "nested-cache: hits=%ld misses=%ld bag-misses=%ld (hit_rate=%.1f%%)\n",
-        h, m, bm, total > 0 ? (100.0 * (double)h) / (double)total : 0.0);
-  }
-
-  // Per-worker breakdown. Helps decide private vs shared TT and whether work
-  // is balanced. Slot n_slots-1 is the helper (main-thread fallback).
-  printf("\nper-worker telemetry "
-         "(slot/orderings/recursive/solves/nested/busy_s/TT_hits/TT_lookups/"
-         "TT_hit_rate):\n");
-  for (int i = 0; i < n_slots; i++) {
-    if (pw_orderings[i] == 0 && i != n_slots - 1) {
-      continue;
-    }
-    long long tt_hits = -1;
-    long long tt_lookups = -1;
-    double tt_hr = 0.0;
-    if (eg_ctxs[i]) {
-      const TranspositionTable *tt =
-          endgame_ctx_get_transposition_table(eg_ctxs[i]);
-      if (tt) {
-        tt_hits = atomic_load(&((TranspositionTable *)tt)->hits);
-        tt_lookups = atomic_load(&((TranspositionTable *)tt)->lookups);
-        if (tt_lookups > 0) {
-          tt_hr = (100.0 * (double)tt_hits) / (double)tt_lookups;
-        }
-      }
-    }
-    printf("  slot=%-3d ord=%-4lld rec=%-9lld solves=%-8lld nested=%-7lld "
-           "busy=%.2fs",
-           i, (long long)pw_orderings[i], (long long)pw_recursive[i],
-           (long long)pw_solves[i], (long long)pw_nested[i],
-           (double)pw_busy_ns[i] / 1e9);
-    if (tt_hits >= 0) {
-      printf(" tt_hits=%lld tt_lookups=%lld hr=%.1f%%", tt_hits, tt_lookups,
-             tt_hr);
-    } else {
-      printf(" tt=disabled");
-    }
-    printf("\n");
-  }
-  if (shared_tt) {
-    const long long h = atomic_load(&shared_tt->hits);
-    const long long l = atomic_load(&shared_tt->lookups);
-    printf("shared-TT: hits=%lld lookups=%lld (hit_rate=%.1f%%)\n", h, l,
-           l > 0 ? (100.0 * (double)h) / (double)l : 0.0);
-  }
+  pessfull_print_report(
+      args, &acc, win_pct, atomic_load(&total_solves),
+      atomic_load(&total_recursive), atomic_load(&total_loss_cutoffs),
+      atomic_load(&total_win_cutoffs), atomic_load(&total_nested_calls),
+      atomic_load(&total_leaf_visits), solve_elapsed, cache, nested_cache,
+      shared_tt, eg_ctxs, n_slots, pw_orderings, pw_solves, pw_recursive,
+      pw_nested, pw_busy_ns);
 
   for (int i = 0; i < n_slots; i++) {
     endgame_ctx_destroy(eg_ctxs[i]);
@@ -2650,7 +1910,6 @@ void test_pass_peg_pessimistic_full_eval(void) {
   free(eg_ctxs);
   free(eg_results);
   free(solvers);
-  free(arena.free_stack);
   free(jobs);
   free(job_ptrs);
   free(orderings);
@@ -2670,6 +1929,55 @@ void test_pass_peg_pessimistic_full_eval(void) {
   validated_moves_destroy(vms);
   error_stack_destroy(parse_err);
   config_destroy(config);
+  return acc;
+}
+
+// On-demand entry: parse PASSPEG_PESSFULL_* env vars and run the full eval.
+void test_pass_peg_pessimistic_full_eval(void) {
+  PessFullArgs args;
+  pessfull_parse_args(&args);
+  (void)pessfull_run(&args);
+}
+
+// Regression test for the pre-endgame drawing fix: in a non-empty-bag descent,
+// the opponent must DRAW after playing out rather than spuriously "going out".
+// peg1pb, mover passes, the single Q-in-bag ordering (draw=[Q]), capped to the
+// opponent's single top reply (max_opp_k=1) so it runs in <0.1s. With the bug
+// (no draw) the opp's top play-out phantom-ends the game -> mover LOSS (0/1/0);
+// the fix draws the Q -> real endgame -> mover WIN (1/0/0).
+void test_peg_pessfull_draw_regression(void) {
+  PessFullArgs args = {
+      .cgp = "7C6D/7H4LAR/7I2P1ALA/7VOGUE1AG/6RERAN2M1/7S1BY2O1/8OY2Id1/"
+             "5JEUX3NEW/3C1U2O3A1E/3O1M6N1B/3ZIP2OAK1E2/2TI1sTIFLERS2/"
+             "2WED5F1T2/1HIDEOUT7/VEG1N2IDOL4 AEINRST/AEINRST 372/369 0 "
+             "-lex CSW24",
+      .move_str = "pass",
+      .only_draw = "17", // machine letter 17 = Q in CSW24
+      .plies = 2,
+      .per_solve_time = 0.0,
+      .max_opp_k = 1,
+      .tt_mb = 0,
+      .tt_fraction_of_mem = 0.0,
+      .tt_shared = false,
+      .opp_sort_mode = 0,
+      .mover_sort_mode = 0,
+      .subperm_sort = false,
+      .skip_word_pruning = false,
+      .slow_solve_log_s = 0.0,
+      .first_win = true,
+      .endgame_threads = 1,
+      .n_threads = 1,
+      .do_sort = false,
+      .nested_our_turn = false,
+      .nested_depth_limit = 0,
+      .nested_mover_k = 0,
+      .use_cache = false,
+      .use_nested_cache = false,
+  };
+  const PegPessFullAccum acc = pessfull_run(&args);
+  assert(acc.wins == 1);
+  assert(acc.losses == 0);
+  assert(acc.draws == 0);
 }
 
 // Debug harness: solve a single endgame from a CGP and report timing. Used to

@@ -17,6 +17,10 @@
 // SLOW_SOLVE_LOG_S, IDLE_PROBE_S, RUNG4_PROBE_S, GROUP_BY_FIRST, WANT_DRAW.
 void test_pass_peg_pessimistic_full_eval(void);
 
+// Fast CI regression test for the pre-endgame drawing fix (one tiny
+// pessimistic case, no env vars). Asserts mover WIN (1/0/0).
+void test_peg_pessfull_draw_regression(void);
+
 // Sanity probe: a single endgame_solve on one pessimistic scenario.
 // Env knobs: PASSPEG_ENDGAME_CGP (required), _MOVE, _DRAW, _PLIES, _THREADS,
 // _FIRST_WIN.
