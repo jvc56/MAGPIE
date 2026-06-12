@@ -848,6 +848,17 @@ static inline void board_load_lanes_cache(const Board *b, int ci,
          sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
 }
 
+// Returns a pointer to the contiguous block of both directions' lanes for
+// the given cross index, usable with board_get_row_cache without copying
+// the whole board. The pointer is only valid while the board is alive, not
+// transposed, and not mutated.
+static inline const Square *board_get_readonly_lanes(const Board *b, int ci) {
+  if (b->transposed) {
+    log_fatal("cannot get lanes pointer while board is transposed");
+  }
+  return board_get_readonly_square(b, 0, 0, 0, ci);
+}
+
 static inline void board_copy_row_cache(const Square *lanes_cache,
                                         Square *row_cache, int row_or_col,
                                         int dir) {

@@ -148,7 +148,9 @@ typedef struct MoveGen {
   Rack bingo_alpha_rack_shadow_right_copy;
   Rack opponent_rack;
   Rack leave;
-  Square lanes_cache[BOARD_DIM * BOARD_DIM * 2];
+  // Read-only view into the board's lanes for the current cross index;
+  // refreshed by gen_load_position each call.
+  const Square *lanes_cache;
   Square row_cache[BOARD_DIM];
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];

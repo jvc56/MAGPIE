@@ -2949,7 +2949,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   board_load_number_of_row_anchors_cache(gen->board,
                                          gen->row_number_of_anchors_cache);
-  board_load_lanes_cache(gen->board, gen->cross_index, gen->lanes_cache);
+  gen->lanes_cache = board_get_readonly_lanes(gen->board, gen->cross_index);
 
   board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
 
