@@ -1096,7 +1096,7 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   if (!board_get_cross_sets_valid(board)) {
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
-      const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      MoveUndo *parent_undo = &worker->move_undos[undo_index];
       if (parent_undo->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
       }
@@ -1443,7 +1443,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     if (!board_get_cross_sets_valid(leaf_board)) {
       int undo_idx = plies - 1; // last negamax move
       if (undo_idx >= 0) {
-        const MoveUndo *last_undo = &worker->move_undos[undo_idx];
+        MoveUndo *last_undo = &worker->move_undos[undo_idx];
         if (last_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
         }
@@ -1472,7 +1472,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     Board *pb = game_get_board(worker->game_copy);
     if (!board_get_cross_sets_valid(pb)) {
       int undo_idx = plies + playout_depth - 1;
-      const MoveUndo *prev = &worker->move_undos[undo_idx];
+      MoveUndo *prev = &worker->move_undos[undo_idx];
       if (prev->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(prev, worker->game_copy);
       }
@@ -1621,15 +1621,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       playout_depth < MAX_VARIANT_LENGTH ? playout_depth : MAX_VARIANT_LENGTH;
   pv->negamax_depth = 0;
 
-  // Unplay all playout moves in reverse
+  // Unplay all playout moves in reverse. Lazy cross-set updates were saved
+  // into each move's undo, so the square restore reverts them exactly.
   for (int d = playout_depth - 1; d >= 0; d--) {
     int undo_slot = plies + d;
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_slot]);
-    const MoveUndo *undo = &worker->move_undos[undo_slot];
-    if (undo->move_tiles_length > 0) {
-      update_cross_sets_after_unplay_from_undo(undo, worker->game_copy);
-      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-    }
   }
 
   if (playout_interrupted) {
@@ -1699,7 +1695,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     if (!board_get_cross_sets_valid(board)) {
       int undo_index = worker->solver->requested_plies - depth - 1;
       if (undo_index >= 0) {
-        const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+        MoveUndo *parent_undo = &worker->move_undos[undo_index];
         if (parent_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
         }
@@ -2186,15 +2182,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       unplay_move_incremental(worker->game_copy,
                               &worker->move_undos[undo_index]);
-      // After unplay, if tiles were placed, cross-sets need to be recomputed
-      // for the restored state. Use undo-based function for correct cross-set
-      // update. If it was a pass, cross-sets are unchanged and still valid.
-      const MoveUndo *current_undo = &worker->move_undos[undo_index];
-      if (current_undo->move_tiles_length > 0) {
-        update_cross_sets_after_unplay_from_undo(current_undo,
-                                                 worker->game_copy);
-        board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-      }
+      // Cross-sets need no recompute here: any lazy cross-set update in the
+      // child's subtree was saved into this undo (or a descendant's undo that
+      // was already restored), so the square restore reverted them exactly.
 
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;

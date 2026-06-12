@@ -13,10 +13,13 @@
 // block endgame support for 8+ tile racks, so larger support is not needed.
 // A 7-tile move can affect:
 // - 7 tiles × 4 sub-boards for letters + is_cross_word = ~84
-// - Cross sets: ~30 squares × specific dir/ci = ~60
 // - Anchors: ~30 squares × 2 directions = ~60
-// Total: ~200, round up to 256 for safety
-#define MAX_UNDO_SQUARE_CHANGES 256
+// - Lazy cross-set updates (saved into the same undo so unplay restores
+//   them): cross-set + extension-set squares around each tile's cross word
+//   plus the word's own row, ~60 per cross index — doubled when the players
+//   use different lexicons (both cross indices are regenerated): ~120
+// Total: ~265 worst case, round up to 384 for safety
+#define MAX_UNDO_SQUARE_CHANGES 384
 
 typedef struct SquareChange {
   int16_t index; // flat index into Board.squares
