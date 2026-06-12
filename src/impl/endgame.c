@@ -68,6 +68,11 @@ enum {
   ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
+  // Lazy move ordering at interior nodes: selection-pick the best remaining
+  // move for this many indices before sorting the rest once. Beta cutoffs
+  // usually happen within the first few moves, so most nodes never pay for
+  // a full sort of the move list.
+  LAZY_SELECTION_LIMIT = 8,
   // Conservation bonus weights: penalize playing tiles when opponent is stuck
   CONSERVATION_TILE_WEIGHT = 7,
   CONSERVATION_VALUE_WEIGHT = 2,
@@ -1311,8 +1316,11 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
   return build_values;
 }
 
-void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
-                               uint64_t tt_move, float opp_stuck_frac) {
+// Assign estimated values to the freshly generated moves at the top of the
+// arena. Does not sort: interior nodes order moves lazily in abdada_negamax
+// (selection picks + one tail sort), and the root sorts explicitly.
+void assign_estimates(EndgameCtxWorker *worker, int move_count,
+                      uint64_t tt_move, float opp_stuck_frac) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1392,10 +1400,17 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
     }
   }
   free(build_values);
-  // sort moves by estimated value, from biggest to smallest value. A good move
-  // sorting is instrumental to the performance of ab pruning.
+}
+
+// assign_estimates plus a full sort by estimated value, biggest first.
+// Used for the root move list, which is iterated in full every depth.
+void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
+                               uint64_t tt_move, float opp_stuck_frac) {
+  assign_estimates(worker, move_count, tt_move, opp_stuck_frac);
   SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+      (SmallMove *)(worker->small_move_arena->memory +
+                    worker->small_move_arena->size -
+                    (sizeof(SmallMove) * move_count));
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
@@ -1666,9 +1681,11 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                             entry_to_store);
 }
 
-// Stuck-tile detection, move generation, logging, and sorting for non-root
-// nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
+// Stuck-tile detection, move generation, logging, and estimate assignment
+// for non-root nodes (move ordering itself is done lazily by the caller).
+// Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
+static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
+                                               int depth,
                                            uint64_t tt_move,
                                            float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
@@ -1736,7 +1753,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     }
   }
 
-  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
+  assign_estimates(worker, nplays, tt_move, *opp_stuck_frac);
   return nplays;
 }
 
@@ -1891,8 +1908,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       return ABDADA_INTERRUPTED;
     }
-    nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
-                                             &opp_stuck_frac);
+    nplays = negamax_generate_and_estimate_moves(worker, depth, tt_move,
+                                                 &opp_stuck_frac);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
@@ -2050,6 +2067,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // Pass 1+: retry only deferred moves without exclusion.
   int pass = 0;
   bool all_done = false;
+  // Freshly generated moves are unsorted (assign_estimates does not sort).
+  // Order them lazily: selection-pick the best remaining move into slot idx
+  // for the first LAZY_SELECTION_LIMIT indices, then sort the tail once if
+  // the node gets that far without a cutoff. Most nodes cut off within the
+  // first few moves and never pay for a full sort. Root move lists
+  // (!arena_alloced) arrive pre-sorted.
+  bool tail_sorted = !arena_alloced;
   while (!all_done) {
     all_done = true;
 
@@ -2058,6 +2082,34 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // (they were already successfully searched)
       if (pass > 0 && deferred != NULL && !deferred[idx]) {
         continue;
+      }
+
+      // Lazy move ordering, pass 0 only: later passes revisit positions
+      // recorded in deferred[], so the array must not be reordered then.
+      if (!tail_sorted && pass == 0) {
+        SmallMove *moves_base =
+            (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+        if (idx < LAZY_SELECTION_LIMIT) {
+          int best_est_idx = idx;
+          int32_t best_est = small_move_get_estimated_value(&moves_base[idx]);
+          for (int scan = idx + 1; scan < nplays; scan++) {
+            const int32_t est =
+                small_move_get_estimated_value(&moves_base[scan]);
+            if (est > best_est) {
+              best_est = est;
+              best_est_idx = scan;
+            }
+          }
+          if (best_est_idx != idx) {
+            SmallMove tmp = moves_base[idx];
+            moves_base[idx] = moves_base[best_est_idx];
+            moves_base[best_est_idx] = tmp;
+          }
+        } else {
+          qsort(moves_base + idx, (size_t)(nplays - idx), sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
+          tail_sorted = true;
+        }
       }
 
       // ABDADA: determine if this move should be searched exclusively
