@@ -957,11 +957,12 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       // Reject before touching bonus squares or scanning word extents:
       // most candidate squares fail the cross-set test.
       if (!is_blank) {
-        if (!(combined & ((uint64_t)1 << tile_ml))) {
+        if (!board_is_letter_allowed_in_cross_set(combined, tile_ml)) {
           continue;
         }
       } else {
-        // Any non-blank letter permitted by the combined cross-set is valid.
+        // A blank is playable if any non-blank letter is permitted by the
+        // combined cross-set (bit 0 is the blank marker, so shift it out).
         if (!(combined >> 1)) {
           continue;
         }
@@ -1029,7 +1030,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       if (is_blank) {
         letter = 0;
         for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
-          if ((combined >> L) & 1) {
+          if (board_is_letter_allowed_in_cross_set(combined, L)) {
             letter = L;
             break;
           }
