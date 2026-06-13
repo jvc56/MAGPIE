@@ -38,13 +38,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-// clang-tidy (cert-err34-c) flags atoi/atof for not reporting conversion
-// errors; these wrappers keep call sites terse while using strtol/strtod.
+// clang-tidy (cert-err34-c) flags atoi for not reporting conversion errors;
+// this wrapper keeps call sites terse while using strtol.
 static int passpeg_str_to_int(const char *str) {
   return (int)strtol(str, NULL, 10);
-}
-static double passpeg_str_to_double(const char *str) {
-  return strtod(str, NULL);
 }
 
 // Recursive enumeration of ordered draws of `remaining` tiles from
@@ -1842,72 +1839,4 @@ void test_peg_pessfull_draw_regression(void) {
   assert(acc.wins == 1);
   assert(acc.losses == 0);
   assert(acc.draws == 0);
-}
-
-// Debug harness: solve a single endgame from a CGP and report timing. Used to
-// reproduce/diagnose pathological endgames captured by the pessimistic
-// solver's pre-solve logging. Env:
-//   PASSPEG_ENDGAME_CGP      (required) full cgp string incl. -lex
-//   PASSPEG_ENDGAME_PLIES    (default 2)
-//   PASSPEG_ENDGAME_TIME     (default 0 = no limit)
-//   PASSPEG_ENDGAME_THREADS  (default 1)
-//   PASSPEG_ENDGAME_FIRST_WIN (default 0)
-void test_pass_peg_endgame_one(void) {
-  const char *cgp = getenv("PASSPEG_ENDGAME_CGP");
-  if (!cgp || !*cgp) {
-    log_fatal("PASSPEG_ENDGAME_CGP must be set");
-  }
-  const char *plies_env = getenv("PASSPEG_ENDGAME_PLIES");
-  const int plies = plies_env && *plies_env ? passpeg_str_to_int(plies_env) : 2;
-  const char *time_env = getenv("PASSPEG_ENDGAME_TIME");
-  const double tlimit =
-      time_env && *time_env ? passpeg_str_to_double(time_env) : 0.0;
-  const char *threads_env = getenv("PASSPEG_ENDGAME_THREADS");
-  const int threads = threads_env && passpeg_str_to_int(threads_env) > 0
-                          ? passpeg_str_to_int(threads_env)
-                          : 1;
-  const char *fw_env = getenv("PASSPEG_ENDGAME_FIRST_WIN");
-  const bool first_win = fw_env && passpeg_str_to_int(fw_env) > 0;
-
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  char load_cmd[10240];
-  (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", cgp);
-  load_and_exec_config_or_die(config, load_cmd);
-  Game *game = config_get_game(config);
-  game_set_endgame_solving_mode(game);
-  game_set_backup_mode(game, BACKUP_MODE_OFF);
-
-  EndgameCtx *ctx = NULL;
-  EndgameResults *results = endgame_results_create();
-  (void)fprintf(stderr,
-                "[pegendgame] plies=%d time=%.1fs threads=%d first_win=%d\n",
-                plies, tlimit, threads, first_win ? 1 : 0);
-  (void)fflush(stderr);
-  EndgameArgs ea = {
-      .thread_control = config_get_thread_control(config),
-      .game = game,
-      .plies = plies,
-      .shared_tt = NULL,
-      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-      .num_threads = threads,
-      .use_heuristics = true,
-      .num_top_moves = 1,
-      .first_win = first_win,
-      .dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT,
-      .skip_word_pruning = false,
-      .soft_time_limit = tlimit,
-      .hard_time_limit = tlimit,
-      .external_deadline_ns =
-          tlimit > 0.0 ? ctimer_monotonic_ns() + (int64_t)(tlimit * 1.0e9) : 0,
-  };
-  Timer t;
-  ctimer_start(&t);
-  endgame_solve_inline(&ctx, &ea, results);
-  const double elapsed = ctimer_elapsed_seconds(&t);
-  const int eg_val = endgame_results_get_value(results, ENDGAME_RESULT_BEST);
-  printf("[pegendgame] value=%d  wall=%.3fs\n", eg_val, elapsed);
-
-  endgame_ctx_destroy(ctx);
-  endgame_results_destroy(results);
-  config_destroy(config);
 }

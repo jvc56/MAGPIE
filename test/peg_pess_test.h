@@ -13,9 +13,4 @@
 // pessimistic case, hardcoded). Asserts mover WIN (1/0/0).
 void test_peg_pessfull_draw_regression(void);
 
-// Sanity probe: a single endgame_solve on one pessimistic scenario.
-// Env knobs: PASSPEG_ENDGAME_CGP (required), _MOVE, _DRAW, _PLIES, _THREADS,
-// _FIRST_WIN.
-void test_pass_peg_endgame_one(void);
-
 #endif // PEG_PESS_TEST_H
