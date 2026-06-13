@@ -78,6 +78,11 @@ enum {
   CONSERVATION_VALUE_WEIGHT = 2,
   // Random noise range for thread jitter, centered around zero
   THREAD_JITTER_NOISE = 8,
+  // Max top-K ranked PVLines built for the per-ply display/callback.
+  MAX_RANKED_CALLBACK_PVS = 10,
+  // Default cap on the depth-0 interrupt-fallback sweep when first_win_optim is
+  // set: 0 = use this default, <0 = skip the sweep, >0 = explicit cap.
+  FIRST_WIN_D0_FALLBACK_MOVES = 12,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -115,6 +120,9 @@ struct EndgameCtx {
   int initial_small_move_arena_size;
   bool iterative_deepening_optim;
   bool first_win_optim;
+  // Cap on the first-win depth-0 interrupt fallback sweep (root moves greedy-
+  // evaluated). 0 = built-in default, <0 = skip the sweep, >0 = explicit cap.
+  int first_win_fallback_moves;
   bool transposition_table_optim;
   bool negascout_optim;
   bool use_heuristics;
@@ -555,6 +563,7 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
 void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = endgame_args->first_win;
+  es->first_win_fallback_moves = endgame_args->first_win_fallback_moves;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
@@ -2358,7 +2367,6 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                         const PVLine *extended_pv,
                                         const SmallMove *initial_moves,
                                         int initial_move_count) {
-  enum { MAX_RANKED_CALLBACK_PVS = 10 };
   int n_ranked = initial_move_count < MAX_RANKED_CALLBACK_PVS
                      ? initial_move_count
                      : MAX_RANKED_CALLBACK_PVS;
@@ -2455,6 +2463,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // as a depth-0 result. If the IDS is interrupted before depth-1 completes
   // even once, the caller gets the best-from-static-greedy answer instead
   // of the default "no result / pass / value=0".
+  //
+  // first_win_optim only needs win/loss, not the best move, and its depth-1
+  // search is cheap, so sweeping all root candidates (often 1000+ at a 7-tile
+  // endgame root) is almost pure overhead. Cap it to the top few moves by
+  // estimate (the moves are already sorted) so the interrupt fallback is still
+  // present but ~100x cheaper. The result is unchanged whenever IDS completes
+  // (the common case), since depth-1+ overwrites the depth-0 value.
   if (worker->ordinal == 0) {
     int32_t best_root_value = -LARGE_VALUE;
     SmallMove best_root_move;
@@ -2464,7 +2479,18 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     d0_pv.num_moves = 0;
     d0_pv.negamax_depth = 0;
 
-    for (int i = 0; i < initial_move_count; i++) {
+    // first_win_fallback_moves: 0 = use FIRST_WIN_D0_FALLBACK_MOVES default,
+    // <0 = skip the sweep, >0 = explicit cap.
+    int fw_fallback_cap = FIRST_WIN_D0_FALLBACK_MOVES;
+    if (worker->solver->first_win_fallback_moves > 0) {
+      fw_fallback_cap = worker->solver->first_win_fallback_moves;
+    } else if (worker->solver->first_win_fallback_moves < 0) {
+      fw_fallback_cap = 0; // skip the sweep entirely
+    }
+    const int d0_move_count = worker->solver->first_win_optim
+                                  ? MIN(initial_move_count, fw_fallback_cap)
+                                  : initial_move_count;
+    for (int i = 0; i < d0_move_count; i++) {
       if (iterative_deepening_should_stop(worker->solver)) {
         break;
       }

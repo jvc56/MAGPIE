@@ -12,5 +12,6 @@ void test_via_mover_bingo_one_ply(void);
 void test_via_opp_must_block_every_depth(void);
 void test_via_interrupted_reasonable_under_time_pressure(void);
 void test_endgame_dynamic_worker_injection(void);
+void test_endgame_first_win_sign(void);
 
 #endif

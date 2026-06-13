@@ -78,6 +78,13 @@ typedef struct EndgameArgs {
   // returns only win/loss/draw rather than exact spread. Faster (more
   // alpha-beta cutoffs) but exact spread is unknown when set.
   bool first_win;
+  // Cap on the depth-0 interrupt fallback when first_win is set. The fallback
+  // greedy-evaluates root candidates so an interrupted solve still returns a
+  // best move; for first_win that sweep (often 1000+ moves at a wide endgame
+  // root) is almost pure overhead. 0 = built-in default (12), <0 = skip the
+  // sweep entirely, >0 = evaluate at most this many top moves. Ignored unless
+  // first_win is set.
+  int first_win_fallback_moves;
   // Absolute monotonic-ns deadline (ctimer_monotonic_ns()-compatible). If
   // non-zero, workers bail out mid-search once now > deadline. Lets a
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
