@@ -68,6 +68,11 @@ enum {
   ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
+  // Lazy move ordering at interior nodes: selection-pick the best remaining
+  // move for this many indices before sorting the rest once. Beta cutoffs
+  // usually happen within the first few moves, so most nodes never pay for
+  // a full sort of the move list.
+  LAZY_SELECTION_LIMIT = 8,
   // Conservation bonus weights: penalize playing tiles when opponent is stuck
   CONSERVATION_TILE_WEIGHT = 7,
   CONSERVATION_VALUE_WEIGHT = 2,
@@ -921,7 +926,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   bool best_dir_vertical = false;
   int best_start = 0; // leftmost col (H) or topmost row (V) of the word
   int best_play_length = 0;
-  MachineLetter best_letter = 0; // for blank: the letter the blank plays as
+  MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -949,6 +954,20 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
           board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
       uint64_t combined = h_cs & v_cs;
 
+      // Reject before touching bonus squares or scanning word extents:
+      // most candidate squares fail the cross-set test.
+      if (!is_blank) {
+        if (!board_is_letter_allowed_in_cross_set(combined, tile_ml)) {
+          continue;
+        }
+      } else {
+        // A blank is playable if the combined cross-set permits any
+        // non-blank letter.
+        if (!board_cross_set_allows_any_letter(combined)) {
+          continue;
+        }
+      }
+
       BonusSquare bsq = board_get_bonus_square(board, row, col);
       int lm = bonus_square_get_letter_multiplier(bsq);
       int wm = bonus_square_get_word_multiplier(bsq);
@@ -959,12 +978,24 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       Equity v_nbr_score = board_get_cross_score(
           board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
 
+      // Blank has zero face value; its score depends only on position.
+      Equity tile_ls = is_blank ? 0 : ld_get_score(ld, tile_ml) * lm;
+      Equity score = 0;
+      if (has_h_nbrs) {
+        score += (tile_ls + h_nbr_score) * wm;
+      }
+      if (has_v_nbrs) {
+        score += (tile_ls + v_nbr_score) * wm;
+      }
+      if (found && score <= best_score) {
+        continue;
+      }
+
+      // New best: only now compute the word extent (for play_length and
+      // col_start/row_start encoding) and, for a blank, pick its letter.
       // Use vertical direction only when there are vertical neighbors and no
       // horizontal neighbors; otherwise label the play horizontal.
       bool dir_vertical = has_v_nbrs && !has_h_nbrs;
-
-      // Find word extent in the primary direction for play_length and
-      // col_start/row_start encoding.
       int word_start;
       int word_end;
       if (!dir_vertical) {
@@ -994,61 +1025,25 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         }
         word_end--;
       }
-      int play_length = word_end - word_start + 1;
 
-      if (!is_blank) {
-        if (!(combined & ((uint64_t)1 << tile_ml))) {
-          continue;
-        }
-        Equity tile_ls = ld_get_score(ld, tile_ml) * lm;
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += (tile_ls + h_nbr_score) * wm;
-        }
-        if (has_v_nbrs) {
-          score += (tile_ls + v_nbr_score) * wm;
-        }
-        if (!found || score > best_score) {
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = tile_ml;
-        }
-      } else {
-        // Blank has zero face value; score depends only on position.
-        // Any non-blank letter permitted by the combined cross-set is valid.
-        if (!(combined >> 1)) {
-          continue;
-        }
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += h_nbr_score * wm;
-        }
-        if (has_v_nbrs) {
-          score += v_nbr_score * wm;
-        }
-        if (!found || score > best_score) {
-          MachineLetter letter = 0;
-          for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
-            if ((combined >> L) & 1) {
-              letter = L;
-              break;
-            }
+      MachineLetter chosen_ml = tile_ml;
+      if (is_blank) {
+        chosen_ml = 0;
+        for (MachineLetter ml = 1; ml < (MachineLetter)ld_size; ml++) {
+          if (board_is_letter_allowed_in_cross_set(combined, ml)) {
+            chosen_ml = ml;
+            break;
           }
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = letter;
         }
       }
+      found = true;
+      best_score = score;
+      best_row = row;
+      best_col = col;
+      best_dir_vertical = dir_vertical;
+      best_start = word_start;
+      best_play_length = word_end - word_start + 1;
+      best_ml = chosen_ml;
     }
   }
 
@@ -1071,7 +1066,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_letter << 20;
+  uint64_t tm = (uint64_t)best_ml << 20;
   if (is_blank) {
     tm |= 1ULL << 12; // blank flag for tile index 0
   }
@@ -1096,7 +1091,7 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   if (!board_get_cross_sets_valid(board)) {
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
-      const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      MoveUndo *parent_undo = &worker->move_undos[undo_index];
       if (parent_undo->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
       }
@@ -1139,8 +1134,9 @@ static int compute_played_tiles_face_value(const SmallMove *sm,
   int n = sm->metadata.tiles_played;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return face_value;
@@ -1156,8 +1152,9 @@ static int compute_conservation_bonus(const SmallMove *sm,
   int face_value = 0;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
@@ -1296,12 +1293,12 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
 
       bool tiles_match = true;
       for (int ti = 0; ti < len_a; ti++) {
-        uint8_t tile_a = move_get_tile(&mv_a, ti);
-        if (tile_a == PLAYED_THROUGH_MARKER) {
+        uint8_t ml_a = move_get_tile(&mv_a, ti);
+        if (ml_a == PLAYED_THROUGH_MARKER) {
           continue; // board tile, not placed by A
         }
-        uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
-        if (tile_a != tile_b) {
+        uint8_t ml_b = move_get_tile(&mv_b, ti + offset_in_b);
+        if (ml_a != ml_b) {
           tiles_match = false;
           break;
         }
@@ -1322,8 +1319,11 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
   return build_values;
 }
 
-void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
-                               uint64_t tt_move, float opp_stuck_frac) {
+// Assign estimated values to the freshly generated moves at the top of the
+// arena. Does not sort: interior nodes order moves lazily in abdada_negamax
+// (selection picks + one tail sort), and the root sorts explicitly.
+void assign_estimates(EndgameCtxWorker *worker, int move_count,
+                      uint64_t tt_move, float opp_stuck_frac) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1403,10 +1403,16 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
     }
   }
   free(build_values);
-  // sort moves by estimated value, from biggest to smallest value. A good move
-  // sorting is instrumental to the performance of ab pruning.
-  SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+}
+
+// assign_estimates plus a full sort by estimated value, biggest first.
+// Used for the root move list, which is iterated in full every depth.
+void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
+                               uint64_t tt_move, float opp_stuck_frac) {
+  assign_estimates(worker, move_count, tt_move, opp_stuck_frac);
+  SmallMove *small_moves = (SmallMove *)(worker->small_move_arena->memory +
+                                         worker->small_move_arena->size -
+                                         (sizeof(SmallMove) * move_count));
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
@@ -1443,7 +1449,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     if (!board_get_cross_sets_valid(leaf_board)) {
       int undo_idx = plies - 1; // last negamax move
       if (undo_idx >= 0) {
-        const MoveUndo *last_undo = &worker->move_undos[undo_idx];
+        MoveUndo *last_undo = &worker->move_undos[undo_idx];
         if (last_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
         }
@@ -1472,7 +1478,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     Board *pb = game_get_board(worker->game_copy);
     if (!board_get_cross_sets_valid(pb)) {
       int undo_idx = plies + playout_depth - 1;
-      const MoveUndo *prev = &worker->move_undos[undo_idx];
+      MoveUndo *prev = &worker->move_undos[undo_idx];
       if (prev->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(prev, worker->game_copy);
       }
@@ -1621,15 +1627,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       playout_depth < MAX_VARIANT_LENGTH ? playout_depth : MAX_VARIANT_LENGTH;
   pv->negamax_depth = 0;
 
-  // Unplay all playout moves in reverse
+  // Unplay all playout moves in reverse. Lazy cross-set updates were saved
+  // into each move's undo, so the square restore reverts them exactly.
   for (int d = playout_depth - 1; d >= 0; d--) {
     int undo_slot = plies + d;
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_slot]);
-    const MoveUndo *undo = &worker->move_undos[undo_slot];
-    if (undo->move_tiles_length > 0) {
-      update_cross_sets_after_unplay_from_undo(undo, worker->game_copy);
-      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-    }
   }
 
   if (playout_interrupted) {
@@ -1681,11 +1683,12 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
                             entry_to_store);
 }
 
-// Stuck-tile detection, move generation, logging, and sorting for non-root
-// nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
-                                           uint64_t tt_move,
-                                           float *opp_stuck_frac) {
+// Stuck-tile detection, move generation, logging, and estimate assignment
+// for non-root nodes (move ordering itself is done lazily by the caller).
+// Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
+static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
+                                               int depth, uint64_t tt_move,
+                                               float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
@@ -1699,7 +1702,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     if (!board_get_cross_sets_valid(board)) {
       int undo_index = worker->solver->requested_plies - depth - 1;
       if (undo_index >= 0) {
-        const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+        MoveUndo *parent_undo = &worker->move_undos[undo_index];
         if (parent_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
         }
@@ -1751,7 +1754,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     }
   }
 
-  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
+  assign_estimates(worker, nplays, tt_move, *opp_stuck_frac);
   return nplays;
 }
 
@@ -1906,8 +1909,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       return ABDADA_INTERRUPTED;
     }
-    nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
-                                             &opp_stuck_frac);
+    nplays = negamax_generate_and_estimate_moves(worker, depth, tt_move,
+                                                 &opp_stuck_frac);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
@@ -2065,6 +2068,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // Pass 1+: retry only deferred moves without exclusion.
   int pass = 0;
   bool all_done = false;
+  // Freshly generated moves are unsorted (assign_estimates does not sort).
+  // Order them lazily: selection-pick the best remaining move into slot idx
+  // for the first LAZY_SELECTION_LIMIT indices, then sort the tail once if
+  // the node gets that far without a cutoff. Most nodes cut off within the
+  // first few moves and never pay for a full sort. Root move lists
+  // (!arena_alloced) arrive pre-sorted.
+  bool tail_sorted = !arena_alloced;
   while (!all_done) {
     all_done = true;
 
@@ -2073,6 +2083,34 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // (they were already successfully searched)
       if (pass > 0 && deferred != NULL && !deferred[idx]) {
         continue;
+      }
+
+      // Lazy move ordering, pass 0 only: later passes revisit positions
+      // recorded in deferred[], so the array must not be reordered then.
+      if (!tail_sorted && pass == 0) {
+        SmallMove *moves_base =
+            (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+        if (idx < LAZY_SELECTION_LIMIT) {
+          int best_est_idx = idx;
+          int32_t best_est = small_move_get_estimated_value(&moves_base[idx]);
+          for (int scan = idx + 1; scan < nplays; scan++) {
+            const int32_t est =
+                small_move_get_estimated_value(&moves_base[scan]);
+            if (est > best_est) {
+              best_est = est;
+              best_est_idx = scan;
+            }
+          }
+          if (best_est_idx != idx) {
+            SmallMove tmp = moves_base[idx];
+            moves_base[idx] = moves_base[best_est_idx];
+            moves_base[best_est_idx] = tmp;
+          }
+        } else {
+          qsort(moves_base + idx, (size_t)(nplays - idx), sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
+          tail_sorted = true;
+        }
       }
 
       // ABDADA: determine if this move should be searched exclusively
@@ -2186,15 +2224,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       unplay_move_incremental(worker->game_copy,
                               &worker->move_undos[undo_index]);
-      // After unplay, if tiles were placed, cross-sets need to be recomputed
-      // for the restored state. Use undo-based function for correct cross-set
-      // update. If it was a pass, cross-sets are unchanged and still valid.
-      const MoveUndo *current_undo = &worker->move_undos[undo_index];
-      if (current_undo->move_tiles_length > 0) {
-        update_cross_sets_after_unplay_from_undo(current_undo,
-                                                 worker->game_copy);
-        board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-      }
+      // Cross-sets need no recompute here: any lazy cross-set update in the
+      // child's subtree was saved into this undo (or a descendant's undo that
+      // was already restored), so the square restore reverted them exactly.
 
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;
