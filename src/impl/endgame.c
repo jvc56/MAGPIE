@@ -73,6 +73,11 @@ enum {
   CONSERVATION_VALUE_WEIGHT = 2,
   // Random noise range for thread jitter, centered around zero
   THREAD_JITTER_NOISE = 8,
+  // Max top-K ranked PVLines built for the per-ply display/callback.
+  MAX_RANKED_CALLBACK_PVS = 10,
+  // Default cap on the depth-0 interrupt-fallback sweep when first_win_optim is
+  // set: 0 = use this default, <0 = skip the sweep, >0 = explicit cap.
+  FIRST_WIN_D0_FALLBACK_MOVES = 12,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -2330,7 +2335,6 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                         const PVLine *extended_pv,
                                         const SmallMove *initial_moves,
                                         int initial_move_count) {
-  enum { MAX_RANKED_CALLBACK_PVS = 10 };
   int n_ranked = initial_move_count < MAX_RANKED_CALLBACK_PVS
                      ? initial_move_count
                      : MAX_RANKED_CALLBACK_PVS;
@@ -2443,8 +2447,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     d0_pv.num_moves = 0;
     d0_pv.negamax_depth = 0;
 
-    // first_win_fallback_moves: 0 = use this default, <0 = skip, >0 = explicit.
-    enum { FIRST_WIN_D0_FALLBACK_MOVES = 12 };
+    // first_win_fallback_moves: 0 = use FIRST_WIN_D0_FALLBACK_MOVES default,
+    // <0 = skip the sweep, >0 = explicit cap.
     int fw_fallback_cap = FIRST_WIN_D0_FALLBACK_MOVES;
     if (worker->solver->first_win_fallback_moves > 0) {
       fw_fallback_cap = worker->solver->first_win_fallback_moves;

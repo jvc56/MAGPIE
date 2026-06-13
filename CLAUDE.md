@@ -54,6 +54,8 @@ Always use `{}` braces for `if`, `else if`, and `else` blocks, even when the bod
 
 **No forward declarations** — Never forward-declare a struct that is already defined in another module's header. Use `#include` to bring in that header instead. Forward declarations are only acceptable when the struct or function is defined in the same file.
 
+**Declare enum constants at file scope, never inside a function body.** Named constants belong with the other enum values, not buried where a reader can't find them. A constant shared across modules goes in the relevant `src/def/*_defs.h` header. A constant private to one `.c` file goes in that file's top-of-file anonymous `enum { ... }` block (see `src/impl/endgame.c`). An `enum { FOO = 12 };` declared inside a function is a bug — move it out.
+
 ## Naming
 
 Avoid single-character or terse variable names.
