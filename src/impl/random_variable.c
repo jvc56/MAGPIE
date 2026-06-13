@@ -509,7 +509,14 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Move *best_play = get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
-    play_move(best_play, game, NULL);
+    // On the final ply the resulting cross-sets are never read (no further move
+    // generation happens before game_unplay_last_move restores the board), so
+    // skip the cross-set update for that play.
+    if (ply == plies - 1) {
+      play_move_no_cross_set_update(best_play, game, NULL);
+    } else {
+      play_move(best_play, game, NULL);
+    }
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(

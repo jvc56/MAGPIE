@@ -541,7 +541,8 @@ void draw_starting_racks(const Game *game) {
 // Assumes the move has been validated
 // If the input leave rack is not null, it will record the leave of
 // the play in the leave rack.
-void play_move(const Move *move, Game *game, Rack *leave) {
+static void play_move_internal(const Move *move, Game *game, Rack *leave,
+                               bool update_cross_sets) {
   game_backup(game);
   const LetterDistribution *ld = game_get_ld(game);
   int player_on_turn_index = game_get_player_on_turn_index(game);
@@ -552,7 +553,12 @@ void play_move(const Move *move, Game *game, Rack *leave) {
     if (leave) {
       rack_copy(leave, player_on_turn_rack);
     }
-    update_cross_set_for_move(move, game);
+    // Cross-sets are scratch state used only by subsequent move generation.
+    // Callers that play a terminal move whose board state is immediately
+    // discarded (e.g. the final ply of a sim rollout) can skip this work.
+    if (update_cross_sets) {
+      update_cross_set_for_move(move, game);
+    }
     game_set_consecutive_scoreless_turns(game, 0);
 
     player_add_to_score(player_on_turn, move_get_score(move));
@@ -579,6 +585,17 @@ void play_move(const Move *move, Game *game, Rack *leave) {
     game_set_game_end_reason(game, GAME_END_REASON_CONSECUTIVE_ZEROS);
   }
   game_start_next_player_turn(game);
+}
+
+void play_move(const Move *move, Game *game, Rack *leave) {
+  play_move_internal(move, game, leave, true);
+}
+
+// Like play_move, but skips updating the board's cross-sets. Only safe when the
+// resulting position is not used for move generation before being unplayed
+// (which restores the cross-sets via the game backup).
+void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave) {
+  play_move_internal(move, game, leave, false);
 }
 
 void play_move_without_drawing_tiles(const Move *move, Game *game) {
