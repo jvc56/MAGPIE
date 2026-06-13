@@ -22,16 +22,6 @@
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
-#include <stdlib.h>
-
-// clang-tidy (cert-err34-c) flags atoi/atof for not reporting conversion
-// errors; these wrappers keep call sites terse while using strtol/strtod.
-static int passpeg_str_to_int(const char *str) {
-  return (int)strtol(str, NULL, 10);
-}
-static double passpeg_str_to_double(const char *str) {
-  return strtod(str, NULL);
-}
 
 // ---------------------------------------------------------------------------
 // Oracle eval: evaluate a fixed candidate move on a 1-in-bag PEG by direct
@@ -40,23 +30,15 @@ static double passpeg_str_to_double(const char *str) {
 // endgame depth.
 // ---------------------------------------------------------------------------
 void test_pass_peg_oracle_eval_move(void) {
-  // Default to passpeg position 1 (the lone disagreement vs macondo) and
-  // C6 REEST (macondo's "winner" tile play).
-  const char *default_cgp =
+  // Passpeg position 1 (the lone disagreement vs macondo) and C6 REEST
+  // (macondo's "winner" tile play). Hardcoded; edit here to probe another move.
+  const char *cgp =
       "ENTITy1YONIC2F/1A9H1AR/1P9U1TA/JELL7R1aY/1R1OVA3CON1V1/AI3GLAD2I1I1/"
       "BE5BOP1N1S1/OS4WOWING1TI/D4EH3U3N/E4XI3K1O1G/6Z3E1O1U/10DURAL/12I1F/"
       "12E1E/14D AEEMRST/AEEMRST 364/351 0";
-  const char *cgp_env = getenv("PASSPEG_ORACLE_CGP");
-  const char *cgp = cgp_env ? cgp_env : default_cgp;
-
-  const char *move_str_env = getenv("PASSPEG_ORACLE_MOVE");
-  const char *move_str = move_str_env ? move_str_env : "C6.REEST";
-
-  const char *plies_env = getenv("PASSPEG_ORACLE_PLIES");
-  int plies = plies_env ? passpeg_str_to_int(plies_env) : 12;
-
-  const char *time_env = getenv("PASSPEG_ORACLE_TIME");
-  double per_solve_time = time_env ? passpeg_str_to_double(time_env) : 30.0;
+  const char *move_str = "C6 REEST";
+  const int plies = 12;
+  const double per_solve_time = 30.0;
 
   Config *config = config_create_or_die("set -s1 score -s2 score");
   char load_cmd[10240];
