@@ -672,7 +672,7 @@ peg_pess_nested_run_scenario(PegPessSolver *s, const Game *base_state,
 //
 // Result is cached by info-state (board, our rack, unseen multiset, scoreless,
 // on-turn); value is the per-bag-sig verdict map for the leader cand.
-static PegPessOut peg_pess_nested_solve(PegPessSolver *s, MoveList *ml,
+static PegPessOut peg_pess_nested_solve(PegPessSolver *s, const MoveList *ml,
                                         const int *order, int n_cands) {
   s->n_nested_calls++;
   Game *g = s->game;
