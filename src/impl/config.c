@@ -2260,6 +2260,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
       total_tokens++;
     }
     assert(total_tokens == NUMBER_OF_ARG_TOKENS);
+    // total_tokens is read only by the assert above (compiled out in release).
+    (void)total_tokens;
   } else {
     add_help_arg_to_string_builder(config, help_arg_token, sb, false, false);
   }
