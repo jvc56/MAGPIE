@@ -1029,9 +1029,9 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       MachineLetter letter = tile_ml;
       if (is_blank) {
         letter = 0;
-        for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
-          if (board_is_letter_allowed_in_cross_set(combined, L)) {
-            letter = L;
+        for (MachineLetter ml = 1; ml < (MachineLetter)ld_size; ml++) {
+          if (board_is_letter_allowed_in_cross_set(combined, ml)) {
+            letter = ml;
             break;
           }
         }
