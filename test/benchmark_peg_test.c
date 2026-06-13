@@ -1,11 +1,18 @@
 #include "benchmark_peg_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/game_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -354,4 +361,78 @@ void test_benchmark_peg_3(void) {
 
 void test_benchmark_peg_4(void) {
   run_stage_table_utility("notes/peg_positions/random_4peg.txt", "4-peg", 50);
+}
+
+// ---------------------------------------------------------------------------
+// Fixture generator (on-demand): produce the random_{2,3,4}peg.txt position
+// files. random_{3,4}peg are consumed by the benchmarks above; random_2peg
+// documents the lineage of peg_poll_test's hardcoded position. Greedy self-play
+// from a random opening; whenever the bag drops to exactly `target_bag` tiles
+// with both players holding a full rack, the position is the canonical
+// K-in-bag PEG setup, so emit "<cgp> -lex CSW24" (the per-line lexicon the
+// loaders honor). Deterministic in the base seed.
+// ---------------------------------------------------------------------------
+
+// Greedy self-play until the bag holds exactly target_bag tiles with both
+// racks full. Returns false if the game ends first or the bag skips past
+// target_bag (a turn can draw several tiles at once).
+static bool play_until_bag_size(Game *game, MoveList *move_list,
+                                int target_bag) {
+  while (bag_get_letters(game_get_bag(game)) > target_bag) {
+    const Move *move = get_top_equity_move(game, move_list);
+    play_move(move, game, NULL);
+    if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+      return false;
+    }
+    if (bag_get_letters(game_get_bag(game)) < target_bag) {
+      return false; // overshot this target
+    }
+  }
+  if (bag_get_letters(game_get_bag(game)) != target_bag) {
+    return false;
+  }
+  const Rack *rack0 = player_get_rack(game_get_player(game, 0));
+  const Rack *rack1 = player_get_rack(game_get_player(game, 1));
+  return rack_get_total_letters(rack0) == RACK_SIZE &&
+         rack_get_total_letters(rack1) == RACK_SIZE;
+}
+
+static void generate_peg_cgps(uint64_t base_seed, int target_bag,
+                              int target_count, const char *outfile) {
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  MoveList *move_list = move_list_create(1);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  const int max_attempts = 2000000;
+  FILE *fp = fopen_or_die(outfile, "we");
+  int found = 0;
+  for (int attempt = 0; found < target_count && attempt < max_attempts;
+       attempt++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)attempt);
+    draw_starting_racks(game);
+    if (!play_until_bag_size(game, move_list, target_bag)) {
+      continue;
+    }
+    char *cgp = game_get_cgp(game, true);
+    (void)fprintf(fp, "%s -lex CSW24\n", cgp);
+    free(cgp);
+    found++;
+  }
+  (void)fclose(fp);
+  printf("[genpegcgps] %d-in-bag: %d/%d positions -> %s\n", target_bag, found,
+         target_count, outfile);
+  (void)fflush(stdout);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+void test_generate_peg_cgps(void) {
+  log_set_level(LOG_FATAL);
+  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt");
+  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt");
+  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt");
 }
