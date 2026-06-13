@@ -8,18 +8,18 @@
 #include "rack.h"
 #include <assert.h>
 
-// Maximum squares that can be modified by a single move.
-// This calculation assumes RACK_SIZE=7. Other factors (SmallMove encoding)
-// block endgame support for 8+ tile racks, so larger support is not needed.
-// A 7-tile move can affect:
-// - 7 tiles × 4 sub-boards for letters + is_cross_word = ~84
-// - Anchors: ~30 squares × 2 directions = ~60
-// - Lazy cross-set updates (saved into the same undo so unplay restores
-//   them): cross-set + extension-set squares around each tile's cross word
-//   plus the word's own row, ~60 per cross index — doubled when the players
-//   use different lexicons (both cross indices are regenerated): ~120
-// Total: ~265 worst case, round up to 384 for safety
-#define MAX_UNDO_SQUARE_CHANGES 384
+// Maximum squares that can be modified by a single move, including the lazy
+// cross-set updates saved into the same undo so unplay can restore them.
+//
+// Provable upper bound: every save goes through move_undo_save_square, which
+// deduplicates via saved_squares_bitmap — one bit per board square, indexed by
+// board_get_square_index() over [0, 2*2*BOARD_DIM*BOARD_DIM). A square is
+// recorded at most once, so num_square_changes can never exceed the number of
+// board squares, regardless of move shape, lexicon mode, or how many cross-set
+// squares a single lazy update touches. Sizing the array to that count makes
+// overflow impossible by construction (the assert below is unreachable).
+// Typical endgame moves save ~150; this is the hard ceiling, not the norm.
+#define MAX_UNDO_SQUARE_CHANGES (2 * 2 * BOARD_DIM * BOARD_DIM)
 
 typedef struct SquareChange {
   int16_t index; // flat index into Board.squares
