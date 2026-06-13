@@ -926,7 +926,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   bool best_dir_vertical = false;
   int best_start = 0; // leftmost col (H) or topmost row (V) of the word
   int best_play_length = 0;
-  MachineLetter best_letter = 0; // for blank: the letter the blank plays as
+  MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -1026,12 +1026,12 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         word_end--;
       }
 
-      MachineLetter letter = tile_ml;
+      MachineLetter chosen_ml = tile_ml;
       if (is_blank) {
-        letter = 0;
+        chosen_ml = 0;
         for (MachineLetter ml = 1; ml < (MachineLetter)ld_size; ml++) {
           if (board_is_letter_allowed_in_cross_set(combined, ml)) {
-            letter = ml;
+            chosen_ml = ml;
             break;
           }
         }
@@ -1043,7 +1043,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       best_dir_vertical = dir_vertical;
       best_start = word_start;
       best_play_length = word_end - word_start + 1;
-      best_letter = letter;
+      best_ml = chosen_ml;
     }
   }
 
@@ -1066,7 +1066,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_letter << 20;
+  uint64_t tm = (uint64_t)best_ml << 20;
   if (is_blank) {
     tm |= 1ULL << 12; // blank flag for tile index 0
   }
@@ -1134,8 +1134,9 @@ static int compute_played_tiles_face_value(const SmallMove *sm,
   int n = sm->metadata.tiles_played;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return face_value;
@@ -1151,8 +1152,9 @@ static int compute_conservation_bonus(const SmallMove *sm,
   int face_value = 0;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
@@ -1291,12 +1293,12 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
 
       bool tiles_match = true;
       for (int ti = 0; ti < len_a; ti++) {
-        uint8_t tile_a = move_get_tile(&mv_a, ti);
-        if (tile_a == PLAYED_THROUGH_MARKER) {
+        uint8_t ml_a = move_get_tile(&mv_a, ti);
+        if (ml_a == PLAYED_THROUGH_MARKER) {
           continue; // board tile, not placed by A
         }
-        uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
-        if (tile_a != tile_b) {
+        uint8_t ml_b = move_get_tile(&mv_b, ti + offset_in_b);
+        if (ml_a != ml_b) {
           tiles_match = false;
           break;
         }
