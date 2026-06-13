@@ -19,6 +19,16 @@
 // squares a single lazy update touches. Sizing the array to that count makes
 // overflow impossible by construction (the assert below is unreachable).
 // Typical endgame moves save ~150; this is the hard ceiling, not the norm.
+//
+// Memory: sizeof(MoveUndo) is ~35 KB at BOARD_DIM=15 (900 SquareChange slots
+// of 40 bytes each). An endgame worker holds 2*(MAX_SEARCH_DEPTH+1) undos, so
+// ~1.9 MB/worker — negligible beside the multi-hundred-MB transposition table.
+// The unused tail of square_changes[] is never written or read (move_undo_reset
+// clears only the bitmap, not the array; restore walks only num_square_changes
+// entries), so the working set tracks actual usage (~150), not the capacity —
+// the larger array does not change cache behavior, and measured solve times are
+// unchanged. A tight bound that beat this one would need to model the dedup
+// across overlapping save sites; not worth the fragility for the memory saved.
 #define MAX_UNDO_SQUARE_CHANGES (2 * 2 * BOARD_DIM * BOARD_DIM)
 
 typedef struct SquareChange {
