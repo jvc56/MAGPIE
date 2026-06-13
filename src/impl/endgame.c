@@ -961,9 +961,9 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
           continue;
         }
       } else {
-        // A blank is playable if any non-blank letter is permitted by the
-        // combined cross-set (bit 0 is the blank marker, so shift it out).
-        if (!(combined >> 1)) {
+        // A blank is playable if the combined cross-set permits any
+        // non-blank letter.
+        if (!board_cross_set_allows_any_letter(combined)) {
           continue;
         }
       }

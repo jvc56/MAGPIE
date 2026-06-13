@@ -511,6 +511,14 @@ static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
   return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
+// Returns true if the cross set permits at least one non-blank letter.
+// Bit 0 is the blank marker, not a letter, so it is shifted out: in an
+// intersection of cross sets the blank bit can survive even when no common
+// letter does.
+static inline bool board_cross_set_allows_any_letter(uint64_t cross_set) {
+  return (cross_set >> 1) != 0;
+}
+
 static inline bool board_is_dir_vertical(int dir) {
   return dir == BOARD_VERTICAL_DIRECTION;
 }
