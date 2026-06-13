@@ -3,9 +3,8 @@
 
 // Fast, self-contained smoke tests for the pre-endgame (PEG) solver that run
 // in the main suite (the heavier reference/benchmark coverage stays on-demand
-// in peg_pess_test / peg_greedy_bench_test / benchmark_peg_test). Each drives
-// the public peg_solve API on a known position via PegArgs.only_moves so the
-// cost is one candidate.
+// in peg_pess_test / benchmark_peg_test). Each drives the public peg_solve API
+// on a known position via PegArgs.only_moves so the cost is one candidate.
 void test_peg(void);
 
 // On-demand deep anchors (test.c keys peg1pb / peg1onyx / peg2axe / peg2acid /
