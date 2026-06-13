@@ -173,7 +173,6 @@ static TestEntry on_demand_test_table[] = {
     {"pegbench4", test_benchmark_peg_4},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
-    {"pegpessfull", test_pass_peg_pessimistic_full_eval},
     {"pegendgame", test_pass_peg_endgame_one},
     {NULL, NULL} // Sentinel value to mark end of array
 };

@@ -2,7 +2,6 @@
 
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
-#include "../src/compat/memory_info.h"
 #include "../src/def/board_defs.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/equity_defs.h"
@@ -95,15 +94,8 @@ static void peg_pess_enum_ordered_draws(
 // For each (cand, bag-ordering) pair, accumulate W/L/D. Report per-cand
 // win% = (wins + 0.5*draws) / total_orderings.
 //
-// Env vars (all required for the test):
-//   PASSPEG_PESSFULL_CGP       CGP string (with -lex)
-//   PASSPEG_PESSFULL_MOVE      mover's cand in MAGPIE notation
-//   PASSPEG_PESSFULL_PLIES     endgame_solve plies at the bag-empty leaf
-//                              (default 12)
-//   PASSPEG_PESSFULL_TIME      per-solve time budget (default 5)
-//   PASSPEG_PESSFULL_MAX_OPP_K cap opp move enumeration at top-K by score
-//                              (default 0 = no cap). Loose pessimistic if
-//                              set — opp may not be playing globally-best.
+// The solver is driven by a hardcoded PessFullArgs (see PessFullArgs and the
+// draw-fix regression below); it has no environment-variable interface.
 // ---------------------------------------------------------------------------
 
 typedef enum {
@@ -403,21 +395,6 @@ static PegPessOut peg_pess_base_case(PegPessSolver *s) {
   const bool time_this_solve = s->slow_solve_log_s > 0.0;
   if (time_this_solve) {
     ctimer_start(&slow_t);
-  }
-  if (s->slow_solve_log_s > 0.0) {
-    // Pre-solve capture: overwrite a temp file with the CGP we're about to
-    // solve. If a solve hangs (never returns), this file holds the culprit
-    // position. PASSPEG_PESSFULL_PRESOLVE_FILE selects the path.
-    const char *presolve_file = getenv("PASSPEG_PESSFULL_PRESOLVE_FILE");
-    if (presolve_file) {
-      char *pre_cgp = game_get_cgp(scratch, true);
-      FILE *pf = fopen(presolve_file, "we");
-      if (pf) {
-        (void)fprintf(pf, "%s\n", pre_cgp);
-        (void)fclose(pf);
-      }
-      free(pre_cgp);
-    }
   }
   endgame_solve_inline(s->eg_ctx_p, &ea, s->eg_results);
   if (time_this_solve) {
@@ -1368,93 +1345,6 @@ typedef struct PessFullArgs {
   bool use_nested_cache;
 } PessFullArgs;
 
-// Parse all PASSPEG_PESSFULL_* env vars into args, applying defaults. Pure
-// getenv parsing; no side effects beyond log_fatal on missing required vars.
-static void pessfull_parse_args(PessFullArgs *args) {
-  args->cgp = getenv("PASSPEG_PESSFULL_CGP");
-  if (!args->cgp || !*args->cgp) {
-    log_fatal("PASSPEG_PESSFULL_CGP must be set");
-  }
-  args->move_str = getenv("PASSPEG_PESSFULL_MOVE");
-  if (!args->move_str || !*args->move_str) {
-    log_fatal("PASSPEG_PESSFULL_MOVE must be set");
-  }
-  args->only_draw = getenv("PASSPEG_PESSFULL_ONLY_DRAW");
-  const char *plies_env = getenv("PASSPEG_PESSFULL_PLIES");
-  args->plies = plies_env && *plies_env ? passpeg_str_to_int(plies_env) : 12;
-  const char *time_env = getenv("PASSPEG_PESSFULL_TIME");
-  args->per_solve_time =
-      time_env && *time_env ? passpeg_str_to_double(time_env) : 5.0;
-  const char *opp_k_env = getenv("PASSPEG_PESSFULL_MAX_OPP_K");
-  args->max_opp_k = opp_k_env && *opp_k_env ? passpeg_str_to_int(opp_k_env) : 0;
-  // Endgame TT size in MB. Default 1024 MB. 0 = disabled.
-  const char *tt_env = getenv("PASSPEG_PESSFULL_TT_MB");
-  args->tt_mb = tt_env && *tt_env ? passpeg_str_to_int(tt_env) : 1024;
-  const uint64_t total_mem = get_total_memory();
-  args->tt_fraction_of_mem =
-      args->tt_mb > 0
-          ? ((double)args->tt_mb * 1024.0 * 1024.0) / (double)total_mem
-          : 0.0;
-  // PASSPEG_PESSFULL_TT_SHARED: when set, allocate ONE TT of tt_mb total and
-  // share it across all workers (lockless). Otherwise each worker gets its
-  // own tt_mb-sized TT. Shared captures cross-ordering reuse without tying
-  // it to worker assignment, so per-ordering dispatch stays load-balanced.
-  const char *tt_shared_env = getenv("PASSPEG_PESSFULL_TT_SHARED");
-  args->tt_shared = tt_shared_env && passpeg_str_to_int(tt_shared_env) > 0;
-  // Move-ordering keys (0=score default, 1=equity, 2=tiles-then-score,
-  // 3=tiles-then-equity), nested sub-perm sort, word-prune skip, first_win,
-  // slow-solve CGP logging. All verdict-invariant (skip_word_pruning has no
-  // verdict effect).
-  const char *opp_sort_env = getenv("PASSPEG_PESSFULL_OPP_SORT");
-  args->opp_sort_mode = opp_sort_env ? passpeg_str_to_int(opp_sort_env) : 0;
-  const char *mover_sort_env = getenv("PASSPEG_PESSFULL_MOVER_SORT");
-  args->mover_sort_mode =
-      mover_sort_env ? passpeg_str_to_int(mover_sort_env) : 0;
-  const char *subperm_env = getenv("PASSPEG_PESSFULL_SUBPERM_SORT");
-  args->subperm_sort = subperm_env && passpeg_str_to_int(subperm_env) > 0;
-  const char *skip_wp_env = getenv("PASSPEG_PESSFULL_SKIP_WORD_PRUNE");
-  args->skip_word_pruning = skip_wp_env && passpeg_str_to_int(skip_wp_env) > 0;
-  const char *slow_env = getenv("PASSPEG_PESSFULL_SLOW_SOLVE_S");
-  args->slow_solve_log_s = slow_env ? passpeg_str_to_double(slow_env) : 0.0;
-  // first_win: endgame solves use a narrow [-1,+1] window (sign only). This is
-  // correct for pessimistic W/L/D classification (we only consume the spread's
-  // sign, and the window still distinguishes win/loss/draw) and verdict-
-  // invariant vs a full-spread solve, but far cheaper — so it is the default.
-  // Set PASSPEG_PESSFULL_FIRST_WIN=0 to force full-spread endgame solves.
-  const char *first_win_env = getenv("PASSPEG_PESSFULL_FIRST_WIN");
-  args->first_win =
-      first_win_env ? passpeg_str_to_int(first_win_env) > 0 : true;
-  // Per-solve endgame thread count. Default 1. For single-ordering (ONLY_DRAW)
-  // investigation, set >1 to parallelize each endgame solve across cores.
-  const char *eg_threads_env = getenv("PASSPEG_PESSFULL_ENDGAME_THREADS");
-  args->endgame_threads =
-      eg_threads_env && passpeg_str_to_int(eg_threads_env) > 0
-          ? passpeg_str_to_int(eg_threads_env)
-          : 1;
-  const char *threads_env = getenv("PASSPEG_PESSFULL_THREADS");
-  args->n_threads =
-      threads_env && *threads_env ? passpeg_str_to_int(threads_env) : 18;
-  const char *sort_env = getenv("PASSPEG_PESSFULL_SORT");
-  args->do_sort =
-      sort_env && *sort_env ? passpeg_str_to_int(sort_env) > 0 : true;
-  const char *nested_env = getenv("PASSPEG_PESSFULL_NESTED");
-  args->nested_our_turn =
-      nested_env && *nested_env ? passpeg_str_to_int(nested_env) > 0 : false;
-  const char *nested_depth_env = getenv("PASSPEG_PESSFULL_NESTED_DEPTH");
-  args->nested_depth_limit = nested_depth_env && *nested_depth_env
-                                 ? passpeg_str_to_int(nested_depth_env)
-                                 : 1;
-  const char *nested_k_env = getenv("PASSPEG_PESSFULL_NESTED_K");
-  args->nested_mover_k =
-      nested_k_env && *nested_k_env ? passpeg_str_to_int(nested_k_env) : 0;
-  // Shared endgame-state cache toggle (default on).
-  const char *cache_env = getenv("PASSPEG_PESSFULL_CACHE");
-  args->use_cache = !cache_env || passpeg_str_to_int(cache_env) > 0;
-  // Macondo-style nested verdict-map cache toggle (default on).
-  const char *ncache_env = getenv("PASSPEG_PESSFULL_NESTED_CACHE");
-  args->use_nested_cache = !ncache_env || passpeg_str_to_int(ncache_env) > 0;
-}
-
 // Compute opp_top_score for each materialized ordering and insertion-sort them
 // by opp_top_score (desc) so first-loss-style cutoffs fire sooner. Logs timing
 // and the top/bottom opp_top_score. Single-threaded pre-pass.
@@ -1706,24 +1596,6 @@ static PegPessFullAccum pessfull_run(const PessFullArgs *args) {
                             opp_idx, move);
   }
 
-  // Optional: dump materialized orderings (idx, weight, opp_top_score, draw)
-  // and exit. Used to reconstruct weighted win% from an interrupted run.
-  if (getenv("PASSPEG_PESSFULL_DUMP_ORDERINGS")) {
-    for (int oi = 0; oi < mc.n_orderings; oi++) {
-      const PegPessOrdering *o = &orderings[oi];
-      (void)fprintf(stderr,
-                    "[pessfull-dump] ord %3d  weight=%lld  opp_top=%d  draw=",
-                    oi + 1, (long long)o->weight, o->opp_top_score);
-      for (int i = 0; i < o->n; i++) {
-        (void)fprintf(stderr, "%02d%s", o->draw[i], (i + 1 < o->n) ? "_" : "");
-      }
-      (void)fputc('\n', stderr);
-    }
-    free(orderings);
-    config_destroy(config);
-    return (PegPessFullAccum){0};
-  }
-
   // Optional: solve only ONE ordering, selected by its draw signature
   // (underscore-joined two-digit machine letters, e.g. "05_09_01"). Lets us
   // reproduce/inspect a single straggler in isolation.
@@ -1757,13 +1629,12 @@ static PegPessFullAccum pessfull_run(const PessFullArgs *args) {
       }
     }
     if (found < 0) {
-      log_fatal("PASSPEG_PESSFULL_ONLY_DRAW=%s matched no ordering",
-                only_draw_env);
+      log_fatal("only_draw=%s matched no ordering", only_draw_env);
     }
     orderings[0] = orderings[found];
     mc.n_orderings = 1;
     (void)fprintf(stderr,
-                  "[pessfull] ONLY_DRAW=%s → solving 1 ordering in isolation\n",
+                  "[pessfull] only_draw=%s → solving 1 ordering in isolation\n",
                   only_draw_env);
   }
 
@@ -1772,7 +1643,7 @@ static PegPessFullAccum pessfull_run(const PessFullArgs *args) {
 
   // Macondo-style nested verdict-map cache. Key on info-state; value is the
   // leader cand's per-bag-sig outcome map. 2^18 entries with small dynamic
-  // maps inside. Toggle via PASSPEG_PESSFULL_NESTED_CACHE (default on).
+  // maps inside. Toggled by PessFullArgs.use_nested_cache (default on).
   PegNestedCache *nested_cache =
       use_nested_cache ? peg_nested_cache_create(1U << 18) : NULL;
 
@@ -1930,13 +1801,6 @@ static PegPessFullAccum pessfull_run(const PessFullArgs *args) {
   error_stack_destroy(parse_err);
   config_destroy(config);
   return acc;
-}
-
-// On-demand entry: parse PASSPEG_PESSFULL_* env vars and run the full eval.
-void test_pass_peg_pessimistic_full_eval(void) {
-  PessFullArgs args;
-  pessfull_parse_args(&args);
-  (void)pessfull_run(&args);
 }
 
 // Regression test for the pre-endgame drawing fix: in a non-empty-bag descent,

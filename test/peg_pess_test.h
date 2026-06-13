@@ -6,19 +6,11 @@
 // with the production solver in src/impl/peg.c: it recursively solves both
 // sides over perfect-information ordered draws, so it can chase macondo's
 // exact guaranteed-win numbers at depth, where the production
-// PEG_OPP_PESSIMISTIC model is only a 1-ply adversarial playout. Used to
-// cross-validate production results and study macondo parity.
-
-// Full pessimistic evaluation of one candidate move over every ordered draw
-// of the bag tiles. Env knobs (PASSPEG_PESSFULL_*): CGP and MOVE (required),
-// PLIES, MAX_OPP_K, TT_MB, TT_SHARED, OPP_SORT, MOVER_SORT, SUBPERM_SORT,
-// SKIP_WORD_PRUNING, THREADS, SPLIT_OPP, RECURSIVE_SPLIT, FORCE_NESTED_PERM,
-// FIRST_WIN, EG_THREADS, NESTED (+_DEPTH/_K), CACHE, NESTED_CACHE,
-// SLOW_SOLVE_LOG_S, IDLE_PROBE_S, RUNG4_PROBE_S, GROUP_BY_FIRST, WANT_DRAW.
-void test_pass_peg_pessimistic_full_eval(void);
+// PEG_OPP_PESSIMISTIC model is only a 1-ply adversarial playout. Retained as
+// the engine behind the draw-fix CI regression below.
 
 // Fast CI regression test for the pre-endgame drawing fix (one tiny
-// pessimistic case, no env vars). Asserts mover WIN (1/0/0).
+// pessimistic case, hardcoded). Asserts mover WIN (1/0/0).
 void test_peg_pessfull_draw_regression(void);
 
 // Sanity probe: a single endgame_solve on one pessimistic scenario.
