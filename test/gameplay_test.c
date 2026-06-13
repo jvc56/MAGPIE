@@ -1,4 +1,7 @@
+#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
@@ -6,17 +9,20 @@
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/move_undo.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
 #include <stdio.h>
+#include <string.h>
 
 void return_racks_to_bag(const Game *game) {
   return_rack_to_bag(game, 0);
@@ -780,6 +786,110 @@ void test_moves_are_similar(void) {
   config_destroy(config);
 }
 
+// Bag-empty endgame position (no lexicon option so it loads under any
+// english-distribution config).
+#define INCREMENTAL_ROUNDTRIP_ENDGAME_CGP                                      \
+  "5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"              \
+  "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
+  "4RENEGADE2P CDIOST?/AIINOOU 450/392 0"
+
+// Round-trip invariant the endgame solver relies on instead of recomputing
+// cross-sets after unplay: play_move_incremental, then the lazy
+// update_cross_set_for_move_from_undo a descendant node performs before move
+// generation, then unplay_move_incremental must restore the board (letters,
+// cross sets, cross scores, extension sets, anchors, flags) byte-for-byte.
+static void assert_incremental_play_roundtrip(Game *game) {
+  game_gen_all_cross_sets(game);
+  Board *board = game_get_board(game);
+  board_set_cross_sets_valid(board, true);
+  Game *snapshot = game_duplicate(game);
+  const Board *snapshot_board = game_get_board(snapshot);
+
+  MoveList *move_list = move_list_create(30);
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&args);
+  SortedMoveList *sml = sorted_move_list_create(move_list);
+
+  MoveUndo undo;
+  int tested_vertical = 0;
+  int tested_horizontal = 0;
+  for (int move_idx = 0; move_idx < sml->count; move_idx++) {
+    const Move *move = sml->moves[move_idx];
+    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    play_move_incremental(move, game, &undo);
+    // Mirror the endgame solver's descendant node: bring cross-sets up to
+    // date from the parent's undo before (hypothetical) move generation.
+    if (undo.move_tiles_length > 0) {
+      update_cross_set_for_move_from_undo(&undo, game);
+      board_set_cross_sets_valid(board, true);
+    }
+    unplay_move_incremental(game, &undo);
+
+    assert(memcmp(board->squares, snapshot_board->squares,
+                  sizeof(board->squares)) == 0);
+    assert(board_get_cross_sets_valid(board) ==
+           board_get_cross_sets_valid(snapshot_board));
+    assert(board_get_tiles_played(board) ==
+           board_get_tiles_played(snapshot_board));
+    assert(memcmp(board->number_of_row_anchors,
+                  snapshot_board->number_of_row_anchors,
+                  sizeof(board->number_of_row_anchors)) == 0);
+    if (board_is_dir_vertical(move_get_dir(move))) {
+      tested_vertical++;
+    } else {
+      tested_horizontal++;
+    }
+  }
+  // The position must exercise both branches of the transposed lazy update.
+  assert(tested_vertical > 0);
+  assert(tested_horizontal > 0);
+
+  // A pass round-trips too (no tiles: nothing to update, flags restored).
+  Move pass;
+  move_set_as_pass(&pass);
+  play_move_incremental(&pass, game, &undo);
+  unplay_move_incremental(game, &undo);
+  assert(memcmp(board->squares, snapshot_board->squares,
+                sizeof(board->squares)) == 0);
+  assert(game_get_consecutive_scoreless_turns(game) ==
+         game_get_consecutive_scoreless_turns(snapshot));
+
+  sorted_move_list_destroy(sml);
+  move_list_destroy(move_list);
+  game_destroy(snapshot);
+}
+
+void test_incremental_cross_set_undo(void) {
+  // Shared-KWG (single lexicon): only cross index 0 is maintained.
+  Config *config = config_create_or_die("set -lex CSW21 -s1 score -s2 score");
+  Game *game = config_game_create(config);
+  load_cgp_or_die(game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
+  assert_incremental_play_roundtrip(game);
+  game_destroy(game);
+  config_destroy(config);
+
+  // Dual-lexicon (non-shared KWGs): the lazy update regenerates both cross
+  // indices, so the undo must capture both.
+  Config *dual_config =
+      config_create_or_die("set -l1 CSW21 -l2 NWL20 -s1 score -s2 score");
+  Game *dual_game = config_game_create(dual_config);
+  load_cgp_or_die(dual_game, INCREMENTAL_ROUNDTRIP_ENDGAME_CGP);
+  assert_incremental_play_roundtrip(dual_game);
+  game_destroy(dual_game);
+  config_destroy(dual_config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -791,4 +901,5 @@ void test_gameplay(void) {
   test_backups();
   test_leave_record();
   test_moves_are_similar();
+  test_incremental_cross_set_undo();
 }
