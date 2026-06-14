@@ -13,12 +13,14 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
+#include "../ent/word_info_table.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
 #include "wmp_maker.h"
+#include "word_info_table_maker.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -240,6 +242,27 @@ void convert_with_names(const LetterDistribution *ld,
     free(rit_output_filename);
     wmp_destroy(wmp);
     klv_destroy(klv);
+  } else if (conversion_type == CONVERT_KWG2WIT) {
+    KWG *kwg = kwg_create(data_paths, input_name, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      char *wit_output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+          error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+        word_info_table_write_to_file(wit, wit_output_filename, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+              get_formatted_string(
+                  "could not write word info table to output file: %s",
+                  wit_output_filename));
+        }
+        word_info_table_destroy(wit);
+      }
+      free(wit_output_filename);
+    }
+    kwg_destroy(kwg);
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
@@ -270,6 +293,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_DAWG2WORDMAP;
   } else if (strings_equal(conversion_type_string, "klvwmp2rit")) {
     conversion_type = CONVERT_KLVWMP2RIT;
+  } else if (strings_equal(conversion_type_string, "kwg2wit")) {
+    conversion_type = CONVERT_KWG2WIT;
   }
   return conversion_type;
 }

@@ -9,6 +9,7 @@
 //   SIMBENCH_PLIES  sim depth (default 2)
 //   SIMBENCH_MI     -minplayiterations (default 100000)
 //   SIMBENCH_RIT    "true" / "false" — toggles the RIT file (default true)
+//   SIMBENCH_WIT    "true" / "false" — toggles the WIT file (default false)
 
 #include "sim_benchmark_test.h"
 
@@ -18,7 +19,6 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
 #include <time.h>
 
 void test_sim_benchmark(void) {
@@ -41,13 +41,16 @@ void test_sim_benchmark(void) {
   const char *rit = (rit_env != NULL) ? rit_env : "true";
   const char *wmp_env = getenv("SIMBENCH_WMP");
   const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
+  const char *wit_env = getenv("SIMBENCH_WIT");
+  const char *wit = (wit_env != NULL) ? wit_env : "false";
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex CSW24 -wmp %s -rit %s -s1 equity -s2 equity "
+                 "set -lex CSW24 -wmp %s -rit %s -wit %s -s1 equity -s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads 10 -tlim 2 "
                  "-seed 42 -sr tt -minplayiterations %s",
-                 wmp, rit, plies, mi);
+                 wmp, rit, wit, plies, mi);
   Config *config = config_create_or_die(cmd);
+
   load_and_exec_config_or_die(config, "autoplay games 1");
 
   clock_gettime(CLOCK_MONOTONIC, &end);
