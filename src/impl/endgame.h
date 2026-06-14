@@ -15,6 +15,7 @@
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include <stdint.h>
 
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
@@ -85,6 +86,18 @@ typedef struct EndgameArgs {
   // sweep entirely, >0 = evaluate at most this many top moves. Ignored unless
   // first_win is set.
   int first_win_fallback_moves;
+  // Generalization of first_win: search every iterative-deepening pass
+  // with the fixed window [initial_alpha, initial_beta] (in final-spread
+  // units for the solving player, i.e. PVLine score plus the initial
+  // spread) and disable aspiration windows. The solve then answers how
+  // the exact value relates to the window instead of computing it: a
+  // returned value >= initial_beta is a lower bound and a value <=
+  // initial_alpha is an upper bound. A null window [x, x+1] proves
+  // whether the exact value exceeds x. first_win is equivalent to a
+  // [-1, 1] window.
+  bool use_initial_window;
+  int32_t initial_alpha;
+  int32_t initial_beta;
   // Absolute monotonic-ns deadline (ctimer_monotonic_ns()-compatible). If
   // non-zero, workers bail out mid-search once now > deadline. Lets a
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
