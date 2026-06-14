@@ -257,8 +257,12 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
   int a_optimal = 0;
   int b_optimal = 0;
   int solved = 0;
-  double sum_t_a = 0, max_t_a = 0, sum_t_b = 0, max_t_b = 0, sum_t_o = 0,
-         max_t_o = 0;
+  double sum_t_a = 0;
+  double max_t_a = 0;
+  double sum_t_b = 0;
+  double max_t_b = 0;
+  double sum_t_o = 0;
+  double max_t_o = 0;
 
   for (int ci = 0; ci < num_cgps; ci++) {
     char *cmd = get_formatted_string("cgp %s", cgp_lines[ci]);
