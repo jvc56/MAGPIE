@@ -525,17 +525,18 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
 
 void test_generate_peg_cgps(void) {
   log_set_level(LOG_FATAL);
-  // 1-in-bag: 100 CONTESTED positions (win% in [5,95] by a quick solve). At
-  // this bag count ~80% of random positions are already decided and the score
-  // margin can't tell them apart, so the solve-based filter is required.
+  // All bag counts use CONTESTED positions only (best-move win% in [5,95] by a
+  // quick pre-filter solve), so the four utility-loss tables are comparable.
+  // Without it, ~80% of random 1-2 in-bag positions are already decided (move
+  // choice is moot), and the score margin can't separate decided from contested
+  // at low bag, so the solve-based filter is required. 1-in-bag uses 100
+  // positions (it is cheap, ~85s/solve); 2-4 use 25 (their oracle is slow).
   generate_peg_cgps(10241, 1, 100, "notes/peg_positions/random_1peg.txt",
                     /*append=*/false, /*contested_only=*/true);
-  // 2-4 in-bag: unfiltered random sample (their contested fraction is high
-  // enough, and the full benchmark over them is slow to rerun).
-  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt",
-                    /*append=*/false, /*contested_only=*/false);
-  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt",
-                    /*append=*/false, /*contested_only=*/false);
-  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt",
-                    /*append=*/false, /*contested_only=*/false);
+  generate_peg_cgps(20242, 2, 25, "notes/peg_positions/random_2peg.txt",
+                    /*append=*/false, /*contested_only=*/true);
+  generate_peg_cgps(30243, 3, 25, "notes/peg_positions/random_3peg.txt",
+                    /*append=*/false, /*contested_only=*/true);
+  generate_peg_cgps(40244, 4, 25, "notes/peg_positions/random_4peg.txt",
+                    /*append=*/false, /*contested_only=*/true);
 }
