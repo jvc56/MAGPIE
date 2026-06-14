@@ -159,11 +159,11 @@ void gen_destroy_cache(void) {
 // Cache getter functions
 
 static inline MachineLetter gen_cache_get_letter(const MoveGen *gen, int col) {
-  return square_get_letter(&gen->row_cache[col]);
+  return square_get_letter(&gen->row_squares[col]);
 }
 
 static inline bool gen_cache_get_is_anchor(const MoveGen *gen, int col) {
-  return square_get_anchor(&gen->row_cache[col]);
+  return square_get_anchor(&gen->row_squares[col]);
 }
 
 static inline int gen_cache_is_empty(const MoveGen *gen, int col) {
@@ -171,30 +171,30 @@ static inline int gen_cache_is_empty(const MoveGen *gen, int col) {
 }
 
 static inline bool gen_cache_get_is_cross_word(const MoveGen *gen, int col) {
-  return square_get_is_cross_word(&gen->row_cache[col]);
+  return square_get_is_cross_word(&gen->row_squares[col]);
 }
 
 static inline BonusSquare gen_cache_get_bonus_square(const MoveGen *gen,
                                                      int col) {
-  return square_get_bonus_square(&gen->row_cache[col]);
+  return square_get_bonus_square(&gen->row_squares[col]);
 }
 
 static inline uint64_t gen_cache_get_cross_set(const MoveGen *gen, int col) {
-  return square_get_cross_set(&gen->row_cache[col]);
+  return square_get_cross_set(&gen->row_squares[col]);
 }
 
 static inline Equity gen_cache_get_cross_score(const MoveGen *gen, int col) {
-  return square_get_cross_score(&gen->row_cache[col]);
+  return square_get_cross_score(&gen->row_squares[col]);
 }
 
 static inline uint64_t gen_cache_get_left_extension_set(const MoveGen *gen,
                                                         int col) {
-  return square_get_left_extension_set(&gen->row_cache[col]);
+  return square_get_left_extension_set(&gen->row_squares[col]);
 }
 
 static inline uint64_t gen_cache_get_right_extension_set(const MoveGen *gen,
                                                          int col) {
-  return square_get_right_extension_set(&gen->row_cache[col]);
+  return square_get_right_extension_set(&gen->row_squares[col]);
 }
 
 static inline Equity gen_get_static_equity(const MoveGen *gen,
@@ -915,7 +915,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     }
   }
 
-  wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_cache);
+  wmp_move_gen_set_playthrough_bit_rack(wgen, anchor, gen->row_squares,
+                                        gen->wit_row_lane, gen->wit_len_lane);
   wmp_move_gen_playthrough_subracks_init(wgen, anchor);
 
   assert(anchor->leftmost_start_col <= anchor->rightmost_start_col);
@@ -923,6 +924,38 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+
+  // Word info table prune, lifted entirely out of the loops below. The block
+  // scan in wmp_move_gen_set_playthrough_bit_rack already AND-folded each
+  // playthrough block's letter set at this word length into
+  // wgen->playthrough_addable: every placed tile must be one of those letters.
+  // So the rack must supply tiles_to_play tiles that are each addable (blanks
+  // are wild). Count the rack tiles that are NOT placeable -- present non-blank
+  // letters outside addable, usually just a couple of set bits -- and skip the
+  // whole anchor if too few remain. The blocks (hence addable) are the same for
+  // every start column, so this rules out every candidate play at once.
+  if (gen->word_info_table != NULL && anchor->playthrough_blocks > 0) {
+    const uint32_t letter_universe =
+        (uint32_t)((1u << ld_get_size(&gen->ld)) - 1) & ~1u;
+    const uint32_t addable = wgen->playthrough_addable & letter_universe;
+    if (addable == 0) {
+      return;
+    }
+    const uint32_t rack_present =
+        (uint32_t)gen->rack_cross_set & letter_universe;
+    uint32_t forbidden = rack_present & ~addable;
+    int forbidden_count = 0;
+    while (forbidden != 0) {
+      forbidden_count += rack_get_letter(
+          &gen->player_rack, (MachineLetter)__builtin_ctz(forbidden));
+      forbidden &= forbidden - 1;
+    }
+    if (gen->number_of_letters_on_rack - forbidden_count <
+        anchor->tiles_to_play) {
+      return;
+    }
+  }
+
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
     if (gen->number_of_tiles_in_bag > 0) {
@@ -2676,8 +2709,12 @@ void shadow_by_orientation(MoveGen *gen) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
-                         gen->current_row_index, gen->dir);
+    gen->row_squares =
+        board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+    gen->wit_row_lane = board_get_wit_row_lane(
+        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
+    gen->wit_len_lane = board_get_wit_len_lane(
+        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor(gen, col);
@@ -2701,8 +2738,12 @@ void shadow_by_orientation_small(MoveGen *gen) {
       continue;
     }
     gen->last_anchor_col = INITIAL_LAST_ANCHOR_COL;
-    board_copy_row_cache(gen->lanes_cache, gen->row_cache,
-                         gen->current_row_index, gen->dir);
+    gen->row_squares =
+        board_get_row_cache(gen->board_lanes, gen->current_row_index, gen->dir);
+    gen->wit_row_lane = board_get_wit_row_lane(
+        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
+    gen->wit_len_lane = board_get_wit_len_lane(
+        gen->board, gen->current_row_index, gen->dir, gen->cross_index);
     for (int col = 0; col < BOARD_DIM; col++) {
       if (gen_cache_get_is_anchor(gen, col)) {
         shadow_play_for_anchor_small(gen, col);
@@ -2803,6 +2844,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     }
   }
   gen->rack_info_table = new_rit;
+  gen->word_info_table = player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
@@ -2884,7 +2926,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   board_load_number_of_row_anchors_cache(gen->board,
                                          gen->row_number_of_anchors_cache);
-  gen->lanes_cache = board_get_readonly_lanes(gen->board, gen->cross_index);
+  gen->board_lanes = board_get_readonly_lanes(gen->board, gen->cross_index);
 
   // opening_move_penalties is read only by gen_get_static_equity (the
   // equity-recording paths). The endgame's small-record movegen types never
@@ -3090,7 +3132,11 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
         continue;
       }
       gen->current_row_index = row;
-      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+      gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
+      gen->wit_row_lane =
+          board_get_wit_row_lane(gen->board, row, dir, gen->cross_index);
+      gen->wit_len_lane =
+          board_get_wit_len_lane(gen->board, row, dir, gen->cross_index);
 
       int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
       for (int col = 0; col < BOARD_DIM; col++) {
@@ -3145,8 +3191,12 @@ void gen_record_scoring_plays(MoveGen *gen) {
     if ((gen->current_row_index != anchor.row) || (gen->dir != anchor.dir)) {
       gen->current_row_index = anchor.row;
       gen->dir = anchor.dir;
-      board_copy_row_cache(gen->lanes_cache, gen->row_cache, anchor.row,
-                           anchor.dir);
+      gen->row_squares =
+          board_get_row_cache(gen->board_lanes, anchor.row, anchor.dir);
+      gen->wit_row_lane = board_get_wit_row_lane(gen->board, anchor.row,
+                                                 anchor.dir, gen->cross_index);
+      gen->wit_len_lane = board_get_wit_len_lane(gen->board, anchor.row,
+                                                 anchor.dir, gen->cross_index);
     }
     gen->last_anchor_col = anchor.last_anchor_col;
     gen->anchor_right_extension_set =

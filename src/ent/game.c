@@ -16,6 +16,7 @@
 #include "player.h"
 #include "players_data.h"
 #include "rack.h"
+#include "word_info_table.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -255,6 +256,37 @@ static inline const KWG *get_kwg_for_cross_set(const Game *game,
   return player_get_kwg(game_get_player(game, cross_set_index));
 }
 
+// The word info table parallel to get_kwg_for_cross_set. Returns NULL when no
+// table is loaded or when an override KWG is in use (endgame/word-prune runs a
+// reduced word list the full-lexicon table does not match), in which case the
+// board caches no WIT block rows and move generation falls back to no pruning.
+static inline const WordInfoTable *
+get_word_info_table_for_cross_set(const Game *game, int cross_set_index) {
+  if (game->override_kwgs[0] != NULL) {
+    return NULL;
+  }
+  return player_get_word_info_table(game_get_player(game, cross_set_index));
+}
+
+// Computes and caches the word info table value-row pointer for the block of
+// tiles [block_left, block_right] on `row` (this orientation), keyed to the
+// block's leftmost square in the word direction. Move generation reads it with
+// no per-call lookup. See Square.wit_block_row.
+static inline void game_store_wit_block(const WordInfoTable *wit, Board *board,
+                                        int row, int block_left,
+                                        int block_right, int through_dir,
+                                        int csi) {
+  MachineLetter block[BOARD_DIM];
+  int len = 0;
+  for (int block_col = block_left; block_col <= block_right; block_col++) {
+    block[len++] =
+        get_unblanked_machine_letter(board_get_letter(board, row, block_col));
+  }
+  const uint32_t *block_row = word_info_table_lookup(wit, block, len);
+  board_set_wit_block(board, row, block_left, through_dir, csi, block_row,
+                      (uint8_t)len);
+}
+
 static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
                                             int dir, int cross_set_index) {
   if (!board_is_position_in_bounds(row, col)) {
@@ -334,6 +366,21 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
       board_get_word_edge(board, row, col - 1, WORD_DIRECTION_LEFT);
   const int right_col =
       board_get_word_edge(board, row, col + 1, WORD_DIRECTION_RIGHT);
+
+  // Cache word info table block rows for the blocks flanking this empty square,
+  // keyed to each block's leftmost square in the word (through) direction.
+  const WordInfoTable *wit =
+      get_word_info_table_for_cross_set(game, cross_set_index);
+  if (wit != NULL) {
+    if (left_col < col) {
+      game_store_wit_block(wit, board, row, left_col, col - 1, through_dir,
+                           cross_set_index);
+    }
+    if (right_col > col) {
+      game_store_wit_block(wit, board, row, col + 1, right_col, through_dir,
+                           cross_set_index);
+    }
+  }
   Equity score = 0;
   uint64_t front_hook_set = 0;
   uint64_t back_hook_set = 0;

@@ -31,6 +31,14 @@ typedef struct Board {
   // - One pair for each direction
   // - One pair for each cross index
   Square squares[2 * 2 * BOARD_DIM * BOARD_DIM];
+  // Word info table data parallel to squares[] (kept out of the hot Square so
+  // move generation's per-square scan stays cache-dense). For a square that is
+  // a block's leftmost tile in its direction, wit_block_rows holds that block's
+  // value row (entry i = letters in any length-(wit_block_lens + i) word that
+  // contains the block) and wit_block_lens its length. NULL/0 otherwise.
+  // Computed with cross sets, invalidated through the same tracked update.
+  const uint32_t *wit_block_rows[2 * 2 * BOARD_DIM * BOARD_DIM];
+  uint8_t wit_block_lens[2 * 2 * BOARD_DIM * BOARD_DIM];
   // Stores the penalties to be applied to
   // the opening move for each square in both
   // horizontal and vertical directions if the
@@ -401,6 +409,34 @@ board_set_right_extension_set_with_blank(Board *b, int row, int col, int dir,
       right_extension_set_with_blank);
 }
 
+static inline void board_set_wit_block(Board *b, int row, int col, int dir,
+                                       int csi, const uint32_t *row_ptr,
+                                       uint8_t len) {
+  const int index = board_get_square_index(b, row, col, dir, csi);
+  b->wit_block_rows[index] = row_ptr;
+  b->wit_block_lens[index] = len;
+}
+
+// Returns pointers into the WIT parallel arrays for the lane at row_or_col in
+// `dir`/`csi`, mirroring board_get_row_cache: index [i] is the square at
+// position i along the lane (stride 1, transposition handled by
+// get_square_index).
+static inline const uint32_t *const *
+board_get_wit_row_lane(const Board *b, int row_or_col, int dir, int csi) {
+  const int row = (dir == BOARD_HORIZONTAL_DIRECTION) ? row_or_col : 0;
+  const int col = (dir == BOARD_HORIZONTAL_DIRECTION) ? 0 : row_or_col;
+  return &b->wit_block_rows[get_square_index(b->transposed, row, col, dir,
+                                             csi)];
+}
+
+static inline const uint8_t *
+board_get_wit_len_lane(const Board *b, int row_or_col, int dir, int csi) {
+  const int row = (dir == BOARD_HORIZONTAL_DIRECTION) ? row_or_col : 0;
+  const int col = (dir == BOARD_HORIZONTAL_DIRECTION) ? 0 : row_or_col;
+  return &b->wit_block_lens[get_square_index(b->transposed, row, col, dir,
+                                             csi)];
+}
+
 // This bypasses the modification of the number of row anchors and
 // should only be used when resetting the board. Do not use this when
 // updating the board after a play.
@@ -719,6 +755,13 @@ static inline void board_reset(Board *board) {
   board_set_all_crosses(board);
   board_reset_all_cross_scores(board);
   board_update_all_anchors(board);
+
+  // Clear the WIT parallel arrays so that, when no word info table is loaded,
+  // move generation reads NULL block rows (skipping the prune) instead of
+  // stale pointers. With a table loaded these are repopulated by the cross-set
+  // computation as tiles are played.
+  memset(board->wit_block_rows, 0, sizeof(board->wit_block_rows));
+  memset(board->wit_block_lens, 0, sizeof(board->wit_block_lens));
 }
 
 static inline void update_opening_penalty(Board *board, int dir, int i,
