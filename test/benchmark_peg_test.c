@@ -410,7 +410,46 @@ void test_benchmark_peg_4(void) {
 // with both players holding a full rack, the position is the canonical
 // K-in-bag PEG setup, so emit "<cgp> -lex CSW24" (the per-line lexicon the
 // loaders honor). Deterministic in the base seed.
+//
+// contested_only: when set, keep a candidate only if a quick PEG solve scores
+// its best move between PEG_CONTESTED_LO and PEG_CONTESTED_HI win% -- i.e. the
+// outcome is genuinely in doubt. This matters most at small bag counts (1-2),
+// where most random positions are already decided (win% pegged at 0 or 100) and
+// the score margin does NOT separate decided from contested, so a solve is the
+// only reliable filter.
 // ---------------------------------------------------------------------------
+
+enum { PEG_GEN_QUICK_TOP_K_0 = 8, PEG_GEN_QUICK_TOP_K_1 = 4 };
+static const double PEG_CONTESTED_LO = 0.05;
+static const double PEG_CONTESTED_HI = 0.95;
+
+// Fast PEG solve to classify the currently-loaded position. Returns the best
+// move's win% in [0,1], or -1 on failure. Shallow cascade (top-{8,4}) at full
+// scenario enumeration -- enough to tell a contested position from a decided
+// one without the cost of the full benchmark oracle.
+static double peg_quick_best_win(const Config *config) {
+  static const int quick_top_k[] = {PEG_GEN_QUICK_TOP_K_0,
+                                    PEG_GEN_QUICK_TOP_K_1};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = config_get_game(config);
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 4;
+  args.time_budget_seconds = 10;
+  args.scenario_stride = 1;
+  args.stage_top_k = quick_top_k;
+  args.num_stages = 2;
+  PegResult result;
+  ErrorStack *err = error_stack_create();
+  peg_solve(&args, &result, err);
+  double win = -1.0;
+  if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+    win = result.top_cands[0].win_pct;
+  }
+  error_stack_destroy(err);
+  peg_result_destroy(&result);
+  return win;
+}
 
 // Greedy self-play until the bag holds exactly target_bag tiles with both
 // racks full. Returns false if the game ends first or the bag skips past
@@ -438,7 +477,7 @@ static bool play_until_bag_size(Game *game, MoveList *move_list,
 
 static void generate_peg_cgps(uint64_t base_seed, int target_bag,
                               int target_count, const char *outfile,
-                              bool append) {
+                              bool append, bool contested_only) {
   Config *config =
       config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
   MoveList *move_list = move_list_create(1);
@@ -448,6 +487,7 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
   const int max_attempts = 2000000;
   FILE *fp = fopen_or_die(outfile, append ? "ae" : "we");
   int found = 0;
+  int examined = 0;
   for (int attempt = 0; found < target_count && attempt < max_attempts;
        attempt++) {
     game_reset(game);
@@ -456,14 +496,27 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
     if (!play_until_bag_size(game, move_list, target_bag)) {
       continue;
     }
+    if (contested_only) {
+      examined++;
+      const double win = peg_quick_best_win(config);
+      if (win < PEG_CONTESTED_LO || win > PEG_CONTESTED_HI) {
+        continue; // decided (or failed solve) -> skip
+      }
+    }
     char *cgp = game_get_cgp(game, true);
     (void)fprintf(fp, "%s -lex CSW24\n", cgp);
     free(cgp);
     found++;
   }
   (void)fclose(fp);
-  printf("[genpegcgps] %d-in-bag: %d/%d positions -> %s\n", target_bag, found,
-         target_count, outfile);
+  if (contested_only) {
+    printf("[genpegcgps] %d-in-bag: %d/%d contested -> %s (%d K-in-bag "
+           "positions examined)\n",
+           target_bag, found, target_count, outfile, examined);
+  } else {
+    printf("[genpegcgps] %d-in-bag: %d/%d positions -> %s\n", target_bag, found,
+           target_count, outfile);
+  }
   (void)fflush(stdout);
 
   move_list_destroy(move_list);
@@ -472,12 +525,17 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
 
 void test_generate_peg_cgps(void) {
   log_set_level(LOG_FATAL);
-  // 1-in-bag uses a 100-position sample (its small scenario space makes the
-  // utility-loss tail noisier, so it wants more positions): 25 from seed 10241
-  // plus 75 from a different seed, appended.
-  generate_peg_cgps(10241, 1, 25, "notes/peg_positions/random_1peg.txt", false);
-  generate_peg_cgps(99917, 1, 75, "notes/peg_positions/random_1peg.txt", true);
-  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt", false);
-  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt", false);
-  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt", false);
+  // 1-in-bag: 100 CONTESTED positions (win% in [5,95] by a quick solve). At
+  // this bag count ~80% of random positions are already decided and the score
+  // margin can't tell them apart, so the solve-based filter is required.
+  generate_peg_cgps(10241, 1, 100, "notes/peg_positions/random_1peg.txt",
+                    /*append=*/false, /*contested_only=*/true);
+  // 2-4 in-bag: unfiltered random sample (their contested fraction is high
+  // enough, and the full benchmark over them is slow to rerun).
+  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt",
+                    /*append=*/false, /*contested_only=*/false);
+  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt",
+                    /*append=*/false, /*contested_only=*/false);
+  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt",
+                    /*append=*/false, /*contested_only=*/false);
 }
