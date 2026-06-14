@@ -1,5 +1,7 @@
 #include "move_entry.h"
 
+#include "../src/def/board_defs.h"
+#include "../src/def/game_defs.h"
 #include "../src/ent/board.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -7,7 +9,10 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/words.h"
 #include "../src/impl/gameplay.h"
+#include "../src/str/letter_distribution_string.h"
+#include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/string_util.h"
 #include "bot_worker.h"
@@ -457,7 +462,7 @@ void tui_board_builder_cancel(TuiGameState *gs) {
 
 void tui_board_entry_begin_keyboard(TuiGameState *gs) {
   if (gs->app_mode == TUI_APP_MODE_WATCH || gs->game == NULL ||
-      game_over(gs->game)) {
+      tui_game_state_play_over(gs)) {
     return;
   }
   const Board *brd = game_get_board(gs->game);
@@ -568,9 +573,89 @@ void tui_tag_move_owners(Board *board, const Move *move, int player_idx) {
   }
 }
 
+// Format a validated placement move for the History panel the same
+// way the bot's entries are formatted: string_builder_add_move wraps
+// played-through letters in parens so the renderer can dim them
+// (copying the typed text verbatim rendered playthrough bold).
+//
+// Single-tile plays whose typed direction forms no word there (a
+// one-letter "word", e.g. "10H K" typed with a horizontal cursor)
+// are re-expressed along the perpendicular word they complete —
+// "H8 (OI)K" — matching the GCG convention that a lone tile belongs
+// to the word it makes. Must run BEFORE play_move: the walk and the
+// playthrough-letter lookup read the pre-play board.
+static void format_history_move(const TuiGameState *gs, const Move *move,
+                                char *out, size_t out_size) {
+  const Board *brd = game_get_board(gs->game);
+  Move display_move;
+  move_copy(&display_move, move);
+  if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      move_get_tiles_length(move) == 1) {
+    const int row = move_get_row_start(move);
+    const int col = move_get_col_start(move);
+    const bool typed_vertical = board_is_dir_vertical(move_get_dir(move));
+    const int typed_dr = typed_vertical ? 1 : 0;
+    const int typed_dc = typed_vertical ? 0 : 1;
+    const int perp_dr = typed_vertical ? 0 : 1;
+    const int perp_dc = typed_vertical ? 1 : 0;
+    // Any neighbor along the typed axis means the typed direction
+    // already forms a real word — leave the move as entered.
+    const bool word_in_typed_dir =
+        (row - typed_dr >= 0 && col - typed_dc >= 0 &&
+         board_get_letter(brd, row - typed_dr, col - typed_dc) !=
+             ALPHABET_EMPTY_SQUARE_MARKER) ||
+        (row + typed_dr < BOARD_DIM && col + typed_dc < BOARD_DIM &&
+         board_get_letter(brd, row + typed_dr, col + typed_dc) !=
+             ALPHABET_EMPTY_SQUARE_MARKER);
+    if (!word_in_typed_dir) {
+      int start_row = row;
+      int start_col = col;
+      while (start_row - perp_dr >= 0 && start_col - perp_dc >= 0 &&
+             board_get_letter(brd, start_row - perp_dr, start_col - perp_dc) !=
+                 ALPHABET_EMPTY_SQUARE_MARKER) {
+        start_row -= perp_dr;
+        start_col -= perp_dc;
+      }
+      int end_row = row;
+      int end_col = col;
+      while (end_row + perp_dr < BOARD_DIM && end_col + perp_dc < BOARD_DIM &&
+             board_get_letter(brd, end_row + perp_dr, end_col + perp_dc) !=
+                 ALPHABET_EMPTY_SQUARE_MARKER) {
+        end_row += perp_dr;
+        end_col += perp_dc;
+      }
+      const int word_len = (end_row - start_row) + (end_col - start_col) + 1;
+      if (word_len > 1) {
+        move_set_dir(&display_move, typed_vertical ? BOARD_HORIZONTAL_DIRECTION
+                                                   : BOARD_VERTICAL_DIRECTION);
+        move_set_row_start(&display_move, start_row);
+        move_set_col_start(&display_move, start_col);
+        move_set_tiles_length(&display_move, word_len);
+        int walk_row = start_row;
+        int walk_col = start_col;
+        for (int tile_idx = 0; tile_idx < word_len; tile_idx++) {
+          const bool is_placed_square = walk_row == row && walk_col == col;
+          move_set_tile(&display_move,
+                        is_placed_square ? move_get_tile(move, 0)
+                                         : PLAYED_THROUGH_MARKER,
+                        tile_idx);
+          walk_row += perp_dr;
+          walk_col += perp_dc;
+        }
+      }
+    }
+  }
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_move(sb, brd, &display_move, gs->ld, false);
+  char *dump = string_builder_dump(sb, NULL);
+  snprintf(out, out_size, "%s", dump);
+  free(dump);
+  string_builder_destroy(sb);
+}
+
 bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   if (gs->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER || gs->game == NULL ||
-      game_over(gs->game)) {
+      tui_game_state_play_over(gs)) {
     return false;
   }
   tui_game_state_parse_edit_buf(gs);
@@ -594,14 +679,84 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
     return false;
   }
 
+  // Word validity per the session's challenge rule. The engine's
+  // FormedWords lists every word the play makes; any invalid one
+  // makes the whole play a phony.
+  bool phony = false;
+  char invalid_words[48];
+  invalid_words[0] = '\0';
+  if (gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER) {
+    const Player *player = game_get_player(gs->game, player_idx);
+    FormedWords *fw =
+        formed_words_create(game_get_board(gs->game), gs->edit_preview_move);
+    formed_words_populate_validities(player_get_kwg(player), fw,
+                                     game_get_variant(gs->game) ==
+                                         GAME_VARIANT_WORDSMOG);
+    StringBuilder *wsb = string_builder_create();
+    const int num_words = formed_words_get_num_words(fw);
+    int num_invalid = 0;
+    for (int word_idx = 0; word_idx < num_words; word_idx++) {
+      if (formed_words_get_word_valid(fw, word_idx)) {
+        continue;
+      }
+      if (num_invalid > 0) {
+        string_builder_add_string(wsb, ", ");
+      }
+      const int word_len = formed_words_get_word_length(fw, word_idx);
+      for (int letter_idx = 0; letter_idx < word_len; letter_idx++) {
+        string_builder_add_user_visible_letter(
+            wsb, gs->ld,
+            (MachineLetter)formed_words_get_word_letter(fw, word_idx,
+                                                        letter_idx));
+      }
+      string_builder_add_string(wsb, "*");
+      num_invalid++;
+    }
+    if (num_invalid > 0) {
+      phony = true;
+      char *dump = string_builder_dump(wsb, NULL);
+      snprintf(invalid_words, sizeof(invalid_words), "%s", dump);
+      free(dump);
+    }
+    string_builder_destroy(wsb);
+    formed_words_destroy(fw);
+  }
+  if (phony && gs->challenge_rule == UI_CHALLENGE_VOID) {
+    // VOID: invalid plays never reach the board. Reject the commit
+    // and leave the editor open for a do-over.
+    snprintf(gs->notice_buf, sizeof(gs->notice_buf), "not valid: %s",
+             invalid_words);
+    clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
+    gs->notice_expires_at.tv_sec += 3;
+    atomic_fetch_add(&gs->render_version, 1);
+    return false;
+  }
+
   Rack leave;
   rack_set_dist_size(&leave, ld_get_size(gs->ld));
-  play_move(gs->edit_preview_move, gs->game, &leave);
-  tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
-                      player_idx);
-  snprintf(e->move_str, sizeof(e->move_str), "%s", gs->edit_move_canonical);
+  // Format the display notation before play_move — the playthrough
+  // walk needs the pre-play board.
+  char display_move[sizeof(e->move_str)];
+  format_history_move(gs, gs->edit_preview_move, display_move,
+                      sizeof(display_move));
+  if (phony) {
+    // SINGLE / DOUBLE / PENALTY: the play is recorded, then
+    // auto-challenged off for loss of turn (the computer never misses
+    // a phony). The board, rack, and score never change — the engine
+    // sees a pass, which advances the turn and counts the zero-point
+    // turn toward the consecutive-scoreless end condition, exactly
+    // like a challenged-off play does under live rules.
+    Move pass_move;
+    move_set_as_pass(&pass_move);
+    play_move(&pass_move, gs->game, &leave);
+  } else {
+    play_move(gs->edit_preview_move, gs->game, &leave);
+    tui_tag_move_owners(game_get_board(gs->game), gs->edit_preview_move,
+                        player_idx);
+  }
+  snprintf(e->move_str, sizeof(e->move_str), "%s", display_move);
   e->score = gs->edit_move_score;
-  {
+  if (!phony) {
     StringBuilder *sb = string_builder_create();
     string_builder_add_rack(sb, &leave, gs->ld, false);
     char *dump = string_builder_dump(sb, NULL);
@@ -612,7 +767,7 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   const int post =
       equity_to_int(player_get_score(game_get_player(gs->game, player_idx)));
   int bonus = 0;
-  if (game_over(gs->game)) {
+  if (!phony && game_over(gs->game)) {
     const Rack *opp =
         player_get_rack(game_get_player(gs->game, 1 - player_idx));
     if (opp != NULL && !rack_is_empty(opp)) {
@@ -626,7 +781,15 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
       string_builder_destroy(sb);
     }
   }
-  e->total_after = post - bonus;
+  // For a challenged-off play the engine score is untouched; the
+  // entry keeps the play's as-if score / total and its extra
+  // "challenged off −N" row pair cancels them (mirroring
+  // GAME_EVENT_PHONY_TILES_RETURNED's adjustment + cumulative-score
+  // pair). Kept inside the play's own entry — not appended as a
+  // separate one — so the two-column history's index-parity column
+  // assignment stays in sync.
+  e->challenged_off = phony;
+  e->total_after = phony ? post + e->score : post - bonus;
   e->pending = false;
   // Charge wall time to the human, clamping clock skew to 0.
   struct timespec now;
@@ -640,6 +803,12 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   gs->turn_started = now;
   e->clock_at_end =
       gs->time_per_side_seconds - (int)gs->seconds_used[player_idx];
+  if (phony) {
+    snprintf(gs->notice_buf, sizeof(gs->notice_buf),
+             "challenged off (%s) - turn lost", invalid_words);
+    clock_gettime(CLOCK_MONOTONIC, &gs->notice_expires_at);
+    gs->notice_expires_at.tv_sec += 4;
+  }
   gs->board_entry_active = false;
   gs->edit_history_idx = -1;
   gs->edit_move_buf[0] = '\0';
@@ -648,6 +817,10 @@ bool tui_pvc_commit_preview_move(TuiGameState *gs) {
   if (game_over(gs->game) && gs->history_count > 0) {
     gs->history_cursor = gs->history_count - 1;
     gs->analysis_cursor = 0;
+    // Settle overtime penalties now that the game is over. Appended
+    // after the cursor parking so the cursor stays on the going-out
+    // move (penalty entries have no analysis to browse).
+    tui_bot_worker_apply_time_penalties(gs);
   } else {
     // Keep following the live game so the next (computer) turn shows.
     gs->history_cursor = -1;

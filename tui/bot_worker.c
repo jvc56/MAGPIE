@@ -16,6 +16,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
@@ -38,6 +39,10 @@ enum {
   SIM_CANDIDATES = 50,
   SIM_PLIES = 4,
   ENDGAME_PLIES = 25,
+  // Effective "run until /stop" budget for resumed analysis. Large
+  // enough to never fire in practice; the watchdog's interrupt (or
+  // BAI's own convergence cutoff) is the real terminator.
+  ANALYSIS_RESUME_TIME_LIMIT_SEC = 14 * 24 * 3600,
   // Untimed games still want a noticeable pause per turn so the player
   // can read the previous move; 5s gives the engine real work to do
   // without dragging.
@@ -66,6 +71,43 @@ static void copy_str(char *dst, size_t dst_size, const char *src) {
   dst[len] = '\0';
 }
 
+// Ring-buffer eviction: drop the oldest entry's owned state before
+// shifting the array left so nothing leaks. Shifts the history cursor
+// down by one too so it tracks the same logical move; if it was on the
+// evicted entry, it falls back to the [4>] label. No-op while there is
+// still room.
+//
+// Caller must hold state->mutex.
+static void evict_oldest_history_entry(TuiGameState *state) {
+  if (state->history_count < TUI_HISTORY_MAX) {
+    return;
+  }
+  if (state->history[0].board_before != NULL) {
+    board_destroy(state->history[0].board_before);
+  }
+  if (state->history[0].rack_before != NULL) {
+    rack_destroy(state->history[0].rack_before);
+  }
+  if (state->history[0].opp_rack_before != NULL) {
+    rack_destroy(state->history[0].opp_rack_before);
+  }
+  if (state->history[0].sim_results_saved != NULL) {
+    sim_results_destroy(state->history[0].sim_results_saved);
+  }
+  if (state->history[0].endgame_moves_saved != NULL) {
+    free(state->history[0].endgame_moves_saved);
+  }
+  if (state->history[0].loaded_move != NULL) {
+    free(state->history[0].loaded_move);
+  }
+  memmove(&state->history[0], &state->history[1],
+          sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
+  state->history_count = TUI_HISTORY_MAX - 1;
+  if (state->history_cursor >= 0) {
+    state->history_cursor--; // -1 = label, which is fine if 0 → -1
+  }
+}
+
 // Snapshot the on-turn player's rack into entry->rack_str before the
 // engine has computed the move. The clock value reflects what the
 // player had when the turn began.
@@ -90,37 +132,7 @@ int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
   // turn.
   const bool watching_latest_turn =
       state->history_cursor < 0 || follow_to_new_pending;
-  if (state->history_count >= TUI_HISTORY_MAX) {
-    // Ring-buffer eviction: drop the oldest entry's owned state
-    // before we shift the array left so we don't leak anything.
-    // Shift the cursor down by one too so it tracks the same
-    // logical move; if it was on the evicted entry, it falls back
-    // to the [4>] label.
-    if (state->history[0].board_before != NULL) {
-      board_destroy(state->history[0].board_before);
-    }
-    if (state->history[0].rack_before != NULL) {
-      rack_destroy(state->history[0].rack_before);
-    }
-    if (state->history[0].opp_rack_before != NULL) {
-      rack_destroy(state->history[0].opp_rack_before);
-    }
-    if (state->history[0].sim_results_saved != NULL) {
-      sim_results_destroy(state->history[0].sim_results_saved);
-    }
-    if (state->history[0].endgame_moves_saved != NULL) {
-      free(state->history[0].endgame_moves_saved);
-    }
-    if (state->history[0].loaded_move != NULL) {
-      free(state->history[0].loaded_move);
-    }
-    memmove(&state->history[0], &state->history[1],
-            sizeof(state->history[0]) * (TUI_HISTORY_MAX - 1));
-    state->history_count = TUI_HISTORY_MAX - 1;
-    if (state->history_cursor >= 0) {
-      state->history_cursor--; // -1 = label, which is fine if 0 → -1
-    }
-  }
+  evict_oldest_history_entry(state);
   TuiHistoryEntry *entry = &state->history[state->history_count++];
   memset(entry, 0, sizeof(*entry));
   entry->player_idx = player_idx;
@@ -138,6 +150,14 @@ int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
   // the engine-friendly Rack object — analysis resumption needs
   // it; the text rack_str field on the entry is just for display.
   entry->board_before = board_duplicate(game_get_board(state->game));
+  // CGP of this position (on-turn rack first) so the "/resume"
+  // analysis worker can rebuild the exact game — board, racks, bag,
+  // and scores — to keep sampling on after the game ends.
+  char *cgp = game_get_cgp(state->game, true);
+  if (cgp != NULL) {
+    copy_str(entry->cgp_before, sizeof(entry->cgp_before), cgp);
+    free(cgp);
+  }
   if (rack_at_start != NULL) {
     entry->rack_before = rack_duplicate(rack_at_start);
   } else {
@@ -181,6 +201,89 @@ int tui_bot_worker_append_pending_history(TuiGameState *state, int player_idx,
     string_builder_destroy(rsb);
   }
   return state->history_count - 1;
+}
+
+void tui_bot_worker_append_clock_event(TuiGameState *state, int kind,
+                                       int player_idx, int adjustment,
+                                       int cumulative_after) {
+  evict_oldest_history_entry(state);
+  TuiHistoryEntry *entry = &state->history[state->history_count++];
+  memset(entry, 0, sizeof(*entry));
+  entry->kind = kind;
+  entry->player_idx = player_idx;
+  entry->score = adjustment;
+  entry->total_after = cumulative_after;
+  // Clocks at the moment of the event. With the game in overtime
+  // these go negative; the renderer formats negative values as
+  // "-m:ss". clock_at_end doubles as the entry's "how far into
+  // overtime" readout.
+  const int remaining =
+      state->time_per_side_seconds - (int)state->seconds_used[player_idx];
+  entry->clock_at_start = remaining;
+  entry->clock_at_end = remaining;
+  entry->opp_clock_at_start =
+      state->time_per_side_seconds - (int)state->seconds_used[1 - player_idx];
+  // Snapshot the (final) board so the History-cursor preview has
+  // something coherent to show when parked on this entry.
+  entry->board_before = board_duplicate(game_get_board(state->game));
+}
+
+// Seconds of overtime used by player_idx, rounded up so any started
+// second counts. 0 when the player finished within their base time or
+// the game is untimed.
+static int overtime_seconds_used(const TuiGameState *state, int player_idx) {
+  if (state->time_per_side_seconds <= 0) {
+    return 0;
+  }
+  const double over =
+      state->seconds_used[player_idx] - (double)state->time_per_side_seconds;
+  if (over <= 0.0) {
+    return 0;
+  }
+  int over_secs = (int)over;
+  if ((double)over_secs < over) {
+    over_secs++;
+  }
+  return over_secs;
+}
+
+// Penalty points for the given overtime, per the session's rate.
+// 10 pts/min charges every started minute in full (the standard
+// "10 points per minute or fraction thereof" rule).
+static int time_penalty_points(const TuiGameState *state, int over_secs) {
+  if (over_secs <= 0) {
+    return 0;
+  }
+  if (state->time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC) {
+    return over_secs;
+  }
+  return ((over_secs + 59) / 60) * 10;
+}
+
+void tui_bot_worker_apply_time_penalties(TuiGameState *state) {
+  if (state->app_mode != TUI_APP_MODE_PLAY_VS_COMPUTER ||
+      state->time_per_side_seconds <= 0 ||
+      state->overtime_rule == UI_OVERTIME_FLAG ||
+      state->time_penalties_applied) {
+    return;
+  }
+  state->time_penalties_applied = true;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    const int penalty =
+        time_penalty_points(state, overtime_seconds_used(state, player_idx));
+    if (penalty <= 0) {
+      continue;
+    }
+    // Mirror the engine's GAME_EVENT_TIME_PENALTY semantics: a
+    // negative score adjustment applied to the player's cumulative
+    // score. Adjusting the live engine score keeps the player pills,
+    // CGP export, and history totals all in agreement.
+    Player *player = game_get_player(state->game, player_idx);
+    player_add_to_score(player, int_to_equity(-penalty));
+    tui_bot_worker_append_clock_event(state, TUI_HISTORY_ENTRY_TIME_PENALTY,
+                                      player_idx, -penalty,
+                                      equity_to_int(player_get_score(player)));
+  }
 }
 
 // Fill in move_str, score, total_after on an entry that was created
@@ -678,19 +781,26 @@ static void endgame_before_search_cb(const Game *game,
                             solving_player, game, /*exhaustive=*/false);
 }
 
-static bool run_endgame(TuiGameState *state, double budget_sec,
-                        Move *out_move) {
+// Solve `position` (the live game for the bot; a reconstructed past
+// position for the "/resume" analysis worker). `results_turn_idx` is
+// stamped into endgame_results_turn_idx for the analysis panel;
+// `stop_flag` is the atomic the watchdog translates into an engine
+// interrupt (&state->bot_stop for the bot, &state->analysis_stop for
+// the resume worker).
+static bool run_endgame_on(TuiGameState *state, const Game *position,
+                           int results_turn_idx, double budget_sec,
+                           _Atomic bool *stop_flag, Move *out_move) {
   ThreadControl *tc = thread_control_create();
   thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
 
-  Watchdog wd = {.tc = tc, .bot_stop = &state->bot_stop, .finished = false};
+  Watchdog wd = {.tc = tc, .bot_stop = stop_flag, .finished = false};
   pthread_t wd_thread;
   const bool wd_started =
       (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
 
   EndgameArgs args = {0};
   args.thread_control = tc;
-  args.game = state->game;
+  args.game = position;
   args.tt_fraction_of_mem = 0.10;
   args.plies = ENDGAME_PLIES;
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
@@ -733,16 +843,16 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   // Capture the solver's initial spread so the renderer can show
   // W/T/L from the correct side once the bot has played and the
   // on-turn flag has flipped.
-  const int solving_player = game_get_player_on_turn_index(state->game);
+  const int solving_player = game_get_player_on_turn_index(position);
   const int p0_score =
-      equity_to_int(player_get_score(game_get_player(state->game, 0)));
+      equity_to_int(player_get_score(game_get_player(position, 0)));
   const int p1_score =
-      equity_to_int(player_get_score(game_get_player(state->game, 1)));
+      equity_to_int(player_get_score(game_get_player(position, 1)));
   const int initial_spread =
       (solving_player == 0) ? p0_score - p1_score : p1_score - p0_score;
 
   atomic_store(&state->endgame_initial_spread, initial_spread);
-  atomic_store(&state->endgame_results_turn_idx, state->history_count);
+  atomic_store(&state->endgame_results_turn_idx, results_turn_idx);
 
   // Clear the previous turn's snapshot now so the renderer doesn't
   // keep showing it during the gap between activation and the engine's
@@ -772,7 +882,7 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   bool got_move = false;
   const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   if (pv != NULL && pv->num_moves > 0) {
-    small_move_to_move(out_move, &pv->moves[0], game_get_board(state->game));
+    small_move_to_move(out_move, &pv->moves[0], game_get_board(position));
     got_move = true;
   }
 
@@ -788,7 +898,7 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   endgame_snapshot_from_pvs(
       state, multi, num_pvs,
       endgame_results_get_depth(results, ENDGAME_RESULT_BEST), initial_spread,
-      solving_player, state->game, exhaustive);
+      solving_player, position, exhaustive);
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
 
   atomic_store(&state->endgame_results_active, false);
@@ -798,6 +908,13 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
   error_stack_destroy(err);
   thread_control_destroy(tc);
   return got_move;
+}
+
+// Bot-turn wrapper: solve the live game, stamped as the live turn.
+static bool run_endgame(TuiGameState *state, double budget_sec,
+                        Move *out_move) {
+  return run_endgame_on(state, state->game, state->history_count, budget_sec,
+                        &state->bot_stop, out_move);
 }
 
 static void *bot_thread_main(void *arg) {
@@ -821,6 +938,82 @@ static void *bot_thread_main(void *arg) {
       break;
     }
     player_idx = game_get_player_on_turn_index(state->game);
+
+    // Time-forfeit enforcement (play-vs-computer only). Poll the
+    // on-turn player's live clock against the overtime rule — losing
+    // at 0:00 under FLAG, at the overtime cap under MAX. UNLIMITED
+    // never forfeits; its penalties are settled at game end. The 30ms
+    // human-turn idle poll below gives this check sub-second latency
+    // while the human is thinking.
+    if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+        state->time_per_side_seconds > 0 &&
+        state->overtime_rule != UI_OVERTIME_UNLIMITED) {
+      struct timespec poll_now;
+      clock_gettime(CLOCK_MONOTONIC, &poll_now);
+      double turn_elapsed =
+          (double)(poll_now.tv_sec - state->turn_started.tv_sec) +
+          (double)(poll_now.tv_nsec - state->turn_started.tv_nsec) / 1e9;
+      if (turn_elapsed < 0.0) {
+        turn_elapsed = 0.0;
+      }
+      const double live_used = state->seconds_used[player_idx] + turn_elapsed;
+      double allowed = (double)state->time_per_side_seconds;
+      if (state->overtime_rule == UI_OVERTIME_MAX) {
+        allowed += (double)state->overtime_cap_minutes * 60.0;
+      }
+      if (live_used >= allowed) {
+        // Stop the clock at the forfeit moment so the final times
+        // reflect what was actually used.
+        state->seconds_used[player_idx] = live_used;
+        state->turn_started = poll_now;
+        state->time_forfeit_player_idx = player_idx;
+        const int cumulative = equity_to_int(
+            player_get_score(game_get_player(state->game, player_idx)));
+        // The turn's pending entry (if present) becomes the forfeit
+        // event in place, preserving its board snapshot; otherwise
+        // append a fresh event.
+        TuiHistoryEntry *last = state->history_count > 0
+                                    ? &state->history[state->history_count - 1]
+                                    : NULL;
+        if (last != NULL && last->pending && last->player_idx == player_idx) {
+          last->kind = TUI_HISTORY_ENTRY_TIME_FORFEIT;
+          last->pending = false;
+          last->move_str[0] = '\0';
+          last->leave_str[0] = '\0';
+          last->score = 0;
+          last->total_after = cumulative;
+          last->clock_at_end = state->time_per_side_seconds -
+                               (int)state->seconds_used[player_idx];
+          // Re-stamp the start clock to the forfeit moment too — the
+          // pill preview reads clock_at_start while the cursor is
+          // parked here, and "time remaining when the turn began" is
+          // misleading for an event that ended the game.
+          last->clock_at_start = last->clock_at_end;
+        } else {
+          tui_bot_worker_append_clock_event(
+              state, TUI_HISTORY_ENTRY_TIME_FORFEIT, player_idx, 0, cumulative);
+        }
+        // Drop any in-progress board move entry — the game is over.
+        state->board_entry_active = false;
+        state->edit_history_idx = -1;
+        state->edit_move_buf[0] = '\0';
+        state->edit_move_len = 0;
+        state->edit_move_cursor = 0;
+        tui_game_state_parse_edit_buf(state);
+        const char *loser_name = state->player_names[player_idx][0] != '\0'
+                                     ? state->player_names[player_idx]
+                                     : (player_idx == 0 ? "P1" : "P2");
+        snprintf(state->notice_buf, sizeof(state->notice_buf),
+                 "%s lost on time", loser_name);
+        clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
+        state->notice_expires_at.tv_sec += 6;
+        state->history_cursor = state->history_count - 1;
+        atomic_fetch_add(&state->render_version, 1);
+        pthread_mutex_unlock(&state->mutex);
+        break;
+      }
+    }
+
     const int clock_at_start =
         state->time_per_side_seconds - (int)state->seconds_used[player_idx];
 
@@ -1028,6 +1221,10 @@ static void *bot_thread_main(void *arg) {
         state->analysis_cursor_column = 0; // TUI_ANALYSIS_COLUMN_RANK
         state->analysis_anchored_move[0] = '\0';
       }
+      // Settle overtime penalties now that the game is over. Appended
+      // after the cursor parking above so the cursor stays on the
+      // going-out move (penalty entries have no analysis to browse).
+      tui_bot_worker_apply_time_penalties(state);
     }
 
     atomic_fetch_add(&state->render_version, 1);
@@ -1051,6 +1248,291 @@ void tui_bot_worker_start(TuiGameState *state) {
   if (pthread_create(&state->bot_thread, NULL, bot_thread_main, state) == 0) {
     state->bot_started = true;
   }
+}
+
+// ── Post-game analysis resume ("/resume") ────────────────────────────
+
+// Status-bar notice helper. Caller must hold state->mutex.
+static void set_analysis_notice(TuiGameState *state, const char *message) {
+  snprintf(state->notice_buf, sizeof(state->notice_buf), "%s", message);
+  clock_gettime(CLOCK_MONOTONIC, &state->notice_expires_at);
+  state->notice_expires_at.tv_sec += 3;
+  atomic_fetch_add(&state->render_version, 1);
+}
+
+// Build a MoveList containing the same plays a saved SimResults was
+// built from. The resume path only consumes the count and the rack —
+// sampling reads moves from the SimmedPlays themselves — but the
+// plays are real so the engine's compatibility checks hold.
+static MoveList *move_list_from_sim_results(SimResults *results) {
+  const int num_plays = sim_results_get_number_of_plays(results);
+  if (num_plays <= 0) {
+    return NULL;
+  }
+  MoveList *list = move_list_create(num_plays);
+  for (int play_idx = 0; play_idx < num_plays; play_idx++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(results, play_idx);
+    Move *spare = move_list_get_spare_move(list);
+    move_copy(spare, simmed_play_get_move(play));
+    move_list_insert_spare_move(list, move_get_equity(spare));
+  }
+  move_list_set_rack(list, sim_results_get_rack(results));
+  return list;
+}
+
+// Continue sampling a saved sim directly on the entry's own
+// SimResults: the live display pointer is swapped to it for the
+// duration (the analysis panel renders it ticking in real time) and
+// the accumulated samples stay owned by the entry afterward — the
+// next "/resume" keeps adding on.
+static void analysis_resume_sim(TuiGameState *state, TuiHistoryEntry *entry,
+                                int turn_idx, Game *position) {
+  SimResults *results = entry->sim_results_saved;
+  MoveList *candidates = move_list_from_sim_results(results);
+  if (candidates == NULL) {
+    pthread_mutex_lock(&state->mutex);
+    set_analysis_notice(state, "resume failed: empty saved sim");
+    pthread_mutex_unlock(&state->mutex);
+    return;
+  }
+
+  pthread_mutex_lock(&state->mutex);
+  SimResults *live_results = state->sim_results;
+  const int prev_turn_idx = atomic_load(&state->sim_results_turn_idx);
+  state->sim_results = results;
+  state->analysis_game = position;
+  atomic_store(&state->sim_results_turn_idx, turn_idx);
+  atomic_store(&state->sim_results_active, true);
+  set_analysis_notice(state, "resuming sim - /stop to pause");
+  pthread_mutex_unlock(&state->mutex);
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+  Watchdog wd = {
+      .tc = tc, .bot_stop = &state->analysis_stop, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  const int hw_cores = get_num_cores();
+  const int num_threads = hw_cores > 2 ? hw_cores - 1 : hw_cores;
+  SimArgs args = {0};
+  args.num_plies = sim_results_get_num_plies(results);
+  args.move_list = candidates;
+  args.num_plays = move_list_get_count(candidates);
+  args.known_opp_rack = NULL;
+  args.win_pcts = state->win_pcts;
+  args.use_inference = false;
+  args.use_heat_map = false;
+  args.inference_results = NULL;
+  args.num_threads = num_threads;
+  args.print_interval = 0;
+  args.max_num_display_plays = sim_results_get_number_of_plays(results);
+  args.max_num_display_plies = args.num_plies;
+  args.seed = (uint64_t)time(NULL);
+  args.thread_control = tc;
+  args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  args.bai_options.threshold = BAI_THRESHOLD_NONE;
+  args.bai_options.sample_limit = (uint64_t)1e15;
+  args.bai_options.sample_minimum = 1;
+  args.bai_options.time_limit_seconds = ANALYSIS_RESUME_TIME_LIMIT_SEC;
+  args.bai_options.num_threads = num_threads;
+  args.bai_options.cutoff = 0.005;
+  args.bai_options.parent_worker_thread_index = 0;
+  args.bai_options.arm_avoid_prune = NULL;
+  args.bai_options.num_arm_avoid_prune = 0;
+  args.bai_options.delta = 1.0;
+  args.game = position;
+  args.resume_results = true;
+
+  ErrorStack *sim_err = error_stack_create();
+  simulate_without_ctx(&args, results, sim_err);
+  error_stack_destroy(sim_err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+  thread_control_destroy(tc);
+
+  pthread_mutex_lock(&state->mutex);
+  atomic_store(&state->sim_results_active, false);
+  // Refresh the entry's static snapshot from the accumulated samples
+  // (the capture reads state->sim_results — currently the entry's own
+  // results — and formats against analysis_game).
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  state->sim_results = live_results;
+  atomic_store(&state->sim_results_turn_idx, prev_turn_idx);
+  char done_notice[64];
+  snprintf(done_notice, sizeof(done_notice), "sim paused - %llu iterations",
+           (unsigned long long)sim_results_get_iteration_count(results));
+  set_analysis_notice(state, done_notice);
+  pthread_mutex_unlock(&state->mutex);
+
+  moves_for_move_list_destroy(candidates);
+  free(candidates);
+}
+
+// Re-solve a saved endgame turn with the session's warm transposition
+// table. The live endgame snapshot streams to the panel during the
+// solve; the entry's snapshot + saved leaderboard are refreshed when
+// it stops.
+static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
+                                    int turn_idx, const Game *position) {
+  pthread_mutex_lock(&state->mutex);
+  set_analysis_notice(state, "resuming endgame solve - /stop to pause");
+  state->analysis_game = (struct Game *)position;
+  pthread_mutex_unlock(&state->mutex);
+
+  Move *scratch = move_create();
+  run_endgame_on(state, position, turn_idx,
+                 (double)ANALYSIS_RESUME_TIME_LIMIT_SEC, &state->analysis_stop,
+                 scratch);
+  move_destroy(scratch);
+
+  pthread_mutex_lock(&state->mutex);
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  // Refresh the entry's saved leaderboard from the final snapshot so
+  // candidate previews use the deeper solve (same copy the bot's
+  // finalize path makes).
+  if (state->endgame_snapshot.valid &&
+      state->endgame_snapshot.num_entries > 0 &&
+      state->endgame_snapshot.moves != NULL) {
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
+    }
+    const int num_moves = state->endgame_snapshot.num_entries;
+    entry->endgame_moves_saved =
+        (Move *)malloc((size_t)num_moves * sizeof(Move));
+    if (entry->endgame_moves_saved != NULL) {
+      for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+        if (state->endgame_snapshot.moves[move_idx] != NULL) {
+          move_copy(&entry->endgame_moves_saved[move_idx],
+                    state->endgame_snapshot.moves[move_idx]);
+        } else {
+          memset(&entry->endgame_moves_saved[move_idx], 0, sizeof(Move));
+        }
+      }
+      entry->endgame_moves_saved_count = num_moves;
+    }
+  }
+  set_analysis_notice(state, "endgame analysis saved");
+  pthread_mutex_unlock(&state->mutex);
+}
+
+static void *analysis_thread_main(void *arg) {
+  TuiGameState *state = (TuiGameState *)arg;
+
+  pthread_mutex_lock(&state->mutex);
+  const int turn_idx = state->analysis_resume_turn_idx;
+  TuiHistoryEntry *entry = NULL;
+  if (turn_idx >= 0 && turn_idx < state->history_count) {
+    entry = &state->history[turn_idx];
+  }
+  Game *position = NULL;
+  bool is_sim = false;
+  if (entry != NULL && entry->cgp_before[0] != '\0') {
+    is_sim = entry->analysis_snapshot.is_sim;
+    position = game_duplicate(state->game);
+  }
+  pthread_mutex_unlock(&state->mutex);
+
+  if (position == NULL) {
+    atomic_store(&state->analysis_running, false);
+    return NULL;
+  }
+
+  // Rebuild the position this turn was decided from. Entries are
+  // stable here: nothing appends after game over, and every reset /
+  // teardown path stops this worker first.
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(position, entry->cgp_before, err);
+  const bool position_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+  if (!position_ok) {
+    game_destroy(position);
+    pthread_mutex_lock(&state->mutex);
+    set_analysis_notice(state, "resume failed: bad position snapshot");
+    state->analysis_resume_turn_idx = -1;
+    pthread_mutex_unlock(&state->mutex);
+    atomic_store(&state->analysis_running, false);
+    return NULL;
+  }
+
+  if (is_sim) {
+    analysis_resume_sim(state, entry, turn_idx, position);
+  } else {
+    analysis_resume_endgame(state, entry, turn_idx, position);
+  }
+
+  pthread_mutex_lock(&state->mutex);
+  state->analysis_game = NULL;
+  state->analysis_resume_turn_idx = -1;
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+  game_destroy(position);
+  atomic_store(&state->analysis_running, false);
+  return NULL;
+}
+
+bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
+  if (state == NULL) {
+    return false;
+  }
+  if (!tui_game_state_play_over(state)) {
+    set_analysis_notice(state, "/resume is available once the game is over");
+    return false;
+  }
+  if (atomic_load(&state->analysis_running)) {
+    set_analysis_notice(state, "analysis already running - /stop first");
+    return false;
+  }
+  if (turn_idx < 0 || turn_idx >= state->history_count) {
+    set_analysis_notice(state, "park the History cursor on a turn to resume");
+    return false;
+  }
+  TuiHistoryEntry *entry = &state->history[turn_idx];
+  if (entry->pending || !entry->analysis_snapshot.valid) {
+    set_analysis_notice(state, "no saved analysis for this turn");
+    return false;
+  }
+  if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
+    set_analysis_notice(state, "no saved sim for this turn");
+    return false;
+  }
+  if (entry->cgp_before[0] == '\0') {
+    set_analysis_notice(state, "no position snapshot for this turn");
+    return false;
+  }
+  // Reap a previously finished worker before reusing the handle.
+  if (state->analysis_started) {
+    pthread_join(state->analysis_thread, NULL);
+    state->analysis_started = false;
+  }
+  atomic_store(&state->analysis_stop, false);
+  state->analysis_resume_turn_idx = turn_idx;
+  atomic_store(&state->analysis_running, true);
+  if (pthread_create(&state->analysis_thread, NULL, analysis_thread_main,
+                     state) != 0) {
+    atomic_store(&state->analysis_running, false);
+    state->analysis_resume_turn_idx = -1;
+    set_analysis_notice(state, "failed to start the analysis worker");
+    return false;
+  }
+  state->analysis_started = true;
+  return true;
+}
+
+void tui_analysis_worker_stop_and_join(TuiGameState *state) {
+  if (state == NULL || !state->analysis_started) {
+    return;
+  }
+  atomic_store(&state->analysis_stop, true);
+  pthread_join(state->analysis_thread, NULL);
+  state->analysis_started = false;
+  atomic_store(&state->analysis_stop, false);
 }
 
 void *tui_pixel_worker_main(void *arg);

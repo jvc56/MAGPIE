@@ -35,12 +35,17 @@ typedef enum {
   TUI_PLAY_SETUP_COMPUTER_NAME = 1,
   TUI_PLAY_SETUP_FIRST_MOVE = 2,
   TUI_PLAY_SETUP_TIME = 3,
-  TUI_PLAY_SETUP_LANGUAGE = 4,
-  TUI_PLAY_SETUP_LEXICON = 5,
-  TUI_PLAY_SETUP_SIM_PLIES = 6,
-  TUI_PLAY_SETUP_SIM_CANDIDATES = 7,
-  TUI_PLAY_SETUP_START = 8,
-  TUI_PLAY_SETUP_ITEM_COUNT = 9,
+  TUI_PLAY_SETUP_OVERTIME = 4,
+  TUI_PLAY_SETUP_OVERTIME_CAP = 5,
+  TUI_PLAY_SETUP_TIME_PENALTY = 6,
+  TUI_PLAY_SETUP_CHALLENGE = 7,
+  TUI_PLAY_SETUP_CHALLENGE_PENALTY = 8,
+  TUI_PLAY_SETUP_LANGUAGE = 9,
+  TUI_PLAY_SETUP_LEXICON = 10,
+  TUI_PLAY_SETUP_SIM_PLIES = 11,
+  TUI_PLAY_SETUP_SIM_CANDIDATES = 12,
+  TUI_PLAY_SETUP_START = 13,
+  TUI_PLAY_SETUP_ITEM_COUNT = 14,
 } TuiPlaySetupItem;
 
 // First-move choice on the play-setup modal.
@@ -51,12 +56,25 @@ typedef enum {
   TUI_PLAY_FIRST_COUNT = 3,
 } TuiPlayFirstMove;
 
-void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
-                                int focus, const char *human_name,
-                                const char *computer_name, int first_move,
-                                int name_edit_pos, int time_seconds,
-                                const char *language, const char *lexicon,
-                                int sim_plies, int sim_candidates);
+void tui_game_render_play_setup(
+    struct ncplane *plane, const Theme *theme, int focus,
+    const char *human_name, const char *computer_name, int first_move,
+    int name_edit_pos, int time_seconds, UiOvertimeRule overtime_rule,
+    int overtime_cap_minutes, UiTimePenaltyRate time_penalty_rate,
+    UiChallengeRule challenge_rule, UiChallengePenalty challenge_penalty,
+    const char *language, const char *lexicon, int sim_plies,
+    int sim_candidates);
+
+// Which Play-setup rows are adjustable given the current rule
+// settings: the overtime-cap row only applies under UI_OVERTIME_MAX,
+// the time-penalty row never applies under UI_OVERTIME_FLAG (the game
+// simply ends at 0:00), every clock-dependent row is off when the
+// game is untimed (time_seconds <= 0), and the challenge-penalty row
+// only applies under UI_CHALLENGE_PENALTY. Disabled rows render
+// dimmed and are skipped by cursor navigation / clicks.
+void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
+                                 UiChallengeRule challenge_rule,
+                                 bool out_enabled[TUI_PLAY_SETUP_ITEM_COUNT]);
 
 // Annotate-game setup modal. Lets the user pick the lexicon and
 // both player names before entering annotation mode (where the

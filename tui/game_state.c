@@ -237,6 +237,18 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   out_state->time_per_side_seconds = 0;
   out_state->seconds_used[0] = 0.0;
   out_state->seconds_used[1] = 0.0;
+  out_state->overtime_rule = UI_OVERTIME_MAX;
+  out_state->overtime_cap_minutes = 5;
+  out_state->time_penalty_rate = UI_TIME_PENALTY_10_PER_MIN;
+  out_state->time_forfeit_player_idx = -1;
+  out_state->time_penalties_applied = false;
+  out_state->challenge_rule = UI_CHALLENGE_VOID;
+  out_state->challenge_penalty = UI_CHALLENGE_PENALTY_5_PER_PLAY;
+  out_state->analysis_started = false;
+  atomic_store(&out_state->analysis_stop, false);
+  atomic_store(&out_state->analysis_running, false);
+  out_state->analysis_resume_turn_idx = -1;
+  out_state->analysis_game = NULL;
   out_state->border_thickness = 2; // default; overridden by config
   out_state->blank_uppercase = true;
   out_state->premium_labels = TUI_PREMIUM_LABELS_UPPERCASE;
@@ -290,6 +302,16 @@ void tui_game_state_set_time_per_side(TuiGameState *state, int seconds) {
   state->seconds_used[0] = 0.0;
   state->seconds_used[1] = 0.0;
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
+}
+
+bool tui_game_state_play_over(const TuiGameState *state) {
+  if (state == NULL) {
+    return false;
+  }
+  if (state->time_forfeit_player_idx >= 0) {
+    return true;
+  }
+  return state->game != NULL && game_over(state->game);
 }
 
 static bool tok_is_rack_char(char c) {
@@ -1123,6 +1145,8 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
   state->history_cursor = -1;
   state->seconds_used[0] = 0.0;
   state->seconds_used[1] = 0.0;
+  state->time_forfeit_player_idx = -1;
+  state->time_penalties_applied = false;
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
   atomic_store(&state->sim_results_active, false);
   atomic_store(&state->sim_results_turn_idx, -1);
@@ -1439,6 +1463,8 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   state->history_cursor = -1;
   state->seconds_used[0] = 0.0;
   state->seconds_used[1] = 0.0;
+  state->time_forfeit_player_idx = -1;
+  state->time_penalties_applied = false;
   clock_gettime(CLOCK_MONOTONIC, &state->turn_started);
   atomic_store(&state->sim_results_active, false);
   atomic_store(&state->sim_results_turn_idx, -1);
@@ -1469,6 +1495,13 @@ void tui_game_state_destroy(TuiGameState *state) {
     atomic_store(&state->bot_stop, true);
     pthread_join(state->bot_thread, NULL);
     state->bot_started = false;
+  }
+  // Tear down the analysis-resume worker before its entry-owned
+  // sim results / the endgame ctx are freed below.
+  if (state->analysis_started) {
+    atomic_store(&state->analysis_stop, true);
+    pthread_join(state->analysis_thread, NULL);
+    state->analysis_started = false;
   }
   // Tear down the pixel worker: set the stop flag, wake the thread
   // (it might be blocked in cond_wait), join.

@@ -40,9 +40,14 @@ exactly the shape the TUI streams.
 - [ ] **Game-over flow.** End banner with final scores/bonus, then a
       clear "what now": new game / copy CGP / browse analysis. Today
       the game just stops and the analysis panel reappears.
-- [ ] **Clock enforcement.** Clocks count down and display, but
-      nothing happens at 0:00. Minimum: overtime penalty (engine has
-      `overtimepenalty`); decide whether hard timeout = loss for v1.
+- [x] **Clock enforcement.** Play-setup now offers three overtime
+      rules (flag at 0:00 / max overtime with a minute cap /
+      unlimited) and two penalty rates (10 pts per started minute /
+      1 pt per started second). Flagging and cap-exceeded forfeits
+      end the game with a "lost on time" history event; overtime
+      penalties post as engine-style time-penalty history entries at
+      game end and adjust the live scores. Overtime clocks render
+      negative ("-1:23") in the error color.
 - [ ] Six-zero / consecutive-scoreless end condition surfaced properly.
 
 ### 3. GCG export / session safety

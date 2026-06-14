@@ -119,8 +119,25 @@ typedef struct {
   bool valid;
 } TuiAnalysisSnapshot;
 
+// What a history entry represents. MOVE is a normal played turn. The
+// clock-event kinds mirror the engine's GAME_EVENT_TIME_PENALTY
+// game-history representation: for TIME_PENALTY, `score` holds the
+// (negative) score adjustment and `total_after` the player's
+// cumulative score after the adjustment. TIME_FORFEIT records a loss
+// on time (flagging) — no score adjustment, text-only. (Challenged-
+// off phonies are NOT a separate entry kind: they render as extra
+// rows of the play's own MOVE entry via `challenged_off`, keeping the
+// two-column history's index-parity column assignment intact.)
+enum {
+  TUI_HISTORY_ENTRY_MOVE = 0,
+  TUI_HISTORY_ENTRY_TIME_PENALTY = 1,
+  TUI_HISTORY_ENTRY_TIME_FORFEIT = 2,
+};
+
 typedef struct {
   int player_idx;
+  // Entry kind (TUI_HISTORY_ENTRY_*). Zero-init = MOVE.
+  int kind;
   int score;              // points earned on this play
   int total_after;        // running total after this play (excluding bonus)
   int clock_at_start;     // seconds remaining when this player's turn began
@@ -139,6 +156,14 @@ typedef struct {
   // when this entry has no end-of-game adjustment.
   int end_bonus;
   char end_rack_str[16]; // opponent's leftover tiles (e.g. "EE")
+  // True when this play was challenged off (a phony under the
+  // SINGLE / DOUBLE / PENALTY challenge rules): the tiles returned
+  // and the turn was lost. `score` / `total_after` keep the play's
+  // as-if values; the renderer appends a "challenged off −N" row
+  // pair that cancels them (mirroring the engine's
+  // GAME_EVENT_PHONY_TILES_RETURNED adjustment), and running-total
+  // aggregation treats the entry as zero points.
+  bool challenged_off;
   // True while the bot is still computing this turn's move. The
   // renderer shows a braille spinner in place of move_str / +score
   // and the bot worker flips it back to false once the move is
@@ -183,6 +208,12 @@ typedef struct {
   // above is for display; this is the engine-friendly object the
   // simmer / endgame would consume.
   struct Rack *rack_before;
+  // CGP of the position this turn was decided from (on-turn player's
+  // rack first). Captured when the pending entry is created; the
+  // "/resume" analysis worker reloads it into a scratch Game so a
+  // stopped sim / endgame solve can continue on the exact position —
+  // board and racks alone wouldn't pin down the bag or the scores.
+  char cgp_before[512];
   // Owned, deep-copied Move that this turn played, for loaded
   // GCG entries that don't carry a sim/endgame leaderboard. Lets
   // the board renderer ghost the played tiles when the user
@@ -297,11 +328,47 @@ typedef struct {
   double seconds_used[2];       // accumulated time used by each side
   struct timespec turn_started; // CLOCK_MONOTONIC; when the on-turn
                                 // player's current turn started ticking
+  // Overtime rules (play-vs-computer only; see UiOvertimeRule).
+  // The cap applies only under UI_OVERTIME_MAX.
+  UiOvertimeRule overtime_rule;
+  int overtime_cap_minutes;
+  UiTimePenaltyRate time_penalty_rate;
+  // Challenge rule (play-vs-computer only; see UiChallengeRule).
+  // VOID rejects invalid plays at commit (do-over); the other rules
+  // auto-challenge them off for loss of turn. The penalty variant
+  // only matters once challenging the computer's plays exists.
+  UiChallengeRule challenge_rule;
+  UiChallengePenalty challenge_penalty;
+  // Player who lost on time (-1 = none). Set by the bot worker when
+  // the on-turn player's clock violates the overtime rule; the
+  // commit / render paths treat a set value as game over.
+  int time_forfeit_player_idx;
+  // Guard so end-of-game overtime penalties are appended exactly once
+  // (both the human-commit and bot-finalize paths can end the game).
+  bool time_penalties_applied;
 
   // Bot worker.
   pthread_t bot_thread;
   bool bot_started;
   _Atomic bool bot_stop;
+
+  // Post-game analysis-resume worker ("/resume"). Continues the
+  // history-cursored turn's saved sim — accumulating onto the samples
+  // gathered during the game — or re-solves its endgame with the
+  // session's warm transposition table, streaming progress into the
+  // live analysis panel. One resume at a time; "/stop" (or any reset
+  // / new-game path) interrupts and joins it.
+  pthread_t analysis_thread;
+  bool analysis_started; // thread handle valid; join before reuse
+  _Atomic bool analysis_stop;
+  _Atomic bool analysis_running;
+  int analysis_resume_turn_idx; // history idx being resumed; -1 = none
+  // Scratch game positioned at the resumed turn (reloaded from the
+  // entry's cgp_before). Owned by the worker; non-NULL only while a
+  // resume is running. The analysis row builder and snapshot capture
+  // format moves / read the bag against it instead of the live
+  // (post-game) game.
+  struct Game *analysis_game;
 
   // Pixel worker — rasterizes the 2x board RGBA composite off the
   // UI thread so cursor scrubbing through History doesn't stall
@@ -688,6 +755,12 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".
 void tui_game_state_set_time_per_side(TuiGameState *state, int seconds);
+
+// True when the play has ended — either the engine says the game is
+// over or a player lost on time (time_forfeit_player_idx is set).
+// Play-vs-computer interactivity / concealment paths use this instead
+// of bare game_over so a time forfeit also ends the game.
+bool tui_game_state_play_over(const TuiGameState *state);
 
 // Resets the game to a fresh start: new seed, fresh racks, empty
 // history, zeroed clocks, cleared sim/endgame state, cleared

@@ -105,6 +105,16 @@ bool tui_config_load(TuiConfig *config) {
   config->lexicon_set = false;
   config->time_per_side_seconds = 0;
   config->time_per_side_set = false;
+  config->overtime_rule = UI_OVERTIME_MAX;
+  config->overtime_rule_set = false;
+  config->overtime_cap_minutes = 5;
+  config->overtime_cap_set = false;
+  config->time_penalty_rate = UI_TIME_PENALTY_10_PER_MIN;
+  config->time_penalty_set = false;
+  config->challenge_rule = UI_CHALLENGE_VOID;
+  config->challenge_rule_set = false;
+  config->challenge_penalty = UI_CHALLENGE_PENALTY_5_PER_PLAY;
+  config->challenge_penalty_set = false;
   config->border_thickness = 2;
   config->border_thickness_set = false;
   config->blank_uppercase = true;
@@ -177,6 +187,60 @@ bool tui_config_load(TuiConfig *config) {
       if (endptr != value && parsed > 0 && parsed <= 24 * 60 * 60) {
         config->time_per_side_seconds = (int)parsed;
         config->time_per_side_set = true;
+      }
+    } else if (strcmp(trimmed, "overtime_rule") == 0) {
+      if (strcmp(value, "flag") == 0) {
+        config->overtime_rule = UI_OVERTIME_FLAG;
+        config->overtime_rule_set = true;
+      } else if (strcmp(value, "max") == 0) {
+        config->overtime_rule = UI_OVERTIME_MAX;
+        config->overtime_rule_set = true;
+      } else if (strcmp(value, "unlimited") == 0) {
+        config->overtime_rule = UI_OVERTIME_UNLIMITED;
+        config->overtime_rule_set = true;
+      }
+    } else if (strcmp(trimmed, "overtime_cap_minutes") == 0) {
+      char *endptr = NULL;
+      const long parsed = strtol(value, &endptr, 10);
+      if (endptr != value && parsed >= 1 && parsed <= 60) {
+        config->overtime_cap_minutes = (int)parsed;
+        config->overtime_cap_set = true;
+      }
+    } else if (strcmp(trimmed, "time_penalty") == 0) {
+      if (strcmp(value, "10_per_min") == 0) {
+        config->time_penalty_rate = UI_TIME_PENALTY_10_PER_MIN;
+        config->time_penalty_set = true;
+      } else if (strcmp(value, "1_per_sec") == 0) {
+        config->time_penalty_rate = UI_TIME_PENALTY_1_PER_SEC;
+        config->time_penalty_set = true;
+      }
+    } else if (strcmp(trimmed, "challenge_rule") == 0) {
+      if (strcmp(value, "void") == 0) {
+        config->challenge_rule = UI_CHALLENGE_VOID;
+        config->challenge_rule_set = true;
+      } else if (strcmp(value, "single") == 0) {
+        config->challenge_rule = UI_CHALLENGE_SINGLE;
+        config->challenge_rule_set = true;
+      } else if (strcmp(value, "double") == 0) {
+        config->challenge_rule = UI_CHALLENGE_DOUBLE;
+        config->challenge_rule_set = true;
+      } else if (strcmp(value, "penalty") == 0) {
+        config->challenge_rule = UI_CHALLENGE_PENALTY;
+        config->challenge_rule_set = true;
+      }
+    } else if (strcmp(trimmed, "challenge_penalty") == 0) {
+      if (strcmp(value, "5_per_play") == 0) {
+        config->challenge_penalty = UI_CHALLENGE_PENALTY_5_PER_PLAY;
+        config->challenge_penalty_set = true;
+      } else if (strcmp(value, "10_per_play") == 0) {
+        config->challenge_penalty = UI_CHALLENGE_PENALTY_10_PER_PLAY;
+        config->challenge_penalty_set = true;
+      } else if (strcmp(value, "5_per_word") == 0) {
+        config->challenge_penalty = UI_CHALLENGE_PENALTY_5_PER_WORD;
+        config->challenge_penalty_set = true;
+      } else if (strcmp(value, "10_per_word") == 0) {
+        config->challenge_penalty = UI_CHALLENGE_PENALTY_10_PER_WORD;
+        config->challenge_penalty_set = true;
       }
     } else if (strcmp(trimmed, "border_thickness") == 0) {
       char *endptr = NULL;
@@ -290,6 +354,72 @@ bool tui_config_save(const TuiConfig *config) {
   if (config->time_per_side_set && config->time_per_side_seconds > 0) {
     fprintf(file, "time_per_side_seconds = %d\n",
             config->time_per_side_seconds);
+  }
+  if (config->overtime_rule_set) {
+    const char *value = "max";
+    switch (config->overtime_rule) {
+    case UI_OVERTIME_FLAG:
+      value = "flag";
+      break;
+    case UI_OVERTIME_UNLIMITED:
+      value = "unlimited";
+      break;
+    case UI_OVERTIME_MAX:
+    case UI_OVERTIME_RULE_COUNT:
+    default:
+      value = "max";
+      break;
+    }
+    fprintf(file, "overtime_rule = \"%s\"\n", value);
+  }
+  if (config->overtime_cap_set) {
+    fprintf(file, "overtime_cap_minutes = %d\n", config->overtime_cap_minutes);
+  }
+  if (config->time_penalty_set) {
+    fprintf(file, "time_penalty = \"%s\"\n",
+            config->time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC
+                ? "1_per_sec"
+                : "10_per_min");
+  }
+  if (config->challenge_rule_set) {
+    const char *value = "void";
+    switch (config->challenge_rule) {
+    case UI_CHALLENGE_SINGLE:
+      value = "single";
+      break;
+    case UI_CHALLENGE_DOUBLE:
+      value = "double";
+      break;
+    case UI_CHALLENGE_PENALTY:
+      value = "penalty";
+      break;
+    case UI_CHALLENGE_VOID:
+    case UI_CHALLENGE_RULE_COUNT:
+    default:
+      value = "void";
+      break;
+    }
+    fprintf(file, "challenge_rule = \"%s\"\n", value);
+  }
+  if (config->challenge_penalty_set) {
+    const char *value = "5_per_play";
+    switch (config->challenge_penalty) {
+    case UI_CHALLENGE_PENALTY_10_PER_PLAY:
+      value = "10_per_play";
+      break;
+    case UI_CHALLENGE_PENALTY_5_PER_WORD:
+      value = "5_per_word";
+      break;
+    case UI_CHALLENGE_PENALTY_10_PER_WORD:
+      value = "10_per_word";
+      break;
+    case UI_CHALLENGE_PENALTY_5_PER_PLAY:
+    case UI_CHALLENGE_PENALTY_COUNT:
+    default:
+      value = "5_per_play";
+      break;
+    }
+    fprintf(file, "challenge_penalty = \"%s\"\n", value);
   }
   if (config->border_thickness_set) {
     fprintf(file, "border_thickness = %d\n", config->border_thickness);

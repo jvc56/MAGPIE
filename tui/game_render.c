@@ -278,7 +278,8 @@ static int history_two_col_rows_needed(const TuiGameState *state) {
   int left = 0;
   int right = 0;
   for (int idx = 0; idx < state->history_count; idx++) {
-    const int rows = state->history[idx].end_bonus != 0
+    const int rows = (state->history[idx].end_bonus != 0 ||
+                      state->history[idx].challenged_off)
                          ? 4
                          : 2; // mirrors history_entry_rows
     if (idx % 2 == 0) {
@@ -410,7 +411,7 @@ static Layout compute_layout(struct ncplane *plane, int user_scale,
   // rack). The panel returns once the game is over, for post-game study.
   const bool pvc_in_progress =
       state != NULL && state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
-      state->game != NULL && !game_over(state->game);
+      state->game != NULL && !tui_game_state_play_over(state);
   if (state != NULL && !pvc_in_progress) {
     if (L.right_col_width >= ANALYSIS_THREE_COL_THRESHOLD) {
       L.analysis_placement = ANALYSIS_RIGHT_OF_HISTORY;
@@ -1044,14 +1045,15 @@ static void draw_combined_pills_history_frame(struct ncplane *plane,
   }
 }
 
+// Negative values render with a leading "-" ("-1:23") — the overtime
+// display for play-vs-computer games whose rule allows the clock to
+// run past 0:00.
 static void format_clock(int seconds, char *buf, size_t buf_size) {
-  if (seconds < 0) {
-    snprintf(buf, buf_size, "--:--");
-    return;
-  }
-  const int minutes = seconds / 60;
-  const int secs = seconds % 60;
-  snprintf(buf, buf_size, "%d:%02d", minutes, secs);
+  const bool negative = seconds < 0;
+  const int magnitude = negative ? -seconds : seconds;
+  const int minutes = magnitude / 60;
+  const int secs = magnitude % 60;
+  snprintf(buf, buf_size, "%s%d:%02d", negative ? "-" : "", minutes, secs);
 }
 
 // ── Pixel-graphics grid overlay ───────────────────────────────────────────
@@ -1466,7 +1468,7 @@ static const Rack *pick_render_rack(const TuiGameState *state, int player_idx) {
   // either.
   if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
       player_idx != state->human_player_idx && state->game != NULL &&
-      !game_over(state->game)) {
+      !tui_game_state_play_over(state)) {
     return NULL;
   }
   const TuiHistoryEntry *entry = pick_history_view(state);
@@ -1581,7 +1583,7 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
   // ghosting tiles on the human's rack). Analysis previews return at
   // game over for post-game review.
   if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
-      !game_over(state->game)) {
+      !tui_game_state_play_over(state)) {
     return NULL;
   }
   const int idx = effective_analysis_cursor(state);
@@ -1936,7 +1938,11 @@ static double pick_render_clock_seconds(const TuiGameState *state,
     const int snap = entry->player_idx == player_idx
                          ? entry->clock_at_start
                          : entry->opp_clock_at_start;
-    return snap < 0 ? 0.0 : (double)snap;
+    // Negative snapshots are real under the overtime rules (the turn
+    // began past 0:00) — pass them through so the pill shows the
+    // overtime clock. Outside overtime the snapshots are never
+    // negative, so no defensive floor is needed here.
+    return (double)snap;
   }
   return seconds_remaining(state, player_idx);
 }
@@ -1959,6 +1965,11 @@ static int pick_render_score(const TuiGameState *state, int player_idx) {
       continue;
     }
     if (prior->player_idx == player_idx) {
+      // A challenged-off play netted zero — its as-if total minus the
+      // cancelled score is the player's real running total.
+      if (prior->challenged_off) {
+        return prior->total_after - prior->score;
+      }
       return prior->total_after + prior->end_bonus;
     }
   }
@@ -4026,7 +4037,8 @@ static void render_rack_panel(struct ncplane *plane, const Theme *theme,
   // row of empty tile slots so the human sees "opponent's tiles hidden."
   const bool concealed = state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
                          player_idx != state->human_player_idx &&
-                         state->game != NULL && !game_over(state->game);
+                         state->game != NULL &&
+                         !tui_game_state_play_over(state);
   if (concealed) {
     draw_box_styled(plane, theme, L->rack_top, 0, box_height, L->board_width,
                     "Rack", TUI_FOCUS_RACK, rack_focused);
@@ -4474,7 +4486,7 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
   // clock would count down even though no game has started.
   if (state->bot_started &&
       game_get_player_on_turn_index(state->game) == player_idx &&
-      !game_over(state->game)) {
+      !tui_game_state_play_over(state)) {
     struct timespec now;
     clock_gettime(CLOCK_MONOTONIC, &now);
     double elapsed = (double)(now.tv_sec - state->turn_started.tv_sec) +
@@ -4486,7 +4498,13 @@ static double seconds_remaining(const TuiGameState *state, int player_idx) {
   }
   const double total = (double)state->time_per_side_seconds;
   double remaining = total - used;
-  if (remaining < 0.0) {
+  // In play-vs-computer overtime (MAX / UNLIMITED rules) the clock
+  // legitimately runs negative and the display shows it ("-1:23").
+  // Everywhere else, keep the defensive floor at 0.
+  const bool overtime_allowed =
+      state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      state->overtime_rule != UI_OVERTIME_FLAG;
+  if (remaining < 0.0 && !overtime_allowed) {
     remaining = 0.0;
   }
   if (remaining > total) {
@@ -4558,12 +4576,23 @@ static void render_player_pill(struct ncplane *plane, const Theme *theme,
   int score_col;
   if (show_clock) {
     const double remaining = pick_render_clock_seconds(state, player_idx);
+    // Floor toward -inf so the first second past 0:00 already reads
+    // "-0:01" instead of lingering on "0:00".
+    int remaining_secs = (int)remaining;
+    if (remaining < 0 && (double)remaining_secs != remaining) {
+      remaining_secs--;
+    }
     char clock_str[16];
-    format_clock(remaining < 0 ? 0 : (int)remaining, clock_str,
-                 sizeof(clock_str));
+    format_clock(remaining_secs, clock_str, sizeof(clock_str));
     const int clock_len = (int)strlen(clock_str);
     const int clock_col = content_right - clock_len + 1;
-    theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
+    // An overtime (negative) clock renders in the error color so the
+    // player can't miss that penalties are accruing.
+    if (remaining < 0) {
+      theme_apply_fg(plane, theme->error_fg);
+    } else {
+      theme_apply_fg(plane, on_turn ? player_accent : theme->dim_fg);
+    }
     theme_apply_bg(plane, theme->bg);
     ncplane_putstr_yx(plane, content_row, clock_col, clock_str);
     const int score_len = (int)strlen(score_str);
@@ -4720,7 +4749,7 @@ static int history_error_rows(const TuiHistoryEntry *e, int width) {
 }
 
 static int history_entry_rows(const TuiHistoryEntry *e, int width) {
-  int rows = e->end_bonus != 0 ? 4 : 2;
+  int rows = (e->end_bonus != 0 || e->challenged_off) ? 4 : 2;
   // Revalidation error: word-wrapped rows tucked under the entry's
   // move/rack pair. Lets the user see the impossible-move
   // explanation inline rather than hunting for a status line.
@@ -4864,6 +4893,78 @@ static void render_move_styled(struct ncplane *plane, int row, int col,
   ncplane_set_styles(plane, 0);
 }
 
+// Body (rows 1-2 minus the rank prefix) of an event entry — a time
+// penalty, a time forfeit, or a challenged-off phony. Mirrors the
+// engine's game-event presentation (GAME_EVENT_TIME_PENALTY /
+// GAME_EVENT_PHONY_TILES_RETURNED): an event label where the move
+// notation would go, the (negative) score adjustment in the delta
+// column, and the resulting cumulative total on row 2 alongside the
+// clock at the moment of the event.
+static void render_clock_event_entry(struct ncplane *plane, const Theme *theme,
+                                     const TuiHistoryEntry *e, int row,
+                                     int interior_left, int interior_right,
+                                     int row_bottom_inclusive,
+                                     const char *prefix, ThemeRgb player_fg,
+                                     ThemeRgb player_dim_fg,
+                                     bool clocks_active) {
+  // Adjustment-carrying events show their delta + new total; the
+  // forfeit is text-only. Labels render in the error color when the
+  // event is "bad news" (game over / turn lost); the time penalty
+  // stays in the player's palette like any other scored event.
+  const char *label = "time penalty";
+  bool show_adjustment = true;
+  bool error_color = false;
+  switch (e->kind) {
+  case TUI_HISTORY_ENTRY_TIME_FORFEIT:
+    label = "lost on time";
+    show_adjustment = false;
+    error_color = true;
+    break;
+  case TUI_HISTORY_ENTRY_TIME_PENALTY:
+  default:
+    break;
+  }
+  theme_apply_bg(plane, theme->bg);
+  ncplane_set_styles(plane, 0);
+  theme_apply_fg(plane, error_color ? theme->error_fg : player_fg);
+  ncplane_putstr_yx(plane, row, interior_left + (int)strlen(prefix), label);
+  if (show_adjustment) {
+    theme_apply_fg(plane, player_fg);
+    char delta_str[16];
+    snprintf(delta_str, sizeof(delta_str), "%d", e->score); // negative
+    const int delta_len = (int)strlen(delta_str);
+    const int delta_col = interior_right - delta_len + 1;
+    if (delta_col > interior_left + (int)strlen(prefix)) {
+      ncplane_putstr_yx(plane, row, delta_col, delta_str);
+    }
+  }
+
+  // Row 2: the player's clock at the event (negative = overtime
+  // depth) + the cumulative total after the adjustment.
+  if (row + 1 > row_bottom_inclusive) {
+    return;
+  }
+  const int row2 = row + 1;
+  theme_apply_fg(plane, player_dim_fg);
+  if (clocks_active) {
+    char clock_str[16];
+    format_clock(e->clock_at_end, clock_str, sizeof(clock_str));
+    char left_line[32];
+    snprintf(left_line, sizeof(left_line), "%*s%s", (int)strlen(prefix), "",
+             clock_str);
+    ncplane_putstr_yx(plane, row2, interior_left, left_line);
+  }
+  if (show_adjustment) {
+    char total_str[16];
+    snprintf(total_str, sizeof(total_str), "%d", e->total_after);
+    const int total_len = (int)strlen(total_str);
+    const int total_col = interior_right - total_len + 1;
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, row2, total_col, total_str);
+    ncplane_set_styles(plane, 0);
+  }
+}
+
 static void
 render_history_entry(struct ncplane *plane, const Theme *theme,
                      const TuiGameState *state, const TuiHistoryEntry *e,
@@ -4880,10 +4981,10 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // Play-vs-computer conceals the computer's private tiles (rack + leave)
   // in the History panel until the game ends — the played move and score
   // are public, but the rack/leave are not. Revealed at game over.
-  const bool conceal_tiles = state != NULL &&
-                             state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
-                             e->player_idx != state->human_player_idx &&
-                             state->game != NULL && !game_over(state->game);
+  const bool conceal_tiles =
+      state != NULL && state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+      e->player_idx != state->human_player_idx && state->game != NULL &&
+      !tui_game_state_play_over(state);
   // Pick the player-specific text-color pair so the entry reads as
   // belonging to whichever player made the move.
   const ThemeRgb player_fg =
@@ -4999,6 +5100,15 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     }
   } else {
     ncplane_putstr_yx(plane, row, interior_left, prefix);
+  }
+
+  // Clock events (time penalty / time forfeit) have no move, rack, or
+  // leave — render their dedicated two-row body and stop.
+  if (e->kind != TUI_HISTORY_ENTRY_MOVE) {
+    render_clock_event_entry(plane, theme, e, row, interior_left,
+                             interior_right, row_bottom_inclusive, prefix,
+                             player_fg, player_dim_fg, clocks_active);
+    return;
   }
 
   if (editing) {
@@ -5394,8 +5504,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
   // where the move started on row 1 ("4. 14F XU" → "   2:45 EGIPS").
   if (clocks_active) {
     char clock_str[16];
-    format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
-                 sizeof(clock_str));
+    format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
     snprintf(left_line, sizeof(left_line), "%*s%s %s", (int)strlen(prefix), "",
              clock_str, rack_disp);
   } else {
@@ -5416,8 +5525,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     int rack_col = interior_left + (int)strlen(prefix);
     if (clocks_active) {
       char clock_str[16];
-      format_clock(e->clock_at_start < 0 ? 0 : e->clock_at_start, clock_str,
-                   sizeof(clock_str));
+      format_clock(e->clock_at_start, clock_str, sizeof(clock_str));
       rack_col += (int)strlen(clock_str) + 1;
     }
     // Same player-tinted row bg as row 1 — computed inline so
@@ -5573,7 +5681,9 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     for (int prev = 0; prev < idx; prev++) {
       const TuiHistoryEntry *pe = &state->history[prev];
       if (pe->player_idx == e->player_idx && !pe->pending) {
-        total_before += pe->score + pe->end_bonus;
+        if (!pe->challenged_off) {
+          total_before += pe->score + pe->end_bonus;
+        }
       }
     }
     char total_str[16];
@@ -5596,7 +5706,9 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     for (int prev = 0; prev < idx; prev++) {
       const TuiHistoryEntry *pe = &state->history[prev];
       if (pe->player_idx == e->player_idx && !pe->pending) {
-        total_before += pe->score + pe->end_bonus;
+        if (!pe->challenged_off) {
+          total_before += pe->score + pe->end_bonus;
+        }
       }
     }
     char total_str[16];
@@ -5609,6 +5721,50 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
     ncplane_set_styles(plane, NCSTYLE_BOLD);
     ncplane_putstr_yx(plane, row2, total_col, total_str);
     ncplane_set_styles(plane, 0);
+  }
+
+  // ── Rows 3-4 (challenged-off phony): the auto-challenge outcome,
+  // folded into the play's own entry so the two-column history keeps
+  // its index-parity column assignment. Row 3 carries the event label
+  // and the cancelling adjustment; row 4 the clock at resolution and
+  // the corrected running total (back to where it was before the
+  // play).
+  if (e->challenged_off) {
+    if (row + 2 > row_bottom_inclusive) {
+      return;
+    }
+    const int challenge_row = row + 2;
+    ncplane_set_styles(plane, 0);
+    theme_apply_bg(plane, theme->bg);
+    theme_apply_fg(plane, theme->error_fg);
+    char challenge_left[32];
+    snprintf(challenge_left, sizeof(challenge_left), "%*schallenged off",
+             (int)strlen(prefix), "");
+    ncplane_putstr_yx(plane, challenge_row, interior_left, challenge_left);
+    char delta_chal_str[16];
+    snprintf(delta_chal_str, sizeof(delta_chal_str), "%d", -e->score);
+    const int delta_chal_len = (int)strlen(delta_chal_str);
+    const int delta_chal_col = interior_right - delta_chal_len + 1;
+    if (delta_chal_col > interior_left + (int)strlen(challenge_left)) {
+      theme_apply_fg(plane, player_fg);
+      ncplane_putstr_yx(plane, challenge_row, delta_chal_col, delta_chal_str);
+    }
+    if (row + 3 > row_bottom_inclusive) {
+      return;
+    }
+    // No clock on the resolution row — the player's next turn shows
+    // the same value as its start clock.
+    const int resolve_row = row + 3;
+    theme_apply_fg(plane, player_dim_fg);
+    char corrected_str[16];
+    snprintf(corrected_str, sizeof(corrected_str), "%d",
+             e->total_after - e->score);
+    const int corrected_len = (int)strlen(corrected_str);
+    const int corrected_col = interior_right - corrected_len + 1;
+    ncplane_set_styles(plane, NCSTYLE_BOLD);
+    ncplane_putstr_yx(plane, resolve_row, corrected_col, corrected_str);
+    ncplane_set_styles(plane, 0);
+    return;
   }
 
   // ── Row 3 (going-out bonus delta): "    (LNRU)               +8" ──────
@@ -5660,8 +5816,7 @@ render_history_entry(struct ncplane *plane, const Theme *theme,
 
   if (clocks_active) {
     char end_clock_str[16];
-    format_clock(e->clock_at_end < 0 ? 0 : e->clock_at_end, end_clock_str,
-                 sizeof(end_clock_str));
+    format_clock(e->clock_at_end, end_clock_str, sizeof(end_clock_str));
     char end_line[32];
     snprintf(end_line, sizeof(end_line), "%*s%s", (int)strlen(prefix), "",
              end_clock_str);
@@ -7156,6 +7311,29 @@ static void render_analysis_rows(struct ncplane *plane, const Theme *theme,
 
 // Populate the row cache from the sim leaderboard. Returns the
 // number of rows filled (≤ max_rows).
+// True when the analysis-resume worker is actively recomputing the
+// turn the History cursor is parked on — the panel should show the
+// live (ticking) results instead of the entry's frozen snapshot.
+static bool resume_active_for_cursor(const TuiGameState *state) {
+  if (state->history_cursor < 0) {
+    return false;
+  }
+  TuiGameState *mut = (TuiGameState *)state;
+  if (atomic_load(&mut->sim_results_active) &&
+      atomic_load(&mut->sim_results_turn_idx) == state->history_cursor) {
+    return true;
+  }
+  return atomic_load(&mut->endgame_results_active) &&
+         atomic_load(&mut->endgame_results_turn_idx) == state->history_cursor;
+}
+
+// The game the analysis panel should read positions from: the
+// resume worker's reconstructed past position while a "/resume" is
+// running, the live game otherwise.
+static const Game *analysis_source_game(const TuiGameState *state) {
+  return state->analysis_game != NULL ? state->analysis_game : state->game;
+}
+
 static int fill_analysis_rows_from_sim(const TuiGameState *state,
                                        AnalysisRow *rows, int max_rows) {
   SimResults *results = state->sim_results;
@@ -7165,15 +7343,19 @@ static int fill_analysis_rows_from_sim(const TuiGameState *state,
   }
   const int num_plays = sim_results_get_number_of_plays(results);
   int n = num_plays < max_rows ? num_plays : max_rows;
-  const Board *board = game_get_board(state->game);
-  // Read the rack from the live game (the on-turn player's rack at
+  // Format against the position the sim is actually running on — the
+  // reconstructed past position during a "/resume", the live game
+  // otherwise.
+  const Game *fmt_game = analysis_source_game(state);
+  const Board *board = game_get_board(fmt_game);
+  // Read the rack from the game (the on-turn player's rack at
   // the moment we're rendering, which during a sim is still the
   // pre-play rack since play_move runs only after the sim returns).
   // The sim_results internal rack is also valid in principle, but
   // sourcing it from the game directly removes a memory-ordering
   // dependency on the simmer's writes from another thread.
-  const int on_turn = game_get_player_on_turn_index(state->game);
-  const Rack *sim_rack = player_get_rack(game_get_player(state->game, on_turn));
+  const int on_turn = game_get_player_on_turn_index(fmt_game);
+  const Rack *sim_rack = player_get_rack(game_get_player(fmt_game, on_turn));
   for (int i = 0; i < n; i++) {
     rows[i].valid = false;
     rows[i].move[0] = '\0';
@@ -7334,11 +7516,15 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
   // churn fights a heavily contended allocator while the bot's search
   // threads hammer malloc, measured at ~280ms per frame in `sample`.
   if (state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
-      !game_over(state->game)) {
+      !tui_game_state_play_over(state)) {
     return;
   }
+  // While the "/resume" worker is recomputing the cursored turn, the
+  // live (ticking) results take precedence over the entry's frozen
+  // snapshot.
+  const bool resuming_cursor = resume_active_for_cursor(state);
   const TuiAnalysisSnapshot *snap = NULL;
-  if (state->history_cursor >= 0 &&
+  if (!resuming_cursor && state->history_cursor >= 0 &&
       state->history_cursor < state->history_count) {
     const TuiHistoryEntry *e = &state->history[state->history_cursor];
     if (!e->pending && e->analysis_snapshot.valid) {
@@ -7353,8 +7539,13 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
     state->last_rendered_analysis_row_count = n;
     return;
   }
+  // Bag emptiness follows the position being analyzed — the resumed
+  // turn's reconstruction during a "/resume", the live game otherwise
+  // — so a resumed mid-game sim doesn't get misread as endgame just
+  // because the finished game's bag is empty.
+  const Game *src_game = analysis_source_game(state);
   const bool bag_empty =
-      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+      src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
   // Gate sim row population on sim_results_turn_idx — the
@@ -7423,8 +7614,13 @@ void tui_capture_analysis_snapshot(const TuiGameState *state,
     return;
   }
   memset(out, 0, sizeof(*out));
+  // Bag emptiness follows the analyzed position (the resume worker's
+  // reconstruction during a "/resume", the live game otherwise) so a
+  // resumed mid-game sim captures as a sim snapshot even though the
+  // finished game's bag is empty.
+  const Game *src_game = analysis_source_game(state);
   const bool bag_empty =
-      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+      src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
   if (use_endgame) {
@@ -7465,7 +7661,7 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   // live (in-flight pending) turn still falls through to the live
   // path so the user sees the bot's progress in real time.
   const TuiAnalysisSnapshot *snap = NULL;
-  if (state->history_cursor >= 0 &&
+  if (!resume_active_for_cursor(state) && state->history_cursor >= 0 &&
       state->history_cursor < state->history_count) {
     const TuiHistoryEntry *cursor_entry =
         &state->history[state->history_cursor];
@@ -7475,14 +7671,15 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   }
 
   // Pick mode: when replaying a snapshot, use whatever mode it
-  // captured. Otherwise, endgame when the bag has run dry (and we
-  // have a saved snapshot from a completed solve); else sim. The
-  // live endgame snapshot persists across turns and through game-
-  // over, so the last-completed endgame analysis stays on screen
-  // after the game ends — which is what you want to study a
+  // captured. Otherwise, endgame when the analyzed position's bag has
+  // run dry (and we have a saved snapshot from a completed solve);
+  // else sim. The live endgame snapshot persists across turns and
+  // through game-over, so the last-completed endgame analysis stays
+  // on screen after the game ends — which is what you want to study a
   // finished game.
+  const Game *src_game = analysis_source_game(state);
   const bool bag_empty =
-      state->game != NULL && bag_get_letters(game_get_bag(state->game)) == 0;
+      src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = snap != NULL
                                ? !snap->is_sim
                                : (bag_empty && state->endgame_snapshot.valid &&
@@ -8166,7 +8363,7 @@ static void render_status_bar(struct ncplane *plane, const Theme *theme,
   // bot search running, so a lingering/decaying nps readout is just noise.
   const bool human_on_turn =
       state->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && state->game != NULL &&
-      !game_over(state->game) &&
+      !tui_game_state_play_over(state) &&
       game_get_player_on_turn_index(state->game) == state->human_player_idx;
   const bool show_nps = nps >= 1.0 && !human_on_turn;
 
@@ -9534,12 +9731,37 @@ void tui_game_render_quit_confirm(struct ncplane *plane, const Theme *theme,
   render_modal(plane, theme, "Quit?", items, shortcuts, 2, focus, 24);
 }
 
-void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
-                                int focus, const char *human_name,
-                                const char *computer_name, int first_move,
-                                int name_edit_pos, int time_seconds,
-                                const char *language, const char *lexicon,
-                                int sim_plies, int sim_candidates) {
+void tui_play_setup_enabled_rows(UiOvertimeRule overtime_rule, int time_seconds,
+                                 UiChallengeRule challenge_rule,
+                                 bool out_enabled[TUI_PLAY_SETUP_ITEM_COUNT]) {
+  for (int item_idx = 0; item_idx < TUI_PLAY_SETUP_ITEM_COUNT; item_idx++) {
+    out_enabled[item_idx] = true;
+  }
+  if (challenge_rule != UI_CHALLENGE_PENALTY) {
+    out_enabled[TUI_PLAY_SETUP_CHALLENGE_PENALTY] = false;
+  }
+  if (time_seconds <= 0) {
+    out_enabled[TUI_PLAY_SETUP_OVERTIME] = false;
+    out_enabled[TUI_PLAY_SETUP_OVERTIME_CAP] = false;
+    out_enabled[TUI_PLAY_SETUP_TIME_PENALTY] = false;
+    return;
+  }
+  if (overtime_rule != UI_OVERTIME_MAX) {
+    out_enabled[TUI_PLAY_SETUP_OVERTIME_CAP] = false;
+  }
+  if (overtime_rule == UI_OVERTIME_FLAG) {
+    out_enabled[TUI_PLAY_SETUP_TIME_PENALTY] = false;
+  }
+}
+
+void tui_game_render_play_setup(
+    struct ncplane *plane, const Theme *theme, int focus,
+    const char *human_name, const char *computer_name, int first_move,
+    int name_edit_pos, int time_seconds, UiOvertimeRule overtime_rule,
+    int overtime_cap_minutes, UiTimePenaltyRate time_penalty_rate,
+    UiChallengeRule challenge_rule, UiChallengePenalty challenge_penalty,
+    const char *language, const char *lexicon, int sim_plies,
+    int sim_candidates) {
   if (plane == NULL || theme == NULL) {
     return;
   }
@@ -9555,6 +9777,13 @@ void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
   int cursor_cols[TUI_PLAY_SETUP_ITEM_COUNT];
   int zone_starts[TUI_PLAY_SETUP_ITEM_COUNT];
   int zone_widths[TUI_PLAY_SETUP_ITEM_COUNT];
+  bool enabled[TUI_PLAY_SETUP_ITEM_COUNT];
+  bool disabled[TUI_PLAY_SETUP_ITEM_COUNT];
+  tui_play_setup_enabled_rows(overtime_rule, time_seconds, challenge_rule,
+                              enabled);
+  for (int item_idx = 0; item_idx < TUI_PLAY_SETUP_ITEM_COUNT; item_idx++) {
+    disabled[item_idx] = !enabled[item_idx];
+  }
   const bool focus_human = (focus == TUI_PLAY_SETUP_HUMAN_NAME);
   const bool focus_comp = (focus == TUI_PLAY_SETUP_COMPUTER_NAME);
 
@@ -9589,6 +9818,65 @@ void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
   }
   format_setup_row(buf[TUI_PLAY_SETUP_TIME], ROW_BUF, CONTENT_W, "Time",
                    time_value, focus == TUI_PLAY_SETUP_TIME);
+
+  // Overtime rule + its dependents. Disabled rows render their value
+  // dimmed without the ◀ ▶ adjusters (the cap only matters under
+  // "max overtime"; penalties don't exist under "flag at 0:00").
+  const char *overtime_value =
+      overtime_rule == UI_OVERTIME_FLAG  ? "flag at 0:00"
+      : overtime_rule == UI_OVERTIME_MAX ? "max overtime"
+                                         : "unlimited";
+  format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME], ROW_BUF, CONTENT_W, "Overtime",
+                   overtime_value,
+                   focus == TUI_PLAY_SETUP_OVERTIME &&
+                       enabled[TUI_PLAY_SETUP_OVERTIME]);
+  // Disabled rows show a plain-ASCII "n/a" — format_setup_row pads by
+  // byte length, so a multi-byte glyph (em dash) would right-align two
+  // columns short.
+  char cap_value[24];
+  if (enabled[TUI_PLAY_SETUP_OVERTIME_CAP]) {
+    snprintf(cap_value, sizeof(cap_value), "%d min", overtime_cap_minutes);
+  } else {
+    snprintf(cap_value, sizeof(cap_value), "n/a");
+  }
+  format_setup_row(buf[TUI_PLAY_SETUP_OVERTIME_CAP], ROW_BUF, CONTENT_W,
+                   "Overtime cap", cap_value,
+                   focus == TUI_PLAY_SETUP_OVERTIME_CAP &&
+                       enabled[TUI_PLAY_SETUP_OVERTIME_CAP]);
+  const char *penalty_value = "n/a";
+  if (enabled[TUI_PLAY_SETUP_TIME_PENALTY]) {
+    penalty_value = time_penalty_rate == UI_TIME_PENALTY_1_PER_SEC
+                        ? "1 pt/sec"
+                        : "10 pts/min";
+  }
+  format_setup_row(buf[TUI_PLAY_SETUP_TIME_PENALTY], ROW_BUF, CONTENT_W,
+                   "Time penalty", penalty_value,
+                   focus == TUI_PLAY_SETUP_TIME_PENALTY &&
+                       enabled[TUI_PLAY_SETUP_TIME_PENALTY]);
+
+  // Challenge rule + its penalty variant (the variant row only
+  // applies under the "penalty" rule).
+  const char *challenge_value =
+      challenge_rule == UI_CHALLENGE_VOID     ? "void"
+      : challenge_rule == UI_CHALLENGE_SINGLE ? "single"
+      : challenge_rule == UI_CHALLENGE_DOUBLE ? "double"
+                                              : "penalty";
+  format_setup_row(buf[TUI_PLAY_SETUP_CHALLENGE], ROW_BUF, CONTENT_W,
+                   "Challenge", challenge_value,
+                   focus == TUI_PLAY_SETUP_CHALLENGE);
+  const char *challenge_penalty_value = "n/a";
+  if (enabled[TUI_PLAY_SETUP_CHALLENGE_PENALTY]) {
+    challenge_penalty_value =
+        challenge_penalty == UI_CHALLENGE_PENALTY_5_PER_PLAY    ? "5 pts/play"
+        : challenge_penalty == UI_CHALLENGE_PENALTY_10_PER_PLAY ? "10 pts/play"
+        : challenge_penalty == UI_CHALLENGE_PENALTY_5_PER_WORD  ? "5 pts/word"
+                                                                : "10 pts/word";
+  }
+  format_setup_row(buf[TUI_PLAY_SETUP_CHALLENGE_PENALTY], ROW_BUF, CONTENT_W,
+                   "Challenge penalty", challenge_penalty_value,
+                   focus == TUI_PLAY_SETUP_CHALLENGE_PENALTY &&
+                       enabled[TUI_PLAY_SETUP_CHALLENGE_PENALTY]);
+
   format_setup_row(buf[TUI_PLAY_SETUP_LANGUAGE], ROW_BUF, CONTENT_W, "Language",
                    language != NULL && language[0] != '\0' ? language
                                                            : "(none)",
@@ -9623,7 +9911,7 @@ void tui_game_render_play_setup(struct ncplane *plane, const Theme *theme,
     cursor_cols[TUI_PLAY_SETUP_COMPUTER_NAME] = NAME_ZONE_START + name_edit_pos;
   }
   render_modal_ex(plane, theme, "Play vs computer", items, /*shortcuts=*/NULL,
-                  /*disabled=*/NULL, cursor_cols, zone_starts, zone_widths,
+                  disabled, cursor_cols, zone_starts, zone_widths,
                   TUI_PLAY_SETUP_ITEM_COUNT, focus, MODAL_WIDTH);
 }
 

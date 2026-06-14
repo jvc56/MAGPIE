@@ -54,6 +54,66 @@ typedef enum {
   TUI_RACK_SORT_COUNT,
 } TuiRackSort;
 
+// What happens when a player's clock reaches 0:00 in a timed
+// play-vs-computer game.
+//   FLAG      — the game ends immediately; the player whose clock ran
+//               out loses on time. No score penalties.
+//   MAX       — play continues into overtime up to a cap
+//               (overtime_cap_minutes); exceeding the cap loses on
+//               time. Overtime used is penalized at the chosen rate.
+//   UNLIMITED — play continues indefinitely; overtime is penalized at
+//               the chosen rate.
+typedef enum {
+  UI_OVERTIME_FLAG = 0,
+  UI_OVERTIME_MAX = 1,
+  UI_OVERTIME_UNLIMITED = 2,
+  UI_OVERTIME_RULE_COUNT,
+} UiOvertimeRule;
+
+// Scoring rate for overtime penalties (MAX / UNLIMITED overtime).
+// Both rates round up: any started second (1 pt/sec) or any started
+// minute (10 pts/min) is charged in full, matching the engine's
+// `overtimepenalty` game-history convention of whole-point negative
+// score adjustments.
+typedef enum {
+  UI_TIME_PENALTY_10_PER_MIN = 0,
+  UI_TIME_PENALTY_1_PER_SEC = 1,
+  UI_TIME_PENALTY_RATE_COUNT,
+} UiTimePenaltyRate;
+
+// How invalid words are handled.
+//   VOID    — invalid plays are rejected outright; the player re-enters
+//             their move (no penalty, no turn lost).
+//   SINGLE  — a successfully challenged play comes off for loss of
+//             turn; an unsuccessful challenge costs the challenger
+//             nothing.
+//   DOUBLE  — as SINGLE, but an unsuccessful challenger loses their
+//             turn.
+//   PENALTY — as SINGLE, but an unsuccessful challenger forfeits
+//             points (see UiChallengePenalty).
+// In play-vs-computer the human's invalid plays are auto-challenged
+// (the computer never misses), so SINGLE / DOUBLE / PENALTY currently
+// behave identically there; the distinction matters once challenging
+// the computer's plays (and live-game annotation) is wired up.
+typedef enum {
+  UI_CHALLENGE_VOID = 0,
+  UI_CHALLENGE_SINGLE = 1,
+  UI_CHALLENGE_DOUBLE = 2,
+  UI_CHALLENGE_PENALTY = 3,
+  UI_CHALLENGE_RULE_COUNT,
+} UiChallengeRule;
+
+// Points an unsuccessful challenger forfeits under
+// UI_CHALLENGE_PENALTY, charged either once per challenged play or
+// once per word formed by it.
+typedef enum {
+  UI_CHALLENGE_PENALTY_5_PER_PLAY = 0,
+  UI_CHALLENGE_PENALTY_10_PER_PLAY = 1,
+  UI_CHALLENGE_PENALTY_5_PER_WORD = 2,
+  UI_CHALLENGE_PENALTY_10_PER_WORD = 3,
+  UI_CHALLENGE_PENALTY_COUNT,
+} UiChallengePenalty;
+
 typedef struct {
   ThemeName theme;
   bool theme_set;
@@ -61,6 +121,20 @@ typedef struct {
   bool lexicon_set;
   int time_per_side_seconds;
   bool time_per_side_set;
+  // Overtime rule + penalty rate for play-vs-computer games. The cap
+  // only applies when overtime_rule is UI_OVERTIME_MAX.
+  UiOvertimeRule overtime_rule;
+  bool overtime_rule_set;
+  int overtime_cap_minutes;
+  bool overtime_cap_set;
+  UiTimePenaltyRate time_penalty_rate;
+  bool time_penalty_set;
+  // Challenge rule + penalty variant for play-vs-computer games. The
+  // penalty only applies when challenge_rule is UI_CHALLENGE_PENALTY.
+  UiChallengeRule challenge_rule;
+  bool challenge_rule_set;
+  UiChallengePenalty challenge_penalty;
+  bool challenge_penalty_set;
   // Pixel-grid border thickness. 0 = off; 1..6 supported.
   int border_thickness;
   bool border_thickness_set;

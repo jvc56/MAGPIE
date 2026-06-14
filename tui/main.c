@@ -352,8 +352,8 @@ static void tui_copy_position_cgp(TuiGameState *gs) {
   if (cgp == NULL) {
     return;
   }
-  const bool conceal =
-      gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER && !game_over(gs->game);
+  const bool conceal = gs->app_mode == TUI_APP_MODE_PLAY_VS_COMPUTER &&
+                       !tui_game_state_play_over(gs);
   if (conceal) {
     // CGP is "<board> <rack_on_turn>/<rack_other> <scores> <zeros>".
     // Blank the computer's side of the racks token by splicing the
@@ -837,6 +837,14 @@ int main(int argc, char *argv[]) {
   char play_setup_computer_name[32] = "Computer";
   int play_setup_first_move = TUI_PLAY_FIRST_RANDOM;
   int play_setup_name_cursor = 0;
+  // Overtime rule + penalty rate scratch. Seeded from the config (or
+  // its defaults when the file / keys are missing) and persisted on
+  // Start; survives across modal opens within the session.
+  UiOvertimeRule play_setup_overtime_rule = loaded.overtime_rule;
+  int play_setup_overtime_cap = loaded.overtime_cap_minutes;
+  UiTimePenaltyRate play_setup_penalty_rate = loaded.time_penalty_rate;
+  UiChallengeRule play_setup_challenge_rule = loaded.challenge_rule;
+  UiChallengePenalty play_setup_challenge_penalty = loaded.challenge_penalty;
   // Annotate setup: lexicon (◀/▶ cycled, language-scoped) plus
   // two free-form player names. Same modal-local pattern as
   // Watch setup — commits to the session only on Start.
@@ -1024,6 +1032,9 @@ int main(int argc, char *argv[]) {
       if (resolve_ok) {
         // Stop the bot if a previous load started one (currently
         // we never start the bot on load, but be safe).
+        // The analysis-resume worker reads history entries and the
+        // endgame ctx — stop it before any reset / reconfigure.
+        tui_analysis_worker_stop_and_join(&game_state);
         if (game_state.bot_started) {
           atomic_store(&game_state.bot_stop, true);
           pthread_join(game_state.bot_thread, NULL);
@@ -1239,6 +1250,9 @@ int main(int argc, char *argv[]) {
         }
       }
       if (resolve_ok) {
+        // The analysis-resume worker reads history entries and the
+        // endgame ctx — stop it before any reset / reconfigure.
+        tui_analysis_worker_stop_and_join(&game_state);
         if (game_state.bot_started) {
           atomic_store(&game_state.bot_stop, true);
           pthread_join(game_state.bot_thread, NULL);
@@ -1794,8 +1808,10 @@ int main(int argc, char *argv[]) {
         tui_game_render_play_setup(
             std_plane, theme, play_setup_focus, play_setup_human_name,
             play_setup_computer_name, play_setup_first_move,
-            play_setup_name_cursor, watch_setup_time, play_lang_buf,
-            watch_setup_lexicon, game_state.sim_plies,
+            play_setup_name_cursor, watch_setup_time, play_setup_overtime_rule,
+            play_setup_overtime_cap, play_setup_penalty_rate,
+            play_setup_challenge_rule, play_setup_challenge_penalty,
+            play_lang_buf, watch_setup_lexicon, game_state.sim_plies,
             game_state.sim_candidates);
       }
       // Time the UI thread's full render path so the debug overlay
@@ -3650,6 +3666,9 @@ int main(int argc, char *argv[]) {
             // that's running, reset state (re-init if lexicon /
             // RIT changed), kick off a fresh bot run with the
             // chosen settings.
+            // The analysis-resume worker reads history entries and the
+            // endgame ctx — stop it before any reset / reconfigure.
+            tui_analysis_worker_stop_and_join(&game_state);
             if (game_state.bot_started) {
               atomic_store(&game_state.bot_stop, true);
               pthread_join(game_state.bot_thread, NULL);
@@ -3904,6 +3923,9 @@ int main(int argc, char *argv[]) {
           // empty-board reset, set player names, append one
           // pending entry for P1, drop into annotation mode (no
           // bot started).
+          // The analysis-resume worker reads history entries and the
+          // endgame ctx — stop it before any reset / reconfigure.
+          tui_analysis_worker_stop_and_join(&game_state);
           if (game_state.bot_started) {
             atomic_store(&game_state.bot_stop, true);
             pthread_join(game_state.bot_thread, NULL);
@@ -4010,14 +4032,14 @@ int main(int argc, char *argv[]) {
               }
             }
             play_setup_focus = hit;
-            if (hit == TUI_PLAY_SETUP_FIRST_MOVE &&
-                chev == TUI_MODAL_CHEVRON_LEFT) {
-              key = NCKEY_LEFT;
-            } else if (hit == TUI_PLAY_SETUP_FIRST_MOVE &&
-                       chev == TUI_MODAL_CHEVRON_RIGHT) {
-              key = NCKEY_RIGHT;
-            } else if (hit == TUI_PLAY_SETUP_START) {
+            // Chevrons only render on the focused adjustable row, so a
+            // chevron hit always means "adjust this row".
+            if (hit == TUI_PLAY_SETUP_START) {
               key = NCKEY_ENTER;
+            } else if (chev == TUI_MODAL_CHEVRON_LEFT) {
+              key = NCKEY_LEFT;
+            } else if (chev == TUI_MODAL_CHEVRON_RIGHT) {
+              key = NCKEY_RIGHT;
             } else {
               continue;
             }
@@ -4041,14 +4063,20 @@ int main(int argc, char *argv[]) {
           startup_menu_focus = TUI_STARTUP_PLAY_VS_COMPUTER;
           continue;
         }
+        // Cursor navigation skips rows the current overtime rule
+        // disables (cap under non-MAX, penalty rate under FLAG).
+        bool ps_enabled[TUI_PLAY_SETUP_ITEM_COUNT];
+        tui_play_setup_enabled_rows(play_setup_overtime_rule, watch_setup_time,
+                                    play_setup_challenge_rule, ps_enabled);
         if (key == NCKEY_UP || key == NCKEY_DOWN) {
           const int delta = key == NCKEY_UP ? -1 : 1;
           int next = play_setup_focus + delta;
-          if (next < 0) {
-            next = 0;
+          while (next >= 0 && next < TUI_PLAY_SETUP_ITEM_COUNT &&
+                 !ps_enabled[next]) {
+            next += delta;
           }
-          if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
-            next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
+          if (next < 0 || next >= TUI_PLAY_SETUP_ITEM_COUNT) {
+            next = play_setup_focus; // no enabled row that way — stay put
           }
           play_setup_focus = next;
           if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
@@ -4060,12 +4088,18 @@ int main(int argc, char *argv[]) {
         }
         if (key == NCKEY_TAB) {
           const bool shift = ncinput_shift_p(&input);
-          int next = play_setup_focus + (shift ? -1 : 1);
-          if (next < 0) {
-            next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
-          }
-          if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
-            next = 0;
+          int next = play_setup_focus;
+          for (int step = 0; step < TUI_PLAY_SETUP_ITEM_COUNT; step++) {
+            next += shift ? -1 : 1;
+            if (next < 0) {
+              next = TUI_PLAY_SETUP_ITEM_COUNT - 1;
+            }
+            if (next >= TUI_PLAY_SETUP_ITEM_COUNT) {
+              next = 0;
+            }
+            if (ps_enabled[next]) {
+              break;
+            }
           }
           play_setup_focus = next;
           if (next == TUI_PLAY_SETUP_HUMAN_NAME) {
@@ -4092,6 +4126,42 @@ int main(int argc, char *argv[]) {
               next = n - 1;
             }
             watch_setup_time = tui_time_picker_preset_seconds(next);
+          } else if (play_setup_focus == TUI_PLAY_SETUP_OVERTIME) {
+            play_setup_overtime_rule =
+                (UiOvertimeRule)(((int)play_setup_overtime_rule + dir +
+                                  UI_OVERTIME_RULE_COUNT) %
+                                 UI_OVERTIME_RULE_COUNT);
+          } else if (play_setup_focus == TUI_PLAY_SETUP_OVERTIME_CAP) {
+            if (play_setup_overtime_rule == UI_OVERTIME_MAX) {
+              int v = play_setup_overtime_cap + dir;
+              if (v < 1) {
+                v = 1;
+              }
+              if (v > 60) {
+                v = 60;
+              }
+              play_setup_overtime_cap = v;
+            }
+          } else if (play_setup_focus == TUI_PLAY_SETUP_TIME_PENALTY) {
+            if (play_setup_overtime_rule != UI_OVERTIME_FLAG) {
+              // Two rates — Left/Right both toggle.
+              play_setup_penalty_rate =
+                  play_setup_penalty_rate == UI_TIME_PENALTY_10_PER_MIN
+                      ? UI_TIME_PENALTY_1_PER_SEC
+                      : UI_TIME_PENALTY_10_PER_MIN;
+            }
+          } else if (play_setup_focus == TUI_PLAY_SETUP_CHALLENGE) {
+            play_setup_challenge_rule =
+                (UiChallengeRule)(((int)play_setup_challenge_rule + dir +
+                                   UI_CHALLENGE_RULE_COUNT) %
+                                  UI_CHALLENGE_RULE_COUNT);
+          } else if (play_setup_focus == TUI_PLAY_SETUP_CHALLENGE_PENALTY) {
+            if (play_setup_challenge_rule == UI_CHALLENGE_PENALTY) {
+              play_setup_challenge_penalty =
+                  (UiChallengePenalty)(((int)play_setup_challenge_penalty +
+                                        dir + UI_CHALLENGE_PENALTY_COUNT) %
+                                       UI_CHALLENGE_PENALTY_COUNT);
+            }
           } else if (play_setup_focus == TUI_PLAY_SETUP_LANGUAGE) {
             if (lexicon_list == NULL) {
               lexicon_list = tui_lexicon_list_load();
@@ -4206,10 +4276,13 @@ int main(int argc, char *argv[]) {
           }
         }
         if (key == NCKEY_ENTER || key == '\r' || key == '\n') {
-          // Enter on a non-Start row advances to the next field; Enter
-          // on Start launches the game.
+          // Enter on a non-Start row advances to the next enabled
+          // field; Enter on Start launches the game.
           if (play_setup_focus != TUI_PLAY_SETUP_START) {
-            play_setup_focus++;
+            do {
+              play_setup_focus++;
+            } while (play_setup_focus < TUI_PLAY_SETUP_START &&
+                     !ps_enabled[play_setup_focus]);
             if (play_setup_focus == TUI_PLAY_SETUP_HUMAN_NAME) {
               play_setup_name_cursor = (int)strlen(play_setup_human_name);
             } else if (play_setup_focus == TUI_PLAY_SETUP_COMPUTER_NAME) {
@@ -4243,6 +4316,9 @@ int main(int argc, char *argv[]) {
                    watch_setup_lexicon);
           pthread_mutex_unlock(&game_state.mutex);
           // Stop any running bot before reconfiguring the game.
+          // The analysis-resume worker reads history entries and the
+          // endgame ctx — stop it before any reset / reconfigure.
+          tui_analysis_worker_stop_and_join(&game_state);
           if (game_state.bot_started) {
             atomic_store(&game_state.bot_stop, true);
             pthread_join(game_state.bot_thread, NULL);
@@ -4252,6 +4328,16 @@ int main(int argc, char *argv[]) {
           if (!args.no_config) {
             to_save.time_per_side_seconds = chosen_time;
             to_save.time_per_side_set = true;
+            to_save.overtime_rule = play_setup_overtime_rule;
+            to_save.overtime_rule_set = true;
+            to_save.overtime_cap_minutes = play_setup_overtime_cap;
+            to_save.overtime_cap_set = true;
+            to_save.time_penalty_rate = play_setup_penalty_rate;
+            to_save.time_penalty_set = true;
+            to_save.challenge_rule = play_setup_challenge_rule;
+            to_save.challenge_rule_set = true;
+            to_save.challenge_penalty = play_setup_challenge_penalty;
+            to_save.challenge_penalty_set = true;
             strncpy(to_save.lexicon, chosen_lexicon,
                     sizeof(to_save.lexicon) - 1);
             to_save.lexicon[sizeof(to_save.lexicon) - 1] = '\0';
@@ -4290,6 +4376,11 @@ int main(int argc, char *argv[]) {
           }
           pthread_mutex_lock(&game_state.mutex);
           tui_game_state_set_time_per_side(&game_state, chosen_time);
+          game_state.overtime_rule = play_setup_overtime_rule;
+          game_state.overtime_cap_minutes = play_setup_overtime_cap;
+          game_state.time_penalty_rate = play_setup_penalty_rate;
+          game_state.challenge_rule = play_setup_challenge_rule;
+          game_state.challenge_penalty = play_setup_challenge_penalty;
           tui_game_state_reset_game(&game_state, (uint64_t)time(NULL));
           game_state.app_mode = TUI_APP_MODE_PLAY_VS_COMPUTER;
           game_state.human_player_idx = human_idx;
@@ -4805,6 +4896,9 @@ int main(int argc, char *argv[]) {
             // launch the bot is idle (waiting on the startup menu), so
             // the pthread_join would block forever on a never-started
             // thread.
+            // The analysis-resume worker reads history entries and the
+            // endgame ctx — stop it before any reset / reconfigure.
+            tui_analysis_worker_stop_and_join(&game_state);
             if (game_state.bot_started) {
               atomic_store(&game_state.bot_stop, true);
               pthread_join(game_state.bot_thread, NULL);
@@ -5301,8 +5395,8 @@ int main(int argc, char *argv[]) {
             pthread_mutex_unlock(&game_state.mutex);
           } else if (key == NCKEY_TAB || key == '\t') {
             // Tab completes against the unique prefix match.
-            static const char *cmd_names[] = {"copy", "exit", "new", "quit",
-                                              "settings"};
+            static const char *cmd_names[] = {
+                "copy", "exit", "new", "quit", "resume", "settings", "stop"};
             static const int n_cmds =
                 (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
             const char *match = NULL;
@@ -5345,10 +5439,16 @@ int main(int argc, char *argv[]) {
               pthread_mutex_lock(&game_state.mutex);
               tui_copy_position_cgp(&game_state);
               pthread_mutex_unlock(&game_state.mutex);
+            } else if (strcmp(cmd, "resume") == 0) {
+              pthread_mutex_lock(&game_state.mutex);
+              tui_analysis_worker_start(&game_state, game_state.history_cursor);
+              pthread_mutex_unlock(&game_state.mutex);
+            } else if (strcmp(cmd, "stop") == 0) {
+              tui_analysis_worker_stop_and_join(&game_state);
             } else {
               // Try a unique prefix match.
-              static const char *cmd_names[] = {"copy", "exit", "new", "quit",
-                                                "settings"};
+              static const char *cmd_names[] = {
+                  "copy", "exit", "new", "quit", "resume", "settings", "stop"};
               static const int n_cmds =
                   (int)(sizeof(cmd_names) / sizeof(cmd_names[0]));
               const char *match = NULL;
@@ -5379,6 +5479,13 @@ int main(int argc, char *argv[]) {
                   pthread_mutex_lock(&game_state.mutex);
                   tui_copy_position_cgp(&game_state);
                   pthread_mutex_unlock(&game_state.mutex);
+                } else if (strcmp(match, "resume") == 0) {
+                  pthread_mutex_lock(&game_state.mutex);
+                  tui_analysis_worker_start(&game_state,
+                                            game_state.history_cursor);
+                  pthread_mutex_unlock(&game_state.mutex);
+                } else if (strcmp(match, "stop") == 0) {
+                  tui_analysis_worker_stop_and_join(&game_state);
                 }
               }
             }

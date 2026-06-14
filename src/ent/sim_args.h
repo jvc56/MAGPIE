@@ -29,6 +29,14 @@ typedef struct SimArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  // When true and the provided SimResults already holds simmed plays
+  // matching the move list (same play count and ply count), the sim
+  // skips the results reset and keeps accumulating samples onto the
+  // existing per-play stats — resuming a previously stopped (or
+  // saved-and-restored) simulation instead of starting from zero.
+  // The move list must contain the same plays the SimResults was
+  // built from; sampling reads moves from the SimmedPlays themselves.
+  bool resume_results;
 } SimArgs;
 
 static inline void
