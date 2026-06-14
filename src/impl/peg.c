@@ -433,9 +433,10 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
     for (int i = 0; i < n_consider; i++) {
       game_copy(branch, game);
       play_move(move_list_get_move(opp_ml, i), branch, NULL);
-      const int32_t mt = peg_greedy_playout(branch, mover_idx, rollout_ml);
-      if (mt < worst_for_mover) {
-        worst_for_mover = mt;
+      const int32_t mover_net =
+          peg_greedy_playout(branch, mover_idx, rollout_ml);
+      if (mover_net < worst_for_mover) {
+        worst_for_mover = mover_net;
         worst_idx = i;
       }
     }
@@ -481,7 +482,7 @@ typedef struct PegProgress {
 typedef struct PegScenarioCapture {
   PegPerScenario *rows;
   int count;
-  int cap;
+  int capacity;
   const LetterDistribution *ld;
 } PegScenarioCapture;
 
@@ -572,15 +573,15 @@ typedef struct PegScenarioJob {
 struct PegScenarioJobList {
   PegScenarioJob *jobs;
   int count;
-  int cap;
+  int capacity;
 };
 
 static void peg_scenario_joblist_push(PegScenarioJobList *list,
                                       const PegScenarioJob *job) {
-  if (list->count == list->cap) {
-    list->cap = list->cap ? list->cap * 2 : 256;
-    list->jobs =
-        realloc_or_die(list->jobs, (size_t)list->cap * sizeof(PegScenarioJob));
+  if (list->count == list->capacity) {
+    list->capacity = list->capacity ? list->capacity * 2 : 256;
+    list->jobs = realloc_or_die(list->jobs, (size_t)list->capacity *
+                                                sizeof(PegScenarioJob));
   }
   list->jobs[list->count++] = *job;
 }
@@ -660,9 +661,9 @@ static void peg_capture_row(PegScenarioCapture *capture,
                             const MachineLetter *mover_drawn, int k_drawn,
                             const MachineLetter *bag_order, int n_bag_remaining,
                             int64_t weight, int32_t mover_total) {
-  if (capture->count == capture->cap) {
-    capture->cap = capture->cap ? capture->cap * 2 : 64;
-    capture->rows = realloc_or_die(capture->rows, (size_t)capture->cap *
+  if (capture->count == capture->capacity) {
+    capture->capacity = capture->capacity ? capture->capacity * 2 : 64;
+    capture->rows = realloc_or_die(capture->rows, (size_t)capture->capacity *
                                                       sizeof(PegPerScenario));
   }
   PegPerScenario *row = &capture->rows[capture->count];
@@ -778,8 +779,8 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
     if (mover_left == 0 && bag_rem_left == 0) {
       // k_drawn! accounts for the order in which the mover draws its tiles.
       int64_t full_weight = weight;
-      for (int f = 2; f <= ctx->k_drawn; f++) {
-        full_weight *= f;
+      for (int factor = 2; factor <= ctx->k_drawn; factor++) {
+        full_weight *= factor;
       }
       // Weight-stratified sampling: this split covers the weight band
       // [seen, seen + full_weight); keep it only if a stride boundary falls
@@ -803,20 +804,21 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
   }
   const int avail = ctx->unseen[ml];
   const int max_mover = mover_left < avail ? mover_left : avail;
-  for (int m = 0; m <= max_mover; m++) {
-    const int max_bag = bag_rem_left < (avail - m) ? bag_rem_left : (avail - m);
-    for (int b = 0; b <= max_bag; b++) {
-      const int64_t add_weight =
-          peg_binomial(avail, m) * peg_binomial(avail - m, b);
-      for (int i = 0; i < m; i++) {
+  for (int to_mover = 0; to_mover <= max_mover; to_mover++) {
+    const int max_bag =
+        bag_rem_left < (avail - to_mover) ? bag_rem_left : (avail - to_mover);
+    for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
+      const int64_t add_weight = peg_binomial(avail, to_mover) *
+                                 peg_binomial(avail - to_mover, to_bag);
+      for (int i = 0; i < to_mover; i++) {
         mover_drawn[n_mover + i] = (MachineLetter)ml;
       }
-      for (int i = 0; i < b; i++) {
+      for (int i = 0; i < to_bag; i++) {
         bag_remaining[n_bag_rem + i] = (MachineLetter)ml;
       }
-      peg_enum_splits(ctx, ml + 1, mover_left - m, bag_rem_left - b,
-                      weight * add_weight, mover_drawn, n_mover + m,
-                      bag_remaining, n_bag_rem + b);
+      peg_enum_splits(ctx, ml + 1, mover_left - to_mover, bag_rem_left - to_bag,
+                      weight * add_weight, mover_drawn, n_mover + to_mover,
+                      bag_remaining, n_bag_rem + to_bag);
     }
   }
 }
@@ -992,16 +994,17 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
   if (keep >= live_count) {
     return live_count;
   }
-  int write = keep;
-  for (int read = keep; read < live_count; read++) {
-    if (peg_move_protected(&ranked[read].move, rack, protect_keys, n_protect)) {
-      if (read != write) {
-        ranked[write] = ranked[read];
+  int write_idx = keep;
+  for (int read_idx = keep; read_idx < live_count; read_idx++) {
+    if (peg_move_protected(&ranked[read_idx].move, rack, protect_keys,
+                           n_protect)) {
+      if (read_idx != write_idx) {
+        ranked[write_idx] = ranked[read_idx];
       }
-      write++;
+      write_idx++;
     }
   }
-  return write;
+  return write_idx;
 }
 
 // Evaluate `n` candidate moves at `fidelity_plies`, writing ranked[i] for each.
@@ -1229,8 +1232,8 @@ static void *peg_injector_main(void *arg) {
       int total_live = 0;
       EndgameCtx *least = NULL;
       int least_live = INT_MAX;
-      for (int w = 0; w < inj->n_workers; w++) {
-        EndgameCtx *ctx = inj->workers[w].eg_ctx;
+      for (int worker_idx = 0; worker_idx < inj->n_workers; worker_idx++) {
+        EndgameCtx *ctx = inj->workers[worker_idx].eg_ctx;
         if (ctx == NULL || !endgame_injecting(ctx)) {
           continue;
         }
@@ -1405,15 +1408,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     tt_fraction = 0.05;
   }
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
-  for (int w = 0; w < n_scratch; w++) {
-    workers[w].playout_ml = move_list_create(1);
-    workers[w].eg_results = endgame_results_create();
+  for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
+    workers[worker_idx].playout_ml = move_list_create(1);
+    workers[worker_idx].eg_results = endgame_results_create();
     // Pre-created so the injection monitor reads a stable, non-NULL ctx pointer
     // (no race with lazy creation inside endgame_solve_inline).
-    workers[w].eg_ctx = endgame_ctx_create();
-    workers[w].template_game = NULL;
-    workers[w].scratch_game = NULL;
-    workers[w].eg_tt = transposition_table_create(tt_fraction);
+    workers[worker_idx].eg_ctx = endgame_ctx_create();
+    workers[worker_idx].template_game = NULL;
+    workers[worker_idx].scratch_game = NULL;
+    workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
   }
 
   // Injection monitor: lends idle cores to in-flight leaf endgames. Only
@@ -1498,12 +1501,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     if (n_real == 0) {
       n_real = n_cands; // nothing finished in budget; keep what we have
     }
-    const int keep0 = n_real < counts[0] ? n_real : counts[0];
+    const int num_kept_after_stage0 = n_real < counts[0] ? n_real : counts[0];
     // Survivors carried forward = top-K plus any protected straggler. Tracked
     // as a shrinking live_count so protected moves never leave a stale copy in
     // the unscanned tail.
-    int live_count = peg_select_survivors(ranked, n_real, keep0, mover_rack,
-                                          protect_keys, n_protect);
+    int live_count = peg_select_survivors(ranked, n_real, num_kept_after_stage0,
+                                          mover_rack, protect_keys, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
     peg_poll_replace(args->poll, ranked, live_count, /*stage=*/0,
                      /*fidelity_plies=*/0, live_count);
@@ -1512,8 +1515,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
     // needs >= 2 candidates to be meaningful, and is skipped once the budget is
     // spent.
-    for (int s = 1; s <= num_stages; s++) {
-      const int keep = live_count < counts[s - 1] ? live_count : counts[s - 1];
+    for (int stage_idx = 1; stage_idx <= num_stages; stage_idx++) {
+      const int keep = live_count < counts[stage_idx - 1]
+                           ? live_count
+                           : counts[stage_idx - 1];
       const int eval_count = peg_select_survivors(
           ranked, live_count, keep, mover_rack, protect_keys, n_protect);
       if (eval_count < 2) {
@@ -1522,11 +1527,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
-      peg_poll_begin_stage(args->poll, s, /*fidelity_plies=*/s + 1, eval_count);
-      progress.stage_idx = s;
+      peg_poll_begin_stage(args->poll, stage_idx,
+                           /*fidelity_plies=*/stage_idx + 1, eval_count);
+      progress.stage_idx = stage_idx;
       if (args->on_stage_start != NULL) {
-        args->on_stage_start(s, eval_count, /*inner_d=*/0,
-                             /*emptier_plies=*/s + 1, args->user_data);
+        args->on_stage_start(stage_idx, eval_count, /*inner_d=*/0,
+                             /*emptier_plies=*/stage_idx + 1, args->user_data);
       }
       for (int i = 0; i < eval_count; i++) {
         moves[i] = &ranked[i].move;
@@ -1541,15 +1547,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_eval_candidates_scenario(
           pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
           moves, eval_count, args->opp_model, args->inner_top_k,
-          /*fidelity_plies=*/s + 1, scenario_stride, deadline_ns,
+          /*fidelity_plies=*/stage_idx + 1, scenario_stride, deadline_ns,
           args->thread_control, &progress, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
       live_count = eval_count;
-      peg_publish(out, ranked, eval_count, s);
-      peg_poll_replace(args->poll, ranked, eval_count, s,
-                       /*fidelity_plies=*/s + 1, eval_count);
+      peg_publish(out, ranked, eval_count, stage_idx);
+      peg_poll_replace(args->poll, ranked, eval_count, stage_idx,
+                       /*fidelity_plies=*/stage_idx + 1, eval_count);
     }
 
     // Optional per-scenario detail for the published best cand. A single-cand,
@@ -1603,17 +1609,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     move_list_destroy(cand_ml);
   }
   free(protect_keys);
-  for (int w = 0; w < n_scratch; w++) {
-    move_list_destroy(workers[w].playout_ml);
-    endgame_ctx_destroy(workers[w].eg_ctx);
-    endgame_results_destroy(workers[w].eg_results);
-    if (workers[w].template_game) {
-      game_destroy(workers[w].template_game);
+  for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
+    move_list_destroy(workers[worker_idx].playout_ml);
+    endgame_ctx_destroy(workers[worker_idx].eg_ctx);
+    endgame_results_destroy(workers[worker_idx].eg_results);
+    if (workers[worker_idx].template_game) {
+      game_destroy(workers[worker_idx].template_game);
     }
-    if (workers[w].scratch_game) {
-      game_destroy(workers[w].scratch_game);
+    if (workers[worker_idx].scratch_game) {
+      game_destroy(workers[worker_idx].scratch_game);
     }
-    transposition_table_destroy(workers[w].eg_tt);
+    transposition_table_destroy(workers[worker_idx].eg_tt);
   }
   free(workers);
   if (pool) {
