@@ -28,17 +28,20 @@
 
 // On-demand pre-endgame (PEG) utility-loss benchmark. Each position is solved
 // with two fast in-game configs (A and B), then a single strong COMMON ORACLE
-// is run on EVERY position: a full-enumeration (no stride), deep default
-// cascade {32,16,8,4,2}, with pnoprune (PegArgs.protect_moves) forcing A's and
-// B's chosen moves to survive to the deepest stage so they are scored in the
-// context of the full field even when they would otherwise be pruned.
+// is run on EVERY position: full-enumeration (no stride), the top-32 candidates
+// carried without halving to 4-ply fidelity, with pnoprune (PegArgs.protect_
+// moves) forcing A's and B's chosen moves into that field so they are always
+// scored. Every leaf — arms and oracle — uses MAGPIE's greedy playout at the
+// endgame frontier (no static truncation before game end).
 //
 // Quality is the oracle's value of a move, never a config's own self-reported
 // win% (which is just its estimate at its own shallow fidelity). For each mode
 // we report utility loss = oracle_best_win - oracle_win(mode's chosen move):
 // how much win% the mode left on the table versus the best play the oracle
 // found. Running the oracle even when A and B agree catches the case where they
-// agree on a jointly-suboptimal move.
+// agree on a jointly-suboptimal move. The oracle is a strong reference, not
+// ground truth (a 4-ply, top-32 greedy-playout search), and is slow
+// (~hundreds of seconds/position); the A/B times are the in-game-relevant ones.
 //
 // Configs (including the oracle) are hardcoded in the test_benchmark_peg_*
 // entry points below — there are deliberately no environment-variable knobs.
@@ -254,6 +257,8 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
   int a_optimal = 0;
   int b_optimal = 0;
   int solved = 0;
+  double sum_t_a = 0, max_t_a = 0, sum_t_b = 0, max_t_b = 0, sum_t_o = 0,
+         max_t_o = 0;
 
   for (int ci = 0; ci < num_cgps; ci++) {
     char *cmd = get_formatted_string("cgp %s", cgp_lines[ci]);
@@ -267,6 +272,12 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
     }
     OracleResult o = run_oracle(config, oracle_cfg, &a, &b);
     solved++;
+    sum_t_a += a.elapsed;
+    max_t_a = a.elapsed > max_t_a ? a.elapsed : max_t_a;
+    sum_t_b += b.elapsed;
+    max_t_b = b.elapsed > max_t_b ? b.elapsed : max_t_b;
+    sum_t_o += o.elapsed;
+    max_t_o = o.elapsed > max_t_o ? o.elapsed : max_t_o;
 
     // win/loss are 0..1; report as percentage points.
     double loss_a = o.win_a >= 0.0 ? 100.0 * (o.best_win - o.win_a) : -1.0;
@@ -318,6 +329,12 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
   printf("    B (%s): matched oracle best %d/%d, mean loss %.2f, worst %.1f\n",
          cfg_b->name, b_optimal, loss_n_b,
          loss_n_b > 0 ? sum_loss_b / loss_n_b : 0.0, worst_b);
+  if (solved > 0) {
+    printf("    TIME/pos  A %.3fs (max %.3fs)  B %.3fs (max %.3fs)  oracle "
+           "%.3fs (max %.3fs)\n",
+           sum_t_a / solved, max_t_a, sum_t_b / solved, max_t_b,
+           sum_t_o / solved, max_t_o);
+  }
   printf("==============================================================\n");
   (void)fflush(stdout);
 
@@ -325,15 +342,21 @@ static void run_peg_utility_benchmark(const char *cgp_file, const char *label,
   config_destroy(config);
 }
 
-// Stage-table A/B with a full-enumeration deep oracle. A and B are fast in-game
-// configs (18 threads, 30s, stride 7); the oracle is the full default cascade
-// with no stride and a generous budget, run on every position with pnoprune so
-// A's and B's moves are always scored. Edit these to sweep configs.
+// Stage-table A/B with a top-32, 4-ply, full-enumeration oracle. A and B are
+// fast in-game configs (18 threads, 30s, stride 7); the oracle keeps the top 32
+// candidates (no halving) at 4-ply fidelity with no stride and a generous
+// budget, run on every position with pnoprune so A's and B's moves are always
+// scored. Edit these to sweep configs.
 static void run_stage_table_utility(const char *cgp_file, const char *label,
                                     int max_positions) {
   log_set_level(LOG_FATAL);
   static const int stage_top_k_a[] = {4, 2};
   static const int stage_top_k_b[] = {8, 4, 2};
+  // Oracle: top-32 candidates carried (no halving) to 4-ply fidelity. fidelity
+  // is stage+1, so three same-width stages reach stage 3 = 4-ply while never
+  // narrowing the field. Leaves use MAGPIE's greedy playout at the endgame
+  // frontier (no static truncation), like the arms.
+  static const int stage_top_k_oracle[] = {32, 32, 32};
   const PegBenchConfig cfg_a = {.name = "4,2",
                                 .num_threads = 18,
                                 .time_budget_seconds = 30,
@@ -346,22 +369,22 @@ static void run_stage_table_utility(const char *cgp_file, const char *label,
                                 .scenario_stride = 7,
                                 .stage_top_k = stage_top_k_b,
                                 .num_stages = 3};
-  const PegBenchConfig oracle = {.name = "full/deep",
+  const PegBenchConfig oracle = {.name = "top32@4ply",
                                  .num_threads = 18,
                                  .time_budget_seconds = 3600,
                                  .scenario_stride = 1,
-                                 .stage_top_k = NULL,
-                                 .num_stages = 0};
+                                 .stage_top_k = stage_top_k_oracle,
+                                 .num_stages = 3};
   run_peg_utility_benchmark(cgp_file, label, &cfg_a, &cfg_b, &oracle,
                             max_positions);
 }
 
 void test_benchmark_peg_3(void) {
-  run_stage_table_utility("notes/peg_positions/random_3peg.txt", "3-peg", 10);
+  run_stage_table_utility("notes/peg_positions/random_3peg.txt", "3-peg", 25);
 }
 
 void test_benchmark_peg_4(void) {
-  run_stage_table_utility("notes/peg_positions/random_4peg.txt", "4-peg", 50);
+  run_stage_table_utility("notes/peg_positions/random_4peg.txt", "4-peg", 25);
 }
 
 // ---------------------------------------------------------------------------
