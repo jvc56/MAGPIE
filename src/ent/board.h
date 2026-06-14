@@ -540,6 +540,14 @@ static inline bool board_is_letter_allowed_in_cross_set(uint64_t cross_set,
   return (cross_set & ((uint64_t)1 << letter)) != 0;
 }
 
+// Returns true if the cross set permits at least one non-blank letter.
+// Bit 0 is the blank marker, not a letter, so it is shifted out: in an
+// intersection of cross sets the blank bit can survive even when no common
+// letter does.
+static inline bool board_cross_set_allows_any_letter(uint64_t cross_set) {
+  return (cross_set >> 1) != 0;
+}
+
 static inline bool board_is_dir_vertical(int dir) {
   return dir == BOARD_VERTICAL_DIRECTION;
 }
@@ -875,6 +883,17 @@ static inline void board_load_lanes_cache(const Board *b, int ci,
   // of memory representing that cross index.
   memcpy(lanes_cache, board_get_readonly_square(b, 0, 0, 0, ci),
          sizeof(Square) * 2 * BOARD_DIM * BOARD_DIM);
+}
+
+// Returns a pointer to the contiguous block of both directions' lanes for
+// the given cross index, usable with board_get_row_cache without copying
+// the whole board. The pointer is only valid while the board is alive, not
+// transposed, and not mutated.
+static inline const Square *board_get_readonly_lanes(const Board *b, int ci) {
+  if (b->transposed) {
+    log_fatal("cannot get lanes pointer while board is transposed");
+  }
+  return board_get_readonly_square(b, 0, 0, 0, ci);
 }
 
 static inline void board_copy_row_cache(const Square *lanes_cache,

@@ -59,7 +59,7 @@ static void exec_config_quiet(Config *config, const char *cmd) {
 // position (bag empty, both players have tiles)
 static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   while (bag_get_letters(game_get_bag(game)) > 0) {
-    const Move *move = get_top_equity_move(game, 0, move_list);
+    const Move *move = get_top_equity_move(game, move_list);
     play_move(move, game, NULL);
 
     // Check if game ended before bag emptied
@@ -90,7 +90,6 @@ static float compute_stuck_fraction(Game *game, MoveList *move_list,
       .move_record_type = MOVE_RECORD_TILES_PLAYED,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = NULL,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -218,7 +217,7 @@ void test_generate_stuck_cgps(void) {
       }
 
       // Play one more greedy move
-      const Move *move = get_top_equity_move(game, 0, move_list);
+      const Move *move = get_top_equity_move(game, move_list);
       if (move_get_type(move) == GAME_EVENT_PASS) {
         break;
       }

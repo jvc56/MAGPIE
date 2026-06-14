@@ -86,6 +86,31 @@ static inline void cpthread_create(pthread_t *newthread,
   }
 }
 
+// Like cpthread_create, but requests a specific stack size (bytes) for the
+// new thread. The platform default secondary-thread stack is small (512 KB on
+// macOS); callers whose work recurses deeply on the worker stack — e.g. a
+// reentrant help-while-waiting thread pool — must request a larger stack to
+// avoid a guard-page fault (SIGBUS) that prints no diagnostic. stack_bytes is
+// rounded up to a page by the platform; pass a page-multiple to be explicit.
+static inline void cpthread_create_with_stack(pthread_t *newthread,
+                                              void *(*start_routine)(void *),
+                                              void *arg, size_t stack_bytes) {
+  pthread_attr_t attr;
+  if (pthread_attr_init(&attr)) {
+    log_fatal("thread attr init failed");
+  }
+  if (pthread_attr_setstacksize(&attr, stack_bytes)) {
+    log_fatal("thread attr setstacksize failed");
+  }
+  if (pthread_create(newthread, &attr, start_routine, arg)) {
+    log_fatal("thread create failed");
+  }
+  // attr is a value type with no embedded allocations on the platforms we
+  // target; destroying it releases any attr-internal state and is required by
+  // POSIX (this is an attr object, not a mutex/cond — see CLAUDE.md).
+  pthread_attr_destroy(&attr);
+}
+
 static inline void cpthread_join(cpthread_t th) {
   if (pthread_join(th, NULL)) {
     log_fatal("thread join failed");
@@ -101,6 +126,31 @@ static inline void cpthread_detach(cpthread_t thread) {
 static inline void cpthread_cancel(cpthread_t thread) {
   if (pthread_cancel(thread)) {
     log_fatal("thread cancel failed");
+  }
+}
+
+static inline void cpthread_key_create(cpthread_key_t *key,
+                                       void (*destructor)(void *)) {
+  if (pthread_key_create(key, destructor)) {
+    log_fatal("thread key create failed");
+  }
+}
+
+static inline void cpthread_once(cpthread_once_t *once_control,
+                                 void (*init_routine)(void)) {
+  if (pthread_once(once_control, init_routine)) {
+    log_fatal("thread once failed");
+  }
+}
+
+static inline void *cpthread_getspecific(cpthread_key_t key) {
+  return pthread_getspecific(key);
+}
+
+static inline void cpthread_setspecific(cpthread_key_t key,
+                                        const void *value) {
+  if (pthread_setspecific(key, value)) {
+    log_fatal("thread setspecific failed");
   }
 }
 

@@ -24,6 +24,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,7 +112,6 @@ void assert_move_gen_row(Game *game, MoveList *move_list,
   const MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -166,7 +166,6 @@ void macondo_tests(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -422,7 +421,6 @@ void unfound_leave_lookup_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -468,7 +466,6 @@ void exchange_tests(void) {
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
       .override_kwg = NULL,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -509,7 +506,6 @@ void movegen_many_moves(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -537,7 +533,6 @@ void equity_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -590,7 +585,6 @@ void top_equity_play_recorder_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -629,7 +623,6 @@ void small_play_recorder_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -700,7 +693,6 @@ void best_small_play_recorder_test(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -730,7 +722,6 @@ void best_small_play_recorder_test(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -757,7 +748,6 @@ void distinct_lexica_test(bool w1) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -891,7 +881,6 @@ void consistent_tiebreaking_test(void) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1069,7 +1058,6 @@ void movegen_within_x_of_best_test(bool use_wmp) {
   MoveGenArgs move_gen_args = {
       .game = game,
       .move_list = move_list,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1263,7 +1251,6 @@ void movegen_does_not_return_early_from_anchor(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_BEST,
       .move_sort_type = MOVE_SORT_EQUITY,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1315,7 +1302,6 @@ void movegen_one_tile_nonwmp(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1360,7 +1346,6 @@ void movegen_one_tile_wmp(void) {
       .move_list = move_list,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_SCORE,
-      .thread_index = 0,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1398,7 +1383,7 @@ void wmp_blank_possibilities_natural(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
   gen->wmp_move_gen.word_length = 7;
 
@@ -1430,7 +1415,7 @@ void wmp_blank_possibilities_blanked(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   // No playthrough tiles. All of these tiles are newly placed.
@@ -1465,7 +1450,7 @@ void wmp_blank_possibilities_bananas_1(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BANANAS");
@@ -1493,7 +1478,7 @@ void wmp_blank_possibilities_bananas_2(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNANAS");
@@ -1522,7 +1507,7 @@ void wmp_blank_possibilities_bananas_3(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BaNaNAS");
@@ -1550,7 +1535,7 @@ void wmp_blank_possibilities_bananas_4(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "B.NaNAS");
@@ -1578,7 +1563,7 @@ void wmp_blank_possibilities_bananas_5(void) {
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
 
-  MoveGen *gen = get_movegen(0);
+  MoveGen *gen = get_movegen();
   memset(gen, 0, sizeof(*gen));
 
   set_playthrough_marked_from_string(gen, ld, "BA.ANAS");
@@ -1601,7 +1586,42 @@ void wmp_blank_possibilities_bananas_5(void) {
   config_destroy(config);
 }
 
+// Regression guard for the move_gen subrack/KLV cache invalidation. A loaded
+// WMP/KLV exposes an instance fingerprint that gen_load_position uses to
+// invalidate the per-thread caches when a Config's WMP/KLV is freed and a new
+// one is loaded at the same struct address -- a pointer or lexicon-name
+// comparison cannot detect that reuse. The fingerprint must therefore (a) be
+// stable across calls for one instance and (b) differ between two independent
+// loads of the *same* lexicon. This is deterministic on every platform because
+// both instances are alive at once, so their internal arrays are necessarily
+// at distinct addresses; if the fingerprint were ever reverted to a
+// pointer/name basis, the distinct-instance assertions below would fail.
+void test_move_gen_instance_fingerprint(void) {
+  ErrorStack *error_stack = error_stack_create();
+
+  WMP *wmp_a = wmp_create(DEFAULT_TEST_DATA_PATH, "CSW21", error_stack);
+  WMP *wmp_b = wmp_create(DEFAULT_TEST_DATA_PATH, "CSW21", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(wmp_a != NULL && wmp_b != NULL);
+  const uint64_t wmp_fp_a = wmp_get_instance_fingerprint(wmp_a);
+  assert(wmp_fp_a == wmp_get_instance_fingerprint(wmp_a));
+  assert(wmp_fp_a != wmp_get_instance_fingerprint(wmp_b));
+  wmp_destroy(wmp_a);
+  wmp_destroy(wmp_b);
+
+  KLV *klv_a = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
+  KLV *klv_b = klv_create_or_die(DEFAULT_TEST_DATA_PATH, "CSW21");
+  const uint64_t klv_fp_a = klv_get_instance_fingerprint(klv_a);
+  assert(klv_fp_a == klv_get_instance_fingerprint(klv_a));
+  assert(klv_fp_a != klv_get_instance_fingerprint(klv_b));
+  klv_destroy(klv_a);
+  klv_destroy(klv_b);
+
+  error_stack_destroy(error_stack);
+}
+
 void test_move_gen(void) {
+  test_move_gen_instance_fingerprint();
   leave_lookup_test();
   unfound_leave_lookup_test();
   macondo_tests();

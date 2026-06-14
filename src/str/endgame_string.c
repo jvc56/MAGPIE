@@ -61,8 +61,7 @@ static void string_builder_endgame_single_pv_with_lock(
     const int max_depth = endgame_results_get_max_depth(endgame_results);
     Game *ext_game =
         endgame_results_prepare_ext_game(endgame_results, source_game);
-    pvline_extend_from_tt(&pv, ext_game, tt, solving_player, max_depth, 0,
-                          ENDGAME_MOVEGEN_RESULT_DISPLAY);
+    pvline_extend_from_tt(&pv, ext_game, tt, solving_player, max_depth);
   } else {
     // Solve complete: display the requested PV directly.
     pv = *endgame_results_get_multi_pvline(endgame_results, pv_idx);

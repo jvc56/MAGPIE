@@ -42,7 +42,12 @@ void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
 }
 
 void test_bai_top_two(int num_threads) {
-  const double means_and_vars[] = {0.1, 1, 0.9, 1};
+  // The winning arm's spread is kept small so its empirical mean cannot drift
+  // to >= 1.0, which (with cutoff == 0) would trip an early WIN_PCT_CUTOFF stop
+  // before the GK16 threshold is reached. A variance of 1 here leaves the
+  // initial-phase mean of a 0.9 arm above 1.0 for a meaningful fraction of
+  // sample sequences.
+  const double means_and_vars[] = {0.1, 1, 0.9, 0.05};
   const int num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
   RandomVariablesArgs rv_args = {
       .type = RANDOM_VARIABLES_NORMAL,

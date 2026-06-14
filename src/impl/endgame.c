@@ -327,29 +327,10 @@ static void pvline_update(PVLine *pv_line, const PVLine *new_pv_line,
   // negamax_depth is not updated here; callers set it explicitly.
 }
 
-// Returns the movegen cache slot index to use for the given caller.
-// RESULT_DISPLAY uses slot 0 and SOLVER uses slot 1 for cache locality; they
-// can run simultaneously during a solve. WORKER threads use slot
-// thread_index + 2 so they never collide with either display slot.
-static inline int endgame_get_movegen_index(int thread_index,
-                                            endgame_movegen_caller_t caller) {
-  switch (caller) {
-  case ENDGAME_MOVEGEN_RESULT_DISPLAY:
-    return 0;
-  case ENDGAME_MOVEGEN_SOLVER:
-    return 1;
-  case ENDGAME_MOVEGEN_WORKER:
-    return thread_index + 2;
-  }
-  return 0;
-}
-
 // Greedy playout for display: extend PV with highest-scoring moves after
 // TT extension. Returns number of moves appended.
 static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
-                                      Game *game_copy, MoveList *move_list,
-                                      int thread_index,
-                                      endgame_movegen_caller_t caller) {
+                                      Game *game_copy, MoveList *move_list) {
   int num_moves = start_idx;
   while (num_moves < MAX_VARIANT_LENGTH &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -359,7 +340,6 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
         .move_record_type = MOVE_RECORD_ALL_SMALL,
         .move_sort_type = MOVE_SORT_SCORE,
         .override_kwg = NULL,
-        .thread_index = endgame_get_movegen_index(thread_index, caller),
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -403,8 +383,7 @@ static int greedy_playout_for_display(PVLine *pv_line, int start_idx,
 // correct scores) are preserved; only new moves are appended.
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,
-                           int max_depth, int thread_index,
-                           endgame_movegen_caller_t caller) {
+                           int max_depth) {
   if (!tt) {
     return;
   }
@@ -498,8 +477,8 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
   // effects) and TT entries were overwritten.
-  num_moves += greedy_playout_for_display(pv_line, num_moves, game_copy,
-                                          move_list, thread_index, caller);
+  num_moves +=
+      greedy_playout_for_display(pv_line, num_moves, game_copy, move_list);
 
   pv_line->num_moves = num_moves;
   small_move_list_destroy(move_list);
@@ -594,8 +573,6 @@ static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
       .move_record_type = MOVE_RECORD_TILES_PLAYED,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = pruned_kwg,
-      .thread_index =
-          endgame_get_movegen_index(thread_index, ENDGAME_MOVEGEN_WORKER),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -735,7 +712,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   }
 }
 
-static EndgameCtx *endgame_ctx_create(void) {
+EndgameCtx *endgame_ctx_create(void) {
   return calloc_or_die(1, sizeof(EndgameCtx));
 }
 
@@ -1237,7 +1214,7 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   if (!board_get_cross_sets_valid(board)) {
     int undo_index = worker->solver->requested_plies - depth - 1;
     if (undo_index >= 0) {
-      const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+      MoveUndo *parent_undo = &worker->move_undos[undo_index];
       if (parent_undo->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
       }
@@ -1259,8 +1236,6 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       .move_record_type = MOVE_RECORD_ALL_SMALL,
       .move_sort_type = MOVE_SORT_SCORE,
       .override_kwg = solver_get_pruned_kwg(worker->solver, stm_idx),
-      .thread_index = endgame_get_movegen_index(worker->thread_index,
-                                                ENDGAME_MOVEGEN_WORKER),
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1581,7 +1556,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     if (!board_get_cross_sets_valid(leaf_board)) {
       int undo_idx = plies - 1; // last negamax move
       if (undo_idx >= 0) {
-        const MoveUndo *last_undo = &worker->move_undos[undo_idx];
+        MoveUndo *last_undo = &worker->move_undos[undo_idx];
         if (last_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(last_undo, worker->game_copy);
         }
@@ -1610,7 +1585,7 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     Board *pb = game_get_board(worker->game_copy);
     if (!board_get_cross_sets_valid(pb)) {
       int undo_idx = plies + playout_depth - 1;
-      const MoveUndo *prev = &worker->move_undos[undo_idx];
+      MoveUndo *prev = &worker->move_undos[undo_idx];
       if (prev->move_tiles_length > 0) {
         update_cross_set_for_move_from_undo(prev, worker->game_copy);
       }
@@ -1645,8 +1620,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = solver_get_pruned_kwg(
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
-          .thread_index = endgame_get_movegen_index(worker->thread_index,
-                                                    ENDGAME_MOVEGEN_WORKER),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1661,8 +1634,6 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
           .move_sort_type = MOVE_SORT_SCORE,
           .override_kwg = solver_get_pruned_kwg(
               worker->solver, game_get_player_on_turn_index(worker->game_copy)),
-          .thread_index = endgame_get_movegen_index(worker->thread_index,
-                                                    ENDGAME_MOVEGEN_WORKER),
           .eq_margin_movegen = 0,
           .target_equity = EQUITY_MAX_VALUE,
           .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
@@ -1767,11 +1738,9 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   for (int d = playout_depth - 1; d >= 0; d--) {
     int undo_slot = plies + d;
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_slot]);
-    const MoveUndo *undo = &worker->move_undos[undo_slot];
-    if (undo->move_tiles_length > 0) {
-      update_cross_sets_after_unplay_from_undo(undo, worker->game_copy);
-      board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-    }
+    // Cross-sets need no recompute here: any lazy cross-set update in the
+    // subtree was saved into this undo (or a descendant's undo already
+    // restored), so the square restore reverted them exactly.
   }
 
   if (playout_interrupted) {
@@ -1893,7 +1862,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     if (!board_get_cross_sets_valid(board)) {
       int undo_index = worker->solver->requested_plies - depth - 1;
       if (undo_index >= 0) {
-        const MoveUndo *parent_undo = &worker->move_undos[undo_index];
+        MoveUndo *parent_undo = &worker->move_undos[undo_index];
         if (parent_undo->move_tiles_length > 0) {
           update_cross_set_for_move_from_undo(parent_undo, worker->game_copy);
         }
@@ -2487,15 +2456,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       unplay_move_incremental(worker->game_copy,
                               &worker->move_undos[undo_index]);
-      // After unplay, if tiles were placed, cross-sets need to be recomputed
-      // for the restored state. Use undo-based function for correct cross-set
-      // update. If it was a pass, cross-sets are unchanged and still valid.
-      const MoveUndo *current_undo = &worker->move_undos[undo_index];
-      if (current_undo->move_tiles_length > 0) {
-        update_cross_sets_after_unplay_from_undo(current_undo,
-                                                 worker->game_copy);
-        board_set_cross_sets_valid(game_get_board(worker->game_copy), true);
-      }
+      // Cross-sets need no recompute here: any lazy cross-set update in the
+      // child's subtree was saved into this undo (or a descendant's undo that
+      // was already restored), so the square restore reverted them exactly.
 
       // Live-progress: pop the line back to the parent's depth. The
       // entry at undo_index is left as-is (will be overwritten by the
@@ -2661,10 +2624,9 @@ static bool iterative_deepening_should_stop(EndgameCtx *solver) {
 // Prepare solver->ext_game (lazy init or reset) then extend pv_line from TT.
 // Consolidates the repeated "prepare ext_game, then call pvline_extend_from_tt"
 // pattern used at all solver call sites.
-static inline void
-solver_pvline_extend_from_tt(PVLine *pv_line, EndgameCtx *solver,
-                             const Game *source_game, int thread_index,
-                             endgame_movegen_caller_t caller) {
+static inline void solver_pvline_extend_from_tt(PVLine *pv_line,
+                                                EndgameCtx *solver,
+                                                const Game *source_game) {
   if (!solver->ext_game) {
     solver->ext_game = game_duplicate(source_game);
   } else {
@@ -2672,8 +2634,7 @@ solver_pvline_extend_from_tt(PVLine *pv_line, EndgameCtx *solver,
   }
   game_set_endgame_solving_mode(solver->ext_game);
   pvline_extend_from_tt(pv_line, solver->ext_game, solver->transposition_table,
-                        solver->solving_player, solver->requested_plies,
-                        thread_index, caller);
+                        solver->solving_player, solver->requested_plies);
 }
 
 // Build top-K ranked PVLines from root SmallMoves (with TT extension) and
@@ -2682,8 +2643,7 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                         int32_t pv_value,
                                         const PVLine *extended_pv,
                                         const SmallMove *initial_moves,
-                                        int initial_move_count,
-                                        endgame_movegen_caller_t caller) {
+                                        int initial_move_count) {
   enum { MAX_RANKED_CALLBACK_PVS = 50 };
   int n_ranked = initial_move_count < MAX_RANKED_CALLBACK_PVS
                      ? initial_move_count
@@ -2699,8 +2659,7 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
     rpv->game = NULL;
     // Extend from TT
     if (worker->solver->transposition_table_optim) {
-      solver_pvline_extend_from_tt(rpv, worker->solver, worker->game_copy,
-                                   worker->thread_index, caller);
+      solver_pvline_extend_from_tt(rpv, worker->solver, worker->game_copy);
     }
   }
 
@@ -2909,13 +2868,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       PVLine extended_pv = pv;
       if (worker->solver->transposition_table_optim) {
         solver_pvline_extend_from_tt(&extended_pv, worker->solver,
-                                     worker->game_copy, worker->thread_index,
-                                     ENDGAME_MOVEGEN_SOLVER);
+                                     worker->game_copy);
       }
 
       build_ranked_pvs_and_notify(worker, ply, pv_value, &extended_pv,
-                                  initial_moves, initial_move_count,
-                                  ENDGAME_MOVEGEN_SOLVER);
+                                  initial_moves, initial_move_count);
     }
 
     // EBF-based time management: decide whether to start the next depth.
@@ -3033,8 +2990,7 @@ void *solver_worker_start(void *uncasted_solver_worker) {
 // is unstable, so when several root moves tie on estimated_value the
 // search-tracked best one may sit at any of the tied indices.
 static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
-                             const Game *game, PVLine *multi_pvs, int num_top,
-                             endgame_movegen_caller_t caller) {
+                             const Game *game, PVLine *multi_pvs, int num_top) {
   const int n_root = best_worker->n_initial_moves;
   const SmallMove *root_moves =
       (const SmallMove *)best_worker->small_move_arena->memory;
@@ -3054,7 +3010,7 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
     pv->game = NULL;
 
     if (solver->transposition_table) {
-      solver_pvline_extend_from_tt(pv, solver, game, 0, caller);
+      solver_pvline_extend_from_tt(pv, solver, game);
     }
     dst++;
   }
@@ -3253,8 +3209,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     // endgame_results_set_best_pvline during the search).
     multi_pvs[0] = *endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
     // TT-extend the best PV for display.
-    solver_pvline_extend_from_tt(&multi_pvs[0], solver, endgame_args->game, 0,
-                                 ENDGAME_MOVEGEN_SOLVER);
+    solver_pvline_extend_from_tt(&multi_pvs[0], solver, endgame_args->game);
     int num_pvs = 1;
     if (solver->num_top_moves > 1) {
       // Find the thread that completed the deepest search for its root move
@@ -3269,9 +3224,9 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
           best_thread = thread_index;
         }
       }
-      num_pvs = extract_multi_pvs(
-          solver, solver->workers[best_thread], endgame_args->game, multi_pvs,
-          solver->num_top_moves, ENDGAME_MOVEGEN_SOLVER);
+      num_pvs = extract_multi_pvs(solver, solver->workers[best_thread],
+                                  endgame_args->game, multi_pvs,
+                                  solver->num_top_moves);
     }
     endgame_results_set_num_pvs(results, num_pvs);
 
@@ -3307,8 +3262,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
         pv->num_moves = 1;
         pv->negamax_depth = 1;
         pv->game = NULL;
-        solver_pvline_extend_from_tt(pv, solver, endgame_args->game, 0,
-                                     ENDGAME_MOVEGEN_SOLVER);
+        solver_pvline_extend_from_tt(pv, solver, endgame_args->game);
       }
     }
   }

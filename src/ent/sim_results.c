@@ -729,7 +729,15 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  const int best_play_idx = sim_results_get_best_move_index(sim_results);
+  // Prefer BAI's chosen arm: that's the one with highest mean *utility*
+  // (which the simmer blends from wpct + sigmoid(spread) when -uspread is
+  // non-zero). Falling through to sim_results_get_best_move_index would
+  // re-rank by raw win_pct_stat, ignoring the utility blend entirely.
+  int best_play_idx =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  if (best_play_idx < 0) {
+    best_play_idx = sim_results_get_best_move_index(sim_results);
+  }
   if (best_play_idx < 0) {
     return NULL;
   }

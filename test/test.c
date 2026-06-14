@@ -7,6 +7,7 @@
 #include "autoplay_test.h"
 #include "bag_test.h"
 #include "bai_test.h"
+#include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
@@ -38,6 +39,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "peg_pool_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -100,6 +102,7 @@ static TestEntry test_table[] = {
     {"sim", test_sim},
     {"math", test_math_util},
     {"bai", test_bai},
+    {"baiutil", test_bai_utility},
     {"command", test_command},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
@@ -122,6 +125,7 @@ static TestEntry test_table[] = {
     {"zobrist", test_zobrist},
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
+    {"pegpool", test_peg_pool},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

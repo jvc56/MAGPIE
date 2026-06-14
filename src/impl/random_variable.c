@@ -46,9 +46,15 @@ struct RandomVariables {
   void *data;
 };
 
+// Draws a uniform value in [0, 1) from prng. Caller must hold whatever mutex
+// guards prng (see uniform_sample for the self-locking variant).
+static inline double uniform_sample_while_locked(XoshiroPRNG *prng) {
+  return (double)prng_next(prng) / ((double)UINT64_MAX);
+}
+
 double uniform_sample(XoshiroPRNG *prng, cpthread_mutex_t *mutex) {
   cpthread_mutex_lock(mutex);
-  double result = (double)prng_next(prng) / ((double)UINT64_MAX);
+  double result = uniform_sample_while_locked(prng);
   cpthread_mutex_unlock(mutex);
   return result;
 }
@@ -167,28 +173,61 @@ void rv_uniform_predetermined_reset(RandomVariables *rvs) {
 }
 
 typedef struct RVNormal {
-  XoshiroPRNG *xoshiro_prng;
+  // One PRNG per arm, each seeded with a non-overlapping subsequence, guarded
+  // by its own mutex. See rv_normal_seed_arm_prngs / rv_normal_sample for why.
+  XoshiroPRNG **xoshiro_prngs;
+  cpthread_mutex_t *mutexes;
+  uint64_t num_arms;
   double *means_and_vars;
-  cpthread_mutex_t mutex;
 } RVNormal;
+
+// Re-seeds every arm's PRNG so arm k draws from the subsequence reached by
+// jumping the base stream k times (2^128 draws apart). Independent per-arm
+// streams make an arm's sample sequence -- hence its running mean/variance
+// after N draws -- a function of N alone, not of how worker threads interleave
+// across arms, which keeps BAI results reproducible across thread counts.
+static void rv_normal_seed_arm_prngs(RVNormal *rv_normal, const uint64_t seed) {
+  if (rv_normal->num_arms == 0) {
+    return;
+  }
+  // Arm k's stream is the base stream jumped k times. Build them in O(num_arms)
+  // jumps by seeding arm 0, then copying the previous arm and advancing it one
+  // jump, rather than re-seeding and jumping k times per arm (O(num_arms^2)).
+  prng_seed(rv_normal->xoshiro_prngs[0], seed);
+  for (uint64_t arm = 1; arm < rv_normal->num_arms; arm++) {
+    prng_copy(rv_normal->xoshiro_prngs[arm], rv_normal->xoshiro_prngs[arm - 1]);
+    prng_jump(rv_normal->xoshiro_prngs[arm]);
+  }
+}
 
 double rv_normal_sample(RandomVariables *rvs, const uint64_t k,
                         const int __attribute__((unused)) thread_index,
                         const uint64_t __attribute__((unused)) sample_count,
                         BAILogger __attribute__((unused)) * bai_logger) {
-  // Implements the Box-Muller transform
+  // Implements the Box-Muller transform. The arm's mutex is held across the
+  // entire rejection loop so each logical sample consumes a contiguous block
+  // of draws; otherwise concurrent draws on the same arm could re-pair (u, v)
+  // and change the nonlinear result, breaking reproducibility.
   RVNormal *rv_normal = (RVNormal *)rvs->data;
+  XoshiroPRNG *arm_prng = rv_normal->xoshiro_prngs[k];
+  cpthread_mutex_t *arm_mutex = &rv_normal->mutexes[k];
   double u = 0.0;
   double s = 2.0;
+  cpthread_mutex_lock(arm_mutex);
   while (s >= 1.0 || s == 0.0) {
-    u = 2.0 * uniform_sample(rv_normal->xoshiro_prng, &rv_normal->mutex) - 1.0;
-    const double v =
-        2.0 * uniform_sample(rv_normal->xoshiro_prng, &rv_normal->mutex) - 1.0;
+    u = 2.0 * uniform_sample_while_locked(arm_prng) - 1.0;
+    const double v = 2.0 * uniform_sample_while_locked(arm_prng) - 1.0;
     s = u * u + v * v;
   }
+  cpthread_mutex_unlock(arm_mutex);
   s = sqrt(-2.0 * log(s) / s);
-  return rv_normal->means_and_vars[k * 2] +
-         rv_normal->means_and_vars[k * 2 + 1] * u * s;
+  // means_and_vars holds {mean, variance} per arm, so scale the unit normal
+  // (u * s) by the standard deviation. This matches the variance semantics used
+  // by rv_normal_predetermined_sample (which multiplies its unit sample by
+  // sqrt(sigma2)); without the sqrt the arm's variance would be variance^2.
+  const double mean = rv_normal->means_and_vars[k * 2];
+  const double variance = rv_normal->means_and_vars[k * 2 + 1];
+  return mean + sqrt(variance) * u * s;
 }
 
 bool rv_normal_are_similar(RandomVariables *rvs, const int i, const int j) {
@@ -206,7 +245,11 @@ bool rv_normal_are_similar(RandomVariables *rvs, const int i, const int j) {
 
 void rv_normal_destroy(RandomVariables *rvs) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
-  prng_destroy(rv_normal->xoshiro_prng);
+  for (uint64_t arm = 0; arm < rv_normal->num_arms; arm++) {
+    prng_destroy(rv_normal->xoshiro_prngs[arm]);
+  }
+  free(rv_normal->xoshiro_prngs);
+  free(rv_normal->mutexes);
   free(rv_normal->means_and_vars);
   free(rv_normal);
 }
@@ -218,17 +261,25 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   rvs->destroy_data_func = rv_normal_destroy;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
-  rv_normal->xoshiro_prng = prng_create(seed);
+  rv_normal->num_arms = rvs->num_rvs;
+  rv_normal->xoshiro_prngs =
+      malloc_or_die(rv_normal->num_arms * sizeof(XoshiroPRNG *));
+  rv_normal->mutexes =
+      malloc_or_die(rv_normal->num_arms * sizeof(cpthread_mutex_t));
+  for (uint64_t arm = 0; arm < rv_normal->num_arms; arm++) {
+    rv_normal->xoshiro_prngs[arm] = prng_create(seed);
+    cpthread_mutex_init(&rv_normal->mutexes[arm]);
+  }
+  rv_normal_seed_arm_prngs(rv_normal, seed);
   rv_normal->means_and_vars = malloc_or_die(rvs->num_rvs * 2 * sizeof(double));
   memcpy(rv_normal->means_and_vars, means_and_vars,
          rvs->num_rvs * 2 * sizeof(double));
-  cpthread_mutex_init(&rv_normal->mutex);
   rvs->data = rv_normal;
 }
 
 void rv_normal_reset(RandomVariables *rvs, const uint64_t seed) {
   RVNormal *rv_normal = (RVNormal *)rvs->data;
-  prng_seed(rv_normal->xoshiro_prng, seed);
+  rv_normal_seed_arm_prngs(rv_normal, seed);
 }
 
 typedef struct RVNormalPredetermined {
@@ -347,6 +398,11 @@ typedef struct Simmer {
   int print_interval;
   int max_num_display_plays;
   int max_num_display_plies;
+  // Utility blend weights consumed by rv_sim_sample (see sim_utility_blend
+  // in sim_args.h). Copied from SimArgs on create/reset.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -450,10 +506,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, thread_index, move_list);
+    const Move *best_play = get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
-    play_move(best_play, game, NULL);
+    // On the final ply the resulting cross-sets are never read (no further move
+    // generation happens before game_unplay_last_move restores the board), so
+    // skip the cross-set update for that play.
+    if (ply == plies - 1) {
+      play_move_no_cross_set_update(best_play, game, NULL);
+    } else {
+      play_move(best_play, game, NULL);
+    }
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
       Equity this_leftover = get_leave_value_for_move(
@@ -492,7 +555,9 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return wpct;
+  return sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+                           simmer->utility_w_spread,
+                           simmer->utility_spread_scale);
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
@@ -580,6 +645,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
   simmer->inference_results = sim_args->inference_results;
 
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
+
   simmer->thread_control = thread_control;
 
   if (!rv_sim_can_resume(sim_args, sim_results)) {
@@ -629,6 +698,10 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+
+  simmer->utility_w_winpct = sim_args->utility_w_winpct;
+  simmer->utility_w_spread = sim_args->utility_w_spread;
+  simmer->utility_spread_scale = sim_args->utility_spread_scale;
 
   if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
     sim_results_reset(sim_args->move_list, simmer->sim_results,

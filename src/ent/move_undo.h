@@ -8,15 +8,28 @@
 #include "rack.h"
 #include <assert.h>
 
-// Maximum squares that can be modified by a single move.
-// This calculation assumes RACK_SIZE=7. Other factors (SmallMove encoding)
-// block endgame support for 8+ tile racks, so larger support is not needed.
-// A 7-tile move can affect:
-// - 7 tiles × 4 sub-boards for letters + is_cross_word = ~84
-// - Cross sets: ~30 squares × specific dir/ci = ~60
-// - Anchors: ~30 squares × 2 directions = ~60
-// Total: ~200, round up to 256 for safety
-#define MAX_UNDO_SQUARE_CHANGES 256
+// Maximum squares that can be modified by a single move, including the lazy
+// cross-set updates saved into the same undo so unplay can restore them.
+//
+// Provable upper bound: every save goes through move_undo_save_square, which
+// deduplicates via saved_squares_bitmap — one bit per board square, indexed by
+// board_get_square_index() over [0, 2*2*BOARD_DIM*BOARD_DIM). A square is
+// recorded at most once, so num_square_changes can never exceed the number of
+// board squares, regardless of move shape, lexicon mode, or how many cross-set
+// squares a single lazy update touches. Sizing the array to that count makes
+// overflow impossible by construction (the assert below is unreachable).
+// Typical endgame moves save ~150; this is the hard ceiling, not the norm.
+//
+// Memory: sizeof(MoveUndo) is ~35 KB at BOARD_DIM=15 (900 SquareChange slots
+// of 40 bytes each). An endgame worker holds 2*(MAX_SEARCH_DEPTH+1) undos, so
+// ~1.9 MB/worker — negligible beside the multi-hundred-MB transposition table.
+// The unused tail of square_changes[] is never written or read (move_undo_reset
+// clears only the bitmap, not the array; restore walks only num_square_changes
+// entries), so the working set tracks actual usage (~150), not the capacity —
+// the larger array does not change cache behavior, and measured solve times are
+// unchanged. A tight bound that beat this one would need to model the dedup
+// across overlapping save sites; not worth the fragility for the memory saved.
+#define MAX_UNDO_SQUARE_CHANGES (2 * 2 * BOARD_DIM * BOARD_DIM)
 
 typedef struct SquareChange {
   int16_t index; // flat index into Board.squares

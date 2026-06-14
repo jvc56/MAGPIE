@@ -17,12 +17,12 @@ Equity calculate_end_rack_points(const Rack *rack,
 Equity calculate_end_rack_penalty(const Rack *rack,
                                   const LetterDistribution *ld);
 void play_move(const Move *move, Game *game, Rack *leave);
+void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
-const Move *get_top_equity_move(Game *game, int movegen_index,
-                                MoveList *move_list);
+const Move *get_top_equity_move(Game *game, MoveList *move_list);
 Move *get_top_equity_move_for_inferences(
-    Game *game, int movegen_index, MoveList *move_list, Equity target_equity,
+    Game *game, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin);
 void generate_moves_for_game_override_record_type(
     const MoveGenArgs *args, move_record_t move_record_type);
@@ -49,11 +49,11 @@ void unplay_move_incremental(Game *game, const MoveUndo *undo);
 void play_move_endgame_outplay(const Move *move, Game *game, MoveUndo *undo);
 void update_cross_sets_after_unplay(const Move *move, const Game *game);
 
-// MoveUndo-based cross-set update functions (use tiles_placed_mask)
-void update_cross_set_for_move_from_undo(const MoveUndo *undo,
-                                         const Game *game);
-void update_cross_sets_after_unplay_from_undo(const MoveUndo *undo,
-                                              const Game *game);
+// MoveUndo-based cross-set update for the move region (forward, lazy).
+// Saves the previous contents of every square it modifies into the same
+// undo, so unplay_move_incremental's square restore reverts the cross-set
+// updates exactly — no recompute is needed after unplay.
+void update_cross_set_for_move_from_undo(MoveUndo *undo, const Game *game);
 
 void game_play_n_events(GameHistory *game_history, Game *game, int event_index,
                         bool validate, ErrorStack *error_stack);

@@ -71,4 +71,8 @@ void game_set_override_kwgs(Game *game, const KWG *kwg0, const KWG *kwg1,
                             dual_lexicon_mode_t mode);
 void game_clear_override_kwgs(Game *game);
 
+// Returns the effective KWG for the given player/cross-set index, respecting
+// any override KWGs. Falls back to the player's own KWG if no override is set.
+const KWG *game_get_effective_kwg(const Game *game, int player_index);
+
 #endif

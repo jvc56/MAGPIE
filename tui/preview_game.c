@@ -113,7 +113,6 @@ static void play_out_max_score(TuiPreviewGame *pg) {
         .eq_margin_movegen = 0,
         .target_equity = EQUITY_MAX_VALUE,
         .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-        .thread_index = 0,
         .move_list = move_list,
         .tiles_played_bv = NULL,
         .initial_tiles_bv = 0,
