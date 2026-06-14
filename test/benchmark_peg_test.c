@@ -387,7 +387,7 @@ static void run_stage_table_utility(const char *cgp_file, const char *label,
 // (peg.c only strides at bag >= 3), so A and B both run full enumeration and
 // differ only by cascade depth. Solves are fast at this bag size.
 void test_benchmark_peg_1(void) {
-  run_stage_table_utility("notes/peg_positions/random_1peg.txt", "1-peg", 25);
+  run_stage_table_utility("notes/peg_positions/random_1peg.txt", "1-peg", 100);
 }
 
 void test_benchmark_peg_2(void) {
@@ -437,7 +437,8 @@ static bool play_until_bag_size(Game *game, MoveList *move_list,
 }
 
 static void generate_peg_cgps(uint64_t base_seed, int target_bag,
-                              int target_count, const char *outfile) {
+                              int target_count, const char *outfile,
+                              bool append) {
   Config *config =
       config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
   MoveList *move_list = move_list_create(1);
@@ -445,7 +446,7 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
   Game *game = config_get_game(config);
 
   const int max_attempts = 2000000;
-  FILE *fp = fopen_or_die(outfile, "we");
+  FILE *fp = fopen_or_die(outfile, append ? "ae" : "we");
   int found = 0;
   for (int attempt = 0; found < target_count && attempt < max_attempts;
        attempt++) {
@@ -471,8 +472,12 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
 
 void test_generate_peg_cgps(void) {
   log_set_level(LOG_FATAL);
-  generate_peg_cgps(10241, 1, 50, "notes/peg_positions/random_1peg.txt");
-  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt");
-  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt");
-  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt");
+  // 1-in-bag uses a 100-position sample (its small scenario space makes the
+  // utility-loss tail noisier, so it wants more positions): 25 from seed 10241
+  // plus 75 from a different seed, appended.
+  generate_peg_cgps(10241, 1, 25, "notes/peg_positions/random_1peg.txt", false);
+  generate_peg_cgps(99917, 1, 75, "notes/peg_positions/random_1peg.txt", true);
+  generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt", false);
+  generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt", false);
+  generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt", false);
 }
