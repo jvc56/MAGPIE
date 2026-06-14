@@ -70,6 +70,13 @@ typedef struct WMPMoveGen {
   int word_length;
   int num_words;
   Equity leave_value;
+  // AND, over this anchor's playthrough blocks, of each block's word info table
+  // letter set at this anchor's word length (bit ml set iff some word of that
+  // length containing the block uses ml). Accumulated for free while scanning
+  // the blocks in wmp_move_gen_set_playthrough_bit_rack. Every placed tile must
+  // be one of these letters, so move generation can skip the whole anchor when
+  // the rack cannot supply enough of them. All-ones when no table is loaded.
+  uint32_t playthrough_addable;
 } WMPMoveGen;
 
 static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
@@ -571,11 +578,11 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
   }
 }
 
-static inline void
-wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
-                                      const Anchor *anchor,
-                                      Square row_cache[BOARD_DIM]) {
+static inline void wmp_move_gen_set_playthrough_bit_rack(
+    WMPMoveGen *wmp_move_gen, const Anchor *anchor, const Square *row_cache,
+    const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane) {
   wmp_move_gen_reset_playthrough(wmp_move_gen);
+  wmp_move_gen->playthrough_addable = 0xFFFFFFFFu;
   if (anchor->playthrough_blocks == 0) {
     return;
   }
@@ -597,6 +604,15 @@ wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
     if (!in_block) {
       in_block = true;
       blocks_found++;
+      // `col` is this block's leftmost tile; fold in the cached letter set of
+      // words of this length that contain the block. A NULL row means uncached
+      // or no table loaded (treat as permit-all).
+      const uint32_t *block_row = wit_row_lane[col];
+      if (block_row != NULL) {
+        const int block_len = wit_len_lane[col];
+        wmp_move_gen->playthrough_addable &=
+            block_row[anchor->word_length - block_len];
+      }
     }
   }
   assert(blocks_found == anchor->playthrough_blocks);
