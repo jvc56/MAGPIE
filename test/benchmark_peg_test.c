@@ -383,6 +383,17 @@ static void run_stage_table_utility(const char *cgp_file, const char *label,
                             max_positions);
 }
 
+// At bag <= 2 the scenario space is tiny and scenario_stride is ignored
+// (peg.c only strides at bag >= 3), so A and B both run full enumeration and
+// differ only by cascade depth. Solves are fast at this bag size.
+void test_benchmark_peg_1(void) {
+  run_stage_table_utility("notes/peg_positions/random_1peg.txt", "1-peg", 25);
+}
+
+void test_benchmark_peg_2(void) {
+  run_stage_table_utility("notes/peg_positions/random_2peg.txt", "2-peg", 25);
+}
+
 void test_benchmark_peg_3(void) {
   run_stage_table_utility("notes/peg_positions/random_3peg.txt", "3-peg", 25);
 }
@@ -392,9 +403,9 @@ void test_benchmark_peg_4(void) {
 }
 
 // ---------------------------------------------------------------------------
-// Fixture generator (on-demand): produce the random_{2,3,4}peg.txt position
-// files. random_{3,4}peg are consumed by the benchmarks above; random_2peg
-// documents the lineage of peg_poll_test's hardcoded position. Greedy self-play
+// Fixture generator (on-demand): produce the random_{1,2,3,4}peg.txt position
+// files consumed by the benchmarks above (random_2peg also documents the
+// lineage of peg_poll_test's hardcoded position). Greedy self-play
 // from a random opening; whenever the bag drops to exactly `target_bag` tiles
 // with both players holding a full rack, the position is the canonical
 // K-in-bag PEG setup, so emit "<cgp> -lex CSW24" (the per-line lexicon the
@@ -460,6 +471,7 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
 
 void test_generate_peg_cgps(void) {
   log_set_level(LOG_FATAL);
+  generate_peg_cgps(10241, 1, 50, "notes/peg_positions/random_1peg.txt");
   generate_peg_cgps(20242, 2, 50, "notes/peg_positions/random_2peg.txt");
   generate_peg_cgps(30243, 3, 50, "notes/peg_positions/random_3peg.txt");
   generate_peg_cgps(40244, 4, 50, "notes/peg_positions/random_4peg.txt");
