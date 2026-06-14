@@ -39,12 +39,14 @@ void test_sim_benchmark(void) {
   const char *mi = (mi_env != NULL) ? mi_env : "100000";
   const char *rit_env = getenv("SIMBENCH_RIT");
   const char *rit = (rit_env != NULL) ? rit_env : "true";
+  const char *wmp_env = getenv("SIMBENCH_WMP");
+  const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex CSW24 -wmp true -rit %s -s1 equity -s2 equity "
+                 "set -lex CSW24 -wmp %s -rit %s -s1 equity -s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads 10 -tlim 2 "
                  "-seed 42 -sr tt -minplayiterations %s",
-                 rit, plies, mi);
+                 wmp, rit, plies, mi);
   Config *config = config_create_or_die(cmd);
   load_and_exec_config_or_die(config, "autoplay games 1");
 
