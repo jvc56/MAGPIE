@@ -8349,7 +8349,6 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_INFER:
     case ARG_TOKEN_ENDGAME:
     case ARG_TOKEN_PEG:
-    case ARG_TOKEN_PEG_TOP_K:
     case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_AUTOPLAY:
@@ -8526,6 +8525,15 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_plies);
+      break;
+    case ARG_TOKEN_PEG_TOP_K:
+      // Serialize the raw -pegtopk value (e.g. "32,16,8,4,2") if set, so the
+      // halving schedule round-trips like -pegstride / -pegpess. -pegonly and
+      // -pnoprune stay unserialized: they are transient per-run move lists,
+      // like the simmer's -snoprune.
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          config_get_parg_value(config, ARG_TOKEN_PEG_TOP_K, 0));
       break;
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

@@ -1273,6 +1273,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
         get_formatted_string("PEG requires a bag of %d..%d tiles, but found %d",
                              PEG_MIN_BAG, PEG_MAX_BAG, bag_size));
+    peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
     return;
   }
 
@@ -1301,6 +1302,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                            "PEG eval_bag_order must list exactly the %d bag "
                            "tiles, all drawable from the unseen pool",
                            bag_size));
+      peg_poll_finish(args->poll);
       return;
     }
   }
@@ -1320,6 +1322,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           error_stack, ERROR_STATUS_PEG_INVALID_STAGE_COUNTS,
           get_formatted_string("PEG stage_top_k must list num_stages (> 0) "
                                "per-stage counts, each >= 2"));
+      peg_poll_finish(args->poll);
       return;
     }
   }
