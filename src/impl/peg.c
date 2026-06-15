@@ -647,6 +647,13 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
+  // If the solver was interrupted before completing any search depth (depth
+  // remains -1 after reset), eg_results still holds a stale value from a prior
+  // solve. Fall back to greedy rather than misreporting the scenario outcome.
+  if (endgame_results_get_depth(ctx->worker->eg_results,
+                                ENDGAME_RESULT_BEST) < 0) {
+    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
+  }
   const int eg_val =
       endgame_results_get_value(ctx->worker->eg_results, ENDGAME_RESULT_BEST);
   const Player *me = game_get_player(game, ctx->mover_idx);
