@@ -1,6 +1,7 @@
 #ifndef PEG_H
 #define PEG_H
 
+#include "../compat/ctime.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/peg_defs.h"
 #include "../ent/game.h"
@@ -209,8 +210,10 @@ typedef struct PegResult {
   // stage = the deepest stage actually run).
   int last_completed_stage;
 
-  // Wall time used (seconds).
-  double elapsed_seconds;
+  // Wall-clock timer: started at the top of peg_solve (is_running == true
+  // while solving, false once done). ctimer_elapsed_seconds reads the live
+  // elapsed time while running and the final elapsed time after completion.
+  Timer timer;
 
   // Top-K cand list from the last completed stage, sorted descending by
   // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.

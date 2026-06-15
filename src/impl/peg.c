@@ -1283,8 +1283,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
 
-  Timer timer;
-  ctimer_start(&timer);
+  ctimer_start(&out->timer);
 
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
@@ -1677,7 +1676,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // freeing the KWG itself.
   game_destroy(prepared_base);
   kwg_destroy(pruned_kwg);
-  out->elapsed_seconds = ctimer_elapsed_seconds(&timer);
+  ctimer_stop(&out->timer);
 }
 
 void peg_result_destroy(PegResult *r) {

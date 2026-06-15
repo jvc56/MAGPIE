@@ -23,7 +23,7 @@ char *peg_result_get_string(const PegResult *result, const Game *game) {
   string_builder_add_formatted_string(
       sb, "PEG (last completed stage %d): %d candidates, %.2fs\n",
       result->last_completed_stage, result->n_top_cands,
-      result->elapsed_seconds);
+      ctimer_elapsed_seconds(&result->timer));
   string_builder_add_string(sb, "rank  move                  win%    spread\n");
   for (int i = 0; i < result->n_top_cands; i++) {
     const PegRankedCand *cand = &result->top_cands[i];

@@ -933,7 +933,7 @@ static void peg_anchor_protected_move(
   string_builder_add_move(best_sb, board, &result.best_move, ld, false);
   printf("[%s] %s: win=%.4f spread=%+.3f (field best %s, stage %d, %.1fs)\n",
          name, studied_text, win, spread, string_builder_peek(best_sb),
-         result.last_completed_stage, result.elapsed_seconds);
+         result.last_completed_stage, ctimer_elapsed_seconds(&result.timer));
   if (win < 0.0) {
     log_fatal("[%s] protected move '%s' missing from ranking", name,
               studied_text);
