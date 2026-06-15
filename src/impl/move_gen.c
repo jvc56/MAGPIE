@@ -1881,6 +1881,50 @@ static inline bool try_restrict_tile_and_accumulate_score(
   return true;
 }
 
+// Sound shadow early-stop using the WordInfoTable. After a rightward shadow
+// step places a tile and walks through a playthrough block beginning at
+// `block_col`, every tile in the main word must be an addable letter of that
+// block for the block's containing word at its *eventual* length. Shadow does
+// not know that length yet, only a minimum (`min_word_length`), so we take the
+// cumulative "length >= min" addable set: the suffix-OR of the block's WIT row
+// from index `min_word_length - block_len`. Lengthening the word only shrinks
+// this set, so if the just-placed tile (achievable letters
+// `possible_letters_here`, including a wild blank when one is playable here)
+// cannot be in it, no rightward continuation forms a word and the caller stops.
+//
+// The blank is treated conservatively: when a blank can be placed at this
+// square (bit 0 of `possible_letters_here`), it is assumed able to realize any
+// addable letter, so we only declare the step dead when no addable letter
+// exists at all. Blank-placeability must be read from `possible_letters_here`
+// rather than the live rack, because a square restricted to a blank has already
+// consumed that blank from the rack by this point. This never prunes a legal
+// play.
+static inline bool wit_shadow_right_block_dead(const MoveGen *gen,
+                                               int block_col,
+                                               uint64_t possible_letters_here,
+                                               int min_word_length) {
+  const uint32_t *block_row = gen->wit_row_lane[block_col];
+  if (block_row == NULL) {
+    return false;
+  }
+  const int block_len = gen->wit_len_lane[block_col];
+  int min_idx = min_word_length - block_len;
+  if (min_idx < 0) {
+    min_idx = 0;
+  }
+  const bool blank_here = (possible_letters_here & 1u) != 0;
+  const uint32_t cand = (uint32_t)possible_letters_here & ~1u;
+  const int stride = BOARD_DIM - block_len + 1;
+  uint32_t geq = 0;
+  for (int idx = min_idx; idx < stride; idx++) {
+    geq |= block_row[idx];
+    if ((cand & geq) != 0 || (blank_here && geq != 0)) {
+      return false;
+    }
+  }
+  return true;
+}
+
 static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Save the score totals to be reset after shadowing right.
   const Equity orig_main_restricted_score =
@@ -1987,6 +2031,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       is_unique = true;
     }
     bool found_playthrough_tile = false;
+    const int right_block_col = gen->current_right_col + 1;
     while (gen->current_right_col + 1 < BOARD_DIM) {
       const MachineLetter next_letter =
           gen_cache_get_letter(gen, gen->current_right_col + 1);
@@ -2013,6 +2058,19 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
 
     if (wmp_move_gen_is_active(&gen->wmp_move_gen) && found_playthrough_tile) {
       wmp_move_gen_increment_playthrough_blocks(&gen->wmp_move_gen);
+    }
+
+    // WordInfoTable shadow early-stop: if the tile just placed can never be an
+    // addable letter of the right playthrough block at any reachable word
+    // length, no rightward continuation forms a word, so stop shadowing right.
+    if (found_playthrough_tile && gen->word_info_table != NULL &&
+        wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+      const int min_word_length =
+          gen->wmp_move_gen.num_tiles_played_through + gen->tiles_played;
+      if (wit_shadow_right_block_dead(gen, right_block_col,
+                                      possible_letters_here, min_word_length)) {
+        break;
+      }
     }
 
     if (play_is_nonempty_and_nonduplicate(gen->tiles_played, is_unique)) {
