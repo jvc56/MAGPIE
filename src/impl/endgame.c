@@ -506,7 +506,6 @@ static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
 // Callers detect the interrupt themselves after this returns.
 static float compute_opp_stuck_fraction(Game *game, MoveList *move_list,
                                         const KWG *pruned_kwg, int opp_idx,
-                                        int thread_index,
                                         uint64_t *tiles_played_bv_out,
                                         EndgameCtx *solver) {
   int saved_on_turn = game_get_player_on_turn_index(game);
@@ -599,8 +598,8 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
   Game *root_game = game_duplicate(game);
   MoveList *tmp_ml = move_list_create_small(DEFAULT_ENDGAME_MOVELIST_CAPACITY);
   float frac = compute_opp_stuck_fraction(
-      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, 0,
-      NULL, NULL);
+      root_game, tmp_ml, solver_get_pruned_kwg(solver, opp_idx), opp_idx, NULL,
+      NULL);
   small_move_list_destroy(tmp_ml);
   game_destroy(root_game);
   return frac;
@@ -1566,8 +1565,8 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
     int opp_idx = 1 - solving_player;
     opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
-        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, NULL, worker->solver);
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, NULL,
+        worker->solver);
   }
 
   bool playout_interrupted = false;
@@ -1873,8 +1872,8 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
   if (worker->solver->use_heuristics) {
     *opp_stuck_frac = compute_opp_stuck_fraction(
         worker->game_copy, worker->move_list,
-        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx,
-        worker->thread_index, &opp_tiles_bv, worker->solver);
+        solver_get_pruned_kwg(worker->solver, opp_idx), opp_idx, &opp_tiles_bv,
+        worker->solver);
     // Check for interrupt between the two expensive operations so threads
     // don't run a second full movegen after the timer has already fired.
     if (iterative_deepening_should_stop(worker->solver)) {

@@ -1117,20 +1117,21 @@ static void *stream_reader_thread(void *arg) {
     // callback to exclude setup overhead like TT allocation).
     char prefix[160];
     if (!seen_initial) {
-      snprintf(prefix, sizeof(prefix),
-               "  [    --ms] (waiting for d=0 callback)");
+      (void)snprintf(prefix, sizeof(prefix),
+                     "  [    --ms] (waiting for d=0 callback)");
     } else {
       const double elapsed_ms = (double)(now_ns - solve_start_ns) / 1.0e6;
       if (last_depth == 0) {
-        snprintf(
+        (void)snprintf(
             prefix, sizeof(prefix),
             "  [%6.0fms] d=0 published (n=%d) cur_depth=%d searching %d/%d",
             elapsed_ms, initial_count, cur_depth, done, total);
       } else {
-        snprintf(prefix, sizeof(prefix),
-                 "  [%6.0fms] last_completed=d%d val=%d "
-                 "cur_depth=%d searching %d/%d",
-                 elapsed_ms, last_depth, last_val, cur_depth, done, total);
+        (void)snprintf(prefix, sizeof(prefix),
+                       "  [%6.0fms] last_completed=d%d val=%d "
+                       "cur_depth=%d searching %d/%d",
+                       elapsed_ms, last_depth, last_val, cur_depth, done,
+                       total);
       }
     }
 
@@ -1143,7 +1144,7 @@ static void *stream_reader_thread(void *arg) {
           snprintf(line_str + written, sizeof(line_str) - written, "%s0x%llx",
                    i == 0 ? "" : ",", (unsigned long long)line[i]);
     }
-    snprintf(line_str + written, sizeof(line_str) - written, "]");
+    (void)snprintf(line_str + written, sizeof(line_str) - written, "]");
 
     // Always-on signals appended to every frame: nodes/sec (smoothed
     // across the last poll interval) and the live current-line snapshot
@@ -1160,7 +1161,7 @@ static void *stream_reader_thread(void *arg) {
           snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "%s0x%llx",
                    i == 0 ? "" : ",", (unsigned long long)live_pv[i]);
     }
-    snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "]");
+    (void)snprintf(pv_str + pv_written, sizeof(pv_str) - pv_written, "]");
 
     // Compact "top-K" tail: show first-move tiny + value for each slot,
     // then "+continuation_len" for the longest continuation. Reader
@@ -1178,7 +1179,8 @@ static void *stream_reader_thread(void *arg) {
                    (unsigned long long)live_top_k[i].root_tiny,
                    live_top_k[i].value, live_top_k[i].continuation_len);
     }
-    snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written, "}");
+    (void)snprintf(topk_str + topk_written, sizeof(topk_str) - topk_written,
+                   "}");
 
     if (s->mode == STREAM_MODE_POLL_PLY2) {
       printf("%s | ply2 %d/%d | %.0fk nps | t0_line %s | "
@@ -1252,8 +1254,8 @@ void test_endgame_progress_stream(void) {
     // about getting the TT on the heap.
     Config *warmup_config = config_create_or_die("set -s1 score -s2 score");
     char warmup_cmd[1024];
-    snprintf(warmup_cmd, sizeof(warmup_cmd), "cgp %s -lex %s", positions[0].cgp,
-             positions[0].lex);
+    (void)snprintf(warmup_cmd, sizeof(warmup_cmd), "cgp %s -lex %s",
+                   positions[0].cgp, positions[0].lex);
     load_and_exec_config_or_die(warmup_config, warmup_cmd);
     EndgameArgs warmup_args = {0};
     warmup_args.thread_control = config_get_thread_control(warmup_config);
@@ -1289,8 +1291,8 @@ void test_endgame_progress_stream(void) {
 
       Config *config = config_create_or_die("set -s1 score -s2 score");
       char cmd[1024];
-      snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
-               positions[pos_idx].lex);
+      (void)snprintf(cmd, sizeof(cmd), "cgp %s -lex %s", positions[pos_idx].cgp,
+                     positions[pos_idx].lex);
       load_and_exec_config_or_die(config, cmd);
 
       printf(

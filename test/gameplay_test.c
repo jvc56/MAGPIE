@@ -836,6 +836,7 @@ static void assert_incremental_play_roundtrip(Game *game) {
     }
     unplay_move_incremental(game, &undo);
 
+    // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison,cert-exp42-c,cert-flp37-c)
     assert(memcmp(board->squares, snapshot_board->squares,
                   sizeof(board->squares)) == 0);
     assert(board_get_cross_sets_valid(board) ==
@@ -860,6 +861,7 @@ static void assert_incremental_play_roundtrip(Game *game) {
   move_set_as_pass(&pass);
   play_move_incremental(&pass, game, &undo);
   unplay_move_incremental(game, &undo);
+  // NOLINTNEXTLINE(bugprone-suspicious-memory-comparison,cert-exp42-c,cert-flp37-c)
   assert(memcmp(board->squares, snapshot_board->squares,
                 sizeof(board->squares)) == 0);
   assert(game_get_consecutive_scoreless_turns(game) ==
