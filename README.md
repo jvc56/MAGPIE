@@ -385,12 +385,17 @@ exhaustive analysis, controlled by a few knobs:
 - **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
 
 So a quick in-game read might sample scenarios under a time cap, while an
-exhaustive study enumerates everything with a deeper schedule and no limit:
+exhaustive study enumerates everything with a deeper schedule and **no time
+limit at all** — it simply runs the full schedule to completion (which can take
+a very long time):
 
 ```
-magpie> peg -pegstride 7 -tlim 5                  # fast, sampled
-magpie> peg -pegstride 1 -pegtopk 64,32,16,8,4,2  # exhaustive, deeper
+magpie> peg -pegstride 7 -tlim 5                  # fast: sampled, 5s cap
+magpie> peg                                       # default: full enumeration, uncapped
+magpie> peg -pegstride 1 -pegtopk 64,32,16,8,4,2  # exhaustive: full enumeration, deeper schedule, uncapped
 ```
+
+(With no `-tlim` the run is uncapped; omit it for the most thorough analysis.)
 
 The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
 greedy playout (averaged over the leftover-bag orderings) for the rest, so even
