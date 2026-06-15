@@ -1089,6 +1089,120 @@ void test_peg_4bag_pond_pessimistic(void) {
                             /*win_tol=*/0.02, /*spread_tol=*/12.0);
 }
 
+// Verify that peg_solve accepts a position without returning a
+// bag-out-of-range error. The best-equity move is used as the single
+// candidate so no expensive move search or multi-stage cascade runs.
+static void peg_assert_bag_accepted(const char *name, const char *cgp) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+
+  MoveList *gen_ml = move_list_create(1);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  assert(move_list_get_count(gen_ml) == 1);
+  const Move *only_moves[1] = {move_list_get_move(gen_ml, 0)};
+
+  ErrorStack *error_stack = error_stack_create();
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 1;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    char *err = error_stack_get_string_and_reset(error_stack);
+    log_fatal("[%s] peg_solve unexpectedly failed: %s", name, err);
+  }
+  assert(result.n_top_cands == 1);
+  assert(result.top_cands[0].win_pct >= 0.0 &&
+         result.top_cands[0].win_pct <= 1.0);
+  printf("[%s] accepted: win=%.4f spread=%+.3f\n", name,
+         result.top_cands[0].win_pct, result.top_cands[0].mean_spread);
+
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  move_list_destroy(gen_ml);
+  config_destroy(config);
+}
+
+// Verifies the opp-rack bag adjustment fix for the direct peg_solve API.
+// Two variants of the 1-in-bag ONYX position are tested:
+//   - Empty opp rack: all opp tiles hidden in the game bag (raw bag = 8,
+//     effective = 1 after subtracting the 7 unknown opp tiles).
+//   - Partial opp rack (3 tiles): 4 opp tiles hidden in the game bag (raw
+//     bag = 5, effective = 1 after subtracting 4 unknown tiles).
+// Both should be accepted as 1-in-bag positions; previously both failed with
+// a bag-out-of-range error.
+static void test_peg_opp_rack_sizes(void) {
+  // Empty opp rack: raw bag = 7 (opp) + 1 (real) = 8; effective = 1.
+  peg_assert_bag_accepted(
+      "peg_opp_empty",
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
+  // Partial opp rack (3 of 7 tiles known): raw bag = 4 (opp) + 1 (real) = 5;
+  // effective = 1. Opp originally held ACEISUY; keeping ACE and leaving ISUY
+  // as unknown tiles in the bag exercises the (RACK_SIZE - opp_rack_size)
+  // subtraction with a non-zero starting count.
+  peg_assert_bag_accepted(
+      "peg_opp_partial",
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
+}
+
+// Verifies the opp-rack bag adjustment fix through the CLI command path
+// (config / cgp / set -pegonly / peg), exercising both the empty and partial
+// opp-rack cases on the same 1-in-bag ONYX board.
+static void test_peg_opp_rack_sizes_cli(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+
+  // Empty opp rack: the game bag holds all 7 opp tiles plus the 1 real bag
+  // tile; peg should subtract the 7 unknown opp tiles and see a 1-in-bag
+  // position.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
+         config_get_peg_result(config)->best_win);
+
+  // Partial opp rack (3 tiles known): the game bag holds 4 unknown opp tiles
+  // plus the 1 real bag tile; peg should subtract (RACK_SIZE - 3) = 4 and
+  // see a 1-in-bag position.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
+         config_get_peg_result(config)->best_win);
+
+  config_destroy(config);
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
   test_peg_main_1bag_pass();
@@ -1106,4 +1220,7 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  // Opp-rack bag adjustment fix: empty and partial opp racks.
+  test_peg_opp_rack_sizes();
+  test_peg_opp_rack_sizes_cli();
 }

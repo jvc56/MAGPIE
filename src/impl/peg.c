@@ -1287,7 +1287,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   ctimer_start(&timer);
 
   const Game *game = args->game;
-  const int bag_size = bag_get_letters(game_get_bag(game));
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  // The game bag holds the real remaining bag tiles plus any opponent tiles
+  // unknown to the mover: (RACK_SIZE - opp_rack_size) tiles are assumed to be
+  // in the bag as the opponent's unknown holdings. Tiles explicitly on the
+  // opponent's rack are already known and not counted here.
+  const Rack *opp_rack_in_game =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
+  const int opp_unknown = RACK_SIZE - opp_rack_size;
+  const int bag_size = raw_bag_size - opp_unknown;
   if (bag_size < PEG_MIN_BAG || bag_size > PEG_MAX_BAG) {
     error_stack_push(
         error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
@@ -1296,8 +1306,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
     return;
   }
-
-  const int mover_idx = game_get_player_on_turn_index(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   uint8_t unseen[MAX_ALPHABET_SIZE];
