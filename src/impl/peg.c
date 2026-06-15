@@ -38,12 +38,17 @@
 #include <string.h>
 #include <time.h>
 
-// Default halving schedule for the cascade's stages 1..N. Stage 0 is the
-// greedy seed (top-K = all); each halving stage narrows the surviving set
-// while adding a ply of fidelity. The tail is top-2, never top-1 — a stage
-// re-ranks a set, so its output needs >= 2 candidates to compare. The length
-// of this table is the default number of halving stages; there is no fixed
-// cap, so a caller may pass a longer schedule via PegArgs.stage_top_k.
+// Default schedule for the halving stages, which run AFTER the root. Stage 0 is
+// not in this table: it greedy-evaluates EVERY candidate play (a fast playout,
+// no narrowing) and keeps the top counts[0]. Each halving stage then carries
+// the surviving top counts[i] forward and re-ranks them at one more ply of
+// fidelity: counts[0]=32 at 2-ply, counts[1]=16 at 3-ply, counts[2]=8 at 4-ply,
+// counts[3]=4 at 5-ply, counts[4]=2 at 6-ply. So each entry is how many plays
+// are KEPT at that stage, not a cap on what enters it (stage 0 always sees them
+// all). The tail is top-2, never top-1 — a stage re-ranks a set, so it needs
+// >= 2 to compare. The table length is the default number of halving stages;
+// there is no fixed cap, so a caller may pass a longer schedule via
+// PegArgs.stage_top_k.
 static const int PEG_DEFAULT_HALVING_COUNTS[] = {32, 16, 8, 4, 2};
 
 enum {

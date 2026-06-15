@@ -356,7 +356,10 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
 - `-pnoprune <moves>` protects moves from being cut by the halving cascade so
   they are evaluated at full fidelity even if their win% rank falls below the cut.
 - `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
-  (default `32,16,8,4,2`).
+  (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
+  play; each count is how many top plays are then kept and re-ranked at the next
+  ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
+  16/8/4/2 across the halving stages).
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
 
 Use `-` to clear `pegonly` or `pnoprune`.

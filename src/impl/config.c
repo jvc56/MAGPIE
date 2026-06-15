@@ -1540,9 +1540,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "32,16,8,4,2";
       examples[1] = "30,12,6,2";
       text =
-          "Per-stage candidate counts for the PEG halving stages, overriding "
-          "the default 32,16,8,4,2. Each count must be >= 2; powers of two "
-          "are conventional but not required.";
+          "Per-stage SURVIVOR counts for the PEG halving stages, overriding "
+          "the "
+          "default 32,16,8,4,2. Stage 0 always greedy-evaluates EVERY "
+          "candidate "
+          "play; each count is how many top plays are then KEPT and re-ranked "
+          "at "
+          "the next ply of fidelity (e.g. 32,16,8,4,2 keeps the top 32 after "
+          "stage 0, then narrows 16/8/4/2 across the halving stages). Each "
+          "count "
+          "must be >= 2; powers of two are conventional but not required.";
       break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
