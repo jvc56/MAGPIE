@@ -1572,6 +1572,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
+      if (thread_control_get_status(args->thread_control) ==
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+        break;
+      }
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
       if (args->on_stage_start != NULL) {
