@@ -134,6 +134,7 @@ static TestEntry test_table[] = {
     {"pegpool", test_peg_pool},
     {"peg", test_peg},
     {"pegpessdraw", test_peg_pessfull_draw_regression},
+    {"pegtopkall", test_peg_pegtopk_all},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

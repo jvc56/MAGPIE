@@ -359,7 +359,8 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
   (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
   play; each count is how many top plays are then kept and re-ranked at the next
   ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
-  16/8/4/2 across the halving stages).
+  16/8/4/2 across the halving stages). A count of `all` (or `0`) keeps every
+  candidate at that stage — no cap.
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
 
 Use `-` to clear `pegonly` or `pnoprune`.
@@ -386,16 +387,23 @@ exhaustive analysis, controlled by a few knobs:
 
 So a quick in-game read might sample scenarios under a time cap, while an
 exhaustive study enumerates everything with a deeper schedule and **no time
-limit at all** — it simply runs the full schedule to completion (which can take
-a very long time):
+limit at all** — it simply runs the full schedule to completion. The most
+thorough setting uses `all` for every `-pegtopk` count, which keeps *every*
+candidate through *every* stage (no cap), evaluating all of them at the deepest
+fidelity:
 
 ```
 magpie> peg -pegstride 7 -tlim 5                  # fast: sampled, 5s cap
-magpie> peg                                       # default: full enumeration, uncapped
-magpie> peg -pegstride 1 -pegtopk 64,32,16,8,4,2  # exhaustive: full enumeration, deeper schedule, uncapped
+magpie> peg                                       # default: full enumeration, uncapped time
+magpie> peg -pegstride 1 -pegtopk all,all,all,all,all  # every play, every stage, no caps
 ```
 
-(With no `-tlim` the run is uncapped; omit it for the most thorough analysis.)
+(With no `-tlim` the run is uncapped in time; for `-pegtopk`, `all` — or `0` —
+means no candidate cap at that stage.) How far this extreme is practical depends
+on the bag: at **1-in-bag**, exhaustively solving every candidate is realistic
+for most positions given enough time; at **4-in-bag** carrying all plays through
+all stages can take effectively forever — but you can still configure and run
+it.
 
 The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
 greedy playout (averaged over the leftover-bag orderings) for the rest, so even

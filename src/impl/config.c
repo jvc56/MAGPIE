@@ -1538,18 +1538,21 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
       examples[0] = "32,16,8,4,2";
-      examples[1] = "30,12,6,2";
+      examples[1] = "all,all,all,all,all";
       text =
           "Per-stage SURVIVOR counts for the PEG halving stages, overriding "
           "the "
           "default 32,16,8,4,2. Stage 0 always greedy-evaluates EVERY "
           "candidate "
           "play; each count is how many top plays are then KEPT and re-ranked "
-          "at "
-          "the next ply of fidelity (e.g. 32,16,8,4,2 keeps the top 32 after "
-          "stage 0, then narrows 16/8/4/2 across the halving stages). Each "
-          "count "
-          "must be >= 2; powers of two are conventional but not required.";
+          "at the next ply of fidelity (e.g. 32,16,8,4,2 keeps the top 32 "
+          "after "
+          "stage 0, then narrows 16/8/4/2 across the halving stages). A count "
+          "of "
+          "'all' (or 0) keeps every candidate at that stage — no cap — so "
+          "'all,all,all,all,all' evaluates every play at every stage "
+          "(exhaustive, can be very slow). Each count must be 'all'/0 or an "
+          "integer >= 2.";
       break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
@@ -3102,18 +3105,26 @@ static void config_load_peg_stage_top_k(Config *config,
   int counts[CONFIG_PEG_MAX_STAGES];
   for (int i = 0; i < n; i++) {
     const char *item = string_splitter_get_item(split, i);
+    // "all" (or 0) = no cap: keep every candidate at that stage. Stored as
+    // INT_MAX so the solver's keep = min(field, count) keeps the whole field.
+    if (strcmp(item, "all") == 0) {
+      counts[i] = INT_MAX;
+      continue;
+    }
     char *endptr = NULL;
     const long count = strtol(item, &endptr, 10);
-    if (endptr == item || *endptr != '\0' || count < 2 || count > INT_MAX) {
+    // 1 is meaningless (a stage re-ranks a set, so it needs >= 2 to compare).
+    if (endptr == item || *endptr != '\0' || count < 0 || count == 1 ||
+        count > INT_MAX) {
       error_stack_push(
           error_stack, ERROR_STATUS_PEG_INVALID_STAGE_COUNTS,
-          get_formatted_string("pegtopk stage counts must be integers >= 2 (a "
-                               "stage re-ranks a set); got '%s'",
+          get_formatted_string("pegtopk stage counts must be 'all'/0 (no cap) "
+                               "or an integer >= 2; got '%s'",
                                item));
       string_splitter_destroy(split);
       return;
     }
-    counts[i] = (int)count;
+    counts[i] = count == 0 ? INT_MAX : (int)count;
   }
   string_splitter_destroy(split);
   for (int i = 0; i < n; i++) {
