@@ -1,10 +1,7 @@
 #include "benchmark_peg_test.h"
 
 #include "../src/compat/ctime.h"
-#include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
-#include "../src/def/game_history_defs.h"
-#include "../src/def/move_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
@@ -16,7 +13,6 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
-#include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
@@ -24,7 +20,6 @@
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
-#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -546,85 +541,33 @@ void test_generate_peg_cgps(void) {
                     /*append=*/false, /*contested_only=*/true);
 }
 
-// Count player_idx's scoring tile-placement plays at the current position.
-static int peg_count_scoring_plays(Game *game, MoveList *move_list,
-                                   int player_idx) {
-  const int on_turn = game_get_player_on_turn_index(game);
-  if (on_turn != player_idx) {
-    game_set_player_on_turn_index(game, player_idx);
-  }
-  const MoveGenArgs args = {
-      .game = game,
-      .move_list = move_list,
-      .move_record_type = MOVE_RECORD_ALL,
-      .move_sort_type = MOVE_SORT_SCORE,
-      .override_kwg = NULL,
-      .eq_margin_movegen = 0,
-      .target_equity = EQUITY_MAX_VALUE,
-      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-  };
-  generate_moves(&args);
-  const int n = move_list_get_count(move_list);
-  int scoring = 0;
-  for (int i = 0; i < n; i++) {
-    const Move *move = move_list_get_move(move_list, i);
-    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE &&
-        move_get_score(move) > 0) {
-      scoring++;
-    }
-  }
-  if (on_turn != player_idx) {
-    game_set_player_on_turn_index(game, on_turn);
-  }
-  return scoring;
-}
-
-// CI test for `-pegtopk all` (no candidate cap). Finds a locked-down K-in-bag
-// position by seeded self-play — both players have >= 2 scoring plays but the
-// board is otherwise minimal, so the mover has only a handful of candidates —
-// then solves it twice: with a top-2 cap and with `all`. `all` must publish
-// strictly more candidates than the cap (it kept the whole field). Fast because
-// the field is tiny; only run by CI (this is in the main test_table).
+// CI test for `-pegtopk all` (no candidate cap). Two canned, locked-down
+// K-in-bag positions (1-in-bag and 2-in-bag) where the board is nearly full, so
+// the mover has only a handful of legal plays. Each is solved twice -- with a
+// top-2 cap and with `all` -- and `all` must publish strictly more candidates
+// than the cap, proving the cap was removed and the whole field was kept. The
+// positions are hardcoded (not derived) so the test is fast and deterministic;
+// TWL98 keeps the branching factor tiny. Only run by CI (in the main
+// test_table). The positions were found by TWL98 self-play -- the mover's full
+// field is 7 plays in the 1-in-bag case and 5 in the 2-in-bag case.
 void test_peg_pegtopk_all(void) {
   log_set_level(LOG_FATAL);
-  for (int target_bag = 1; target_bag <= 2; target_bag++) {
-    // -tlim bounds each solve in case the locked field is not tiny; the
-    // assertions hold regardless (stage 0 keeps the whole field for 'all').
-    Config *config = config_create_or_die(
-        "set -lex CSW24 -threads 1 -s1 score -s2 score -tlim 15");
-    MoveList *move_list = move_list_create(1 << 14); // generous move capacity
-    exec_config_quiet(config, "new");
-    Game *game = config_get_game(config);
+  // Each line embeds "-lex TWL98", which the cgp load honors.
+  static const char *const locked_positions[] = {
+      "6ACINAR1V1/6XU2W1PIP/7DAG1GATE/8RIF1YAK/9LORE1E/9TREEN1/10ME1AB/"
+      "6JUN1OF2E/7HOpLITES/11E2T/8QATS1HE/9LIT1OD/7N5O1/6AUSfORMED/5VINO1W2YO "
+      "AEGINRZ/BCDILSU 331/320 0 -lex TWL98",
+      "15/15/15/15/15/14Y/7B5FA/4J1WIZ4AN/1K1FAYED1AT1PIG/TOD1PEE2MUCINS/"
+      "1LOBE1LOVAT1L2/1b1ORA2A2NONE/1ADUST1UNROOTED/AS1R5EX2EH/HI1GUIRO1E1VIMS "
+      "EEGIINR/EILQRTW 317/303 0 -lex TWL98",
+  };
+  const int num_positions =
+      (int)(sizeof(locked_positions) / sizeof(locked_positions[0]));
 
-    // Seeded search for the most locked-down position (smallest mover field
-    // with both players holding >= 2 scoring plays).
-    char locked_cgp[4096] = {0};
-    int best_field = INT_MAX;
-    const uint64_t base_seed = 424242 + (uint64_t)target_bag;
-    for (int attempt = 0; attempt < 1500 && best_field > 6; attempt++) {
-      game_reset(game);
-      game_seed(game, base_seed + (uint64_t)attempt);
-      draw_starting_racks(game);
-      if (!play_until_bag_size(game, move_list, target_bag)) {
-        continue;
-      }
-      const int mover_idx = game_get_player_on_turn_index(game);
-      if (peg_count_scoring_plays(game, move_list, mover_idx) < 2 ||
-          peg_count_scoring_plays(game, move_list, 1 - mover_idx) < 2) {
-        continue;
-      }
-      const int field = move_list_get_count(move_list); // mover's full field
-      if (field > 2 && field < best_field) {
-        best_field = field;
-        char *cgp = game_get_cgp(game, true);
-        (void)snprintf(locked_cgp, sizeof(locked_cgp), "%s", cgp);
-        free(cgp);
-      }
-    }
-    assert(best_field != INT_MAX); // found a locked, contested position
-
-    char load_cmd[4096];
-    (void)snprintf(load_cmd, sizeof(load_cmd), "cgp %s", locked_cgp);
+  Config *config =
+      config_create_or_die("set -lex TWL98 -threads 1 -s1 score -s2 score");
+  for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
+    char *load_cmd = get_formatted_string("cgp %s", locked_positions[pos_idx]);
 
     // Top-2 cap: at most 2 candidates published.
     exec_config_quiet(config, "set -pegtopk 2");
@@ -632,7 +575,7 @@ void test_peg_pegtopk_all(void) {
     exec_config_quiet(config, "peg");
     const int n_capped = config_get_peg_result(config)->n_top_cands;
 
-    // No cap: the whole field is kept and published.
+    // No cap: the whole (tiny) field is kept and published.
     exec_config_quiet(config, "set -pegtopk all");
     exec_config_quiet(config, load_cmd);
     exec_config_quiet(config, "peg");
@@ -642,10 +585,11 @@ void test_peg_pegtopk_all(void) {
     assert(result->last_completed_stage >= 0);
     assert(n_capped <= 2);    // the cap held the field to 2
     assert(n_all > n_capped); // 'all' removed the cap -> strictly more cands
-    printf("[pegtopk_all] %d-in-bag locked field=%d: capped=%d all=%d\n",
-           target_bag, best_field, n_capped, n_all);
+    printf("[pegtopk_all] position %d: capped=%d all=%d\n", pos_idx + 1,
+           n_capped, n_all);
+    (void)fflush(stdout);
 
-    move_list_destroy(move_list);
-    config_destroy(config);
+    free(load_cmd);
   }
+  config_destroy(config);
 }
