@@ -474,8 +474,6 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
 
 // ----- per-candidate scenario evaluation -----------------------------------
 
-typedef struct PegScenarioJobList PegScenarioJobList;
-
 // Optional progress callbacks bundled for threading through the worker structs.
 // on_stage_start is invoked directly by peg_solve and so is not carried here.
 // The on_cand_done / on_scenario_done callbacks may fire concurrently from
@@ -500,6 +498,45 @@ typedef struct PegScenarioCapture {
   int capacity;
   const LetterDistribution *ld;
 } PegScenarioCapture;
+
+// One scenario job: a single (cand, mover-draw split) unit of work. Carries the
+// shared per-cand template to copy from and a result the worker fills.
+// Splitting at this granularity (rather than per-cand) keeps every core fed
+// even when a stage has only a couple of candidates.
+typedef struct PegScenarioJob {
+  const Game *template_src;
+  int mover_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  int k_drawn;
+  int n_bag_remaining;
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  int64_t weight;
+  PegOppModel opp_model;
+  int inner_top_k;
+  int fidelity_plies;
+  int injection_cap;
+  int64_t deadline_ns;
+  ThreadControl *thread_control;
+  PegWorker *workers;
+  int cand_idx;
+  const PegProgress *progress; // optional; cand_idx is the cand rank
+  // Result (filled by the worker, reduced per-cand afterwards).
+  double total_weight;
+  double win_weight;
+  double spread_weight;
+  int64_t weight_sum;
+  int n_scenarios;
+} PegScenarioJob;
+
+// A growable list of scenario jobs (collect mode). Not recursive, so defined
+// inline.
+typedef struct PegScenarioJobList {
+  PegScenarioJob *jobs;
+  int count;
+  int capacity;
+} PegScenarioJobList;
 
 typedef struct PegEvalCtx {
   const Game *base_game;
@@ -553,43 +590,6 @@ typedef struct PegEvalCtx {
   int64_t weight_sum;
   int n_scenarios;
 } PegEvalCtx;
-
-// One scenario job: a single (cand, mover-draw split) unit of work. Carries the
-// shared per-cand template to copy from and a result the worker fills.
-// Splitting at this granularity (rather than per-cand) keeps every core fed
-// even when a stage has only a couple of candidates.
-typedef struct PegScenarioJob {
-  const Game *template_src;
-  int mover_idx;
-  const uint8_t *unseen;
-  int ld_size;
-  int k_drawn;
-  int n_bag_remaining;
-  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
-  int64_t weight;
-  PegOppModel opp_model;
-  int inner_top_k;
-  int fidelity_plies;
-  int injection_cap;
-  int64_t deadline_ns;
-  ThreadControl *thread_control;
-  PegWorker *workers;
-  int cand_idx;
-  const PegProgress *progress; // optional; cand_idx is the cand rank
-  // Result (filled by the worker, reduced per-cand afterwards).
-  double total_weight;
-  double win_weight;
-  double spread_weight;
-  int64_t weight_sum;
-  int n_scenarios;
-} PegScenarioJob;
-
-struct PegScenarioJobList {
-  PegScenarioJob *jobs;
-  int count;
-  int capacity;
-};
 
 static void peg_scenario_joblist_push(PegScenarioJobList *list,
                                       const PegScenarioJob *job) {

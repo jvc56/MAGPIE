@@ -364,6 +364,38 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
 
 Use `-` to clear `pegonly` or `pnoprune`.
 
+#### Speed vs. accuracy
+
+The same `peg` command spans a spectrum from a fast in-game estimate to an
+exhaustive analysis, controlled by a few knobs:
+
+- **Scenario coverage — `-pegstride`.** Stride `1` (the default) enumerates
+  *every* bag/opponent-rack ordering. `-pegstride <n>` instead samples ~1/n of
+  them (reweighted to preserve the expected aggregate), trading accuracy for
+  speed; it applies only at bag ≥ 3 (bag ≤ 2 is always fully enumerated). A
+  larger stride is the single biggest speedup.
+- **Search depth — `-pegtopk`.** A longer/wider schedule carries more candidates
+  into the deeper, higher-fidelity stages (where bag-emptying leaves are solved
+  further), so it is more accurate but slower; a shorter/narrower schedule is
+  faster and coarser. Stage 0 always greedy-scores *every* move, so even an
+  interrupted run returns a ranked answer.
+- **Time — `-tlim <seconds>`.** The solver returns the best answer it has when
+  the limit hits (stage 0 finishes first, then each halving stage refines). With
+  no limit it runs the full schedule to completion.
+- **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
+
+So a quick in-game read might sample scenarios under a time cap, while an
+exhaustive study enumerates everything with a deeper schedule and no limit:
+
+```
+magpie> peg -pegstride 7 -tlim 5                  # fast, sampled
+magpie> peg -pegstride 1 -pegtopk 64,32,16,8,4,2  # exhaustive, deeper
+```
+
+The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
+greedy playout (averaged over the leftover-bag orderings) for the rest, so even
+the exhaustive end is a very strong estimate rather than a literal proof.
+
 ### Comparing lexica
 
 To play two lexica against each other to see which is stronger, you can create the required lexical data from text files and run the autoplay command. First, set the letter distribution:
