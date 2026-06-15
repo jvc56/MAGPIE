@@ -294,6 +294,8 @@ static Game *peg_make_post_cand_game(PegWorker *worker,
   Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
   Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
 
+  // opp rack = unseen minus the original K-tile bag (mover_drawn ++
+  // bag_remaining); the mover would have drawn mover_drawn off the top.
   MachineLetter all_bag[PEG_MAX_BAG + 1];
   const int n_bag = k_drawn + n_bag_remaining;
   for (int i = 0; i < k_drawn; i++) {
@@ -302,12 +304,20 @@ static Game *peg_make_post_cand_game(PegWorker *worker,
   for (int i = 0; i < n_bag_remaining; i++) {
     all_bag[k_drawn + i] = bag_remaining[i];
   }
-  bag_set_to_tiles(bag, all_bag, n_bag);
   peg_set_opp_rack(opp_rack, unseen, ld_size, all_bag, n_bag);
-  // The template's mover rack holds the leave; add this scenario's draws.
+  // Set the bag directly to this scenario's leftover ordering and add the
+  // mover's drawn tiles to the leave. We deliberately do NOT lay out the full
+  // K-tile bag and bag_draw_letter the mover tiles back off: that draw swaps
+  // each removed tile to the bag end, scrambling bag_remaining's order. The
+  // caller (peg_eval_split) enumerates the *distinct orderings* of
+  // bag_remaining and averages the leaf over them, so the bag must hold exactly
+  // the passed ordering — otherwise the scramble could collapse two enumerated
+  // orderings onto the same realized one (when the mover drew a tile whose
+  // value is also in the bag), double-counting one ordering and dropping
+  // another.
+  bag_set_to_tiles(bag, bag_remaining, n_bag_remaining);
   for (int i = 0; i < k_drawn; i++) {
     rack_add_letter(mover_rack, mover_drawn[i]);
-    (void)bag_draw_letter(bag, mover_drawn[i], 0);
   }
   // Playing the cand in the template may have flagged GAME_END_REASON_STANDARD
   // (rack emptied in the no-draw world). We re-stock here, so clear the stale
