@@ -1538,7 +1538,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
       examples[0] = "32,16,8,4,2";
-      examples[1] = "all,all,all,all,all";
+      examples[1] = "all";
       text =
           "Per-stage SURVIVOR counts for the PEG halving stages, overriding "
           "the "
@@ -1547,12 +1547,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "play; each count is how many top plays are then KEPT and re-ranked "
           "at the next ply of fidelity (e.g. 32,16,8,4,2 keeps the top 32 "
           "after "
-          "stage 0, then narrows 16/8/4/2 across the halving stages). A count "
-          "of "
-          "'all' (or 0) keeps every candidate at that stage — no cap — so "
-          "'all,all,all,all,all' evaluates every play at every stage "
-          "(exhaustive, can be very slow). Each count must be 'all'/0 or an "
-          "integer >= 2.";
+          "stage 0, then narrows 16/8/4/2 across the halving stages). A single "
+          "'all' (or 0) is the EXHAUSTIVE setting: keep every candidate and "
+          "solve each at full endgame depth in one deep stage, with full "
+          "scenario enumeration (ignores -pegstride). Realistic at 1-in-bag, "
+          "astronomically slow at higher bag counts. Each count must be "
+          "'all'/0 "
+          "or an integer >= 2.";
       break;
     case ARG_TOKEN_PEG_STRIDE:
       usages[0] = "<stride>";
@@ -3107,6 +3108,8 @@ static void config_load_peg_stage_top_k(Config *config,
     const char *item = string_splitter_get_item(split, i);
     // "all" (or 0) = no cap: keep every candidate at that stage. Stored as
     // INT_MAX so the solver's keep = min(field, count) keeps the whole field.
+    // A single uncapped stage (bare "all"/"0") is the solver's exhaustive
+    // mode — one deep full-depth-endgame stage over the whole field.
     if (strcmp(item, "all") == 0) {
       counts[i] = INT_MAX;
       continue;

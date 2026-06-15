@@ -10,8 +10,9 @@ void test_benchmark_peg_4(void);
 // fixtures that drive the benchmarks above.
 void test_generate_peg_cgps(void);
 
-// CI test: -pegtopk all (no candidate cap) keeps the whole field. Fast (two
-// canned locked-down positions with tiny fields).
+// CI test: -pegtopk all (no candidate cap = exhaustive single stage) keeps the
+// whole field. Fast: a canned near-decided 2-in-bag position whose exhaustive
+// solve completes in ~0.03s.
 void test_peg_pegtopk_all(void);
 
 #endif

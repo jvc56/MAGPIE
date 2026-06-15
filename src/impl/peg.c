@@ -56,6 +56,11 @@ enum {
   PEG_CAND_LIST_CAP = 16384,
   // Greedy playout depth ceiling (a PEG playout terminates well before this).
   PEG_PLAYOUT_MAX_PLIES = 40,
+  // Endgame depth for the exhaustive single stage (-pegtopk all / 0). An
+  // emptier PEG leaf holds at most 2*RACK_SIZE tiles, so the endgame tree
+  // bottoms out at terminal nodes well short of this; the overshoot is free and
+  // just guarantees the solve runs to game end with no frontier truncation.
+  PEG_EXHAUSTIVE_PLIES = 40,
   // Fixed endgame seed for deterministic leaf solves.
   PEG_ENDGAME_SEED = 1,
   // Pessimistic playout: capacity of the opponent reply list. The adversarial
@@ -1394,13 +1399,25 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     num_stages = 0;
   }
 
+  // Exhaustive mode: a single uncapped stage (-pegtopk all / 0). With no
+  // narrowing the per-stage fidelity ramp is pointless — re-evaluating the
+  // whole field at 2,3,4,... ply just to keep all of it every time — so
+  // collapse to one deep stage that runs the full-depth endgame over the entire
+  // field with full scenario enumeration. The greedy stage 0 still seeds the
+  // ranking.
+  const bool exhaustive = num_stages == 1 && counts[0] == INT_MAX;
+
   // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
   // (the bag <= 2 scenario space is too small to sample without destroying
   // coverage). Default (<= 1) is full enumeration — exact, just slower.
   // Applied to every stage including the greedy seed (stage 0), whose full
   // bag-3+ enumeration over thousands of candidates is the dominant cost.
+  // Exhaustive mode always enumerates fully (no stride), regardless of
+  // -pegstride.
   const int scenario_stride =
-      (bag_size >= 3 && args->scenario_stride > 1) ? args->scenario_stride : 1;
+      (!exhaustive && bag_size >= 3 && args->scenario_stride > 1)
+          ? args->scenario_stride
+          : 1;
 
   // Wall-clock deadline (0 = unbounded). Each endgame leaf is also capped by
   // this so a single deep solve cannot overrun the budget.
@@ -1532,8 +1549,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // Halving stages. Stage s re-evaluates the surviving top counts[s-1] (plus
     // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
     // needs >= 2 candidates to be meaningful, and is skipped once the budget is
-    // spent.
+    // spent. In exhaustive mode the lone stage runs at full endgame depth
+    // instead of the stage_idx+1 ramp (see `exhaustive` above).
     for (int stage_idx = 1; stage_idx <= num_stages; stage_idx++) {
+      const int stage_fidelity =
+          exhaustive ? PEG_EXHAUSTIVE_PLIES : stage_idx + 1;
       const int keep = live_count < counts[stage_idx - 1]
                            ? live_count
                            : counts[stage_idx - 1];
@@ -1545,12 +1565,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
-      peg_poll_begin_stage(args->poll, stage_idx,
-                           /*fidelity_plies=*/stage_idx + 1, eval_count);
+      peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
       if (args->on_stage_start != NULL) {
         args->on_stage_start(stage_idx, eval_count, /*inner_d=*/0,
-                             /*emptier_plies=*/stage_idx + 1, args->user_data);
+                             /*emptier_plies=*/stage_fidelity, args->user_data);
       }
       for (int i = 0; i < eval_count; i++) {
         moves[i] = &ranked[i].move;
@@ -1562,18 +1581,18 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       // Scenario-level parallelism: a halving stage has few candidates, so
       // splitting each into its scenarios keeps all cores busy.
-      peg_eval_candidates_scenario(
-          pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
-          moves, eval_count, args->opp_model, args->inner_top_k,
-          /*fidelity_plies=*/stage_idx + 1, scenario_stride, deadline_ns,
-          args->thread_control, &progress, restaged);
+      peg_eval_candidates_scenario(pool, workers, prepared_base, mover_idx,
+                                   unseen, ld_size, bag_size, moves, eval_count,
+                                   args->opp_model, args->inner_top_k,
+                                   stage_fidelity, scenario_stride, deadline_ns,
+                                   args->thread_control, &progress, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
       live_count = eval_count;
       peg_publish(out, ranked, eval_count, stage_idx);
       peg_poll_replace(args->poll, ranked, eval_count, stage_idx,
-                       /*fidelity_plies=*/stage_idx + 1, eval_count);
+                       stage_fidelity, eval_count);
     }
 
     // Optional per-scenario detail for the published best cand. A single-cand,
@@ -1581,8 +1600,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // recording each scenario's draw/remainder/weight/value. Off by default
     // (include_per_scenario) since it doubles the top cand's leaf work.
     if (args->include_per_scenario && out->n_top_cands > 0) {
-      const int capture_fidelity =
-          out->last_completed_stage == 0 ? 0 : out->last_completed_stage + 1;
+      const int capture_fidelity = out->last_completed_stage == 0 ? 0
+                                   : exhaustive ? PEG_EXHAUSTIVE_PLIES
+                                                : out->last_completed_stage + 1;
       PegScenarioCapture capture = {0};
       capture.ld = ld;
       PegEvalCtx ctx;

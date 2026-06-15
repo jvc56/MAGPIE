@@ -359,8 +359,10 @@ search; see `help peg`, `help pegonly`, etc. for full descriptions:
   (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
   play; each count is how many top plays are then kept and re-ranked at the next
   ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
-  16/8/4/2 across the halving stages). A count of `all` (or `0`) keeps every
-  candidate at that stage — no cap.
+  16/8/4/2 across the halving stages). A single `all` (or `0`) is the
+  **exhaustive** setting: it keeps every candidate and solves each at full
+  endgame depth in one deep stage, with full scenario enumeration (it ignores
+  `-pegstride`).
 - `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
 
 Use `-` to clear `pegonly` or `pnoprune`.
@@ -386,24 +388,22 @@ exhaustive analysis, controlled by a few knobs:
 - **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
 
 So a quick in-game read might sample scenarios under a time cap, while an
-exhaustive study enumerates everything with a deeper schedule and **no time
-limit at all** — it simply runs the full schedule to completion. The most
-thorough setting uses `all` for every `-pegtopk` count, which keeps *every*
-candidate through *every* stage (no cap), evaluating all of them at the deepest
-fidelity:
+exhaustive study enumerates everything and solves to game end. The most thorough
+setting is `-pegtopk all`: after the greedy stage 0 it runs a single deep stage
+that keeps *every* candidate, enumerates *every* scenario (no stride), and solves
+each bag-emptying leaf at full endgame depth — no narrowing, no truncation:
 
 ```
-magpie> peg -pegstride 7 -tlim 5                  # fast: sampled, 5s cap
-magpie> peg                                       # default: full enumeration, uncapped time
-magpie> peg -pegstride 1 -pegtopk all,all,all,all,all  # every play, every stage, no caps
+magpie> peg -pegstride 7 -tlim 5    # fast: sampled, 5s cap
+magpie> peg                         # default: full enumeration, halving cascade, uncapped time
+magpie> peg -pegtopk all            # exhaustive: every play, full-depth endgame, no caps
 ```
 
-(With no `-tlim` the run is uncapped in time; for `-pegtopk`, `all` — or `0` —
-means no candidate cap at that stage.) How far this extreme is practical depends
-on the bag: at **1-in-bag**, exhaustively solving every candidate is realistic
-for most positions given enough time; at **4-in-bag** carrying all plays through
-all stages can take effectively forever — but you can still configure and run
-it.
+(`-pegtopk all` — or `0` — forces full enumeration regardless of `-pegstride`;
+with no `-tlim` it is uncapped in time.) How far this extreme is practical
+depends on the bag: at **1-in-bag**, exhaustively solving every candidate is
+realistic for most positions given enough time; at **4-in-bag** it can take
+effectively forever — but you can still configure and run it.
 
 The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
 greedy playout (averaged over the leftover-bag orderings) for the rest, so even

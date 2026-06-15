@@ -541,55 +541,51 @@ void test_generate_peg_cgps(void) {
                     /*append=*/false, /*contested_only=*/true);
 }
 
-// CI test for `-pegtopk all` (no candidate cap). Two canned, locked-down
-// K-in-bag positions (1-in-bag and 2-in-bag) where the board is nearly full, so
-// the mover has only a handful of legal plays. Each is solved twice -- with a
-// top-2 cap and with `all` -- and `all` must publish strictly more candidates
-// than the cap, proving the cap was removed and the whole field was kept. The
-// positions are hardcoded (not derived) so the test is fast and deterministic;
-// TWL98 keeps the branching factor tiny. Only run by CI (in the main
-// test_table). The positions were found by TWL98 self-play -- the mover's full
-// field is 7 plays in the 1-in-bag case and 5 in the 2-in-bag case.
+// CI test for `-pegtopk all` (no candidate cap = EXHAUSTIVE mode: one deep
+// stage that keeps every candidate and solves each at full endgame depth). The
+// position is solved twice -- with a top-2 cap and with `all` -- and `all` must
+// publish strictly more candidates than the cap, proving the cap was removed
+// and the whole field was kept (and the exhaustive deep stage actually ran).
+//
+// The position is a canned (not derived) near-decided 2-in-bag TWL98 position:
+// the exhaustive solve of EVERY candidate (field of 9) completes in ~0.03s,
+// because the endgame is essentially settled. This matters because most
+// K-in-bag positions have genuinely hard endgames whose exhaustive solve takes
+// ~minutes
+// -- far too slow for CI -- so the position was chosen by timing the actual
+// exhaustive `peg_solve` and keeping a fast, fully-completing one (1-in-bag and
+// typical 2-in-bag exhaustives do NOT finish quickly). Only run by CI (in the
+// main test_table). The line embeds "-lex TWL98", which the cgp load honors.
 void test_peg_pegtopk_all(void) {
   log_set_level(LOG_FATAL);
-  // Each line embeds "-lex TWL98", which the cgp load honors.
-  static const char *const locked_positions[] = {
-      "6ACINAR1V1/6XU2W1PIP/7DAG1GATE/8RIF1YAK/9LORE1E/9TREEN1/10ME1AB/"
-      "6JUN1OF2E/7HOpLITES/11E2T/8QATS1HE/9LIT1OD/7N5O1/6AUSfORMED/5VINO1W2YO "
-      "AEGINRZ/BCDILSU 331/320 0 -lex TWL98",
-      "15/15/15/15/15/14Y/7B5FA/4J1WIZ4AN/1K1FAYED1AT1PIG/TOD1PEE2MUCINS/"
-      "1LOBE1LOVAT1L2/1b1ORA2A2NONE/1ADUST1UNROOTED/AS1R5EX2EH/HI1GUIRO1E1VIMS "
-      "EEGIINR/EILQRTW 317/303 0 -lex TWL98",
-  };
-  const int num_positions =
-      (int)(sizeof(locked_positions) / sizeof(locked_positions[0]));
+  static const char *const locked_position =
+      "15/15/12V2/11GO1G/10SOX1R/10LO1SI/8J1ID1oN/7POUTY1UN/5Q4H2RE/"
+      "5UNLIVED1ED/3KOA1A2REBS1/3A1G1T3LITE/2BUD1AE1W1LO2/1FIREMEN1YA1NA1/"
+      "1AZINE1THEMaTIC AFIOPRR/ACEEOST 332/386 0 -lex TWL98";
 
   Config *config =
       config_create_or_die("set -lex TWL98 -threads 1 -s1 score -s2 score");
-  for (int pos_idx = 0; pos_idx < num_positions; pos_idx++) {
-    char *load_cmd = get_formatted_string("cgp %s", locked_positions[pos_idx]);
+  char *load_cmd = get_formatted_string("cgp %s", locked_position);
 
-    // Top-2 cap: at most 2 candidates published.
-    exec_config_quiet(config, "set -pegtopk 2");
-    exec_config_quiet(config, load_cmd);
-    exec_config_quiet(config, "peg");
-    const int n_capped = config_get_peg_result(config)->n_top_cands;
+  // Top-2 cap: at most 2 candidates published.
+  exec_config_quiet(config, "set -pegtopk 2");
+  exec_config_quiet(config, load_cmd);
+  exec_config_quiet(config, "peg");
+  const int n_capped = config_get_peg_result(config)->n_top_cands;
 
-    // No cap: the whole (tiny) field is kept and published.
-    exec_config_quiet(config, "set -pegtopk all");
-    exec_config_quiet(config, load_cmd);
-    exec_config_quiet(config, "peg");
-    const PegResult *result = config_get_peg_result(config);
-    const int n_all = result->n_top_cands;
+  // No cap: the whole field is kept and published (exhaustive single stage).
+  exec_config_quiet(config, "set -pegtopk all");
+  exec_config_quiet(config, load_cmd);
+  exec_config_quiet(config, "peg");
+  const PegResult *result = config_get_peg_result(config);
+  const int n_all = result->n_top_cands;
 
-    assert(result->last_completed_stage >= 0);
-    assert(n_capped <= 2);    // the cap held the field to 2
-    assert(n_all > n_capped); // 'all' removed the cap -> strictly more cands
-    printf("[pegtopk_all] position %d: capped=%d all=%d\n", pos_idx + 1,
-           n_capped, n_all);
-    (void)fflush(stdout);
+  assert(result->last_completed_stage >= 1); // the exhaustive deep stage ran
+  assert(n_capped <= 2);                     // the cap held the field to 2
+  assert(n_all > n_capped); // 'all' removed the cap -> strictly more cands
+  printf("[pegtopk_all] capped=%d all=%d\n", n_capped, n_all);
+  (void)fflush(stdout);
 
-    free(load_cmd);
-  }
+  free(load_cmd);
   config_destroy(config);
 }
