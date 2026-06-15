@@ -356,6 +356,7 @@ struct Config {
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
   PegResult peg_result;
+  PegPoll *peg_poll;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -3206,8 +3207,12 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
+  // Fresh poll for this solve; destroy the previous one if it exists.
+  peg_poll_destroy(config->peg_poll);
+  config->peg_poll = peg_poll_create();
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
+  peg_args.poll = config->peg_poll;
 
   // Optional "only solve" set: evaluate exactly these moves as the candidates.
   ValidatedMoves *only_vms = NULL;
@@ -3257,6 +3262,13 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 }
 
 char *status_peg(Config *config) {
+  if (config->peg_poll != NULL) {
+    PegPollSnapshot snap;
+    peg_poll_read(config->peg_poll, &snap);
+    if (!snap.done) {
+      return peg_status_get_string(&snap);
+    }
+  }
   if (config->peg_result.last_completed_stage < 0) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
@@ -8319,6 +8331,7 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
+  peg_poll_destroy(config->peg_poll);
   free(config->peg_only_str);
   free(config->peg_noprune_str);
   autoplay_results_destroy(config->autoplay_results);

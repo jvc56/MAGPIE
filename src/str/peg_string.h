@@ -11,4 +11,8 @@
 char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes);
 
+// Render a live per-stage progress table from a poll snapshot taken while
+// peg_solve is still running. Caller frees.
+char *peg_status_get_string(const PegPollSnapshot *snap);
+
 #endif // PEG_STRING_H

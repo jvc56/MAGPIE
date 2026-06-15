@@ -126,12 +126,29 @@ static inline double peg_poll_key(const PegRankedCand *cand) {
 }
 
 // Stage-boundary metadata, set before a stage's evaluation begins.
+// Finalizes the previous stage entry (sets its end_ns) and opens a new one.
 static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
                                  int field_size) {
   if (poll == NULL) {
     return;
   }
+  const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
+  // Finalize the previous stage: record when it ended.
+  if (poll->s.n_stage_history > 0) {
+    poll->s.stage_history[poll->s.n_stage_history - 1].end_ns = now_ns;
+  }
+  // Open a new stage entry if there is room.
+  if (poll->s.n_stage_history < PEG_POLL_MAX_STAGES) {
+    PegStageSnapshot *st = &poll->s.stage_history[poll->s.n_stage_history];
+    st->fidelity_plies = fidelity_plies;
+    st->field_size = field_size;
+    st->cands_done = 0;
+    st->start_ns = now_ns;
+    st->end_ns = 0;
+    st->best_win_pct = -1.0;
+    poll->s.n_stage_history++;
+  }
   poll->s.stage = stage;
   poll->s.fidelity_plies = fidelity_plies;
   poll->s.field_size = field_size;
@@ -139,7 +156,22 @@ static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
   cpthread_mutex_unlock(&poll->mutex);
 }
 
+// Bump the cands_done counter for the current stage. Call once per candidate
+// completion in any stage; the leaderboard upsert (below) is separate.
+static void peg_poll_bump_cand_done(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  if (poll->s.n_stage_history > 0) {
+    poll->s.stage_history[poll->s.n_stage_history - 1].cands_done++;
+  }
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
 // Insert one finished candidate into the descending top-K (stage-0 liveness).
+// Also bumps the stage cands_done counter and updates best_win_pct.
 // Called from worker threads, so it locks.
 static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   if (poll == NULL) {
@@ -147,6 +179,10 @@ static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   }
   cpthread_mutex_lock(&poll->mutex);
   PegPollSnapshot *snap = &poll->s;
+  // Always count this candidate as done regardless of leaderboard outcome.
+  if (snap->n_stage_history > 0) {
+    snap->stage_history[snap->n_stage_history - 1].cands_done++;
+  }
   const double key = peg_poll_key(cand);
   int i;
   if (snap->n_entries < PEG_POLL_MAX_ENTRIES) {
@@ -154,19 +190,26 @@ static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   } else if (key > peg_poll_key(&snap->entries[PEG_POLL_MAX_ENTRIES - 1])) {
     i = PEG_POLL_MAX_ENTRIES - 1;
   } else {
+    snap->version++;
     cpthread_mutex_unlock(&poll->mutex);
-    return; // full and no better than the worst kept entry
+    return; // full and outranked — still counted done, but not inserted
   }
   while (i > 0 && peg_poll_key(&snap->entries[i - 1]) < key) {
     snap->entries[i] = snap->entries[i - 1];
     i--;
   }
   snap->entries[i] = *cand;
+  // entries[0] is always the best; reflect in the current stage.
+  if (snap->n_stage_history > 0) {
+    snap->stage_history[snap->n_stage_history - 1].best_win_pct =
+        snap->entries[0].win_pct;
+  }
   snap->version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
 
 // Replace the leaderboard with an authoritative ranking at a stage boundary.
+// Also records the best win% for the current stage history entry.
 static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
                              int stage, int fidelity_plies, int field_size) {
   if (poll == NULL) {
@@ -181,6 +224,10 @@ static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
   poll->s.stage = stage;
   poll->s.fidelity_plies = fidelity_plies;
   poll->s.field_size = field_size;
+  if (poll->s.n_stage_history > 0 && k > 0) {
+    poll->s.stage_history[poll->s.n_stage_history - 1].best_win_pct =
+        ranked[0].win_pct;
+  }
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
@@ -189,7 +236,12 @@ static void peg_poll_finish(PegPoll *poll) {
   if (poll == NULL) {
     return;
   }
+  const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
+  // Finalize the last stage.
+  if (poll->s.n_stage_history > 0) {
+    poll->s.stage_history[poll->s.n_stage_history - 1].end_ns = now_ns;
+  }
   poll->s.done = true;
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
@@ -1125,7 +1177,7 @@ static void peg_eval_candidates_scenario(
     const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
     int n, PegOppModel opp_model, int inner_top_k, int fidelity_plies,
     int scenario_stride, int64_t deadline_ns, ThreadControl *thread_control,
-    const PegProgress *progress, PegRankedCand *ranked) {
+    const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -1207,6 +1259,7 @@ static void peg_eval_candidates_scenario(
                              ranked[i].win_pct, ranked[i].mean_spread,
                              ranked[i].n_scenarios, progress->user_data);
     }
+    peg_poll_bump_cand_done(poll);
   }
   free(total_w);
   free(win_w);
@@ -1603,7 +1656,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                                    unseen, ld_size, bag_size, moves, eval_count,
                                    args->opp_model, args->inner_top_k,
                                    stage_fidelity, scenario_stride, deadline_ns,
-                                   args->thread_control, &progress, restaged);
+                                   args->thread_control, &progress, args->poll,
+                                   restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
