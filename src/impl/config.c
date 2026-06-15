@@ -137,6 +137,7 @@ typedef enum {
   ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
+  ARG_TOKEN_PEG_OUTCOMES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -273,6 +274,8 @@ struct Config {
   int peg_scenario_stride;
   // PEG pessimistic opponent model (-pegpess); else rational (the default).
   bool peg_pessimistic;
+  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
+  bool peg_show_outcomes;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -1591,6 +1594,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
              "(default) = rational (the opponent plays its best-equity reply).";
       break;
+    case ARG_TOKEN_PEG_OUTCOMES:
+      usages[0] = "<true/false>";
+      examples[0] = "true";
+      text = "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
+             "losses L:, each as [drawn]remaining) for the best candidate. "
+             "Requires a second pass over the top candidate after the solve, "
+             "roughly doubling its leaf work. Default false.";
+      break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
       examples[0] = "150";
@@ -2149,6 +2160,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
+        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
@@ -3149,6 +3161,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->stage_top_k =
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
+  peg_args->include_per_scenario = config->peg_show_outcomes;
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -3247,7 +3260,8 @@ char *status_peg(Config *config) {
   if (config->peg_result.last_completed_stage < 0) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return peg_result_get_string(&config->peg_result, config->game);
+  return peg_result_get_string(&config->peg_result, config->game,
+                               config->peg_show_outcomes);
 }
 
 // Autoplay
@@ -6523,6 +6537,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_PEG_OUTCOMES, &config->peg_show_outcomes,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // PEG "only solve" / "never prune" lists persist across commands (pargs reset
   // each parse). Update only when given this parse; an empty value or "-"
   // clears the restriction.
@@ -7619,7 +7639,8 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = peg_result_get_string(&config->peg_result, config->game);
+  char *result = peg_result_get_string(&config->peg_result, config->game,
+                                       config->peg_show_outcomes);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -8082,6 +8103,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
+  arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -8193,6 +8215,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
+  config->peg_show_outcomes = false;
   config->peg_only_str = NULL;
   config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
@@ -8372,6 +8395,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG:
     case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_PEG_NOPRUNE:
+    case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
