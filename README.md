@@ -325,6 +325,90 @@ magpie> goto 3
 magpie> infer
 ```
 
+### Solving a pre-endgame
+
+The `peg` command solves a pre-endgame (1 to 4 tiles in the bag): for each
+candidate move it enumerates the possible bag/opponent-rack orderings, solves
+the resulting endgames, and reports each move's win percentage and spread.
+
+Load a position with `cgp` and run `peg`:
+
+```
+magpie> cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20
+magpie> peg
+```
+
+By default the solver generates all root moves and assumes a **rational**
+opponent (it replies with its best-equity move). Several settings tune the
+search; see `help peg`, `help pegonly`, etc. for full descriptions:
+
+- `-pegpess true` switches to the **pessimistic** opponent model (the opponent
+  plays the worst-for-you reply) — i.e. guaranteed-win analysis.
+- `-pegonly <moves>` restricts the search to a fixed set of root candidates
+  instead of generating all moves. Moves are comma-separated UCGI with no
+  spaces — coordinate and tiles joined by a period, pass as `pass` (exchanges
+  are not valid PEG moves):
+
+  ```
+  magpie> peg -pegonly 13L.ONYX,13L.OXY
+  ```
+
+- `-pnoprune <moves>` protects moves from being cut by the halving cascade so
+  they are evaluated at full fidelity even if their win% rank falls below the cut.
+- `-pegtopk <count1>,<count2>,...` overrides the per-stage halving counts
+  (default `32,16,8,4,2`). Stage 0 always greedy-evaluates *every* candidate
+  play; each count is how many top plays are then kept and re-ranked at the next
+  ply of fidelity (so the default keeps the top 32 after stage 0, then narrows
+  16/8/4/2 across the halving stages). A single `all` (or `0`) is the
+  **exhaustive** setting: it keeps every candidate and solves each at full
+  endgame depth in one deep stage, with full scenario enumeration (it ignores
+  `-pegstride`).
+- `-pegstride <n>` samples ~1/n of the scenarios for bag >= 3 (faster, approximate).
+
+Use `-` to clear `pegonly` or `pnoprune`.
+
+#### Speed vs. accuracy
+
+The same `peg` command spans a spectrum from a fast in-game estimate to an
+exhaustive analysis, controlled by a few knobs:
+
+- **Scenario coverage — `-pegstride`.** Stride `1` (the default) enumerates
+  *every* bag/opponent-rack ordering. `-pegstride <n>` instead samples ~1/n of
+  them (reweighted to preserve the expected aggregate), trading accuracy for
+  speed; it applies only at bag ≥ 3 (bag ≤ 2 is always fully enumerated). A
+  larger stride is the single biggest speedup.
+- **Search depth — `-pegtopk`.** A longer/wider schedule carries more candidates
+  into the deeper, higher-fidelity stages (where bag-emptying leaves are solved
+  further), so it is more accurate but slower; a shorter/narrower schedule is
+  faster and coarser. Stage 0 always greedy-scores *every* move, so even an
+  interrupted run returns a ranked answer.
+- **Time — `-tlim <seconds>`.** The solver returns the best answer it has when
+  the limit hits (stage 0 finishes first, then each halving stage refines). With
+  no limit it runs the full schedule to completion.
+- **Cores — `-threads <n>`.** Pure speedup at the same accuracy.
+
+So a quick in-game read might sample scenarios under a time cap, while an
+exhaustive study enumerates everything and solves to game end. The most thorough
+setting is `-pegtopk all`: after the greedy stage 0 it runs a single deep stage
+that keeps *every* candidate, enumerates *every* scenario (no stride), and solves
+each bag-emptying leaf at full endgame depth — no narrowing, no truncation:
+
+```
+magpie> peg -pegstride 7 -tlim 5    # fast: sampled, 5s cap
+magpie> peg                         # default: full enumeration, halving cascade, uncapped time
+magpie> peg -pegtopk all            # exhaustive: every play, full-depth endgame, no caps
+```
+
+(`-pegtopk all` — or `0` — forces full enumeration regardless of `-pegstride`;
+with no `-tlim` it is uncapped in time.) How far this extreme is practical
+depends on the bag: at **1-in-bag**, exhaustively solving every candidate is
+realistic for most positions given enough time; at **4-in-bag** it can take
+effectively forever — but you can still configure and run it.
+
+The leaf evaluation is an exact `endgame_solve` for bag-emptying scenarios but a
+greedy playout (averaged over the leftover-bag orderings) for the rest, so even
+the exhaustive end is a very strong estimate rather than a literal proof.
+
 ### Comparing lexica
 
 To play two lexica against each other to see which is stronger, you can create the required lexical data from text files and run the autoplay command. First, set the letter distribution:

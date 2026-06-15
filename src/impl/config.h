@@ -20,6 +20,7 @@
 #include "../ent/win_pct.h"
 #include "../impl/simmer.h"
 #include "../util/io_util.h"
+#include "peg.h"
 #include <stdbool.h>
 
 typedef struct Config Config;
@@ -84,6 +85,7 @@ GameHistory *config_get_game_history(const Config *config);
 MoveList *config_get_move_list(const Config *config);
 SimResults *config_get_sim_results(const Config *config);
 EndgameResults *config_get_endgame_results(const Config *config);
+const PegResult *config_get_peg_result(const Config *config);
 AutoplayResults *config_get_autoplay_results(const Config *config);
 const char *config_get_settings_filename(const Config *config);
 const char *config_get_current_exec_name(const Config *config);
