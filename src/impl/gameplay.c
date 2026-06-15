@@ -730,10 +730,17 @@ void play_move_incremental(const Move *move, Game *game, MoveUndo *undo) {
     undo->tiles_placed_mask = tiles_placed_mask;
 
     play_move_on_board_tracked(move, game, undo);
-    // Cross-sets are NOT updated here - they are computed lazily before move
-    // generation. The caller can call update_cross_set_for_move if eager update
-    // is needed, or leave them invalid for lazy evaluation.
-    board_set_cross_sets_valid(board, false);
+    // Update cross-sets eagerly, tracked into this move's undo so unplay
+    // restores them exactly. Deferring the update (computing it lazily before
+    // the next move generation) was unsafe: a move whose lazy update never ran
+    // -- e.g. the last move of a greedy playout, or any node that does not
+    // re-generate -- left its placed and neighbor squares with stale,
+    // empty-isolated TRIVIAL cross-sets. Those propagated through the
+    // save/restore cycle across the search tree and let move generation place
+    // tiles forming invalid words. The update is incremental (only the move's
+    // region), so eager evaluation keeps correctness without a full recompute.
+    update_cross_set_for_move_from_undo(undo, game);
+    board_set_cross_sets_valid(board, true);
     game_set_consecutive_scoreless_turns(game, 0);
 
     player_add_to_score(player_on_turn, move_get_score(move));
