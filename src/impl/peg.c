@@ -1600,9 +1600,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // recording each scenario's draw/remainder/weight/value. Off by default
     // (include_per_scenario) since it doubles the top cand's leaf work.
     if (args->include_per_scenario && out->n_top_cands > 0) {
-      const int capture_fidelity = out->last_completed_stage == 0 ? 0
-                                   : exhaustive ? PEG_EXHAUSTIVE_PLIES
-                                                : out->last_completed_stage + 1;
+      int capture_fidelity = 0;
+      if (out->last_completed_stage > 0) {
+        capture_fidelity =
+            exhaustive ? PEG_EXHAUSTIVE_PLIES : out->last_completed_stage + 1;
+      }
       PegScenarioCapture capture = {0};
       capture.ld = ld;
       PegEvalCtx ctx;
