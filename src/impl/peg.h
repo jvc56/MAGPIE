@@ -190,6 +190,21 @@ typedef struct PegArgs {
   PegPoll *poll;
 } PegArgs;
 
+// ----- Stage progress snapshot ------------------------------------------
+
+enum { PEG_POLL_MAX_STAGES = 20 };
+
+// Per-stage progress snapshot. Completed stages have end_ns != 0; the current
+// stage has end_ns == 0. best_win_pct is -1.0 until the first candidate done.
+typedef struct PegStageSnapshot {
+  int fidelity_plies;  // 0 = greedy; N = N-ply endgame
+  int field_size;      // total candidates evaluated in this stage
+  int cands_done;      // candidates that have finished so far
+  int64_t start_ns;    // monotonic ns when this stage started
+  int64_t end_ns;      // monotonic ns when this stage ended; 0 = still running
+  double best_win_pct; // best mover win% seen; -1.0 if none yet
+} PegStageSnapshot;
+
 // ----- Solver outputs ---------------------------------------------------
 
 typedef struct PegRankedCand {
@@ -207,7 +222,7 @@ typedef struct PegResult {
   double best_spread;
 
   // Index of the last stage that completed (0 = greedy only; the final halving
-  // stage = the deepest stage actually run).
+  // stage = the deepest stage actually run). -1 while running or uninitialized.
   int last_completed_stage;
 
   // Wall-clock timer: started at the top of peg_solve (is_running == true
@@ -225,6 +240,11 @@ typedef struct PegResult {
   // PegArgs.include_per_scenario is set. NULL otherwise.
   struct PegPerScenario *per_scenario;
   int n_per_scenario;
+
+  // Per-stage progress history, populated from the poll at the end of
+  // peg_solve. Index i = stage i; n_stage_history grows as stages complete.
+  int n_stage_history;
+  PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
 } PegResult;
 
 // Per-scenario detail row.
@@ -252,18 +272,6 @@ typedef struct PegPerScenario {
 // solve finishes.
 
 enum { PEG_POLL_MAX_ENTRIES = 64 };
-enum { PEG_POLL_MAX_STAGES = 20 };
-
-// Per-stage progress snapshot. Completed stages have end_ns != 0; the current
-// stage has end_ns == 0. best_win_pct is -1.0 until the first candidate done.
-typedef struct PegStageSnapshot {
-  int fidelity_plies;  // 0 = greedy; N = N-ply endgame
-  int field_size;      // total candidates evaluated in this stage
-  int cands_done;      // candidates that have finished so far
-  int64_t start_ns;    // monotonic ns when this stage started
-  int64_t end_ns;      // monotonic ns when this stage ended; 0 = still running
-  double best_win_pct; // best mover win% seen; -1.0 if none yet
-} PegStageSnapshot;
 
 typedef struct PegPollSnapshot {
   int stage;          // current stage (0 = greedy seed); -1 before stage 0

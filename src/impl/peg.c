@@ -1711,6 +1711,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // Mark the live poll done so a poller's read loop can terminate.
   peg_poll_finish(args->poll);
 
+  if (args->poll) {
+    PegPollSnapshot poll_snap;
+    peg_poll_read(args->poll, &poll_snap);
+    out->n_stage_history = poll_snap.n_stage_history;
+    memcpy(out->stage_history, poll_snap.stage_history,
+           (size_t)poll_snap.n_stage_history * sizeof(PegStageSnapshot));
+  }
+
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {
     atomic_store(&injector.stop, 1);

@@ -48,23 +48,94 @@ static char *peg_build_outcomes_string(const PegResult *result) {
   return out;
 }
 
+static void peg_append_stage_table(StringBuilder *sb,
+                                    const PegStageSnapshot *history,
+                                    int n_history) {
+  const int64_t now_ns = ctimer_monotonic_ns();
+  const int num_rows = n_history + 1;
+  StringGrid *sg = string_grid_create(num_rows, 5, 2);
+  string_grid_set_cell(sg, 0, 0, string_duplicate("stage"));
+  string_grid_set_cell(sg, 0, 1, string_duplicate("fidelity"));
+  string_grid_set_cell(sg, 0, 2, string_duplicate("cands"));
+  string_grid_set_cell(sg, 0, 3, string_duplicate("best win%"));
+  string_grid_set_cell(sg, 0, 4, string_duplicate("time"));
+
+  for (int stage_idx = 0; stage_idx < n_history; stage_idx++) {
+    const PegStageSnapshot *st = &history[stage_idx];
+    const int row = stage_idx + 1;
+    const bool is_current = (st->end_ns == 0);
+
+    string_grid_set_cell(sg, row, 0, get_formatted_string("%d", stage_idx));
+
+    if (st->fidelity_plies == 0) {
+      string_grid_set_cell(sg, row, 1, string_duplicate("greedy"));
+    } else {
+      string_grid_set_cell(sg, row, 1,
+                           get_formatted_string("%d-ply eg", st->fidelity_plies));
+    }
+
+    if (is_current && st->field_size > 0) {
+      const double pct = 100.0 * st->cands_done / st->field_size;
+      string_grid_set_cell(
+          sg, row, 2,
+          get_formatted_string("%d/%d (%.0f%%)", st->cands_done, st->field_size,
+                               pct));
+    } else {
+      string_grid_set_cell(
+          sg, row, 2,
+          get_formatted_string("%d/%d", st->cands_done, st->field_size));
+    }
+
+    if (st->best_win_pct >= 0.0) {
+      string_grid_set_cell(sg, row, 3,
+                           get_formatted_string("%.1f%%", 100.0 * st->best_win_pct));
+    } else {
+      string_grid_set_cell(sg, row, 3, string_duplicate("-"));
+    }
+
+    const int64_t end_ns = (st->end_ns != 0) ? st->end_ns : now_ns;
+    const double stage_secs = (double)(end_ns - st->start_ns) / 1e9;
+    string_grid_set_cell(sg, row, 4, get_formatted_string("%.1fs", stage_secs));
+  }
+
+  string_builder_add_string_grid(sb, sg, false);
+  string_grid_destroy(sg);
+}
+
 char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes) {
   StringBuilder *sb = string_builder_create();
-  if (result->last_completed_stage < 0 || result->n_top_cands == 0) {
-    string_builder_add_string(sb, "no PEG results.\n");
+
+  if (result->last_completed_stage < 0) {
+    if (result->n_stage_history == 0) {
+      string_builder_add_string(sb, "no PEG results.\n");
+      char *out = string_builder_dump(sb, NULL);
+      string_builder_destroy(sb);
+      return out;
+    }
+    const int64_t now_ns = ctimer_monotonic_ns();
+    const double total_secs =
+        (double)(now_ns - result->stage_history[0].start_ns) / 1e9;
+    string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
+                                        total_secs);
+    peg_append_stage_table(sb, result->stage_history, result->n_stage_history);
     char *out = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     return out;
   }
 
-  const Board *board = game_get_board(game);
-  const LetterDistribution *ld = game_get_ld(game);
-
   string_builder_add_formatted_string(
       sb, "PEG (last completed stage %d): %d candidates, %.2fs\n",
       result->last_completed_stage, result->n_top_cands,
       ctimer_elapsed_seconds(&result->timer));
+
+  if (result->n_stage_history > 0) {
+    peg_append_stage_table(sb, result->stage_history, result->n_stage_history);
+    string_builder_add_string(sb, "\n");
+  }
+
+  const Board *board = game_get_board(game);
+  const LetterDistribution *ld = game_get_ld(game);
 
   const bool have_outcomes = show_outcomes && result->n_per_scenario > 0;
   const int num_cols = have_outcomes ? 6 : 5;
@@ -106,79 +177,6 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
         string_grid_set_cell(sg, row, 5, string_duplicate(""));
       }
     }
-  }
-
-  string_builder_add_string_grid(sb, sg, false);
-  string_grid_destroy(sg);
-
-  char *out = string_builder_dump(sb, NULL);
-  string_builder_destroy(sb);
-  return out;
-}
-
-char *peg_status_get_string(const PegPollSnapshot *snap) {
-  StringBuilder *sb = string_builder_create();
-
-  if (snap->n_stage_history == 0) {
-    string_builder_add_string(sb, "PEG running...\n");
-    char *out = string_builder_dump(sb, NULL);
-    string_builder_destroy(sb);
-    return out;
-  }
-
-  const int64_t now_ns = ctimer_monotonic_ns();
-  const double total_secs =
-      (double)(now_ns - snap->stage_history[0].start_ns) / 1e9;
-  string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n", total_secs);
-
-  // One header row + one row per stage seen so far.
-  const int num_rows = snap->n_stage_history + 1;
-  StringGrid *sg = string_grid_create(num_rows, 5, 2);
-  string_grid_set_cell(sg, 0, 0, string_duplicate("stage"));
-  string_grid_set_cell(sg, 0, 1, string_duplicate("fidelity"));
-  string_grid_set_cell(sg, 0, 2, string_duplicate("cands"));
-  string_grid_set_cell(sg, 0, 3, string_duplicate("best win%"));
-  string_grid_set_cell(sg, 0, 4, string_duplicate("time"));
-
-  for (int stage_idx = 0; stage_idx < snap->n_stage_history; stage_idx++) {
-    const PegStageSnapshot *st = &snap->stage_history[stage_idx];
-    const int row = stage_idx + 1;
-    const bool is_current =
-        (stage_idx == snap->n_stage_history - 1) && !snap->done;
-
-    string_grid_set_cell(sg, row, 0, get_formatted_string("%d", stage_idx));
-
-    if (st->fidelity_plies == 0) {
-      string_grid_set_cell(sg, row, 1, string_duplicate("greedy"));
-    } else {
-      string_grid_set_cell(sg, row, 1,
-                           get_formatted_string("%d-ply eg", st->fidelity_plies));
-    }
-
-    if (is_current && st->field_size > 0) {
-      const double pct = 100.0 * st->cands_done / st->field_size;
-      string_grid_set_cell(
-          sg, row, 2,
-          get_formatted_string("%d/%d (%.0f%%)", st->cands_done, st->field_size,
-                               pct));
-    } else {
-      string_grid_set_cell(
-          sg, row, 2,
-          get_formatted_string("%d/%d", st->cands_done, st->field_size));
-    }
-
-    if (st->best_win_pct >= 0.0) {
-      string_grid_set_cell(
-          sg, row, 3,
-          get_formatted_string("%.1f%%", 100.0 * st->best_win_pct));
-    } else {
-      string_grid_set_cell(sg, row, 3, string_duplicate("-"));
-    }
-
-    const int64_t end_ns = (st->end_ns != 0) ? st->end_ns : now_ns;
-    const double stage_secs = (double)(end_ns - st->start_ns) / 1e9;
-    string_grid_set_cell(sg, row, 4,
-                         get_formatted_string("%.1fs", stage_secs));
   }
 
   string_builder_add_string_grid(sb, sg, false);
