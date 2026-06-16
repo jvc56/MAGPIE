@@ -30,6 +30,11 @@ typedef enum {
 typedef enum {
   KWG_MAKER_MERGE_NONE,
   KWG_MAKER_MERGE_EXACT,
+  // Like KWG_MAKER_MERGE_EXACT, but additionally overlaps sibling lists (child
+  // lists) when one is a tail of another (wolges-style "tail merging"),
+  // producing a smaller node array at the cost of cache locality during
+  // movegen.
+  KWG_MAKER_MERGE_TAIL,
 } kwg_maker_merge_t;
 
 #endif
