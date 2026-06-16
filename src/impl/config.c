@@ -177,6 +177,7 @@ typedef enum {
   ARG_TOKEN_SHOW_MOVES,
   ARG_TOKEN_SHOW_INFERENCE,
   ARG_TOKEN_SHOW_ENDGAME,
+  ARG_TOKEN_SHOW_PEG,
   ARG_TOKEN_SHOW_HEAT_MAP,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -2099,6 +2100,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
+        ARG_TOKEN_SHOW_PEG,             /* shpeg */
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
@@ -3862,6 +3864,30 @@ void execute_show_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
   return impl_show_endgame(config, error_stack);
+}
+
+// Show PEG
+
+char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
+  if (!config->game || config->peg_result.last_completed_stage < 0) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_PEG_TO_SHOW,
+                     string_duplicate("no PEG results to show"));
+    return empty_string();
+  }
+  return peg_result_get_string(&config->peg_result, config->game,
+                               config->peg_show_outcomes);
+}
+
+void execute_show_peg(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_peg(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_peg(Config *config, ErrorStack *error_stack) {
+  return impl_show_peg(config, error_stack);
 }
 
 // Show heat map
@@ -8068,6 +8094,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 0, show_peg, peg, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
