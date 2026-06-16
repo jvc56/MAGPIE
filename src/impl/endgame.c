@@ -168,6 +168,14 @@ struct EndgameCtx {
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
+  // Fired once on thread 0 before iterative deepening begins, with the sorted
+  // d=0 root-move list (for an initial leaderboard render).
+  EndgameBeforeSearchCallback before_search_callback;
+  void *before_search_callback_data;
+  // Fired on thread 0 each time a root move completes at the current IDS depth
+  // (for live per-root leaderboard updates).
+  EndgamePerRootMoveCallback per_root_move_callback;
+  void *per_root_move_callback_data;
 
   // Owned by the caller:
   EndgameResults *results;
@@ -229,6 +237,53 @@ struct EndgameCtxWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
+
+  // Per-thread node counter for the live-progress getter. Plain uint64
+  // (no atomics on the writer side); flushed periodically to the
+  // shared atomic via the deadline-check rhythm. The reader sums per-
+  // thread atomics, so a brief lag (up to DEPTH_DEADLINE_CHECK_INTERVAL
+  // nodes) is acceptable.
+  uint64_t local_nodes_searched;
+  _Atomic uint64_t published_nodes_searched;
+
+  // Per-thread "current line being explored" for the live-progress
+  // getter. current_line[i] is the tiny_move played at the i-th ply
+  // from the root; current_line_len is the number of valid entries.
+  // Worker writes the move slot, then atomic_store_release the length;
+  // reader does atomic_load_acquire on the length, then reads the
+  // line. Reader may see torn entries if the worker is concurrently
+  // ascending into a sibling subtree, but the result remains
+  // structurally consistent (length matches what's been written).
+  uint64_t current_line[MAX_SEARCH_DEPTH];
+  _Atomic int current_line_len;
+
+  // Live best-PV-from-root snapshot. Updated by abdada_negamax every
+  // time best_value improves at the root (is_root=true), so a polling
+  // reader can watch the engine's evolving best line refine through
+  // each depth.  Seqlock pattern: live_pv_seq is even when the
+  // snapshot is consistent, odd while a write is in progress. Reader
+  // loads seq, reads length+moves+value, loads seq again; retries on
+  // odd or mismatched seq.
+  uint64_t live_pv_tiny_moves[MAX_SEARCH_DEPTH];
+  _Atomic int32_t live_pv_value;
+  _Atomic int live_pv_length;
+  _Atomic uint64_t live_pv_seq;
+
+  // Live multi-PV top-K snapshot, updated per root completion (so
+  // every per_root_move_callback firing also republishes here).
+  // Each slot has (root tiny_move, spread-adjusted value, the
+  // continuation tiny_moves from after the root move, and the
+  // continuation length).  Entries are sorted descending by value.
+  // live_top_k_filled is how many of MAX_ENDGAME_DISPLAY_PVS slots
+  // are currently populated. Same seqlock pattern as live_pv.
+  // Reset to 0 entries at the start of each new IDS depth so the
+  // leaderboard reflects the current depth's evaluations only.
+  uint64_t live_top_k_root_tiny[MAX_ENDGAME_DISPLAY_PVS];
+  int32_t live_top_k_value[MAX_ENDGAME_DISPLAY_PVS];
+  uint64_t live_top_k_continuation[MAX_ENDGAME_DISPLAY_PVS][MAX_SEARCH_DEPTH];
+  int live_top_k_continuation_len[MAX_ENDGAME_DISPLAY_PVS];
+  _Atomic int live_top_k_filled;
+  _Atomic uint64_t live_top_k_seq;
 };
 
 #ifndef MAX
@@ -570,6 +625,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
   es->num_top_moves = endgame_args->num_top_moves;
+  // The in-search top-K array (topk_values) and the live multi-PV leaderboard
+  // are sized to MAX_ENDGAME_DISPLAY_PVS; clamp so a caller asking for more
+  // displayed root moves can't overrun them.
+  if (es->num_top_moves > MAX_ENDGAME_DISPLAY_PVS) {
+    es->num_top_moves = MAX_ENDGAME_DISPLAY_PVS;
+  }
   es->threads = endgame_args->num_threads;
   if (es->threads < 1) {
     es->threads = 1;
@@ -659,6 +720,10 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->game = endgame_args->game;
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
+  es->before_search_callback = endgame_args->before_search_callback;
+  es->before_search_callback_data = endgame_args->before_search_callback_data;
+  es->per_root_move_callback = endgame_args->per_root_move_callback;
+  es->per_root_move_callback_data = endgame_args->per_root_move_callback_data;
   if (endgame_args->shared_tt) {
     // Use caller-provided TT. Free any previously owned TT.
     if (!es->tt_is_external) {
@@ -737,6 +802,127 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
   *ply2_moves_total = atomic_load(&ctx->ply2_moves_total);
 }
 
+void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
+  if (ctx->transposition_table != NULL) {
+    transposition_table_reset(ctx->transposition_table);
+  }
+}
+
+uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
+  uint64_t total = 0;
+  for (int i = 0; i < ctx->cap_workers; i++) {
+    total += atomic_load_explicit(&ctx->workers[i]->published_nodes_searched,
+                                  memory_order_relaxed);
+  }
+  return total;
+}
+
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
+                                 uint64_t *out_line, int max_len) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  // Acquire on length pairs with release on writer side: by the time we
+  // observe length L, all writes to current_line[0..L-1] up to that
+  // store are visible. The worker may have moved on since then; entries
+  // beyond what we read may correspond to a different sibling subtree.
+  int len = atomic_load_explicit(&w->current_line_len, memory_order_acquire);
+  if (len > max_len) {
+    len = max_len;
+  }
+  if (len > MAX_SEARCH_DEPTH) {
+    len = MAX_SEARCH_DEPTH;
+  }
+  for (int i = 0; i < len; i++) {
+    out_line[i] = w->current_line[i];
+  }
+  return len;
+}
+
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
+                            uint64_t *out_moves, int max_len,
+                            int32_t *out_value) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+    *out_value = 0;
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  // Seqlock read: try a few times to capture a consistent snapshot
+  // (length, moves, value all from the same writer update).
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int len = atomic_load_explicit(&w->live_pv_length, memory_order_relaxed);
+    const int32_t value =
+        atomic_load_explicit(&w->live_pv_value, memory_order_relaxed);
+    if (len > max_len) {
+      len = max_len;
+    }
+    if (len > MAX_SEARCH_DEPTH) {
+      len = MAX_SEARCH_DEPTH;
+    }
+    for (int i = 0; i < len; i++) {
+      out_moves[i] = w->live_pv_tiny_moves[i];
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      *out_value = value;
+      return len;
+    }
+  }
+  *out_value = 0;
+  return 0;
+}
+
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
+                                   EndgameLivePvSnapshot *out, int max_k) {
+  if (thread_index < 0 || thread_index >= ctx->cap_workers || max_k <= 0) {
+    return 0;
+  }
+  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int filled =
+        atomic_load_explicit(&w->live_top_k_filled, memory_order_relaxed);
+    if (filled > max_k) {
+      filled = max_k;
+    }
+    if (filled > MAX_ENDGAME_DISPLAY_PVS) {
+      filled = MAX_ENDGAME_DISPLAY_PVS;
+    }
+    for (int i = 0; i < filled; i++) {
+      out[i].root_tiny = w->live_top_k_root_tiny[i];
+      out[i].value = w->live_top_k_value[i];
+      int cont_len = w->live_top_k_continuation_len[i];
+      if (cont_len > MAX_SEARCH_DEPTH) {
+        cont_len = MAX_SEARCH_DEPTH;
+      }
+      out[i].continuation_len = cont_len;
+      for (int j = 0; j < cont_len; j++) {
+        out[i].continuation_tiny[j] = w->live_top_k_continuation[i][j];
+      }
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      return filled;
+    }
+  }
+  return 0;
+}
+
+// Defined below; used by both the worker create and reset paths.
+static void reset_worker_analysis_state(EndgameCtxWorker *worker);
+
 static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   if (!solver_worker) {
     return;
@@ -797,8 +983,24 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
+  reset_worker_analysis_state(solver_worker);
 
   return solver_worker;
+}
+
+// Zero the per-worker live-progress / live-PV / live-top-K snapshot state.
+// Called from both the worker create and reset paths so a fresh solve never
+// inherits a stale leaderboard or node count from a prior solve.
+static void reset_worker_analysis_state(EndgameCtxWorker *worker) {
+  worker->local_nodes_searched = 0;
+  atomic_store_explicit(&worker->published_nodes_searched, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&worker->current_line_len, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_length, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_value, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_seq, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_filled, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_seq, 0, memory_order_relaxed);
 }
 
 // Reset an existing worker for a new solve without reallocating.
@@ -818,6 +1020,7 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   worker->best_pv_value = -LARGE_VALUE;
   worker->completed_depth = 0;
   worker->nodes_since_deadline_check = 0;
+  reset_worker_analysis_state(worker);
 }
 
 void endgame_ctx_reset_worker_and_game(EndgameCtx *solver, uint64_t base_seed,
@@ -1792,11 +1995,102 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   return false;
 }
 
+// Republish worker thread 0's live multi-PV top-K leaderboard with the
+// (root_tiny, value, continuation) for one just-completed root move. Keeps
+// entries sorted descending by value, deduped by root_tiny, capped at K_max
+// (<= MAX_ENDGAME_DISPLAY_PVS). Seqlock writer: bump seq odd, mutate, bump
+// even, so endgame_ctx_get_live_top_k_pvs reads a consistent snapshot.
+static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
+                                  int32_t value,
+                                  const struct PVLine *continuation,
+                                  int K_max) {
+  if (K_max < 1) {
+    return;
+  }
+  if (K_max > MAX_ENDGAME_DISPLAY_PVS) {
+    K_max = MAX_ENDGAME_DISPLAY_PVS;
+  }
+  // Begin seqlock write window: bump seq odd.
+  const uint64_t seq_before =
+      atomic_load_explicit(&worker->live_top_k_seq, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_seq, seq_before + 1,
+                        memory_order_release);
+
+  int filled =
+      atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
+
+  // Remove existing entry for same root_tiny so we can re-insert sorted.
+  for (int i = 0; i < filled; i++) {
+    if (worker->live_top_k_root_tiny[i] == root_tiny) {
+      for (int j = i; j < filled - 1; j++) {
+        worker->live_top_k_root_tiny[j] = worker->live_top_k_root_tiny[j + 1];
+        worker->live_top_k_value[j] = worker->live_top_k_value[j + 1];
+        worker->live_top_k_continuation_len[j] =
+            worker->live_top_k_continuation_len[j + 1];
+        memcpy(worker->live_top_k_continuation[j],
+               worker->live_top_k_continuation[j + 1],
+               sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+      }
+      filled--;
+      break;
+    }
+  }
+
+  // Find insertion position (descending order by value).
+  int insert_pos = filled;
+  for (int i = 0; i < filled; i++) {
+    if (value > worker->live_top_k_value[i]) {
+      insert_pos = i;
+      break;
+    }
+  }
+
+  if (insert_pos < K_max) {
+    const int last = (filled < K_max) ? filled : (K_max - 1);
+    for (int i = last; i > insert_pos; i--) {
+      worker->live_top_k_root_tiny[i] = worker->live_top_k_root_tiny[i - 1];
+      worker->live_top_k_value[i] = worker->live_top_k_value[i - 1];
+      worker->live_top_k_continuation_len[i] =
+          worker->live_top_k_continuation_len[i - 1];
+      memcpy(worker->live_top_k_continuation[i],
+             worker->live_top_k_continuation[i - 1],
+             sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+    }
+    worker->live_top_k_root_tiny[insert_pos] = root_tiny;
+    worker->live_top_k_value[insert_pos] = value;
+    int cont_len = (continuation != NULL) ? continuation->num_moves : 0;
+    if (cont_len > MAX_SEARCH_DEPTH) {
+      cont_len = MAX_SEARCH_DEPTH;
+    }
+    for (int i = 0; i < cont_len; i++) {
+      worker->live_top_k_continuation[insert_pos][i] =
+          continuation->moves[i].tiny_move;
+    }
+    worker->live_top_k_continuation_len[insert_pos] = cont_len;
+    if (filled < K_max) {
+      filled++;
+    }
+    atomic_store_explicit(&worker->live_top_k_filled, filled,
+                          memory_order_relaxed);
+  }
+
+  // End seqlock write window: bump seq even.
+  atomic_store_explicit(&worker->live_top_k_seq, seq_before + 2,
+                        memory_order_release);
+}
+
 int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                        int32_t alpha, int32_t beta, PVLine *pv, bool pv_node,
                        bool exclusive_p, float opp_stuck_frac) {
 
   assert(pv_node || alpha == beta - 1);
+
+  // Live-progress: count this node visit in the per-thread local counter.
+  // The published-to-shared atomic is updated alongside the deadline check
+  // below, batching ~DEPTH_DEADLINE_CHECK_INTERVAL increments into one
+  // atomic_store. Reader sees an upper-bound-stale view, which is fine for
+  // a "is the engine making progress" UI.
+  worker->local_nodes_searched++;
 
   if (iterative_deepening_should_stop(worker->solver)) {
     return ABDADA_INTERRUPTED;
@@ -1809,6 +2103,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // deep searches (e.g. 25-ply) would otherwise overflow the stack.
   if (++worker->nodes_since_deadline_check >= DEPTH_DEADLINE_CHECK_INTERVAL) {
     worker->nodes_since_deadline_check = 0;
+    // Flush per-thread node count to the shared atomic at the same
+    // cadence as the deadline check, so the live-progress getter sees
+    // updates ~once per DEPTH_DEADLINE_CHECK_INTERVAL nodes per worker.
+    atomic_store_explicit(&worker->published_nodes_searched,
+                          worker->local_nodes_searched, memory_order_relaxed);
     if (check_depth_deadline(worker)) {
       return ABDADA_INTERRUPTED;
     }
@@ -2051,7 +2350,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
-  int32_t topk_values[MAX_VARIANT_LENGTH];
+  // Sized for the live multi-PV leaderboard breadth (up to
+  // MAX_ENDGAME_DISPLAY_PVS root moves), not the per-line depth. num_top_moves
+  // is clamped to MAX_ENDGAME_DISPLAY_PVS in endgame_ctx_reset so topk_insert
+  // (called with k == multi_pv_k) never writes past this array.
+  int32_t topk_values[MAX_ENDGAME_DISPLAY_PVS];
   int topk_n = 0;
 
   // ABDADA: track deferred moves for second phase
@@ -2150,6 +2453,15 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // Calculate undo index for incremental backup
       int undo_index = worker->solver->requested_plies - depth;
 
+      // Live-progress: publish this move into the per-thread "current line"
+      // buffer before recursing so a polling reader can see what the engine
+      // is currently exploring even during a long single-root subtree where
+      // no other signal updates. Length store uses release ordering so the
+      // reader (acquire on length) sees the tiny_move write.
+      worker->current_line[undo_index] = small_move->tiny_move;
+      atomic_store_explicit(&worker->current_line_len, undo_index + 1,
+                            memory_order_release);
+
       // Use optimized function for outplays - skips board/cross-set updates
       if (is_outplay) {
         play_move_endgame_outplay(worker->move_list->spare_move,
@@ -2237,6 +2549,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // child's subtree was saved into this undo (or a descendant's undo that
       // was already restored), so the square restore reverted them exactly.
 
+      // Live-progress: pop the line back to the parent's depth. The entry at
+      // undo_index is left as-is (overwritten by the next sibling's push).
+      // Release pairs with the reader's acquire on length.
+      atomic_store_explicit(&worker->current_line_len, undo_index,
+                            memory_order_release);
+
       if (value == ABDADA_INTERRUPTED) {
         all_done = true;
         best_value = ABDADA_INTERRUPTED;
@@ -2268,6 +2586,31 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         pvline_update(pv, &child_pv, small_move,
                       best_value - worker->solver->initial_spread);
         pv->negamax_depth = child_pv.negamax_depth + 1;
+        // Live PV publish (root only): a polling reader sees the engine's
+        // evolving best line refine through each depth as root moves get
+        // evaluated. Seqlock pattern: bump seq odd to signal "writing", write
+        // moves+value+length, bump seq even to signal "consistent". Reader
+        // retries on odd / mismatched seq.
+        if (is_root) {
+          int new_len = pv->num_moves;
+          if (new_len > MAX_SEARCH_DEPTH) {
+            new_len = MAX_SEARCH_DEPTH;
+          }
+          const uint64_t seq_before =
+              atomic_load_explicit(&worker->live_pv_seq, memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_seq, seq_before + 1,
+                                memory_order_release);
+          for (int i = 0; i < new_len; i++) {
+            worker->live_pv_tiny_moves[i] = pv->moves[i].tiny_move;
+          }
+          atomic_store_explicit(&worker->live_pv_length, new_len,
+                                memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_value,
+                                best_value - worker->solver->initial_spread,
+                                memory_order_relaxed);
+          atomic_store_explicit(&worker->live_pv_seq, seq_before + 2,
+                                memory_order_release);
+        }
       }
       if (is_root) {
         // At the very top depth, set the estimated value of the small move,
@@ -2278,6 +2621,21 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // are not missed.
         if (worker->ordinal == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
+          // Spread-adjusted value, same sign convention as PVLine.score.
+          const int32_t reported_value =
+              -value - worker->solver->initial_spread;
+          if (worker->solver->per_root_move_callback) {
+            worker->solver->per_root_move_callback(
+                depth, idx, small_move, reported_value,
+                worker->solver->per_root_move_callback_data);
+          }
+          // Live multi-PV: republish the top-K leaderboard with this root's
+          // evaluation. Covers all root completions (including ABDADA pass-2
+          // deferred re-evaluations), so the displayed leaderboard always
+          // reflects the most recent value seen for each root move at the
+          // current depth.
+          publish_live_top_k_pv(worker, small_move->tiny_move, reported_value,
+                                &child_pv, worker->solver->num_top_moves);
         }
       }
       if (is_ply2) {
@@ -2452,6 +2810,23 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
 
+  // Publish the d=0 root-move list to clients before any depth begins.
+  // root_moves_total is bumped here (rather than only at depth-loop entry) so
+  // the polled progress atomics agree with the callback's view of the
+  // candidate count even before depth-1 starts. Master worker (ordinal 0)
+  // only; the arena holds the sorted moves contiguously from offset 0.
+  if (worker->ordinal == 0) {
+    atomic_store(&worker->solver->root_moves_total, initial_move_count);
+    if (worker->solver->before_search_callback) {
+      const SmallMove *initial_moves =
+          (const SmallMove *)worker->small_move_arena->memory;
+      worker->solver->before_search_callback(
+          worker->game_copy, initial_moves, initial_move_count,
+          worker->solver->initial_spread, worker->solver->solving_player,
+          worker->solver->before_search_callback_data);
+    }
+  }
+
   worker->current_iterative_deepening_depth = 1;
   int start = 1;
   if (!worker->solver->iterative_deepening_optim) {
@@ -2580,6 +2955,17 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
       atomic_store(&worker->solver->ply2_moves_completed, 0);
       atomic_store(&worker->solver->ply2_moves_total, 0);
+      // Live multi-PV: clear the top-K leaderboard so it reflects the new
+      // depth's evaluations only. Brief seqlock window; a reader sees
+      // filled=0 momentarily, then watches entries fill in as roots complete.
+      const uint64_t topk_seq_before =
+          atomic_load_explicit(&worker->live_top_k_seq, memory_order_relaxed);
+      atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 1,
+                            memory_order_release);
+      atomic_store_explicit(&worker->live_top_k_filled, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 2,
+                            memory_order_release);
       worker->in_first_root_move = false;
     }
     double depth_start_time = ctimer_elapsed_seconds(&ids_timer);
