@@ -1315,6 +1315,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "displays only that PV line (1-indexed) in full move-by-move "
              "detail.";
       break;
+    case ARG_TOKEN_SHOW_PEG:
+      usages[0] = "";
+      text = "Shows the PEG result.";
+      break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
       examples[0] = "10";
@@ -8466,6 +8470,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MOVES:
     case ARG_TOKEN_SHOW_INFERENCE:
     case ARG_TOKEN_SHOW_ENDGAME:
+    case ARG_TOKEN_SHOW_PEG:
     case ARG_TOKEN_SHOW_HEAT_MAP:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
