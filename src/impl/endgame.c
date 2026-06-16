@@ -130,7 +130,16 @@ struct EndgameCtx {
   // Set to 1 by any worker when a depth-0 leaf has the game still ongoing.
   // Reset to 0 by thread 0 at the start of each depth. Used by the
   // early-stop check in iterative_deepening to detect fully-solved positions.
-  atomic_int any_leaf_game_unfinished;
+  // Per-depth monotonic "an unfinished (non-game-over) leaf was seen while
+  // searching this iterative-deepening ply" flags, indexed by root ply
+  // (1..requested_plies). Per-depth, not a single solver flag, so the ABDADA
+  // depth jitter (workers searching shallower, still-unfinished plies) can't
+  // pollute thread 0's early-stop check for a deeper, fully-solved ply. The
+  // old single flag was racy: thread 0 reset it and read it for its ply while
+  // a jittered worker at a shallow ply set it, which native scheduling won
+  // but WASM's lost (early-stop missed, search ran to the depth limit).
+  // Monotonic within a solve; all depths reset to 0 at solve start.
+  atomic_int any_leaf_game_unfinished[MAX_SEARCH_DEPTH + 1];
   // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
   // Thread 0 sets this after each completed depth (from EBF estimate).
   // All worker threads check it periodically and bail if exceeded.
@@ -667,7 +676,9 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
-  atomic_store(&es->any_leaf_game_unfinished, 0);
+  for (int depth_idx = 0; depth_idx <= MAX_SEARCH_DEPTH; depth_idx++) {
+    atomic_store(&es->any_leaf_game_unfinished[depth_idx], 0);
+  }
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
@@ -2133,10 +2144,19 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                                      node_key);
     }
     if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
-      // The game has not ended at this leaf. Mark so the iterative-deepening
-      // early-stop logic (which requires all leaves to be game-over) does not
-      // fire prematurely. Visible to all threads via the solver-level atomic.
-      atomic_store(&worker->solver->any_leaf_game_unfinished, 1);
+      // The game has not ended at this leaf. Mark this worker's current
+      // iterative-deepening ply as not-fully-solved so the early-stop check
+      // for that ply doesn't fire. Per-depth so a jittered worker on a
+      // shallower ply can't suppress early-stop for a deeper, solved ply.
+      // Guard the index: the display re-search runs these workers with
+      // current_iterative_deepening_depth == -1 (no IDS, no early-stop), so
+      // only record for a real ply (1..MAX_SEARCH_DEPTH) — writing at -1 would
+      // be an out-of-bounds store.
+      const int unfinished_ply = worker->current_iterative_deepening_depth;
+      if (unfinished_ply >= 1 && unfinished_ply <= MAX_SEARCH_DEPTH) {
+        atomic_store(&worker->solver->any_leaf_game_unfinished[unfinished_ply],
+                     1);
+      }
       if (worker->solver->use_heuristics) {
         return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
                                            on_turn_spread, pv, opp_stuck_frac);
@@ -2766,7 +2786,6 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     worker->root_topk_n = 0;
     // Update root move progress counters (thread 0 only)
     if (worker->thread_index == 0) {
-      atomic_store(&worker->solver->any_leaf_game_unfinished, 0);
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
@@ -2954,15 +2973,16 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // This allows early termination when the actual game length is shorter
     // than the requested plies.
     //
-    // Thread 0 owns this check. any_leaf_game_unfinished is a solver-level
-    // atomic set by any worker that sees an ongoing game at a leaf; thread 0
-    // resets it at the start of each depth before calling abdada_negamax.
+    // Thread 0 owns this check. any_leaf_game_unfinished[ply] is set by any
+    // worker that sees an ongoing game at a leaf while searching this ply;
+    // it is monotonic per solve, so there is no reset race with jittered
+    // workers searching other plies.
     // In ABDADA all workers eventually process all root moves (deferred moves
     // come back via TT on pass 2), so root_topk_n is accurate per worker.
     if (worker->thread_index == 0) {
       int needed = MIN(worker->solver->num_top_moves, worker->n_initial_moves);
       bool topk_fully_solved =
-          (!atomic_load(&worker->solver->any_leaf_game_unfinished)) &&
+          (!atomic_load(&worker->solver->any_leaf_game_unfinished[ply])) &&
           (worker->root_topk_n >= needed);
       if (topk_fully_solved || ply == plies) {
         atomic_store(&worker->solver->search_complete, 1);

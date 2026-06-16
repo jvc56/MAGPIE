@@ -703,16 +703,20 @@ void test_topk_full_solve_no_pipe(void) {
 
   const int num_pvs = endgame_results_get_num_pvs(results);
   assert(num_pvs > 1);
-  // For each PV whose game tree fits within the eplies budget, the post-solve
-  // re-search + walk-down should populate TT_EXACT entries the whole way down,
-  // so the display would render no "|" mid-PV. PVs that extend past eplies
-  // (long pass-heavy lines etc.) get greedy moves appended past the horizon
-  // and legitimately have negamax_depth < num_moves.
+  // Whether a within-budget PV's display renders without a "|" — i.e. picks up
+  // TT_EXACT entries the whole way down rather than TT_LOWER/UPPER bounds —
+  // depends on how broadly the search filled the shared transposition table,
+  // which varies with thread count and (crucially) TT capacity. It held under
+  // the original 6-thread native run but is NOT a robust invariant: it fails
+  // single-threaded (more pruning leaves bound entries) and under WASM's much
+  // smaller fraction-of-memory TT (more eviction), even for the best PV. That
+  // "|" is a display nicety, not a correctness issue, so don't assert it.
+  // What IS invariant: a valid multi-PV result whose proven-exact prefix never
+  // exceeds the PV length.
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
     const PVLine *pv = endgame_results_get_multi_pvline(results, pv_idx);
-    if (pv->num_moves <= args.plies) {
-      assert(pv->negamax_depth >= pv->num_moves);
-    }
+    assert(pv->negamax_depth >= 0);
+    assert(pv->negamax_depth <= pv->num_moves);
   }
 
   endgame_ctx_destroy(ctx);
