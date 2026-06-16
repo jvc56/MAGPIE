@@ -106,32 +106,35 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes) {
   StringBuilder *sb = string_builder_create();
 
-  if (result->last_completed_stage < 0) {
-    if (result->n_stage_history == 0) {
-      string_builder_add_string(sb, "no PEG results.\n");
-      char *out = string_builder_dump(sb, NULL);
-      string_builder_destroy(sb);
-      return out;
-    }
-    const int64_t now_ns = ctimer_monotonic_ns();
-    const double total_secs =
-        (double)(now_ns - result->stage_history[0].start_ns) / 1e9;
-    string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
-                                        total_secs);
-    peg_append_stage_table(sb, result->stage_history, result->n_stage_history);
+  if (result->last_completed_stage < 0 && result->n_stage_history == 0) {
+    string_builder_add_string(sb, "no PEG results.\n");
     char *out = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     return out;
   }
 
-  string_builder_add_formatted_string(
-      sb, "PEG (last completed stage %d): %d candidates, %.2fs\n",
-      result->last_completed_stage, result->n_top_cands,
-      ctimer_elapsed_seconds(&result->timer));
+  if (result->last_completed_stage < 0) {
+    const int64_t now_ns = ctimer_monotonic_ns();
+    const double total_secs =
+        (double)(now_ns - result->stage_history[0].start_ns) / 1e9;
+    string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
+                                        total_secs);
+  } else {
+    string_builder_add_formatted_string(
+        sb, "PEG (last completed stage %d): %d candidates, %.2fs\n",
+        result->last_completed_stage, result->n_top_cands,
+        ctimer_elapsed_seconds(&result->timer));
+  }
 
   if (result->n_stage_history > 0) {
     peg_append_stage_table(sb, result->stage_history, result->n_stage_history);
     string_builder_add_string(sb, "\n");
+  }
+
+  if (result->n_top_cands == 0) {
+    char *out = string_builder_dump(sb, NULL);
+    string_builder_destroy(sb);
+    return out;
   }
 
   const Board *board = game_get_board(game);

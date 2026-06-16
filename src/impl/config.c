@@ -3266,12 +3266,17 @@ char *status_peg(Config *config) {
     PegPollSnapshot snap;
     peg_poll_read(config->peg_poll, &snap);
     if (!snap.done) {
+      PegRankedCand live_cands[PEG_POLL_MAX_ENTRIES];
+      memcpy(live_cands, snap.entries,
+             (size_t)snap.n_entries * sizeof(PegRankedCand));
       PegResult live_result;
       memset(&live_result, 0, sizeof(live_result));
       live_result.last_completed_stage = -1;
       live_result.n_stage_history = snap.n_stage_history;
       memcpy(live_result.stage_history, snap.stage_history,
              (size_t)snap.n_stage_history * sizeof(PegStageSnapshot));
+      live_result.top_cands = live_cands;
+      live_result.n_top_cands = snap.n_entries;
       return peg_result_get_string(&live_result, config->game, false);
     }
   }
