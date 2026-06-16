@@ -1,3 +1,4 @@
+#include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -828,6 +829,27 @@ static void assert_incremental_play_roundtrip(Game *game) {
       continue;
     }
     play_move_incremental(move, game, &undo);
+    // Regression guard for the greedy-playout staleness bug: an incremental
+    // play must leave cross-sets valid and identical to a full recompute, even
+    // with NO subsequent lazy update. The old deferred behavior left them
+    // invalid/stale, which let the endgame playout generate invalid words.
+    assert(board_get_cross_sets_valid(board));
+    {
+      Game *fresh = game_duplicate(game);
+      game_gen_all_cross_sets(fresh);
+      const Board *fresh_board = game_get_board(fresh);
+      for (int r = 0; r < BOARD_DIM; r++) {
+        for (int c = 0; c < BOARD_DIM; c++) {
+          for (int d = 0; d < 2; d++) {
+            assert(board_get_cross_set(board, r, c, d, 0) ==
+                   board_get_cross_set(fresh_board, r, c, d, 0));
+            assert(board_get_cross_set(board, r, c, d, 1) ==
+                   board_get_cross_set(fresh_board, r, c, d, 1));
+          }
+        }
+      }
+      game_destroy(fresh);
+    }
     // Mirror the endgame solver's descendant node: bring cross-sets up to
     // date from the parent's undo before (hypothetical) move generation.
     if (undo.move_tiles_length > 0) {
