@@ -299,6 +299,16 @@ typedef struct PegPerScenario {
 // solve finishes.
 
 enum { PEG_POLL_MAX_ENTRIES = 64 };
+// Max non-greedy stages we store per-candidate timing history for.
+// 8 covers the default cascade (32->16->8->4->2, five stages) with room to spare.
+enum { PEG_POLL_MAX_HISTORY_STAGES = 8 };
+
+// Compact per-candidate record kept for each completed non-greedy stage so the
+// status display can show one time column per stage.
+typedef struct {
+  Move move;
+  double eval_seconds;
+} PegHistoryCand;
 
 typedef struct PegPollSnapshot {
   int stage;          // current stage (0 = greedy seed); -1 before stage 0
@@ -317,6 +327,28 @@ typedef struct PegPollSnapshot {
   // entry is the current (possibly still-running) stage.
   int n_stage_history;
   PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
+  // Snapshot of the previous completed stage's ranking, saved when a new
+  // halving stage begins (via peg_poll_clear_entries). Lets status_peg build a
+  // cross-depth merged display that always shows the best available result for
+  // every candidate, even when the new stage has not yet finished any of them.
+  int n_baseline_entries;
+  int baseline_fidelity;
+  PegRankedCand baseline_entries[PEG_POLL_MAX_ENTRIES];
+  // Index into stage_moves[] of the candidate currently being evaluated at the
+  // current depth; -1 when none is in flight. eval_start_ns is the monotonic
+  // timestamp when that evaluation began, used by the status display to show a
+  // live elapsed time and a '*' marker on the depth label.
+  int currently_evaluating_move_idx;
+  int64_t eval_start_ns;
+  // Per-candidate timing history for completed non-greedy stages, accumulated
+  // by peg_poll_clear_entries. Greedy (fidelity 0) is excluded — it is always
+  // instant and the user does not need a greedy time column. Each slot records
+  // the move and eval_seconds for every candidate that completed in that stage.
+  // Matched at render time by move identity.
+  int n_history_stages;
+  int history_fidelities[PEG_POLL_MAX_HISTORY_STAGES];
+  int history_n_cands[PEG_POLL_MAX_HISTORY_STAGES];
+  PegHistoryCand history_cands[PEG_POLL_MAX_HISTORY_STAGES][PEG_POLL_MAX_ENTRIES];
 } PegPollSnapshot;
 
 PegPoll *peg_poll_create(void);

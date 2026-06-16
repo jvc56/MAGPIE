@@ -258,13 +258,54 @@ static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
 // Empty the live leaderboard. Used at the start of a halving stage in live
 // (poll) mode so the per-candidate upserts below show only the candidates
 // evaluated so far in THIS stage, not the previous stage's carried-over
-// ranking.
+// ranking. The current entries are saved as the baseline so status_peg can
+// build a cross-depth merged display while the new stage runs.
 static void peg_poll_clear_entries(PegPoll *poll) {
   if (poll == NULL) {
     return;
   }
   cpthread_mutex_lock(&poll->mutex);
+  // Save completed non-greedy stages to history for per-depth time columns.
+  if (poll->s.fidelity_plies > 0 &&
+      poll->s.n_history_stages < PEG_POLL_MAX_HISTORY_STAGES) {
+    const int slot = poll->s.n_history_stages++;
+    poll->s.history_fidelities[slot] = poll->s.fidelity_plies;
+    const int n = poll->s.n_entries < PEG_POLL_MAX_ENTRIES
+                      ? poll->s.n_entries
+                      : PEG_POLL_MAX_ENTRIES;
+    poll->s.history_n_cands[slot] = n;
+    for (int cand_idx = 0; cand_idx < n; cand_idx++) {
+      poll->s.history_cands[slot][cand_idx].move =
+          poll->s.entries[cand_idx].move;
+      poll->s.history_cands[slot][cand_idx].eval_seconds =
+          poll->s.entries[cand_idx].eval_seconds;
+    }
+  }
+  // Save as baseline for the cross-depth merged candidate view.
+  poll->s.n_baseline_entries = poll->s.n_entries;
+  poll->s.baseline_fidelity = poll->s.fidelity_plies;
+  const int k = poll->s.n_entries < PEG_POLL_MAX_ENTRIES
+                    ? poll->s.n_entries
+                    : PEG_POLL_MAX_ENTRIES;
+  for (int baseline_idx = 0; baseline_idx < k; baseline_idx++) {
+    poll->s.baseline_entries[baseline_idx] = poll->s.entries[baseline_idx];
+  }
   poll->s.n_entries = 0;
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Mark the candidate at stage_moves[move_idx] as currently in-flight so the
+// status display can show a live elapsed time and '*' depth marker. Call with
+// move_idx = -1 / start_ns = 0 to clear (no candidate in flight).
+static void peg_poll_set_evaluating(PegPoll *poll, int move_idx,
+                                    int64_t start_ns) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  poll->s.currently_evaluating_move_idx = move_idx;
+  poll->s.eval_start_ns = start_ns;
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
@@ -1759,6 +1800,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       const int n_graded_before_stage = n_graded;
       peg_graded_append(graded, graded_fidelity, &n_graded, ranked, eval_count,
                         live_count, prev_fidelity);
+      // Save entries as baseline BEFORE begin_stage updates fidelity_plies, so
+      // baseline_fidelity captures the previous stage's depth (not the new one).
+      peg_poll_clear_entries(args->poll);
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
       if (args->on_stage_start != NULL) {
@@ -1781,7 +1825,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // record each candidate's own wall-clock time. Each candidate still
         // gets the whole pool for its scenarios. Greedy stage 0 is not routed
         // here.
-        peg_poll_clear_entries(args->poll);
         // Publish the whole stage's moves so a live renderer can fix the move
         // column width up front (moves[] aliases ranked[].move for [0,eval)).
         peg_poll_set_stage_moves(args->poll, moves, eval_count);
@@ -1801,6 +1844,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             break;
           }
           Timer cand_timer;
+          const int64_t cand_start_ns = ctimer_monotonic_ns();
+          peg_poll_set_evaluating(args->poll, i, cand_start_ns);
           ctimer_start(&cand_timer);
           peg_eval_candidates_scenario(
               pool, workers, prepared_base, mover_idx, unseen, ld_size,
@@ -1808,6 +1853,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               stage_fidelity, scenario_stride, deadline_ns,
               args->thread_control, &inner, /*poll=*/NULL, &restaged[i]);
           restaged[i].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
+          peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
           // its scenarios bailed (above), so its score is incomplete — drop it
           // rather than show or rank a partial result, and stop the stage.
