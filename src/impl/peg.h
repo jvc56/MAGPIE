@@ -81,9 +81,13 @@ typedef enum {
 typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
                                 int emptier_plies, void *user_data);
 
+// Fired when a candidate finishes. reordered is true when the candidate slotted
+// in above the bottom of the live ranking (so the displayed order changed and
+// the whole list should be redrawn); false when it sorted to the bottom (the
+// new worst), so a streaming view can just append its one row.
 typedef void (*PegOnCandDone)(int stage_idx, int cand_rank, const Move *cand,
                               double win_pct, double mean_spread, int scen_done,
-                              void *user_data);
+                              bool reordered, void *user_data);
 
 typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
                                   int scenario_idx, int32_t mover_total,
@@ -208,11 +212,18 @@ typedef struct PegStageSnapshot {
 // ----- Solver outputs ---------------------------------------------------
 
 typedef struct PegRankedCand {
-  Move move;          // the cand
-  double win_pct;     // 0..1
-  double mean_spread; // signed (mover - opp), in points
-  int64_t weight_sum; // total scenario weight evaluated
-  int n_scenarios;    // distinct multisets evaluated
+  Move move;           // the cand
+  double win_pct;      // 0..1
+  double mean_spread;  // signed (mover - opp), in points
+  int64_t weight_sum;  // labeled ordered-draw count = perm(unseen, bag_size),
+                       // the "weighted orderings" denominator (constant across
+                       // all plays in a position)
+  int64_t win_count;   // labeled bag-orderings won (leaf value > 0)
+  int64_t tie_count;   // labeled bag-orderings tied (leaf value == 0); losses
+                       // are weight_sum - win_count - tie_count
+  int n_scenarios;     // distinct (multiset, bag-ordering) scenarios evaluated
+  double eval_seconds; // wall-clock time to score this cand at its deepest
+                       // stage (live/CLI solves only; 0 otherwise)
 } PegRankedCand;
 
 typedef struct PegResult {
@@ -221,9 +232,14 @@ typedef struct PegResult {
   double best_win;
   double best_spread;
 
-  // Index of the last stage that completed (0 = greedy only; the final halving
+  // Index of the deepest stage reached (0 = greedy only; the final halving
   // stage = the deepest stage actually run). -1 while running or uninitialized.
   int last_completed_stage;
+
+  // True when the deepest stage was cut off by the budget/interrupt after
+  // scoring only some of its candidates (a partial tier), so it was reached but
+  // not completed. False when every stage shown ran to completion.
+  bool last_stage_partial;
 
   // Wall-clock timer: started at the top of peg_solve (is_running == true
   // while solving, false once done). ctimer_elapsed_seconds reads the live
@@ -235,6 +251,17 @@ typedef struct PegResult {
   // NULL on failure.
   PegRankedCand *top_cands;
   int n_top_cands;
+
+  // Graded final ranking: every candidate that entered a halving stage, each
+  // tagged with the deepest endgame fidelity (ply count) it reached, captured
+  // shallowest-tier first (graded_fidelity[i] is the ply count for
+  // graded_cands[i]). A renderer can group by fidelity, showing the deepest
+  // tier first with the rank continuing across tiers. Caller owns/frees via
+  // peg_result_destroy. n_graded == 0 when no halving stage completed (then the
+  // renderer falls back to the flat top_cands list).
+  PegRankedCand *graded_cands;
+  int *graded_fidelity;
+  int n_graded;
 
   // Optional per-scenario breakdown for top_cands[0]. Only populated when
   // PegArgs.include_per_scenario is set. NULL otherwise.
@@ -281,6 +308,11 @@ typedef struct PegPollSnapshot {
   uint64_t version;   // bumped on every update (skip redundant redraws)
   int n_entries;      // populated leaderboard rows below
   PegRankedCand entries[PEG_POLL_MAX_ENTRIES]; // current top-K, sorted desc
+  // Moves of every candidate that will be scored in the current stage, recorded
+  // when the stage begins. Lets a live renderer size the move column to the
+  // whole stage up front so it doesn't grow as candidates finish.
+  int n_stage_moves;
+  Move stage_moves[PEG_POLL_MAX_ENTRIES];
   // Per-stage history: index i = stage i. Grows as stages start. The last
   // entry is the current (possibly still-running) stage.
   int n_stage_history;

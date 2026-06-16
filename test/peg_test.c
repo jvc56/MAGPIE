@@ -644,10 +644,11 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  void *user_data) {
+                                  bool reordered, void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
+  (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
   assert(win_pct >= 0.0 && win_pct <= 1.0);

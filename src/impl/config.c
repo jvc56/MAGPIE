@@ -1603,10 +1603,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
       examples[0] = "true";
-      text = "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
-             "losses L:, each as [drawn]remaining) for the best candidate. "
-             "Requires a second pass over the top candidate after the solve, "
-             "roughly doubling its leaf work. Default false.";
+      text =
+          "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
+          "losses L:, each as [drawn]remaining) for the best candidate. "
+          "Requires a second pass over the top candidate after the solve, "
+          "roughly doubling its leaf work. Default false.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -3155,6 +3156,48 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
+// Streams the live candidate ranking to the user as each candidate finishes in
+// a halving stage. When the candidate reordered the ranking (it sorted in above
+// the bottom), the whole list is redrawn so the order is corrected; when it
+// sorted to the bottom as the new worst, only its one row is appended. Wired as
+// PegArgs.on_cand_done for CLI solves.
+static void config_peg_progress_cb(int stage_idx, int cand_rank,
+                                   const Move *cand, double win_pct,
+                                   double mean_spread, int scen_done,
+                                   bool reordered, void *user_data) {
+  (void)cand_rank;
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scen_done;
+  // Greedy stage 0 finishes too fast to stream per candidate.
+  if (stage_idx < 1) {
+    return;
+  }
+  Config *config = (Config *)user_data;
+  if (config->peg_poll == NULL) {
+    return;
+  }
+  PegPollSnapshot snap;
+  peg_poll_read(config->peg_poll, &snap);
+  if (snap.done || snap.n_entries == 0) {
+    return;
+  }
+  PegRankedCand live_cands[PEG_POLL_MAX_ENTRIES];
+  memcpy(live_cands, snap.entries,
+         (size_t)snap.n_entries * sizeof(PegRankedCand));
+  PegResult live_result;
+  memset(&live_result, 0, sizeof(live_result));
+  live_result.last_completed_stage = -1;
+  live_result.top_cands = live_cands;
+  live_result.n_top_cands = snap.n_entries;
+  char *ranking = peg_result_get_ranking_string(
+      &live_result, config->game, snap.stage_moves, snap.n_stage_moves,
+      snap.fidelity_plies, /*only_last_row=*/!reordered);
+  thread_control_print(config->thread_control, ranking);
+  free(ranking);
+}
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   memset(peg_args, 0, sizeof(*peg_args));
   peg_args->game = config->game;
@@ -3169,6 +3212,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
   peg_args->include_per_scenario = config->peg_show_outcomes;
+  // Stream the live ranking as each candidate reorders it.
+  peg_args->on_cand_done = config_peg_progress_cb;
+  peg_args->user_data = config;
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
