@@ -130,7 +130,11 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     } else if (conversion_type == CONVERT_TEXT2GADDAG) {
       output_type = KWG_MAKER_OUTPUT_GADDAG;
     }
-    KWG *kwg = make_kwg_from_words(strings, output_type, KWG_MAKER_MERGE_EXACT);
+    const kwg_maker_merge_t merge_type =
+        (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE)
+            ? KWG_MAKER_MERGE_TAIL
+            : KWG_MAKER_MERGE_EXACT;
+    KWG *kwg = make_kwg_from_words(strings, output_type, merge_type);
     kwg_write_to_file(kwg, kwg_output_filename, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_push(
@@ -155,6 +159,7 @@ void convert_with_names(const LetterDistribution *ld,
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||
+      (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE) ||
       (conversion_type == CONVERT_TEXT2WORDMAP)) {
     DictionaryWordList *strings = dictionary_word_list_create();
     convert_from_text_with_dwl(ld, conversion_type, data_paths, input_name,
@@ -256,6 +261,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_TEXT2GADDAG;
   } else if (strings_equal(conversion_type_string, "text2kwg")) {
     conversion_type = CONVERT_TEXT2KWG;
+  } else if (strings_equal(conversion_type_string, "text2kwgtailmerge")) {
+    conversion_type = CONVERT_TEXT2KWG_TAIL_MERGE;
   } else if (strings_equal(conversion_type_string, "dawg2text")) {
     conversion_type = CONVERT_DAWG2TEXT;
   } else if (strings_equal(conversion_type_string, "gaddag2text")) {

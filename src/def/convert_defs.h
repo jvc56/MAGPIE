@@ -5,6 +5,9 @@ typedef enum {
   CONVERT_TEXT2DAWG,
   CONVERT_TEXT2GADDAG,
   CONVERT_TEXT2KWG,
+  // Like CONVERT_TEXT2KWG but uses wolges-style tail merging for a smaller
+  // (but slightly slower to traverse) node array.
+  CONVERT_TEXT2KWG_TAIL_MERGE,
   CONVERT_DAWG2TEXT,
   CONVERT_GADDAG2TEXT,
   CONVERT_CSV2KLV,
