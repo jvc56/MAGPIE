@@ -284,9 +284,8 @@ static void peg_poll_clear_entries(PegPoll *poll) {
   // Save as baseline for the cross-depth merged candidate view.
   poll->s.n_baseline_entries = poll->s.n_entries;
   poll->s.baseline_fidelity = poll->s.fidelity_plies;
-  const int k = poll->s.n_entries < PEG_POLL_MAX_ENTRIES
-                    ? poll->s.n_entries
-                    : PEG_POLL_MAX_ENTRIES;
+  const int k = poll->s.n_entries < PEG_POLL_MAX_ENTRIES ? poll->s.n_entries
+                                                         : PEG_POLL_MAX_ENTRIES;
   for (int baseline_idx = 0; baseline_idx < k; baseline_idx++) {
     poll->s.baseline_entries[baseline_idx] = poll->s.entries[baseline_idx];
   }
@@ -657,6 +656,14 @@ typedef struct PegScenarioJob {
   PegWorker *workers;
   int cand_idx;
   const PegProgress *progress; // optional; cand_idx is the cand rank
+  // Optional per-ordering capture (PegArgs.include_per_scenario). When
+  // do_capture is set, the worker records this split's orderings into its own
+  // job-local `cap` (no cross-job sharing, so no locking); the reducer
+  // concatenates per candidate afterwards and frees cap.rows. `ld` formats the
+  // captured tile strings.
+  bool do_capture;
+  const LetterDistribution *ld;
+  PegScenarioCapture cap;
   // Result (filled by the worker, reduced per-cand afterwards).
   double total_weight;
   double win_weight;
@@ -904,6 +911,9 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   int n_orderings = 0;
   int ordering_wins = 0;
   int ordering_ties = 0;
+  // Captured rows for this split start here; their weight is backfilled to the
+  // per-ordering labeled count once n_orderings is known (below).
+  const int capture_start = ctx->capture != NULL ? ctx->capture->count : 0;
   do {
     Game *game = peg_make_post_cand_game(
         ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
@@ -951,6 +961,14 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   ctx->win_count += per_ordering * ordering_wins;
   ctx->tie_count += per_ordering * ordering_ties;
   ctx->weight_sum += weight * n_bag_factorial;
+  // Backfill each captured ordering's weight with its labeled-ordering count so
+  // a renderer's per-draw multipliers sum to the integer win/tie/loss columns.
+  if (ctx->capture != NULL) {
+    for (int row_idx = capture_start; row_idx < ctx->capture->count;
+         row_idx++) {
+      ctx->capture->rows[row_idx].weight = per_ordering;
+    }
+  }
 }
 
 // Recursively choose, per machine letter, how many tiles go to the mover's
@@ -1289,6 +1307,11 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   // Progress: cand_idx carries this cand's rank for on_scenario_done.
   ctx.progress = job->progress;
   ctx.cand_idx = job->cand_idx;
+  // Per-ordering capture into the job's own sink (single-threaded per job).
+  if (job->do_capture) {
+    job->cap.ld = job->ld;
+    ctx.capture = &job->cap;
+  }
   // peg_eval_split reads bag_remaining (permuting a local copy), so passing the
   // job's own copy directly is fine.
   peg_eval_split(&ctx, job->mover_drawn, job->n_bag_remaining,
@@ -1302,6 +1325,44 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   job->n_scenarios = ctx.n_scenarios;
 }
 
+// True when two moves are the same play (type, position, tiles).
+static bool peg_move_eq(const Move *a, const Move *b) {
+  if (move_get_type(a) != move_get_type(b) ||
+      move_get_dir(a) != move_get_dir(b) ||
+      move_get_row_start(a) != move_get_row_start(b) ||
+      move_get_col_start(a) != move_get_col_start(b) ||
+      move_get_tiles_length(a) != move_get_tiles_length(b) ||
+      move_get_tiles_played(a) != move_get_tiles_played(b)) {
+    return false;
+  }
+  for (int tile_idx = 0; tile_idx < move_get_tiles_length(a); tile_idx++) {
+    if (move_get_tile(a, tile_idx) != move_get_tile(b, tile_idx)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// Insert or replace a candidate's captured outcomes in the store, keyed by
+// move. Since the halving stages re-score survivors at deeper fidelity, a later
+// (deeper) capture for the same move replaces the earlier one, so each move
+// ends up with its deepest-fidelity rows. Takes ownership of `one`'s rows.
+static void peg_outcomes_store_upsert(PegCandOutcomes **store, int *n, int *cap,
+                                      const PegCandOutcomes *one) {
+  for (int store_idx = 0; store_idx < *n; store_idx++) {
+    if (peg_move_eq(&(*store)[store_idx].move, &one->move)) {
+      free((*store)[store_idx].rows);
+      (*store)[store_idx] = *one;
+      return;
+    }
+  }
+  if (*n == *cap) {
+    *cap = *cap ? *cap * 2 : 16;
+    *store = realloc_or_die(*store, (size_t)*cap * sizeof(PegCandOutcomes));
+  }
+  (*store)[(*n)++] = *one;
+}
+
 // Scenario-level evaluation: build one shared post-cand template per candidate,
 // expand every (cand, mover-draw split) into a job, run them all across the
 // pool, then reduce per candidate. This keeps all cores busy even when a stage
@@ -1309,10 +1370,12 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
 // would leave most cores idle.
 static void peg_eval_candidates_scenario(
     PegPool *pool, PegWorker *workers, const Game *prepared_base, int mover_idx,
-    const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
-    int n, PegOppModel opp_model, int inner_top_k, int fidelity_plies,
-    int scenario_stride, int64_t deadline_ns, ThreadControl *thread_control,
-    const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked) {
+    const uint8_t *unseen, int ld_size, const LetterDistribution *ld,
+    int bag_size, const Move *const *cands, int n, PegOppModel opp_model,
+    int inner_top_k, int fidelity_plies, int scenario_stride,
+    int64_t deadline_ns, ThreadControl *thread_control,
+    const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked,
+    PegCandOutcomes *out_outcomes) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -1353,6 +1416,14 @@ static void peg_eval_candidates_scenario(
                     mover_drawn, 0, bag_remaining, 0);
   }
 
+  // Enable per-ordering capture on every job when the caller asked for it.
+  if (out_outcomes != NULL) {
+    for (int j = 0; j < list.count; j++) {
+      list.jobs[j].do_capture = true;
+      list.jobs[j].ld = ld;
+    }
+  }
+
   // Run every scenario job.
   if (pool && list.count > 0) {
     void **ptrs = malloc_or_die((size_t)list.count * sizeof(void *));
@@ -1390,6 +1461,38 @@ static void peg_eval_candidates_scenario(
     ranked[i].win_count += job->win_count;
     ranked[i].tie_count += job->tie_count;
     ranked[i].n_scenarios += job->n_scenarios;
+  }
+  // Concatenate each candidate's per-ordering capture rows (in enumeration
+  // order) into out_outcomes, renumbering scenario_idx sequentially per cand.
+  // Then release the job-local capture buffers.
+  if (out_outcomes != NULL) {
+    int *nrows = calloc_or_die((size_t)n, sizeof(int));
+    for (int j = 0; j < list.count; j++) {
+      nrows[list.jobs[j].cand_idx] += list.jobs[j].cap.count;
+    }
+    for (int i = 0; i < n; i++) {
+      out_outcomes[i].move = *cands[i];
+      out_outcomes[i].fidelity = fidelity_plies;
+      out_outcomes[i].n_rows = 0;
+      out_outcomes[i].rows =
+          nrows[i] > 0
+              ? malloc_or_die((size_t)nrows[i] * sizeof(PegPerScenario))
+              : NULL;
+    }
+    free(nrows);
+    for (int j = 0; j < list.count; j++) {
+      const PegScenarioJob *job = &list.jobs[j];
+      PegCandOutcomes *oc = &out_outcomes[job->cand_idx];
+      for (int r = 0; r < job->cap.count; r++) {
+        PegPerScenario *dst = &oc->rows[oc->n_rows];
+        *dst = job->cap.rows[r];
+        dst->scenario_idx = oc->n_rows;
+        oc->n_rows++;
+      }
+    }
+  }
+  for (int j = 0; j < list.count; j++) {
+    free(list.jobs[j].cap.rows);
   }
   for (int i = 0; i < n; i++) {
     ranked[i].win_pct = total_w[i] > 0 ? win_w[i] / total_w[i] : 0.0;
@@ -1770,6 +1873,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     int n_graded = 0;
     int prev_fidelity = 0;
 
+    // Per-candidate per-ordering outcome store (only when capture requested).
+    // Keyed by move; deeper stages overwrite shallower captures so each move
+    // ends up at its deepest fidelity. Handed to out->cand_outcomes at the end.
+    PegCandOutcomes *oc_store = NULL;
+    int oc_n = 0;
+    int oc_cap = 0;
+
     // Halving stages. Stage s re-evaluates the surviving top counts[s-1] (plus
     // protected stragglers) at one more ply of fidelity, then re-ranks; a stage
     // needs >= 2 candidates to be meaningful, and is skipped once the budget is
@@ -1801,7 +1911,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_graded_append(graded, graded_fidelity, &n_graded, ranked, eval_count,
                         live_count, prev_fidelity);
       // Save entries as baseline BEFORE begin_stage updates fidelity_plies, so
-      // baseline_fidelity captures the previous stage's depth (not the new one).
+      // baseline_fidelity captures the previous stage's depth (not the new
+      // one).
       peg_poll_clear_entries(args->poll);
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
@@ -1847,20 +1958,28 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           const int64_t cand_start_ns = ctimer_monotonic_ns();
           peg_poll_set_evaluating(args->poll, i, cand_start_ns);
           ctimer_start(&cand_timer);
+          PegCandOutcomes cand_oc;
           peg_eval_candidates_scenario(
-              pool, workers, prepared_base, mover_idx, unseen, ld_size,
+              pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
               bag_size, &moves[i], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
-              args->thread_control, &inner, /*poll=*/NULL, &restaged[i]);
+              args->thread_control, &inner, /*poll=*/NULL, &restaged[i],
+              args->include_per_scenario ? &cand_oc : NULL);
           restaged[i].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
           // its scenarios bailed (above), so its score is incomplete — drop it
           // rather than show or rank a partial result, and stop the stage.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+            if (args->include_per_scenario) {
+              free(cand_oc.rows);
+            }
             break;
           }
           done_count = i + 1;
+          if (args->include_per_scenario) {
+            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &cand_oc);
+          }
           // Surface this finished candidate into the leaderboard, then stream
           // the updated ranking to the caller right away — every candidate's
           // result prints as soon as it finishes, so the deep stages fill in
@@ -1880,11 +1999,21 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // across all candidates at once — a halving stage has few candidates,
         // so pooling their scenarios keeps all cores busy with a single
         // barrier.
+        PegCandOutcomes *stage_oc =
+            args->include_per_scenario
+                ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+                : NULL;
         peg_eval_candidates_scenario(
-            pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
-            moves, eval_count, args->opp_model, args->inner_top_k,
+            pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
+            bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged);
+            &progress, args->poll, restaged, stage_oc);
+        if (stage_oc != NULL) {
+          for (int i = 0; i < eval_count; i++) {
+            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &stage_oc[i]);
+          }
+          free(stage_oc);
+        }
       }
       // Fewer than 2 finished: nothing to compare at this depth, so discard the
       // partial work and undo this stage's drop capture, leaving every
@@ -1936,41 +2065,63 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       free(graded_fidelity);
     }
 
-    // Optional per-scenario detail for the published best cand. A single-cand,
-    // single-threaded re-evaluation at the deepest fidelity actually reached,
-    // recording each scenario's draw/remainder/weight/value. Off by default
-    // (include_per_scenario) since it doubles the top cand's leaf work.
+    // Per-candidate per-ordering outcomes, captured inline during the halving
+    // stages above (no re-evaluation). Hand the store to the result.
+    out->cand_outcomes = oc_store;
+    out->n_cand_outcomes = oc_n;
+
+    // Per-scenario detail for the published best cand (the "outcomes (best)"
+    // line). Prefer the rows already captured inline at the best cand's deepest
+    // fidelity. Only when the best cand was never captured inline — a
+    // greedy-only or pinned result, where no halving stage ran — fall back to a
+    // dedicated single-cand capture pass. That fallback runs at greedy fidelity
+    // (instant), so the formerly-expensive deep re-evaluation is gone.
     if (args->include_per_scenario && out->n_top_cands > 0) {
-      int capture_fidelity = 0;
-      if (out->last_completed_stage > 0) {
-        capture_fidelity =
-            exhaustive ? PEG_EXHAUSTIVE_PLIES : out->last_completed_stage + 1;
+      const PegCandOutcomes *best_oc = NULL;
+      for (int store_idx = 0; store_idx < oc_n; store_idx++) {
+        if (peg_move_eq(&oc_store[store_idx].move, &out->top_cands[0].move)) {
+          best_oc = &oc_store[store_idx];
+          break;
+        }
       }
-      PegScenarioCapture capture = {0};
-      capture.ld = ld;
-      PegEvalCtx ctx;
-      memset(&ctx, 0, sizeof(ctx));
-      ctx.mover_idx = mover_idx;
-      ctx.unseen = unseen;
-      ctx.ld_size = ld_size;
-      ctx.opp_model = args->opp_model;
-      ctx.inner_top_k = args->inner_top_k;
-      ctx.fidelity_plies = capture_fidelity;
-      ctx.scenario_stride = scenario_stride;
-      ctx.thread_control = args->thread_control;
-      ctx.worker = &workers[0];
-      ctx.capture = &capture;
-      peg_build_template(ctx.worker, prepared_base, &out->top_cands[0].move);
-      ctx.template_src = ctx.worker->template_game;
-      const int tiles_played = move_get_tiles_played(&out->top_cands[0].move);
-      ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
-      const int n_bag_remaining = bag_size - ctx.k_drawn;
-      MachineLetter mover_drawn[PEG_MAX_BAG + 1];
-      MachineLetter bag_remaining[PEG_MAX_BAG + 1];
-      peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
-                      /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
-      out->per_scenario = capture.rows;
-      out->n_per_scenario = capture.count;
+      if (best_oc != NULL && best_oc->n_rows > 0) {
+        out->per_scenario =
+            malloc_or_die((size_t)best_oc->n_rows * sizeof(PegPerScenario));
+        memcpy(out->per_scenario, best_oc->rows,
+               (size_t)best_oc->n_rows * sizeof(PegPerScenario));
+        out->n_per_scenario = best_oc->n_rows;
+      } else {
+        int capture_fidelity = 0;
+        if (out->last_completed_stage > 0) {
+          capture_fidelity =
+              exhaustive ? PEG_EXHAUSTIVE_PLIES : out->last_completed_stage + 1;
+        }
+        PegScenarioCapture capture = {0};
+        capture.ld = ld;
+        PegEvalCtx ctx;
+        memset(&ctx, 0, sizeof(ctx));
+        ctx.mover_idx = mover_idx;
+        ctx.unseen = unseen;
+        ctx.ld_size = ld_size;
+        ctx.opp_model = args->opp_model;
+        ctx.inner_top_k = args->inner_top_k;
+        ctx.fidelity_plies = capture_fidelity;
+        ctx.scenario_stride = scenario_stride;
+        ctx.thread_control = args->thread_control;
+        ctx.worker = &workers[0];
+        ctx.capture = &capture;
+        peg_build_template(ctx.worker, prepared_base, &out->top_cands[0].move);
+        ctx.template_src = ctx.worker->template_game;
+        const int tiles_played = move_get_tiles_played(&out->top_cands[0].move);
+        ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
+        const int n_bag_remaining = bag_size - ctx.k_drawn;
+        MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+        MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+        peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
+                        /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
+        out->per_scenario = capture.rows;
+        out->n_per_scenario = capture.count;
+      }
     }
 
     free(moves);
@@ -2036,4 +2187,12 @@ void peg_result_destroy(PegResult *r) {
   free(r->per_scenario);
   r->per_scenario = NULL;
   r->n_per_scenario = 0;
+  if (r->cand_outcomes != NULL) {
+    for (int oc_idx = 0; oc_idx < r->n_cand_outcomes; oc_idx++) {
+      free(r->cand_outcomes[oc_idx].rows);
+    }
+    free(r->cand_outcomes);
+    r->cand_outcomes = NULL;
+    r->n_cand_outcomes = 0;
+  }
 }
