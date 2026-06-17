@@ -2008,9 +2008,58 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
             &progress, args->poll, restaged, stage_oc);
-        if (stage_oc != NULL) {
+        // A deadline can cut the stage mid-flight: a candidate whose scenario
+        // jobs bailed has a short weight_sum, so keep only the fully-scored
+        // ones (as the live path does) instead of ranking partial scores.
+        // Stable-partition the complete candidates — with their carried-in
+        // (prev-fidelity) records and outcome captures — to the front so the
+        // shared partial-stage handling below sees the right done_count. The
+        // complete weight_sum is ranked[0].weight_sum: carried candidates were
+        // fully scored at the previous stage and weight_sum (= perm(unseen,
+        // bag_size)) is constant across plays.
+        const int64_t full_weight = ranked[0].weight_sum;
+        PegRankedCand *part_new =
+            malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
+        PegRankedCand *part_old =
+            malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
+        PegCandOutcomes *part_oc =
+            stage_oc != NULL
+                ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+                : NULL;
+        int placed = 0;
+        for (int pass = 0; pass < 2; pass++) {
+          const bool want_complete = pass == 0;
           for (int i = 0; i < eval_count; i++) {
+            const bool complete = restaged[i].weight_sum >= full_weight;
+            if (complete != want_complete) {
+              continue;
+            }
+            part_new[placed] = restaged[i];
+            part_old[placed] = ranked[i];
+            if (part_oc != NULL) {
+              part_oc[placed] = stage_oc[i];
+            }
+            placed++;
+          }
+          if (pass == 0) {
+            done_count = placed;
+          }
+        }
+        memcpy(restaged, part_new, (size_t)eval_count * sizeof(PegRankedCand));
+        memcpy(ranked, part_old, (size_t)eval_count * sizeof(PegRankedCand));
+        free(part_new);
+        free(part_old);
+        if (stage_oc != NULL) {
+          memcpy(stage_oc, part_oc,
+                 (size_t)eval_count * sizeof(PegCandOutcomes));
+          free(part_oc);
+          // Publish only the fully-scored candidates' outcomes; discard the cut
+          // candidates' partial captures.
+          for (int i = 0; i < done_count; i++) {
             peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &stage_oc[i]);
+          }
+          for (int i = done_count; i < eval_count; i++) {
+            free(stage_oc[i].rows);
           }
           free(stage_oc);
         }
