@@ -26,11 +26,209 @@ typedef struct {
   int64_t weight;
 } PegOutcomeTok;
 
-// Per-multiset record of which outcome buckets its orderings landed in.
+// Per-multiset record: which outcome buckets its orderings landed in, the
+// labeled-ordering count per ordering (constant within a multiset), and the
+// summed weight of all its rows.
 typedef struct {
   char ms[40];
   bool seen[3]; // [0]=win [1]=loss [2]=tie
+  int64_t per_ordering;
+  int64_t total_weight;
 } PegOutcomeMs;
+
+// A growable list of short strings (sequences / segmented forms).
+typedef struct {
+  char **items;
+  int len;
+  int cap;
+} PegStrList;
+
+static void peg_strlist_push(PegStrList *list, const char *s) {
+  if (list->len == list->cap) {
+    list->cap = list->cap > 0 ? list->cap * 2 : 8;
+    list->items =
+        realloc_or_die(list->items, (size_t)list->cap * sizeof(char *));
+  }
+  list->items[list->len++] = string_duplicate(s);
+}
+
+static bool peg_strlist_has(const PegStrList *list, const char *s) {
+  for (int i = 0; i < list->len; i++) {
+    if (strcmp(list->items[i], s) == 0) {
+      return true;
+    }
+  }
+  return false;
+}
+
+static void peg_strlist_push_unique(PegStrList *list, const char *s) {
+  if (!peg_strlist_has(list, s)) {
+    peg_strlist_push(list, s);
+  }
+}
+
+static void peg_strlist_destroy(PegStrList *list) {
+  for (int i = 0; i < list->len; i++) {
+    free(list->items[i]);
+  }
+  free(list->items);
+  list->items = NULL;
+  list->len = 0;
+  list->cap = 0;
+}
+
+// Sort a short tile string in place (insertion sort).
+static void peg_sort_str(char *s) {
+  for (int i = 1; s[i] != '\0'; i++) {
+    const char key = s[i];
+    int prev = i - 1;
+    while (prev >= 0 && s[prev] > key) {
+      s[prev + 1] = s[prev];
+      prev--;
+    }
+    s[prev + 1] = key;
+  }
+}
+
+// Number of distinct permutations of the sorted multiset string s.
+static int64_t peg_perm_count(const char *s) {
+  const int len = (int)strlen(s);
+  int64_t count = 1;
+  for (int factor = 2; factor <= len; factor++) {
+    count *= factor;
+  }
+  int run = 1;
+  for (int i = 1; i <= len; i++) {
+    if (i < len && s[i] == s[i - 1]) {
+      run++;
+    } else {
+      int64_t run_fact = 1;
+      for (int factor = 2; factor <= run; factor++) {
+        run_fact *= factor;
+      }
+      count /= run_fact;
+      run = 1;
+    }
+  }
+  return count;
+}
+
+// Distinct orderings a segmented form ("F/GH/I") represents: the product over
+// its "/"-separated (sorted) segments of each segment's permutation count.
+static int64_t peg_form_covered(const char *form) {
+  int64_t covered = 1;
+  char seg[40];
+  int seg_len = 0;
+  for (const char *cursor = form;; cursor++) {
+    if (*cursor == '/' || *cursor == '\0') {
+      seg[seg_len] = '\0';
+      if (seg_len > 0) {
+        covered *= peg_perm_count(seg);
+      }
+      seg_len = 0;
+      if (*cursor == '\0') {
+        break;
+      }
+    } else if (seg_len < (int)sizeof(seg) - 1) {
+      seg[seg_len++] = *cursor;
+    }
+  }
+  return covered;
+}
+
+// Factor a set of distinct, equal-length tile sequences (all the same multiset
+// and outcome bucket) into the coarsest segmented forms: a maximal contiguous
+// block whose orderings are all present collapses into one sorted multiset
+// segment ("GH"), while order-significant boundaries stay "/"-separated. The
+// returned forms (e.g. "F/GH/I") partition the input. Recurses on the leftmost
+// boundary where the set factors as a cartesian product L x R.
+static PegStrList peg_factor(const PegStrList *seqs) {
+  PegStrList out = {0};
+  const int width = (int)strlen(seqs->items[0]);
+  if (width == 1) {
+    for (int i = 0; i < seqs->len; i++) {
+      peg_strlist_push_unique(&out, seqs->items[i]);
+    }
+    return out;
+  }
+  for (int split = 0; split < width - 1; split++) {
+    PegStrList left = {0};
+    PegStrList right = {0};
+    for (int i = 0; i < seqs->len; i++) {
+      char lbuf[40];
+      char rbuf[40];
+      memcpy(lbuf, seqs->items[i], (size_t)(split + 1));
+      lbuf[split + 1] = '\0';
+      const int rlen = width - (split + 1);
+      memcpy(rbuf, seqs->items[i] + split + 1, (size_t)rlen);
+      rbuf[rlen] = '\0';
+      peg_strlist_push_unique(&left, lbuf);
+      peg_strlist_push_unique(&right, rbuf);
+    }
+    bool factors = seqs->len == left.len * right.len;
+    for (int li = 0; factors && li < left.len; li++) {
+      for (int ri = 0; factors && ri < right.len; ri++) {
+        char comb[40];
+        strcpy(comb, left.items[li]);
+        strcat(comb, right.items[ri]);
+        if (!peg_strlist_has(seqs, comb)) {
+          factors = false;
+        }
+      }
+    }
+    if (factors) {
+      PegStrList left_forms = peg_factor(&left);
+      PegStrList right_forms = peg_factor(&right);
+      for (int a = 0; a < left_forms.len; a++) {
+        for (int b = 0; b < right_forms.len; b++) {
+          char form[64];
+          strcpy(form, left_forms.items[a]);
+          strcat(form, "/");
+          strcat(form, right_forms.items[b]);
+          peg_strlist_push(&out, form);
+        }
+      }
+      peg_strlist_destroy(&left_forms);
+      peg_strlist_destroy(&right_forms);
+      peg_strlist_destroy(&left);
+      peg_strlist_destroy(&right);
+      return out;
+    }
+    peg_strlist_destroy(&left);
+    peg_strlist_destroy(&right);
+  }
+  // Irreducible: a single permutable block when the set is all permutations of
+  // one multiset; otherwise each sequence stands alone (a "/" per tile).
+  char sorted0[40];
+  strcpy(sorted0, seqs->items[0]);
+  peg_sort_str(sorted0);
+  bool all_same_ms = true;
+  for (int i = 1; all_same_ms && i < seqs->len; i++) {
+    char other[40];
+    strcpy(other, seqs->items[i]);
+    peg_sort_str(other);
+    if (strcmp(other, sorted0) != 0) {
+      all_same_ms = false;
+    }
+  }
+  if (all_same_ms && (int64_t)seqs->len == peg_perm_count(sorted0)) {
+    peg_strlist_push(&out, sorted0);
+    return out;
+  }
+  for (int i = 0; i < seqs->len; i++) {
+    char form[64];
+    int form_len = 0;
+    for (int c = 0; seqs->items[i][c] != '\0'; c++) {
+      if (c > 0) {
+        form[form_len++] = '/';
+      }
+      form[form_len++] = seqs->items[i][c];
+    }
+    form[form_len] = '\0';
+    peg_strlist_push(&out, form);
+  }
+  return out;
+}
 
 static int peg_outcome_tok_cmp(const void *a, const void *b) {
   return strcmp(((const PegOutcomeTok *)a)->text,
@@ -48,51 +246,34 @@ static int peg_outcome_bucket(int32_t mover_total) {
   return 2;
 }
 
-// Build a draw's sorted-multiset key ("FGHI") and slash-joined draw-order
-// sequence ("F/G/H/I") from the mover's drawn tiles followed by the bag
-// remainder. Single-character tiles assumed (English; blank renders as '?').
+// Build a draw's sorted-multiset key ("FGHI") and raw draw-order tile string
+// ("FGHI": the mover's drawn tiles, then the bag remainder, in draw order).
+// Single-character tiles assumed (English; blank renders as '?').
 static void peg_draw_keys(const char *drawn, const char *remaining, char *ms,
                           char *seq) {
-  char tiles[32];
   int n = 0;
   for (const char *tp = drawn; *tp != '\0' && n < 31; tp++) {
-    tiles[n++] = *tp;
+    seq[n++] = *tp;
   }
   for (const char *tp = remaining; *tp != '\0' && n < 31; tp++) {
-    tiles[n++] = *tp;
+    seq[n++] = *tp;
   }
-  size_t seq_len = 0;
-  for (int tile_idx = 0; tile_idx < n; tile_idx++) {
-    if (tile_idx > 0) {
-      seq[seq_len++] = '/';
-    }
-    seq[seq_len++] = tiles[tile_idx];
-  }
-  seq[seq_len] = '\0';
-  for (int tile_idx = 1; tile_idx < n; tile_idx++) { // sort for multiset key
-    const char key = tiles[tile_idx];
-    int prev = tile_idx - 1;
-    while (prev >= 0 && tiles[prev] > key) {
-      tiles[prev + 1] = tiles[prev];
-      prev--;
-    }
-    tiles[prev + 1] = key;
-  }
-  for (int tile_idx = 0; tile_idx < n; tile_idx++) {
-    ms[tile_idx] = tiles[tile_idx];
-  }
-  ms[n] = '\0';
+  seq[n] = '\0';
+  memcpy(ms, seq, (size_t)n + 1);
+  peg_sort_str(ms);
 }
 
 // Condense a candidate's per-ordering rows into one line. A draw whose
 // orderings all land in a single bucket is shown as a sorted multiset
-// ("FGHI"); a draw whose orderings span two or more of win/loss/tie is shown
-// as its individual slash-joined sequences ("F/G/H/I"). Each token carries an
-// "xN" labeled-ordering weight (N=1 omitted), so the win tokens' weights sum to
-// the wins column and the loss tokens' to the loss column. Only the shorter of
-// the win / loss lists is printed (the other is implied by the counts); tie
-// tiles are not listed but do count toward the split decision. When every
-// ordering shares one bucket, says "always wins/loses/ties". Caller frees.
+// ("FGHI"); a draw whose orderings span two or more of win/loss/tie is split
+// into segmented forms ("F/GH/I") where contiguous freely-permutable blocks
+// collapse to a sorted multiset segment and order-significant boundaries stay
+// "/"-separated. Each token carries an "xN" labeled-ordering weight (N=1
+// omitted), so the win tokens' weights sum to the wins column and the loss
+// tokens' to the loss column. Only the shorter of the win / loss lists is
+// printed (the other is implied by the counts); tie tiles are not listed but do
+// count toward the split decision. When every ordering shares one bucket, says
+// "always wins/loses/ties". Caller frees.
 static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
                                             int n_rows) {
   if (n_rows <= 0) {
@@ -114,11 +295,12 @@ static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
     return string_duplicate(all_label);
   }
 
-  // Pass 1: per-multiset bucket presence (decides multiset vs sequence).
+  // Pass 1: per-multiset bucket presence (decides multiset vs sequence), the
+  // per-ordering labeled count, and the summed weight.
   PegOutcomeMs *ms_info = malloc_or_die((size_t)n_rows * sizeof(PegOutcomeMs));
   int n_ms = 0;
   char (*row_ms)[40] = malloc_or_die((size_t)n_rows * sizeof(*row_ms));
-  char (*row_seq)[64] = malloc_or_die((size_t)n_rows * sizeof(*row_seq));
+  char (*row_seq)[40] = malloc_or_die((size_t)n_rows * sizeof(*row_seq));
   for (int row_idx = 0; row_idx < n_rows; row_idx++) {
     peg_draw_keys(rows[row_idx].drawn, rows[row_idx].remaining, row_ms[row_idx],
                   row_seq[row_idx]);
@@ -135,44 +317,67 @@ static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
       ms_info[ms_idx].seen[0] = false;
       ms_info[ms_idx].seen[1] = false;
       ms_info[ms_idx].seen[2] = false;
+      ms_info[ms_idx].per_ordering = rows[row_idx].weight;
+      ms_info[ms_idx].total_weight = 0;
     }
     ms_info[ms_idx].seen[peg_outcome_bucket(rows[row_idx].mover_total)] = true;
+    ms_info[ms_idx].total_weight += rows[row_idx].weight;
   }
 
-  // Pass 2: aggregate labeled weight per (display token, bucket). Tie draws are
-  // not listed (but already counted toward each multiset's split decision).
-  PegOutcomeTok *toks = malloc_or_die((size_t)n_rows * sizeof(PegOutcomeTok));
+  // Pass 2: emit one token per (display form, bucket). A non-split multiset is
+  // one multiset token; a split multiset's orderings are factored per bucket
+  // into segmented forms (no token for a tie-only multiset). At most one token
+  // per non-split multiset plus one per distinct sequence overall.
+  PegOutcomeTok *toks =
+      malloc_or_die((size_t)(n_rows + n_ms) * sizeof(PegOutcomeTok));
   int n_toks = 0;
-  for (int row_idx = 0; row_idx < n_rows; row_idx++) {
-    const int bucket = peg_outcome_bucket(rows[row_idx].mover_total);
-    if (bucket == 2) {
+  for (int ms_idx = 0; ms_idx < n_ms; ms_idx++) {
+    const PegOutcomeMs *info = &ms_info[ms_idx];
+    const int n_buckets =
+        (int)info->seen[0] + (int)info->seen[1] + (int)info->seen[2];
+    if (n_buckets <= 1) {
+      int bucket = 2;
+      if (info->seen[0]) {
+        bucket = 0;
+      } else if (info->seen[1]) {
+        bucket = 1;
+      }
+      if (bucket == 2) {
+        continue; // tie-only: not listed
+      }
+      strcpy(toks[n_toks].text, info->ms);
+      toks[n_toks].bucket = bucket;
+      toks[n_toks].weight = info->total_weight;
+      n_toks++;
       continue;
     }
-    int ms_idx = 0;
-    for (int k = 0; k < n_ms; k++) {
-      if (strcmp(ms_info[k].ms, row_ms[row_idx]) == 0) {
-        ms_idx = k;
-        break;
+    // Split: factor this multiset's distinct orderings, per win/loss bucket.
+    for (int bucket = 0; bucket <= 1; bucket++) {
+      PegStrList seqs = {0};
+      for (int row_idx = 0; row_idx < n_rows; row_idx++) {
+        if (peg_outcome_bucket(rows[row_idx].mover_total) != bucket) {
+          continue;
+        }
+        if (strcmp(row_ms[row_idx], info->ms) != 0) {
+          continue;
+        }
+        peg_strlist_push_unique(&seqs, row_seq[row_idx]);
       }
-    }
-    const int n_buckets = (int)ms_info[ms_idx].seen[0] +
-                          (int)ms_info[ms_idx].seen[1] +
-                          (int)ms_info[ms_idx].seen[2];
-    const char *text = n_buckets >= 2 ? row_seq[row_idx] : row_ms[row_idx];
-    int tok_idx = -1;
-    for (int k = 0; k < n_toks; k++) {
-      if (toks[k].bucket == bucket && strcmp(toks[k].text, text) == 0) {
-        tok_idx = k;
-        break;
+      if (seqs.len == 0) {
+        peg_strlist_destroy(&seqs);
+        continue;
       }
+      PegStrList forms = peg_factor(&seqs);
+      for (int f = 0; f < forms.len; f++) {
+        strcpy(toks[n_toks].text, forms.items[f]);
+        toks[n_toks].bucket = bucket;
+        toks[n_toks].weight =
+            peg_form_covered(forms.items[f]) * info->per_ordering;
+        n_toks++;
+      }
+      peg_strlist_destroy(&forms);
+      peg_strlist_destroy(&seqs);
     }
-    if (tok_idx < 0) {
-      tok_idx = n_toks++;
-      strcpy(toks[tok_idx].text, text);
-      toks[tok_idx].bucket = bucket;
-      toks[tok_idx].weight = 0;
-    }
-    toks[tok_idx].weight += rows[row_idx].weight;
   }
   free(ms_info);
   free(row_ms);
@@ -1198,7 +1403,8 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 
   // Read poll snapshot once. Used for both the live path and (when done) to
   // supply per-stage timing history to the completed-result display. Zeroed so
-  // it is never read uninitialized when poll == NULL (have_snap gates real use).
+  // it is never read uninitialized when poll == NULL (have_snap gates real
+  // use).
   PegPollSnapshot snap = {0};
   bool have_snap = false;
   if (poll != NULL) {
