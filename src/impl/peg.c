@@ -70,6 +70,22 @@ enum {
   PEG_PESSIMISTIC_OPP_LIST_CAP = 1024,
 };
 
+// Solve-scoped cache mapping a post-candidate board signature to its
+// per-candidate pruned KWG. At an emptier (0-in-bag) endgame leaf the pruned
+// KWG depends only on the post-cand board and the union of both racks (all
+// remaining tiles) -- both fixed per candidate across every scenario AND stage
+// -- so one build is reused by every leaf of that candidate. Built lazily by
+// chaining off the parent (root) prune already on the game, which is correct
+// because the parent is a superset of any descendant's playable words. Shared
+// across workers: lookups hold the lock briefly, builds run outside it.
+typedef struct PegPruneCache {
+  cpthread_mutex_t mutex;
+  uint64_t *keys; // 0 marks an empty slot
+  KWG **values;   // owned; destroyed with the cache
+  int capacity;   // power of two
+  int count;
+} PegPruneCache;
+
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
 // context/results pair. Indexed by the pool worker_idx (one extra slot for the
 // main thread when it helps drain the queue).
@@ -88,6 +104,8 @@ typedef struct PegWorker {
   // scenarios reach identical board states, so cross-scenario reuse is the
   // dominant endgame speedup.
   TranspositionTable *eg_tt;
+  // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
+  PegPruneCache *prune_cache;
 } PegWorker;
 
 // ----- live poll -----------------------------------------------------------
@@ -745,6 +763,94 @@ static void peg_scenario_joblist_push(PegScenarioJobList *list,
   list->jobs[list->count++] = *job;
 }
 
+static PegPruneCache *peg_prune_cache_create(void) {
+  PegPruneCache *cache = malloc_or_die(sizeof(*cache));
+  cpthread_mutex_init(&cache->mutex);
+  // Ample: distinct post-cand boards reaching an exact leaf are bounded by the
+  // candidate field (hundreds), so this never approaches full in practice.
+  cache->capacity = 1 << 14;
+  cache->count = 0;
+  cache->keys = calloc_or_die((size_t)cache->capacity, sizeof(uint64_t));
+  cache->values = calloc_or_die((size_t)cache->capacity, sizeof(KWG *));
+  return cache;
+}
+
+static void peg_prune_cache_destroy(PegPruneCache *cache) {
+  if (cache == NULL) {
+    return;
+  }
+  for (int slot = 0; slot < cache->capacity; slot++) {
+    kwg_destroy(cache->values[slot]);
+  }
+  free(cache->keys);
+  free(cache->values);
+  // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
+  free(cache);
+}
+
+static uint64_t peg_board_signature(const Game *game) {
+  const Board *board = game_get_board(game);
+  uint64_t hash = 1469598103934665603ULL; // FNV-1a over the board letters
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      hash ^= (uint64_t)board_get_letter(board, row, col);
+      hash *= 1099511628211ULL;
+    }
+  }
+  return hash == 0 ? 1 : hash; // reserve 0 as the empty-slot sentinel
+}
+
+// Return the per-candidate pruned KWG for this leaf's board, building it once
+// (chained off the parent prune on the game) and caching it by board signature.
+// Builds run outside the lock; a rare insert race just discards the loser's
+// build. If the table is somehow full, fall back to the (looser but correct)
+// parent prune rather than caching.
+static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
+                                      int mover_idx) {
+  const uint64_t key = peg_board_signature(game);
+  const uint32_t mask = (uint32_t)cache->capacity - 1;
+  cpthread_mutex_lock(&cache->mutex);
+  uint32_t slot = (uint32_t)key & mask;
+  while (cache->keys[slot] != 0) {
+    if (cache->keys[slot] == key) {
+      const KWG *hit = cache->values[slot];
+      cpthread_mutex_unlock(&cache->mutex);
+      return hit;
+    }
+    slot = (slot + 1) & mask;
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+
+  const KWG *parent_kwg = game_get_effective_kwg(game, mover_idx);
+  DictionaryWordList *word_list = dictionary_word_list_create();
+  generate_possible_words(game, parent_kwg, word_list);
+  KWG *built = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                         KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(word_list);
+
+  cpthread_mutex_lock(&cache->mutex);
+  slot = (uint32_t)key & mask;
+  while (cache->keys[slot] != 0) {
+    if (cache->keys[slot] == key) { // another worker built it first
+      const KWG *other = cache->values[slot];
+      cpthread_mutex_unlock(&cache->mutex);
+      kwg_destroy(built);
+      return other;
+    }
+    slot = (slot + 1) & mask;
+  }
+  if (cache->count >= cache->capacity - 1) {
+    cpthread_mutex_unlock(&cache->mutex);
+    kwg_destroy(built);
+    return parent_kwg;
+  }
+  cache->keys[slot] = key;
+  cache->values[slot] = built;
+  cache->count++;
+  cpthread_mutex_unlock(&cache->mutex);
+  return built;
+}
+
 // Evaluate the leaf of one fully-resolved scenario (a specific post-cand game).
 // Returns mover's signed spread (points) — exact via endgame_solve for emptier
 // scenarios at fidelity > 0, else the greedy playout.
@@ -778,10 +884,24 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.num_top_moves = 1;
   ea.external_deadline_ns = ctx->deadline_ns;
   ea.shared_tt = ctx->worker->eg_tt;
-  // The scratch game already carries the root pruned KWG (override) and valid
-  // cross-sets (copied from the prepared base, incrementally updated by the
-  // cand play), so the endgame must not rebuild a pruned KWG or regenerate all
-  // cross-sets per solve — that regeneration dominates the per-leaf cost.
+  // Chained re-prune: install this candidate's tighter pruned KWG (built once
+  // per board, chained off the root prune already on the game) for the endgame
+  // to use. The existing (parent) cross-sets are kept as-is and NOT
+  // regenerated: narrowing the word list only removes words, and the parent
+  // cross-sets already agree with the leaf's on every rack-playable letter (any
+  // perpendicular word a rack tile forms is itself playable, hence in the leaf
+  // KWG too), so the looser parent cross-sets gate the exact same legal moves.
+  //
+  // Only worth it for >=2-ply searches: a tighter KWG speeds up move
+  // generation, so the gain scales with how many move-gens the endgame runs. At
+  // 1 ply there are too few to amortize the build. (The default cascade only
+  // ever uses 2..6-ply exact leaves, so this is a robustness guard for custom
+  // configs.)
+  if (ctx->fidelity_plies >= 2) {
+    const KWG *leaf_kwg =
+        peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
+    game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
+  }
   ea.skip_word_pruning = true;
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
@@ -1652,6 +1772,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (tt_fraction > 0.05) {
     tt_fraction = 0.05;
   }
+  // One prune cache shared by every worker (cross-worker board reuse).
+  PegPruneCache *prune_cache = peg_prune_cache_create();
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -1662,6 +1784,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].template_game = NULL;
     workers[worker_idx].scratch_game = NULL;
     workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
+    workers[worker_idx].prune_cache = prune_cache;
   }
 
   // Injection monitor: lends idle cores to in-flight leaf endgames. Only
@@ -2011,6 +2134,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     transposition_table_destroy(workers[worker_idx].eg_tt);
   }
   free(workers);
+  // Safe now that every worker's scratch game (which referenced cached KWGs via
+  // its override pointer) has been destroyed.
+  peg_prune_cache_destroy(prune_cache);
   if (pool) {
     peg_pool_destroy(pool);
   }
