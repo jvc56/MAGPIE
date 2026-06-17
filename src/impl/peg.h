@@ -181,6 +181,11 @@ typedef struct PegArgs {
   // cand. Default false (saves memory).
   bool include_per_scenario;
 
+  // INVESTIGATION (do not merge): when true, disable the chained per-candidate
+  // leaf prune cache (use the root prune everywhere) so a benchmark can A/B
+  // re-pruning on vs off in one binary. Default false (re-pruning on).
+  bool reprune_disabled;
+
   // Optional progress callbacks. NULL to skip.
   PegOnStageStart on_stage_start;
   PegOnCandDone on_cand_done;

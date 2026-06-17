@@ -84,6 +84,8 @@ typedef struct PegPruneCache {
   KWG **values;   // owned; destroyed with the cache
   int capacity;   // power of two
   int count;
+  bool
+      disabled; // INVESTIGATION: when set, leaves use the root prune (no chain)
 } PegPruneCache;
 
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
@@ -897,7 +899,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // 1 ply there are too few to amortize the build. (The default cascade only
   // ever uses 2..6-ply exact leaves, so this is a robustness guard for custom
   // configs.)
-  if (ctx->fidelity_plies >= 2) {
+  if (ctx->fidelity_plies >= 2 && !ctx->worker->prune_cache->disabled) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
@@ -1774,6 +1776,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
+  prune_cache->disabled =
+      args->reprune_disabled; // INVESTIGATION (do not merge)
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);

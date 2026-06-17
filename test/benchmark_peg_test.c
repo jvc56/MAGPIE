@@ -57,6 +57,7 @@ typedef struct PegBenchConfig {
   int scenario_stride;        // <= 1 = full enumeration (bag >= 3 only)
   const int *stage_top_k;     // NULL = built-in default cascade
   int num_stages;             // 0 = default cascade length
+  bool reprune_disabled;      // INVESTIGATION: turn the leaf prune cache off
 } PegBenchConfig;
 
 // Result of solving one position with one fast config.
@@ -112,6 +113,7 @@ static void fill_peg_args(PegArgs *args, const Config *config,
   args->scenario_stride = cfg->scenario_stride;
   args->stage_top_k = cfg->num_stages > 0 ? cfg->stage_top_k : NULL;
   args->num_stages = cfg->num_stages;
+  args->reprune_disabled = cfg->reprune_disabled;
 }
 
 static void move_to_string(const Game *game, const Move *move, char *out,
@@ -588,4 +590,193 @@ void test_peg_pegtopk_all(void) {
 
   free(load_cmd);
   config_destroy(config);
+}
+
+// INVESTIGATION ONLY (do not merge): run PEG to completion on the first
+// PEG_BENCH_MAX positions of a fixture file, printing per-position wall time +
+// chosen move/win/spread + the total. Used to A/B the chained-wordprune cache.
+// Env: PEG_BENCH_FILE, PEG_BENCH_MAX (10), PEG_BENCH_THREADS (8),
+//      PEG_BENCH_TLIM (0 = unbounded).
+void test_peg_bench_fixture(void) {
+  log_set_level(LOG_FATAL);
+  const char *file = getenv("PEG_BENCH_FILE");
+  if (file == NULL) {
+    file = "notes/peg_positions/random_3peg.txt";
+  }
+  const int max_pos =
+      getenv("PEG_BENCH_MAX") ? atoi(getenv("PEG_BENCH_MAX")) : 10;
+  const int threads =
+      getenv("PEG_BENCH_THREADS") ? atoi(getenv("PEG_BENCH_THREADS")) : 8;
+  const double tlim =
+      getenv("PEG_BENCH_TLIM") ? atof(getenv("PEG_BENCH_TLIM")) : 0.0;
+
+  FILE *fp = fopen(file, "re");
+  if (!fp) {
+    printf("[pegb] no fixture at %s (run from repo root)\n", file);
+    return;
+  }
+  char (*lines)[4096] = malloc((size_t)max_pos * 4096);
+  assert(lines);
+  int n = 0;
+  while (n < max_pos && fgets(lines[n], 4096, fp)) {
+    size_t len = strlen(lines[n]);
+    if (len > 0 && lines[n][len - 1] == '\n') {
+      lines[n][len - 1] = '\0';
+    }
+    if (strlen(lines[n]) > 0) {
+      n++;
+    }
+  }
+  (void)fclose(fp);
+
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  printf("[pegb] file=%s positions=%d threads=%d tlim=%.0f\n", file, n, threads,
+         tlim);
+  (void)fflush(stdout);
+
+  double sum_elapsed = 0;
+  for (int i = 0; i < n; i++) {
+    char *cmd = get_formatted_string("cgp %s", lines[i]);
+    exec_config_quiet(config, cmd);
+    free(cmd);
+
+    PegArgs args;
+    memset(&args, 0, sizeof(args));
+    args.game = config_get_game(config);
+    args.thread_control = config_get_thread_control(config);
+    args.num_threads = threads;
+    args.time_budget_seconds = tlim;
+    args.scenario_stride = 1;
+    args.num_stages = 0; // built-in default cascade
+
+    PegResult result;
+    ErrorStack *err = error_stack_create();
+    Timer timer;
+    ctimer_start(&timer);
+    peg_solve(&args, &result, err);
+    const double elapsed = ctimer_elapsed_seconds(&timer);
+    sum_elapsed += elapsed;
+
+    char best[32] = "-";
+    double win = -1.0;
+    double spread = 0.0;
+    if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+      move_to_string(config_get_game(config), &result.best_move, best,
+                     sizeof(best));
+      win = result.top_cands[0].win_pct;
+      spread = result.top_cands[0].mean_spread;
+    }
+    printf("[pegb] pos=%2d elapsed=%.2f stage=%d best=%-14s win=%.4f "
+           "spread=%+.3f\n",
+           i, elapsed, result.last_completed_stage, best, win, spread);
+    (void)fflush(stdout);
+    error_stack_destroy(err);
+    peg_result_destroy(&result);
+  }
+  printf("[pegb] TOTAL elapsed=%.2fs over %d positions\n", sum_elapsed, n);
+  (void)fflush(stdout);
+  free(lines);
+  config_destroy(config);
+}
+
+// INVESTIGATION ONLY (do not merge): A/B re-pruning ON vs OFF under a time
+// limit across 1..4-in-bag contested fixtures. Both arms use the same budget +
+// default cascade + full enumeration. When the two arms pick DIFFERENT moves, a
+// deeper oracle (both moves protected via pnoprune) scores each move; the gap =
+// oracle_win(reprune move) - oracle_win(no-reprune move). Positive => the
+// faster (re-pruned) search reached a better in-budget decision. Env:
+// PEG_ARM_TLIM (default 8), PEG_ORACLE_TLIM (default 60), PEG_GAP_MAX (default
+// 25).
+void test_peg_reprune_gap(void) {
+  log_set_level(LOG_FATAL);
+  const double arm_tlim =
+      getenv("PEG_ARM_TLIM") ? atof(getenv("PEG_ARM_TLIM")) : 8.0;
+  const double oracle_tlim =
+      getenv("PEG_ORACLE_TLIM") ? atof(getenv("PEG_ORACLE_TLIM")) : 60.0;
+  const int max_pos = getenv("PEG_GAP_MAX") ? atoi(getenv("PEG_GAP_MAX")) : 25;
+  const int threads = 8;
+
+  PegBenchConfig cfg_on = {.name = "reprune",
+                           .num_threads = threads,
+                           .time_budget_seconds = arm_tlim,
+                           .scenario_stride = 1,
+                           .stage_top_k = NULL,
+                           .num_stages = 0,
+                           .reprune_disabled = false};
+  PegBenchConfig cfg_off = cfg_on;
+  cfg_off.name = "noreprune";
+  cfg_off.reprune_disabled = true;
+  static const int oracle_topk[] = {32, 32, 32};
+  PegBenchConfig cfg_oracle = {.name = "oracle",
+                               .num_threads = threads,
+                               .time_budget_seconds = oracle_tlim,
+                               .scenario_stride = 1,
+                               .stage_top_k = oracle_topk,
+                               .num_stages = 3,
+                               .reprune_disabled = false};
+
+  printf("[gap] arm_tlim=%.0f oracle_tlim=%.0f max=%d\n", arm_tlim, oracle_tlim,
+         max_pos);
+  (void)fflush(stdout);
+  for (int bag = 1; bag <= 4; bag++) {
+    char file[128];
+    snprintf(file, sizeof(file), "notes/peg_positions/random_%dpeg.txt", bag);
+    FILE *fp = fopen(file, "re");
+    if (!fp) {
+      printf("[gap] bag=%d: no fixture %s\n", bag, file);
+      continue;
+    }
+    Config *config =
+        config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+    char (*lines)[4096] = malloc((size_t)max_pos * 4096);
+    assert(lines);
+    int n = 0;
+    while (n < max_pos && fgets(lines[n], 4096, fp)) {
+      size_t l = strlen(lines[n]);
+      if (l > 0 && lines[n][l - 1] == '\n') {
+        lines[n][l - 1] = '\0';
+      }
+      if (strlen(lines[n]) > 0) {
+        n++;
+      }
+    }
+    (void)fclose(fp);
+    int disagree = 0;
+    int on_better = 0;
+    int off_better = 0;
+    double sum_gap = 0;
+    for (int i = 0; i < n; i++) {
+      char *cmd = get_formatted_string("cgp %s", lines[i]);
+      exec_config_quiet(config, cmd);
+      free(cmd);
+      PegBenchOutcome a = run_one_peg(config, &cfg_on);
+      PegBenchOutcome b = run_one_peg(config, &cfg_off);
+      if (!a.ok || !b.ok || strcmp(a.move_str, b.move_str) == 0) {
+        continue; // agree (or error) -> no oracle
+      }
+      disagree++;
+      OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
+      const double gap =
+          o.win_a - o.win_b; // reprune move minus no-reprune move
+      sum_gap += gap;
+      if (gap > 0) {
+        on_better++;
+      } else if (gap < 0) {
+        off_better++;
+      }
+      printf("[gap] bag=%d pos=%2d reprune=%-13s noreprune=%-13s "
+             "win_rp=%.4f win_norp=%.4f gap=%+.4f\n",
+             bag, i, a.move_str, b.move_str, o.win_a, o.win_b, gap);
+      (void)fflush(stdout);
+    }
+    printf(
+        "[gap] BAG %d SUMMARY: positions=%d disagreements=%d reprune_better=%d "
+        "noreprune_better=%d mean_gap=%+.4f\n",
+        bag, n, disagree, on_better, off_better,
+        disagree ? sum_gap / disagree : 0.0);
+    (void)fflush(stdout);
+    free(lines);
+    config_destroy(config);
+  }
 }
