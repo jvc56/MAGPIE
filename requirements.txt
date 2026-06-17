@@ -1,0 +1,7 @@
+# MAGPIE documentation toolchain (MkDocs + Material).
+#   pip install -r requirements.txt
+#
+# The [imaging] extra pulls in Pillow/CairoSVG for social-card generation,
+# which also needs system Cairo/Pango (installed in the docs CI workflow).
+mkdocs-material[imaging]==9.7.6
+mkdocs-git-revision-date-localized-plugin>=1.3,<2

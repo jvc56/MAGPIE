@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <style>
+    .fg { stroke: #15171c; }
+    @media (prefers-color-scheme: dark) { .fg { stroke: #f5f7fa; } }
+  </style>
+  <rect class="fg" x="5" y="5" width="54" height="54" fill="none" stroke-width="5"/>
+  <path class="fg" d="M17,48 L17,22 L32,40 L47,22 L47,48" fill="none" stroke-width="8" stroke-linejoin="miter" stroke-linecap="butt"/>
+</svg>

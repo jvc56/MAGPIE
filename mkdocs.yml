@@ -1,0 +1,203 @@
+# MAGPIE documentation — MkDocs + Material
+#
+# Local preview:
+#   pip install -r requirements.txt
+#   mkdocs serve
+#
+# Strict build (matches CI):
+#   mkdocs build --strict
+
+site_name: MAGPIE
+site_description: >-
+  MAGPIE — a crossword game playing and analysis engine: move generation,
+  Monte Carlo simulation, inference, endgame solving, and autoplay.
+site_author: jvc56
+site_url: https://jvc56.github.io/MAGPIE/
+
+repo_name: jvc56/MAGPIE
+repo_url: https://github.com/jvc56/MAGPIE
+edit_uri: edit/main/docs/
+
+copyright: Copyright &copy; MAGPIE contributors
+
+# Repo-facing note, not a site page.
+exclude_docs: |
+  assets/README.md
+
+theme:
+  name: material
+  custom_dir: overrides
+  language: en
+  favicon: assets/favicon.svg
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - navigation.footer
+    - navigation.instant
+    - navigation.instant.progress
+    - navigation.tracking
+    - toc.follow
+    - search.suggest
+    - search.highlight
+    - search.share
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - content.tooltips
+  palette:
+    - media: "(prefers-color-scheme)"
+      toggle:
+        icon: material/brightness-auto
+        name: Switch to light mode
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: black
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to system preference
+  font:
+    text: Hanken Grotesk
+    code: Fira Code
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - tags
+  # git-revision-date stamps "last updated"; falls back to build date when the
+  # checkout is shallow so local/strict builds don't fail.
+  - git-revision-date-localized:
+      fallback_to_build_date: true
+  # Social cards need Cairo/Pango (the [imaging] extra). Only run in CI so a
+  # bare `mkdocs serve` works without the native libraries installed.
+  - social:
+      enabled: !ENV [CI, false]
+
+markdown_extensions:
+  - abbr
+  - admonition
+  - attr_list
+  - def_list
+  - footnotes
+  - md_in_html
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.details
+  - pymdownx.keys
+  - pymdownx.mark
+  - pymdownx.caret
+  - pymdownx.tilde
+  - pymdownx.smartsymbols
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.arithmatex:
+      generic: true
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+
+hooks:
+  - hooks/build_version.py
+
+extra_javascript:
+  - javascripts/version.js
+  - javascripts/katex.js
+  - https://unpkg.com/katex@0/dist/katex.min.js
+  - https://unpkg.com/katex@0/dist/contrib/auto-render.min.js
+
+extra_css:
+  # Heading font (body + code fonts are loaded via theme.font above).
+  - "https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@300;400;600;700&family=Schibsted+Grotesk:wght@400;600;700;800&display=swap"
+  - https://unpkg.com/katex@0/dist/katex.min.css
+  - stylesheets/extra.css
+
+extra:
+  app_version: "0.9"
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/jvc56/MAGPIE
+      name: MAGPIE on GitHub
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - getting-started/index.md
+      - Installation & Build: getting-started/installation.md
+      - Data Setup: getting-started/data-setup.md
+      - Quick Start: getting-started/quick-start.md
+  - User Guide:
+      - user-guide/index.md
+      - Commands & Settings: user-guide/commands-and-settings.md
+      - Execution Modes: user-guide/execution-modes.md
+      - Annotating Games: user-guide/annotating-games.md
+      - Move Generation: user-guide/move-generation.md
+      - Simulation: user-guide/simulation.md
+      - Inference: user-guide/inference.md
+      - Endgame: user-guide/endgame.md
+      - Pre-Endgame (PEG): user-guide/pre-endgame.md
+      - Autoplay & Game Pairs: user-guide/autoplay.md
+      - Superleave Generation: user-guide/superleaves.md
+      - Lexica & Variants: user-guide/lexica-and-variants.md
+  - Algorithms & Internals:
+      - algorithms/index.md
+      - Architecture: algorithms/architecture.md
+      - Move Generation & Shadow Play: algorithms/move-generation.md
+      - Word Graphs (KWG/DAWG/GADDAG): algorithms/word-graphs.md
+      - Leaves & Equity: algorithms/leaves-and-equity.md
+      - Simulation & Best-Arm Identification: algorithms/simulation-and-bai.md
+      - Inference: algorithms/inference.md
+      - Endgame Solver: algorithms/endgame.md
+      - Pre-Endgame Solver: algorithms/pre-endgame.md
+      - Word Pruning: algorithms/word-pruning.md
+  - Data & Formats:
+      - formats/index.md
+      - KWG (Word Graph): formats/kwg.md
+      - KLV (Leave Values): formats/klv.md
+      - WMP (Word Map): formats/wmp.md
+      - GCG (Game Format): formats/gcg.md
+      - CGP (Position String): formats/cgp.md
+      - Lexicon & Board Data: formats/lexicon-data.md
+  - Developer Guide:
+      - developer-guide/index.md
+      - Source Map: developer-guide/source-map.md
+      - Building & CI: developer-guide/building-and-ci.md
+      - Testing & Validation: developer-guide/testing.md
+      - Style & Conventions: developer-guide/style.md
+      - WebAssembly Build: developer-guide/wasm.md
+      - Contributing: developer-guide/contributing.md
+  - Reference:
+      - reference/index.md
+      - Command Reference: reference/commands.md
+      - Settings Reference: reference/settings.md
+      - Glossary: reference/glossary.md
+  - About:
+      - about/index.md
+      - Background & Lineage: about/background.md
+      - FAQ: about/faq.md
+      - References: about/references.md
+      - Changelog: about/changelog.md

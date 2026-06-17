@@ -1,0 +1,374 @@
+/* MAGPIE doc-site polish.
+ *
+ * Two layers:
+ *   1. Typographic polish (small, theme-agnostic).
+ *   2. A restrained Scrabble-skeuomorphic skin in magpie colors — black/white
+ *      plumage with iridescent blue — rendered as crisp, sharp-cornered tiles.
+ *      Everything is driven by the palette + --sc-radius knobs at the top, so
+ *      it's easy to retune or flatten. Delete the "Magpie skin" section to
+ *      revert to stock Material.
+ */
+
+/* ---- Palette & shape knobs ----------------------------------------------- */
+:root {
+  --md-code-font: "Fira Code", monospace;
+
+  --sc-radius: 2px; /* corner sharpness — set 0 for perfectly square tiles */
+
+  /* Magpie plumage */
+  --mag-black: #15171c; /* the bird's black — header / ink            */
+  --mag-black-deep: #0d0f12; /* tabs / darkest                             */
+  --mag-blue: #0a84ff; /* iridescent wing blue — links / accent      */
+  --mag-blue-bright: #3ba0ff; /* hover                                      */
+  --mag-blue-deep: #0a6ccc;
+
+  /* Tile (white plumage) */
+  --sc-tile: #ffffff;
+  --sc-tile-hi: #ffffff; /* top bevel highlight                        */
+  --sc-tile-edge: #c4ccd8; /* cool-gray tile border                      */
+  --sc-tile-shadow: rgba(21, 23, 28, 0.22);
+  --sc-ink: var(--mag-black); /* engraved letter color                      */
+
+  --sc-page: #ffffff;
+}
+
+/* ---- Typographic polish -------------------------------------------------- */
+/* Headings + the header wordmark + card titles in Schibsted Grotesk; body and
+ * code come from theme.font (Hanken Grotesk / Fira Code). */
+.md-typeset h1,
+.md-typeset h2,
+.md-typeset h3,
+.md-typeset h4,
+.md-typeset h5,
+.md-typeset h6,
+.md-header__topic .md-ellipsis,
+.md-typeset .grid.cards.premium a {
+  font-family: "Schibsted Grotesk", system-ui, sans-serif;
+}
+.md-typeset h1 {
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+/* Home hero wordmark — large and tight. */
+.md-typeset h1.wordmark {
+  font-size: clamp(2.6rem, 7vw, 4rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin: 0 0 0.5rem;
+}
+/* Drop Material's top spacer + main-inner margin on the home page so the
+ * wordmark sits up high under the header. */
+.md-content__inner:has(.wordmark)::before {
+  display: none;
+}
+.md-main__inner:has(.wordmark) {
+  margin-top: 0.2rem;
+}
+
+/* Tagline: light lowercase with heavier initial caps so MAGPIE reads down the
+ * first letters. */
+.md-typeset .tagline {
+  font-weight: 300;
+  font-size: 1.05rem;
+  margin-top: 0.2rem;
+}
+.md-typeset .tagline .ic {
+  font-weight: 600;
+}
+.md-typeset h2 {
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+.md-typeset table:not([class]) {
+  font-size: 0.78rem;
+}
+.md-typeset .mermaid {
+  text-align: center;
+  margin: 1.5em 0;
+}
+.md-typeset figure img,
+.md-typeset .mermaid svg {
+  border-radius: var(--sc-radius);
+}
+.md-typeset .md-button + .md-button {
+  margin-left: 0.4rem;
+}
+
+/* =========================================================================
+ * Magpie skin
+ * ====================================================================== */
+
+/* --- Color scheme overrides (loaded after Material, so these win) --- */
+[data-md-color-scheme="default"] {
+  --md-primary-fg-color: var(--mag-black);
+  --md-primary-fg-color--light: #2a2e36;
+  --md-primary-fg-color--dark: var(--mag-black-deep);
+  --md-primary-bg-color: #f5f7fa; /* text on the black header */
+  --md-primary-bg-color--light: rgba(245, 247, 250, 0.75);
+
+  --md-accent-fg-color: var(--mag-blue-bright);
+
+  --md-default-bg-color: var(--sc-page);
+  --md-typeset-a-color: var(--mag-blue);
+}
+
+[data-md-color-scheme="slate"] {
+  --md-primary-fg-color: var(--mag-black-deep);
+  --md-primary-fg-color--dark: #07080a;
+  --md-primary-bg-color: #eef2f8;
+  --md-accent-fg-color: #4ea1f0;
+  --md-typeset-a-color: #6cb1f2;
+
+  /* Dark-mode tile face: charcoal with cool-white "ink". */
+  --sc-tile: #1c2029;
+  --sc-tile-hi: #2a2f3a;
+  --sc-tile-edge: #3a414e;
+  --sc-ink: #e8edf5;
+}
+
+/* --- Near-black header + tabs with a blue top hairline (Azure) --- */
+.md-header {
+  background-image: none;
+  background-color: #0b0d12;
+  box-shadow:
+    inset 0 3px 0 var(--mag-blue),
+    0 2px 6px rgba(0, 0, 0, 0.3);
+}
+.md-tabs {
+  background-color: #0b0d12;
+}
+
+/* --- Inline code as crisp engraved tiles --- */
+.md-typeset :not(pre) > code {
+  background-color: var(--sc-tile);
+  color: var(--sc-ink);
+  border: 1px solid var(--sc-tile-edge);
+  border-radius: var(--sc-radius);
+  padding: 0.05em 0.36em;
+  font-weight: 600;
+  box-shadow:
+    inset 0 1px 0 var(--sc-tile-hi),
+    0 1px 1px var(--sc-tile-shadow);
+}
+
+/* Keep fenced code blocks clean (they're commands, not tiles). */
+.md-typeset pre > code {
+  box-shadow: none;
+}
+
+/* --- Buttons: primary = filled blue CTA, secondary = blue outline --- */
+.md-typeset .md-button--primary {
+  background: var(--mag-blue);
+  color: #fff;
+  border: 1px solid var(--mag-blue);
+  border-radius: var(--sc-radius);
+  box-shadow: none;
+}
+.md-typeset .md-button--primary:hover {
+  background: var(--mag-blue-bright);
+  border-color: var(--mag-blue-bright);
+  color: #fff;
+}
+.md-typeset .md-button:not(.md-button--primary) {
+  border-radius: var(--sc-radius);
+  color: var(--mag-blue);
+  border-color: var(--mag-blue);
+}
+.md-typeset .md-button:not(.md-button--primary):hover {
+  background: var(--mag-blue);
+  border-color: var(--mag-blue);
+  color: #fff;
+}
+
+.md-typeset .grid.cards > ul > li,
+.md-typeset .grid.cards > :is(ol, ul) > li {
+  border: 1px solid var(--sc-tile-edge);
+  border-radius: var(--sc-radius);
+  box-shadow:
+    inset 0 1px 0 var(--sc-tile-hi),
+    0 2px 4px var(--sc-tile-shadow);
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+.md-typeset .grid.cards > ul > li:hover {
+  transform: translateY(-2px);
+  border-color: var(--mag-blue);
+  box-shadow:
+    inset 0 1px 0 var(--sc-tile-hi),
+    0 5px 10px var(--sc-tile-shadow);
+}
+
+/* --- Premium squares (home page `.grid.cards.premium`) ---------------------
+ * Each card *is* a Scrabble premium square: the whole card takes a board color
+ * and is clipped to a four-sided starburst, so the spikes poke into the white
+ * gaps between squares exactly like the board. Spike count encodes the
+ * multiplier (triple = 3 per side, double = 2). The squares lay out in a
+ * responsive row. */
+:root {
+  --sq-tw: #d23f31; /* triple word   */
+  --sq-dw: #f4a9a0; /* double word   */
+  --sq-tl: #1c79c0; /* triple letter */
+  --sq-dl: #a9d4ec; /* double letter */
+  --sq-mat: #ece6d7; /* light "border" the spikes poke into */
+  /* Four-sided burst masks. Square viewBox (200) stretched onto the square
+   * card, so spike height = 15/200 = 7.5% of the square. Spikes are contiguous
+   * (no gaps) and centered on each side; base 19.5 = 1.3 x height (≈66° apex).
+   * Body inset = spike height = 15. */
+  --burst-3: url("data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'><path%20d='M15,15L70.75,15L80.5,0L90.25,15L100,0L109.75,15L119.5,0L129.25,15L185,15L185,70.75L200,80.5L185,90.25L200,100L185,109.75L200,119.5L185,129.25L185,185L129.25,185L119.5,200L109.75,185L100,200L90.25,185L80.5,200L70.75,185L15,185L15,129.25L0,119.5L15,109.75L0,100L15,90.25L0,80.5L15,70.75L15,15Z'%20fill='%23000'/></svg>");
+  --burst-2: url("data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%20200%20200'><path%20d='M15,15L80.5,15L90.25,0L100,15L109.75,0L119.5,15L185,15L185,80.5L200,90.25L185,100L200,109.75L185,119.5L185,185L119.5,185L109.75,200L100,185L90.25,200L80.5,185L15,185L15,119.5L0,109.75L15,100L0,90.25L15,80.5L15,15Z'%20fill='%23000'/></svg>");
+}
+
+/* Two rows of three squares, centered and capped so they don't get huge. */
+.md-typeset .grid.premium {
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.6rem;
+  max-width: 46rem;
+  margin-inline: auto;
+}
+@media screen and (max-width: 44.9375em) {
+  .md-typeset .grid.premium {
+    grid-template-columns: repeat(2, 1fr);
+    max-width: 30rem;
+  }
+}
+
+/* Each card: a light "mat" square (the border, as thick as the spikes) with the
+ * colored starburst masked on top via ::before — so the spikes poke exactly to
+ * the mat's outer edge, and the mat shows between/around them. The title fills
+ * the square as one big click target. */
+.md-typeset .grid.cards.premium > ul > li {
+  --sq-burst: var(--burst-3); /* default: triple = 3 spikes/side */
+  position: relative;
+  aspect-ratio: 1;
+  display: flex;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
+  background: var(--sq-mat);
+  color: #fff;
+  transition: transform 120ms ease;
+}
+.md-typeset .grid.cards.premium > ul > li::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  background: var(--sq-color);
+  -webkit-mask: var(--sq-burst) center / 100% 100% no-repeat;
+  mask: var(--sq-burst) center / 100% 100% no-repeat;
+}
+.md-typeset .grid.cards.premium > ul > li:hover {
+  transform: scale(1.04);
+}
+.md-typeset .grid.cards.premium > ul > li > p {
+  display: contents;
+}
+.md-typeset .grid.cards.premium > ul > li a {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.15rem;
+  text-align: center;
+  padding: 14%; /* keep the title inside the burst body */
+  color: inherit;
+  font-weight: 700;
+  font-size: 0.85rem;
+  line-height: 1.2;
+}
+.md-typeset .grid.cards.premium > ul > li a:hover {
+  text-decoration: none;
+}
+/* Tag list under the title — outline pills with sharp corners. Each pill sizes
+ * to its content and wraps internally (multi-line tags stay clean rectangles). */
+.md-typeset .grid.cards.premium .tags {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.3rem;
+  margin-top: 0.45rem;
+}
+.md-typeset .grid.cards.premium .tag {
+  width: max-content; /* hug the text instead of stretching when it wraps */
+  max-width: 100%;
+  font-weight: 400;
+  font-size: 0.62rem;
+  line-height: 1.25;
+  padding: 0.12rem 0.45rem;
+  border: 1.5px solid currentColor;
+  border-radius: var(--sc-radius);
+  opacity: 0.82;
+}
+
+/* Board palette + multiplier (spike count) per card: TWS DLS TWS TLS DWS TLS. */
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 1) {
+  --sq-color: var(--sq-tw); /* triple word */
+}
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 2) {
+  --sq-color: var(--sq-dl); /* double letter */
+  --sq-burst: var(--burst-2);
+  color: var(--mag-black);
+}
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 3) {
+  --sq-color: var(--sq-tw); /* triple word */
+}
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 4) {
+  --sq-color: var(--sq-tl); /* triple letter */
+}
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 5) {
+  --sq-color: var(--sq-dw); /* double word */
+  --sq-burst: var(--burst-2);
+  color: var(--mag-black);
+}
+.md-typeset .grid.cards.premium > ul > li:nth-child(6n + 6) {
+  --sq-color: var(--sq-tl); /* triple letter */
+}
+
+/* --- The Status / Sources blockquote: an iridescent-blue rail --- */
+.md-typeset blockquote {
+  border-left: 4px solid var(--mag-blue);
+}
+
+/* --- Section headings get a blue underline (Azure) --- */
+.md-typeset h2 {
+  border-bottom: 2px solid var(--mag-blue);
+  padding-bottom: 0.2em;
+}
+
+/* --- Permalink anchor: a bookmark icon instead of the pilcrow (¶) --- */
+.md-typeset .headerlink {
+  display: inline-block;
+  width: 0.72em;
+  height: 0.72em;
+  vertical-align: -0.04em;
+  color: transparent;
+  background-color: var(--md-default-fg-color--lighter);
+  -webkit-mask: url("data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'><path%20d='M17,3H7A2,2%200%200,0%205,5V21L12,18L19,21V5C19,3.89%2018.1,3%2017,3Z'/></svg>")
+    center / contain no-repeat;
+  mask: url("data:image/svg+xml,<svg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'><path%20d='M17,3H7A2,2%200%200,0%205,5V21L12,18L19,21V5C19,3.89%2018.1,3%2017,3Z'/></svg>")
+    center / contain no-repeat;
+}
+.md-typeset .headerlink:hover {
+  background-color: var(--mag-blue);
+}
+
+/* --- Version (matches the MAGPIE wordmark) + small build stamp in header --- */
+.md-header__topic .md-version {
+  margin-left: 0.5rem;
+  font-family: "Schibsted Grotesk", system-ui, sans-serif;
+  font-weight: 700;
+  font-size: inherit; /* same size as the MAGPIE title */
+}
+.md-header__topic .md-build {
+  margin-left: 0.5rem;
+  font-family: var(--md-code-font);
+  font-size: 0.6rem;
+  font-weight: 400;
+  letter-spacing: 0;
+  opacity: 0.6;
+  white-space: nowrap;
+}

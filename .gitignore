@@ -32,8 +32,16 @@ playwright/.cache/
 # Python venv
 venv/
 
+# MkDocs
+site/
+.cache/
+
 # Compiled libraries
 *.a
 PR_DESCRIPTION.md
 PR_TITLE.txt
 SPEEDUP_NOTES.md
+
+# Python bytecode
+__pycache__/
+*.pyc

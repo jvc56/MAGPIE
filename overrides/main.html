@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+
+<!-- Stamp the build (date + commit) so the header version badge can read it. -->
+{% block extrahead %}
+  {{ super() }}
+  <!-- Warm up the font connections early to shrink the load flicker. -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <meta name="magpie-version" content="v{{ config.extra.app_version }}" />
+  <meta
+    name="magpie-build"
+    content="{{ config.extra.build_date }} · {{ config.extra.build_rev }}"
+  />
+{% endblock %}
