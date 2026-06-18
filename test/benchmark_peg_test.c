@@ -84,6 +84,13 @@ typedef struct PegBenchOutcome {
   // for getting further within a partial stage, not just for completing one.
   int deep_stage; // index of the deepest stage reached (n_stage_history - 1)
   int deep_work;  // scenario-completions in that deepest stage
+  // Per-arm coverage: how many stages the arm completed, the root candidate
+  // field size (same for both arms on a position), and the total candidate-
+  // scenario evaluations across all stages (the real "how much did this arm
+  // compute" number, which differs sharply between nested and rollout).
+  int n_stages;    // stages reached (n_stage_history)
+  int root_cands;  // stage-0 candidate field size
+  int total_evals; // sum of cands_done across all stages
   // Leaf-rebuild accounting (reprune arm only; zero when disabled).
   double build_enum_s;
   double build_construct_s;
@@ -192,11 +199,16 @@ static PegBenchOutcome run_one_peg(const Config *config,
                    sizeof(outcome.move_str));
     outcome.stage = result.last_completed_stage;
     outcome.stage_partial = result.last_stage_partial;
+    outcome.n_stages = result.n_stage_history;
     if (result.n_stage_history > 0) {
       const PegStageSnapshot *deep =
           &result.stage_history[result.n_stage_history - 1];
       outcome.deep_stage = result.n_stage_history - 1;
       outcome.deep_work = deep->cands_done;
+      outcome.root_cands = result.stage_history[0].field_size;
+      for (int s = 0; s < result.n_stage_history; s++) {
+        outcome.total_evals += result.stage_history[s].cands_done;
+      }
     }
     outcome.build_enum_s = (double)result.build_enum_ns / 1e9;
     outcome.build_construct_s = (double)result.build_construct_ns / 1e9;
@@ -919,14 +931,17 @@ void test_peg_reprune_gap(void) {
 
   // Nested mode (PEG_GAP_NESTED=1): A = nested non-emptier lookahead, B = plain
   // rollout (both reprune-on), and the oracle is an EXHAUSTIVE nested solve
-  // (stride 1, no caps) so it scores both arms' moves with full nested fidelity.
-  const bool nested = getenv("PEG_GAP_NESTED") && atoi(getenv("PEG_GAP_NESTED"));
+  // (stride 1, no caps) so it scores both arms' moves with full nested
+  // fidelity.
+  const bool nested =
+      getenv("PEG_GAP_NESTED") && atoi(getenv("PEG_GAP_NESTED"));
   const int nest_cap =
       getenv("PEG_GAP_NEST_CAP") ? atoi(getenv("PEG_GAP_NEST_CAP")) : 0;
   const int nest_stride =
       getenv("PEG_GAP_NEST_STRIDE") ? atoi(getenv("PEG_GAP_NEST_STRIDE")) : 1;
-  const int nest_maxdepth =
-      getenv("PEG_GAP_NEST_MAXDEPTH") ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH")) : 0;
+  const int nest_maxdepth = getenv("PEG_GAP_NEST_MAXDEPTH")
+                                ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH"))
+                                : 0;
 
   PegBenchConfig cfg_on = {.name = "reprune",
                            .num_threads = threads,
@@ -954,7 +969,8 @@ void test_peg_reprune_gap(void) {
     cfg_on.nested_stride = nest_stride;
     cfg_on.nested_max_depth = nest_maxdepth;
     cfg_off.name = "rollout";
-    cfg_off.reprune_disabled = false; // both arms reprune; differ only in nesting
+    cfg_off.reprune_disabled =
+        false; // both arms reprune; differ only in nesting
     cfg_off.nested_enabled = false;
     cfg_oracle.name = "oracle-nested";
     cfg_oracle.nested_enabled = true; // exhaustive nested: stride 1, no caps
@@ -1041,14 +1057,15 @@ void test_peg_reprune_gap(void) {
           off_better++;
         }
       }
-      // Per-position: timing + completed stage (+'p' if that stage was partial)
-      // + deepest-stage scenario-work (w) for both arms, the chosen moves, and
-      // the oracle gap on disagreements. 'w' credits partial-stage progress.
-      printf("[gap] bag=%d pos=%3d rp[%.2fs s%d%s w%-5d %-13s] "
-             "norp[%.2fs s%d%s w%-5d %-13s] %s gap=%+.4f\n",
-             bag, i, a.elapsed, a.stage, a.stage_partial ? "p" : "",
-             a.deep_work, a.move_str, b.elapsed, b.stage,
-             b.stage_partial ? "p" : "", b.deep_work, b.move_str,
+      // Per-position: rc = root candidate field (same for both arms). Per arm:
+      // elapsed, st = stages reached (+'p' if the deepest was partial), ev =
+      // total candidate-scenario evaluations (coverage), the chosen move, and
+      // the oracle gap on disagreements.
+      printf("[gap] bag=%d pos=%3d rc%-3d rp[%.2fs st%d%s ev%-6d %-13s] "
+             "norp[%.2fs st%d%s ev%-6d %-13s] %s gap=%+.4f\n",
+             bag, i, a.root_cands, a.elapsed, a.n_stages,
+             a.stage_partial ? "p" : "", a.total_evals, a.move_str, b.elapsed,
+             b.n_stages, b.stage_partial ? "p" : "", b.total_evals, b.move_str,
              agree ? "AGREE" : "DIFFER", gap);
       (void)fflush(stdout);
     }
@@ -1081,9 +1098,15 @@ void test_gen_peg_more(void) {
     const int bag = atoi(getenv("PEG_GEN_BAG"));
     const int count =
         getenv("PEG_GEN_COUNT") ? atoi(getenv("PEG_GEN_COUNT")) : 75;
+    // PEG_GEN_SEED picks a fresh, non-overlapping seed; default is the fixed
+    // per-bag seed. PEG_GEN_APPEND=0 overwrites instead of appending.
+    const uint64_t seed = getenv("PEG_GEN_SEED")
+                              ? strtoull(getenv("PEG_GEN_SEED"), NULL, 10)
+                              : (uint64_t)bag * 1010101 + 777;
+    const bool append =
+        !(getenv("PEG_GEN_APPEND") && atoi(getenv("PEG_GEN_APPEND")) == 0);
     snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
-    generate_peg_cgps((uint64_t)bag * 1010101 + 777, bag, count, f,
-                      /*append=*/true, /*contested_only=*/true);
+    generate_peg_cgps(seed, bag, count, f, append, /*contested_only=*/true);
     return;
   }
   snprintf(f, sizeof(f), "%s/random_2peg.txt", dir);
