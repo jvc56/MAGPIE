@@ -484,6 +484,56 @@ void test_kwg_tail_merge(void) {
   config_destroy(config);
 }
 
+// Builds the CSW21 DAWG with KWG_MAKER_MERGE_TAIL and the child-reordering
+// KWG_MAKER_MERGE_TAIL_REORDER, confirms the reordered DAWG accepts the exact
+// same word SET (child order now differs by design, so it is compared as a
+// sorted set, not position-by-position), that every node is reachable, and
+// reports the extra node-count savings from reordering.
+void test_kwg_tail_reorder(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+
+  KWG *tail_kwg =
+      make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_TAIL);
+  KWG *reorder_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG,
+                                         KWG_MAKER_MERGE_TAIL_REORDER);
+
+  const int tail_nodes = kwg_get_number_of_nodes(tail_kwg);
+  const int reorder_nodes = kwg_get_number_of_nodes(reorder_kwg);
+  printf("kwg tail reorder (DAWG): tail=%d nodes, reorder=%d nodes (saved %d, "
+         "%.2f%%)\n",
+         tail_nodes, reorder_nodes, tail_nodes - reorder_nodes,
+         100.0 * (tail_nodes - reorder_nodes) / tail_nodes);
+  assert(reorder_nodes <= tail_nodes);
+
+  // Reordered DAWG must encode the identical word set.
+  bool *nodes_reached = calloc_or_die(reorder_nodes, sizeof(bool));
+  DictionaryWordList *encoded = dictionary_word_list_create();
+  kwg_write_words(reorder_kwg, kwg_get_dawg_root_node_index(reorder_kwg),
+                  encoded, nodes_reached);
+  // Compare as sets: reordering changes the DFS emission order.
+  dictionary_word_list_sort(words);
+  dictionary_word_list_sort(encoded);
+  assert_word_lists_are_equal(words, encoded);
+
+  // Every node (past the two root pointers) must be reachable: no orphans.
+  for (int node_idx = 2; node_idx < reorder_nodes; node_idx++) {
+    assert(nodes_reached[node_idx]);
+  }
+
+  free(nodes_reached);
+  dictionary_word_list_destroy(encoded);
+  dictionary_word_list_destroy(words);
+  kwg_destroy(reorder_kwg);
+  kwg_destroy(tail_kwg);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 // Builds a GADDAG from `word_list` with each merge style, timing build speed.
 // This is the endgame/PEG word-prune code path (make_kwg_from_words_small,
 // OUTPUT_GADDAG), where build time — not node count — is what matters.

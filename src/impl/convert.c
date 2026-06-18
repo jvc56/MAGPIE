@@ -125,15 +125,18 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
       return;
     }
     kwg_maker_output_t output_type = KWG_MAKER_OUTPUT_DAWG_AND_GADDAG;
-    if (conversion_type == CONVERT_TEXT2DAWG) {
+    if (conversion_type == CONVERT_TEXT2DAWG ||
+        conversion_type == CONVERT_TEXT2DAWG_TAIL_REORDER) {
       output_type = KWG_MAKER_OUTPUT_DAWG;
     } else if (conversion_type == CONVERT_TEXT2GADDAG) {
       output_type = KWG_MAKER_OUTPUT_GADDAG;
     }
-    const kwg_maker_merge_t merge_type =
-        (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE)
-            ? KWG_MAKER_MERGE_TAIL
-            : KWG_MAKER_MERGE_EXACT;
+    kwg_maker_merge_t merge_type = KWG_MAKER_MERGE_EXACT;
+    if (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE) {
+      merge_type = KWG_MAKER_MERGE_TAIL;
+    } else if (conversion_type == CONVERT_TEXT2DAWG_TAIL_REORDER) {
+      merge_type = KWG_MAKER_MERGE_TAIL_REORDER;
+    }
     KWG *kwg = make_kwg_from_words(strings, output_type, merge_type);
     kwg_write_to_file(kwg, kwg_output_filename, error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -160,6 +163,7 @@ void convert_with_names(const LetterDistribution *ld,
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||
       (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE) ||
+      (conversion_type == CONVERT_TEXT2DAWG_TAIL_REORDER) ||
       (conversion_type == CONVERT_TEXT2WORDMAP)) {
     DictionaryWordList *strings = dictionary_word_list_create();
     convert_from_text_with_dwl(ld, conversion_type, data_paths, input_name,
@@ -263,6 +267,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_TEXT2KWG;
   } else if (strings_equal(conversion_type_string, "text2kwgtailmerge")) {
     conversion_type = CONVERT_TEXT2KWG_TAIL_MERGE;
+  } else if (strings_equal(conversion_type_string, "text2dawgtailreorder")) {
+    conversion_type = CONVERT_TEXT2DAWG_TAIL_REORDER;
   } else if (strings_equal(conversion_type_string, "dawg2text")) {
     conversion_type = CONVERT_DAWG2TEXT;
   } else if (strings_equal(conversion_type_string, "gaddag2text")) {

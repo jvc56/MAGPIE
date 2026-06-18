@@ -159,6 +159,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchns3v3", test_benchmark_nonstuck_3v3},
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
+    {"kwgtailreorder", test_kwg_tail_reorder},
     {"kwgmergebench", test_kwg_merge_build_bench},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
