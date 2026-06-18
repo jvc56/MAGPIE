@@ -66,7 +66,7 @@ static void check_packed_mode(const KWG *reorder_kwg,
   }
 
   // File round-trip.
-  const char *filename = "dawg_packed_round_trip_test.pdwg";
+  const char *filename = "dawg_packed_round_trip_test.pdawg";
   ErrorStack *error_stack = error_stack_create();
   dawg_packed_write_to_file(dp, filename, error_stack);
   assert(error_stack_is_empty(error_stack));
@@ -100,6 +100,30 @@ static void check_packed_mode(const KWG *reorder_kwg,
   dawg_packed_destroy(loaded);
   error_stack_destroy(error_stack);
   dawg_packed_destroy(dp);
+}
+
+// A corrupt header (here, an out-of-range arc_bits) must be rejected cleanly
+// rather than triggering a huge allocation or an out-of-range shift.
+static void assert_rejects_bad_header(void) {
+  const char *filename = "dawg_packed_bad_header_test.pdawg";
+  uint8_t header[DAWG_PACKED_HEADER_BYTES];
+  memset(header, 0, sizeof(header));
+  memcpy(header, DAWG_PACKED_MAGIC, 4);
+  header[4] = DAWG_PACKED_VERSION;
+  header[5] = 5;  // tile_bits
+  header[6] = 99; // arc_bits: out of range
+  header[7] = 24; // stored_width
+  ErrorStack *error_stack = error_stack_create();
+  FILE *stream = fopen_safe(filename, "wb", error_stack);
+  assert(error_stack_is_empty(error_stack));
+  fwrite_or_die(header, 1, sizeof(header), stream, "bad packed dawg header");
+  fclose_or_die(stream);
+
+  const DawgPacked *dp = dawg_packed_read_from_file(filename, error_stack);
+  assert(dp == NULL);
+  assert(!error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
+  (void)remove(filename);
 }
 
 void test_dawg_packed(void) {
@@ -140,6 +164,7 @@ void test_dawg_packed(void) {
 
   check_packed_mode(reorder_kwg, words, false);
   check_packed_mode(reorder_kwg, words, true);
+  assert_rejects_bad_header();
 
   dictionary_word_list_destroy(words);
   kwg_destroy(reorder_kwg);

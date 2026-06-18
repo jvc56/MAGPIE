@@ -94,7 +94,9 @@ static inline uint32_t dawg_packed_get_node(const DawgPacked *dp,
   const uint8_t raw_width = (uint8_t)(dp->arc_bits + 2 + dp->tile_bits);
   const uint32_t value =
       dawg_packed_bits_read(dp->node_bits, bit_off, raw_width);
-  const uint32_t arc = value & ((1U << dp->arc_bits) - 1U);
+  // 64-bit shift keeps the mask well-defined even for an out-of-range
+  // arc_bits; dawg_packed_read_from_file additionally rejects such headers.
+  const uint32_t arc = value & (uint32_t)(((uint64_t)1 << dp->arc_bits) - 1U);
   const uint32_t is_end = (value >> dp->arc_bits) & 1U;
   const uint32_t accepts = (value >> (dp->arc_bits + 1)) & 1U;
   const uint32_t tile = value >> (dp->arc_bits + 2);
@@ -123,9 +125,10 @@ static inline size_t dawg_packed_get_node_bytes(const DawgPacked *dp) {
 
 void dawg_packed_destroy(DawgPacked *dp);
 
-// Builds a packed DAWG from a DAWG-only KWG. prefer_byte_alignment requests the
-// byte-aligned strategy when its overhead is small; otherwise (or when it would
-// not help) the bit-packed strategy is used.
+// Builds a packed DAWG from a DAWG-only KWG. When prefer_byte_alignment is
+// true, stored_width is rounded up to a whole number of bytes (whole-byte
+// nodes, cheaper to decode on 8-bit CPUs); when false, nodes are bit-packed at
+// the minimal width.
 DawgPacked *dawg_packed_create_from_kwg(const KWG *kwg,
                                         bool prefer_byte_alignment);
 

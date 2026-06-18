@@ -13,6 +13,14 @@
 #include <stdlib.h>
 #include <string.h>
 
+enum {
+  // A decoded node is a 32-bit KWG word: the tile occupies bits 24..31 (8
+  // bits) and the arc index bits 0..21 (KWG_ARC_INDEX_MASK, 22 bits).
+  DAWG_PACKED_MAX_TILE_BITS = 8,
+  DAWG_PACKED_MAX_ARC_BITS = 22,
+  DAWG_PACKED_MAX_NODE_BITS = 32,
+};
+
 // Number of bits needed to represent every value in [0, max_value].
 static inline uint8_t bits_needed(uint32_t max_value) {
   uint8_t bits = 1;
@@ -126,6 +134,27 @@ DawgPacked *dawg_packed_read_from_file(const char *filename,
   dp->byte_aligned = (header[8] & DAWG_PACKED_FLAG_BYTE_ALIGNED) != 0;
   memcpy(&dp->node_count, header + 12, sizeof(uint32_t));
   memcpy(&dp->root_index, header + 16, sizeof(uint32_t));
+
+  // Reject corrupt/malicious headers before trusting the fields for sizing,
+  // allocation, and bit-shift widths. arc_bits <= 22 keeps node decoding
+  // shift-safe; node_count <= 2^arc_bits (arc indices must address every node)
+  // bounds the allocation; stored_width in [raw_width, 32] keeps reads in
+  // range.
+  const uint8_t raw_width = (uint8_t)(dp->tile_bits + 2 + dp->arc_bits);
+  if (dp->tile_bits < 1 || dp->tile_bits > DAWG_PACKED_MAX_TILE_BITS ||
+      dp->arc_bits < 1 || dp->arc_bits > DAWG_PACKED_MAX_ARC_BITS ||
+      dp->stored_width < raw_width ||
+      dp->stored_width > DAWG_PACKED_MAX_NODE_BITS || dp->node_count == 0 ||
+      dp->node_count > (1U << dp->arc_bits) ||
+      dp->root_index >= dp->node_count) {
+    fclose_or_die(stream);
+    free(dp);
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONVERT_MALFORMED_KWG,
+        get_formatted_string("invalid packed dawg header fields in file: %s",
+                             filename));
+    return NULL;
+  }
 
   const size_t total_bits = (size_t)dp->node_count * dp->stored_width;
   dp->node_bytes = (total_bits + 7U) / 8U;
