@@ -938,6 +938,33 @@ static int peg_nested_depth_cap(const PegWorker *worker) {
   return PEG_MAX_NEST_DEPTH - 1;
 }
 
+// The nested recursion can be deep and serial, so it must observe the same stop
+// signals the outer solve does — the wall-clock deadline and a user interrupt —
+// at every node and between candidates, not just hand a deadline to the leaf
+// endgame. Once stopped, nodes degrade to the cheap greedy floor immediately.
+static bool peg_nested_should_stop(const PegWorker *worker,
+                                   int64_t deadline_ns) {
+  if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+    return true;
+  }
+  return worker->thread_control != NULL &&
+         thread_control_get_status(worker->thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
+// Greedy-rollout floor value (on-turn perspective) on a scratch copy, since the
+// playout mutates the game it walks.
+static int32_t peg_nested_floor(PegWorker *worker, int level, Game *game,
+                                int on_turn) {
+  Game **slot = &worker->nest_scratch[level];
+  if (*slot == NULL) {
+    *slot = game_duplicate(game);
+  } else {
+    game_copy(*slot, game);
+  }
+  return peg_greedy_playout(*slot, on_turn, worker->playout_ml);
+}
+
 // Exact endgame value at an emptier nested leaf, from the on-turn perspective.
 // Plies are capped at min(lookahead, nested_emptier_ply_cap) so emptiers
 // reached deep in the lookahead need not get the full depth the top-level
@@ -1106,23 +1133,19 @@ static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
     const Player *op = game_get_player(game, 1 - on_turn);
     return equity_to_int(player_get_score(me) - player_get_score(op));
   }
+  // Stop signal is checked BEFORE the emptier endgame: once the budget is spent
+  // (or the user interrupts) even the exact base case degrades to the cheap
+  // floor, so the whole nested subtree collapses fast instead of running every
+  // remaining emptier leaf to a full solve.
+  if (peg_nested_should_stop(worker, deadline_ns)) {
+    return peg_nested_floor(worker, level, game, on_turn);
+  }
   if (bag_get_letters(game_get_bag(game)) == 0) {
     return peg_nested_endgame_value(worker, game, on_turn, lookahead,
                                     deadline_ns);
   }
-  // Floor: budget/depth spent, or a deadline hit — fall back to the greedy
-  // rollout on a scratch copy (the playout mutates the game it walks).
-  const bool past_deadline =
-      deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns;
-  if (lookahead <= 0 || level >= peg_nested_depth_cap(worker) ||
-      past_deadline) {
-    Game **slot = &worker->nest_scratch[level];
-    if (*slot == NULL) {
-      *slot = game_duplicate(game);
-    } else {
-      game_copy(*slot, game);
-    }
-    return peg_greedy_playout(*slot, on_turn, worker->playout_ml);
+  if (lookahead <= 0 || level >= peg_nested_depth_cap(worker)) {
+    return peg_nested_floor(worker, level, game, on_turn);
   }
   // Generate the on-turn player's candidates (WMP path: override_kwg = NULL).
   if (worker->nest_ml[level] == NULL) {
@@ -1144,13 +1167,7 @@ static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
   generate_moves(&ga);
   const int n = move_list_get_count(ml);
   if (n == 0) {
-    Game **slot = &worker->nest_scratch[level];
-    if (*slot == NULL) {
-      *slot = game_duplicate(game);
-    } else {
-      game_copy(*slot, game);
-    }
-    return peg_greedy_playout(*slot, on_turn, worker->playout_ml);
+    return peg_nested_floor(worker, level, game, on_turn);
   }
   move_list_sort_moves(ml);
   int cap = n;
@@ -1162,6 +1179,12 @@ static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
   peg_compute_unseen(game, on_turn, unseen);
   int32_t best = INT32_MIN;
   for (int i = 0; i < cap; i++) {
+    // Between candidates, bail on the stop signal: return the best move found
+    // so far (candidates are equity-sorted, so the strongest are evaluated
+    // first).
+    if (i > 0 && peg_nested_should_stop(worker, deadline_ns)) {
+      break;
+    }
     const Move *cand = move_list_get_move(ml, i);
     const int32_t value =
         peg_nested_cand_value(worker, level, game, on_turn, cand, unseen,
