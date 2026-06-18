@@ -186,6 +186,13 @@ typedef struct PegArgs {
   // re-pruning on vs off in one binary. Default false (re-pruning on).
   bool reprune_disabled;
 
+  // INVESTIGATION (do not merge): when > 0, restrict the generated root
+  // candidate field to plays of at most this many tiles (pass/exchange kept by
+  // tile count). Shrinks an exhaustive to-completion solve so per-candidate
+  // build-cost economics can be measured cheaply. Ignored when only_moves is
+  // set. Default 0 (no restriction).
+  int cand_max_tiles_played;
+
   // Optional progress callbacks. NULL to skip.
   PegOnStageStart on_stage_start;
   PegOnCandDone on_cand_done;
@@ -277,6 +284,15 @@ typedef struct PegResult {
   // peg_solve. Index i = stage i; n_stage_history grows as stages complete.
   int n_stage_history;
   PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
+
+  // INVESTIGATION: per-solve leaf-rebuild accounting for build-cost break-even
+  // analysis. Summed across all leaf KWGs the prune cache built this solve.
+  // Zero when re-pruning is disabled. enum = generate_possible_words time,
+  // construct = make_kwg_from_words_small time.
+  int64_t build_enum_ns;
+  int64_t build_construct_ns;
+  int64_t build_n;          // number of leaf KWGs built
+  int64_t build_total_words; // summed pruned word counts (avg = /build_n)
 } PegResult;
 
 // Per-scenario detail row.
@@ -358,6 +374,10 @@ typedef struct PegPollSnapshot {
 
 PegPoll *peg_poll_create(void);
 void peg_poll_destroy(PegPoll *poll);
+// Clear the live view back to its just-created state. Call before reusing one
+// poll across multiple peg_solve calls so per-solve progress (stage history,
+// cands_done) does not accumulate from prior solves.
+void peg_poll_reset(PegPoll *poll);
 // Copy a consistent snapshot of the current live view into *out (under lock).
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out);
 

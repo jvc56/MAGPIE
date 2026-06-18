@@ -86,6 +86,11 @@ typedef struct PegPruneCache {
   int count;
   bool
       disabled; // INVESTIGATION: when set, leaves use the root prune (no chain)
+  // INVESTIGATION: per-solve leaf-rebuild accounting (build-cost break-even).
+  _Atomic int64_t enum_ns;      // time in generate_possible_words
+  _Atomic int64_t construct_ns; // time in make_kwg_from_words_small
+  _Atomic int64_t n_builds;     // number of leaf KWGs built
+  _Atomic int64_t total_words;  // summed pruned word counts (avg leaf KWG size)
 } PegPruneCache;
 
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
@@ -125,6 +130,16 @@ PegPoll *peg_poll_create(void) {
   memset(&poll->s, 0, sizeof(poll->s));
   poll->s.stage = -1;
   return poll;
+}
+
+void peg_poll_reset(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  memset(&poll->s, 0, sizeof(poll->s));
+  poll->s.stage = -1;
+  cpthread_mutex_unlock(&poll->mutex);
 }
 
 void peg_poll_destroy(PegPoll *poll) {
@@ -774,6 +789,10 @@ static PegPruneCache *peg_prune_cache_create(void) {
   cache->count = 0;
   cache->keys = calloc_or_die((size_t)cache->capacity, sizeof(uint64_t));
   cache->values = calloc_or_die((size_t)cache->capacity, sizeof(KWG *));
+  atomic_store(&cache->enum_ns, 0);
+  atomic_store(&cache->construct_ns, 0);
+  atomic_store(&cache->n_builds, 0);
+  atomic_store(&cache->total_words, 0);
   return cache;
 }
 
@@ -825,9 +844,17 @@ static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
 
   const KWG *parent_kwg = game_get_effective_kwg(game, mover_idx);
   DictionaryWordList *word_list = dictionary_word_list_create();
+  const int64_t t0 = ctimer_monotonic_ns();
   generate_possible_words(game, parent_kwg, word_list);
+  const int64_t t1 = ctimer_monotonic_ns();
   KWG *built = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
                                          KWG_MAKER_MERGE_EXACT);
+  const int64_t t2 = ctimer_monotonic_ns();
+  atomic_fetch_add(&cache->enum_ns, t1 - t0);
+  atomic_fetch_add(&cache->construct_ns, t2 - t1);
+  atomic_fetch_add(&cache->n_builds, 1);
+  atomic_fetch_add(&cache->total_words,
+                   dictionary_word_list_get_count(word_list));
   dictionary_word_list_destroy(word_list);
 
   cpthread_mutex_lock(&cache->mutex);
@@ -1846,10 +1873,24 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         .stage_idx = 0,
     };
 
-    // Stage 0: greedy evaluation of every candidate.
-    for (int i = 0; i < n_cands; i++) {
-      moves[i] = args->n_only_moves > 0 ? args->only_moves[i]
-                                        : move_list_get_move(cand_ml, i);
+    // Stage 0: greedy evaluation of every candidate. When cand_max_tiles_played
+    // is set (investigation), drop generated candidates that play more tiles
+    // than the cap, shrinking the field for a cheap to-completion solve.
+    if (args->n_only_moves > 0) {
+      for (int i = 0; i < n_cands; i++) {
+        moves[i] = args->only_moves[i];
+      }
+    } else {
+      int kept = 0;
+      for (int i = 0; i < n_cands; i++) {
+        const Move *cand = move_list_get_move(cand_ml, i);
+        if (args->cand_max_tiles_played > 0 &&
+            move_get_tiles_played(cand) > args->cand_max_tiles_played) {
+          continue;
+        }
+        moves[kept++] = cand;
+      }
+      n_cands = kept;
     }
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
@@ -2140,6 +2181,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   free(workers);
   // Safe now that every worker's scratch game (which referenced cached KWGs via
   // its override pointer) has been destroyed.
+  out->build_enum_ns = atomic_load(&prune_cache->enum_ns);
+  out->build_construct_ns = atomic_load(&prune_cache->construct_ns);
+  out->build_n = atomic_load(&prune_cache->n_builds);
+  out->build_total_words = atomic_load(&prune_cache->total_words);
   peg_prune_cache_destroy(prune_cache);
   if (pool) {
     peg_pool_destroy(pool);

@@ -58,6 +58,8 @@ typedef struct PegBenchConfig {
   const int *stage_top_k;     // NULL = built-in default cascade
   int num_stages;             // 0 = default cascade length
   bool reprune_disabled;      // INVESTIGATION: turn the leaf prune cache off
+  int cand_max_tiles_played;  // INVESTIGATION: 0 = all; N = cap root cand tiles
+  PegPoll *poll; // INVESTIGATION: non-NULL = live mode (publishes partial stages)
 } PegBenchConfig;
 
 // Result of solving one position with one fast config.
@@ -65,8 +67,37 @@ typedef struct PegBenchOutcome {
   char move_str[32];
   Move move; // kept so the oracle can re-evaluate it via pnoprune
   double elapsed;
+  int stage;         // last_completed_stage reached
+  bool stage_partial; // true if that stage was cut off mid-way (partial top-K)
+  // Deepest stage REACHED (>= stage; one beyond when partial) and its progress.
+  // deep_work is the stage's cands_done counter, which is bumped per candidate
+  // *scenario* completion (peg.c) — a scenario-granular measure of how far into
+  // the stage the arm got. It is comparable across arms: both evaluate the same
+  // candidates over the same scenario set at each stage, so the only difference
+  // is how much of that work each finished in the budget. This credits reprune
+  // for getting further within a partial stage, not just for completing one.
+  int deep_stage;    // index of the deepest stage reached (n_stage_history - 1)
+  int deep_work;     // scenario-completions in that deepest stage
+  // Leaf-rebuild accounting (reprune arm only; zero when disabled).
+  double build_enum_s;
+  double build_construct_s;
+  int64_t build_n;
+  int64_t build_total_words;
   bool ok;
 } PegBenchOutcome;
+
+// How far an arm got, crediting partial-stage progress: deeper stage wins; at the
+// same stage, more scenario work finished wins. Returns >0 if `a` got further
+// than `b`, <0 if `b` got further, 0 if tied.
+static int peg_progress_cmp(const PegBenchOutcome *a, const PegBenchOutcome *b) {
+  if (a->deep_stage != b->deep_stage) {
+    return a->deep_stage > b->deep_stage ? 1 : -1;
+  }
+  if (a->deep_work != b->deep_work) {
+    return a->deep_work > b->deep_work ? 1 : -1;
+  }
+  return 0;
+}
 
 // Oracle outcome for one position: the best move it found plus the oracle's
 // value of A's and B's chosen moves (matched by move string; -1 if not found).
@@ -114,6 +145,8 @@ static void fill_peg_args(PegArgs *args, const Config *config,
   args->stage_top_k = cfg->num_stages > 0 ? cfg->stage_top_k : NULL;
   args->num_stages = cfg->num_stages;
   args->reprune_disabled = cfg->reprune_disabled;
+  args->cand_max_tiles_played = cfg->cand_max_tiles_played;
+  args->poll = cfg->poll;
 }
 
 static void move_to_string(const Game *game, const Move *move, char *out,
@@ -129,6 +162,9 @@ static PegBenchOutcome run_one_peg(const Config *config,
                                    const PegBenchConfig *cfg) {
   PegArgs args;
   fill_peg_args(&args, config, cfg);
+  // Reset the (reused) live poll so this solve's stage history / cands_done
+  // start from zero rather than accumulating from prior solves.
+  peg_poll_reset(args.poll);
   PegResult result;
   ErrorStack *err = error_stack_create();
   Timer timer;
@@ -142,6 +178,18 @@ static PegBenchOutcome run_one_peg(const Config *config,
     outcome.move = result.best_move;
     move_to_string(config_get_game(config), &outcome.move, outcome.move_str,
                    sizeof(outcome.move_str));
+    outcome.stage = result.last_completed_stage;
+    outcome.stage_partial = result.last_stage_partial;
+    if (result.n_stage_history > 0) {
+      const PegStageSnapshot *deep =
+          &result.stage_history[result.n_stage_history - 1];
+      outcome.deep_stage = result.n_stage_history - 1;
+      outcome.deep_work = deep->cands_done;
+    }
+    outcome.build_enum_s = (double)result.build_enum_ns / 1e9;
+    outcome.build_construct_s = (double)result.build_construct_ns / 1e9;
+    outcome.build_n = result.build_n;
+    outcome.build_total_words = result.build_total_words;
     outcome.ok = true;
   }
   error_stack_destroy(err);
@@ -680,6 +728,138 @@ void test_peg_bench_fixture(void) {
   config_destroy(config);
 }
 
+// INVESTIGATION ONLY (do not merge): build-cost break-even. Runs re-pruning ON
+// vs OFF to completion (or a fixed budget) on the same positions and decomposes
+// the reprune arm's wall time into leaf-build (enum + construct) vs search. The
+// root prune is common to both arms, so it cancels in the search delta:
+//   search_on  = wall_on - build           (move-finding time, reprune KWGs)
+//   dsearch    = wall_off - search_on       (>0 => move finding is FASTER with
+//                                            reprune; the root build cancels)
+//   net        = wall_on - wall_off         (>0 => reprune slower overall)
+// Break-even construction speedup X makes (wall_on - construct*(1 - 1/X)) = wall_off:
+//   X = construct / (construct - net)       (valid when 0 < net < construct;
+//   net<=0 => already ahead; net>=construct => construction alone can't cover,
+//   enum cost also exceeds the search saving).
+// Env: PEG_BE_DIR, PEG_BE_BAG (default 2), PEG_BE_MAX (default 5),
+// PEG_BE_TLIM (default 0 = run to completion).
+void test_peg_build_breakeven(void) {
+  log_set_level(LOG_FATAL);
+  const int bag = getenv("PEG_BE_BAG") ? atoi(getenv("PEG_BE_BAG")) : 2;
+  const int max_pos = getenv("PEG_BE_MAX") ? atoi(getenv("PEG_BE_MAX")) : 5;
+  const double tlim = getenv("PEG_BE_TLIM") ? atof(getenv("PEG_BE_TLIM")) : 0.0;
+  const int max_tiles =
+      getenv("PEG_BE_MAXTILES") ? atoi(getenv("PEG_BE_MAXTILES")) : 0;
+  const int threads = 8;
+  const char *dir =
+      getenv("PEG_BE_DIR") ? getenv("PEG_BE_DIR") : "notes/peg_positions";
+
+  PegBenchConfig cfg_on = {.name = "reprune",
+                           .num_threads = threads,
+                           .time_budget_seconds = tlim,
+                           .scenario_stride = 1,
+                           .stage_top_k = NULL,
+                           .num_stages = 0,
+                           .reprune_disabled = false,
+                           .cand_max_tiles_played = max_tiles};
+  PegBenchConfig cfg_off = cfg_on;
+  cfg_off.reprune_disabled = true;
+
+  printf("[pegbe] bag=%d max=%d tlim=%.0f (0=to-completion) maxtiles=%d "
+         "threads=%d\n",
+         bag, max_pos, tlim, max_tiles, threads);
+  (void)fflush(stdout);
+
+  char file[256];
+  snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
+  FILE *fp = fopen(file, "re");
+  if (!fp) {
+    printf("[pegbe] no fixture %s\n", file);
+    return;
+  }
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  char (*lines)[4096] = malloc((size_t)max_pos * 4096);
+  assert(lines);
+  int n = 0;
+  while (n < max_pos && fgets(lines[n], 4096, fp)) {
+    size_t l = strlen(lines[n]);
+    if (l > 0 && lines[n][l - 1] == '\n') {
+      lines[n][l - 1] = '\0';
+    }
+    if (strlen(lines[n]) > 0) {
+      n++;
+    }
+  }
+  (void)fclose(fp);
+
+  double sum_on = 0, sum_off = 0, sum_enum = 0, sum_construct = 0;
+  int64_t sum_builds = 0, sum_words = 0;
+  for (int i = 0; i < n; i++) {
+    char *cmd = get_formatted_string("cgp %s", lines[i]);
+    exec_config_quiet(config, cmd);
+    PegBenchOutcome on = run_one_peg(config, &cfg_on);
+    // Reload the position (the solve mutates the scratch game's bag/racks) so
+    // the OFF arm solves the identical starting position.
+    exec_config_quiet(config, cmd);
+    PegBenchOutcome off = run_one_peg(config, &cfg_off);
+    free(cmd);
+    if (!on.ok || !off.ok) {
+      continue;
+    }
+    const double build = on.build_enum_s + on.build_construct_s;
+    const double search_on = on.elapsed - build;
+    const double dsearch = off.elapsed - search_on;
+    const double net = on.elapsed - off.elapsed;
+    sum_on += on.elapsed;
+    sum_off += off.elapsed;
+    sum_enum += on.build_enum_s;
+    sum_construct += on.build_construct_s;
+    sum_builds += on.build_n;
+    sum_words += on.build_total_words;
+    const double avg_words =
+        on.build_n ? (double)on.build_total_words / (double)on.build_n : 0.0;
+    printf("[pegbe] pos=%2d builds=%5lld avgwords=%6.0f enum=%.2f construct=%.2f"
+           " | wall_on=%.2f wall_off=%.2f search_on=%.2f dsearch=%+.2f net=%+.2f\n",
+           i, (long long)on.build_n, avg_words, on.build_enum_s,
+           on.build_construct_s, on.elapsed, off.elapsed, search_on, dsearch,
+           net);
+    (void)fflush(stdout);
+  }
+  const double build = sum_enum + sum_construct;
+  const double search_on = sum_on - build;
+  const double dsearch = sum_off - search_on;
+  const double net = sum_on - sum_off;
+  printf("[pegbe] TOTAL builds=%lld avgwords=%.0f enum=%.2fs construct=%.2fs "
+         "build=%.2fs\n",
+         (long long)sum_builds,
+         sum_builds ? (double)sum_words / (double)sum_builds : 0.0, sum_enum,
+         sum_construct, build);
+  printf("[pegbe] TOTAL wall_on=%.2fs wall_off=%.2fs search_on=%.2fs "
+         "dsearch=%+.2fs net=%+.2fs\n",
+         sum_on, sum_off, search_on, dsearch, net);
+  printf("[pegbe] move-finding %s with reprune (dsearch=%+.2fs, %.1f%% of "
+         "search_off)\n",
+         dsearch > 0 ? "FASTER" : "SLOWER", dsearch,
+         sum_off > 0 ? 100.0 * dsearch / sum_off : 0.0);
+  if (net <= 0) {
+    printf("[pegbe] break-even: reprune ALREADY net-faster (net=%+.2fs); no "
+           "construction speedup needed\n",
+           net);
+  } else if (net < sum_construct) {
+    printf("[pegbe] break-even: need construction %.2fx faster "
+           "(X = construct/(construct-net) = %.2f/%.2f)\n",
+           sum_construct / (sum_construct - net), sum_construct,
+           sum_construct - net);
+  } else {
+    printf("[pegbe] break-even: construction speedup ALONE cannot cover "
+           "(net=%.2fs >= construct=%.2fs; enum=%.2fs also exceeds saving)\n",
+           net, sum_construct, sum_enum);
+  }
+  (void)fflush(stdout);
+  free(lines);
+  config_destroy(config);
+}
+
 // INVESTIGATION ONLY (do not merge): A/B re-pruning ON vs OFF under a time
 // limit across 1..4-in-bag contested fixtures. Both arms use the same budget +
 // default cascade + full enumeration. When the two arms pick DIFFERENT moves, a
@@ -696,6 +876,11 @@ void test_peg_reprune_gap(void) {
       getenv("PEG_ORACLE_TLIM") ? atof(getenv("PEG_ORACLE_TLIM")) : 60.0;
   const int max_pos = getenv("PEG_GAP_MAX") ? atoi(getenv("PEG_GAP_MAX")) : 25;
   const int threads = 8;
+  // PEG_GAP_BAG: restrict to one bag size (1..4); 0 = all four.
+  const int only_bag = getenv("PEG_GAP_BAG") ? atoi(getenv("PEG_GAP_BAG")) : 0;
+  // Live-mode poll so the arms publish PARTIAL stages (the faster arm's extra
+  // in-budget candidates are credited). Reused across the sequential arm solves.
+  PegPoll *arm_poll = peg_poll_create();
 
   PegBenchConfig cfg_on = {.name = "reprune",
                            .num_threads = threads,
@@ -704,6 +889,7 @@ void test_peg_reprune_gap(void) {
                            .stage_top_k = NULL,
                            .num_stages = 0,
                            .reprune_disabled = false};
+  cfg_on.poll = arm_poll; // live mode -> partial stages used
   PegBenchConfig cfg_off = cfg_on;
   cfg_off.name = "noreprune";
   cfg_off.reprune_disabled = true;
@@ -719,9 +905,14 @@ void test_peg_reprune_gap(void) {
   printf("[gap] arm_tlim=%.0f oracle_tlim=%.0f max=%d\n", arm_tlim, oracle_tlim,
          max_pos);
   (void)fflush(stdout);
+  const char *dir =
+      getenv("PEG_GAP_DIR") ? getenv("PEG_GAP_DIR") : "notes/peg_positions";
   for (int bag = 1; bag <= 4; bag++) {
-    char file[128];
-    snprintf(file, sizeof(file), "notes/peg_positions/random_%dpeg.txt", bag);
+    if (only_bag != 0 && bag != only_bag) {
+      continue;
+    }
+    char file[256];
+    snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
     FILE *fp = fopen(file, "re");
     if (!fp) {
       printf("[gap] bag=%d: no fixture %s\n", bag, file);
@@ -746,37 +937,97 @@ void test_peg_reprune_gap(void) {
     int on_better = 0;
     int off_better = 0;
     double sum_gap = 0;
+    double sum_a_elapsed = 0;
+    double sum_b_elapsed = 0;
+    int rp_deeper = 0; // reprune reached a deeper completed stage
+    int norp_deeper = 0;
+    int rp_further = 0; // reprune got further crediting partial-stage candidates
+    int norp_further = 0;
     for (int i = 0; i < n; i++) {
       char *cmd = get_formatted_string("cgp %s", lines[i]);
       exec_config_quiet(config, cmd);
       free(cmd);
       PegBenchOutcome a = run_one_peg(config, &cfg_on);
       PegBenchOutcome b = run_one_peg(config, &cfg_off);
-      if (!a.ok || !b.ok || strcmp(a.move_str, b.move_str) == 0) {
-        continue; // agree (or error) -> no oracle
+      if (!a.ok || !b.ok) {
+        continue;
       }
-      disagree++;
-      OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
-      const double gap =
-          o.win_a - o.win_b; // reprune move minus no-reprune move
-      sum_gap += gap;
-      if (gap > 0) {
-        on_better++;
-      } else if (gap < 0) {
-        off_better++;
+      sum_a_elapsed += a.elapsed;
+      sum_b_elapsed += b.elapsed;
+      if (a.stage > b.stage) {
+        rp_deeper++;
+      } else if (b.stage > a.stage) {
+        norp_deeper++;
       }
-      printf("[gap] bag=%d pos=%2d reprune=%-13s noreprune=%-13s "
-             "win_rp=%.4f win_norp=%.4f gap=%+.4f\n",
-             bag, i, a.move_str, b.move_str, o.win_a, o.win_b, gap);
+      const int prog = peg_progress_cmp(&a, &b);
+      if (prog > 0) {
+        rp_further++;
+      } else if (prog < 0) {
+        norp_further++;
+      }
+      const bool agree = strcmp(a.move_str, b.move_str) == 0;
+      double gap = 0.0;
+      double win_a = -1.0;
+      double win_b = -1.0;
+      if (!agree) {
+        disagree++;
+        OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
+        win_a = o.win_a;
+        win_b = o.win_b;
+        gap = win_a - win_b; // reprune move minus no-reprune move
+        sum_gap += gap;
+        if (gap > 0) {
+          on_better++;
+        } else if (gap < 0) {
+          off_better++;
+        }
+      }
+      // Per-position: timing + completed stage (+'p' if that stage was partial)
+      // + deepest-stage scenario-work (w) for both arms, the chosen moves, and
+      // the oracle gap on disagreements. 'w' credits partial-stage progress.
+      printf("[gap] bag=%d pos=%3d rp[%.2fs s%d%s w%-5d %-13s] "
+             "norp[%.2fs s%d%s w%-5d %-13s] %s gap=%+.4f\n",
+             bag, i, a.elapsed, a.stage, a.stage_partial ? "p" : "", a.deep_work,
+             a.move_str, b.elapsed, b.stage, b.stage_partial ? "p" : "",
+             b.deep_work, b.move_str, agree ? "AGREE" : "DIFFER", gap);
       (void)fflush(stdout);
     }
-    printf(
-        "[gap] BAG %d SUMMARY: positions=%d disagreements=%d reprune_better=%d "
-        "noreprune_better=%d mean_gap=%+.4f\n",
-        bag, n, disagree, on_better, off_better,
-        disagree ? sum_gap / disagree : 0.0);
+    printf("[gap] BAG %d SUMMARY: positions=%d disagreements=%d reprune_better=%d "
+           "noreprune_better=%d mean_gap=%+.4f | mean_elapsed rp=%.2fs norp=%.2fs "
+           "| deeper_stage rp=%d norp=%d | further(stage,cands) rp=%d norp=%d\n",
+           bag, n, disagree, on_better, off_better,
+           disagree ? sum_gap / disagree : 0.0, n ? sum_a_elapsed / n : 0.0,
+           n ? sum_b_elapsed / n : 0.0, rp_deeper, norp_deeper, rp_further,
+           norp_further);
     (void)fflush(stdout);
     free(lines);
     config_destroy(config);
   }
+  peg_poll_destroy(arm_poll);
+}
+
+// INVESTIGATION ONLY (do not merge): append 75 more contested positions for
+// 2/3/4-in-bag (1-in-bag already has 100) with fresh seeds, into $PEG_GAP_DIR
+// (default notes/peg_positions), so the gap benchmark can run 100 per bag.
+void test_gen_peg_more(void) {
+  log_set_level(LOG_FATAL);
+  const char *dir =
+      getenv("PEG_GAP_DIR") ? getenv("PEG_GAP_DIR") : "notes/peg_positions";
+  char f[256];
+  // PEG_GEN_BAG + PEG_GEN_COUNT: append COUNT more contested for a single bag.
+  // Default: 75 more each for 2/3/4-bag.
+  if (getenv("PEG_GEN_BAG") != NULL) {
+    const int bag = atoi(getenv("PEG_GEN_BAG"));
+    const int count = getenv("PEG_GEN_COUNT") ? atoi(getenv("PEG_GEN_COUNT")) : 75;
+    snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
+    generate_peg_cgps((uint64_t)bag * 1010101 + 777, bag, count, f,
+                      /*append=*/true, /*contested_only=*/true);
+    return;
+  }
+  snprintf(f, sizeof(f), "%s/random_2peg.txt", dir);
+  generate_peg_cgps(20242777, 2, 75, f, /*append=*/true, /*contested_only=*/true);
+  snprintf(f, sizeof(f), "%s/random_3peg.txt", dir);
+  generate_peg_cgps(30243777, 3, 75, f, /*append=*/true, /*contested_only=*/true);
+  snprintf(f, sizeof(f), "%s/random_4peg.txt", dir);
+  generate_peg_cgps(40244777, 4, 75, f, /*append=*/true, /*contested_only=*/true);
 }
