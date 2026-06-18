@@ -21,6 +21,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "dawg_packed_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -160,6 +161,7 @@ static TestEntry on_demand_test_table[] = {
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},
+    {"dawgpacked", test_dawg_packed},
     {"kwgmergebench", test_kwg_merge_build_bench},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
