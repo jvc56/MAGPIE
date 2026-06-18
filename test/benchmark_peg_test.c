@@ -917,6 +917,17 @@ void test_peg_reprune_gap(void) {
   // solves.
   PegPoll *arm_poll = peg_poll_create();
 
+  // Nested mode (PEG_GAP_NESTED=1): A = nested non-emptier lookahead, B = plain
+  // rollout (both reprune-on), and the oracle is an EXHAUSTIVE nested solve
+  // (stride 1, no caps) so it scores both arms' moves with full nested fidelity.
+  const bool nested = getenv("PEG_GAP_NESTED") && atoi(getenv("PEG_GAP_NESTED"));
+  const int nest_cap =
+      getenv("PEG_GAP_NEST_CAP") ? atoi(getenv("PEG_GAP_NEST_CAP")) : 0;
+  const int nest_stride =
+      getenv("PEG_GAP_NEST_STRIDE") ? atoi(getenv("PEG_GAP_NEST_STRIDE")) : 1;
+  const int nest_maxdepth =
+      getenv("PEG_GAP_NEST_MAXDEPTH") ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH")) : 0;
+
   PegBenchConfig cfg_on = {.name = "reprune",
                            .num_threads = threads,
                            .time_budget_seconds = arm_tlim,
@@ -936,6 +947,18 @@ void test_peg_reprune_gap(void) {
                                .stage_top_k = oracle_topk,
                                .num_stages = 3,
                                .reprune_disabled = false};
+  if (nested) {
+    cfg_on.name = "nested";
+    cfg_on.nested_enabled = true;
+    cfg_on.nested_cand_cap = nest_cap;
+    cfg_on.nested_stride = nest_stride;
+    cfg_on.nested_max_depth = nest_maxdepth;
+    cfg_off.name = "rollout";
+    cfg_off.reprune_disabled = false; // both arms reprune; differ only in nesting
+    cfg_off.nested_enabled = false;
+    cfg_oracle.name = "oracle-nested";
+    cfg_oracle.nested_enabled = true; // exhaustive nested: stride 1, no caps
+  }
 
   printf("[gap] arm_tlim=%.0f oracle_tlim=%.0f max=%d\n", arm_tlim, oracle_tlim,
          max_pos);

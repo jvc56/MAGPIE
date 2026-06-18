@@ -123,6 +123,7 @@ typedef struct PegWorker {
 
   // Inline nested-PEG lookahead state (see peg_nested_value). Solve-level knobs
   // copied here so the recursion needn't thread them through every job/ctx.
+  ThreadControl *thread_control; // needed by nested emptier endgame solves
   bool nested_enabled;
   int nested_cand_cap;
   int nested_stride;
@@ -954,6 +955,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   }
   EndgameArgs ea;
   memset(&ea, 0, sizeof(ea));
+  ea.thread_control = worker->thread_control;
   ea.game = game;
   ea.plies = plies;
   ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
@@ -2120,6 +2122,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
     workers[worker_idx].prune_cache = prune_cache;
     // Nested-PEG lookahead config + per-level scratch (lazily created).
+    workers[worker_idx].thread_control = args->thread_control;
     workers[worker_idx].nested_enabled = args->nested_enabled;
     workers[worker_idx].nested_cand_cap = args->nested_cand_cap;
     workers[worker_idx].nested_stride = args->nested_stride;
