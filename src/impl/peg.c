@@ -68,6 +68,13 @@ enum {
   // far fewer than this), so the opponent's true worst-for-mover reply — which
   // includes the rational best-equity one — is always considered.
   PEG_PESSIMISTIC_OPP_LIST_CAP = 1024,
+  // Max recursion depth of the inline nested-PEG lookahead (one frame per
+  // non-emptier ply). Bounds the per-level scratch stack and caps how far an
+  // exhaustive nested solve can recurse through passes/exchanges before the
+  // lookahead budget is spent. Comfortably above any realistic fidelity.
+  PEG_MAX_NEST_DEPTH = 24,
+  // Candidate list capacity for a nested-PEG level's move generation.
+  PEG_NEST_CAND_LIST_CAP = 4096,
 };
 
 // Solve-scoped cache mapping a post-candidate board signature to its
@@ -113,6 +120,20 @@ typedef struct PegWorker {
   TranspositionTable *eg_tt;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+
+  // Inline nested-PEG lookahead state (see peg_nested_value). Solve-level knobs
+  // copied here so the recursion needn't thread them through every job/ctx.
+  bool nested_enabled;
+  int nested_cand_cap;
+  int nested_stride;
+  int nested_emptier_ply_cap;
+  int nested_max_depth;
+  // Per-recursion-level scratch (one frame per lookahead ply), lazily created.
+  // A level's template/scratch game and move list stay live while deeper levels
+  // recurse, so they cannot share the worker's top-level scratch.
+  Game *nest_template[PEG_MAX_NEST_DEPTH];
+  Game *nest_scratch[PEG_MAX_NEST_DEPTH];
+  MoveList *nest_ml[PEG_MAX_NEST_DEPTH];
 } PegWorker;
 
 // ----- live poll -----------------------------------------------------------
@@ -319,9 +340,8 @@ static void peg_poll_clear_entries(PegPoll *poll) {
   // Save as baseline for the cross-depth merged candidate view.
   poll->s.n_baseline_entries = poll->s.n_entries;
   poll->s.baseline_fidelity = poll->s.fidelity_plies;
-  const int k = poll->s.n_entries < PEG_POLL_MAX_ENTRIES
-                    ? poll->s.n_entries
-                    : PEG_POLL_MAX_ENTRIES;
+  const int k = poll->s.n_entries < PEG_POLL_MAX_ENTRIES ? poll->s.n_entries
+                                                         : PEG_POLL_MAX_ENTRIES;
   for (int baseline_idx = 0; baseline_idx < k; baseline_idx++) {
     poll->s.baseline_entries[baseline_idx] = poll->s.entries[baseline_idx];
   }
@@ -432,16 +452,20 @@ static void peg_set_opp_rack(Rack *opp_rack,
 // keeps both the cand play and the cross-set generation out of the per-scenario
 // loop. Leaves the mover's leave on its rack; per-scenario draws are added
 // later.
+static void peg_build_template_into(Game **slot, const Game *prepared_base,
+                                    const Move *cand) {
+  if (*slot == NULL) {
+    *slot = game_duplicate(prepared_base);
+  } else {
+    game_copy(*slot, prepared_base);
+  }
+  play_move_without_drawing_tiles(cand, *slot);
+  game_gen_all_cross_sets(*slot);
+}
+
 static void peg_build_template(PegWorker *worker, const Game *prepared_base,
                                const Move *cand) {
-  if (worker->template_game == NULL) {
-    worker->template_game = game_duplicate(prepared_base);
-  } else {
-    game_copy(worker->template_game, prepared_base);
-  }
-  Game *template_game = worker->template_game;
-  play_move_without_drawing_tiles(cand, template_game);
-  game_gen_all_cross_sets(template_game);
+  peg_build_template_into(&worker->template_game, prepared_base, cand);
 }
 
 // Build the post-cand game for one (mover_drawn, bag_remaining) split by
@@ -452,19 +476,18 @@ static void peg_build_template(PegWorker *worker, const Game *prepared_base,
 // their k_drawn tiles onto the leave. Returns the scratch game (worker-owned;
 // not destroyed per call). Racks/bag don't affect cross-sets, so the copied
 // ones stay valid and the leaf endgame can skip regenerating them.
-static Game *peg_make_post_cand_game(PegWorker *worker,
-                                     const Game *template_src, int mover_idx,
-                                     const uint8_t *unseen, int ld_size,
-                                     int k_drawn,
-                                     const MachineLetter *mover_drawn,
-                                     int n_bag_remaining,
-                                     const MachineLetter *bag_remaining) {
-  if (worker->scratch_game == NULL) {
-    worker->scratch_game = game_duplicate(template_src);
+static Game *peg_make_post_cand_game_into(Game **slot, const Game *template_src,
+                                          int mover_idx, const uint8_t *unseen,
+                                          int ld_size, int k_drawn,
+                                          const MachineLetter *mover_drawn,
+                                          int n_bag_remaining,
+                                          const MachineLetter *bag_remaining) {
+  if (*slot == NULL) {
+    *slot = game_duplicate(template_src);
   } else {
-    game_copy(worker->scratch_game, template_src);
+    game_copy(*slot, template_src);
   }
-  Game *game = worker->scratch_game;
+  Game *game = *slot;
   Bag *bag = game_get_bag(game);
   Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
   Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
@@ -501,6 +524,18 @@ static Game *peg_make_post_cand_game(PegWorker *worker,
     game_set_game_end_reason(game, GAME_END_REASON_NONE);
   }
   return game;
+}
+
+static Game *peg_make_post_cand_game(PegWorker *worker,
+                                     const Game *template_src, int mover_idx,
+                                     const uint8_t *unseen, int ld_size,
+                                     int k_drawn,
+                                     const MachineLetter *mover_drawn,
+                                     int n_bag_remaining,
+                                     const MachineLetter *bag_remaining) {
+  return peg_make_post_cand_game_into(
+      &worker->scratch_game, template_src, mover_idx, unseen, ld_size, k_drawn,
+      mover_drawn, n_bag_remaining, bag_remaining);
 }
 
 // Greedy playout to game end; returns signed mover spread (points), with the
@@ -880,6 +915,262 @@ static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
   return built;
 }
 
+// ----- Nested pre-endgame lookahead (PegArgs.nested_enabled) ----------------
+//
+// A non-emptier leaf hands the opponent a genuine sub-pre-endgame. Instead of a
+// single greedy/pessimistic rollout, peg_nested_value solves that sub-game by
+// the same min/max-over-scenarios logic the outer PEG uses, recursing until the
+// bag empties (exact endgame) or the lookahead budget / depth cap is spent
+// (greedy floor). Single-threaded, inline on the worker's per-level scratch.
+// Negamax in points: every node returns the ON-TURN player's signed final
+// spread; the parent negates a child evaluated from the next player's view.
+
+static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
+                                int lookahead, int64_t deadline_ns);
+
+// Effective recursion-depth cap: the knob, clamped to the scratch-stack size.
+static int peg_nested_depth_cap(const PegWorker *worker) {
+  const int knob = worker->nested_max_depth;
+  if (knob > 0 && knob < PEG_MAX_NEST_DEPTH) {
+    return knob;
+  }
+  return PEG_MAX_NEST_DEPTH - 1;
+}
+
+// Exact endgame value at an emptier nested leaf, from the on-turn perspective.
+// Plies are capped at min(lookahead, nested_emptier_ply_cap) so emptiers
+// reached deep in the lookahead need not get the full depth the top-level
+// emptiers do.
+static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
+                                        int on_turn, int lookahead,
+                                        int64_t deadline_ns) {
+  int plies = lookahead;
+  if (worker->nested_emptier_ply_cap > 0 &&
+      worker->nested_emptier_ply_cap < plies) {
+    plies = worker->nested_emptier_ply_cap;
+  }
+  if (plies < 1) {
+    plies = 1;
+  }
+  EndgameArgs ea;
+  memset(&ea, 0, sizeof(ea));
+  ea.game = game;
+  ea.plies = plies;
+  ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  ea.num_threads = 1;
+  ea.max_workers = 0; // nested endgames are small and many; no core injection
+  ea.use_heuristics = true;
+  ea.num_top_moves = 1;
+  ea.external_deadline_ns = deadline_ns;
+  ea.shared_tt = worker->eg_tt;
+  if (plies >= 2 && !worker->prune_cache->disabled) {
+    const KWG *leaf_kwg =
+        peg_prune_cache_get(worker->prune_cache, game, on_turn);
+    game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
+  }
+  ea.skip_word_pruning = true;
+  ea.seed = PEG_ENDGAME_SEED;
+  endgame_results_reset(worker->eg_results);
+  endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
+  if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
+    return peg_greedy_playout(game, on_turn, worker->playout_ml);
+  }
+  const int32_t eg_val =
+      endgame_results_get_value(worker->eg_results, ENDGAME_RESULT_BEST);
+  const Player *me = game_get_player(game, on_turn);
+  const Player *op = game_get_player(game, 1 - on_turn);
+  const int32_t lead =
+      equity_to_int(player_get_score(me) - player_get_score(op));
+  return lead + eg_val; // on_turn is on move, so eg_val is its future delta
+}
+
+// Scenario accumulator + context for one nested candidate's split enumeration.
+typedef struct PegNestCtx {
+  PegWorker *worker;
+  int level;                // recursion level whose scratch slots we own
+  const Game *template_src; // nest_template[level]: cand played + cross-sets
+  int mover_idx;            // on-turn player at this level
+  const uint8_t *unseen;
+  int ld_size;
+  int k_drawn;
+  int child_lookahead;
+  int64_t deadline_ns;
+  int scenario_stride;
+  int64_t sampled_weight_seen;
+  int64_t weight_sum;
+  double value_weight; // sum of full_weight * (mover_idx-perspective spread)
+} PegNestCtx;
+
+// Distribute the unseen pool into (mover draws k_drawn, bag keeps n_bag_rem,
+// opp gets the rest); for each resulting scenario recurse and fold the negamax
+// value into the weighted accumulator. Mirrors peg_enum_splits, but the leaf
+// action is the recursive solve rather than a win/spread tally.
+static void peg_nest_enum_splits(PegNestCtx *nc, int ml, int mover_left,
+                                 int bag_rem_left, int64_t weight,
+                                 MachineLetter *mover_drawn, int n_mover,
+                                 MachineLetter *bag_remaining, int n_bag_rem) {
+  if (ml == nc->ld_size) {
+    if (mover_left != 0 || bag_rem_left != 0) {
+      return;
+    }
+    int64_t full_weight = weight;
+    for (int factor = 2; factor <= nc->k_drawn; factor++) {
+      full_weight *= factor;
+    }
+    if (nc->scenario_stride > 1) {
+      const int64_t stride = nc->scenario_stride;
+      const int64_t old_seen = nc->sampled_weight_seen;
+      nc->sampled_weight_seen += full_weight;
+      const int64_t samples =
+          (old_seen + full_weight) / stride - old_seen / stride;
+      if (samples == 0) {
+        return;
+      }
+      full_weight = samples * stride;
+    }
+    Game *sub = peg_make_post_cand_game_into(
+        &nc->worker->nest_scratch[nc->level], nc->template_src, nc->mover_idx,
+        nc->unseen, nc->ld_size, nc->k_drawn, mover_drawn, n_bag_rem,
+        bag_remaining);
+    const int32_t child = peg_nested_value(
+        nc->worker, nc->level + 1, sub, nc->child_lookahead, nc->deadline_ns);
+    const int child_turn = game_get_player_on_turn_index(sub);
+    const int32_t mover_spread = (child_turn == nc->mover_idx) ? child : -child;
+    nc->weight_sum += full_weight;
+    nc->value_weight += (double)full_weight * (double)mover_spread;
+    return;
+  }
+  const int avail = nc->unseen[ml];
+  const int max_mover = mover_left < avail ? mover_left : avail;
+  for (int to_mover = 0; to_mover <= max_mover; to_mover++) {
+    const int max_bag =
+        bag_rem_left < (avail - to_mover) ? bag_rem_left : (avail - to_mover);
+    for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
+      const int64_t add_weight = peg_binomial(avail, to_mover) *
+                                 peg_binomial(avail - to_mover, to_bag);
+      for (int i = 0; i < to_mover; i++) {
+        mover_drawn[n_mover + i] = (MachineLetter)ml;
+      }
+      for (int i = 0; i < to_bag; i++) {
+        bag_remaining[n_bag_rem + i] = (MachineLetter)ml;
+      }
+      peg_nest_enum_splits(nc, ml + 1, mover_left - to_mover,
+                           bag_rem_left - to_bag, weight * add_weight,
+                           mover_drawn, n_mover + to_mover, bag_remaining,
+                           n_bag_rem + to_bag);
+    }
+  }
+}
+
+// Expected (over the candidate's scenarios) on-turn spread of playing `cand`.
+static int32_t peg_nested_cand_value(PegWorker *worker, int level,
+                                     Game *parent_game, int mover_idx,
+                                     const Move *cand, const uint8_t *unseen,
+                                     int ld_size, int lookahead,
+                                     int64_t deadline_ns) {
+  const int bag = bag_get_letters(game_get_bag(parent_game));
+  const int tiles_played = move_get_tiles_played(cand);
+  const int k_drawn = tiles_played < bag ? tiles_played : bag;
+  const int bag_rem = bag - k_drawn;
+  peg_build_template_into(&worker->nest_template[level], parent_game, cand);
+  PegNestCtx nc;
+  memset(&nc, 0, sizeof(nc));
+  nc.worker = worker;
+  nc.level = level;
+  nc.template_src = worker->nest_template[level];
+  nc.mover_idx = mover_idx;
+  nc.unseen = unseen;
+  nc.ld_size = ld_size;
+  nc.k_drawn = k_drawn;
+  nc.child_lookahead = lookahead - 1;
+  nc.deadline_ns = deadline_ns;
+  nc.scenario_stride = worker->nested_stride > 0 ? worker->nested_stride : 1;
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  peg_nest_enum_splits(&nc, 0, k_drawn, bag_rem, 1, mover_drawn, 0,
+                       bag_remaining, 0);
+  if (nc.weight_sum == 0) {
+    return peg_greedy_playout(parent_game, mover_idx, worker->playout_ml);
+  }
+  const double avg = nc.value_weight / (double)nc.weight_sum;
+  return (int32_t)(avg >= 0 ? avg + 0.5 : avg - 0.5);
+}
+
+static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
+                                int lookahead, int64_t deadline_ns) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+    const Player *me = game_get_player(game, on_turn);
+    const Player *op = game_get_player(game, 1 - on_turn);
+    return equity_to_int(player_get_score(me) - player_get_score(op));
+  }
+  if (bag_get_letters(game_get_bag(game)) == 0) {
+    return peg_nested_endgame_value(worker, game, on_turn, lookahead,
+                                    deadline_ns);
+  }
+  // Floor: budget/depth spent, or a deadline hit — fall back to the greedy
+  // rollout on a scratch copy (the playout mutates the game it walks).
+  const bool past_deadline =
+      deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns;
+  if (lookahead <= 0 || level >= peg_nested_depth_cap(worker) ||
+      past_deadline) {
+    Game **slot = &worker->nest_scratch[level];
+    if (*slot == NULL) {
+      *slot = game_duplicate(game);
+    } else {
+      game_copy(*slot, game);
+    }
+    return peg_greedy_playout(*slot, on_turn, worker->playout_ml);
+  }
+  // Generate the on-turn player's candidates (WMP path: override_kwg = NULL).
+  if (worker->nest_ml[level] == NULL) {
+    worker->nest_ml[level] = move_list_create(PEG_NEST_CAND_LIST_CAP);
+  }
+  MoveList *ml = worker->nest_ml[level];
+  const MoveGenArgs ga = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = ml,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&ga);
+  const int n = move_list_get_count(ml);
+  if (n == 0) {
+    Game **slot = &worker->nest_scratch[level];
+    if (*slot == NULL) {
+      *slot = game_duplicate(game);
+    } else {
+      game_copy(*slot, game);
+    }
+    return peg_greedy_playout(*slot, on_turn, worker->playout_ml);
+  }
+  move_list_sort_moves(ml);
+  int cap = n;
+  if (worker->nested_cand_cap > 0 && worker->nested_cand_cap < cap) {
+    cap = worker->nested_cand_cap;
+  }
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  const int ld_size = (int)ld_get_size(game_get_ld(game));
+  peg_compute_unseen(game, on_turn, unseen);
+  int32_t best = INT32_MIN;
+  for (int i = 0; i < cap; i++) {
+    const Move *cand = move_list_get_move(ml, i);
+    const int32_t value =
+        peg_nested_cand_value(worker, level, game, on_turn, cand, unseen,
+                              ld_size, lookahead, deadline_ns);
+    if (value > best) {
+      best = value;
+    }
+  }
+  return best;
+}
+
 // Evaluate the leaf of one fully-resolved scenario (a specific post-cand game).
 // Returns mover's signed spread (points) — exact via endgame_solve for emptier
 // scenarios at fidelity > 0, else the greedy playout.
@@ -890,6 +1181,18 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
     // Non-emptier (or stage-0) leaf: the opponent still draws, so the model
     // matters. Emptier leaves fall through to the exact endgame below, which is
     // already adversarial-optimal and thus identical for both models.
+    //
+    // Nested lookahead: at fidelity > 0, recursively solve the opponent's
+    // sub-pre-endgame (matching the emptiers' move-count horizon) instead of a
+    // flat rollout, so non-emptier candidates gain depth as the cascade
+    // deepens.
+    if (!emptier && ctx->fidelity_plies > 0 && ctx->worker->nested_enabled) {
+      const int32_t on_turn_val =
+          peg_nested_value(ctx->worker, /*level=*/0, game, ctx->fidelity_plies,
+                           ctx->deadline_ns);
+      const int turn = game_get_player_on_turn_index(game);
+      return (turn == ctx->mover_idx) ? on_turn_val : -on_turn_val;
+    }
     if (ctx->opp_model == PEG_OPP_PESSIMISTIC) {
       return peg_pessimistic_playout(game, ctx->mover_idx,
                                      ctx->worker->playout_ml, ctx->inner_top_k);
@@ -1816,6 +2119,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].scratch_game = NULL;
     workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
     workers[worker_idx].prune_cache = prune_cache;
+    // Nested-PEG lookahead config + per-level scratch (lazily created).
+    workers[worker_idx].nested_enabled = args->nested_enabled;
+    workers[worker_idx].nested_cand_cap = args->nested_cand_cap;
+    workers[worker_idx].nested_stride = args->nested_stride;
+    workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
+    workers[worker_idx].nested_max_depth = args->nested_max_depth;
+    for (int d = 0; d < PEG_MAX_NEST_DEPTH; d++) {
+      workers[worker_idx].nest_template[d] = NULL;
+      workers[worker_idx].nest_scratch[d] = NULL;
+      workers[worker_idx].nest_ml[d] = NULL;
+    }
   }
 
   // Injection monitor: lends idle cores to in-flight leaf endgames. Only
@@ -1969,7 +2283,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_graded_append(graded, graded_fidelity, &n_graded, ranked, eval_count,
                         live_count, prev_fidelity);
       // Save entries as baseline BEFORE begin_stage updates fidelity_plies, so
-      // baseline_fidelity captures the previous stage's depth (not the new one).
+      // baseline_fidelity captures the previous stage's depth (not the new
+      // one).
       peg_poll_clear_entries(args->poll);
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
@@ -2175,6 +2490,17 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     }
     if (workers[worker_idx].scratch_game) {
       game_destroy(workers[worker_idx].scratch_game);
+    }
+    for (int d = 0; d < PEG_MAX_NEST_DEPTH; d++) {
+      if (workers[worker_idx].nest_template[d]) {
+        game_destroy(workers[worker_idx].nest_template[d]);
+      }
+      if (workers[worker_idx].nest_scratch[d]) {
+        game_destroy(workers[worker_idx].nest_scratch[d]);
+      }
+      if (workers[worker_idx].nest_ml[d]) {
+        move_list_destroy(workers[worker_idx].nest_ml[d]);
+      }
     }
     transposition_table_destroy(workers[worker_idx].eg_tt);
   }

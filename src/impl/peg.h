@@ -146,6 +146,28 @@ typedef struct PegArgs {
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
 
+  // Nested pre-endgame lookahead for NON-EMPTIER leaves. When nested_enabled,
+  // a leaf that still has bag tiles is evaluated by recursively solving the
+  // opponent's sub-pre-endgame (alternating sides down to emptier endgames)
+  // instead of by a single greedy/pessimistic rollout. Its lookahead horizon
+  // is the outer stage's fidelity_plies, so non-emptier candidates gain depth
+  // as the cascade deepens, matching the emptiers' move-count horizon.
+  // Off (default) preserves the rollout behavior exactly.
+  bool nested_enabled;
+  // Cost knobs for the nested recursion (the outer solve is unaffected):
+  //   nested_cand_cap  : max candidates considered per nested level (0 = all).
+  //   nested_stride    : scenario sampling stride inside nested levels (>=1).
+  //   nested_emptier_ply_cap : cap on endgame plies at a nested emptier leaf
+  //                            (0 = use the remaining lookahead, so deeper
+  //                            nested emptiers naturally get fewer plies).
+  //   nested_max_depth : cap on recursion depth / bag levels (0 = until empty).
+  // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth 0 with a
+  // large fidelity: a genuinely game-theoretic solve under the unseen model.
+  int nested_cand_cap;
+  int nested_stride;
+  int nested_emptier_ply_cap;
+  int nested_max_depth;
+
   // Optional: pin scenario evaluation to a single bag ordering instead of
   // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
   // evaluated against exactly one scenario: the bag is set to
@@ -291,7 +313,7 @@ typedef struct PegResult {
   // construct = make_kwg_from_words_small time.
   int64_t build_enum_ns;
   int64_t build_construct_ns;
-  int64_t build_n;          // number of leaf KWGs built
+  int64_t build_n;           // number of leaf KWGs built
   int64_t build_total_words; // summed pruned word counts (avg = /build_n)
 } PegResult;
 
@@ -321,7 +343,8 @@ typedef struct PegPerScenario {
 
 enum { PEG_POLL_MAX_ENTRIES = 64 };
 // Max non-greedy stages we store per-candidate timing history for.
-// 8 covers the default cascade (32->16->8->4->2, five stages) with room to spare.
+// 8 covers the default cascade (32->16->8->4->2, five stages) with room to
+// spare.
 enum { PEG_POLL_MAX_HISTORY_STAGES = 8 };
 
 // Compact per-candidate record kept for each completed non-greedy stage so the
@@ -369,7 +392,8 @@ typedef struct PegPollSnapshot {
   int n_history_stages;
   int history_fidelities[PEG_POLL_MAX_HISTORY_STAGES];
   int history_n_cands[PEG_POLL_MAX_HISTORY_STAGES];
-  PegHistoryCand history_cands[PEG_POLL_MAX_HISTORY_STAGES][PEG_POLL_MAX_ENTRIES];
+  PegHistoryCand history_cands[PEG_POLL_MAX_HISTORY_STAGES]
+                              [PEG_POLL_MAX_ENTRIES];
 } PegPollSnapshot;
 
 PegPoll *peg_poll_create(void);
