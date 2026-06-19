@@ -952,23 +952,27 @@ void test_peg_reprune_gap(void) {
       getenv("PEG_GAP_NESTED") && atoi(getenv("PEG_GAP_NESTED"));
   const int nest_cap =
       getenv("PEG_GAP_NEST_CAP") ? atoi(getenv("PEG_GAP_NEST_CAP")) : 0;
+  // 0 = bag-dependent default stride (2-peg 1, 3-peg 5, 4-peg 7).
   const int nest_stride =
-      getenv("PEG_GAP_NEST_STRIDE") ? atoi(getenv("PEG_GAP_NEST_STRIDE")) : 1;
+      getenv("PEG_GAP_NEST_STRIDE") ? atoi(getenv("PEG_GAP_NEST_STRIDE")) : 0;
+  // Inner-peg recursion depth (how many nested pegs before greedy); default 1.
   const int nest_maxdepth = getenv("PEG_GAP_NEST_MAXDEPTH")
                                 ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH"))
-                                : 0;
-  // PEG_GAP_NEST_CAPS=8,4,2 => per-level candidate cap sequence (overrides
-  // PEG_GAP_NEST_CAP for the nested arm; the oracle stays exhaustive).
-  static int nest_cap_seq[16];
-  int nest_n_caps = 0;
+                                : 1;
+  // PEG_GAP_NEST_CAPS=8,4,2 => the inner peg's STAGE schedule (initial field +
+  // per-stage keep counts). Default arm {8,4,2}; oracle is {8,8,8} (wider).
+  static int nest_cap_seq[16] = {8, 4, 2};
+  int nest_n_caps = 3;
   if (getenv("PEG_GAP_NEST_CAPS")) {
     char buf[128];
     (void)snprintf(buf, sizeof(buf), "%s", getenv("PEG_GAP_NEST_CAPS"));
+    nest_n_caps = 0;
     for (char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
          tok = strtok(NULL, ",")) {
       nest_cap_seq[nest_n_caps++] = atoi(tok);
     }
   }
+  static const int oracle_nest_caps[] = {8, 8, 8}; // wider inner peg for oracle
 
   PegBenchConfig cfg_on = {.name = "reprune",
                            .num_threads = threads,
@@ -1003,8 +1007,13 @@ void test_peg_reprune_gap(void) {
     cfg_off.reprune_disabled =
         false; // both arms reprune; differ only in nesting
     cfg_off.nested_enabled = false;
+    // Oracle: same staged inner peg, but wider {8,8,8} schedule (no narrowing).
     cfg_oracle.name = "oracle-nested";
-    cfg_oracle.nested_enabled = true; // exhaustive nested: stride 1, no caps
+    cfg_oracle.nested_enabled = true;
+    cfg_oracle.nested_cand_caps = oracle_nest_caps;
+    cfg_oracle.nested_n_cand_caps = 3;
+    cfg_oracle.nested_stride = nest_stride;
+    cfg_oracle.nested_max_depth = nest_maxdepth;
   }
 
   printf("[gap] arm_tlim=%.0f oracle_tlim=%.0f max=%d\n", arm_tlim, oracle_tlim,
