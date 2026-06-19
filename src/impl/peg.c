@@ -126,6 +126,8 @@ typedef struct PegWorker {
   ThreadControl *thread_control; // needed by nested emptier endgame solves
   bool nested_enabled;
   int nested_cand_cap;
+  const int *nested_cand_caps; // per-level cap sequence (NULL = flat cap)
+  int nested_n_cand_caps;
   int nested_stride;
   int nested_emptier_ply_cap;
   int nested_max_depth;
@@ -1170,9 +1172,19 @@ static int32_t peg_nested_value(PegWorker *worker, int level, Game *game,
     return peg_nested_floor(worker, level, game, on_turn);
   }
   move_list_sort_moves(ml);
+  // Per-level candidate cap: a sequence (e.g. 8,4,2) caps deeper nesting
+  // harder; levels past the sequence reuse its last entry. Falls back to the
+  // flat cap.
+  int level_cap = worker->nested_cand_cap;
+  if (worker->nested_n_cand_caps > 0) {
+    const int idx = level < worker->nested_n_cand_caps
+                        ? level
+                        : worker->nested_n_cand_caps - 1;
+    level_cap = worker->nested_cand_caps[idx];
+  }
   int cap = n;
-  if (worker->nested_cand_cap > 0 && worker->nested_cand_cap < cap) {
-    cap = worker->nested_cand_cap;
+  if (level_cap > 0 && level_cap < cap) {
+    cap = level_cap;
   }
   uint8_t unseen[MAX_ALPHABET_SIZE];
   const int ld_size = (int)ld_get_size(game_get_ld(game));
@@ -2148,6 +2160,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].thread_control = args->thread_control;
     workers[worker_idx].nested_enabled = args->nested_enabled;
     workers[worker_idx].nested_cand_cap = args->nested_cand_cap;
+    workers[worker_idx].nested_cand_caps = args->nested_cand_caps;
+    workers[worker_idx].nested_n_cand_caps = args->nested_n_cand_caps;
     workers[worker_idx].nested_stride = args->nested_stride;
     workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
     workers[worker_idx].nested_max_depth = args->nested_max_depth;

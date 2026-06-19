@@ -61,6 +61,8 @@ typedef struct PegBenchConfig {
   int cand_max_tiles_played;  // INVESTIGATION: 0 = all; N = cap root cand tiles
   bool nested_enabled;        // INVESTIGATION: nested-PEG non-emptier lookahead
   int nested_cand_cap;
+  const int *nested_cand_caps; // per-level cap sequence (NULL = flat cap)
+  int nested_n_cand_caps;
   int nested_stride;
   int nested_emptier_ply_cap;
   int nested_max_depth;
@@ -165,6 +167,8 @@ static void fill_peg_args(PegArgs *args, const Config *config,
   args->cand_max_tiles_played = cfg->cand_max_tiles_played;
   args->nested_enabled = cfg->nested_enabled;
   args->nested_cand_cap = cfg->nested_cand_cap;
+  args->nested_cand_caps = cfg->nested_cand_caps;
+  args->nested_n_cand_caps = cfg->nested_n_cand_caps;
   args->nested_stride = cfg->nested_stride;
   args->nested_emptier_ply_cap = cfg->nested_emptier_ply_cap;
   args->nested_max_depth = cfg->nested_max_depth;
@@ -953,6 +957,18 @@ void test_peg_reprune_gap(void) {
   const int nest_maxdepth = getenv("PEG_GAP_NEST_MAXDEPTH")
                                 ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH"))
                                 : 0;
+  // PEG_GAP_NEST_CAPS=8,4,2 => per-level candidate cap sequence (overrides
+  // PEG_GAP_NEST_CAP for the nested arm; the oracle stays exhaustive).
+  static int nest_cap_seq[16];
+  int nest_n_caps = 0;
+  if (getenv("PEG_GAP_NEST_CAPS")) {
+    char buf[128];
+    (void)snprintf(buf, sizeof(buf), "%s", getenv("PEG_GAP_NEST_CAPS"));
+    for (char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
+         tok = strtok(NULL, ",")) {
+      nest_cap_seq[nest_n_caps++] = atoi(tok);
+    }
+  }
 
   PegBenchConfig cfg_on = {.name = "reprune",
                            .num_threads = threads,
@@ -977,6 +993,10 @@ void test_peg_reprune_gap(void) {
     cfg_on.name = "nested";
     cfg_on.nested_enabled = true;
     cfg_on.nested_cand_cap = nest_cap;
+    if (nest_n_caps > 0) {
+      cfg_on.nested_cand_caps = nest_cap_seq;
+      cfg_on.nested_n_cand_caps = nest_n_caps;
+    }
     cfg_on.nested_stride = nest_stride;
     cfg_on.nested_max_depth = nest_maxdepth;
     cfg_off.name = "rollout";

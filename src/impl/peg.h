@@ -156,6 +156,10 @@ typedef struct PegArgs {
   bool nested_enabled;
   // Cost knobs for the nested recursion (the outer solve is unaffected):
   //   nested_cand_cap  : max candidates considered per nested level (0 = all).
+  //   nested_cand_caps : optional PER-LEVEL cap sequence (e.g. {8,4,2}) that
+  //                      overrides nested_cand_cap; level L uses caps[L], or
+  //                      the last entry for deeper levels. NULL = use the flat
+  //                      cap.
   //   nested_stride    : scenario sampling stride inside nested levels (>=1).
   //   nested_emptier_ply_cap : cap on endgame plies at a nested emptier leaf
   //                            (0 = use the remaining lookahead, so deeper
@@ -164,6 +168,8 @@ typedef struct PegArgs {
   // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth 0 with a
   // large fidelity: a genuinely game-theoretic solve under the unseen model.
   int nested_cand_cap;
+  const int *nested_cand_caps; // per-level cap sequence; NULL = use flat cap
+  int nested_n_cand_caps;      // length of nested_cand_caps
   int nested_stride;
   int nested_emptier_ply_cap;
   int nested_max_depth;
