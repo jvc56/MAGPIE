@@ -269,11 +269,12 @@ uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 // Snapshot of the line currently being explored by worker `worker_index`
 // (0 = main worker; see conventions above). Writes up to `max_len` `tiny_move`
 // entries into `out_line` and returns the number written (0..max_len). The
-// line reads per-worker state without locking; the reader uses
-// release/acquire on the length so the prefix length is always
-// consistent, but individual entries past the length may still be
-// torn if the worker is concurrently swapping into a sibling subtree.
-// For display only; never used to drive search decisions.
+// line reads per-worker state without locking: the slots are relaxed atomics
+// and the reader uses release/acquire on the length, so the prefix length is
+// always consistent and each slot read is well-defined (no torn reads). A slot
+// the worker is concurrently overwriting may simply be stale — it can reflect a
+// different sibling subtree than the reported length — which is fine for a
+// display heartbeat. For display only; never used to drive search decisions.
 int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
                                  uint64_t *out_line, int max_len);
 
