@@ -12,6 +12,11 @@ typedef enum {
   // maximize tail merging (smallest node array). NOT valid for the Alpha
   // cross-set path; for linear-scan readers / export only.
   CONVERT_TEXT2DAWG_TAIL_REORDER,
+  // Like CONVERT_TEXT2DAWG_TAIL_REORDER, but additionally re-encodes the
+  // reorder DAWG into a "packed DAWG": each node uses only the bits it needs
+  // (minimal arc width + minimal tile width) rather than a full 32-bit word.
+  // Niche, opt-in output for fitting a word list onto small/retro hardware.
+  CONVERT_TEXT2DAWG_PACKED,
   CONVERT_DAWG2TEXT,
   CONVERT_GADDAG2TEXT,
   CONVERT_CSV2KLV,
