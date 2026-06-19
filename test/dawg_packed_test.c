@@ -108,7 +108,9 @@ static void assert_rejects_bad_header(void) {
   const char *filename = "dawg_packed_bad_header_test.pdawg";
   uint8_t header[DAWG_PACKED_HEADER_BYTES];
   memset(header, 0, sizeof(header));
-  memcpy(header, DAWG_PACKED_MAGIC, 4);
+  for (int magic_idx = 0; magic_idx < 4; magic_idx++) {
+    header[magic_idx] = (uint8_t)DAWG_PACKED_MAGIC[magic_idx];
+  }
   header[4] = DAWG_PACKED_VERSION;
   header[5] = 5;  // tile_bits
   header[6] = 99; // arc_bits: out of range

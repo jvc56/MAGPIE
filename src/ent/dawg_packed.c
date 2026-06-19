@@ -95,7 +95,12 @@ void dawg_packed_write_to_file(const DawgPacked *dp, const char *filename,
   }
   uint8_t header[DAWG_PACKED_HEADER_BYTES];
   memset(header, 0, sizeof(header));
-  memcpy(header, DAWG_PACKED_MAGIC, 4);
+  // Write the 4-byte magic tag byte-by-byte: memcpy from the string literal
+  // trips bugprone-not-null-terminated-result, since this is a binary tag, not
+  // a NUL-terminated string.
+  for (int magic_idx = 0; magic_idx < 4; magic_idx++) {
+    header[magic_idx] = (uint8_t)DAWG_PACKED_MAGIC[magic_idx];
+  }
   header[4] = DAWG_PACKED_VERSION;
   header[5] = dp->tile_bits;
   header[6] = dp->arc_bits;
