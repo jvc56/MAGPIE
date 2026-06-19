@@ -33,12 +33,12 @@ typedef struct EndgameCtx EndgameCtx;
 // observe; a consumer may use either or both:
 //
 //   * Push — the callbacks on EndgameArgs (before_search / per_root_move /
-//     per_ply). They fire synchronously, on the master worker (ordinal 0), at
+//     per_ply). They fire synchronously, on the main worker (ordinal 0), at
 //     well-defined moments (search start, each root completion, each completed
 //     depth). They deliver exact, in-order state, but they run inside the
 //     search: a handler must be cheap, must not block, and must copy out
 //     anything it keeps (pointer arguments are valid only for the call).
-//     Note the master is not necessarily a dedicated thread: endgame_solve
+//     Note the main worker is not necessarily a dedicated thread: endgame_solve
 //     runs it on a spawned worker thread, but endgame_solve_inline (the entry
 //     point the PEG solver drives) runs it on the *calling* thread — so a
 //     handler may execute on the caller's own thread.
@@ -74,10 +74,10 @@ typedef struct EndgameCtx EndgameCtx;
 //     value with no engine-owned pointers in it.
 //
 //   * `worker_index` selects which worker to observe (an index into the
-//     solver's worker pool, not an OS thread id). Index 0 is the master: it
-//     owns root ordering, the progress counters, and the live PV / leaderboard,
-//     so a simple UI passes 0 for the canonical view. Higher indices are the
-//     parallel ABDADA helper workers and are rarely needed.
+//     solver's worker pool, not an OS thread id). Index 0 is the main worker:
+//     it owns root ordering, the progress counters, and the live PV /
+//     leaderboard, so a simple UI passes 0 for the canonical view. Higher
+//     indices are the parallel ABDADA helper workers and are rarely needed.
 // ===========================================================================
 
 // Callback for per-ply PV reporting during iterative deepening
@@ -93,7 +93,7 @@ typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
 // Callback fired once before iterative deepening begins. Provides the
 // d=0 root-move list (sorted descending by static estimate from
 // assign_estimates_and_sort), letting the caller render an initial
-// leaderboard before any depth completes. Fires from the master worker
+// leaderboard before any depth completes. Fires from the main worker
 // (ordinal 0; see the overview above for which thread that is) after its
 // initial-move generation finishes (sub-ms after the solve starts) and
 // before any negamax call. The polled
@@ -111,7 +111,7 @@ typedef void (*EndgameBeforeSearchCallback)(
     void *user_data);
 
 // Callback fired each time a root move completes its negamax evaluation at
-// the current iterative-deepening depth, from the master worker (ordinal 0)
+// the current iterative-deepening depth, from the main worker (ordinal 0)
 // only. Lets clients re-rank the leaderboard live (per-root resolution rather
 // than per-completed-depth) and watch values swing during long depths.
 //
@@ -128,7 +128,7 @@ typedef void (*EndgameBeforeSearchCallback)(
 //
 // Fires from inside abdada_negamax. Multiple per-root callbacks may happen
 // back-to-back at the same depth as roots complete in scan order. Only the
-// master worker calls, but it may be any OS thread (see the overview), so a
+// main worker calls, but it may be any OS thread (see the overview), so a
 // handler must not assume a fixed calling thread.
 typedef void (*EndgamePerRootMoveCallback)(int depth, int root_index,
                                            const struct SmallMove *move,
@@ -208,21 +208,22 @@ void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 // Inject one additional ABDADA worker into an in-flight solve. Works against
-// both entry points: endgame_solve (spawned master) and endgame_solve_inline
-// (the calling thread is the master). It may be called from another thread
-// (e.g. a pool lending an idle core) or from the solving thread itself — the
-// injection test drives it from the master's per_ply_callback. The new worker
-// gets the next free ordinal (> 0, never the root master), its own ABDADA
-// jitter from that ordinal, a game copy from the (read-only) root inputs, and a
-// MoveGen cache slot assigned on demand by get_movegen(); it cooperates with
-// the running workers purely through the shared TT and self-exits when the
-// search completes. Returns true if a worker was spawned, false if the
-// injection window is shut or the max_workers ceiling is reached. Only valid
-// against a ctx whose current solve was launched with max_workers enabling
-// growth (max_workers > effective thread count after reset normalization).
+// both entry points: endgame_solve (spawned main worker) and
+// endgame_solve_inline (the calling thread is the main worker). It may be
+// called from another thread (e.g. a pool lending an idle core) or from the
+// solving thread itself — the injection test drives it from the main worker's
+// per_ply_callback. The new worker gets the next free ordinal (> 0, never
+// ordinal 0), its own ABDADA jitter from that ordinal, a game copy from the
+// (read-only) root inputs, and a MoveGen cache slot assigned on demand by
+// get_movegen(); it cooperates with the running workers purely through the
+// shared TT and self-exits when the search completes. Returns true if a worker
+// was spawned, false if the injection window is shut or the max_workers ceiling
+// is reached. Only valid against a ctx whose current solve was launched with
+// max_workers enabling growth (max_workers > effective thread count after reset
+// normalization).
 bool endgame_add_worker(EndgameCtx *ctx);
 
-// Number of worker threads currently live in this solve (master + injected
+// Number of worker threads currently live in this solve (main worker + injected
 // helpers). Lets an injection monitor cap total threads near the core count.
 int endgame_live_workers(const EndgameCtx *ctx);
 // True while the solve is accepting injected workers (window open).
@@ -246,7 +247,7 @@ endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 // (the cost is the same — a memset of the full TT — but no malloc/free).
 // No-op if the ctx has no TT (tt_fraction_of_mem == 0).
 void endgame_ctx_clear_transposition_table(EndgameCtx *ctx);
-// Coarse progress counters for a progress bar (master worker's view). Writes
+// Coarse progress counters for a progress bar (main worker's view). Writes
 // the current iterative-deepening depth, and how many of this depth's root
 // moves have finished (completed/total). The ply2_* out-params are an optional
 // finer-grained sub-progress — how many children of the first root move have
@@ -266,7 +267,7 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 
 // Snapshot of the line currently being explored by worker `worker_index`
-// (0 = master; see conventions above). Writes up to `max_len` `tiny_move`
+// (0 = main worker; see conventions above). Writes up to `max_len` `tiny_move`
 // entries into `out_line` and returns the number written (0..max_len). The
 // line reads per-worker state without locking; the reader uses
 // release/acquire on the length so the prefix length is always
@@ -276,7 +277,7 @@ uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
                                  uint64_t *out_line, int max_len);
 
-// Snapshot of the live best PV from worker `worker_index` (0 = master).
+// Snapshot of the live best PV from worker `worker_index` (0 = main worker).
 // Updated by the engine each time best_value improves at the root (so during a
 // long depth the reader can see the engine's best line refine as
 // successive root moves get evaluated).
@@ -311,7 +312,7 @@ typedef struct EndgameLivePvSnapshot {
 } EndgameLivePvSnapshot;
 
 // Snapshot of the live multi-PV top-K leaderboard from worker `worker_index`
-// (0 = master). Each slot in `out` is filled with one root move,
+// (0 = main worker). Each slot in `out` is filled with one root move,
 // its current value, and the continuation line found at this depth.
 // Slots are sorted descending by value; the leaderboard is reset at
 // the start of each IDS depth and fills in as roots complete (so the

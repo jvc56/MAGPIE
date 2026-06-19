@@ -207,7 +207,7 @@ struct EndgameCtx {
 
 struct EndgameCtxWorker {
   // Worker ordinal within this solve (0..threads-1, == position in the cached
-  // workers[] array, so stable across solves). ordinal 0 is the root master:
+  // workers[] array, so stable across solves). ordinal 0 is the main worker:
   // it owns root move ordering, ply-2 tracking, the soft-time check, and PV
   // display. Drives per-worker jitter parity. Each worker reaches move
   // generation through get_movegen(), which auto-assigns a distinct per-pthread
@@ -2813,7 +2813,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // Publish the d=0 root-move list to clients before any depth begins.
   // root_moves_total is bumped here (rather than only at depth-loop entry) so
   // the polled progress atomics agree with the callback's view of the
-  // candidate count even before depth-1 starts. Master worker (ordinal 0)
+  // candidate count even before depth-1 starts. Main worker (ordinal 0)
   // only; the arena holds the sorted moves contiguously from offset 0.
   if (worker->ordinal == 0) {
     atomic_store(&worker->solver->root_moves_total, initial_move_count);
@@ -2948,7 +2948,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    // Update root move progress counters (master worker, ordinal 0, only)
+    // Update root move progress counters (main worker, ordinal 0, only)
     if (worker->ordinal == 0) {
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
@@ -3046,7 +3046,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
-    // Call per-ply callback (only this solver's master worker, ordinal 0, to
+    // Call per-ply callback (only this solver's main worker, ordinal 0, to
     // avoid race conditions).
     if (worker->ordinal == 0 && worker->solver->per_ply_callback) {
       // Extend PV from TT + greedy playout for display
@@ -3212,8 +3212,8 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   EndgameCtx *solver = *ctx;
 
   endgame_ctx_reset(solver, results, endgame_args);
-  // The inline master runs in the calling thread, so the base worker count is
-  // always 1 regardless of the caller's num_threads — only injected helpers
+  // The inline main worker runs in the calling thread, so the base worker count
+  // is always 1 regardless of the caller's num_threads — only injected helpers
   // (ordinals > 0) are spawned. Force threads/live_workers to 1 so injection
   // ordinals and join ranges stay consistent (otherwise helpers would start at
   // ordinal == num_threads, leaving gaps).
@@ -3229,9 +3229,10 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   atomic_store(&solver->stuck_tile_logged, 1);
 
   // Open the injection window so helpers can be added mid-search via
-  // endgame_add_worker while this thread runs the master (ordinal 0). The
-  // calling thread is the master, so unlike endgame_solve there is no spawned
-  // thread for ordinal 0 — only injected helpers (ordinals > 0) are joined.
+  // endgame_add_worker while this thread runs the main worker (ordinal 0). The
+  // calling thread is the main worker, so unlike endgame_solve there is no
+  // spawned thread for ordinal 0 — only injected helpers (ordinals > 0) are
+  // joined.
   if (solver->max_workers > solver->threads) {
     cpthread_mutex_lock(&solver->add_mutex);
     atomic_store(&solver->window_open_ns, ctimer_monotonic_ns());
@@ -3243,8 +3244,8 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   iterative_deepening(solver->workers[0], solver->requested_plies);
 
   // Shut the window and join any injected helpers. live_workers counts the
-  // in-thread master (solver->threads, normally 1) plus any added workers, so
-  // the spawned pthreads are [solver->threads, live_workers).
+  // in-thread main worker (solver->threads, normally 1) plus any added workers,
+  // so the spawned pthreads are [solver->threads, live_workers).
   cpthread_mutex_lock(&solver->add_mutex);
   atomic_store(&solver->adding_closed, 1);
   const int total_workers = atomic_load(&solver->live_workers);
@@ -3310,8 +3311,9 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     cpthread_mutex_unlock(&solver->add_mutex);
   }
 
-  // Wait for the initial workers. The master (ordinal 0) drives completion, so
-  // once these exit the search has finished (or interrupted/timed out).
+  // Wait for the initial workers. The main worker (ordinal 0) drives
+  // completion, so once these exit the search has finished (or
+  // interrupted/timed out).
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
     cpthread_join(solver->worker_ids[thread_index]);
   }
