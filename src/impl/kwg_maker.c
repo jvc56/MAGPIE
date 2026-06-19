@@ -1077,8 +1077,8 @@ static KWG *make_dawg_tail_reorder(const DictionaryWordList *words) {
   // superset child list whose tail is still free, and absorb into it. Largest
   // first wins the per-superset tail contention for the lists that save the
   // most nodes (a measured ~0.3% smaller DAWG than smallest-first).
-  for (uint32_t head_rank = num_heads; head_rank-- > 0;) {
-    const uint32_t subset_head = (uint32_t)heads_by_size[head_rank];
+  for (uint32_t head_rank = num_heads; head_rank > 0; head_rank--) {
+    const uint32_t subset_head = (uint32_t)heads_by_size[head_rank - 1];
     const uint32_t subset_size = item_count[subset_head];
     if (subset_size == 0) {
       continue;
