@@ -24,6 +24,57 @@ enum {
 
 typedef struct EndgameCtx EndgameCtx;
 
+// ===========================================================================
+// Live analysis interface
+// ===========================================================================
+//
+// The solver exposes its in-progress state so a UI (or any observer) can
+// render a live view of the search. There are two complementary ways to
+// observe; a consumer may use either or both:
+//
+//   * Push — the callbacks on EndgameArgs (before_search / per_root_move /
+//     per_ply). They fire synchronously, ON the solver's worker thread 0, at
+//     well-defined moments (search start, each root completion, each completed
+//     depth). They deliver exact, in-order state, but they run inside the
+//     search: a handler must be cheap, must not block, and must copy out
+//     anything it keeps (pointer arguments are valid only for the call).
+//
+//   * Pull — the endgame_ctx_get_* accessors below. A separate thread polls
+//     these at its own cadence (e.g. a render loop) while endgame_solve runs
+//     on another thread. They return lock-free, internally-consistent
+//     snapshots (seqlock / release-acquire) and never block the search. A
+//     snapshot may be a few nodes stale, which is fine for a heartbeat or a
+//     leaderboard.
+//
+// Everything here is observation only: nothing feeds back into the search, and
+// whether or not it is read does not change the result.
+//
+// Conventions shared by the whole interface:
+//
+//   * Values are spreads in WHOLE POINTS — not the millipoint Equity used
+//     elsewhere in MAGPIE — from the solving player's perspective: positive
+//     means the solving player is ahead. This matches PVLine.score.
+//     "Spread-adjusted" below means the raw negamax value has had the root's
+//     initial spread folded in, so it is the projected final spread, not a
+//     delta from the current position.
+//
+//   * Moves are returned as `tiny_move` codes: the compact 64-bit SmallMove
+//     encoding (schema in move.h). A code of 0 is a pass. To render one, wrap
+//     it in a SmallMove and decode it against the board:
+//         SmallMove sm = {0};
+//         sm.tiny_move = code;
+//         Move move;
+//         small_move_to_move(&move, &sm, board);
+//     The push callbacks hand back SmallMove pointers directly; the pull
+//     accessors hand back raw codes so each snapshot stays a flat, copy-safe
+//     value with no engine-owned pointers in it.
+//
+//   * `thread_index` selects which worker to observe. Thread 0 is the master:
+//     it owns root ordering, the progress counters, and the live PV /
+//     leaderboard, so a simple UI passes 0 for the canonical view. Other
+//     indices expose the parallel ABDADA helper threads and are rarely needed.
+// ===========================================================================
+
 // Callback for per-ply PV reporting during iterative deepening
 // Parameters: depth, value (spread delta), pv_line, game,
 //             ranked_pvs (top-K PVLines with TT-extended variations),
@@ -188,6 +239,13 @@ endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 // (the cost is the same — a memset of the full TT — but no malloc/free).
 // No-op if the ctx has no TT (tt_fraction_of_mem == 0).
 void endgame_ctx_clear_transposition_table(EndgameCtx *ctx);
+// Coarse progress counters for a progress bar (master worker's view). Writes
+// the current iterative-deepening depth, and how many of this depth's root
+// moves have finished (completed/total). The ply2_* out-params are an optional
+// finer-grained sub-progress — how many children of the first root move have
+// finished — for a UI that wants a second bar during a long first root; a
+// simple consumer can pass them and ignore the values. All are plain atomic
+// reads, cheap from any thread.
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed, int *ply2_moves_total);
@@ -217,9 +275,8 @@ int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
 // successive root moves get evaluated).
 //
 // Writes up to `max_len` `tiny_move` entries into `out_moves` and
-// returns the number written (0..max_len). `*out_value` is set to
-// the spread-adjusted PV value (same sign convention as
-// PVLine.score).
+// returns the number written (0..max_len). `*out_value` is set to the
+// spread-adjusted value (whole points; see conventions above).
 //
 // Uses a seqlock so the moves array, length, and value all come
 // from the same writer update — never from a half-overwritten
@@ -230,11 +287,15 @@ int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
                             uint64_t *out_moves, int max_len,
                             int32_t *out_value);
 
-// One slot of the live multi-PV top-K leaderboard. root_tiny is the
-// first move (a SmallMove tiny_move); value is the spread-adjusted
-// negamax value (same sign convention as PVLine.score); continuation
-// is the rest of the line (depth - 1 moves at most), with
-// continuation_len in [0, MAX_SEARCH_DEPTH].
+// One slot of the live multi-PV top-K leaderboard: a root move, its current
+// spread-adjusted value (whole points; see conventions above), and the
+// continuation line found after it (up to depth - 1 more moves,
+// continuation_len in [0, MAX_SEARCH_DEPTH]). Moves are tiny_move codes.
+//
+// This is a flat, copy-safe value type, deliberately distinct from PVLine:
+// PVLine carries a Game* and is sized for the search, whereas a poller wants
+// to memcpy a leaderboard slice out under the seqlock and keep using it after
+// the engine has moved on. The snapshot owns no engine pointers.
 typedef struct EndgameLivePvSnapshot {
   uint64_t root_tiny;
   int32_t value;
