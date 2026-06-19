@@ -120,6 +120,9 @@ typedef struct OracleResult {
   double best_win;
   double win_a;
   double win_b;
+  double spread_a; // oracle mean spread (points) of A's move
+  double spread_b; // oracle mean spread (points) of B's move
+  bool has_spread; // true when both moves were scored by the oracle
   double elapsed;
   bool ok;
 } OracleResult;
@@ -252,6 +255,9 @@ static OracleResult run_oracle(const Config *config, const PegBenchConfig *cfg,
   oracle.best_win = -1.0;
   oracle.win_a = -1.0;
   oracle.win_b = -1.0;
+  oracle.spread_a = 0.0;
+  oracle.spread_b = 0.0;
+  oracle.has_spread = false;
   if (error_stack_is_empty(err) && result.n_top_cands > 0) {
     oracle.ok = true;
     const Game *game = config_get_game(config);
@@ -263,13 +269,18 @@ static OracleResult run_oracle(const Config *config, const PegBenchConfig *cfg,
       char cand_str[32];
       move_to_string(game, &result.top_cands[c].move, cand_str,
                      sizeof(cand_str));
+      // Oracle's value of each arm's chosen move: win% and mean spread
+      // (points).
       if (strcmp(cand_str, a->move_str) == 0) {
         oracle.win_a = result.top_cands[c].win_pct;
+        oracle.spread_a = result.top_cands[c].mean_spread;
       }
       if (strcmp(cand_str, b->move_str) == 0) {
         oracle.win_b = result.top_cands[c].win_pct;
+        oracle.spread_b = result.top_cands[c].mean_spread;
       }
     }
+    oracle.has_spread = oracle.win_a >= 0.0 && oracle.win_b >= 0.0;
   }
   error_stack_destroy(err);
   peg_result_destroy(&result);
@@ -1011,6 +1022,7 @@ void test_peg_reprune_gap(void) {
     int on_better = 0;
     int off_better = 0;
     double sum_gap = 0;
+    double sum_spread_gap = 0; // oracle spread (points): A's move - B's move
     double sum_a_elapsed = 0;
     double sum_b_elapsed = 0;
     int rp_deeper = 0; // reprune reached a deeper completed stage
@@ -1042,6 +1054,8 @@ void test_peg_reprune_gap(void) {
       }
       const bool agree = strcmp(a.move_str, b.move_str) == 0;
       double gap = 0.0;
+      double spread_gap = 0.0;
+      bool have_spread = false;
       double win_a = -1.0;
       double win_b = -1.0;
       if (!agree) {
@@ -1049,32 +1063,44 @@ void test_peg_reprune_gap(void) {
         OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
         win_a = o.win_a;
         win_b = o.win_b;
-        gap = win_a - win_b; // reprune move minus no-reprune move
+        gap = win_a - win_b; // win%: A's (nested) move minus B's (rollout) move
         sum_gap += gap;
         if (gap > 0) {
           on_better++;
         } else if (gap < 0) {
           off_better++;
         }
+        if (o.has_spread) {
+          have_spread = true;
+          spread_gap = o.spread_a - o.spread_b; // points
+          sum_spread_gap += spread_gap;
+        }
       }
       // Per-position: rc = root candidate field (same for both arms). Per arm:
       // elapsed, st = stages reached (+'p' if the deepest was partial), ev =
       // total candidate-scenario evaluations (coverage), the chosen move, and
       // the oracle gap on disagreements.
+      char spreadstr[24] = "";
+      if (have_spread) {
+        (void)snprintf(spreadstr, sizeof(spreadstr), " sgap=%+.2f", spread_gap);
+      }
       printf("[gap] bag=%d pos=%3d rc%-3d rp[%.2fs st%d%s ev%-6d %-13s] "
-             "norp[%.2fs st%d%s ev%-6d %-13s] %s gap=%+.4f\n",
+             "norp[%.2fs st%d%s ev%-6d %-13s] %s gap=%+.4f%s\n",
              bag, i, a.root_cands, a.elapsed, a.n_stages,
              a.stage_partial ? "p" : "", a.total_evals, a.move_str, b.elapsed,
              b.n_stages, b.stage_partial ? "p" : "", b.total_evals, b.move_str,
-             agree ? "AGREE" : "DIFFER", gap);
+             agree ? "AGREE" : "DIFFER", gap, spreadstr);
       (void)fflush(stdout);
     }
     printf(
         "[gap] BAG %d SUMMARY: positions=%d disagreements=%d reprune_better=%d "
-        "noreprune_better=%d mean_gap=%+.4f | mean_elapsed rp=%.2fs norp=%.2fs "
-        "| deeper_stage rp=%d norp=%d | further(stage,cands) rp=%d norp=%d\n",
+        "noreprune_better=%d mean_gap=%+.4f mean_spreadgap=%+.3f | "
+        "mean_elapsed "
+        "rp=%.2fs norp=%.2fs | deeper_stage rp=%d norp=%d | "
+        "further(stage,cands) rp=%d norp=%d\n",
         bag, n, disagree, on_better, off_better,
-        disagree ? sum_gap / disagree : 0.0, n ? sum_a_elapsed / n : 0.0,
+        disagree ? sum_gap / disagree : 0.0,
+        disagree ? sum_spread_gap / disagree : 0.0, n ? sum_a_elapsed / n : 0.0,
         n ? sum_b_elapsed / n : 0.0, rp_deeper, norp_deeper, rp_further,
         norp_further);
     (void)fflush(stdout);
