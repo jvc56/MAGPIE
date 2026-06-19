@@ -1059,10 +1059,10 @@ static KWG *make_dawg_tail_reorder(const DictionaryWordList *words) {
   }
   qsort(pairs, total_items, sizeof(ReorderItemHead), reorder_pair_cmp);
 
-  // Heads in ascending size order: absorb the smallest child lists first.
-  // Sort without a context-carrying comparator by packing (size << 32 | head)
-  // into a 64-bit key, plain-sort, then read the head index back from the low
-  // 32 bits. Full-width, so it is safe for state graphs beyond 2^22 states.
+  // Heads sorted by ascending size: pack (size << 32 | head) into a 64-bit key
+  // (no context-carrying comparator needed), plain-sort, then read the head
+  // index back from the low 32 bits. Full-width, so it is safe for state graphs
+  // beyond 2^22 states. The greedy below walks this largest-first.
   uint64_t *heads_by_size = malloc_or_die(count * sizeof(uint64_t));
   uint32_t num_heads = 0;
   for (uint32_t head = 1; head < count; head++) {
@@ -1073,9 +1073,11 @@ static KWG *make_dawg_tail_reorder(const DictionaryWordList *words) {
   qsort(heads_by_size, num_heads, sizeof(uint64_t), reorder_u64_cmp);
 
   bool *has_tail = calloc_or_die(count, sizeof(bool));
-  // Greedy: for each child list (smallest first), find the smallest proper
-  // superset child list whose tail is still free, and absorb into it.
-  for (uint32_t head_rank = 0; head_rank < num_heads; head_rank++) {
+  // Greedy: for each child list (largest first), find the smallest proper
+  // superset child list whose tail is still free, and absorb into it. Largest
+  // first wins the per-superset tail contention for the lists that save the
+  // most nodes (a measured ~0.3% smaller DAWG than smallest-first).
+  for (uint32_t head_rank = num_heads; head_rank-- > 0;) {
     const uint32_t subset_head = (uint32_t)heads_by_size[head_rank];
     const uint32_t subset_size = item_count[subset_head];
     if (subset_size == 0) {
