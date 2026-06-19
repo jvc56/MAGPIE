@@ -817,12 +817,12 @@ uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
   return total;
 }
 
-int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
                                  uint64_t *out_line, int max_len) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+  if (worker_index < 0 || worker_index >= ctx->cap_workers) {
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  const EndgameCtxWorker *w = ctx->workers[worker_index];
   // Acquire on length pairs with release on writer side: by the time we
   // observe length L, all writes to current_line[0..L-1] up to that
   // store are visible. The worker may have moved on since then; entries
@@ -840,14 +840,14 @@ int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
   return len;
 }
 
-int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int worker_index,
                             uint64_t *out_moves, int max_len,
                             int32_t *out_value) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
+  if (worker_index < 0 || worker_index >= ctx->cap_workers) {
     *out_value = 0;
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  const EndgameCtxWorker *w = ctx->workers[worker_index];
   // Seqlock read: try a few times to capture a consistent snapshot
   // (length, moves, value all from the same writer update).
   for (int attempt = 0; attempt < 4; attempt++) {
@@ -879,12 +879,12 @@ int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
   return 0;
 }
 
-int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int worker_index,
                                    EndgameLivePvSnapshot *out, int max_k) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers || max_k <= 0) {
+  if (worker_index < 0 || worker_index >= ctx->cap_workers || max_k <= 0) {
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
+  const EndgameCtxWorker *w = ctx->workers[worker_index];
   for (int attempt = 0; attempt < 4; attempt++) {
     const uint64_t seq1 =
         atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
