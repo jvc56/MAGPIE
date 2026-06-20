@@ -978,7 +978,8 @@ static bool peg_nested_should_stop(const PegWorker *worker,
 
 // Greedy-rollout floor value (on-turn perspective) on a scratch copy, since the
 // playout mutates the game it walks.
-static int32_t peg_nested_floor(PegWorker *worker, Game *game, int on_turn) {
+static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
+                                int on_turn) {
   PegNestFrame *frame = peg_nest_acquire(worker);
   if (frame->game == NULL) {
     frame->game = game_duplicate(game);
@@ -1198,8 +1199,9 @@ static int peg_nested_stride_for_bag(const PegWorker *worker, int bag) {
 // Expected (over the candidate's scenarios) on-turn value of playing `cand`.
 // Collects the scenarios as jobs, runs them across the pool (or inline when
 // there is no pool / a single scenario), and reduces the weighted average.
-static int32_t peg_nested_cand_value(PegWorker *worker, Game *parent_game,
-                                     int mover_idx, const Move *cand,
+static int32_t peg_nested_cand_value(PegWorker *worker,
+                                     const Game *parent_game, int mover_idx,
+                                     const Move *cand,
                                      const uint8_t *unseen, int ld_size,
                                      int stage_fidelity, int depth,
                                      int outer_fidelity, int64_t deadline_ns) {

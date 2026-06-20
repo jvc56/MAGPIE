@@ -798,7 +798,7 @@ void test_peg_nested_gap(void) {
     char buf[128];
     (void)snprintf(buf, sizeof(buf), "%s", getenv("PEG_GAP_NEST_CAPS"));
     nest_n_caps = 0;
-    for (char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
+    for (const char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
          tok = strtok(NULL, ",")) {
       nest_cap_seq[nest_n_caps++] = atoi(tok);
     }
@@ -911,14 +911,11 @@ void test_peg_nested_gap(void) {
       double gap = 0.0;
       double spread_gap = 0.0;
       bool have_spread = false;
-      double win_a = -1.0;
-      double win_b = -1.0;
       if (!agree) {
         disagree++;
         OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
-        win_a = o.win_a;
-        win_b = o.win_b;
-        gap = win_a - win_b; // win%: A's (nested) move minus B's (rollout) move
+        // win%: A's (nested) move minus B's (rollout) move.
+        gap = o.win_a - o.win_b;
         sum_gap += gap;
         if (gap > 0) {
           nst_better++;
