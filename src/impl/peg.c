@@ -94,13 +94,6 @@ typedef struct PegPruneCache {
   KWG **values;   // owned; destroyed with the cache
   int capacity;   // power of two
   int count;
-  bool
-      disabled; // INVESTIGATION: when set, leaves use the root prune (no chain)
-  // INVESTIGATION: per-solve leaf-rebuild accounting (build-cost break-even).
-  _Atomic int64_t enum_ns;      // time in generate_possible_words
-  _Atomic int64_t construct_ns; // time in make_kwg_from_words_small
-  _Atomic int64_t n_builds;     // number of leaf KWGs built
-  _Atomic int64_t total_words;  // summed pruned word counts (avg leaf KWG size)
 } PegPruneCache;
 
 // A reusable scratch frame for the nested recursion: one game (a candidate
@@ -870,10 +863,6 @@ static PegPruneCache *peg_prune_cache_create(void) {
   cache->count = 0;
   cache->keys = calloc_or_die((size_t)cache->capacity, sizeof(uint64_t));
   cache->values = calloc_or_die((size_t)cache->capacity, sizeof(KWG *));
-  atomic_store(&cache->enum_ns, 0);
-  atomic_store(&cache->construct_ns, 0);
-  atomic_store(&cache->n_builds, 0);
-  atomic_store(&cache->total_words, 0);
   return cache;
 }
 
@@ -925,17 +914,9 @@ static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
 
   const KWG *parent_kwg = game_get_effective_kwg(game, mover_idx);
   DictionaryWordList *word_list = dictionary_word_list_create();
-  const int64_t t0 = ctimer_monotonic_ns();
   generate_possible_words(game, parent_kwg, word_list);
-  const int64_t t1 = ctimer_monotonic_ns();
   KWG *built = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
                                          KWG_MAKER_MERGE_EXACT);
-  const int64_t t2 = ctimer_monotonic_ns();
-  atomic_fetch_add(&cache->enum_ns, t1 - t0);
-  atomic_fetch_add(&cache->construct_ns, t2 - t1);
-  atomic_fetch_add(&cache->n_builds, 1);
-  atomic_fetch_add(&cache->total_words,
-                   dictionary_word_list_get_count(word_list));
   dictionary_word_list_destroy(word_list);
 
   cpthread_mutex_lock(&cache->mutex);
@@ -1037,7 +1018,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   ea.num_top_moves = 1;
   ea.external_deadline_ns = deadline_ns;
   ea.shared_tt = worker->eg_tt;
-  if (plies >= 2 && !worker->prune_cache->disabled) {
+  if (plies >= 2) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(worker->prune_cache, game, on_turn);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
@@ -1480,7 +1461,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // 1 ply there are too few to amortize the build. (The default cascade only
   // ever uses 2..6-ply exact leaves, so this is a robustness guard for custom
   // configs.)
-  if (ctx->fidelity_plies >= 2 && !ctx->worker->prune_cache->disabled) {
+  if (ctx->fidelity_plies >= 2) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
@@ -2357,8 +2338,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
-  prune_cache->disabled =
-      args->reprune_disabled; // INVESTIGATION (do not merge)
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -2447,24 +2426,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         .stage_idx = 0,
     };
 
-    // Stage 0: greedy evaluation of every candidate. When cand_max_tiles_played
-    // is set (investigation), drop generated candidates that play more tiles
-    // than the cap, shrinking the field for a cheap to-completion solve.
+    // Stage 0: greedy evaluation of every candidate.
     if (args->n_only_moves > 0) {
       for (int i = 0; i < n_cands; i++) {
         moves[i] = args->only_moves[i];
       }
     } else {
-      int kept = 0;
       for (int i = 0; i < n_cands; i++) {
-        const Move *cand = move_list_get_move(cand_ml, i);
-        if (args->cand_max_tiles_played > 0 &&
-            move_get_tiles_played(cand) > args->cand_max_tiles_played) {
-          continue;
-        }
-        moves[kept++] = cand;
+        moves[i] = move_list_get_move(cand_ml, i);
       }
-      n_cands = kept;
     }
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
@@ -2767,10 +2737,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   free(workers);
   // Safe now that every worker's scratch game (which referenced cached KWGs via
   // its override pointer) has been destroyed.
-  out->build_enum_ns = atomic_load(&prune_cache->enum_ns);
-  out->build_construct_ns = atomic_load(&prune_cache->construct_ns);
-  out->build_n = atomic_load(&prune_cache->n_builds);
-  out->build_total_words = atomic_load(&prune_cache->total_words);
   peg_prune_cache_destroy(prune_cache);
   if (pool) {
     peg_pool_destroy(pool);

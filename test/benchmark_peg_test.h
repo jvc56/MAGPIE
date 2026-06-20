@@ -17,9 +17,7 @@ void test_peg_pegtopk_all(void);
 
 void test_peg_bench_fixture(void);
 
-void test_peg_reprune_gap(void);
-
-void test_peg_build_breakeven(void);
+void test_peg_nested_gap(void);
 
 void test_gen_peg_more(void);
 
