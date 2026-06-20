@@ -75,6 +75,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 enum {
   HELP_INDENT = 10,
@@ -138,6 +141,8 @@ typedef enum {
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
   ARG_TOKEN_PEG_OUTCOMES,
+  ARG_TOKEN_PEG_OUT_WIDTH,
+  ARG_TOKEN_PEG_OUT_LINES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -277,6 +282,12 @@ struct Config {
   bool peg_pessimistic;
   // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
   bool peg_show_outcomes;
+  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
+  // the cell always fits the label + a worst-case token) and max wrapped lines
+  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
+  // chart is written to a timestamped file under data/pegcharts/.
+  int peg_out_width;
+  int peg_out_lines;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -1604,10 +1615,29 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<true/false>";
       examples[0] = "true";
       text =
-          "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
-          "losses L:, each as [drawn]remaining) for the best candidate. "
-          "Requires a second pass over the top candidate after the solve, "
-          "roughly doubling its leaf work. Default false.";
+          "When true, adds a per-play outcomes column to the graded table: the "
+          "shorter of the winning / losing draws (the other is implied by the "
+          "counts). A draw is a sorted multiset (FGHI) when order is "
+          "irrelevant, or a slash-joined sequence (F/G/H/I) when it matters; "
+          "each carries an xN labeled-ordering weight. Default false.";
+      break;
+    case ARG_TOKEN_PEG_OUT_WIDTH:
+      usages[0] = "<columns>";
+      examples[0] = "100";
+      examples[1] = "0";
+      text = "Maximum whole-line width for the graded outcomes column "
+             "(default 100). The column wraps at token boundaries, indented "
+             "under its header; the width is clamped up so a cell always fits "
+             "its label plus one worst-case token. 0 = unbounded (no wrap).";
+      break;
+    case ARG_TOKEN_PEG_OUT_LINES:
+      usages[0] = "<lines>";
+      examples[0] = "1";
+      examples[1] = "0";
+      text = "Maximum wrapped lines per outcomes cell (default 1); a truncated "
+             "cell ends with '...'. 0 = unlimited. When any cell is truncated, "
+             "the full untruncated chart is written to a timestamped file "
+             "under data/pegcharts/ and its path is printed above the table.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2169,6 +2199,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
@@ -3268,13 +3300,68 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
   config_peg(config, error_stack);
 }
 
+// Writes the untruncated peg chart to data/pegcharts/outcomes_<ts>.txt, where
+// <ts> is the current wall-clock time down to microseconds. Returns the path
+// (caller frees) or NULL on failure.
+static char *config_write_peg_chart_file(const char *contents) {
+  mkdir("data", 0777);
+  mkdir("data/pegcharts", 0777);
+  struct timeval now_tv;
+  gettimeofday(&now_tv, NULL);
+  const time_t now_secs = now_tv.tv_sec;
+  char stamp[32];
+  stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", localtime(&now_secs))] =
+      '\0';
+  char *path = get_formatted_string("data/pegcharts/outcomes_%s_%06ld.txt",
+                                    stamp, (long)now_tv.tv_usec);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(path, "w", contents, error_stack);
+  const bool ok = error_stack_is_empty(error_stack);
+  error_stack_destroy(error_stack);
+  if (!ok) {
+    free(path);
+    return NULL;
+  }
+  return path;
+}
+
+// Renders the peg result for display. When the outcomes column truncates any
+// cell at the configured width/line caps, writes the full (unlimited-lines)
+// chart to a data/pegcharts/ file and embeds its path above the table.
+static char *config_peg_display(const Config *config, PegPoll *poll) {
+  const int width = config->peg_out_width;
+  const int lines = config->peg_out_lines;
+  bool truncated = false;
+  char *display = peg_result_get_string(&config->peg_result, config->game,
+                                        config->peg_show_outcomes, poll, width,
+                                        lines, /*trunc_note=*/NULL, &truncated);
+  if (!truncated) {
+    return display;
+  }
+  free(display);
+  char *full = peg_result_get_string(&config->peg_result, config->game,
+                                     config->peg_show_outcomes, poll, width,
+                                     /*out_max_lines=*/0, NULL, NULL);
+  char *path = config_write_peg_chart_file(full);
+  free(full);
+  char *note =
+      path != NULL
+          ? get_formatted_string("untruncated chart written to: %s", path)
+          : NULL;
+  char *out =
+      peg_result_get_string(&config->peg_result, config->game,
+                            config->peg_show_outcomes, poll, width, lines, note,
+                            /*out_truncated=*/NULL);
+  free(note);
+  free(path);
+  return out;
+}
+
 char *status_peg(Config *config) {
-  if (config->peg_result.last_completed_stage < 0 &&
-      config->peg_poll == NULL) {
+  if (config->peg_result.last_completed_stage < 0 && config->peg_poll == NULL) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return peg_result_get_string(&config->peg_result, config->game,
-                               config->peg_show_outcomes, config->peg_poll);
+  return config_peg_display(config, config->peg_poll);
 }
 
 // Autoplay
@@ -3862,8 +3949,7 @@ char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
                      string_duplicate("no PEG results to show"));
     return empty_string();
   }
-  return peg_result_get_string(&config->peg_result, config->game,
-                               config->peg_show_outcomes, /*poll=*/NULL);
+  return config_peg_display(config, /*poll=*/NULL);
 }
 
 void execute_show_peg(Config *config, ErrorStack *error_stack) {
@@ -6568,6 +6654,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
+                  &config->peg_out_width, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_PEG_OUT_LINES, 0, INT_MAX,
+                  &config->peg_out_lines, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_PEG_PESSIMISTIC, &config->peg_pessimistic,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -7676,8 +7774,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = peg_result_get_string(&config->peg_result, config->game,
-                                       config->peg_show_outcomes, /*poll=*/NULL);
+  char *result = config_peg_display(config, /*poll=*/NULL);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -8142,6 +8239,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
   arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
+  arg(ARG_TOKEN_PEG_OUT_WIDTH, "pegoutwidth", 1, 1);
+  arg(ARG_TOKEN_PEG_OUT_LINES, "pegoutlines", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -8254,6 +8353,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_show_outcomes = false;
+  config->peg_out_width = 100;
+  config->peg_out_lines = 1;
   config->peg_only_str = NULL;
   config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
@@ -8623,6 +8724,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_STRIDE:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
+      break;
+    case ARG_TOKEN_PEG_OUT_WIDTH:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_out_width);
+      break;
+    case ARG_TOKEN_PEG_OUT_LINES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_out_lines);
       break;
     case ARG_TOKEN_PEG_PESSIMISTIC:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

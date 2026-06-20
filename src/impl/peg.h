@@ -296,6 +296,15 @@ typedef struct PegResult {
   struct PegPerScenario *per_scenario;
   int n_per_scenario;
 
+  // Optional per-candidate per-ordering outcomes, captured inline during the
+  // halving stages (no re-evaluation) when PegArgs.include_per_scenario is set.
+  // One entry per candidate that reached a halving stage, each holding that
+  // candidate's per-ordering W/L/T rows at the deepest fidelity it was scored
+  // at. Looked up by move at render time. NULL / 0 otherwise. Caller owns/frees
+  // via peg_result_destroy.
+  struct PegCandOutcomes *cand_outcomes;
+  int n_cand_outcomes;
+
   // Per-stage progress history, populated from the poll at the end of
   // peg_solve. Index i = stage i; n_stage_history grows as stages complete.
   int n_stage_history;
@@ -310,6 +319,17 @@ typedef struct PegPerScenario {
   int64_t weight;
   int32_t mover_total;
 } PegPerScenario;
+
+// Per-candidate per-ordering outcomes (see PegResult.cand_outcomes). rows is a
+// PegPerScenario list for the single candidate `move`, captured at `fidelity`
+// plies (0 = greedy; N = N-ply endgame). Caller owns rows via
+// peg_result_destroy.
+typedef struct PegCandOutcomes {
+  Move move;
+  PegPerScenario *rows;
+  int n_rows;
+  int fidelity;
+} PegCandOutcomes;
 
 // ----- Live polling (optional) ------------------------------------------
 //

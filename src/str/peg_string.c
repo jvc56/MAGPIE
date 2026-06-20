@@ -9,44 +9,411 @@
 #include "../util/string_util.h"
 #include "move_string.h"
 #include <inttypes.h>
+#include <limits.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
+#include <string.h>
 
-static char *peg_build_outcomes_string(const PegResult *result) {
-  StringBuilder *sb = string_builder_create();
-  const char *group_labels[3] = {"W:", "T:", "L:"};
-  for (int group_idx = 0; group_idx < 3; group_idx++) {
-    bool first_in_group = true;
-    for (int scen_idx = 0; scen_idx < result->n_per_scenario; scen_idx++) {
-      const PegPerScenario *sc = &result->per_scenario[scen_idx];
-      const bool is_win = sc->mover_total > 0;
-      const bool is_tie = sc->mover_total == 0;
-      bool matches;
-      if (group_idx == 0) {
-        matches = is_win;
-      } else if (group_idx == 1) {
-        matches = is_tie;
-      } else {
-        matches = !is_win && !is_tie;
-      }
-      if (!matches) {
-        continue;
-      }
-      if (first_in_group) {
-        if (string_builder_length(sb) > 0) {
-          string_builder_add_string(sb, " ");
-        }
-        string_builder_add_string(sb, group_labels[group_idx]);
-        first_in_group = false;
-      }
-      string_builder_add_formatted_string(sb, " [%s]%s", sc->drawn,
-                                          sc->remaining);
+// One displayable outcome token: a draw shown either as a sorted multiset
+// ("FGHI", order irrelevant) or a slash-joined draw-order sequence
+// ("F/G/H/I", order matters), tagged with its bucket and summed
+// labeled-ordering weight.
+typedef struct {
+  char text[64];
+  int bucket; // 0 = win, 1 = loss
+  int64_t weight;
+} PegOutcomeTok;
+
+// Per-multiset record: which outcome buckets its orderings landed in, the
+// labeled-ordering count per ordering (constant within a multiset), and the
+// summed weight of all its rows.
+typedef struct {
+  char ms[40];
+  bool seen[3]; // [0]=win [1]=loss [2]=tie
+  int64_t per_ordering;
+  int64_t total_weight;
+} PegOutcomeMs;
+
+// A growable list of short strings (sequences / segmented forms).
+typedef struct {
+  char **items;
+  int len;
+  int cap;
+} PegStrList;
+
+static void peg_strlist_push(PegStrList *list, const char *s) {
+  if (list->len == list->cap) {
+    list->cap = list->cap > 0 ? list->cap * 2 : 8;
+    list->items =
+        realloc_or_die(list->items, (size_t)list->cap * sizeof(char *));
+  }
+  list->items[list->len++] = string_duplicate(s);
+}
+
+static bool peg_strlist_has(const PegStrList *list, const char *s) {
+  for (int i = 0; i < list->len; i++) {
+    if (strcmp(list->items[i], s) == 0) {
+      return true;
     }
   }
+  return false;
+}
+
+static void peg_strlist_push_unique(PegStrList *list, const char *s) {
+  if (!peg_strlist_has(list, s)) {
+    peg_strlist_push(list, s);
+  }
+}
+
+static void peg_strlist_destroy(PegStrList *list) {
+  for (int i = 0; i < list->len; i++) {
+    free(list->items[i]);
+  }
+  free(list->items);
+  list->items = NULL;
+  list->len = 0;
+  list->cap = 0;
+}
+
+// Sort a short tile string in place (insertion sort).
+static void peg_sort_str(char *s) {
+  for (int i = 1; s[i] != '\0'; i++) {
+    const char key = s[i];
+    int prev = i - 1;
+    while (prev >= 0 && s[prev] > key) {
+      s[prev + 1] = s[prev];
+      prev--;
+    }
+    s[prev + 1] = key;
+  }
+}
+
+// Number of distinct permutations of the sorted multiset string s.
+static int64_t peg_perm_count(const char *s) {
+  const int len = (int)strlen(s);
+  int64_t count = 1;
+  for (int factor = 2; factor <= len; factor++) {
+    count *= factor;
+  }
+  int run = 1;
+  for (int i = 1; i <= len; i++) {
+    if (i < len && s[i] == s[i - 1]) {
+      run++;
+    } else {
+      int64_t run_fact = 1;
+      for (int factor = 2; factor <= run; factor++) {
+        run_fact *= factor;
+      }
+      count /= run_fact;
+      run = 1;
+    }
+  }
+  return count;
+}
+
+// Distinct orderings a segmented form ("F/GH/I") represents: the product over
+// its "/"-separated (sorted) segments of each segment's permutation count.
+static int64_t peg_form_covered(const char *form) {
+  int64_t covered = 1;
+  char seg[40];
+  int seg_len = 0;
+  for (const char *cursor = form;; cursor++) {
+    if (*cursor == '/' || *cursor == '\0') {
+      seg[seg_len] = '\0';
+      if (seg_len > 0) {
+        covered *= peg_perm_count(seg);
+      }
+      seg_len = 0;
+      if (*cursor == '\0') {
+        break;
+      }
+    } else if (seg_len < (int)sizeof(seg) - 1) {
+      seg[seg_len++] = *cursor;
+    }
+  }
+  return covered;
+}
+
+// Factor a set of distinct, equal-length tile sequences (all the same multiset
+// and outcome bucket) into the coarsest segmented forms: a maximal contiguous
+// block whose orderings are all present collapses into one sorted multiset
+// segment ("GH"), while order-significant boundaries stay "/"-separated. The
+// returned forms (e.g. "F/GH/I") partition the input. Recurses on the leftmost
+// boundary where the set factors as a cartesian product L x R.
+static PegStrList peg_factor(const PegStrList *seqs) {
+  PegStrList out = {0};
+  const int width = (int)strlen(seqs->items[0]);
+  if (width == 1) {
+    for (int i = 0; i < seqs->len; i++) {
+      peg_strlist_push_unique(&out, seqs->items[i]);
+    }
+    return out;
+  }
+  for (int split = 0; split < width - 1; split++) {
+    PegStrList left = {0};
+    PegStrList right = {0};
+    for (int i = 0; i < seqs->len; i++) {
+      char lbuf[40];
+      char rbuf[40];
+      memcpy(lbuf, seqs->items[i], (size_t)(split + 1));
+      lbuf[split + 1] = '\0';
+      const int rlen = width - (split + 1);
+      memcpy(rbuf, seqs->items[i] + split + 1, (size_t)rlen);
+      rbuf[rlen] = '\0';
+      peg_strlist_push_unique(&left, lbuf);
+      peg_strlist_push_unique(&right, rbuf);
+    }
+    bool factors = seqs->len == left.len * right.len;
+    for (int li = 0; factors && li < left.len; li++) {
+      for (int ri = 0; factors && ri < right.len; ri++) {
+        char comb[40];
+        strcpy(comb, left.items[li]);
+        strcat(comb, right.items[ri]);
+        if (!peg_strlist_has(seqs, comb)) {
+          factors = false;
+        }
+      }
+    }
+    if (factors) {
+      PegStrList left_forms = peg_factor(&left);
+      PegStrList right_forms = peg_factor(&right);
+      for (int a = 0; a < left_forms.len; a++) {
+        for (int b = 0; b < right_forms.len; b++) {
+          char form[64];
+          strcpy(form, left_forms.items[a]);
+          strcat(form, "/");
+          strcat(form, right_forms.items[b]);
+          peg_strlist_push(&out, form);
+        }
+      }
+      peg_strlist_destroy(&left_forms);
+      peg_strlist_destroy(&right_forms);
+      peg_strlist_destroy(&left);
+      peg_strlist_destroy(&right);
+      return out;
+    }
+    peg_strlist_destroy(&left);
+    peg_strlist_destroy(&right);
+  }
+  // Irreducible: a single permutable block when the set is all permutations of
+  // one multiset; otherwise each sequence stands alone (a "/" per tile).
+  char sorted0[40];
+  strcpy(sorted0, seqs->items[0]);
+  peg_sort_str(sorted0);
+  bool all_same_ms = true;
+  for (int i = 1; all_same_ms && i < seqs->len; i++) {
+    char other[40];
+    strcpy(other, seqs->items[i]);
+    peg_sort_str(other);
+    if (strcmp(other, sorted0) != 0) {
+      all_same_ms = false;
+    }
+  }
+  if (all_same_ms && (int64_t)seqs->len == peg_perm_count(sorted0)) {
+    peg_strlist_push(&out, sorted0);
+    return out;
+  }
+  for (int i = 0; i < seqs->len; i++) {
+    char form[64];
+    int form_len = 0;
+    for (int c = 0; seqs->items[i][c] != '\0'; c++) {
+      if (c > 0) {
+        form[form_len++] = '/';
+      }
+      form[form_len++] = seqs->items[i][c];
+    }
+    form[form_len] = '\0';
+    peg_strlist_push(&out, form);
+  }
+  return out;
+}
+
+static int peg_outcome_tok_cmp(const void *a, const void *b) {
+  return strcmp(((const PegOutcomeTok *)a)->text,
+                ((const PegOutcomeTok *)b)->text);
+}
+
+// 0 = win, 1 = loss, 2 = tie.
+static int peg_outcome_bucket(int32_t mover_total) {
+  if (mover_total > 0) {
+    return 0;
+  }
+  if (mover_total < 0) {
+    return 1;
+  }
+  return 2;
+}
+
+// Build a draw's sorted-multiset key ("FGHI") and raw draw-order tile string
+// ("FGHI": the mover's drawn tiles, then the bag remainder, in draw order).
+// Single-character tiles assumed (English; blank renders as '?').
+static void peg_draw_keys(const char *drawn, const char *remaining, char *ms,
+                          char *seq) {
+  int n = 0;
+  for (const char *tp = drawn; *tp != '\0' && n < 31; tp++) {
+    seq[n++] = *tp;
+  }
+  for (const char *tp = remaining; *tp != '\0' && n < 31; tp++) {
+    seq[n++] = *tp;
+  }
+  seq[n] = '\0';
+  memcpy(ms, seq, (size_t)n + 1);
+  peg_sort_str(ms);
+}
+
+// Condense a candidate's per-ordering rows into one line. A draw whose
+// orderings all land in a single bucket is shown as a sorted multiset
+// ("FGHI"); a draw whose orderings span two or more of win/loss/tie is split
+// into segmented forms ("F/GH/I") where contiguous freely-permutable blocks
+// collapse to a sorted multiset segment and order-significant boundaries stay
+// "/"-separated. Each token carries an "xN" labeled-ordering weight (N=1
+// omitted), so the win tokens' weights sum to the wins column and the loss
+// tokens' to the loss column. Only the shorter of the win / loss lists is
+// printed (the other is implied by the counts); tie tiles are not listed but do
+// count toward the split decision. When every ordering shares one bucket, says
+// "always wins/loses/ties". Caller frees.
+static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
+                                            int n_rows) {
+  if (n_rows <= 0) {
+    return string_duplicate("");
+  }
+
+  // "always X" when every ordering shares a single bucket.
+  bool any[3] = {false, false, false};
+  for (int row_idx = 0; row_idx < n_rows; row_idx++) {
+    any[peg_outcome_bucket(rows[row_idx].mover_total)] = true;
+  }
+  if ((int)any[0] + (int)any[1] + (int)any[2] == 1) {
+    const char *all_label = "always ties";
+    if (any[0]) {
+      all_label = "always wins";
+    } else if (any[1]) {
+      all_label = "always loses";
+    }
+    return string_duplicate(all_label);
+  }
+
+  // Pass 1: per-multiset bucket presence (decides multiset vs sequence), the
+  // per-ordering labeled count, and the summed weight.
+  PegOutcomeMs *ms_info = malloc_or_die((size_t)n_rows * sizeof(PegOutcomeMs));
+  int n_ms = 0;
+  char (*row_ms)[40] = malloc_or_die((size_t)n_rows * sizeof(*row_ms));
+  char (*row_seq)[40] = malloc_or_die((size_t)n_rows * sizeof(*row_seq));
+  for (int row_idx = 0; row_idx < n_rows; row_idx++) {
+    peg_draw_keys(rows[row_idx].drawn, rows[row_idx].remaining, row_ms[row_idx],
+                  row_seq[row_idx]);
+    int ms_idx = -1;
+    for (int k = 0; k < n_ms; k++) {
+      if (strcmp(ms_info[k].ms, row_ms[row_idx]) == 0) {
+        ms_idx = k;
+        break;
+      }
+    }
+    if (ms_idx < 0) {
+      ms_idx = n_ms++;
+      strcpy(ms_info[ms_idx].ms, row_ms[row_idx]);
+      ms_info[ms_idx].seen[0] = false;
+      ms_info[ms_idx].seen[1] = false;
+      ms_info[ms_idx].seen[2] = false;
+      ms_info[ms_idx].per_ordering = rows[row_idx].weight;
+      ms_info[ms_idx].total_weight = 0;
+    }
+    ms_info[ms_idx].seen[peg_outcome_bucket(rows[row_idx].mover_total)] = true;
+    ms_info[ms_idx].total_weight += rows[row_idx].weight;
+  }
+
+  // Pass 2: emit one token per (display form, bucket). A non-split multiset is
+  // one multiset token; a split multiset's orderings are factored per bucket
+  // into segmented forms (no token for a tie-only multiset). At most one token
+  // per non-split multiset plus one per distinct sequence overall.
+  PegOutcomeTok *toks =
+      malloc_or_die((size_t)(n_rows + n_ms) * sizeof(PegOutcomeTok));
+  int n_toks = 0;
+  for (int ms_idx = 0; ms_idx < n_ms; ms_idx++) {
+    const PegOutcomeMs *info = &ms_info[ms_idx];
+    const int n_buckets =
+        (int)info->seen[0] + (int)info->seen[1] + (int)info->seen[2];
+    if (n_buckets <= 1) {
+      int bucket = 2;
+      if (info->seen[0]) {
+        bucket = 0;
+      } else if (info->seen[1]) {
+        bucket = 1;
+      }
+      if (bucket == 2) {
+        continue; // tie-only: not listed
+      }
+      strcpy(toks[n_toks].text, info->ms);
+      toks[n_toks].bucket = bucket;
+      toks[n_toks].weight = info->total_weight;
+      n_toks++;
+      continue;
+    }
+    // Split: factor this multiset's distinct orderings, per win/loss bucket.
+    for (int bucket = 0; bucket <= 1; bucket++) {
+      PegStrList seqs = {0};
+      for (int row_idx = 0; row_idx < n_rows; row_idx++) {
+        if (peg_outcome_bucket(rows[row_idx].mover_total) != bucket) {
+          continue;
+        }
+        if (strcmp(row_ms[row_idx], info->ms) != 0) {
+          continue;
+        }
+        peg_strlist_push_unique(&seqs, row_seq[row_idx]);
+      }
+      if (seqs.len == 0) {
+        peg_strlist_destroy(&seqs);
+        continue;
+      }
+      PegStrList forms = peg_factor(&seqs);
+      for (int f = 0; f < forms.len; f++) {
+        strcpy(toks[n_toks].text, forms.items[f]);
+        toks[n_toks].bucket = bucket;
+        toks[n_toks].weight =
+            peg_form_covered(forms.items[f]) * info->per_ordering;
+        n_toks++;
+      }
+      peg_strlist_destroy(&forms);
+      peg_strlist_destroy(&seqs);
+    }
+  }
+  free(ms_info);
+  free(row_ms);
+  free(row_seq);
+
+  qsort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
+  int n_win_toks = 0;
+  for (int k = 0; k < n_toks; k++) {
+    if (toks[k].bucket == 0) {
+      n_win_toks++;
+    }
+  }
+  const int want = n_win_toks <= n_toks - n_win_toks ? 0 : 1;
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_string(sb, want == 0 ? "W:" : "L:");
+  for (int k = 0; k < n_toks; k++) {
+    if (toks[k].bucket != want) {
+      continue;
+    }
+    if (toks[k].weight > 1) {
+      string_builder_add_formatted_string(sb, " %sx%" PRId64, toks[k].text,
+                                          toks[k].weight);
+    } else {
+      string_builder_add_formatted_string(sb, " %s", toks[k].text);
+    }
+  }
+  free(toks);
   char *out = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
   return out;
+}
+
+static char *peg_build_outcomes_string(const PegResult *result) {
+  return peg_build_outcomes_string_rows(result->per_scenario,
+                                        result->n_per_scenario);
 }
 
 static void peg_append_stage_table(StringBuilder *sb,
@@ -109,6 +476,128 @@ static bool peg_moves_match(const Move *m1, const Move *m2);
 static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
                                       const Move *move);
 
+// Smallest outcomes-cell content width we ever wrap to: enough for the label
+// plus one worst-case token (a 4-tile sequence with a 4-digit weight).
+enum { PEG_OUTCOMES_MIN_CELL = 15 }; // strlen("W: A/B/C/Dx1234")
+
+// Append `text` (an outcomes cell like "W: tok tok ...") wrapped to `avail`
+// columns per line, breaking only at spaces (defensive char-break if a single
+// token exceeds `avail`). The first line continues from whatever the caller
+// already emitted on the current line; each continuation line is preceded by a
+// newline and `indent` spaces so the column stays aligned. At most `max_lines`
+// lines are emitted (0 = unlimited); if more tokens remain, the last line ends
+// with " ..." (kept within `avail`) and *truncated is set true. avail >= 1.
+static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
+                               int avail, int max_lines, bool *truncated) {
+  if (avail < 1) {
+    avail = 1;
+  }
+  // Tokenize on spaces (the label "W:"/"L:" is just the first token).
+  int cap = 16;
+  int n_tok = 0;
+  const char **tok = malloc_or_die((size_t)cap * sizeof(char *));
+  int *tok_len = malloc_or_die((size_t)cap * sizeof(int));
+  for (const char *cursor = text; *cursor != '\0';) {
+    while (*cursor == ' ') {
+      cursor++;
+    }
+    if (*cursor == '\0') {
+      break;
+    }
+    const char *start = cursor;
+    while (*cursor != '\0' && *cursor != ' ') {
+      cursor++;
+    }
+    if (n_tok == cap) {
+      cap *= 2;
+      tok = realloc_or_die(tok, (size_t)cap * sizeof(char *));
+      tok_len = realloc_or_die(tok_len, (size_t)cap * sizeof(int));
+    }
+    tok[n_tok] = start;
+    tok_len[n_tok] = (int)(cursor - start);
+    n_tok++;
+  }
+
+  const int ELLIPSIS = 4; // " ..."
+  int idx = 0;
+  int line = 0;
+  while (idx < n_tok) {
+    if (line > 0) {
+      string_builder_add_char(sb, '\n');
+      string_builder_add_spaces(sb, indent);
+    }
+    const bool last_line = max_lines > 0 && line == max_lines - 1;
+    int col = 0;
+    while (idx < n_tok) {
+      const int sep = col > 0 ? 1 : 0;
+      // Defensive: a token wider than the whole cell — hard-break it.
+      if (col == 0 && tok_len[idx] > avail) {
+        int emitted = 0;
+        while (emitted < tok_len[idx]) {
+          if (emitted > 0) {
+            if (max_lines > 0 && line + 1 >= max_lines) {
+              if (truncated != NULL) {
+                *truncated = true;
+              }
+              string_builder_add_string(sb, "...");
+              goto cleanup;
+            }
+            string_builder_add_char(sb, '\n');
+            string_builder_add_spaces(sb, indent);
+            line++;
+          }
+          const int chunk = (tok_len[idx] - emitted) < avail
+                                ? (tok_len[idx] - emitted)
+                                : avail;
+          char *piece = get_formatted_string("%.*s", chunk, tok[idx] + emitted);
+          string_builder_add_string(sb, piece);
+          free(piece);
+          emitted += chunk;
+        }
+        idx++;
+        col = avail; // force a wrap before the next token
+        continue;
+      }
+      // On the last allowed line keep room for " ..." when more tokens remain.
+      const int reserve = (last_line && idx + 1 < n_tok) ? ELLIPSIS : 0;
+      if (col > 0 && col + sep + tok_len[idx] + reserve > avail) {
+        break;
+      }
+      if (sep) {
+        string_builder_add_char(sb, ' ');
+        col++;
+      }
+      char *piece = get_formatted_string("%.*s", tok_len[idx], tok[idx]);
+      string_builder_add_string(sb, piece);
+      free(piece);
+      col += tok_len[idx];
+      idx++;
+    }
+    if (last_line && idx < n_tok) {
+      if (truncated != NULL) {
+        *truncated = true;
+      }
+      string_builder_add_string(sb, " ...");
+      break;
+    }
+    line++;
+  }
+cleanup:
+  free(tok);
+  free(tok_len);
+}
+
+// Find the captured per-ordering outcomes for a given move, or NULL.
+static const PegCandOutcomes *peg_find_cand_outcomes(const PegResult *result,
+                                                     const Move *move) {
+  for (int oc_idx = 0; oc_idx < result->n_cand_outcomes; oc_idx++) {
+    if (peg_moves_match(&result->cand_outcomes[oc_idx].move, move)) {
+      return &result->cand_outcomes[oc_idx];
+    }
+  }
+  return NULL;
+}
+
 // Render the final graded ranking: every play that entered a halving stage,
 // grouped by the deepest endgame fidelity it reached. Deepest tier first, a
 // dashed separator between tiers, and the rank continuing across them. Shows
@@ -117,8 +606,14 @@ static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
 // When snap is non-NULL, shows "total" + per-fidelity time columns (one per
 // non-greedy completed stage). When snap is NULL, shows a single "time" column.
 static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
-                                    const Board *board, const LetterDistribution *ld,
-                                    const PegPollSnapshot *snap) {
+                                    const Board *board,
+                                    const LetterDistribution *ld,
+                                    const PegPollSnapshot *snap,
+                                    bool show_outcomes, int out_width,
+                                    int out_max_lines, const char *trunc_note,
+                                    bool *out_truncated) {
+  // Per-play outcomes column (W/L draws) when requested and captured.
+  const bool show_outc = show_outcomes && result->n_cand_outcomes > 0;
   // Collect distinct non-greedy fidelities from the graded result, in ascending
   // order (graded_cands is stored shallowest-first so iteration is ordered).
   int unique_fids[PEG_POLL_MAX_STAGES];
@@ -164,9 +659,12 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   char **movec = malloc_or_die((size_t)total * sizeof(char *));
   char **winsc = malloc_or_die((size_t)total * sizeof(char *));
   char **tiesc = malloc_or_die((size_t)total * sizeof(char *));
+  char **lossc = malloc_or_die((size_t)total * sizeof(char *));
   char **winc = malloc_or_die((size_t)total * sizeof(char *));
   char **spreadc = malloc_or_die((size_t)total * sizeof(char *));
   char **totalc = malloc_or_die((size_t)total * sizeof(char *));
+  char **outc =
+      show_outc ? malloc_or_die((size_t)total * sizeof(char *)) : NULL;
   // timecols[fid_col][row]
   char ***timecols =
       show_time ? malloc_or_die((size_t)n_unique_fids * sizeof(char **)) : NULL;
@@ -184,8 +682,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   while (block_end > 0) {
     const int fid = result->graded_fidelity[block_end - 1];
     int block_start = block_end - 1;
-    while (block_start > 0 &&
-           result->graded_fidelity[block_start - 1] == fid) {
+    while (block_start > 0 && result->graded_fidelity[block_start - 1] == fid) {
       block_start--;
     }
     for (int graded_idx = block_start; graded_idx < block_end; graded_idx++) {
@@ -202,8 +699,17 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
       string_builder_destroy(move_sb);
       winsc[n_rows] = get_formatted_string("%" PRId64, cand->win_count);
       tiesc[n_rows] = get_formatted_string("%" PRId64, cand->tie_count);
+      lossc[n_rows] = get_formatted_string(
+          "%" PRId64, cand->weight_sum - cand->win_count - cand->tie_count);
       winc[n_rows] = get_formatted_string("%.1f", 100.0 * cand->win_pct);
       spreadc[n_rows] = get_formatted_string("%+.1f", cand->mean_spread);
+      if (show_outc) {
+        const PegCandOutcomes *oc = peg_find_cand_outcomes(result, &cand->move);
+        outc[n_rows] =
+            (oc != NULL && oc->n_rows > 0)
+                ? peg_build_outcomes_string_rows(oc->rows, oc->n_rows)
+                : string_duplicate("-");
+      }
       rowfid[n_rows] = fid;
 
       if (show_time) {
@@ -225,9 +731,8 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
               t = cand->eval_seconds;
             }
           }
-          timecols[uf_idx][n_rows] =
-              t >= 0.0 ? get_formatted_string("%.1fs", t)
-                       : string_duplicate("-");
+          timecols[uf_idx][n_rows] = t >= 0.0 ? get_formatted_string("%.1fs", t)
+                                              : string_duplicate("-");
           if (t >= 0.0) {
             total_secs += t;
           }
@@ -243,6 +748,9 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
     block_end = block_start;
   }
 
+  if (trunc_note != NULL) {
+    string_builder_add_formatted_string(sb, "%s\n", trunc_note);
+  }
   string_builder_add_formatted_string(
       sb, "%" PRId64 " weighted bag orderings (%d unique)\n",
       weighted_orderings, unique_orderings);
@@ -252,6 +760,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   size_t wm = string_length("move");
   size_t ww = string_length("wins");
   size_t wti = string_length("ties");
+  size_t wlo = string_length("loss");
   size_t wp = string_length("win%");
   size_t wsp = string_length("spread");
   const char *total_hdr = show_time ? "total" : "time";
@@ -266,13 +775,22 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
     wfid[uf_idx] = string_length(fid_hdrs[uf_idx]);
   }
   for (int row_idx = 0; row_idx < n_rows; row_idx++) {
-    wd = string_length(depth[row_idx]) > wd ? string_length(depth[row_idx]) : wd;
-    wr = string_length(rankc[row_idx]) > wr ? string_length(rankc[row_idx]) : wr;
-    wm = string_length(movec[row_idx]) > wm ? string_length(movec[row_idx]) : wm;
-    ww = string_length(winsc[row_idx]) > ww ? string_length(winsc[row_idx]) : ww;
-    wti = string_length(tiesc[row_idx]) > wti ? string_length(tiesc[row_idx]) : wti;
+    wd =
+        string_length(depth[row_idx]) > wd ? string_length(depth[row_idx]) : wd;
+    wr =
+        string_length(rankc[row_idx]) > wr ? string_length(rankc[row_idx]) : wr;
+    wm =
+        string_length(movec[row_idx]) > wm ? string_length(movec[row_idx]) : wm;
+    ww =
+        string_length(winsc[row_idx]) > ww ? string_length(winsc[row_idx]) : ww;
+    wti = string_length(tiesc[row_idx]) > wti ? string_length(tiesc[row_idx])
+                                              : wti;
+    wlo = string_length(lossc[row_idx]) > wlo ? string_length(lossc[row_idx])
+                                              : wlo;
     wp = string_length(winc[row_idx]) > wp ? string_length(winc[row_idx]) : wp;
-    wsp = string_length(spreadc[row_idx]) > wsp ? string_length(spreadc[row_idx]) : wsp;
+    wsp = string_length(spreadc[row_idx]) > wsp
+              ? string_length(spreadc[row_idx])
+              : wsp;
     wtotal = string_length(totalc[row_idx]) > wtotal
                  ? string_length(totalc[row_idx])
                  : wtotal;
@@ -284,21 +802,50 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   }
 
   // Total row width for the tier-separator dashes.
-  // 7 fixed gaps (between 8 fixed columns) + 1 gap before total + n_unique_fids gaps.
-  size_t total_w = wd + wr + wm + ww + wti + wp + wsp + wtotal +
-                   (size_t)(14 + 2 + 2 * n_unique_fids);
+  // 8 fixed gaps (between 9 fixed columns) + 1 gap before total + n_unique_fids
+  // gaps.
+  size_t total_w = wd + wr + wm + ww + wti + wlo + wp + wsp + wtotal +
+                   (size_t)(16 + 2 + 2 * n_unique_fids);
   for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
     total_w += wfid[uf_idx];
   }
 
+  // Column where the outcomes cell content begins (9 fixed columns + their 8
+  // two-space gaps + each time column's "  <fid>" + the "  " before outcomes).
+  // Wrapped continuation lines indent to here so the column stays aligned.
+  size_t outc_indent =
+      wd + wr + wm + ww + wti + wlo + wp + wsp + wtotal + (size_t)(16);
+  for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
+    outc_indent += 2 + wfid[uf_idx];
+  }
+  outc_indent += 2;
+  // Per-line width available for outcomes content. out_width is the whole line;
+  // clamp it up so the cell always fits at least the label + one worst-case
+  // token. out_width <= 0 means unbounded (no wrapping).
+  int outc_avail = INT_MAX;
+  if (out_width > 0) {
+    int eff_width = out_width;
+    const int floor_width = (int)outc_indent + PEG_OUTCOMES_MIN_CELL;
+    if (eff_width < floor_width) {
+      eff_width = floor_width;
+    }
+    outc_avail = eff_width - (int)outc_indent;
+  }
+
   // Header.
   string_builder_add_formatted_string(
-      sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd, "depth",
+      sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s  %*s", (int)wd, "depth",
       (int)wr, "rank", (int)wm, "move", (int)ww, "wins", (int)wti, "ties",
-      (int)wp, "win%", (int)wsp, "spread", (int)wtotal, total_hdr);
+      (int)wlo, "loss", (int)wp, "win%", (int)wsp, "spread", (int)wtotal,
+      total_hdr);
   for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
     string_builder_add_formatted_string(sb, "  %*s", (int)wfid[uf_idx],
                                         fid_hdrs[uf_idx]);
+  }
+  if (show_outc) {
+    // Trailing, unaligned: outcomes strings vary in width per row, so padding
+    // them to a common width would waste space; keep it as the last column.
+    string_builder_add_string(sb, "  outcomes");
   }
   string_builder_add_string(sb, "\n");
 
@@ -311,13 +858,20 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
       string_builder_add_char(sb, '\n');
     }
     string_builder_add_formatted_string(
-        sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd, depth[row_idx],
-        (int)wr, rankc[row_idx], (int)wm, movec[row_idx], (int)ww,
-        winsc[row_idx], (int)wti, tiesc[row_idx], (int)wp, winc[row_idx],
-        (int)wsp, spreadc[row_idx], (int)wtotal, totalc[row_idx]);
+        sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s  %*s", (int)wd,
+        depth[row_idx], (int)wr, rankc[row_idx], (int)wm, movec[row_idx],
+        (int)ww, winsc[row_idx], (int)wti, tiesc[row_idx], (int)wlo,
+        lossc[row_idx], (int)wp, winc[row_idx], (int)wsp, spreadc[row_idx],
+        (int)wtotal, totalc[row_idx]);
     for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
       string_builder_add_formatted_string(sb, "  %*s", (int)wfid[uf_idx],
                                           timecols[uf_idx][row_idx]);
+    }
+    if (show_outc) {
+      string_builder_add_string(sb, "  ");
+      peg_append_wrapped(sb, outc[row_idx], (int)outc_indent, outc_avail,
+                         out_max_lines, out_truncated);
+      free(outc[row_idx]);
     }
     string_builder_add_string(sb, "\n");
     free(depth[row_idx]);
@@ -325,6 +879,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
     free(movec[row_idx]);
     free(winsc[row_idx]);
     free(tiesc[row_idx]);
+    free(lossc[row_idx]);
     free(winc[row_idx]);
     free(spreadc[row_idx]);
     free(totalc[row_idx]);
@@ -338,9 +893,11 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   free(movec);
   free(winsc);
   free(tiesc);
+  free(lossc);
   free(winc);
   free(spreadc);
   free(totalc);
+  free(outc);
   if (show_time) {
     for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
       free(timecols[uf_idx]);
@@ -371,6 +928,7 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
   const int move_col = col++;
   const int wins_col = show_wins ? col++ : -1;
   const int ties_col = show_wins ? col++ : -1;
+  const int loss_col = show_wins ? col++ : -1;
   const int winpct_col = col++;
   const int spread_col = col++;
   const int time_col = show_time ? col++ : -1;
@@ -394,6 +952,9 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
   if (ties_col >= 0) {
     string_grid_set_col_right_align(sg, ties_col, true);
   }
+  if (loss_col >= 0) {
+    string_grid_set_col_right_align(sg, loss_col, true);
+  }
   string_grid_set_col_right_align(sg, winpct_col, true);
   string_grid_set_col_right_align(sg, spread_col, true);
   if (time_col >= 0) {
@@ -407,6 +968,9 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
   }
   if (ties_col >= 0) {
     string_grid_set_cell(sg, 0, ties_col, string_duplicate("ties"));
+  }
+  if (loss_col >= 0) {
+    string_grid_set_cell(sg, 0, loss_col, string_duplicate("loss"));
   }
   string_grid_set_cell(sg, 0, winpct_col, string_duplicate("win%"));
   string_grid_set_cell(sg, 0, spread_col, string_duplicate("spread"));
@@ -441,6 +1005,12 @@ static void peg_append_flat_ranking(StringBuilder *sb, const PegResult *result,
     if (ties_col >= 0) {
       string_grid_set_cell(sg, row, ties_col,
                            get_formatted_string("%" PRId64, cand->tie_count));
+    }
+    if (loss_col >= 0) {
+      const int64_t loss_count =
+          cand->weight_sum - cand->win_count - cand->tie_count;
+      string_grid_set_cell(sg, row, loss_col,
+                           get_formatted_string("%" PRId64, loss_count));
     }
     string_grid_set_cell(sg, row, winpct_col,
                          get_formatted_string("%.1f", 100.0 * cand->win_pct));
@@ -480,13 +1050,13 @@ static bool peg_cands_same_move(const PegRankedCand *a,
 
 // Per-candidate merged record for the cross-depth live status display.
 typedef struct {
-  PegRankedCand cand;  // stats at `fidelity` (last fully-completed depth)
-  int fidelity;        // depth at which cand was LAST FULLY evaluated
+  PegRankedCand cand; // stats at `fidelity` (last fully-completed depth)
+  int fidelity;       // depth at which cand was LAST FULLY evaluated
   // Per-history-slot eval times, indexed 1:1 with snap->history_fidelities[].
   // -1.0 means this candidate was not found in that history slot.
   double depth_times[PEG_POLL_MAX_HISTORY_STAGES];
-  bool is_evaluating;  // currently being evaluated at the next depth
-  double live_secs;    // live elapsed seconds when is_evaluating (else 0)
+  bool is_evaluating; // currently being evaluated at the next depth
+  double live_secs;   // live elapsed seconds when is_evaluating (else 0)
 } PegMergedEntry;
 
 static int peg_merged_entry_cmp(const void *va, const void *vb) {
@@ -525,16 +1095,16 @@ static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
 // Render a cross-depth merged ranking table with one time column per completed
 // non-greedy stage plus the currently active stage (if non-greedy). History
 // columns are labeled by fidelity (e.g. "2-ply"); greedy is never shown since
-// it is always instant. The in-flight candidate's depth label gets a trailing '*'.
+// it is always instant. The in-flight candidate's depth label gets a trailing
+// '*'.
 static void peg_append_cross_depth_ranking(StringBuilder *sb,
-                                           const PegMergedEntry *merged,
-                                           int n,
+                                           const PegMergedEntry *merged, int n,
                                            const int *history_fidelities,
-                                           int n_history,
-                                           int current_fidelity,
+                                           int n_history, int current_fidelity,
                                            const Board *board,
                                            const LetterDistribution *ld) {
-  // Time columns: one per history stage + one for the current stage (if non-greedy).
+  // Time columns: one per history stage + one for the current stage (if
+  // non-greedy).
   const bool show_current_col = current_fidelity > 0;
   const int n_time_cols = n_history + (show_current_col ? 1 : 0);
 
@@ -555,6 +1125,7 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
   char **movec = malloc_or_die((size_t)n * sizeof(char *));
   char **winsc = malloc_or_die((size_t)n * sizeof(char *));
   char **tiesc = malloc_or_die((size_t)n * sizeof(char *));
+  char **lossc = malloc_or_die((size_t)n * sizeof(char *));
   char **winc = malloc_or_die((size_t)n * sizeof(char *));
   char **spreadc = malloc_or_die((size_t)n * sizeof(char *));
   char **totalc = show_time ? malloc_or_die((size_t)n * sizeof(char *)) : NULL;
@@ -581,6 +1152,9 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
     string_builder_destroy(move_sb);
     winsc[cand_idx] = get_formatted_string("%" PRId64, entry->cand.win_count);
     tiesc[cand_idx] = get_formatted_string("%" PRId64, entry->cand.tie_count);
+    lossc[cand_idx] = get_formatted_string(
+        "%" PRId64,
+        entry->cand.weight_sum - entry->cand.win_count - entry->cand.tie_count);
     winc[cand_idx] = get_formatted_string("%.1f", 100.0 * entry->cand.win_pct);
     spreadc[cand_idx] = get_formatted_string("%+.1f", entry->cand.mean_spread);
 
@@ -589,8 +1163,7 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
       for (int hist_idx = 0; hist_idx < n_history; hist_idx++) {
         const double t = entry->depth_times[hist_idx];
         timecols[hist_idx][cand_idx] =
-            t >= 0.0 ? get_formatted_string("%.1fs", t)
-                     : string_duplicate("-");
+            t >= 0.0 ? get_formatted_string("%.1fs", t) : string_duplicate("-");
         if (t >= 0.0) {
           total_secs += t;
         }
@@ -620,6 +1193,7 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
   size_t wm = string_length("move");
   size_t ww = string_length("wins");
   size_t wti = string_length("ties");
+  size_t wlo = string_length("loss");
   size_t wp = string_length("win%");
   size_t wsp = string_length("spread");
   size_t wtotal = show_time ? string_length("total") : 0;
@@ -629,20 +1203,20 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
     wt[col_idx] = string_length(time_hdrs[col_idx]);
   }
   for (int cand_idx = 0; cand_idx < n; cand_idx++) {
-    wd = string_length(depthc[cand_idx]) > wd
-             ? string_length(depthc[cand_idx])
-             : wd;
+    wd = string_length(depthc[cand_idx]) > wd ? string_length(depthc[cand_idx])
+                                              : wd;
     wr = string_length(rankc[cand_idx]) > wr ? string_length(rankc[cand_idx])
                                              : wr;
     wm = string_length(movec[cand_idx]) > wm ? string_length(movec[cand_idx])
                                              : wm;
     ww = string_length(winsc[cand_idx]) > ww ? string_length(winsc[cand_idx])
                                              : ww;
-    wti = string_length(tiesc[cand_idx]) > wti
-              ? string_length(tiesc[cand_idx])
-              : wti;
-    wp = string_length(winc[cand_idx]) > wp ? string_length(winc[cand_idx])
-                                            : wp;
+    wti = string_length(tiesc[cand_idx]) > wti ? string_length(tiesc[cand_idx])
+                                               : wti;
+    wlo = string_length(lossc[cand_idx]) > wlo ? string_length(lossc[cand_idx])
+                                               : wlo;
+    wp =
+        string_length(winc[cand_idx]) > wp ? string_length(winc[cand_idx]) : wp;
     wsp = string_length(spreadc[cand_idx]) > wsp
               ? string_length(spreadc[cand_idx])
               : wsp;
@@ -651,19 +1225,18 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
                    ? string_length(totalc[cand_idx])
                    : wtotal;
       for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-        wt[col_idx] =
-            string_length(timecols[col_idx][cand_idx]) > wt[col_idx]
-                ? string_length(timecols[col_idx][cand_idx])
-                : wt[col_idx];
+        wt[col_idx] = string_length(timecols[col_idx][cand_idx]) > wt[col_idx]
+                          ? string_length(timecols[col_idx][cand_idx])
+                          : wt[col_idx];
       }
     }
   }
 
   // Header: fixed columns, then "total", then per-depth columns.
   string_builder_add_formatted_string(
-      sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s", (int)wd, "depth", (int)wr,
-      "rank", (int)wm, "move", (int)ww, "wins", (int)wti, "ties", (int)wp,
-      "win%", (int)wsp, "spread");
+      sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd, "depth", (int)wr,
+      "rank", (int)wm, "move", (int)ww, "wins", (int)wti, "ties", (int)wlo,
+      "loss", (int)wp, "win%", (int)wsp, "spread");
   if (show_time) {
     string_builder_add_formatted_string(sb, "  %*s", (int)wtotal, "total");
     for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
@@ -675,10 +1248,10 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
 
   for (int cand_idx = 0; cand_idx < n; cand_idx++) {
     string_builder_add_formatted_string(
-        sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s", (int)wd, depthc[cand_idx],
-        (int)wr, rankc[cand_idx], (int)wm, movec[cand_idx], (int)ww,
-        winsc[cand_idx], (int)wti, tiesc[cand_idx], (int)wp, winc[cand_idx],
-        (int)wsp, spreadc[cand_idx]);
+        sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd,
+        depthc[cand_idx], (int)wr, rankc[cand_idx], (int)wm, movec[cand_idx],
+        (int)ww, winsc[cand_idx], (int)wti, tiesc[cand_idx], (int)wlo,
+        lossc[cand_idx], (int)wp, winc[cand_idx], (int)wsp, spreadc[cand_idx]);
     if (show_time) {
       string_builder_add_formatted_string(sb, "  %*s", (int)wtotal,
                                           totalc[cand_idx]);
@@ -693,6 +1266,7 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
     free(movec[cand_idx]);
     free(winsc[cand_idx]);
     free(tiesc[cand_idx]);
+    free(lossc[cand_idx]);
     free(winc[cand_idx]);
     free(spreadc[cand_idx]);
     if (show_time) {
@@ -708,6 +1282,7 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
   free(movec);
   free(winsc);
   free(tiesc);
+  free(lossc);
   free(winc);
   free(spreadc);
   free(totalc);
@@ -726,7 +1301,8 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
 // Baseline entries (previous completed stage) seed the display; current-stage
 // candidates replace their counterparts as they finish. History slots supply
 // per-candidate times for each completed non-greedy stage's time column.
-// The in-flight candidate gets a '*' depth label and a live current-column time.
+// The in-flight candidate gets a '*' depth label and a live current-column
+// time.
 static void peg_append_live_ranking(StringBuilder *sb,
                                     const PegPollSnapshot *snap,
                                     const Board *board,
@@ -813,20 +1389,23 @@ static void peg_append_live_ranking(StringBuilder *sb,
           peg_merged_entry_cmp);
   }
 
-  peg_append_cross_depth_ranking(sb, merged, n_merged,
-                                 snap->history_fidelities,
+  peg_append_cross_depth_ranking(sb, merged, n_merged, snap->history_fidelities,
                                  snap->n_history_stages, snap->fidelity_plies,
                                  board, ld);
   free(merged);
 }
 
 char *peg_result_get_string(const PegResult *result, const Game *game,
-                            bool show_outcomes, PegPoll *poll) {
+                            bool show_outcomes, PegPoll *poll, int out_width,
+                            int out_max_lines, const char *trunc_note,
+                            bool *out_truncated) {
   StringBuilder *sb = string_builder_create();
 
   // Read poll snapshot once. Used for both the live path and (when done) to
-  // supply per-stage timing history to the completed-result display.
-  PegPollSnapshot snap;
+  // supply per-stage timing history to the completed-result display. Zeroed so
+  // it is never read uninitialized when poll == NULL (have_snap gates real
+  // use).
+  PegPollSnapshot snap = {0};
   bool have_snap = false;
   if (poll != NULL) {
     peg_poll_read(poll, &snap);
@@ -836,9 +1415,8 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
   // Live path: poll is set and the solve is still running.
   if (have_snap && !snap.done) {
     const int64_t now_ns = ctimer_monotonic_ns();
-    const int64_t start_ns = snap.n_stage_history > 0
-                                 ? snap.stage_history[0].start_ns
-                                 : now_ns;
+    const int64_t start_ns =
+        snap.n_stage_history > 0 ? snap.stage_history[0].start_ns : now_ns;
     const double total_secs = (double)(now_ns - start_ns) / 1e9;
     string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
                                         total_secs);
@@ -899,14 +1477,11 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
   // greedy); in that case there are no tiers, so just show the post-greedy
   // ranking.
   if (result->n_graded > 0) {
-    peg_append_graded_table(sb, result, board, ld,
-                            have_snap ? &snap : NULL);
-    if (show_outcomes && result->n_per_scenario > 0) {
-      char *outcomes = peg_build_outcomes_string(result);
-      string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n",
-                                          outcomes);
-      free(outcomes);
-    }
+    // The graded table carries a per-play outcomes column itself (when
+    // show_outcomes), so no separate "outcomes (best)" line is needed here.
+    peg_append_graded_table(sb, result, board, ld, have_snap ? &snap : NULL,
+                            show_outcomes, out_width, out_max_lines, trunc_note,
+                            out_truncated);
     char *out = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     return out;
