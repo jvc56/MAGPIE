@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -1199,9 +1201,8 @@ static int peg_nested_stride_for_bag(const PegWorker *worker, int bag) {
 // Expected (over the candidate's scenarios) on-turn value of playing `cand`.
 // Collects the scenarios as jobs, runs them across the pool (or inline when
 // there is no pool / a single scenario), and reduces the weighted average.
-static int32_t peg_nested_cand_value(PegWorker *worker,
-                                     const Game *parent_game, int mover_idx,
-                                     const Move *cand,
+static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
+                                     int mover_idx, const Move *cand,
                                      const uint8_t *unseen, int ld_size,
                                      int stage_fidelity, int depth,
                                      int outer_fidelity, int64_t deadline_ns) {
@@ -1322,7 +1323,7 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   }
   move_list_sort_moves(ml);
   uint8_t unseen[MAX_ALPHABET_SIZE];
-  const int ld_size = (int)ld_get_size(game_get_ld(game));
+  const int ld_size = ld_get_size(game_get_ld(game));
   peg_compute_unseen(game, on_turn, unseen);
   // Stage schedule: nested_cand_caps (e.g. {8,4,2} arm, {8,8,8} oracle). Entry
   // 0 is the initial field size; each later entry is the keep-count after that

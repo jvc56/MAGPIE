@@ -49,6 +49,19 @@
 // fixtures (run from the repo root); each line's embedded "-lex CSW24" is
 // honored by loading via the cgp command.
 
+// Env-var parsers for the on-demand knobs: a single getenv (no TOCTOU on a
+// second lookup) and strtol/strtod (which, unlike atoi/atof, are the checked
+// conversions clang-tidy expects).
+static int env_int(const char *name, int dflt) {
+  const char *value = getenv(name);
+  return value != NULL ? (int)strtol(value, NULL, 10) : dflt;
+}
+
+static double env_double(const char *name, double dflt) {
+  const char *value = getenv(name);
+  return value != NULL ? strtod(value, NULL) : dflt;
+}
+
 // One hardcoded PEG solver configuration (an A/B arm or the oracle).
 typedef struct PegBenchConfig {
   const char *name;
@@ -676,12 +689,9 @@ void test_peg_bench_fixture(void) {
   if (file == NULL) {
     file = "notes/peg_positions/random_3peg.txt";
   }
-  const int max_pos =
-      getenv("PEG_BENCH_MAX") ? atoi(getenv("PEG_BENCH_MAX")) : 10;
-  const int threads =
-      getenv("PEG_BENCH_THREADS") ? atoi(getenv("PEG_BENCH_THREADS")) : 8;
-  const double tlim =
-      getenv("PEG_BENCH_TLIM") ? atof(getenv("PEG_BENCH_TLIM")) : 0.0;
+  const int max_pos = env_int("PEG_BENCH_MAX", 10);
+  const int threads = env_int("PEG_BENCH_THREADS", 8);
+  const double tlim = env_double("PEG_BENCH_TLIM", 0.0);
 
   FILE *fp = fopen(file, "re");
   if (!fp) {
@@ -767,40 +777,34 @@ void test_peg_bench_fixture(void) {
 // (default 1), PEG_GAP_NEST_CAPS (default 8,4,2 = inner-peg stage schedule).
 void test_peg_nested_gap(void) {
   log_set_level(LOG_FATAL);
-  const double arm_tlim =
-      getenv("PEG_ARM_TLIM") ? atof(getenv("PEG_ARM_TLIM")) : 8.0;
-  const double oracle_tlim =
-      getenv("PEG_ORACLE_TLIM") ? atof(getenv("PEG_ORACLE_TLIM")) : 60.0;
-  const int max_pos = getenv("PEG_GAP_MAX") ? atoi(getenv("PEG_GAP_MAX")) : 25;
-  const int threads =
-      getenv("PEG_GAP_THREADS") ? atoi(getenv("PEG_GAP_THREADS")) : 8;
+  const double arm_tlim = env_double("PEG_ARM_TLIM", 8.0);
+  const double oracle_tlim = env_double("PEG_ORACLE_TLIM", 60.0);
+  const int max_pos = env_int("PEG_GAP_MAX", 25);
+  const int threads = env_int("PEG_GAP_THREADS", 8);
   // PEG_GAP_BAG: restrict to one bag size (1..4); 0 = all four.
-  const int only_bag = getenv("PEG_GAP_BAG") ? atoi(getenv("PEG_GAP_BAG")) : 0;
+  const int only_bag = env_int("PEG_GAP_BAG", 0);
   // Live-mode poll so the arms publish PARTIAL stages (the faster arm's extra
   // in-budget candidates are credited). Reused across the sequential arm
   // solves.
   PegPoll *arm_poll = peg_poll_create();
 
-  const int nest_cap =
-      getenv("PEG_GAP_NEST_CAP") ? atoi(getenv("PEG_GAP_NEST_CAP")) : 0;
+  const int nest_cap = env_int("PEG_GAP_NEST_CAP", 0);
   // 0 = bag-dependent default stride (2-peg 1, 3-peg 5, 4-peg 7).
-  const int nest_stride =
-      getenv("PEG_GAP_NEST_STRIDE") ? atoi(getenv("PEG_GAP_NEST_STRIDE")) : 0;
+  const int nest_stride = env_int("PEG_GAP_NEST_STRIDE", 0);
   // Inner-peg recursion depth (how many nested pegs before greedy); default 1.
-  const int nest_maxdepth = getenv("PEG_GAP_NEST_MAXDEPTH")
-                                ? atoi(getenv("PEG_GAP_NEST_MAXDEPTH"))
-                                : 1;
+  const int nest_maxdepth = env_int("PEG_GAP_NEST_MAXDEPTH", 1);
   // PEG_GAP_NEST_CAPS=8,4,2 => the inner peg's STAGE schedule (initial field +
   // per-stage keep counts). Default arm {8,4,2}; oracle is {8,8,8} (wider).
   static int nest_cap_seq[16] = {8, 4, 2};
   int nest_n_caps = 3;
-  if (getenv("PEG_GAP_NEST_CAPS")) {
+  const char *caps_env = getenv("PEG_GAP_NEST_CAPS");
+  if (caps_env != NULL) {
     char buf[128];
-    (void)snprintf(buf, sizeof(buf), "%s", getenv("PEG_GAP_NEST_CAPS"));
+    (void)snprintf(buf, sizeof(buf), "%s", caps_env);
     nest_n_caps = 0;
     for (const char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
          tok = strtok(NULL, ",")) {
-      nest_cap_seq[nest_n_caps++] = atoi(tok);
+      nest_cap_seq[nest_n_caps++] = (int)strtol(tok, NULL, 10);
     }
   }
   static const int oracle_nest_caps[] = {8, 8, 8}; // wider inner peg for oracle
@@ -973,16 +977,14 @@ void test_gen_peg_more(void) {
   // PEG_GEN_BAG + PEG_GEN_COUNT: append COUNT more contested for a single bag.
   // Default: 75 more each for 2/3/4-bag.
   if (getenv("PEG_GEN_BAG") != NULL) {
-    const int bag = atoi(getenv("PEG_GEN_BAG"));
-    const int count =
-        getenv("PEG_GEN_COUNT") ? atoi(getenv("PEG_GEN_COUNT")) : 75;
+    const int bag = env_int("PEG_GEN_BAG", 0);
+    const int count = env_int("PEG_GEN_COUNT", 75);
     // PEG_GEN_SEED picks a fresh, non-overlapping seed; default is the fixed
     // per-bag seed. PEG_GEN_APPEND=0 overwrites instead of appending.
-    const uint64_t seed = getenv("PEG_GEN_SEED")
-                              ? strtoull(getenv("PEG_GEN_SEED"), NULL, 10)
-                              : (uint64_t)bag * 1010101 + 777;
-    const bool append =
-        !(getenv("PEG_GEN_APPEND") && atoi(getenv("PEG_GEN_APPEND")) == 0);
+    const char *seed_env = getenv("PEG_GEN_SEED");
+    const uint64_t seed = seed_env != NULL ? strtoull(seed_env, NULL, 10)
+                                           : (uint64_t)bag * 1010101 + 777;
+    const bool append = env_int("PEG_GEN_APPEND", 1) != 0;
     snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
     generate_peg_cgps(seed, bag, count, f, append, /*contested_only=*/true);
     return;
