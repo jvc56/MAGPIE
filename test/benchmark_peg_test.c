@@ -936,7 +936,8 @@ void test_peg_reprune_gap(void) {
   const double oracle_tlim =
       getenv("PEG_ORACLE_TLIM") ? atof(getenv("PEG_ORACLE_TLIM")) : 60.0;
   const int max_pos = getenv("PEG_GAP_MAX") ? atoi(getenv("PEG_GAP_MAX")) : 25;
-  const int threads = 8;
+  const int threads =
+      getenv("PEG_GAP_THREADS") ? atoi(getenv("PEG_GAP_THREADS")) : 8;
   // PEG_GAP_BAG: restrict to one bag size (1..4); 0 = all four.
   const int only_bag = getenv("PEG_GAP_BAG") ? atoi(getenv("PEG_GAP_BAG")) : 0;
   // Live-mode poll so the arms publish PARTIAL stages (the faster arm's extra
