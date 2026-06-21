@@ -30,6 +30,19 @@ typedef enum {
 typedef enum {
   KWG_MAKER_MERGE_NONE,
   KWG_MAKER_MERGE_EXACT,
+  // Like KWG_MAKER_MERGE_EXACT, but additionally overlaps sibling lists (child
+  // lists) when one is a tail of another (wolges-style "tail merging"),
+  // producing a smaller node array at the cost of cache locality during
+  // movegen.
+  KWG_MAKER_MERGE_TAIL,
+  // Like KWG_MAKER_MERGE_TAIL, but first PERMUTES each node's child order so
+  // that a child list that is merely a SUBSET of another can be reordered to
+  // become its tail (e.g. {A,C} laid out as the tail of {B,A,C}). Smaller
+  // still, but the resulting child lists are NOT in ascending tile order, so
+  // the KWG is invalid for kwg_compute_alpha_cross_set (the Alpha variant). It
+  // remains valid for all linear-scan readers (standard movegen, word lookup).
+  // DAWG output only.
+  KWG_MAKER_MERGE_TAIL_REORDER,
 } kwg_maker_merge_t;
 
 #endif

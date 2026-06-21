@@ -326,6 +326,56 @@ void add_playthrough_words_from_row(const BoardRow *board_row, const KWG *kwg,
   }
 }
 
+// Enumerate words playable in empty space (non-playthrough) using only the
+// GADDAG, so wordprune runs on any KWG including gaddag-only pruned ones (no
+// DAWG required). For each first letter, follow its arc then the separator to
+// reach the forward (DAWG-equivalent) node, then reuse the existing forward
+// walk for the suffix. gaddag_root -> first_letter -> SEPARATOR encodes the
+// same forward suffix language as the DAWG node after that first letter.
+void add_words_without_playthrough_gaddag(
+    const KWG *kwg, Rack *rack, int max_nonplaythrough, MachineLetter *word,
+    DictionaryWordList *possible_word_list) {
+  if (max_nonplaythrough <= 0) {
+    return;
+  }
+  const uint32_t gaddag_root = kwg_get_root_node_index(kwg);
+  for (uint32_t node_idx = gaddag_root;; node_idx++) {
+    const uint32_t node = kwg_node(kwg, node_idx);
+    const MachineLetter ml = kwg_node_tile(node);
+    const bool have_natural = rack_get_letter(rack, ml) > 0;
+    const bool have_blank = rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0;
+    if (ml != SEPARATION_MACHINE_LETTER && (have_natural || have_blank)) {
+      // Cross the separator from the single-letter reversed prefix [ml] to the
+      // forward node (and its acceptance: whether ml alone is a word).
+      uint32_t fwd_node = 0;
+      bool fwd_accepts = false;
+      for (uint32_t sep_idx = kwg_node_arc_index_prefetch(node, kwg);;
+           sep_idx++) {
+        const uint32_t sep = kwg_node(kwg, sep_idx);
+        if (kwg_node_tile(sep) == SEPARATION_MACHINE_LETTER) {
+          fwd_node = kwg_node_arc_index_prefetch(sep, kwg);
+          fwd_accepts = kwg_node_accepts(sep);
+          break;
+        }
+        if (kwg_node_is_end(sep)) {
+          break;
+        }
+      }
+      if (fwd_node != 0 || fwd_accepts) {
+        word[0] = ml; // blanks are recorded as their natural letter
+        const MachineLetter consumed = have_natural ? ml : BLANK_MACHINE_LETTER;
+        rack_take_letter(rack, consumed);
+        add_words_without_playthrough(kwg, fwd_node, rack, max_nonplaythrough,
+                                      word, 1, fwd_accepts, possible_word_list);
+        rack_add_letter(rack, consumed);
+      }
+    }
+    if (kwg_node_is_end(node)) {
+      break;
+    }
+  }
+}
+
 void generate_possible_words(const Game *game, const KWG *override_kwg,
                              DictionaryWordList *possible_word_list) {
   const KWG *kwg = override_kwg;
@@ -369,9 +419,9 @@ void generate_possible_words(const Game *game, const KWG *override_kwg,
   }
 
   MachineLetter word[BOARD_DIM];
-  add_words_without_playthrough(kwg, kwg_get_dawg_root_node_index(kwg),
-                                &unplayed_as_rack, max_nonplaythrough_spaces,
-                                word, 0, false, temp_list);
+  // Gaddag-only enumeration (no DAWG dependency) so this works on any KWG.
+  add_words_without_playthrough_gaddag(
+      kwg, &unplayed_as_rack, max_nonplaythrough_spaces, word, temp_list);
   for (int i = 0; i < board_rows->num_rows; i++) {
     add_playthrough_words_from_row(&board_rows->rows[i], kwg, &unplayed_as_rack,
                                    temp_list);
