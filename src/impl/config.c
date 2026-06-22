@@ -3306,7 +3306,10 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 static char *config_write_peg_chart_file(const char *contents) {
   mkdir("data", 0777);
   mkdir("data/pegcharts", 0777);
-  struct timeval now_tv;
+  // struct timeval comes transitively from <sys/time.h> (included), but
+  // include-cleaner maps it to a glibc-internal header that cannot be included
+  // directly. Matches the clock-API suppression in sim_benchmark_test.c.
+  struct timeval now_tv; // NOLINT(misc-include-cleaner)
   gettimeofday(&now_tv, NULL);
   const time_t now_secs = now_tv.tv_sec;
   char stamp[32];

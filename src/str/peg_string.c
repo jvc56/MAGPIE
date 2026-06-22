@@ -4,6 +4,7 @@
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
+#include "../ent/move.h"
 #include "../impl/peg.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
@@ -13,6 +14,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -144,6 +146,9 @@ static int64_t peg_form_covered(const char *form) {
 // boundary where the set factors as a cartesian product L x R.
 static PegStrList peg_factor(const PegStrList *seqs) {
   PegStrList out = {0};
+  if (seqs->items == NULL || seqs->len == 0) {
+    return out;
+  }
   const int width = (int)strlen(seqs->items[0]);
   if (width == 1) {
     for (int i = 0; i < seqs->len; i++) {
@@ -157,7 +162,7 @@ static PegStrList peg_factor(const PegStrList *seqs) {
     for (int i = 0; i < seqs->len; i++) {
       char lbuf[40];
       char rbuf[40];
-      memcpy(lbuf, seqs->items[i], (size_t)(split + 1));
+      memcpy(lbuf, seqs->items[i], (size_t)split + 1);
       lbuf[split + 1] = '\0';
       const int rlen = width - (split + 1);
       memcpy(rbuf, seqs->items[i] + split + 1, (size_t)rlen);
@@ -169,8 +174,8 @@ static PegStrList peg_factor(const PegStrList *seqs) {
     for (int li = 0; factors && li < left.len; li++) {
       for (int ri = 0; factors && ri < right.len; ri++) {
         char comb[40];
-        strcpy(comb, left.items[li]);
-        strcat(comb, right.items[ri]);
+        (void)snprintf(comb, sizeof(comb), "%s%s", left.items[li],
+                       right.items[ri]);
         if (!peg_strlist_has(seqs, comb)) {
           factors = false;
         }
@@ -182,9 +187,8 @@ static PegStrList peg_factor(const PegStrList *seqs) {
       for (int a = 0; a < left_forms.len; a++) {
         for (int b = 0; b < right_forms.len; b++) {
           char form[64];
-          strcpy(form, left_forms.items[a]);
-          strcat(form, "/");
-          strcat(form, right_forms.items[b]);
+          (void)snprintf(form, sizeof(form), "%s/%s", left_forms.items[a],
+                         right_forms.items[b]);
           peg_strlist_push(&out, form);
         }
       }
@@ -200,12 +204,12 @@ static PegStrList peg_factor(const PegStrList *seqs) {
   // Irreducible: a single permutable block when the set is all permutations of
   // one multiset; otherwise each sequence stands alone (a "/" per tile).
   char sorted0[40];
-  strcpy(sorted0, seqs->items[0]);
+  (void)snprintf(sorted0, sizeof(sorted0), "%s", seqs->items[0]);
   peg_sort_str(sorted0);
   bool all_same_ms = true;
   for (int i = 1; all_same_ms && i < seqs->len; i++) {
     char other[40];
-    strcpy(other, seqs->items[i]);
+    (void)snprintf(other, sizeof(other), "%s", seqs->items[i]);
     peg_sort_str(other);
     if (strcmp(other, sorted0) != 0) {
       all_same_ms = false;
@@ -313,7 +317,8 @@ static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
     }
     if (ms_idx < 0) {
       ms_idx = n_ms++;
-      strcpy(ms_info[ms_idx].ms, row_ms[row_idx]);
+      (void)snprintf(ms_info[ms_idx].ms, sizeof(ms_info[ms_idx].ms), "%s",
+                     row_ms[row_idx]);
       ms_info[ms_idx].seen[0] = false;
       ms_info[ms_idx].seen[1] = false;
       ms_info[ms_idx].seen[2] = false;
@@ -345,7 +350,8 @@ static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
       if (bucket == 2) {
         continue; // tie-only: not listed
       }
-      strcpy(toks[n_toks].text, info->ms);
+      (void)snprintf(toks[n_toks].text, sizeof(toks[n_toks].text), "%s",
+                     info->ms);
       toks[n_toks].bucket = bucket;
       toks[n_toks].weight = info->total_weight;
       n_toks++;
@@ -369,7 +375,8 @@ static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
       }
       PegStrList forms = peg_factor(&seqs);
       for (int f = 0; f < forms.len; f++) {
-        strcpy(toks[n_toks].text, forms.items[f]);
+        (void)snprintf(toks[n_toks].text, sizeof(toks[n_toks].text), "%s",
+                       forms.items[f]);
         toks[n_toks].bucket = bucket;
         toks[n_toks].weight =
             peg_form_covered(forms.items[f]) * info->per_ordering;
@@ -1113,11 +1120,13 @@ static void peg_append_cross_depth_ranking(StringBuilder *sb,
   // Per-depth column headers (not including "total").
   char **time_hdrs =
       show_time ? malloc_or_die((size_t)n_time_cols * sizeof(char *)) : NULL;
-  for (int hist_idx = 0; hist_idx < n_history; hist_idx++) {
-    time_hdrs[hist_idx] = peg_fidelity_label(history_fidelities[hist_idx]);
-  }
-  if (show_current_col) {
-    time_hdrs[n_history] = peg_fidelity_label(current_fidelity);
+  if (show_time) {
+    for (int hist_idx = 0; hist_idx < n_history; hist_idx++) {
+      time_hdrs[hist_idx] = peg_fidelity_label(history_fidelities[hist_idx]);
+    }
+    if (show_current_col) {
+      time_hdrs[n_history] = peg_fidelity_label(current_fidelity);
+    }
   }
 
   char **depthc = malloc_or_die((size_t)n * sizeof(char *));
