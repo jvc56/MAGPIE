@@ -1352,6 +1352,13 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   }
   int idx[PEG_NEST_FIELD_MAX];
   int32_t val[PEG_NEST_FIELD_MAX];
+  // memset first so the analyzer treats the whole array as initialized: the
+  // read at idx[i] (i < field_n) is provably in-bounds since field_n is seeded
+  // to field_cap and only ever shrinks, but the analyzer can't follow that
+  // across the separate init/read bounds. Behaviorally identical (entries
+  // >= field_cap are never read); clears a clang-analyzer uninit-read false
+  // positive.
+  memset(idx, 0, sizeof(idx));
   for (int i = 0; i < field_cap; i++) {
     idx[i] = i;
   }

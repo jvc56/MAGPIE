@@ -856,7 +856,7 @@ void test_peg_nested_gap(void) {
       continue;
     }
     char file[256];
-    snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
+    (void)snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
     FILE *fp = fopen(file, "re");
     if (!fp) {
       printf("[gap] bag=%d: no fixture %s\n", bag, file);
@@ -985,17 +985,17 @@ void test_gen_peg_more(void) {
     const uint64_t seed = seed_env != NULL ? strtoull(seed_env, NULL, 10)
                                            : (uint64_t)bag * 1010101 + 777;
     const bool append = env_int("PEG_GEN_APPEND", 1) != 0;
-    snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
+    (void)snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
     generate_peg_cgps(seed, bag, count, f, append, /*contested_only=*/true);
     return;
   }
-  snprintf(f, sizeof(f), "%s/random_2peg.txt", dir);
+  (void)snprintf(f, sizeof(f), "%s/random_2peg.txt", dir);
   generate_peg_cgps(20242777, 2, 75, f, /*append=*/true,
                     /*contested_only=*/true);
-  snprintf(f, sizeof(f), "%s/random_3peg.txt", dir);
+  (void)snprintf(f, sizeof(f), "%s/random_3peg.txt", dir);
   generate_peg_cgps(30243777, 3, 75, f, /*append=*/true,
                     /*contested_only=*/true);
-  snprintf(f, sizeof(f), "%s/random_4peg.txt", dir);
+  (void)snprintf(f, sizeof(f), "%s/random_4peg.txt", dir);
   generate_peg_cgps(40244777, 4, 75, f, /*append=*/true,
                     /*contested_only=*/true);
 }
