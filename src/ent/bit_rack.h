@@ -112,9 +112,13 @@ static inline BitRack bit_rack_create_from_rack(const LetterDistribution *ld,
     const int shift = ml * BIT_RACK_BITS_PER_LETTER;
     if (shift < 64) {
       bit_rack.low |= (uint64_t)num_this << shift;
-    } else {
+    } else if (shift < 128) {
       bit_rack.high |= (uint64_t)num_this << (shift - 64);
     }
+    // A BitRack holds BIT_RACK_MAX_ALPHABET_SIZE letters; callers must gate on
+    // bit_rack_is_compatible_with_ld so ml never reaches the 128-bit boundary.
+    // The bound above keeps a misuse from shifting by >= 64 (undefined
+    // behavior) instead of silently producing a corrupt key.
 #endif
   }
   return bit_rack;

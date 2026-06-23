@@ -1620,6 +1620,42 @@ void test_move_gen_instance_fingerprint(void) {
   error_stack_destroy(error_stack);
 }
 
+// Regression: an alphabet too large for a BitRack (Polish has more than
+// BIT_RACK_MAX_ALPHABET_SIZE letters) must not build a BitRack cache key during
+// move generation -- doing so shifts a uint64_t by >= 64 (undefined behavior).
+// With a full rack and equity sort the generator takes its RIT / KLV-leaves
+// cache path, which is where the BitRack key was built; this drives that path
+// for such an alphabet and asserts it completes and produces moves (under the
+// sanitizer build, a reintroduced shift would be caught here).
+void large_alphabet_movegen_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex OSPS49 -s1 equity -s2 equity -r1 all -r2 all -numplays 1 "
+      "-wmp false");
+  Game *game = config_game_create(config);
+  // Precondition for the path under test: this alphabet does not fit a BitRack.
+  assert(!bit_rack_is_compatible_with_ld(game_get_ld(game)));
+  game_seed(game, 42);
+  draw_to_full_rack(game, 0);
+  MoveList *move_list = move_list_create(1000);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves_for_game(&move_gen_args);
+  // A full rack with a full bag generates exchanges, so at least one
+  // non-scoring play exists -- proving the leave/exchange path ran.
+  assert(count_nonscoring_plays(move_list) > 0);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   test_move_gen_instance_fingerprint();
   leave_lookup_test();
@@ -1651,4 +1687,5 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_3();
   wmp_blank_possibilities_bananas_4();
   wmp_blank_possibilities_bananas_5();
+  large_alphabet_movegen_test();
 }

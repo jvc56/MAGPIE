@@ -221,6 +221,11 @@ typedef struct MoveGen {
   KlvLeavesCacheEntry klv_leaves_cache[MOVEGEN_KLV_LEAVES_CACHE_SIZE];
   const Board *board;
   LetterDistribution ld;
+  // Whether ld's alphabet fits a BitRack (<= BIT_RACK_MAX_ALPHABET_SIZE
+  // letters). The RIT and KLV-leaves caches key on a BitRack, which cannot
+  // represent larger alphabets (e.g. Polish), so they are disabled when this is
+  // false. Set in gen_load_position.
+  bool bit_rack_compatible;
   MoveList *move_list;
   AnchorHeap anchor_heap;
   Equity tile_scores[MACHINE_LETTER_MAX_VALUE];
