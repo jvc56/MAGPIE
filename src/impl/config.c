@@ -83,6 +83,9 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // Default byte budget for the klv2clv compact-leaves model when 'clvsize' is
+  // omitted (a few KB; the maker fits as many synergies as fit).
+  DEFAULT_CLV_TARGET_BYTES = 8192,
 };
 
 typedef enum {
@@ -102,6 +105,7 @@ typedef enum {
   ARG_TOKEN_PEG,
   ARG_TOKEN_AUTOPLAY,
   ARG_TOKEN_CONVERT,
+  ARG_TOKEN_CLV_SIZE,
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
@@ -1132,7 +1136,18 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "Runs the convert command for the specified type with the given "
           "input and output names. If no output name is specified, the input "
           "name will be used. Note that this will not overwrite the input "
-          "since the output filename will have a different extension.";
+          "since the output filename will have a different extension. The "
+          "klv2clv type fits a small parametric compact-leaves (.clv) model "
+          "approximating the input KLV under the 'clvsize' byte budget, for "
+          "small/retro targets that cannot carry a full KLV.";
+      break;
+    case ARG_TOKEN_CLV_SIZE:
+      usages[0] = "<target_bytes>";
+      examples[0] = "8192";
+      text = "Target byte budget for the klv2clv compact-leaves model. The base "
+             "model (no synergies) is always emitted, so a budget below its "
+             "floor yields a base-only file at the floor size; above the floor "
+             "the file is at most this many bytes (default: 8192).";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
@@ -2178,6 +2193,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
+        ARG_TOKEN_CLV_SIZE,                /* clvsize */
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
@@ -3461,7 +3477,8 @@ char *status_autoplay(Config *config) {
 
 // Conversion
 
-void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
+void config_fill_conversion_args(const Config *config, ConversionArgs *args,
+                                 ErrorStack *error_stack) {
   args->conversion_type_string =
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 0);
   args->data_paths = config_get_data_paths(config);
@@ -3469,12 +3486,31 @@ void config_fill_conversion_args(const Config *config, ConversionArgs *args) {
       config_get_parg_value(config, ARG_TOKEN_CONVERT, 1);
   args->ld_name = config_get_parg_value(config, ARG_TOKEN_CONVERT, 2);
   args->num_threads = config_get_num_threads(config);
+  args->clv_target_bytes = DEFAULT_CLV_TARGET_BYTES;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_CLV_SIZE) > 0) {
+    const int clv_target_bytes = string_to_int(
+        config_get_parg_value(config, ARG_TOKEN_CLV_SIZE, 0), error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    if (clv_target_bytes <= 0) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("clvsize must be a positive number of bytes: %d",
+                               clv_target_bytes));
+      return;
+    }
+    args->clv_target_bytes = clv_target_bytes;
+  }
 }
 
 void config_convert(const Config *config, ConversionResults *results,
                     ErrorStack *error_stack) {
   ConversionArgs args;
-  config_fill_conversion_args(config, &args);
+  config_fill_conversion_args(config, &args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
   convert(&args, results, error_stack);
 }
 
@@ -8212,6 +8248,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
+  arg(ARG_TOKEN_CLV_SIZE, "clvsize", 1, 1);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_PLAYABILITY, "playability", 1, 1, playability, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
@@ -8551,6 +8588,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_NOPRUNE:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
+    case ARG_TOKEN_CLV_SIZE:
     case ARG_TOKEN_LEAVE_GEN:
     case ARG_TOKEN_PLAYABILITY:
     case ARG_TOKEN_PLAYABILITY_SMALL_KWG:

@@ -4,6 +4,7 @@
 #include "../def/convert_defs.h"
 #include "../def/kwg_defs.h"
 #include "../def/letter_distribution_defs.h"
+#include "../ent/compact_leaves.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/dawg_arc_compressed.h"
@@ -18,6 +19,7 @@
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "compact_leaves_maker.h"
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
 #include "wmp_maker.h"
@@ -219,7 +221,7 @@ void convert_with_names(const LetterDistribution *ld,
                         const char *data_paths, const char *input_name,
                         const char *output_name,
                         ConversionResults *conversion_results, int num_threads,
-                        ErrorStack *error_stack) {
+                        int clv_target_bytes, ErrorStack *error_stack) {
   if ((conversion_type == CONVERT_TEXT2DAWG) ||
       (conversion_type == CONVERT_TEXT2GADDAG) ||
       (conversion_type == CONVERT_TEXT2KWG) ||
@@ -273,6 +275,33 @@ void convert_with_names(const LetterDistribution *ld,
     KLV *klv = klv_create(data_paths, input_name, error_stack);
     if (error_stack_is_empty(error_stack)) {
       klv_write_to_csv(klv, ld, data_paths, output_name, NULL, error_stack);
+    }
+    klv_destroy(klv);
+  } else if (conversion_type == CONVERT_KLV2CLV) {
+    KLV *klv = klv_create(data_paths, input_name, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      char *clv_output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_COMPACT_LEAVES,
+          error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        // Uniform weighting, default (eighth) radix, bit-packed body for the
+        // smallest fit. Frequency-weighted fitting (compact_leaves_read_weights
+        // _csv) and radix selection are available in the maker for callers that
+        // want them; the convert command ships the common case.
+        const size_t target_bytes = (size_t)clv_target_bytes;
+        CompactLeaves *cl = compact_leaves_create_from_klv(
+            klv, ld, NULL, target_bytes, COMPACT_LEAVES_RADIX_EIGHTH, true);
+        compact_leaves_write_to_file(cl, clv_output_filename, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+              get_formatted_string(
+                  "could not write compact leaves to output file: %s",
+                  clv_output_filename));
+        }
+        compact_leaves_destroy(cl);
+      }
+      free(clv_output_filename);
     }
     klv_destroy(klv);
   } else if (conversion_type == CONVERT_KLVWMP2RIT) {
@@ -347,6 +376,8 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_CSV2KLV;
   } else if (strings_equal(conversion_type_string, "klv2csv")) {
     conversion_type = CONVERT_KLV2CSV;
+  } else if (strings_equal(conversion_type_string, "klv2clv")) {
+    conversion_type = CONVERT_KLV2CLV;
   } else if (strings_equal(conversion_type_string, "text2wordmap")) {
     conversion_type = CONVERT_TEXT2WORDMAP;
   } else if (strings_equal(conversion_type_string, "dawg2wordmap")) {
@@ -396,6 +427,7 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
 
   convert_with_names(ld, conversion_type, args->data_paths,
                      args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, args->num_threads, error_stack);
+                     conversion_results, args->num_threads,
+                     args->clv_target_bytes, error_stack);
   ld_destroy(ld);
 }

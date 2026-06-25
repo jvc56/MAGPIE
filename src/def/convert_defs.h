@@ -30,6 +30,10 @@ typedef enum {
   CONVERT_GADDAG2TEXT,
   CONVERT_CSV2KLV,
   CONVERT_KLV2CSV,
+  // Fits a small parametric "compact leaves" (.clv) model approximating the
+  // input KLV's leave values under a target byte budget (see 'clvsize'). For
+  // small/retro targets that cannot carry a full ~3.7 MB KLV.
+  CONVERT_KLV2CLV,
   CONVERT_TEXT2WORDMAP,
   CONVERT_DAWG2WORDMAP,
   CONVERT_KLVWMP2RIT,

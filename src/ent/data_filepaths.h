@@ -9,6 +9,7 @@
 #define DAWG_ARC_COMPRESSED_EXTENSION ".acdawg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
+#define COMPACT_LEAVES_EXTENSION ".clv"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
@@ -28,6 +29,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
   DATA_FILEPATH_TYPE_DAWG_PACKED,
   DATA_FILEPATH_TYPE_DAWG_ARC_COMPRESSED,
+  DATA_FILEPATH_TYPE_COMPACT_LEAVES,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,
