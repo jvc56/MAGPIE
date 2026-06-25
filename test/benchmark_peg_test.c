@@ -655,6 +655,11 @@ void test_peg_pegtopk_all(void) {
       config_create_or_die("set -lex TWL98 -threads 1 -s1 score -s2 score");
   char *load_cmd = get_formatted_string("cgp %s", locked_position);
 
+  // This test exercises the -pegtopk cap mechanism, not nesting; the canned
+  // position was chosen for a fast FLAT exhaustive (~0.03s). Pin nesting off so
+  // the timing/field premise holds independent of the -pegnested default.
+  exec_config_quiet(config, "set -pegnested false");
+
   // Top-2 cap: at most 2 candidates published.
   exec_config_quiet(config, "set -pegtopk 2");
   exec_config_quiet(config, load_cmd);
