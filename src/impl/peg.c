@@ -999,12 +999,11 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
 }
 
 // Exact endgame value at an emptier nested leaf, from the on-turn perspective.
-// A positive nested_emptier_ply_cap is a FIXED endgame depth: emptier (bag-
-// empty) leaves are solved to exactly that many plies, NOT decremented to the
-// per-stage lookahead. Tying the endgame depth to the stage lookahead truncated
-// the outplay and badly understated the spread -- a forced +16 endgame (whose
-// decisive play is several plies deep) read as +1. 0 keeps the legacy behavior
-// of tying the depth to the lookahead.
+// nested_emptier_ply_cap sets the endgame depth: a positive value solves the
+// emptier (bag-empty) leaf to exactly that many plies -- a fixed depth, so a
+// deep forced outplay is searched in full -- while 0 ties the depth to the
+// per-stage lookahead, which is cheaper but understates the spread of any
+// outplay deeper than that lookahead.
 static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
                                         int on_turn, int lookahead,
                                         int64_t deadline_ns) {
@@ -2471,10 +2470,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // threaded => inline). Safe because inner scenario jobs are submitted
     // re-entrantly: a worker that blocks on an inner batch only help-drains
     // other re-entrant items, never an outer job that would clobber the
-    // per-worker scratch it is mid-evaluation on. This keeps all cores busy on
-    // positions with few outer candidates (where outer parallelism alone leaves
-    // most cores idle), e.g. a 3-candidate uniform-pool 3-peg climbs from ~1 to
-    // ~8 of 10 cores.
+    // per-worker scratch it is mid-evaluation on. This keeps the cores busy on
+    // positions with few outer candidates, where outer parallelism alone would
+    // leave most cores idle.
     workers[worker_idx].nest_pool = pool;
     workers[worker_idx].nest_workers = workers;
     workers[worker_idx].nest_worker_idx = worker_idx;

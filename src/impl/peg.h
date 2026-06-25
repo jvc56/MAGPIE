@@ -170,12 +170,11 @@ typedef struct PegArgs {
   //                            deeper nested emptiers get fewer plies.
   //   nested_max_depth : how many nested pegs deep before a non-emptier leaf
   //                      falls to a greedy rollout. 0 or unset = 1 (the
-  //                      default, and the best depth per the decision-quality
-  //                      benchmark
-  //                      -- deeper adds no quality). A value >= the bag size
-  //                      nests "until empty": the recursion bottoms out at the
-  //                      exact endgame when the bag empties, so it is bounded
-  //                      by bag size however large the cap is.
+  //                      default; deeper recursion does not improve the
+  //                      decision). A value >= the bag size nests "until
+  //                      empty": the recursion bottoms out at the exact endgame
+  //                      when the bag empties, so it is bounded by bag size
+  //                      however large the cap is.
   // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth >= bag size
   // with a large fidelity: a genuinely game-theoretic solve under the unseen
   // model.

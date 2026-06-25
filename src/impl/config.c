@@ -3202,9 +3202,9 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
-// Default inner-peg stage schedule used when nesting is on -- the validated arm
-// config from the decision-quality benchmark (flat vs nested across pass/2-bag/
-// 3-bag), where depth 1 with this schedule was the right default.
+// Default inner-peg stage schedule when nesting is on: the inner cascade keeps
+// 8 candidates at its first stage, then 4, then 2 -- enough lookahead to
+// sharpen the non-emptier leaf decision without paying for a wide inner field.
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
@@ -3221,12 +3221,12 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
   peg_args->include_per_scenario = config->peg_show_outcomes;
-  // Nested inner-peg lookahead for non-emptier leaves: on by default at depth 1
-  // with the validated cost knobs (inner stage schedule {8,4,2}, bag-default
-  // scenario stride). -pegnested false restores the flat rollout. Emptier
-  // (bag-empty) leaves are unaffected -- they always solve exact endgames.
+  // Nested inner-peg lookahead for non-emptier leaves, on by default at depth 1
+  // with the inner stage schedule above and the bag-size default scenario
+  // stride. -pegnested false restores the flat rollout. Emptier (bag-empty)
+  // leaves are unaffected -- they always solve exact endgames.
   peg_args->nested_enabled = config->peg_nested;
-  peg_args->nested_max_depth = 1;
+  peg_args->nested_max_depth = PEG_NESTED_DEFAULT_DEPTH;
   peg_args->nested_cand_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
   peg_args->nested_n_cand_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
                                        sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));

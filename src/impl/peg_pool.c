@@ -130,18 +130,18 @@ static bool pp_try_pop(PegPool *pool, PegPoolItem *out) {
 // lock; the queue is small in practice (bounded fan-out per submit).
 static bool pp_try_pop_reentrant(PegPool *pool, PegPoolItem *out) {
   cpthread_mutex_lock(&pool->q_mutex);
-  for (int scan = 0; scan < pool->q_count; scan++) {
-    const int slot = (pool->q_head + scan) % pool->q_cap;
-    if (!pool->queue[slot].reentrant) {
+  for (int scan_idx = 0; scan_idx < pool->q_count; scan_idx++) {
+    const int slot_idx = (pool->q_head + scan_idx) % pool->q_cap;
+    if (!pool->queue[slot_idx].reentrant) {
       continue;
     }
-    *out = pool->queue[slot];
-    // Compact: shift the items after `slot` back by one to fill the gap,
+    *out = pool->queue[slot_idx];
+    // Compact: shift the items after slot_idx back by one to fill the gap,
     // preserving FIFO order among the remaining items.
-    for (int shift = scan; shift < pool->q_count - 1; shift++) {
-      const int dst = (pool->q_head + shift) % pool->q_cap;
-      const int src = (pool->q_head + shift + 1) % pool->q_cap;
-      pool->queue[dst] = pool->queue[src];
+    for (int shift_idx = scan_idx; shift_idx < pool->q_count - 1; shift_idx++) {
+      const int dst_slot = (pool->q_head + shift_idx) % pool->q_cap;
+      const int src_slot = (pool->q_head + shift_idx + 1) % pool->q_cap;
+      pool->queue[dst_slot] = pool->queue[src_slot];
     }
     pool->q_count--;
     cpthread_mutex_unlock(&pool->q_mutex);
