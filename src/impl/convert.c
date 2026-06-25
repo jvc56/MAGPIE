@@ -6,6 +6,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../ent/conversion_results.h"
 #include "../ent/data_filepaths.h"
+#include "../ent/dawg_arc_compressed.h"
 #include "../ent/dawg_packed.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/klv.h"
@@ -144,6 +145,40 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
     dawg_packed_destroy(dp);
     kwg_destroy(kwg);
     free(packed_output_filename);
+  } else if (conversion_type == CONVERT_TEXT2DAWG_ARC_COMPRESSED ||
+             conversion_type == CONVERT_TEXT2DAWG_ARC_COMPRESSED_BALANCED) {
+    char *arc_compressed_output_filename = data_filepaths_get_writable_filename(
+        data_paths, output_name, DATA_FILEPATH_TYPE_DAWG_ARC_COMPRESSED,
+        error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    // Build the reorder DAWG, then arc-compress it (popular table + local gaps
+    // + rank-located escapes) for a smaller resident footprint than the packed
+    // DAWG. Niche, opt-in output for fitting a word list onto retro hardware.
+    // BALANCED trades a little of that RAM win for materially faster traversal.
+    const dawg_arc_compressed_mode_t mode =
+        conversion_type == CONVERT_TEXT2DAWG_ARC_COMPRESSED_BALANCED
+            ? DAWG_ARC_COMPRESSED_MODE_BALANCED
+            : DAWG_ARC_COMPRESSED_MODE_MIN_RAM;
+    KWG *kwg = make_kwg_from_words(strings, KWG_MAKER_OUTPUT_DAWG,
+                                   KWG_MAKER_MERGE_TAIL_REORDER);
+    DawgArcCompressed *dp = dawg_arc_compressed_create_from_kwg(kwg, mode);
+    dawg_arc_compressed_write_to_file(dp, arc_compressed_output_filename,
+                                      error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+          get_formatted_string(
+              "could not write arc-compressed dawg to output file: %s",
+              arc_compressed_output_filename));
+    } else {
+      conversion_results_set_number_of_strings(
+          conversion_results, dictionary_word_list_get_count(strings));
+    }
+    dawg_arc_compressed_destroy(dp);
+    kwg_destroy(kwg);
+    free(arc_compressed_output_filename);
   } else {
     char *kwg_output_filename = data_filepaths_get_writable_filename(
         data_paths, output_name, DATA_FILEPATH_TYPE_KWG, error_stack);
@@ -191,6 +226,8 @@ void convert_with_names(const LetterDistribution *ld,
       (conversion_type == CONVERT_TEXT2KWG_TAIL_MERGE) ||
       (conversion_type == CONVERT_TEXT2DAWG_TAIL_REORDER) ||
       (conversion_type == CONVERT_TEXT2DAWG_PACKED) ||
+      (conversion_type == CONVERT_TEXT2DAWG_ARC_COMPRESSED) ||
+      (conversion_type == CONVERT_TEXT2DAWG_ARC_COMPRESSED_BALANCED) ||
       (conversion_type == CONVERT_TEXT2WORDMAP)) {
     DictionaryWordList *strings = dictionary_word_list_create();
     convert_from_text_with_dwl(ld, conversion_type, data_paths, input_name,
@@ -298,6 +335,10 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_TEXT2DAWG_TAIL_REORDER;
   } else if (strings_equal(conversion_type_string, "text2dawgpacked")) {
     conversion_type = CONVERT_TEXT2DAWG_PACKED;
+  } else if (strings_equal(conversion_type_string, "text2acdawg")) {
+    conversion_type = CONVERT_TEXT2DAWG_ARC_COMPRESSED;
+  } else if (strings_equal(conversion_type_string, "text2acdawgbalanced")) {
+    conversion_type = CONVERT_TEXT2DAWG_ARC_COMPRESSED_BALANCED;
   } else if (strings_equal(conversion_type_string, "dawg2text")) {
     conversion_type = CONVERT_DAWG2TEXT;
   } else if (strings_equal(conversion_type_string, "gaddag2text")) {

@@ -6,6 +6,7 @@
 
 #define KWG_EXTENSION ".kwg"
 #define DAWG_PACKED_EXTENSION ".pdawg"
+#define DAWG_ARC_COMPRESSED_EXTENSION ".acdawg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
@@ -26,6 +27,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_WORDMAP,
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
   DATA_FILEPATH_TYPE_DAWG_PACKED,
+  DATA_FILEPATH_TYPE_DAWG_ARC_COMPRESSED,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,

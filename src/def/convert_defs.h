@@ -17,6 +17,15 @@ typedef enum {
   // (minimal arc width + minimal tile width) rather than a full 32-bit word.
   // Niche, opt-in output for fitting a word list onto small/retro hardware.
   CONVERT_TEXT2DAWG_PACKED,
+  // Like CONVERT_TEXT2DAWG_PACKED, but arc-compresses the reorder DAWG: the
+  // first-child arc is encoded as a popular-table index, a local signed gap, or
+  // a rank-located escape, shrinking the resident footprint further than the
+  // packed DAWG. Same niche, opt-in retro-hardware use; same Alpha caveat.
+  CONVERT_TEXT2DAWG_ARC_COMPRESSED,
+  // Same arc-compressed format, but built in BALANCED mode: a lower escape rate
+  // (a little more RAM, still smaller than the packed DAWG) for materially
+  // faster traversal. See dawg_arc_compressed_mode_t.
+  CONVERT_TEXT2DAWG_ARC_COMPRESSED_BALANCED,
   CONVERT_DAWG2TEXT,
   CONVERT_GADDAG2TEXT,
   CONVERT_CSV2KLV,
