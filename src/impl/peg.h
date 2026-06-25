@@ -160,13 +160,25 @@ typedef struct PegArgs {
   //                      overrides nested_cand_cap; level L uses caps[L], or
   //                      the last entry for deeper levels. NULL = use the flat
   //                      cap.
-  //   nested_stride    : scenario sampling stride inside nested levels (>=1).
-  //   nested_emptier_ply_cap : cap on endgame plies at a nested emptier leaf
-  //                            (0 = use the remaining lookahead, so deeper
-  //                            nested emptiers naturally get fewer plies).
-  //   nested_max_depth : cap on recursion depth / bag levels (0 = until empty).
-  // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth 0 with a
-  // large fidelity: a genuinely game-theoretic solve under the unseen model.
+  //   nested_stride    : scenario sampling stride inside nested levels.
+  //                      0 = bag-size default (2-peg 1, 3-peg 5, 4-peg 7);
+  //                      >= 1 = that explicit stride.
+  //   nested_emptier_ply_cap : endgame depth at a nested emptier (bag-empty)
+  //                            leaf. > 0 = solve to exactly that many plies (a
+  //                            FIXED depth, not capped down to the lookahead);
+  //                            0 = tie the depth to the remaining lookahead, so
+  //                            deeper nested emptiers get fewer plies.
+  //   nested_max_depth : how many nested pegs deep before a non-emptier leaf
+  //                      falls to a greedy rollout. 0 or unset = 1 (the
+  //                      default, and the best depth per the decision-quality
+  //                      benchmark
+  //                      -- deeper adds no quality). A value >= the bag size
+  //                      nests "until empty": the recursion bottoms out at the
+  //                      exact endgame when the bag empties, so it is bounded
+  //                      by bag size however large the cap is.
+  // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth >= bag size
+  // with a large fidelity: a genuinely game-theoretic solve under the unseen
+  // model.
   int nested_cand_cap;
   const int *nested_cand_caps; // per-level cap sequence; NULL = use flat cap
   int nested_n_cand_caps;      // length of nested_cand_caps

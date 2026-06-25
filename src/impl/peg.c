@@ -1433,8 +1433,10 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
     //
     // Nested lookahead: at fidelity > 0, solve the opponent's response as a
     // staged inner peg instead of a flat rollout. nested_max_depth is the
-    // inner-peg recursion depth (how many nested pegs before greedy rollout);
-    // default 1 = solve the response as one minimal peg, greedy below.
+    // inner-peg recursion depth (how many nested pegs before greedy rollout):
+    // 0 or unset = 1 (one minimal peg, greedy below); a value >= the bag size
+    // nests until the bag empties (the recursion bottoms out at the exact
+    // endgame, so it is bounded by the bag regardless of the cap).
     if (!emptier && ctx->fidelity_plies > 0 && ctx->worker->nested_enabled) {
       const int depth =
           ctx->worker->nested_max_depth > 0 ? ctx->worker->nested_max_depth : 1;
