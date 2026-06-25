@@ -150,10 +150,6 @@ typedef struct PegWorker {
   // released frames; nest_all chains every allocated frame for teardown.
   PegNestFrame *nest_free;
   PegNestFrame *nest_all;
-  // Depth of in-flight inner-scenario pool submissions on this worker's thread.
-  // Only the outermost submit parallelizes; deeper cand_values run inline, so
-  // help-while-waiting can't recurse unboundedly and overflow the stack.
-  int nest_submit_depth;
 } PegWorker;
 
 // Acquire a scratch frame from the worker's free-list (allocating if empty);
@@ -1003,17 +999,18 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
 }
 
 // Exact endgame value at an emptier nested leaf, from the on-turn perspective.
-// Plies are capped at min(lookahead, nested_emptier_ply_cap) so emptiers
-// reached deep in the lookahead need not get the full depth the top-level
-// emptiers do.
+// A positive nested_emptier_ply_cap is a FIXED endgame depth: emptier (bag-
+// empty) leaves are solved to exactly that many plies, NOT decremented to the
+// per-stage lookahead. Tying the endgame depth to the stage lookahead truncated
+// the outplay and badly understated the spread -- a forced +16 endgame (whose
+// decisive play is several plies deep) read as +1. 0 keeps the legacy behavior
+// of tying the depth to the lookahead.
 static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
                                         int on_turn, int lookahead,
                                         int64_t deadline_ns) {
-  int plies = lookahead;
-  if (worker->nested_emptier_ply_cap > 0 &&
-      worker->nested_emptier_ply_cap < plies) {
-    plies = worker->nested_emptier_ply_cap;
-  }
+  int plies = worker->nested_emptier_ply_cap > 0
+                  ? worker->nested_emptier_ply_cap
+                  : lookahead;
   if (plies < 1) {
     plies = 1;
   }
@@ -1240,16 +1237,19 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   MachineLetter bag_remaining[PEG_MAX_BAG + 1];
   peg_nest_enum_splits(&nc, 0, k_drawn, bag_rem, 1, mover_drawn, 0,
                        bag_remaining, 0);
-  if (worker->nest_pool != NULL && nc.n_jobs > 1 &&
-      worker->nest_submit_depth == 0) {
+  if (worker->nest_pool != NULL && nc.n_jobs > 1) {
     void **ptrs = malloc_or_die((size_t)nc.n_jobs * sizeof(void *));
     for (int i = 0; i < nc.n_jobs; i++) {
       ptrs[i] = &nc.jobs[i];
     }
-    worker->nest_submit_depth++;
-    peg_pool_submit_and_wait(worker->nest_pool, peg_nest_scenario_worker_fn,
-                             ptrs, nc.n_jobs, worker->nest_worker_idx);
-    worker->nest_submit_depth--;
+    // Re-entrant submit so a blocked worker only help-drains other re-entrant
+    // (inner) items. Every nesting level fans out -- the inner unseen is
+    // diverse even when the outer pool is uniform (the mover's leave joins it),
+    // so deep nesting is where most of the cores come from on few-candidate
+    // positions; the recursion depth bounds the submit nesting.
+    peg_pool_submit_and_wait_reentrant(worker->nest_pool,
+                                       peg_nest_scenario_worker_fn, ptrs,
+                                       nc.n_jobs, worker->nest_worker_idx);
     free(ptrs);
   } else {
     for (int i = 0; i < nc.n_jobs; i++) {
@@ -2465,12 +2465,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].prune_cache = prune_cache;
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
-    // Inner-scenario pool submission is gated OFF for now: it does not improve
-    // coverage (the outer cascade already saturates the pool) and the nested
-    // help-while-waiting submission has a release-only stack issue still under
-    // investigation. The inner scenarios run inline; outer parallelism is
-    // unaffected. Re-enable by setting nest_pool = pool once bounded safely.
-    workers[worker_idx].nest_pool = NULL;
+    // Inner-peg scenarios fan out across the shared pool (NULL when single-
+    // threaded => inline). Safe because inner scenario jobs are submitted
+    // re-entrantly: a worker that blocks on an inner batch only help-drains
+    // other re-entrant items, never an outer job that would clobber the
+    // per-worker scratch it is mid-evaluation on. This keeps all cores busy on
+    // positions with few outer candidates (where outer parallelism alone leaves
+    // most cores idle), e.g. a 3-candidate uniform-pool 3-peg climbs from ~1 to
+    // ~8 of 10 cores.
+    workers[worker_idx].nest_pool = pool;
     workers[worker_idx].nest_workers = workers;
     workers[worker_idx].nest_worker_idx = worker_idx;
     workers[worker_idx].nested_enabled = args->nested_enabled;
@@ -2482,7 +2485,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nested_max_depth = args->nested_max_depth;
     workers[worker_idx].nest_free = NULL;
     workers[worker_idx].nest_all = NULL;
-    workers[worker_idx].nest_submit_depth = 0;
   }
 
   // Injection monitor: lends idle cores to in-flight leaf endgames. Only

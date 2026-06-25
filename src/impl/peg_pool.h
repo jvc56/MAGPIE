@@ -64,4 +64,14 @@ void peg_pool_set_stuck_timeout_seconds(PegPool *pool, int seconds);
 void peg_pool_submit_and_wait(PegPool *pool, PegPoolFn fn, void *const *args,
                               int n, int helper_worker_idx);
 
+// Like peg_pool_submit_and_wait, but for a batch whose items are re-entrant
+// safe (they work on the per-worker nest-frame stack, not the fixed scratch
+// games). The calling thread is assumed to itself be executing a job, so while
+// it blocks it only help-drains other re-entrant items — never an outer job
+// that would corrupt the in-progress one. Use for inner-peg scenario fan-out
+// submitted from within an outer leaf evaluation.
+void peg_pool_submit_and_wait_reentrant(PegPool *pool, PegPoolFn fn,
+                                        void *const *args, int n,
+                                        int helper_worker_idx);
+
 #endif
