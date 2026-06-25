@@ -31,6 +31,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
 #include "../ent/klv_csv.h"
+#include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
@@ -64,6 +65,7 @@
 #include "move_gen.h"
 #include "peg.h"
 #include "simmer.h"
+#include "word_playability.h"
 #include <assert.h>
 #include <ctype.h>
 #include <float.h>
@@ -103,6 +105,11 @@ typedef enum {
   ARG_TOKEN_P1_NAME,
   ARG_TOKEN_P2_NAME,
   ARG_TOKEN_LEAVE_GEN,
+  ARG_TOKEN_PLAYABILITY,
+  ARG_TOKEN_PLAYABILITY_SMALL_KWG,
+  ARG_TOKEN_PLAYABILITY_OUT,
+  ARG_TOKEN_PLAYABILITY_SORT,
+  ARG_TOKEN_PLAYABILITY_DUMP,
   ARG_TOKEN_CREATE_DATA,
   ARG_TOKEN_DATA_PATH,
   ARG_TOKEN_BINGO_BONUS,
@@ -1150,6 +1157,47 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "with game pairs to evaluate the resulting leaves. Depending on your "
           "hardware, this command could take days or weeks.";
       break;
+    case ARG_TOKEN_PLAYABILITY:
+      usages[0] = "<num_games>";
+      examples[0] = "1000";
+      text =
+          "Plays <num_games> autoplay games and writes a CSV of per-word "
+          "playability metrics for the current lexicon: a uniform play count "
+          "(main word and every hook), the equity loss if the word were the "
+          "only one removed from the lexicon, and (when a small word set is "
+          "given via 'smallkwg') the equity gained by adding the word to that "
+          "small set. Use 'pbout' for the output path and 'pbsort' for the "
+          "sort key. Equity totals are summed in integer millipoints.";
+      break;
+    case ARG_TOKEN_PLAYABILITY_SMALL_KWG:
+      usages[0] = "<lexicon_name>";
+      examples[0] = "CSW24_2to4";
+      text = "Specifies a small word set (a KWG lexicon name) for the "
+             "playability bonus metric. When omitted, the bonus is not "
+             "computed.";
+      break;
+    case ARG_TOKEN_PLAYABILITY_OUT:
+      usages[0] = "<output_path>";
+      examples[0] = "playability.csv";
+      text = "Specifies the output CSV path for the playability command "
+             "(default: playability.csv).";
+      break;
+    case ARG_TOKEN_PLAYABILITY_SORT:
+      usages[0] = "<count_or_penalty_or_bonus>";
+      examples[0] = "count";
+      examples[1] = "penalty";
+      text = "Specifies the playability CSV sort key (descending, ties "
+             "alphabetical); one of count, penalty, or bonus (default: count).";
+      break;
+    case ARG_TOKEN_PLAYABILITY_DUMP:
+      usages[0] = "<dump_path_prefix>";
+      examples[0] = "cache/pb";
+      text =
+          "Dumps each analyzed position (seed baseline + above-baseline moves "
+          "with formed-word ids) to <prefix>.<n> per worker, plus "
+          "<prefix>.words, for offline dictionary-subset selection. Requires "
+          "a small word set (smallkwg) used as the seed.";
+      break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
       examples[0] = "klv CSW50";
@@ -2084,6 +2132,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_INFER,                /* infer */
         ARG_TOKEN_LEAVE_GEN,            /* leavegen */
         ARG_TOKEN_PEG,                  /* peg */
+        ARG_TOKEN_PLAYABILITY,          /* playability */
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
@@ -2148,6 +2197,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_PLAYABILITY_DUMP,        /* pbdump */
+        ARG_TOKEN_PLAYABILITY_OUT,         /* pbout */
+        ARG_TOKEN_PLAYABILITY_SORT,        /* pbsort */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
@@ -2157,6 +2209,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PLIES,                   /* plies */
         ARG_TOKEN_PEG_NOPRUNE,             /* pnoprune */
         ARG_TOKEN_STOP_COND_PCT,           /* scondition */
+        ARG_TOKEN_PLAYABILITY_SMALL_KWG,   /* smallkwg */
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
@@ -3271,6 +3324,8 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  // Only the playability command sets this (after this fill); default off.
+  autoplay_args->playability = NULL;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -3472,6 +3527,114 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
                   error_stack);
+}
+
+void impl_playability(Config *config, ErrorStack *error_stack) {
+  if (!config_has_game_data(config)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
+        string_duplicate("cannot compute playability without lexicon"));
+    return;
+  }
+  // A single full lexicon is scored, so both players must share it.
+  if (!players_data_get_is_shared(config->players_data,
+                                  PLAYERS_DATA_TYPE_KWG)) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_LEAVE_GEN_DIFFERENT_LEXICA_OR_LEAVES,
+        string_duplicate(
+            "cannot compute playability with different lexica for the "
+            "players"));
+    return;
+  }
+
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+    config_load_win_pcts(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  word_playability_sort_t sort = WORD_PLAYABILITY_SORT_COUNT;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PLAYABILITY_SORT) > 0) {
+    const char *sort_str =
+        config_get_parg_value(config, ARG_TOKEN_PLAYABILITY_SORT, 0);
+    if (has_iprefix(sort_str, "count")) {
+      sort = WORD_PLAYABILITY_SORT_COUNT;
+    } else if (has_iprefix(sort_str, "penalty")) {
+      sort = WORD_PLAYABILITY_SORT_PENALTY;
+    } else if (has_iprefix(sort_str, "bonus")) {
+      sort = WORD_PLAYABILITY_SORT_BONUS;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("invalid playability sort key: %s", sort_str));
+      return;
+    }
+  }
+
+  KWG *small_kwg = NULL;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PLAYABILITY_SMALL_KWG) >
+      0) {
+    const char *small_name =
+        config_get_parg_value(config, ARG_TOKEN_PLAYABILITY_SMALL_KWG, 0);
+    small_kwg =
+        kwg_create(config_get_data_paths(config), small_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (sort == WORD_PLAYABILITY_SORT_BONUS && !small_kwg) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+        string_duplicate("playability sort key 'bonus' requires a small word "
+                         "set (smallkwg)"));
+    kwg_destroy(small_kwg);
+    return;
+  }
+
+  char *out_path = NULL;
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PLAYABILITY_OUT) > 0) {
+    out_path = string_duplicate(
+        config_get_parg_value(config, ARG_TOKEN_PLAYABILITY_OUT, 0));
+  } else {
+    out_path = string_duplicate("playability.csv");
+  }
+
+  autoplay_results_set_options(config->autoplay_results, "games", error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(out_path);
+    kwg_destroy(small_kwg);
+    return;
+  }
+
+  WordPlayabilityContext *playability_ctx = word_playability_context_create(
+      players_data_get_kwg(config->players_data, 0), small_kwg, config->ld,
+      out_path, sort);
+
+  if (config_get_parg_num_set_values(config, ARG_TOKEN_PLAYABILITY_DUMP) > 0) {
+    const char *dump_prefix =
+        config_get_parg_value(config, ARG_TOKEN_PLAYABILITY_DUMP, 0);
+    word_playability_context_set_dump_prefix(playability_ctx, dump_prefix);
+    char *words_path = get_formatted_string("%s.words", dump_prefix);
+    word_playability_write_word_list(playability_ctx, words_path, error_stack);
+    free(words_path);
+  }
+
+  const char *num_games_str =
+      config_get_parg_value(config, ARG_TOKEN_PLAYABILITY, 0);
+
+  // Like config_autoplay, but inject the playability context after filling.
+  AutoplayArgs args;
+  GameArgs game_args;
+  args.game_args = &game_args;
+  config_fill_autoplay_args(config, &args, AUTOPLAY_TYPE_DEFAULT, num_games_str,
+                            0);
+  args.playability = playability_ctx;
+  autoplay(&args, config->autoplay_results, error_stack);
+
+  word_playability_context_destroy(playability_ctx);
+  kwg_destroy(small_kwg);
 }
 
 // Create
@@ -7656,6 +7819,15 @@ char *str_api_leave_gen(Config *config, ErrorStack *error_stack) {
   return empty_string();
 }
 
+void execute_playability(Config *config, ErrorStack *error_stack) {
+  impl_playability(config, error_stack);
+}
+
+char *str_api_playability(Config *config, ErrorStack *error_stack) {
+  impl_playability(config, error_stack);
+  return empty_string();
+}
+
 void execute_create_data(Config *config, ErrorStack *error_stack) {
   impl_create_data(config, error_stack);
 }
@@ -8041,6 +8213,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
+  cmd(ARG_TOKEN_PLAYABILITY, "playability", 1, 1, playability, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -8060,6 +8233,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
+  arg(ARG_TOKEN_PLAYABILITY_SMALL_KWG, "smallkwg", 1, 1);
+  arg(ARG_TOKEN_PLAYABILITY_OUT, "pbout", 1, 1);
+  arg(ARG_TOKEN_PLAYABILITY_SORT, "pbsort", 1, 1);
+  arg(ARG_TOKEN_PLAYABILITY_DUMP, "pbdump", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
@@ -8375,6 +8552,11 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
+    case ARG_TOKEN_PLAYABILITY:
+    case ARG_TOKEN_PLAYABILITY_SMALL_KWG:
+    case ARG_TOKEN_PLAYABILITY_OUT:
+    case ARG_TOKEN_PLAYABILITY_SORT:
+    case ARG_TOKEN_PLAYABILITY_DUMP:
     case ARG_TOKEN_CREATE_DATA:
     case ARG_TOKEN_ANALYZE:
     case ARG_TOKEN_LOAD:

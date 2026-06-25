@@ -21,6 +21,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "dawg_arc_compressed_test.h"
 #include "dawg_packed_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
@@ -62,6 +63,7 @@
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
+#include "word_playability_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
@@ -115,6 +117,8 @@ static TestEntry test_table[] = {
     {"autoplay", test_autoplay},
     {"words", test_words},
     {"wordprune", test_word_prune},
+    {"playability", test_word_playability},
+    {"dawgarccompressed", test_dawg_arc_compressed},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
     {"rl", test_rack_list},
