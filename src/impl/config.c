@@ -140,6 +140,7 @@ typedef enum {
   ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
+  ARG_TOKEN_PEG_NESTED,
   ARG_TOKEN_PEG_OUTCOMES,
   ARG_TOKEN_PEG_OUT_WIDTH,
   ARG_TOKEN_PEG_OUT_LINES,
@@ -280,6 +281,9 @@ struct Config {
   int peg_scenario_stride;
   // PEG pessimistic opponent model (-pegpess); else rational (the default).
   bool peg_pessimistic;
+  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
+  // default (depth 1); off restores the flat greedy/pessimistic rollout.
+  bool peg_nested;
   // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
   bool peg_show_outcomes;
   // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
@@ -1610,6 +1614,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "PEG opponent model: true = pessimistic (the opponent plays the "
              "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
              "(default) = rational (the opponent plays its best-equity reply).";
+      break;
+    case ARG_TOKEN_PEG_NESTED:
+      usages[0] = "<true/false>";
+      examples[0] = "false";
+      text =
+          "PEG non-emptier leaf evaluation: true (default) = nested inner-peg "
+          "lookahead (solve the opponent's sub-pre-endgame, depth 1); false = "
+          "flat greedy/pessimistic rollout. Nested wins more decisions but "
+          "costs more per solve.";
       break;
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
@@ -3188,6 +3201,11 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
+// Default inner-peg stage schedule used when nesting is on -- the validated arm
+// config from the decision-quality benchmark (flat vs nested across pass/2-bag/
+// 3-bag), where depth 1 with this schedule was the right default.
+static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   memset(peg_args, 0, sizeof(*peg_args));
   peg_args->game = config->game;
@@ -3202,6 +3220,16 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
   peg_args->include_per_scenario = config->peg_show_outcomes;
+  // Nested inner-peg lookahead for non-emptier leaves: on by default at depth 1
+  // with the validated cost knobs (inner stage schedule {8,4,2}, bag-default
+  // scenario stride). -pegnested false restores the flat rollout. Emptier
+  // (bag-empty) leaves are unaffected -- they always solve exact endgames.
+  peg_args->nested_enabled = config->peg_nested;
+  peg_args->nested_max_depth = 1;
+  peg_args->nested_cand_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
+  peg_args->nested_n_cand_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
+                                       sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));
+  peg_args->nested_stride = 0; // bag-size default
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -6675,6 +6703,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_PEG_NESTED, &config->peg_nested,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_PEG_OUTCOMES, &config->peg_show_outcomes,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8241,6 +8275,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
+  arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
   arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_WIDTH, "pegoutwidth", 1, 1);
   arg(ARG_TOKEN_PEG_OUT_LINES, "pegoutlines", 1, 1);
@@ -8355,6 +8390,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
+  config->peg_nested = true;
   config->peg_show_outcomes = false;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
@@ -8739,6 +8775,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_PESSIMISTIC:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->peg_pessimistic);
+      break;
+    case ARG_TOKEN_PEG_NESTED:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->peg_nested);
       break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
