@@ -41,6 +41,11 @@ lflags.test := -sNODERAWFS=1 \
 
 LDLIBS := -lm
 
+# Emit a .d makefile fragment next to each .o (header deps) so the -included
+# fragments below let a header edit recompile exactly its dependents -- no
+# `make clean`. -MP adds phony header targets so a deleted header won't error.
+DEPFLAGS := -MMD -MP
+
 .PHONY: all clean
 
 all: magpie_wasm
@@ -54,13 +59,13 @@ magpie_wasm_test: $(OBJ_SRC) $(OBJ_TEST) | $(TEST_BIN_DIR)
 	-sINITIAL_MEMORY=512MB
 
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
-	emcc $(cflags.release) -c $< -o $@
+	emcc $(cflags.release) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
-	emcc $(cflags.release) -c $< -o $@
+	emcc $(cflags.release) $(DEPFLAGS) -c $< -o $@
 
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR)
-	emcc $(cflags.release) -c $< -o $@
+	emcc $(cflags.release) $(DEPFLAGS) -c $< -o $@
 
 $(BIN_DIR) $(TEST_BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS):
 	mkdir -p $@
