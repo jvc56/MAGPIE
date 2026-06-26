@@ -47,20 +47,9 @@
 // entry points below — there are deliberately no environment-variable knobs.
 // Positions come from the committed notes/peg_positions/random_Npeg.txt
 // fixtures (run from the repo root); each line's embedded "-lex CSW24" is
-// honored by loading via the cgp command.
-
-// Env-var parsers for the on-demand knobs: a single getenv (no TOCTOU on a
-// second lookup) and strtol/strtod (which, unlike atoi/atof, are the checked
-// conversions clang-tidy expects).
-static int env_int(const char *name, int dflt) {
-  const char *value = getenv(name);
-  return value != NULL ? (int)strtol(value, NULL, 10) : dflt;
-}
-
-static double env_double(const char *name, double dflt) {
-  const char *value = getenv(name);
-  return value != NULL ? strtod(value, NULL) : dflt;
-}
+// honored by loading via the cgp command. The on-demand entry points hardcode
+// their tuning knobs (threads, time budgets, position counts, nesting schedule)
+// as local constants — edit them in source to sweep different values.
 
 // One hardcoded PEG solver configuration (an A/B arm or the oracle).
 typedef struct PegBenchConfig {
@@ -683,20 +672,15 @@ void test_peg_pegtopk_all(void) {
   config_destroy(config);
 }
 
-// On-demand: run PEG to completion on the first PEG_BENCH_MAX positions of a
-// fixture file, printing per-position wall time + chosen move/win/spread + the
-// total. A simple timing harness (used to A/B the chained-wordprune cache).
-// Env: PEG_BENCH_FILE, PEG_BENCH_MAX (10), PEG_BENCH_THREADS (8),
-//      PEG_BENCH_TLIM (0 = unbounded).
+// On-demand: run PEG to completion on the first max_pos positions of a fixture
+// file, printing per-position wall time + chosen move/win/spread + the total. A
+// simple timing harness (used to A/B the chained-wordprune cache).
 void test_peg_bench_fixture(void) {
   log_set_level(LOG_FATAL);
-  const char *file = getenv("PEG_BENCH_FILE");
-  if (file == NULL) {
-    file = "notes/peg_positions/random_3peg.txt";
-  }
-  const int max_pos = env_int("PEG_BENCH_MAX", 10);
-  const int threads = env_int("PEG_BENCH_THREADS", 8);
-  const double tlim = env_double("PEG_BENCH_TLIM", 0.0);
+  const char *file = "notes/peg_positions/random_3peg.txt";
+  const int max_pos = 10;
+  const int threads = 8;
+  const double tlim = 0.0; // 0 = unbounded
 
   FILE *fp = fopen(file, "re");
   if (!fp) {
@@ -775,43 +759,29 @@ void test_peg_bench_fixture(void) {
 // moves, a deeper EXHAUSTIVE-ish nested oracle (both moves protected via
 // pnoprune) scores each move; the win% gap = oracle_win(nested move) -
 // oracle_win(rollout move). Positive => nesting reached a better in-budget
-// decision. The spread gap (points) is logged separately. Env: PEG_ARM_TLIM
-// (default 8), PEG_ORACLE_TLIM (default 60), PEG_GAP_MAX (default 25),
-// PEG_GAP_THREADS (default 8), PEG_GAP_BAG (0 = all four),
-// PEG_GAP_NEST_STRIDE (0 = bag-dependent default), PEG_GAP_NEST_MAXDEPTH
-// (default 1), PEG_GAP_NEST_CAPS (default 8,4,2 = inner-peg stage schedule).
+// decision. The spread gap (points) is logged separately.
 void test_peg_nested_gap(void) {
   log_set_level(LOG_FATAL);
-  const double arm_tlim = env_double("PEG_ARM_TLIM", 8.0);
-  const double oracle_tlim = env_double("PEG_ORACLE_TLIM", 60.0);
-  const int max_pos = env_int("PEG_GAP_MAX", 25);
-  const int threads = env_int("PEG_GAP_THREADS", 8);
-  // PEG_GAP_BAG: restrict to one bag size (1..4); 0 = all four.
-  const int only_bag = env_int("PEG_GAP_BAG", 0);
+  const double arm_tlim = 8.0;
+  const double oracle_tlim = 60.0;
+  const int max_pos = 25;
+  const int threads = 8;
+  // Restrict to one bag size (1..4); 0 = all four.
+  const int only_bag = 0;
   // Live-mode poll so the arms publish PARTIAL stages (the faster arm's extra
   // in-budget candidates are credited). Reused across the sequential arm
   // solves.
   PegPoll *arm_poll = peg_poll_create();
 
-  const int nest_cap = env_int("PEG_GAP_NEST_CAP", 0);
+  const int nest_cap = 0;
   // 0 = bag-dependent default stride (2-peg 1, 3-peg 5, 4-peg 7).
-  const int nest_stride = env_int("PEG_GAP_NEST_STRIDE", 0);
+  const int nest_stride = 0;
   // Inner-peg recursion depth (how many nested pegs before greedy); default 1.
-  const int nest_maxdepth = env_int("PEG_GAP_NEST_MAXDEPTH", 1);
-  // PEG_GAP_NEST_CAPS=8,4,2 => the inner peg's STAGE schedule (initial field +
-  // per-stage keep counts). Default arm {8,4,2}; oracle is {8,8,8} (wider).
-  static int nest_cap_seq[16] = {8, 4, 2};
-  int nest_n_caps = 3;
-  const char *caps_env = getenv("PEG_GAP_NEST_CAPS");
-  if (caps_env != NULL) {
-    char buf[128];
-    (void)snprintf(buf, sizeof(buf), "%s", caps_env);
-    nest_n_caps = 0;
-    for (const char *tok = strtok(buf, ","); tok != NULL && nest_n_caps < 16;
-         tok = strtok(NULL, ",")) {
-      nest_cap_seq[nest_n_caps++] = (int)strtol(tok, NULL, 10);
-    }
-  }
+  const int nest_maxdepth = 1;
+  // The inner peg's STAGE schedule (initial field + per-stage keep counts). The
+  // arms use {8,4,2}; the oracle uses {8,8,8} (wider).
+  static const int nest_cap_seq[] = {8, 4, 2};
+  const int nest_n_caps = 3;
   static const int oracle_nest_caps[] = {8, 8, 8}; // wider inner peg for oracle
 
   // Arm A: staged inner-peg lookahead. Arm B: plain rollout. Both reprune-on
@@ -854,8 +824,7 @@ void test_peg_nested_gap(void) {
   printf("[gap] arm_tlim=%.0f oracle_tlim=%.0f max=%d\n", arm_tlim, oracle_tlim,
          max_pos);
   (void)fflush(stdout);
-  const char *dir =
-      getenv("PEG_GAP_DIR") ? getenv("PEG_GAP_DIR") : "notes/peg_positions";
+  const char *dir = "notes/peg_positions";
   for (int bag = 1; bag <= 4; bag++) {
     if (only_bag != 0 && bag != only_bag) {
       continue;
@@ -972,28 +941,12 @@ void test_peg_nested_gap(void) {
 }
 
 // On-demand: append 75 more contested positions for 2/3/4-in-bag (1-in-bag
-// already has 100) with fresh seeds, into $PEG_GAP_DIR (default
-// notes/peg_positions), so the gap benchmark can run 100 per bag.
+// already has 100) with fresh seeds, into notes/peg_positions, so the gap
+// benchmark can run 100 per bag.
 void test_gen_peg_more(void) {
   log_set_level(LOG_FATAL);
-  const char *dir =
-      getenv("PEG_GAP_DIR") ? getenv("PEG_GAP_DIR") : "notes/peg_positions";
+  const char *dir = "notes/peg_positions";
   char f[256];
-  // PEG_GEN_BAG + PEG_GEN_COUNT: append COUNT more contested for a single bag.
-  // Default: 75 more each for 2/3/4-bag.
-  if (getenv("PEG_GEN_BAG") != NULL) {
-    const int bag = env_int("PEG_GEN_BAG", 0);
-    const int count = env_int("PEG_GEN_COUNT", 75);
-    // PEG_GEN_SEED picks a fresh, non-overlapping seed; default is the fixed
-    // per-bag seed. PEG_GEN_APPEND=0 overwrites instead of appending.
-    const char *seed_env = getenv("PEG_GEN_SEED");
-    const uint64_t seed = seed_env != NULL ? strtoull(seed_env, NULL, 10)
-                                           : (uint64_t)bag * 1010101 + 777;
-    const bool append = env_int("PEG_GEN_APPEND", 1) != 0;
-    (void)snprintf(f, sizeof(f), "%s/random_%dpeg.txt", dir, bag);
-    generate_peg_cgps(seed, bag, count, f, append, /*contested_only=*/true);
-    return;
-  }
   (void)snprintf(f, sizeof(f), "%s/random_2peg.txt", dir);
   generate_peg_cgps(20242777, 2, 75, f, /*append=*/true,
                     /*contested_only=*/true);
