@@ -22,4 +22,12 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
                             int out_max_lines, const char *trunc_note,
                             bool *out_truncated);
 
+// Render one candidate's per-ordering W/L/T rows as the compact outcomes-cell
+// string (e.g. "W: DH/Ax2 DR/Hx2"): the mover's drawn tiles as a sorted
+// multiset prefix, then the bag remainder (a multiset, or "/"-segmented when
+// its orderings split across buckets). Only the shorter of the win/loss lists
+// is shown; the per-token "xN" weights sum to the win/loss columns. Exposed for
+// unit testing; production reaches it via peg_result_get_string. Caller frees.
+char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
+
 #endif // PEG_STRING_H

@@ -83,8 +83,13 @@ static void peg_strlist_destroy(PegStrList *list) {
   list->cap = 0;
 }
 
-// Sort a short tile string in place (insertion sort).
+// Sort a short tile string in place (insertion sort). A no-op on the empty
+// string (a pass draws nothing; a play that empties the bag leaves no
+// remainder), where there is no s[0] to seed the sort from.
 static void peg_sort_str(char *s) {
+  if (s[0] == '\0') {
+    return;
+  }
   for (int i = 1; s[i] != '\0'; i++) {
     const char key = s[i];
     int prev = i - 1;
@@ -287,8 +292,7 @@ static void peg_draw_token(char *dst, size_t dst_size, const char *drawn,
 // win / loss lists is printed (the other is implied by the counts); tie draws
 // are not listed but do count toward the split decision. When every ordering
 // shares one bucket, says "always wins/loses/ties". Caller frees.
-static char *peg_build_outcomes_string_rows(const PegPerScenario *rows,
-                                            int n_rows) {
+char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   if (n_rows <= 0) {
     return string_duplicate("");
   }
