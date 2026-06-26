@@ -52,12 +52,14 @@ static void cand_hash_create(CandHash *h) {
   h->ntiles = (uint8_t *)calloc_or_die(CLM_HASH_SIZE, 1);
   h->count = 0;
 }
+
 static void cand_hash_destroy(CandHash *h) {
   free(h->keys);
   free(h->s1);
   free(h->s2);
   free(h->ntiles);
 }
+
 static void cand_hash_add(CandHash *h, uint64_t key, uint8_t ntiles, double w,
                           double residual) {
   uint64_t slot = (key * 0x9E3779B97F4A7C15ULL) >> (64 - CLM_HASH_BITS);
@@ -307,6 +309,7 @@ static void hash_sink_cb(uint64_t key, uint8_t ntiles, void *ctx) {
   HashSink *sink = (HashSink *)ctx;
   cand_hash_add(sink->hash, key, ntiles, sink->w, sink->e);
 }
+
 static void cb_residual(FitState *st, void *data) {
   const ResAcc *acc = (const ResAcc *)data;
   const uint32_t idx = klv_get_word_index(st->klv, st->leave);
@@ -346,10 +349,12 @@ static void sel_hash_create(SelHash *h, uint32_t num_selected) {
   }
   h->shift = 64 - bits;
 }
+
 static void sel_hash_destroy(SelHash *h) {
   free(h->keys);
   free(h->idx);
 }
+
 static void sel_hash_put(SelHash *h, uint64_t key, int32_t value) {
   uint64_t slot = (key * 0x9E3779B97F4A7C15ULL) >> h->shift;
   while (h->keys[slot] != 0) {
@@ -358,6 +363,7 @@ static void sel_hash_put(SelHash *h, uint64_t key, int32_t value) {
   h->keys[slot] = key;
   h->idx[slot] = value;
 }
+
 static int32_t sel_hash_get(const SelHash *h, uint64_t key) {
   uint64_t slot = (key * 0x9E3779B97F4A7C15ULL) >> h->shift;
   while (h->keys[slot] != 0) {
@@ -618,6 +624,7 @@ static int clm_bits_needed(uint32_t max_value) {
   }
   return bits < 1 ? 1 : bits;
 }
+
 static int clm_coef_bits(int32_t ticks) {
   const uint32_t sign = ticks < 0 ? 0xFFFFFFFFU : 0U;
   const uint32_t zigzag = ((uint32_t)ticks << 1) ^ sign;
@@ -851,6 +858,7 @@ static void cb_overwrite(FitState *st, void *data) {
   klv_set_indexed_leave_value(
       acc->klv, idx, compact_leaves_get_leave_value(acc->cl, st->leave));
 }
+
 void compact_leaves_overwrite_klv(const CompactLeaves *cl, KLV *klv,
                                   const LetterDistribution *ld) {
   const int A = ld_get_size(ld);
@@ -892,6 +900,7 @@ static void cb_rms(FitState *st, void *data) {
     acc->wsum += w;
   }
 }
+
 void compact_leaves_rms(const CompactLeaves *cl, const KLV *klv,
                         const LetterDistribution *ld, const uint64_t *weights,
                         double *weighted_rms_out, double *unweighted_rms_out) {

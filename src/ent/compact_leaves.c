@@ -17,21 +17,25 @@ static inline void put_u16(uint8_t *b, size_t *p, uint16_t v) {
   b[(*p)++] = (uint8_t)(v & 0xFF);
   b[(*p)++] = (uint8_t)((v >> 8) & 0xFF);
 }
+
 static inline void put_u32(uint8_t *b, size_t *p, uint32_t v) {
   for (int byte_idx = 0; byte_idx < 4; byte_idx++) {
     b[(*p)++] = (uint8_t)((v >> (8 * byte_idx)) & 0xFF);
   }
 }
+
 static inline void put_u64(uint8_t *b, size_t *p, uint64_t v) {
   for (int byte_idx = 0; byte_idx < 8; byte_idx++) {
     b[(*p)++] = (uint8_t)((v >> (8 * byte_idx)) & 0xFF);
   }
 }
+
 static inline uint16_t get_u16(const uint8_t *b, size_t *p) {
   const uint16_t v = (uint16_t)(b[*p] | ((uint16_t)b[*p + 1] << 8));
   *p += 2;
   return v;
 }
+
 static inline uint32_t get_u32(const uint8_t *b, size_t *p) {
   uint32_t v = 0;
   for (int byte_idx = 0; byte_idx < 4; byte_idx++) {
@@ -40,6 +44,7 @@ static inline uint32_t get_u32(const uint8_t *b, size_t *p) {
   *p += 4;
   return v;
 }
+
 static inline uint64_t get_u64(const uint8_t *b, size_t *p) {
   uint64_t v = 0;
   for (int byte_idx = 0; byte_idx < 8; byte_idx++) {
@@ -60,14 +65,17 @@ static int compact_leaves_bits_needed(uint32_t max_value) {
   }
   return bits < 1 ? 1 : bits;
 }
+
 // Map signed <-> unsigned so small-magnitude coefficients pack into few bits.
 static inline uint32_t compact_leaves_zigzag(int32_t value) {
   const uint32_t sign = value < 0 ? 0xFFFFFFFFU : 0U;
   return ((uint32_t)value << 1) ^ sign;
 }
+
 static inline int32_t compact_leaves_unzigzag(uint32_t encoded) {
   return (int32_t)(encoded >> 1) ^ -(int32_t)(encoded & 1U);
 }
+
 // buf must be zero-initialized over the bit range (writes via OR).
 static void put_bits(uint8_t *buf, size_t *bit_pos, uint32_t value, int nbits) {
   for (int i = 0; i < nbits; i++) {
@@ -78,6 +86,7 @@ static void put_bits(uint8_t *buf, size_t *bit_pos, uint32_t value, int nbits) {
   }
   *bit_pos += (size_t)nbits;
 }
+
 static uint32_t get_bits(const uint8_t *buf, size_t *bit_pos, int nbits) {
   uint32_t value = 0;
   for (int i = 0; i < nbits; i++) {
@@ -89,11 +98,13 @@ static uint32_t get_bits(const uint8_t *buf, size_t *bit_pos, int nbits) {
   *bit_pos += (size_t)nbits;
   return value;
 }
+
 // Bit widths derived identically by writer and reader from dist_size / the
 // max-synergy-tiles constant (so they need not be stored).
 static int compact_leaves_tile_bits(const CompactLeaves *cl) {
   return compact_leaves_bits_needed((uint32_t)cl->dist_size - 1);
 }
+
 static int compact_leaves_num_tiles_bits(void) {
   return compact_leaves_bits_needed(COMPACT_LEAVES_MAX_SYNERGY_TILES);
 }

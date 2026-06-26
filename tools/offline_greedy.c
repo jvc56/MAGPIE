@@ -22,6 +22,7 @@ static void *xmalloc(size_t n) {
   if (!p) { fprintf(stderr, "OOM %zu\n", n); exit(1); }
   return p;
 }
+
 static void *xrealloc(void *p, size_t n) {
   p = realloc(p, n);
   if (!p) { fprintf(stderr, "OOM %zu\n", n); exit(1); }
@@ -123,6 +124,7 @@ static int trie_new_node(void) {
   memset(g_trie[g_trie_nodes], 0, sizeof(g_trie[0])); // 0 = no child
   return g_trie_nodes++;
 }
+
 static void trie_add(const char *w, int L) {
   int node = 0;
   for (int i = 0; i < L; i++) {
@@ -132,6 +134,7 @@ static void trie_add(const char *w, int L) {
     node = g_trie[node][c];
   }
 }
+
 static int trie_cost(const char *w, int L) { // new nodes = L - shared prefix
   int node = 0, shared = 0;
   for (int i = 0; i < L; i++) {
