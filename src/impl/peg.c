@@ -80,6 +80,10 @@ enum {
   // Max candidate field an inner-peg cascade carries (the first stage cap is
   // clamped to this); the staged narrowing keeps the working set tiny.
   PEG_NEST_FIELD_MAX = 64,
+  // Slot capacity of the per-solve leaf-prune cache. Distinct post-candidate
+  // boards reaching an exact leaf are bounded by the candidate field (a few
+  // hundred), so this is never approached in practice.
+  PEG_PRUNE_CACHE_CAPACITY = 1 << 14,
 };
 
 // Solve-scoped cache mapping a post-candidate board signature to its
@@ -103,8 +107,7 @@ typedef struct PegPruneCache {
 // from / released to the owning worker's free-list. Each worker is touched by
 // exactly one thread (its pool index, or the main thread for the helper slot),
 // so the free-list needs no locking -- and a frame held across a parallel
-// scenario submission survives help-while-waiting interleaving, which the old
-// per-(worker,level) indexing could not.
+// scenario submission survives help-while-waiting interleaving.
 typedef struct PegNestFrame {
   Game *game;
   MoveList *moves;
@@ -863,9 +866,7 @@ static void peg_scenario_joblist_push(PegScenarioJobList *list,
 static PegPruneCache *peg_prune_cache_create(void) {
   PegPruneCache *cache = malloc_or_die(sizeof(*cache));
   cpthread_mutex_init(&cache->mutex);
-  // Ample: distinct post-cand boards reaching an exact leaf are bounded by the
-  // candidate field (hundreds), so this never approaches full in practice.
-  cache->capacity = 1 << 14;
+  cache->capacity = PEG_PRUNE_CACHE_CAPACITY;
   cache->count = 0;
   cache->keys = calloc_or_die((size_t)cache->capacity, sizeof(uint64_t));
   cache->values = calloc_or_die((size_t)cache->capacity, sizeof(KWG *));
@@ -1309,8 +1310,8 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   if (cframe->moves == NULL) {
     cframe->moves = move_list_create(PEG_NEST_CAND_LIST_CAP);
   }
-  MoveList *ml = cframe->moves;
-  const MoveGenArgs ga = {
+  MoveList *cand_moves = cframe->moves;
+  const MoveGenArgs movegen_args = {
       .game = game,
       .move_record_type = MOVE_RECORD_ALL,
       .move_sort_type = MOVE_SORT_EQUITY,
@@ -1318,17 +1319,17 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
       .eq_margin_movegen = 0,
       .target_equity = EQUITY_MAX_VALUE,
       .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
-      .move_list = ml,
+      .move_list = cand_moves,
       .tiles_played_bv = NULL,
       .initial_tiles_bv = 0,
   };
-  generate_moves(&ga);
-  const int n = move_list_get_count(ml);
-  if (n == 0) {
+  generate_moves(&movegen_args);
+  const int num_cands = move_list_get_count(cand_moves);
+  if (num_cands == 0) {
     peg_nest_release(worker, cframe);
     return peg_nested_floor(worker, game, on_turn);
   }
-  move_list_sort_moves(ml);
+  move_list_sort_moves(cand_moves);
   uint8_t unseen[MAX_ALPHABET_SIZE];
   const int ld_size = ld_get_size(game_get_ld(game));
   peg_compute_unseen(game, on_turn, unseen);
@@ -1337,14 +1338,14 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   // stage. No schedule -> the flat cap as a single stage.
   const int *sched = worker->nested_cand_caps;
   const int n_sched = worker->nested_n_cand_caps;
-  int field_cap = n;
+  int field_cap = num_cands;
   if (n_sched > 0) {
     field_cap = sched[0];
   } else if (worker->nested_cand_cap > 0) {
     field_cap = worker->nested_cand_cap;
   }
-  if (field_cap > n) {
-    field_cap = n;
+  if (field_cap > num_cands) {
+    field_cap = num_cands;
   }
   if (field_cap > PEG_NEST_FIELD_MAX) {
     field_cap = PEG_NEST_FIELD_MAX;
@@ -1352,20 +1353,21 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   int idx[PEG_NEST_FIELD_MAX];
   int32_t val[PEG_NEST_FIELD_MAX];
   // memset first so the analyzer treats the whole array as initialized: the
-  // read at idx[i] (i < field_n) is provably in-bounds since field_n is seeded
-  // to field_cap and only ever shrinks, but the analyzer can't follow that
-  // across the separate init/read bounds. Behaviorally identical (entries
-  // >= field_cap are never read); clears a clang-analyzer uninit-read false
-  // positive.
+  // read at idx[cand_idx] (cand_idx < field_n) is provably in-bounds since
+  // field_n is seeded to field_cap and only ever shrinks, but the analyzer
+  // can't follow that across the separate init/read bounds. Behaviorally
+  // identical (entries >= field_cap are never read); clears a clang-analyzer
+  // uninit-read false positive.
   memset(idx, 0, sizeof(idx));
-  for (int i = 0; i < field_cap; i++) {
-    idx[i] = i;
+  for (int cand_idx = 0; cand_idx < field_cap; cand_idx++) {
+    idx[cand_idx] = cand_idx;
   }
   int field_n = field_cap;
-  // Scale inner depth to the outer stage: inner stage s runs at endgame
-  // fidelity 2 + s, so cap the stage count at outer_fidelity - 1. Early outer
-  // stages (2-ply) thus run a single cheap inner stage; the inner peg only
-  // deepens as the outer cascade does, keeping early outer stages affordable.
+  // Scale inner depth to the outer stage: inner stage stage_idx runs at endgame
+  // fidelity 2 + stage_idx, so cap the stage count at outer_fidelity - 1. Early
+  // outer stages (2-ply) thus run a single cheap inner stage; the inner peg
+  // only deepens as the outer cascade does, keeping early outer stages
+  // affordable.
   int n_stages = n_sched > 0 ? n_sched : 1;
   const int fidelity_stage_cap = outer_fidelity - 1;
   if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
@@ -1374,40 +1376,40 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   if (n_stages < 1) {
     n_stages = 1;
   }
-  for (int s = 0; s < n_stages; s++) {
-    if (s > 0 && peg_nested_should_stop(worker, deadline_ns)) {
+  for (int stage_idx = 0; stage_idx < n_stages; stage_idx++) {
+    if (stage_idx > 0 && peg_nested_should_stop(worker, deadline_ns)) {
       break;
     }
-    const int stage_fidelity = 2 + s; // rising endgame fidelity per stage
-    for (int i = 0; i < field_n; i++) {
-      if (i > 0 && peg_nested_should_stop(worker, deadline_ns)) {
-        field_n = i;
+    const int stage_fidelity = 2 + stage_idx; // rising endgame fidelity / stage
+    for (int cand_idx = 0; cand_idx < field_n; cand_idx++) {
+      if (cand_idx > 0 && peg_nested_should_stop(worker, deadline_ns)) {
+        field_n = cand_idx;
         break;
       }
-      const Move *cand = move_list_get_move(ml, idx[i]);
-      val[i] = peg_nested_cand_value(worker, game, on_turn, cand, unseen,
-                                     ld_size, stage_fidelity, depth,
-                                     outer_fidelity, deadline_ns);
+      const Move *cand = move_list_get_move(cand_moves, idx[cand_idx]);
+      val[cand_idx] = peg_nested_cand_value(worker, game, on_turn, cand, unseen,
+                                            ld_size, stage_fidelity, depth,
+                                            outer_fidelity, deadline_ns);
     }
     // Selection sort the small field by value, descending.
-    for (int a = 0; a < field_n; a++) {
-      int best_b = a;
-      for (int b = a + 1; b < field_n; b++) {
-        if (val[b] > val[best_b]) {
-          best_b = b;
+    for (int sel_idx = 0; sel_idx < field_n; sel_idx++) {
+      int best_idx = sel_idx;
+      for (int scan_idx = sel_idx + 1; scan_idx < field_n; scan_idx++) {
+        if (val[scan_idx] > val[best_idx]) {
+          best_idx = scan_idx;
         }
       }
-      if (best_b != a) {
-        const int ti = idx[a];
-        idx[a] = idx[best_b];
-        idx[best_b] = ti;
-        const int32_t tv = val[a];
-        val[a] = val[best_b];
-        val[best_b] = tv;
+      if (best_idx != sel_idx) {
+        const int tmp_idx = idx[sel_idx];
+        idx[sel_idx] = idx[best_idx];
+        idx[best_idx] = tmp_idx;
+        const int32_t tmp_val = val[sel_idx];
+        val[sel_idx] = val[best_idx];
+        val[best_idx] = tmp_val;
       }
     }
-    if (s + 1 < n_stages) {
-      const int keep = sched[s + 1];
+    if (stage_idx + 1 < n_stages) {
+      const int keep = sched[stage_idx + 1];
       if (keep > 0 && keep < field_n) {
         field_n = keep;
       }
@@ -2848,8 +2850,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // line). Prefer the rows already captured inline at the best cand's deepest
     // fidelity. Only when the best cand was never captured inline — a
     // greedy-only or pinned result, where no halving stage ran — fall back to a
-    // dedicated single-cand capture pass. That fallback runs at greedy fidelity
-    // (instant), so the formerly-expensive deep re-evaluation is gone.
+    // dedicated single-cand capture pass. That fallback runs at greedy
+    // fidelity: one candidate at greedy depth, not a deep re-evaluation, so it
+    // is cheap.
     if (args->include_per_scenario && out->n_top_cands > 0) {
       const PegCandOutcomes *best_oc = NULL;
       for (int store_idx = 0; store_idx < oc_n; store_idx++) {

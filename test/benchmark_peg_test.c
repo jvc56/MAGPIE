@@ -205,8 +205,8 @@ static PegBenchOutcome run_one_peg(const Config *config,
       outcome.deep_stage = result.n_stage_history - 1;
       outcome.deep_work = deep->cands_done;
       outcome.root_cands = result.stage_history[0].field_size;
-      for (int s = 0; s < result.n_stage_history; s++) {
-        outcome.total_evals += result.stage_history[s].cands_done;
+      for (int stage_idx = 0; stage_idx < result.n_stage_history; stage_idx++) {
+        outcome.total_evals += result.stage_history[stage_idx].cands_done;
       }
     }
     outcome.ok = true;
@@ -689,27 +689,27 @@ void test_peg_bench_fixture(void) {
   }
   char (*lines)[4096] = malloc((size_t)max_pos * 4096);
   assert(lines);
-  int n = 0;
-  while (n < max_pos && fgets(lines[n], 4096, fp)) {
-    size_t len = strlen(lines[n]);
-    if (len > 0 && lines[n][len - 1] == '\n') {
-      lines[n][len - 1] = '\0';
+  int num_lines = 0;
+  while (num_lines < max_pos && fgets(lines[num_lines], 4096, fp)) {
+    size_t len = strlen(lines[num_lines]);
+    if (len > 0 && lines[num_lines][len - 1] == '\n') {
+      lines[num_lines][len - 1] = '\0';
     }
-    if (strlen(lines[n]) > 0) {
-      n++;
+    if (strlen(lines[num_lines]) > 0) {
+      num_lines++;
     }
   }
   (void)fclose(fp);
 
   Config *config =
       config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
-  printf("[pegb] file=%s positions=%d threads=%d tlim=%.0f\n", file, n, threads,
-         tlim);
+  printf("[pegb] file=%s positions=%d threads=%d tlim=%.0f\n", file, num_lines,
+         threads, tlim);
   (void)fflush(stdout);
 
   double sum_elapsed = 0;
-  for (int i = 0; i < n; i++) {
-    char *cmd = get_formatted_string("cgp %s", lines[i]);
+  for (int pos_idx = 0; pos_idx < num_lines; pos_idx++) {
+    char *cmd = get_formatted_string("cgp %s", lines[pos_idx]);
     exec_config_quiet(config, cmd);
     free(cmd);
 
@@ -741,12 +741,13 @@ void test_peg_bench_fixture(void) {
     }
     printf("[pegb] pos=%2d elapsed=%.2f stage=%d best=%-14s win=%.4f "
            "spread=%+.3f\n",
-           i, elapsed, result.last_completed_stage, best, win, spread);
+           pos_idx, elapsed, result.last_completed_stage, best, win, spread);
     (void)fflush(stdout);
     error_stack_destroy(err);
     peg_result_destroy(&result);
   }
-  printf("[pegb] TOTAL elapsed=%.2fs over %d positions\n", sum_elapsed, n);
+  printf("[pegb] TOTAL elapsed=%.2fs over %d positions\n", sum_elapsed,
+         num_lines);
   (void)fflush(stdout);
   free(lines);
   config_destroy(config);
@@ -766,8 +767,10 @@ void test_peg_nested_gap(void) {
   const double oracle_tlim = 60.0;
   const int max_pos = 25;
   const int threads = 8;
-  // Restrict to one bag size (1..4); 0 = all four.
-  const int only_bag = 0;
+  // Bag sizes to benchmark (1..4). Narrow to a single size by setting both
+  // bounds to it (e.g. first_bag = last_bag = 3 for 3-in-bag only).
+  const int first_bag = 1;
+  const int last_bag = 4;
   // Live-mode poll so the arms publish PARTIAL stages (the faster arm's extra
   // in-budget candidates are credited). Reused across the sequential arm
   // solves.
@@ -825,10 +828,7 @@ void test_peg_nested_gap(void) {
          max_pos);
   (void)fflush(stdout);
   const char *dir = "notes/peg_positions";
-  for (int bag = 1; bag <= 4; bag++) {
-    if (only_bag != 0 && bag != only_bag) {
-      continue;
-    }
+  for (int bag = first_bag; bag <= last_bag; bag++) {
     char file[256];
     (void)snprintf(file, sizeof(file), "%s/random_%dpeg.txt", dir, bag);
     FILE *fp = fopen(file, "re");
@@ -840,14 +840,14 @@ void test_peg_nested_gap(void) {
         config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
     char (*lines)[4096] = malloc((size_t)max_pos * 4096);
     assert(lines);
-    int n = 0;
-    while (n < max_pos && fgets(lines[n], 4096, fp)) {
-      size_t l = strlen(lines[n]);
-      if (l > 0 && lines[n][l - 1] == '\n') {
-        lines[n][l - 1] = '\0';
+    int num_lines = 0;
+    while (num_lines < max_pos && fgets(lines[num_lines], 4096, fp)) {
+      size_t len = strlen(lines[num_lines]);
+      if (len > 0 && lines[num_lines][len - 1] == '\n') {
+        lines[num_lines][len - 1] = '\0';
       }
-      if (strlen(lines[n]) > 0) {
-        n++;
+      if (strlen(lines[num_lines]) > 0) {
+        num_lines++;
       }
     }
     (void)fclose(fp);
@@ -863,8 +863,8 @@ void test_peg_nested_gap(void) {
     int nst_further =
         0; // nested got further crediting partial-stage candidates
     int rol_further = 0;
-    for (int i = 0; i < n; i++) {
-      char *cmd = get_formatted_string("cgp %s", lines[i]);
+    for (int pos_idx = 0; pos_idx < num_lines; pos_idx++) {
+      char *cmd = get_formatted_string("cgp %s", lines[pos_idx]);
       exec_config_quiet(config, cmd);
       free(cmd);
       PegBenchOutcome a = run_one_peg(config, &cfg_on);
@@ -916,7 +916,7 @@ void test_peg_nested_gap(void) {
       }
       printf("[gap] bag=%d pos=%3d rc%-3d nst[%.2fs st%d%s ev%-6d %-13s] "
              "rol[%.2fs st%d%s ev%-6d %-13s] %s gap=%+.4f%s\n",
-             bag, i, a.root_cands, a.elapsed, a.n_stages,
+             bag, pos_idx, a.root_cands, a.elapsed, a.n_stages,
              a.stage_partial ? "p" : "", a.total_evals, a.move_str, b.elapsed,
              b.n_stages, b.stage_partial ? "p" : "", b.total_evals, b.move_str,
              agree ? "AGREE" : "DIFFER", gap, spreadstr);
@@ -928,11 +928,12 @@ void test_peg_nested_gap(void) {
         "mean_elapsed "
         "nst=%.2fs rol=%.2fs | deeper_stage nst=%d rol=%d | "
         "further(stage,cands) nst=%d rol=%d\n",
-        bag, n, disagree, nst_better, rol_better,
+        bag, num_lines, disagree, nst_better, rol_better,
         disagree ? sum_gap / disagree : 0.0,
-        disagree ? sum_spread_gap / disagree : 0.0, n ? sum_a_elapsed / n : 0.0,
-        n ? sum_b_elapsed / n : 0.0, nst_deeper, rol_deeper, nst_further,
-        rol_further);
+        disagree ? sum_spread_gap / disagree : 0.0,
+        num_lines ? sum_a_elapsed / num_lines : 0.0,
+        num_lines ? sum_b_elapsed / num_lines : 0.0, nst_deeper, rol_deeper,
+        nst_further, rol_further);
     (void)fflush(stdout);
     free(lines);
     config_destroy(config);
