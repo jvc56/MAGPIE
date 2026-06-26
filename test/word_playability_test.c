@@ -1,7 +1,9 @@
 #include "word_playability_test.h"
 
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/game.h"
 #include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
@@ -11,6 +13,7 @@
 #include "../src/ent/words.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/impl/word_playability.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -18,6 +21,7 @@
 #include <assert.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 // Sets the player-on-turn's rack and returns the deterministic best play's
 // formed-word full-lexicon indices (and the main word's index).
@@ -48,6 +52,71 @@ static int collect_best_play_words(Game *game,
   formed_words_destroy(fw);
   move_list_destroy(move_list);
   return count;
+}
+
+// Polish (OSPS49) flex: a large alphabet (no 64-bit BitRack) exercises full-
+// lexicon enumeration and word indexing over wider machine letters. Every
+// enumerated word must index back to a valid id, and a non-word must not.
+static void test_word_playability_polish_indexing(void) {
+  Config *config = config_create_or_die("set -lex OSPS49 -wmp false");
+  Game *game = config_game_create(config);
+  const KWG *kwg = player_get_kwg(game_get_player(game, 0));
+
+  WordPlayabilityContext *ctx = word_playability_context_create(
+      kwg, NULL, game_get_ld(game),
+      string_duplicate("playability_polish_test.csv"),
+      WORD_PLAYABILITY_SORT_COUNT);
+  const uint32_t num_words = word_playability_context_num_words(ctx);
+  assert(num_words > 100000); // OSPS49 is a large lexicon
+
+  DictionaryWordList *all_words = dictionary_word_list_create();
+  kwg_write_words(kwg, kwg_get_dawg_root_node_index(kwg), all_words, NULL);
+  const int total = dictionary_word_list_get_count(all_words);
+  assert((uint32_t)total == num_words);
+
+  // Sample across the enumeration; each enumerated word must map to a valid id.
+  for (int word_idx = 0; word_idx < total; word_idx += total / 50 + 1) {
+    const DictionaryWord *word =
+        dictionary_word_list_get_word(all_words, word_idx);
+    const uint32_t id = word_playability_context_word_index(
+        ctx, dictionary_word_get_word(word), dictionary_word_get_length(word));
+    assert(id != UINT32_MAX);
+    assert(id < num_words);
+  }
+
+  // Pick a genuine two-tile non-word (one absent from the enumerated list) and
+  // confirm it indexes as absent. Found by flagging the real two-letter words,
+  // then taking the first combo that is not one -- language-agnostic.
+  const int ld_size = ld_get_size(game_get_ld(game));
+  bool *two_letter_exists = calloc((size_t)ld_size * ld_size, sizeof(bool));
+  for (int word_idx = 0; word_idx < total; word_idx++) {
+    const DictionaryWord *word =
+        dictionary_word_list_get_word(all_words, word_idx);
+    if (dictionary_word_get_length(word) == 2) {
+      const MachineLetter *mls = dictionary_word_get_word(word);
+      two_letter_exists[(int)mls[0] * ld_size + (int)mls[1]] = true;
+    }
+  }
+  MachineLetter not_a_word[2] = {0, 0};
+  bool found_non_word = false;
+  for (int first = 1; first < ld_size && !found_non_word; first++) {
+    for (int second = 1; second < ld_size; second++) {
+      if (!two_letter_exists[first * ld_size + second]) {
+        not_a_word[0] = (MachineLetter)first;
+        not_a_word[1] = (MachineLetter)second;
+        found_non_word = true;
+        break;
+      }
+    }
+  }
+  free(two_letter_exists);
+  assert(found_non_word);
+  assert(word_playability_context_word_index(ctx, not_a_word, 2) == UINT32_MAX);
+
+  dictionary_word_list_destroy(all_words);
+  word_playability_context_destroy(ctx);
+  game_destroy(game);
+  config_destroy(config);
 }
 
 void test_word_playability(void) {
@@ -126,4 +195,6 @@ void test_word_playability(void) {
 
   game_destroy(game);
   config_destroy(config);
+
+  test_word_playability_polish_indexing();
 }

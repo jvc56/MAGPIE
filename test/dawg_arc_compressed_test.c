@@ -7,6 +7,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/kwg_maker.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -83,8 +84,13 @@ static void assert_rejects_bad_header(void) {
   (void)remove(filename);
 }
 
-void test_dawg_arc_compressed(void) {
-  Config *config = config_create_or_die("set -lex CSW21");
+// Builds, compresses, decodes and round-trips the (length-capped) word list of
+// `lexicon`. Run for English (CSW21) and Polish (OSPS49); the larger Polish
+// alphabet flexes the wider tile_bits encoding path.
+static void test_dawg_arc_compressed_for_lexicon(const char *lexicon) {
+  char *set_cmd = get_formatted_string("set -lex %s -wmp false", lexicon);
+  Config *config = config_create_or_die(set_cmd);
+  free(set_cmd);
   Game *game = config_game_create(config);
   const KWG *csw_kwg = player_get_kwg(game_get_player(game, 0));
   DictionaryWordList *all_words = dictionary_word_list_create();
@@ -109,10 +115,11 @@ void test_dawg_arc_compressed(void) {
 
   DawgArcCompressed *dp = dawg_arc_compressed_create_from_kwg(
       reorder_kwg, DAWG_ARC_COMPRESSED_MODE_MIN_RAM);
-  printf("arc-compressed dawg: %u nodes, tile_bits=%u arc_bits=%u field=%u "
+  printf("[%s] arc-compressed dawg: %u nodes, tile_bits=%u arc_bits=%u field=%u "
          "rec_width=%u, popular=%u escapes=%u -> %zu bytes (vs %d bytes at 32 "
          "bits, %.2f%%)\n",
-         dawg_arc_compressed_get_node_count(dp), dp->tile_bits, dp->arc_bits,
+         lexicon, dawg_arc_compressed_get_node_count(dp), dp->tile_bits,
+         dp->arc_bits,
          dp->field, dp->rec_width, dp->popular_count, dp->escape_count,
          dawg_arc_compressed_get_num_bytes(dp), reorder_node_count * 4,
          100.0 * (double)dawg_arc_compressed_get_num_bytes(dp) /
@@ -173,8 +180,6 @@ void test_dawg_arc_compressed(void) {
   DictionaryWordList *expected_loaded = copy_word_list(words);
   assert_same_word_set(expected_loaded, decoded_loaded);
 
-  assert_rejects_bad_header();
-
   (void)remove(filename);
   dictionary_word_list_destroy(decoded);
   dictionary_word_list_destroy(expected);
@@ -187,4 +192,12 @@ void test_dawg_arc_compressed(void) {
   kwg_destroy(reorder_kwg);
   game_destroy(game);
   config_destroy(config);
+}
+
+void test_dawg_arc_compressed(void) {
+  test_dawg_arc_compressed_for_lexicon("CSW21");
+  // Polish: a larger alphabet (no 64-bit BitRack) that flexes the wider
+  // tile_bits arc encoding.
+  test_dawg_arc_compressed_for_lexicon("OSPS49");
+  assert_rejects_bad_header();
 }

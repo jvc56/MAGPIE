@@ -17,6 +17,7 @@
 #include "cgp_test.h"
 #include "checkpoint_test.h"
 #include "command_test.h"
+#include "compact_leaves_test.h"
 #include "config_test.h"
 #include "convert_test.h"
 #include "create_data_test.h"
@@ -118,6 +119,7 @@ static TestEntry test_table[] = {
     {"words", test_words},
     {"wordprune", test_word_prune},
     {"playability", test_word_playability},
+    {"clv", test_compact_leaves},
     {"dawgarccompressed", test_dawg_arc_compressed},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
