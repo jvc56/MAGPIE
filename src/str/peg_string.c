@@ -128,7 +128,12 @@ static int64_t peg_perm_count(const char *s) {
 // its "/"-separated (sorted) segments of each segment's permutation count.
 static int64_t peg_form_covered(const char *form) {
   int64_t covered = 1;
-  char seg[40];
+  // Zero-initialized so the analyzer sees every byte as defined: each segment
+  // is null-terminated at seg_len before peg_perm_count reads it, but the
+  // analyzer can't tie strlen(seg) to the written prefix and flags the read as
+  // a garbage value. Behaviorally identical (bytes past the terminator are
+  // never read).
+  char seg[40] = {0};
   int seg_len = 0;
   for (const char *cursor = form;; cursor++) {
     if (*cursor == '/' || *cursor == '\0') {
