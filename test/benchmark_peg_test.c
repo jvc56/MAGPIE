@@ -852,6 +852,7 @@ void test_peg_nested_gap(void) {
     }
     (void)fclose(fp);
     int disagree = 0;
+    int scored = 0; // disagreements where the oracle valued BOTH arms' moves
     int nst_better = 0;
     int rol_better = 0;
     double sum_gap = 0;
@@ -892,15 +893,18 @@ void test_peg_nested_gap(void) {
       if (!agree) {
         disagree++;
         OracleResult o = run_oracle(config, &cfg_oracle, &a, &b);
-        // win%: A's (nested) move minus B's (rollout) move.
-        gap = o.win_a - o.win_b;
-        sum_gap += gap;
-        if (gap > 0) {
-          nst_better++;
-        } else if (gap < 0) {
-          rol_better++;
-        }
+        // Only fold the gap in when the oracle valued BOTH protected moves.
+        // o.has_spread means win_a and win_b are both real; a budget cutoff can
+        // leave one unscored (win = -1), which would poison the aggregates.
         if (o.has_spread) {
+          scored++;
+          gap = o.win_a - o.win_b; // win%: A's (nested) minus B's (rollout)
+          sum_gap += gap;
+          if (gap > 0) {
+            nst_better++;
+          } else if (gap < 0) {
+            rol_better++;
+          }
           have_spread = true;
           spread_gap = o.spread_a - o.spread_b; // points
           sum_spread_gap += spread_gap;
@@ -922,18 +926,17 @@ void test_peg_nested_gap(void) {
              agree ? "AGREE" : "DIFFER", gap, spreadstr);
       (void)fflush(stdout);
     }
-    printf(
-        "[gap] BAG %d SUMMARY: positions=%d disagreements=%d nested_better=%d "
-        "rollout_better=%d mean_gap=%+.4f mean_spreadgap=%+.3f | "
-        "mean_elapsed "
-        "nst=%.2fs rol=%.2fs | deeper_stage nst=%d rol=%d | "
-        "further(stage,cands) nst=%d rol=%d\n",
-        bag, num_lines, disagree, nst_better, rol_better,
-        disagree ? sum_gap / disagree : 0.0,
-        disagree ? sum_spread_gap / disagree : 0.0,
-        num_lines ? sum_a_elapsed / num_lines : 0.0,
-        num_lines ? sum_b_elapsed / num_lines : 0.0, nst_deeper, rol_deeper,
-        nst_further, rol_further);
+    printf("[gap] BAG %d SUMMARY: positions=%d disagreements=%d scored=%d "
+           "nested_better=%d rollout_better=%d mean_gap=%+.4f "
+           "mean_spreadgap=%+.3f "
+           "| mean_elapsed nst=%.2fs rol=%.2fs | deeper_stage nst=%d rol=%d | "
+           "further(stage,cands) nst=%d rol=%d\n",
+           bag, num_lines, disagree, scored, nst_better, rol_better,
+           scored ? sum_gap / scored : 0.0,
+           scored ? sum_spread_gap / scored : 0.0,
+           num_lines ? sum_a_elapsed / num_lines : 0.0,
+           num_lines ? sum_b_elapsed / num_lines : 0.0, nst_deeper, rol_deeper,
+           nst_further, rol_further);
     (void)fflush(stdout);
     free(lines);
     config_destroy(config);

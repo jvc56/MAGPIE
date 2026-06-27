@@ -152,7 +152,9 @@ typedef struct PegArgs {
   // instead of by a single greedy/pessimistic rollout. Its lookahead horizon
   // is the outer stage's fidelity_plies, so non-emptier candidates gain depth
   // as the cascade deepens, matching the emptiers' move-count horizon.
-  // Off (default) preserves the rollout behavior exactly.
+  // When off, such a leaf takes the single greedy/pessimistic rollout instead.
+  // A zero-initialized PegArgs leaves this off; the CLI turns it on by default
+  // (-pegnested).
   bool nested_enabled;
   // Cost knobs for the nested recursion (the outer solve is unaffected):
   //   nested_cand_cap  : max candidates considered per nested level (0 = all).
