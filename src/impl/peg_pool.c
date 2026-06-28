@@ -3,6 +3,7 @@
 #include "../compat/cpthread.h"
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
+#include "../def/peg_defs.h"
 #include "../util/io_util.h"
 #include <errno.h>
 #include <pthread.h>
@@ -10,16 +11,6 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-
-enum {
-  PEG_POOL_QUEUE_INIT_CAP = 1024,
-  // Per-worker stack. Workers recurse into nested solves while help-draining
-  // the queue (bounded by the PEG fork-nesting cap), so the small default
-  // secondary-thread stack is not enough. 64 MiB is virtual address space,
-  // committed lazily, so only the nesting depth actually reached is paid for.
-  PEG_POOL_WORKER_STACK_BYTES = 64 * 1024 * 1024,
-};
-
 // ---------------------------------------------------------------------------
 // Work-stealing pool
 // ---------------------------------------------------------------------------

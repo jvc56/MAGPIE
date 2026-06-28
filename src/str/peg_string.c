@@ -513,10 +513,6 @@ static bool peg_moves_match(const Move *m1, const Move *m2);
 static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
                                       const Move *move);
 
-// Smallest outcomes-cell content width we ever wrap to: enough for the label
-// plus one worst-case token (a 4-tile sequence with a 4-digit weight).
-enum { PEG_OUTCOMES_MIN_CELL = 15 }; // strlen("W: A/B/C/Dx1234")
-
 // Append `text` (an outcomes cell like "W: tok tok ...") wrapped to `avail`
 // columns per line, breaking only at spaces (defensive char-break if a single
 // token exceeds `avail`). The first line continues from whatever the caller

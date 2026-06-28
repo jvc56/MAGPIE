@@ -237,8 +237,6 @@ typedef struct PegArgs {
 
 // ----- Stage progress snapshot ------------------------------------------
 
-enum { PEG_POLL_MAX_STAGES = 20 };
-
 // Per-stage progress snapshot. Completed stages have end_ns != 0; the current
 // stage has end_ns == 0. best_win_pct is -1.0 until the first candidate done.
 typedef struct PegStageSnapshot {
@@ -358,12 +356,6 @@ typedef struct PegCandOutcomes {
 // fidelity / field-size metadata. The deep halving stages track per-candidate
 // completion via cands_done in the stage history. `done` flips true when the
 // solve finishes.
-
-enum { PEG_POLL_MAX_ENTRIES = 64 };
-// Max non-greedy stages we store per-candidate timing history for.
-// 8 covers the default cascade (32->16->8->4->2, five stages) with room to
-// spare.
-enum { PEG_POLL_MAX_HISTORY_STAGES = 8 };
 
 // Compact per-candidate record kept for each completed non-greedy stage so the
 // status display can show one time column per stage.
