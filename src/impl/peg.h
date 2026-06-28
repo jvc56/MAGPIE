@@ -423,6 +423,17 @@ void peg_poll_reset(PegPoll *poll);
 // Copy a consistent snapshot of the current live view into *out (under lock).
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out);
 
+// Replace the poll's live per-candidate outcomes with a deep copy of src[0..n)
+// (under lock). Call at each stage boundary so a status poll can render the
+// per-multiset W/L/T column; the values change as candidates deepen. src ==
+// NULL clears them.
+void peg_poll_set_outcomes(PegPoll *poll, const PegCandOutcomes *src, int n);
+// Deep-copy the poll's current outcomes into a fresh array (caller owns; free
+// with peg_cand_outcomes_destroy_array). *out is NULL when there are none.
+void peg_poll_copy_outcomes(PegPoll *poll, PegCandOutcomes **out, int *n_out);
+// Free an array of PegCandOutcomes (each rows[] then the array).
+void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n);
+
 // ----- Entry points -----------------------------------------------------
 
 // Solve PEG analysis for args->game. Fills *out. Caller owns out->top_cands

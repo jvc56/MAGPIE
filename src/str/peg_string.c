@@ -1080,36 +1080,6 @@ static bool peg_moves_match(const Move *m1, const Move *m2) {
   return true;
 }
 
-static bool peg_cands_same_move(const PegRankedCand *a,
-                                const PegRankedCand *b) {
-  return peg_moves_match(&a->move, &b->move);
-}
-
-// Per-candidate merged record for the cross-depth live status display.
-typedef struct {
-  PegRankedCand cand; // stats at `fidelity` (last fully-completed depth)
-  int fidelity;       // depth at which cand was LAST FULLY evaluated
-  // Per-history-slot eval times, indexed 1:1 with snap->history_fidelities[].
-  // -1.0 means this candidate was not found in that history slot.
-  double depth_times[PEG_POLL_MAX_HISTORY_STAGES];
-  bool is_evaluating; // currently being evaluated at the next depth
-  double live_secs;   // live elapsed seconds when is_evaluating (else 0)
-} PegMergedEntry;
-
-static int peg_merged_entry_cmp(const void *va, const void *vb) {
-  const PegMergedEntry *a = (const PegMergedEntry *)va;
-  const PegMergedEntry *b = (const PegMergedEntry *)vb;
-  const double ka = a->cand.win_pct + 1e-4 * a->cand.mean_spread;
-  const double kb = b->cand.win_pct + 1e-4 * b->cand.mean_spread;
-  if (ka > kb) {
-    return -1;
-  }
-  if (ka < kb) {
-    return 1;
-  }
-  return 0;
-}
-
 // Return a heap-allocated depth label string. Caller frees.
 static char *peg_fidelity_label(int fidelity) {
   return fidelity == 0 ? string_duplicate("greedy")
@@ -1127,311 +1097,6 @@ static double peg_graded_history_time(const PegPollSnapshot *snap, int slot,
     }
   }
   return -1.0;
-}
-
-// Render a cross-depth merged ranking table with one time column per completed
-// non-greedy stage plus the currently active stage (if non-greedy). History
-// columns are labeled by fidelity (e.g. "2-ply"); greedy is never shown since
-// it is always instant. The in-flight candidate's depth label gets a trailing
-// '*'.
-static void peg_append_cross_depth_ranking(StringBuilder *sb,
-                                           const PegMergedEntry *merged, int n,
-                                           const int *history_fidelities,
-                                           int n_history, int current_fidelity,
-                                           const Board *board,
-                                           const LetterDistribution *ld) {
-  // Time columns: one per history stage + one for the current stage (if
-  // non-greedy).
-  const bool show_current_col = current_fidelity > 0;
-  const int n_time_cols = n_history + (show_current_col ? 1 : 0);
-
-  const bool show_time = n_time_cols > 0;
-
-  // Per-depth column headers (not including "total").
-  char **time_hdrs =
-      show_time ? malloc_or_die((size_t)n_time_cols * sizeof(char *)) : NULL;
-  if (show_time) {
-    for (int hist_idx = 0; hist_idx < n_history; hist_idx++) {
-      time_hdrs[hist_idx] = peg_fidelity_label(history_fidelities[hist_idx]);
-    }
-    if (show_current_col) {
-      time_hdrs[n_history] = peg_fidelity_label(current_fidelity);
-    }
-  }
-
-  char **depthc = malloc_or_die((size_t)n * sizeof(char *));
-  char **rankc = malloc_or_die((size_t)n * sizeof(char *));
-  char **movec = malloc_or_die((size_t)n * sizeof(char *));
-  char **winsc = malloc_or_die((size_t)n * sizeof(char *));
-  char **tiesc = malloc_or_die((size_t)n * sizeof(char *));
-  char **lossc = malloc_or_die((size_t)n * sizeof(char *));
-  char **winc = malloc_or_die((size_t)n * sizeof(char *));
-  char **spreadc = malloc_or_die((size_t)n * sizeof(char *));
-  char **totalc = show_time ? malloc_or_die((size_t)n * sizeof(char *)) : NULL;
-  // timecols[col_idx][cand_idx]
-  char ***timecols =
-      show_time ? malloc_or_die((size_t)n_time_cols * sizeof(char **)) : NULL;
-  for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-    timecols[col_idx] = malloc_or_die((size_t)n * sizeof(char *));
-  }
-
-  for (int cand_idx = 0; cand_idx < n; cand_idx++) {
-    const PegMergedEntry *entry = &merged[cand_idx];
-    char *dlabel = peg_fidelity_label(entry->fidelity);
-    if (entry->is_evaluating) {
-      char *starred = get_formatted_string("%s*", dlabel);
-      free(dlabel);
-      dlabel = starred;
-    }
-    depthc[cand_idx] = dlabel;
-    rankc[cand_idx] = get_formatted_string("%d", cand_idx + 1);
-    StringBuilder *move_sb = string_builder_create();
-    string_builder_add_move(move_sb, board, &entry->cand.move, ld, false);
-    movec[cand_idx] = string_builder_dump(move_sb, NULL);
-    string_builder_destroy(move_sb);
-    winsc[cand_idx] = get_formatted_string("%" PRId64, entry->cand.win_count);
-    tiesc[cand_idx] = get_formatted_string("%" PRId64, entry->cand.tie_count);
-    lossc[cand_idx] = get_formatted_string(
-        "%" PRId64,
-        entry->cand.weight_sum - entry->cand.win_count - entry->cand.tie_count);
-    winc[cand_idx] = get_formatted_string("%.1f", 100.0 * entry->cand.win_pct);
-    spreadc[cand_idx] = get_formatted_string("%+.1f", entry->cand.mean_spread);
-
-    if (show_time) {
-      double total_secs = 0.0;
-      for (int hist_idx = 0; hist_idx < n_history; hist_idx++) {
-        const double t = entry->depth_times[hist_idx];
-        timecols[hist_idx][cand_idx] =
-            t >= 0.0 ? get_formatted_string("%.1fs", t) : string_duplicate("-");
-        if (t >= 0.0) {
-          total_secs += t;
-        }
-      }
-      if (show_current_col) {
-        if (entry->is_evaluating) {
-          timecols[n_history][cand_idx] =
-              get_formatted_string("%.1fs", entry->live_secs);
-          total_secs += entry->live_secs;
-        } else if (entry->fidelity == current_fidelity &&
-                   entry->cand.eval_seconds > 0.0) {
-          timecols[n_history][cand_idx] =
-              get_formatted_string("%.1fs", entry->cand.eval_seconds);
-          total_secs += entry->cand.eval_seconds;
-        } else {
-          timecols[n_history][cand_idx] = string_duplicate("-");
-        }
-      }
-      totalc[cand_idx] = total_secs > 0.0
-                             ? get_formatted_string("%.1fs", total_secs)
-                             : string_duplicate("-");
-    }
-  }
-
-  size_t wd = string_length("depth");
-  size_t wr = string_length("rank");
-  size_t wm = string_length("move");
-  size_t ww = string_length("wins");
-  size_t wti = string_length("ties");
-  size_t wlo = string_length("loss");
-  size_t wp = string_length("win%");
-  size_t wsp = string_length("spread");
-  size_t wtotal = show_time ? string_length("total") : 0;
-  size_t *wt =
-      show_time ? malloc_or_die((size_t)n_time_cols * sizeof(size_t)) : NULL;
-  for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-    wt[col_idx] = string_length(time_hdrs[col_idx]);
-  }
-  for (int cand_idx = 0; cand_idx < n; cand_idx++) {
-    wd = string_length(depthc[cand_idx]) > wd ? string_length(depthc[cand_idx])
-                                              : wd;
-    wr = string_length(rankc[cand_idx]) > wr ? string_length(rankc[cand_idx])
-                                             : wr;
-    wm = string_length(movec[cand_idx]) > wm ? string_length(movec[cand_idx])
-                                             : wm;
-    ww = string_length(winsc[cand_idx]) > ww ? string_length(winsc[cand_idx])
-                                             : ww;
-    wti = string_length(tiesc[cand_idx]) > wti ? string_length(tiesc[cand_idx])
-                                               : wti;
-    wlo = string_length(lossc[cand_idx]) > wlo ? string_length(lossc[cand_idx])
-                                               : wlo;
-    wp =
-        string_length(winc[cand_idx]) > wp ? string_length(winc[cand_idx]) : wp;
-    wsp = string_length(spreadc[cand_idx]) > wsp
-              ? string_length(spreadc[cand_idx])
-              : wsp;
-    if (show_time) {
-      wtotal = string_length(totalc[cand_idx]) > wtotal
-                   ? string_length(totalc[cand_idx])
-                   : wtotal;
-      for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-        wt[col_idx] = string_length(timecols[col_idx][cand_idx]) > wt[col_idx]
-                          ? string_length(timecols[col_idx][cand_idx])
-                          : wt[col_idx];
-      }
-    }
-  }
-
-  // Header: fixed columns, then "total", then per-depth columns.
-  string_builder_add_formatted_string(
-      sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd, "depth", (int)wr,
-      "rank", (int)wm, "move", (int)ww, "wins", (int)wti, "ties", (int)wlo,
-      "loss", (int)wp, "win%", (int)wsp, "spread");
-  if (show_time) {
-    string_builder_add_formatted_string(sb, "  %*s", (int)wtotal, "total");
-    for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-      string_builder_add_formatted_string(sb, "  %*s", (int)wt[col_idx],
-                                          time_hdrs[col_idx]);
-    }
-  }
-  string_builder_add_string(sb, "\n");
-
-  for (int cand_idx = 0; cand_idx < n; cand_idx++) {
-    string_builder_add_formatted_string(
-        sb, "%-*s  %*s  %-*s  %*s  %*s  %*s  %*s  %*s", (int)wd,
-        depthc[cand_idx], (int)wr, rankc[cand_idx], (int)wm, movec[cand_idx],
-        (int)ww, winsc[cand_idx], (int)wti, tiesc[cand_idx], (int)wlo,
-        lossc[cand_idx], (int)wp, winc[cand_idx], (int)wsp, spreadc[cand_idx]);
-    if (show_time) {
-      string_builder_add_formatted_string(sb, "  %*s", (int)wtotal,
-                                          totalc[cand_idx]);
-      for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-        string_builder_add_formatted_string(sb, "  %*s", (int)wt[col_idx],
-                                            timecols[col_idx][cand_idx]);
-      }
-    }
-    string_builder_add_string(sb, "\n");
-    free(depthc[cand_idx]);
-    free(rankc[cand_idx]);
-    free(movec[cand_idx]);
-    free(winsc[cand_idx]);
-    free(tiesc[cand_idx]);
-    free(lossc[cand_idx]);
-    free(winc[cand_idx]);
-    free(spreadc[cand_idx]);
-    if (show_time) {
-      free(totalc[cand_idx]);
-      for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-        free(timecols[col_idx][cand_idx]);
-      }
-    }
-  }
-
-  free(depthc);
-  free(rankc);
-  free(movec);
-  free(winsc);
-  free(tiesc);
-  free(lossc);
-  free(winc);
-  free(spreadc);
-  free(totalc);
-  if (show_time) {
-    for (int col_idx = 0; col_idx < n_time_cols; col_idx++) {
-      free(timecols[col_idx]);
-      free(time_hdrs[col_idx]);
-    }
-  }
-  free(timecols);
-  free(time_hdrs);
-  free(wt);
-}
-
-// Build and render the cross-depth merged view from a live poll snapshot.
-// Baseline entries (previous completed stage) seed the display; current-stage
-// candidates replace their counterparts as they finish. History slots supply
-// per-candidate times for each completed non-greedy stage's time column.
-// The in-flight candidate gets a '*' depth label and a live current-column
-// time.
-static void peg_append_live_ranking(StringBuilder *sb,
-                                    const PegPollSnapshot *snap,
-                                    const Board *board,
-                                    const LetterDistribution *ld) {
-  const int max_merged = snap->n_baseline_entries + snap->n_entries;
-  if (max_merged == 0) {
-    return;
-  }
-  PegMergedEntry *merged =
-      malloc_or_die((size_t)max_merged * sizeof(PegMergedEntry));
-  int n_merged = 0;
-
-  // Start with baseline entries (previous completed stage's full ranking).
-  for (int baseline_idx = 0; baseline_idx < snap->n_baseline_entries;
-       baseline_idx++) {
-    merged[n_merged].cand = snap->baseline_entries[baseline_idx];
-    merged[n_merged].fidelity = snap->baseline_fidelity;
-    for (int hist_idx = 0; hist_idx < PEG_POLL_MAX_HISTORY_STAGES; hist_idx++) {
-      merged[n_merged].depth_times[hist_idx] = -1.0;
-    }
-    merged[n_merged].is_evaluating = false;
-    merged[n_merged].live_secs = 0.0;
-    n_merged++;
-  }
-
-  // Overlay current-stage candidates that have finished.
-  for (int entry_idx = 0; entry_idx < snap->n_entries; entry_idx++) {
-    bool found = false;
-    for (int merged_idx = 0; merged_idx < n_merged; merged_idx++) {
-      if (peg_cands_same_move(&snap->entries[entry_idx],
-                              &merged[merged_idx].cand)) {
-        merged[merged_idx].cand = snap->entries[entry_idx];
-        merged[merged_idx].fidelity = snap->fidelity_plies;
-        found = true;
-        break;
-      }
-    }
-    if (!found && n_merged < max_merged) {
-      merged[n_merged].cand = snap->entries[entry_idx];
-      merged[n_merged].fidelity = snap->fidelity_plies;
-      for (int hist_idx = 0; hist_idx < PEG_POLL_MAX_HISTORY_STAGES;
-           hist_idx++) {
-        merged[n_merged].depth_times[hist_idx] = -1.0;
-      }
-      merged[n_merged].is_evaluating = false;
-      merged[n_merged].live_secs = 0.0;
-      n_merged++;
-    }
-  }
-
-  // Populate per-history-slot times by move-matching through history.
-  for (int merged_idx = 0; merged_idx < n_merged; merged_idx++) {
-    for (int hist_slot = 0; hist_slot < snap->n_history_stages; hist_slot++) {
-      for (int hcand_idx = 0; hcand_idx < snap->history_n_cands[hist_slot];
-           hcand_idx++) {
-        if (peg_moves_match(&merged[merged_idx].cand.move,
-                            &snap->history_cands[hist_slot][hcand_idx].move)) {
-          merged[merged_idx].depth_times[hist_slot] =
-              snap->history_cands[hist_slot][hcand_idx].eval_seconds;
-          break;
-        }
-      }
-    }
-  }
-
-  // Mark the in-flight candidate and compute its live elapsed time.
-  const int eval_idx = snap->currently_evaluating_move_idx;
-  if (eval_idx >= 0 && eval_idx < snap->n_stage_moves &&
-      snap->eval_start_ns > 0) {
-    const int64_t now_ns = ctimer_monotonic_ns();
-    const double live_secs = (double)(now_ns - snap->eval_start_ns) / 1e9;
-    const Move *eval_move = &snap->stage_moves[eval_idx];
-    for (int merged_idx = 0; merged_idx < n_merged; merged_idx++) {
-      if (peg_moves_match(eval_move, &merged[merged_idx].cand.move)) {
-        merged[merged_idx].is_evaluating = true;
-        merged[merged_idx].live_secs = live_secs;
-        break;
-      }
-    }
-  }
-
-  if (n_merged > 1) {
-    qsort(merged, (size_t)n_merged, sizeof(PegMergedEntry),
-          peg_merged_entry_cmp);
-  }
-
-  peg_append_cross_depth_ranking(sb, merged, n_merged, snap->history_fidelities,
-                                 snap->n_history_stages, snap->fidelity_plies,
-                                 board, ld);
-  free(merged);
 }
 
 char *peg_result_get_string(const PegResult *result, const Game *game,
@@ -1463,9 +1128,46 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
       peg_append_stage_table(sb, snap.stage_history, snap.n_stage_history);
       string_builder_add_string(sb, "\n");
     }
-    const Board *board = game_get_board(game);
-    const LetterDistribution *ld = game_get_ld(game);
-    peg_append_live_ranking(sb, &snap, board, ld);
+    // Use the current stage's entries, or fall back to the previous stage's
+    // ranking (saved at each stage boundary) while a new stage has not yet
+    // finished a candidate, so a poll always shows the best available ranking.
+    PegRankedCand *live_entries = snap.entries;
+    int n_live_entries = snap.n_entries;
+    if (n_live_entries == 0 && snap.n_baseline_entries > 0) {
+      live_entries = snap.baseline_entries;
+      n_live_entries = snap.n_baseline_entries;
+    }
+    if (n_live_entries > 0) {
+      const Board *board = game_get_board(game);
+      const LetterDistribution *ld = game_get_ld(game);
+      // Render the same flat table as the final printout on the live snapshot,
+      // so a `sta` poll matches the final view (with partial data) rather than
+      // a separate live layout.
+      PegResult live = {0};
+      live.top_cands = live_entries;
+      live.n_top_cands = n_live_entries;
+      live.last_completed_stage = snap.stage;
+      peg_append_flat_ranking(sb, &live, board, ld, /*show_wins=*/true,
+                              /*show_time=*/false, /*show_stats=*/true,
+                              /*min_move_width=*/0);
+      // Per-multiset W/L/T for the best play, fed live via the poll outcomes.
+      if (show_outcomes) {
+        PegCandOutcomes *live_oc = NULL;
+        int live_n_oc = 0;
+        peg_poll_copy_outcomes(poll, &live_oc, &live_n_oc);
+        live.cand_outcomes = live_oc;
+        live.n_cand_outcomes = live_n_oc;
+        const PegCandOutcomes *best =
+            peg_find_cand_outcomes(&live, &live_entries[0].move);
+        if (best != NULL && best->n_rows > 0) {
+          char *oc = peg_build_outcomes_string_rows(best->rows, best->n_rows);
+          string_builder_add_formatted_string(sb, "\noutcomes (best): %s\n",
+                                              oc);
+          free(oc);
+        }
+        peg_cand_outcomes_destroy_array(live_oc, live_n_oc);
+      }
+    }
     char *out = string_builder_dump(sb, NULL);
     string_builder_destroy(sb);
     return out;

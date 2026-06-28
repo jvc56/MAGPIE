@@ -184,13 +184,53 @@ static void peg_nest_release(PegWorker *worker, PegNestFrame *frame) {
 struct PegPoll {
   cpthread_mutex_t mutex;
   PegPollSnapshot s;
+  // Per-candidate outcomes for the live status display, deep-copied in at each
+  // stage boundary and grown/replaced as candidates reach deeper fidelity. Kept
+  // off the fixed-size snapshot (the row count per candidate is up to
+  // (RACK_SIZE+PEG_MAX_BAG)!/RACK_SIZE! = 7920 for 4-in-bag) and owned here;
+  // each PegCandOutcomes.rows is heap-allocated.
+  PegCandOutcomes *outcomes;
+  int n_outcomes;
 };
+
+void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n) {
+  if (arr == NULL) {
+    return;
+  }
+  for (int i = 0; i < n; i++) {
+    free(arr[i].rows);
+  }
+  free(arr);
+}
+
+// Deep-copies src[0..n) into a fresh PegCandOutcomes array (rows duplicated).
+// Returns NULL when n <= 0 or src is NULL.
+static PegCandOutcomes *peg_cand_outcomes_dup_array(const PegCandOutcomes *src,
+                                                    int n) {
+  if (src == NULL || n <= 0) {
+    return NULL;
+  }
+  PegCandOutcomes *copy = malloc_or_die((size_t)n * sizeof(PegCandOutcomes));
+  for (int i = 0; i < n; i++) {
+    copy[i].move = src[i].move;
+    copy[i].n_rows = src[i].n_rows;
+    copy[i].rows = NULL;
+    if (src[i].n_rows > 0) {
+      const size_t bytes = (size_t)src[i].n_rows * sizeof(PegPerScenario);
+      copy[i].rows = malloc_or_die(bytes);
+      memcpy(copy[i].rows, src[i].rows, bytes);
+    }
+  }
+  return copy;
+}
 
 PegPoll *peg_poll_create(void) {
   PegPoll *poll = malloc_or_die(sizeof(*poll));
   cpthread_mutex_init(&poll->mutex);
   memset(&poll->s, 0, sizeof(poll->s));
   poll->s.stage = -1;
+  poll->outcomes = NULL;
+  poll->n_outcomes = 0;
   return poll;
 }
 
@@ -201,13 +241,19 @@ void peg_poll_reset(PegPoll *poll) {
   cpthread_mutex_lock(&poll->mutex);
   memset(&poll->s, 0, sizeof(poll->s));
   poll->s.stage = -1;
+  PegCandOutcomes *old = poll->outcomes;
+  const int old_n = poll->n_outcomes;
+  poll->outcomes = NULL;
+  poll->n_outcomes = 0;
   cpthread_mutex_unlock(&poll->mutex);
+  peg_cand_outcomes_destroy_array(old, old_n);
 }
 
 void peg_poll_destroy(PegPoll *poll) {
   if (poll == NULL) {
     return;
   }
+  peg_cand_outcomes_destroy_array(poll->outcomes, poll->n_outcomes);
   // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
   free(poll);
 }
@@ -215,6 +261,38 @@ void peg_poll_destroy(PegPoll *poll) {
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out) {
   cpthread_mutex_lock(&poll->mutex);
   *out = poll->s;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
+// Replaces the poll's live outcomes with a deep copy of src[0..n). Called at
+// each stage boundary; values change as candidates deepen. src == NULL clears.
+void peg_poll_set_outcomes(PegPoll *poll, const PegCandOutcomes *src, int n) {
+  if (poll == NULL) {
+    return;
+  }
+  // Build the copy outside the lock to keep the hold time short.
+  PegCandOutcomes *copy = peg_cand_outcomes_dup_array(src, n);
+  const int copy_n = (copy != NULL) ? n : 0;
+  cpthread_mutex_lock(&poll->mutex);
+  PegCandOutcomes *old = poll->outcomes;
+  const int old_n = poll->n_outcomes;
+  poll->outcomes = copy;
+  poll->n_outcomes = copy_n;
+  cpthread_mutex_unlock(&poll->mutex);
+  peg_cand_outcomes_destroy_array(old, old_n);
+}
+
+// Deep-copies the poll's current outcomes into a fresh array (caller owns; free
+// with peg_cand_outcomes_destroy_array). *out is NULL when there are none.
+void peg_poll_copy_outcomes(PegPoll *poll, PegCandOutcomes **out, int *n_out) {
+  *out = NULL;
+  *n_out = 0;
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  *out = peg_cand_outcomes_dup_array(poll->outcomes, poll->n_outcomes);
+  *n_out = (*out != NULL) ? poll->n_outcomes : 0;
   cpthread_mutex_unlock(&poll->mutex);
 }
 
@@ -2840,6 +2918,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       out->last_stage_partial = done_count < eval_count;
       peg_poll_replace(args->poll, ranked, done_count, stage_idx,
                        stage_fidelity, done_count);
+      // Surface this stage's per-candidate outcomes to the live poll so a
+      // status query can render the per-multiset W/L/T column (refreshed each
+      // stage).
+      peg_poll_set_outcomes(args->poll, oc_store, oc_n);
       // A partial stage means the budget/interrupt already hit, so stop the
       // cascade rather than starting another (deeper, costlier) stage.
       if (done_count < eval_count) {
