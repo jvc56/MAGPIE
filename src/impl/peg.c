@@ -25,6 +25,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -888,11 +889,10 @@ static void peg_prune_cache_destroy(PegPruneCache *cache) {
 
 static uint64_t peg_board_signature(const Game *game) {
   const Board *board = game_get_board(game);
-  uint64_t hash = 1469598103934665603ULL; // FNV-1a over the board letters
+  uint64_t hash = FNV_64_OFFSET_BASIS; // FNV-1a over the board letters
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
-      hash ^= (uint64_t)board_get_letter(board, row, col);
-      hash *= 1099511628211ULL;
+      hash = fnv64a_step(hash, (uint64_t)board_get_letter(board, row, col));
     }
   }
   return hash == 0 ? 1 : hash; // reserve 0 as the empty-slot sentinel
