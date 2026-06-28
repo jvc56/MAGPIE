@@ -49,8 +49,8 @@ static char *peg_build_outcomes_string(const PegResult *result) {
 }
 
 static void peg_append_stage_table(StringBuilder *sb,
-                                    const PegStageSnapshot *history,
-                                    int n_history) {
+                                   const PegStageSnapshot *history,
+                                   int n_history) {
   const int64_t now_ns = ctimer_monotonic_ns();
   const int num_rows = n_history + 1;
   StringGrid *sg = string_grid_create(num_rows, 5, 2);
@@ -70,16 +70,16 @@ static void peg_append_stage_table(StringBuilder *sb,
     if (st->fidelity_plies == 0) {
       string_grid_set_cell(sg, row, 1, string_duplicate("greedy"));
     } else {
-      string_grid_set_cell(sg, row, 1,
-                           get_formatted_string("%d-ply eg", st->fidelity_plies));
+      string_grid_set_cell(
+          sg, row, 1, get_formatted_string("%d-ply eg", st->fidelity_plies));
     }
 
     if (is_current && st->field_size > 0) {
       const double pct = 100.0 * st->cands_done / st->field_size;
-      string_grid_set_cell(
-          sg, row, 2,
-          get_formatted_string("%d/%d (%.0f%%)", st->cands_done, st->field_size,
-                               pct));
+      string_grid_set_cell(sg, row, 2,
+                           get_formatted_string("%d/%d (%.0f%%)",
+                                                st->cands_done, st->field_size,
+                                                pct));
     } else {
       string_grid_set_cell(
           sg, row, 2,
@@ -87,8 +87,8 @@ static void peg_append_stage_table(StringBuilder *sb,
     }
 
     if (st->best_win_pct >= 0.0) {
-      string_grid_set_cell(sg, row, 3,
-                           get_formatted_string("%.1f%%", 100.0 * st->best_win_pct));
+      string_grid_set_cell(
+          sg, row, 3, get_formatted_string("%.1f%%", 100.0 * st->best_win_pct));
     } else {
       string_grid_set_cell(sg, row, 3, string_duplicate("-"));
     }

@@ -11,5 +11,4 @@
 char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool show_outcomes);
 
-
 #endif // PEG_STRING_H

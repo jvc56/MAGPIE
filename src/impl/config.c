@@ -1603,10 +1603,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_PEG_OUTCOMES:
       usages[0] = "<true/false>";
       examples[0] = "true";
-      text = "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
-             "losses L:, each as [drawn]remaining) for the best candidate. "
-             "Requires a second pass over the top candidate after the solve, "
-             "roughly doubling its leaf work. Default false.";
+      text =
+          "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
+          "losses L:, each as [drawn]remaining) for the best candidate. "
+          "Requires a second pass over the top candidate after the solve, "
+          "roughly doubling its leaf work. Default false.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";

@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -702,8 +704,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // If the solver was interrupted before completing any search depth (depth
   // remains -1 after reset), eg_results still holds a stale value from a prior
   // solve. Fall back to greedy rather than misreporting the scenario outcome.
-  if (endgame_results_get_depth(ctx->worker->eg_results,
-                                ENDGAME_RESULT_BEST) < 0) {
+  if (endgame_results_get_depth(ctx->worker->eg_results, ENDGAME_RESULT_BEST) <
+      0) {
     return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
   }
   const int eg_val =
@@ -1652,12 +1654,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       // Scenario-level parallelism: a halving stage has few candidates, so
       // splitting each into its scenarios keeps all cores busy.
-      peg_eval_candidates_scenario(pool, workers, prepared_base, mover_idx,
-                                   unseen, ld_size, bag_size, moves, eval_count,
-                                   args->opp_model, args->inner_top_k,
-                                   stage_fidelity, scenario_stride, deadline_ns,
-                                   args->thread_control, &progress, args->poll,
-                                   restaged);
+      peg_eval_candidates_scenario(
+          pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
+          moves, eval_count, args->opp_model, args->inner_top_k, stage_fidelity,
+          scenario_stride, deadline_ns, args->thread_control, &progress,
+          args->poll, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);

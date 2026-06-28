@@ -1,5 +1,6 @@
 #include "peg_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
