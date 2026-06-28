@@ -1,6 +1,7 @@
 #ifndef PEG_H
 #define PEG_H
 
+#include "../compat/ctime.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/peg_defs.h"
 #include "../ent/game.h"
@@ -189,6 +190,21 @@ typedef struct PegArgs {
   PegPoll *poll;
 } PegArgs;
 
+// ----- Stage progress snapshot ------------------------------------------
+
+enum { PEG_POLL_MAX_STAGES = 20 };
+
+// Per-stage progress snapshot. Completed stages have end_ns != 0; the current
+// stage has end_ns == 0. best_win_pct is -1.0 until the first candidate done.
+typedef struct PegStageSnapshot {
+  int fidelity_plies;  // 0 = greedy; N = N-ply endgame
+  int field_size;      // total candidates evaluated in this stage
+  int cands_done;      // candidates that have finished so far
+  int64_t start_ns;    // monotonic ns when this stage started
+  int64_t end_ns;      // monotonic ns when this stage ended; 0 = still running
+  double best_win_pct; // best mover win% seen; -1.0 if none yet
+} PegStageSnapshot;
+
 // ----- Solver outputs ---------------------------------------------------
 
 typedef struct PegRankedCand {
@@ -206,11 +222,13 @@ typedef struct PegResult {
   double best_spread;
 
   // Index of the last stage that completed (0 = greedy only; the final halving
-  // stage = the deepest stage actually run).
+  // stage = the deepest stage actually run). -1 while running or uninitialized.
   int last_completed_stage;
 
-  // Wall time used (seconds).
-  double elapsed_seconds;
+  // Wall-clock timer: started at the top of peg_solve (is_running == true
+  // while solving, false once done). ctimer_elapsed_seconds reads the live
+  // elapsed time while running and the final elapsed time after completion.
+  Timer timer;
 
   // Top-K cand list from the last completed stage, sorted descending by
   // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.
@@ -222,6 +240,11 @@ typedef struct PegResult {
   // PegArgs.include_per_scenario is set. NULL otherwise.
   struct PegPerScenario *per_scenario;
   int n_per_scenario;
+
+  // Per-stage progress history, populated from the poll at the end of
+  // peg_solve. Index i = stage i; n_stage_history grows as stages complete.
+  int n_stage_history;
+  PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
 } PegResult;
 
 // Per-scenario detail row.
@@ -244,9 +267,9 @@ typedef struct PegPerScenario {
 // Update cadence: the top-K leaderboard is upserted per candidate during the
 // stage-0 greedy seed (so it animates as thousands of candidates resolve), and
 // replaced authoritatively at every stage boundary along with the stage /
-// fidelity / field-size metadata. The deep halving stages refresh per stage
-// (a future refinement could poll per-scenario running win% for finer liveness
-// there). `done` flips true when the solve finishes.
+// fidelity / field-size metadata. The deep halving stages track per-candidate
+// completion via cands_done in the stage history. `done` flips true when the
+// solve finishes.
 
 enum { PEG_POLL_MAX_ENTRIES = 64 };
 
@@ -258,6 +281,10 @@ typedef struct PegPollSnapshot {
   uint64_t version;   // bumped on every update (skip redundant redraws)
   int n_entries;      // populated leaderboard rows below
   PegRankedCand entries[PEG_POLL_MAX_ENTRIES]; // current top-K, sorted desc
+  // Per-stage history: index i = stage i. Grows as stages start. The last
+  // entry is the current (possibly still-running) stage.
+  int n_stage_history;
+  PegStageSnapshot stage_history[PEG_POLL_MAX_STAGES];
 } PegPollSnapshot;
 
 PegPoll *peg_poll_create(void);

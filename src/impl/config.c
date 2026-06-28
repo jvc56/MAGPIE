@@ -137,6 +137,7 @@ typedef enum {
   ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
+  ARG_TOKEN_PEG_OUTCOMES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -176,6 +177,7 @@ typedef enum {
   ARG_TOKEN_SHOW_MOVES,
   ARG_TOKEN_SHOW_INFERENCE,
   ARG_TOKEN_SHOW_ENDGAME,
+  ARG_TOKEN_SHOW_PEG,
   ARG_TOKEN_SHOW_HEAT_MAP,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -273,6 +275,8 @@ struct Config {
   int peg_scenario_stride;
   // PEG pessimistic opponent model (-pegpess); else rational (the default).
   bool peg_pessimistic;
+  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
+  bool peg_show_outcomes;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -353,6 +357,7 @@ struct Config {
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
   PegResult peg_result;
+  PegPoll *peg_poll;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -1310,6 +1315,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "displays only that PV line (1-indexed) in full move-by-move "
              "detail.";
       break;
+    case ARG_TOKEN_SHOW_PEG:
+      usages[0] = "";
+      text = "Shows the PEG result.";
+      break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
       examples[0] = "10";
@@ -1590,6 +1599,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "PEG opponent model: true = pessimistic (the opponent plays the "
              "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
              "(default) = rational (the opponent plays its best-equity reply).";
+      break;
+    case ARG_TOKEN_PEG_OUTCOMES:
+      usages[0] = "<true/false>";
+      examples[0] = "true";
+      text =
+          "When true, adds a per-scenario outcomes column (wins W:, ties T:, "
+          "losses L:, each as [drawn]remaining) for the best candidate. "
+          "Requires a second pass over the top candidate after the solve, "
+          "roughly doubling its leaf work. Default false.";
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
@@ -2087,6 +2105,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
+        ARG_TOKEN_SHOW_PEG,             /* shpeg */
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
@@ -2149,6 +2168,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
+        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
@@ -3149,6 +3169,7 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->stage_top_k =
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
+  peg_args->include_per_scenario = config->peg_show_outcomes;
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -3193,8 +3214,12 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
+  // Fresh poll for this solve; destroy the previous one if it exists.
+  peg_poll_destroy(config->peg_poll);
+  config->peg_poll = peg_poll_create();
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
+  peg_args.poll = config->peg_poll;
 
   // Optional "only solve" set: evaluate exactly these moves as the candidates.
   ValidatedMoves *only_vms = NULL;
@@ -3244,10 +3269,29 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
 }
 
 char *status_peg(Config *config) {
+  if (config->peg_poll != NULL) {
+    PegPollSnapshot snap;
+    peg_poll_read(config->peg_poll, &snap);
+    if (!snap.done) {
+      PegRankedCand live_cands[PEG_POLL_MAX_ENTRIES];
+      memcpy(live_cands, snap.entries,
+             (size_t)snap.n_entries * sizeof(PegRankedCand));
+      PegResult live_result;
+      memset(&live_result, 0, sizeof(live_result));
+      live_result.last_completed_stage = -1;
+      live_result.n_stage_history = snap.n_stage_history;
+      memcpy(live_result.stage_history, snap.stage_history,
+             (size_t)snap.n_stage_history * sizeof(PegStageSnapshot));
+      live_result.top_cands = live_cands;
+      live_result.n_top_cands = snap.n_entries;
+      return peg_result_get_string(&live_result, config->game, false);
+    }
+  }
   if (config->peg_result.last_completed_stage < 0) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return peg_result_get_string(&config->peg_result, config->game);
+  return peg_result_get_string(&config->peg_result, config->game,
+                               config->peg_show_outcomes);
 }
 
 // Autoplay
@@ -3825,6 +3869,30 @@ void execute_show_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
   return impl_show_endgame(config, error_stack);
+}
+
+// Show PEG
+
+char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
+  if (!config->game || config->peg_result.last_completed_stage < 0) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_PEG_TO_SHOW,
+                     string_duplicate("no PEG results to show"));
+    return empty_string();
+  }
+  return peg_result_get_string(&config->peg_result, config->game,
+                               config->peg_show_outcomes);
+}
+
+void execute_show_peg(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_peg(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_peg(Config *config, ErrorStack *error_stack) {
+  return impl_show_peg(config, error_stack);
 }
 
 // Show heat map
@@ -6523,6 +6591,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_PEG_OUTCOMES, &config->peg_show_outcomes,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // PEG "only solve" / "never prune" lists persist across commands (pargs reset
   // each parse). Update only when given this parse; an empty value or "-"
   // clears the restriction.
@@ -7619,7 +7693,8 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = peg_result_get_string(&config->peg_result, config->game);
+  char *result = peg_result_get_string(&config->peg_result, config->game,
+                                       config->peg_show_outcomes);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -8024,6 +8099,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 0, show_peg, peg, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
@@ -8082,6 +8158,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
+  arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -8193,6 +8270,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
+  config->peg_show_outcomes = false;
   config->peg_only_str = NULL;
   config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
@@ -8296,6 +8374,7 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
+  peg_poll_destroy(config->peg_poll);
   free(config->peg_only_str);
   free(config->peg_noprune_str);
   autoplay_results_destroy(config->autoplay_results);
@@ -8372,6 +8451,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG:
     case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_PEG_NOPRUNE:
+    case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
@@ -8391,6 +8471,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MOVES:
     case ARG_TOKEN_SHOW_INFERENCE:
     case ARG_TOKEN_SHOW_ENDGAME:
+    case ARG_TOKEN_SHOW_PEG:
     case ARG_TOKEN_SHOW_HEAT_MAP:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:

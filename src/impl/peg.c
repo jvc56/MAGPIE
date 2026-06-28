@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -125,13 +127,45 @@ static inline double peg_poll_key(const PegRankedCand *cand) {
   return cand->win_pct + 1e-4 * cand->mean_spread;
 }
 
+// The current (still-running) stage-history entry, or NULL when there is none:
+// either no stage has begun yet, or the history is full (PEG_POLL_MAX_STAGES)
+// and its last entry has already been finalized (end_ns != 0). All live stage
+// progress -- end_ns, cands_done, best_win_pct -- must be written only through
+// this, so an overflowed history never corrupts an already-ended stage. The
+// caller must hold poll->mutex.
+static PegStageSnapshot *peg_poll_open_stage(PegPollSnapshot *snap) {
+  if (snap->n_stage_history > 0 &&
+      snap->stage_history[snap->n_stage_history - 1].end_ns == 0) {
+    return &snap->stage_history[snap->n_stage_history - 1];
+  }
+  return NULL;
+}
+
 // Stage-boundary metadata, set before a stage's evaluation begins.
+// Finalizes the previous stage entry (sets its end_ns) and opens a new one.
 static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
                                  int field_size) {
   if (poll == NULL) {
     return;
   }
+  const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
+  // Finalize the previous stage: record when it ended.
+  PegStageSnapshot *prev = peg_poll_open_stage(&poll->s);
+  if (prev != NULL) {
+    prev->end_ns = now_ns;
+  }
+  // Open a new stage entry if there is room.
+  if (poll->s.n_stage_history < PEG_POLL_MAX_STAGES) {
+    PegStageSnapshot *st = &poll->s.stage_history[poll->s.n_stage_history];
+    st->fidelity_plies = fidelity_plies;
+    st->field_size = field_size;
+    st->cands_done = 0;
+    st->start_ns = now_ns;
+    st->end_ns = 0;
+    st->best_win_pct = -1.0;
+    poll->s.n_stage_history++;
+  }
   poll->s.stage = stage;
   poll->s.fidelity_plies = fidelity_plies;
   poll->s.field_size = field_size;
@@ -139,7 +173,26 @@ static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
   cpthread_mutex_unlock(&poll->mutex);
 }
 
+// Bump the current stage's cands_done counter. Used by the halving stages,
+// whose candidates are evaluated via peg_eval_candidates_scenario. Stage-0
+// greedy instead counts each candidate inside peg_poll_upsert. Exactly one of
+// the two paths runs per candidate, so they must stay mutually exclusive --
+// otherwise a candidate is double-counted and cands_done overshoots field_size.
+static void peg_poll_bump_cand_done(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->cands_done++;
+  }
+  poll->s.version++;
+  cpthread_mutex_unlock(&poll->mutex);
+}
+
 // Insert one finished candidate into the descending top-K (stage-0 liveness).
+// Also bumps the stage cands_done counter and updates best_win_pct.
 // Called from worker threads, so it locks.
 static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   if (poll == NULL) {
@@ -147,6 +200,11 @@ static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   }
   cpthread_mutex_lock(&poll->mutex);
   PegPollSnapshot *snap = &poll->s;
+  PegStageSnapshot *cur = peg_poll_open_stage(snap);
+  // Always count this candidate as done regardless of leaderboard outcome.
+  if (cur != NULL) {
+    cur->cands_done++;
+  }
   const double key = peg_poll_key(cand);
   int i;
   if (snap->n_entries < PEG_POLL_MAX_ENTRIES) {
@@ -154,19 +212,25 @@ static void peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   } else if (key > peg_poll_key(&snap->entries[PEG_POLL_MAX_ENTRIES - 1])) {
     i = PEG_POLL_MAX_ENTRIES - 1;
   } else {
+    snap->version++;
     cpthread_mutex_unlock(&poll->mutex);
-    return; // full and no better than the worst kept entry
+    return; // full and outranked — still counted done, but not inserted
   }
   while (i > 0 && peg_poll_key(&snap->entries[i - 1]) < key) {
     snap->entries[i] = snap->entries[i - 1];
     i--;
   }
   snap->entries[i] = *cand;
+  // entries[0] is always the best; reflect in the current stage.
+  if (cur != NULL) {
+    cur->best_win_pct = snap->entries[0].win_pct;
+  }
   snap->version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
 
 // Replace the leaderboard with an authoritative ranking at a stage boundary.
+// Also records the best win% for the current stage history entry.
 static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
                              int stage, int fidelity_plies, int field_size) {
   if (poll == NULL) {
@@ -181,6 +245,10 @@ static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
   poll->s.stage = stage;
   poll->s.fidelity_plies = fidelity_plies;
   poll->s.field_size = field_size;
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL && k > 0) {
+    cur->best_win_pct = ranked[0].win_pct;
+  }
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
@@ -189,7 +257,13 @@ static void peg_poll_finish(PegPoll *poll) {
   if (poll == NULL) {
     return;
   }
+  const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
+  // Finalize the last stage.
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->end_ns = now_ns;
+  }
   poll->s.done = true;
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
@@ -647,6 +721,13 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
+  // If the solver was interrupted before completing any search depth (depth
+  // remains -1 after reset), eg_results still holds a stale value from a prior
+  // solve. Fall back to greedy rather than misreporting the scenario outcome.
+  if (endgame_results_get_depth(ctx->worker->eg_results, ENDGAME_RESULT_BEST) <
+      0) {
+    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
+  }
   const int eg_val =
       endgame_results_get_value(ctx->worker->eg_results, ENDGAME_RESULT_BEST);
   const Player *me = game_get_player(game, ctx->mover_idx);
@@ -1118,7 +1199,7 @@ static void peg_eval_candidates_scenario(
     const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
     int n, PegOppModel opp_model, int inner_top_k, int fidelity_plies,
     int scenario_stride, int64_t deadline_ns, ThreadControl *thread_control,
-    const PegProgress *progress, PegRankedCand *ranked) {
+    const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -1200,6 +1281,7 @@ static void peg_eval_candidates_scenario(
                              ranked[i].win_pct, ranked[i].mean_spread,
                              ranked[i].n_scenarios, progress->user_data);
     }
+    peg_poll_bump_cand_done(poll);
   }
   free(total_w);
   free(win_w);
@@ -1283,11 +1365,18 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
 
-  Timer timer;
-  ctimer_start(&timer);
-
   const Game *game = args->game;
-  const int bag_size = bag_get_letters(game_get_bag(game));
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  // The game bag holds the real remaining bag tiles plus any opponent tiles
+  // unknown to the mover: (RACK_SIZE - opp_rack_size) tiles are assumed to be
+  // in the bag as the opponent's unknown holdings. Tiles explicitly on the
+  // opponent's rack are already known and not counted here.
+  const Rack *opp_rack_in_game =
+      player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_rack_size = (int)rack_get_total_letters(opp_rack_in_game);
+  const int opp_unknown = RACK_SIZE - opp_rack_size;
+  const int bag_size = raw_bag_size - opp_unknown;
   if (bag_size < PEG_MIN_BAG || bag_size > PEG_MAX_BAG) {
     error_stack_push(
         error_stack, ERROR_STATUS_PEG_BAG_OUT_OF_RANGE,
@@ -1296,8 +1385,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
     return;
   }
-
-  const int mover_idx = game_get_player_on_turn_index(game);
   const LetterDistribution *ld = game_get_ld(game);
   const int ld_size = ld_get_size(ld);
   uint8_t unseen[MAX_ALPHABET_SIZE];
@@ -1346,6 +1433,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Validation passed: start the solve timer here, after the early-return error
+  // checks above, so an invalid-args return leaves the result's timer stopped
+  // (is_running stays false) rather than running forever.
+  ctimer_start(&out->timer);
 
   // Protected ("never prune") moves: precompute their similarity keys against
   // the mover's rack so each stage can carry them past its top-K cut.
@@ -1565,6 +1657,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
+      if (thread_control_get_status(args->thread_control) ==
+          THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+        break;
+      }
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
       progress.stage_idx = stage_idx;
       if (args->on_stage_start != NULL) {
@@ -1581,11 +1677,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       // Scenario-level parallelism: a halving stage has few candidates, so
       // splitting each into its scenarios keeps all cores busy.
-      peg_eval_candidates_scenario(pool, workers, prepared_base, mover_idx,
-                                   unseen, ld_size, bag_size, moves, eval_count,
-                                   args->opp_model, args->inner_top_k,
-                                   stage_fidelity, scenario_stride, deadline_ns,
-                                   args->thread_control, &progress, restaged);
+      peg_eval_candidates_scenario(
+          pool, workers, prepared_base, mover_idx, unseen, ld_size, bag_size,
+          moves, eval_count, args->opp_model, args->inner_top_k, stage_fidelity,
+          scenario_stride, deadline_ns, args->thread_control, &progress,
+          args->poll, restaged);
       qsort(restaged, (size_t)eval_count, sizeof(PegRankedCand), peg_rank_cmp);
       memcpy(ranked, restaged, (size_t)eval_count * sizeof(PegRankedCand));
       free(restaged);
@@ -1639,6 +1735,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // Mark the live poll done so a poller's read loop can terminate.
   peg_poll_finish(args->poll);
 
+  if (args->poll) {
+    PegPollSnapshot poll_snap;
+    peg_poll_read(args->poll, &poll_snap);
+    out->n_stage_history = poll_snap.n_stage_history;
+    memcpy(out->stage_history, poll_snap.stage_history,
+           (size_t)poll_snap.n_stage_history * sizeof(PegStageSnapshot));
+  }
+
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {
     atomic_store(&injector.stop, 1);
@@ -1669,7 +1773,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // freeing the KWG itself.
   game_destroy(prepared_base);
   kwg_destroy(pruned_kwg);
-  out->elapsed_seconds = ctimer_elapsed_seconds(&timer);
+  ctimer_stop(&out->timer);
 }
 
 void peg_result_destroy(PegResult *r) {
