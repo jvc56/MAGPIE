@@ -164,8 +164,8 @@ void peg_cand_outcomes_destroy_array(PegCandOutcomes *arr, int n) {
   if (arr == NULL) {
     return;
   }
-  for (int i = 0; i < n; i++) {
-    free(arr[i].rows);
+  for (int cand_idx = 0; cand_idx < n; cand_idx++) {
+    free(arr[cand_idx].rows);
   }
   free(arr);
 }
@@ -178,14 +178,15 @@ static PegCandOutcomes *peg_cand_outcomes_dup_array(const PegCandOutcomes *src,
     return NULL;
   }
   PegCandOutcomes *copy = malloc_or_die((size_t)n * sizeof(PegCandOutcomes));
-  for (int i = 0; i < n; i++) {
-    copy[i].move = src[i].move;
-    copy[i].n_rows = src[i].n_rows;
-    copy[i].rows = NULL;
-    if (src[i].n_rows > 0) {
-      const size_t bytes = (size_t)src[i].n_rows * sizeof(PegPerScenario);
-      copy[i].rows = malloc_or_die(bytes);
-      memcpy(copy[i].rows, src[i].rows, bytes);
+  for (int cand_idx = 0; cand_idx < n; cand_idx++) {
+    copy[cand_idx].move = src[cand_idx].move;
+    copy[cand_idx].n_rows = src[cand_idx].n_rows;
+    copy[cand_idx].rows = NULL;
+    if (src[cand_idx].n_rows > 0) {
+      const size_t bytes =
+          (size_t)src[cand_idx].n_rows * sizeof(PegPerScenario);
+      copy[cand_idx].rows = malloc_or_die(bytes);
+      memcpy(copy[cand_idx].rows, src[cand_idx].rows, bytes);
     }
   }
   return copy;
@@ -321,12 +322,12 @@ static void peg_poll_set_stage_moves(PegPoll *poll, const Move *const *moves,
   if (poll == NULL) {
     return;
   }
-  const int k = n < PEG_POLL_MAX_ENTRIES ? n : PEG_POLL_MAX_ENTRIES;
+  const int entry_count = n < PEG_POLL_MAX_ENTRIES ? n : PEG_POLL_MAX_ENTRIES;
   cpthread_mutex_lock(&poll->mutex);
-  for (int i = 0; i < k; i++) {
-    poll->s.stage_moves[i] = *moves[i];
+  for (int entry_idx = 0; entry_idx < entry_count; entry_idx++) {
+    poll->s.stage_moves[entry_idx] = *moves[entry_idx];
   }
-  poll->s.n_stage_moves = k;
+  poll->s.n_stage_moves = entry_count;
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
 }
@@ -1192,11 +1193,11 @@ static void peg_nest_push_job(PegNestCtx *nc, const MachineLetter *mover_drawn,
   job->ld_size = nc->ld_size;
   job->k_drawn = nc->k_drawn;
   job->n_bag_remaining = n_bag_rem;
-  for (int i = 0; i < nc->k_drawn; i++) {
-    job->mover_drawn[i] = mover_drawn[i];
+  for (int drawn_idx = 0; drawn_idx < nc->k_drawn; drawn_idx++) {
+    job->mover_drawn[drawn_idx] = mover_drawn[drawn_idx];
   }
-  for (int i = 0; i < n_bag_rem; i++) {
-    job->bag_remaining[i] = bag_remaining[i];
+  for (int bag_idx = 0; bag_idx < n_bag_rem; bag_idx++) {
+    job->bag_remaining[bag_idx] = bag_remaining[bag_idx];
   }
   job->weight = full_weight;
   job->stage_fidelity = nc->stage_fidelity;
@@ -1243,11 +1244,11 @@ static void peg_nest_enum_splits(PegNestCtx *nc, int ml, int mover_left,
     for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
       const int64_t add_weight = peg_binomial(avail, to_mover) *
                                  peg_binomial(avail - to_mover, to_bag);
-      for (int i = 0; i < to_mover; i++) {
-        mover_drawn[n_mover + i] = (MachineLetter)ml;
+      for (int copy_idx = 0; copy_idx < to_mover; copy_idx++) {
+        mover_drawn[n_mover + copy_idx] = (MachineLetter)ml;
       }
-      for (int i = 0; i < to_bag; i++) {
-        bag_remaining[n_bag_rem + i] = (MachineLetter)ml;
+      for (int copy_idx = 0; copy_idx < to_bag; copy_idx++) {
+        bag_remaining[n_bag_rem + copy_idx] = (MachineLetter)ml;
       }
       peg_nest_enum_splits(nc, ml + 1, mover_left - to_mover,
                            bag_rem_left - to_bag, weight * add_weight,
@@ -1309,8 +1310,8 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
                        bag_remaining, 0);
   if (worker->nest_pool != NULL && nc.n_jobs > 1) {
     void **ptrs = malloc_or_die((size_t)nc.n_jobs * sizeof(void *));
-    for (int i = 0; i < nc.n_jobs; i++) {
-      ptrs[i] = &nc.jobs[i];
+    for (int job_idx = 0; job_idx < nc.n_jobs; job_idx++) {
+      ptrs[job_idx] = &nc.jobs[job_idx];
     }
     // Re-entrant submit so a blocked worker only help-drains other re-entrant
     // (inner) items. Every nesting level fans out -- the inner unseen is
@@ -1322,15 +1323,16 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
                                        nc.n_jobs, worker->nest_worker_idx);
     free(ptrs);
   } else {
-    for (int i = 0; i < nc.n_jobs; i++) {
-      peg_nest_scenario_worker_fn(&nc.jobs[i], worker->nest_worker_idx);
+    for (int job_idx = 0; job_idx < nc.n_jobs; job_idx++) {
+      peg_nest_scenario_worker_fn(&nc.jobs[job_idx], worker->nest_worker_idx);
     }
   }
   int64_t weight_sum = 0;
   double value_weight = 0.0;
-  for (int i = 0; i < nc.n_jobs; i++) {
-    weight_sum += nc.jobs[i].weight;
-    value_weight += (double)nc.jobs[i].weight * (double)nc.jobs[i].mover_spread;
+  for (int job_idx = 0; job_idx < nc.n_jobs; job_idx++) {
+    weight_sum += nc.jobs[job_idx].weight;
+    value_weight +=
+        (double)nc.jobs[job_idx].weight * (double)nc.jobs[job_idx].mover_spread;
   }
   free(nc.jobs);
   peg_nest_release(worker, tframe);
@@ -1991,8 +1993,8 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
 static void peg_graded_append(PegRankedCand *graded, int *graded_fidelity,
                               int *n_graded, const PegRankedCand *src, int from,
                               int to, int fidelity) {
-  for (int i = from; i < to; i++) {
-    graded[*n_graded] = src[i];
+  for (int src_idx = from; src_idx < to; src_idx++) {
+    graded[*n_graded] = src[src_idx];
     graded_fidelity[*n_graded] = fidelity;
     (*n_graded)++;
   }
@@ -2186,9 +2188,9 @@ static void peg_eval_candidates_scenario(
 
   // Enable per-ordering capture on every job when the caller asked for it.
   if (out_outcomes != NULL) {
-    for (int j = 0; j < list.count; j++) {
-      list.jobs[j].do_capture = true;
-      list.jobs[j].ld = ld;
+    for (int job_idx = 0; job_idx < list.count; job_idx++) {
+      list.jobs[job_idx].do_capture = true;
+      list.jobs[job_idx].ld = ld;
     }
   }
 
@@ -2235,32 +2237,32 @@ static void peg_eval_candidates_scenario(
   // Then release the job-local capture buffers.
   if (out_outcomes != NULL) {
     int *nrows = calloc_or_die((size_t)n, sizeof(int));
-    for (int j = 0; j < list.count; j++) {
-      nrows[list.jobs[j].cand_idx] += list.jobs[j].cap.count;
+    for (int job_idx = 0; job_idx < list.count; job_idx++) {
+      nrows[list.jobs[job_idx].cand_idx] += list.jobs[job_idx].cap.count;
     }
-    for (int i = 0; i < n; i++) {
-      out_outcomes[i].move = *cands[i];
-      out_outcomes[i].fidelity = fidelity_plies;
-      out_outcomes[i].n_rows = 0;
-      out_outcomes[i].rows =
-          nrows[i] > 0
-              ? malloc_or_die((size_t)nrows[i] * sizeof(PegPerScenario))
+    for (int cand_idx = 0; cand_idx < n; cand_idx++) {
+      out_outcomes[cand_idx].move = *cands[cand_idx];
+      out_outcomes[cand_idx].fidelity = fidelity_plies;
+      out_outcomes[cand_idx].n_rows = 0;
+      out_outcomes[cand_idx].rows =
+          nrows[cand_idx] > 0
+              ? malloc_or_die((size_t)nrows[cand_idx] * sizeof(PegPerScenario))
               : NULL;
     }
     free(nrows);
-    for (int j = 0; j < list.count; j++) {
-      const PegScenarioJob *job = &list.jobs[j];
+    for (int job_idx = 0; job_idx < list.count; job_idx++) {
+      const PegScenarioJob *job = &list.jobs[job_idx];
       PegCandOutcomes *oc = &out_outcomes[job->cand_idx];
-      for (int r = 0; r < job->cap.count; r++) {
+      for (int row_idx = 0; row_idx < job->cap.count; row_idx++) {
         PegPerScenario *dst = &oc->rows[oc->n_rows];
-        *dst = job->cap.rows[r];
+        *dst = job->cap.rows[row_idx];
         dst->scenario_idx = oc->n_rows;
         oc->n_rows++;
       }
     }
   }
-  for (int j = 0; j < list.count; j++) {
-    free(list.jobs[j].cap.rows);
+  for (int job_idx = 0; job_idx < list.count; job_idx++) {
+    free(list.jobs[job_idx].cap.rows);
   }
   for (int i = 0; i < n; i++) {
     ranked[i].win_pct = total_w[i] > 0 ? win_w[i] / total_w[i] : 0.0;
@@ -2623,12 +2625,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
 
     // Stage 0: greedy evaluation of every candidate.
     if (args->n_only_moves > 0) {
-      for (int i = 0; i < n_cands; i++) {
-        moves[i] = args->only_moves[i];
+      for (int cand_idx = 0; cand_idx < n_cands; cand_idx++) {
+        moves[cand_idx] = args->only_moves[cand_idx];
       }
     } else {
-      for (int i = 0; i < n_cands; i++) {
-        moves[i] = move_list_get_move(cand_ml, i);
+      for (int cand_idx = 0; cand_idx < n_cands; cand_idx++) {
+        moves[cand_idx] = move_list_get_move(cand_ml, cand_idx);
       }
     }
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
@@ -2746,7 +2748,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         PegProgress inner = progress;
         inner.on_cand_done = NULL; // fired below, once, after the poll upsert
         done_count = 0;
-        for (int i = 0; i < eval_count; i++) {
+        for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
           // Stop deepening once the budget or a user interrupt hits. Checked
           // before starting a candidate so done_count counts only candidates
           // evaluated within budget; the finished ones (if >= 2) still form a
@@ -2760,16 +2762,16 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           }
           Timer cand_timer;
           const int64_t cand_start_ns = ctimer_monotonic_ns();
-          peg_poll_set_evaluating(args->poll, i, cand_start_ns);
+          peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns);
           ctimer_start(&cand_timer);
           PegCandOutcomes cand_oc;
           peg_eval_candidates_scenario(
               pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
-              bag_size, &moves[i], 1, args->opp_model, args->inner_top_k,
+              bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
-              args->thread_control, &inner, /*poll=*/NULL, &restaged[i],
+              args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
               args->include_per_scenario ? &cand_oc : NULL);
-          restaged[i].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
+          restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
           // its scenarios bailed (above), so its score is incomplete — drop it
@@ -2780,7 +2782,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             }
             break;
           }
-          done_count = i + 1;
+          done_count = cand_idx + 1;
           if (args->include_per_scenario) {
             peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &cand_oc);
           }
@@ -2790,12 +2792,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // row by row. reordered tells the renderer whether the candidate
           // slotted in above the bottom (redraw the whole list) or sorted to
           // the bottom as the new worst (just append its row).
-          const bool reordered = peg_poll_upsert(args->poll, &restaged[i]);
+          const bool reordered =
+              peg_poll_upsert(args->poll, &restaged[cand_idx]);
           if (args->on_cand_done != NULL) {
-            args->on_cand_done(stage_idx, i, &restaged[i].move,
-                               restaged[i].win_pct, restaged[i].mean_spread,
-                               restaged[i].n_scenarios, reordered,
-                               args->user_data);
+            args->on_cand_done(
+                stage_idx, cand_idx, &restaged[cand_idx].move,
+                restaged[cand_idx].win_pct, restaged[cand_idx].mean_spread,
+                restaged[cand_idx].n_scenarios, reordered, args->user_data);
           }
         }
       } else {
@@ -2833,15 +2836,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         int placed = 0;
         for (int pass = 0; pass < 2; pass++) {
           const bool want_complete = pass == 0;
-          for (int i = 0; i < eval_count; i++) {
-            const bool complete = restaged[i].weight_sum >= full_weight;
+          for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
+            const bool complete = restaged[cand_idx].weight_sum >= full_weight;
             if (complete != want_complete) {
               continue;
             }
-            part_new[placed] = restaged[i];
-            part_old[placed] = ranked[i];
+            part_new[placed] = restaged[cand_idx];
+            part_old[placed] = ranked[cand_idx];
             if (part_oc != NULL) {
-              part_oc[placed] = stage_oc[i];
+              part_oc[placed] = stage_oc[cand_idx];
             }
             placed++;
           }
@@ -2859,11 +2862,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           free(part_oc);
           // Publish only the fully-scored candidates' outcomes; discard the cut
           // candidates' partial captures.
-          for (int i = 0; i < done_count; i++) {
-            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &stage_oc[i]);
+          for (int cand_idx = 0; cand_idx < done_count; cand_idx++) {
+            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap,
+                                      &stage_oc[cand_idx]);
           }
-          for (int i = done_count; i < eval_count; i++) {
-            free(stage_oc[i].rows);
+          for (int cand_idx = done_count; cand_idx < eval_count; cand_idx++) {
+            free(stage_oc[cand_idx].rows);
           }
           free(stage_oc);
         }

@@ -59,8 +59,8 @@ static void peg_strlist_push(PegStrList *list, const char *s) {
 }
 
 static bool peg_strlist_has(const PegStrList *list, const char *s) {
-  for (int i = 0; i < list->len; i++) {
-    if (strcmp(list->items[i], s) == 0) {
+  for (int item_idx = 0; item_idx < list->len; item_idx++) {
+    if (strcmp(list->items[item_idx], s) == 0) {
       return true;
     }
   }
@@ -74,8 +74,8 @@ static void peg_strlist_push_unique(PegStrList *list, const char *s) {
 }
 
 static void peg_strlist_destroy(PegStrList *list) {
-  for (int i = 0; i < list->len; i++) {
-    free(list->items[i]);
+  for (int item_idx = 0; item_idx < list->len; item_idx++) {
+    free(list->items[item_idx]);
   }
   free(list->items);
   list->items = NULL;
@@ -90,9 +90,9 @@ static void peg_sort_str(char *s) {
   if (s[0] == '\0') {
     return;
   }
-  for (int i = 1; s[i] != '\0'; i++) {
-    const char key = s[i];
-    int prev = i - 1;
+  for (int char_idx = 1; s[char_idx] != '\0'; char_idx++) {
+    const char key = s[char_idx];
+    int prev = char_idx - 1;
     while (prev >= 0 && s[prev] > key) {
       s[prev + 1] = s[prev];
       prev--;
@@ -109,8 +109,8 @@ static int64_t peg_perm_count(const char *s) {
     count *= factor;
   }
   int run = 1;
-  for (int i = 1; i <= len; i++) {
-    if (i < len && s[i] == s[i - 1]) {
+  for (int char_idx = 1; char_idx <= len; char_idx++) {
+    if (char_idx < len && s[char_idx] == s[char_idx - 1]) {
       run++;
     } else {
       int64_t run_fact = 1;
@@ -165,31 +165,31 @@ static PegStrList peg_factor(const PegStrList *seqs) {
   }
   const int width = (int)strlen(seqs->items[0]);
   if (width == 1) {
-    for (int i = 0; i < seqs->len; i++) {
-      peg_strlist_push_unique(&out, seqs->items[i]);
+    for (int seq_idx = 0; seq_idx < seqs->len; seq_idx++) {
+      peg_strlist_push_unique(&out, seqs->items[seq_idx]);
     }
     return out;
   }
   for (int split = 0; split < width - 1; split++) {
     PegStrList left = {0};
     PegStrList right = {0};
-    for (int i = 0; i < seqs->len; i++) {
+    for (int seq_idx = 0; seq_idx < seqs->len; seq_idx++) {
       char lbuf[40];
       char rbuf[40];
-      memcpy(lbuf, seqs->items[i], (size_t)split + 1);
+      memcpy(lbuf, seqs->items[seq_idx], (size_t)split + 1);
       lbuf[split + 1] = '\0';
       const int rlen = width - (split + 1);
-      memcpy(rbuf, seqs->items[i] + split + 1, (size_t)rlen);
+      memcpy(rbuf, seqs->items[seq_idx] + split + 1, (size_t)rlen);
       rbuf[rlen] = '\0';
       peg_strlist_push_unique(&left, lbuf);
       peg_strlist_push_unique(&right, rbuf);
     }
     bool factors = seqs->len == left.len * right.len;
-    for (int li = 0; factors && li < left.len; li++) {
-      for (int ri = 0; factors && ri < right.len; ri++) {
+    for (int left_idx = 0; factors && left_idx < left.len; left_idx++) {
+      for (int right_idx = 0; factors && right_idx < right.len; right_idx++) {
         char comb[40];
-        (void)snprintf(comb, sizeof(comb), "%s%s", left.items[li],
-                       right.items[ri]);
+        (void)snprintf(comb, sizeof(comb), "%s%s", left.items[left_idx],
+                       right.items[right_idx]);
         if (!peg_strlist_has(seqs, comb)) {
           factors = false;
         }
@@ -198,11 +198,14 @@ static PegStrList peg_factor(const PegStrList *seqs) {
     if (factors) {
       PegStrList left_forms = peg_factor(&left);
       PegStrList right_forms = peg_factor(&right);
-      for (int a = 0; a < left_forms.len; a++) {
-        for (int b = 0; b < right_forms.len; b++) {
+      for (int left_form_idx = 0; left_form_idx < left_forms.len;
+           left_form_idx++) {
+        for (int right_form_idx = 0; right_form_idx < right_forms.len;
+             right_form_idx++) {
           char form[64];
-          (void)snprintf(form, sizeof(form), "%s/%s", left_forms.items[a],
-                         right_forms.items[b]);
+          (void)snprintf(form, sizeof(form), "%s/%s",
+                         left_forms.items[left_form_idx],
+                         right_forms.items[right_form_idx]);
           peg_strlist_push(&out, form);
         }
       }
@@ -221,9 +224,9 @@ static PegStrList peg_factor(const PegStrList *seqs) {
   (void)snprintf(sorted0, sizeof(sorted0), "%s", seqs->items[0]);
   peg_sort_str(sorted0);
   bool all_same_ms = true;
-  for (int i = 1; all_same_ms && i < seqs->len; i++) {
+  for (int seq_idx = 1; all_same_ms && seq_idx < seqs->len; seq_idx++) {
     char other[40];
-    (void)snprintf(other, sizeof(other), "%s", seqs->items[i]);
+    (void)snprintf(other, sizeof(other), "%s", seqs->items[seq_idx]);
     peg_sort_str(other);
     if (strcmp(other, sorted0) != 0) {
       all_same_ms = false;
@@ -233,14 +236,14 @@ static PegStrList peg_factor(const PegStrList *seqs) {
     peg_strlist_push(&out, sorted0);
     return out;
   }
-  for (int i = 0; i < seqs->len; i++) {
+  for (int seq_idx = 0; seq_idx < seqs->len; seq_idx++) {
     char form[64];
     int form_len = 0;
-    for (int c = 0; seqs->items[i][c] != '\0'; c++) {
-      if (c > 0) {
+    for (int char_idx = 0; seqs->items[seq_idx][char_idx] != '\0'; char_idx++) {
+      if (char_idx > 0) {
         form[form_len++] = '/';
       }
-      form[form_len++] = seqs->items[i][c];
+      form[form_len++] = seqs->items[seq_idx][char_idx];
     }
     form[form_len] = '\0';
     peg_strlist_push(&out, form);
@@ -332,10 +335,10 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
     peg_sorted_copy(rows[row_idx].remaining, row_rem_ms[row_idx],
                     sizeof(row_rem_ms[row_idx]));
     int fam_idx = -1;
-    for (int k = 0; k < n_fams; k++) {
-      if (strcmp(fams[k].drawn, row_drawn[row_idx]) == 0 &&
-          strcmp(fams[k].rem_ms, row_rem_ms[row_idx]) == 0) {
-        fam_idx = k;
+    for (int existing_idx = 0; existing_idx < n_fams; existing_idx++) {
+      if (strcmp(fams[existing_idx].drawn, row_drawn[row_idx]) == 0 &&
+          strcmp(fams[existing_idx].rem_ms, row_rem_ms[row_idx]) == 0) {
+        fam_idx = existing_idx;
         break;
       }
     }
@@ -404,12 +407,12 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
         continue;
       }
       PegStrList forms = peg_factor(&seqs);
-      for (int f = 0; f < forms.len; f++) {
+      for (int form_idx = 0; form_idx < forms.len; form_idx++) {
         peg_draw_token(toks[n_toks].text, sizeof(toks[n_toks].text), fam->drawn,
-                       forms.items[f]);
+                       forms.items[form_idx]);
         toks[n_toks].bucket = bucket;
         toks[n_toks].weight =
-            peg_form_covered(forms.items[f]) * fam->per_ordering;
+            peg_form_covered(forms.items[form_idx]) * fam->per_ordering;
         n_toks++;
       }
       peg_strlist_destroy(&forms);
@@ -422,8 +425,8 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
 
   qsort(toks, (size_t)n_toks, sizeof(PegOutcomeTok), peg_outcome_tok_cmp);
   int n_win_toks = 0;
-  for (int k = 0; k < n_toks; k++) {
-    if (toks[k].bucket == 0) {
+  for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
+    if (toks[tok_idx].bucket == 0) {
       n_win_toks++;
     }
   }
@@ -431,15 +434,15 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
 
   StringBuilder *sb = string_builder_create();
   string_builder_add_string(sb, want == 0 ? "W:" : "L:");
-  for (int k = 0; k < n_toks; k++) {
-    if (toks[k].bucket != want) {
+  for (int tok_idx = 0; tok_idx < n_toks; tok_idx++) {
+    if (toks[tok_idx].bucket != want) {
       continue;
     }
-    if (toks[k].weight > 1) {
-      string_builder_add_formatted_string(sb, " %sx%" PRId64, toks[k].text,
-                                          toks[k].weight);
+    if (toks[tok_idx].weight > 1) {
+      string_builder_add_formatted_string(
+          sb, " %sx%" PRId64, toks[tok_idx].text, toks[tok_idx].weight);
     } else {
-      string_builder_add_formatted_string(sb, " %s", toks[k].text);
+      string_builder_add_formatted_string(sb, " %s", toks[tok_idx].text);
     }
   }
   free(toks);
@@ -756,25 +759,26 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
         double total_secs = 0.0;
         for (int uf_idx = 0; uf_idx < n_unique_fids; uf_idx++) {
           const int col_fid = unique_fids[uf_idx];
-          double t = -1.0;
+          double col_time = -1.0;
           if (col_fid > fid) {
             // This candidate was not evaluated at this depth.
-            t = -1.0;
+            col_time = -1.0;
           } else {
             const int hist_slot = fid_to_hist[uf_idx];
             if (hist_slot >= 0) {
-              t = peg_graded_history_time(snap, hist_slot, &cand->move);
+              col_time = peg_graded_history_time(snap, hist_slot, &cand->move);
             }
             // Not in history → this is the deepest completed stage for this
             // tier; use eval_seconds (which equals the time at col_fid).
-            if (t < 0.0 && col_fid == fid) {
-              t = cand->eval_seconds;
+            if (col_time < 0.0 && col_fid == fid) {
+              col_time = cand->eval_seconds;
             }
           }
-          timecols[uf_idx][n_rows] = t >= 0.0 ? get_formatted_string("%.1fs", t)
-                                              : string_duplicate("-");
-          if (t >= 0.0) {
-            total_secs += t;
+          timecols[uf_idx][n_rows] =
+              col_time >= 0.0 ? get_formatted_string("%.1fs", col_time)
+                              : string_duplicate("-");
+          if (col_time >= 0.0) {
+            total_secs += col_time;
           }
         }
         totalc[n_rows] = total_secs > 0.0
@@ -892,7 +896,7 @@ static void peg_append_graded_table(StringBuilder *sb, const PegResult *result,
   // Data rows with tier-separator lines between fidelity groups.
   for (int row_idx = 0; row_idx < n_rows; row_idx++) {
     if (row_idx > 0 && rowfid[row_idx] != rowfid[row_idx - 1]) {
-      for (size_t k = 0; k < total_w; k++) {
+      for (size_t dash_idx = 0; dash_idx < total_w; dash_idx++) {
         string_builder_add_char(sb, '-');
       }
       string_builder_add_char(sb, '\n');
