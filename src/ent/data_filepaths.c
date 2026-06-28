@@ -17,7 +17,9 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "lexicon",
                                                   "wordmap",
                                                   "rack info table",
-                                                  "packed dawg"};
+                                                  "packed dawg",
+                                                  "arc-compressed dawg",
+                                                  "compact leaves"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
@@ -30,6 +32,8 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_LEAVES:
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
+  case DATA_FILEPATH_TYPE_DAWG_ARC_COMPRESSED:
+  case DATA_FILEPATH_TYPE_COMPACT_LEAVES:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -69,6 +73,12 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
     file_ext = DAWG_PACKED_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_DAWG_ARC_COMPRESSED:
+    file_ext = DAWG_ARC_COMPRESSED_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_COMPACT_LEAVES:
+    file_ext = COMPACT_LEAVES_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
     file_ext = TXT_EXTENSION;

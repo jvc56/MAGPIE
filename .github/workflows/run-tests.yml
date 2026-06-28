@@ -100,6 +100,11 @@ jobs:
             tests: "config movegen gameplay players string alpha ld l leavemap kwg bag rack bitrack board layout cs move game vm shadow eq eqadj stats infer rv am"
           - shard: rest
             tests: "hm math bai command gcg words wordprune kwgmaker cgp rl ch cv cd wmp wmpmaker wmg winpct zobrist tt load"
+          - shard: retro
+            # Small/retro-target formats (arc-compressed + packed DAWG, compact
+            # leaves) and playability metrics. acdawg, clv and playability also
+            # run Polish (OSPS49) internally to flex the large-alphabet paths.
+            tests: "dawgarccompressed dawgpacked clv playability"
           - shard: ap_rit
             tests: "ap_rit"
     steps:

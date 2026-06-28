@@ -12,6 +12,9 @@ typedef struct ConversionArgs {
   const char *input_and_output_name;
   const char *ld_name;
   int num_threads;
+  // Target byte budget for the klv2clv compact-leaves model (ignored by other
+  // conversion types). 0 selects the default.
+  int clv_target_bytes;
 } ConversionArgs;
 
 void convert(const ConversionArgs *args, ConversionResults *conversion_results,

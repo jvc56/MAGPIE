@@ -7,6 +7,7 @@
 #include "../ent/sim_args.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
+#include "word_playability.h"
 #include <stdbool.h>
 
 typedef struct GameStringOptions GameStringOptions;
@@ -29,6 +30,10 @@ typedef struct AutoplayArgs {
   double cutoff;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
+  // When non-NULL, every position the player on turn faces is analyzed for the
+  // word-playability metrics and a CSV is written at the end. Owned by the
+  // caller (config), borrowed here. NULL for ordinary autoplay/leavegen.
+  const WordPlayabilityContext *playability;
 } AutoplayArgs;
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,

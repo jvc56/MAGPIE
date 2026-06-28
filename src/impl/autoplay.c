@@ -37,6 +37,7 @@
 #include "gameplay.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include "word_playability.h"
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -297,6 +298,9 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Per-thread word-playability accumulator; NULL unless args.playability is
+  // set.
+  WordPlayabilityCounts *playability_counts;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -334,6 +338,10 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->sim_results = NULL;
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
+  autoplay_worker->playability_counts =
+      ap_args->playability
+          ? word_playability_counts_create(ap_args->playability)
+          : NULL;
 
   // Only allocate sim structs if at least one of the players running a sim.
   if (ap_args->p1_sim_args.num_plies > 0 ||
@@ -364,6 +372,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   error_stack_destroy(autoplay_worker->error_stack);
   move_list_destroy(autoplay_worker->move_lists[0]);
   move_list_destroy(autoplay_worker->move_lists[1]);
+  word_playability_counts_destroy(autoplay_worker->playability_counts);
   free(autoplay_worker);
 }
 
@@ -666,6 +675,14 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
                             game_runner->game, move, &rare_rack_or_move_leave);
+
+  // Word-playability analyzes the position the player on turn faces, using its
+  // own full move list (the engine's list is best-only under static equity).
+  if (autoplay_worker->playability_counts) {
+    word_playability_counts_add_position(autoplay_worker->playability_counts,
+                                         autoplay_worker->args.playability,
+                                         game);
+  }
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
@@ -1045,6 +1062,26 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   if (!is_leavegen_mode) {
     autoplay_results_consolidate(autoplay_results_list, autoplay_num_threads,
                                  autoplay_results);
+  }
+
+  // Reduce the per-thread word-playability tables into the first worker's and
+  // write the sorted CSV. Done before the workers are destroyed.
+  if (args->playability && autoplay_num_threads > 0) {
+    WordPlayabilityCounts *totals = autoplay_workers[0]->playability_counts;
+    for (int thread_index = 1; thread_index < autoplay_num_threads;
+         thread_index++) {
+      word_playability_counts_merge(
+          totals, autoplay_workers[thread_index]->playability_counts);
+    }
+    word_playability_write_csv(args->playability, totals, error_stack);
+    const uint64_t positions = word_playability_counts_get_positions(totals);
+    const uint64_t bingos = word_playability_counts_get_bingos(totals);
+    char *pb_status = get_formatted_string(
+        "playability: %llu bingos in %llu best-play turns (%.4f bingos/turn)\n",
+        (unsigned long long)bingos, (unsigned long long)positions,
+        positions > 0 ? (double)bingos / (double)positions : 0.0);
+    thread_control_print(thread_control, pb_status);
+    free(pb_status);
   }
 
   autoplay_results_set_status_data(autoplay_results, NULL, 0, true,
