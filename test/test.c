@@ -180,6 +180,9 @@ static TestEntry on_demand_test_table[] = {
     {"pegbench2", test_benchmark_peg_2},
     {"pegbench3", test_benchmark_peg_3},
     {"pegbench4", test_benchmark_peg_4},
+    {"pegbfix", test_peg_bench_fixture},
+    {"pegngap", test_peg_nested_gap},
+    {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {NULL, NULL} // Sentinel value to mark end of array

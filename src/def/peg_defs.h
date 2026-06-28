@@ -11,4 +11,10 @@ enum {
   PEG_MAX_UNSEEN = RACK_SIZE + PEG_MAX_BAG,
 };
 
+// Default inner-peg recursion depth when nested lookahead is on: one nested
+// peg, then a greedy rollout. Deeper recursion does not improve the decision.
+enum {
+  PEG_NESTED_DEFAULT_DEPTH = 1,
+};
+
 #endif

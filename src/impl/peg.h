@@ -146,6 +146,47 @@ typedef struct PegArgs {
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
 
+  // Nested pre-endgame lookahead for NON-EMPTIER leaves. When nested_enabled,
+  // a leaf that still has bag tiles is evaluated by recursively solving the
+  // opponent's sub-pre-endgame (alternating sides down to emptier endgames)
+  // instead of by a single greedy/pessimistic rollout. Its lookahead horizon
+  // is the outer stage's fidelity_plies, so non-emptier candidates gain depth
+  // as the cascade deepens, matching the emptiers' move-count horizon.
+  // When off, such a leaf takes the single greedy/pessimistic rollout instead.
+  // A zero-initialized PegArgs leaves this off; the CLI turns it on by default
+  // (-pegnested).
+  bool nested_enabled;
+  // Cost knobs for the nested recursion (the outer solve is unaffected):
+  //   nested_cand_cap  : max candidates considered per nested level (0 = all).
+  //   nested_cand_caps : optional PER-LEVEL cap sequence (e.g. {8,4,2}) that
+  //                      overrides nested_cand_cap; level L uses caps[L], or
+  //                      the last entry for deeper levels. NULL = use the flat
+  //                      cap.
+  //   nested_stride    : scenario sampling stride inside nested levels.
+  //                      0 = bag-size default (2-peg 1, 3-peg 5, 4-peg 7);
+  //                      >= 1 = that explicit stride.
+  //   nested_emptier_ply_cap : endgame depth at a nested emptier (bag-empty)
+  //                            leaf. > 0 = solve to exactly that many plies (a
+  //                            FIXED depth, not capped down to the lookahead);
+  //                            0 = tie the depth to the remaining lookahead, so
+  //                            deeper nested emptiers get fewer plies.
+  //   nested_max_depth : how many nested pegs deep before a non-emptier leaf
+  //                      falls to a greedy rollout. 0 or unset = 1 (the
+  //                      default; deeper recursion does not improve the
+  //                      decision). A value >= the bag size nests "until
+  //                      empty": the recursion bottoms out at the exact endgame
+  //                      when the bag empties, so it is bounded by bag size
+  //                      however large the cap is.
+  // Exhaustive nesting = cand_cap 0, stride 1, ply_cap 0, max_depth >= bag size
+  // with a large fidelity: a genuinely game-theoretic solve under the unseen
+  // model.
+  int nested_cand_cap;
+  const int *nested_cand_caps; // per-level cap sequence; NULL = use flat cap
+  int nested_n_cand_caps;      // length of nested_cand_caps
+  int nested_stride;
+  int nested_emptier_ply_cap;
+  int nested_max_depth;
+
   // Optional: pin scenario evaluation to a single bag ordering instead of
   // enumerating all scenarios. When eval_bag_order_len > 0, each candidate is
   // evaluated against exactly one scenario: the bag is set to
@@ -375,6 +416,10 @@ typedef struct PegPollSnapshot {
 
 PegPoll *peg_poll_create(void);
 void peg_poll_destroy(PegPoll *poll);
+// Clear the live view back to its just-created state. Call before reusing one
+// poll across multiple peg_solve calls so per-solve progress (stage history,
+// cands_done) does not accumulate from prior solves.
+void peg_poll_reset(PegPoll *poll);
 // Copy a consistent snapshot of the current live view into *out (under lock).
 void peg_poll_read(PegPoll *poll, PegPollSnapshot *out);
 

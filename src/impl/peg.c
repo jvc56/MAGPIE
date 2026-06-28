@@ -10,6 +10,8 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/peg_defs.h"
+#include "../def/rack_defs.h"
+#include "../def/thread_control_defs.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -23,6 +25,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "endgame.h"
 #include "gameplay.h"
@@ -68,7 +71,50 @@ enum {
   // far fewer than this), so the opponent's true worst-for-mover reply — which
   // includes the rational best-equity one — is always considered.
   PEG_PESSIMISTIC_OPP_LIST_CAP = 1024,
+  // Max recursion depth of the inline nested-PEG lookahead (one frame per
+  // non-emptier ply). Bounds the per-level scratch stack and caps how far an
+  // exhaustive nested solve can recurse through passes/exchanges before the
+  // lookahead budget is spent. Comfortably above any realistic fidelity.
+  PEG_MAX_NEST_DEPTH = 24,
+  // Candidate list capacity for a nested-PEG level's move generation.
+  PEG_NEST_CAND_LIST_CAP = 4096,
+  // Max candidate field an inner-peg cascade carries (the first stage cap is
+  // clamped to this); the staged narrowing keeps the working set tiny.
+  PEG_NEST_FIELD_MAX = 64,
+  // Slot capacity of the per-solve leaf-prune cache. Distinct post-candidate
+  // boards reaching an exact leaf are bounded by the candidate field (a few
+  // hundred), so this is never approached in practice.
+  PEG_PRUNE_CACHE_CAPACITY = 1 << 14,
 };
+
+// Solve-scoped cache mapping a post-candidate board signature to its
+// per-candidate pruned KWG. At an emptier (0-in-bag) endgame leaf the pruned
+// KWG depends only on the post-cand board and the union of both racks (all
+// remaining tiles) -- both fixed per candidate across every scenario AND stage
+// -- so one build is reused by every leaf of that candidate. Built lazily by
+// chaining off the parent (root) prune already on the game, which is correct
+// because the parent is a superset of any descendant's playable words. Shared
+// across workers: lookups hold the lock briefly, builds run outside it.
+typedef struct PegPruneCache {
+  cpthread_mutex_t mutex;
+  uint64_t *keys; // 0 marks an empty slot
+  KWG **values;   // owned; destroyed with the cache
+  int capacity;   // power of two
+  int count;
+} PegPruneCache;
+
+// A reusable scratch frame for the nested recursion: one game (a candidate
+// template or a per-scenario sub-game) and one candidate move list. Acquired
+// from / released to the owning worker's free-list. Each worker is touched by
+// exactly one thread (its pool index, or the main thread for the helper slot),
+// so the free-list needs no locking -- and a frame held across a parallel
+// scenario submission survives help-while-waiting interleaving.
+typedef struct PegNestFrame {
+  Game *game;
+  MoveList *moves;
+  struct PegNestFrame *free_next; // free-list link (released frames)
+  struct PegNestFrame *all_next;  // all-frames link (for teardown)
+} PegNestFrame;
 
 // Per-worker scratch: a greedy-playout move list plus a reusable endgame
 // context/results pair. Indexed by the pool worker_idx (one extra slot for the
@@ -88,7 +134,48 @@ typedef struct PegWorker {
   // scenarios reach identical board states, so cross-scenario reuse is the
   // dominant endgame speedup.
   TranspositionTable *eg_tt;
+  // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
+  PegPruneCache *prune_cache;
+
+  // Nested-PEG lookahead state. Solve-level knobs copied here so the recursion
+  // needn't thread them through every job/ctx.
+  ThreadControl *thread_control; // needed by nested emptier endgame solves
+  PegPool *nest_pool; // shared pool for parallel inner scenarios (NULL=inline)
+  struct PegWorker *nest_workers; // worker array; jobs index by worker_idx
+  int nest_worker_idx; // this worker's pool index (helper idx when submitting)
+  bool nested_enabled;
+  int nested_cand_cap;
+  const int *nested_cand_caps; // inner-peg stage schedule (NULL = flat cap)
+  int nested_n_cand_caps;
+  int nested_stride;
+  int nested_emptier_ply_cap;
+  int nested_max_depth;
+  // Free-list of reusable scratch frames (see PegNestFrame). nest_free holds
+  // released frames; nest_all chains every allocated frame for teardown.
+  PegNestFrame *nest_free;
+  PegNestFrame *nest_all;
 } PegWorker;
+
+// Acquire a scratch frame from the worker's free-list (allocating if empty);
+// release returns it. Single-thread-per-worker, so no locking.
+static PegNestFrame *peg_nest_acquire(PegWorker *worker) {
+  PegNestFrame *frame = worker->nest_free;
+  if (frame != NULL) {
+    worker->nest_free = frame->free_next;
+    return frame;
+  }
+  frame = malloc_or_die(sizeof(*frame));
+  frame->game = NULL;
+  frame->moves = NULL;
+  frame->all_next = worker->nest_all;
+  worker->nest_all = frame;
+  return frame;
+}
+
+static void peg_nest_release(PegWorker *worker, PegNestFrame *frame) {
+  frame->free_next = worker->nest_free;
+  worker->nest_free = frame;
+}
 
 // ----- live poll -----------------------------------------------------------
 // Mutex-guarded leaderboard the solver refreshes while running; a separate
@@ -105,6 +192,16 @@ PegPoll *peg_poll_create(void) {
   memset(&poll->s, 0, sizeof(poll->s));
   poll->s.stage = -1;
   return poll;
+}
+
+void peg_poll_reset(PegPoll *poll) {
+  if (poll == NULL) {
+    return;
+  }
+  cpthread_mutex_lock(&poll->mutex);
+  memset(&poll->s, 0, sizeof(poll->s));
+  poll->s.stage = -1;
+  cpthread_mutex_unlock(&poll->mutex);
 }
 
 void peg_poll_destroy(PegPoll *poll) {
@@ -396,16 +493,20 @@ static void peg_set_opp_rack(Rack *opp_rack,
 // keeps both the cand play and the cross-set generation out of the per-scenario
 // loop. Leaves the mover's leave on its rack; per-scenario draws are added
 // later.
+static void peg_build_template_into(Game **slot, const Game *prepared_base,
+                                    const Move *cand) {
+  if (*slot == NULL) {
+    *slot = game_duplicate(prepared_base);
+  } else {
+    game_copy(*slot, prepared_base);
+  }
+  play_move_without_drawing_tiles(cand, *slot);
+  game_gen_all_cross_sets(*slot);
+}
+
 static void peg_build_template(PegWorker *worker, const Game *prepared_base,
                                const Move *cand) {
-  if (worker->template_game == NULL) {
-    worker->template_game = game_duplicate(prepared_base);
-  } else {
-    game_copy(worker->template_game, prepared_base);
-  }
-  Game *template_game = worker->template_game;
-  play_move_without_drawing_tiles(cand, template_game);
-  game_gen_all_cross_sets(template_game);
+  peg_build_template_into(&worker->template_game, prepared_base, cand);
 }
 
 // Build the post-cand game for one (mover_drawn, bag_remaining) split by
@@ -416,19 +517,18 @@ static void peg_build_template(PegWorker *worker, const Game *prepared_base,
 // their k_drawn tiles onto the leave. Returns the scratch game (worker-owned;
 // not destroyed per call). Racks/bag don't affect cross-sets, so the copied
 // ones stay valid and the leaf endgame can skip regenerating them.
-static Game *peg_make_post_cand_game(PegWorker *worker,
-                                     const Game *template_src, int mover_idx,
-                                     const uint8_t *unseen, int ld_size,
-                                     int k_drawn,
-                                     const MachineLetter *mover_drawn,
-                                     int n_bag_remaining,
-                                     const MachineLetter *bag_remaining) {
-  if (worker->scratch_game == NULL) {
-    worker->scratch_game = game_duplicate(template_src);
+static Game *peg_make_post_cand_game_into(Game **slot, const Game *template_src,
+                                          int mover_idx, const uint8_t *unseen,
+                                          int ld_size, int k_drawn,
+                                          const MachineLetter *mover_drawn,
+                                          int n_bag_remaining,
+                                          const MachineLetter *bag_remaining) {
+  if (*slot == NULL) {
+    *slot = game_duplicate(template_src);
   } else {
-    game_copy(worker->scratch_game, template_src);
+    game_copy(*slot, template_src);
   }
-  Game *game = worker->scratch_game;
+  Game *game = *slot;
   Bag *bag = game_get_bag(game);
   Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
   Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
@@ -465,6 +565,18 @@ static Game *peg_make_post_cand_game(PegWorker *worker,
     game_set_game_end_reason(game, GAME_END_REASON_NONE);
   }
   return game;
+}
+
+static Game *peg_make_post_cand_game(PegWorker *worker,
+                                     const Game *template_src, int mover_idx,
+                                     const uint8_t *unseen, int ld_size,
+                                     int k_drawn,
+                                     const MachineLetter *mover_drawn,
+                                     int n_bag_remaining,
+                                     const MachineLetter *bag_remaining) {
+  return peg_make_post_cand_game_into(
+      &worker->scratch_game, template_src, mover_idx, unseen, ld_size, k_drawn,
+      mover_drawn, n_bag_remaining, bag_remaining);
 }
 
 // Greedy playout to game end; returns signed mover spread (points), with the
@@ -752,6 +864,563 @@ static void peg_scenario_joblist_push(PegScenarioJobList *list,
   list->jobs[list->count++] = *job;
 }
 
+static PegPruneCache *peg_prune_cache_create(void) {
+  PegPruneCache *cache = malloc_or_die(sizeof(*cache));
+  cpthread_mutex_init(&cache->mutex);
+  cache->capacity = PEG_PRUNE_CACHE_CAPACITY;
+  cache->count = 0;
+  cache->keys = calloc_or_die((size_t)cache->capacity, sizeof(uint64_t));
+  cache->values = calloc_or_die((size_t)cache->capacity, sizeof(KWG *));
+  return cache;
+}
+
+static void peg_prune_cache_destroy(PegPruneCache *cache) {
+  if (cache == NULL) {
+    return;
+  }
+  for (int slot = 0; slot < cache->capacity; slot++) {
+    kwg_destroy(cache->values[slot]);
+  }
+  free(cache->keys);
+  free(cache->values);
+  // No cpthread_mutex_destroy: project mutexes don't dynamically allocate.
+  free(cache);
+}
+
+static uint64_t peg_board_signature(const Game *game) {
+  const Board *board = game_get_board(game);
+  uint64_t hash = FNV_64_OFFSET_BASIS; // FNV-1a over the board letters
+  for (int row = 0; row < BOARD_DIM; row++) {
+    for (int col = 0; col < BOARD_DIM; col++) {
+      hash = fnv64a_step(hash, (uint64_t)board_get_letter(board, row, col));
+    }
+  }
+  return hash == 0 ? 1 : hash; // reserve 0 as the empty-slot sentinel
+}
+
+// Return the per-candidate pruned KWG for this leaf's board, building it once
+// (chained off the parent prune on the game) and caching it by board signature.
+// Builds run outside the lock; a rare insert race just discards the loser's
+// build. If the table is somehow full, fall back to the (looser but correct)
+// parent prune rather than caching.
+static const KWG *peg_prune_cache_get(PegPruneCache *cache, const Game *game,
+                                      int mover_idx) {
+  const uint64_t key = peg_board_signature(game);
+  const uint32_t mask = (uint32_t)cache->capacity - 1;
+  cpthread_mutex_lock(&cache->mutex);
+  uint32_t slot = (uint32_t)key & mask;
+  while (cache->keys[slot] != 0) {
+    if (cache->keys[slot] == key) {
+      const KWG *hit = cache->values[slot];
+      cpthread_mutex_unlock(&cache->mutex);
+      return hit;
+    }
+    slot = (slot + 1) & mask;
+  }
+  cpthread_mutex_unlock(&cache->mutex);
+
+  const KWG *parent_kwg = game_get_effective_kwg(game, mover_idx);
+  DictionaryWordList *word_list = dictionary_word_list_create();
+  generate_possible_words(game, parent_kwg, word_list);
+  KWG *built = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                         KWG_MAKER_MERGE_EXACT);
+  dictionary_word_list_destroy(word_list);
+
+  cpthread_mutex_lock(&cache->mutex);
+  slot = (uint32_t)key & mask;
+  while (cache->keys[slot] != 0) {
+    if (cache->keys[slot] == key) { // another worker built it first
+      const KWG *other = cache->values[slot];
+      cpthread_mutex_unlock(&cache->mutex);
+      kwg_destroy(built);
+      return other;
+    }
+    slot = (slot + 1) & mask;
+  }
+  if (cache->count >= cache->capacity - 1) {
+    cpthread_mutex_unlock(&cache->mutex);
+    kwg_destroy(built);
+    return parent_kwg;
+  }
+  cache->keys[slot] = key;
+  cache->values[slot] = built;
+  cache->count++;
+  cpthread_mutex_unlock(&cache->mutex);
+  return built;
+}
+
+// ----- Nested pre-endgame lookahead (PegArgs.nested_enabled) ----------------
+//
+// A non-emptier leaf hands the opponent a genuine sub-pre-endgame. Instead of a
+// single greedy/pessimistic rollout, peg_nested_value solves that sub-game by
+// the same min/max-over-scenarios logic the outer PEG uses, recursing until the
+// bag empties (exact endgame) or the lookahead budget / depth cap is spent
+// (greedy floor). Single-threaded, inline on the worker's per-level scratch.
+// Negamax in points: every node returns the ON-TURN player's signed final
+// spread; the parent negates a child evaluated from the next player's view.
+
+// The inner peg is a staged cascade (greedy seed -> halving stages at rising
+// fidelity), run recursively on the opponent's sub-position. peg_inner_leaf
+// evaluates one scenario's resolved game; peg_inner_cascade runs the staged
+// search over the on-turn player's candidates and returns its best value.
+static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
+                                 int outer_fidelity, int64_t deadline_ns);
+static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
+                              int depth, int outer_fidelity,
+                              int64_t deadline_ns);
+
+// The nested recursion can be deep and serial, so it must observe the same stop
+// signals the outer solve does — the wall-clock deadline and a user interrupt —
+// at every node and between candidates, not just hand a deadline to the leaf
+// endgame. Once stopped, nodes degrade to the cheap greedy floor immediately.
+static bool peg_nested_should_stop(const PegWorker *worker,
+                                   int64_t deadline_ns) {
+  if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+    return true;
+  }
+  return worker->thread_control != NULL &&
+         thread_control_get_status(worker->thread_control) ==
+             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
+// Greedy-rollout floor value (on-turn perspective) on a scratch copy, since the
+// playout mutates the game it walks.
+static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
+                                int on_turn) {
+  PegNestFrame *frame = peg_nest_acquire(worker);
+  if (frame->game == NULL) {
+    frame->game = game_duplicate(game);
+  } else {
+    game_copy(frame->game, game);
+  }
+  const int32_t value =
+      peg_greedy_playout(frame->game, on_turn, worker->playout_ml);
+  peg_nest_release(worker, frame);
+  return value;
+}
+
+// Exact endgame value at an emptier nested leaf, from the on-turn perspective.
+// nested_emptier_ply_cap sets the endgame depth: a positive value solves the
+// emptier (bag-empty) leaf to exactly that many plies -- a fixed depth, so a
+// deep forced outplay is searched in full -- while 0 ties the depth to the
+// per-stage lookahead, which is cheaper but understates the spread of any
+// outplay deeper than that lookahead.
+static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
+                                        int on_turn, int lookahead,
+                                        int64_t deadline_ns) {
+  int plies = worker->nested_emptier_ply_cap > 0
+                  ? worker->nested_emptier_ply_cap
+                  : lookahead;
+  if (plies < 1) {
+    plies = 1;
+  }
+  EndgameArgs ea;
+  memset(&ea, 0, sizeof(ea));
+  ea.thread_control = worker->thread_control;
+  ea.game = game;
+  ea.plies = plies;
+  ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  ea.num_threads = 1;
+  ea.max_workers = 0; // nested endgames are small and many; no core injection
+  ea.use_heuristics = true;
+  ea.num_top_moves = 1;
+  ea.external_deadline_ns = deadline_ns;
+  ea.shared_tt = worker->eg_tt;
+  if (plies >= 2) {
+    const KWG *leaf_kwg =
+        peg_prune_cache_get(worker->prune_cache, game, on_turn);
+    game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
+  }
+  ea.skip_word_pruning = true;
+  ea.seed = PEG_ENDGAME_SEED;
+  endgame_results_reset(worker->eg_results);
+  endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
+  if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
+    return peg_greedy_playout(game, on_turn, worker->playout_ml);
+  }
+  const int32_t eg_val =
+      endgame_results_get_value(worker->eg_results, ENDGAME_RESULT_BEST);
+  const Player *me = game_get_player(game, on_turn);
+  const Player *op = game_get_player(game, 1 - on_turn);
+  const int32_t lead =
+      equity_to_int(player_get_score(me) - player_get_score(op));
+  return lead + eg_val; // on_turn is on move, so eg_val is its future delta
+}
+
+// One inner-peg scenario as a pool work item: a (mover_drawn, bag_remaining)
+// split off a shared candidate template. The worker fn builds the sub-game on
+// its own scratch frame, scores it, and writes mover_spread; the parent reduces
+// the batch afterward (no atomics).
+typedef struct PegNestScenarioJob {
+  struct PegWorker *workers; // job indexes by the worker_idx it runs on
+  const Game
+      *template_src; // cand template (read-only, shared across scenarios)
+  int mover_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  int k_drawn;
+  int n_bag_remaining;
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  int64_t weight;
+  int stage_fidelity;
+  int depth;
+  int outer_fidelity;
+  int64_t deadline_ns;
+  int32_t mover_spread; // result (mover-perspective leaf value)
+} PegNestScenarioJob;
+
+static void peg_nest_scenario_worker_fn(void *arg, int worker_idx) {
+  PegNestScenarioJob *job = (PegNestScenarioJob *)arg;
+  PegWorker *worker = &job->workers[worker_idx];
+  PegNestFrame *frame = peg_nest_acquire(worker);
+  Game *sub = peg_make_post_cand_game_into(
+      &frame->game, job->template_src, job->mover_idx, job->unseen,
+      job->ld_size, job->k_drawn, job->mover_drawn, job->n_bag_remaining,
+      job->bag_remaining);
+  const int32_t child =
+      peg_inner_leaf(worker, sub, job->stage_fidelity, job->depth,
+                     job->outer_fidelity, job->deadline_ns);
+  const int child_turn = game_get_player_on_turn_index(sub);
+  job->mover_spread = (child_turn == job->mover_idx) ? child : -child;
+  peg_nest_release(worker, frame);
+}
+
+// Collects one inner candidate's scenarios as a growable job array, to be run
+// across the pool (or inline) and reduced by peg_nested_cand_value.
+typedef struct PegNestCtx {
+  struct PegWorker *workers;
+  const Game *template_src;
+  int mover_idx;
+  const uint8_t *unseen;
+  int ld_size;
+  int k_drawn;
+  int stage_fidelity;
+  int depth;
+  int outer_fidelity;
+  int64_t deadline_ns;
+  int scenario_stride;
+  int64_t sampled_weight_seen;
+  PegNestScenarioJob *jobs;
+  int n_jobs;
+  int cap_jobs;
+} PegNestCtx;
+
+static void peg_nest_push_job(PegNestCtx *nc, const MachineLetter *mover_drawn,
+                              int n_bag_rem, const MachineLetter *bag_remaining,
+                              int64_t full_weight) {
+  if (nc->n_jobs == nc->cap_jobs) {
+    nc->cap_jobs = nc->cap_jobs ? nc->cap_jobs * 2 : 16;
+    nc->jobs = realloc_or_die(nc->jobs, (size_t)nc->cap_jobs *
+                                            sizeof(PegNestScenarioJob));
+  }
+  PegNestScenarioJob *job = &nc->jobs[nc->n_jobs++];
+  job->workers = nc->workers;
+  job->template_src = nc->template_src;
+  job->mover_idx = nc->mover_idx;
+  job->unseen = nc->unseen;
+  job->ld_size = nc->ld_size;
+  job->k_drawn = nc->k_drawn;
+  job->n_bag_remaining = n_bag_rem;
+  for (int i = 0; i < nc->k_drawn; i++) {
+    job->mover_drawn[i] = mover_drawn[i];
+  }
+  for (int i = 0; i < n_bag_rem; i++) {
+    job->bag_remaining[i] = bag_remaining[i];
+  }
+  job->weight = full_weight;
+  job->stage_fidelity = nc->stage_fidelity;
+  job->depth = nc->depth;
+  job->outer_fidelity = nc->outer_fidelity;
+  job->deadline_ns = nc->deadline_ns;
+  job->mover_spread = 0;
+}
+
+// Distribute the unseen pool into (mover draws k_drawn, bag keeps n_bag_rem,
+// opp gets the rest); push one job per resulting scenario. Mirrors
+// peg_enum_splits, but emits parallelizable work rather than evaluating inline.
+static void peg_nest_enum_splits(PegNestCtx *nc, int ml, int mover_left,
+                                 int bag_rem_left, int64_t weight,
+                                 MachineLetter *mover_drawn, int n_mover,
+                                 MachineLetter *bag_remaining, int n_bag_rem) {
+  if (ml == nc->ld_size) {
+    if (mover_left != 0 || bag_rem_left != 0) {
+      return;
+    }
+    int64_t full_weight = weight;
+    for (int factor = 2; factor <= nc->k_drawn; factor++) {
+      full_weight *= factor;
+    }
+    if (nc->scenario_stride > 1) {
+      const int64_t stride = nc->scenario_stride;
+      const int64_t old_seen = nc->sampled_weight_seen;
+      nc->sampled_weight_seen += full_weight;
+      const int64_t samples =
+          (old_seen + full_weight) / stride - old_seen / stride;
+      if (samples == 0) {
+        return;
+      }
+      full_weight = samples * stride;
+    }
+    peg_nest_push_job(nc, mover_drawn, n_bag_rem, bag_remaining, full_weight);
+    return;
+  }
+  const int avail = nc->unseen[ml];
+  const int max_mover = mover_left < avail ? mover_left : avail;
+  for (int to_mover = 0; to_mover <= max_mover; to_mover++) {
+    const int max_bag =
+        bag_rem_left < (avail - to_mover) ? bag_rem_left : (avail - to_mover);
+    for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
+      const int64_t add_weight = peg_binomial(avail, to_mover) *
+                                 peg_binomial(avail - to_mover, to_bag);
+      for (int i = 0; i < to_mover; i++) {
+        mover_drawn[n_mover + i] = (MachineLetter)ml;
+      }
+      for (int i = 0; i < to_bag; i++) {
+        bag_remaining[n_bag_rem + i] = (MachineLetter)ml;
+      }
+      peg_nest_enum_splits(nc, ml + 1, mover_left - to_mover,
+                           bag_rem_left - to_bag, weight * add_weight,
+                           mover_drawn, n_mover + to_mover, bag_remaining,
+                           n_bag_rem + to_bag);
+    }
+  }
+}
+
+// Scenario sampling stride for an inner peg of the given bag size. An explicit
+// nested_stride > 0 overrides; otherwise bag-dependent (2-peg full, 3-peg 1/5,
+// 4-peg 1/7) so deeper inner pegs sample rather than enumerate every split.
+static int peg_nested_stride_for_bag(const PegWorker *worker, int bag) {
+  if (worker->nested_stride > 0) {
+    return worker->nested_stride;
+  }
+  if (bag <= 2) {
+    return 1;
+  }
+  if (bag == 3) {
+    return 5;
+  }
+  return 7;
+}
+
+// Expected (over the candidate's scenarios) on-turn value of playing `cand`.
+// Collects the scenarios as jobs, runs them across the pool (or inline when
+// there is no pool / a single scenario), and reduces the weighted average.
+static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
+                                     int mover_idx, const Move *cand,
+                                     const uint8_t *unseen, int ld_size,
+                                     int stage_fidelity, int depth,
+                                     int outer_fidelity, int64_t deadline_ns) {
+  const int bag = bag_get_letters(game_get_bag(parent_game));
+  const int tiles_played = move_get_tiles_played(cand);
+  const int k_drawn = tiles_played < bag ? tiles_played : bag;
+  const int bag_rem = bag - k_drawn;
+  // The template (cand played + cross-sets) is read concurrently by the
+  // scenario jobs, so it is held on its own frame for the lifetime of the
+  // submission.
+  PegNestFrame *tframe = peg_nest_acquire(worker);
+  peg_build_template_into(&tframe->game, parent_game, cand);
+  PegNestCtx nc;
+  memset(&nc, 0, sizeof(nc));
+  nc.workers = worker->nest_workers;
+  nc.template_src = tframe->game;
+  nc.mover_idx = mover_idx;
+  nc.unseen = unseen;
+  nc.ld_size = ld_size;
+  nc.k_drawn = k_drawn;
+  nc.stage_fidelity = stage_fidelity;
+  nc.depth = depth;
+  nc.outer_fidelity = outer_fidelity;
+  nc.deadline_ns = deadline_ns;
+  nc.scenario_stride = peg_nested_stride_for_bag(worker, bag);
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  peg_nest_enum_splits(&nc, 0, k_drawn, bag_rem, 1, mover_drawn, 0,
+                       bag_remaining, 0);
+  if (worker->nest_pool != NULL && nc.n_jobs > 1) {
+    void **ptrs = malloc_or_die((size_t)nc.n_jobs * sizeof(void *));
+    for (int i = 0; i < nc.n_jobs; i++) {
+      ptrs[i] = &nc.jobs[i];
+    }
+    // Re-entrant submit so a blocked worker only help-drains other re-entrant
+    // (inner) items. Every nesting level fans out -- the inner unseen is
+    // diverse even when the outer pool is uniform (the mover's leave joins it),
+    // so deep nesting is where most of the cores come from on few-candidate
+    // positions; the recursion depth bounds the submit nesting.
+    peg_pool_submit_and_wait_reentrant(worker->nest_pool,
+                                       peg_nest_scenario_worker_fn, ptrs,
+                                       nc.n_jobs, worker->nest_worker_idx);
+    free(ptrs);
+  } else {
+    for (int i = 0; i < nc.n_jobs; i++) {
+      peg_nest_scenario_worker_fn(&nc.jobs[i], worker->nest_worker_idx);
+    }
+  }
+  int64_t weight_sum = 0;
+  double value_weight = 0.0;
+  for (int i = 0; i < nc.n_jobs; i++) {
+    weight_sum += nc.jobs[i].weight;
+    value_weight += (double)nc.jobs[i].weight * (double)nc.jobs[i].mover_spread;
+  }
+  free(nc.jobs);
+  peg_nest_release(worker, tframe);
+  if (weight_sum == 0) {
+    return peg_nested_floor(worker, parent_game, mover_idx);
+  }
+  const double avg = value_weight / (double)weight_sum;
+  return (int32_t)(avg >= 0 ? avg + 0.5 : avg - 0.5);
+}
+
+// Score one scenario's fully-resolved game (on-turn perspective): terminal
+// score; stop/seed -> greedy floor; emptier -> exact endgame at stage_fidelity;
+// non-emptier -> a deeper inner peg if recursion depth remains, else greedy.
+static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
+                              int depth, int outer_fidelity,
+                              int64_t deadline_ns) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+    const Player *me = game_get_player(game, on_turn);
+    const Player *op = game_get_player(game, 1 - on_turn);
+    return equity_to_int(player_get_score(me) - player_get_score(op));
+  }
+  if (peg_nested_should_stop(worker, deadline_ns) || stage_fidelity <= 0) {
+    return peg_nested_floor(worker, game, on_turn);
+  }
+  if (bag_get_letters(game_get_bag(game)) == 0) {
+    return peg_nested_endgame_value(worker, game, on_turn, stage_fidelity,
+                                    deadline_ns);
+  }
+  if (depth <= 1) {
+    return peg_nested_floor(worker, game, on_turn);
+  }
+  return peg_inner_cascade(worker, game, depth - 1, outer_fidelity,
+                           deadline_ns);
+}
+
+// Staged cascade over the on-turn player's candidates: seed the field by static
+// equity to the schedule's first cap, then run one stage per schedule entry at
+// rising endgame fidelity (2-ply, 3-ply, ...), narrowing to each entry's keep
+// count. Returns the best candidate's value (on-turn perspective).
+static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
+                                 int outer_fidelity, int64_t deadline_ns) {
+  const int on_turn = game_get_player_on_turn_index(game);
+  // The candidate list is read across the stage loop (which submits + waits per
+  // candidate), so it is held on its own frame for the cascade's lifetime.
+  PegNestFrame *cframe = peg_nest_acquire(worker);
+  if (cframe->moves == NULL) {
+    cframe->moves = move_list_create(PEG_NEST_CAND_LIST_CAP);
+  }
+  MoveList *cand_moves = cframe->moves;
+  const MoveGenArgs movegen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = cand_moves,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&movegen_args);
+  const int num_cands = move_list_get_count(cand_moves);
+  if (num_cands == 0) {
+    peg_nest_release(worker, cframe);
+    return peg_nested_floor(worker, game, on_turn);
+  }
+  move_list_sort_moves(cand_moves);
+  uint8_t unseen[MAX_ALPHABET_SIZE];
+  const int ld_size = ld_get_size(game_get_ld(game));
+  peg_compute_unseen(game, on_turn, unseen);
+  // Stage schedule: nested_cand_caps (e.g. {8,4,2} arm, {8,8,8} oracle). Entry
+  // 0 is the initial field size; each later entry is the keep-count after that
+  // stage. No schedule -> the flat cap as a single stage.
+  const int *sched = worker->nested_cand_caps;
+  const int n_sched = worker->nested_n_cand_caps;
+  int field_cap = num_cands;
+  if (n_sched > 0) {
+    field_cap = sched[0];
+  } else if (worker->nested_cand_cap > 0) {
+    field_cap = worker->nested_cand_cap;
+  }
+  if (field_cap > num_cands) {
+    field_cap = num_cands;
+  }
+  if (field_cap > PEG_NEST_FIELD_MAX) {
+    field_cap = PEG_NEST_FIELD_MAX;
+  }
+  int idx[PEG_NEST_FIELD_MAX];
+  int32_t val[PEG_NEST_FIELD_MAX];
+  // memset first so the analyzer treats the whole array as initialized: the
+  // read at idx[cand_idx] (cand_idx < field_n) is provably in-bounds since
+  // field_n is seeded to field_cap and only ever shrinks, but the analyzer
+  // can't follow that across the separate init/read bounds. Behaviorally
+  // identical (entries >= field_cap are never read); clears a clang-analyzer
+  // uninit-read false positive.
+  memset(idx, 0, sizeof(idx));
+  for (int cand_idx = 0; cand_idx < field_cap; cand_idx++) {
+    idx[cand_idx] = cand_idx;
+  }
+  int field_n = field_cap;
+  // Scale inner depth to the outer stage: inner stage stage_idx runs at endgame
+  // fidelity 2 + stage_idx, so cap the stage count at outer_fidelity - 1. Early
+  // outer stages (2-ply) thus run a single cheap inner stage; the inner peg
+  // only deepens as the outer cascade does, keeping early outer stages
+  // affordable.
+  int n_stages = n_sched > 0 ? n_sched : 1;
+  const int fidelity_stage_cap = outer_fidelity - 1;
+  if (fidelity_stage_cap >= 1 && fidelity_stage_cap < n_stages) {
+    n_stages = fidelity_stage_cap;
+  }
+  if (n_stages < 1) {
+    n_stages = 1;
+  }
+  for (int stage_idx = 0; stage_idx < n_stages; stage_idx++) {
+    if (stage_idx > 0 && peg_nested_should_stop(worker, deadline_ns)) {
+      break;
+    }
+    const int stage_fidelity = 2 + stage_idx; // rising endgame fidelity / stage
+    for (int cand_idx = 0; cand_idx < field_n; cand_idx++) {
+      if (cand_idx > 0 && peg_nested_should_stop(worker, deadline_ns)) {
+        field_n = cand_idx;
+        break;
+      }
+      const Move *cand = move_list_get_move(cand_moves, idx[cand_idx]);
+      val[cand_idx] = peg_nested_cand_value(worker, game, on_turn, cand, unseen,
+                                            ld_size, stage_fidelity, depth,
+                                            outer_fidelity, deadline_ns);
+    }
+    // Selection sort the small field by value, descending.
+    for (int sel_idx = 0; sel_idx < field_n; sel_idx++) {
+      int best_idx = sel_idx;
+      for (int scan_idx = sel_idx + 1; scan_idx < field_n; scan_idx++) {
+        if (val[scan_idx] > val[best_idx]) {
+          best_idx = scan_idx;
+        }
+      }
+      if (best_idx != sel_idx) {
+        const int tmp_idx = idx[sel_idx];
+        idx[sel_idx] = idx[best_idx];
+        idx[best_idx] = tmp_idx;
+        const int32_t tmp_val = val[sel_idx];
+        val[sel_idx] = val[best_idx];
+        val[best_idx] = tmp_val;
+      }
+    }
+    if (stage_idx + 1 < n_stages) {
+      const int keep = sched[stage_idx + 1];
+      if (keep > 0 && keep < field_n) {
+        field_n = keep;
+      }
+    }
+  }
+  const int32_t result =
+      field_n > 0 ? val[0] : peg_nested_floor(worker, game, on_turn);
+  peg_nest_release(worker, cframe);
+  return result;
+}
+
 // Evaluate the leaf of one fully-resolved scenario (a specific post-cand game).
 // Returns mover's signed spread (points) — exact via endgame_solve for emptier
 // scenarios at fidelity > 0, else the greedy playout.
@@ -762,6 +1431,21 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
     // Non-emptier (or stage-0) leaf: the opponent still draws, so the model
     // matters. Emptier leaves fall through to the exact endgame below, which is
     // already adversarial-optimal and thus identical for both models.
+    //
+    // Nested lookahead: at fidelity > 0, solve the opponent's response as a
+    // staged inner peg instead of a flat rollout. nested_max_depth is the
+    // inner-peg recursion depth (how many nested pegs before greedy rollout):
+    // 0 or unset = 1 (one minimal peg, greedy below); a value >= the bag size
+    // nests until the bag empties (the recursion bottoms out at the exact
+    // endgame, so it is bounded by the bag regardless of the cap).
+    if (!emptier && ctx->fidelity_plies > 0 && ctx->worker->nested_enabled) {
+      const int depth =
+          ctx->worker->nested_max_depth > 0 ? ctx->worker->nested_max_depth : 1;
+      const int32_t on_turn_val = peg_inner_cascade(
+          ctx->worker, game, depth, ctx->fidelity_plies, ctx->deadline_ns);
+      const int turn = game_get_player_on_turn_index(game);
+      return (turn == ctx->mover_idx) ? on_turn_val : -on_turn_val;
+    }
     if (ctx->opp_model == PEG_OPP_PESSIMISTIC) {
       return peg_pessimistic_playout(game, ctx->mover_idx,
                                      ctx->worker->playout_ml, ctx->inner_top_k);
@@ -785,10 +1469,24 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   ea.num_top_moves = 1;
   ea.external_deadline_ns = ctx->deadline_ns;
   ea.shared_tt = ctx->worker->eg_tt;
-  // The scratch game already carries the root pruned KWG (override) and valid
-  // cross-sets (copied from the prepared base, incrementally updated by the
-  // cand play), so the endgame must not rebuild a pruned KWG or regenerate all
-  // cross-sets per solve — that regeneration dominates the per-leaf cost.
+  // Chained re-prune: install this candidate's tighter pruned KWG (built once
+  // per board, chained off the root prune already on the game) for the endgame
+  // to use. The existing (parent) cross-sets are kept as-is and NOT
+  // regenerated: narrowing the word list only removes words, and the parent
+  // cross-sets already agree with the leaf's on every rack-playable letter (any
+  // perpendicular word a rack tile forms is itself playable, hence in the leaf
+  // KWG too), so the looser parent cross-sets gate the exact same legal moves.
+  //
+  // Only worth it for >=2-ply searches: a tighter KWG speeds up move
+  // generation, so the gain scales with how many move-gens the endgame runs. At
+  // 1 ply there are too few to amortize the build. (The default cascade only
+  // ever uses 2..6-ply exact leaves, so this is a robustness guard for custom
+  // configs.)
+  if (ctx->fidelity_plies >= 2) {
+    const KWG *leaf_kwg =
+        peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
+    game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
+  }
   ea.skip_word_pruning = true;
   ea.seed = PEG_ENDGAME_SEED;
   endgame_results_reset(ctx->worker->eg_results);
@@ -1755,6 +2453,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (tt_fraction > 0.05) {
     tt_fraction = 0.05;
   }
+  // One prune cache shared by every worker (cross-worker board reuse).
+  PegPruneCache *prune_cache = peg_prune_cache_create();
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -1765,6 +2465,28 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].template_game = NULL;
     workers[worker_idx].scratch_game = NULL;
     workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
+    workers[worker_idx].prune_cache = prune_cache;
+    // Nested-PEG lookahead config + free-list scratch.
+    workers[worker_idx].thread_control = args->thread_control;
+    // Inner-peg scenarios fan out across the shared pool (NULL when single-
+    // threaded => inline). Safe because inner scenario jobs are submitted
+    // re-entrantly: a worker that blocks on an inner batch only help-drains
+    // other re-entrant items, never an outer job that would clobber the
+    // per-worker scratch it is mid-evaluation on. This keeps the cores busy on
+    // positions with few outer candidates, where outer parallelism alone would
+    // leave most cores idle.
+    workers[worker_idx].nest_pool = pool;
+    workers[worker_idx].nest_workers = workers;
+    workers[worker_idx].nest_worker_idx = worker_idx;
+    workers[worker_idx].nested_enabled = args->nested_enabled;
+    workers[worker_idx].nested_cand_cap = args->nested_cand_cap;
+    workers[worker_idx].nested_cand_caps = args->nested_cand_caps;
+    workers[worker_idx].nested_n_cand_caps = args->nested_n_cand_caps;
+    workers[worker_idx].nested_stride = args->nested_stride;
+    workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
+    workers[worker_idx].nested_max_depth = args->nested_max_depth;
+    workers[worker_idx].nest_free = NULL;
+    workers[worker_idx].nest_all = NULL;
   }
 
   // Injection monitor: lends idle cores to in-flight leaf endgames. Only
@@ -1823,9 +2545,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     };
 
     // Stage 0: greedy evaluation of every candidate.
-    for (int i = 0; i < n_cands; i++) {
-      moves[i] = args->n_only_moves > 0 ? args->only_moves[i]
-                                        : move_list_get_move(cand_ml, i);
+    if (args->n_only_moves > 0) {
+      for (int i = 0; i < n_cands; i++) {
+        moves[i] = args->only_moves[i];
+      }
+    } else {
+      for (int i = 0; i < n_cands; i++) {
+        moves[i] = move_list_get_move(cand_ml, i);
+      }
     }
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
@@ -2123,8 +2850,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // line). Prefer the rows already captured inline at the best cand's deepest
     // fidelity. Only when the best cand was never captured inline — a
     // greedy-only or pinned result, where no halving stage ran — fall back to a
-    // dedicated single-cand capture pass. That fallback runs at greedy fidelity
-    // (instant), so the formerly-expensive deep re-evaluation is gone.
+    // dedicated single-cand capture pass. That fallback runs at greedy
+    // fidelity: one candidate at greedy depth, not a deep re-evaluation, so it
+    // is cheap.
     if (args->include_per_scenario && out->n_top_cands > 0) {
       const PegCandOutcomes *best_oc = NULL;
       for (int store_idx = 0; store_idx < oc_n; store_idx++) {
@@ -2208,9 +2936,23 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     if (workers[worker_idx].scratch_game) {
       game_destroy(workers[worker_idx].scratch_game);
     }
+    for (PegNestFrame *frame = workers[worker_idx].nest_all; frame != NULL;) {
+      PegNestFrame *next = frame->all_next;
+      if (frame->game) {
+        game_destroy(frame->game);
+      }
+      if (frame->moves) {
+        move_list_destroy(frame->moves);
+      }
+      free(frame);
+      frame = next;
+    }
     transposition_table_destroy(workers[worker_idx].eg_tt);
   }
   free(workers);
+  // Safe now that every worker's scratch game (which referenced cached KWGs via
+  // its override pointer) has been destroyed.
+  peg_prune_cache_destroy(prune_cache);
   if (pool) {
     peg_pool_destroy(pool);
   }

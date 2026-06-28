@@ -1,5 +1,6 @@
 #include "peg_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -15,6 +16,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
+#include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -23,6 +25,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Several macondo PEG positions store an empty opponent rack, so MAGPIE loads
@@ -1204,8 +1207,65 @@ static void test_peg_opp_rack_sizes_cli(void) {
   config_destroy(config);
 }
 
+// Feed synthetic per-ordering rows to the outcomes-cell renderer and assert the
+// compact string. Decouples the rendering from a live solve.
+static void assert_outcomes_eq(const PegPerScenario *rows, int n_rows,
+                               const char *expected) {
+  char *got = peg_build_outcomes_string_rows(rows, n_rows);
+  if (strcmp(got, expected) != 0) {
+    printf("[peg_outcomes] expected '%s' got '%s'\n", expected, got);
+  }
+  assert(strcmp(got, expected) == 0);
+  free(got);
+}
+
+static void test_peg_outcomes_string(void) {
+  // A 2-tile play (drawn pair + one bag tile left): the mover draws its two
+  // tiles together, so every draw must lead with the 2-tile multiset (DH/A, not
+  // D/H/A). Draws with the same total tiles but a different drawn pair stay
+  // distinct (DH/R and DR/H, never a merged D/HR). Three wins, three losses, so
+  // the shorter (here equal -> win) list is the one shown.
+  const PegPerScenario two_tile[] = {
+      {.drawn = "DH", .remaining = "A", .weight = 2, .mover_total = 5},
+      {.drawn = "DH", .remaining = "R", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "H", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "D", .weight = 2, .mover_total = -5},
+  };
+  assert_outcomes_eq(two_tile, 6, "W: DH/Ax2 DH/Rx2 DR/Hx2");
+
+  // A play that draws the whole bag (no remainder): the draw is a bare
+  // multiset, no slash.
+  const PegPerScenario no_remainder[] = {
+      {.drawn = "AD", .remaining = "", .weight = 4, .mover_total = 5},
+      {.drawn = "EI", .remaining = "", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(no_remainder, 2, "W: ADx4");
+
+  // A 1-tile draw with a 2-tile bag remainder. When both remainder orderings
+  // share a bucket the remainder collapses to a multiset behind the prefix
+  // (X/YZ); the weights of its orderings sum into the one token.
+  const PegPerScenario rem_multiset[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "AB", .weight = 3, .mover_total = -5},
+      {.drawn = "X", .remaining = "BA", .weight = 3, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_multiset, 4, "W: X/YZx6");
+
+  // Same prefix, but the remainder orderings split across buckets, so the
+  // remainder is "/"-segmented behind the drawn prefix (X/Y/Z).
+  const PegPerScenario rem_split[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 4, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_split, 2, "W: X/Y/Zx4");
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
+  test_peg_outcomes_string();
   test_peg_main_1bag_pass();
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
