@@ -1345,8 +1345,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
 
-  ctimer_start(&out->timer);
-
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
   const int raw_bag_size = bag_get_letters(game_get_bag(game));
@@ -1415,6 +1413,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Validation passed: start the solve timer here, after the early-return error
+  // checks above, so an invalid-args return leaves the result's timer stopped
+  // (is_running stays false) rather than running forever.
+  ctimer_start(&out->timer);
 
   // Protected ("never prune") moves: precompute their similarity keys against
   // the mover's rack so each stage can carry them past its top-K cut.
