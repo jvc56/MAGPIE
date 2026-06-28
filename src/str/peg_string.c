@@ -576,6 +576,13 @@ static void peg_append_wrapped(StringBuilder *sb, const char *text, int indent,
               if (truncated != NULL) {
                 *truncated = true;
               }
+              // The previous chunk already filled the column to `avail`, so
+              // drop its last 3 chars and replace them with "..." to keep the
+              // line within width (avail >= PEG_OUTCOMES_MIN_CELL > 3).
+              const size_t cur_len = string_builder_length(sb);
+              if (cur_len >= 3) {
+                string_builder_truncate(sb, cur_len - 3);
+              }
               string_builder_add_string(sb, "...");
               goto cleanup;
             }

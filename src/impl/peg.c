@@ -420,7 +420,12 @@ static bool peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
     cur->best_win_pct = snap->entries[0].win_pct;
   }
   snap->version++;
-  const bool reordered = old_n_entries == 0 || i < snap->n_entries - 1;
+  // A simple bottom append (reordered == false) only when the list actually
+  // grew. If it was already full, a bottom insert evicted the previous worst
+  // entry without changing the index, so the displayed content changed and a
+  // streaming renderer must redraw -- treat that as reordered.
+  const bool grew = snap->n_entries > old_n_entries;
+  const bool reordered = old_n_entries == 0 || i < snap->n_entries - 1 || !grew;
   cpthread_mutex_unlock(&poll->mutex);
   return reordered;
 }
@@ -2385,11 +2390,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
 
-  ctimer_start(&out->timer);
   // Anchor the wall-clock deadline at the very start so the whole solve —
   // including KWG pruning and the initial greedy move generation, not just the
   // halving stages — counts against the time budget (0 = unbounded). Each
   // endgame leaf is also capped by this so a single deep solve cannot overrun.
+  // (The result timer itself is started after validation below, so an
+  // invalid-args early return leaves it stopped rather than running forever.)
   const double budget = args->time_budget_seconds;
   const int64_t deadline_ns =
       budget > 0.0 ? ctimer_monotonic_ns() + (int64_t)(budget * 1.0e9) : 0;
@@ -2461,6 +2467,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Validation passed: start the result timer here, after the early-return
+  // error checks above, so an invalid-args return leaves it stopped (is_running
+  // stays false) rather than running forever. The deadline (above) still
+  // anchors at the very start so the budget covers pruning/movegen too.
+  ctimer_start(&out->timer);
 
   // Protected ("never prune") moves: precompute their similarity keys against
   // the mover's rack so each stage can carry them past its top-K cut.
