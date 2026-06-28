@@ -158,8 +158,11 @@ static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
   cpthread_mutex_unlock(&poll->mutex);
 }
 
-// Bump the cands_done counter for the current stage. Call once per candidate
-// completion in any stage; the leaderboard upsert (below) is separate.
+// Bump the current stage's cands_done counter. Used by the halving stages,
+// whose candidates are evaluated via peg_eval_candidates_scenario. Stage-0
+// greedy instead counts each candidate inside peg_poll_upsert. Exactly one of
+// the two paths runs per candidate, so they must stay mutually exclusive --
+// otherwise a candidate is double-counted and cands_done overshoots field_size.
 static void peg_poll_bump_cand_done(PegPoll *poll) {
   if (poll == NULL) {
     return;
