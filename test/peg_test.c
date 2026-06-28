@@ -405,9 +405,15 @@ static void test_peg_macondo_only_onyx(void) {
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
   double win = 0.0;
+  // No time limit (budget 0 = unbounded): this case asserts an EXACT endgame
+  // value (7.5/8 = 0.9375), which is only produced when the halving stage runs
+  // to full fidelity. Any wall-clock cap could truncate the deep stage on a
+  // slow (ASAN/instrumented) build and drop the result to the ~0.625
+  // greedy-stage-0 fallback. The position is small and deterministic, so the
+  // solve terminates on its own (sub-second on a release build).
   peg_macondo_case("peg_macondo_only_onyx", cgp, "13L ONYX", "13L OXY",
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
-                   PEG_OPP_RATIONAL, /*time_budget=*/5.0,
+                   PEG_OPP_RATIONAL, /*time_budget=*/0.0,
                    /*expect_best=*/"13L ONYX", &win, /*out_spread=*/NULL);
   assert(win >= (7.5 / 8.0) - 0.005 && win <= (7.5 / 8.0) + 0.005); // 0.9375
 }
@@ -437,9 +443,16 @@ static void test_peg_macondo_axe(void) {
       "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
       "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
   double win = 0.0;
+  // No time limit (budget 0 = unbounded): asserts an EXACT value (70/72), only
+  // produced when the full 2-bag enumeration runs to fidelity. A wall-clock cap
+  // could truncate the deep stage on a slow build and drop the win, failing the
+  // assertion. This is a 2-in-bag position (heavier than the 1-in-bag onyx
+  // case), so it is the most cap-exposed of the macondo cases. (Measured: the
+  // solve completes in ~0.07s on a release build, so the old 5s cap was never
+  // actually hit in CI -- it was only latent risk on slow/instrumented builds.)
   peg_macondo_case("peg_macondo_axe", cgp, "6F (A)X(E)", /*move_str2=*/NULL,
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
-                   PEG_OPP_RATIONAL, /*time_budget=*/5.0, /*expect_best=*/NULL,
+                   PEG_OPP_RATIONAL, /*time_budget=*/0.0, /*expect_best=*/NULL,
                    &win, /*out_spread=*/NULL);
   assert(win >= (70.0 / 72.0) - 0.005 && win <= (70.0 / 72.0) + 0.005);
 }

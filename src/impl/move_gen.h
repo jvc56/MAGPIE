@@ -221,6 +221,12 @@ typedef struct MoveGen {
   KlvLeavesCacheEntry klv_leaves_cache[MOVEGEN_KLV_LEAVES_CACHE_SIZE];
   const Board *board;
   LetterDistribution ld;
+  // Whether ld fits a BitRack: <= BIT_RACK_MAX_ALPHABET_SIZE machine letters
+  // (4-bit letter index) and <= 15 of any one letter, blanks included (4-bit
+  // per-letter count) -- see bit_rack_is_compatible_with_ld. The RIT cache,
+  // KLV-leaves cache, and WMP all key on a BitRack, so all three are disabled
+  // when this is false. Set in gen_load_position.
+  bool bit_rack_compatible;
   MoveList *move_list;
   AnchorHeap anchor_heap;
   Equity tile_scores[MACHINE_LETTER_MAX_VALUE];

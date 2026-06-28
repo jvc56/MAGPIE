@@ -2721,6 +2721,7 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Player *opponent = game_get_player(game, 1 - gen->player_index);
 
   memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
+  gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
@@ -2751,7 +2752,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
   gen->klv_instance_fp_at_load = new_klv_instance_fp;
-  const RackInfoTable *new_rit = player_get_rack_info_table(player);
+  // The RIT keys on a BitRack, so it is unusable for a BitRack-incompatible
+  // alphabet; treat it as absent (the WMP is gated the same way below).
+  const RackInfoTable *new_rit =
+      gen->bit_rack_compatible ? player_get_rack_info_table(player) : NULL;
   if (new_rit != gen->rack_info_table) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
     // Leave values are stored in the subrack cache; they depend on the
@@ -2767,8 +2771,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   const WMP *previous_wmp = gen->wmp_move_gen.wmp;
+  // The WMP keys on a BitRack, so it is unusable for a BitRack-incompatible
+  // alphabet; pass NULL so wmp_move_gen stays inactive (no BitRack is built).
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
-                    player_get_wmp(player));
+                    gen->bit_rack_compatible ? player_get_wmp(player) : NULL);
 
   if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
       gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
@@ -2876,6 +2882,8 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   const RackInfoTable *rit = gen->rack_info_table;
   gen->rit_entry = NULL;
 
+  // rit is NULL for BitRack-incompatible alphabets (gated in
+  // gen_load_position), so this RIT-cache path is already skipped for them.
   if (has_full_rack && rit != NULL) {
     const BitRack player_bit_rack =
         bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
@@ -2933,7 +2941,10 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     // requires recording the actual exchange moves (which goes through
     // the RIT-alike generate_exchange_moves_from_table, skipping the
     // KLV descent either way).
-    const bool kle_eligible = has_full_rack;
+    // Unlike the RIT/WMP caches (gated by being NULL), this KLV-leaves cache is
+    // always available, so it must consult bit_rack_compatible directly: its
+    // key is a BitRack, unrepresentable for a too-large alphabet.
+    const bool kle_eligible = has_full_rack && gen->bit_rack_compatible;
     const BitRack kle_bit_rack =
         kle_eligible ? bit_rack_create_from_rack(&gen->ld, &gen->player_rack)
                      : bit_rack_create_empty();

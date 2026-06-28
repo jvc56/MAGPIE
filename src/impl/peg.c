@@ -222,6 +222,20 @@ static inline double peg_poll_key(const PegRankedCand *cand) {
   return cand->win_pct + 1e-4 * cand->mean_spread;
 }
 
+// The current (still-running) stage-history entry, or NULL when there is none:
+// either no stage has begun yet, or the history is full (PEG_POLL_MAX_STAGES)
+// and its last entry has already been finalized (end_ns != 0). All live stage
+// progress -- end_ns, cands_done, best_win_pct -- must be written only through
+// this, so an overflowed history never corrupts an already-ended stage. The
+// caller must hold poll->mutex.
+static PegStageSnapshot *peg_poll_open_stage(PegPollSnapshot *snap) {
+  if (snap->n_stage_history > 0 &&
+      snap->stage_history[snap->n_stage_history - 1].end_ns == 0) {
+    return &snap->stage_history[snap->n_stage_history - 1];
+  }
+  return NULL;
+}
+
 // Stage-boundary metadata, set before a stage's evaluation begins.
 // Finalizes the previous stage entry (sets its end_ns) and opens a new one.
 static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
@@ -232,8 +246,9 @@ static void peg_poll_begin_stage(PegPoll *poll, int stage, int fidelity_plies,
   const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
   // Finalize the previous stage: record when it ended.
-  if (poll->s.n_stage_history > 0) {
-    poll->s.stage_history[poll->s.n_stage_history - 1].end_ns = now_ns;
+  PegStageSnapshot *prev = peg_poll_open_stage(&poll->s);
+  if (prev != NULL) {
+    prev->end_ns = now_ns;
   }
   // Open a new stage entry if there is room.
   if (poll->s.n_stage_history < PEG_POLL_MAX_STAGES) {
@@ -271,15 +286,19 @@ static void peg_poll_set_stage_moves(PegPoll *poll, const Move *const *moves,
   cpthread_mutex_unlock(&poll->mutex);
 }
 
-// Bump the cands_done counter for the current stage. Call once per candidate
-// completion in any stage; the leaderboard upsert (below) is separate.
+// Bump the current stage's cands_done counter. Used by the halving stages,
+// whose candidates are evaluated via peg_eval_candidates_scenario. Stage-0
+// greedy instead counts each candidate inside peg_poll_upsert. Exactly one of
+// the two paths runs per candidate, so they must stay mutually exclusive --
+// otherwise a candidate is double-counted and cands_done overshoots field_size.
 static void peg_poll_bump_cand_done(PegPoll *poll) {
   if (poll == NULL) {
     return;
   }
   cpthread_mutex_lock(&poll->mutex);
-  if (poll->s.n_stage_history > 0) {
-    poll->s.stage_history[poll->s.n_stage_history - 1].cands_done++;
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->cands_done++;
   }
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
@@ -297,9 +316,10 @@ static bool peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   cpthread_mutex_lock(&poll->mutex);
   PegPollSnapshot *snap = &poll->s;
   const int old_n_entries = snap->n_entries;
+  PegStageSnapshot *cur = peg_poll_open_stage(snap);
   // Always count this candidate as done regardless of leaderboard outcome.
-  if (snap->n_stage_history > 0) {
-    snap->stage_history[snap->n_stage_history - 1].cands_done++;
+  if (cur != NULL) {
+    cur->cands_done++;
   }
   const double key = peg_poll_key(cand);
   int i;
@@ -318,9 +338,8 @@ static bool peg_poll_upsert(PegPoll *poll, const PegRankedCand *cand) {
   }
   snap->entries[i] = *cand;
   // entries[0] is always the best; reflect in the current stage.
-  if (snap->n_stage_history > 0) {
-    snap->stage_history[snap->n_stage_history - 1].best_win_pct =
-        snap->entries[0].win_pct;
+  if (cur != NULL) {
+    cur->best_win_pct = snap->entries[0].win_pct;
   }
   snap->version++;
   const bool reordered = old_n_entries == 0 || i < snap->n_entries - 1;
@@ -344,9 +363,9 @@ static void peg_poll_replace(PegPoll *poll, const PegRankedCand *ranked, int n,
   poll->s.stage = stage;
   poll->s.fidelity_plies = fidelity_plies;
   poll->s.field_size = field_size;
-  if (poll->s.n_stage_history > 0 && k > 0) {
-    poll->s.stage_history[poll->s.n_stage_history - 1].best_win_pct =
-        ranked[0].win_pct;
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL && k > 0) {
+    cur->best_win_pct = ranked[0].win_pct;
   }
   poll->s.version++;
   cpthread_mutex_unlock(&poll->mutex);
@@ -413,8 +432,9 @@ static void peg_poll_finish(PegPoll *poll) {
   const int64_t now_ns = ctimer_monotonic_ns();
   cpthread_mutex_lock(&poll->mutex);
   // Finalize the last stage.
-  if (poll->s.n_stage_history > 0) {
-    poll->s.stage_history[poll->s.n_stage_history - 1].end_ns = now_ns;
+  PegStageSnapshot *cur = peg_poll_open_stage(&poll->s);
+  if (cur != NULL) {
+    cur->end_ns = now_ns;
   }
   poll->s.done = true;
   poll->s.version++;
