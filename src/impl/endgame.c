@@ -192,7 +192,9 @@ struct EndgameCtx {
   // bag_copy into incompatibly-sized allocations.
   EndgameCtxWorker **workers;
   cpthread_t *worker_ids;
-  int cap_workers; // number of created worker structs (workers[0..cap_workers))
+  // _Atomic so the lock-free live-view accessors can read it (acquire) while
+  // endgame_add_worker grows it (under add_mutex) during a solve.
+  atomic_int cap_workers; // created worker structs (workers[0..cap_workers))
   int arr_cap; // allocated length of workers[]/worker_ids[] (>= cap_workers)
   const LetterDistribution *workers_ld;
   // Dynamic worker injection (endgame_add_worker): grow an in-flight solve's
@@ -822,8 +824,9 @@ void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
 // so the accessors below must not read them.
 static int endgame_active_worker_count(const EndgameCtx *ctx) {
   int active = atomic_load_explicit(&ctx->live_workers, memory_order_acquire);
-  if (active > ctx->cap_workers) {
-    active = ctx->cap_workers;
+  const int cap = atomic_load_explicit(&ctx->cap_workers, memory_order_acquire);
+  if (active > cap) {
+    active = cap;
   }
   if (active < 0) {
     active = 0;
@@ -971,7 +974,7 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   if (!ctx) {
     return;
   }
-  for (int i = 0; i < ctx->cap_workers; i++) {
+  for (int i = 0; i < atomic_load(&ctx->cap_workers); i++) {
     solver_worker_destroy(ctx->workers[i]);
   }
   free(ctx->workers);
@@ -1082,14 +1085,14 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   // If the letter distribution changed (e.g., different lexicon), the worker
   // game copies have incompatibly-sized bags/racks. Destroy and rebuild.
   if (solver->workers_ld != NULL && solver->workers_ld != ld) {
-    for (int idx = 0; idx < solver->cap_workers; idx++) {
+    for (int idx = 0; idx < atomic_load(&solver->cap_workers); idx++) {
       solver_worker_destroy(solver->workers[idx]);
     }
     free(solver->workers);
     free(solver->worker_ids);
     solver->workers = NULL;
     solver->worker_ids = NULL;
-    solver->cap_workers = 0;
+    atomic_store(&solver->cap_workers, 0);
     solver->arr_cap = 0;
   }
   solver->workers_ld = ld;
@@ -1114,12 +1117,13 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
   // needed_cap >= threads above, so whenever this loop runs (threads > 0) the
   // array was allocated; assert it for the static analyzer and as a guard.
   assert(solver->threads == 0 || solver->workers != NULL);
-  for (int idx = solver->cap_workers; idx < solver->threads; idx++) {
+  for (int idx = atomic_load(&solver->cap_workers); idx < solver->threads;
+       idx++) {
     solver->workers[idx] =
         endgame_ctx_create_worker(solver, idx, base_seed, solver->game);
   }
-  if (solver->cap_workers < solver->threads) {
-    solver->cap_workers = solver->threads;
+  if (atomic_load(&solver->cap_workers) < solver->threads) {
+    atomic_store(&solver->cap_workers, solver->threads);
   }
   // Cached workers persist across solves; the ordinal is the array position and
   // never changes. Each worker gets its MoveGen cache slot on demand from
@@ -3466,10 +3470,12 @@ bool endgame_add_worker(EndgameCtx *solver) {
   // Create the worker struct on first use at this ordinal; reuse it on later
   // solves. Either way, stamp this solve's ordinal. The worker's MoveGen cache
   // slot is assigned on demand by get_movegen() when it first generates moves.
-  if (ordinal >= solver->cap_workers) {
+  if (ordinal >= atomic_load(&solver->cap_workers)) {
     solver->workers[ordinal] = endgame_ctx_create_worker(
         solver, ordinal, solver->worker_base_seed, solver->game);
-    solver->cap_workers = ordinal + 1;
+    // Release so a live-view accessor that later reads this cap (acquire) also
+    // sees the fully-created worker struct stored just above.
+    atomic_store(&solver->cap_workers, ordinal + 1);
   } else {
     solver->workers[ordinal]->ordinal = ordinal;
   }

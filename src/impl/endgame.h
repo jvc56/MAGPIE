@@ -57,10 +57,14 @@ typedef struct EndgameCtx EndgameCtx;
 //
 //   * Values are spreads in WHOLE POINTS — not the millipoint Equity used
 //     elsewhere in MAGPIE — from the solving player's perspective: positive
-//     means the solving player is ahead. This matches PVLine.score.
-//     "Spread-adjusted" below means the raw negamax value has had the root's
-//     initial spread folded in, so it is the projected final spread, not a
-//     delta from the current position.
+//     means the endgame nets points for the solving player. This matches
+//     PVLine.score.
+//     "Spread-adjusted" below means the root's initial spread has been
+//     subtracted from the raw negamax value (which is itself the projected
+//     final spread), so the reported number is the delta — the net point
+//     swing over the endgame from the current position, not the projected
+//     final spread. (The per-ply callback documents this same value as the
+//     "spread delta".)
 //
 //   * Moves are returned as `tiny_move` codes: the compact 64-bit SmallMove
 //     encoding (schema in move.h). A code of 0 is a pass. To render one, wrap
