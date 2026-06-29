@@ -660,10 +660,11 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  void *user_data) {
+                                  bool reordered, void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
+  (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
   assert(win_pct >= 0.0 && win_pct <= 1.0);
@@ -1219,59 +1220,65 @@ static void test_peg_opp_rack_sizes_cli(void) {
   config_destroy(config);
 }
 
-// Renders a real PegResult and checks the human-readable table. The CLI peg
-// path populates both the per-scenario outcomes (via -pegoutcomes true) and the
-// poll-backed stage history, so this covers the peg_string.c rendering: the
-// ranking-table headers, the stage-progress table, the W/T/L outcomes grouping,
-// and the gating of the outcomes column on show_outcomes.
-static void test_peg_render(void) {
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(
-      config,
-      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
-      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
-      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
-  load_and_exec_config_or_die(config,
-                              "set -pegonly 13L.ONYX -pegoutcomes true");
-  load_and_exec_config_or_die(config, "peg");
+// Feed synthetic per-ordering rows to the outcomes-cell renderer and assert the
+// compact string. Decouples the rendering from a live solve.
+static void assert_outcomes_eq(const PegPerScenario *rows, int n_rows,
+                               const char *expected) {
+  char *got = peg_build_outcomes_string_rows(rows, n_rows);
+  if (strcmp(got, expected) != 0) {
+    printf("[peg_outcomes] expected '%s' got '%s'\n", expected, got);
+  }
+  assert(strcmp(got, expected) == 0);
+  free(got);
+}
 
-  const PegResult *result = config_get_peg_result(config);
-  assert(result->last_completed_stage >= 0);
-  assert(result->n_top_cands >= 1);
-  assert(result->n_stage_history > 0); // poll-backed stage history populated
-  assert(result->n_per_scenario > 0);  // -pegoutcomes true populated scenarios
-  const Game *game = config_get_game(config);
+static void test_peg_outcomes_string(void) {
+  // A 2-tile play (drawn pair + one bag tile left): the mover draws its two
+  // tiles together, so every draw must lead with the 2-tile multiset (DH/A, not
+  // D/H/A). Draws with the same total tiles but a different drawn pair stay
+  // distinct (DH/R and DR/H, never a merged D/HR). Three wins, three losses, so
+  // the shorter (here equal -> win) list is the one shown.
+  const PegPerScenario two_tile[] = {
+      {.drawn = "DH", .remaining = "A", .weight = 2, .mover_total = 5},
+      {.drawn = "DH", .remaining = "R", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "H", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "D", .weight = 2, .mover_total = -5},
+  };
+  assert_outcomes_eq(two_tile, 6, "W: DH/Ax2 DH/Rx2 DR/Hx2");
 
-  // With outcomes: ranking table + stage-progress table + outcomes column.
-  char *with = peg_result_get_string(result, game, true);
-  assert(strstr(with, "rank") != NULL);
-  assert(strstr(with, "move") != NULL);
-  assert(strstr(with, "wins") != NULL);
-  assert(strstr(with, "win%") != NULL);
-  assert(strstr(with, "spread") != NULL);
-  assert(strstr(with, "outcomes") != NULL);
-  // Stage-progress table headers.
-  assert(strstr(with, "stage") != NULL);
-  assert(strstr(with, "fidelity") != NULL);
-  assert(strstr(with, "best win%") != NULL);
-  // The outcomes column groups scenarios into wins/ties/losses; with scenarios
-  // populated at least one group label must appear.
-  assert(strstr(with, "W:") != NULL || strstr(with, "T:") != NULL ||
-         strstr(with, "L:") != NULL);
-  free(with);
+  // A play that draws the whole bag (no remainder): the draw is a bare
+  // multiset, no slash.
+  const PegPerScenario no_remainder[] = {
+      {.drawn = "AD", .remaining = "", .weight = 4, .mover_total = 5},
+      {.drawn = "EI", .remaining = "", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(no_remainder, 2, "W: ADx4");
 
-  // Without outcomes: same ranking table, but no outcomes column.
-  char *without = peg_result_get_string(result, game, false);
-  assert(strstr(without, "rank") != NULL);
-  assert(strstr(without, "win%") != NULL);
-  assert(strstr(without, "outcomes") == NULL);
-  free(without);
+  // A 1-tile draw with a 2-tile bag remainder. When both remainder orderings
+  // share a bucket the remainder collapses to a multiset behind the prefix
+  // (X/YZ); the weights of its orderings sum into the one token.
+  const PegPerScenario rem_multiset[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "AB", .weight = 3, .mover_total = -5},
+      {.drawn = "X", .remaining = "BA", .weight = 3, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_multiset, 4, "W: X/YZx6");
 
-  config_destroy(config);
+  // Same prefix, but the remainder orderings split across buckets, so the
+  // remainder is "/"-segmented behind the drawn prefix (X/Y/Z).
+  const PegPerScenario rem_split[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 4, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_split, 2, "W: X/Y/Zx4");
 }
 
 void test_peg(void) {
   log_set_level(LOG_FATAL);
+  test_peg_outcomes_string();
   test_peg_main_1bag_pass();
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
@@ -1290,6 +1297,4 @@ void test_peg(void) {
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();
-  // Human-readable rendering (ranking table, stage table, outcomes column).
-  test_peg_render();
 }

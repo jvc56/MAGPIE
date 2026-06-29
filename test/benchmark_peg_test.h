@@ -15,4 +15,10 @@ void test_generate_peg_cgps(void);
 // solve completes in ~0.03s.
 void test_peg_pegtopk_all(void);
 
+void test_peg_bench_fixture(void);
+
+void test_peg_nested_gap(void);
+
+void test_gen_peg_more(void);
+
 #endif
