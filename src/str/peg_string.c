@@ -1,6 +1,7 @@
 #include "peg_string.h"
 
 #include "../compat/ctime.h"
+#include "../def/peg_defs.h"
 #include "../ent/board.h"
 #include "../ent/game.h"
 #include "../ent/letter_distribution.h"
