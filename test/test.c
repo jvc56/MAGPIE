@@ -31,6 +31,7 @@
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
+#include "json_api_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -117,6 +118,7 @@ static TestEntry test_table[] = {
     {"wordprune", test_word_prune},
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
+    {"jsonapi", test_json_api},
     {"rl", test_rack_list},
     {"ch", test_checkpoint},
     {"klv", test_klv},
