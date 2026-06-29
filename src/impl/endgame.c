@@ -837,9 +837,10 @@ static int endgame_active_worker_count(const EndgameCtx *ctx) {
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
   uint64_t total = 0;
   const int active = endgame_active_worker_count(ctx);
-  for (int i = 0; i < active; i++) {
-    total += atomic_load_explicit(&ctx->workers[i]->published_nodes_searched,
-                                  memory_order_relaxed);
+  for (int worker_idx = 0; worker_idx < active; worker_idx++) {
+    total += atomic_load_explicit(
+        &ctx->workers[worker_idx]->published_nodes_searched,
+        memory_order_relaxed);
   }
   return total;
 }
@@ -850,21 +851,22 @@ int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
       worker_index >= endgame_active_worker_count(ctx)) {
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[worker_index];
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
   // Acquire on length pairs with release on writer side: by the time we
   // observe length L, all writes to current_line[0..L-1] up to that
   // store are visible. The worker may have moved on since then; entries
   // beyond what we read may correspond to a different sibling subtree.
-  int len = atomic_load_explicit(&w->current_line_len, memory_order_acquire);
+  int len =
+      atomic_load_explicit(&worker->current_line_len, memory_order_acquire);
   if (len > max_len) {
     len = max_len;
   }
   if (len > MAX_SEARCH_DEPTH) {
     len = MAX_SEARCH_DEPTH;
   }
-  for (int i = 0; i < len; i++) {
-    out_line[i] =
-        atomic_load_explicit(&w->current_line[i], memory_order_relaxed);
+  for (int ply_idx = 0; ply_idx < len; ply_idx++) {
+    out_line[ply_idx] = atomic_load_explicit(&worker->current_line[ply_idx],
+                                             memory_order_relaxed);
   }
   return len;
 }
@@ -877,30 +879,31 @@ int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int worker_index,
     *out_value = 0;
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[worker_index];
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
   // Seqlock read: try a few times to capture a consistent snapshot
   // (length, moves, value all from the same writer update).
   for (int attempt = 0; attempt < 4; attempt++) {
     const uint64_t seq1 =
-        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+        atomic_load_explicit(&worker->live_pv_seq, memory_order_acquire);
     if ((seq1 & 1ULL) != 0) {
       continue; // writer in progress
     }
-    int len = atomic_load_explicit(&w->live_pv_length, memory_order_relaxed);
+    int len =
+        atomic_load_explicit(&worker->live_pv_length, memory_order_relaxed);
     const int32_t value =
-        atomic_load_explicit(&w->live_pv_value, memory_order_relaxed);
+        atomic_load_explicit(&worker->live_pv_value, memory_order_relaxed);
     if (len > max_len) {
       len = max_len;
     }
     if (len > MAX_SEARCH_DEPTH) {
       len = MAX_SEARCH_DEPTH;
     }
-    for (int i = 0; i < len; i++) {
-      out_moves[i] =
-          atomic_load_explicit(&w->live_pv_tiny_moves[i], memory_order_relaxed);
+    for (int ply_idx = 0; ply_idx < len; ply_idx++) {
+      out_moves[ply_idx] = atomic_load_explicit(
+          &worker->live_pv_tiny_moves[ply_idx], memory_order_relaxed);
     }
     const uint64_t seq2 =
-        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
+        atomic_load_explicit(&worker->live_pv_seq, memory_order_acquire);
     if (seq1 == seq2) {
       *out_value = value;
       return len;
@@ -916,39 +919,40 @@ int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int worker_index,
       worker_index >= endgame_active_worker_count(ctx)) {
     return 0;
   }
-  const EndgameCtxWorker *w = ctx->workers[worker_index];
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
   for (int attempt = 0; attempt < 4; attempt++) {
     const uint64_t seq1 =
-        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+        atomic_load_explicit(&worker->live_top_k_seq, memory_order_acquire);
     if ((seq1 & 1ULL) != 0) {
       continue; // writer in progress
     }
     int filled =
-        atomic_load_explicit(&w->live_top_k_filled, memory_order_relaxed);
+        atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
     if (filled > max_k) {
       filled = max_k;
     }
     if (filled > MAX_ENDGAME_DISPLAY_PVS) {
       filled = MAX_ENDGAME_DISPLAY_PVS;
     }
-    for (int i = 0; i < filled; i++) {
-      out[i].root_tiny = atomic_load_explicit(&w->live_top_k_root_tiny[i],
-                                              memory_order_relaxed);
-      out[i].value =
-          atomic_load_explicit(&w->live_top_k_value[i], memory_order_relaxed);
-      int cont_len = atomic_load_explicit(&w->live_top_k_continuation_len[i],
-                                          memory_order_relaxed);
+    for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+      out[pv_idx].root_tiny = atomic_load_explicit(
+          &worker->live_top_k_root_tiny[pv_idx], memory_order_relaxed);
+      out[pv_idx].value = atomic_load_explicit(
+          &worker->live_top_k_value[pv_idx], memory_order_relaxed);
+      int cont_len = atomic_load_explicit(
+          &worker->live_top_k_continuation_len[pv_idx], memory_order_relaxed);
       if (cont_len > MAX_SEARCH_DEPTH) {
         cont_len = MAX_SEARCH_DEPTH;
       }
-      out[i].continuation_len = cont_len;
-      for (int j = 0; j < cont_len; j++) {
-        out[i].continuation_tiny[j] = atomic_load_explicit(
-            &w->live_top_k_continuation[i][j], memory_order_relaxed);
+      out[pv_idx].continuation_len = cont_len;
+      for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
+        out[pv_idx].continuation_tiny[ply_idx] = atomic_load_explicit(
+            &worker->live_top_k_continuation[pv_idx][ply_idx],
+            memory_order_relaxed);
       }
     }
     const uint64_t seq2 =
-        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
+        atomic_load_explicit(&worker->live_top_k_seq, memory_order_acquire);
     if (seq1 == seq2) {
       return filled;
     }
@@ -974,8 +978,9 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   if (!ctx) {
     return;
   }
-  for (int i = 0; i < atomic_load(&ctx->cap_workers); i++) {
-    solver_worker_destroy(ctx->workers[i]);
+  for (int worker_idx = 0; worker_idx < atomic_load(&ctx->cap_workers);
+       worker_idx++) {
+    solver_worker_destroy(ctx->workers[worker_idx]);
   }
   free(ctx->workers);
   free(ctx->worker_ids);
@@ -2034,7 +2039,7 @@ check_depth_deadline(EndgameCtxWorker *worker) {
 
 // Republish worker thread 0's live multi-PV top-K leaderboard with the
 // (root_tiny, value, continuation) for one just-completed root move. Keeps
-// entries sorted descending by value, deduped by root_tiny, capped at K_max
+// entries sorted descending by value, deduped by root_tiny, capped at max_k
 // (<= MAX_ENDGAME_DISPLAY_PVS). Seqlock writer: bump seq odd, mutate, bump
 // even, so endgame_ctx_get_live_top_k_pvs reads a consistent snapshot.
 // Atomically copy leaderboard slot `src` onto slot `dst` (relaxed loads/stores;
@@ -2053,10 +2058,10 @@ static void topk_copy_slot(EndgameCtxWorker *worker, int dst, int src) {
       &worker->live_top_k_continuation_len[src], memory_order_relaxed);
   atomic_store_explicit(&worker->live_top_k_continuation_len[dst], cont_len,
                         memory_order_relaxed);
-  for (int j = 0; j < cont_len; j++) {
+  for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
     atomic_store_explicit(
-        &worker->live_top_k_continuation[dst][j],
-        atomic_load_explicit(&worker->live_top_k_continuation[src][j],
+        &worker->live_top_k_continuation[dst][ply_idx],
+        atomic_load_explicit(&worker->live_top_k_continuation[src][ply_idx],
                              memory_order_relaxed),
         memory_order_relaxed);
   }
@@ -2065,12 +2070,12 @@ static void topk_copy_slot(EndgameCtxWorker *worker, int dst, int src) {
 static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
                                   int32_t value,
                                   const struct PVLine *continuation,
-                                  int K_max) {
-  if (K_max < 1) {
+                                  int max_k) {
+  if (max_k < 1) {
     return;
   }
-  if (K_max > MAX_ENDGAME_DISPLAY_PVS) {
-    K_max = MAX_ENDGAME_DISPLAY_PVS;
+  if (max_k > MAX_ENDGAME_DISPLAY_PVS) {
+    max_k = MAX_ENDGAME_DISPLAY_PVS;
   }
   // Begin seqlock write window: bump seq odd.
   const uint64_t seq_before =
@@ -2082,11 +2087,11 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
       atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
 
   // Remove existing entry for same root_tiny so we can re-insert sorted.
-  for (int i = 0; i < filled; i++) {
-    if (atomic_load_explicit(&worker->live_top_k_root_tiny[i],
+  for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+    if (atomic_load_explicit(&worker->live_top_k_root_tiny[pv_idx],
                              memory_order_relaxed) == root_tiny) {
-      for (int j = i; j < filled - 1; j++) {
-        topk_copy_slot(worker, j, j + 1);
+      for (int shift_idx = pv_idx; shift_idx < filled - 1; shift_idx++) {
+        topk_copy_slot(worker, shift_idx, shift_idx + 1);
       }
       filled--;
       break;
@@ -2095,18 +2100,18 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
 
   // Find insertion position (descending order by value).
   int insert_pos = filled;
-  for (int i = 0; i < filled; i++) {
-    if (value > atomic_load_explicit(&worker->live_top_k_value[i],
+  for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+    if (value > atomic_load_explicit(&worker->live_top_k_value[pv_idx],
                                      memory_order_relaxed)) {
-      insert_pos = i;
+      insert_pos = pv_idx;
       break;
     }
   }
 
-  if (insert_pos < K_max) {
-    const int last = (filled < K_max) ? filled : (K_max - 1);
-    for (int i = last; i > insert_pos; i--) {
-      topk_copy_slot(worker, i, i - 1);
+  if (insert_pos < max_k) {
+    const int last = (filled < max_k) ? filled : (max_k - 1);
+    for (int slot_idx = last; slot_idx > insert_pos; slot_idx--) {
+      topk_copy_slot(worker, slot_idx, slot_idx - 1);
     }
     atomic_store_explicit(&worker->live_top_k_root_tiny[insert_pos], root_tiny,
                           memory_order_relaxed);
@@ -2116,14 +2121,14 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
     if (cont_len > MAX_SEARCH_DEPTH) {
       cont_len = MAX_SEARCH_DEPTH;
     }
-    for (int i = 0; i < cont_len; i++) {
-      atomic_store_explicit(&worker->live_top_k_continuation[insert_pos][i],
-                            continuation->moves[i].tiny_move,
-                            memory_order_relaxed);
+    for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
+      atomic_store_explicit(
+          &worker->live_top_k_continuation[insert_pos][ply_idx],
+          continuation->moves[ply_idx].tiny_move, memory_order_relaxed);
     }
     atomic_store_explicit(&worker->live_top_k_continuation_len[insert_pos],
                           cont_len, memory_order_relaxed);
-    if (filled < K_max) {
+    if (filled < max_k) {
       filled++;
     }
     atomic_store_explicit(&worker->live_top_k_filled, filled,
@@ -2658,9 +2663,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
               atomic_load_explicit(&worker->live_pv_seq, memory_order_relaxed);
           atomic_store_explicit(&worker->live_pv_seq, seq_before + 1,
                                 memory_order_release);
-          for (int i = 0; i < new_len; i++) {
-            atomic_store_explicit(&worker->live_pv_tiny_moves[i],
-                                  pv->moves[i].tiny_move, memory_order_relaxed);
+          for (int ply_idx = 0; ply_idx < new_len; ply_idx++) {
+            atomic_store_explicit(&worker->live_pv_tiny_moves[ply_idx],
+                                  pv->moves[ply_idx].tiny_move,
+                                  memory_order_relaxed);
           }
           atomic_store_explicit(&worker->live_pv_length, new_len,
                                 memory_order_relaxed);

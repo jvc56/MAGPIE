@@ -1403,7 +1403,7 @@ void test_endgame_progress_stream(void) {
     printf("(warmup complete; TT pre-allocated)\n");
   }
 
-  const int kIterations = npos * nmodes;
+  const int total_iterations = npos * nmodes;
   int iter = 0;
   for (int pos_idx = 0; pos_idx < npos; pos_idx++) {
     for (int mode_idx = 0; mode_idx < nmodes; mode_idx++) {
@@ -1419,7 +1419,7 @@ void test_endgame_progress_stream(void) {
 
       printf(
           "\n=== iter %d/%d: pos=%d mode=%s threads=%d plies=%d lex=%s ===\n",
-          iter, kIterations, pos_idx, mode_labels[mode_idx], threads,
+          iter, total_iterations, pos_idx, mode_labels[mode_idx], threads,
           positions[pos_idx].eplies, positions[pos_idx].lex);
 
       ProgressStream stream = {0};
