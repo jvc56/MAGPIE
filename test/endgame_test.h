@@ -13,5 +13,7 @@ void test_via_opp_must_block_every_depth(void);
 void test_via_interrupted_reasonable_under_time_pressure(void);
 void test_endgame_dynamic_worker_injection(void);
 void test_endgame_first_win_sign(void);
+void test_before_search_callback(void);
+void test_endgame_progress_stream(void);
 
 #endif

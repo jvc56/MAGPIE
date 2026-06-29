@@ -163,6 +163,7 @@ static TestEntry on_demand_test_table[] = {
     {"kwgtailreorder", test_kwg_tail_reorder},
     {"dawgpacked", test_dawg_packed},
     {"kwgmergebench", test_kwg_merge_build_bench},
+    {"endgame_stream", test_endgame_progress_stream},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
