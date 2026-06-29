@@ -929,11 +929,8 @@ typedef struct BeforeSearchCaptured {
   int initial_move_count;
   int initial_spread;
   int solving_player;
-  // first move's tiny_move + estimated_value (lets us verify the array is
-  // sorted descending by static estimate at the moment of firing)
-  uint64_t first_move_tiny;
-  int32_t first_move_estimate;
-  // sortedness check across all received moves
+  // sortedness check across all received moves: are they in descending static
+  // estimate order at the moment the callback fires?
   bool sorted_desc_by_estimate;
 } BeforeSearchCaptured;
 
@@ -947,10 +944,6 @@ static void capture_before_search_cb(const Game *game,
   c->initial_move_count = initial_move_count;
   c->initial_spread = initial_spread;
   c->solving_player = solving_player;
-  if (initial_move_count > 0) {
-    c->first_move_tiny = initial_moves[0].tiny_move;
-    c->first_move_estimate = small_move_get_estimated_value(&initial_moves[0]);
-  }
   c->sorted_desc_by_estimate = true;
   for (int i = 1; i < initial_move_count; i++) {
     if (small_move_get_estimated_value(&initial_moves[i]) >
@@ -1030,7 +1023,9 @@ void test_before_search_callback(void) {
   assert(captured.call_count == 1);
   assert(captured.initial_move_count > 0);
   assert(captured.solving_player == 0);
-  assert(captured.first_move_tiny != 0); // not PASS at slot 0
+  // The callback contract is about sortedness and counts, not move identity:
+  // PASS (tiny_move == 0) is a legal root move and qsort has no tie-breaker,
+  // so it may legitimately land at slot 0 — don't assert against it.
   assert(captured.sorted_desc_by_estimate);
 
   // Polled atomics seen from inside the callback must match the callback's

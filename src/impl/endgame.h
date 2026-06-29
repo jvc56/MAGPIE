@@ -262,12 +262,13 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed, int *ply2_moves_total);
 
-// Sum of nodes searched across all worker threads, lagging by up to
-// DEPTH_DEADLINE_CHECK_INTERVAL nodes per thread (the period at which
-// each worker flushes its non-atomic local counter to the shared
-// atomic). Cheap to call from any thread; intended for "is the engine
-// alive / nodes per second" UI heartbeats during long single-root
-// subtree evaluations.
+// Sum of nodes searched across all worker threads. While the search is
+// running this lags by up to DEPTH_DEADLINE_CHECK_INTERVAL nodes per thread
+// (the period at which each worker flushes its non-atomic local counter to
+// the shared atomic); each worker does a final exact flush when it stops, so
+// once the solve completes the total is exact. Cheap to call from any thread;
+// intended for "is the engine alive / nodes per second" UI heartbeats during
+// long single-root subtree evaluations.
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 
 // Snapshot of the line currently being explored by worker `worker_index`

@@ -3204,6 +3204,15 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
+
+  // Final flush: this worker has stopped searching, so publish its exact
+  // node count. The periodic in-search flush only fires every
+  // DEPTH_DEADLINE_CHECK_INTERVAL nodes, so without this the tail of every
+  // worker (and all of a very short solve) would be permanently
+  // under-reported by up to DEPTH_DEADLINE_CHECK_INTERVAL-1 nodes. All
+  // exit paths of the loop above fall through to here.
+  atomic_store_explicit(&worker->published_nodes_searched,
+                        worker->local_nodes_searched, memory_order_relaxed);
 }
 
 void *solver_worker_start(void *uncasted_solver_worker) {
