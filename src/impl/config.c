@@ -234,6 +234,7 @@ typedef enum {
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
+  ARG_TOKEN_VERSION,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -898,6 +899,18 @@ char *str_api_fatal(Config *config,
                     ErrorStack __attribute__((unused)) * error_stack) {
   execute_fatal(config, error_stack);
   return empty_string();
+}
+
+#define MAGPIE_VERSION "0.0.0"
+
+void execute_version(Config *config,
+                     ErrorStack __attribute__((unused)) * error_stack) {
+  thread_control_print(config->thread_control, MAGPIE_VERSION "\n");
+}
+
+char *str_api_version(Config __attribute__((unused)) * config,
+                      ErrorStack __attribute__((unused)) * error_stack) {
+  return string_duplicate(MAGPIE_VERSION "\n");
 }
 
 // Used for commands that only update the config state
@@ -2050,6 +2063,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
              " runs one game at a time using all threads for simulation.";
       break;
+    case ARG_TOKEN_VERSION:
+      usages[0] = "";
+      text = "Prints the version of the magpie executable.";
+      break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
       break;
@@ -2163,7 +2180,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_CREATE_DATA, /* createdata */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
-
+        ARG_TOKEN_VERSION,     /* version */
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
@@ -8198,6 +8215,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
                     str_api_fatal, status_generic, false, false)
 
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
+  cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -8561,6 +8579,7 @@ void config_add_settings_to_string_builder(const Config *config,
        arg_token++) {
     switch (arg_token) {
     case ARG_TOKEN_HELP:
+    case ARG_TOKEN_VERSION:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
