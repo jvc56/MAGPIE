@@ -848,8 +848,7 @@ void linenoiseEditHistoryNext(struct linenoiseState *l, int dir) {
       l->history_index = history_len - 1;
       return;
     }
-    strncpy(l->buf, history[history_len - 1 - l->history_index], l->buflen);
-    l->buf[l->buflen - 1] = '\0';
+    snprintf(l->buf, l->buflen, "%s", history[history_len - 1 - l->history_index]);
     l->len = l->pos = strlen(l->buf);
     refreshLine(l);
   }
@@ -1333,10 +1332,9 @@ int linenoiseHistoryAdd(const char *line) {
 
   /* Initialization on first call. */
   if (history == NULL) {
-    history = malloc(sizeof(char *) * history_max_len);
+    history = calloc(history_max_len, sizeof(char *));
     if (history == NULL)
       return 0;
-    memset(history, 0, (sizeof(char *) * history_max_len));
   }
 
   /* Don't add duplicated lines. */
