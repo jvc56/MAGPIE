@@ -235,6 +235,46 @@ void test_autoplay_leaves_record(void) {
   config_destroy(csw_config);
 }
 
+void test_autoplay_rack_equity_record(void) {
+  Config *csw_config =
+      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
+                           "all -numplays 1 -gp false -threads 3");
+  load_and_exec_config_or_die(csw_config,
+                              "autoplay rackequity 5 -seed 42 -wb 1000000");
+  config_destroy(csw_config);
+
+  char *csv = get_string_from_file_or_die("autoplay_record_rackequity.csv");
+  assert(csv);
+
+  StringSplitter *lines = split_string_by_newline(csv, true);
+  const int num_lines = string_splitter_get_number_of_items(lines);
+  assert(num_lines > 0);
+
+  for (int line_idx = 0; line_idx < num_lines; line_idx++) {
+    const char *line = string_splitter_get_item(lines, line_idx);
+    StringSplitter *cols = split_string(line, ',', false);
+    const int num_cols = string_splitter_get_number_of_items(cols);
+    // Each row must have at least rack + one equity value
+    assert(num_cols >= 2);
+    // First column is the rack string (non-empty)
+    const char *rack_str = string_splitter_get_item(cols, 0);
+    assert(strlen(rack_str) > 0);
+    // All subsequent columns must be parseable as doubles (equity values)
+    ErrorStack *error_stack = error_stack_create();
+    for (int col_idx = 1; col_idx < num_cols; col_idx++) {
+      const char *equity_str = string_splitter_get_item(cols, col_idx);
+      string_to_double(equity_str, error_stack);
+      assert(error_stack_is_empty(error_stack));
+    }
+    error_stack_destroy(error_stack);
+    string_splitter_destroy(cols);
+  }
+
+  string_splitter_destroy(lines);
+  free(csv);
+  (void)remove("autoplay_record_rackequity.csv");
+}
+
 // Check wmp movegen correctness by comparing results in gamepair autoplay to
 // the legacy recursive_gen algorithm. Auto-discovers .wmp lexica under the
 // configured data paths so the test stays in sync with available data.
@@ -388,6 +428,7 @@ void test_autoplay_remaining(void) {
   test_autoplay_divergent_games();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
+  test_autoplay_rack_equity_record();
   test_autoplay_sim();
 }
 

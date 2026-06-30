@@ -1037,6 +1037,116 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   free(leaves_count_name);
 }
 
+// Rack equity recorder
+
+#define RACK_EQUITY_FILENAME "autoplay_record_rackequity.csv"
+
+enum { RACK_EQUITY_INITIAL_CAPACITY = 4096 };
+
+typedef struct RackEquityEntry {
+  char rack_str[RACK_SIZE + 1];
+  Equity equity;
+} RackEquityEntry;
+
+typedef struct RackEquityData {
+  RackEquityEntry *entries;
+  int num_entries;
+  int capacity;
+} RackEquityData;
+
+void rack_equity_data_reset(Recorder *recorder) {
+  RackEquityData *data = (RackEquityData *)recorder->data;
+  data->num_entries = 0;
+}
+
+void rack_equity_data_create(Recorder *recorder) {
+  RackEquityData *data = malloc_or_die(sizeof(RackEquityData));
+  data->capacity = RACK_EQUITY_INITIAL_CAPACITY;
+  data->entries = malloc_or_die(sizeof(RackEquityEntry) * data->capacity);
+  data->num_entries = 0;
+  recorder->data = data;
+  recorder->thread_shared_data = NULL;
+}
+
+void rack_equity_data_destroy(Recorder *recorder) {
+  RackEquityData *data = (RackEquityData *)recorder->data;
+  free(data->entries);
+  free(data);
+}
+
+void rack_equity_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  RackEquityData *data = (RackEquityData *)recorder->data;
+  if (data->num_entries == data->capacity) {
+    data->capacity *= 2;
+    data->entries =
+        realloc_or_die(data->entries, sizeof(RackEquityEntry) * data->capacity);
+  }
+  RackEquityEntry *entry = &data->entries[data->num_entries];
+  const Game *game = args->game;
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const LetterDistribution *ld = recorder->recorder_context->ld;
+  StringBuilder *rack_sb = string_builder_create();
+  string_builder_add_rack(rack_sb, player_get_rack(player), ld, false);
+  snprintf(entry->rack_str, sizeof(entry->rack_str), "%s",
+           string_builder_peek(rack_sb));
+  string_builder_destroy(rack_sb);
+  entry->equity = move_get_equity(args->move);
+  data->num_entries++;
+}
+
+int rack_equity_entry_compare(const void *a, const void *b) {
+  const RackEquityEntry *ea = (const RackEquityEntry *)a;
+  const RackEquityEntry *eb = (const RackEquityEntry *)b;
+  return strcmp(ea->rack_str, eb->rack_str);
+}
+
+void rack_equity_data_consolidate(Recorder **recorder_list, int list_size,
+                                  Recorder __attribute__((unused)) *
+                                      primary_recorder) {
+  int total = 0;
+  for (int i = 0; i < list_size; i++) {
+    total += ((RackEquityData *)recorder_list[i]->data)->num_entries;
+  }
+
+  RackEquityEntry *all_entries =
+      malloc_or_die(sizeof(RackEquityEntry) * (total > 0 ? total : 1));
+  int pos = 0;
+  for (int i = 0; i < list_size; i++) {
+    const RackEquityData *data = (RackEquityData *)recorder_list[i]->data;
+    memcpy(all_entries + pos, data->entries,
+           sizeof(RackEquityEntry) * data->num_entries);
+    pos += data->num_entries;
+  }
+
+  qsort(all_entries, total, sizeof(RackEquityEntry), rack_equity_entry_compare);
+
+  StringBuilder *sb = string_builder_create();
+  int entry_idx = 0;
+  while (entry_idx < total) {
+    const char *current_rack = all_entries[entry_idx].rack_str;
+    string_builder_add_string(sb, current_rack);
+    while (entry_idx < total &&
+           strcmp(all_entries[entry_idx].rack_str, current_rack) == 0) {
+      string_builder_add_formatted_string(
+          sb, ",%g", equity_to_double(all_entries[entry_idx].equity));
+      entry_idx++;
+    }
+    string_builder_add_char(sb, '\n');
+  }
+
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(RACK_EQUITY_FILENAME, "w", string_builder_peek(sb),
+                       error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("error writing rack equity file '%s'", RACK_EQUITY_FILENAME);
+  }
+  error_stack_destroy(error_stack);
+  string_builder_destroy(sb);
+  free(all_entries);
+}
+
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
@@ -1163,6 +1273,11 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
       get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_RACK_EQUITY,
+      rack_equity_data_reset, rack_equity_data_create, rack_equity_data_destroy,
+      rack_equity_data_add_move, add_game_noop, rack_equity_data_consolidate,
+      get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -1189,6 +1304,9 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
+    } else if (has_iprefix(option_str, "rackequity")) {
+      options |=
+          autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_RACK_EQUITY);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,

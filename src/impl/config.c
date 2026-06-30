@@ -1145,9 +1145,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "games 100";
       examples[1] = "games,winpct 1000";
       examples[2] = "leave,winpct 2000";
+      examples[3] = "rackequity 500";
       text = "Runs the autoplay command with the specified recorder(s). If the "
              "game pairs option is set to true, autoplay will run <num_games> "
-             "game pairs resulting in a total of 2 * <num_games> games.";
+             "game pairs resulting in a total of 2 * <num_games> games. The "
+             "'rackequity' recorder writes a CSV of rack,equity pairs to "
+             "autoplay_record_rackequity.csv.";
       break;
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <input_name_without_extension> "
