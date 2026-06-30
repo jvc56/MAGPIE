@@ -13,6 +13,7 @@
 #include "../util/string_util.h"
 #include "bag.h"
 #include "data_filepaths.h"
+#include "encoded_rack.h"
 #include "equity.h"
 #include "game.h"
 #include "klv.h"
@@ -1044,7 +1045,7 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
 enum { RACK_EQUITY_INITIAL_CAPACITY = 4096 };
 
 typedef struct RackEquityEntry {
-  char rack_str[RACK_SIZE + 1];
+  EncodedRack encoded_rack;
   Equity equity;
 } RackEquityEntry;
 
@@ -1085,12 +1086,7 @@ void rack_equity_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   const Game *game = args->game;
   const int player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, player_index);
-  const LetterDistribution *ld = recorder->recorder_context->ld;
-  StringBuilder *rack_sb = string_builder_create();
-  string_builder_add_rack(rack_sb, player_get_rack(player), ld, false);
-  snprintf(entry->rack_str, sizeof(entry->rack_str), "%s",
-           string_builder_peek(rack_sb));
-  string_builder_destroy(rack_sb);
+  rack_encode(player_get_rack(player), &entry->encoded_rack);
   entry->equity = move_get_equity(args->move);
   data->num_entries++;
 }
@@ -1098,7 +1094,8 @@ void rack_equity_data_add_move(Recorder *recorder, const RecorderArgs *args) {
 int rack_equity_entry_compare(const void *a, const void *b) {
   const RackEquityEntry *ea = (const RackEquityEntry *)a;
   const RackEquityEntry *eb = (const RackEquityEntry *)b;
-  return strcmp(ea->rack_str, eb->rack_str);
+  return memcmp(ea->encoded_rack.array, eb->encoded_rack.array,
+                sizeof(ea->encoded_rack.array));
 }
 
 void rack_equity_data_consolidate(Recorder **recorder_list, int list_size,
@@ -1121,13 +1118,19 @@ void rack_equity_data_consolidate(Recorder **recorder_list, int list_size,
 
   qsort(all_entries, total, sizeof(RackEquityEntry), rack_equity_entry_compare);
 
+  const LetterDistribution *ld = primary_recorder->recorder_context->ld;
+  Rack decode_rack;
+  rack_set_dist_size(&decode_rack, ld_get_size(ld));
   StringBuilder *sb = string_builder_create();
   int entry_idx = 0;
   while (entry_idx < total) {
-    const char *current_rack = all_entries[entry_idx].rack_str;
-    string_builder_add_string(sb, current_rack);
+    const EncodedRack *current_encoded = &all_entries[entry_idx].encoded_rack;
+    rack_decode(current_encoded, &decode_rack);
+    string_builder_add_rack(sb, &decode_rack, ld, false);
     while (entry_idx < total &&
-           strcmp(all_entries[entry_idx].rack_str, current_rack) == 0) {
+           memcmp(all_entries[entry_idx].encoded_rack.array,
+                  current_encoded->array,
+                  sizeof(current_encoded->array)) == 0) {
       string_builder_add_formatted_string(
           sb, ",%g", equity_to_double(all_entries[entry_idx].equity));
       entry_idx++;
