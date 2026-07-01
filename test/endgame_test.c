@@ -165,7 +165,6 @@ void test_single_endgame(const char *config_settings, const char *cgp,
   endgame_args.initial_small_move_arena_size = initial_small_move_arena_size;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
-  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -279,6 +278,168 @@ void test_pass_first(void) {
       0);
 }
 
+// Drives endgame_add_worker from inside the running solve: the per-ply
+// callback fires on the master worker after each completed depth, and injects
+// one extra ABDADA worker per ply (up to max_attempts) — modeling a pool that
+// lends idle cores mid-search. Each injected worker draws its own MoveGen cache
+// slot from get_movegen() (per-pthread), so the injector hands out no slots.
+typedef struct WorkerInjector {
+  EndgameCtx **solver_ptr; // address of the caller's ctx (set by endgame_solve)
+  int max_attempts;        // cap on injection attempts (one per ply)
+  int attempts;            // attempts made so far
+  int added;               // successful injections
+} WorkerInjector;
+
+static void inject_worker_per_ply(int depth, int32_t value,
+                                  const PVLine *pv_line, const Game *game,
+                                  const PVLine *ranked_pvs, int num_ranked_pvs,
+                                  void *user_data) {
+  (void)depth;
+  (void)value;
+  (void)pv_line;
+  (void)game;
+  (void)ranked_pvs;
+  (void)num_ranked_pvs;
+  WorkerInjector *injector = (WorkerInjector *)user_data;
+  EndgameCtx *solver = *injector->solver_ptr;
+  if (solver == NULL || injector->attempts >= injector->max_attempts) {
+    return;
+  }
+  if (endgame_add_worker(solver)) {
+    injector->added++;
+  }
+  injector->attempts++;
+}
+
+// Dynamic worker injection: a solve started with one thread must absorb extra
+// ABDADA workers injected mid-search (as cores free up) and still return the
+// exact single-threaded value. ABDADA is value-deterministic regardless of
+// thread count or when workers join, so the result must equal the known -63.
+// Exercised for both endgame_solve (master is a spawned thread) and
+// endgame_solve_inline (master runs in the calling thread — the path PEG uses,
+// where injected helpers cooperate while the caller's own core keeps solving).
+// 6 plies is the shallowest depth that reaches the converged -63 (5 gives -60),
+// and still injects one worker per IDS depth — the value-determinism property
+// is what the test checks, not the search depth.
+static void run_injection_case(bool use_inline) {
+  Config *config =
+      config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21");
+
+  Game *game = config_get_game(config);
+  EndgameResults *results = config_get_endgame_results(config);
+
+  EndgameCtx *ctx = NULL;
+  // Model a pool lending up to 4 idle cores mid-search (one per ply).
+  WorkerInjector injector = {
+      .solver_ptr = &ctx, .max_attempts = 4, .attempts = 0, .added = 0};
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = game;
+  args.plies = config_get_endgame_plies(config);
+  // Tiny TT (clamps to the 2^24 minimum) instead of the 0.25 default: this
+  // small endgame needs almost no TT, and allocating + zeroing a multi-GB
+  // table twice (once per case) dominated the test's runtime. The solved value
+  // is exact regardless of TT size, so this only affects speed.
+  args.tt_fraction_of_mem = 0.0001;
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1; // start single-threaded...
+  args.max_workers = 5; // ...and allow growth to 1 + 4 injected
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.seed = 42;
+  args.per_ply_callback = inject_worker_per_ply;
+  args.per_ply_callback_data = &injector;
+
+  ErrorStack *error_stack = error_stack_create();
+  if (use_inline) {
+    endgame_solve_inline(&ctx, &args, results);
+  } else {
+    endgame_solve(&ctx, &args, results, error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  const int32_t value =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+
+  printf("dynamic-worker-injection (%s): value=%d workers_added=%d\n",
+         use_inline ? "inline" : "spawned", value, injector.added);
+  assert(value == -63);
+  assert(injector.added > 0); // at least one helper joined mid-search
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
+void test_endgame_dynamic_worker_injection(void) {
+  run_injection_case(/*use_inline=*/false);
+  run_injection_case(/*use_inline=*/true);
+}
+
+// first_win uses a narrow [-1,+1] window to resolve win/loss/draw cheaply (the
+// path pessimistic PEG uses), and caps the depth-0 interrupt fallback to the
+// top few root moves. It must agree in SIGN with the exact full-spread solve.
+// This position is a converged 63-point loss for the player on turn at 6 plies:
+// full-spread must report exactly -63, first_win a loss (strictly negative).
+void test_endgame_first_win_sign(void) {
+  const char *cgp =
+      "cgp "
+      "GATELEGs1POGOED/R4MOOLI3X1/AA10U2/YU4BREDRIN2/1TITULE3E1IN1/1E4N3c1BOK/"
+      "1C2O4CHARD1/QI1FLAWN2E1OE1/IS2E1HIN1A1W2/1MOTIVATE1T1S2/1S2N5S4/"
+      "3PERJURY5/15/15/15 FV/AADIZ 442/388 0 -lex CSW21";
+  // {first_win, first_win_fallback_moves}: full-spread, then first-win with the
+  // default fallback cap, then first-win skipping the fallback entirely (-1).
+  // first-win must agree in SIGN with the exact solve regardless of the
+  // (adjustable) fallback cap.
+  const struct {
+    bool first_win;
+    int fallback;
+  } cases[] = {{false, 0}, {true, 0}, {true, -1}};
+  for (size_t ci = 0; ci < sizeof(cases) / sizeof(cases[0]); ci++) {
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -threads 1 -eplies 6");
+    load_and_exec_config_or_die(config, cgp);
+    Game *game = config_get_game(config);
+    EndgameResults *results = config_get_endgame_results(config);
+
+    EndgameCtx *ctx = NULL;
+    EndgameArgs args = {0};
+    args.thread_control = config_get_thread_control(config);
+    args.game = game;
+    args.plies = config_get_endgame_plies(config);
+    args.tt_fraction_of_mem = 0.0001;
+    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    args.num_threads = 1;
+    args.max_workers = 1;
+    args.use_heuristics = true;
+    args.forced_pass_bypass = true;
+    args.num_top_moves = 1;
+    args.seed = 42;
+    args.first_win = cases[ci].first_win;
+    args.first_win_fallback_moves = cases[ci].fallback;
+
+    endgame_solve_inline(&ctx, &args, results);
+    const int32_t value =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+    printf("endgame first_win=%d fallback=%d: value=%d\n", args.first_win,
+           args.first_win_fallback_moves, value);
+    if (args.first_win) {
+      assert(value < 0); // correct loss sign regardless of the fallback cap
+    } else {
+      assert(value == -63); // exact full-spread value
+    }
+    endgame_ctx_destroy(ctx);
+    config_destroy(config);
+  }
+}
+
 void test_nonempty_bag(void) {
   // The solver should return an error if the bag is not empty.
   test_single_endgame("set -s1 score -s2 score -threads 6 -eplies 4",
@@ -311,7 +472,6 @@ void test_single_pv_display(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
-  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 5;
@@ -371,7 +531,6 @@ void test_ctx_reuse(void) {
         DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
     endgame_args.num_threads = thread_counts[solve_idx];
     endgame_args.use_heuristics = true;
-    endgame_args.enable_iterative_deepening = true;
     endgame_args.forced_pass_bypass = true;
     endgame_args.enable_pv_display = true;
     endgame_args.num_top_moves = 1;
@@ -472,7 +631,6 @@ void test_kue(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 8;
   endgame_args.use_heuristics = true;
-  endgame_args.enable_iterative_deepening = true;
   endgame_args.num_top_moves = 10;
   endgame_args.per_ply_callback = print_pv_and_ranked_callback;
   endgame_args.per_ply_callback_data = &timer;
@@ -535,7 +693,6 @@ void test_2lex_endgame(dual_lexicon_mode_t mode, int expected_score) {
       .num_threads = 1,
       .num_top_moves = 1,
       .use_heuristics = false,
-      .enable_iterative_deepening = true,
       .per_ply_callback = NULL,
       .per_ply_callback_data = NULL,
       .dual_lexicon_mode = mode,
@@ -561,255 +718,209 @@ void test_2lex_informed(void) {
   test_2lex_endgame(DUAL_LEXICON_MODE_INFORMED, 81);
 }
 
-// Test that topk_fully_solved fires when the actual game is shorter than eplies
-// (all branches end before the depth limit), and does NOT fire when unfinished
-// leaves remain. Covers single-thread, multi-thread, single-PV, and etopk.
-void test_topk_fully_solved(void) {
-  // --- Case 1: game ends before eplies (early-stop must fire) ---
-  // BGIV/DEHILOR: 4+7=11 tiles. Score=11, confirmed by test_solve_standard
-  // at eplies=4. With eplies=10, early-stop fires at depth 7-8 (< 10),
-  // well before the depth limit. The search completes in seconds even
-  // single-threaded because the 11-tile game tree is small.
-  const char *short_cgp =
-      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20";
+// Pos 28 from the 2peg random suite (CSW24). After mover plays 4L (V)IA 19
+// in scenario IS (mover drew I,S from bag): bag empty, opp has AIINOOU,
+// mover has CDIOST?. The blank gives mover a DISCO(U)nT bingo at 1A through
+// the existing U at row 1 col F, scoring 167 + 14 going-out bonus = +181
+// value. Opp's only defence is 2B ONIO(N) 10 which creates an "IO" cross
+// below 1B and BLOCKS DISCO(U)nT. Discovered while debugging the peg
+// greedy d=0 evaluator: a tight -tlim that interrupts IDS in the middle
+// of its depth-3 iteration was returning pass-pass at "status: finished"
+// even though -plies 3 with adequate time gives the correct answer.
+//
+// The tests below verify both halves of the response at every search depth:
+// (1) from mover's turn (after opp would pass), mover MUST find DISCO(U)nT
+// (2) from opp's turn, opp MUST block and the PV ends in mover's bingo.
 
-  typedef struct {
-    int threads;
-    int topk;
-  } EarlyStopCase;
-  const EarlyStopCase cases[] = {
-      {1, 1}, // single-thread, single-PV
-      {6, 1}, // multi-thread ABDADA, single-PV
-      {6, 3}, // multi-thread ABDADA, etopk
-  };
-  for (int ci = 0; ci < 3; ci++) {
-    Config *config = config_create_or_die("set -s1 score -s2 score");
-    load_and_exec_config_or_die(config, short_cgp);
+#define VIA_IS_OPP_TURN_CGP                                                    \
+  "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"          \
+  "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
+  "4RENEGADE2P AIINOOU/CDIOST? 392/450 0 -lex CSW24"
 
-    EndgameCtx *ctx = NULL;
-    EndgameArgs args = {0};
-    args.thread_control = config_get_thread_control(config);
-    args.game = config_get_game(config);
-    args.plies = 10;
-    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = cases[ci].threads;
-    args.num_top_moves = cases[ci].topk;
-    args.use_heuristics = true;
-    args.enable_iterative_deepening = true;
-    args.forced_pass_bypass = true;
-    args.seed = 42;
+#define VIA_IS_MOVER_TURN_CGP                                                  \
+  "cgp 5U4OHMIC/5N3WREATH/5T4FAX2/5i3B1VIA1/5N3L1E3/5G2VELDT2/5E3S5/"          \
+  "5DREKS1F3/8YELL3/4ABASER1U3/4GYM3ZO3/WAITE5OR2J/10OI2A/3QUOIT1PINNER/"      \
+  "4RENEGADE2P CDIOST?/AIINOOU 450/392 0 -lex CSW24"
 
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-    endgame_solve(&ctx, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-
-    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
-    int completed_depth =
-        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
-    printf("topk_fully_solved early-stop (threads=%d topk=%d): "
-           "score=%d completed_depth=%d\n",
-           cases[ci].threads, cases[ci].topk, pv->score, completed_depth);
-    // Correct score: 11 (matches test_solve_standard at eplies=4).
-    assert(pv->score == 11);
-    // Early-stop must have fired (completed_depth < eplies=10).
-    assert(completed_depth > 0 && completed_depth < 10);
-
-    endgame_ctx_destroy(ctx);
-    error_stack_destroy(error_stack);
-    config_destroy(config);
-  }
-
-  // --- Case 2: non-terminal horizon (early-stop must NOT fire) ---
-  // ?AEEKSU/BEIQUVW: 14 tiles. At eplies=2 most branches still have tiles
-  // in hand → any_leaf_game_unfinished is set → topk_fully_solved stays false.
-  // The solver must terminate via ply==plies, so completed_depth == 2.
-  {
-    Config *config =
-        config_create_or_die("set -s1 score -s2 score -ttfraction 0.5");
-    load_and_exec_config_or_die(
-        config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
-                "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
-                "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
-                "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23;");
-
-    EndgameCtx *ctx = NULL;
-    EndgameArgs args = {0};
-    args.thread_control = config_get_thread_control(config);
-    args.game = config_get_game(config);
-    args.plies = 2;
-    args.tt_fraction_of_mem = 0.5;
-    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = 6;
-    args.num_top_moves = 3;
-    args.use_heuristics = false;
-    args.enable_iterative_deepening = true;
-    args.seed = 42;
-
-    EndgameResults *results = config_get_endgame_results(config);
-    ErrorStack *error_stack = error_stack_create();
-    endgame_solve(&ctx, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-
-    int completed_depth =
-        endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
-    printf("topk_fully_solved non-terminal horizon: completed_depth=%d\n",
-           completed_depth);
-    // Early-stop must NOT have fired; solver must reach the eplies limit.
-    assert(completed_depth == 2);
-
-    endgame_ctx_destroy(ctx);
-    error_stack_destroy(error_stack);
-    config_destroy(config);
+void test_via_mover_must_bingo_every_depth(void) {
+  // Mover (CDIOST?) on turn after VIA + (implicit opp pass). Bag empty.
+  // Mover MUST play DISCO(U)nT 167 going out, value +181, at every depth.
+  // The bingo terminates the game so depth-1 already suffices; depths 4-6
+  // search the same tree but get pruned quickly when the leaf finds the
+  // going-out bonus. Test plies 1..3 (deeper plies just confirm the same
+  // answer at much higher wall-time cost).
+  for (int plies = 1; plies <= 3; plies++) {
+    char settings[128];
+    (void)snprintf(settings, sizeof(settings),
+                   "set -s1 score -s2 score -threads 6 -eplies %d "
+                   "-ttfraction 0.05",
+                   plies);
+    test_single_endgame(settings, VIA_IS_MOVER_TURN_CGP,
+                        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        ERROR_STATUS_SUCCESS, 181, false, 0);
   }
 }
 
-// Asserts the post-solve re-search produces TT_EXACT entries throughout each
-// multi-PV display PV: every PV's negamax_depth covers all of its moves so
-// the display never renders a "|" mid-PV. Uses BGIV/DEHILOR (the same
-// short-game position as test_topk_fully_solved); at eplies=4 the search
-// reaches game-end on the principal lines for all top-10 root moves, so
-// the walk-down re-search has room to populate EXACT entries throughout.
-void test_topk_full_solve_no_pipe(void) {
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(
-      config,
-      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+// Cheap in-suite smoke for the VIA mover-must-bingo regression: a single 1-ply
+// solve (1 thread, no PV display) of the mover-on-turn position. The going-out
+// DISCO(U)nT bingo terminates the game at depth 1, so this is sub-second and
+// safe for run_all; the full plies-1..3 sweep with display stays on-demand
+// (viamover).
+void test_via_mover_bingo_one_ply(void) {
+  Config *config = config_create_or_die(
+      "set -s1 score -s2 score -threads 1 -eplies 1 -ttfraction 0.05");
+  load_and_exec_config_or_die(config, VIA_IS_MOVER_TURN_CGP);
 
-  EndgameCtx *ctx = NULL;
   EndgameArgs args = {0};
   args.thread_control = config_get_thread_control(config);
   args.game = config_get_game(config);
-  args.plies = 4;
+  args.plies = config_get_endgame_plies(config);
   args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
   args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  args.num_threads = 6;
-  args.num_top_moves = 10;
+  args.num_threads = 1;
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
-  args.enable_iterative_deepening = true;
-  args.enable_pv_display = true;
+  args.num_top_moves = 1;
   args.seed = 42;
 
   EndgameResults *results = config_get_endgame_results(config);
   ErrorStack *error_stack = error_stack_create();
+  EndgameCtx *ctx = NULL;
   endgame_solve(&ctx, &args, results, error_stack);
   assert(error_stack_is_empty(error_stack));
 
-  const int num_pvs = endgame_results_get_num_pvs(results);
-  assert(num_pvs > 1);
-  // Whether a within-budget PV's display renders without a "|" — i.e. picks up
-  // TT_EXACT entries the whole way down rather than TT_LOWER/UPPER bounds —
-  // depends on how broadly the search filled the shared transposition table,
-  // which varies with thread count and (crucially) TT capacity. It held under
-  // the original 6-thread native run but is NOT a robust invariant: it fails
-  // single-threaded (more pruning leaves bound entries) and under WASM's much
-  // smaller fraction-of-memory TT (more eviction), even for the best PV. That
-  // "|" is a display nicety, not a correctness issue, so don't assert it.
-  // What IS invariant: a valid multi-PV result whose proven-exact prefix never
-  // exceeds the PV length.
-  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-    const PVLine *pv = endgame_results_get_multi_pvline(results, pv_idx);
-    assert(pv->negamax_depth >= 0);
-    assert(pv->negamax_depth <= pv->num_moves);
-  }
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  assert(pv->score == 181); // mover plays DISCO(U)nT going out, value +181
+  assert(!small_move_is_pass(&pv->moves[0]));
 
   endgame_ctx_destroy(ctx);
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
 
-// Returns true if two PVLines describe the same first move in terms of
-// what hits the board (anchor + direction + tile sequence). Ignores
-// SmallMove.metadata.score because the engine's walk-down re-search
-// can update one PV's score while leaving an identical sibling PV's
-// score stale.
-static bool pvline_first_move_equivalent(const PVLine *a, const PVLine *b) {
-  if (a->num_moves <= 0 || b->num_moves <= 0) {
-    return false;
-  }
-  const SmallMove *sa = &a->moves[0];
-  const SmallMove *sb = &b->moves[0];
-  // tiny_move encodes anchor + direction + tile placement; metadata
-  // holds the cached score and is what diverges between near-duplicate
-  // re-search outputs.
-  return sa->tiny_move == sb->tiny_move;
-}
+// Stress test: post-VIA opp-on-turn position with many randomized short
+// time cutoffs. Asserts that even when IDS is interrupted mid-iteration,
+// the returned result is "reasonable" — concretely, opp's value must not
+// exceed 0 (opp's optimal play LOSES spread in this position; if the
+// solver reports opp gains spread, that's the depth-3 IDS glitch).
+void test_via_interrupted_reasonable_under_time_pressure(void) {
+  // Focus on short tlim (0.05s - 0.8s): bug fires reliably when IDS gets
+  // interrupted before depth-3 or depth-4 fully resolves. Earlier sweep
+  // with [0.3, 3.0] range hit the glitch ~35% of the time, mostly at the
+  // bottom of the range. Tighter range here both repros more often and
+  // keeps the test fast.
+  const int N_ITERATIONS = 100;
+  const double TLIM_MIN = 0.05;
+  const double TLIM_MAX = 0.8;
+  // Fixed seed for reproducibility across runs.
+  uint64_t rng = 0xdeadbeefULL;
+  int n_glitched = 0;
+  int n_finished = 0;
+  int n_interrupted_no_result = 0;
+  for (int iter = 0; iter < N_ITERATIONS; iter++) {
+    // xorshift for a deterministic pseudo-random tlim in [TLIM_MIN, TLIM_MAX].
+    rng ^= rng << 13;
+    rng ^= rng >> 7;
+    rng ^= rng << 17;
+    double frac = (double)(rng & 0xFFFFFFU) / (double)(0x1000000);
+    double tlim = TLIM_MIN + frac * (TLIM_MAX - TLIM_MIN);
 
-// Regression test for an etopk duplicate-PV bug: extract_multi_pvs could
-// land with two PVLines whose moves[0] was the same SmallMove. Cause:
-// solver->principal_variation was zero-initialized and never written, so
-// the swap that was meant to hoist the search-tracked best move into
-// root_moves[0] would instead swap a deep PASS into slot 0. With several
-// root moves tied on estimated_value (qsort is unstable), the actual best
-// move could be at root_moves[1..k-1] and get copied into multi_pvs[r] as
-// a duplicate of the multi_pvs[0] entry already set from
-// ENDGAME_RESULT_BEST. Reproduces only with multi-PV (num_top_moves >= 2)
-// and parallel threads, and only when ties exist among root moves.
-//
-// Pre-fix at this config (eplies=3, threads=2, etopk=5) the bug fired in
-// ~97% of solves, so 10 iterations gives ~1 - 0.03^10 ≈ certainty of
-// catching a regression. Total cost ≈ 3s.
-void test_topk_no_duplicates(void) {
-  static const int kIterations = 10;
-  for (int iter = 0; iter < kIterations; iter++) {
-    Config *config = config_create_or_die("set -s1 score -s2 score");
-    load_and_exec_config_or_die(
-        config,
-        "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-        "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-        "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+    Config *config =
+        config_create_or_die("set -s1 score -s2 score -threads 6 -eplies 25");
+    load_and_exec_config_or_die(config, VIA_IS_OPP_TURN_CGP);
 
-    EndgameCtx *ctx = NULL;
-    EndgameArgs args = {0};
-    args.thread_control = config_get_thread_control(config);
-    args.game = config_get_game(config);
-    args.plies = 3;
-    args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-    args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-    args.num_threads = 2;
-    args.num_top_moves = 5;
-    args.use_heuristics = true;
-    args.forced_pass_bypass = true;
-    args.enable_iterative_deepening = true;
-    args.enable_pv_display = true;
-    args.seed = 42;
+    EndgameCtx *endgame_ctx = NULL;
+    Game *game = config_get_game(config);
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = game;
+    endgame_args.plies = 25;
+    endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 6;
+    endgame_args.use_heuristics = true;
+    endgame_args.forced_pass_bypass = true;
+    endgame_args.enable_pv_display = true;
+    endgame_args.num_top_moves = 1;
+    endgame_args.seed = 42;
+    endgame_args.soft_time_limit = tlim;
+    endgame_args.hard_time_limit = tlim;
+    endgame_args.external_deadline_ns =
+        ctimer_monotonic_ns() + (int64_t)(tlim * 1.0e9);
 
-    EndgameResults *results = config_get_endgame_results(config);
+    EndgameResults *endgame_results = config_get_endgame_results(config);
     ErrorStack *error_stack = error_stack_create();
-    endgame_solve(&ctx, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
+    endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
 
-    const int num_pvs = endgame_results_get_num_pvs(results);
-    for (int i = 0; i < num_pvs; i++) {
-      const PVLine *pi = endgame_results_get_multi_pvline(results, i);
-      for (int j = i + 1; j < num_pvs; j++) {
-        const PVLine *pj = endgame_results_get_multi_pvline(results, j);
-        if (pvline_first_move_equivalent(pi, pj)) {
-          printf("iter=%d PV[%d] and PV[%d] share moves[0].tiny_move "
-                 "(0x%llx)\n",
-                 iter, i, j, (unsigned long long)pi->moves[0].tiny_move);
-          printf("  PV[%d] score=%d num_moves=%d\n", i, pi->score,
-                 pi->num_moves);
-          printf("  PV[%d] score=%d num_moves=%d\n", j, pj->score,
-                 pj->num_moves);
-          assert(0 && "duplicate first move in multi_pvs");
-        }
+    if (!error_stack_is_empty(error_stack)) {
+      n_interrupted_no_result++;
+      printf("  iter %2d tlim=%.3fs: error during solve (acceptable)\n", iter,
+             tlim);
+      error_stack_reset(error_stack);
+    } else {
+      const PVLine *pv =
+          endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+      int32_t value = pv->score;
+      bool is_pass = small_move_is_pass(&pv->moves[0]);
+      int depth =
+          endgame_results_get_depth(endgame_results, ENDGAME_RESULT_BEST);
+      bool glitched = (value > 0);
+      if (glitched) {
+        n_glitched++;
       }
+      n_finished++;
+      // Render the first PV move as a readable string.
+      char move_str[64] = {0};
+      if (is_pass) {
+        (void)snprintf(move_str, sizeof(move_str), "pass");
+      } else {
+        Move first_move;
+        small_move_to_move(&first_move, &pv->moves[0], game_get_board(game));
+        StringBuilder *sb = string_builder_create();
+        string_builder_add_move(sb, game_get_board(game), &first_move,
+                                game_get_ld(game), true);
+        (void)snprintf(move_str, sizeof(move_str), "%s",
+                       string_builder_peek(sb));
+        string_builder_destroy(sb);
+      }
+      printf("  iter %3d tlim=%.3fs depth=%d move=%-22s value=%+4d %s\n", iter,
+             tlim, depth, move_str, value, glitched ? "*** GLITCHED ***" : "");
     }
 
-    endgame_ctx_destroy(ctx);
     error_stack_destroy(error_stack);
+    endgame_ctx_destroy(endgame_ctx);
     config_destroy(config);
+  }
+  printf("VIA-interrupt stress: %d iterations, %d finished, %d errored, "
+         "%d glitched (value > 0)\n",
+         N_ITERATIONS, n_finished, n_interrupted_no_result, n_glitched);
+  // Opp's optimal play in this position LOSES spread (~ -78). Any
+  // "finished" result reporting value > 0 is the depth-3 IDS glitch
+  // (pass-pass returning value = +2). Tolerate 0 glitches.
+  assert(n_glitched == 0);
+}
+
+void test_via_opp_must_block_every_depth(void) {
+  // Opp (AIINOOU) on turn after mover played VIA. Bag empty, mover holds
+  // CDIOST? with the DISCO(U)nT bingo threat at 1A through the U at 1F.
+  // Opp's optimal play is 2B ONIO(N) 10 (or equivalent), which puts an O
+  // at 2B forming "IO" below 1B and blocking the bingo column. Mover then
+  // finds B7 STICc(A)DO 82 bingo instead (blank as c). Value from opp's
+  // POV is -78, opp's first move scores 10 and is not pass. Test plies
+  // 1..3 (deeper plies confirm the same answer at much higher cost).
+  for (int plies = 1; plies <= 3; plies++) {
+    char settings[128];
+    (void)snprintf(settings, sizeof(settings),
+                   "set -s1 score -s2 score -threads 6 -eplies %d "
+                   "-ttfraction 0.05",
+                   plies);
+    test_single_endgame(settings, VIA_IS_OPP_TURN_CGP,
+                        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        ERROR_STATUS_SUCCESS, -78, false, 0);
   }
 }
 
-// ---------------------------------------------------------------------------
 // before_search_callback tests
 // ---------------------------------------------------------------------------
 
@@ -818,11 +929,8 @@ typedef struct BeforeSearchCaptured {
   int initial_move_count;
   int initial_spread;
   int solving_player;
-  // first move's tiny_move + estimated_value (lets us verify the array is
-  // sorted descending by static estimate at the moment of firing)
-  uint64_t first_move_tiny;
-  int32_t first_move_estimate;
-  // sortedness check across all received moves
+  // sortedness check across all received moves: are they in descending static
+  // estimate order at the moment the callback fires?
   bool sorted_desc_by_estimate;
 } BeforeSearchCaptured;
 
@@ -836,10 +944,6 @@ static void capture_before_search_cb(const Game *game,
   c->initial_move_count = initial_move_count;
   c->initial_spread = initial_spread;
   c->solving_player = solving_player;
-  if (initial_move_count > 0) {
-    c->first_move_tiny = initial_moves[0].tiny_move;
-    c->first_move_estimate = small_move_get_estimated_value(&initial_moves[0]);
-  }
   c->sorted_desc_by_estimate = true;
   for (int i = 1; i < initial_move_count; i++) {
     if (small_move_get_estimated_value(&initial_moves[i]) >
@@ -906,7 +1010,6 @@ void test_before_search_callback(void) {
   args.num_top_moves = 1;
   args.use_heuristics = true;
   args.forced_pass_bypass = true;
-  args.enable_iterative_deepening = true;
   args.enable_pv_display = true;
   args.seed = 42;
   args.before_search_callback = capture_and_poll_before_search_cb;
@@ -920,7 +1023,9 @@ void test_before_search_callback(void) {
   assert(captured.call_count == 1);
   assert(captured.initial_move_count > 0);
   assert(captured.solving_player == 0);
-  assert(captured.first_move_tiny != 0); // not PASS at slot 0
+  // The callback contract is about sortedness and counts, not move identity:
+  // PASS (tiny_move == 0) is a legal root move and qsort has no tie-breaker,
+  // so it may legitimately land at slot 0 — don't assert against it.
   assert(captured.sorted_desc_by_estimate);
 
   // Polled atomics seen from inside the callback must match the callback's
@@ -1063,11 +1168,20 @@ static void *stream_reader_thread(void *arg) {
     uint64_t live_pv[MAX_SEARCH_DEPTH];
     int live_pv_len = 0;
     int32_t live_pv_value = 0;
-    EndgameLivePvSnapshot live_top_k[10];
+    EndgameLivePvSnapshot live_top_k[10] = {0};
     int live_top_k_n = 0;
     if (ctx != NULL) {
       endgame_ctx_get_progress(ctx, &cur_depth, &done, &total, &ply2_done,
                                &ply2_total);
+    }
+    // The worker-array accessors (nodes/current-line/live-PV/top-K) read
+    // ctx->workers, which endgame_solve's prepare_workers may free and rebuild
+    // when the lexicon changes between solves. Only poll them once this solve's
+    // before_search_callback has fired (seen_initial) — by then prepare_workers
+    // has finished and the pool is stable for the duration of the search. This
+    // mirrors the contract that the accessors are valid only during an active
+    // solve.
+    if (ctx != NULL && seen_initial) {
       nodes = endgame_ctx_get_nodes_searched(ctx);
       line_len = endgame_ctx_get_current_line(ctx, 0, line, MAX_SEARCH_DEPTH);
       live_pv_len = endgame_ctx_get_live_pv(ctx, 0, live_pv, MAX_SEARCH_DEPTH,
@@ -1273,7 +1387,6 @@ void test_endgame_progress_stream(void) {
     warmup_args.num_top_moves = 1;
     warmup_args.use_heuristics = true;
     warmup_args.forced_pass_bypass = true;
-    warmup_args.enable_iterative_deepening = true;
     warmup_args.enable_pv_display = true;
     warmup_args.seed = 1;
     EndgameResults *warmup_results = config_get_endgame_results(warmup_config);
@@ -1285,7 +1398,7 @@ void test_endgame_progress_stream(void) {
     printf("(warmup complete; TT pre-allocated)\n");
   }
 
-  const int kIterations = npos * nmodes;
+  const int total_iterations = npos * nmodes;
   int iter = 0;
   for (int pos_idx = 0; pos_idx < npos; pos_idx++) {
     for (int mode_idx = 0; mode_idx < nmodes; mode_idx++) {
@@ -1301,7 +1414,7 @@ void test_endgame_progress_stream(void) {
 
       printf(
           "\n=== iter %d/%d: pos=%d mode=%s threads=%d plies=%d lex=%s ===\n",
-          iter, kIterations, pos_idx, mode_labels[mode_idx], threads,
+          iter, total_iterations, pos_idx, mode_labels[mode_idx], threads,
           positions[pos_idx].eplies, positions[pos_idx].lex);
 
       ProgressStream stream = {0};
@@ -1322,7 +1435,6 @@ void test_endgame_progress_stream(void) {
       args.num_top_moves = 5;
       args.use_heuristics = true;
       args.forced_pass_bypass = true;
-      args.enable_iterative_deepening = true;
       args.enable_pv_display = true;
       args.seed = 42;
       args.before_search_callback = stream_before_search_cb;
@@ -1376,61 +1488,8 @@ void test_endgame_progress_stream(void) {
   prng_destroy(prng);
 }
 
-// Tight, search-bound benchmark: run the kue position at depth 4 N
-// times in a row on a single warmed EndgameCtx.  Prints wall-clock and
-// nodes/sec.  Used to measure the cost of always-on engine
-// instrumentation (node counter + current-line) by comparing builds
-// with and without it.
-void test_endgame_bench_kue(void) {
-  static const int kIterations = 5;
-  static const int kPlies = 4;
-
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(
-      config, "cgp 6MOO1VIRLS/1EJECTA6A1/2I2AEON4R1/2BAH6X1N1/2SLID4GIFTS/"
-              "4DONG1OR1R1i/7HOURLY1Z/FE4DINT1A2Y/RECLINE2I1N3/"
-              "EW1ATAP2E1G3/M10U3/D3PATOOTIE3/15/15/15 "
-              "?AEEKSU/BEIQUVW 276/321 0 -lex NWL23");
-
-  EndgameCtx *ctx = NULL;
-  EndgameArgs args = {0};
-  args.thread_control = config_get_thread_control(config);
-  args.game = config_get_game(config);
-  args.plies = kPlies;
-  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  args.num_threads = 4;
-  args.num_top_moves = 1;
-  args.use_heuristics = true;
-  args.forced_pass_bypass = true;
-  args.enable_iterative_deepening = true;
-  args.enable_pv_display = false;
-  args.seed = 42;
-
-  EndgameResults *results = config_get_endgame_results(config);
-  ErrorStack *error_stack = error_stack_create();
-
-  // Warmup so the TT is allocated outside the timed iterations.
-  endgame_solve(&ctx, &args, results, error_stack);
-  assert(error_stack_is_empty(error_stack));
-
-  for (int i = 0; i < kIterations; i++) {
-    endgame_ctx_clear_transposition_table(ctx);
-    const int64_t t0 = ctimer_monotonic_ns();
-    endgame_solve(&ctx, &args, results, error_stack);
-    assert(error_stack_is_empty(error_stack));
-    const int64_t t1 = ctimer_monotonic_ns();
-    const double elapsed_s = (double)(t1 - t0) / 1.0e9;
-    printf("BENCH iter=%d plies=%d threads=%d elapsed=%.3fs\n", i, kPlies,
-           args.num_threads, elapsed_s);
-  }
-
-  endgame_ctx_destroy(ctx);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
-}
-
 void test_endgame(void) {
+  test_before_search_callback();
   test_single_pv_display();
   test_ctx_reuse();
   test_solve_standard();
@@ -1442,13 +1501,11 @@ void test_endgame(void) {
   test_2lex_ignorant();
   test_2lex_informed();
   test_endgame_interrupt();
-  test_topk_fully_solved();
-  test_topk_full_solve_no_pipe();
-  test_topk_no_duplicates();
-  test_before_search_callback();
-  // test_endgame_progress_stream is on-demand (registered as
-  // "endgame_stream"); it prints live progress to stdout and isn't
-  // suitable for the silent CI run.
+  // Cheap (sub-second) regression of the VIA mover-must-bingo case. The full
+  // VIA depth/stress sweeps (viamover / viaopp / viastress) are on-demand only
+  // — viamover re-solves plies 1..3 with display (~14s) and viastress runs 100
+  // timed iterations — so they are not invoked here from the run_all suite.
+  test_via_mover_bingo_one_ply();
   //  Uncomment out more of these tests once we add more optimizations,
   //  and/or if we can run the endgame tests in release mode.
   // test_vs_joey();
@@ -1479,7 +1536,6 @@ void test_monster_q(void) {
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
   endgame_args.num_threads = 6;
   endgame_args.use_heuristics = true;
-  endgame_args.enable_iterative_deepening = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
@@ -1533,7 +1589,6 @@ void test_multi_pv(void) {
   endgame_args.num_threads = 6;
   endgame_args.num_top_moves = 1;
   endgame_args.use_heuristics = true;
-  endgame_args.enable_iterative_deepening = true;
   endgame_args.per_ply_callback = NULL;
   endgame_args.per_ply_callback_data = NULL;
   endgame_args.seed = 42;
@@ -1599,45 +1654,4 @@ void test_endgame_wasm(void) {
   test_small_arena_realloc();
   test_pass_first();
   test_nonempty_bag();
-}
-
-// Regression test for stack-buffer-overflow in abdada_negamax: topk_values
-// was sized to MAX_VARIANT_LENGTH (25) but multi_pv_k can go up to
-// MAX_ENDGAME_DISPLAY_PVS (100) via -etopk. With -etopk > 25, topk_insert
-// writes past the array, clobbering topk_n and adjacent stack. ASAN catches
-// this on dev builds; release builds crash with SIGABRT from the stack
-// canary. Uses the same short BGIV/DEHILOR position as test_topk_fully_solved.
-void test_topk50_overflow_repro(void) {
-  Config *config = config_create_or_die("set -s1 score -s2 score");
-  load_and_exec_config_or_die(
-      config,
-      "cgp 9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
-      "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
-      "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
-
-  EndgameCtx *ctx = NULL;
-  EndgameArgs args = {0};
-  args.thread_control = config_get_thread_control(config);
-  args.game = config_get_game(config);
-  args.plies = 4;
-  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
-  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  args.num_threads = 1;
-  args.num_top_moves = 50; // > MAX_VARIANT_LENGTH (25); pre-fix overflows
-  args.use_heuristics = true;
-  args.forced_pass_bypass = true;
-  // Intentionally leave args.enable_iterative_deepening = false: this
-  // exercises the depth-jumps-to-plies path on thread 0, which (along with
-  // -etopk 50) is the configuration that originally tripped the overflow.
-  args.seed = 42;
-
-  EndgameResults *results = config_get_endgame_results(config);
-  ErrorStack *error_stack = error_stack_create();
-  endgame_solve(&ctx, &args, results, error_stack);
-  assert(error_stack_is_empty(error_stack));
-  printf("topk50 overflow repro: solved\n");
-
-  endgame_ctx_destroy(ctx);
-  error_stack_destroy(error_stack);
-  config_destroy(config);
 }

@@ -9,6 +9,7 @@
 #include "bai_test.h"
 #include "bai_utility_test.h"
 #include "benchmark_endgame_test.h"
+#include "benchmark_peg_test.h"
 #include "bit_rack_test.h"
 #include "board_layout_default_test.h"
 #include "board_layout_super_test.h"
@@ -20,6 +21,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "dawg_packed_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -39,7 +41,11 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "peg_oracle_test.h"
+#include "peg_pess_test.h"
+#include "peg_poll_test.h"
 #include "peg_pool_test.h"
+#include "peg_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -126,6 +132,9 @@ static TestEntry test_table[] = {
     {"tt", test_transposition_table},
     {"load", test_load_gcg},
     {"pegpool", test_peg_pool},
+    {"peg", test_peg},
+    {"pegpessdraw", test_peg_pessfull_draw_regression},
+    {"pegtopkall", test_peg_pegtopk_all},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -140,18 +149,39 @@ static TestEntry on_demand_test_table[] = {
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
+    {"genpegcgps", test_generate_peg_cgps},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
     {"multipv", test_multi_pv},
+    {"kwgtailmerge", test_kwg_tail_merge},
+    {"kwgtailreorder", test_kwg_tail_reorder},
+    {"dawgpacked", test_dawg_packed},
+    {"kwgmergebench", test_kwg_merge_build_bench},
+    {"endgame_stream", test_endgame_progress_stream},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
-    {"topk50repro", test_topk50_overflow_repro},
-    {"topk_dup_repro", test_topk_no_duplicates},
     {"endgame_stream", test_endgame_progress_stream},
-    {"endgame_bench_kue", test_endgame_bench_kue},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
+    // Pre-endgame (PEG) solver
+    {"peg1pb", test_peg_1bag_pass_best},
+    {"peg1onyx", test_peg_1bag_onyx},
+    {"peg2axe", test_peg_2bag_axe},
+    {"peg2acid", test_peg_2bag_acidotic},
+    {"peg3pah", test_peg_3bag_pah},
+    {"peg4pond", test_peg_4bag_pond},
+    {"peg3pahpess", test_peg_3bag_pah_pessimistic},
+    {"peg4pondpess", test_peg_4bag_pond_pessimistic},
+    {"pegbench1", test_benchmark_peg_1},
+    {"pegbench2", test_benchmark_peg_2},
+    {"pegbench3", test_benchmark_peg_3},
+    {"pegbench4", test_benchmark_peg_4},
+    {"pegbfix", test_peg_bench_fixture},
+    {"pegngap", test_peg_nested_gap},
+    {"genpegmore", test_gen_peg_more},
+    {"pegpoll", test_peg_poll},
+    {"passpegoracle", test_pass_peg_oracle_eval_move},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

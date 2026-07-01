@@ -53,8 +53,9 @@ enum {
   MAX_DEFERRED_STACK = 64,
   // How many abdada_negamax calls between per-depth deadline checks.
   // Checked per-worker (no cross-thread contention). At ~100K nodes/s/thread,
-  // 4096 nodes ≈ 40ms granularity — cheap but responsive enough to bail early.
-  DEPTH_DEADLINE_CHECK_INTERVAL = 4096,
+  // 1024 nodes ≈ 10ms granularity — tighter response for PEG inner solves
+  // where each scenario's endgame budget can be tens of ms.
+  DEPTH_DEADLINE_CHECK_INTERVAL = 1024,
   // Bit flags for move estimates. These large numbers will force these
   // estimated values to sort first.
   LARGE_VALUE = 1 << 30, // for alpha-beta pruning
@@ -67,11 +68,21 @@ enum {
   ABDADA_INTERRUPTED = -(1 << 28),
   // Aspiration window initial size
   ASPIRATION_WINDOW = 25,
+  // Lazy move ordering at interior nodes: selection-pick the best remaining
+  // move for this many indices before sorting the rest once. Beta cutoffs
+  // usually happen within the first few moves, so most nodes never pay for
+  // a full sort of the move list.
+  LAZY_SELECTION_LIMIT = 8,
   // Conservation bonus weights: penalize playing tiles when opponent is stuck
   CONSERVATION_TILE_WEIGHT = 7,
   CONSERVATION_VALUE_WEIGHT = 2,
   // Random noise range for thread jitter, centered around zero
   THREAD_JITTER_NOISE = 8,
+  // Max top-K ranked PVLines built for the per-ply display/callback.
+  MAX_RANKED_CALLBACK_PVS = 10,
+  // Default cap on the depth-0 interrupt-fallback sweep when first_win_optim is
+  // set: 0 = use this default, <0 = skip the sweep, >0 = explicit cap.
+  FIRST_WIN_D0_FALLBACK_MOVES = 12,
 };
 
 // Returns fraction of opponent's rack score that is stuck (0.0 = none, 1.0 =
@@ -109,10 +120,14 @@ struct EndgameCtx {
   int initial_small_move_arena_size;
   bool iterative_deepening_optim;
   bool first_win_optim;
+  // Cap on the first-win depth-0 interrupt fallback sweep (root moves greedy-
+  // evaluated). 0 = built-in default, <0 = skip the sweep, >0 = explicit cap.
+  int first_win_fallback_moves;
   bool transposition_table_optim;
   bool negascout_optim;
   bool use_heuristics;
   bool forced_pass_bypass;
+  PVLine principal_variation;
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
@@ -124,26 +139,18 @@ struct EndgameCtx {
   int threads;
   double tt_fraction_of_mem;
   TranspositionTable *transposition_table;
+  bool tt_is_external; // true when using a caller-provided shared TT
 
   // Signal for threads to stop early (0=running, 1=done)
   atomic_int search_complete;
-  // Set to 1 by any worker when a depth-0 leaf has the game still ongoing.
-  // Reset to 0 by thread 0 at the start of each depth. Used by the
-  // early-stop check in iterative_deepening to detect fully-solved positions.
-  // Per-depth monotonic "an unfinished (non-game-over) leaf was seen while
-  // searching this iterative-deepening ply" flags, indexed by root ply
-  // (1..requested_plies). Per-depth, not a single solver flag, so the ABDADA
-  // depth jitter (workers searching shallower, still-unfinished plies) can't
-  // pollute thread 0's early-stop check for a deeper, fully-solved ply. The
-  // old single flag was racy: thread 0 reset it and read it for its ply while
-  // a jittered worker at a shallow ply set it, which native scheduling won
-  // but WASM's lost (early-stop missed, search ran to the depth limit).
-  // Monotonic within a solve; all depths reset to 0 at solve start.
-  atomic_int any_leaf_game_unfinished[MAX_SEARCH_DEPTH + 1];
   // Per-depth deadline: absolute CLOCK_MONOTONIC nanoseconds; 0 = disabled.
   // Thread 0 sets this after each completed depth (from EBF estimate).
   // All worker threads check it periodically and bail if exceeded.
   _Atomic int64_t depth_deadline_ns;
+  // Caller-supplied absolute deadline (CLOCK_MONOTONIC ns). 0 = disabled.
+  // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
+  // wall-clock budget always wins over the EBF-projected per-depth budget.
+  int64_t external_deadline_ns;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
@@ -161,14 +168,12 @@ struct EndgameCtx {
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
   void *per_ply_callback_data;
-
-  // Fired once from worker thread 0 after initial movegen and before
-  // depth-1 negamax. Lets clients render a d=0 leaderboard immediately.
+  // Fired once on thread 0 before iterative deepening begins, with the sorted
+  // d=0 root-move list (for an initial leaderboard render).
   EndgameBeforeSearchCallback before_search_callback;
   void *before_search_callback_data;
-
-  // Fired from thread 0 each time a root move completes at the current
-  // depth. Per-root resolution for live leaderboard re-ranking.
+  // Fired on thread 0 each time a root move completes at the current IDS depth
+  // (for live per-root leaderboard updates).
   EndgamePerRootMoveCallback per_root_move_callback;
   void *per_root_move_callback_data;
 
@@ -187,19 +192,42 @@ struct EndgameCtx {
   // bag_copy into incompatibly-sized allocations.
   EndgameCtxWorker **workers;
   cpthread_t *worker_ids;
-  int cap_workers; // allocated size of workers[] and worker_ids[]
+  // _Atomic so the lock-free live-view accessors can read it (acquire) while
+  // endgame_add_worker grows it (under add_mutex) during a solve.
+  atomic_int cap_workers; // created worker structs (workers[0..cap_workers))
+  int arr_cap; // allocated length of workers[]/worker_ids[] (>= cap_workers)
   const LetterDistribution *workers_ld;
+  // Dynamic worker injection (endgame_add_worker): grow an in-flight solve's
+  // worker count up to arr_cap as cores free up. All guarded by add_mutex.
+  int max_workers;           // ceiling for live_workers; 0 => no growth
+  uint64_t worker_base_seed; // ABDADA jitter seed, reused for late workers
+  atomic_int live_workers;   // worker threads spawned this solve (initial+late)
+  atomic_int adding_closed; // 1 = injection window shut (between/ending solves)
+  _Atomic int64_t window_open_ns; // monotonic ns when the window last opened
+  cpthread_mutex_t add_mutex; // serializes add vs the close+snapshot in solve
 };
 
 struct EndgameCtxWorker {
-  int thread_index;
+  // Worker ordinal within this solve (0..threads-1, == position in the cached
+  // workers[] array, so stable across solves). ordinal 0 is the main worker:
+  // it owns root move ordering, ply-2 tracking, the soft-time check, and PV
+  // display. Drives per-worker jitter parity. Each worker reaches move
+  // generation through get_movegen(), which auto-assigns a distinct per-pthread
+  // MoveGen cache slot, so no explicit slot is tracked here.
+  int ordinal;
   Game *game_copy;
   Arena *small_move_arena;
   MoveList *move_list;
   EndgameCtx *solver;
   int current_iterative_deepening_depth;
-  // Array of MoveUndo structures for incremental play/unplay
-  MoveUndo move_undos[MAX_SEARCH_DEPTH];
+  // Array of MoveUndo structures for incremental play/unplay. Sized at
+  // MAX_SEARCH_DEPTH + 1 so the greedy leaf playout has at least one slot
+  // available past negamax's deepest move when requested_plies ==
+  // MAX_SEARCH_DEPTH. Without this slack the greedy `while` loop never runs
+  // at full-depth IDS and the leaf returns the static rack-adjusted spread,
+  // producing wildly wrong values (e.g. +31 instead of -78) for positions
+  // where the greedy needs to play one final bingo to terminate the game.
+  MoveUndo move_undos[MAX_SEARCH_DEPTH + 1];
   // Per-depth MoveUndo for forced-pass bypass. Pass recurses at the same depth
   // so it cannot share move_undos[]; indexed by the depth parameter (0..25).
   MoveUndo pass_undos[MAX_SEARCH_DEPTH + 1];
@@ -211,10 +239,6 @@ struct EndgameCtxWorker {
   bool in_first_root_move; // True when thread 0 is inside root move idx==0
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
-  // Number of root moves confirmed in the top-K after the root-level search.
-  // For multi-PV (num_top_moves > 1) this is topk_n; for single-PV it is 1
-  // when any best move was found, else 0.
-  int root_topk_n;
 
   // Per-thread node counter for the live-progress getter. Plain uint64
   // (no atomics on the writer side); flushed periodically to the
@@ -228,11 +252,13 @@ struct EndgameCtxWorker {
   // getter. current_line[i] is the tiny_move played at the i-th ply
   // from the root; current_line_len is the number of valid entries.
   // Worker writes the move slot, then atomic_store_release the length;
-  // reader does atomic_load_acquire on the length, then reads the
-  // line. Reader may see torn entries if the worker is concurrently
-  // ascending into a sibling subtree, but the result remains
-  // structurally consistent (length matches what's been written).
-  uint64_t current_line[MAX_SEARCH_DEPTH];
+  // reader does atomic_load_acquire on the length, then reads the line.
+  // The slots are relaxed atomics so concurrent reader/writer access is a
+  // well-defined relaxed access, not a C data race: the reader may still
+  // observe a slot the writer is updating (the value is "stale", not torn
+  // or UB), but the result stays structurally consistent (length matches
+  // what has been published).
+  _Atomic uint64_t current_line[MAX_SEARCH_DEPTH];
   _Atomic int current_line_len;
 
   // Live best-PV-from-root snapshot. Updated by abdada_negamax every
@@ -241,8 +267,10 @@ struct EndgameCtxWorker {
   // each depth.  Seqlock pattern: live_pv_seq is even when the
   // snapshot is consistent, odd while a write is in progress. Reader
   // loads seq, reads length+moves+value, loads seq again; retries on
-  // odd or mismatched seq.
-  uint64_t live_pv_tiny_moves[MAX_SEARCH_DEPTH];
+  // odd or mismatched seq. The data slots are relaxed atomics (accessed
+  // under the seq's release/acquire fences) so the lock-free protocol is
+  // free of C data races.
+  _Atomic uint64_t live_pv_tiny_moves[MAX_SEARCH_DEPTH];
   _Atomic int32_t live_pv_value;
   _Atomic int live_pv_length;
   _Atomic uint64_t live_pv_seq;
@@ -253,13 +281,15 @@ struct EndgameCtxWorker {
   // continuation tiny_moves from after the root move, and the
   // continuation length).  Entries are sorted descending by value.
   // live_top_k_filled is how many of MAX_ENDGAME_DISPLAY_PVS slots
-  // are currently populated. Same seqlock pattern as live_pv.
+  // are currently populated. Same seqlock pattern as live_pv; the data
+  // slots are relaxed atomics so the protocol is C-data-race-free.
   // Reset to 0 entries at the start of each new IDS depth so the
   // leaderboard reflects the current depth's evaluations only.
-  uint64_t live_top_k_root_tiny[MAX_ENDGAME_DISPLAY_PVS];
-  int32_t live_top_k_value[MAX_ENDGAME_DISPLAY_PVS];
-  uint64_t live_top_k_continuation[MAX_ENDGAME_DISPLAY_PVS][MAX_SEARCH_DEPTH];
-  int live_top_k_continuation_len[MAX_ENDGAME_DISPLAY_PVS];
+  _Atomic uint64_t live_top_k_root_tiny[MAX_ENDGAME_DISPLAY_PVS];
+  _Atomic int32_t live_top_k_value[MAX_ENDGAME_DISPLAY_PVS];
+  _Atomic uint64_t live_top_k_continuation[MAX_ENDGAME_DISPLAY_PVS]
+                                          [MAX_SEARCH_DEPTH];
+  _Atomic int live_top_k_continuation_len[MAX_ENDGAME_DISPLAY_PVS];
   _Atomic int live_top_k_filled;
   _Atomic uint64_t live_top_k_seq;
 };
@@ -271,15 +301,6 @@ struct EndgameCtxWorker {
 #ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #endif
-
-// Endgame search clamps consecutive_scoreless_turns to <=2 in the zobrist
-// hash because the search shouldn't be exploring states past 2 consecutive
-// passes — by then the position is essentially decided. The zobrist's
-// scoreless_turns array is sized 3 ([0,2]) and asserts on out-of-range
-// indices; this helper is the single place that enforces that invariant.
-static inline int endgame_zobrist_scoreless_turns(const Game *game) {
-  return MIN(2, game_get_consecutive_scoreless_turns(game));
-}
 
 // Insert a value into a sorted (descending) top-K array.
 // Returns the Kth-best value (or -LARGE_VALUE if fewer than K values stored).
@@ -412,13 +433,8 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     play_move(move_list->spare_move, game_copy, NULL);
   }
 
-  // Extend PV from TT. Track the separator independently: only advance it for
-  // entries that are TT_EXACT at sufficient depth (remaining plies >= depth
-  // stored in entry). Bounds (TT_UPPER/TT_LOWER) and shallow entries don't
-  // prove the move is best, so they stay on the heuristic side of |.
+  // Extend PV from TT
   int num_moves = pv_line->num_moves;
-  int separator = pv_line->negamax_depth;
-  bool still_exact = true;
 
   while (num_moves < max_depth &&
          game_get_game_end_reason(game_copy) == GAME_END_REASON_NONE) {
@@ -429,7 +445,7 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     uint64_t hash = zobrist_calculate_hash(
         tt->zobrist, game_get_board(game_copy), player_get_rack(solving),
         player_get_rack(other), on_turn != solving_player,
-        endgame_zobrist_scoreless_turns(game_copy));
+        game_get_consecutive_scoreless_turns(game_copy));
 
     TTEntry tt_entry = transposition_table_lookup(tt, hash);
     if (!ttentry_valid(tt_entry)) {
@@ -439,14 +455,6 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
     uint64_t tiny_move = ttentry_move(tt_entry);
     if (tiny_move == INVALID_TINY_MOVE) {
       break;
-    }
-
-    if (still_exact) {
-      int remaining_depth = max_depth - num_moves;
-      if (ttentry_flag(tt_entry) != TT_EXACT ||
-          ttentry_depth(tt_entry) < (uint8_t)remaining_depth) {
-        still_exact = false;
-      }
     }
 
     SmallMove sm = {0};
@@ -473,15 +481,11 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
            sizeof(pv_line->moves[num_moves].metadata));
     pv_line->moves[num_moves].metadata.score = move_score;
     num_moves++;
-
-    if (still_exact) {
-      separator = num_moves;
-    }
   }
 
-  // The | separator marks the boundary between proven-exact moves and the
-  // heuristic greedy continuation.
-  pv_line->negamax_depth = separator;
+  // Preserve original negamax_depth from the search. TT-extended moves
+  // are from cached entries, not the current depth's negamax search.
+  // The | separator in PV display marks the search depth boundary.
 
   // Greedy playout: if game isn't over, extend PV with highest-scoring moves.
   // This handles cases where the search PV was truncated (e.g., parallel search
@@ -498,8 +502,13 @@ static bool iterative_deepening_should_stop(EndgameCtx *solver);
 // Returns the pruned KWG for the given player index.
 // In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
 // In non-shared mode, each player index maps to its own pruned KWG.
+// When skip_word_pruning was used (pruned_kwgs are NULL), falls back to the
+// game's effective KWG (which respects any override KWGs set by the caller).
 static inline const KWG *solver_get_pruned_kwg(const EndgameCtx *solver,
                                                int player_index) {
+  if (solver->pruned_kwgs[0] == NULL) {
+    return game_get_effective_kwg(solver->game, player_index);
+  }
   if (solver->pruned_kwgs[1] == NULL) {
     return solver->pruned_kwgs[0];
   }
@@ -616,17 +625,42 @@ static float compute_initial_stuck_fraction(const EndgameCtx *solver,
 
 void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
-  es->first_win_optim = false;
+  es->first_win_optim = endgame_args->first_win;
+  es->first_win_fallback_moves = endgame_args->first_win_fallback_moves;
   es->transposition_table_optim = true;
-  es->iterative_deepening_optim = endgame_args->enable_iterative_deepening;
+  es->iterative_deepening_optim = true;
   es->negascout_optim = true;
   es->use_heuristics = endgame_args->use_heuristics;
   es->forced_pass_bypass = endgame_args->forced_pass_bypass;
   es->num_top_moves = endgame_args->num_top_moves;
+  // The in-search top-K array (topk_values) and the live multi-PV leaderboard
+  // are sized to MAX_ENDGAME_DISPLAY_PVS; clamp so a caller asking for more
+  // displayed root moves can't overrun them.
+  if (es->num_top_moves > MAX_ENDGAME_DISPLAY_PVS) {
+    es->num_top_moves = MAX_ENDGAME_DISPLAY_PVS;
+  }
   es->threads = endgame_args->num_threads;
   if (es->threads < 1) {
     es->threads = 1;
   }
+  // Normalize the injection ceiling so later logic has one interpretation:
+  // clamp to MAX_THREADS (injected workers draw MoveGen slots from a pool
+  // capped there, and the worker arrays are sized to it), and treat any
+  // ceiling <= threads as "no growth" (0).
+  es->max_workers = endgame_args->max_workers;
+  if (es->max_workers > MAX_THREADS) {
+    es->max_workers = MAX_THREADS;
+  }
+  if (es->max_workers <= es->threads) {
+    es->max_workers = 0;
+  }
+  // Injection window starts shut: endgame_solve opens it once the initial
+  // workers are spawned, and shuts it again before the join. live_workers
+  // counts the initial set until adds bump it. Clear window_open_ns so a
+  // monitor can't read a stale timestamp from a previous solve.
+  atomic_store(&es->adding_closed, 1);
+  atomic_store(&es->live_workers, es->threads);
+  atomic_store(&es->window_open_ns, (int64_t)0);
   es->requested_plies = endgame_args->plies;
   es->solving_player = game_get_player_on_turn_index(endgame_args->game);
   es->initial_small_move_arena_size =
@@ -655,30 +689,33 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   }
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
+  es->external_deadline_ns = endgame_args->external_deadline_ns;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
-  // Generate pruned KWG(s) from the set of possible words on this board.
-  // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
-  // In INFORMED mode with different lexicons, each player index gets its own
-  // pruned KWG so that cross-set index i uses the pruned KWG derived from
-  // player i's lexicon.
-  for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
-       player_idx++) {
-    const KWG *full_kwg =
-        player_get_kwg(game_get_player(endgame_args->game, player_idx));
-    DictionaryWordList *word_list = dictionary_word_list_create();
-    generate_possible_words(endgame_args->game, full_kwg, word_list);
-    es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
-        word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
-    dictionary_word_list_destroy(word_list);
+  // skip_word_pruning: leave pruned_kwgs NULL so move gen uses the full KWG
+  // (or any override KWGs the caller set on the game). Used by PEG which
+  // builds its own pruned KWGs once at the root position.
+  if (!endgame_args->skip_word_pruning) {
+    // Generate pruned KWG(s) from the set of possible words on this board.
+    // In IGNORANT mode (or shared-KWG), one pruned KWG is used for everything.
+    // In INFORMED mode with different lexicons, each player index gets its own
+    // pruned KWG so that cross-set index i uses the pruned KWG derived from
+    // player i's lexicon.
+    for (int player_idx = 0; player_idx < (create_separate_kwgs ? 2 : 1);
+         player_idx++) {
+      const KWG *full_kwg =
+          player_get_kwg(game_get_player(endgame_args->game, player_idx));
+      DictionaryWordList *word_list = dictionary_word_list_create();
+      generate_possible_words(endgame_args->game, full_kwg, word_list);
+      es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
+          word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
+      dictionary_word_list_destroy(word_list);
+    }
   }
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
-  for (int depth_idx = 0; depth_idx <= MAX_SEARCH_DEPTH; depth_idx++) {
-    atomic_store(&es->any_leaf_game_unfinished[depth_idx], 0);
-  }
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
@@ -695,24 +732,50 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->before_search_callback_data = endgame_args->before_search_callback_data;
   es->per_root_move_callback = endgame_args->per_root_move_callback;
   es->per_root_move_callback_data = endgame_args->per_root_move_callback_data;
-  if (endgame_args->tt_fraction_of_mem == 0) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table = NULL;
-  } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
-    transposition_table_destroy(es->transposition_table);
-    es->transposition_table =
-        transposition_table_create(endgame_args->tt_fraction_of_mem);
+  if (endgame_args->shared_tt) {
+    // Use caller-provided TT. Free any previously owned TT.
+    if (!es->tt_is_external) {
+      transposition_table_destroy(es->transposition_table);
+    }
+    es->transposition_table = endgame_args->shared_tt;
+    es->tt_fraction_of_mem = 0;
+    es->tt_is_external = true;
+  } else {
+    if (!es->tt_is_external) {
+      if (endgame_args->tt_fraction_of_mem == 0) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table = NULL;
+      } else if (es->tt_fraction_of_mem != endgame_args->tt_fraction_of_mem) {
+        transposition_table_destroy(es->transposition_table);
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    } else {
+      // Transitioning from external to owned. Don't destroy the external TT.
+      es->transposition_table = NULL;
+      if (endgame_args->tt_fraction_of_mem > 0) {
+        es->transposition_table =
+            transposition_table_create(endgame_args->tt_fraction_of_mem);
+      }
+    }
+    es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+    es->tt_is_external = false;
   }
-  es->tt_fraction_of_mem = endgame_args->tt_fraction_of_mem;
+  // Disable TT optimization when no TT is available.
+  if (es->transposition_table == NULL) {
+    es->transposition_table_optim = false;
+  }
   es->results = results;
-  endgame_results_lock(es->results, ENDGAME_RESULT_DISPLAY);
-  endgame_results_reset(es->results);
-  endgame_results_set_start_game(es->results, endgame_args->game);
-  endgame_results_set_pvline_extend_args(es->results, es->transposition_table,
-                                         es->solving_player,
-                                         es->requested_plies);
-  endgame_results_set_valid_for_current_game_state(es->results, true);
-  endgame_results_unlock(es->results, ENDGAME_RESULT_DISPLAY);
+  if (es->results) {
+    endgame_results_lock(es->results, ENDGAME_RESULT_DISPLAY);
+    endgame_results_reset(es->results);
+    endgame_results_set_start_game(es->results, endgame_args->game);
+    endgame_results_set_pvline_extend_args(es->results, es->transposition_table,
+                                           es->solving_player,
+                                           es->requested_plies);
+    endgame_results_set_valid_for_current_game_state(es->results, true);
+    endgame_results_unlock(es->results, ENDGAME_RESULT_DISPLAY);
+  }
   // Compute initial stuck-tile fraction for root move ordering.
   // Per-node detection in abdada_negamax recomputes this dynamically.
   es->initial_opp_stuck_frac = 0.0F;
@@ -723,130 +786,17 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 }
 
 EndgameCtx *endgame_ctx_create(void) {
-  return calloc_or_die(1, sizeof(EndgameCtx));
+  EndgameCtx *solver = calloc_or_die(1, sizeof(EndgameCtx));
+  cpthread_mutex_init(&solver->add_mutex);
+  // Closed until a solve opens the window; otherwise a never-solved ctx (calloc
+  // zeroes adding_closed) would look injectable to an external monitor.
+  atomic_store(&solver->adding_closed, 1);
+  return solver;
 }
 
 const TranspositionTable *
 endgame_ctx_get_transposition_table(const EndgameCtx *ctx) {
   return ctx->transposition_table;
-}
-
-void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
-  if (ctx->transposition_table != NULL) {
-    transposition_table_reset(ctx->transposition_table);
-  }
-}
-
-uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
-  uint64_t total = 0;
-  for (int i = 0; i < ctx->cap_workers; i++) {
-    total += atomic_load_explicit(&ctx->workers[i]->published_nodes_searched,
-                                  memory_order_relaxed);
-  }
-  return total;
-}
-
-int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
-                                 uint64_t *out_line, int max_len) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
-    return 0;
-  }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
-  // Acquire on length pairs with release on writer side: by the time we
-  // observe length L, all writes to current_line[0..L-1] up to that
-  // store are visible. The worker may have moved on since then; entries
-  // beyond what we read may correspond to a different sibling subtree.
-  int len = atomic_load_explicit(&w->current_line_len, memory_order_acquire);
-  if (len > max_len) {
-    len = max_len;
-  }
-  if (len > MAX_SEARCH_DEPTH) {
-    len = MAX_SEARCH_DEPTH;
-  }
-  for (int i = 0; i < len; i++) {
-    out_line[i] = w->current_line[i];
-  }
-  return len;
-}
-
-int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
-                            uint64_t *out_moves, int max_len,
-                            int32_t *out_value) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers) {
-    *out_value = 0;
-    return 0;
-  }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
-  // Seqlock read: try a few times to capture a consistent snapshot
-  // (length, moves, value all from the same writer update).
-  for (int attempt = 0; attempt < 4; attempt++) {
-    const uint64_t seq1 =
-        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
-    if ((seq1 & 1ULL) != 0) {
-      continue; // writer in progress
-    }
-    int len = atomic_load_explicit(&w->live_pv_length, memory_order_relaxed);
-    const int32_t value =
-        atomic_load_explicit(&w->live_pv_value, memory_order_relaxed);
-    if (len > max_len) {
-      len = max_len;
-    }
-    if (len > MAX_SEARCH_DEPTH) {
-      len = MAX_SEARCH_DEPTH;
-    }
-    for (int i = 0; i < len; i++) {
-      out_moves[i] = w->live_pv_tiny_moves[i];
-    }
-    const uint64_t seq2 =
-        atomic_load_explicit(&w->live_pv_seq, memory_order_acquire);
-    if (seq1 == seq2) {
-      *out_value = value;
-      return len;
-    }
-  }
-  *out_value = 0;
-  return 0;
-}
-
-int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
-                                   EndgameLivePvSnapshot *out, int max_k) {
-  if (thread_index < 0 || thread_index >= ctx->cap_workers || max_k <= 0) {
-    return 0;
-  }
-  const EndgameCtxWorker *w = ctx->workers[thread_index];
-  for (int attempt = 0; attempt < 4; attempt++) {
-    const uint64_t seq1 =
-        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
-    if ((seq1 & 1ULL) != 0) {
-      continue; // writer in progress
-    }
-    int filled =
-        atomic_load_explicit(&w->live_top_k_filled, memory_order_relaxed);
-    if (filled > max_k) {
-      filled = max_k;
-    }
-    if (filled > MAX_ENDGAME_DISPLAY_PVS) {
-      filled = MAX_ENDGAME_DISPLAY_PVS;
-    }
-    for (int i = 0; i < filled; i++) {
-      out[i].root_tiny = w->live_top_k_root_tiny[i];
-      out[i].value = w->live_top_k_value[i];
-      int cont_len = w->live_top_k_continuation_len[i];
-      if (cont_len > MAX_SEARCH_DEPTH) {
-        cont_len = MAX_SEARCH_DEPTH;
-      }
-      out[i].continuation_len = cont_len;
-      for (int j = 0; j < cont_len; j++) {
-        out[i].continuation_tiny[j] = w->live_top_k_continuation[i][j];
-      }
-    }
-    const uint64_t seq2 =
-        atomic_load_explicit(&w->live_top_k_seq, memory_order_acquire);
-    if (seq1 == seq2) {
-      return filled;
-    }
-  }
-  return 0;
 }
 
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
@@ -859,6 +809,159 @@ void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
   *ply2_moves_completed = atomic_load(&ctx->ply2_moves_completed);
   *ply2_moves_total = atomic_load(&ctx->ply2_moves_total);
 }
+
+void endgame_ctx_clear_transposition_table(EndgameCtx *ctx) {
+  if (ctx->transposition_table != NULL) {
+    transposition_table_reset(ctx->transposition_table);
+  }
+}
+
+// Number of workers valid to observe in the current solve: live_workers
+// (initial + injected) clamped to cap_workers. The clamp guards the brief
+// window at solve start before prepare_workers has created worker structs up
+// to live_workers. Workers at indices >= this count are not part of the
+// current solve and hold stale live-view state left over from a previous one,
+// so the accessors below must not read them.
+static int endgame_active_worker_count(const EndgameCtx *ctx) {
+  int active = atomic_load_explicit(&ctx->live_workers, memory_order_acquire);
+  const int cap = atomic_load_explicit(&ctx->cap_workers, memory_order_acquire);
+  if (active > cap) {
+    active = cap;
+  }
+  if (active < 0) {
+    active = 0;
+  }
+  return active;
+}
+
+uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx) {
+  uint64_t total = 0;
+  const int active = endgame_active_worker_count(ctx);
+  for (int worker_idx = 0; worker_idx < active; worker_idx++) {
+    total += atomic_load_explicit(
+        &ctx->workers[worker_idx]->published_nodes_searched,
+        memory_order_relaxed);
+  }
+  return total;
+}
+
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
+                                 uint64_t *out_line, int max_len) {
+  if (max_len <= 0 || worker_index < 0 ||
+      worker_index >= endgame_active_worker_count(ctx)) {
+    return 0;
+  }
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
+  // Acquire on length pairs with release on writer side: by the time we
+  // observe length L, all writes to current_line[0..L-1] up to that
+  // store are visible. The worker may have moved on since then; entries
+  // beyond what we read may correspond to a different sibling subtree.
+  int len =
+      atomic_load_explicit(&worker->current_line_len, memory_order_acquire);
+  if (len > max_len) {
+    len = max_len;
+  }
+  if (len > MAX_SEARCH_DEPTH) {
+    len = MAX_SEARCH_DEPTH;
+  }
+  for (int ply_idx = 0; ply_idx < len; ply_idx++) {
+    out_line[ply_idx] = atomic_load_explicit(&worker->current_line[ply_idx],
+                                             memory_order_relaxed);
+  }
+  return len;
+}
+
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int worker_index,
+                            uint64_t *out_moves, int max_len,
+                            int32_t *out_value) {
+  if (max_len <= 0 || worker_index < 0 ||
+      worker_index >= endgame_active_worker_count(ctx)) {
+    *out_value = 0;
+    return 0;
+  }
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
+  // Seqlock read: try a few times to capture a consistent snapshot
+  // (length, moves, value all from the same writer update).
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&worker->live_pv_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int len =
+        atomic_load_explicit(&worker->live_pv_length, memory_order_relaxed);
+    const int32_t value =
+        atomic_load_explicit(&worker->live_pv_value, memory_order_relaxed);
+    if (len > max_len) {
+      len = max_len;
+    }
+    if (len > MAX_SEARCH_DEPTH) {
+      len = MAX_SEARCH_DEPTH;
+    }
+    for (int ply_idx = 0; ply_idx < len; ply_idx++) {
+      out_moves[ply_idx] = atomic_load_explicit(
+          &worker->live_pv_tiny_moves[ply_idx], memory_order_relaxed);
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&worker->live_pv_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      *out_value = value;
+      return len;
+    }
+  }
+  *out_value = 0;
+  return 0;
+}
+
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int worker_index,
+                                   EndgameLivePvSnapshot *out, int max_k) {
+  if (max_k <= 0 || worker_index < 0 ||
+      worker_index >= endgame_active_worker_count(ctx)) {
+    return 0;
+  }
+  const EndgameCtxWorker *worker = ctx->workers[worker_index];
+  for (int attempt = 0; attempt < 4; attempt++) {
+    const uint64_t seq1 =
+        atomic_load_explicit(&worker->live_top_k_seq, memory_order_acquire);
+    if ((seq1 & 1ULL) != 0) {
+      continue; // writer in progress
+    }
+    int filled =
+        atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
+    if (filled > max_k) {
+      filled = max_k;
+    }
+    if (filled > MAX_ENDGAME_DISPLAY_PVS) {
+      filled = MAX_ENDGAME_DISPLAY_PVS;
+    }
+    for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+      out[pv_idx].root_tiny = atomic_load_explicit(
+          &worker->live_top_k_root_tiny[pv_idx], memory_order_relaxed);
+      out[pv_idx].value = atomic_load_explicit(
+          &worker->live_top_k_value[pv_idx], memory_order_relaxed);
+      int cont_len = atomic_load_explicit(
+          &worker->live_top_k_continuation_len[pv_idx], memory_order_relaxed);
+      if (cont_len > MAX_SEARCH_DEPTH) {
+        cont_len = MAX_SEARCH_DEPTH;
+      }
+      out[pv_idx].continuation_len = cont_len;
+      for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
+        out[pv_idx].continuation_tiny[ply_idx] = atomic_load_explicit(
+            &worker->live_top_k_continuation[pv_idx][ply_idx],
+            memory_order_relaxed);
+      }
+    }
+    const uint64_t seq2 =
+        atomic_load_explicit(&worker->live_top_k_seq, memory_order_acquire);
+    if (seq1 == seq2) {
+      return filled;
+    }
+  }
+  return 0;
+}
+
+// Defined below; used by both the worker create and reset paths.
+static void reset_worker_analysis_state(EndgameCtxWorker *worker);
 
 static void solver_worker_destroy(EndgameCtxWorker *solver_worker) {
   if (!solver_worker) {
@@ -875,12 +978,15 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
   if (!ctx) {
     return;
   }
-  for (int i = 0; i < ctx->cap_workers; i++) {
-    solver_worker_destroy(ctx->workers[i]);
+  for (int worker_idx = 0; worker_idx < atomic_load(&ctx->cap_workers);
+       worker_idx++) {
+    solver_worker_destroy(ctx->workers[worker_idx]);
   }
   free(ctx->workers);
   free(ctx->worker_ids);
-  transposition_table_destroy(ctx->transposition_table);
+  if (!ctx->tt_is_external) {
+    transposition_table_destroy(ctx->transposition_table);
+  }
   kwg_destroy(ctx->pruned_kwgs[0]);
   kwg_destroy(ctx->pruned_kwgs[1]);
   game_destroy(ctx->ext_game);
@@ -890,12 +996,12 @@ void endgame_ctx_destroy(EndgameCtx *ctx) {
 // Create a new worker, duplicating the given game state.
 // Called only when growing the worker pool.
 static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
-                                                   int worker_index,
+                                                   int ordinal,
                                                    uint64_t base_seed,
                                                    const Game *template_game) {
   EndgameCtxWorker *solver_worker = malloc_or_die(sizeof(EndgameCtxWorker));
 
-  solver_worker->thread_index = worker_index;
+  solver_worker->ordinal = ordinal;
   solver_worker->game_copy = game_duplicate(template_game);
   game_set_endgame_solving_mode(solver_worker->game_copy);
   game_set_backup_mode(solver_worker->game_copy, BACKUP_MODE_SIMULATION);
@@ -909,29 +1015,33 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->solver = solver;
   memset(solver_worker->move_undos, 0, sizeof(solver_worker->move_undos));
 
-  solver_worker->prng = prng_create(base_seed + (uint64_t)worker_index * 12345);
+  // Seed by ordinal (stable across solves), not the MoveGen slot, so jitter is
+  // deterministic regardless of which slots were borrowed.
+  solver_worker->prng = prng_create(base_seed + (uint64_t)ordinal * 12345);
 
   solver_worker->best_pv.game = solver_worker->game_copy;
   solver_worker->best_pv.num_moves = 0;
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
   solver_worker->nodes_since_deadline_check = 0;
-  solver_worker->root_topk_n = 0;
-  solver_worker->local_nodes_searched = 0;
-  atomic_store_explicit(&solver_worker->published_nodes_searched, 0,
-                        memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->current_line_len, 0,
-                        memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->live_pv_length, 0,
-                        memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->live_pv_value, 0, memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->live_pv_seq, 0, memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->live_top_k_filled, 0,
-                        memory_order_relaxed);
-  atomic_store_explicit(&solver_worker->live_top_k_seq, 0,
-                        memory_order_relaxed);
+  reset_worker_analysis_state(solver_worker);
 
   return solver_worker;
+}
+
+// Zero the per-worker live-progress / live-PV / live-top-K snapshot state.
+// Called from both the worker create and reset paths so a fresh solve never
+// inherits a stale leaderboard or node count from a prior solve.
+static void reset_worker_analysis_state(EndgameCtxWorker *worker) {
+  worker->local_nodes_searched = 0;
+  atomic_store_explicit(&worker->published_nodes_searched, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&worker->current_line_len, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_length, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_value, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_pv_seq, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_filled, 0, memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_seq, 0, memory_order_relaxed);
 }
 
 // Reset an existing worker for a new solve without reallocating.
@@ -945,32 +1055,27 @@ static void endgame_ctx_reset_worker(EndgameCtxWorker *worker,
   game_set_backup_mode(worker->game_copy, BACKUP_MODE_SIMULATION);
   arena_reset(worker->small_move_arena);
   memset(worker->move_undos, 0, sizeof(worker->move_undos));
-  prng_seed(worker->prng, base_seed + (uint64_t)worker->thread_index * 12345);
+  prng_seed(worker->prng, base_seed + (uint64_t)worker->ordinal * 12345);
   worker->best_pv.game = worker->game_copy;
   worker->best_pv.num_moves = 0;
   worker->best_pv_value = -LARGE_VALUE;
   worker->completed_depth = 0;
   worker->nodes_since_deadline_check = 0;
-  worker->root_topk_n = 0;
-  worker->local_nodes_searched = 0;
-  atomic_store_explicit(&worker->published_nodes_searched, 0,
-                        memory_order_relaxed);
-  atomic_store_explicit(&worker->current_line_len, 0, memory_order_relaxed);
-  atomic_store_explicit(&worker->live_pv_length, 0, memory_order_relaxed);
-  atomic_store_explicit(&worker->live_pv_value, 0, memory_order_relaxed);
-  atomic_store_explicit(&worker->live_pv_seq, 0, memory_order_relaxed);
-  atomic_store_explicit(&worker->live_top_k_filled, 0, memory_order_relaxed);
-  atomic_store_explicit(&worker->live_top_k_seq, 0, memory_order_relaxed);
+  reset_worker_analysis_state(worker);
 }
 
 void endgame_ctx_reset_worker_and_game(EndgameCtx *solver, uint64_t base_seed,
                                        int worker_index) {
   endgame_ctx_reset_worker(solver->workers[worker_index], solver, solver->game,
                            base_seed);
-  game_set_override_kwgs(solver->workers[worker_index]->game_copy,
-                         solver->pruned_kwgs[0], solver->pruned_kwgs[1],
-                         solver->dual_lexicon_mode);
-  game_gen_all_cross_sets(solver->workers[worker_index]->game_copy);
+  // When skip_word_pruning was used, pruned_kwgs are NULL; the game's existing
+  // KWGs and cross-sets (set by the caller, e.g. PEG) are preserved.
+  if (solver->pruned_kwgs[0] != NULL) {
+    game_set_override_kwgs(solver->workers[worker_index]->game_copy,
+                           solver->pruned_kwgs[0], solver->pruned_kwgs[1],
+                           solver->dual_lexicon_mode);
+    game_gen_all_cross_sets(solver->workers[worker_index]->game_copy);
+  }
 }
 
 // Prepare the worker pool for a new solve. Computes pruned-KWG cross-sets
@@ -980,30 +1085,56 @@ static void endgame_ctx_prepare_workers(EndgameCtx *solver,
                                         uint64_t base_seed) {
   const LetterDistribution *ld = game_get_ld(solver->game);
 
+  solver->worker_base_seed = base_seed;
+
   // If the letter distribution changed (e.g., different lexicon), the worker
   // game copies have incompatibly-sized bags/racks. Destroy and rebuild.
   if (solver->workers_ld != NULL && solver->workers_ld != ld) {
-    for (int idx = 0; idx < solver->cap_workers; idx++) {
+    for (int idx = 0; idx < atomic_load(&solver->cap_workers); idx++) {
       solver_worker_destroy(solver->workers[idx]);
     }
     free(solver->workers);
     free(solver->worker_ids);
     solver->workers = NULL;
     solver->worker_ids = NULL;
-    solver->cap_workers = 0;
+    atomic_store(&solver->cap_workers, 0);
+    solver->arr_cap = 0;
   }
   solver->workers_ld = ld;
 
-  if (solver->cap_workers < solver->threads) {
-    solver->workers = realloc_or_die(
-        solver->workers, sizeof(EndgameCtxWorker *) * solver->threads);
-    solver->worker_ids = realloc_or_die(solver->worker_ids,
-                                        sizeof(cpthread_t) * solver->threads);
-    for (int idx = solver->cap_workers; idx < solver->threads; idx++) {
-      solver->workers[idx] =
-          endgame_ctx_create_worker(solver, idx, base_seed, solver->game);
+  // Size the arrays to the injection ceiling so endgame_add_worker can append
+  // late workers without reallocating the arrays while threads are running.
+  const int needed_cap = solver->max_workers > solver->threads
+                             ? solver->max_workers
+                             : solver->threads;
+  if (solver->arr_cap < needed_cap) {
+    solver->workers = realloc_or_die(solver->workers,
+                                     sizeof(EndgameCtxWorker *) * needed_cap);
+    solver->worker_ids =
+        realloc_or_die(solver->worker_ids, sizeof(cpthread_t) * needed_cap);
+    for (int idx = solver->arr_cap; idx < needed_cap; idx++) {
+      solver->workers[idx] = NULL;
     }
-    solver->cap_workers = solver->threads;
+    solver->arr_cap = needed_cap;
+  }
+  // Create the initial worker structs lazily (reused across solves). Late
+  // workers beyond solver->threads are created on demand by endgame_add_worker.
+  // needed_cap >= threads above, so whenever this loop runs (threads > 0) the
+  // array was allocated; assert it for the static analyzer and as a guard.
+  assert(solver->threads == 0 || solver->workers != NULL);
+  for (int idx = atomic_load(&solver->cap_workers); idx < solver->threads;
+       idx++) {
+    solver->workers[idx] =
+        endgame_ctx_create_worker(solver, idx, base_seed, solver->game);
+  }
+  if (atomic_load(&solver->cap_workers) < solver->threads) {
+    atomic_store(&solver->cap_workers, solver->threads);
+  }
+  // Cached workers persist across solves; the ordinal is the array position and
+  // never changes. Each worker gets its MoveGen cache slot on demand from
+  // get_movegen() (per-pthread), so there is no per-solve slot to reassign.
+  for (int idx = 0; idx < solver->threads; idx++) {
+    solver->workers[idx]->ordinal = idx;
   }
   // Copy worker 0's game state (with cross-sets) to workers 1..N-1
   for (int idx = 0; idx < solver->threads; idx++) {
@@ -1049,7 +1180,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   bool best_dir_vertical = false;
   int best_start = 0; // leftmost col (H) or topmost row (V) of the word
   int best_play_length = 0;
-  MachineLetter best_letter = 0; // for blank: the letter the blank plays as
+  MachineLetter best_ml = 0; // for blank: the letter the blank plays as
 
   for (int row = 0; row < BOARD_DIM; row++) {
     for (int col = 0; col < BOARD_DIM; col++) {
@@ -1077,6 +1208,20 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
           board_get_cross_set(board, row, col, BOARD_VERTICAL_DIRECTION, ci);
       uint64_t combined = h_cs & v_cs;
 
+      // Reject before touching bonus squares or scanning word extents:
+      // most candidate squares fail the cross-set test.
+      if (!is_blank) {
+        if (!board_is_letter_allowed_in_cross_set(combined, tile_ml)) {
+          continue;
+        }
+      } else {
+        // A blank is playable if the combined cross-set permits any
+        // non-blank letter.
+        if (!board_cross_set_allows_any_letter(combined)) {
+          continue;
+        }
+      }
+
       BonusSquare bsq = board_get_bonus_square(board, row, col);
       int lm = bonus_square_get_letter_multiplier(bsq);
       int wm = bonus_square_get_word_multiplier(bsq);
@@ -1087,12 +1232,24 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
       Equity v_nbr_score = board_get_cross_score(
           board, row, col, BOARD_HORIZONTAL_DIRECTION, ci);
 
+      // Blank has zero face value; its score depends only on position.
+      Equity tile_ls = is_blank ? 0 : ld_get_score(ld, tile_ml) * lm;
+      Equity score = 0;
+      if (has_h_nbrs) {
+        score += (tile_ls + h_nbr_score) * wm;
+      }
+      if (has_v_nbrs) {
+        score += (tile_ls + v_nbr_score) * wm;
+      }
+      if (found && score <= best_score) {
+        continue;
+      }
+
+      // New best: only now compute the word extent (for play_length and
+      // col_start/row_start encoding) and, for a blank, pick its letter.
       // Use vertical direction only when there are vertical neighbors and no
       // horizontal neighbors; otherwise label the play horizontal.
       bool dir_vertical = has_v_nbrs && !has_h_nbrs;
-
-      // Find word extent in the primary direction for play_length and
-      // col_start/row_start encoding.
       int word_start;
       int word_end;
       if (!dir_vertical) {
@@ -1122,61 +1279,25 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
         }
         word_end--;
       }
-      int play_length = word_end - word_start + 1;
 
-      if (!is_blank) {
-        if (!(combined & ((uint64_t)1 << tile_ml))) {
-          continue;
-        }
-        Equity tile_ls = ld_get_score(ld, tile_ml) * lm;
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += (tile_ls + h_nbr_score) * wm;
-        }
-        if (has_v_nbrs) {
-          score += (tile_ls + v_nbr_score) * wm;
-        }
-        if (!found || score > best_score) {
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = tile_ml;
-        }
-      } else {
-        // Blank has zero face value; score depends only on position.
-        // Any non-blank letter permitted by the combined cross-set is valid.
-        if (!(combined >> 1)) {
-          continue;
-        }
-        Equity score = 0;
-        if (has_h_nbrs) {
-          score += h_nbr_score * wm;
-        }
-        if (has_v_nbrs) {
-          score += v_nbr_score * wm;
-        }
-        if (!found || score > best_score) {
-          MachineLetter letter = 0;
-          for (MachineLetter L = 1; L < (MachineLetter)ld_size; L++) {
-            if ((combined >> L) & 1) {
-              letter = L;
-              break;
-            }
+      MachineLetter chosen_ml = tile_ml;
+      if (is_blank) {
+        chosen_ml = 0;
+        for (MachineLetter ml = 1; ml < (MachineLetter)ld_size; ml++) {
+          if (board_is_letter_allowed_in_cross_set(combined, ml)) {
+            chosen_ml = ml;
+            break;
           }
-          found = true;
-          best_score = score;
-          best_row = row;
-          best_col = col;
-          best_dir_vertical = dir_vertical;
-          best_start = word_start;
-          best_play_length = play_length;
-          best_letter = letter;
         }
       }
+      found = true;
+      best_score = score;
+      best_row = row;
+      best_col = col;
+      best_dir_vertical = dir_vertical;
+      best_start = word_start;
+      best_play_length = word_end - word_start + 1;
+      best_ml = chosen_ml;
     }
   }
 
@@ -1199,7 +1320,7 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
 
   // Build tiny_move following the same convention as small_move_set_all:
   // for vertical, row_start and col_start are swapped before storing.
-  uint64_t tm = (uint64_t)best_letter << 20;
+  uint64_t tm = (uint64_t)best_ml << 20;
   if (is_blank) {
     tm |= 1ULL << 12; // blank flag for tile index 0
   }
@@ -1267,8 +1388,9 @@ static int compute_played_tiles_face_value(const SmallMove *sm,
   int n = sm->metadata.tiles_played;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return face_value;
@@ -1284,8 +1406,9 @@ static int compute_conservation_bonus(const SmallMove *sm,
   int face_value = 0;
   uint64_t tm = sm->tiny_move;
   for (int i = 0; i < n; i++) {
-    MachineLetter tile = (tm >> (20 + 6 * i)) & 63;
-    MachineLetter ml = (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile;
+    MachineLetter tile_ml = (tm >> (20 + 6 * i)) & 63;
+    MachineLetter ml =
+        (tm & (1ULL << (12 + i))) ? BLANK_MACHINE_LETTER : tile_ml;
     face_value += equity_to_int(ld_get_score(ld, ml));
   }
   return (int)((float)(CONSERVATION_TILE_WEIGHT * n +
@@ -1297,7 +1420,7 @@ static int compute_conservation_bonus(const SmallMove *sm,
 // based on tiles played. Odd threads favor aggressive play, even threads favor
 // conservative play. Returns 0 for single-threaded or thread 0.
 static int compute_thread_jitter(EndgameCtxWorker *worker, int tiles_played) {
-  int thread_idx = worker->thread_index;
+  int thread_idx = worker->ordinal;
   if (worker->solver->threads <= 1 || thread_idx == 0) {
     return 0;
   }
@@ -1424,12 +1547,12 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
 
       bool tiles_match = true;
       for (int ti = 0; ti < len_a; ti++) {
-        uint8_t tile_a = move_get_tile(&mv_a, ti);
-        if (tile_a == PLAYED_THROUGH_MARKER) {
+        uint8_t ml_a = move_get_tile(&mv_a, ti);
+        if (ml_a == PLAYED_THROUGH_MARKER) {
           continue; // board tile, not placed by A
         }
-        uint8_t tile_b = move_get_tile(&mv_b, ti + offset_in_b);
-        if (tile_a != tile_b) {
+        uint8_t ml_b = move_get_tile(&mv_b, ti + offset_in_b);
+        if (ml_a != ml_b) {
           tiles_match = false;
           break;
         }
@@ -1450,8 +1573,11 @@ static int *compute_build_chain_values(EndgameCtxWorker *worker, int move_count,
   return build_values;
 }
 
-void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
-                               uint64_t tt_move, float opp_stuck_frac) {
+// Assign estimated values to the freshly generated moves at the top of the
+// arena. Does not sort: interior nodes order moves lazily in abdada_negamax
+// (selection picks + one tail sort), and the root sorts explicitly.
+void assign_estimates(EndgameCtxWorker *worker, int move_count,
+                      uint64_t tt_move, float opp_stuck_frac) {
   const int player_index = game_get_player_on_turn_index(worker->game_copy);
   const Player *player = game_get_player(worker->game_copy, player_index);
   const Player *opponent = game_get_player(worker->game_copy, 1 - player_index);
@@ -1531,10 +1657,16 @@ void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
     }
   }
   free(build_values);
-  // sort moves by estimated value, from biggest to smallest value. A good move
-  // sorting is instrumental to the performance of ab pruning.
-  SmallMove *small_moves =
-      (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+}
+
+// assign_estimates plus a full sort by estimated value, biggest first.
+// Used for the root move list, which is iterated in full every depth.
+void assign_estimates_and_sort(EndgameCtxWorker *worker, int move_count,
+                               uint64_t tt_move, float opp_stuck_frac) {
+  assign_estimates(worker, move_count, tt_move, opp_stuck_frac);
+  SmallMove *small_moves = (SmallMove *)(worker->small_move_arena->memory +
+                                         worker->small_move_arena->size -
+                                         (sizeof(SmallMove) * move_count));
   qsort(small_moves, move_count, sizeof(SmallMove),
         compare_small_moves_by_estimated_value);
 }
@@ -1550,7 +1682,12 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
   int solving_player = worker->solver->solving_player;
   int plies = worker->solver->requested_plies;
   int playout_depth = 0;
-  int max_playout = MAX_SEARCH_DEPTH - plies;
+  // +1 because move_undos[] is now sized MAX_SEARCH_DEPTH+1 specifically so
+  // the greedy can claim at least one slot past the deepest negamax-used
+  // slot. Without this, full-depth IDS (plies == MAX_SEARCH_DEPTH) gives
+  // greedy 0 plies and leaks the static rack-adjusted spread instead of
+  // playing a terminating move.
+  int max_playout = MAX_SEARCH_DEPTH + 1 - plies;
 
   // Recompute opp_stuck_frac from the current position rather than using the
   // parent's value. This ensures position-dependent (not path-dependent)
@@ -1744,13 +1881,11 @@ static int32_t negamax_greedy_leaf_playout(EndgameCtxWorker *worker,
       playout_depth < MAX_VARIANT_LENGTH ? playout_depth : MAX_VARIANT_LENGTH;
   pv->negamax_depth = 0;
 
-  // Unplay all playout moves in reverse
+  // Unplay all playout moves in reverse. Lazy cross-set updates were saved
+  // into each move's undo, so the square restore reverts them exactly.
   for (int d = playout_depth - 1; d >= 0; d--) {
     int undo_slot = plies + d;
     unplay_move_incremental(worker->game_copy, &worker->move_undos[undo_slot]);
-    // Cross-sets need no recompute here: any lazy cross-set update in the
-    // subtree was saved into this undo (or a descendant's undo already
-    // restored), so the square restore reverted them exactly.
   }
 
   if (playout_interrupted) {
@@ -1798,67 +1933,16 @@ static void negamax_tt_store(const EndgameCtxWorker *worker, uint64_t node_key,
   }
   entry_to_store.flag_and_depth = (flag << 6) + (uint8_t)depth;
   entry_to_store.tiny_move = best_tiny_move;
-  // Single-PV: keep the original always-replace policy to avoid adding any
-  // overhead to the hot path. Multi-PV-specific bugs (alpha widening producing
-  // bound-flag entries that get clobbered) only manifest with num_top_moves
-  // > 1.
-  if (worker->solver->num_top_moves <= 1) {
-    transposition_table_store(worker->solver->transposition_table, node_key,
-                              entry_to_store);
-    return;
-  }
-  // Multi-PV: depth-and-flag-preferred replacement with CAS. Keep the
-  // existing entry if it's for the same position AND either (a) at greater
-  // depth or (b) at equal depth but already TT_EXACT while the new entry is
-  // only a bound. The CAS on slot[1] narrows the common-case race where two
-  // writers both decide to overwrite an existing entry — without it, two
-  // parallel re-search workers can read the same (existing=LOWER) snapshot,
-  // both decide to write, and the LOWER write may land last and clobber a
-  // freshly-written EXACT. The slot[0] update is non-atomic with the CAS,
-  // so the existing lockless-XOR torn-write hazard remains: a torn read is
-  // detected via hash mismatch and treated as a TT miss (correctness is
-  // preserved, but a rare overlap can lose an EXACT entry until the next
-  // write to that slot).
-  TranspositionTable *tt = worker->solver->transposition_table;
-  const uint64_t idx = node_key & tt->size_mask;
-  const uint64_t stored_hash = node_key >> tt->size_power_of_2;
-  entry_to_store.top_4_bytes = (uint32_t)(stored_hash >> 8);
-  entry_to_store.fifth_byte = (uint8_t)(stored_hash & 0xFF);
-  uint64_t new_key_half;
-  memcpy(&new_key_half, &entry_to_store, 8);
-  const uint64_t new_xored = new_key_half ^ entry_to_store.tiny_move;
-  const uint64_t new_data = entry_to_store.tiny_move;
-  _Atomic uint64_t *slot = &tt->table[idx * 2];
-  for (;;) {
-    uint64_t cur_xored = atomic_load_explicit(&slot[0], memory_order_relaxed);
-    uint64_t cur_data = atomic_load_explicit(&slot[1], memory_order_relaxed);
-    const uint64_t cur_key_half = cur_xored ^ cur_data;
-    TTEntry existing;
-    memcpy(&existing, &cur_key_half, 8);
-    existing.tiny_move = cur_data;
-    if (ttentry_valid(existing) &&
-        ttentry_full_hash(existing, idx, tt->size_power_of_2) == node_key &&
-        (ttentry_depth(existing) > (uint8_t)depth ||
-         (ttentry_depth(existing) == (uint8_t)depth &&
-          ttentry_flag(existing) == TT_EXACT && flag != TT_EXACT))) {
-      return;
-    }
-    if (atomic_compare_exchange_strong_explicit(&slot[1], &cur_data, new_data,
-                                                memory_order_relaxed,
-                                                memory_order_relaxed)) {
-      atomic_store_explicit(&slot[0], new_xored, memory_order_relaxed);
-      atomic_fetch_add(&tt->created, 1);
-      return;
-    }
-    // CAS failed — slot[1] changed under us; loop and re-check.
-  }
+  transposition_table_store(worker->solver->transposition_table, node_key,
+                            entry_to_store);
 }
 
-// Stuck-tile detection, move generation, logging, and sorting for non-root
-// nodes. Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
-static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
-                                           uint64_t tt_move,
-                                           float *opp_stuck_frac) {
+// Stuck-tile detection, move generation, logging, and estimate assignment
+// for non-root nodes (move ordering itself is done lazily by the caller).
+// Updates *opp_stuck_frac. Returns move count, or -1 if interrupted.
+static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
+                                               int depth, uint64_t tt_move,
+                                               float *opp_stuck_frac) {
   int opp_idx = 1 - worker->solver->solving_player;
   uint64_t opp_tiles_bv = 0;
   int nplays;
@@ -1924,7 +2008,7 @@ static int negamax_generate_and_sort_moves(EndgameCtxWorker *worker, int depth,
     }
   }
 
-  assign_estimates_and_sort(worker, nplays, tt_move, *opp_stuck_frac);
+  assign_estimates(worker, nplays, tt_move, *opp_stuck_frac);
   return nplays;
 }
 
@@ -1936,6 +2020,12 @@ __attribute__((noinline)) static bool
 check_depth_deadline(EndgameCtxWorker *worker) {
   int64_t deadline_ns = atomic_load_explicit(&worker->solver->depth_deadline_ns,
                                              memory_order_relaxed);
+  // External deadline (e.g. PEG's wall-clock cap) takes precedence if it
+  // exists and is earlier than the EBF-projected per-depth deadline.
+  int64_t external = worker->solver->external_deadline_ns;
+  if (external != 0 && (deadline_ns == 0 || external < deadline_ns)) {
+    deadline_ns = external;
+  }
   if (deadline_ns == 0) {
     return false;
   }
@@ -1947,22 +2037,45 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   return false;
 }
 
-// Insert (root_tiny, value, continuation_pv) into the worker's live
-// multi-PV top-K snapshot under its seqlock. If a slot already exists
-// for the same root_tiny (e.g. ABDADA pass-2 re-evaluation) it's
-// removed first so re-inserting reflects the new value/continuation.
-// Insertion is sorted descending by value; capped at K_max slots.
-// Caller must be the worker's owning thread (only thread 0 should
-// call this so the writer side stays single-threaded).
+// Republish worker thread 0's live multi-PV top-K leaderboard with the
+// (root_tiny, value, continuation) for one just-completed root move. Keeps
+// entries sorted descending by value, deduped by root_tiny, capped at max_k
+// (<= MAX_ENDGAME_DISPLAY_PVS). Seqlock writer: bump seq odd, mutate, bump
+// even, so endgame_ctx_get_live_top_k_pvs reads a consistent snapshot.
+// Atomically copy leaderboard slot `src` onto slot `dst` (relaxed loads/stores;
+// the surrounding seqlock release/acquire provides ordering for readers). Only
+// the live continuation prefix is copied, which is all a reader observes.
+static void topk_copy_slot(EndgameCtxWorker *worker, int dst, int src) {
+  atomic_store_explicit(&worker->live_top_k_root_tiny[dst],
+                        atomic_load_explicit(&worker->live_top_k_root_tiny[src],
+                                             memory_order_relaxed),
+                        memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_value[dst],
+                        atomic_load_explicit(&worker->live_top_k_value[src],
+                                             memory_order_relaxed),
+                        memory_order_relaxed);
+  const int cont_len = atomic_load_explicit(
+      &worker->live_top_k_continuation_len[src], memory_order_relaxed);
+  atomic_store_explicit(&worker->live_top_k_continuation_len[dst], cont_len,
+                        memory_order_relaxed);
+  for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
+    atomic_store_explicit(
+        &worker->live_top_k_continuation[dst][ply_idx],
+        atomic_load_explicit(&worker->live_top_k_continuation[src][ply_idx],
+                             memory_order_relaxed),
+        memory_order_relaxed);
+  }
+}
+
 static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
                                   int32_t value,
                                   const struct PVLine *continuation,
-                                  int K_max) {
-  if (K_max < 1) {
+                                  int max_k) {
+  if (max_k < 1) {
     return;
   }
-  if (K_max > MAX_ENDGAME_DISPLAY_PVS) {
-    K_max = MAX_ENDGAME_DISPLAY_PVS;
+  if (max_k > MAX_ENDGAME_DISPLAY_PVS) {
+    max_k = MAX_ENDGAME_DISPLAY_PVS;
   }
   // Begin seqlock write window: bump seq odd.
   const uint64_t seq_before =
@@ -1974,16 +2087,11 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
       atomic_load_explicit(&worker->live_top_k_filled, memory_order_relaxed);
 
   // Remove existing entry for same root_tiny so we can re-insert sorted.
-  for (int i = 0; i < filled; i++) {
-    if (worker->live_top_k_root_tiny[i] == root_tiny) {
-      for (int j = i; j < filled - 1; j++) {
-        worker->live_top_k_root_tiny[j] = worker->live_top_k_root_tiny[j + 1];
-        worker->live_top_k_value[j] = worker->live_top_k_value[j + 1];
-        worker->live_top_k_continuation_len[j] =
-            worker->live_top_k_continuation_len[j + 1];
-        memcpy(worker->live_top_k_continuation[j],
-               worker->live_top_k_continuation[j + 1],
-               sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+  for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+    if (atomic_load_explicit(&worker->live_top_k_root_tiny[pv_idx],
+                             memory_order_relaxed) == root_tiny) {
+      for (int shift_idx = pv_idx; shift_idx < filled - 1; shift_idx++) {
+        topk_copy_slot(worker, shift_idx, shift_idx + 1);
       }
       filled--;
       break;
@@ -1992,36 +2100,35 @@ static void publish_live_top_k_pv(EndgameCtxWorker *worker, uint64_t root_tiny,
 
   // Find insertion position (descending order by value).
   int insert_pos = filled;
-  for (int i = 0; i < filled; i++) {
-    if (value > worker->live_top_k_value[i]) {
-      insert_pos = i;
+  for (int pv_idx = 0; pv_idx < filled; pv_idx++) {
+    if (value > atomic_load_explicit(&worker->live_top_k_value[pv_idx],
+                                     memory_order_relaxed)) {
+      insert_pos = pv_idx;
       break;
     }
   }
 
-  if (insert_pos < K_max) {
-    const int last = (filled < K_max) ? filled : (K_max - 1);
-    for (int i = last; i > insert_pos; i--) {
-      worker->live_top_k_root_tiny[i] = worker->live_top_k_root_tiny[i - 1];
-      worker->live_top_k_value[i] = worker->live_top_k_value[i - 1];
-      worker->live_top_k_continuation_len[i] =
-          worker->live_top_k_continuation_len[i - 1];
-      memcpy(worker->live_top_k_continuation[i],
-             worker->live_top_k_continuation[i - 1],
-             sizeof(uint64_t) * MAX_SEARCH_DEPTH);
+  if (insert_pos < max_k) {
+    const int last = (filled < max_k) ? filled : (max_k - 1);
+    for (int slot_idx = last; slot_idx > insert_pos; slot_idx--) {
+      topk_copy_slot(worker, slot_idx, slot_idx - 1);
     }
-    worker->live_top_k_root_tiny[insert_pos] = root_tiny;
-    worker->live_top_k_value[insert_pos] = value;
+    atomic_store_explicit(&worker->live_top_k_root_tiny[insert_pos], root_tiny,
+                          memory_order_relaxed);
+    atomic_store_explicit(&worker->live_top_k_value[insert_pos], value,
+                          memory_order_relaxed);
     int cont_len = (continuation != NULL) ? continuation->num_moves : 0;
     if (cont_len > MAX_SEARCH_DEPTH) {
       cont_len = MAX_SEARCH_DEPTH;
     }
-    for (int i = 0; i < cont_len; i++) {
-      worker->live_top_k_continuation[insert_pos][i] =
-          continuation->moves[i].tiny_move;
+    for (int ply_idx = 0; ply_idx < cont_len; ply_idx++) {
+      atomic_store_explicit(
+          &worker->live_top_k_continuation[insert_pos][ply_idx],
+          continuation->moves[ply_idx].tiny_move, memory_order_relaxed);
     }
-    worker->live_top_k_continuation_len[insert_pos] = cont_len;
-    if (filled < K_max) {
+    atomic_store_explicit(&worker->live_top_k_continuation_len[insert_pos],
+                          cont_len, memory_order_relaxed);
+    if (filled < max_k) {
       filled++;
     }
     atomic_store_explicit(&worker->live_top_k_filled, filled,
@@ -2143,24 +2250,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       transposition_table_leave_node(worker->solver->transposition_table,
                                      node_key);
     }
-    if (game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
-      // The game has not ended at this leaf. Mark this worker's current
-      // iterative-deepening ply as not-fully-solved so the early-stop check
-      // for that ply doesn't fire. Per-depth so a jittered worker on a
-      // shallower ply can't suppress early-stop for a deeper, solved ply.
-      // Guard the index: the display re-search runs these workers with
-      // current_iterative_deepening_depth == -1 (no IDS, no early-stop), so
-      // only record for a real ply (1..MAX_SEARCH_DEPTH) — writing at -1 would
-      // be an out-of-bounds store.
-      const int unfinished_ply = worker->current_iterative_deepening_depth;
-      if (unfinished_ply >= 1 && unfinished_ply <= MAX_SEARCH_DEPTH) {
-        atomic_store(&worker->solver->any_leaf_game_unfinished[unfinished_ply],
-                     1);
-      }
-      if (worker->solver->use_heuristics) {
-        return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
-                                           on_turn_spread, pv, opp_stuck_frac);
-      }
+    if (worker->solver->use_heuristics &&
+        game_get_game_end_reason(worker->game_copy) == GAME_END_REASON_NONE) {
+      return negamax_greedy_leaf_playout(worker, node_key, on_turn_idx,
+                                         on_turn_spread, pv, opp_stuck_frac);
     }
     pv->negamax_depth = 0;
     return on_turn_spread;
@@ -2185,8 +2278,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       }
       return ABDADA_INTERRUPTED;
     }
-    nplays = negamax_generate_and_sort_moves(worker, depth, tt_move,
-                                             &opp_stuck_frac);
+    nplays = negamax_generate_and_estimate_moves(worker, depth, tt_move,
+                                                 &opp_stuck_frac);
     if (nplays == -1) {
       // Interrupted during compute_opp_stuck_fraction
       if (abdada_active) {
@@ -2218,7 +2311,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       small_move_to_move(worker->move_list->spare_move, &pass_move, board);
 
       int last_consecutive_scoreless_turns =
-          endgame_zobrist_scoreless_turns(worker->game_copy);
+          game_get_consecutive_scoreless_turns(worker->game_copy);
 
       play_move_incremental(worker->move_list->spare_move, worker->game_copy,
                             &worker->pass_undos[depth]);
@@ -2226,12 +2319,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
         const Rack *stm_rack = player_get_rack(player_on_turn);
-        child_key =
-            zobrist_add_move(worker->solver->transposition_table->zobrist,
-                             node_key, worker->move_list->spare_move, stm_rack,
-                             on_turn_idx == worker->solver->solving_player,
-                             endgame_zobrist_scoreless_turns(worker->game_copy),
-                             last_consecutive_scoreless_turns);
+        child_key = zobrist_add_move(
+            worker->solver->transposition_table->zobrist, node_key,
+            worker->move_list->spare_move, stm_rack,
+            on_turn_idx == worker->solver->solving_player,
+            game_get_consecutive_scoreless_turns(worker->game_copy),
+            last_consecutive_scoreless_turns);
       }
 
       // Recurse at SAME depth (forced pass doesn't consume depth)
@@ -2311,13 +2404,17 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   const bool is_root = (worker->current_iterative_deepening_depth == depth);
   const bool is_ply2 =
       (worker->current_iterative_deepening_depth - 1 == depth) &&
-      worker->thread_index == 0 && worker->in_first_root_move;
+      worker->ordinal == 0 && worker->in_first_root_move;
   if (is_ply2) {
     atomic_store(&worker->solver->ply2_moves_total, nplays);
     atomic_store(&worker->solver->ply2_moves_completed, 0);
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
+  // Sized for the live multi-PV leaderboard breadth (up to
+  // MAX_ENDGAME_DISPLAY_PVS root moves), not the per-line depth. num_top_moves
+  // is clamped to MAX_ENDGAME_DISPLAY_PVS in endgame_ctx_reset so topk_insert
+  // (called with k == multi_pv_k) never writes past this array.
   int32_t topk_values[MAX_ENDGAME_DISPLAY_PVS];
   int topk_n = 0;
 
@@ -2344,6 +2441,13 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // Pass 1+: retry only deferred moves without exclusion.
   int pass = 0;
   bool all_done = false;
+  // Freshly generated moves are unsorted (assign_estimates does not sort).
+  // Order them lazily: selection-pick the best remaining move into slot idx
+  // for the first LAZY_SELECTION_LIMIT indices, then sort the tail once if
+  // the node gets that far without a cutoff. Most nodes cut off within the
+  // first few moves and never pay for a full sort. Root move lists
+  // (!arena_alloced) arrive pre-sorted.
+  bool tail_sorted = !arena_alloced;
   while (!all_done) {
     all_done = true;
 
@@ -2352,6 +2456,34 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // (they were already successfully searched)
       if (pass > 0 && deferred != NULL && !deferred[idx]) {
         continue;
+      }
+
+      // Lazy move ordering, pass 0 only: later passes revisit positions
+      // recorded in deferred[], so the array must not be reordered then.
+      if (!tail_sorted && pass == 0) {
+        SmallMove *moves_base =
+            (SmallMove *)(worker->small_move_arena->memory + arena_offset);
+        if (idx < LAZY_SELECTION_LIMIT) {
+          int best_est_idx = idx;
+          int32_t best_est = small_move_get_estimated_value(&moves_base[idx]);
+          for (int scan = idx + 1; scan < nplays; scan++) {
+            const int32_t est =
+                small_move_get_estimated_value(&moves_base[scan]);
+            if (est > best_est) {
+              best_est = est;
+              best_est_idx = scan;
+            }
+          }
+          if (best_est_idx != idx) {
+            SmallMove tmp = moves_base[idx];
+            moves_base[idx] = moves_base[best_est_idx];
+            moves_base[best_est_idx] = tmp;
+          }
+        } else {
+          qsort(moves_base + idx, (size_t)(nplays - idx), sizeof(SmallMove),
+                compare_small_moves_by_estimated_value);
+          tail_sorted = true;
+        }
       }
 
       // ABDADA: determine if this move should be searched exclusively
@@ -2372,23 +2504,24 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
           small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
       // Track whether thread 0 is inside root move #1's subtree
-      if (is_root && worker->thread_index == 0 && pass == 0) {
+      if (is_root && worker->ordinal == 0 && pass == 0) {
         worker->in_first_root_move = (idx == 0);
       }
 
       int last_consecutive_scoreless_turns =
-          endgame_zobrist_scoreless_turns(worker->game_copy);
+          game_get_consecutive_scoreless_turns(worker->game_copy);
 
       // Calculate undo index for incremental backup
       int undo_index = worker->solver->requested_plies - depth;
 
-      // Live-progress: publish this move into the per-thread "current
-      // line" buffer before recursing so a polling reader can see what
-      // the engine is currently exploring even during a long single-
-      // root subtree where no other signal updates. Length store uses
-      // release ordering so the reader (acquire on length) sees the
-      // tiny_move write.
-      worker->current_line[undo_index] = small_move->tiny_move;
+      // Live-progress: publish this move into the per-thread "current line"
+      // buffer before recursing so a polling reader can see what the engine
+      // is currently exploring even during a long single-root subtree where
+      // no other signal updates. The slot store is a relaxed atomic; the
+      // length store uses release ordering so the reader (acquire on length)
+      // sees the tiny_move write.
+      atomic_store_explicit(&worker->current_line[undo_index],
+                            small_move->tiny_move, memory_order_relaxed);
       atomic_store_explicit(&worker->current_line_len, undo_index + 1,
                             memory_order_release);
 
@@ -2407,12 +2540,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
       uint64_t child_key = 0;
       if (worker->solver->transposition_table_optim) {
-        child_key =
-            zobrist_add_move(worker->solver->transposition_table->zobrist,
-                             node_key, worker->move_list->spare_move, stm_rack,
-                             on_turn_idx == worker->solver->solving_player,
-                             endgame_zobrist_scoreless_turns(worker->game_copy),
-                             last_consecutive_scoreless_turns);
+        child_key = zobrist_add_move(
+            worker->solver->transposition_table->zobrist, node_key,
+            worker->move_list->spare_move, stm_rack,
+            on_turn_idx == worker->solver->solving_player,
+            game_get_consecutive_scoreless_turns(worker->game_copy),
+            last_consecutive_scoreless_turns);
       }
 
       // Per-root-move aspiration: at root after depth 1, each move gets its
@@ -2479,10 +2612,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // child's subtree was saved into this undo (or a descendant's undo that
       // was already restored), so the square restore reverted them exactly.
 
-      // Live-progress: pop the line back to the parent's depth. The
-      // entry at undo_index is left as-is (will be overwritten by the
-      // next sibling's push). Release pairs with reader's acquire on
-      // length.
+      // Live-progress: pop the line back to the parent's depth. The entry at
+      // undo_index is left as-is (overwritten by the next sibling's push).
+      // Release pairs with the reader's acquire on length.
       atomic_store_explicit(&worker->current_line_len, undo_index,
                             memory_order_release);
 
@@ -2517,12 +2649,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         pvline_update(pv, &child_pv, small_move,
                       best_value - worker->solver->initial_spread);
         pv->negamax_depth = child_pv.negamax_depth + 1;
-        // Live PV publish (root only): a polling reader sees the
-        // engine's evolving best line refine through each depth as
-        // root moves get evaluated. Seqlock pattern: bump seq odd to
-        // signal "writing", write moves+value+length, bump seq even
-        // to signal "consistent". Reader retries on odd / mismatched
-        // seq.
+        // Live PV publish (root only): a polling reader sees the engine's
+        // evolving best line refine through each depth as root moves get
+        // evaluated. Seqlock pattern: bump seq odd to signal "writing", write
+        // moves+value+length, bump seq even to signal "consistent". Reader
+        // retries on odd / mismatched seq.
         if (is_root) {
           int new_len = pv->num_moves;
           if (new_len > MAX_SEARCH_DEPTH) {
@@ -2532,8 +2663,10 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
               atomic_load_explicit(&worker->live_pv_seq, memory_order_relaxed);
           atomic_store_explicit(&worker->live_pv_seq, seq_before + 1,
                                 memory_order_release);
-          for (int i = 0; i < new_len; i++) {
-            worker->live_pv_tiny_moves[i] = pv->moves[i].tiny_move;
+          for (int ply_idx = 0; ply_idx < new_len; ply_idx++) {
+            atomic_store_explicit(&worker->live_pv_tiny_moves[ply_idx],
+                                  pv->moves[ply_idx].tiny_move,
+                                  memory_order_relaxed);
           }
           atomic_store_explicit(&worker->live_pv_length, new_len,
                                 memory_order_relaxed);
@@ -2551,7 +2684,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // Track root move progress (thread 0 only, for external polling).
         // Count on any pass so ABDADA deferred moves that complete on pass 1+
         // are not missed.
-        if (worker->thread_index == 0) {
+        if (worker->ordinal == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
           // Spread-adjusted value, same sign convention as PVLine.score.
           const int32_t reported_value =
@@ -2561,11 +2694,11 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                 depth, idx, small_move, reported_value,
                 worker->solver->per_root_move_callback_data);
           }
-          // Live multi-PV: republish the top-K leaderboard with this
-          // root's evaluation. Covers all root completions (including
-          // ABDADA pass-2 deferred re-evaluations), so the displayed
-          // leaderboard always reflects the most recent value seen for
-          // each root move at the current depth.
+          // Live multi-PV: republish the top-K leaderboard with this root's
+          // evaluation. Covers all root completions (including ABDADA pass-2
+          // deferred re-evaluations), so the displayed leaderboard always
+          // reflects the most recent value seen for each root move at the
+          // current depth.
           publish_live_top_k_pv(worker, small_move->tiny_move, reported_value,
                                 &child_pv, worker->solver->num_top_moves);
         }
@@ -2607,12 +2740,6 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
   // Clean up deferred array (only if heap-allocated)
   if (deferred_heap_allocated) {
     free(deferred);
-  }
-
-  // Record how many top-K root moves were confirmed this depth (used by the
-  // iterative-deepening early-stop check). Only meaningful at the root level.
-  if (is_root && best_value != ABDADA_INTERRUPTED) {
-    worker->root_topk_n = multi_pv ? topk_n : best_value > -LARGE_VALUE;
   }
 
   if (worker->solver->transposition_table_optim &&
@@ -2663,11 +2790,16 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                         const PVLine *extended_pv,
                                         const SmallMove *initial_moves,
                                         int initial_move_count) {
-  enum { MAX_RANKED_CALLBACK_PVS = 50 };
   int n_ranked = initial_move_count < MAX_RANKED_CALLBACK_PVS
                      ? initial_move_count
                      : MAX_RANKED_CALLBACK_PVS;
   PVLine ranked_pvs[MAX_RANKED_CALLBACK_PVS];
+  // Seed each ranked PV from its root SmallMove first, while the arena is
+  // stable. solver_pvline_extend_from_tt below runs a greedy playout that can
+  // grow (realloc) small_move_arena, so it must not run while we still need to
+  // read initial_moves — otherwise a later iteration would index a freed
+  // buffer. Splitting the loops keeps all initial_moves reads before any
+  // possible realloc.
   for (int r = 0; r < n_ranked; r++) {
     PVLine *rpv = &ranked_pvs[r];
     rpv->moves[0] = initial_moves[r];
@@ -2676,9 +2808,11 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                  worker->solver->initial_spread;
     rpv->negamax_depth = 1;
     rpv->game = NULL;
-    // Extend from TT
-    if (worker->solver->transposition_table_optim) {
-      solver_pvline_extend_from_tt(rpv, worker->solver, worker->game_copy);
+  }
+  if (worker->solver->transposition_table_optim) {
+    for (int r = 0; r < n_ranked; r++) {
+      solver_pvline_extend_from_tt(&ranked_pvs[r], worker->solver,
+                                   worker->game_copy);
     }
   }
 
@@ -2723,12 +2857,12 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
         worker->solver->transposition_table->zobrist,
         game_get_board(worker->game_copy), player_get_rack(solving_player),
         player_get_rack(other_player), false,
-        endgame_zobrist_scoreless_turns(worker->game_copy));
+        game_get_consecutive_scoreless_turns(worker->game_copy));
   }
 
   // Half the threads use stuck-tile-aware root ordering (build chains +
   // conservation), the other half use score-based ordering for diversity.
-  float initial_opp_stuck_frac = (worker->thread_index % 2 == 0)
+  float initial_opp_stuck_frac = (worker->ordinal % 2 == 0)
                                      ? worker->solver->initial_opp_stuck_frac
                                      : 0.0F;
 
@@ -2742,10 +2876,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
          initial_move_count * sizeof(SmallMove));
 
   // Publish the d=0 root-move list to clients before any depth begins.
-  // root_moves_total is bumped here (rather than only at depth-loop entry)
-  // so the polled progress atomics agree with the callback's view of the
-  // candidate count even before depth-1 starts. Thread 0 only.
-  if (worker->thread_index == 0) {
+  // root_moves_total is bumped here (rather than only at depth-loop entry) so
+  // the polled progress atomics agree with the callback's view of the
+  // candidate count even before depth-1 starts. Main worker (ordinal 0)
+  // only; the arena holds the sorted moves contiguously from offset 0.
+  if (worker->ordinal == 0) {
     atomic_store(&worker->solver->root_moves_total, initial_move_count);
     if (worker->solver->before_search_callback) {
       const SmallMove *initial_moves =
@@ -2763,16 +2898,111 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     start = plies;
   }
 
+  // Depth-0 fallback (thread 0 only): before the IDS loop runs depth-1+,
+  // do a greedy-leaf evaluation of EACH root candidate and store the best
+  // as a depth-0 result. If the IDS is interrupted before depth-1 completes
+  // even once, the caller gets the best-from-static-greedy answer instead
+  // of the default "no result / pass / value=0".
+  //
+  // first_win_optim only needs win/loss, not the best move, and its depth-1
+  // search is cheap, so sweeping all root candidates (often 1000+ at a 7-tile
+  // endgame root) is almost pure overhead. Cap it to the top few moves by
+  // estimate (the moves are already sorted) so the interrupt fallback is still
+  // present but ~100x cheaper. The result is unchanged whenever IDS completes
+  // (the common case), since depth-1+ overwrites the depth-0 value.
+  if (worker->ordinal == 0) {
+    int32_t best_root_value = -LARGE_VALUE;
+    SmallMove best_root_move;
+    bool have_root_best = false;
+    PVLine d0_pv;
+    d0_pv.game = worker->game_copy;
+    d0_pv.num_moves = 0;
+    d0_pv.negamax_depth = 0;
+
+    // first_win_fallback_moves: 0 = use FIRST_WIN_D0_FALLBACK_MOVES default,
+    // <0 = skip the sweep, >0 = explicit cap.
+    int fw_fallback_cap = FIRST_WIN_D0_FALLBACK_MOVES;
+    if (worker->solver->first_win_fallback_moves > 0) {
+      fw_fallback_cap = worker->solver->first_win_fallback_moves;
+    } else if (worker->solver->first_win_fallback_moves < 0) {
+      fw_fallback_cap = 0; // skip the sweep entirely
+    }
+    const int d0_move_count = worker->solver->first_win_optim
+                                  ? MIN(initial_move_count, fw_fallback_cap)
+                                  : initial_move_count;
+    for (int i = 0; i < d0_move_count; i++) {
+      if (iterative_deepening_should_stop(worker->solver)) {
+        break;
+      }
+      // negamax_greedy_leaf_playout below can grow (realloc) small_move_arena,
+      // which moves its backing buffer. Re-read the base each iteration and
+      // copy the candidate by value so nothing dereferences a pointer into a
+      // freed buffer after the leaf call.
+      const SmallMove *initial_moves =
+          (const SmallMove *)(worker->small_move_arena->memory);
+      const SmallMove sm = initial_moves[i];
+      small_move_to_move(worker->move_list->spare_move, &sm,
+                         game_get_board(worker->game_copy));
+      // Slot 0 — the root play. Negamax's IDS will reuse this slot for
+      // its own play at depth=requested_plies; the depth-0 sweep finishes
+      // (play + leaf + unplay) before IDS starts, so the slot is free.
+      play_move_incremental(worker->move_list->spare_move, worker->game_copy,
+                            &worker->move_undos[0]);
+      // Compute leaf value from the perspective of the post-move
+      // player-on-turn (= mover, since we just played opp's move at root).
+      const int post_on_turn = game_get_player_on_turn_index(worker->game_copy);
+      const int32_t post_on_turn_spread = equity_to_int(
+          player_get_score(game_get_player(worker->game_copy, post_on_turn)) -
+          player_get_score(
+              game_get_player(worker->game_copy, 1 - post_on_turn)));
+      PVLine child_pv;
+      child_pv.game = worker->game_copy;
+      child_pv.num_moves = 0;
+      child_pv.negamax_depth = 0;
+      int32_t leaf_val = negamax_greedy_leaf_playout(
+          worker, 0, post_on_turn, post_on_turn_spread, &child_pv, 0.0F);
+      unplay_move_incremental(worker->game_copy, &worker->move_undos[0]);
+      if (leaf_val == ABDADA_INTERRUPTED) {
+        break;
+      }
+      // Negamax convention: opp's value for this move = -leaf_val.
+      int32_t opp_val = -leaf_val;
+      if (opp_val > best_root_value) {
+        best_root_value = opp_val;
+        best_root_move = sm;
+        d0_pv.moves[0] = sm;
+        for (int j = 0; j < child_pv.num_moves && j + 1 < MAX_VARIANT_LENGTH;
+             j++) {
+          d0_pv.moves[j + 1] = child_pv.moves[j];
+        }
+        d0_pv.num_moves = (child_pv.num_moves + 1 < MAX_VARIANT_LENGTH)
+                              ? child_pv.num_moves + 1
+                              : MAX_VARIANT_LENGTH;
+        d0_pv.negamax_depth = 0;
+        have_root_best = true;
+      }
+    }
+    if (have_root_best) {
+      d0_pv.score = best_root_value - worker->solver->initial_spread;
+      endgame_results_set_best_pvline(worker->solver->results, &d0_pv,
+                                      d0_pv.score, 0);
+    }
+    (void)best_root_move;
+  }
+
   // ABDADA depth jitter: spread threads across different starting depths
   // so they don't all compete on the same shallow levels simultaneously.
   // Thread 0 always starts at depth 1 (main thread, provides per-ply callback).
   // Other threads start at depth 1 + (index % depth_spread), clamped to plies.
   const int num_threads = worker->solver->threads;
-  if (num_threads > 1 && worker->thread_index > 0) {
+  // plies > 1 guards the `% (plies - 1)` below: a 1-ply solve has only depth 1,
+  // so there is no range to spread across (and `% 0` is a divide-by-zero that
+  // traps as SIGFPE on x86).
+  if (num_threads > 1 && worker->ordinal > 0 && plies > 1) {
     // Spread across up to 4 different starting depths to reduce contention.
     // With 16 threads: 1 at d1 (thread 0), ~4 at d2, ~4 at d3, ~4 at d4, ~3 at
     // d5
-    int depth_offset = 1 + (worker->thread_index % MIN(4, plies - 1));
+    int depth_offset = 1 + (worker->ordinal % MIN(4, plies - 1));
     start = MIN(depth_offset, plies);
   }
 
@@ -2783,18 +3013,16 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     }
 
     worker->current_iterative_deepening_depth = ply;
-    worker->root_topk_n = 0;
-    // Update root move progress counters (thread 0 only)
-    if (worker->thread_index == 0) {
+    // Update root move progress counters (main worker, ordinal 0, only)
+    if (worker->ordinal == 0) {
       atomic_store(&worker->solver->current_depth, ply);
       atomic_store(&worker->solver->root_moves_completed, 0);
       atomic_store(&worker->solver->root_moves_total, worker->n_initial_moves);
       atomic_store(&worker->solver->ply2_moves_completed, 0);
       atomic_store(&worker->solver->ply2_moves_total, 0);
-      // Live multi-PV: clear the top-K leaderboard so it reflects the
-      // new depth's evaluations only. Brief seqlock window; reader
-      // will see filled=0 momentarily and then watch entries fill in
-      // as roots complete.
+      // Live multi-PV: clear the top-K leaderboard so it reflects the new
+      // depth's evaluations only. Brief seqlock window; a reader sees
+      // filled=0 momentarily, then watches entries fill in as roots complete.
       const uint64_t topk_seq_before =
           atomic_load_explicit(&worker->live_top_k_seq, memory_order_relaxed);
       atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 1,
@@ -2816,8 +3044,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Track whether this depth's search completed validly
     bool search_valid = true;
 
-    // Use aspiration windows after depth 1
-    if (use_aspiration && ply > 1 && !worker->solver->first_win_optim) {
+    // Use aspiration windows once this worker has searched at least one
+    // prior depth — otherwise prev_value is uninitialized and the window
+    // is bogus. With ABDADA depth-jitter, threads with thread_index > 0
+    // can start at depth > 1, so checking `ply > 1` is insufficient.
+    if (use_aspiration && ply > start && !worker->solver->first_win_optim) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;
@@ -2880,8 +3111,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
-    // Call per-ply callback (only thread 0 to avoid race conditions)
-    if (worker->thread_index == 0 && worker->solver->per_ply_callback) {
+    // Call per-ply callback (only this solver's main worker, ordinal 0, to
+    // avoid race conditions).
+    if (worker->ordinal == 0 && worker->solver->per_ply_callback) {
       // Extend PV from TT + greedy playout for display
       PVLine extended_pv = pv;
       if (worker->solver->transposition_table_optim) {
@@ -2906,7 +3138,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // Callers using only hard_time_limit rely on the external timer thread
     // and check_depth_deadline instead; soft_time_limit = 0 disables this
     // block intentionally (e.g. baseline time_mode=0 via endgame_time.c).
-    if (worker->thread_index == 0 && worker->solver->soft_time_limit > 0) {
+    if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
       if (ply >= min_depth_for_time_mgmt) {
@@ -2967,30 +3199,20 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
       prev_depth_time = this_depth_time;
     }
 
-    // Stop when the top num_top_moves plays are fully solved. "Fully solved"
-    // means every depth-0 leaf in this depth's search had the game already
-    // over — no branches hit the search horizon with tiles still to play.
-    // This allows early termination when the actual game length is shorter
-    // than the requested plies.
-    //
-    // Thread 0 owns this check. any_leaf_game_unfinished[ply] is set by any
-    // worker that sees an ongoing game at a leaf while searching this ply;
-    // it is monotonic per solve, so there is no reset race with jittered
-    // workers searching other plies.
-    // In ABDADA all workers eventually process all root moves (deferred moves
-    // come back via TT on pass 2), so root_topk_n is accurate per worker.
-    if (worker->thread_index == 0) {
-      int needed = MIN(worker->solver->num_top_moves, worker->n_initial_moves);
-      bool topk_fully_solved =
-          (!atomic_load(&worker->solver->any_leaf_game_unfinished[ply])) &&
-          (worker->root_topk_n >= needed);
-      if (topk_fully_solved || ply == plies) {
-        atomic_store(&worker->solver->search_complete, 1);
-      }
-    } else if (ply == plies) {
+    // Signal other threads to stop when we complete the full search
+    if (ply == plies) {
       atomic_store(&worker->solver->search_complete, 1);
     }
   }
+
+  // Final flush: this worker has stopped searching, so publish its exact
+  // node count. The periodic in-search flush only fires every
+  // DEPTH_DEADLINE_CHECK_INTERVAL nodes, so without this the tail of every
+  // worker (and all of a very short solve) would be permanently
+  // under-reported by up to DEPTH_DEADLINE_CHECK_INTERVAL-1 nodes. All
+  // exit paths of the loop above fall through to here.
+  atomic_store_explicit(&worker->published_nodes_searched,
+                        worker->local_nodes_searched, memory_order_relaxed);
 }
 
 void *solver_worker_start(void *uncasted_solver_worker) {
@@ -3000,27 +3222,40 @@ void *solver_worker_start(void *uncasted_solver_worker) {
   return NULL;
 }
 
-// Build PVLines for the next-best root moves (slots 1..num_top-1) from
-// the best worker's root SmallMove arena, with TT extension.  Returns the
-// number of PVs filled.  multi_pvs[0] must already be set by caller (from
-// ENDGAME_RESULT_BEST), and serves as the de-dup reference: any root_moves
-// entry sharing its tiny_move is skipped so the search-tracked best move
-// can't reappear later in multi_pvs.  The final qsort in iterative_deepening
-// is unstable, so when several root moves tie on estimated_value the
-// search-tracked best one may sit at any of the tied indices.
+// Format and log all final PV lines: move-by-move replay, game-end
+// annotations (rack points, 6 zeros), win/loss/tie summary.
+// Read root SmallMoves from best thread's arena, swap PV move to front,
+// build PVLines with TT extension for non-best root moves. Returns number
+// of PVs filled. multi_pvs[0] must already be set by caller.
 static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
                              const Game *game, PVLine *multi_pvs, int num_top) {
-  const int n_root = best_worker->n_initial_moves;
-  const SmallMove *root_moves =
-      (const SmallMove *)best_worker->small_move_arena->memory;
-  const uint64_t best_tiny = multi_pvs[0].moves[0].tiny_move;
+  int n_root = best_worker->n_initial_moves;
+  int k = (num_top < n_root) ? num_top : n_root;
+  SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
 
-  int dst = 1;
-  for (int r = 0; r < n_root && dst < num_top; r++) {
-    if (root_moves[r].tiny_move == best_tiny) {
-      continue;
+  // Root moves are already sorted by estimated_value descending from the
+  // final qsort in iterative_deepening. The estimated_value for each root
+  // move is the actual negamax return value set during the search
+  // (line small_move_set_estimated_value(small_move, -value) at root).
+
+  // Ensure the PV's first move is at root_moves[0] to avoid duplicates.
+  // qsort is not stable, so tied values may place the PV move elsewhere.
+  uint64_t pv_tiny = solver->principal_variation.moves[0].tiny_move;
+  if (root_moves[0].tiny_move != pv_tiny) {
+    for (int r = 1; r < n_root; r++) {
+      if (root_moves[r].tiny_move == pv_tiny) {
+        SmallMove tmp = root_moves[0];
+        root_moves[0] = root_moves[r];
+        root_moves[r] = tmp;
+        break;
+      }
     }
-    PVLine *pv = &multi_pvs[dst];
+  }
+
+  // Build PVLines for non-best root moves (r=1..k-1).
+  // PV[0] is already set from the search-tracked principal variation above.
+  for (int r = 1; r < k; r++) {
+    PVLine *pv = &multi_pvs[r];
     pv->moves[0] = root_moves[r];
     pv->num_moves = 1;
     pv->score =
@@ -3031,148 +3266,87 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
     if (solver->transposition_table) {
       solver_pvline_extend_from_tt(pv, solver, game);
     }
-    dst++;
   }
-  return dst;
+  return k;
 }
 
-// Parallel re-search task: workers grab PVs from a shared atomic counter
-// (work-stealing) so subtree-size variance doesn't leave threads idle.
-typedef struct ResearchTask {
-  EndgameCtx *solver;
-  EndgameCtxWorker *worker;
-  PVLine *multi_pvs;
-  int num_pvs;
-  atomic_int *next_pv;
-  const Game *source_game;
-} ResearchTask;
+// Single-threaded endgame solve that runs in the calling thread (no
+// cpthread_create). Safe for use from concurrent PEG decomp threads.
+void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
+                          EndgameResults *results) {
+  assert(ctx);
+  assert(results);
+  // Same precondition as endgame_solve. This entry point takes no ErrorStack
+  // (it's the hot path PEG drives on known-empty-bag leaves), so a non-empty
+  // bag is a caller bug rather than a recoverable input error.
+  assert(bag_get_letters(game_get_bag(endgame_args->game)) == 0);
+  if (*ctx == NULL) {
+    *ctx = endgame_ctx_create();
+  }
+  EndgameCtx *solver = *ctx;
 
-static void *research_worker(void *arg) {
-  ResearchTask *t = (ResearchTask *)arg;
-  EndgameCtxWorker *rw = t->worker;
-  EndgameCtx *solver = t->solver;
-  for (;;) {
-    int pv_idx = atomic_fetch_add(t->next_pv, 1);
-    if (pv_idx >= t->num_pvs) {
-      break;
-    }
-    PVLine *pv = &t->multi_pvs[pv_idx];
-    if (pv->num_moves == 0) {
-      continue;
-    }
-    // Skip if extract_multi_pvs already extended this PV all the way through
-    // TT_EXACT entries — no "|" would show in the display, so re-search would
-    // be wasted work. Common for the strongest etopk roots whose subtrees
-    // were searched first (default alpha) during the original multi-PV solve.
-    if (pv->negamax_depth >= pv->num_moves) {
-      continue;
-    }
-    game_copy(rw->game_copy, t->source_game);
-    arena_reset(rw->small_move_arena);
-    rw->current_iterative_deepening_depth = -1;
-    Move root_full_move;
-    small_move_to_move(&root_full_move, &pv->moves[0],
-                       game_get_board(rw->game_copy));
-    play_move(&root_full_move, rw->game_copy, NULL);
-    const int on_turn = game_get_player_on_turn_index(rw->game_copy);
-    const Player *us = game_get_player(rw->game_copy, solver->solving_player);
-    const Player *them =
-        game_get_player(rw->game_copy, 1 - solver->solving_player);
-    const uint64_t key = zobrist_calculate_hash(
-        solver->transposition_table->zobrist, game_get_board(rw->game_copy),
-        player_get_rack(us), player_get_rack(them),
-        on_turn != solver->solving_player,
-        endgame_zobrist_scoreless_turns(rw->game_copy));
-    PVLine local_pv = {.game = NULL, .num_moves = 0, .negamax_depth = 0};
-    abdada_negamax(rw, key, solver->requested_plies - 1, -LARGE_VALUE,
-                   LARGE_VALUE, &local_pv, true, false, 0.0F);
+  endgame_ctx_reset(solver, results, endgame_args);
+  // The inline main worker runs in the calling thread, so the base worker count
+  // is always 1 regardless of the caller's num_threads — only injected helpers
+  // (ordinals > 0) are spawned. Force threads/live_workers to 1 so injection
+  // ordinals and join ranges stay consistent (otherwise helpers would start at
+  // ordinal == num_threads, leaving gaps).
+  solver->threads = 1;
+  atomic_store(&solver->live_workers, 1);
 
-    // Walk down the PV one step at a time and re-search at each position
-    // whose TT entry isn't already proven EXACT. The initial call above only
-    // guarantees TT_EXACT for the root of the re-search; deeper entries can
-    // remain TT_LOWER/UPPER from internal alpha-beta tightening (the
-    // eventually-best move's child gets a narrowed window during PVS
-    // re-search). Walking down keeps each step's window full relative to its
-    // own position, which produces TT_EXACT throughout the PV.
-    uint64_t cur_key = key;
-    int cur_depth = solver->requested_plies - 1;
-    while (cur_depth > 0 &&
-           game_get_game_end_reason(rw->game_copy) == GAME_END_REASON_NONE) {
-      const TTEntry cur_e =
-          transposition_table_lookup(solver->transposition_table, cur_key);
-      if (!ttentry_valid(cur_e)) {
-        break;
-      }
-      const uint64_t tm = ttentry_move(cur_e);
-      if (tm == INVALID_TINY_MOVE) {
-        break;
-      }
-      SmallMove sm = {0};
-      sm.tiny_move = tm;
-      Move m;
-      small_move_to_move(&m, &sm, game_get_board(rw->game_copy));
-      play_move(&m, rw->game_copy, NULL);
-      cur_depth--;
-      const int wd_on_turn = game_get_player_on_turn_index(rw->game_copy);
-      const Player *wd_us =
-          game_get_player(rw->game_copy, solver->solving_player);
-      const Player *wd_them =
-          game_get_player(rw->game_copy, 1 - solver->solving_player);
-      cur_key = zobrist_calculate_hash(
-          solver->transposition_table->zobrist, game_get_board(rw->game_copy),
-          player_get_rack(wd_us), player_get_rack(wd_them),
-          wd_on_turn != solver->solving_player,
-          endgame_zobrist_scoreless_turns(rw->game_copy));
-      // Skip re-search if already proven EXACT at sufficient depth.
-      const TTEntry next_e =
-          transposition_table_lookup(solver->transposition_table, cur_key);
-      if (ttentry_valid(next_e) && ttentry_flag(next_e) == TT_EXACT &&
-          ttentry_depth(next_e) >= (uint8_t)cur_depth) {
-        continue;
-      }
-      arena_reset(rw->small_move_arena);
-      rw->current_iterative_deepening_depth = -1;
-      PVLine inner_pv = {.game = NULL, .num_moves = 0, .negamax_depth = 0};
-      abdada_negamax(rw, cur_key, cur_depth, -LARGE_VALUE, LARGE_VALUE,
-                     &inner_pv, true, false, 0.0F);
-    }
-  }
-  return NULL;
-}
+  uint64_t base_seed = endgame_args->seed != 0
+                           ? endgame_args->seed
+                           : (uint64_t)ctime_get_current_time();
+  endgame_ctx_prepare_workers(solver, base_seed);
 
-// Distribute PVs across worker threads (round-robin via stride). Each
-// worker re-searches its assigned PVs single-threaded (solver->threads has
-// already been set to 1 by the caller so ABDADA stays disabled).
-static void research_run_parallel(EndgameCtx *solver, PVLine *multi_pvs,
-                                  int num_pvs, const Game *source_game,
-                                  int n_workers) {
-  if (n_workers < 1) {
-    n_workers = 1;
+  // Suppress stuck-tile log to avoid localtime thread safety issues.
+  atomic_store(&solver->stuck_tile_logged, 1);
+
+  // Open the injection window so helpers can be added mid-search via
+  // endgame_add_worker while this thread runs the main worker (ordinal 0). The
+  // calling thread is the main worker, so unlike endgame_solve there is no
+  // spawned thread for ordinal 0 — only injected helpers (ordinals > 0) are
+  // joined.
+  if (solver->max_workers > solver->threads) {
+    cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->window_open_ns, ctimer_monotonic_ns());
+    atomic_store(&solver->adding_closed, 0);
+    cpthread_mutex_unlock(&solver->add_mutex);
   }
-  if (n_workers > num_pvs) {
-    n_workers = num_pvs;
+
+  // Run IDS directly in the calling thread.
+  iterative_deepening(solver->workers[0], solver->requested_plies);
+
+  // Shut the window and join any injected helpers. live_workers counts the
+  // in-thread main worker (solver->threads, normally 1) plus any added workers,
+  // so the spawned pthreads are [solver->threads, live_workers).
+  cpthread_mutex_lock(&solver->add_mutex);
+  atomic_store(&solver->adding_closed, 1);
+  const int total_workers = atomic_load(&solver->live_workers);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  for (int idx = solver->threads; idx < total_workers; idx++) {
+    cpthread_join(solver->worker_ids[idx]);
   }
-  if (n_workers > solver->cap_workers) {
-    n_workers = solver->cap_workers;
+
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  solver->principal_variation = *best_pv;
+
+  // Finalize results like endgame_solve does: stop the timer, record terminal
+  // status, and drop the TT reference that endgame_ctx_reset stored in the
+  // results' pvline-extend args. Without the last step a post-solve
+  // string_builder_endgame_results would dereference the ctx's TT, which is a
+  // use-after-free once the caller destroys the ctx (and its owned TT).
+  endgame_results_stop_ctimer(results);
+  if (thread_control_get_status(endgame_args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
   }
-  ResearchTask *tasks = malloc_or_die(sizeof(ResearchTask) * (size_t)n_workers);
-  atomic_int next_pv;
-  atomic_store(&next_pv, 0);
-  for (int i = 0; i < n_workers; i++) {
-    tasks[i] = (ResearchTask){
-        .solver = solver,
-        .worker = solver->workers[i],
-        .multi_pvs = multi_pvs,
-        .num_pvs = num_pvs,
-        .next_pv = &next_pv,
-        .source_game = source_game,
-    };
-    cpthread_create(&solver->worker_ids[i], research_worker, &tasks[i]);
-  }
-  for (int i = 0; i < n_workers; i++) {
-    cpthread_join(solver->worker_ids[i]);
-  }
-  free(tasks);
+  endgame_results_set_pvline_extend_args(
+      results, NULL, endgame_results_get_solving_player(results),
+      endgame_results_get_max_depth(results));
 }
 
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
@@ -3202,8 +3376,31 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                     solver->workers[thread_index]);
   }
 
-  // Wait for all threads to complete
+  // Open the injection window now that the initial workers exist and the solve
+  // state is fully published. endgame_add_worker may now grow the worker count.
+  if (solver->max_workers > solver->threads) {
+    cpthread_mutex_lock(&solver->add_mutex);
+    atomic_store(&solver->window_open_ns, ctimer_monotonic_ns());
+    atomic_store(&solver->adding_closed, 0);
+    cpthread_mutex_unlock(&solver->add_mutex);
+  }
+
+  // Wait for the initial workers. The main worker (ordinal 0) drives
+  // completion, so once these exit the search has finished (or
+  // interrupted/timed out).
   for (int thread_index = 0; thread_index < solver->threads; thread_index++) {
+    cpthread_join(solver->worker_ids[thread_index]);
+  }
+
+  // Shut the injection window and join any workers added mid-search. Under the
+  // lock so no add is half-spawned when we snapshot the count; late workers
+  // also exit on search_complete, so they are done or finishing.
+  cpthread_mutex_lock(&solver->add_mutex);
+  atomic_store(&solver->adding_closed, 1);
+  const int total_workers = atomic_load(&solver->live_workers);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  for (int thread_index = solver->threads; thread_index < total_workers;
+       thread_index++) {
     cpthread_join(solver->worker_ids[thread_index]);
   }
 
@@ -3235,8 +3432,8 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       // arena.
       int best_thread = 0;
       int best_depth = solver->workers[0]->completed_depth;
-      for (int thread_index = 1; thread_index < solver->threads;
-           thread_index++) {
+      const int live = atomic_load(&solver->live_workers);
+      for (int thread_index = 1; thread_index < live; thread_index++) {
         int thread_depth = solver->workers[thread_index]->completed_depth;
         if (thread_depth > best_depth) {
           best_depth = thread_depth;
@@ -3248,42 +3445,6 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                                   solver->num_top_moves);
     }
     endgame_results_set_num_pvs(results, num_pvs);
-
-    // Re-search each multi-PV root move at full window so the displayed
-    // continuation comes from TT_EXACT entries rather than TT_LOWER/UPPER
-    // bounds left by multi-PV alpha widening. Distribute PVs across the
-    // existing worker threads for parallelism; each worker runs its slice
-    // single-threaded (ABDADA disabled) but the workers run concurrently.
-    // Only useful for multi-PV: single-PV searches don't widen alpha so
-    // their TT entries are already EXACT where they can be. Skip entirely
-    // when the caller has a hard time budget — the re-search runs at full
-    // depth with no time-aware interruption and would blow the budget.
-    if (num_pvs > 1 && solver->transposition_table_optim &&
-        solver->requested_plies >= 1 && endgame_args->hard_time_limit <= 0) {
-      const int saved_threads = solver->threads;
-      solver->threads = 1; // disable ABDADA inside each worker's re-search
-      // Reset both the global stop flag and the IDS depth-deadline that the
-      // original search may have set. Without clearing depth_deadline_ns,
-      // the first check_depth_deadline() inside the re-search would see
-      // now_ns > deadline_ns and immediately flip search_complete back to
-      // 1, aborting the re-search before it does any useful work.
-      atomic_store(&solver->search_complete, 0);
-      atomic_store(&solver->depth_deadline_ns, 0);
-      research_run_parallel(solver, multi_pvs, num_pvs, endgame_args->game,
-                            saved_threads);
-      solver->threads = saved_threads;
-      // Re-extend each display PV from TT (serial — uses solver->ext_game).
-      for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
-        PVLine *pv = &multi_pvs[pv_idx];
-        if (pv->num_moves == 0) {
-          continue;
-        }
-        pv->num_moves = 1;
-        pv->negamax_depth = 1;
-        pv->game = NULL;
-        solver_pvline_extend_from_tt(pv, solver, endgame_args->game);
-      }
-    }
   }
 
   // The stored multi_pvs are already fully extended; null out the TT reference
@@ -3293,4 +3454,53 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       results, NULL, endgame_results_get_solving_player(results),
       endgame_results_get_max_depth(results));
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+}
+
+int endgame_live_workers(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->live_workers);
+}
+
+bool endgame_injecting(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->adding_closed) == 0;
+}
+
+int64_t endgame_window_open_ns(const EndgameCtx *ctx) {
+  return atomic_load(&ctx->window_open_ns);
+}
+
+bool endgame_add_worker(EndgameCtx *solver) {
+  cpthread_mutex_lock(&solver->add_mutex);
+  // Decline if the window is shut (between solves, or the join has begun) or
+  // the max_workers ceiling (== arr_cap) is reached.
+  if (atomic_load(&solver->adding_closed)) {
+    cpthread_mutex_unlock(&solver->add_mutex);
+    return false;
+  }
+  const int ordinal = atomic_load(&solver->live_workers);
+  if (ordinal >= solver->arr_cap) {
+    cpthread_mutex_unlock(&solver->add_mutex);
+    return false;
+  }
+
+  // Create the worker struct on first use at this ordinal; reuse it on later
+  // solves. Either way, stamp this solve's ordinal. The worker's MoveGen cache
+  // slot is assigned on demand by get_movegen() when it first generates moves.
+  if (ordinal >= atomic_load(&solver->cap_workers)) {
+    solver->workers[ordinal] = endgame_ctx_create_worker(
+        solver, ordinal, solver->worker_base_seed, solver->game);
+    // Release so a live-view accessor that later reads this cap (acquire) also
+    // sees the fully-created worker struct stored just above.
+    atomic_store(&solver->cap_workers, ordinal + 1);
+  } else {
+    solver->workers[ordinal]->ordinal = ordinal;
+  }
+  // Prep the late worker's game from the read-only root inputs (solver->game +
+  // pruned KWGs + fresh cross-sets) — NOT from worker 0, whose game_copy is
+  // mid-traversal. Seeds the worker PRNG by its ordinal.
+  endgame_ctx_reset_worker_and_game(solver, solver->worker_base_seed, ordinal);
+  cpthread_create(&solver->worker_ids[ordinal], solver_worker_start,
+                  solver->workers[ordinal]);
+  atomic_store(&solver->live_workers, ordinal + 1);
+  cpthread_mutex_unlock(&solver->add_mutex);
+  return true;
 }

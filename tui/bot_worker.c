@@ -816,12 +816,9 @@ static bool run_endgame_on(TuiGameState *state, const Game *position,
   }
   args.num_top_moves = top_k;
   args.enable_pv_display = true;
-  // Iterative deepening is REQUIRED for the per-ply callback to fire
-  // incrementally. Without it thread 0 jumps straight to the
-  // requested ply depth (25) and only the final post-solve update
-  // ever lands in the snapshot — which is why the panel used to feel
-  // stuck on stale data until the search fully completed.
-  args.enable_iterative_deepening = true;
+  // The engine always iterative-deepens (thread 0 runs depth 1, 2, ... up to
+  // the requested plies), which is what makes the per-ply callback fire
+  // incrementally instead of only landing one final post-solve update.
   // Live updates:
   //   before_search_callback fires once before any worker spawns,
   //     populating the snapshot with the d=0 leaderboard (root moves

@@ -584,9 +584,601 @@ static void serialize_states_to_kwg(const StateList *states, uint32_t dawg_root,
   free(chain_base_map);
 }
 
+// ============================================================================
+// Tail-merging (wolges-style) serializer
+// ============================================================================
+//
+// "Tail" here means the tail end of a child (sibling) list, not a word suffix.
+// The State graph built above is already a minimal DAG: identical sibling
+// chains are shared (two parents whose children are byte-identical point to the
+// same head State). serialize_states_to_kwg, however, lays every distinct chain
+// head down as its own contiguous run, so a child list that is only a tail of
+// another (e.g. [R,S] vs [E,R,S]) is duplicated in the output.
+//
+// This serializer instead overlaps such tails: a node whose children are [R,S]
+// points into the middle of an existing [E,R,S] run. It is a direct port of
+// wolges' BuildLayout::MagpieMerged defragger (gen_head_indexes /
+// gen_to_end_lens / defrag_magpie_merged / to_vec). See
+// https://github.com/andy-k/wolges/blob/main/src/build.rs
+
+// Temporary sentinel marking a state's output slot as reserved-but-unassigned
+// while we break self-cycles during the post-order walk.
+enum { TAIL_DEFRAG_PENDING = 0xFFFFFFFF };
+
+typedef struct TailDefragger {
+  const State *states;
+  // head_indexes[p] = the head (first sibling) of the longest sibling chain
+  // that state p is a tail of. Canonicalizing arc targets through this is what
+  // enables tail overlap.
+  uint32_t *head_indexes;
+  // to_end_lens[p] = number of siblings from p to the end of its chain.
+  uint32_t *to_end_lens;
+  // destination[p] = output node index assigned to state p (0 = unassigned).
+  uint32_t *destination;
+  uint32_t num_written;
+} TailDefragger;
+
+// head_indexes[p] points to the head of p's sibling chain. Because a tail state
+// can belong to several chains, we pick the lowest-indexed predecessor, which
+// (since states are topologically ordered with next_index < p) chases up to the
+// head of the longest containing chain.
+static void tail_compute_head_indexes(const StateList *states,
+                                      uint32_t *head_indexes) {
+  const uint32_t count = (uint32_t)states->count;
+  for (uint32_t state_idx = 0; state_idx < count; state_idx++) {
+    head_indexes[state_idx] = state_idx;
+  }
+  // Point each state's next_index back to it (its immediate predecessor).
+  for (uint32_t state_idx = count - 1; state_idx >= 1; state_idx--) {
+    head_indexes[states->states[state_idx].next_index] = state_idx;
+  }
+  // head_indexes[0] is garbage and unused. Chase predecessors to the chain
+  // head.
+  for (uint32_t state_idx = count - 1; state_idx >= 1; state_idx--) {
+    head_indexes[state_idx] = head_indexes[head_indexes[state_idx]];
+  }
+}
+
+static void tail_compute_to_end_lens(const StateList *states,
+                                     uint32_t *to_end_lens) {
+  const uint32_t count = (uint32_t)states->count;
+  for (uint32_t state_idx = 0; state_idx < count; state_idx++) {
+    to_end_lens[state_idx] = 1;
+  }
+  // next_index < state_idx, so the value we add is already finalized.
+  for (uint32_t state_idx = 1; state_idx < count; state_idx++) {
+    const uint32_t next = states->states[state_idx].next_index;
+    if (next != 0) {
+      to_end_lens[state_idx] += to_end_lens[next];
+    }
+  }
+}
+
+// Reserve output space for the chain headed (after canonicalization) at p, then
+// recurse into children, then assign each sibling an output slot — stopping
+// early if a tail of this chain was already placed elsewhere, in which case
+// the remaining siblings reuse those slots.
+static void tail_defrag(TailDefragger *defragger, uint32_t p) {
+  p = defragger->head_indexes[p];
+  if (defragger->destination[p] != 0) {
+    return;
+  }
+  const uint32_t initial_num_written = defragger->num_written;
+  defragger->destination[p] = TAIL_DEFRAG_PENDING;
+  const uint32_t num = defragger->to_end_lens[p];
+  defragger->num_written += num;
+  for (uint32_t sibling = p;;) {
+    const uint32_t arc_index = defragger->states[sibling].arc_index;
+    if (arc_index != 0) {
+      tail_defrag(defragger, arc_index);
+    }
+    sibling = defragger->states[sibling].next_index;
+    if (sibling == 0) {
+      break;
+    }
+  }
+  uint32_t write_p = p;
+  defragger->destination[write_p] = 0;
+  for (uint32_t ofs = 0; ofs < num; ofs++) {
+    if (defragger->destination[write_p] != 0) {
+      break;
+    }
+    defragger->destination[write_p] = initial_num_written + ofs;
+    write_p = defragger->states[write_p].next_index;
+  }
+}
+
+static inline uint32_t tail_node_value(const TailDefragger *defragger,
+                                       uint32_t arc_index, bool is_end,
+                                       bool accepts, uint8_t tile) {
+  uint32_t node = ((uint32_t)tile) << KWG_TILE_BIT_OFFSET;
+  if (accepts) {
+    node |= KWG_NODE_ACCEPTS_FLAG;
+  }
+  if (is_end) {
+    node |= KWG_NODE_IS_END_FLAG;
+  }
+  node |= (defragger->destination[arc_index] & KWG_ARC_INDEX_MASK);
+  return node;
+}
+
+// MAGPIE builds sibling chains highest-tile-first (arc_index -> highest tile,
+// next_index descending to the lowest, which carries next_index 0). wolges'
+// defragger above assumes the opposite orientation (arc_index -> lowest tile,
+// next_index ascending to the highest). The tail-merge sharing is anchored at
+// the next_index-0 end, so feeding it MAGPIE's orientation would overlap the
+// wrong (low-tile) end. This converter rebuilds the (already minimal) state
+// graph in wolges' orientation via the same hash-consing dedup, so shared
+// reversed tails merge correctly.
+typedef struct WolgesConverter {
+  const StateList *src;
+  StateList *dst;
+  StateHashTable *table;
+  uint32_t *memo; // src head index -> dst head index (UINT32_MAX = unconverted)
+} WolgesConverter;
+
+static uint32_t wolges_convert_chain(WolgesConverter *converter,
+                                     uint32_t src_head) {
+  if (src_head == 0) {
+    return 0;
+  }
+  if (converter->memo[src_head] != UINT32_MAX) {
+    return converter->memo[src_head];
+  }
+  // Collect this chain's siblings in MAGPIE order (highest tile first),
+  // converting each child subtree first.
+  uint8_t tiles[MACHINE_LETTER_MAX_VALUE];
+  uint8_t accepts[MACHINE_LETTER_MAX_VALUE];
+  uint32_t arcs[MACHINE_LETTER_MAX_VALUE];
+  uint32_t count = 0;
+  for (uint32_t s = src_head; s != 0;
+       s = converter->src->states[s].next_index) {
+    tiles[count] = converter->src->states[s].tile;
+    accepts[count] = converter->src->states[s].accepts;
+    arcs[count] =
+        wolges_convert_chain(converter, converter->src->states[s].arc_index);
+    count++;
+  }
+  // Chaining next_index = previous insertion while iterating highest -> lowest
+  // produces the ascending chain (head = lowest tile, highest carries
+  // next_index 0), matching wolges' make_state.
+  uint32_t ret = 0;
+  for (uint32_t k = 0; k < count; k++) {
+    ret = state_hash_table_find_or_insert(converter->table, converter->dst,
+                                          tiles[k], accepts[k], arcs[k], ret);
+  }
+  converter->memo[src_head] = ret;
+  return ret;
+}
+
+// Runs the wolges tail-merge defragger over an already wolges-convention state
+// graph (head = lowest/first-forward sibling, next_index ascending to the
+// is_end sibling which carries next_index 0) and writes the packed KWG. Does
+// not take ownership of `states`.
+static void tail_defrag_and_emit(const StateList *states, uint32_t dawg_root,
+                                 uint32_t gaddag_root, bool output_dawg,
+                                 bool output_gaddag, KWG *kwg) {
+  const size_t count = states->count;
+  TailDefragger defragger = {
+      .states = states->states,
+      .head_indexes = malloc_or_die(sizeof(uint32_t) * count),
+      .to_end_lens = malloc_or_die(sizeof(uint32_t) * count),
+      .destination = calloc_or_die(count, sizeof(uint32_t)),
+      // Reserve output nodes 0 and 1 for the DAWG and GADDAG root pointers, as
+      // MAGPIE readers expect both to be present.
+      .num_written = 2,
+  };
+  tail_compute_head_indexes(states, defragger.head_indexes);
+  tail_compute_to_end_lens(states, defragger.to_end_lens);
+
+  // Mark the null state as placed so arc_index 0 resolves to a 0 pointer and
+  // self-cycles during the walk terminate.
+  defragger.destination[0] = TAIL_DEFRAG_PENDING;
+  if (output_dawg && dawg_root != 0) {
+    tail_defrag(&defragger, dawg_root);
+  }
+  if (output_gaddag && gaddag_root != 0) {
+    tail_defrag(&defragger, gaddag_root);
+  }
+  defragger.destination[0] = 0;
+
+  kwg_allocate_nodes(kwg, defragger.num_written);
+  uint32_t *kwg_nodes = kwg_get_mutable_nodes(kwg);
+  kwg_nodes[0] = tail_node_value(&defragger, dawg_root, true, false, 0);
+  kwg_nodes[1] = tail_node_value(&defragger, gaddag_root, true, false, 0);
+
+  for (uint32_t state_idx = 1; state_idx < count; state_idx++) {
+    uint32_t output_idx = defragger.destination[state_idx];
+    if (output_idx == 0) {
+      continue;
+    }
+    for (uint32_t sibling = state_idx;;) {
+      const uint32_t next = defragger.states[sibling].next_index;
+      kwg_nodes[output_idx] = tail_node_value(
+          &defragger, defragger.states[sibling].arc_index, next == 0,
+          defragger.states[sibling].accepts, defragger.states[sibling].tile);
+      if (next == 0) {
+        break;
+      }
+      sibling = next;
+      output_idx++;
+    }
+  }
+
+  free(defragger.head_indexes);
+  free(defragger.to_end_lens);
+  free(defragger.destination);
+}
+
+static void serialize_states_to_kwg_tail_merged(const StateList *src_states,
+                                                uint32_t dawg_root,
+                                                uint32_t gaddag_root,
+                                                bool output_dawg,
+                                                bool output_gaddag, KWG *kwg) {
+  // Reorient into wolges' convention.
+  StateList states;
+  state_list_create(&states, src_states->count);
+  StateHashTable convert_table;
+  state_hash_table_create(&convert_table, src_states->count * 2 + 1,
+                          src_states->count);
+  uint32_t *memo = malloc_or_die(sizeof(uint32_t) * src_states->count);
+  for (size_t i = 0; i < src_states->count; i++) {
+    memo[i] = UINT32_MAX;
+  }
+  WolgesConverter converter = {
+      .src = src_states, .dst = &states, .table = &convert_table, .memo = memo};
+  if (output_dawg) {
+    dawg_root = wolges_convert_chain(&converter, dawg_root);
+  }
+  if (output_gaddag) {
+    gaddag_root = wolges_convert_chain(&converter, gaddag_root);
+  }
+  free(memo);
+  state_hash_table_destroy(&convert_table);
+
+  tail_defrag_and_emit(&states, dawg_root, gaddag_root, output_dawg,
+                       output_gaddag, kwg);
+  state_list_destroy(&states);
+}
+
+// ============================================================================
+// DAWG child-list reordering (KWG_MAKER_MERGE_TAIL_REORDER)
+//
+// Standard tail merging only overlaps a child list that is an (ascending-tile)
+// suffix of another. Sibling order is not load-bearing for linear-scan readers
+// (movegen, lookup), so we may freely PERMUTE each node's child order; then a
+// child list that is merely a SUBSET of another can be reordered to become its
+// tail. e.g. {A,C} cannot tail-merge into ascending {A,B,C}, but can if the
+// latter is laid out [B,A,C]. We pick orders with a greedy subset path-cover,
+// rebuild the state graph in those orders, and reuse the verified tail_defrag.
+//
+// Correctness rests on two facts: (1) permuting a node's children never changes
+// the accepted word set for a linear-scan reader; (2) tail_defrag only ever
+// overlaps byte-identical suffix states, so a bad ordering loses merging but is
+// never wrong. Verified by the kwgtailreorder test (word-set equality).
+//
+// WARNING: output child lists are NOT in ascending tile order, so the KWG is
+// invalid for kwg_compute_alpha_cross_set (Alpha variant). DAWG output only.
+// ============================================================================
+
+// item key (one child entry): tile in bits 48+, accepts in bit 40, arc (a full
+// 32-bit StateList index, not a serialized KWG node index) in bits 0..31.
+static inline uint64_t reorder_item_key(uint8_t tile, uint8_t accepts,
+                                        uint32_t arc) {
+  return ((uint64_t)tile << 48) | ((uint64_t)accepts << 40) | (uint64_t)arc;
+}
+static inline uint8_t reorder_key_tile(uint64_t key) {
+  return (uint8_t)(key >> 48);
+}
+static inline uint8_t reorder_key_accepts(uint64_t key) {
+  return (uint8_t)((key >> 40) & 1);
+}
+static inline uint32_t reorder_key_arc(uint64_t key) {
+  // Full 32-bit StateList index (bits 0..31); accepts/tile sit at bits 40/48.
+  return (uint32_t)key;
+}
+
+static int reorder_u64_cmp(const void *a, const void *b) {
+  const uint64_t x = *(const uint64_t *)a;
+  const uint64_t y = *(const uint64_t *)b;
+  return (x > y) - (x < y);
+}
+
+typedef struct ReorderItemHead {
+  uint64_t key;
+  uint32_t head;
+} ReorderItemHead;
+
+static int reorder_pair_cmp(const void *a, const void *b) {
+  const uint64_t x = ((const ReorderItemHead *)a)->key;
+  const uint64_t y = ((const ReorderItemHead *)b)->key;
+  return (x > y) - (x < y);
+}
+
+// Returns true if `key` is present in the sorted item array of head `h`.
+static bool reorder_head_has_item(uint64_t *const *items,
+                                  const uint32_t *item_count, uint32_t head,
+                                  uint64_t key) {
+  const uint64_t *item_keys = items[head];
+  uint32_t low_idx = 0;
+  uint32_t high_idx = item_count[head];
+  while (low_idx < high_idx) {
+    const uint32_t mid_idx = low_idx + (high_idx - low_idx) / 2;
+    if (item_keys[mid_idx] < key) {
+      low_idx = mid_idx + 1;
+    } else if (item_keys[mid_idx] > key) {
+      high_idx = mid_idx;
+    } else {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Returns true if every item of `subset_head` is also an item of
+// `superset_head`.
+static bool reorder_is_subset(uint64_t *const *items,
+                              const uint32_t *item_count, uint32_t subset_head,
+                              uint32_t superset_head) {
+  const uint64_t *subset_items = items[subset_head];
+  const uint32_t subset_count = item_count[subset_head];
+  for (uint32_t item_idx = 0; item_idx < subset_count; item_idx++) {
+    if (!reorder_head_has_item(items, item_count, superset_head,
+                               subset_items[item_idx])) {
+      return false;
+    }
+  }
+  return true;
+}
+
+typedef struct ReorderCtx {
+  uint64_t **items; // items[h] = sorted item-key array (NULL if non-head)
+  const uint32_t *item_count;
+  const uint32_t *tail_child; // head absorbed as h's tail (UINT32_MAX = none)
+  uint32_t *new_head; // dst head index per src head (UINT32_MAX = unbuilt)
+  StateList *dst;
+  StateHashTable *table;
+} ReorderCtx;
+
+// Builds head `h`'s child chain in the dst graph in its chosen order (its tail
+// child as the suffix, the remaining items ascending in front) and returns the
+// dst index of the chain head. Recurses into the tail child and into each
+// item's subtree. Memoized via new_head.
+static uint32_t reorder_build_chain(ReorderCtx *ctx, uint32_t head) {
+  if (head == 0) {
+    return 0;
+  }
+  if (ctx->new_head[head] != UINT32_MAX) {
+    return ctx->new_head[head];
+  }
+  const uint32_t member_count = ctx->item_count[head];
+  const uint64_t *head_items = ctx->items[head];
+  const uint32_t tail_head = ctx->tail_child[head];
+  uint32_t chain_head;
+  if (tail_head != UINT32_MAX) {
+    // Lay the tail child as the suffix, then prepend the remaining items
+    // (built in descending tile order so the forward order is ascending).
+    chain_head = reorder_build_chain(ctx, tail_head);
+    for (uint32_t item_idx = member_count; item_idx-- > 0;) {
+      const uint64_t key = head_items[item_idx];
+      if (reorder_head_has_item(ctx->items, ctx->item_count, tail_head, key)) {
+        continue;
+      }
+      const uint32_t new_arc = reorder_build_chain(ctx, reorder_key_arc(key));
+      chain_head = state_hash_table_find_or_insert(
+          ctx->table, ctx->dst, reorder_key_tile(key), reorder_key_accepts(key),
+          new_arc, chain_head);
+    }
+  } else {
+    chain_head = 0;
+    for (uint32_t item_idx = member_count; item_idx-- > 0;) {
+      const uint64_t key = head_items[item_idx];
+      const uint32_t new_arc = reorder_build_chain(ctx, reorder_key_arc(key));
+      chain_head = state_hash_table_find_or_insert(
+          ctx->table, ctx->dst, reorder_key_tile(key), reorder_key_accepts(key),
+          new_arc, chain_head);
+    }
+  }
+  ctx->new_head[head] = chain_head;
+  return chain_head;
+}
+
+static KWG *make_dawg_tail_reorder(const DictionaryWordList *words) {
+  const int words_count = dictionary_word_list_get_count(words);
+  const size_t estimated_states = (size_t)words_count * 8 + 100;
+  const size_t num_buckets = estimated_states * 2 + 1;
+
+  // Build the minimal DAWG state graph (MAGPIE convention).
+  StateList states;
+  state_list_create(&states, estimated_states);
+  StateHashTable build_table;
+  state_hash_table_create(&build_table, num_buckets, estimated_states);
+  TransitionStack stack;
+  transition_stack_create(&stack, (size_t)MAX_KWG_STRING_LENGTH * 2,
+                          (size_t)MAX_KWG_STRING_LENGTH + 1);
+  const uint32_t dawg_root =
+      build_dawg_from_sorted_words(words, &states, &build_table, &stack);
+  transition_stack_destroy(&stack);
+  state_hash_table_destroy(&build_table);
+
+  const uint32_t count = (uint32_t)states.count;
+
+  // Identify distinct child lists (chain heads) and collect their item sets.
+  bool *is_head = calloc_or_die(count, sizeof(bool));
+  if (dawg_root != 0) {
+    is_head[dawg_root] = true;
+  }
+  for (uint32_t state_idx = 1; state_idx < count; state_idx++) {
+    const uint32_t arc_index = states.states[state_idx].arc_index;
+    if (arc_index != 0) {
+      is_head[arc_index] = true;
+    }
+  }
+  uint64_t **items = calloc_or_die(count, sizeof(uint64_t *));
+  uint32_t *item_count = calloc_or_die(count, sizeof(uint32_t));
+  uint32_t *tail_child = malloc_or_die(count * sizeof(uint32_t));
+  for (uint32_t head = 0; head < count; head++) {
+    tail_child[head] = UINT32_MAX;
+  }
+  size_t total_items = 0;
+  for (uint32_t head = 1; head < count; head++) {
+    if (!is_head[head]) {
+      continue;
+    }
+    uint32_t member_count = 0;
+    for (uint32_t member = head; member != 0;
+         member = states.states[member].next_index) {
+      member_count++;
+    }
+    item_count[head] = member_count;
+    total_items += member_count;
+    uint64_t *item_keys = malloc_or_die(member_count * sizeof(uint64_t));
+    uint32_t member_idx = 0;
+    for (uint32_t member = head; member != 0;
+         member = states.states[member].next_index) {
+      item_keys[member_idx++] = reorder_item_key(
+          states.states[member].tile, states.states[member].accepts,
+          states.states[member].arc_index);
+    }
+    qsort(item_keys, member_count, sizeof(uint64_t), reorder_u64_cmp);
+    items[head] = item_keys;
+  }
+
+  // Index: (item -> heads containing it), as pairs sorted by item key.
+  ReorderItemHead *pairs = malloc_or_die(total_items * sizeof(ReorderItemHead));
+  size_t pair_idx = 0;
+  for (uint32_t head = 1; head < count; head++) {
+    if (!is_head[head]) {
+      continue;
+    }
+    for (uint32_t item_idx = 0; item_idx < item_count[head]; item_idx++) {
+      pairs[pair_idx].key = items[head][item_idx];
+      pairs[pair_idx].head = head;
+      pair_idx++;
+    }
+  }
+  qsort(pairs, total_items, sizeof(ReorderItemHead), reorder_pair_cmp);
+
+  // Heads sorted by ascending size: pack (size << 32 | head) into a 64-bit key
+  // (no context-carrying comparator needed), plain-sort, then read the head
+  // index back from the low 32 bits. Full-width, so it is safe for state graphs
+  // beyond 2^22 states. The greedy below walks this largest-first.
+  uint64_t *heads_by_size = malloc_or_die(count * sizeof(uint64_t));
+  uint32_t num_heads = 0;
+  for (uint32_t head = 1; head < count; head++) {
+    if (is_head[head]) {
+      heads_by_size[num_heads++] = ((uint64_t)item_count[head] << 32) | head;
+    }
+  }
+  qsort(heads_by_size, num_heads, sizeof(uint64_t), reorder_u64_cmp);
+
+  bool *has_tail = calloc_or_die(count, sizeof(bool));
+  // Greedy: for each child list (largest first), find the smallest proper
+  // superset child list whose tail is still free, and absorb into it. Largest
+  // first wins the per-superset tail contention for the lists that save the
+  // most nodes (a measured ~0.3% smaller DAWG than smallest-first).
+  for (uint32_t head_rank = num_heads; head_rank > 0; head_rank--) {
+    const uint32_t subset_head = (uint32_t)heads_by_size[head_rank - 1];
+    const uint32_t subset_size = item_count[subset_head];
+    if (subset_size == 0) {
+      continue;
+    }
+    // Bound the candidate scan by the rarest item of subset_head: the item key
+    // whose group of containing heads (a contiguous run in `pairs`) is
+    // smallest.
+    uint32_t rarest_len = UINT32_MAX;
+    uint32_t rarest_start = 0;
+    for (uint32_t item_idx = 0; item_idx < subset_size; item_idx++) {
+      const uint64_t key = items[subset_head][item_idx];
+      uint32_t low_idx = 0;
+      uint32_t high_idx = (uint32_t)total_items;
+      while (low_idx < high_idx) {
+        const uint32_t mid_idx = low_idx + (high_idx - low_idx) / 2;
+        if (pairs[mid_idx].key < key) {
+          low_idx = mid_idx + 1;
+        } else {
+          high_idx = mid_idx;
+        }
+      }
+      uint32_t group_end = low_idx;
+      while (group_end < total_items && pairs[group_end].key == key) {
+        group_end++;
+      }
+      const uint32_t group_len = group_end - low_idx;
+      if (group_len < rarest_len) {
+        rarest_len = group_len;
+        rarest_start = low_idx;
+      }
+    }
+    uint32_t best_superset = UINT32_MAX;
+    uint32_t best_superset_size = UINT32_MAX;
+    for (uint32_t pair_pos = rarest_start; pair_pos < rarest_start + rarest_len;
+         pair_pos++) {
+      const uint32_t candidate = pairs[pair_pos].head;
+      if (candidate == subset_head || has_tail[candidate] ||
+          item_count[candidate] <= subset_size) {
+        continue;
+      }
+      if (item_count[candidate] < best_superset_size &&
+          reorder_is_subset(items, item_count, subset_head, candidate)) {
+        best_superset = candidate;
+        best_superset_size = item_count[candidate];
+      }
+    }
+    if (best_superset != UINT32_MAX) {
+      tail_child[best_superset] = subset_head;
+      has_tail[best_superset] = true;
+    }
+  }
+
+  // Rebuild the state graph in the chosen orders, then tail-merge + emit.
+  StateList dst;
+  state_list_create(&dst, estimated_states);
+  StateHashTable dst_table;
+  state_hash_table_create(&dst_table, num_buckets, estimated_states);
+  uint32_t *new_head = malloc_or_die(count * sizeof(uint32_t));
+  for (uint32_t head = 0; head < count; head++) {
+    new_head[head] = UINT32_MAX;
+  }
+  ReorderCtx ctx = {.items = items,
+                    .item_count = item_count,
+                    .tail_child = tail_child,
+                    .new_head = new_head,
+                    .dst = &dst,
+                    .table = &dst_table};
+  // Build every head (ascending src index keeps subtree arcs already built).
+  for (uint32_t head = 1; head < count; head++) {
+    if (is_head[head] && new_head[head] == UINT32_MAX) {
+      reorder_build_chain(&ctx, head);
+    }
+  }
+  const uint32_t new_dawg_root =
+      (dawg_root == 0) ? 0 : reorder_build_chain(&ctx, dawg_root);
+
+  KWG *kwg = kwg_create_empty();
+  tail_defrag_and_emit(&dst, new_dawg_root, 0, true, false, kwg);
+
+  for (uint32_t head = 0; head < count; head++) {
+    free(items[head]);
+  }
+  free(items);
+  free(item_count);
+  free(tail_child);
+  free(is_head);
+  free(pairs);
+  free(heads_by_size);
+  free(has_tail);
+  free(new_head);
+  state_hash_table_destroy(&dst_table);
+  state_list_destroy(&dst);
+  state_list_destroy(&states);
+  return kwg;
+}
+
 // Fast KWG builder using compact states and transition stack
 KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
-                              kwg_maker_output_t output) {
+                              kwg_maker_output_t output,
+                              kwg_maker_merge_t merge) {
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
                            (output == KWG_MAKER_OUTPUT_DAWG_AND_GADDAG);
   const bool output_gaddag = (output == KWG_MAKER_OUTPUT_GADDAG) ||
@@ -672,7 +1264,12 @@ KWG *make_kwg_from_words_fast(const DictionaryWordList *words,
 
   // Serialize to KWG format
   KWG *kwg = kwg_create_empty();
-  serialize_states_to_kwg(&states, dawg_root, gaddag_root, kwg);
+  if (merge == KWG_MAKER_MERGE_TAIL) {
+    serialize_states_to_kwg_tail_merged(&states, dawg_root, gaddag_root,
+                                        output_dawg, output_gaddag, kwg);
+  } else {
+    serialize_states_to_kwg(&states, dawg_root, gaddag_root, kwg);
+  }
 
   transition_stack_destroy(&stack);
   state_hash_table_destroy(&table);
@@ -1223,9 +1820,15 @@ static inline int get_letters_in_common(const DictionaryWord *word,
 // The dictionary word list must be in alphabetical order.
 KWG *make_kwg_from_words(const DictionaryWordList *words,
                          kwg_maker_output_t output, kwg_maker_merge_t merging) {
+  if (merging == KWG_MAKER_MERGE_TAIL_REORDER) {
+    if (output != KWG_MAKER_OUTPUT_DAWG) {
+      log_fatal("KWG_MAKER_MERGE_TAIL_REORDER supports DAWG output only");
+    }
+    return make_dawg_tail_reorder(words);
+  }
   // Use the fast compact-state builder when merging is enabled
-  if (merging == KWG_MAKER_MERGE_EXACT) {
-    return make_kwg_from_words_fast(words, output);
+  if (merging == KWG_MAKER_MERGE_EXACT || merging == KWG_MAKER_MERGE_TAIL) {
+    return make_kwg_from_words_fast(words, output, merging);
   }
 
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||
@@ -1311,9 +1914,15 @@ KWG *make_kwg_from_words(const DictionaryWordList *words,
 KWG *make_kwg_from_words_small(const DictionaryWordList *words,
                                kwg_maker_output_t output,
                                kwg_maker_merge_t merging) {
+  if (merging == KWG_MAKER_MERGE_TAIL_REORDER) {
+    if (output != KWG_MAKER_OUTPUT_DAWG) {
+      log_fatal("KWG_MAKER_MERGE_TAIL_REORDER supports DAWG output only");
+    }
+    return make_dawg_tail_reorder(words);
+  }
   // Use the fast compact-state builder when merging is enabled
-  if (merging == KWG_MAKER_MERGE_EXACT) {
-    return make_kwg_from_words_fast(words, output);
+  if (merging == KWG_MAKER_MERGE_EXACT || merging == KWG_MAKER_MERGE_TAIL) {
+    return make_kwg_from_words_fast(words, output, merging);
   }
 
   const bool output_dawg = (output == KWG_MAKER_OUTPUT_DAWG) ||

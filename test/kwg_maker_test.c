@@ -1,3 +1,4 @@
+#include "../src/compat/ctime.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/dictionary_word.h"
@@ -7,11 +8,13 @@
 #include "../src/ent/player.h"
 #include "../src/impl/config.h"
 #include "../src/impl/kwg_maker.h"
+#include "../src/impl/word_prune.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -423,6 +426,194 @@ void test_full_csw_gaddag(void) {
   game_destroy(game);
   kwg_destroy(kwg);
   config_destroy(config);
+}
+
+// Builds CSW21 with both KWG_MAKER_MERGE_EXACT and KWG_MAKER_MERGE_TAIL,
+// confirms the tail-merged graph round-trips the identical word set and
+// GADDAG strings, and reports the node-count savings.
+void test_kwg_tail_merge(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+
+  DictionaryWordList *gaddag_strings = dictionary_word_list_create();
+  add_gaddag_strings(words, gaddag_strings);
+
+  KWG *exact_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                       KWG_MAKER_MERGE_EXACT);
+  KWG *tail_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                      KWG_MAKER_MERGE_TAIL);
+
+  const int exact_nodes = kwg_get_number_of_nodes(exact_kwg);
+  const int tail_nodes = kwg_get_number_of_nodes(tail_kwg);
+  printf("kwg tail merge: exact=%d nodes, tail=%d nodes (saved %d, %.2f%%)\n",
+         exact_nodes, tail_nodes, exact_nodes - tail_nodes,
+         100.0 * (exact_nodes - tail_nodes) / exact_nodes);
+  assert(tail_nodes < exact_nodes);
+
+  // The tail-merged graph must encode the identical DAWG word set...
+  bool *nodes_reached =
+      calloc_or_die(kwg_get_number_of_nodes(tail_kwg), sizeof(bool));
+  DictionaryWordList *encoded_words = dictionary_word_list_create();
+  kwg_write_words(tail_kwg, kwg_get_dawg_root_node_index(tail_kwg),
+                  encoded_words, nodes_reached);
+  assert_word_lists_are_equal(words, encoded_words);
+
+  // ...and the identical GADDAG strings.
+  DictionaryWordList *encoded_gaddag_strings = dictionary_word_list_create();
+  kwg_write_gaddag_strings(tail_kwg, kwg_get_root_node_index(tail_kwg),
+                           encoded_gaddag_strings, nodes_reached);
+  assert_word_lists_are_equal(gaddag_strings, encoded_gaddag_strings);
+
+  // Every node (past the two root pointers) must be reachable: no orphans.
+  for (int i = 2; i < kwg_get_number_of_nodes(tail_kwg); i++) {
+    assert(nodes_reached[i]);
+  }
+
+  free(nodes_reached);
+  dictionary_word_list_destroy(encoded_gaddag_strings);
+  dictionary_word_list_destroy(encoded_words);
+  dictionary_word_list_destroy(gaddag_strings);
+  dictionary_word_list_destroy(words);
+  kwg_destroy(tail_kwg);
+  kwg_destroy(exact_kwg);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// Builds the CSW21 DAWG with KWG_MAKER_MERGE_TAIL and the child-reordering
+// KWG_MAKER_MERGE_TAIL_REORDER, confirms the reordered DAWG accepts the exact
+// same word SET (child order now differs by design, so it is compared as a
+// sorted set, not position-by-position), that every node is reachable, and
+// reports the extra node-count savings from reordering.
+void test_kwg_tail_reorder(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const KWG *csw_kwg = player_get_kwg(player);
+  DictionaryWordList *words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), words, NULL);
+
+  KWG *tail_kwg =
+      make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG, KWG_MAKER_MERGE_TAIL);
+  KWG *reorder_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG,
+                                         KWG_MAKER_MERGE_TAIL_REORDER);
+
+  const int tail_nodes = kwg_get_number_of_nodes(tail_kwg);
+  const int reorder_nodes = kwg_get_number_of_nodes(reorder_kwg);
+  printf("kwg tail reorder (DAWG): tail=%d nodes, reorder=%d nodes (saved %d, "
+         "%.2f%%)\n",
+         tail_nodes, reorder_nodes, tail_nodes - reorder_nodes,
+         100.0 * (tail_nodes - reorder_nodes) / tail_nodes);
+  assert(reorder_nodes <= tail_nodes);
+
+  // Reordered DAWG must encode the identical word set.
+  bool *nodes_reached = calloc_or_die(reorder_nodes, sizeof(bool));
+  DictionaryWordList *encoded = dictionary_word_list_create();
+  kwg_write_words(reorder_kwg, kwg_get_dawg_root_node_index(reorder_kwg),
+                  encoded, nodes_reached);
+  // Compare as sets: reordering changes the DFS emission order.
+  dictionary_word_list_sort(words);
+  dictionary_word_list_sort(encoded);
+  assert_word_lists_are_equal(words, encoded);
+
+  // Every node (past the two root pointers) must be reachable: no orphans.
+  for (int node_idx = 2; node_idx < reorder_nodes; node_idx++) {
+    assert(nodes_reached[node_idx]);
+  }
+
+  free(nodes_reached);
+  dictionary_word_list_destroy(encoded);
+  dictionary_word_list_destroy(words);
+  kwg_destroy(reorder_kwg);
+  kwg_destroy(tail_kwg);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+// Builds a GADDAG from `word_list` with each merge style, timing build speed.
+// This is the endgame/PEG word-prune code path (make_kwg_from_words_small,
+// OUTPUT_GADDAG), where build time — not node count — is what matters.
+static void bench_kwg_merge_build(const char *label,
+                                  const DictionaryWordList *word_list) {
+  const int word_count = dictionary_word_list_get_count(word_list);
+  const kwg_maker_merge_t merges[3] = {
+      KWG_MAKER_MERGE_NONE, KWG_MAKER_MERGE_EXACT, KWG_MAKER_MERGE_TAIL};
+  const char *names[3] = {"none  ", "exact ", "tail  "};
+  int reps = 4000000 / (word_count + 1);
+  if (reps < 10) {
+    reps = 10;
+  }
+  if (reps > 4000) {
+    reps = 4000;
+  }
+  printf("[%-14s] %6d words, reps=%d\n", label, word_count, reps);
+  for (int merge_idx = 0; merge_idx < 3; merge_idx++) {
+    KWG *warm = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                          merges[merge_idx]);
+    const int nodes = kwg_get_number_of_nodes(warm);
+    kwg_destroy(warm);
+    Timer timer;
+    ctimer_start(&timer);
+    for (int rep = 0; rep < reps; rep++) {
+      KWG *kwg = make_kwg_from_words_small(word_list, KWG_MAKER_OUTPUT_GADDAG,
+                                           merges[merge_idx]);
+      kwg_destroy(kwg);
+    }
+    const double secs = ctimer_elapsed_seconds(&timer);
+    printf("    %s  %9.1f us/build   %8d nodes\n", names[merge_idx],
+           1e6 * secs / reps, nodes);
+  }
+}
+
+void test_kwg_merge_build_bench(void) {
+  Config *config = config_create_or_die("set -lex CSW21");
+  Game *game = config_game_create(config);
+  const KWG *csw_kwg = player_get_kwg(game_get_player(game, 0));
+  DictionaryWordList *all_words = dictionary_word_list_create();
+  kwg_write_words(csw_kwg, kwg_get_dawg_root_node_index(csw_kwg), all_words,
+                  NULL);
+  const int total = dictionary_word_list_get_count(all_words);
+
+  // Synthetic size sweep: evenly-sampled (still sorted, unique) sublists at
+  // sizes spanning what an endgame/PEG word prune produces.
+  const int sizes[] = {100, 500, 2000, 10000, 50000};
+  for (size_t size_idx = 0; size_idx < sizeof(sizes) / sizeof(sizes[0]);
+       size_idx++) {
+    const int target = sizes[size_idx];
+    DictionaryWordList *sub = dictionary_word_list_create();
+    for (int word_idx = 0; word_idx < target; word_idx++) {
+      const DictionaryWord *word = dictionary_word_list_get_word(
+          all_words, (int)((int64_t)word_idx * total / target));
+      dictionary_word_list_add_word(sub, dictionary_word_get_word(word),
+                                    dictionary_word_get_length(word));
+    }
+    char label[32];
+    (void)snprintf(label, sizeof(label), "sampled-%d", target);
+    bench_kwg_merge_build(label, sub);
+    dictionary_word_list_destroy(sub);
+  }
+  dictionary_word_list_destroy(all_words);
+  game_destroy(game);
+  config_destroy(config);
+
+  // A real, nearly-full board: the genuine word-prune output an endgame faces.
+  Config *pos_config = config_create_or_die("set -lex NWL20");
+  load_and_exec_config_or_die(
+      pos_config,
+      "cgp AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/"
+      "NE2CUSTARDS1Q1/ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/"
+      "2GOOP2NAIVEsT/1DIRE10/2GAY10/15/15 AEFILMR/DIV 371/412 0");
+  const Game *pos_game = config_get_game(pos_config);
+  const KWG *full_kwg = player_get_kwg(game_get_player(pos_game, 0));
+  DictionaryWordList *pruned = dictionary_word_list_create();
+  generate_possible_words(pos_game, full_kwg, pruned);
+  bench_kwg_merge_build("real-fullboard", pruned);
+  dictionary_word_list_destroy(pruned);
+  config_destroy(pos_config);
 }
 
 void test_kwg_maker(void) {

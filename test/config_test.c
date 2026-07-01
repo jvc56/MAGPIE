@@ -1725,6 +1725,13 @@ void test_config_anno(void) {
                             ERROR_STATUS_NO_INFERENCE_TO_SHOW);
   assert_config_exec_status(config, "shendgame",
                             ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  assert_config_exec_status(config, "shpeg", ERROR_STATUS_NO_PEG_TO_SHOW);
+  // The -pegoutcomes boolean setting (drives the peg/shpeg outcomes column)
+  // parses and loads in both states.
+  assert_config_exec_status(config, "set -pegoutcomes true",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -pegoutcomes false",
+                            ERROR_STATUS_SUCCESS);
   // Passing a rack to the top commit should commit the best static move
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));

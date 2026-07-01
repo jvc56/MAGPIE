@@ -7,6 +7,7 @@
 // search. The board-size limitation comes from MoveUndo's 16-bit
 // tiles_placed_mask.
 
+#include "../def/game_defs.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -23,6 +24,66 @@ enum {
 
 typedef struct EndgameCtx EndgameCtx;
 
+// ===========================================================================
+// Live analysis interface
+// ===========================================================================
+//
+// The solver exposes its in-progress state so a UI (or any observer) can
+// render a live view of the search. There are two complementary ways to
+// observe; a consumer may use either or both:
+//
+//   * Push — the callbacks on EndgameArgs (before_search / per_root_move /
+//     per_ply). They fire synchronously, on the main worker (ordinal 0), at
+//     well-defined moments (search start, each root completion, each completed
+//     depth). They deliver exact, in-order state, but they run inside the
+//     search: a handler must be cheap, must not block, and must copy out
+//     anything it keeps (pointer arguments are valid only for the call).
+//     Note the main worker is not necessarily a dedicated thread: endgame_solve
+//     runs it on a spawned worker thread, but endgame_solve_inline (the entry
+//     point the PEG solver drives) runs it on the *calling* thread — so a
+//     handler may execute on the caller's own thread.
+//
+//   * Pull — the endgame_ctx_get_* accessors below. A separate thread polls
+//     these at its own cadence (e.g. a render loop) while endgame_solve runs
+//     on another thread. They return lock-free, internally-consistent
+//     snapshots (seqlock / release-acquire) and never block the search. A
+//     snapshot may be a few nodes stale, which is fine for a heartbeat or a
+//     leaderboard.
+//
+// Everything here is observation only: nothing feeds back into the search, and
+// whether or not it is read does not change the result.
+//
+// Conventions shared by the whole interface:
+//
+//   * Values are spreads in WHOLE POINTS — not the millipoint Equity used
+//     elsewhere in MAGPIE — from the solving player's perspective: positive
+//     means the endgame nets points for the solving player. This matches
+//     PVLine.score.
+//     "Spread-adjusted" below means the root's initial spread has been
+//     subtracted from the raw negamax value (which is itself the projected
+//     final spread), so the reported number is the delta — the net point
+//     swing over the endgame from the current position, not the projected
+//     final spread. (The per-ply callback documents this same value as the
+//     "spread delta".)
+//
+//   * Moves are returned as `tiny_move` codes: the compact 64-bit SmallMove
+//     encoding (schema in move.h). A code of 0 is a pass. To render one, wrap
+//     it in a SmallMove and decode it against the board:
+//         SmallMove sm = {0};
+//         sm.tiny_move = code;
+//         Move move;
+//         small_move_to_move(&move, &sm, board);
+//     The push callbacks hand back SmallMove pointers directly; the pull
+//     accessors hand back raw codes so each snapshot stays a flat, copy-safe
+//     value with no engine-owned pointers in it.
+//
+//   * `worker_index` selects which worker to observe (an index into the
+//     solver's worker pool, not an OS thread id). Index 0 is the main worker:
+//     it owns root ordering, the progress counters, and the live PV /
+//     leaderboard, so a simple UI passes 0 for the canonical view. Higher
+//     indices are the parallel ABDADA helper workers and are rarely needed.
+// ===========================================================================
+
 // Callback for per-ply PV reporting during iterative deepening
 // Parameters: depth, value (spread delta), pv_line, game,
 //             ranked_pvs (top-K PVLines with TT-extended variations),
@@ -36,9 +97,10 @@ typedef void (*EndgamePerPlyCallback)(int depth, int32_t value,
 // Callback fired once before iterative deepening begins. Provides the
 // d=0 root-move list (sorted descending by static estimate from
 // assign_estimates_and_sort), letting the caller render an initial
-// leaderboard before any depth completes. Fires from worker thread 0
-// after its initial-move generation finishes (sub-ms after
-// endgame_solve start) and before any negamax call. The polled
+// leaderboard before any depth completes. Fires from the main worker
+// (ordinal 0; see the overview above for which thread that is) after its
+// initial-move generation finishes (sub-ms after the solve starts) and
+// before any negamax call. The polled
 // atomics (endgame_ctx_get_progress) are guaranteed to show
 // root_moves_total == initial_move_count and root_moves_completed == 0
 // at the moment this callback fires; current_depth is still 0.
@@ -52,9 +114,9 @@ typedef void (*EndgameBeforeSearchCallback)(
     int initial_move_count, int initial_spread, int solving_player,
     void *user_data);
 
-// Callback fired each time a root move completes its negamax evaluation
-// at the current iterative-deepening depth, from worker thread 0 only.
-// Lets clients re-rank the leaderboard live (per-root resolution rather
+// Callback fired each time a root move completes its negamax evaluation at
+// the current iterative-deepening depth, from the main worker (ordinal 0)
+// only. Lets clients re-rank the leaderboard live (per-root resolution rather
 // than per-completed-depth) and watch values swing during long depths.
 //
 // Parameters:
@@ -68,9 +130,10 @@ typedef void (*EndgameBeforeSearchCallback)(
 //                as PVLine.score)
 //   user_data  - opaque
 //
-// Fires from inside abdada_negamax. Multiple per-root callbacks may
-// happen back-to-back at the same depth as roots complete in scan order.
-// Implementations must be thread-safe even though only thread 0 calls.
+// Fires from inside abdada_negamax. Multiple per-root callbacks may happen
+// back-to-back at the same depth as roots complete in scan order. Only the
+// main worker calls, but it may be any OS thread (see the overview), so a
+// handler must not assume a fixed calling thread.
 typedef void (*EndgamePerRootMoveCallback)(int depth, int root_index,
                                            const struct SmallMove *move,
                                            int32_t value, void *user_data);
@@ -95,13 +158,6 @@ typedef struct EndgameArgs {
   dual_lexicon_mode_t dual_lexicon_mode;
   // If true, play forced passes without consuming a depth ply (default: false)
   bool forced_pass_bypass;
-  // If true, run iterative deepening on thread 0 (depth 1, then 2, ..., up
-  // to plies). If false, thread 0 jumps directly to plies (other threads
-  // still use depth jitter regardless). Callers should normally set this to
-  // true; the EndgameArgs zero-initializer leaves it false intentionally so
-  // designated initializers don't silently enable an optimization the test
-  // wasn't designed for.
-  bool enable_iterative_deepening;
   bool enable_pv_display; // Whether to prepare PVLine data for display
                           // (default: false)
   // IDS time management (0 = no limit, rely on external timer only):
@@ -156,21 +212,22 @@ void endgame_ctx_destroy(EndgameCtx *ctx);
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
                    EndgameResults *results, ErrorStack *error_stack);
 // Inject one additional ABDADA worker into an in-flight solve. Works against
-// both entry points: endgame_solve (spawned master) and endgame_solve_inline
-// (the calling thread is the master). It may be called from another thread
-// (e.g. a pool lending an idle core) or from the solving thread itself — the
-// injection test drives it from the master's per_ply_callback. The new worker
-// gets the next free ordinal (> 0, never the root master), its own ABDADA
-// jitter from that ordinal, a game copy from the (read-only) root inputs, and a
-// MoveGen cache slot assigned on demand by get_movegen(); it cooperates with
-// the running workers purely through the shared TT and self-exits when the
-// search completes. Returns true if a worker was spawned, false if the
-// injection window is shut or the max_workers ceiling is reached. Only valid
-// against a ctx whose current solve was launched with max_workers enabling
-// growth (max_workers > effective thread count after reset normalization).
+// both entry points: endgame_solve (spawned main worker) and
+// endgame_solve_inline (the calling thread is the main worker). It may be
+// called from another thread (e.g. a pool lending an idle core) or from the
+// solving thread itself — the injection test drives it from the main worker's
+// per_ply_callback. The new worker gets the next free ordinal (> 0, never
+// ordinal 0), its own ABDADA jitter from that ordinal, a game copy from the
+// (read-only) root inputs, and a MoveGen cache slot assigned on demand by
+// get_movegen(); it cooperates with the running workers purely through the
+// shared TT and self-exits when the search completes. Returns true if a worker
+// was spawned, false if the injection window is shut or the max_workers ceiling
+// is reached. Only valid against a ctx whose current solve was launched with
+// max_workers enabling growth (max_workers > effective thread count after reset
+// normalization).
 bool endgame_add_worker(EndgameCtx *ctx);
 
-// Number of worker threads currently live in this solve (master + injected
+// Number of worker threads currently live in this solve (main worker + injected
 // helpers). Lets an injection monitor cap total threads near the core count.
 int endgame_live_workers(const EndgameCtx *ctx);
 // True while the solve is accepting injected workers (window open).
@@ -194,53 +251,65 @@ endgame_ctx_get_transposition_table(const EndgameCtx *ctx);
 // (the cost is the same — a memset of the full TT — but no malloc/free).
 // No-op if the ctx has no TT (tt_fraction_of_mem == 0).
 void endgame_ctx_clear_transposition_table(EndgameCtx *ctx);
+// Coarse progress counters for a progress bar (main worker's view). Writes
+// the current iterative-deepening depth, and how many of this depth's root
+// moves have finished (completed/total). The ply2_* out-params are an optional
+// finer-grained sub-progress — how many children of the first root move have
+// finished — for a UI that wants a second bar during a long first root; a
+// simple consumer can pass them and ignore the values. All are plain atomic
+// reads, cheap from any thread.
 void endgame_ctx_get_progress(const EndgameCtx *ctx, int *current_depth,
                               int *root_moves_completed, int *root_moves_total,
                               int *ply2_moves_completed, int *ply2_moves_total);
 
-// Sum of nodes searched across all worker threads, lagging by up to
-// DEPTH_DEADLINE_CHECK_INTERVAL nodes per thread (the period at which
-// each worker flushes its non-atomic local counter to the shared
-// atomic). Cheap to call from any thread; intended for "is the engine
-// alive / nodes per second" UI heartbeats during long single-root
-// subtree evaluations.
+// Sum of nodes searched across all worker threads. While the search is
+// running this lags by up to DEPTH_DEADLINE_CHECK_INTERVAL nodes per thread
+// (the period at which each worker flushes its non-atomic local counter to
+// the shared atomic); each worker does a final exact flush when it stops, so
+// once the solve completes the total is exact. Cheap to call from any thread;
+// intended for "is the engine alive / nodes per second" UI heartbeats during
+// long single-root subtree evaluations.
 uint64_t endgame_ctx_get_nodes_searched(const EndgameCtx *ctx);
 
-// Snapshot of the line currently being explored by worker thread
-// `thread_index`. Writes up to `max_len` `tiny_move` entries into
-// `out_line` and returns the number written (0..max_len). The line
-// reads thread-local state without locking; the reader uses
-// release/acquire on the length so the prefix length is always
-// consistent, but individual entries past the length may still be
-// torn if the worker is concurrently swapping into a sibling subtree.
-// For display only; never used to drive search decisions.
-int endgame_ctx_get_current_line(const EndgameCtx *ctx, int thread_index,
+// Snapshot of the line currently being explored by worker `worker_index`
+// (0 = main worker; see conventions above). Writes up to `max_len` `tiny_move`
+// entries into `out_line` and returns the number written (0..max_len). The
+// line reads per-worker state without locking: the slots are relaxed atomics
+// and the reader uses release/acquire on the length, so the prefix length is
+// always consistent and each slot read is well-defined (no torn reads). A slot
+// the worker is concurrently overwriting may simply be stale — it can reflect a
+// different sibling subtree than the reported length — which is fine for a
+// display heartbeat. For display only; never used to drive search decisions.
+int endgame_ctx_get_current_line(const EndgameCtx *ctx, int worker_index,
                                  uint64_t *out_line, int max_len);
 
-// Snapshot of the live best PV from worker `thread_index`. Updated by
-// the engine each time best_value improves at the root (so during a
+// Snapshot of the live best PV from worker `worker_index` (0 = main worker).
+// Updated by the engine each time best_value improves at the root (so during a
 // long depth the reader can see the engine's best line refine as
 // successive root moves get evaluated).
 //
 // Writes up to `max_len` `tiny_move` entries into `out_moves` and
-// returns the number written (0..max_len). `*out_value` is set to
-// the spread-adjusted PV value (same sign convention as
-// PVLine.score).
+// returns the number written (0..max_len). `*out_value` is set to the
+// spread-adjusted value (whole points; see conventions above).
 //
 // Uses a seqlock so the moves array, length, and value all come
 // from the same writer update — never from a half-overwritten
 // state. If a consistent snapshot can't be obtained after a few
 // retries (writer continuously updating) returns 0 and *out_value=0;
 // callers should treat that as "no fresh PV this frame".
-int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int thread_index,
+int endgame_ctx_get_live_pv(const EndgameCtx *ctx, int worker_index,
                             uint64_t *out_moves, int max_len,
                             int32_t *out_value);
 
-// One slot of the live multi-PV top-K leaderboard. root_tiny is the
-// first move (a SmallMove tiny_move); value is the spread-adjusted
-// negamax value (same sign convention as PVLine.score); continuation
-// is the rest of the line (depth - 1 moves at most), with
-// continuation_len in [0, MAX_SEARCH_DEPTH].
+// One slot of the live multi-PV top-K leaderboard: a root move, its current
+// spread-adjusted value (whole points; see conventions above), and the
+// continuation line found after it (up to depth - 1 more moves,
+// continuation_len in [0, MAX_SEARCH_DEPTH]). Moves are tiny_move codes.
+//
+// This is a flat, copy-safe value type, deliberately distinct from PVLine:
+// PVLine carries a Game* and is sized for the search, whereas a poller wants
+// to memcpy a leaderboard slice out under the seqlock and keep using it after
+// the engine has moved on. The snapshot owns no engine pointers.
 typedef struct EndgameLivePvSnapshot {
   uint64_t root_tiny;
   int32_t value;
@@ -248,8 +317,8 @@ typedef struct EndgameLivePvSnapshot {
   uint64_t continuation_tiny[MAX_SEARCH_DEPTH];
 } EndgameLivePvSnapshot;
 
-// Snapshot of the live multi-PV top-K leaderboard from worker
-// `thread_index`. Each slot in `out` is filled with one root move,
+// Snapshot of the live multi-PV top-K leaderboard from worker `worker_index`
+// (0 = main worker). Each slot in `out` is filled with one root move,
 // its current value, and the continuation line found at this depth.
 // Slots are sorted descending by value; the leaderboard is reset at
 // the start of each IDS depth and fills in as roots complete (so the
@@ -260,7 +329,7 @@ typedef struct EndgameLivePvSnapshot {
 // snapshot is consistent (every entry came from the same writer
 // update). Returns 0 if a consistent snapshot can't be obtained
 // after a few retries.
-int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int thread_index,
+int endgame_ctx_get_live_top_k_pvs(const EndgameCtx *ctx, int worker_index,
                                    EndgameLivePvSnapshot *out, int max_k);
 
 #endif

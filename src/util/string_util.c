@@ -949,6 +949,7 @@ struct StringGrid {
   int cols;
   int col_padding;
   int *max_col_widths;
+  bool *col_right_align; // per column; false (left-aligned) by default
   char **cells;
 };
 
@@ -958,6 +959,7 @@ StringGrid *string_grid_create(int rows, int cols, int col_padding) {
   string_grid->cols = cols;
   string_grid->col_padding = col_padding;
   string_grid->max_col_widths = calloc_or_die(cols, sizeof(int));
+  string_grid->col_right_align = calloc_or_die(cols, sizeof(bool));
   string_grid->cells =
       calloc_or_die((size_t)rows * (size_t)cols, sizeof(char *));
   return string_grid;
@@ -971,8 +973,17 @@ void string_grid_destroy(StringGrid *string_grid) {
     free(string_grid->cells[i]);
   }
   free(string_grid->max_col_widths);
+  free(string_grid->col_right_align);
   free(string_grid->cells);
   free(string_grid);
+}
+
+void string_grid_set_col_right_align(StringGrid *string_grid, int col,
+                                     bool right_align) {
+  if (col < 0 || col >= string_grid->cols) {
+    log_fatal("string grid column out of range: %d", col);
+  }
+  string_grid->col_right_align[col] = right_align;
 }
 
 int string_grid_get_cell_index(const StringGrid *string_grid, int row,
@@ -1041,8 +1052,21 @@ void string_builder_add_string_grid(StringBuilder *sb, const StringGrid *sg,
         cell_value = "";
       }
 
-      string_builder_add_formatted_string(sb, "%-*s", sg->max_col_widths[c],
-                                          cell_value);
+      // Align the cell within its content width, then emit the column padding
+      // as a trailing separator. This keeps padding between columns regardless
+      // of alignment (so right-aligned columns still get a gap to the next
+      // one), and is byte-identical to the old "%-*s" over the padded width for
+      // the default left-aligned case.
+      int content_width = sg->max_col_widths[c] - sg->col_padding;
+      if (content_width < 0) {
+        content_width = 0;
+      }
+      string_builder_add_formatted_string(
+          sb, sg->col_right_align[c] ? "%*s" : "%-*s", content_width,
+          cell_value);
+      for (int pad = 0; pad < sg->col_padding; pad++) {
+        string_builder_add_char(sb, ' ');
+      }
 
       if (add_border) {
         string_builder_add_string(sb, "|");

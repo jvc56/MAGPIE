@@ -20,6 +20,13 @@ int bag_get_letter(const Bag *bag, MachineLetter ml);
 bool bag_is_empty(const Bag *bag);
 
 void bag_add_letter(Bag *bag, MachineLetter letter, int player_draw_index);
+// Set the bag to tiles[0..n-1] in that exact order (no PRNG). Used by
+// (pre)endgame enumerators that already know the bag contents and must not
+// randomize them. n must not exceed the bag's backing capacity.
+void bag_set_to_tiles(Bag *bag, const MachineLetter *tiles, int n);
+// Copy the bag's current tiles in order into `out` (which must hold at least
+// bag_get_letters(bag) entries); returns the number copied.
+int bag_peek_tiles(const Bag *bag, MachineLetter *out);
 bool bag_draw_letter(Bag *bag, MachineLetter letter, int player_draw_index);
 
 MachineLetter bag_draw_random_letter(Bag *bag, int player_draw_index);
