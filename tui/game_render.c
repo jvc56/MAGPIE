@@ -14,6 +14,7 @@
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/impl/endgame.h"
+#include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/string_util.h"
 #include "frame_dump.h"
@@ -1629,6 +1630,14 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
       }
       return &hist_entry->endgame_moves_saved[idx];
     }
+    if (hist_entry->peg_moves_saved != NULL &&
+        idx < hist_entry->peg_moves_saved_count) {
+      // PEG turn — same uniform saved-leaderboard replay.
+      if (out_player_idx != NULL) {
+        *out_player_idx = hist_entry->player_idx;
+      }
+      return &hist_entry->peg_moves_saved[idx];
+    }
     // Loaded GCG entry — no sim/endgame leaderboard, just the
     // single move that was played. Surface it as the preview so
     // the board ghosts the played tiles when the cursor lands on
@@ -1653,6 +1662,24 @@ static const Move *pick_analysis_preview_move(const TuiGameState *state,
       *out_player_idx = state->endgame_snapshot.solving_player;
     }
     return m;
+  }
+  // Live PEG leaderboard — the snapshot's Move array is stable
+  // between refreshes (owned by the state, rebuilt under the same
+  // mutex this render frame holds), and its row order is exactly
+  // what populate_frame_analysis_rows displayed. Gate on the analyzed
+  // position actually being in the PEG bag range so a midgame sim
+  // (e.g. a resumed early turn) doesn't preview a leftover peg row.
+  const struct Game *preview_src_game =
+      state->analysis_game != NULL ? state->analysis_game : state->game;
+  if (!bag_empty && state->peg_snapshot.valid &&
+      state->peg_snapshot.moves != NULL &&
+      tui_game_state_is_peg_position(preview_src_game) &&
+      atomic_load(&((TuiGameState *)state)->peg_results_turn_idx) >= 0 &&
+      idx < state->peg_snapshot.num_entries) {
+    if (out_player_idx != NULL) {
+      *out_player_idx = state->peg_snapshot.solving_player;
+    }
+    return &state->peg_snapshot.moves[idx];
   }
   if (state->sim_results == NULL) {
     return NULL;
@@ -7321,6 +7348,10 @@ static bool resume_active_for_cursor(const TuiGameState *state) {
       atomic_load(&mut->sim_results_turn_idx) == state->history_cursor) {
     return true;
   }
+  if (atomic_load(&mut->peg_results_active) &&
+      atomic_load(&mut->peg_results_turn_idx) == state->history_cursor) {
+    return true;
+  }
   return atomic_load(&mut->endgame_results_active) &&
          atomic_load(&mut->endgame_results_turn_idx) == state->history_cursor;
 }
@@ -7494,6 +7525,181 @@ static int fill_analysis_rows_from_endgame(const TuiGameState *state,
   return n;
 }
 
+// Board-effect equality for PEG leaderboard moves: same move_type,
+// same anchor + direction + tiles. Scores are ignored — a candidate
+// re-scored at a deeper stage is still the same play. Mirrors the
+// dedupe the endgame snapshot builder uses.
+static bool peg_moves_same_play(const Move *move_1, const Move *move_2) {
+  if (move_get_type(move_1) != move_get_type(move_2)) {
+    return false;
+  }
+  if (move_get_type(move_1) == GAME_EVENT_PASS) {
+    return true; // only one "pass" play, no further fields
+  }
+  if (move_get_row_start(move_1) != move_get_row_start(move_2) ||
+      move_get_col_start(move_1) != move_get_col_start(move_2) ||
+      move_get_dir(move_1) != move_get_dir(move_2) ||
+      move_get_tiles_played(move_1) != move_get_tiles_played(move_2) ||
+      move_get_tiles_length(move_1) != move_get_tiles_length(move_2)) {
+    return false;
+  }
+  const int tiles_length = move_get_tiles_length(move_1);
+  for (int tile_idx = 0; tile_idx < tiles_length; tile_idx++) {
+    if (move_get_tile(move_1, tile_idx) != move_get_tile(move_2, tile_idx)) {
+      return false;
+    }
+  }
+  return true;
+}
+
+// True when the live PEG poll is the analysis panel's data source for
+// the analyzed position: a solve has published (or is publishing) a
+// ranking and the position is still in the pre-endgame bag range. The
+// reset paths flip peg_results_turn_idx to -1 to mark the poll's
+// contents stale, same as the sim gate.
+static bool live_peg_source(const TuiGameState *state, const Game *src_game) {
+  if (state->peg_poll == NULL || !tui_game_state_is_peg_position(src_game)) {
+    return false;
+  }
+  const int peg_turn =
+      atomic_load(&((TuiGameState *)state)->peg_results_turn_idx);
+  if (peg_turn < 0) {
+    return false;
+  }
+  // During a "/resume" the analyzed position is the resumed turn's
+  // reconstruction. The poll is only that panel's source when its
+  // contents were produced for the SAME turn (a peg resume) — a sim
+  // resume can be re-sampling a pre-endgame position while the poll
+  // still holds some other turn's peg ranking.
+  if (state->analysis_game != NULL && src_game == state->analysis_game) {
+    return peg_turn == state->analysis_resume_turn_idx;
+  }
+  return true;
+}
+
+// Rebuild the TUI-side PEG snapshot from the engine's live poll, then
+// populate the row cache from it. The merged view lists the current
+// stage's completed candidates first (the deepest data), followed by
+// any baseline candidates from the previous stage that the current
+// stage has not re-scored yet — so a halving-stage transition never
+// blanks the leaderboard while its first candidate is still solving.
+// Returns the number of rows filled (≤ max_rows). Caller must hold
+// state->mutex (the snapshot rebuild mutates state->peg_snapshot).
+static int fill_analysis_rows_from_peg(const TuiGameState *cstate,
+                                       AnalysisRow *rows, int max_rows) {
+  TuiGameState *state = (TuiGameState *)cstate;
+  if (state->peg_poll == NULL || state->peg_poll_scratch == NULL ||
+      state->peg_snapshot.moves == NULL) {
+    return 0;
+  }
+  PegPollSnapshot *poll_snap = state->peg_poll_scratch;
+  peg_poll_read(state->peg_poll, poll_snap);
+
+  TuiPegSnapshot *snap = &state->peg_snapshot;
+  int filled = 0;
+  for (int entry_idx = 0;
+       entry_idx < poll_snap->n_entries && filled < TUI_PEG_SNAPSHOT_CAP;
+       entry_idx++) {
+    const PegRankedCand *cand = &poll_snap->entries[entry_idx];
+    move_copy(&snap->moves[filled], &cand->move);
+    snap->win_pcts[filled] = cand->win_pct;
+    snap->spreads[filled] = cand->mean_spread;
+    filled++;
+  }
+  for (int base_idx = 0; base_idx < poll_snap->n_baseline_entries &&
+                         filled < TUI_PEG_SNAPSHOT_CAP;
+       base_idx++) {
+    const PegRankedCand *cand = &poll_snap->baseline_entries[base_idx];
+    bool rescored = false;
+    for (int cur_idx = 0; cur_idx < poll_snap->n_entries; cur_idx++) {
+      if (peg_moves_same_play(&poll_snap->entries[cur_idx].move, &cand->move)) {
+        rescored = true;
+        break;
+      }
+    }
+    if (rescored) {
+      continue;
+    }
+    move_copy(&snap->moves[filled], &cand->move);
+    snap->win_pcts[filled] = cand->win_pct;
+    snap->spreads[filled] = cand->mean_spread;
+    filled++;
+  }
+  snap->num_entries = filled;
+  snap->stage = poll_snap->stage;
+  snap->fidelity_plies = poll_snap->fidelity_plies;
+  snap->field_size = poll_snap->field_size;
+  snap->done = poll_snap->done;
+  snap->cands_done =
+      poll_snap->n_stage_history > 0
+          ? poll_snap->stage_history[poll_snap->n_stage_history - 1].cands_done
+          : 0;
+  const Game *fmt_game = analysis_source_game(state);
+  const int on_turn = game_get_player_on_turn_index(fmt_game);
+  snap->solving_player = on_turn;
+  snap->valid = filled > 0;
+
+  const Board *board = game_get_board(fmt_game);
+  const Rack *peg_rack = player_get_rack(game_get_player(fmt_game, on_turn));
+  const int n = filled < max_rows ? filled : max_rows;
+  for (int i = 0; i < n; i++) {
+    rows[i].valid = false;
+    rows[i].move[0] = '\0';
+    rows[i].leave[0] = '\0';
+    rows[i].score[0] = '\0';
+    rows[i].primary[0] = '\0';
+    rows[i].secondary[0] = '\0';
+    rows[i].ply_count = 0;
+    const Move *move = &snap->moves[i];
+    const double win_pct = snap->win_pcts[i] * 100.0;
+    // Same 6-col win% cell the sim rows use, including the 100%
+    // rounding special case.
+    if (win_pct >= 99.95) {
+      snprintf(rows[i].primary, sizeof(rows[i].primary), "  100%%");
+    } else {
+      snprintf(rows[i].primary, sizeof(rows[i].primary), "%5.1f%%", win_pct);
+    }
+    snprintf(rows[i].secondary, sizeof(rows[i].secondary), "%+6.1f",
+             snap->spreads[i]);
+    const int play_score = equity_to_int(move_get_score(move));
+    snprintf(rows[i].score, sizeof(rows[i].score), "%d", play_score);
+    rows[i].score_value = play_score;
+    rows[i].primary_value = win_pct;
+    rows[i].secondary_value = snap->spreads[i];
+    rows[i].candidate_player_idx = on_turn;
+
+    StringBuilder *sb = string_builder_create();
+    string_builder_add_move(sb, board, move, state->ld, false);
+    size_t mlen = 0;
+    char *mdump = string_builder_dump(sb, &mlen);
+    if (mdump != NULL) {
+      const size_t copy =
+          mlen < sizeof(rows[i].move) ? mlen : sizeof(rows[i].move) - 1;
+      memcpy(rows[i].move, mdump, copy);
+      rows[i].move[copy] = '\0';
+      free(mdump);
+    }
+    string_builder_destroy(sb);
+
+    if (peg_rack != NULL) {
+      StringBuilder *lsb = string_builder_create();
+      string_builder_add_move_leave(lsb, peg_rack, move, state->ld);
+      size_t llen = 0;
+      char *ldump = string_builder_dump(lsb, &llen);
+      if (ldump != NULL) {
+        const size_t copy =
+            llen < sizeof(rows[i].leave) ? llen : sizeof(rows[i].leave) - 1;
+        memcpy(rows[i].leave, ldump, copy);
+        rows[i].leave[copy] = '\0';
+        free(ldump);
+      }
+      string_builder_destroy(lsb);
+    }
+    rows[i].valid = true;
+  }
+  return n;
+}
+
 // Populate state->last_rendered_analysis_rows for the current
 // frame. Called once at the top of tui_game_render (before
 // render_board, so the on-board candidate preview can resolve
@@ -7546,15 +7752,17 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
       src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
+  const bool use_peg = !use_endgame && live_peg_source(state, src_game);
   // Gate sim row population on sim_results_turn_idx — the
   // reset paths flip it to -1 to signal "the sim_results
   // object's contents aren't valid for the current game".
   // The engine doesn't zero sim_results itself, so without
   // this check the prior game's leaderboard keeps rendering
   // (and burning per-frame CPU) after annotation start.
-  const bool live_sim = !use_endgame && state->sim_results != NULL &&
+  const bool live_sim = !use_endgame && !use_peg &&
+                        state->sim_results != NULL &&
                         atomic_load(&state->sim_results_turn_idx) >= 0;
-  if (use_endgame || live_sim) {
+  if (use_endgame || use_peg || live_sim) {
     // Throttle live-leaderboard rebuilds to ~10Hz. Rebuilding the row
     // strings at 60fps is pure waste — the leaderboard doesn't change
     // meaningfully frame-to-frame — and it's expensive far beyond its
@@ -7575,6 +7783,9 @@ static void populate_frame_analysis_rows(const TuiGameState *cstate) {
     }
     if (use_endgame) {
       state->last_rendered_analysis_row_count = fill_analysis_rows_from_endgame(
+          state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
+    } else if (use_peg) {
+      state->last_rendered_analysis_row_count = fill_analysis_rows_from_peg(
           state, state->last_rendered_analysis_rows, ANALYSIS_ROW_CAP);
     } else {
       state->last_rendered_analysis_row_count = fill_analysis_rows_from_sim(
@@ -7622,7 +7833,7 @@ void tui_capture_analysis_snapshot(const TuiGameState *state,
   const bool use_endgame = bag_empty && state->endgame_snapshot.valid &&
                            state->endgame_snapshot.num_entries > 0;
   if (use_endgame) {
-    out->is_sim = false;
+    out->mode = TUI_ANALYSIS_MODE_ENDGAME;
     out->num_rows =
         fill_analysis_rows_from_endgame(state, out->rows, ANALYSIS_ROW_CAP);
     out->endgame_depth = state->endgame_snapshot.depth;
@@ -7631,8 +7842,25 @@ void tui_capture_analysis_snapshot(const TuiGameState *state,
       out->endgame_nodes = endgame_ctx_get_nodes_searched(state->endgame_ctx);
     }
     out->valid = out->num_rows > 0;
-  } else if (state->sim_results != NULL) {
-    out->is_sim = true;
+    return;
+  }
+  // PEG turn: the live poll holds a ranking for this position. A PEG
+  // solve that produced no rows (interrupted before its first
+  // candidate) resets the turn index, so this cleanly falls through
+  // to the sim capture below when the bot fell back to a sim.
+  if (live_peg_source(state, src_game)) {
+    out->num_rows =
+        fill_analysis_rows_from_peg(state, out->rows, ANALYSIS_ROW_CAP);
+    if (out->num_rows > 0) {
+      out->mode = TUI_ANALYSIS_MODE_PEG;
+      out->peg_fidelity = state->peg_snapshot.fidelity_plies;
+      out->peg_field_size = state->peg_snapshot.field_size;
+      out->valid = true;
+      return;
+    }
+  }
+  if (state->sim_results != NULL) {
+    out->mode = TUI_ANALYSIS_MODE_SIM;
     out->num_rows =
         fill_analysis_rows_from_sim(state, out->rows, ANALYSIS_ROW_CAP);
     out->sim_plies = sim_results_get_num_plies(state->sim_results);
@@ -7679,9 +7907,12 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
   const bool bag_empty =
       src_game != NULL && bag_get_letters(game_get_bag(src_game)) == 0;
   const bool use_endgame = snap != NULL
-                               ? !snap->is_sim
+                               ? snap->mode == TUI_ANALYSIS_MODE_ENDGAME
                                : (bag_empty && state->endgame_snapshot.valid &&
                                   state->endgame_snapshot.num_entries > 0);
+  const bool use_peg =
+      !use_endgame && (snap != NULL ? snap->mode == TUI_ANALYSIS_MODE_PEG
+                                    : live_peg_source(state, src_game));
 
   // Title varies by mode.
   char title[64];
@@ -7728,6 +7959,35 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       snprintf(title, sizeof(title), "Endgame (starting\xe2\x80\xa6)");
     } else {
       snprintf(title, sizeof(title), "Endgame");
+    }
+  } else if (use_peg) {
+    // "PEG (5p 3/8)" — the current stage's endgame fidelity on the
+    // left, candidates finished / stage field size on the right. The
+    // greedy seed stage (fidelity 0) reads "PEG (seed 120/300)".
+    if (snap != NULL) {
+      if (snap->peg_fidelity > 0) {
+        snprintf(title, sizeof(title), "PEG (%dp)", snap->peg_fidelity);
+      } else {
+        snprintf(title, sizeof(title), "PEG");
+      }
+    } else {
+      const TuiPegSnapshot *live_peg = &state->peg_snapshot;
+      const bool searching =
+          atomic_load(&((TuiGameState *)state)->peg_results_active);
+      if (live_peg->valid && live_peg->field_size > 0) {
+        if (live_peg->fidelity_plies > 0) {
+          snprintf(title, sizeof(title), "PEG (%dp %d/%d)",
+                   live_peg->fidelity_plies, live_peg->cands_done,
+                   live_peg->field_size);
+        } else {
+          snprintf(title, sizeof(title), "PEG (seed %d/%d)",
+                   live_peg->cands_done, live_peg->field_size);
+        }
+      } else if (searching) {
+        snprintf(title, sizeof(title), "PEG (starting\xe2\x80\xa6)");
+      } else {
+        snprintf(title, sizeof(title), "PEG");
+      }
     }
   } else if (snap != NULL) {
     if (snap->sim_plies > 0 && snap->sim_iterations > 0) {
@@ -7779,7 +8039,8 @@ static void render_analysis_panel(struct ncplane *plane, const Theme *theme,
       sim_turn_idx >= 0 && state->sim_results != NULL &&
       sim_results_get_num_plies(state->sim_results) > 0 &&
       sim_results_get_iteration_count(state->sim_results) > 0;
-  const bool play_only_fallback = snap == NULL && !use_endgame && !sim_has_data;
+  const bool play_only_fallback =
+      snap == NULL && !use_endgame && !use_peg && !sim_has_data;
   const bool analysis_focused = state->focused_panel == TUI_FOCUS_ANALYSIS;
   // badge_secondary: the cursor has navigated off the label onto a
   // specific candidate row, so "[5>" → "[5]" while focus stays

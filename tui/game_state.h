@@ -1,6 +1,7 @@
 #ifndef TUI_GAME_STATE_H
 #define TUI_GAME_STATE_H
 
+#include "../src/def/peg_defs.h"
 #include "config.h"
 #include <pthread.h>
 #include <stdatomic.h>
@@ -20,6 +21,8 @@ struct WinPct;
 struct SimResults;
 struct EndgameResults;
 struct EndgameCtx;
+struct PegPoll;
+struct PegPollSnapshot;
 struct Board;
 struct Move;
 struct Rack;
@@ -46,6 +49,45 @@ typedef struct {
   // shows "(exhaustive)" instead of "(N-ply negamax)" in that case.
   bool exhaustive;
 } TuiEndgameSnapshot;
+
+enum {
+  // Row capacity of the TUI-side PEG leaderboard: the current stage's
+  // candidates plus the previous stage's baseline ranking (each capped
+  // at PEG_POLL_MAX_ENTRIES by the engine's poll).
+  TUI_PEG_SNAPSHOT_CAP = 2 * PEG_POLL_MAX_ENTRIES,
+};
+
+// Live view of an in-progress (or just-finished) PEG (pre-endgame)
+// solve, rebuilt from the engine's PegPoll at the analysis panel's
+// ~10 Hz refresh cadence. Owns a contiguous Move array (allocated
+// once at game-state init) so the board-preview path can hand out
+// stable Move pointers between refreshes. The rows merge the current
+// stage's completed candidates (deepest data first) with the previous
+// stage's baseline ranking, so a fresh halving stage never blanks the
+// leaderboard while its first candidate is still solving. Written by
+// the analysis row builder under state->mutex.
+typedef struct {
+  struct Move *moves;                    // owned; capacity TUI_PEG_SNAPSHOT_CAP
+  double win_pcts[TUI_PEG_SNAPSHOT_CAP]; // mover win fraction, 0..1
+  double spreads[TUI_PEG_SNAPSHOT_CAP];  // signed mean spread (points)
+  int num_entries;
+  int stage;          // current stage (0 = greedy seed)
+  int fidelity_plies; // current stage's endgame fidelity (0 = greedy)
+  int cands_done;     // candidates finished in the current stage
+  int field_size;     // candidates being evaluated in the current stage
+  int solving_player; // player on turn in the analyzed position
+  bool done;          // solve finished
+  bool valid;
+} TuiPegSnapshot;
+
+// Which engine produced an analysis leaderboard — the saved-snapshot
+// discriminator and the render dispatch key. SIM is the zero value so
+// a zero-initialized snapshot defaults to the sim shape.
+enum {
+  TUI_ANALYSIS_MODE_SIM = 0,
+  TUI_ANALYSIS_MODE_PEG = 1,
+  TUI_ANALYSIS_MODE_ENDGAME = 2,
+};
 
 enum {
   TUI_HISTORY_MAX = 200,
@@ -100,8 +142,8 @@ typedef struct {
 // at bot-worker finalize time (move chosen, before play_move) so
 // the user can navigate the history cursor back to any committed
 // turn and re-display the analysis that was visible at the moment
-// the bot decided. Sim and endgame share this shape; `is_sim`
-// flips which set of meta fields the title rendering reads.
+// the bot decided. Sim, PEG, and endgame share this shape; `mode`
+// selects which set of meta fields the title rendering reads.
 typedef struct {
   AnalysisRow rows[ANALYSIS_ROW_CAP];
   int num_rows;
@@ -114,8 +156,11 @@ typedef struct {
   int endgame_depth;
   uint64_t endgame_nodes;
   bool endgame_exhaustive;
-  // True when this snapshot is from a sim solve; false for endgame.
-  bool is_sim;
+  // PEG-mode title meta.
+  int peg_fidelity;   // deepest fidelity (plies) behind the rows
+  int peg_field_size; // candidates evaluated at capture time
+  // Which engine produced the rows (TUI_ANALYSIS_MODE_*).
+  int mode;
   bool valid;
 } TuiAnalysisSnapshot;
 
@@ -202,6 +247,15 @@ typedef struct {
   // endgame_moves_saved_count. NULL when not an endgame turn.
   struct Move *endgame_moves_saved;
   int endgame_moves_saved_count;
+
+  // Deep-copy of the PEG leaderboard moves at finalize time, captured
+  // for turns the bot decided via the pre-endgame solver. Same role
+  // as endgame_moves_saved: lets the History cursor preview each PEG
+  // candidate on the board after the live peg_snapshot has moved on.
+  // Owned by this entry; contiguous Move array. NULL when not a PEG
+  // turn.
+  struct Move *peg_moves_saved;
+  int peg_moves_saved_count;
 
   // Pre-move rack snapshot, owned. Pairs with board_before for
   // resuming analysis on this turn's position. The text rack_str
@@ -315,6 +369,21 @@ typedef struct {
   // each successful solve (and while it still holds the pre-play
   // board). Renderer reads under state->mutex.
   TuiEndgameSnapshot endgame_snapshot;
+
+  // PEG (pre-endgame) live analysis. peg_poll is the engine's
+  // mutex-guarded live view — created once at init, reset before each
+  // solve, safe to read from the render thread while peg_solve runs
+  // on the bot worker. peg_poll_scratch is a reusable heap buffer for
+  // peg_poll_read (PegPollSnapshot is tens of KB; don't stack one per
+  // frame). peg_snapshot is the TUI-side merged leaderboard rebuilt
+  // from the scratch snapshot under state->mutex. The active flag and
+  // turn index mirror the sim/endgame pairs above; the reset paths
+  // flip the turn index to -1 to mark the poll's contents stale.
+  struct PegPoll *peg_poll;
+  struct PegPollSnapshot *peg_poll_scratch;
+  TuiPegSnapshot peg_snapshot;
+  _Atomic bool peg_results_active;
+  _Atomic int peg_results_turn_idx;
   // Monotonically bumped whenever something that affects pixel-plane
   // content changes (move played by the bot, theme switch, setting
   // toggle). The renderer caches its last successful blit signature
@@ -751,6 +820,16 @@ void tui_game_state_seek_engine_to_turn(TuiGameState *state, int idx);
 // values), zeros the fields, marks invalid. Safe on a zero-init or
 // already-cleared snapshot.
 void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
+
+// Zeros a PEG snapshot's rows and meta, marks it invalid. Keeps the
+// owned Move array allocated for reuse (it is sized once at init and
+// freed in tui_game_state_destroy). Safe on a zero-init snapshot.
+void tui_peg_snapshot_clear(TuiPegSnapshot *snap);
+
+// True when `game` is a PEG-phase position: the effective bag size —
+// the raw bag minus the opponent's unknown tiles, the same formula
+// peg_solve validates against — is within PEG_MIN_BAG..PEG_MAX_BAG.
+bool tui_game_state_is_peg_position(const struct Game *game);
 
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".

@@ -9,6 +9,7 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/gcg.h"
+#include "../src/impl/peg.h"
 #include "../src/str/rack_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -1073,6 +1074,11 @@ int main(int argc, char *argv[]) {
               e->endgame_moves_saved = NULL;
               e->endgame_moves_saved_count = 0;
             }
+            if (e->peg_moves_saved != NULL) {
+              free(e->peg_moves_saved);
+              e->peg_moves_saved = NULL;
+              e->peg_moves_saved_count = 0;
+            }
             if (e->loaded_move != NULL) {
               free(e->loaded_move);
               e->loaded_move = NULL;
@@ -1298,6 +1304,11 @@ int main(int argc, char *argv[]) {
               e->endgame_moves_saved = NULL;
               e->endgame_moves_saved_count = 0;
             }
+            if (e->peg_moves_saved != NULL) {
+              free(e->peg_moves_saved);
+              e->peg_moves_saved = NULL;
+              e->peg_moves_saved_count = 0;
+            }
             if (e->loaded_move != NULL) {
               free(e->loaded_move);
               e->loaded_move = NULL;
@@ -1329,6 +1340,12 @@ int main(int argc, char *argv[]) {
           game_state.sim_results = sim_results_create(0.005);
           atomic_store(&game_state.sim_results_active, false);
           atomic_store(&game_state.sim_results_turn_idx, -1);
+          if (game_state.peg_poll != NULL) {
+            peg_poll_reset(game_state.peg_poll);
+          }
+          tui_peg_snapshot_clear(&game_state.peg_snapshot);
+          atomic_store(&game_state.peg_results_active, false);
+          atomic_store(&game_state.peg_results_turn_idx, -1);
 
           // Surface real player names from the GCG so the pill
           // headers read "Quackle" / "New Player 1" instead of

@@ -5,6 +5,7 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/endgame_results.h"
@@ -19,6 +20,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/peg.h"
 #include "../src/util/io_util.h"
 #include "glyph_cache.h"
 #include <pthread.h>
@@ -180,6 +182,18 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   atomic_store(&out_state->endgame_results_active, false);
   atomic_store(&out_state->endgame_results_turn_idx, -1);
   atomic_store(&out_state->endgame_initial_spread, 0);
+
+  // PEG live-analysis plumbing: one engine poll reused across solves,
+  // one heap scratch buffer for reading it (PegPollSnapshot is tens of
+  // KB), and the TUI-side merged leaderboard's Move storage.
+  out_state->peg_poll = peg_poll_create();
+  out_state->peg_poll_scratch = (struct PegPollSnapshot *)malloc_or_die(
+      sizeof(*out_state->peg_poll_scratch));
+  out_state->peg_snapshot.moves =
+      (Move *)malloc_or_die(sizeof(Move) * TUI_PEG_SNAPSHOT_CAP);
+  tui_peg_snapshot_clear(&out_state->peg_snapshot);
+  atomic_store(&out_state->peg_results_active, false);
+  atomic_store(&out_state->peg_results_turn_idx, -1);
 
   const GameArgs args = {
       .players_data = out_state->players_data,
@@ -1136,6 +1150,16 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
     }
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
+    }
+    if (entry->peg_moves_saved != NULL) {
+      free(entry->peg_moves_saved);
+      entry->peg_moves_saved = NULL;
+      entry->peg_moves_saved_count = 0;
+    }
     if (entry->loaded_move != NULL) {
       free(entry->loaded_move);
       entry->loaded_move = NULL;
@@ -1157,6 +1181,12 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
   }
+  atomic_store(&state->peg_results_active, false);
+  atomic_store(&state->peg_results_turn_idx, -1);
+  if (state->peg_poll != NULL) {
+    peg_poll_reset(state->peg_poll);
+  }
+  tui_peg_snapshot_clear(&state->peg_snapshot);
   // Drop any in-progress board move-entry so a stale anchor doesn't
   // leak into the next game.
   state->board_entry_active = false;
@@ -1454,6 +1484,16 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
     }
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
+    }
+    if (entry->peg_moves_saved != NULL) {
+      free(entry->peg_moves_saved);
+      entry->peg_moves_saved = NULL;
+      entry->peg_moves_saved_count = 0;
+    }
     if (entry->loaded_move != NULL) {
       free(entry->loaded_move);
       entry->loaded_move = NULL;
@@ -1475,6 +1515,12 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
   }
+  atomic_store(&state->peg_results_active, false);
+  atomic_store(&state->peg_results_turn_idx, -1);
+  if (state->peg_poll != NULL) {
+    peg_poll_reset(state->peg_poll);
+  }
+  tui_peg_snapshot_clear(&state->peg_snapshot);
   // Drop any in-progress board move-entry so a stale anchor doesn't
   // leak into the next game.
   state->board_entry_active = false;
@@ -1550,6 +1596,16 @@ void tui_game_state_destroy(TuiGameState *state) {
       sim_results_destroy(entry->sim_results_saved);
       entry->sim_results_saved = NULL;
     }
+    if (entry->endgame_moves_saved != NULL) {
+      free(entry->endgame_moves_saved);
+      entry->endgame_moves_saved = NULL;
+      entry->endgame_moves_saved_count = 0;
+    }
+    if (entry->peg_moves_saved != NULL) {
+      free(entry->peg_moves_saved);
+      entry->peg_moves_saved = NULL;
+      entry->peg_moves_saved_count = 0;
+    }
     if (entry->loaded_move != NULL) {
       free(entry->loaded_move);
       entry->loaded_move = NULL;
@@ -1587,6 +1643,11 @@ void tui_game_state_destroy(TuiGameState *state) {
     endgame_ctx_destroy(state->endgame_ctx);
   }
   tui_endgame_snapshot_clear(&state->endgame_snapshot);
+  if (state->peg_poll != NULL) {
+    peg_poll_destroy(state->peg_poll);
+  }
+  free(state->peg_poll_scratch);
+  free(state->peg_snapshot.moves);
   memset(state, 0, sizeof(*state));
 }
 
@@ -1620,4 +1681,37 @@ void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap) {
   snap->depth = 0;
   snap->solving_player = 0;
   snap->valid = false;
+}
+
+void tui_peg_snapshot_clear(TuiPegSnapshot *snap) {
+  if (snap == NULL) {
+    return;
+  }
+  // The Move array is a fixed-capacity buffer owned for the state's
+  // lifetime — zero the counts, keep the storage.
+  snap->num_entries = 0;
+  snap->stage = 0;
+  snap->fidelity_plies = 0;
+  snap->cands_done = 0;
+  snap->field_size = 0;
+  snap->solving_player = 0;
+  snap->done = false;
+  snap->valid = false;
+}
+
+bool tui_game_state_is_peg_position(const struct Game *game) {
+  if (game == NULL) {
+    return false;
+  }
+  // Mirror peg_solve's own bag-size validation: tiles the opponent
+  // holds beyond what their rack shows are counted as still "in the
+  // bag" from the mover's perspective, so subtract them out. In the
+  // TUI's live games both racks are fully drawn and this reduces to
+  // the raw bag count.
+  const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_unknown = RACK_SIZE - (int)rack_get_total_letters(opp_rack);
+  const int bag_size = raw_bag_size - opp_unknown;
+  return bag_size >= PEG_MIN_BAG && bag_size <= PEG_MAX_BAG;
 }

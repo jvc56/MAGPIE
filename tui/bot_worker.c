@@ -20,6 +20,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/peg.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
@@ -96,6 +97,9 @@ static void evict_oldest_history_entry(TuiGameState *state) {
   }
   if (state->history[0].endgame_moves_saved != NULL) {
     free(state->history[0].endgame_moves_saved);
+  }
+  if (state->history[0].peg_moves_saved != NULL) {
+    free(state->history[0].peg_moves_saved);
   }
   if (state->history[0].loaded_move != NULL) {
     free(state->history[0].loaded_move);
@@ -371,6 +375,11 @@ static void pop_history(TuiGameState *state) {
       free(entry->endgame_moves_saved);
       entry->endgame_moves_saved = NULL;
       entry->endgame_moves_saved_count = 0;
+    }
+    if (entry->peg_moves_saved != NULL) {
+      free(entry->peg_moves_saved);
+      entry->peg_moves_saved = NULL;
+      entry->peg_moves_saved_count = 0;
     }
     if (entry->loaded_move != NULL) {
       free(entry->loaded_move);
@@ -912,6 +921,84 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
                         &state->bot_stop, out_move);
 }
 
+// Run the pre-endgame solver against `position` with a time budget,
+// streaming the live ranking through state->peg_poll — the analysis
+// panel polls it at its ~10 Hz refresh cadence. Same watchdog +
+// active-flag shape as run_endgame_on. Returns true and writes the
+// best move on success; on failure (interrupted before any candidate
+// finished, or the position was rejected) the turn index is flipped
+// back to -1 so the renderer doesn't pair an empty poll with this
+// turn.
+static bool run_peg_on(TuiGameState *state, const Game *position,
+                       int results_turn_idx, double budget_sec,
+                       _Atomic bool *stop_flag, Move *out_move) {
+  if (state->peg_poll == NULL) {
+    return false;
+  }
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = stop_flag, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  // Clear the previous solve's live view BEFORE publishing the new
+  // turn index so the renderer never pairs this turn with stale
+  // leaderboard rows.
+  peg_poll_reset(state->peg_poll);
+  pthread_mutex_lock(&state->mutex);
+  tui_peg_snapshot_clear(&state->peg_snapshot);
+  atomic_fetch_add(&state->render_version, 1);
+  pthread_mutex_unlock(&state->mutex);
+
+  atomic_store(&state->peg_results_turn_idx, results_turn_idx);
+  atomic_store(&state->peg_results_active, true);
+
+  PegArgs args = {0};
+  args.game = position;
+  args.thread_control = tc;
+  {
+    const int hw = get_num_cores();
+    args.num_threads = hw > 2 ? hw - 1 : hw;
+  }
+  args.time_budget_seconds = budget_sec;
+  args.poll = state->peg_poll;
+
+  PegResult result = {0};
+  ErrorStack *err = error_stack_create();
+  peg_solve(&args, &result, err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  // best_move is the top of the last fully-completed stage; an
+  // interrupted stage 0 still publishes the candidates it finished,
+  // so n_top_cands > 0 is the "we have a ranking" signal.
+  bool got_move = false;
+  if (error_stack_is_empty(err) && result.n_top_cands > 0) {
+    move_copy(out_move, &result.best_move);
+    got_move = true;
+  }
+  peg_result_destroy(&result);
+  error_stack_destroy(err);
+
+  atomic_store(&state->peg_results_active, false);
+  if (!got_move) {
+    atomic_store(&state->peg_results_turn_idx, -1);
+  }
+  thread_control_destroy(tc);
+  return got_move;
+}
+
+// Bot-turn wrapper: pre-endgame solve on the live game.
+static bool run_peg(TuiGameState *state, double budget_sec, Move *out_move) {
+  return run_peg_on(state, state->game, state->history_count, budget_sec,
+                    &state->bot_stop, out_move);
+}
+
 static void *bot_thread_main(void *arg) {
   TuiGameState *state = (TuiGameState *)arg;
   // Scratch list for the equity-best fallback path.
@@ -924,6 +1011,7 @@ static void *bot_thread_main(void *arg) {
     // ── Snapshot turn state, append pending history ──────────────────
     int pending_idx = -1;
     bool empty_bag = false;
+    bool peg_phase = false;
     double budget_sec = 0.0;
     int player_idx = -1;
 
@@ -1051,12 +1139,21 @@ static void *bot_thread_main(void *arg) {
 
     budget_sec = compute_budget_sec(state, player_idx);
     empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
+    peg_phase = tui_game_state_is_peg_position(state->game);
     pthread_mutex_unlock(&state->mutex);
 
     // ── Run the engine with the mutex released ───────────────────────
     bool got_move = false;
     if (empty_bag) {
       got_move = run_endgame(state, budget_sec, chosen);
+    } else if (peg_phase) {
+      got_move = run_peg(state, budget_sec, chosen);
+      // PEG produced no ranking (interrupted before its first
+      // candidate finished) — a sim pick still beats raw equity.
+      if (!got_move && state->win_pcts != NULL &&
+          !atomic_load(&state->bot_stop)) {
+        got_move = run_sim(state, budget_sec, chosen);
+      }
     } else if (state->win_pcts != NULL) {
       got_move = run_sim(state, budget_sec, chosen);
     }
@@ -1092,13 +1189,32 @@ static void *bot_thread_main(void *arg) {
     if (pending_idx >= 0 && pending_idx < state->history_count) {
       TuiHistoryEntry *finalized = &state->history[pending_idx];
       tui_capture_analysis_snapshot(state, &finalized->analysis_snapshot);
-      if (finalized->analysis_snapshot.is_sim && state->sim_results != NULL) {
+      const int snap_mode = finalized->analysis_snapshot.mode;
+      if (snap_mode == TUI_ANALYSIS_MODE_SIM && state->sim_results != NULL) {
         if (finalized->sim_results_saved != NULL) {
           sim_results_destroy(finalized->sim_results_saved);
         }
         finalized->sim_results_saved =
             sim_results_duplicate(state->sim_results);
-      } else if (!finalized->analysis_snapshot.is_sim &&
+      } else if (snap_mode == TUI_ANALYSIS_MODE_PEG &&
+                 state->peg_snapshot.valid &&
+                 state->peg_snapshot.num_entries > 0 &&
+                 state->peg_snapshot.moves != NULL) {
+        // PEG turn — deep-copy the merged leaderboard moves so the
+        // History cursor can preview each candidate after the live
+        // peg_snapshot has been reset for the next solve.
+        if (finalized->peg_moves_saved != NULL) {
+          free(finalized->peg_moves_saved);
+        }
+        const int num_peg_moves = state->peg_snapshot.num_entries;
+        finalized->peg_moves_saved =
+            (Move *)malloc((size_t)num_peg_moves * sizeof(Move));
+        if (finalized->peg_moves_saved != NULL) {
+          memcpy(finalized->peg_moves_saved, state->peg_snapshot.moves,
+                 (size_t)num_peg_moves * sizeof(Move));
+          finalized->peg_moves_saved_count = num_peg_moves;
+        }
+      } else if (snap_mode == TUI_ANALYSIS_MODE_ENDGAME &&
                  state->endgame_snapshot.valid &&
                  state->endgame_snapshot.num_entries > 0 &&
                  state->endgame_snapshot.moves != NULL) {
@@ -1417,6 +1533,50 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
   pthread_mutex_unlock(&state->mutex);
 }
 
+// Re-solve a saved PEG turn. The live poll streams to the panel
+// during the solve; the entry's snapshot + saved leaderboard are
+// refreshed when it stops.
+static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
+                                int turn_idx, const Game *position) {
+  pthread_mutex_lock(&state->mutex);
+  set_analysis_notice(state, "resuming peg solve - /stop to pause");
+  state->analysis_game = (struct Game *)position;
+  pthread_mutex_unlock(&state->mutex);
+
+  Move *scratch = move_create();
+  const bool solved = run_peg_on(state, position, turn_idx,
+                                 (double)ANALYSIS_RESUME_TIME_LIMIT_SEC,
+                                 &state->analysis_stop, scratch);
+  move_destroy(scratch);
+
+  pthread_mutex_lock(&state->mutex);
+  if (solved) {
+    tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+    // Refresh the entry's saved leaderboard from the final merged
+    // snapshot (same copy the bot's finalize path makes).
+    if (state->peg_snapshot.valid && state->peg_snapshot.num_entries > 0 &&
+        state->peg_snapshot.moves != NULL) {
+      if (entry->peg_moves_saved != NULL) {
+        free(entry->peg_moves_saved);
+        entry->peg_moves_saved = NULL;
+        entry->peg_moves_saved_count = 0;
+      }
+      const int num_peg_moves = state->peg_snapshot.num_entries;
+      entry->peg_moves_saved =
+          (Move *)malloc((size_t)num_peg_moves * sizeof(Move));
+      if (entry->peg_moves_saved != NULL) {
+        memcpy(entry->peg_moves_saved, state->peg_snapshot.moves,
+               (size_t)num_peg_moves * sizeof(Move));
+        entry->peg_moves_saved_count = num_peg_moves;
+      }
+    }
+    set_analysis_notice(state, "peg analysis saved");
+  } else {
+    set_analysis_notice(state, "peg resume produced no ranking");
+  }
+  pthread_mutex_unlock(&state->mutex);
+}
+
 static void *analysis_thread_main(void *arg) {
   TuiGameState *state = (TuiGameState *)arg;
 
@@ -1427,9 +1587,9 @@ static void *analysis_thread_main(void *arg) {
     entry = &state->history[turn_idx];
   }
   Game *position = NULL;
-  bool is_sim = false;
+  int resume_mode = TUI_ANALYSIS_MODE_SIM;
   if (entry != NULL && entry->cgp_before[0] != '\0') {
-    is_sim = entry->analysis_snapshot.is_sim;
+    resume_mode = entry->analysis_snapshot.mode;
     position = game_duplicate(state->game);
   }
   pthread_mutex_unlock(&state->mutex);
@@ -1456,8 +1616,10 @@ static void *analysis_thread_main(void *arg) {
     return NULL;
   }
 
-  if (is_sim) {
+  if (resume_mode == TUI_ANALYSIS_MODE_SIM) {
     analysis_resume_sim(state, entry, turn_idx, position);
+  } else if (resume_mode == TUI_ANALYSIS_MODE_PEG) {
+    analysis_resume_peg(state, entry, turn_idx, position);
   } else {
     analysis_resume_endgame(state, entry, turn_idx, position);
   }
@@ -1493,7 +1655,8 @@ bool tui_analysis_worker_start(TuiGameState *state, int turn_idx) {
     set_analysis_notice(state, "no saved analysis for this turn");
     return false;
   }
-  if (entry->analysis_snapshot.is_sim && entry->sim_results_saved == NULL) {
+  if (entry->analysis_snapshot.mode == TUI_ANALYSIS_MODE_SIM &&
+      entry->sim_results_saved == NULL) {
     set_analysis_notice(state, "no saved sim for this turn");
     return false;
   }
