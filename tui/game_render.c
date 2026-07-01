@@ -1913,13 +1913,11 @@ static void compute_rack_ghost_mask(const TuiGameState *state,
     }
     const MachineLetter rack_ml =
         get_is_blanked(tile) ? BLANK_MACHINE_LETTER : tile;
-    if ((int)rack_ml < 256) {
-      needed[(int)rack_ml]++;
-    }
+    needed[(int)rack_ml]++;
   }
   for (int i = 0; i < slot_count; i++) {
     const MachineLetter ml = slot_letters[i];
-    if ((int)ml < 256 && needed[(int)ml] > 0) {
+    if (needed[(int)ml] > 0) {
       out_ghost[i] = true;
       needed[(int)ml]--;
     }

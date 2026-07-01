@@ -599,10 +599,11 @@ int main(int argc, char *argv[]) {
   // screen. Capturing to a file gives us a paper trail for the
   // engine's last-words message. Best-effort: a failure here is
   // not fatal (the TUI still runs, we just lose the breadcrumb).
-  freopen("/tmp/magpie_stderr.log", "w", stderr);
-  // Unbuffer stderr so engine log_fatal output reaches disk before
-  // abort().
-  setvbuf(stderr, NULL, _IONBF, 0);
+  if (freopen("/tmp/magpie_stderr.log", "w", stderr) != NULL) {
+    // Unbuffer stderr so engine log_fatal output reaches disk before
+    // abort().
+    setvbuf(stderr, NULL, _IONBF, 0);
+  }
 
   notcurses_options opts = {
       // NO_QUIT_SIGHANDLERS prevents notcurses from installing its
