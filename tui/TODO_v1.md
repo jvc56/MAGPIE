@@ -16,19 +16,27 @@ it falls out of test work.
 ## P0 — v1 blockers (functionality)
 
 ### 1. Pre-endgame (PEG) support
-The engine work lives in unmerged PRs: #549 `peg-solver-port` (the
-solver), #533 `peg-cli`, #532 `peg-bai-solver`, #534 pass support.
-The solver already has a sim-style live poll (`pegpoll`), which is
-exactly the shape the TUI streams.
-- [ ] Land/track the engine PRs; pick the canonical entry point.
-- [ ] bot_worker: third solve mode — bag 1–7 tiles (start: 1-in-bag)
-      between sim and endgame; budget from the same clock logic.
-- [ ] Analysis panel: PEG row source (live poll → rows, same ~10Hz
-      throttle as sim — see NOTES_render_performance.md rule 3) +
-      per-turn snapshot like sim/endgame.
+The engine work has landed on main (`peg_solve` in src/impl/peg.h).
+The solver has a sim-style live poll (`PegPoll`), which is exactly
+the shape the TUI streams.
+- [x] Land/track the engine PRs; pick the canonical entry point
+      (`peg_solve` + `PegPoll`, both upstreamed to main).
+- [x] bot_worker: third solve mode between sim and endgame
+      (`run_peg`); triggers on the solver's own bag range (effective
+      bag 1–4 tiles); budget from the same clock logic; falls back to
+      sim if PEG is interrupted before ranking anything.
+- [x] Analysis panel: PEG row source (live poll → rows at the same
+      ~10Hz throttle as sim — see NOTES_render_performance.md rule 3;
+      current stage's candidates merged over the previous stage's
+      baseline so stage transitions never blank the leaderboard) +
+      per-turn snapshot + saved leaderboard moves + /resume, like
+      sim/endgame.
 - [ ] TT memory budgeting: PEG shares/partitions with the endgame TT
-      (CLAUDE.md: total ≤ 50% RAM; two TTs = 0.25 each).
-- [ ] Status bar: PEG progress (solved/total scenarios) where nps shows.
+      (CLAUDE.md: total ≤ 50% RAM; two TTs = 0.25 each). PEG's leaf
+      endgames currently size their own ctx inside peg_solve.
+- [ ] Status bar: PEG progress (solved/total scenarios) where nps
+      shows. (The panel title already shows cands done / field size
+      per stage.)
 
 ### 2. Play-vs-computer completeness
 - [ ] **Pass and exchange for the human.** Placement-only today. The
