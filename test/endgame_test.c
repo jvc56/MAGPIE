@@ -1649,6 +1649,100 @@ void test_multi_pv(void) {
   config_destroy(config);
 }
 
+// Regression: multi-PV must never return two lines that share the same first
+// move. test_multi_pv checks ordering and counts but not this dedup property,
+// so this guards the extract_multi_pvs de-duplication path directly (ported
+// from the TUI branch, which originally hit duplicate first moves).
+void test_topk_no_duplicates(void) {
+  for (int iter = 0; iter < 10; iter++) {
+    Config *config = config_create_or_die("set -s1 score -s2 score -eplies 3");
+    load_and_exec_config_or_die(
+        config, "cgp "
+                "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/"
+                "8WE2OBI/6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/"
+                "FIVE1E5IT1C/5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 "
+                "-lex NWL20");
+
+    EndgameCtx *endgame_ctx = NULL;
+    EndgameArgs endgame_args = {0};
+    endgame_args.thread_control = config_get_thread_control(config);
+    endgame_args.game = config_get_game(config);
+    endgame_args.plies = 3;
+    endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+    endgame_args.initial_small_move_arena_size =
+        DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+    endgame_args.num_threads = 2;
+    endgame_args.num_top_moves = 5;
+    endgame_args.use_heuristics = true;
+    endgame_args.forced_pass_bypass = true;
+    endgame_args.seed = 42;
+
+    EndgameResults *results = endgame_results_create();
+    ErrorStack *error_stack = error_stack_create();
+    endgame_solve(&endgame_ctx, &endgame_args, results, error_stack);
+    assert(error_stack_is_empty(error_stack));
+
+    const int num_pvs = endgame_results_get_num_pvs(results);
+    for (int i = 0; i < num_pvs; i++) {
+      const PVLine *pv_i = endgame_results_get_multi_pvline(results, i);
+      for (int j = i + 1; j < num_pvs; j++) {
+        const PVLine *pv_j = endgame_results_get_multi_pvline(results, j);
+        const bool same_first_move =
+            pv_i->num_moves > 0 && pv_j->num_moves > 0 &&
+            pv_i->moves[0].tiny_move == pv_j->moves[0].tiny_move;
+        if (same_first_move) {
+          printf("iter=%d PV[%d] and PV[%d] share moves[0].tiny_move 0x%llx\n",
+                 iter, i, j, (unsigned long long)pv_i->moves[0].tiny_move);
+          assert(0 && "duplicate first move in multi_pvs");
+        }
+      }
+    }
+
+    endgame_ctx_destroy(endgame_ctx);
+    endgame_results_destroy(results);
+    error_stack_destroy(error_stack);
+    config_destroy(config);
+  }
+}
+
+// Regression: requesting more top moves than MAX_VARIANT_LENGTH once
+// overflowed an internal buffer during multi-PV extraction. Smoke test that a
+// high -etopk solves cleanly (num_top_moves is clamped to
+// MAX_ENDGAME_DISPLAY_PVS internally). Ported from the TUI branch.
+void test_topk50_overflow_repro(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -eplies 4");
+  load_and_exec_config_or_die(
+      config, "cgp "
+              "9A1PIXY/9S1L3/2ToWNLETS1O3/9U1DA1R/3GERANIAL1U1I/9g2T1C/8WE2OBI/"
+              "6EMU4ON/6AID3GO1/5HUN4ET1/4ZA1T4ME1/1Q1FAKEY3JOES/FIVE1E5IT1C/"
+              "5SPORRAN2A/6ORE2N2D BGIV/DEHILOR 384/389 0 -lex NWL20");
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = config_get_game(config);
+  endgame_args.plies = 4;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 1;
+  endgame_args.num_top_moves = 50; // > MAX_VARIANT_LENGTH (25)
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.seed = 42;
+
+  EndgameResults *results = endgame_results_create();
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &endgame_args, results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  printf("topk50 overflow repro: solved cleanly\n");
+
+  endgame_ctx_destroy(endgame_ctx);
+  endgame_results_destroy(results);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_endgame_wasm(void) {
   test_solve_standard();
   test_small_arena_realloc();
