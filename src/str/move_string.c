@@ -221,14 +221,24 @@ void string_builder_add_move_leave(StringBuilder *sb, const Rack *rack,
                                    const LetterDistribution *ld) {
   Rack leave = *rack;
   const int move_tiles_length = move_get_tiles_length(move);
+  // Debug pre-check: verify every newly-placed tile is actually
+  // present in the source rack before we start subtracting. This
+  // catches the "leave repeats 12 E's" class of bug (uint16_t
+  // underflow in rack_take_letter when a play references a tile
+  // the source rack doesn't hold — typically caller passed the
+  // wrong rack, or the cached play came from a stale game state).
+  // The assert lands at the function boundary so the backtrace
+  // names the actual mismatch site instead of the deep-in-rack
+  // decrement. assert() is a no-op under -DNDEBUG, so the release
+  // hot path is unaffected.
   for (int i = 0; i < move_tiles_length; i++) {
-    if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
-      if (get_is_blanked(move_get_tile(move, i))) {
-        rack_take_letter(&leave, BLANK_MACHINE_LETTER);
-      } else {
-        rack_take_letter(&leave, move_get_tile(move, i));
-      }
+    const MachineLetter ml = move_get_tile(move, i);
+    if (ml == PLAYED_THROUGH_MARKER) {
+      continue;
     }
+    const MachineLetter take = get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml;
+    assert(leave.array[take] > 0);
+    rack_take_letter(&leave, take);
   }
   string_builder_add_rack(sb, &leave, ld, false);
 }

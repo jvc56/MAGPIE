@@ -302,6 +302,85 @@ SimResults *sim_results_create(const double cutoff) {
   return sim_results;
 }
 
+// Deep-clone one SimmedPlay. Allocates fresh Stat / PRNG / heat
+// map / mutex; copies every field. `src->ply_infos` is sized
+// `src->num_alloc_plies`; the clone matches.
+static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
+  SimmedPlay *dst = malloc_or_die(sizeof(SimmedPlay));
+  move_copy(&dst->move, &src->move);
+  dst->equity_stat = stat_create(true);
+  stat_copy(dst->equity_stat, src->equity_stat);
+  dst->leftover_stat = stat_create(true);
+  stat_copy(dst->leftover_stat, src->leftover_stat);
+  dst->win_pct_stat = stat_create(true);
+  stat_copy(dst->win_pct_stat, src->win_pct_stat);
+  dst->similarity_key = src->similarity_key;
+  dst->play_index_by_sort_type = src->play_index_by_sort_type;
+  dst->cutoff = src->cutoff;
+  dst->num_alloc_plies = src->num_alloc_plies;
+  dst->ply_infos =
+      malloc_or_die(sizeof(PlyInfo) * (size_t)src->num_alloc_plies);
+  for (int j = 0; j < src->num_alloc_plies; j++) {
+    PlyInfo *dpi = &dst->ply_infos[j];
+    const PlyInfo *spi = &src->ply_infos[j];
+    dpi->score_stat = stat_create(true);
+    stat_copy(dpi->score_stat, spi->score_stat);
+    dpi->bingo_stat = stat_create(true);
+    stat_copy(dpi->bingo_stat, spi->bingo_stat);
+    dpi->heat_map = heat_map_duplicate(spi->heat_map);
+    memcpy(dpi->ply_info_counts, spi->ply_info_counts,
+           sizeof(dpi->ply_info_counts));
+  }
+  // PRNG: allocate with arbitrary seed, then copy state across so
+  // both streams produce the same next output. Resumption picks up
+  // exactly where the source left off.
+  dst->prng = prng_create(0);
+  prng_copy(dst->prng, src->prng);
+  cpthread_mutex_init(&dst->mutex);
+  return dst;
+}
+
+SimResults *sim_results_duplicate(SimResults *src) {
+  if (src == NULL) {
+    return NULL;
+  }
+  SimResults *dst = malloc_or_die(sizeof(SimResults));
+  cpthread_mutex_init(&dst->simmed_plays_mutex);
+  cpthread_mutex_init(&dst->display_mutex);
+  // Snapshot the display side so sort-order matches the live
+  // table; lock both arrays while we copy them out.
+  cpthread_mutex_lock(&src->simmed_plays_mutex);
+  cpthread_mutex_lock(&src->display_mutex);
+  dst->num_simmed_plays = src->num_simmed_plays;
+  dst->num_alloc_simmed_plays = src->num_alloc_simmed_plays;
+  dst->num_plies = src->num_plies;
+  atomic_init(&dst->iteration_count, atomic_load(&src->iteration_count));
+  atomic_init(&dst->node_count, atomic_load(&src->node_count));
+  dst->valid_for_current_game_state = src->valid_for_current_game_state;
+  dst->cutoff = src->cutoff;
+  dst->num_infer_leaves = src->num_infer_leaves;
+  dst->rack = src->rack;
+  dst->known_opp_rack = src->known_opp_rack;
+  dst->bai_result = bai_result_duplicate(src->bai_result);
+  if (src->num_alloc_simmed_plays > 0 && src->simmed_plays != NULL) {
+    dst->simmed_plays = malloc_or_die(sizeof(SimmedPlay *) *
+                                      (size_t)src->num_alloc_simmed_plays);
+    dst->display_simmed_plays = malloc_or_die(
+        sizeof(SimmedPlay *) * (size_t)src->num_alloc_simmed_plays);
+    for (int i = 0; i < src->num_alloc_simmed_plays; i++) {
+      dst->simmed_plays[i] = simmed_play_duplicate(src->simmed_plays[i]);
+      dst->display_simmed_plays[i] =
+          simmed_play_duplicate(src->display_simmed_plays[i]);
+    }
+  } else {
+    dst->simmed_plays = NULL;
+    dst->display_simmed_plays = NULL;
+  }
+  cpthread_mutex_unlock(&src->display_mutex);
+  cpthread_mutex_unlock(&src->simmed_plays_mutex);
+  return dst;
+}
+
 const Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
   return &simmed_play->move;
 }

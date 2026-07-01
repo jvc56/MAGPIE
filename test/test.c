@@ -166,6 +166,8 @@ static TestEntry on_demand_test_table[] = {
     {"endgame_stream", test_endgame_progress_stream},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
+    {"topk_dup_repro", test_topk_no_duplicates},
+    {"topk50repro", test_topk50_overflow_repro},
     {"simbench", test_sim_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
