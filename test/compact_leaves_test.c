@@ -58,9 +58,9 @@ static void assert_clv_fields_equal(const CompactLeaves *a,
   }
 }
 
-// The quantized leave value must be identical between two models for a spread of
-// sampled leaves (singles, duplicates, and small multi-tile racks). Sampled by
-// machine-letter index so it needs no per-lexicon orthography.
+// The quantized leave value must be identical between two models for a spread
+// of sampled leaves (singles, duplicates, and small multi-tile racks). Sampled
+// by machine-letter index so it needs no per-lexicon orthography.
 static void assert_clv_values_equal(const CompactLeaves *a,
                                     const CompactLeaves *b,
                                     const LetterDistribution *ld) {

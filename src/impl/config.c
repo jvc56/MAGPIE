@@ -1144,10 +1144,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_CLV_SIZE:
       usages[0] = "<target_bytes>";
       examples[0] = "8192";
-      text = "Target byte budget for the klv2clv compact-leaves model. The base "
-             "model (no synergies) is always emitted, so a budget below its "
-             "floor yields a base-only file at the floor size; above the floor "
-             "the file is at most this many bytes (default: 8192).";
+      text =
+          "Target byte budget for the klv2clv compact-leaves model. The base "
+          "model (no synergies) is always emitted, so a budget below its "
+          "floor yields a base-only file at the floor size; above the floor "
+          "the file is at most this many bytes (default: 8192).";
       break;
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
