@@ -197,6 +197,14 @@ typedef struct MoveGen {
   // addresses, so it changes whenever the backing data is reloaded.
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
+  // Source LetterDistribution pointer captured at the last gen_load_position
+  // call. gen->ld is a by-value copy; the per-thread MoveGen is reused across
+  // every node of a solve with a stable game->ld, so the copy is skipped when
+  // the source is unchanged. Guarded together with the ld's name pointer (see
+  // gen_load_position) so an ABA reuse of a freed ld's address by a *different*
+  // distribution still reloads -- a same-distribution reload is byte-identical,
+  // so skipping it is harmless.
+  const LetterDistribution *ld_src_at_load;
   const RackInfoTable *rack_info_table;
   // RIT entry for the current player_rack, looked up once in
   // gen_look_up_leaves_and_record_exchanges and cached here for the duration
