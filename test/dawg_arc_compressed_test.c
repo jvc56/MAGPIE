@@ -340,6 +340,65 @@ static AcdawgStatsGraph acdawg_stats_graph_from_arcs(const uint32_t *arcs_of,
   return graph;
 }
 
+// Number of bits needed to represent every value in [0, max_value].
+static uint8_t acdawg_stats_bits_needed(uint32_t max_value) {
+  uint8_t bits = 1;
+  while ((max_value >> bits) != 0) {
+    bits++;
+  }
+  return bits;
+}
+
+// Run-addressing what-if: a copy of the arc table whose gaps are rewritten
+// into RUN-ordinal units (target run's layout ordinal minus the source run's).
+// An arc into the middle of a run (tail-merge suffix sharing) cannot be
+// gap-coded in run units at all; it gets a never-in-window sentinel so the
+// sizing model sends it to the popular table or an escape. Reports the run
+// count and the mid-run arc count through the out params.
+static AcdawgStatsGraph
+acdawg_stats_run_gap_graph(const uint32_t *arcs_of, const uint8_t *is_end,
+                           uint32_t node_count, uint8_t tile_bits,
+                           uint8_t arc_bits, uint32_t *out_run_count,
+                           uint32_t *out_mid_run_arcs) {
+  AcdawgStatsGraph graph =
+      acdawg_stats_graph_from_arcs(arcs_of, node_count, tile_bits, arc_bits);
+
+  // run_of[node] = its run's start node; ordinal[node] = its run's 1-based
+  // position in layout order. Node 0 is the sentinel (is_end set), so node 1
+  // starts the first real run.
+  uint32_t *run_of = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+  uint32_t *ordinal = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+  run_of[0] = 0;
+  ordinal[0] = 0;
+  uint32_t current_run = 0;
+  uint32_t run_count = 0;
+  for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
+    if (is_end[node_idx - 1] != 0) {
+      current_run = node_idx;
+      run_count++;
+    }
+    run_of[node_idx] = current_run;
+    ordinal[node_idx] = run_count;
+  }
+
+  uint32_t mid_run_arcs = 0;
+  for (uint32_t arc_idx = 0; arc_idx < graph.arc_count; arc_idx++) {
+    AcdawgStatsArc *arc = &graph.arcs[arc_idx];
+    const uint32_t target = (uint32_t)((int64_t)arc->source + arc->gap);
+    if (run_of[target] == target) {
+      arc->gap = (int64_t)ordinal[target] - (int64_t)ordinal[arc->source];
+    } else {
+      arc->gap = INT64_MIN; // mid-run: not expressible as a run gap
+      mid_run_arcs++;
+    }
+  }
+  *out_run_count = run_count;
+  *out_mid_run_arcs = mid_run_arcs;
+  free(run_of);
+  free(ordinal);
+  return graph;
+}
+
 // Builds the arc table from a built acdawg by decoding every record.
 static AcdawgStatsGraph acdawg_stats_graph_build(const DawgArcCompressed *dp) {
   const uint32_t node_count = dawg_arc_compressed_get_node_count(dp);
@@ -1071,6 +1130,41 @@ static void acdawg_stats_for_lexicon(const char *lexicon, int max_length) {
                  (double)base.bytes);
       free(regraph.arcs);
       free(reordered);
+    }
+
+    // ---- Run-based addressing what-if: gaps in run-ordinal units. Denser
+    // gaps shrink the field / escape count, but (a) mid-run targets
+    // (tail-merge suffix sharing) cannot gap-code at all, and (b) decoding a
+    // run gap needs select(run -> node): with the records split into planes
+    // the is_end plane doubles as the run bitmap for free, leaving a sampled
+    // select table (one node index per 32 runs) as the real overhead -- plus
+    // a popcount scan on every gap decode (the common path), so this is a
+    // size-only model with a known speed downside.
+    {
+      uint32_t run_count = 0;
+      uint32_t mid_run_arcs = 0;
+      AcdawgStatsGraph run_graph = acdawg_stats_run_gap_graph(
+          arcs_of, is_end, node_count_local, graph.tile_bits, graph.arc_bits,
+          &run_count, &mid_run_arcs);
+      const AcdawgStatsV3Best run_best = acdawg_stats_best_v3(&run_graph);
+      const uint64_t select_bytes =
+          (((uint64_t)run_count + 31) / 32 * graph.arc_bits + 7) / 8;
+      printf("  run addressing: %u runs (%.2f nodes/run, run_bits=%u), "
+             "mid-run arc targets %u/%u (%.1f%%)\n",
+             run_count, (double)node_count_local / run_count,
+             acdawg_stats_bits_needed(run_count), mid_run_arcs,
+             run_graph.arc_count, 100.0 * mid_run_arcs / run_graph.arc_count);
+      printf(
+          "    best run-gap config: %llu + select %llu = %llu bytes "
+          "(%+.2f%% vs node-gap %llu)  field=%u K=%u R=%u escapes=%u\n",
+          (unsigned long long)run_best.bytes, (unsigned long long)select_bytes,
+          (unsigned long long)(run_best.bytes + select_bytes),
+          100.0 *
+              ((double)(run_best.bytes + select_bytes) - (double)base.bytes) /
+              (double)base.bytes,
+          (unsigned long long)base.bytes, run_best.field, run_best.k,
+          run_best.reserve, run_best.escapes);
+      free(run_graph.arcs);
     }
     free(arcs_of);
     free(is_end);
