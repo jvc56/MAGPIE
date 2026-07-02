@@ -2796,19 +2796,19 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   const WMP *previous_wmp = gen->wmp_move_gen.wmp;
-  // The WMP keys on a BitRack, so it is unusable for a BitRack-incompatible
-  // alphabet; pass NULL so wmp_move_gen stays inactive (no BitRack is built).
+  // Decide up front whether WMP will be active. It is disabled for
+  // ALL_SMALL/TILES_PLAYED (unsupported), when override_kwg is set (WMP data
+  // corresponds to the original KWG, not the override), and on a
+  // BitRack-incompatible alphabet (the WMP keys on a BitRack). Passing NULL when
+  // disabled lets wmp_move_gen_init early-return instead of building a BitRack,
+  // clearing the length table, and seeding all anchor slots -- wasted work on
+  // every endgame node, which always passes override_kwg. The seeded fields are
+  // only read while WMP is active, so skipping them when it is NULL is safe.
+  const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+                            gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+                            override_kwg != NULL || !gen->bit_rack_compatible;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
-                    gen->bit_rack_compatible ? player_get_wmp(player) : NULL);
-
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      override_kwg != NULL) {
-    // Disable WMP when using ALL_SMALL/TILES_PLAYED (unsupported) or when
-    // override_kwg is set (WMP data corresponds to the original KWG, not
-    // the override).
-    gen->wmp_move_gen.wmp = NULL;
-  }
+                    wmp_disabled ? NULL : player_get_wmp(player));
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
   // swap (different lexicon) makes those stale -- and "stale" means dangling,
   // since the old WMP's Config may have been freed. Invalidate on a WMP
@@ -2872,7 +2872,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                          gen->row_number_of_anchors_cache);
   gen->lanes_cache = board_get_readonly_lanes(gen->board, gen->cross_index);
 
-  board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+  // opening_move_penalties is read only by gen_get_static_equity (the
+  // equity-recording paths). The endgame's small-record movegen types never
+  // read it, so skip the per-node 120-byte copy for them.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
+      gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
+      gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
+    board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+  }
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
