@@ -271,18 +271,19 @@ typedef struct AcdawgStatsGraph {
   uint8_t arc_bits;
 } AcdawgStatsGraph;
 
-// Builds the arc table (rank + gap per arc) from a built acdawg, recomputing
-// the same descending in-degree ranking the builder used.
-static AcdawgStatsGraph acdawg_stats_graph_build(const DawgArcCompressed *dp) {
-  const uint32_t node_count = dawg_arc_compressed_get_node_count(dp);
-  uint32_t *arcs_of = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+// Builds the arc table (rank + gap per arc) from a first-child index array
+// (arcs_of[node] = renumbered first-child index, 0 = none), recomputing the
+// same descending in-degree ranking the builder uses. Shared by the built
+// graph and the reordered what-if graphs.
+static AcdawgStatsGraph acdawg_stats_graph_from_arcs(const uint32_t *arcs_of,
+                                                     uint32_t node_count,
+                                                     uint8_t tile_bits,
+                                                     uint8_t arc_bits) {
   uint32_t *in_degree = (uint32_t *)calloc_or_die(node_count, sizeof(uint32_t));
   uint32_t arc_count = 0;
   uint32_t no_child_count = 0;
   for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
-    const uint32_t node = dawg_arc_compressed_get_node(dp, node_idx);
-    const uint32_t arc = kwg_node_arc_index(node);
-    arcs_of[node_idx] = arc;
+    const uint32_t arc = arcs_of[node_idx];
     if (arc == 0) {
       no_child_count++;
     } else {
@@ -331,12 +332,25 @@ static AcdawgStatsGraph acdawg_stats_graph_build(const DawgArcCompressed *dp) {
   graph.arc_count = arc_count;
   graph.node_count = node_count;
   graph.no_child_count = no_child_count;
-  graph.tile_bits = dp->tile_bits;
-  graph.arc_bits = dp->arc_bits;
-  free(arcs_of);
+  graph.tile_bits = tile_bits;
+  graph.arc_bits = arc_bits;
   free(in_degree);
   free(ranked);
   free(rank_pos);
+  return graph;
+}
+
+// Builds the arc table from a built acdawg by decoding every record.
+static AcdawgStatsGraph acdawg_stats_graph_build(const DawgArcCompressed *dp) {
+  const uint32_t node_count = dawg_arc_compressed_get_node_count(dp);
+  uint32_t *arcs_of = (uint32_t *)calloc_or_die(node_count, sizeof(uint32_t));
+  for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
+    const uint32_t node = dawg_arc_compressed_get_node(dp, node_idx);
+    arcs_of[node_idx] = kwg_node_arc_index(node);
+  }
+  AcdawgStatsGraph graph = acdawg_stats_graph_from_arcs(
+      arcs_of, node_count, dp->tile_bits, dp->arc_bits);
+  free(arcs_of);
   return graph;
 }
 
@@ -421,6 +435,331 @@ static uint64_t acdawg_stats_v2_overhead_bits(const AcdawgStatsGraph *graph,
       ACDAWG_STATS_BLOCK;
   return (uint64_t)k * graph->arc_bits + (uint64_t)escapes * graph->arc_bits +
          ((uint64_t)graph->node_count + 7) / 8 * 8 + (blocks + 1) * 32;
+}
+
+// ---- Ordering experiments: does a different DFS child order shrink the
+// best-config total? The renumbering is a builder choice, not a format
+// feature, so a winning order is a src change to the renumberer only.
+
+// The best v3-model configuration found for one arc table.
+typedef struct AcdawgStatsV3Best {
+  uint64_t bytes;
+  uint32_t k;
+  uint32_t reserve;
+  uint32_t escapes;
+  uint8_t field;
+  uint8_t block_bits;
+} AcdawgStatsV3Best;
+
+// Models the v3 builder's search on an arc table: positive-only gap window, R
+// iterated to a fixpoint, coarse K grid, block sizes 32/64/128 (no local K
+// refinement -- comparisons across orderings use the same model).
+static AcdawgStatsV3Best acdawg_stats_best_v3(const AcdawgStatsGraph *graph) {
+  static const uint32_t k_grid[] = {0,    64,   128,  192,   256,  384,
+                                    512,  768,  1024, 1536,  2048, 3072,
+                                    4096, 6144, 8192, 12288, 16384};
+  enum { ACDAWG_STATS_V3_K_GRID = 17 };
+  AcdawgStatsV3Best best;
+  memset(&best, 0, sizeof(best));
+  best.bytes = UINT64_MAX;
+  for (uint8_t field = 4; field <= graph->arc_bits; field++) {
+    const uint64_t codes = 1ULL << field;
+    for (uint8_t block_bits = 5; block_bits <= 7; block_bits++) {
+      for (int k_idx = 0; k_idx < ACDAWG_STATS_V3_K_GRID; k_idx++) {
+        const uint32_t k = k_grid[k_idx];
+        if (k + 1 >= codes) {
+          continue;
+        }
+        uint32_t reserve = 0;
+        uint32_t escapes = 0;
+        bool feasible = true;
+        // reserve strictly increases per round and is bounded by the block
+        // size, so this converges.
+        for (;;) {
+          if ((uint64_t)k + reserve + 1 > codes) {
+            feasible = false;
+            break;
+          }
+          const int64_t window = (int64_t)(codes - 1 - k - reserve);
+          escapes = 0;
+          uint32_t block_max = 0;
+          uint32_t cur_block = UINT32_MAX;
+          uint32_t cur_count = 0;
+          for (uint32_t arc_idx = 0; arc_idx < graph->arc_count; arc_idx++) {
+            const AcdawgStatsArc *arc = &graph->arcs[arc_idx];
+            if (arc->rank < k || (arc->gap >= 1 && arc->gap <= window)) {
+              continue;
+            }
+            escapes++;
+            const uint32_t block = arc->source >> block_bits;
+            if (block != cur_block) {
+              cur_block = block;
+              cur_count = 0;
+            }
+            cur_count++;
+            if (cur_count > block_max) {
+              block_max = cur_count;
+            }
+          }
+          if (block_max <= reserve) {
+            break;
+          }
+          reserve = block_max;
+        }
+        if (!feasible) {
+          continue;
+        }
+        const uint64_t blocks =
+            ((uint64_t)graph->node_count + (1ULL << block_bits) - 1) >>
+            block_bits;
+        const uint64_t superblocks =
+            (blocks + ACDAWG_STATS_SUPERBLOCK_BLOCKS - 1) /
+            ACDAWG_STATS_SUPERBLOCK_BLOCKS;
+        const uint64_t total_bits =
+            (uint64_t)graph->node_count * (graph->tile_bits + 2 + field) +
+            (uint64_t)k * graph->arc_bits +
+            (uint64_t)escapes * graph->arc_bits + superblocks * 32 +
+            blocks * 16;
+        const uint64_t total = (total_bits + 7) / 8;
+        if (total < best.bytes) {
+          best.bytes = total;
+          best.k = k;
+          best.reserve = reserve;
+          best.escapes = escapes;
+          best.field = field;
+          best.block_bits = block_bits;
+        }
+      }
+    }
+  }
+  return best;
+}
+
+// (weight, position) pair for ordering a run's child runs.
+typedef struct AcdawgStatsKidEntry {
+  uint64_t weight;
+  uint32_t position; // collection order, the tie-break for determinism
+  uint32_t run;
+} AcdawgStatsKidEntry;
+
+static int acdawg_stats_kid_compare_asc(const void *left, const void *right) {
+  const AcdawgStatsKidEntry *left_kid = (const AcdawgStatsKidEntry *)left;
+  const AcdawgStatsKidEntry *right_kid = (const AcdawgStatsKidEntry *)right;
+  if (left_kid->weight != right_kid->weight) {
+    return (left_kid->weight < right_kid->weight) ? -1 : 1;
+  }
+  return (left_kid->position < right_kid->position) ? -1 : 1;
+}
+
+// One frame of the iterative weight computation: the run being walked, the
+// next member to process, the child run whose finished weight to fold in on
+// resume, and the weight accumulated so far.
+typedef struct AcdawgStatsWeightFrame {
+  uint32_t run;
+  uint32_t cursor;
+  uint32_t pending;
+  uint64_t weight;
+} AcdawgStatsWeightFrame;
+
+// Subtree weight of every run reachable from root_run: run length plus the
+// weights of every member's child run -- the standard placement-cost proxy.
+// With first_visit_only false this is the tree-expanded weight (a shared
+// subtree counts once per completed reference); with it true a run's weight
+// counts only runs not yet reached anywhere in the traversal, approximating
+// the number of NEW nodes its placement would add. Tail-merged arcs can point
+// INTO other runs, so run-to-run edges are not depth-monotone and can even
+// form cycles; this therefore uses an explicit post-order stack (no
+// recursion) and counts a back-edge to an in-progress run as zero.
+static void
+acdawg_stats_compute_weights(uint32_t root_run, const uint32_t *arcs_of,
+                             const uint8_t *is_end, const uint32_t *run_of,
+                             uint32_t node_count, bool first_visit_only,
+                             uint64_t *memo) {
+  // 0 = unvisited, 1 = in progress (on the stack), 2 = done.
+  uint8_t *state = (uint8_t *)calloc_or_die(node_count, 1);
+  AcdawgStatsWeightFrame *stack = (AcdawgStatsWeightFrame *)malloc_or_die(
+      sizeof(AcdawgStatsWeightFrame) * (node_count + 1));
+  uint32_t top = 0;
+  stack[top].run = root_run;
+  stack[top].cursor = root_run;
+  stack[top].pending = 0;
+  stack[top].weight = 0;
+  top++;
+  state[root_run] = 1;
+  while (top > 0) {
+    AcdawgStatsWeightFrame *frame = &stack[top - 1];
+    if (frame->pending != 0) {
+      if (state[frame->pending] == 2) {
+        frame->weight += memo[frame->pending];
+      }
+      frame->pending = 0;
+    }
+    bool descended = false;
+    for (;;) {
+      // Complete when the previously processed member was the run's end.
+      if (frame->cursor > frame->run && is_end[frame->cursor - 1] != 0) {
+        break;
+      }
+      const uint32_t node_idx = frame->cursor;
+      frame->cursor++;
+      frame->weight++;
+      const uint32_t arc = arcs_of[node_idx];
+      if (arc != 0) {
+        const uint32_t child_run = run_of[arc];
+        if (state[child_run] == 0) {
+          frame->pending = child_run;
+          state[child_run] = 1;
+          stack[top].run = child_run;
+          stack[top].cursor = child_run;
+          stack[top].pending = 0;
+          stack[top].weight = 0;
+          top++;
+          descended = true;
+          break;
+        }
+        if (state[child_run] == 2 && !first_visit_only) {
+          frame->weight += memo[child_run];
+        }
+        // state 1 (a back-edge into an in-progress run) contributes zero, as
+        // does any revisited run when only first visits count.
+      }
+    }
+    if (!descended) {
+      memo[frame->run] = frame->weight;
+      state[frame->run] = 2;
+      top--;
+    }
+  }
+  free(state);
+  free(stack);
+}
+
+// Sort-key bias that pushes shared child runs (in-degree > 1) after unique
+// ones in the shared-last ordering; well above any real subtree weight.
+#define ACDAWG_STATS_SHARED_KID_BIAS (1ULL << 40)
+
+// Renumbers the graph with the builder's run-DFS, but ordering each run's
+// child runs by subtree weight: order_mode 0 keeps sibling order (must
+// reproduce the input numbering -- a self-check), 1 processes the smallest
+// subtree first, 2 the largest first, 3 the smallest first with shared
+// (in-degree > 1) child runs pushed last (only one parent can get locality
+// to a shared run, so unique-parent runs take the near slots), 4 the
+// smallest first by first-visit size (only the nodes a placement would
+// newly add). Returns a freshly allocated first-child array in the new
+// numbering.
+static uint32_t *acdawg_stats_reorder(const uint32_t *arcs_of,
+                                      const uint8_t *is_end,
+                                      uint32_t node_count, uint32_t root,
+                                      int order_mode) {
+  // run_of[node] = first node of its sibling run. Node 0 is the sentinel (its
+  // is_end is set), so node 1 starts the first real run.
+  uint32_t *run_of = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+  run_of[0] = 0;
+  uint32_t current_run = 0;
+  for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
+    if (is_end[node_idx - 1] != 0) {
+      current_run = node_idx;
+    }
+    run_of[node_idx] = current_run;
+  }
+
+  // Weights are only consulted when reordering; mode 0's kid entries read the
+  // zeroed memo (their order is position-preserving anyway).
+  uint64_t *weight_memo =
+      (uint64_t *)calloc_or_die(node_count, sizeof(uint64_t));
+  if (order_mode != 0) {
+    acdawg_stats_compute_weights(
+        run_of[root], arcs_of, is_end, run_of, node_count,
+        /*first_visit_only=*/order_mode == 4, weight_memo);
+  }
+  // Shared-last mode biases the sort key of any run referenced by more than
+  // one arc.
+  if (order_mode == 3) {
+    uint32_t *run_in_degree =
+        (uint32_t *)calloc_or_die(node_count, sizeof(uint32_t));
+    for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
+      if (arcs_of[node_idx] != 0) {
+        run_in_degree[run_of[arcs_of[node_idx]]]++;
+      }
+    }
+    for (uint32_t node_idx = 0; node_idx < node_count; node_idx++) {
+      if (run_of[node_idx] == node_idx && run_in_degree[node_idx] > 1) {
+        weight_memo[node_idx] += ACDAWG_STATS_SHARED_KID_BIAS;
+      }
+    }
+    free(run_in_degree);
+  }
+
+  uint32_t *new_of = (uint32_t *)calloc_or_die(node_count, sizeof(uint32_t));
+  uint32_t *order = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+  uint32_t order_count = 0;
+  uint8_t *visited = (uint8_t *)calloc_or_die((node_count + 7) / 8, 1);
+  // Total pushes are bounded by the arc count plus the root (<= node_count+1).
+  uint32_t *stack =
+      (uint32_t *)malloc_or_die(sizeof(uint32_t) * (node_count + 1));
+  uint32_t stack_top = 0;
+  AcdawgStatsKidEntry *kids = (AcdawgStatsKidEntry *)malloc_or_die(
+      sizeof(AcdawgStatsKidEntry) * node_count);
+
+  stack[stack_top++] = run_of[root];
+  while (stack_top > 0) {
+    const uint32_t run = stack[--stack_top];
+    if (((visited[run >> 3] >> (run & 7)) & 1U) != 0) {
+      continue;
+    }
+    visited[run >> 3] |= (uint8_t)(1U << (run & 7));
+    uint32_t kids_count = 0;
+    for (uint32_t node_idx = run;; node_idx++) {
+      new_of[node_idx] = order_count + 1;
+      order[order_count++] = node_idx;
+      const uint32_t arc = arcs_of[node_idx];
+      if (arc != 0) {
+        const uint32_t child_run = run_of[arc];
+        if (((visited[child_run >> 3] >> (child_run & 7)) & 1U) == 0) {
+          kids[kids_count].run = child_run;
+          kids[kids_count].position = kids_count;
+          kids[kids_count].weight = weight_memo[child_run];
+          kids_count++;
+        }
+      }
+      if (is_end[node_idx] != 0) {
+        break;
+      }
+    }
+    if (order_mode != 0) {
+      qsort(kids, kids_count, sizeof(AcdawgStatsKidEntry),
+            acdawg_stats_kid_compare_asc);
+    }
+    // The stack pops in reverse push order. Mode 0/1 want the first entry
+    // (sibling order / smallest weight) processed first, so push back-to-
+    // front; mode 2 wants the largest first, so push front-to-back.
+    if (order_mode == 2) {
+      for (uint32_t kid_idx = 0; kid_idx < kids_count; kid_idx++) {
+        stack[stack_top++] = kids[kid_idx].run;
+      }
+    } else {
+      for (uint32_t kid_idx = kids_count; kid_idx-- > 0;) {
+        stack[stack_top++] = kids[kid_idx].run;
+      }
+    }
+  }
+
+  uint32_t *new_arcs_of =
+      (uint32_t *)calloc_or_die(node_count, sizeof(uint32_t));
+  for (uint32_t new_idx = 1; new_idx <= order_count; new_idx++) {
+    const uint32_t old_idx = order[new_idx - 1];
+    const uint32_t old_arc = arcs_of[old_idx];
+    new_arcs_of[new_idx] = (old_arc != 0) ? new_of[old_arc] : 0;
+  }
+
+  free(run_of);
+  free(weight_memo);
+  free(new_of);
+  free(order);
+  free(visited);
+  free(stack);
+  free(kids);
+  return new_arcs_of;
 }
 
 // Sizes one lexicon's acdawg and prints the per-section byte breakdown plus
@@ -662,6 +1001,80 @@ static void acdawg_stats_for_lexicon(const char *lexicon, int max_length) {
          (unsigned long long)actual,
          100.0 * ((double)actual - (double)best_bytes_v2) /
              (double)best_bytes_v2);
+
+  // ---- Escape-target clustering: could escape entries be narrower than
+  // arc_bits with a base offset? Reads the built escape side array directly.
+  if (dp->escape_count > 0) {
+    uint32_t min_target = UINT32_MAX;
+    uint32_t max_target = 0;
+    for (uint32_t escape_idx = 0; escape_idx < dp->escape_count; escape_idx++) {
+      const uint32_t target = dawg_packed_bits_read(
+          dp->bytes, dp->escape_bit_off + (size_t)escape_idx * dp->arc_bits,
+          dp->arc_bits);
+      if (target < min_target) {
+        min_target = target;
+      }
+      if (target > max_target) {
+        max_target = target;
+      }
+    }
+    uint8_t span_bits = 1;
+    while (((max_target - min_target) >> span_bits) != 0) {
+      span_bits++;
+    }
+    printf("  escape targets: [%u, %u] span_bits=%u vs arc_bits=%u -> "
+           "base-offset entries would save %lld bytes\n",
+           min_target, max_target, span_bits, dp->arc_bits,
+           (long long)((int64_t)dp->escape_count *
+                       ((int64_t)dp->arc_bits - span_bits) / 8));
+  }
+
+  // ---- Ordering experiments: rebuild the arc table under weight-ordered
+  // DFS numberings and re-run the v3-model search. Mode 0 re-walks the
+  // builder's own order and must reproduce it (a self-check of the re-walk).
+  {
+    const uint32_t node_count_local = graph.node_count;
+    uint32_t *arcs_of =
+        (uint32_t *)calloc_or_die(node_count_local, sizeof(uint32_t));
+    uint8_t *is_end = (uint8_t *)calloc_or_die(node_count_local, 1);
+    is_end[0] = 1;
+    for (uint32_t node_idx = 1; node_idx < node_count_local; node_idx++) {
+      const uint32_t node = dawg_arc_compressed_get_node(dp, node_idx);
+      arcs_of[node_idx] = kwg_node_arc_index(node);
+      is_end[node_idx] = kwg_node_is_end(node) ? 1 : 0;
+    }
+    const uint32_t root = dawg_arc_compressed_get_root_index(dp);
+    const AcdawgStatsV3Best base = acdawg_stats_best_v3(&graph);
+    printf("  ordering (v3 model bytes, coarse K):\n");
+    printf("    builder order    : %8llu  field=%u K=%u R=%u block=%u "
+           "escapes=%u\n",
+           (unsigned long long)base.bytes, base.field, base.k, base.reserve,
+           1U << base.block_bits, base.escapes);
+    // Mode 0 re-walks in plain sibling order -- the pre-weight-ordering
+    // baseline (the builder now orders kids by first-visit weight, so this
+    // shows what the ordering is worth rather than reproducing the input).
+    static const char *const order_names[] = {
+        "sibling-order dfs", "smallest-first   ", "largest-first    ",
+        "shared-last      ", "first-visit-size "};
+    for (int order_mode = 0; order_mode <= 4; order_mode++) {
+      uint32_t *reordered = acdawg_stats_reorder(
+          arcs_of, is_end, node_count_local, root, order_mode);
+      AcdawgStatsGraph regraph = acdawg_stats_graph_from_arcs(
+          reordered, node_count_local, graph.tile_bits, graph.arc_bits);
+      const AcdawgStatsV3Best best = acdawg_stats_best_v3(&regraph);
+      printf("    %s: %8llu  field=%u K=%u R=%u block=%u escapes=%u "
+             "(%+.2f%%)\n",
+             order_names[order_mode], (unsigned long long)best.bytes,
+             best.field, best.k, best.reserve, 1U << best.block_bits,
+             best.escapes,
+             100.0 * ((double)best.bytes - (double)base.bytes) /
+                 (double)base.bytes);
+      free(regraph.arcs);
+      free(reordered);
+    }
+    free(arcs_of);
+    free(is_end);
+  }
   (void)fflush(stdout);
 
   free(graph.arcs);
@@ -673,9 +1086,10 @@ static void acdawg_stats_for_lexicon(const char *lexicon, int max_length) {
 }
 
 void test_dawg_arc_compressed_stats(void) {
-  acdawg_stats_for_lexicon("CSW24", BOARD_DIM);
+  // Smallest corpus first so a failure surfaces fast.
   acdawg_stats_for_lexicon("CSW24", 8);
   acdawg_stats_for_lexicon("OSPS49", 8);
+  acdawg_stats_for_lexicon("CSW24", BOARD_DIM);
 }
 
 // ---------------------------------------------------------------------------
