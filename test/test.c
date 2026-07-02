@@ -158,6 +158,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"egspeedbench", test_endgame_speed_bench},
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},

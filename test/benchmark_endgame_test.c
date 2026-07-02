@@ -474,3 +474,147 @@ void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
   run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
 }
+
+// ---------------------------------------------------------------------------
+// Speed-optimization benchmark harness.
+//
+// Solves a battery of endgame CGPs ONCE at a fixed configuration and emits, for
+// each position, a machine-readable line:
+//
+//   BENCHROW <idx> <value> <nodes> <time_s>
+//
+// followed by a summary line. This is designed for baseline-vs-optimized A/B
+// across git revisions: run on the baseline binary, save the output, then run
+// on the optimized binary and diff. Correctness = <value> must match exactly on
+// every position (endgame is exact). When run single-threaded (the default),
+// <nodes> is also deterministic, so an unchanged <nodes> proves a refactor left
+// the search tree identical, while a pruning change shows as fewer nodes with an
+// unchanged value.
+//
+// Parameterized entirely by environment so the same binary can sweep depth /
+// thread count / battery without recompiling:
+//   MAGPIE_BENCH_CGP     CGP file           (default /tmp/nonstuck_cgps.txt)
+//   MAGPIE_BENCH_LEX     lexicon            (default CSW21)
+//   MAGPIE_BENCH_PLIES   endgame plies      (default 4)
+//   MAGPIE_BENCH_THREADS solver threads     (default 1  -> deterministic nodes)
+//   MAGPIE_BENCH_MAX     max positions      (default 100)
+//   MAGPIE_BENCH_TAG     label for the run  (default "bench")
+static int env_int(const char *name, int fallback) {
+  const char *v = getenv(name);
+  if (v == NULL || v[0] == '\0') {
+    return fallback;
+  }
+  return atoi(v);
+}
+
+void test_endgame_speed_bench(void) {
+  log_set_level(LOG_FATAL);
+
+  const char *cgp_file = getenv("MAGPIE_BENCH_CGP");
+  if (cgp_file == NULL || cgp_file[0] == '\0') {
+    cgp_file = "/tmp/nonstuck_cgps.txt";
+  }
+  const char *lex = getenv("MAGPIE_BENCH_LEX");
+  if (lex == NULL || lex[0] == '\0') {
+    lex = "CSW21";
+  }
+  const char *tag = getenv("MAGPIE_BENCH_TAG");
+  if (tag == NULL || tag[0] == '\0') {
+    tag = "bench";
+  }
+  const int plies = env_int("MAGPIE_BENCH_PLIES", 4);
+  const int threads = env_int("MAGPIE_BENCH_THREADS", 1);
+  const int max_positions = env_int("MAGPIE_BENCH_MAX", 100);
+
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("BENCHERR no CGP file at %s\n", cgp_file);
+    return;
+  }
+
+  char settings[256];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -lex %s -threads %d -s1 score -s2 score", lex, threads);
+  Config *config = config_create_or_die(settings);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("BENCHCFG tag=%s lex=%s plies=%d threads=%d positions=%d file=%s\n",
+         tag, lex, plies, threads, num_cgps, cgp_file);
+
+  double total_time = 0.0;
+  uint64_t total_nodes = 0;
+
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      printf("BENCHROW %d SKIP_LOAD\n", ci);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    EndgameArgs args = {.game = game,
+                        .thread_control = config_get_thread_control(config),
+                        .plies = plies,
+                        .tt_fraction_of_mem = 0.05,
+                        .initial_small_move_arena_size =
+                            DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                        .num_threads = threads,
+                        .num_top_moves = 1,
+                        .use_heuristics = true,
+                        .per_ply_callback = NULL,
+                        .per_ply_callback_data = NULL,
+                        .forced_pass_bypass = true,
+                        .enable_pv_display = false,
+                        .seed = 42};
+
+    Timer t;
+    ctimer_start(&t);
+    err = error_stack_create();
+    endgame_solve(&solver, &args, results, err);
+    double elapsed = ctimer_elapsed_seconds(&t);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+
+    int32_t value =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
+    uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
+
+    printf("BENCHROW %d %d %llu %.6f\n", ci, value,
+           (unsigned long long)nodes, elapsed);
+    total_time += elapsed;
+    total_nodes += nodes;
+    if ((ci + 1) % 25 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("BENCHSUM tag=%s positions=%d total_time=%.4f total_nodes=%llu "
+         "nps=%.0f\n",
+         tag, num_cgps, total_time, (unsigned long long)total_nodes,
+         total_time > 0 ? (double)total_nodes / total_time : 0.0);
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  endgame_ctx_destroy(solver);
+  endgame_results_destroy(results);
+  config_destroy(config);
+}
