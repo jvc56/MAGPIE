@@ -507,6 +507,14 @@ static int env_int(const char *name, int fallback) {
   return atoi(v);
 }
 
+static double env_double(const char *name, double fallback) {
+  const char *v = getenv(name);
+  if (v == NULL || v[0] == '\0') {
+    return fallback;
+  }
+  return atof(v);
+}
+
 void test_endgame_speed_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -767,6 +775,15 @@ void test_endgame_playout_bench(void) {
       pos_nodes += endgame_ctx_get_nodes_searched(solver);
       pos_depth += pv->negamax_depth;
 
+      // Per-move move+value dump (for baseline-vs-optimized move-agreement /
+      // points comparison): tiny_move identifies the played move; score is the
+      // solver's spread estimate at the last completed depth.
+      if (getenv("MAGPIE_PO_PRINTMOVE") != NULL) {
+        printf("MOVE pos=%d ply=%d tiny=%llu score=%d depth=%d\n", ci, moves,
+               (unsigned long long)pv->moves[0].tiny_move, pv->score,
+               pv->negamax_depth);
+      }
+
       SmallMove best_sm = pv->moves[0];
       small_move_to_move(play, &best_sm, game_get_board(game));
       play_move(play, game, NULL);
@@ -799,6 +816,134 @@ void test_endgame_playout_bench(void) {
   (void)fflush(stdout);
 
   free(cgp_lines);
+  move_destroy(play);
+  endgame_ctx_destroy(solver);
+  endgame_results_destroy(results);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// Single-move transducer for a cross-process head-to-head match.
+//
+// Reads one endgame position (CGP) plus this player's remaining game time bank
+// (HARD, seconds) from the environment, solves ONE move under a soft/hard time
+// control -- soft = HARD / est_moves_left (a per-turn allocation that banks
+// unused time; the EBF between-depth limit stops there) with HARD as the
+// mid-search wall-clock backstop (external_deadline_ns) -- plays the best move,
+// and emits one machine-readable line the driver feeds to the other engine:
+//
+//   M1 s0=<int> s1=<int> onmove=<0|1> ended=<0|1> used=<sec> soft=<sec>
+//      depth=<int> nodes=<llu> tiny=<llu> cgp=<resulting CGP...>
+//
+// cgp= is LAST because a CGP contains spaces. Because the two engines differ
+// only in movegen speed, running the SAME position through each binary at a
+// wall-clock budget is exactly the baseline-vs-optimized comparison; over many
+// time-limited games the faster engine's only edge is completing more search in
+// the bank it accrues.
+//   MAGPIE_M1_CGP     position (raw CGP, no "cgp " prefix)   [required]
+//   MAGPIE_M1_HARD    remaining game bank in seconds          (default 5.0)
+//   MAGPIE_M1_THREADS solver threads                          (default 1)
+//   MAGPIE_M1_LEX     lexicon                                 (default CSW21)
+void test_endgame_move1(void) {
+  log_set_level(LOG_FATAL);
+  const char *cgp = getenv("MAGPIE_M1_CGP");
+  if (cgp == NULL || cgp[0] == '\0') {
+    printf("M1 ERR no MAGPIE_M1_CGP\n");
+    return;
+  }
+  const char *lex = getenv("MAGPIE_M1_LEX");
+  if (lex == NULL || lex[0] == '\0') {
+    lex = "CSW21";
+  }
+  const int threads = env_int("MAGPIE_M1_THREADS", 1);
+  const double hard = env_double("MAGPIE_M1_HARD", 5.0);
+
+  char settings[256];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -lex %s -threads %d -s1 score -s2 score", lex, threads);
+  Config *config = config_create_or_die(settings);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+
+  ErrorStack *err = error_stack_create();
+  game_load_cgp(game, cgp, err);
+  if (!error_stack_is_empty(err)) {
+    printf("M1 ERR bad cgp\n");
+    error_stack_destroy(err);
+    config_destroy(config);
+    return;
+  }
+  error_stack_destroy(err);
+
+  const int on_turn = game_get_player_on_turn_index(game);
+  // Per-turn soft allocation: spread the bank over an estimate of this player's
+  // remaining moves (~2 tiles played per move), banking whatever is not used.
+  const int rack_tiles =
+      rack_get_total_letters(player_get_rack(game_get_player(game, on_turn)));
+  int est_moves = (rack_tiles + 1) / 2;
+  if (est_moves < 1) {
+    est_moves = 1;
+  }
+  double soft = hard / (double)est_moves;
+  if (soft > hard) {
+    soft = hard;
+  }
+
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+  Move *play = move_create();
+
+  EndgameArgs args = {.game = game,
+                      .thread_control = config_get_thread_control(config),
+                      .plies = MAX_SEARCH_DEPTH,
+                      .tt_fraction_of_mem = 0.05,
+                      .initial_small_move_arena_size =
+                          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                      .num_threads = threads,
+                      .num_top_moves = 1,
+                      .use_heuristics = true,
+                      .forced_pass_bypass = true,
+                      .enable_pv_display = false,
+                      .soft_time_limit = soft,
+                      .hard_time_limit = hard,
+                      .external_deadline_ns =
+                          ctimer_monotonic_ns() + (int64_t)(hard * 1e9),
+                      .seed = 42};
+
+  Timer t;
+  ctimer_start(&t);
+  err = error_stack_create();
+  endgame_solve(&solver, &args, results, err);
+  const double used = ctimer_elapsed_seconds(&t);
+  assert(error_stack_is_empty(err));
+  error_stack_destroy(err);
+
+  const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  int depth = 0;
+  uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
+  uint64_t tiny = 0;
+  if (pv->num_moves > 0) {
+    depth = pv->negamax_depth;
+    tiny = pv->moves[0].tiny_move;
+    SmallMove best = pv->moves[0];
+    small_move_to_move(play, &best, game_get_board(game));
+    play_move(play, game, NULL);
+  }
+
+  const int s0 =
+      equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int s1 =
+      equity_to_int(player_get_score(game_get_player(game, 1)));
+  const int now_on = game_get_player_on_turn_index(game);
+  const int ended = game_get_game_end_reason(game) != GAME_END_REASON_NONE;
+  char *out_cgp = game_get_cgp(game, true);
+  printf("M1 s0=%d s1=%d onmove=%d ended=%d used=%.4f soft=%.4f depth=%d "
+         "nodes=%llu tiny=%llu cgp=%s\n",
+         s0, s1, now_on, ended, used, soft, depth, (unsigned long long)nodes,
+         (unsigned long long)tiny, out_cgp);
+  (void)fflush(stdout);
+
+  free(out_cgp);
   move_destroy(play);
   endgame_ctx_destroy(solver);
   endgame_results_destroy(results);
