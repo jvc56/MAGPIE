@@ -8,5 +8,6 @@ void test_benchmark_forced_pass(void);
 void test_benchmark_nonstuck(void);
 void test_benchmark_nonstuck_3v3(void);
 void test_endgame_speed_bench(void);
+void test_endgame_playout_bench(void);
 
 #endif

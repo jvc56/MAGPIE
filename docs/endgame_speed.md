@@ -73,6 +73,33 @@ the final interleaved number): 0.7% → 1.3% → 1.9% → 3.6%.
 Both are the same lesson: **measure, don't trust the node count or the
 instruction count.**
 
+## Time-limited full-game playout
+
+The fixed-depth benchmark isolates the solver on single positions. To confirm the
+speedup in the realistic scenario — an engine on a clock playing an endgame out to
+the end — `test_endgame_playout_bench` (`egplayout`) plays each bag-empty endgame
+to game over, solving every move under a per-move wall-clock budget (time-limited
+iterative deepening) and playing the best move found.
+
+Interleaved baseline-vs-optimized, 30 endgames @ 200 ms/move, single-thread,
+median of 3 rounds (`tools/eg_playout_ab.sh`):
+
+| metric | baseline | optimized | delta |
+|---|---|---|---|
+| games completed | 30/30 | 30/30 | — |
+| nodes searched | 14,967,225 | 14,981,623 | +0.1% |
+| aggregate exact depth | 140 | 140 | 0% |
+| wall clock | 51.18 s | 49.50 s | **−3.3%** |
+| nodes/sec | 292 k | 303 k | **+3.5%** |
+
+Because the EBF soft-limit stops *between* depths, both engines reach the same
+depth on each move and play the *identical* line (node counts and aggregate depth
+match), so the win is pure wall clock: the optimized solver plays out the same
+endgames **3.3% faster** (+3.5% nps), stable across all three rounds. At a tighter
+budget, or where a depth boundary falls differently, that same speed can instead
+buy one more ply (stronger play at equal time). Move quality is unchanged here,
+consistent with the byte-identical fixed-depth results.
+
 ## Correctness validation
 
 - **Per-position value match**: game-theoretic value (`PVLine.score`) byte-identical
@@ -106,7 +133,9 @@ instruction count.**
 
 ## Files
 
-- `test/benchmark_endgame_test.c` — `egspeedbench` harness.
+- `test/benchmark_endgame_test.c` — `egspeedbench` (fixed-depth) and `egplayout`
+  (time-limited full-game playout) harnesses.
 - `tools/eg_ab.sh` — per-change validator (rebuild + suite + value/node match + speed).
-- `tools/eg_final.sh` — drift-immune interleaved baseline-vs-optimized A/B.
+- `tools/eg_final.sh` — drift-immune interleaved fixed-depth baseline-vs-optimized A/B.
+- `tools/eg_playout_ab.sh` — interleaved time-limited playout A/B.
 - `src/impl/move_gen.c`, `src/impl/move_gen.h` — the five optimizations.

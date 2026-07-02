@@ -618,3 +618,178 @@ void test_endgame_speed_bench(void) {
   endgame_results_destroy(results);
   config_destroy(config);
 }
+
+// ---------------------------------------------------------------------------
+// Time-limited full-game endgame playout benchmark.
+//
+// From each bag-empty endgame CGP, plays the position out to game over: solve
+// the position under a per-move wall-clock budget (time-limited iterative
+// deepening), play the best move found, repeat until the game ends. This is the
+// realistic time-control scenario -- the solver gets a clock, not a fixed depth
+// -- and exercises the solver repeatedly on the shrinking remaining endgame.
+//
+// Under a per-move time budget both a baseline and an optimized binary spend the
+// same wall clock, so the speedup shows up as MORE NODES searched and DEEPER
+// exact search reached in that budget (stronger play at equal time). Emits, per
+// position:
+//   POROW <idx> moves=<n> nodes=<N> depthsum=<D> time=<s> ended=<0|1>
+// and a summary. Set MAGPIE_PO_TIMEMS=0 to disable the time limit and instead
+// fully solve each move to MAGPIE_PO_PLIES (a pure speed comparison).
+//   MAGPIE_PO_CGP    CGP file        (default /tmp/nonstuck_cgps.txt)
+//   MAGPIE_PO_LEX    lexicon         (default CSW21)
+//   MAGPIE_PO_MAX    positions       (default 20)
+//   MAGPIE_PO_TIMEMS per-move budget (default 100; 0 = no limit)
+//   MAGPIE_PO_PLIES  depth ceiling   (default 25)
+//   MAGPIE_PO_THREADS solver threads (default 1)
+//   MAGPIE_PO_MAXMOVES per-playout move cap (default 40, safety)
+//   MAGPIE_PO_TAG    label           (default "playout")
+void test_endgame_playout_bench(void) {
+  log_set_level(LOG_FATAL);
+
+  const char *cgp_file = getenv("MAGPIE_PO_CGP");
+  if (cgp_file == NULL || cgp_file[0] == '\0') {
+    cgp_file = "/tmp/nonstuck_cgps.txt";
+  }
+  const char *lex = getenv("MAGPIE_PO_LEX");
+  if (lex == NULL || lex[0] == '\0') {
+    lex = "CSW21";
+  }
+  const char *tag = getenv("MAGPIE_PO_TAG");
+  if (tag == NULL || tag[0] == '\0') {
+    tag = "playout";
+  }
+  const int max_positions = env_int("MAGPIE_PO_MAX", 20);
+  const int time_ms = env_int("MAGPIE_PO_TIMEMS", 100);
+  const int max_plies = env_int("MAGPIE_PO_PLIES", 25);
+  const int threads = env_int("MAGPIE_PO_THREADS", 1);
+  const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
+  const double budget = (double)time_ms / 1000.0;
+
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("POERR no CGP file at %s\n", cgp_file);
+    return;
+  }
+
+  char settings[256];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -lex %s -threads %d -s1 score -s2 score", lex, threads);
+  Config *config = config_create_or_die(settings);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameResults *results = endgame_results_create();
+  EndgameCtx *solver = NULL;
+  Move *play = move_create();
+
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (strlen(cgp_lines[num_cgps]) > 0) {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  printf("POCFG tag=%s lex=%s time_ms=%d plies=%d threads=%d positions=%d\n", tag,
+         lex, time_ms, max_plies, threads, num_cgps);
+
+  long total_moves = 0;
+  uint64_t total_nodes = 0;
+  long total_depth = 0;
+  double total_time = 0.0;
+  int completed = 0;
+
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    if (!error_stack_is_empty(err)) {
+      error_stack_destroy(err);
+      printf("POROW %d SKIP_LOAD\n", ci);
+      continue;
+    }
+    error_stack_destroy(err);
+
+    int moves = 0;
+    uint64_t pos_nodes = 0;
+    long pos_depth = 0;
+    double pos_time = 0.0;
+    bool ended = false;
+
+    while (moves < max_moves) {
+      if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
+        ended = true;
+        break;
+      }
+      EndgameArgs args = {.game = game,
+                          .thread_control = config_get_thread_control(config),
+                          .plies = max_plies,
+                          .tt_fraction_of_mem = 0.05,
+                          .initial_small_move_arena_size =
+                              DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+                          .num_threads = threads,
+                          .num_top_moves = 1,
+                          .use_heuristics = true,
+                          .forced_pass_bypass = true,
+                          .enable_pv_display = false,
+                          .soft_time_limit = budget,
+                          .hard_time_limit = budget,
+                          .seed = 42};
+
+      Timer t;
+      ctimer_start(&t);
+      err = error_stack_create();
+      endgame_solve(&solver, &args, results, err);
+      pos_time += ctimer_elapsed_seconds(&t);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+
+      const PVLine *pv =
+          endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+      if (pv->num_moves == 0) {
+        break;
+      }
+      pos_nodes += endgame_ctx_get_nodes_searched(solver);
+      pos_depth += pv->negamax_depth;
+
+      SmallMove best_sm = pv->moves[0];
+      small_move_to_move(play, &best_sm, game_get_board(game));
+      play_move(play, game, NULL);
+      moves++;
+    }
+
+    total_moves += moves;
+    total_nodes += pos_nodes;
+    total_depth += pos_depth;
+    total_time += pos_time;
+    if (ended) {
+      completed++;
+    }
+    printf("POROW %d moves=%d nodes=%llu depthsum=%ld time=%.4f ended=%d\n", ci,
+           moves, (unsigned long long)pos_nodes, pos_depth, pos_time,
+           ended ? 1 : 0);
+    if ((ci + 1) % 10 == 0) {
+      (void)fflush(stdout);
+    }
+  }
+
+  printf("POSUM tag=%s positions=%d completed=%d total_moves=%ld "
+         "total_nodes=%llu total_depth=%ld avg_depth=%.3f total_time=%.4f "
+         "nps=%.0f\n",
+         tag, num_cgps, completed, total_moves,
+         (unsigned long long)total_nodes, total_depth,
+         total_moves > 0 ? (double)total_depth / (double)total_moves : 0.0,
+         total_time,
+         total_time > 0 ? (double)total_nodes / total_time : 0.0);
+  (void)fflush(stdout);
+
+  free(cgp_lines);
+  move_destroy(play);
+  endgame_ctx_destroy(solver);
+  endgame_results_destroy(results);
+  config_destroy(config);
+}
