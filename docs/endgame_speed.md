@@ -143,6 +143,36 @@ value** under any per-turn or banked time control at this scale. Converting spee
 to strength needs a *multiplicative* speedup or a move-quality change, not
 micro-refactors.
 
+### Stress test: hard (stuck-tile, budget-binding) subset
+
+The all-positions run finds 0 partly because most endgames fully solve (identical
+play). To isolate the regime where the budget actually binds, the match was
+re-run on **487 stuck-tile endgames filtered to those NOT fully solved to depth 25
+in 2 s @ 18 threads**, at 5 s/player/game for 2 hours (1,122 games / 561 pairs):
+
+| metric | value |
+|---|---|
+| OPT net strength | **+0.20 ± 0.76 pts/game** (still 0) |
+| positions where play diverged | **136 / 561 (24.2%)** — 17× the easy battery |
+| among divergent: opt better / worse | **69 / 67** (binomial z = 0.17, n.s.) |
+
+Now play *does* diverge (24%, because the budget binds), but symmetrically — opt
+wins 69, loses 67, a coin flip — i.e. multi-threaded ABDADA scheduling noise, not
+a speed edge. Two controls confirm it:
+
+- opt does **not** reach systematically deeper completed depth (total completed
+  depth ratio opt/base = **0.995 ≈ 1**) — a 4% edge can't fund an extra ply even
+  here.
+- the **deeper-searching side won only 40.8%** of games (below 50%). Depth reached
+  is driven by *position difficulty*, not skill: the side in the worse position
+  has harder, less-forced choices and searches deeper, while the winning side's
+  continuation is near-forced and converges fast. So "more search" isn't even an
+  advantage signal in these head-to-head endgames — reinforcing that a speedup
+  which only buys marginally more search buys no strength.
+
+Even on the hardest, time-limited positions, the speedup nets zero playing
+strength. (Data: `/tmp/egmatch_stuck/`.)
+
 ## Correctness validation
 
 - **Per-position value match**: game-theoretic value (`PVLine.score`) byte-identical
