@@ -20,25 +20,35 @@
 //
 // Records stay FIXED-WIDTH (node j lives at a known bit offset), so the graph
 // is still randomly addressable and traversable in place. Each record carries
-// the same tile / accepts / is_end fields as a KWG node, plus a 1-bit flag and
-// a field-bit subfield that together encode the arc four ways:
-//   * flag = 1                  -> subfield indexes a "popular" table of the K
+// the same tile / accepts / is_end fields as a KWG node plus a `field`-bit
+// code whose single value space partitions four ways:
+//   * code 0                    -> no child (leaf);
+//   * 1 <= code <= K            -> code-1 indexes a "popular" table of the K
 //                                  highest in-degree target nodes;
-//   * flag = 0, subfield = 0    -> no child (leaf);
-//   * flag = 0, subfield = max  -> escape: the full target lives in a side
-//                                  array, located by rank over an escape
-//                                  bit-map (a one-level rank directory,
-//                                  Jacobson 1989 sec 5.1);
-//   * flag = 0, otherwise       -> target = j + unzigzag(subfield), a local
-//                                  signed gap to a nearby node.
+//   * K < code < escape_base    -> target = j + (code - K), a small positive
+//                                  gap to a nearby later node (in the state-DFS
+//                                  renumbering nearly all local arcs point
+//                                  forward, so no code space is spent on
+//                                  negative gaps -- backward arcs are either
+//                                  popular or escape);
+//   * code >= escape_base       -> escape: the full target lives in a side
+//                                  array at slot escape_start(block) +
+//                                  (code - escape_base), where the R reserved
+//                                  top codes give the escape's index within
+//                                  its own fixed-size node block and a small
+//                                  two-level directory (32-bit superblock
+//                                  anchors + 16-bit per-block deltas) gives
+//                                  escape_start. No per-node bit-map and no
+//                                  popcount rank at decode time.
 // Nodes are renumbered in state-DFS order (sibling runs kept contiguous) so
-// most arcs point near their source and the gap stays small. See
-// tools/RETRO_DAWG.md for the full study and the prior-art attribution.
+// most arcs point a short distance forward and the gap window stays small.
+// Gap coding after WebGraph (Boldi & Vigna 2004); popular-table escape coding
+// after the common most-frequent-value dictionary trick.
 //
 // Layout (all bit fields are LSB-first within bytes, identical on any CPU; the
 // few multi-byte header fields use the writer's native byte order, so an
 // arc-compressed DAWG reads back on a machine of the same endianness):
-//   header | popular | escapes | escape bit-map | rank directory | records
+//   header | popular | escapes | anchors | deltas | records
 //
 // Like the packed DAWG, child order within a node's list is preserved, so an
 // arc-compressed DAWG built from a KWG_MAKER_MERGE_TAIL_REORDER DAWG inherits
@@ -46,31 +56,33 @@
 // the Alpha cross-set path.
 
 enum {
-  // On-disk format version (started at 2; version 1 was never shipped).
-  DAWG_ARC_COMPRESSED_VERSION = 2,
+  // On-disk format version (2 = flag-bit + zigzag + bitmap rank; 3 = unified
+  // code space + positive-only gaps + block-local escape indices).
+  DAWG_ARC_COMPRESSED_VERSION = 3,
   // 4 magic + 1 version + 1 tile_bits + 1 arc_bits + 1 rec_width + 1 field +
-  // 3 pad + 4 node_count + 4 root_index + 4 popular_count + 4 escape_count.
+  // 1 escape_reserve + 1 block_bits + 1 pad + 4 node_count + 4 root_index +
+  // 4 popular_count + 4 escape_count.
   DAWG_ARC_COMPRESSED_HEADER_BYTES = 32,
-  // The escape rank directory stores one cumulative escape count per block of
-  // this many nodes; the in-block remainder is finished with a population
-  // count.
-  DAWG_ARC_COMPRESSED_RANK_BLOCK = 64,
+  // Blocks per superblock in the two-level escape-start directory: a 32-bit
+  // anchor per superblock plus a 16-bit delta per block. The largest possible
+  // delta (every node in a superblock escaping) is 32 * 128 = 4096, so the
+  // 16-bit delta never overflows for any supported block size.
+  DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS = 32,
 };
 
 #define DAWG_ARC_COMPRESSED_MAGIC "ACDW"
 
 // Build mode: which point on the size/speed curve to target. Both modes produce
 // the identical on-disk format and the identical decoder; they differ only in
-// the chosen (field, popular-table size K), and therefore in the escape rate.
-// Escapes cost a popcount-rank + a side-array read on every *descended* node,
-// so a lower escape rate traverses faster, not just larger -- the rate is both
-// a RAM lever and a speed lever. Measured on CSW24, lazy/inlined traversal, vs
-// the fixed-width packed DAWG:
-//   MIN_RAM  -- 472.7 KB, ~33% escapes -> ~1.47x word-lookup, ~1.23x rack-gen.
-//               Smallest possible footprint (the retro goal); the slow end.
-//   BALANCED -- ~488 KB (still smaller than the packed DAWG), ~14% escapes ->
-//               ~1.32x word-lookup, ~1.14x rack-gen. A little more RAM for
-//               materially faster traversal; for lookup/move-gen-heavy use.
+// the chosen (field, popular-table size K, block size), and therefore in the
+// escape rate. An escape costs two directory reads plus a side-array read on
+// every *descended* node, so a lower escape rate traverses faster, not just
+// larger -- the rate is both a RAM lever and a speed lever. Measured on full
+// CSW24 (acdawgbench, word lookup vs the bit-packed packed DAWG's 537.2 KB):
+//   MIN_RAM  -- 451.9 KB, ~21% escapes -> ~1.85x word-lookup, ~1.28x
+//               enumeration. Smallest possible footprint (the retro goal).
+//   BALANCED -- 465.3 KB, <=15% escapes -> ~1.73x word-lookup. A little more
+//               RAM for faster traversal; for lookup/move-gen-heavy use.
 typedef enum {
   DAWG_ARC_COMPRESSED_MODE_MIN_RAM,
   DAWG_ARC_COMPRESSED_MODE_BALANCED,
@@ -86,36 +98,32 @@ typedef struct DawgArcCompressed {
   uint32_t root_index;    // renumbered index of the DAWG root
   uint32_t popular_count; // K: entries in the popular table
   uint32_t escape_count;  // entries in the escape side array
+  uint32_t escape_base;   // first escape code: 2^field - escape_reserve
   uint8_t tile_bits;
   uint8_t arc_bits;  // bits to hold any node index (popular/escape targets)
-  uint8_t rec_width; // tile_bits + 3 + field
-  uint8_t field;     // subfield width in bits
-  // Cached section bit/byte offsets into bytes, derived from the header fields.
+  uint8_t rec_width; // tile_bits + 2 + field
+  uint8_t field;     // code width in bits
+  uint8_t escape_reserve; // R: codes reserved for block-local escape indices
+  uint8_t block_bits;     // log2 of the escape-directory block size in nodes
+  // Cached section bit offsets into bytes, derived from the header fields.
   size_t popular_bit_off;
   size_t escape_bit_off;
-  size_t bitmap_byte_off;
-  size_t directory_bit_off;
+  size_t anchor_bit_off;
+  size_t delta_bit_off;
   size_t record_bit_off;
 } DawgArcCompressed;
 
-// rank over the escape bit-map: directory[block] + population count of the
-// set escape bits in this node's block below node_index.
+// escape_start for a node's block: 32-bit superblock anchor + 16-bit delta.
 static inline uint32_t
-dawg_arc_compressed_escape_rank(const DawgArcCompressed *dp,
-                                uint32_t node_index) {
-  const uint32_t block = node_index / DAWG_ARC_COMPRESSED_RANK_BLOCK;
-  uint32_t rank = dawg_packed_bits_read(
-      dp->bytes, dp->directory_bit_off + (size_t)block * 32, 32);
-  const uint8_t *bitmap = dp->bytes + dp->bitmap_byte_off;
-  const uint32_t block_start_byte =
-      block * (DAWG_ARC_COMPRESSED_RANK_BLOCK / 8);
-  const uint32_t end_byte = node_index >> 3;
-  for (uint32_t byte_idx = block_start_byte; byte_idx < end_byte; byte_idx++) {
-    rank += (uint32_t)__builtin_popcount(bitmap[byte_idx]);
-  }
-  rank += (uint32_t)__builtin_popcount(
-      bitmap[end_byte] & (uint8_t)((1U << (node_index & 7)) - 1U));
-  return rank;
+dawg_arc_compressed_escape_start(const DawgArcCompressed *dp,
+                                 uint32_t node_index) {
+  const uint32_t block = node_index >> dp->block_bits;
+  const uint32_t superblock = block / DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS;
+  const uint32_t anchor = dawg_packed_bits_read(
+      dp->bytes, dp->anchor_bit_off + (size_t)superblock * 32, 32);
+  const uint32_t delta = dawg_packed_bits_read(
+      dp->bytes, dp->delta_bit_off + (size_t)block * 16, 16);
+  return anchor + delta;
 }
 
 // Decodes record node_index back into a 32-bit value using the standard KWG
@@ -126,29 +134,25 @@ static inline uint32_t dawg_arc_compressed_get_node(const DawgArcCompressed *dp,
   const uint32_t record = dawg_packed_bits_read(
       dp->bytes, dp->record_bit_off + (size_t)node_index * dp->rec_width,
       dp->rec_width);
-  const uint32_t sentinel = (1U << dp->field) - 1U;
-  const uint32_t subfield = record & sentinel;
-  const uint32_t flag = (record >> dp->field) & 1U;
-  const uint32_t is_end = (record >> (dp->field + 1)) & 1U;
-  const uint32_t accepts = (record >> (dp->field + 2)) & 1U;
-  const uint32_t tile = record >> (dp->field + 3);
+  const uint32_t code = record & ((1U << dp->field) - 1U);
+  const uint32_t is_end = (record >> dp->field) & 1U;
+  const uint32_t accepts = (record >> (dp->field + 1)) & 1U;
+  const uint32_t tile = record >> (dp->field + 2);
   uint32_t arc;
-  if (flag != 0) {
-    arc = dawg_packed_bits_read(
-        dp->bytes, dp->popular_bit_off + (size_t)subfield * dp->arc_bits,
-        dp->arc_bits);
-  } else if (subfield == 0) {
+  if (code == 0) {
     arc = 0;
-  } else if (subfield == sentinel) {
-    const uint32_t slot = dawg_arc_compressed_escape_rank(dp, node_index);
+  } else if (code <= dp->popular_count) {
+    arc = dawg_packed_bits_read(
+        dp->bytes, dp->popular_bit_off + (size_t)(code - 1) * dp->arc_bits,
+        dp->arc_bits);
+  } else if (code < dp->escape_base) {
+    arc = node_index + (code - dp->popular_count);
+  } else {
+    const uint32_t slot = dawg_arc_compressed_escape_start(dp, node_index) +
+                          (code - dp->escape_base);
     arc = dawg_packed_bits_read(
         dp->bytes, dp->escape_bit_off + (size_t)slot * dp->arc_bits,
         dp->arc_bits);
-  } else {
-    // unzigzag: even -> +n/2, odd -> -(n+1)/2.
-    const int64_t gap = (subfield & 1U) ? -(int64_t)((subfield + 1U) >> 1)
-                                        : (int64_t)(subfield >> 1);
-    arc = (uint32_t)((int64_t)node_index + gap);
   }
   uint32_t node = arc;
   if (is_end != 0) {

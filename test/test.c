@@ -168,6 +168,8 @@ static TestEntry on_demand_test_table[] = {
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},
     {"dawgpacked", test_dawg_packed},
+    {"acdawgstats", test_dawg_arc_compressed_stats},
+    {"acdawgbench", test_dawg_arc_compressed_bench},
     {"kwgmergebench", test_kwg_merge_build_bench},
     {"kue", test_kue},
     {"monsterq", test_monster_q},

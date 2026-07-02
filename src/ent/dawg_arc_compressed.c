@@ -14,25 +14,35 @@
 #include <string.h>
 
 enum {
-  // Smallest subfield width considered by the config search; below this the
+  // Smallest code width considered by the config search; below this the
   // popular table cannot index a useful number of targets.
   DAWG_ARC_COMPRESSED_MIN_FIELD = 4,
   DAWG_ARC_COMPRESSED_MAX_TILE_BITS = 8,
   DAWG_ARC_COMPRESSED_MAX_ARC_BITS = 22,
-  // The config-search directory-size estimate charges one 32-bit counter per
-  // this many nodes (a rough proxy; the real directory keys on RANK_BLOCK).
-  DAWG_ARC_COMPRESSED_CONFIG_DIRECTORY_STRIDE = 256,
+  DAWG_ARC_COMPRESSED_MAX_BLOCK_BITS = 7,
   // BALANCED mode picks the smallest config whose escape rate is at or below
   // this percent of nodes (a knee on the size/speed curve, still smaller than
   // the fixed-width DAWG); MIN_RAM ignores it and just minimizes total bytes.
   DAWG_ARC_COMPRESSED_BALANCED_ESCAPE_PCT = 15,
+  // The local K refinement examines this many code values on each side of the
+  // coarse-grid winner, at this step.
+  DAWG_ARC_COMPRESSED_K_REFINE_SPAN = 192,
+  DAWG_ARC_COMPRESSED_K_REFINE_STEP = 16,
 };
 
-// Candidate popular-table sizes; a candidate is usable only when it is both
-// indexable by the subfield (K <= 2^field) and backed by enough targets.
-static const uint32_t popular_candidates[] = {64,   128,  256,  512,  1024,
-                                              2048, 4096, 8192, 16384};
-enum { DAWG_ARC_COMPRESSED_NUM_POPULAR_CANDIDATES = 9 };
+// Coarse popular-table sizes for the config sweep; the winner's K is then
+// refined locally at DAWG_ARC_COMPRESSED_K_REFINE_STEP granularity (the code
+// space is a value-granular partition, so K is not restricted to powers of
+// two).
+static const uint32_t popular_candidates[] = {
+    0,    64,   128,  192,  256,  384,  512,   768,  1024,
+    1536, 2048, 3072, 4096, 6144, 8192, 12288, 16384};
+enum { DAWG_ARC_COMPRESSED_NUM_POPULAR_CANDIDATES = 17 };
+
+// Block sizes (log2) tried for the escape directory: smaller blocks need fewer
+// reserved escape codes but more directory deltas.
+static const uint8_t block_bits_candidates[] = {5, 6, 7};
+enum { DAWG_ARC_COMPRESSED_NUM_BLOCK_CANDIDATES = 3 };
 
 // A DAWG node after state-DFS renumbering: arc is the renumbered first-child
 // index (0 = no child).
@@ -48,6 +58,17 @@ typedef struct DawgArcCompressedRankEntry {
   uint32_t in_degree;
   uint32_t index;
 } DawgArcCompressedRankEntry;
+
+// One candidate configuration evaluated by the search, and its cost.
+typedef struct DawgArcCompressedConfig {
+  uint8_t field;
+  uint8_t block_bits;
+  uint32_t popular_count;
+  uint32_t escape_reserve;
+  uint32_t escape_count;
+  uint64_t total_bits;
+  bool feasible;
+} DawgArcCompressedConfig;
 
 // Sorts by descending in-degree, breaking ties by ascending node index so the
 // ranking is deterministic.
@@ -73,12 +94,6 @@ static inline uint8_t bits_needed(uint32_t max_value) {
     bits++;
   }
   return bits;
-}
-
-// zig-zag signed->unsigned gap map (WebGraph's int2nat; Boldi & Vigna 2004).
-static inline uint64_t zigzag(int64_t value) {
-  return (value >= 0) ? ((uint64_t)value << 1)
-                      : (((uint64_t)(-value) << 1) - 1U);
 }
 
 // Renumbers the DAWG reachable from the KWG's dawg root into state-DFS order
@@ -171,77 +186,169 @@ static DawgArcCompressedNode *dawg_arc_compressed_renumber(const KWG *kwg,
   return nodes;
 }
 
-// Chooses the (field, popular_count) pair that minimizes the total resident
-// size: fixed-width records + popular table + escape side array + an estimate
-// of the rank directory. rank_pos[node] is the node's position in the
-// in-degree ranking (UINT32_MAX if it is never a target).
-static void dawg_arc_compressed_best_config(
-    const DawgArcCompressedNode *nodes, uint32_t node_count,
-    const uint32_t *rank_pos, uint32_t ranked_count, uint8_t tile_bits,
-    uint8_t arc_bits, dawg_arc_compressed_mode_t mode, uint8_t *out_field,
-    uint32_t *out_popular_count) {
-  const uint32_t directory_estimate =
-      ((node_count + DAWG_ARC_COMPRESSED_CONFIG_DIRECTORY_STRIDE - 1) /
-       DAWG_ARC_COMPRESSED_CONFIG_DIRECTORY_STRIDE) *
-      32;
-  const bool balanced = mode == DAWG_ARC_COMPRESSED_MODE_BALANCED;
-  uint64_t best_total = UINT64_MAX;
-  uint8_t best_field = DAWG_ARC_COMPRESSED_MIN_FIELD;
-  uint32_t best_popular_count = 0;
-  // BALANCED tracks the smallest config whose escape rate is within the
-  // ceiling.
-  uint64_t best_balanced_total = UINT64_MAX;
-  uint8_t balanced_field = DAWG_ARC_COMPRESSED_MIN_FIELD;
-  uint32_t balanced_popular_count = 0;
-  for (uint8_t field = DAWG_ARC_COMPRESSED_MIN_FIELD; field <= arc_bits;
-       field++) {
-    const uint32_t sentinel = (1U << field) - 1U;
-    for (int cand_idx = 0;
-         cand_idx < DAWG_ARC_COMPRESSED_NUM_POPULAR_CANDIDATES; cand_idx++) {
-      const uint32_t popular_count = popular_candidates[cand_idx];
-      if (popular_count > (1U << field) || popular_count > ranked_count) {
+// Directory bits for a node count at a block size: a 32-bit anchor per
+// superblock plus a 16-bit delta per block.
+static uint64_t dawg_arc_compressed_directory_bits(uint32_t node_count,
+                                                   uint8_t block_bits) {
+  const uint64_t blocks =
+      ((uint64_t)node_count + (1ULL << block_bits) - 1) >> block_bits;
+  const uint64_t superblocks =
+      (blocks + DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS - 1) /
+      DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS;
+  return superblocks * 32 + blocks * 16;
+}
+
+// Evaluates one (field, K, block_bits) candidate: iterates the reserved escape
+// code count R to a fixpoint (a larger R shrinks the gap window, which can only
+// add escapes and grow the per-block max, so the iteration is monotone and
+// converges within the block size), then prices the whole structure.
+static DawgArcCompressedConfig
+dawg_arc_compressed_evaluate(const DawgArcCompressedNode *nodes,
+                             uint32_t node_count, const uint32_t *rank_pos,
+                             uint8_t tile_bits, uint8_t arc_bits, uint8_t field,
+                             uint32_t popular_count, uint8_t block_bits) {
+  DawgArcCompressedConfig config;
+  memset(&config, 0, sizeof(config));
+  config.field = field;
+  config.block_bits = block_bits;
+  config.popular_count = popular_count;
+  config.feasible = false;
+  config.total_bits = UINT64_MAX;
+
+  const uint32_t codes = 1U << field;
+  const uint32_t block_size = 1U << block_bits;
+  uint32_t reserve = 0;
+  uint32_t escape_count = 0;
+  for (;;) {
+    if (popular_count + reserve + 1 > codes) {
+      return config; // no room for the gap window (or even the code split)
+    }
+    const uint32_t window = codes - 1 - popular_count - reserve;
+    escape_count = 0;
+    uint32_t block_max = 0;
+    uint32_t cur_block = UINT32_MAX;
+    uint32_t cur_count = 0;
+    for (uint32_t node_idx = 1; node_idx < node_count; node_idx++) {
+      const uint32_t arc = nodes[node_idx].arc;
+      if (arc == 0 || rank_pos[arc] < popular_count) {
         continue;
       }
-      uint32_t escape_count = 0;
-      for (uint32_t node_idx = 0; node_idx < node_count; node_idx++) {
-        const uint32_t arc = nodes[node_idx].arc;
-        if (arc == 0 || rank_pos[arc] < popular_count) {
+      const int64_t gap = (int64_t)arc - (int64_t)node_idx;
+      if (gap >= 1 && gap <= (int64_t)window) {
+        continue;
+      }
+      escape_count++;
+      const uint32_t block = node_idx >> block_bits;
+      if (block != cur_block) {
+        cur_block = block;
+        cur_count = 0;
+      }
+      cur_count++;
+      if (cur_count > block_max) {
+        block_max = cur_count;
+      }
+    }
+    if (block_max <= reserve) {
+      break; // fixpoint: the reserved codes cover every block
+    }
+    if (block_max > block_size) {
+      return config; // cannot happen (a block has block_size nodes), safety
+    }
+    reserve = block_max;
+  }
+
+  config.escape_reserve = reserve;
+  config.escape_count = escape_count;
+  config.total_bits =
+      (uint64_t)node_count * (tile_bits + 2 + field) +
+      (uint64_t)popular_count * arc_bits + (uint64_t)escape_count * arc_bits +
+      dawg_arc_compressed_directory_bits(node_count, block_bits);
+  config.feasible = true;
+  return config;
+}
+
+// True when `candidate` beats `best` for the given mode: MIN_RAM minimizes
+// total bits outright; BALANCED minimizes total bits among configs whose
+// escape rate is at or below the ceiling.
+static bool
+dawg_arc_compressed_config_better(const DawgArcCompressedConfig *candidate,
+                                  const DawgArcCompressedConfig *best,
+                                  uint32_t node_count, bool balanced) {
+  if (!candidate->feasible) {
+    return false;
+  }
+  if (balanced &&
+      (uint64_t)candidate->escape_count * 100 >
+          (uint64_t)node_count * DAWG_ARC_COMPRESSED_BALANCED_ESCAPE_PCT) {
+    return false;
+  }
+  return candidate->total_bits < best->total_bits;
+}
+
+// Chooses the (field, K, block_bits, R) tuple that minimizes the total resident
+// size, sweeping a coarse K grid and then refining K locally around the
+// winner. rank_pos[node] is the node's position in the in-degree ranking
+// (UINT32_MAX if it is never a target).
+static DawgArcCompressedConfig dawg_arc_compressed_best_config(
+    const DawgArcCompressedNode *nodes, uint32_t node_count,
+    const uint32_t *rank_pos, uint32_t ranked_count, uint8_t tile_bits,
+    uint8_t arc_bits, dawg_arc_compressed_mode_t mode) {
+  const bool balanced = mode == DAWG_ARC_COMPRESSED_MODE_BALANCED;
+  DawgArcCompressedConfig best;
+  memset(&best, 0, sizeof(best));
+  best.total_bits = UINT64_MAX;
+  best.feasible = false;
+  // BALANCED falls back to the MIN_RAM winner when no config meets the escape
+  // ceiling (e.g. a tiny lexicon where every config escapes a lot).
+  DawgArcCompressedConfig best_any = best;
+
+  for (uint8_t field = DAWG_ARC_COMPRESSED_MIN_FIELD; field <= arc_bits;
+       field++) {
+    for (int block_idx = 0;
+         block_idx < DAWG_ARC_COMPRESSED_NUM_BLOCK_CANDIDATES; block_idx++) {
+      const uint8_t block_bits = block_bits_candidates[block_idx];
+      for (int k_idx = 0; k_idx < DAWG_ARC_COMPRESSED_NUM_POPULAR_CANDIDATES;
+           k_idx++) {
+        const uint32_t popular_count = popular_candidates[k_idx];
+        if (popular_count > ranked_count || popular_count >= (1U << field)) {
           continue;
         }
-        const uint64_t zigzagged = zigzag((int64_t)arc - (int64_t)node_idx);
-        if (zigzagged < 1 || zigzagged > sentinel - 1) {
-          escape_count++;
+        const DawgArcCompressedConfig candidate = dawg_arc_compressed_evaluate(
+            nodes, node_count, rank_pos, tile_bits, arc_bits, field,
+            popular_count, block_bits);
+        if (dawg_arc_compressed_config_better(&candidate, &best, node_count,
+                                              balanced)) {
+          best = candidate;
         }
-      }
-      const uint64_t record_bits =
-          (uint64_t)node_count * (tile_bits + 3 + field);
-      const uint64_t total = record_bits + (uint64_t)popular_count * arc_bits +
-                             (uint64_t)escape_count * arc_bits +
-                             directory_estimate;
-      if (total < best_total) {
-        best_total = total;
-        best_field = field;
-        best_popular_count = popular_count;
-      }
-      if ((uint64_t)escape_count * 100 <=
-              (uint64_t)node_count * DAWG_ARC_COMPRESSED_BALANCED_ESCAPE_PCT &&
-          total < best_balanced_total) {
-        best_balanced_total = total;
-        balanced_field = field;
-        balanced_popular_count = popular_count;
+        if (dawg_arc_compressed_config_better(&candidate, &best_any, node_count,
+                                              false)) {
+          best_any = candidate;
+        }
       }
     }
   }
-  // BALANCED uses the within-ceiling minimum when one exists; otherwise (e.g. a
-  // tiny lexicon where even the widest config escapes a lot) falls back to the
-  // overall MIN_RAM minimum.
-  if (balanced && best_balanced_total != UINT64_MAX) {
-    *out_field = balanced_field;
-    *out_popular_count = balanced_popular_count;
-  } else {
-    *out_field = best_field;
-    *out_popular_count = best_popular_count;
+  if (!best.feasible) {
+    best = best_any;
   }
+
+  // Local K refinement around the winner (same field/block, finer K).
+  const int64_t base_k = best.popular_count;
+  for (int64_t k = base_k - DAWG_ARC_COMPRESSED_K_REFINE_SPAN;
+       k <= base_k + DAWG_ARC_COMPRESSED_K_REFINE_SPAN;
+       k += DAWG_ARC_COMPRESSED_K_REFINE_STEP) {
+    if (k < 0 || k == base_k || k > ranked_count ||
+        k >= (int64_t)(1U << best.field)) {
+      continue;
+    }
+    const DawgArcCompressedConfig candidate = dawg_arc_compressed_evaluate(
+        nodes, node_count, rank_pos, tile_bits, arc_bits, best.field,
+        (uint32_t)k, best.block_bits);
+    if (dawg_arc_compressed_config_better(&candidate, &best, node_count,
+                                          balanced)) {
+      best = candidate;
+    }
+  }
+  return best;
 }
 
 // Fills the cached section offsets and num_bytes from the header fields, which
@@ -255,14 +362,15 @@ static void dawg_arc_compressed_compute_offsets(DawgArcCompressed *dp) {
   dp->escape_bit_off = pos;
   pos += (size_t)dp->escape_count * dp->arc_bits;
   pos = (pos + 7) & ~(size_t)7;
-  dp->bitmap_byte_off = pos >> 3;
-  const size_t bitmap_bytes = ((size_t)dp->node_count + 7) / 8;
-  pos += bitmap_bytes * 8;
-  dp->directory_bit_off = pos;
-  const size_t num_blocks =
-      ((size_t)dp->node_count + DAWG_ARC_COMPRESSED_RANK_BLOCK - 1) /
-      DAWG_ARC_COMPRESSED_RANK_BLOCK;
-  pos += (num_blocks + 1) * 32;
+  const size_t blocks =
+      ((size_t)dp->node_count + (1ULL << dp->block_bits) - 1) >> dp->block_bits;
+  const size_t superblocks =
+      (blocks + DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS - 1) /
+      DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS;
+  dp->anchor_bit_off = pos;
+  pos += superblocks * 32;
+  dp->delta_bit_off = pos;
+  pos += blocks * 16;
   dp->record_bit_off = pos;
   pos += (size_t)dp->node_count * dp->rec_width;
   dp->num_bytes = (pos + 7) / 8;
@@ -314,38 +422,55 @@ dawg_arc_compressed_create_from_kwg(const KWG *kwg,
     rank_pos[ranked[rank_idx].index] = rank_idx;
   }
 
-  uint8_t field = DAWG_ARC_COMPRESSED_MIN_FIELD;
-  uint32_t popular_count = 0;
-  dawg_arc_compressed_best_config(nodes, node_count, rank_pos, ranked_count,
-                                  tile_bits, arc_bits, mode, &field,
-                                  &popular_count);
-  const uint32_t sentinel = (1U << field) - 1U;
-  const uint8_t rec_width = (uint8_t)(tile_bits + 3 + field);
+  const DawgArcCompressedConfig config = dawg_arc_compressed_best_config(
+      nodes, node_count, rank_pos, ranked_count, tile_bits, arc_bits, mode);
+  const uint8_t field = config.field;
+  const uint32_t popular_count = config.popular_count;
+  const uint32_t escape_reserve = config.escape_reserve;
+  const uint8_t block_bits = config.block_bits;
+  const uint32_t escape_base = (1U << field) - escape_reserve;
+  const uint32_t window = (1U << field) - 1 - popular_count - escape_reserve;
+  const uint8_t rec_width = (uint8_t)(tile_bits + 2 + field);
 
-  // Classify every arc into the four encodings, collecting the escape targets
-  // (in node order) and the escape bit-map.
-  uint32_t *subfield = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
-  uint8_t *flag = (uint8_t *)calloc_or_die(node_count, 1);
-  uint8_t *escape_bitmap = (uint8_t *)calloc_or_die((node_count + 7) / 8, 1);
+  // Classify every arc into the four code ranges, collecting the escape
+  // targets (in node order) and the per-block escape-start directory.
+  uint32_t *code = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
   uint32_t *escapes = (uint32_t *)malloc_or_die(sizeof(uint32_t) * node_count);
+  const uint32_t num_blocks =
+      (node_count + (1U << block_bits) - 1) >> block_bits;
+  uint32_t *block_start =
+      (uint32_t *)calloc_or_die(num_blocks + 1, sizeof(uint32_t));
   uint32_t escape_count = 0;
+  uint32_t cur_block = 0;
+  uint32_t cur_local = 0;
   for (uint32_t node_idx = 0; node_idx < node_count; node_idx++) {
+    const uint32_t block = node_idx >> block_bits;
+    while (cur_block < block) {
+      cur_block++;
+      block_start[cur_block] = escape_count;
+      cur_local = 0;
+    }
     const uint32_t arc = nodes[node_idx].arc;
     if (arc == 0) {
-      subfield[node_idx] = 0;
-    } else if (rank_pos[arc] < popular_count) {
-      subfield[node_idx] = rank_pos[arc];
-      flag[node_idx] = 1;
-    } else {
-      const uint64_t zigzagged = zigzag((int64_t)arc - (int64_t)node_idx);
-      if (zigzagged >= 1 && zigzagged <= sentinel - 1) {
-        subfield[node_idx] = (uint32_t)zigzagged;
-      } else {
-        subfield[node_idx] = sentinel;
-        escape_bitmap[node_idx >> 3] |= (uint8_t)(1U << (node_idx & 7));
-        escapes[escape_count++] = arc;
-      }
+      code[node_idx] = 0;
+      continue;
     }
+    if (rank_pos[arc] < popular_count) {
+      code[node_idx] = 1 + rank_pos[arc];
+      continue;
+    }
+    const int64_t gap = (int64_t)arc - (int64_t)node_idx;
+    if (gap >= 1 && gap <= (int64_t)window) {
+      code[node_idx] = popular_count + (uint32_t)gap;
+      continue;
+    }
+    code[node_idx] = escape_base + cur_local;
+    cur_local++;
+    escapes[escape_count++] = arc;
+  }
+  while (cur_block < num_blocks) {
+    cur_block++;
+    block_start[cur_block] = escape_count;
   }
 
   DawgArcCompressed *dp =
@@ -354,10 +479,13 @@ dawg_arc_compressed_create_from_kwg(const KWG *kwg,
   dp->root_index = root;
   dp->popular_count = popular_count;
   dp->escape_count = escape_count;
+  dp->escape_base = escape_base;
   dp->tile_bits = tile_bits;
   dp->arc_bits = arc_bits;
   dp->rec_width = rec_width;
   dp->field = field;
+  dp->escape_reserve = (uint8_t)escape_reserve;
+  dp->block_bits = block_bits;
   dawg_arc_compressed_compute_offsets(dp);
 
   uint8_t *bytes = (uint8_t *)calloc_or_die(dp->num_bytes, 1);
@@ -371,7 +499,9 @@ dawg_arc_compressed_create_from_kwg(const KWG *kwg,
   bytes[6] = arc_bits;
   bytes[7] = rec_width;
   bytes[8] = field;
-  // bytes[9..11] reserved padding (already zero). Multi-byte fields use native
+  bytes[9] = (uint8_t)escape_reserve;
+  bytes[10] = block_bits;
+  // bytes[11] reserved padding (already zero). Multi-byte fields use native
   // byte order: an arc-compressed DAWG is read back on the same machine.
   memcpy(bytes + 12, &node_count, sizeof(uint32_t));
   memcpy(bytes + 16, &root, sizeof(uint32_t));
@@ -390,37 +520,30 @@ dawg_arc_compressed_create_from_kwg(const KWG *kwg,
                            dp->escape_bit_off + (size_t)escape_idx * arc_bits,
                            arc_bits, escapes[escape_idx]);
   }
-  // Escape bit-map.
-  memcpy(bytes + dp->bitmap_byte_off, escape_bitmap, (node_count + 7) / 8);
-  // Rank directory: directory[block] = cumulative escape count before the
-  // block; directory[num_blocks] = total.
-  const uint32_t num_blocks =
-      (node_count + DAWG_ARC_COMPRESSED_RANK_BLOCK - 1) /
-      DAWG_ARC_COMPRESSED_RANK_BLOCK;
-  uint32_t cumulative = 0;
-  for (uint32_t block_idx = 0; block_idx < num_blocks; block_idx++) {
+  // Two-level escape-start directory: 32-bit anchors per superblock, 16-bit
+  // per-block deltas from the covering anchor.
+  const uint32_t num_superblocks =
+      (num_blocks + DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS - 1) /
+      DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS;
+  for (uint32_t super_idx = 0; super_idx < num_superblocks; super_idx++) {
     dawg_packed_bits_write(
-        bytes, dp->directory_bit_off + (size_t)block_idx * 32, 32, cumulative);
-    uint32_t block_end = (block_idx + 1) * DAWG_ARC_COMPRESSED_RANK_BLOCK;
-    if (block_end > node_count) {
-      block_end = node_count;
-    }
-    for (uint32_t node_idx = block_idx * DAWG_ARC_COMPRESSED_RANK_BLOCK;
-         node_idx < block_end; node_idx++) {
-      if (((escape_bitmap[node_idx >> 3] >> (node_idx & 7)) & 1U) != 0) {
-        cumulative++;
-      }
-    }
+        bytes, dp->anchor_bit_off + (size_t)super_idx * 32, 32,
+        block_start[super_idx * DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS]);
   }
-  dawg_packed_bits_write(bytes, dp->directory_bit_off + (size_t)num_blocks * 32,
-                         32, cumulative);
+  for (uint32_t block_idx = 0; block_idx < num_blocks; block_idx++) {
+    const uint32_t anchor =
+        block_start[(block_idx / DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS) *
+                    DAWG_ARC_COMPRESSED_SUPERBLOCK_BLOCKS];
+    dawg_packed_bits_write(bytes, dp->delta_bit_off + (size_t)block_idx * 16,
+                           16, block_start[block_idx] - anchor);
+  }
   // Records.
   for (uint32_t node_idx = 0; node_idx < node_count; node_idx++) {
     const uint32_t value =
-        subfield[node_idx] | ((uint32_t)flag[node_idx] << field) |
-        ((uint32_t)(nodes[node_idx].is_end ? 1U : 0U) << (field + 1)) |
-        ((uint32_t)(nodes[node_idx].accepts ? 1U : 0U) << (field + 2)) |
-        ((uint32_t)nodes[node_idx].tile << (field + 3));
+        code[node_idx] |
+        ((uint32_t)(nodes[node_idx].is_end ? 1U : 0U) << field) |
+        ((uint32_t)(nodes[node_idx].accepts ? 1U : 0U) << (field + 1)) |
+        ((uint32_t)nodes[node_idx].tile << (field + 2));
     dawg_packed_bits_write(bytes,
                            dp->record_bit_off + (size_t)node_idx * rec_width,
                            rec_width, value);
@@ -431,10 +554,9 @@ dawg_arc_compressed_create_from_kwg(const KWG *kwg,
   free(in_degree);
   free(ranked);
   free(rank_pos);
-  free(subfield);
-  free(flag);
-  free(escape_bitmap);
+  free(code);
   free(escapes);
+  free(block_start);
   return dp;
 }
 
@@ -480,22 +602,32 @@ DawgArcCompressed *dawg_arc_compressed_read_from_file(const char *filename,
   dp->arc_bits = header[6];
   dp->rec_width = header[7];
   dp->field = header[8];
+  dp->escape_reserve = header[9];
+  dp->block_bits = header[10];
   memcpy(&dp->node_count, header + 12, sizeof(uint32_t));
   memcpy(&dp->root_index, header + 16, sizeof(uint32_t));
   memcpy(&dp->popular_count, header + 20, sizeof(uint32_t));
   memcpy(&dp->escape_count, header + 24, sizeof(uint32_t));
 
   // Reject corrupt/malicious headers before trusting the fields for sizing,
-  // allocation, and bit-shift widths.
-  const uint8_t expected_rec_width = (uint8_t)(dp->tile_bits + 3 + dp->field);
+  // allocation, and bit-shift widths. escape_reserve == 0 is only coherent
+  // with no escapes at all (there is no code range to address any).
+  const uint8_t expected_rec_width = (uint8_t)(dp->tile_bits + 2 + dp->field);
+  const bool field_ok = dp->field >= 1 && dp->field < 32;
+  const bool code_space_ok =
+      field_ok && (uint64_t)dp->popular_count + dp->escape_reserve + 1 <=
+                      (1ULL << dp->field);
   if (dp->tile_bits < 1 || dp->tile_bits > DAWG_ARC_COMPRESSED_MAX_TILE_BITS ||
       dp->arc_bits < 1 || dp->arc_bits > DAWG_ARC_COMPRESSED_MAX_ARC_BITS ||
-      dp->field < 1 || dp->field >= dp->arc_bits ||
+      !field_ok || dp->field >= dp->arc_bits + 2 ||
       dp->rec_width != expected_rec_width || dp->node_count == 0 ||
       dp->node_count > (1U << dp->arc_bits) ||
-      dp->root_index >= dp->node_count ||
-      dp->popular_count > (1U << dp->field) ||
-      dp->escape_count > dp->node_count) {
+      dp->root_index >= dp->node_count || !code_space_ok ||
+      dp->block_bits < 1 ||
+      dp->block_bits > DAWG_ARC_COMPRESSED_MAX_BLOCK_BITS ||
+      dp->escape_reserve > (1U << dp->block_bits) ||
+      dp->escape_count > dp->node_count ||
+      (dp->escape_reserve == 0 && dp->escape_count != 0)) {
     fclose_or_die(stream);
     free(dp);
     error_stack_push(
@@ -504,6 +636,7 @@ DawgArcCompressed *dawg_arc_compressed_read_from_file(const char *filename,
             "invalid arc-compressed dawg header fields in file: %s", filename));
     return NULL;
   }
+  dp->escape_base = (1U << dp->field) - dp->escape_reserve;
 
   dawg_arc_compressed_compute_offsets(dp);
   dp->bytes = (uint8_t *)malloc_or_die(dp->num_bytes);
