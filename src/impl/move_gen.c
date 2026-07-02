@@ -2035,19 +2035,16 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
   const int orig_wordmul = gen->shadow_word_multiplier;
 
-  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  // The rack/tile-score and multiplier-array snapshots are saved LAZILY on the
+  // first restriction / first unrestricted insertion in the loop below,
+  // mirroring the non-small shadow_play_right. Most rightward shadows over the
+  // short racks of an endgame restrict nothing, so these ~132 bytes of wide
+  // copies are usually never paid. orig_rack_cross_set and
+  // orig_num_unrestricted_multipliers are cheap scalars, kept eager.
   const uint64_t orig_rack_cross_set = gen->rack_cross_set;
-  memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
-         sizeof(gen->descending_tile_scores));
   bool restricted_any_tiles = false;
-
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-         sizeof(gen->descending_cross_word_multipliers));
-  memcpy(gen->desc_eff_letter_muls_copy,
-         gen->descending_effective_letter_multipliers,
-         sizeof(gen->descending_effective_letter_multipliers));
   bool changed_any_restricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
@@ -2092,13 +2089,30 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
         cross_score * this_word_multiplier;
     gen->shadow_word_multiplier *= this_word_multiplier;
 
-    if (try_restrict_tile_and_accumulate_score(
-            gen, possible_letters_here, letter_multiplier, this_word_multiplier,
-            gen->current_right_col)) {
-      restricted_any_tiles = true;
+    if (is_single_bit_set(possible_letters_here)) {
+      if (!restricted_any_tiles) {
+        // First restriction in this rightward shadow: snapshot the rack and
+        // descending tile scores that restrict_tile_and_accumulate_score is
+        // about to mutate. Must save BEFORE the mutating call.
+        rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+        memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
+               sizeof(gen->descending_tile_scores));
+        restricted_any_tiles = true;
+      }
+      restrict_tile_and_accumulate_score(gen, possible_letters_here,
+                                         letter_multiplier, this_word_multiplier,
+                                         gen->current_right_col);
     } else {
+      if (!changed_any_restricted_multipliers) {
+        // First unrestricted insertion: snapshot the multiplier arrays.
+        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
+               sizeof(gen->descending_cross_word_multipliers));
+        memcpy(gen->desc_eff_letter_muls_copy,
+               gen->descending_effective_letter_multipliers,
+               sizeof(gen->descending_effective_letter_multipliers));
+        changed_any_restricted_multipliers = true;
+      }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
-      changed_any_restricted_multipliers = true;
     }
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
