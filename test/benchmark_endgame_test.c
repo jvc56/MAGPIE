@@ -725,6 +725,16 @@ void test_endgame_playout_bench(void) {
         ended = true;
         break;
       }
+      // Hard wall-clock cutoff: unlimited depth (plies = ceiling), IDS deepens
+      // until the external deadline fires MID-depth (checked every 1024 nodes
+      // via check_depth_deadline). soft/hard_time_limit stay 0 so the EBF
+      // between-depth stop is off -- the only stop is the hard deadline, so both
+      // engines burn the same T ms and the faster one completes deeper. On
+      // interrupt the result is the best move from the last COMPLETED depth.
+      const int64_t deadline_ns =
+          (time_ms > 0)
+              ? (ctimer_monotonic_ns() + (int64_t)time_ms * 1000000LL)
+              : 0;
       EndgameArgs args = {.game = game,
                           .thread_control = config_get_thread_control(config),
                           .plies = max_plies,
@@ -736,8 +746,9 @@ void test_endgame_playout_bench(void) {
                           .use_heuristics = true,
                           .forced_pass_bypass = true,
                           .enable_pv_display = false,
-                          .soft_time_limit = budget,
-                          .hard_time_limit = budget,
+                          .soft_time_limit = 0,
+                          .hard_time_limit = 0,
+                          .external_deadline_ns = deadline_ns,
                           .seed = 42};
 
       Timer t;

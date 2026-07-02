@@ -75,30 +75,39 @@ instruction count.**
 
 ## Time-limited full-game playout
 
-The fixed-depth benchmark isolates the solver on single positions. To confirm the
-speedup in the realistic scenario — an engine on a clock playing an endgame out to
-the end — `test_endgame_playout_bench` (`egplayout`) plays each bag-empty endgame
-to game over, solving every move under a per-move wall-clock budget (time-limited
-iterative deepening) and playing the best move found.
+The fixed-depth benchmark isolates the solver on single positions. To see the
+speedup under a clock — fixed thinking time per move — `test_endgame_playout_bench`
+(`egplayout`) plays each bag-empty endgame out to game over: each move gets a
+**hard** per-move wall-clock budget (unlimited depth; iterative deepening runs
+until the deadline fires *mid-search* via `external_deadline_ns`, checked every
+1024 nodes), then the best move from the last completed depth is played.
 
-Interleaved baseline-vs-optimized, 30 endgames @ 200 ms/move, single-thread,
-median of 3 rounds (`tools/eg_playout_ab.sh`):
+**Identical opening positions (divergence-free), hard 1 s/move, 30 positions,
+median of 3 interleaved rounds:**
 
 | metric | baseline | optimized | delta |
 |---|---|---|---|
-| games completed | 30/30 | 30/30 | — |
-| nodes searched | 14,967,225 | 14,981,623 | +0.1% |
-| aggregate exact depth | 140 | 140 | 0% |
-| wall clock | 51.18 s | 49.50 s | **−3.3%** |
-| nodes/sec | 292 k | 303 k | **+3.5%** |
+| nodes searched | 10,596,643 | 10,863,907 | **+2.5%** |
+| completed depth (sum over 30) | 70 | 70 | **0** |
+| wall clock | 23.78 s | 23.72 s | ~0% |
 
-Because the EBF soft-limit stops *between* depths, both engines reach the same
-depth on each move and play the *identical* line (node counts and aggregate depth
-match), so the win is pure wall clock: the optimized solver plays out the same
-endgames **3.3% faster** (+3.5% nps), stable across all three rounds. At a tighter
-budget, or where a depth boundary falls differently, that same speed can instead
-buy one more ply (stronger play at equal time). Move quality is unchanged here,
-consistent with the byte-identical fixed-depth results.
+Under a hard cutoff both engines burn the full budget, so the speedup shows up as
+~2.5% more nodes searched in the same time — but it reaches the **same completed
+depth and plays the same move**. The reason is quantization: completing one more
+IDS depth costs ~5× more time (endgame effective branching factor ≈ 5), far more
+than a few-percent edge buys, so a small speedup almost never crosses a
+depth-completion boundary under a hard clock. (A full playout to game over shows a
+larger ~6% aggregate node delta, but most of that is **line divergence** — once
+either engine plays a different move the games diverge — not a genuine
+same-position depth gain, which the identical-position table above isolates away.)
+
+Contrast the **soft** (EBF, between-depth) limit: the solver only stops after a
+completed depth, so both engines reach the same depth and play the identical line,
+and the same speedup instead makes the solver finish ~3.3% faster (30 endgames @
+200 ms/move soft: 51.2 s → 49.5 s, +3.5% nps). Either way the ~4% is real; whether
+it buys wall-clock time (soft) or a sliver of extra search at equal time (hard)
+depends on the stop rule, and a few-percent gain is too small to change which move
+a hard-time-limited search plays.
 
 ## Correctness validation
 

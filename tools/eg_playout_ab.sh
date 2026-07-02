@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
-# Time-limited full-game endgame playout A/B: baseline solver vs the optimized
-# stack, interleaved so machine drift cancels. Each move is solved under a
-# per-move wall-clock budget (time-limited IDS), then the best move is played,
-# until the game ends. Reports median aggregates per binary.
+# Hard-time-limit full-game endgame playout A/B: baseline solver vs the optimized
+# stack, interleaved so machine drift cancels. Each move gets a HARD per-move
+# wall-clock budget (unlimited depth; IDS deepens until the deadline fires
+# mid-search), then the best move found is played, until the game ends. Reports
+# median aggregates per binary.
 #
-# Time-limited search is NOT bit-deterministic (the EBF soft limit stops between
-# depths based on measured elapsed time), so the faster engine shows up as some
-# mix of "same search, less time" and "deeper search, same time". Aggregates over
-# many moves/positions are the signal.
+# Under a hard budget both engines burn the same T ms per (non-trivial) move, so
+# the speedup shows up as MORE NODES searched in that budget (deeper effective
+# search), and occasionally a deeper COMPLETED depth -> a stronger move that
+# diverges the line. Search is wall-clock-dependent (not bit-deterministic), so
+# aggregates over many moves/positions/rounds are the signal.
 set -u
 cd "$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 POS=${POS:-30} ; TIMEMS=${TIMEMS:-200} ; ROUNDS=${ROUNDS:-3} ; THREADS=${THREADS:-1}
