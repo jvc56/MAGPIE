@@ -1179,16 +1179,13 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
                                        int rightstrip, bool unique_play,
                                        int main_word_score, int word_multiplier,
                                        Equity cross_score) {
-  const MachineLetter current_letter = gen_cache_get_letter(gen, col);
-  uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col) &
-                                   gen_cache_get_left_extension_set(gen, col);
-  if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
-    possible_letters_here &= gen->anchor_right_extension_set;
-  }
-  if (possible_letters_here == 1) {
-    possible_letters_here = 0;
-  }
+  // Load the row_cache Square once; every field read below goes through it,
+  // giving the compiler a single base for the col*sizeof(Square) arithmetic.
+  const Square *sq = &gen->row_cache[col];
+  const MachineLetter current_letter = square_get_letter(sq);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    // Play-through square: possible_letters_here is dead on this branch (it
+    // reads only raw / next_node_index / accepts), so it is not computed here.
     const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
@@ -1206,15 +1203,30 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     go_on_small(gen, col, current_letter, next_node_index, accepts, leftstrip,
                 rightstrip, unique_play, main_word_score, word_multiplier,
                 cross_score);
-  } else if (!rack_is_empty(&gen->player_rack) &&
-             ((possible_letters_here & gen->rack_cross_set) != 0)) {
+  } else if (!rack_is_empty(&gen->player_rack)) {
+    // Empty square: compute the placeable-letter set only now -- it is unused
+    // on the play-through branch and when the mover's rack is empty.
+    uint64_t possible_letters_here =
+        square_get_cross_set(sq) & square_get_left_extension_set(sq);
+    if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
+      possible_letters_here &= gen->anchor_right_extension_set;
+    }
+    if (possible_letters_here == 1) {
+      possible_letters_here = 0;
+    }
+    if ((possible_letters_here & gen->rack_cross_set) == 0) {
+      return;
+    }
+    // The rack's blank count is invariant across the sibling loop: each
+    // iteration's take/add of a blank (or a non-blank ml) is balanced and the
+    // go_on_small recursion fully restores player_rack, so hoist it.
+    const uint16_t num_blanks =
+        rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const MachineLetter ml = kwg_node_tile(node);
       const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
-      if (ml != 0 &&
-          (number_of_ml != 0 ||
-           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
+      if (ml != 0 && (number_of_ml != 0 || num_blanks != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
@@ -1229,7 +1241,7 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
           rack_add_letter(&gen->player_rack, ml);
         }
         // check blank
-        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+        if (num_blanks > 0) {
           rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
           go_on_small(gen, col, get_blanked_machine_letter(ml), next_node_index,
