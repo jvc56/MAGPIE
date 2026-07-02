@@ -109,6 +109,40 @@ it buys wall-clock time (soft) or a sliver of extra search at equal time (hard)
 depends on the stop rule, and a few-percent gain is too small to change which move
 a hard-time-limited search plays.
 
+## Playing strength under a time control (head-to-head match)
+
+Does the ~4% buy any *points*? An 18-thread, 5 s/player/game, colour-balanced
+head-to-head match between the baseline and optimized solvers (`tools/eg_match.py`,
+cross-process via the `egmove1` transducer, per-turn soft allocation from a
+per-game hard bank), run for 8 hours:
+
+| metric | value |
+|---|---|
+| games / colour-paired positions | 10,989 / 5,494 (133.5 B nodes) |
+| **OPT net strength** | **−0.009 ± 0.153 pts/game** (statistically 0) |
+| positions where play diverged | 80 / 5,494 (**1.46%**) |
+| among divergent: opt better / worse | **40 / 40** (net −49.5) |
+
+Net strength is indistinguishable from zero. Play diverged on only 1.46% of
+positions, and there **symmetrically** (40 better, 40 worse) — that divergence is
+multi-threaded ABDADA scheduling noise, which helps both engines equally, not the
+speed edge. Colour-balancing is what makes this readable: it cancels each
+position's (large) inherent value, so a nonzero paired advantage would mean the
+engines actually played different moves; almost always they don't.
+
+The mechanism, now confirmed at scale: the move played is the last *completed*
+depth, an extra ply costs ≥1.46× (median 4–16×), and a per-game bank over a short
+endgame adds at most ~10–40% — so a ~4% edge can never fund an extra ply, even
+banked. (Even at 5 s × 18 threads these bag-empty 7×7 endgames only reached depth
+1–3 on 91% of moves — they branch hard — yet both engines reached the same
+completed depth and hence the same move.)
+
+**Conclusion:** the ~4% is real *speed* → **throughput** (more analysis / sims /
+self-play per unit time, plus multi-threaded scaling) but **≈0 playing-strength
+value** under any per-turn or banked time control at this scale. Converting speed
+to strength needs a *multiplicative* speedup or a move-quality change, not
+micro-refactors.
+
 ## Correctness validation
 
 - **Per-position value match**: game-theoretic value (`PVLine.score`) byte-identical
@@ -147,4 +181,6 @@ a hard-time-limited search plays.
 - `tools/eg_ab.sh` — per-change validator (rebuild + suite + value/node match + speed).
 - `tools/eg_final.sh` — drift-immune interleaved fixed-depth baseline-vs-optimized A/B.
 - `tools/eg_playout_ab.sh` — interleaved time-limited playout A/B.
+- `egmove1` (transducer) + `tools/eg_match.py` — cross-process, time-banked,
+  colour-balanced head-to-head strength match (baseline vs optimized).
 - `src/impl/move_gen.c`, `src/impl/move_gen.h` — the five optimizations.
