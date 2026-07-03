@@ -198,26 +198,33 @@ So more candidate throughput genuinely improves the PEG move (mean published win
 0.394→0.424 from 2 s→8 s), because partial stages publish and candidates are
 granular — no discrete branching-factor wall.
 
-**True-value confirmation (deep-oracle A/B).** Scoring each arm's chosen move
-against a deep top-32/4-ply oracle (`pegab` harness; mean_loss = win% left on the
-table vs the oracle best): **doubling the budget (2 s→4 s) recovers a mean +2.8
-win% per PEG move** — per-bag +2.1 / +1.2 / +1.9 / +6.1, largest on hard 4-in-bag
-positions. Clean and consistent across every bag: PEG is genuinely
-throughput-limited and heavily undersaturated at a realistic 2 s budget.
+**True-value confirmation (deep-oracle A/B, 700 fresh positions, 7 h run).** Each
+arm's chosen move scored against a deep top-32/4-ply oracle, measuring both win%
+and spread (PEG ranks by utility = `win_pct + 1e-4·mean_spread`, peg.c:267, so
+spread is captured too; it turns out negligible — weight 1e-4 — so utility-gain ≈
+win-gain). Throughput→strength is real and significant (`pegcurve` harness):
 
-**But the ~4% is a small slice of that throughput.** A 2× budget flips ~25% of
-moves; the 4% is ~1/50th of a doubling → ~1% of moves flip. Each flip is a big
-improvement (2.8 ÷ 0.25 ≈ **11 win% per flip**), but at ~1% frequency that is
-**≈ +0.1 win% per PEG move** — small but non-zero. The direct 4% A/B (+0.2 win%,
-mixed signs, unresolvable at this sample) is consistent with that.
+| arm | win%-gain | spread-gain (pts) | move-flips |
+|---|---|---|---|
+| +4% (2.08 s) | +0.11 ± 0.11 | +0.11 ± 0.15 | 3% |
+| +50% (3 s) | +0.76 ± 0.43 | +1.12 ± 0.43 | 13% |
+| 2× (4 s) | **+1.44 ± 0.49** | **+1.65 ± 0.57** | 18% |
 
-So, the takeaway that differs sharply from the endgame: **PEG's move-quality curve
-is steep and unsaturated at realistic budgets, so a *larger* (multiplicative)
-endgame/leaf speedup converts roughly proportionally into pre-endgame strength** —
-a 2× speedup would be worth ~+2.8 win% per PEG move. The 4% just isn't a big enough
-slice. This is the one place in the whole investigation where speed buys strength;
-the lever is *magnitude* of speedup (or a better per-candidate leaf), not the
-micro-refactors.
+Roughly **+1.4 win% per throughput doubling**, and it **concentrates in the
+deepest pre-endgames** — 2× by bag: +0.40 / +1.05 / +1.25 / **+3.44** win% (bag 4
+also +4.59 spread pts, 35% of moves flip). Spread tracks win% and, at weight 1e-4,
+adds nothing to the utility.
+
+**The ~4% speedup itself buys ≈ +0.11 win% per PEG move** (± 0.11 — right at the
+edge of significance): real but tiny, because 4% flips only ~3% of moves. (An
+earlier 12-position probe gave +2.8/doubling; that was ~2× inflated by small-sample
+noise — the 700-position run settles it at ~+1.4.)
+
+So this is **the one place in the whole investigation where speed buys strength**,
+and it scales with the *magnitude* of the speedup: a 2× endgame/leaf speedup would
+be worth ~+1.4 win% per PEG move (~+3.4 on 4-in-bag) — a genuine playing-strength
+gain — whereas the 4% micro-refactors buy ~+0.1. The lever for strength is a
+multiplicative speedup or a cheaper per-candidate PEG leaf, not micro-refactors.
 
 ## Correctness validation
 

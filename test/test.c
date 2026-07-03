@@ -157,6 +157,8 @@ static TestEntry on_demand_test_table[] = {
     {"genpegcgps", test_generate_peg_cgps},
     {"pegstage", test_peg_stage_stability},
     {"pegab", test_peg_strength_ab},
+    {"genpegfresh", test_gen_peg_fresh},
+    {"pegcurve", test_peg_strength_curve},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
