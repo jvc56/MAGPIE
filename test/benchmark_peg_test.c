@@ -1060,3 +1060,51 @@ void test_peg_stage_stability(void) {
   peg_poll_destroy(poll);
   config_destroy(config);
 }
+
+// PEG strength A/B by TRUE oracle value: run two arms that differ only in time
+// budget (base = T, opt = T*1.04, modelling a 4%-faster engine), then score each
+// arm's chosen move against a deep top-32 oracle. mean_loss_a - mean_loss_b is the
+// expected true win% the extra budget buys per PEG move (= flip_rate x win-delta).
+// Env: MAGPIE_PEG_BA (base budget, 2.0), MAGPIE_PEG_BB (opt budget, 2.08),
+// MAGPIE_PEG_ORACLE (oracle budget, 30), MAGPIE_PEG_MAX (pos/file), MAGPIE_PEG_STRIDE.
+static void run_budget_ab(const char *f, const char *label, double ba, double bb,
+                          int stride, double ob, int maxpos) {
+  static const int oracle_k[] = {32, 32, 32};
+  const PegBenchConfig cfg_a = {.name = "base",
+                                .num_threads = 18,
+                                .time_budget_seconds = ba,
+                                .scenario_stride = stride,
+                                .num_stages = 0};
+  const PegBenchConfig cfg_b = {.name = "opt+4%",
+                                .num_threads = 18,
+                                .time_budget_seconds = bb,
+                                .scenario_stride = stride,
+                                .num_stages = 0};
+  const PegBenchConfig oracle = {.name = "top32@4ply",
+                                 .num_threads = 18,
+                                 .time_budget_seconds = ob,
+                                 .scenario_stride = 1,
+                                 .stage_top_k = oracle_k,
+                                 .num_stages = 3};
+  run_peg_utility_benchmark(f, label, &cfg_a, &cfg_b, &oracle, maxpos);
+}
+
+void test_peg_strength_ab(void) {
+  log_set_level(LOG_FATAL);
+  const char *ea = getenv("MAGPIE_PEG_BA");
+  const double ba = (ea && *ea) ? atof(ea) : 2.0;
+  const char *eb = getenv("MAGPIE_PEG_BB");
+  const double bb = (eb && *eb) ? atof(eb) : 2.08;
+  const char *eo = getenv("MAGPIE_PEG_ORACLE");
+  const double ob = (eo && *eo) ? atof(eo) : 30.0;
+  const char *em = getenv("MAGPIE_PEG_MAX");
+  const int maxpos = (em && *em) ? atoi(em) : 25;
+  const char *estr = getenv("MAGPIE_PEG_STRIDE");
+  const int stride = (estr && *estr) ? atoi(estr) : 0;
+  printf("PEGABCFG base=%.2fs opt=%.2fs oracle=%.0fs stride=%d maxpos=%d\n", ba,
+         bb, ob, stride, maxpos);
+  run_budget_ab("notes/peg_positions/random_1peg.txt", "1peg", ba, bb, stride, ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_2peg.txt", "2peg", ba, bb, stride, ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_3peg.txt", "3peg", ba, bb, stride, ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_4peg.txt", "4peg", ba, bb, stride, ob, maxpos);
+}

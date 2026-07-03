@@ -198,15 +198,26 @@ So more candidate throughput genuinely improves the PEG move (mean published win
 0.394→0.424 from 2 s→8 s), because partial stages publish and candidates are
 granular — no discrete branching-factor wall.
 
-**But the ~4% is a small slice of that throughput.** A 2× budget (~2× candidates)
-flips ~25% of moves; +4% candidates is ~1/50th of that, extrapolating to **~1% of
-moves flipped** (0/60 in a direct 3.0 s vs 3.12 s A/B), with a modest win-delta per
-flip. So the PEG strength gain from the 4% is **small but non-zero** — a
-low-single-digit-percent move-change rate with modest value — *not* a structural
-zero. The takeaway that differs from the endgame: PEG's move-quality curve is steep
-and unsaturated at realistic budgets, so a *larger* endgame/leaf speedup would
-convert proportionally into pre-endgame strength; 4% simply isn't a big enough
-slice to matter much.
+**True-value confirmation (deep-oracle A/B).** Scoring each arm's chosen move
+against a deep top-32/4-ply oracle (`pegab` harness; mean_loss = win% left on the
+table vs the oracle best): **doubling the budget (2 s→4 s) recovers a mean +2.8
+win% per PEG move** — per-bag +2.1 / +1.2 / +1.9 / +6.1, largest on hard 4-in-bag
+positions. Clean and consistent across every bag: PEG is genuinely
+throughput-limited and heavily undersaturated at a realistic 2 s budget.
+
+**But the ~4% is a small slice of that throughput.** A 2× budget flips ~25% of
+moves; the 4% is ~1/50th of a doubling → ~1% of moves flip. Each flip is a big
+improvement (2.8 ÷ 0.25 ≈ **11 win% per flip**), but at ~1% frequency that is
+**≈ +0.1 win% per PEG move** — small but non-zero. The direct 4% A/B (+0.2 win%,
+mixed signs, unresolvable at this sample) is consistent with that.
+
+So, the takeaway that differs sharply from the endgame: **PEG's move-quality curve
+is steep and unsaturated at realistic budgets, so a *larger* (multiplicative)
+endgame/leaf speedup converts roughly proportionally into pre-endgame strength** —
+a 2× speedup would be worth ~+2.8 win% per PEG move. The 4% just isn't a big enough
+slice. This is the one place in the whole investigation where speed buys strength;
+the lever is *magnitude* of speedup (or a better per-candidate leaf), not the
+micro-refactors.
 
 ## Correctness validation
 
