@@ -22,6 +22,10 @@ typedef struct SimArgs {
   WinPct *win_pcts;
   bool use_inference;
   bool use_heat_map;
+  // When set (with use_inference), inference_results already holds a leave
+  // distribution (e.g. from simmed inference) and simulate() must NOT
+  // overwrite it by running static inference itself.
+  bool inference_results_precomputed;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
   int num_threads;
@@ -62,6 +66,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
   sim_args->use_heat_map = use_heat_map;
+  // Default: simulate() runs static inference itself. Callers that supply a
+  // precomputed distribution (simmed inference) set this after filling.
+  sim_args->inference_results_precomputed = false;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;
   sim_args->max_num_display_plays = max_num_display_plays;

@@ -683,6 +683,10 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
+  // Refresh the inference results along with use_alias_method: a reused sim
+  // context whose previous solve ran without inference would otherwise sample
+  // racks through a stale (possibly NULL) pointer.
+  simmer->inference_results = sim_args->inference_results;
 
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;

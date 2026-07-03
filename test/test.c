@@ -54,6 +54,8 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
+#include "simmedinf_benchmark.h"
+#include "simmedinf_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "transposition_table_test.h"
@@ -167,6 +169,16 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    // Simmed inference (simulation-based opponent-leave inference)
+    {"simmedinf_exchange", test_simmedinf},
+    {"simmedinf", test_simmedinf_benchmark},
+    {"qintar", test_qintar_simmedinf},
+    {"dings", test_dings_simmedinf},
+    {"qi", test_qi_simmedinf},
+    {"es", test_es_simmedinf},
+    {"eau", test_eau_simmedinf},
+    {"euoi", test_euoi_simmedinf},
+    {"guvy", test_guvy_simmedinf},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},

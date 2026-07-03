@@ -10,6 +10,7 @@ WinPct *win_pct_create(const char *data_paths, const char *win_pct_name,
                        ErrorStack *error_stack);
 void win_pct_destroy(WinPct *wp);
 const char *win_pct_get_name(const WinPct *wp);
+int win_pct_get_max_tiles_unseen(const WinPct *wp);
 float win_pct_get(const WinPct *wp, int spread_plus_leftover,
                   unsigned int game_unseen_tiles);
 bool is_win_pct_within_cutoff(const double win_pct, const double cutoff);

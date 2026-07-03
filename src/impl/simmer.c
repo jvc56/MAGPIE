@@ -84,12 +84,16 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
 
   uint64_t num_infer_leaves = 0;
   if (sim_args->use_inference) {
-    infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
-          sim_args->inference_results, error_stack);
-    if (!error_stack_is_empty(error_stack) ||
-        thread_control_get_status(sim_args->thread_control) !=
-            THREAD_CONTROL_STATUS_STARTED) {
-      return;
+    // A caller that already computed the leave distribution (e.g. simmed
+    // inference) passes it through untouched; otherwise run static inference.
+    if (!sim_args->inference_results_precomputed) {
+      infer(&sim_args->inference_args, &((*sim_ctx)->inference_ctx),
+            sim_args->inference_results, error_stack);
+      if (!error_stack_is_empty(error_stack) ||
+          thread_control_get_status(sim_args->thread_control) !=
+              THREAD_CONTROL_STATUS_STARTED) {
+        return;
+      }
     }
     num_infer_leaves =
         stat_get_num_unique_samples(inference_results_get_equity_values(

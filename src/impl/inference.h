@@ -10,6 +10,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
+#include <stdint.h>
 
 typedef struct InferenceCtx InferenceCtx;
 
@@ -19,5 +20,14 @@ void infer(InferenceArgs *args, InferenceCtx **ctx, InferenceResults *results,
            ErrorStack *error_stack);
 void infer_without_ctx(InferenceArgs *args, InferenceResults *results,
                        ErrorStack *error_stack);
+
+// Shared with simmed_inference (simulation-based inference), which records
+// weighted candidate leaves through the same accounting as static inference.
+uint64_t get_number_of_draws_for_rack(const Rack *bag_as_rack,
+                                      const Rack *rack);
+void record_valid_leave(const Rack *rack, InferenceResults *results,
+                        inference_stat_t inference_stat_type,
+                        double current_leave_value,
+                        uint64_t number_of_draws_for_leave);
 
 #endif
