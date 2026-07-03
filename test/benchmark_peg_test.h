@@ -20,5 +20,6 @@ void test_peg_bench_fixture(void);
 void test_peg_nested_gap(void);
 
 void test_gen_peg_more(void);
+void test_peg_stage_stability(void);
 
 #endif

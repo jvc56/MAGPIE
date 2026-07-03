@@ -961,3 +961,102 @@ void test_gen_peg_more(void) {
   generate_peg_cgps(40244777, 4, 75, f, /*append=*/true,
                     /*contested_only=*/true);
 }
+
+// PEG stage-stability / cost harness: for each fixture position, run peg_solve
+// capped at max_stage=k (k=1..KMAX), unbounded (each capped cascade completes),
+// single deterministic config (stride 1, nested off). Emits per (position,k) the
+// published best move + win/spread + per-stage field/fidelity/wall-time, so we
+// can measure (1) whether the top move changes as one more halving stage
+// completes, and (2) the marginal cost of completing the next stage vs the ~4%
+// speedup (which only touches emptier-leaf endgame time). Env: MAGPIE_PEG_MAX
+// (positions/file), MAGPIE_PEG_KMAX (default 5), MAGPIE_PEG_THREADS (default 18).
+void test_peg_stage_stability(void) {
+  log_set_level(LOG_FATAL);
+  const char *em = getenv("MAGPIE_PEG_MAX");
+  const int maxpos = (em && *em) ? atoi(em) : 100000;
+  const char *ek = getenv("MAGPIE_PEG_KMAX");
+  const int kmax = (ek && *ek) ? atoi(ek) : 5;
+  const char *ekn = getenv("MAGPIE_PEG_KMIN");
+  const int kmin = (ekn && *ekn) ? atoi(ekn) : 1;
+  const char *et = getenv("MAGPIE_PEG_THREADS");
+  const int threads = (et && *et) ? atoi(et) : 18;
+  const char *eb = getenv("MAGPIE_PEG_BUDGET");
+  const double budget = (eb && *eb) ? atof(eb) : 0.0;
+  const char *es_ = getenv("MAGPIE_PEG_STRIDE");
+  const int stride = (es_ && *es_) ? atoi(es_) : 1;
+  struct { const char *f; int bag; } files[] = {
+      {"notes/peg_positions/random_1peg.txt", 1},
+      {"notes/peg_positions/random_2peg.txt", 2},
+      {"notes/peg_positions/random_3peg.txt", 3},
+      {"notes/peg_positions/random_4peg.txt", 4},
+  };
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 18 -s1 score -s2 score");
+  PegPoll *poll = peg_poll_create();
+  printf("PEGCFG threads=%d kmax=%d maxpos=%d\n", threads, kmax, maxpos);
+  (void)fflush(stdout);
+  for (int fi = 0; fi < 4; fi++) {
+    FILE *fp = fopen(files[fi].f, "re");
+    if (!fp) {
+      printf("PEGERR no %s\n", files[fi].f);
+      continue;
+    }
+    char line[4096];
+    int pos_id = 0;
+    while (pos_id < maxpos && fgets(line, sizeof(line), fp)) {
+      size_t len = strlen(line);
+      if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+      }
+      if (strlen(line) == 0) {
+        continue;
+      }
+      char *cmd = get_formatted_string("cgp %s", line);
+      load_and_exec_config_or_die(config, cmd);
+      free(cmd);
+      Game *game = config_get_game(config);
+      for (int k = kmin; k <= kmax; k++) {
+        PegArgs a;
+        memset(&a, 0, sizeof(a));
+        a.game = game;
+        a.thread_control = config_get_thread_control(config);
+        a.num_threads = threads;
+        a.scenario_stride = stride;
+        a.nested_enabled = false;
+        a.time_budget_seconds = budget;
+        a.max_stage = k;
+        peg_poll_reset(poll);
+        a.poll = poll;
+        PegResult r;
+        ErrorStack *es = error_stack_create();
+        peg_solve(&a, &r, es);
+        if (!error_stack_is_empty(es)) {
+          error_stack_destroy(es);
+          break;
+        }
+        error_stack_destroy(es);
+        char mv[64];
+        move_to_string(game, &r.best_move, mv, sizeof(mv));
+        printf("PEGROW bag=%d pos=%d k=%d move=%s win=%.5f spread=%.2f lcs=%d "
+               "partial=%d elapsed=%.4f",
+               files[fi].bag, pos_id, k, mv, r.best_win, r.best_spread,
+               r.last_completed_stage, r.last_stage_partial ? 1 : 0,
+               ctimer_elapsed_seconds(&r.timer));
+        for (int s = 0; s < r.n_stage_history; s++) {
+          const PegStageSnapshot *ss = &r.stage_history[s];
+          double t =
+              ss->end_ns ? (double)(ss->end_ns - ss->start_ns) / 1e9 : -1.0;
+          printf(" |s%d f%d N%d d%d t%.4f", s, ss->fidelity_plies,
+                 ss->field_size, ss->cands_done, t);
+        }
+        printf("\n");
+        peg_result_destroy(&r);
+      }
+      pos_id++;
+      (void)fflush(stdout);
+    }
+    (void)fclose(fp);
+  }
+  peg_poll_destroy(poll);
+  config_destroy(config);
+}

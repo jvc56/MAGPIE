@@ -173,6 +173,33 @@ a speed edge. Two controls confirm it:
 Even on the hardest, time-limited positions, the speedup nets zero playing
 strength. (Data: `/tmp/egmatch_stuck/`.)
 
+### Pre-endgame (PEG) strength
+
+PEG is *breadth*-limited, not depth-limited — a halving beam-search over candidate
+plays (stage 0 greedy-ranks all; then 32→16→8→4→2 at rising 2–6-ply fidelity, each
+candidate's emptier leaves solved via the sped-up endgame). So a natural
+hypothesis: 4% more candidate throughput could surface a better move. And unlike
+the endgame's strict "last completed depth", a PARTIAL PEG stage that finishes ≥2
+candidates *does* publish (peg.c:2896-2901) — so the mechanism is theoretically
+viable here. Tested it (`pegstage` harness, 175 fixture positions, bag 1–4,
+18 threads):
+
+- **Move stability across the cascade** (`max_stage` k=1→5): the published move was
+  **identical across all cascade depths for 29/32 positions**. Where it changed
+  (3/32) it flipped at the stage 1→2 boundary then locked; deeper stages refine the
+  win% value, not the move identity.
+- **4% budget A/B** (3.0 s vs 3.12 s = ×1.04 — the deterministic model of a
+  4%-faster engine): **0 of 60 positions changed their published move**; mean win%
+  delta +0.000. (Thread nondeterminism itself was only 1/60 — PEG is near
+  deterministic.)
+
+So the 4% nets **0 PEG playing strength** too. The top move settles early
+(best-first candidate scoring finds the winner among the first candidates), and
+flipping it requires completing a whole additional stage — far more than a
+few-percent throughput gain buys. It is the endgame branching-factor wall in a
+different guise. The speedup is throughput, not strength, for the pre-endgame as
+well.
+
 ## Correctness validation
 
 - **Per-position value match**: game-theoretic value (`PVLine.score`) byte-identical
@@ -213,4 +240,6 @@ strength. (Data: `/tmp/egmatch_stuck/`.)
 - `tools/eg_playout_ab.sh` — interleaved time-limited playout A/B.
 - `egmove1` (transducer) + `tools/eg_match.py` — cross-process, time-banked,
   colour-balanced head-to-head strength match (baseline vs optimized).
+- `pegstage` (test/benchmark_peg_test.c) — PEG move-stability across cascade
+  stages + budget A/B, for the pre-endgame strength check.
 - `src/impl/move_gen.c`, `src/impl/move_gen.h` — the five optimizations.
