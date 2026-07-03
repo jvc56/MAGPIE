@@ -184,21 +184,29 @@ candidates *does* publish (peg.c:2896-2901) — so the mechanism is theoreticall
 viable here. Tested it (`pegstage` harness, 175 fixture positions, bag 1–4,
 18 threads):
 
-- **Move stability across the cascade** (`max_stage` k=1→5): the published move was
-  **identical across all cascade depths for 29/32 positions**. Where it changed
-  (3/32) it flipped at the stage 1→2 boundary then locked; deeper stages refine the
-  win% value, not the move identity.
-- **4% budget A/B** (3.0 s vs 3.12 s = ×1.04 — the deterministic model of a
-  4%-faster engine): **0 of 60 positions changed their published move**; mean win%
-  delta +0.000. (Thread nondeterminism itself was only 1/60 — PEG is near
-  deterministic.)
+Crucially, PEG's move is **throughput-sensitive and does NOT settle early** — this
+is structurally unlike the endgame:
 
-So the 4% nets **0 PEG playing strength** too. The top move settles early
-(best-first candidate scoring finds the winner among the first candidates), and
-flipping it requires completing a whole additional stage — far more than a
-few-percent throughput gain buys. It is the endgame branching-factor wall in a
-different guise. The speedup is throughput, not strength, for the pre-endgame as
-well.
+- **Within stage 1** the published move flipped on **23/40 positions (58%)** across
+  a 0.5→8 s budget sweep, and the flips occur *late* (e.g. `YER@d6 → HYTE@d21`), not
+  just among the first candidates.
+- **Doubling the budget changes the move on 18–28%** of positions. At a realistic
+  2 s budget the played move matches the near-converged (8 s) move only **60%** of
+  the time — the solver is often *not* playing the fully-considered best.
+
+So more candidate throughput genuinely improves the PEG move (mean published win
+0.394→0.424 from 2 s→8 s), because partial stages publish and candidates are
+granular — no discrete branching-factor wall.
+
+**But the ~4% is a small slice of that throughput.** A 2× budget (~2× candidates)
+flips ~25% of moves; +4% candidates is ~1/50th of that, extrapolating to **~1% of
+moves flipped** (0/60 in a direct 3.0 s vs 3.12 s A/B), with a modest win-delta per
+flip. So the PEG strength gain from the 4% is **small but non-zero** — a
+low-single-digit-percent move-change rate with modest value — *not* a structural
+zero. The takeaway that differs from the endgame: PEG's move-quality curve is steep
+and unsaturated at realistic budgets, so a *larger* endgame/leaf speedup would
+convert proportionally into pre-endgame strength; 4% simply isn't a big enough
+slice to matter much.
 
 ## Correctness validation
 
