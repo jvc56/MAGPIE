@@ -820,6 +820,83 @@ typedef struct PegScenarioCapture {
 // shared per-cand template to copy from and a result the worker fills.
 // Splitting at this granularity (rather than per-cand) keeps every core fed
 // even when a stage has only a couple of candidates.
+// Mid-stage survival gate over one scenario batch. As jobs complete, each
+// candidate's win weight accumulates here; a candidate whose OPTIMISTIC final
+// key -- every not-yet-evaluated scenario scored as a win, plus an extreme
+// spread tiebreak in its favor -- still falls below the keep-th best
+// PESSIMISTIC key in the batch can never survive the next stage's top-keep
+// cut, so its remaining scenario jobs are skipped. Both bounds are monotone
+// as weight accumulates (optimistic only falls, pessimistic only rises), so a
+// doom decision taken mid-stage remains valid at stage end. Protected
+// (pnoprune) candidates are exempt. The final stage runs ungated: its full
+// ranking is the published result.
+typedef struct PegStageGate {
+  cpthread_mutex_t mutex;
+  int n_cands;
+  int keep;           // survivors the next stage will take
+  double band;        // 1e-4 * PEG_GATE_SPREAD_EXTREME_PTS
+  const bool *exempt; // per-cand: never doom (protected moves); may be NULL
+  double *planned_w;  // per-cand total scenario weight the stage will evaluate
+  double *done_w;     // per-cand weight evaluated so far
+  double *win_w;      // per-cand win weight so far (ties count 0.5)
+  bool *doomed;
+} PegStageGate;
+
+// Folds one finished job into the gate and re-evaluates the doom condition.
+// Called by scenario workers after each job; the mutex serializes folds, and
+// the per-fold work is O(keep * n_cands) over a field of at most a few dozen
+// -- noise next to a single endgame solve.
+static void peg_gate_fold(PegStageGate *gate, int cand_idx, double add_done_w,
+                          double add_win_w) {
+  cpthread_mutex_lock(&gate->mutex);
+  gate->done_w[cand_idx] += add_done_w;
+  gate->win_w[cand_idx] += add_win_w;
+  // keep-th largest pessimistic key across the batch (selection over used[]).
+  bool used[PEG_CAND_LIST_CAP > 4096 ? 4096 : PEG_CAND_LIST_CAP];
+  memset(used, 0, (size_t)gate->n_cands * sizeof(bool));
+  double floor_key = -1.0;
+  for (int kth = 0; kth < gate->keep; kth++) {
+    int best_idx = -1;
+    double best = -2.0;
+    for (int i = 0; i < gate->n_cands; i++) {
+      if (used[i]) {
+        continue;
+      }
+      const double pes = gate->win_w[i] / gate->planned_w[i] - gate->band;
+      if (pes > best) {
+        best = pes;
+        best_idx = i;
+      }
+    }
+    if (best_idx < 0) {
+      break;
+    }
+    used[best_idx] = true;
+    floor_key = best;
+  }
+  for (int i = 0; i < gate->n_cands; i++) {
+    if (gate->doomed[i] || (gate->exempt != NULL && gate->exempt[i])) {
+      continue;
+    }
+    const double remaining = gate->planned_w[i] - gate->done_w[i];
+    const double opt =
+        (gate->win_w[i] + remaining) / gate->planned_w[i] + gate->band;
+    if (opt < floor_key) {
+      gate->doomed[i] = true;
+    }
+  }
+  cpthread_mutex_unlock(&gate->mutex);
+}
+
+// Doom check at job start. A stale false reading only means one more job
+// runs; a true reading is sticky.
+static bool peg_gate_is_doomed(PegStageGate *gate, int cand_idx) {
+  cpthread_mutex_lock(&gate->mutex);
+  const bool doomed = gate->doomed[cand_idx];
+  cpthread_mutex_unlock(&gate->mutex);
+  return doomed;
+}
+
 typedef struct PegScenarioJob {
   const Game *template_src;
   int mover_idx;
@@ -838,6 +915,7 @@ typedef struct PegScenarioJob {
   ThreadControl *thread_control;
   PegWorker *workers;
   int cand_idx;
+  PegStageGate *gate;          // optional mid-stage survival gate; may be NULL
   const PegProgress *progress; // optional; cand_idx is the cand rank
   // Optional per-ordering capture (PegArgs.include_per_scenario). When
   // do_capture is set, the worker records this split's orderings into its own
@@ -2060,6 +2138,11 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   if (job->deadline_ns != 0 && ctimer_monotonic_ns() >= job->deadline_ns) {
     return;
   }
+  // A doomed candidate's remaining scenarios are pure waste: skip them (the
+  // job's result fields stay zero and the caller drops the candidate).
+  if (job->gate != NULL && peg_gate_is_doomed(job->gate, job->cand_idx)) {
+    return;
+  }
   PegEvalCtx ctx;
   memset(&ctx, 0, sizeof(ctx));
   ctx.template_src = job->template_src;
@@ -2093,6 +2176,9 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   job->win_count = ctx.win_count;
   job->tie_count = ctx.tie_count;
   job->n_scenarios = ctx.n_scenarios;
+  if (job->gate != NULL) {
+    peg_gate_fold(job->gate, job->cand_idx, ctx.total_weight, ctx.win_weight);
+  }
 }
 
 // True when two moves are the same play (type, position, tiles).
@@ -2145,7 +2231,8 @@ static void peg_eval_candidates_scenario(
     int inner_top_k, int fidelity_plies, int scenario_stride,
     int64_t deadline_ns, ThreadControl *thread_control,
     const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked,
-    PegCandOutcomes *out_outcomes) {
+    PegCandOutcomes *out_outcomes, int gate_keep, const bool *gate_exempt,
+    bool *out_pruned) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -2191,6 +2278,27 @@ static void peg_eval_candidates_scenario(
     for (int job_idx = 0; job_idx < list.count; job_idx++) {
       list.jobs[job_idx].do_capture = true;
       list.jobs[job_idx].ld = ld;
+    }
+  }
+
+  // Mid-stage survival gate: only when a later stage will cut this field down
+  // to gate_keep (0 disables; the final stage always passes 0).
+  PegStageGate gate;
+  const bool use_gate = gate_keep > 0 && gate_keep < n;
+  if (use_gate) {
+    cpthread_mutex_init(&gate.mutex);
+    gate.n_cands = n;
+    gate.keep = gate_keep;
+    gate.band = 1e-4 * (double)PEG_GATE_SPREAD_EXTREME_PTS;
+    gate.exempt = gate_exempt;
+    gate.planned_w = calloc_or_die((size_t)n, sizeof(double));
+    gate.done_w = calloc_or_die((size_t)n, sizeof(double));
+    gate.win_w = calloc_or_die((size_t)n, sizeof(double));
+    gate.doomed = calloc_or_die((size_t)n, sizeof(bool));
+    for (int job_idx = 0; job_idx < list.count; job_idx++) {
+      gate.planned_w[list.jobs[job_idx].cand_idx] +=
+          (double)list.jobs[job_idx].weight;
+      list.jobs[job_idx].gate = &gate;
     }
   }
 
@@ -2263,6 +2371,17 @@ static void peg_eval_candidates_scenario(
   }
   for (int job_idx = 0; job_idx < list.count; job_idx++) {
     free(list.jobs[job_idx].cap.rows);
+  }
+  if (out_pruned != NULL) {
+    for (int i = 0; i < n; i++) {
+      out_pruned[i] = use_gate && gate.doomed[i];
+    }
+  }
+  if (use_gate) {
+    free(gate.planned_w);
+    free(gate.done_w);
+    free(gate.win_w);
+    free(gate.doomed);
   }
   for (int i = 0; i < n; i++) {
     ranked[i].win_pct = total_w[i] > 0 ? win_w[i] / total_w[i] : 0.0;
@@ -2736,6 +2855,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       PegRankedCand *restaged =
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       int done_count = eval_count;
+      // Candidates the survival gate decided out mid-stage (barrier path
+      // only): they count as decided, not as a budget-partial stage.
+      int stage_pruned_count = 0;
       if (args->poll != NULL) {
         // Live mode: evaluate one candidate at a time so each completion
         // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
@@ -2770,7 +2892,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
               args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
-              args->include_per_scenario ? &cand_oc : NULL);
+              args->include_per_scenario ? &cand_oc : NULL,
+              /*gate_keep=*/0, /*gate_exempt=*/NULL, /*out_pruned=*/NULL);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
@@ -2810,11 +2933,30 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             args->include_per_scenario
                 ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
                 : NULL;
+        // Gate this stage against the NEXT stage's cut (counts[stage_idx]);
+        // the final stage passes 0 (ungated) since its full ranking is the
+        // published result. Protected moves are exempt from dooming.
+        int gate_keep = 0;
+        if (!exhaustive && stage_idx < num_stages &&
+            counts[stage_idx] < eval_count) {
+          gate_keep = counts[stage_idx];
+        }
+        bool *gate_exempt = NULL;
+        if (gate_keep > 0 && n_protect > 0) {
+          gate_exempt = calloc_or_die((size_t)eval_count, sizeof(bool));
+          for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
+            gate_exempt[cand_idx] = peg_move_protected(
+                moves[cand_idx], mover_rack, protect_keys, n_protect);
+          }
+        }
+        bool *stage_pruned = calloc_or_die((size_t)eval_count, sizeof(bool));
         peg_eval_candidates_scenario(
             pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged, stage_oc);
+            &progress, args->poll, restaged, stage_oc, gate_keep, gate_exempt,
+            stage_pruned);
+        free(gate_exempt);
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.
@@ -2833,12 +2975,18 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             stage_oc != NULL
                 ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
                 : NULL;
+        // Three groups, in order: fully-scored (rankable at this depth),
+        // gate-pruned (decided out at this depth, recorded at the previous
+        // one), then deadline-partial (undecided; marks the stage partial).
         int placed = 0;
-        for (int pass = 0; pass < 2; pass++) {
-          const bool want_complete = pass == 0;
+        int pruned_placed = 0;
+        for (int pass = 0; pass < 3; pass++) {
           for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
-            const bool complete = restaged[cand_idx].weight_sum >= full_weight;
-            if (complete != want_complete) {
+            const bool pruned = stage_pruned[cand_idx];
+            const bool complete =
+                !pruned && restaged[cand_idx].weight_sum >= full_weight;
+            const int group = complete ? 0 : (pruned ? 1 : 2);
+            if (group != pass) {
               continue;
             }
             part_new[placed] = restaged[cand_idx];
@@ -2850,8 +2998,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           }
           if (pass == 0) {
             done_count = placed;
+          } else if (pass == 1) {
+            pruned_placed = placed - done_count;
           }
         }
+        stage_pruned_count = pruned_placed;
+        free(stage_pruned);
         memcpy(restaged, part_new, (size_t)eval_count * sizeof(PegRankedCand));
         memcpy(ranked, part_old, (size_t)eval_count * sizeof(PegRankedCand));
         free(part_new);
@@ -2898,7 +3050,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       live_count = done_count;
       prev_fidelity = stage_fidelity; // `ranked` is now scored at this depth
       peg_publish(out, ranked, done_count, stage_idx);
-      out->last_stage_partial = done_count < eval_count;
+      out->last_stage_partial = done_count + stage_pruned_count < eval_count;
       peg_poll_replace(args->poll, ranked, done_count, stage_idx,
                        stage_fidelity, done_count);
       // Surface this stage's per-candidate outcomes to the live poll so a
@@ -2907,7 +3059,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_poll_set_outcomes(args->poll, oc_store, oc_n);
       // A partial stage means the budget/interrupt already hit, so stop the
       // cascade rather than starting another (deeper, costlier) stage.
-      if (done_count < eval_count) {
+      // Gate-pruned candidates are decided, not partial: the cascade
+      // continues over the fully-scored survivors.
+      if (done_count + stage_pruned_count < eval_count) {
         break;
       }
     }

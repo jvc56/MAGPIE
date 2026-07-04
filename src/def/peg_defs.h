@@ -49,6 +49,12 @@ enum {
   // boards reaching an exact leaf are bounded by the candidate field (a few
   // hundred), so this is never approached in practice.
   PEG_PRUNE_CACHE_CAPACITY = 1 << 14,
+  // Extreme spread magnitude (display points) assumed when bounding a
+  // candidate's ranking key mid-stage: the stage key is win_pct + 1e-4 *
+  // mean_spread, so spread can move the key by at most 1e-4 * this value in
+  // either direction. 600 points comfortably exceeds any realistic endgame
+  // spread.
+  PEG_GATE_SPREAD_EXTREME_PTS = 600,
 };
 
 // Live-view (PegPoll) fixed capacities sizing the pollable snapshot's arrays.
