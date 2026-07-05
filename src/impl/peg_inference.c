@@ -289,6 +289,7 @@ static double peg_evaluate_candidate_leave(PegInferCtx *ctx) {
 
   // 3. Find (or build) the observed move's slot in the candidate list.
   int obs_idx = -1;
+  bool obs_force_inserted = false;
   if (ctx->observed_move_type == GAME_EVENT_EXCHANGE) {
     const Rack *target_rack =
         player_get_rack(game_get_player(ctx->inner_game, ctx->target_index));
@@ -324,6 +325,7 @@ static double peg_evaluate_candidate_leave(PegInferCtx *ctx) {
       move_copy(extra, &ctx->observed_move_copy);
       ctx->inner_move_list->count = num_static + 1;
       obs_idx = num_static;
+      obs_force_inserted = true;
     }
   }
   if (obs_idx < 0) {
@@ -340,12 +342,20 @@ static double peg_evaluate_candidate_leave(PegInferCtx *ctx) {
   // 4. Static pre-filter: skip the (expensive) PEG solve when the observed move
   //    already trails the static best by a wide margin. Kept generous, since a
   //    low-static setup can still be the pre-endgame win% best.
-  if (ctx->leave_size > 1) {
+  //
+  //    Only applied when the observed move was found in the generated field, so
+  //    its equity is fresh and comparable. A force-inserted observed move
+  //    carries the caller's stale equity (never recomputed for this leave), is
+  //    by construction a low-static play we must not prune, and -- for a pass --
+  //    an EQUITY_PASS_VALUE that equity_to_double cannot convert; skipping the
+  //    filter for it keeps the comparison honest and avoids that crash.
+  if (ctx->leave_size > 1 && !obs_force_inserted) {
     const double best_static = equity_to_double(
         move_get_equity(move_list_get_move(ctx->inner_move_list, 0)));
     const double obs_static = equity_to_double(
         move_get_equity(move_list_get_move(ctx->inner_move_list, obs_idx)));
-    if (best_static - obs_static > ctx->static_prefilter_margin * 4.0) {
+    gap = best_static - obs_static;
+    if (gap > ctx->static_prefilter_margin * 4.0) {
       result = 0.0;
       goto invoke_callback;
     }
@@ -388,8 +398,21 @@ static double peg_evaluate_candidate_leave(PegInferCtx *ctx) {
       if (u > best_util) {
         best_util = u;
       }
-      if (obs_util < 0.0 && cand_is_observed(ctx, &peg_result.top_cands[i].move)) {
+      if (obs_util < 0.0 &&
+          cand_is_observed(ctx, &peg_result.top_cands[i].move)) {
         obs_util = u;
+      }
+    }
+    // top_cands is only the last completed stage's survivors; under the halving
+    // cascade a higher-utility candidate can be cut before the final stage (PEG
+    // ranks by win% + a tiny spread term, not by this utility). graded_cands
+    // holds every candidate that entered a halving stage, so scan it too for
+    // the true best (empty in greedy-seed mode, where top_cands is already the
+    // full field). The observed move is protected, so it stays in top_cands.
+    for (int i = 0; i < peg_result.n_graded; i++) {
+      const double u = peg_cand_utility(ctx, &peg_result.graded_cands[i]);
+      if (u > best_util) {
+        best_util = u;
       }
     }
     if (obs_util >= 0.0) {
@@ -425,9 +448,13 @@ static void record_candidate_leave(PegInferCtx *ctx, double weight) {
   if (raw_draws == 0) {
     return;
   }
+  // A leave that earned a strictly positive weight should not vanish to a zero
+  // draw count just because it has a single draw-combination (raw_draws == 1)
+  // and a sub-0.5 weight; floor it to 1 so low-multiplicity leaves are
+  // down-weighted, not dropped.
   uint64_t weighted = (uint64_t)(raw_draws * weight + 0.5);
   if (weighted == 0) {
-    return;
+    weighted = 1;
   }
   const KLV *klv =
       player_get_klv(game_get_player(ctx->base_inner_game, ctx->target_index));
@@ -514,6 +541,8 @@ static bool setup_base_inner_game(PegInferCtx *ctx,
         error_stack, ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG,
         string_duplicate(
             "peg inference: failed to draw combined target tiles from bag"));
+    game_destroy(ctx->base_inner_game);
+    ctx->base_inner_game = NULL;
     return false;
   }
   if (!draw_rack_from_bag(ctx->base_inner_game, 1 - ctx->target_index,
@@ -565,10 +594,19 @@ void peg_infer(const PegInferenceArgs *args, InferenceResults *results,
                                 : PEG_INFER_DEFAULT_CANDIDATE_PLAYS;
   ctx.util_w_winpct =
       args->utility_w_winpct > 0.0 ? args->utility_w_winpct : 1.0;
-  ctx.util_w_spread = args->utility_w_spread; // 0.0 default = pure win%
+  // The pre-endgame inference unifies on the score+win blended utility, so the
+  // spread term is on by default (unlike the simmer's pure-win% default). The
+  // 0.3 utility margin is calibrated for this blend; a pure-win% gap (a few
+  // points) would be far too small for it.
+  ctx.util_w_spread =
+      args->utility_w_spread > 0.0 ? args->utility_w_spread : 1.0;
   ctx.util_spread_scale =
       args->utility_spread_scale > 0.0 ? args->utility_spread_scale : 100.0;
-  ctx.greedy_seed_only = args->greedy_seed_only;
+  // Inner-solve depth defaults per bag: the wider big-bag scenario space gets
+  // the cheap, deterministic greedy seed; 1-2 tiles in the bag can afford the
+  // halving cascade's deeper refinement.
+  const int peg_bag = bag_get_letters(game_get_bag(base->game));
+  ctx.greedy_seed_only = args->greedy_seed_only || (peg_bag >= 3);
   ctx.peg_max_stage = args->peg_max_stage;
   ctx.peg_scenario_stride = args->peg_scenario_stride;
   ctx.peg_opp_model = args->peg_opp_model;

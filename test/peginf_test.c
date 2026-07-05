@@ -85,17 +85,15 @@ static void assert_peginf_tile_placement_no_crash(void) {
 
   InferenceResults *inference_results = inference_results_create(NULL);
 
+  // Utility weights, margin, and greedy-seed depth are left at peg_infer's
+  // defaults (blended score+win utility, 0.3 margin, greedy for this 4-in-bag
+  // position), so this also covers the default configuration.
   const PegInferenceArgs peg_args = {
       .base = &base_args,
       .observed_move = &observed_move,
       .num_candidate_plays = 5,
-      .utility_w_winpct = 1.0,
-      .utility_w_spread = 1.0,
-      .utility_spread_scale = 100.0,
-      .greedy_seed_only = true,
       .exhaustive_max_leave = 2,
       .time_budget_s = 4.0,
-      .peg_utility_margin = 0.3,
   };
 
   thread_control_set_status(config_get_thread_control(config),

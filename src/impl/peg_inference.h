@@ -58,20 +58,25 @@ typedef struct PegInferenceArgs {
 
   // Score+win utility weights (sim_utility_blend, sim_args.h). The per-move
   // value is (w_winpct*win% + w_spread*sigmoid(spread/spread_scale)) /
-  // (w_winpct + w_spread), in [0, 1]. Zero/unset uses w_winpct 1.0, w_spread
-  // 0.0 (pure win%), spread_scale 100.0. Set w_spread > 0 to weight margin.
+  // (w_winpct + w_spread), in [0, 1]. Unlike the simmer (which defaults to pure
+  // win%), pre-endgame inference unifies on the blended utility: zero/unset
+  // uses w_winpct 1.0, w_spread 1.0 (blended), spread_scale 100.0, which the
+  // 0.3 utility margin is calibrated for.
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
 
   // Inner PEG-solver configuration. The cost/depth levers that scale the
   // inference from 1peg (afford a deeper solve per leave) to 4peg (cheap greedy
-  // solve, fewer candidates, sampled scenarios). Optional; 0/false uses a
-  // per-bag default chosen by peg_infer.
+  // solve, fewer candidates, sampled scenarios).
   //   greedy_seed_only    : rank the field by the stage-0 greedy win% only
-  //                         (bounded, deterministic; the default for big bags).
-  //   peg_max_stage       : cap on PEG halving stages when not greedy-only.
-  //   peg_scenario_stride : PEG scenario sampling (1 = full, k > 1 = sampled).
+  //                         (bounded, deterministic). peg_infer forces this on
+  //                         for bag >= 3 regardless; for bag 1-2 it defaults off
+  //                         (the halving cascade), and setting it true overrides.
+  //   peg_max_stage       : cap on PEG halving stages when not greedy-only
+  //                         (0 = run the full cascade; only used for bag 1-2).
+  //   peg_scenario_stride : PEG scenario sampling (1 = full, k > 1 = sampled;
+  //                         0 = the solver's per-bag default). Passed through.
   //   peg_opp_model       : opponent model for the inner solve (default rational).
   bool greedy_seed_only;
   int peg_max_stage;
