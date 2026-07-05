@@ -60,6 +60,9 @@
 #define PEG_BENCH_MAX_CANDIDATES 20
 #define PEG_BENCH_ENDGAME_PLIES 25
 #define PEG_BENCH_INFERENCE_SAMPLES 200
+// Larger sample counts cut the MC noise in arm B's per-candidate win% estimate
+// (SE ~ sqrt(0.25/N)), so its move choice is driven by the inferred weighting
+// rather than sampling noise.
 // Fraction of the per-turn budget the inference step may use; the rest goes to
 // the PEG solve so the whole turn stays within budget.
 #define PEG_BENCH_INFER_BUDGET_FRAC 0.4
@@ -75,6 +78,10 @@
 // Hardware threads each PEG solve / endgame / inference runs on (all cores, like
 // a real peg run); set once per test from config_get_num_threads.
 static int g_bench_num_threads = 1;
+// Per-turn time budget (s) and arm-B MC sample count; env-overridable per test
+// (PEGBENCH_BUDGET / PEGBENCH_SAMPLES) so a larger-budget run needs no rebuild.
+static double g_bench_budget_s = PEG_BENCH_TURN_BUDGET_S;
+static int g_bench_samples = PEG_BENCH_INFERENCE_SAMPLES;
 
 // Read a positive integer environment override, or fall back to def.
 static int peg_bench_env_int(const char *name, int def) {
@@ -84,6 +91,16 @@ static int peg_bench_env_int(const char *name, int def) {
   }
   const int parsed = atoi(v);
   return parsed > 0 ? parsed : def;
+}
+
+// Read a positive double environment override, or fall back to def.
+static double peg_bench_env_double(const char *name, double def) {
+  const char *v = getenv(name);
+  if (v == NULL) {
+    return def;
+  }
+  const double parsed = atof(v);
+  return parsed > 0.0 ? parsed : def;
 }
 
 static double peg_bench_now_s(void) {
@@ -293,7 +310,7 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
       peg_args.only_moves = cands;
       peg_args.n_only_moves = n_cand;
       peg_args.opp_leave_prior = prior;
-      peg_args.inference_samples = prior ? PEG_BENCH_INFERENCE_SAMPLES : 0;
+      peg_args.inference_samples = prior ? g_bench_samples : 0;
       peg_args.inference_seed = seed;
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
       PegResult peg_result = {0};
@@ -367,8 +384,7 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
     if (use_inference && on_turn == inferring_player && prev_inferable &&
         turn_bag >= PEG_MIN_BAG && turn_bag <= PEG_MAX_BAG) {
       const double t0 = peg_bench_now_s();
-      const double infer_budget =
-          PEG_BENCH_TURN_BUDGET_S * PEG_BENCH_INFER_BUDGET_FRAC;
+      const double infer_budget = g_bench_budget_s * PEG_BENCH_INFER_BUDGET_FRAC;
       if (peg_bench_run_inference(game_before_prev, &prev_move, prev_player,
                                   prev_turn_bag, win_pcts, thread_control,
                                   inf_results, infer_budget, error_stack)) {
@@ -377,7 +393,7 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
       infer_elapsed = peg_bench_now_s() - t0;
     }
 
-    double solve_budget = PEG_BENCH_TURN_BUDGET_S - infer_elapsed;
+    double solve_budget = g_bench_budget_s - infer_elapsed;
     if (solve_budget < 0.5) {
       solve_budget = 0.5;
     }
@@ -397,7 +413,7 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
           "    turn %2d  p%d  bag=%d  infer=%.2fs solve=%.2fs total=%.2fs%s%s\n",
           turn, on_turn, turn_bag, infer_elapsed, solve_elapsed, turn_total,
           prior != NULL ? "  [inf]" : "",
-          turn_total > PEG_BENCH_TURN_BUDGET_S * 1.5 ? "  *** OVER" : "");
+          turn_total > g_bench_budget_s * 1.5 ? "  *** OVER" : "");
     }
 
     game_copy(game_before_prev, snapshot);
@@ -414,7 +430,7 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
   }
   if (verbose) {
     printf("    (%d turns, worst turn %.2fs vs %.2fs budget)\n", turn, worst,
-           PEG_BENCH_TURN_BUDGET_S);
+           g_bench_budget_s);
   }
 
   inference_results_destroy(inf_results);
@@ -523,9 +539,13 @@ void test_peginf_benchmark(void) {
                      error_stack);
   assert(error_stack_is_empty(error_stack));
   g_bench_num_threads = config_get_num_threads(config);
+  g_bench_budget_s =
+      peg_bench_env_double("PEGBENCH_BUDGET", PEG_BENCH_TURN_BUDGET_S);
+  g_bench_samples =
+      peg_bench_env_int("PEGBENCH_SAMPLES", PEG_BENCH_INFERENCE_SAMPLES);
 
   printf("  PEG A/B benchmark (4-in-bag CSW24, budget %.1fs/turn, %d threads):\n",
-         PEG_BENCH_TURN_BUDGET_S, g_bench_num_threads);
+         g_bench_budget_s, g_bench_num_threads);
 
   // Run the A/B for each player as the inferring player. In this position p0
   // moves first (no opponent prior move -> inference is a no-op on its only PEG
@@ -639,6 +659,10 @@ void test_peginf_benchmark_generate(void) {
                                     DEFAULT_WIN_PCT, error_stack);
   assert(error_stack_is_empty(error_stack));
   g_bench_num_threads = config_get_num_threads(config);
+  g_bench_budget_s =
+      peg_bench_env_double("PEGBENCH_BUDGET", PEG_BENCH_TURN_BUDGET_S);
+  g_bench_samples =
+      peg_bench_env_int("PEGBENCH_SAMPLES", PEG_BENCH_INFERENCE_SAMPLES);
 
   // Quotas, seed, and game cap are env-overridable (PEGBENCH_SIM / _PEG / _SEED
   // / _GAMECAP) so a large run needs no rebuild.
@@ -655,7 +679,7 @@ void test_peginf_benchmark_generate(void) {
                                    base_seed, game_cap);
   printf("  PEG A/B aggregation: generated %d positions (target %d sim + %d "
          "peg), budget %.1fs/turn, %d threads\n",
-         n, max_sim, max_peg, PEG_BENCH_TURN_BUDGET_S, g_bench_num_threads);
+         n, max_sim, max_peg, g_bench_budget_s, g_bench_num_threads);
 
   // Debug: skip playing positions before this index (generation is
   // deterministic, so this jumps straight to a specific position to reproduce).
@@ -740,6 +764,8 @@ void test_peginf_endgame_repro(void) {
   ThreadControl *thread_control = config_get_thread_control(config);
   ErrorStack *error_stack = error_stack_create();
   g_bench_num_threads = threads;
+  g_bench_budget_s =
+      peg_bench_env_double("PEGBENCH_BUDGET", PEG_BENCH_TURN_BUDGET_S);
 
   printf("  endgame repro: %d threads, %d iters, d%d\n", threads, iters,
          PEG_BENCH_ENDGAME_PLIES);
@@ -747,7 +773,7 @@ void test_peginf_endgame_repro(void) {
     Game *g = game_duplicate(game);
     Move mv;
     const bool played = peg_bench_play_endgame(
-        g, thread_control, PEG_BENCH_TURN_BUDGET_S, &mv, error_stack);
+        g, thread_control, g_bench_budget_s, &mv, error_stack);
     printf("    iter %2d: played=%d err=%d\n", i, played,
            !error_stack_is_empty(error_stack));
     fflush(stdout);
