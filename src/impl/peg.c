@@ -12,12 +12,14 @@
 #include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/alias_method.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
 #include "../ent/kwg.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
@@ -25,6 +27,7 @@
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "../ent/xoshiro.h"
 #include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "endgame.h"
@@ -1820,6 +1823,12 @@ typedef struct PegCandJob {
   // of enumerating scenarios (see PegArgs.eval_bag_order).
   const MachineLetter *eval_bag_order;
   int eval_bag_order_len;
+  // When opp_leave_prior != NULL, sample inference_samples opponent racks from
+  // it instead of enumerating (see PegArgs.opp_leave_prior). Seeded per
+  // candidate from inference_seed for thread-safe reproducibility.
+  const InferenceResults *opp_leave_prior;
+  int inference_samples;
+  uint64_t inference_seed;
 } PegCandJob;
 
 // Evaluate exactly one bag ordering for the cand (no enumeration): the mover
@@ -1860,6 +1869,86 @@ static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
   ctx->spread_weight = (double)value;
   ctx->weight_sum = 1;
   ctx->n_scenarios = 1;
+}
+
+// Inference-weighted scenario sampling (the pre-endgame analogue of the
+// simmer's inference-weighted opponent draws). Instead of enumerating the
+// uniform unseen splits, draw n_samples opponent racks from the leave-inference
+// prior: sample a leave from its AliasMethod, then complete it to a full rack
+// from the remaining unseen (mirroring set_random_rack). The leftover unseen is
+// the bag -- the mover draws its k_drawn tiles off the front and the rest is the
+// bag ordering. peg_make_post_cand_game derives the opponent rack as
+// unseen - (mover_drawn ++ bag_remaining), which equals the sampled rack by
+// construction. Each sample carries weight 1, so the caller reads win%/spread
+// exactly as for the enumerated path.
+static void peg_eval_inference_samples(PegEvalCtx *ctx,
+                                       const InferenceResults *prior,
+                                       int n_samples, XoshiroPRNG *prng) {
+  AliasMethod *am =
+      inference_results_get_alias_method((InferenceResults *)prior);
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ctx->ld_size);
+  for (int s = 0; s < n_samples; s++) {
+    if (ctx->deadline_ns != 0 && ctimer_monotonic_ns() >= ctx->deadline_ns) {
+      break;
+    }
+    // Sample an opponent leave from the inference (empty prior => uniform rack).
+    rack_reset(&leave);
+    alias_method_sample(am, prng, &leave);
+    // Pool = the unseen tiles not pinned by the leave.
+    MachineLetter pool[RACK_SIZE + PEG_MAX_BAG];
+    int pool_n = 0;
+    for (int ml = 0; ml < ctx->ld_size; ml++) {
+      const int rem = (int)ctx->unseen[ml] - (int)rack_get_letter(&leave, ml);
+      for (int i = 0; i < rem; i++) {
+        pool[pool_n++] = (MachineLetter)ml;
+      }
+    }
+    // Shuffle: the front completes the opponent's rack (leave + draws); the
+    // remainder is the bag (the mover's k_drawn draws ++ the bag ordering).
+    for (int i = 0; i < pool_n; i++) {
+      const uint64_t j =
+          (uint64_t)i + prng_get_random_number(prng, (uint64_t)(pool_n - i));
+      const MachineLetter tmp = pool[i];
+      pool[i] = pool[j];
+      pool[j] = tmp;
+    }
+    int need = RACK_SIZE - rack_get_total_letters(&leave);
+    if (need < 0) {
+      need = 0;
+    }
+    int p = need < pool_n ? need : pool_n; // opp completion consumes pool[0..need)
+    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    int n_mover = 0;
+    for (; n_mover < ctx->k_drawn && p < pool_n; n_mover++, p++) {
+      mover_drawn[n_mover] = pool[p];
+    }
+    int n_bag_rem = 0;
+    for (; p < pool_n; p++) {
+      bag_remaining[n_bag_rem++] = pool[p];
+    }
+    Game *game = peg_make_post_cand_game(
+        ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
+        ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_rem, bag_remaining);
+    const int32_t value = peg_eval_leaf(ctx, game);
+    if (ctx->progress != NULL && ctx->progress->on_scenario_done != NULL) {
+      ctx->progress->on_scenario_done(ctx->progress->stage_idx, ctx->cand_idx,
+                                      ctx->n_scenarios, value, 1,
+                                      ctx->progress->user_data);
+    }
+    ctx->total_weight += 1.0;
+    if (value > 0) {
+      ctx->win_weight += 1.0;
+      ctx->win_count++;
+    } else if (value == 0) {
+      ctx->win_weight += 0.5;
+      ctx->tie_count++;
+    }
+    ctx->spread_weight += (double)value;
+    ctx->weight_sum += 1;
+    ctx->n_scenarios++;
+  }
 }
 
 static void peg_cand_worker_fn(void *arg, int worker_idx) {
@@ -1908,6 +1997,15 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   if (job->eval_bag_order_len > 0) {
     // Pinned single scenario: evaluate exactly the caller's bag ordering.
     peg_eval_fixed_ordering(&ctx, job->eval_bag_order, job->eval_bag_order_len);
+  } else if (job->opp_leave_prior != NULL) {
+    // Inference-weighted sampling instead of uniform enumeration. Seed a
+    // per-candidate PRNG so the sample is reproducible and independent of how
+    // the pool schedules candidates across worker threads.
+    XoshiroPRNG *prng =
+        prng_create(job->inference_seed + (uint64_t)job->cand_rank + 1);
+    peg_eval_inference_samples(&ctx, job->opp_leave_prior,
+                               job->inference_samples, prng);
+    prng_destroy(prng);
   } else {
     MachineLetter mover_drawn[PEG_MAX_BAG + 1];
     MachineLetter bag_remaining[PEG_MAX_BAG + 1];
@@ -2009,7 +2107,8 @@ static void peg_eval_candidates(
     int scenario_stride, int64_t deadline_ns, ThreadControl *thread_control,
     PegPoll *poll, const PegProgress *progress,
     const MachineLetter *eval_bag_order, int eval_bag_order_len,
-    PegRankedCand *ranked) {
+    const InferenceResults *opp_leave_prior, int inference_samples,
+    uint64_t inference_seed, PegRankedCand *ranked) {
   PegCandJob *jobs = malloc_or_die((size_t)n * sizeof(PegCandJob));
   for (int i = 0; i < n; i++) {
     jobs[i].base_game = game;
@@ -2031,6 +2130,9 @@ static void peg_eval_candidates(
     jobs[i].cand_rank = i;
     jobs[i].eval_bag_order = eval_bag_order;
     jobs[i].eval_bag_order_len = eval_bag_order_len;
+    jobs[i].opp_leave_prior = opp_leave_prior;
+    jobs[i].inference_samples = inference_samples;
+    jobs[i].inference_seed = inference_seed;
   }
   if (pool) {
     void **ptrs = malloc_or_die((size_t)n * sizeof(void *));
@@ -2650,7 +2752,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                         args->inner_top_k, /*fidelity_plies=*/0,
                         scenario_stride, deadline_ns, args->thread_control,
                         args->poll, &progress, args->eval_bag_order,
-                        args->eval_bag_order_len, ranked);
+                        args->eval_bag_order_len, args->opp_leave_prior,
+                        args->inference_samples, args->inference_seed, ranked);
     qsort(ranked, (size_t)n_cands, sizeof(PegRankedCand), peg_rank_cmp);
     // Drop budget-skipped sentinels (win_pct < 0) from the carried set: they
     // sort to the bottom, so the real candidates occupy [0, n_real).

@@ -5,6 +5,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../def/peg_defs.h"
 #include "../ent/game.h"
+#include "../ent/inference_results.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
 #include "../util/io_util.h"
@@ -153,6 +154,18 @@ typedef struct PegArgs {
   // k > 1 = sample one multiset per k weight-units, scaled accordingly.
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
+
+  // Optional opponent-leave prior for inference-weighted scenario sampling.
+  // When non-NULL, PEG samples the opponent's COMPLETE rack per scenario from
+  // this leave distribution -- sample a leave via its AliasMethod, then draw to
+  // a full rack from the remaining unseen -- instead of enumerating the uniform
+  // unseen, the pre-endgame analogue of the simmer's inference-weighted
+  // opponent draws. inference_samples scenarios are drawn per candidate;
+  // inference_seed seeds a per-candidate, thread-independent sampler. NULL =
+  // uniform enumeration (default). Honored in the greedy seed stage.
+  const InferenceResults *opp_leave_prior;
+  int inference_samples;
+  uint64_t inference_seed;
 
   // Nested pre-endgame lookahead for NON-EMPTIER leaves. When nested_enabled,
   // a leaf that still has bag tiles is evaluated by recursively solving the

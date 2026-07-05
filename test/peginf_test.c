@@ -1,19 +1,24 @@
 // Unit tests for peg_inference.c (pre-endgame inference).
 
+#include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/inference_args.h"
+#include "../src/ent/alias_method.h"
 #include "../src/ent/inference_results.h"
 #include "../src/ent/leave_rack.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/impl/peg.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/peg_inference.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
@@ -114,4 +119,100 @@ static void assert_peginf_tile_placement_no_crash(void) {
   config_destroy(config);
 }
 
-void test_peginf(void) { assert_peginf_tile_placement_no_crash(); }
+// The PEG solver's inference-weighted scenario sampling: with an opponent-leave
+// prior, PEG must sample the opponent's complete rack from that prior instead
+// of enumerating the uniform unseen. Pin the prior to the opponent's actual
+// rack (a single leave of full size) and confirm (a) the sampling path runs
+// exactly inference_samples scenarios per candidate, and (b) it is a distinct
+// path from the uniform enumeration.
+static void test_peg_inference_weighted_scenarios(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
+      "-threads 1");
+  load_and_exec_config_or_die(config, PEG_INFER_4BAG_CGP ";");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Prior pinned to the opponent's (player 1) actual rack, DEIINOS -- a valid
+  // subset of the mover's unseen, so every sampled opponent rack is DEIINOS.
+  Rack opp_leave;
+  rack_set_dist_size_and_reset(&opp_leave, ld_size);
+  rack_copy(&opp_leave, player_get_rack(game_get_player(game, 1)));
+  AliasMethod *alias = alias_method_create();
+  alias_method_add_rack(alias, &opp_leave, 1);
+  assert(alias_method_generate_tables(alias));
+  InferenceResults *prior = inference_results_create(alias);
+
+  ThreadControl *thread_control = thread_control_create();
+
+  // Restrict both solves to the mover's top few plays so the test is fast; the
+  // hook under test is orthogonal to the candidate field.
+  MoveList *move_list = move_list_create(64);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .tiles_played_bv = NULL,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(move_list);
+  const int n_only =
+      move_list_get_count(move_list) < 5 ? move_list_get_count(move_list) : 5;
+  const Move *only_moves[5];
+  for (int i = 0; i < n_only; i++) {
+    only_moves[i] = move_list_get_move(move_list, i);
+  }
+
+  // Baseline: uniform opponent (no prior).
+  PegArgs base_args = {0};
+  base_args.game = game;
+  base_args.thread_control = thread_control;
+  base_args.num_threads = 1;
+  base_args.greedy_seed_only = true;
+  base_args.time_budget_seconds = 30.0;
+  base_args.only_moves = only_moves;
+  base_args.n_only_moves = n_only;
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  PegResult uniform = {0};
+  peg_solve(&base_args, &uniform, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(uniform.n_top_cands > 0);
+  assert(uniform.best_win >= 0.0 && uniform.best_win <= 1.0);
+
+  // Inference-weighted: opponent pinned to DEIINOS via the prior.
+  const int inference_samples = 64;
+  PegArgs inf_args = base_args;
+  inf_args.opp_leave_prior = prior;
+  inf_args.inference_samples = inference_samples;
+  inf_args.inference_seed = 42;
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  PegResult weighted = {0};
+  peg_solve(&inf_args, &weighted, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(weighted.n_top_cands > 0);
+  assert(weighted.best_win >= 0.0 && weighted.best_win <= 1.0);
+  // The sampling path ran exactly inference_samples scenarios per candidate...
+  assert(weighted.top_cands[0].n_scenarios == inference_samples);
+  // ...a distinct path from the uniform enumeration (which sweeps far more).
+  assert(uniform.top_cands[0].n_scenarios != inference_samples);
+
+  peg_result_destroy(&uniform);
+  peg_result_destroy(&weighted);
+  move_list_destroy(move_list);
+  thread_control_destroy(thread_control);
+  inference_results_destroy(prior);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+void test_peginf(void) {
+  assert_peginf_tile_placement_no_crash();
+  test_peg_inference_weighted_scenarios();
+}
