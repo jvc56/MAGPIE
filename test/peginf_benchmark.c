@@ -34,6 +34,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
@@ -217,6 +218,13 @@ static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
   endgame_args.hard_time_limit = budget_s;
   endgame_args.external_deadline_ns =
       ctimer_monotonic_ns() + (int64_t)(budget_s * 1.0e9);
+
+  if (getenv("PEGBENCH_DUMP_ENDGAME") != NULL) {
+    char *cgp = game_get_cgp(game, /*write_player_on_turn_first=*/true);
+    printf("    ENDGAME_CGP %s\n", cgp);
+    fflush(stdout);
+    free(cgp);
+  }
 
   EndgameCtx *ctx = endgame_ctx_create();
   EndgameResults *results = endgame_results_create();
@@ -649,12 +657,20 @@ void test_peginf_benchmark_generate(void) {
          "peg), budget %.1fs/turn, %d threads\n",
          n, max_sim, max_peg, PEG_BENCH_TURN_BUDGET_S, g_bench_num_threads);
 
+  // Debug: skip playing positions before this index (generation is
+  // deterministic, so this jumps straight to a specific position to reproduce).
+  const int start = peg_bench_env_int("PEGBENCH_START", 0);
+
   PegBenchTally overall = {0};
   PegBenchTally sim = {0};
   PegBenchTally peg = {0};
   const double t_start = peg_bench_now_s();
   for (int i = 0; i < n; i++) {
     PegBenchPosition *p = &positions[i];
+    if (i < start) {
+      peg_bench_position_destroy(p);
+      continue;
+    }
     const bool sim_inf = p->prev_turn_bag >= PEG_BENCH_SIM_INFER_BAG;
     const PegBenchPrevCtx ctx = {
         .game_before_prev = p->game_before_prev,
@@ -695,6 +711,51 @@ void test_peginf_benchmark_generate(void) {
   free(positions);
   win_pct_destroy(win_pcts);
   move_list_destroy(move_list);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Diagnostic: run the d25 endgame on a single CGP (env PEGBENCH_CGP) repeatedly
+// at a controllable thread count (PEGBENCH_THREADS) to isolate whether the
+// zobrist_add_move overflow is a parallel-endgame race (crashes only with >1
+// thread) or a deterministic position/depth bug (crashes single-threaded too).
+void test_peginf_endgame_repro(void) {
+  const char *cgp = getenv("PEGBENCH_CGP");
+  if (cgp == NULL) {
+    printf("  set PEGBENCH_CGP to a board+racks CGP\n");
+    return;
+  }
+  const int threads = peg_bench_env_int("PEGBENCH_THREADS", get_num_cores());
+  const int iters = peg_bench_env_int("PEGBENCH_ITERS", 30);
+  char cmd[256];
+  snprintf(cmd, sizeof(cmd),
+           "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
+           "-threads %d",
+           threads);
+  Config *config = config_create_or_die(cmd);
+  char cgp_cmd[512];
+  snprintf(cgp_cmd, sizeof(cgp_cmd), "cgp %s", cgp);
+  load_and_exec_config_or_die(config, cgp_cmd);
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = config_get_thread_control(config);
+  ErrorStack *error_stack = error_stack_create();
+  g_bench_num_threads = threads;
+
+  printf("  endgame repro: %d threads, %d iters, d%d\n", threads, iters,
+         PEG_BENCH_ENDGAME_PLIES);
+  for (int i = 0; i < iters; i++) {
+    Game *g = game_duplicate(game);
+    Move mv;
+    const bool played = peg_bench_play_endgame(
+        g, thread_control, PEG_BENCH_TURN_BUDGET_S, &mv, error_stack);
+    printf("    iter %2d: played=%d err=%d\n", i, played,
+           !error_stack_is_empty(error_stack));
+    fflush(stdout);
+    error_stack_reset(error_stack);
+    game_destroy(g);
+  }
+  printf("  DONE (no crash over %d iters)\n", iters);
+
   error_stack_destroy(error_stack);
   config_destroy(config);
 }
