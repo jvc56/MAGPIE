@@ -20,14 +20,25 @@ typedef enum {
   // Endgame solver. Only valid once the bag is empty. Respects the
   // per-move time budget.
   PLAY_CHOOSER_EVAL_ENDGAME,
+  // Pre-endgame solver: enumerates the bag's draw scenarios and solves the
+  // resulting (near-)endgames, ranking candidates by win probability. Valid
+  // only while the bag holds [PEG_MIN_BAG, PEG_MAX_BAG] tiles; for larger bags
+  // the chooser falls back to SIM (when win_pcts are set) or STATIC. Values a
+  // position by the score+win utility in [0, 1] (see utility_w_spread below),
+  // so keep/challenge branches are directly comparable. Respects the
+  // per-move / per-decision time budget.
+  PLAY_CHOOSER_EVAL_PEG,
 } play_chooser_eval_t;
 
 // Describes how a computer player delegates its decisions. Examples:
 //   static always:          pre_endgame_eval=STATIC, endgame_eval=STATIC
 //   static until endgame:   pre_endgame_eval=STATIC, endgame_eval=ENDGAME
 //   sim with endgame solve: pre_endgame_eval=SIM,    endgame_eval=ENDGAME
+//   peg into endgame:       pre_endgame_eval=PEG,    endgame_eval=ENDGAME
 typedef struct PlayChooserStrategy {
-  // Evaluation used while the bag still has tiles: STATIC or SIM.
+  // Evaluation used while the bag still has tiles: STATIC, SIM, or PEG. PEG
+  // only runs in the low-bag pre-endgame ([PEG_MIN_BAG, PEG_MAX_BAG]); above
+  // that it falls back to SIM (if win_pcts set) or STATIC.
   play_chooser_eval_t pre_endgame_eval;
   // Evaluation used once the bag is empty: STATIC or ENDGAME.
   play_chooser_eval_t endgame_eval;
@@ -60,6 +71,23 @@ typedef struct PlayChooserStrategy {
   double challenge_decision_seconds;
   WinPct *win_pcts; // required for SIM; not owned
   int num_threads;  // 0 = 1
+  // PEG scenario stride: 1 = full enumeration, k > 1 = weight-stratified
+  // sampling (faster, approximate), 0 = the solver's per-bag default. Only
+  // used by PLAY_CHOOSER_EVAL_PEG.
+  int peg_scenario_stride;
+  // Score+win utility for valuing a branch, identical to the simmer's
+  // sim_utility_blend (see sim_args.h): the branch value is
+  //   (w_winpct * win% + w_spread * sigmoid(spread / spread_scale))
+  //   / (w_winpct + w_spread),
+  // bounded in [0, 1]. win% is the branch's win probability (1 / 0 / 0.5 for a
+  // decided game) and spread is its mean final spread, so equal-win% branches
+  // are separated by margin, with diminishing returns. Used by
+  // PLAY_CHOOSER_EVAL_PEG (its pre-endgame, endgame, and game-over branches).
+  // Zero/unset defaults match the simmer: w_winpct 1.0, w_spread 0.0 (pure
+  // win%), spread_scale 100.0.
+  double utility_w_winpct;
+  double utility_w_spread;
+  double utility_spread_scale;
   uint64_t seed;
 } PlayChooserStrategy;
 
@@ -72,8 +100,8 @@ typedef struct ChallengeDecision {
   bool should_challenge;
   // Diagnostic branch values from the chooser's perspective. Units depend
   // on the evaluation mode (final spread points for STATIC/ENDGAME, win
-  // fraction for SIM) but are always comparable to each other within a
-  // single decision.
+  // fraction for SIM, the score+win utility in [0, 1] for PEG) but are always
+  // comparable to each other within a single decision.
   double keep_value;
   double challenge_value;
 } ChallengeDecision;

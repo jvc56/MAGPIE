@@ -577,6 +577,140 @@ static void test_endgame_initial_window(void) {
   config_destroy(config);
 }
 
+// Pre-endgame challenge decisions driven by the PEG solver. In a real
+// 4-in-bag CSW24 position the chooser (DEIINOS, ahead by 36) faces a
+// phony hook on BEATY announced by the opponent (ACEINOP). With
+// pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG the chooser values the keep
+// branch (phony stands, opponent draws) and the challenge branch (phony
+// off, opponent loses the turn) by the score+win utility. A detected phony
+// is challenged by default; the chooser keeps it only when keeping is
+// strictly better. A one-tile hook leaves the bag non-empty in both
+// branches, so this is a genuine pre-endgame-vs-pre-endgame decision solved
+// by PEG, not a fall-through to the endgame.
+//
+// The branch valuation uses PEG's greedy seed (stage 0): it ranks the full
+// candidate field over every bag-draw scenario with a deterministic playout
+// and no open-ended deep endgame solves, so the value is bounded and
+// machine-independent once the seed completes (the generous decision budget
+// guarantees that) rather than depending on how many refinement stages a
+// wall-clock budget happened to finish.
+//
+// The branch value is the simmer's score+win utility (sim_utility_blend):
+// win% blended with a sigmoid of the mean spread, so margin matters and
+// equal-win% branches are separated by score. With utility_w_spread > 0 a
+// certain-win branch is discounted below 1.0 by its finite margin (see the
+// CBEATY keep-branch assertion below), which is exactly what pure win% could
+// not express.
+//
+// The same position yields opposite verdicts depending on the phony:
+//   - OBEATY: challenging it off (denying the opponent the points and the
+//     turn) raises the chooser's utility, so the chooser challenges.
+//   - CBEATY: keeping it locks in the opponent's weak play and the chooser
+//     wins nearly for certain, whereas challenging would hand the opponent a
+//     do-over with its strong ACEINOP rack, so the chooser declines.
+static void test_peg_challenge_decision_case(
+    const PlayChooserStrategy *strategy, const Game *game,
+    const char *phony_str, bool expect_challenge, ChallengeDecision *decision) {
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *vms =
+      validated_moves_create(game, 0, phony_str, true, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_is_phony(vms, 0));
+  const Move *phony = validated_moves_get_move(vms, 0);
+
+  PlayChooser *play_chooser = play_chooser_create(strategy);
+  play_chooser_decide_challenge(play_chooser, game, phony, decision,
+                                error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(decision->move_is_phony);
+  // PEG branch values are score+win utilities in [0, 1].
+  assert(decision->keep_value >= 0.0 && decision->keep_value <= 1.0);
+  assert(decision->challenge_value >= 0.0 && decision->challenge_value <= 1.0);
+  // A detected phony is challenged by default: the chooser keeps it only with
+  // two valid branch evaluations where keeping is strictly better. For these
+  // cases (both branches valid, or the degenerate both-invalid 0/0) the verdict
+  // therefore matches challenge_value >= keep_value.
+  assert(decision->should_challenge ==
+         (decision->challenge_value >= decision->keep_value));
+  assert(decision->should_challenge == expect_challenge);
+  if (expect_challenge) {
+    assert(decision->challenge_value >= decision->keep_value);
+  } else {
+    assert(decision->keep_value > decision->challenge_value);
+  }
+
+  play_chooser_destroy(play_chooser);
+  validated_moves_destroy(vms);
+  error_stack_destroy(error_stack);
+}
+
+static void test_peg_challenge_decision(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+      "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+      "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;");
+  const Game *game = config_get_game(config);
+  // Pre-endgame regime: the opponent (ACEINOP) is on turn with four tiles
+  // in the bag, so play_chooser keeps the PEG evaluation (it only falls
+  // back to SIM/STATIC above PEG_MAX_BAG).
+  assert(game_get_player_on_turn_index(game) == 0);
+  assert(bag_get_letters(game_get_bag(game)) == 4);
+
+  // The budget is a generous ceiling, not a target: the greedy seed completes
+  // the full-field enumeration well under it (no deep endgame solves to run
+  // long), so the utilities reach their bounded, deterministic values and the
+  // verdicts do not depend on machine speed. Several threads just reach that
+  // completion sooner; the completed utility is thread-count independent.
+  // utility_w_spread > 0 turns on the sigmoid-of-spread term.
+  const PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .fixed_seconds_per_move = 40.0,
+      .enable_challenges = true,
+      .challenge_decision_seconds = 40.0,
+      .num_threads = 8,
+      .utility_w_winpct = 1.0,
+      .utility_w_spread = 1.0,
+      .utility_spread_scale = 100.0,
+      .seed = 42,
+  };
+
+  ChallengeDecision o_decision;
+  test_peg_challenge_decision_case(&strategy, game, "2A O.....",
+                                   /*expect_challenge=*/true, &o_decision);
+
+  ChallengeDecision c_decision;
+  test_peg_challenge_decision_case(&strategy, game, "2A C.....",
+                                   /*expect_challenge=*/false, &c_decision);
+  // The kept CBEATY is a near-certain win for the chooser, but the score+win
+  // utility discounts it below 1.0 for its finite margin -- pure win% would
+  // report exactly 1.0 and lose that information. This is the spread tiebreak
+  // in action, and it stays above the challenge branch's utility so the
+  // verdict is still "don't challenge".
+  assert(c_decision.keep_value < 1.0);
+  assert(c_decision.keep_value > c_decision.challenge_value);
+
+  // Severe-budget degenerate case: the deadline is blown before the greedy
+  // seed finishes any candidate, so both arms fall back to 0.0. A detected
+  // phony must still be taken off -- a 0/0 no-information tie challenges rather
+  // than gifting the opponent an unchallenged invalid play. (CBEATY, which the
+  // full-budget analysis above chose to keep, is challenged here: with no time
+  // to find the strategic reason to keep it, the default wins.)
+  PlayChooserStrategy severe = strategy;
+  severe.fixed_seconds_per_move = 1e-6;
+  severe.challenge_decision_seconds = 1e-6;
+  ChallengeDecision degenerate;
+  test_peg_challenge_decision_case(&severe, game, "2A C.....",
+                                   /*expect_challenge=*/true, &degenerate);
+  assert(degenerate.keep_value == 0.0 && degenerate.challenge_value == 0.0);
+  assert(degenerate.should_challenge);
+
+  config_destroy(config);
+}
+
 void test_play_chooser(void) {
   test_game_timer();
   test_keep_phony_for_triple_triple();
@@ -585,4 +719,5 @@ void test_play_chooser(void) {
   test_endgame_challenge_off_phony();
   test_endgame_keep_phony_to_deny_better_replay();
   test_endgame_initial_window();
+  test_peg_challenge_decision();
 }
