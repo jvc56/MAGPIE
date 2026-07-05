@@ -1,36 +1,49 @@
-// A/B benchmark for pre-endgame (PEG) inference. The end goal: from PEG
-// positions, play the game out with Player A (uniform PEG) vs Player B
-// (inference-weighted PEG), equal per-turn budget, and tally the win%/spread
-// difference, logging per-turn wall time to confirm neither arm overruns.
+// A/B benchmark for pre-endgame (PEG) inference. From a PEG position, play the
+// game out with the inferring player using uniform PEG (arm A) vs
+// inference-weighted PEG (arm B), an equal per-turn budget, and the d25 endgame
+// once the bag empties. Logs per-turn wall time (inference + solve) to confirm
+// neither arm overruns, and reports each arm's final spread.
 //
-// This is built incrementally. THIS increment lands the playout core: from a
-// position, choose and play each move -- PEG (greedy seed) while the bag holds
-// [PEG_MIN_BAG, PEG_MAX_BAG] tiles, a static best otherwise (a placeholder for
-// the d25 time-limited endgame) -- until the game ends, logging per-turn time
-// against the budget. The inference variant (Player B), position generation
-// (static -> sim -> <=4, and PEG -> PEG), and the A/B aggregation build on top.
+// The inferring player's PEG turns weight peg_solve's scenarios by an inference
+// of the opponent's leave from the opponent's previous move: simmed inference
+// when the opponent moved with a bag >= 5, peg inference when <= 4 (they were in
+// a PEG situation themselves). The opponent plays uniform PEG in both arms.
+//
+// Built incrementally: increment 3 adds the inference variant on top of the
+// playout core (PEG + d25 endgame). Position generation and multi-position
+// aggregation follow.
 
+#include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
-#include "../src/compat/ctime.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/inference_args.h"
+#include "../src/ent/inference_results.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
+#include "../src/impl/peg_inference.h"
+#include "../src/impl/simmed_inference.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdio.h>
+#include <string.h>
 #include <time.h>
 
 // A real 4-in-bag CSW24 pre-endgame: player 0 (ACEINOP) on turn, bag = 4.
@@ -42,6 +55,13 @@
 #define PEG_BENCH_TURN_BUDGET_S 3.0
 #define PEG_BENCH_MAX_CANDIDATES 20
 #define PEG_BENCH_ENDGAME_PLIES 25
+#define PEG_BENCH_INFERENCE_SAMPLES 200
+// Fraction of the per-turn budget the inference step may use; the rest goes to
+// the PEG solve so the whole turn stays within budget.
+#define PEG_BENCH_INFER_BUDGET_FRAC 0.4
+// Opponent's-turn bag >= this uses simmed inference; below uses peg inference.
+#define PEG_BENCH_SIM_INFER_BAG 5
+#define PEG_BENCH_INFER_CANDIDATES 7
 
 static double peg_bench_now_s(void) {
   struct timespec t;
@@ -49,11 +69,114 @@ static double peg_bench_now_s(void) {
   return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
 }
 
-// Solve and play the endgame (bag empty), capped to the same per-turn budget as
-// the pre-endgame turns: a depth-25 solve with soft/hard IDS limits and a hard
-// wall-clock deadline all set to budget_s. Returns true if a move was played.
+// ── Inference setup (mirrors simmedinf_benchmark) ────────────────────────────
+
+static void peg_bench_extract_played_tiles(const Move *move, int ld_size,
+                                           Rack *played) {
+  rack_set_dist_size_and_reset(played, ld_size);
+  const int n = move_get_tiles_length(move);
+  for (int i = 0; i < n; i++) {
+    const MachineLetter ml = move_get_tile(move, i);
+    if (ml != PLAYED_THROUGH_MARKER) {
+      rack_add_letter(played, get_is_blanked(ml) ? BLANK_MACHINE_LETTER : ml);
+    }
+  }
+}
+
+typedef struct {
+  Rack target_played_tiles;
+  Rack target_known_rack;
+  Rack nontarget_known_rack;
+  InferenceArgs args;
+} PegBenchInferSetup;
+
+static void peg_bench_fill_infer_args(PegBenchInferSetup *setup,
+                                      const Game *game_before_prev,
+                                      const Move *prev_move,
+                                      int prev_player_index,
+                                      ThreadControl *thread_control) {
+  const int ld_size = ld_get_size(game_get_ld(game_before_prev));
+  rack_set_dist_size_and_reset(&setup->target_known_rack, ld_size);
+  rack_set_dist_size_and_reset(&setup->nontarget_known_rack, ld_size);
+
+  int target_num_exch = 0;
+  if (move_get_type(prev_move) == GAME_EVENT_EXCHANGE) {
+    target_num_exch = move_get_tiles_played(prev_move);
+    rack_set_dist_size_and_reset(&setup->target_played_tiles, ld_size);
+  } else {
+    peg_bench_extract_played_tiles(prev_move, ld_size,
+                                   &setup->target_played_tiles);
+  }
+  rack_copy(&setup->nontarget_known_rack,
+            player_get_rack(
+                game_get_player(game_before_prev, 1 - prev_player_index)));
+
+  infer_args_fill(&setup->args, /*leave_list_capacity=*/PEG_BENCH_INFER_CANDIDATES,
+                  int_to_equity(0), NULL, game_before_prev, /*num_threads=*/1,
+                  /*parent_worker_thread_index=*/0, /*print_interval=*/0,
+                  thread_control, /*use_game_history=*/false,
+                  /*use_inference_cutoff_optimization=*/false, prev_player_index,
+                  move_get_score(prev_move), target_num_exch,
+                  &setup->target_played_tiles, &setup->target_known_rack,
+                  &setup->nontarget_known_rack);
+}
+
+// Infer the opponent's leave distribution from their previous move: simmed
+// inference when they moved with a bag >= PEG_BENCH_SIM_INFER_BAG, peg inference
+// when they were themselves in the PEG range. Returns true on success.
+static bool peg_bench_run_inference(const Game *game_before_prev,
+                                    const Move *prev_move,
+                                    int prev_player_index, int prev_turn_bag,
+                                    WinPct *win_pcts,
+                                    ThreadControl *thread_control,
+                                    InferenceResults *results, double budget_s,
+                                    ErrorStack *error_stack) {
+  PegBenchInferSetup setup;
+  peg_bench_fill_infer_args(&setup, game_before_prev, prev_move,
+                            prev_player_index, thread_control);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  if (prev_turn_bag >= PEG_BENCH_SIM_INFER_BAG) {
+    const SimmedInferenceArgs si_args = {
+        .base = &setup.args,
+        .observed_move = prev_move,
+        .win_pcts = win_pcts,
+        .num_candidate_plays = PEG_BENCH_INFER_CANDIDATES,
+        .num_inner_sim_plies = 2,
+        .probe_iterations = 20,
+        .full_iterations = 40,
+        .time_budget_s = budget_s,
+        .sim_equity_margin = 3.0,
+    };
+    simmed_infer(&si_args, results, error_stack);
+  } else {
+    // Keep the inference inside its slice of the turn budget: bound each inner
+    // PEG solve (peg_time_budget_s) and push leaves of size > 1 onto the
+    // time-bounded Monte-Carlo path (only leaves of size <= exhaustive_max_leave
+    // take peg_infer's unbounded exhaustive path).
+    const PegInferenceArgs peg_args = {
+        .base = &setup.args,
+        .observed_move = prev_move,
+        .num_candidate_plays = PEG_BENCH_INFER_CANDIDATES,
+        .exhaustive_max_leave = 1,
+        .peg_time_budget_s = 0.1,
+        .time_budget_s = budget_s,
+    };
+    peg_infer(&peg_args, results, error_stack);
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_reset(error_stack);
+    return false;
+  }
+  return true;
+}
+
+// ── Move selection ───────────────────────────────────────────────────────────
+
+// Solve and play the endgame (bag empty), capped to budget_s. Copies the played
+// move to *out_move. Returns true if a move was played.
 static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
-                                   double budget_s, ErrorStack *error_stack) {
+                                   double budget_s, Move *out_move,
+                                   ErrorStack *error_stack) {
   EndgameArgs endgame_args = {0};
   endgame_args.thread_control = thread_control;
   endgame_args.game = game;
@@ -67,9 +190,6 @@ static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
   endgame_args.enable_pv_display = true;
   endgame_args.num_top_moves = 1;
   endgame_args.seed = 0;
-  // Same time budget as a pre-endgame turn: stop IDS at the soft limit, don't
-  // start a depth that would blow the hard limit, and bail mid-search at the
-  // wall-clock deadline.
   endgame_args.soft_time_limit = budget_s;
   endgame_args.hard_time_limit = budget_s;
   endgame_args.external_deadline_ns =
@@ -84,9 +204,8 @@ static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
   if (error_stack_is_empty(error_stack)) {
     const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
     if (pv != NULL && pv->num_moves > 0) {
-      Move move;
-      small_move_to_move(&move, &pv->moves[0], game_get_board(game));
-      play_move(&move, game, NULL);
+      small_move_to_move(out_move, &pv->moves[0], game_get_board(game));
+      play_move(out_move, game, NULL);
       played = true;
     }
   }
@@ -95,22 +214,23 @@ static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
   return played;
 }
 
-// Choose and play one move for the player on turn. While the bag is in the PEG
-// range, solve it with the greedy pre-endgame seed within budget_s; at bag 0
-// solve the endgame under the same budget. *elapsed_out is the wall time spent.
+// Choose and play one move: greedy PEG while the bag is in range (with the
+// inference prior when non-NULL), the d25 endgame at bag 0. Copies the played
+// move to *out_move; *elapsed_out is the solve wall time.
 static void peg_bench_play_turn(Game *game, MoveList *move_list,
                                 ThreadControl *thread_control, double budget_s,
-                                double *elapsed_out, ErrorStack *error_stack) {
+                                const InferenceResults *prior, uint64_t seed,
+                                Move *out_move, double *elapsed_out,
+                                ErrorStack *error_stack) {
   const double t0 = peg_bench_now_s();
   const int bag = bag_get_letters(game_get_bag(game));
   bool played = false;
   if (bag == 0) {
-    played = peg_bench_play_endgame(game, thread_control, budget_s, error_stack);
+    played = peg_bench_play_endgame(game, thread_control, budget_s, out_move,
+                                    error_stack);
   } else if (bag >= PEG_MIN_BAG && bag <= PEG_MAX_BAG) {
-    // Supply the candidate field explicitly: peg_solve's own root move
-    // generation is unused by every caller (all pass only_moves) and currently
-    // returns just a pass here. Top-N by static equity is a sound field, and
-    // capping it keeps each greedy solve fast.
+    // Supply the candidate field explicitly (peg_solve's own root move gen is
+    // unused by callers and returns only a pass); top-N by static equity.
     move_list_reset(move_list);
     const MoveGenArgs gen_args = {
         .game = game,
@@ -126,8 +246,8 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
     generate_moves(&gen_args);
     move_list_sort_moves(move_list);
     const int total = move_list_get_count(move_list);
-    const int n_cand = total < PEG_BENCH_MAX_CANDIDATES ? total
-                                                        : PEG_BENCH_MAX_CANDIDATES;
+    const int n_cand =
+        total < PEG_BENCH_MAX_CANDIDATES ? total : PEG_BENCH_MAX_CANDIDATES;
     const Move *cands[PEG_BENCH_MAX_CANDIDATES];
     for (int i = 0; i < n_cand; i++) {
       cands[i] = move_list_get_move(move_list, i);
@@ -141,57 +261,111 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
       peg_args.time_budget_seconds = budget_s;
       peg_args.only_moves = cands;
       peg_args.n_only_moves = n_cand;
+      peg_args.opp_leave_prior = prior;
+      peg_args.inference_samples = prior ? PEG_BENCH_INFERENCE_SAMPLES : 0;
+      peg_args.inference_seed = seed;
       thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
       PegResult peg_result = {0};
       peg_solve(&peg_args, &peg_result, error_stack);
       if (error_stack_is_empty(error_stack) && peg_result.n_top_cands > 0 &&
           peg_result.best_win >= 0.0) {
-        play_move(&peg_result.best_move, game, NULL);
+        move_copy(out_move, &peg_result.best_move);
+        play_move(out_move, game, NULL);
         played = true;
       }
       peg_result_destroy(&peg_result);
     }
   }
   if (!played) {
-    // A solve produced nothing (e.g. a severe budget, or a bag outside the PEG
-    // range that should not occur mid-playout): fall back to the static best.
     const Move *move = get_top_equity_move(game, move_list);
-    play_move(move, game, NULL);
+    move_copy(out_move, move);
+    play_move(out_move, game, NULL);
   }
   *elapsed_out = peg_bench_now_s() - t0;
 }
 
-// Play the game to the end from its current state, logging per-turn wall time
-// against the budget. Returns player 0's final spread (score0 - score1).
+// ── Playout ──────────────────────────────────────────────────────────────────
+
+// Play the game to the end. The inferring player weights its PEG scenarios by
+// an inference of the opponent's previous move when use_inference is set; the
+// opponent always plays uniform PEG. Returns player 0's final spread.
 static int peg_bench_play_out(Game *game, MoveList *move_list,
-                              ThreadControl *thread_control,
+                              ThreadControl *thread_control, WinPct *win_pcts,
+                              int inferring_player, bool use_inference,
                               ErrorStack *error_stack) {
+  Game *game_before_prev = game_duplicate(game);
+  InferenceResults *inf_results = inference_results_create(NULL);
+  Move prev_move;
+  memset(&prev_move, 0, sizeof(prev_move));
+  bool have_prev = false;
+  int prev_player = -1;
+  int prev_turn_bag = 0;
+
   int turn = 0;
-  double total = 0.0;
   double worst = 0.0;
   while (!game_over(game)) {
-    const int player_idx = game_get_player_on_turn_index(game);
-    const int bag = bag_get_letters(game_get_bag(game));
-    double elapsed = 0.0;
-    peg_bench_play_turn(game, move_list, thread_control, PEG_BENCH_TURN_BUDGET_S,
-                        &elapsed, error_stack);
-    total += elapsed;
-    if (elapsed > worst) {
-      worst = elapsed;
+    const int on_turn = game_get_player_on_turn_index(game);
+    const int turn_bag = bag_get_letters(game_get_bag(game));
+    Game *snapshot = game_duplicate(game);
+
+    const InferenceResults *prior = NULL;
+    double infer_elapsed = 0.0;
+    const bool prev_inferable =
+        have_prev && (move_get_type(&prev_move) == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+                      move_get_type(&prev_move) == GAME_EVENT_EXCHANGE);
+    if (use_inference && on_turn == inferring_player && prev_inferable &&
+        turn_bag >= PEG_MIN_BAG && turn_bag <= PEG_MAX_BAG) {
+      const double t0 = peg_bench_now_s();
+      const double infer_budget =
+          PEG_BENCH_TURN_BUDGET_S * PEG_BENCH_INFER_BUDGET_FRAC;
+      if (peg_bench_run_inference(game_before_prev, &prev_move, prev_player,
+                                  prev_turn_bag, win_pcts, thread_control,
+                                  inf_results, infer_budget, error_stack)) {
+        prior = inf_results;
+      }
+      infer_elapsed = peg_bench_now_s() - t0;
     }
-    printf("    turn %2d  p%d  bag=%d  %.2fs%s\n", ++turn, player_idx, bag,
-           elapsed,
-           elapsed > PEG_BENCH_TURN_BUDGET_S * 1.5 ? "  *** OVER BUDGET" : "");
+
+    double solve_budget = PEG_BENCH_TURN_BUDGET_S - infer_elapsed;
+    if (solve_budget < 0.5) {
+      solve_budget = 0.5;
+    }
+    Move played;
+    double solve_elapsed = 0.0;
+    peg_bench_play_turn(game, move_list, thread_control, solve_budget, prior,
+                        /*seed=*/42 + (uint64_t)turn, &played, &solve_elapsed,
+                        error_stack);
+
+    const double turn_total = infer_elapsed + solve_elapsed;
+    if (turn_total > worst) {
+      worst = turn_total;
+    }
+    printf("    turn %2d  p%d  bag=%d  infer=%.2fs solve=%.2fs total=%.2fs%s%s\n",
+           ++turn, on_turn, turn_bag, infer_elapsed, solve_elapsed, turn_total,
+           prior != NULL ? "  [inf]" : "",
+           turn_total > PEG_BENCH_TURN_BUDGET_S * 1.5 ? "  *** OVER" : "");
+
+    game_copy(game_before_prev, snapshot);
+    game_destroy(snapshot);
+    prev_move = played;
+    have_prev = true;
+    prev_player = on_turn;
+    prev_turn_bag = turn_bag;
+
     if (!error_stack_is_empty(error_stack)) {
-      printf("    ERROR on turn %d: ", turn);
       error_stack_print_and_reset(error_stack);
       break;
     }
   }
-  printf("    (%d turns, %.2fs total, worst turn %.2fs vs %.2fs budget)\n", turn,
-         total, worst, PEG_BENCH_TURN_BUDGET_S);
-  return equity_to_int(player_get_score(game_get_player(game, 0))) -
-         equity_to_int(player_get_score(game_get_player(game, 1)));
+  printf("    (%d turns, worst turn %.2fs vs %.2fs budget)\n", turn, worst,
+         PEG_BENCH_TURN_BUDGET_S);
+
+  inference_results_destroy(inf_results);
+  game_destroy(game_before_prev);
+  const int p0_spread =
+      equity_to_int(player_get_score(game_get_player(game, 0))) -
+      equity_to_int(player_get_score(game_get_player(game, 1)));
+  return inferring_player == 0 ? p0_spread : -p0_spread;
 }
 
 void test_peginf_benchmark(void) {
@@ -203,16 +377,48 @@ void test_peginf_benchmark(void) {
   ThreadControl *thread_control = config_get_thread_control(config);
   MoveList *move_list = move_list_create(64);
   ErrorStack *error_stack = error_stack_create();
-
-  printf("  PEG benchmark playout (4-in-bag CSW24, budget %.1fs/turn):\n",
-         PEG_BENCH_TURN_BUDGET_S);
-  const int spread =
-      peg_bench_play_out(game, move_list, thread_control, error_stack);
-  printf("  final spread (p0 - p1): %+d\n", spread);
-
-  assert(game_over(game));
+  WinPct *win_pcts =
+      win_pct_create(config_get_data_paths(config), DEFAULT_WIN_PCT,
+                     error_stack);
   assert(error_stack_is_empty(error_stack));
 
+  printf("  PEG A/B benchmark (4-in-bag CSW24, budget %.1fs/turn):\n",
+         PEG_BENCH_TURN_BUDGET_S);
+
+  // Run the A/B for each player as the inferring player. In this position p0
+  // moves first (no opponent prior move -> inference is a no-op on its only PEG
+  // turn), while p1 gets a PEG turn right after p0's move -> its peg-inference
+  // path fires. Position generation (a later increment) yields positions where
+  // the on-turn player always has the opponent's prior move to infer from.
+  for (int inferring_player = 0; inferring_player < 2; inferring_player++) {
+    printf("  === inferring player p%d ===\n", inferring_player);
+
+    printf("  Arm A (uniform PEG):\n");
+    Game *game_a = game_duplicate(game);
+    const int spread_a =
+        peg_bench_play_out(game_a, move_list, thread_control, win_pcts,
+                           inferring_player, /*use_inference=*/false,
+                           error_stack);
+
+    printf("  Arm B (inference-weighted PEG):\n");
+    Game *game_b = game_duplicate(game);
+    const int spread_b =
+        peg_bench_play_out(game_b, move_list, thread_control, win_pcts,
+                           inferring_player, /*use_inference=*/true,
+                           error_stack);
+
+    printf("  RESULT p%d spread: A (uniform) %+d  vs  B (inference) %+d  "
+           "(delta %+d)\n",
+           inferring_player, spread_a, spread_b, spread_b - spread_a);
+
+    assert(game_over(game_a));
+    assert(game_over(game_b));
+    assert(error_stack_is_empty(error_stack));
+    game_destroy(game_a);
+    game_destroy(game_b);
+  }
+
+  win_pct_destroy(win_pcts);
   move_list_destroy(move_list);
   error_stack_destroy(error_stack);
   config_destroy(config);
