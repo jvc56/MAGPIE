@@ -39,6 +39,7 @@
 #include "../src/impl/peg.h"
 #include "../src/impl/peg_inference.h"
 #include "../src/impl/simmed_inference.h"
+#include "../src/compat/memory_info.h"
 #include "../src/util/io_util.h"
 #include "test_constants.h"
 #include "test_util.h"
@@ -69,6 +70,20 @@
 #define PEG_BENCH_MAX_SIM 6
 #define PEG_BENCH_MAX_PEG 4
 #define PEG_BENCH_GAME_CAP 300
+
+// Hardware threads each PEG solve / endgame / inference runs on (all cores, like
+// a real peg run); set once per test from config_get_num_threads.
+static int g_bench_num_threads = 1;
+
+// Read a positive integer environment override, or fall back to def.
+static int peg_bench_env_int(const char *name, int def) {
+  const char *v = getenv(name);
+  if (v == NULL) {
+    return def;
+  }
+  const int parsed = atoi(v);
+  return parsed > 0 ? parsed : def;
+}
 
 static double peg_bench_now_s(void) {
   struct timespec t;
@@ -119,7 +134,8 @@ static void peg_bench_fill_infer_args(PegBenchInferSetup *setup,
                 game_get_player(game_before_prev, 1 - prev_player_index)));
 
   infer_args_fill(&setup->args, /*leave_list_capacity=*/PEG_BENCH_INFER_CANDIDATES,
-                  int_to_equity(0), NULL, game_before_prev, /*num_threads=*/1,
+                  int_to_equity(0), NULL, game_before_prev,
+                  /*num_threads=*/g_bench_num_threads,
                   /*parent_worker_thread_index=*/0, /*print_interval=*/0,
                   thread_control, /*use_game_history=*/false,
                   /*use_inference_cutoff_optimization=*/false, prev_player_index,
@@ -191,7 +207,7 @@ static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
   endgame_args.tt_fraction_of_mem = 0.05;
   endgame_args.initial_small_move_arena_size =
       DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = 1;
+  endgame_args.num_threads = g_bench_num_threads;
   endgame_args.use_heuristics = true;
   endgame_args.forced_pass_bypass = true;
   endgame_args.enable_pv_display = true;
@@ -263,7 +279,7 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
       PegArgs peg_args = {0};
       peg_args.game = game;
       peg_args.thread_control = thread_control;
-      peg_args.num_threads = 1;
+      peg_args.num_threads = g_bench_num_threads;
       peg_args.greedy_seed_only = true;
       peg_args.time_budget_seconds = budget_s;
       peg_args.only_moves = cands;
@@ -483,9 +499,12 @@ static int peg_bench_generate(Game *proto, MoveList *move_list,
 }
 
 void test_peginf_benchmark(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
-      "-threads 1");
+  char config_cmd[256];
+  snprintf(config_cmd, sizeof(config_cmd),
+           "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
+           "-threads %d",
+           get_num_cores());
+  Config *config = config_create_or_die(config_cmd);
   load_and_exec_config_or_die(config, PEG_BENCH_4BAG_CGP ";");
   Game *game = config_get_game(config);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -495,9 +514,10 @@ void test_peginf_benchmark(void) {
       win_pct_create(config_get_data_paths(config), DEFAULT_WIN_PCT,
                      error_stack);
   assert(error_stack_is_empty(error_stack));
+  g_bench_num_threads = config_get_num_threads(config);
 
-  printf("  PEG A/B benchmark (4-in-bag CSW24, budget %.1fs/turn):\n",
-         PEG_BENCH_TURN_BUDGET_S);
+  printf("  PEG A/B benchmark (4-in-bag CSW24, budget %.1fs/turn, %d threads):\n",
+         PEG_BENCH_TURN_BUDGET_S, g_bench_num_threads);
 
   // Run the A/B for each player as the inferring player. In this position p0
   // moves first (no opponent prior move -> inference is a no-op on its only PEG
@@ -543,10 +563,65 @@ void test_peginf_benchmark(void) {
 // captured state (same bag order) and tally the inferring player's spread delta,
 // split by inference type. The A/B signal -- whether inference improves play --
 // emerges from this aggregate, not from any single position.
+// Win points from the inferring player's final spread: win 1.0, tie 0.5, loss 0.
+static double peg_bench_win_points(int spread) {
+  if (spread > 0) {
+    return 1.0;
+  }
+  return spread == 0 ? 0.5 : 0.0;
+}
+
+// Per-class (and overall) A/B tallies.
+typedef struct {
+  int n;
+  long sum_delta;   // sum of (spread_b - spread_a)
+  int b_better;     // delta > 0
+  int a_better;     // delta < 0
+  int ties;         // delta == 0
+  double a_winpts;  // sum of win points for arm A
+  double b_winpts;  // sum of win points for arm B
+} PegBenchTally;
+
+static void peg_bench_tally_add(PegBenchTally *t, int spread_a, int spread_b) {
+  t->n++;
+  const int delta = spread_b - spread_a;
+  t->sum_delta += delta;
+  if (delta > 0) {
+    t->b_better++;
+  } else if (delta < 0) {
+    t->a_better++;
+  } else {
+    t->ties++;
+  }
+  t->a_winpts += peg_bench_win_points(spread_a);
+  t->b_winpts += peg_bench_win_points(spread_b);
+}
+
+static void peg_bench_tally_print(const char *label, const PegBenchTally *t) {
+  if (t->n == 0) {
+    printf("  %s: no positions\n", label);
+    return;
+  }
+  const int decisive = t->b_better + t->a_better;
+  printf("  %s (n=%d): win%% A %.1f%% vs B %.1f%% (delta %+.1f pts); "
+         "mean spread delta %+.1f; B better %d, A better %d, tie %d",
+         label, t->n, 100.0 * t->a_winpts / t->n, 100.0 * t->b_winpts / t->n,
+         t->b_winpts - t->a_winpts, (double)t->sum_delta / t->n, t->b_better,
+         t->a_better, t->ties);
+  if (decisive > 0) {
+    printf(" (of %d decisive: B %.0f%%)", decisive,
+           100.0 * t->b_better / decisive);
+  }
+  printf("\n");
+}
+
 void test_peginf_benchmark_generate(void) {
-  Config *config = config_create_or_die(
-      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
-      "-threads 1");
+  char config_cmd[256];
+  snprintf(config_cmd, sizeof(config_cmd),
+           "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
+           "-threads %d",
+           get_num_cores());
+  Config *config = config_create_or_die(config_cmd);
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   Game *game = config_get_game(config);
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -555,21 +630,29 @@ void test_peginf_benchmark_generate(void) {
   WinPct *win_pcts = win_pct_create(config_get_data_paths(config),
                                     DEFAULT_WIN_PCT, error_stack);
   assert(error_stack_is_empty(error_stack));
+  g_bench_num_threads = config_get_num_threads(config);
 
-  PegBenchPosition *positions = malloc_or_die(
-      sizeof(PegBenchPosition) * (PEG_BENCH_MAX_SIM + PEG_BENCH_MAX_PEG));
-  const int n = peg_bench_generate(game, move_list, positions, PEG_BENCH_MAX_SIM,
-                                   PEG_BENCH_MAX_PEG, /*base_seed=*/1,
-                                   PEG_BENCH_GAME_CAP);
-  printf("  PEG A/B aggregation: generated %d positions, budget %.1fs/turn\n", n,
-         PEG_BENCH_TURN_BUDGET_S);
+  // Quotas, seed, and game cap are env-overridable (PEGBENCH_SIM / _PEG / _SEED
+  // / _GAMECAP) so a large run needs no rebuild.
+  const int max_sim = peg_bench_env_int("PEGBENCH_SIM", PEG_BENCH_MAX_SIM);
+  const int max_peg = peg_bench_env_int("PEGBENCH_PEG", PEG_BENCH_MAX_PEG);
+  const uint64_t base_seed =
+      (uint64_t)peg_bench_env_int("PEGBENCH_SEED", 1);
+  const uint64_t game_cap =
+      (uint64_t)peg_bench_env_int("PEGBENCH_GAMECAP", PEG_BENCH_GAME_CAP);
 
-  int b_better = 0;
-  int a_better = 0;
-  int ties = 0;
-  long sum_delta = 0;
-  int sim_n = 0;
-  int peg_n = 0;
+  PegBenchPosition *positions =
+      malloc_or_die(sizeof(PegBenchPosition) * (size_t)(max_sim + max_peg));
+  const int n = peg_bench_generate(game, move_list, positions, max_sim, max_peg,
+                                   base_seed, game_cap);
+  printf("  PEG A/B aggregation: generated %d positions (target %d sim + %d "
+         "peg), budget %.1fs/turn, %d threads\n",
+         n, max_sim, max_peg, PEG_BENCH_TURN_BUDGET_S, g_bench_num_threads);
+
+  PegBenchTally overall = {0};
+  PegBenchTally sim = {0};
+  PegBenchTally peg = {0};
+  const double t_start = peg_bench_now_s();
   for (int i = 0; i < n; i++) {
     PegBenchPosition *p = &positions[i];
     const bool sim_inf = p->prev_turn_bag >= PEG_BENCH_SIM_INFER_BAG;
@@ -589,24 +672,12 @@ void test_peginf_benchmark_generate(void) {
         game_b, move_list, thread_control, win_pcts, p->inferring_player,
         /*use_inference=*/true, &ctx, /*verbose=*/false, error_stack);
 
-    const int delta = spread_b - spread_a;
-    sum_delta += delta;
-    if (delta > 0) {
-      b_better++;
-    } else if (delta < 0) {
-      a_better++;
-    } else {
-      ties++;
-    }
-    if (sim_inf) {
-      sim_n++;
-    } else {
-      peg_n++;
-    }
+    peg_bench_tally_add(&overall, spread_a, spread_b);
+    peg_bench_tally_add(sim_inf ? &sim : &peg, spread_a, spread_b);
     printf("    pos %2d  infer p%d  opp-bag=%d  %s-inf  A %+d  B %+d  "
            "delta %+d\n",
            i, p->inferring_player, p->prev_turn_bag, sim_inf ? "sim" : "peg",
-           spread_a, spread_b, delta);
+           spread_a, spread_b, spread_b - spread_a);
 
     assert(game_over(game_a));
     assert(game_over(game_b));
@@ -615,11 +686,10 @@ void test_peginf_benchmark_generate(void) {
     peg_bench_position_destroy(p);
   }
 
-  if (n > 0) {
-    printf("  AGGREGATE over %d positions (%d sim-inf, %d peg-inf): "
-           "B better %d, A better %d, tie %d; mean spread delta %+.1f\n",
-           n, sim_n, peg_n, b_better, a_better, ties, (double)sum_delta / n);
-  }
+  printf("  --- A/B results (%.0fs) ---\n", peg_bench_now_s() - t_start);
+  peg_bench_tally_print("OVERALL", &overall);
+  peg_bench_tally_print("sim-inf", &sim);
+  peg_bench_tally_print("peg-inf", &peg);
   assert(error_stack_is_empty(error_stack));
 
   free(positions);
