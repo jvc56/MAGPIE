@@ -174,6 +174,7 @@ static TestEntry on_demand_test_table[] = {
     // Pre-endgame (PEG) inference
     {"peginf", test_peginf},
     {"peginfbench", test_peginf_benchmark},
+    {"peginfbenchgen", test_peginf_benchmark_generate},
     // Simmed inference (simulation-based opponent-leave inference)
     {"simmedinf_exchange", test_simmedinf},
     {"simmedinf", test_simmedinf_benchmark},

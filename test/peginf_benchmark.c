@@ -40,9 +40,11 @@
 #include "../src/impl/peg_inference.h"
 #include "../src/impl/simmed_inference.h"
 #include "../src/util/io_util.h"
+#include "test_constants.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -62,6 +64,11 @@
 // Opponent's-turn bag >= this uses simmed inference; below uses peg inference.
 #define PEG_BENCH_SIM_INFER_BAG 5
 #define PEG_BENCH_INFER_CANDIDATES 7
+// Per-class quotas of generated PEG positions the aggregation benchmark plays
+// out A/B, and the cap on games scanned to fill them (peg-inf is rare).
+#define PEG_BENCH_MAX_SIM 6
+#define PEG_BENCH_MAX_PEG 4
+#define PEG_BENCH_GAME_CAP 300
 
 static double peg_bench_now_s(void) {
   struct timespec t;
@@ -286,12 +293,25 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
 
 // ── Playout ──────────────────────────────────────────────────────────────────
 
+// The opponent's previous-move context that lets inference fire on the very
+// first turn of a replayed position (a generated PEG position starts with the
+// inferring player already on turn, right after the opponent's move).
+typedef struct {
+  const Game *game_before_prev; // state before the opponent's prev move
+  const Move *prev_move;        // opponent's prev move
+  int prev_player;              // opponent index
+  int prev_turn_bag;            // bag when the opponent moved (sim vs peg inf)
+} PegBenchPrevCtx;
+
 // Play the game to the end. The inferring player weights its PEG scenarios by
 // an inference of the opponent's previous move when use_inference is set; the
-// opponent always plays uniform PEG. Returns player 0's final spread.
+// opponent always plays uniform PEG. When init is non-NULL the playout starts
+// with that opponent-move context so inference can fire immediately. Returns the
+// inferring player's final spread.
 static int peg_bench_play_out(Game *game, MoveList *move_list,
                               ThreadControl *thread_control, WinPct *win_pcts,
                               int inferring_player, bool use_inference,
+                              const PegBenchPrevCtx *init, bool verbose,
                               ErrorStack *error_stack) {
   Game *game_before_prev = game_duplicate(game);
   InferenceResults *inf_results = inference_results_create(NULL);
@@ -300,6 +320,13 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
   bool have_prev = false;
   int prev_player = -1;
   int prev_turn_bag = 0;
+  if (init != NULL) {
+    game_copy(game_before_prev, init->game_before_prev);
+    move_copy(&prev_move, init->prev_move);
+    have_prev = true;
+    prev_player = init->prev_player;
+    prev_turn_bag = init->prev_turn_bag;
+  }
 
   int turn = 0;
   double worst = 0.0;
@@ -340,10 +367,14 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
     if (turn_total > worst) {
       worst = turn_total;
     }
-    printf("    turn %2d  p%d  bag=%d  infer=%.2fs solve=%.2fs total=%.2fs%s%s\n",
-           ++turn, on_turn, turn_bag, infer_elapsed, solve_elapsed, turn_total,
-           prior != NULL ? "  [inf]" : "",
-           turn_total > PEG_BENCH_TURN_BUDGET_S * 1.5 ? "  *** OVER" : "");
+    ++turn;
+    if (verbose) {
+      printf(
+          "    turn %2d  p%d  bag=%d  infer=%.2fs solve=%.2fs total=%.2fs%s%s\n",
+          turn, on_turn, turn_bag, infer_elapsed, solve_elapsed, turn_total,
+          prior != NULL ? "  [inf]" : "",
+          turn_total > PEG_BENCH_TURN_BUDGET_S * 1.5 ? "  *** OVER" : "");
+    }
 
     game_copy(game_before_prev, snapshot);
     game_destroy(snapshot);
@@ -357,8 +388,10 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
       break;
     }
   }
-  printf("    (%d turns, worst turn %.2fs vs %.2fs budget)\n", turn, worst,
-         PEG_BENCH_TURN_BUDGET_S);
+  if (verbose) {
+    printf("    (%d turns, worst turn %.2fs vs %.2fs budget)\n", turn, worst,
+           PEG_BENCH_TURN_BUDGET_S);
+  }
 
   inference_results_destroy(inf_results);
   game_destroy(game_before_prev);
@@ -366,6 +399,87 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
       equity_to_int(player_get_score(game_get_player(game, 0))) -
       equity_to_int(player_get_score(game_get_player(game, 1)));
   return inferring_player == 0 ? p0_spread : -p0_spread;
+}
+
+// ── Position generation ──────────────────────────────────────────────────────
+
+// A generated PEG benchmark position: the inferring player is on turn in the
+// PEG bag range, right after an inferable opponent move.
+typedef struct {
+  Game *game;             // inferring player on turn, bag in PEG range
+  Game *game_before_prev; // state before the opponent's prev move
+  Move prev_move;         // opponent's prev move
+  int prev_player;        // opponent index
+  int prev_turn_bag;      // bag when the opponent moved (sim vs peg inference)
+  int inferring_player;   // player on turn in `game`
+} PegBenchPosition;
+
+static void peg_bench_position_destroy(PegBenchPosition *p) {
+  game_destroy(p->game);
+  game_destroy(p->game_before_prev);
+}
+
+// Play static-eval games and capture states where the player on turn is in the
+// PEG bag range right after an inferable opponent move, filling a per-class
+// quota: sim-inf positions (opponent moved with a bag >= PEG_BENCH_SIM_INFER_BAG
+// -- the transition into the PEG zone) and peg-inf positions (PEG->PEG, opponent
+// moved with a bag <= 4 having played few tiles). Peg-inf positions are rare in
+// static play, so many games are scanned. Returns the number captured.
+static int peg_bench_generate(Game *proto, MoveList *move_list,
+                              PegBenchPosition *out, int max_sim, int max_peg,
+                              uint64_t base_seed, uint64_t game_cap) {
+  int n = 0;
+  int n_sim = 0;
+  int n_peg = 0;
+  for (uint64_t g = 0; (n_sim < max_sim || n_peg < max_peg) && g < game_cap;
+       g++) {
+    game_reset(proto);
+    game_seed(proto, base_seed + g);
+    draw_starting_racks(proto);
+    Game *before_prev = game_duplicate(proto);
+    Move prev_move;
+    memset(&prev_move, 0, sizeof(prev_move));
+    bool have_prev = false;
+    int prev_player = -1;
+    int prev_turn_bag = 0;
+    while (!game_over(proto) && (n_sim < max_sim || n_peg < max_peg)) {
+      const int on_turn = game_get_player_on_turn_index(proto);
+      const int bag = bag_get_letters(game_get_bag(proto));
+      const bool inferable =
+          have_prev &&
+          (move_get_type(&prev_move) == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+           move_get_type(&prev_move) == GAME_EVENT_EXCHANGE);
+      if (inferable && bag >= PEG_MIN_BAG && bag <= PEG_MAX_BAG) {
+        const bool sim_inf = prev_turn_bag >= PEG_BENCH_SIM_INFER_BAG;
+        if ((sim_inf && n_sim < max_sim) || (!sim_inf && n_peg < max_peg)) {
+          PegBenchPosition *p = &out[n++];
+          p->game = game_duplicate(proto);
+          p->game_before_prev = game_duplicate(before_prev);
+          move_copy(&p->prev_move, &prev_move);
+          p->prev_player = prev_player;
+          p->prev_turn_bag = prev_turn_bag;
+          p->inferring_player = on_turn;
+          if (sim_inf) {
+            n_sim++;
+          } else {
+            n_peg++;
+          }
+        }
+      }
+      Game *snap = game_duplicate(proto);
+      Move played;
+      move_copy(&played, get_top_equity_move(proto, move_list));
+      play_move(&played, proto, NULL);
+      game_copy(before_prev, snap);
+      game_destroy(snap);
+      prev_move = played;
+      have_prev = true;
+      prev_player = on_turn;
+      prev_turn_bag = bag;
+    }
+    game_destroy(before_prev);
+  }
+  return n;
 }
 
 void test_peginf_benchmark(void) {
@@ -398,14 +512,14 @@ void test_peginf_benchmark(void) {
     const int spread_a =
         peg_bench_play_out(game_a, move_list, thread_control, win_pcts,
                            inferring_player, /*use_inference=*/false,
-                           error_stack);
+                           /*init=*/NULL, /*verbose=*/true, error_stack);
 
     printf("  Arm B (inference-weighted PEG):\n");
     Game *game_b = game_duplicate(game);
     const int spread_b =
         peg_bench_play_out(game_b, move_list, thread_control, win_pcts,
                            inferring_player, /*use_inference=*/true,
-                           error_stack);
+                           /*init=*/NULL, /*verbose=*/true, error_stack);
 
     printf("  RESULT p%d spread: A (uniform) %+d  vs  B (inference) %+d  "
            "(delta %+d)\n",
@@ -418,6 +532,97 @@ void test_peginf_benchmark(void) {
     game_destroy(game_b);
   }
 
+  win_pct_destroy(win_pcts);
+  move_list_destroy(move_list);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// Generate PEG positions and aggregate the A/B (uniform vs inference) playout
+// over them: for each position, play both arms to the end from the identical
+// captured state (same bag order) and tally the inferring player's spread delta,
+// split by inference type. The A/B signal -- whether inference improves play --
+// emerges from this aggregate, not from any single position.
+void test_peginf_benchmark_generate(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -numplays 15 "
+      "-threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = config_get_thread_control(config);
+  MoveList *move_list = move_list_create(64);
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts = win_pct_create(config_get_data_paths(config),
+                                    DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  PegBenchPosition *positions = malloc_or_die(
+      sizeof(PegBenchPosition) * (PEG_BENCH_MAX_SIM + PEG_BENCH_MAX_PEG));
+  const int n = peg_bench_generate(game, move_list, positions, PEG_BENCH_MAX_SIM,
+                                   PEG_BENCH_MAX_PEG, /*base_seed=*/1,
+                                   PEG_BENCH_GAME_CAP);
+  printf("  PEG A/B aggregation: generated %d positions, budget %.1fs/turn\n", n,
+         PEG_BENCH_TURN_BUDGET_S);
+
+  int b_better = 0;
+  int a_better = 0;
+  int ties = 0;
+  long sum_delta = 0;
+  int sim_n = 0;
+  int peg_n = 0;
+  for (int i = 0; i < n; i++) {
+    PegBenchPosition *p = &positions[i];
+    const bool sim_inf = p->prev_turn_bag >= PEG_BENCH_SIM_INFER_BAG;
+    const PegBenchPrevCtx ctx = {
+        .game_before_prev = p->game_before_prev,
+        .prev_move = &p->prev_move,
+        .prev_player = p->prev_player,
+        .prev_turn_bag = p->prev_turn_bag,
+    };
+
+    Game *game_a = game_duplicate(p->game);
+    const int spread_a = peg_bench_play_out(
+        game_a, move_list, thread_control, win_pcts, p->inferring_player,
+        /*use_inference=*/false, &ctx, /*verbose=*/false, error_stack);
+    Game *game_b = game_duplicate(p->game);
+    const int spread_b = peg_bench_play_out(
+        game_b, move_list, thread_control, win_pcts, p->inferring_player,
+        /*use_inference=*/true, &ctx, /*verbose=*/false, error_stack);
+
+    const int delta = spread_b - spread_a;
+    sum_delta += delta;
+    if (delta > 0) {
+      b_better++;
+    } else if (delta < 0) {
+      a_better++;
+    } else {
+      ties++;
+    }
+    if (sim_inf) {
+      sim_n++;
+    } else {
+      peg_n++;
+    }
+    printf("    pos %2d  infer p%d  opp-bag=%d  %s-inf  A %+d  B %+d  "
+           "delta %+d\n",
+           i, p->inferring_player, p->prev_turn_bag, sim_inf ? "sim" : "peg",
+           spread_a, spread_b, delta);
+
+    assert(game_over(game_a));
+    assert(game_over(game_b));
+    game_destroy(game_a);
+    game_destroy(game_b);
+    peg_bench_position_destroy(p);
+  }
+
+  if (n > 0) {
+    printf("  AGGREGATE over %d positions (%d sim-inf, %d peg-inf): "
+           "B better %d, A better %d, tie %d; mean spread delta %+.1f\n",
+           n, sim_n, peg_n, b_better, a_better, ties, (double)sum_delta / n);
+  }
+  assert(error_stack_is_empty(error_stack));
+
+  free(positions);
   win_pct_destroy(win_pcts);
   move_list_destroy(move_list);
   error_stack_destroy(error_stack);
