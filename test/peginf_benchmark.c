@@ -14,13 +14,16 @@
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/compat/ctime.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/config.h"
+#include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
@@ -38,6 +41,7 @@
 
 #define PEG_BENCH_TURN_BUDGET_S 3.0
 #define PEG_BENCH_MAX_CANDIDATES 20
+#define PEG_BENCH_ENDGAME_PLIES 25
 
 static double peg_bench_now_s(void) {
   struct timespec t;
@@ -45,17 +49,64 @@ static double peg_bench_now_s(void) {
   return (double)t.tv_sec + (double)t.tv_nsec * 1e-9;
 }
 
+// Solve and play the endgame (bag empty), capped to the same per-turn budget as
+// the pre-endgame turns: a depth-25 solve with soft/hard IDS limits and a hard
+// wall-clock deadline all set to budget_s. Returns true if a move was played.
+static bool peg_bench_play_endgame(Game *game, ThreadControl *thread_control,
+                                   double budget_s, ErrorStack *error_stack) {
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = thread_control;
+  endgame_args.game = game;
+  endgame_args.plies = PEG_BENCH_ENDGAME_PLIES;
+  endgame_args.tt_fraction_of_mem = 0.05;
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 1;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.seed = 0;
+  // Same time budget as a pre-endgame turn: stop IDS at the soft limit, don't
+  // start a depth that would blow the hard limit, and bail mid-search at the
+  // wall-clock deadline.
+  endgame_args.soft_time_limit = budget_s;
+  endgame_args.hard_time_limit = budget_s;
+  endgame_args.external_deadline_ns =
+      ctimer_monotonic_ns() + (int64_t)(budget_s * 1.0e9);
+
+  EndgameCtx *ctx = endgame_ctx_create();
+  EndgameResults *results = endgame_results_create();
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  endgame_solve(&ctx, &endgame_args, results, error_stack);
+
+  bool played = false;
+  if (error_stack_is_empty(error_stack)) {
+    const PVLine *pv = endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    if (pv != NULL && pv->num_moves > 0) {
+      Move move;
+      small_move_to_move(&move, &pv->moves[0], game_get_board(game));
+      play_move(&move, game, NULL);
+      played = true;
+    }
+  }
+  endgame_results_destroy(results);
+  endgame_ctx_destroy(ctx);
+  return played;
+}
+
 // Choose and play one move for the player on turn. While the bag is in the PEG
-// range, solve it with the greedy pre-endgame seed within budget_s; otherwise
-// play the static best (placeholder for the d25 endgame at bag 0). *elapsed_out
-// is the wall time spent.
+// range, solve it with the greedy pre-endgame seed within budget_s; at bag 0
+// solve the endgame under the same budget. *elapsed_out is the wall time spent.
 static void peg_bench_play_turn(Game *game, MoveList *move_list,
                                 ThreadControl *thread_control, double budget_s,
                                 double *elapsed_out, ErrorStack *error_stack) {
   const double t0 = peg_bench_now_s();
   const int bag = bag_get_letters(game_get_bag(game));
   bool played = false;
-  if (bag >= PEG_MIN_BAG && bag <= PEG_MAX_BAG) {
+  if (bag == 0) {
+    played = peg_bench_play_endgame(game, thread_control, budget_s, error_stack);
+  } else if (bag >= PEG_MIN_BAG && bag <= PEG_MAX_BAG) {
     // Supply the candidate field explicitly: peg_solve's own root move
     // generation is unused by every caller (all pass only_moves) and currently
     // returns just a pass here. Top-N by static equity is a sound field, and
@@ -102,7 +153,8 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
     }
   }
   if (!played) {
-    // Endgame (bag 0) or a solve that produced nothing: static best for now.
+    // A solve produced nothing (e.g. a severe budget, or a bag outside the PEG
+    // range that should not occur mid-playout): fall back to the static best.
     const Move *move = get_top_equity_move(game, move_list);
     play_move(move, game, NULL);
   }
