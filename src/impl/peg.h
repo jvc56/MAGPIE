@@ -121,6 +121,14 @@ typedef struct PegArgs {
   // all stages".
   int max_stage;
 
+  // Run only the greedy seed (stage 0): rank the full candidate field by the
+  // greedy-playout win% and skip the halving stages' exact endgame refinement.
+  // A fast, bounded, deterministic evaluation -- full scenario enumeration and
+  // a deterministic playout, with no open-ended deep endgame solves -- at the
+  // cost of the endgame-exact fidelity the halving stages add. Overrides
+  // max_stage and stage_top_k. Default false.
+  bool greedy_seed_only;
+
   // Optional per-stage candidate counts for the halving stages (stage 1
   // onward), overriding the built-in default schedule. NULL = use the default.
   // When set, num_stages is the array length and defines how many halving

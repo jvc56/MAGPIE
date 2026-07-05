@@ -52,6 +52,7 @@
 #include "rack_test.h"
 #include "random_variable_test.h"
 #include "shadow_test.h"
+#include "peginf_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
 #include "simmedinf_benchmark.h"
@@ -169,6 +170,8 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    // Pre-endgame (PEG) inference
+    {"peginf", test_peginf},
     // Simmed inference (simulation-based opponent-leave inference)
     {"simmedinf_exchange", test_simmedinf},
     {"simmedinf", test_simmedinf_benchmark},
