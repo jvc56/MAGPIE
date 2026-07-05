@@ -37,6 +37,7 @@
 #include "peg_combinatorics.h"
 #include "peg_pool.h"
 #include "word_prune.h"
+#include <assert.h>
 #include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -1895,11 +1896,16 @@ static void peg_eval_inference_samples(PegEvalCtx *ctx,
     // Sample an opponent leave from the inference (empty prior => uniform rack).
     rack_reset(&leave);
     alias_method_sample(am, prng, &leave);
-    // Pool = the unseen tiles not pinned by the leave.
+    // Pool = the unseen tiles not pinned by the leave. The inference targets the
+    // opponent's immediately preceding move and only the opponent has acted
+    // since, so every sampled leave is a subset of the mover's unseen (leave <=
+    // opponent rack <= unseen) and rem is never negative -- the same invariant
+    // the simmer relies on when set_random_rack draws the leave strictly.
     MachineLetter pool[RACK_SIZE + PEG_MAX_BAG];
     int pool_n = 0;
     for (int ml = 0; ml < ctx->ld_size; ml++) {
       const int rem = (int)ctx->unseen[ml] - (int)rack_get_letter(&leave, ml);
+      assert(rem >= 0);
       for (int i = 0; i < rem; i++) {
         pool[pool_n++] = (MachineLetter)ml;
       }
