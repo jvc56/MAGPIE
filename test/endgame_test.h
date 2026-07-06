@@ -3,6 +3,7 @@
 
 void test_endgame(void);
 void test_endgame_wasm(void);
+void test_endgame_outplay_zobrist_overflow(void);
 void test_multi_pv(void);
 void test_kue(void);
 void test_eldar_v_stick(void);
