@@ -1328,6 +1328,8 @@ int main(int argc, char *argv[]) {
           game_state.sim_results = sim_results_create(0.005);
           atomic_store(&game_state.sim_results_active, false);
           atomic_store(&game_state.sim_results_turn_idx, -1);
+          atomic_store(&game_state.peg_results_active, false);
+          atomic_store(&game_state.peg_results_turn_idx, -1);
 
           // Surface real player names from the GCG so the pill
           // headers read "Quackle" / "New Player 1" instead of

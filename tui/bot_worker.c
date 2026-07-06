@@ -20,6 +20,7 @@
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/peg.h"
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/str/rack_string.h"
@@ -912,6 +913,96 @@ static bool run_endgame(TuiGameState *state, double budget_sec,
                         &state->bot_stop, out_move);
 }
 
+// Inner-peg stage schedule when nested lookahead is on — same
+// defaults the CLI uses (see config_fill_peg_args): 8 candidates at
+// the first inner stage, then 4, then 2.
+static const int TUI_PEG_NESTED_CAND_CAPS[] = {8, 4, 2};
+
+// Run the PEG (pre-endgame) solver against `position` with a time
+// budget. Live progress streams through state->peg_poll, which the
+// analysis panel reads via peg_poll_read at render cadence — the
+// same pollable pattern the sim panel uses. Returns true and writes
+// the best move on success. Generic over which position / stop flag
+// so both the live bot turn and the post-game analysis resume can
+// use it (mirrors run_endgame_on).
+static bool run_peg_on(TuiGameState *state, const Game *position,
+                       int results_turn_idx, double budget_sec,
+                       _Atomic bool *stop_flag, Move *out_move) {
+  // Create the poll lazily on the first PEG turn; reset it on reuse
+  // so a previous solve's stage history doesn't leak into this one.
+  if (state->peg_poll == NULL) {
+    state->peg_poll = peg_poll_create();
+  } else {
+    peg_poll_reset(state->peg_poll);
+  }
+
+  ThreadControl *tc = thread_control_create();
+  thread_control_set_status(tc, THREAD_CONTROL_STATUS_STARTED);
+
+  Watchdog wd = {.tc = tc, .bot_stop = stop_flag, .finished = false};
+  pthread_t wd_thread;
+  const bool wd_started =
+      (pthread_create(&wd_thread, NULL, watchdog_main, &wd) == 0);
+
+  PegArgs args = {0};
+  args.game = position;
+  args.thread_control = tc;
+  {
+    const int hw = get_num_cores();
+    args.num_threads = hw > 2 ? hw - 1 : hw;
+  }
+  args.time_budget_seconds = budget_sec;
+  args.opp_model = PEG_OPP_RATIONAL;
+  args.scenario_stride = 0; // bag-size default
+  args.stage_top_k = NULL;  // built-in halving schedule
+  // Nested inner-peg lookahead for non-emptier leaves, matching the
+  // CLI's defaults (on, depth 1, 8-4-2 inner candidate caps).
+  args.nested_enabled = true;
+  args.nested_max_depth = PEG_NESTED_DEFAULT_DEPTH;
+  args.nested_cand_caps = TUI_PEG_NESTED_CAND_CAPS;
+  args.nested_n_cand_caps = (int)(sizeof(TUI_PEG_NESTED_CAND_CAPS) /
+                                  sizeof(TUI_PEG_NESTED_CAND_CAPS[0]));
+  args.nested_stride = 0; // bag-size default
+  args.poll = state->peg_poll;
+
+  // Publish to the renderer BEFORE the solve kicks off so the panel
+  // doesn't show stale data from a previous turn (sim pattern).
+  atomic_store(&state->peg_results_turn_idx, results_turn_idx);
+  atomic_store(&state->peg_results_active, true);
+
+  PegResult result = {0};
+  ErrorStack *err = error_stack_create();
+  peg_solve(&args, &result, err);
+  const bool solve_ok = error_stack_is_empty(err);
+  error_stack_destroy(err);
+
+  atomic_store(&wd.finished, true);
+  if (wd_started) {
+    pthread_join(wd_thread, NULL);
+  }
+
+  bool got_move = false;
+  if (solve_ok && result.n_top_cands > 0) {
+    // top_cands[0] is the best move of the deepest completed stage
+    // (sorted by win% with a spread tiebreak).
+    move_copy(out_move, &result.top_cands[0].move);
+    got_move = true;
+  }
+
+  atomic_store(&state->peg_results_active, false);
+  atomic_fetch_add(&state->render_version, 1);
+
+  peg_result_destroy(&result);
+  thread_control_destroy(tc);
+  return got_move;
+}
+
+// Bot-turn wrapper: PEG-solve the live game, stamped as the live turn.
+static bool run_peg(TuiGameState *state, double budget_sec, Move *out_move) {
+  return run_peg_on(state, state->game, state->history_count, budget_sec,
+                    &state->bot_stop, out_move);
+}
+
 static void *bot_thread_main(void *arg) {
   TuiGameState *state = (TuiGameState *)arg;
   // Scratch list for the equity-best fallback path.
@@ -924,6 +1015,7 @@ static void *bot_thread_main(void *arg) {
     // ── Snapshot turn state, append pending history ──────────────────
     int pending_idx = -1;
     bool empty_bag = false;
+    bool peg_range = false;
     double budget_sec = 0.0;
     int player_idx = -1;
 
@@ -1051,12 +1143,25 @@ static void *bot_thread_main(void *arg) {
 
     budget_sec = compute_budget_sec(state, player_idx);
     empty_bag = (bag_get_letters(game_get_bag(state->game)) == 0);
+    peg_range = tui_position_in_peg_range(state->game);
     pthread_mutex_unlock(&state->mutex);
 
     // ── Run the engine with the mutex released ───────────────────────
     bool got_move = false;
     if (empty_bag) {
       got_move = run_endgame(state, budget_sec, chosen);
+    } else if (peg_range) {
+      // Pre-endgame (1-4 effective tiles in the bag): exact win%
+      // ranking from the PEG solver, streaming into the live panel.
+      got_move = run_peg(state, budget_sec, chosen);
+      if (!got_move && state->win_pcts != NULL) {
+        // PEG failed before ranking anything — invalidate the poll's
+        // turn stamp so the panel's mode selection doesn't shadow the
+        // sim leaderboard with an empty PEG view, then fall back to a
+        // sim so the bot still gets an informed move.
+        atomic_store(&state->peg_results_turn_idx, -1);
+        got_move = run_sim(state, budget_sec, chosen);
+      }
     } else if (state->win_pcts != NULL) {
       got_move = run_sim(state, budget_sec, chosen);
     }
@@ -1417,6 +1522,28 @@ static void analysis_resume_endgame(TuiGameState *state, TuiHistoryEntry *entry,
   pthread_mutex_unlock(&state->mutex);
 }
 
+// Re-solve a saved PEG turn. Like the endgame resume this is a fresh
+// solve (PEG has no incremental resume), streaming into the live
+// panel through the poll; the entry's snapshot is refreshed when it
+// stops.
+static void analysis_resume_peg(TuiGameState *state, TuiHistoryEntry *entry,
+                                int turn_idx, const Game *position) {
+  pthread_mutex_lock(&state->mutex);
+  set_analysis_notice(state, "resuming peg solve - /stop to pause");
+  state->analysis_game = (struct Game *)position;
+  pthread_mutex_unlock(&state->mutex);
+
+  Move *scratch = move_create();
+  run_peg_on(state, position, turn_idx, (double)ANALYSIS_RESUME_TIME_LIMIT_SEC,
+             &state->analysis_stop, scratch);
+  move_destroy(scratch);
+
+  pthread_mutex_lock(&state->mutex);
+  tui_capture_analysis_snapshot(state, &entry->analysis_snapshot);
+  set_analysis_notice(state, "peg analysis saved");
+  pthread_mutex_unlock(&state->mutex);
+}
+
 static void *analysis_thread_main(void *arg) {
   TuiGameState *state = (TuiGameState *)arg;
 
@@ -1428,8 +1555,10 @@ static void *analysis_thread_main(void *arg) {
   }
   Game *position = NULL;
   bool is_sim = false;
+  bool is_peg = false;
   if (entry != NULL && entry->cgp_before[0] != '\0') {
     is_sim = entry->analysis_snapshot.is_sim;
+    is_peg = entry->analysis_snapshot.is_peg;
     position = game_duplicate(state->game);
   }
   pthread_mutex_unlock(&state->mutex);
@@ -1456,7 +1585,9 @@ static void *analysis_thread_main(void *arg) {
     return NULL;
   }
 
-  if (is_sim) {
+  if (is_peg) {
+    analysis_resume_peg(state, entry, turn_idx, position);
+  } else if (is_sim) {
     analysis_resume_sim(state, entry, turn_idx, position);
   } else {
     analysis_resume_endgame(state, entry, turn_idx, position);

@@ -4,7 +4,9 @@
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
 #include "../src/ent/endgame_results.h"
@@ -19,6 +21,7 @@
 #include "../src/ent/win_pct.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/peg.h"
 #include "../src/util/io_util.h"
 #include "glyph_cache.h"
 #include <pthread.h>
@@ -180,6 +183,12 @@ bool tui_game_state_init(const char *lexicon, uint64_t seed, bool load_rit,
   atomic_store(&out_state->endgame_results_active, false);
   atomic_store(&out_state->endgame_results_turn_idx, -1);
   atomic_store(&out_state->endgame_initial_spread, 0);
+
+  // The PEG poll is created lazily by the bot worker on the first
+  // pre-endgame turn (many games never enter PEG range).
+  out_state->peg_poll = NULL;
+  atomic_store(&out_state->peg_results_active, false);
+  atomic_store(&out_state->peg_results_turn_idx, -1);
 
   const GameArgs args = {
       .players_data = out_state->players_data,
@@ -1153,6 +1162,9 @@ void tui_game_state_reset_game_for_annotation(TuiGameState *state) {
   atomic_store(&state->endgame_results_active, false);
   atomic_store(&state->endgame_results_turn_idx, -1);
   atomic_store(&state->endgame_initial_spread, 0);
+  atomic_store(&state->peg_results_active, false);
+  atomic_store(&state->peg_results_turn_idx, -1);
+  state->peg_live_meta.valid = false;
   tui_endgame_snapshot_clear(&state->endgame_snapshot);
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
@@ -1471,6 +1483,9 @@ void tui_game_state_reset_game(TuiGameState *state, uint64_t seed) {
   atomic_store(&state->endgame_results_active, false);
   atomic_store(&state->endgame_results_turn_idx, -1);
   atomic_store(&state->endgame_initial_spread, 0);
+  atomic_store(&state->peg_results_active, false);
+  atomic_store(&state->peg_results_turn_idx, -1);
+  state->peg_live_meta.valid = false;
   tui_endgame_snapshot_clear(&state->endgame_snapshot);
   if (state->endgame_ctx != NULL) {
     endgame_ctx_clear_transposition_table(state->endgame_ctx);
@@ -1586,8 +1601,26 @@ void tui_game_state_destroy(TuiGameState *state) {
   if (state->endgame_ctx != NULL) {
     endgame_ctx_destroy(state->endgame_ctx);
   }
+  if (state->peg_poll != NULL) {
+    peg_poll_destroy(state->peg_poll);
+  }
   tui_endgame_snapshot_clear(&state->endgame_snapshot);
   memset(state, 0, sizeof(*state));
+}
+
+bool tui_position_in_peg_range(const struct Game *game) {
+  if (game == NULL) {
+    return false;
+  }
+  // Mirror peg_solve's own range check: the raw bag holds the real
+  // remaining tiles plus the opponent's unknown holdings, so subtract
+  // (RACK_SIZE - opp rack tiles) to get the effective bag size.
+  const int raw_bag = bag_get_letters(game_get_bag(game));
+  const int mover_idx = game_get_player_on_turn_index(game);
+  const Rack *opp_rack = player_get_rack(game_get_player(game, 1 - mover_idx));
+  const int opp_unknown = RACK_SIZE - (int)rack_get_total_letters(opp_rack);
+  const int effective_bag = raw_bag - opp_unknown;
+  return effective_bag >= PEG_MIN_BAG && effective_bag <= PEG_MAX_BAG;
 }
 
 void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap) {

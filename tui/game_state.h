@@ -20,6 +20,7 @@ struct WinPct;
 struct SimResults;
 struct EndgameResults;
 struct EndgameCtx;
+struct PegPoll;
 struct Board;
 struct Move;
 struct Rack;
@@ -114,10 +115,29 @@ typedef struct {
   int endgame_depth;
   uint64_t endgame_nodes;
   bool endgame_exhaustive;
-  // True when this snapshot is from a sim solve; false for endgame.
+  // PEG-mode title meta: the endgame fidelity (plies) of the ranking
+  // shown and whether the solve ran to completion.
+  int peg_fidelity;
+  bool peg_done;
+  // Which mode produced this snapshot: is_peg wins over is_sim; when
+  // both are false the snapshot is from an endgame solve.
   bool is_sim;
+  bool is_peg;
   bool valid;
 } TuiAnalysisSnapshot;
+
+// Title metadata for the live PEG panel, refreshed by the render
+// thread's row builder from the same peg_poll_read snapshot the rows
+// came from (so the title always matches the rows on screen). Render
+// thread only — no locking.
+typedef struct {
+  int stage;       // current stage (0 = greedy seed)
+  int fidelity;    // plies of the ranking being displayed
+  int cands_done;  // finished candidates in the current stage
+  int field_size;  // total candidates in the current stage
+  bool solve_done; // peg_solve finished
+  bool valid;
+} TuiPegLiveMeta;
 
 // What a history entry represents. MOVE is a normal played turn. The
 // clock-event kinds mirror the engine's GAME_EVENT_TIME_PENALTY
@@ -296,6 +316,18 @@ typedef struct {
   _Atomic bool sim_results_active;
   _Atomic int sim_results_turn_idx;
 
+  // PEG (pre-endgame) live view, same idea as sim_results above. The
+  // bot worker passes this poll to peg_solve, which refreshes it as
+  // candidates and stages complete; the analysis panel reads it via
+  // peg_poll_read (thread-safe by contract) at render cadence.
+  // Created lazily by the bot worker on the first PEG turn, reset
+  // per solve, destroyed in tui_game_state_destroy.
+  // `peg_results_turn_idx` is the history index the poll's contents
+  // were computed for; -1 = poll contents invalid for this game.
+  struct PegPoll *peg_poll;
+  _Atomic bool peg_results_active;
+  _Atomic int peg_results_turn_idx;
+
   // Endgame results, same idea as sim_results above — allocated once
   // at init, reused per turn. `endgame_initial_spread` captures the
   // solver's score margin (solver - opponent) at the moment the solve
@@ -466,6 +498,10 @@ typedef struct {
   // Written each frame under state->mutex by the render path.
   AnalysisRow last_rendered_analysis_rows[ANALYSIS_ROW_CAP];
   int last_rendered_analysis_row_count;
+  // Title metadata for the live PEG panel, refreshed alongside the
+  // row cache above (same peg_poll_read snapshot). Render thread
+  // only.
+  TuiPegLiveMeta peg_live_meta;
   // Scroll position for the Analysis panel — the rank index of the
   // first row visible in the scroll window. Auto-adjusted to keep
   // the cursor visible; can also be driven directly by the
@@ -751,6 +787,12 @@ void tui_game_state_seek_engine_to_turn(TuiGameState *state, int idx);
 // values), zeros the fields, marks invalid. Safe on a zero-init or
 // already-cleared snapshot.
 void tui_endgame_snapshot_clear(TuiEndgameSnapshot *snap);
+
+// True when the position is in the PEG (pre-endgame) solver's range:
+// the effective bag — raw bag tiles minus the opponent's unknown
+// holdings (RACK_SIZE - opp rack tiles), matching peg_solve's own
+// check — is within [PEG_MIN_BAG, PEG_MAX_BAG]. NULL game is false.
+bool tui_position_in_peg_range(const struct Game *game);
 
 // Set the per-side time budget. Call once after init, before the bot
 // worker starts. Resets the on-turn player's turn_started to "now".
