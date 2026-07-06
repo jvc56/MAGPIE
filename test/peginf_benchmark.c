@@ -21,6 +21,7 @@
 #include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/alias_method.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -82,6 +83,10 @@ static int g_bench_num_threads = 1;
 // (PEGBENCH_BUDGET / PEGBENCH_SAMPLES) so a larger-budget run needs no rebuild.
 static double g_bench_budget_s = PEG_BENCH_TURN_BUDGET_S;
 static int g_bench_samples = PEG_BENCH_INFERENCE_SAMPLES;
+// "Psychic" mode (PEGBENCH_PSYCHIC): arm B weights peg_solve by the opponent's
+// TRUE leave instead of running inference -- the ceiling of leave inference and
+// a check that leave results are applied correctly.
+static bool g_bench_psychic = false;
 
 // Read a positive integer environment override, or fall back to def.
 static int peg_bench_env_int(const char *name, int def) {
@@ -332,6 +337,39 @@ static void peg_bench_play_turn(Game *game, MoveList *move_list,
   *elapsed_out = peg_bench_now_s() - t0;
 }
 
+// "Psychic" prior: pin the opponent-leave distribution to the opponent's ACTUAL
+// kept tiles (leave = their pre-move rack minus the tiles they played) as a
+// point mass. Feeding this true leave through peg_solve's normal weighting path
+// -- which still samples the opponent's redraw from the unseen -- measures the
+// ceiling of leave inference and validates that leave results are applied
+// correctly (the same code path real inference uses, minus the estimation
+// error). Returns a fresh InferenceResults the caller must destroy, or NULL.
+static InferenceResults *peg_bench_psychic_prior(const Game *game_before_prev,
+                                                 const Move *prev_move,
+                                                 int prev_player) {
+  const int ld_size = ld_get_size(game_get_ld(game_before_prev));
+  const Rack *before =
+      player_get_rack(game_get_player(game_before_prev, prev_player));
+  Rack played;
+  peg_bench_extract_played_tiles(prev_move, ld_size, &played);
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ld_size);
+  for (int ml = 0; ml < ld_size; ml++) {
+    const int keep =
+        (int)rack_get_letter(before, ml) - (int)rack_get_letter(&played, ml);
+    for (int k = 0; k < keep; k++) {
+      rack_add_letter(&leave, (MachineLetter)ml);
+    }
+  }
+  AliasMethod *alias = alias_method_create();
+  alias_method_add_rack(alias, &leave, 1);
+  if (!alias_method_generate_tables(alias)) {
+    alias_method_destroy(alias);
+    return NULL;
+  }
+  return inference_results_create(alias); // takes ownership of alias
+}
+
 // ── Playout ──────────────────────────────────────────────────────────────────
 
 // The opponent's previous-move context that lets inference fire on the very
@@ -377,6 +415,7 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
     Game *snapshot = game_duplicate(game);
 
     const InferenceResults *prior = NULL;
+    InferenceResults *psychic_res = NULL; // per-turn; destroyed after the turn
     double infer_elapsed = 0.0;
     const bool prev_inferable =
         have_prev && (move_get_type(&prev_move) == GAME_EVENT_TILE_PLACEMENT_MOVE ||
@@ -384,11 +423,18 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
     if (use_inference && on_turn == inferring_player && prev_inferable &&
         turn_bag >= PEG_MIN_BAG && turn_bag <= PEG_MAX_BAG) {
       const double t0 = peg_bench_now_s();
-      const double infer_budget = g_bench_budget_s * PEG_BENCH_INFER_BUDGET_FRAC;
-      if (peg_bench_run_inference(game_before_prev, &prev_move, prev_player,
-                                  prev_turn_bag, win_pcts, thread_control,
-                                  inf_results, infer_budget, error_stack)) {
-        prior = inf_results;
+      if (g_bench_psychic) {
+        psychic_res =
+            peg_bench_psychic_prior(game_before_prev, &prev_move, prev_player);
+        prior = psychic_res;
+      } else {
+        const double infer_budget =
+            g_bench_budget_s * PEG_BENCH_INFER_BUDGET_FRAC;
+        if (peg_bench_run_inference(game_before_prev, &prev_move, prev_player,
+                                    prev_turn_bag, win_pcts, thread_control,
+                                    inf_results, infer_budget, error_stack)) {
+          prior = inf_results;
+        }
       }
       infer_elapsed = peg_bench_now_s() - t0;
     }
@@ -412,8 +458,11 @@ static int peg_bench_play_out(Game *game, MoveList *move_list,
       printf(
           "    turn %2d  p%d  bag=%d  infer=%.2fs solve=%.2fs total=%.2fs%s%s\n",
           turn, on_turn, turn_bag, infer_elapsed, solve_elapsed, turn_total,
-          prior != NULL ? "  [inf]" : "",
+          prior != NULL ? (g_bench_psychic ? "  [psy]" : "  [inf]") : "",
           turn_total > g_bench_budget_s * 1.5 ? "  *** OVER" : "");
+    }
+    if (psychic_res != NULL) {
+      inference_results_destroy(psychic_res);
     }
 
     game_copy(game_before_prev, snapshot);
@@ -543,6 +592,7 @@ void test_peginf_benchmark(void) {
       peg_bench_env_double("PEGBENCH_BUDGET", PEG_BENCH_TURN_BUDGET_S);
   g_bench_samples =
       peg_bench_env_int("PEGBENCH_SAMPLES", PEG_BENCH_INFERENCE_SAMPLES);
+  g_bench_psychic = peg_bench_env_int("PEGBENCH_PSYCHIC", 0) != 0;
 
   printf("  PEG A/B benchmark (4-in-bag CSW24, budget %.1fs/turn, %d threads):\n",
          g_bench_budget_s, g_bench_num_threads);
@@ -663,6 +713,7 @@ void test_peginf_benchmark_generate(void) {
       peg_bench_env_double("PEGBENCH_BUDGET", PEG_BENCH_TURN_BUDGET_S);
   g_bench_samples =
       peg_bench_env_int("PEGBENCH_SAMPLES", PEG_BENCH_INFERENCE_SAMPLES);
+  g_bench_psychic = peg_bench_env_int("PEGBENCH_PSYCHIC", 0) != 0;
 
   // Quotas, seed, and game cap are env-overridable (PEGBENCH_SIM / _PEG / _SEED
   // / _GAMECAP) so a large run needs no rebuild.
@@ -678,8 +729,9 @@ void test_peginf_benchmark_generate(void) {
   const int n = peg_bench_generate(game, move_list, positions, max_sim, max_peg,
                                    base_seed, game_cap);
   printf("  PEG A/B aggregation: generated %d positions (target %d sim + %d "
-         "peg), budget %.1fs/turn, %d threads\n",
-         n, max_sim, max_peg, g_bench_budget_s, g_bench_num_threads);
+         "peg), budget %.1fs/turn, %d threads, arm B = %s\n",
+         n, max_sim, max_peg, g_bench_budget_s, g_bench_num_threads,
+         g_bench_psychic ? "PSYCHIC (true opponent leave)" : "inference");
 
   // Debug: skip playing positions before this index (generation is
   // deterministic, so this jumps straight to a specific position to reproduce).
