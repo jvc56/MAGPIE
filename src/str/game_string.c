@@ -435,7 +435,7 @@ void string_builder_add_game_internal(
                                  heat_map, heat_map_type);
     string_builder_add_spaces(game_string, 3);
     if (i == UNSEEN_START_ROW) {
-      string_builder_add_formatted_string(game_string, "Unseen: %d (%d v | %d c)",
+      string_builder_add_formatted_string(game_string, "Unseen: %d (%dv | %dc)",
                                           num_bag_letters, num_bag_vowels, num_bag_consonants);
     } else if (i > UNSEEN_START_ROW && letter_index < num_bag_letters) {
       for (int j = 0; j < letters_per_row && letter_index < num_bag_letters;
