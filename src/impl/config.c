@@ -1284,8 +1284,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_OVERTIME:
       usages[0] = "<player_nickname> <overtime_penalty>";
-      examples[0] = "josh 5";
-      examples[1] = "josh 9";
+      examples[0] = "josh -5";
+      examples[1] = "josh -9";
       text =
           "Adds an overtime penalty for the given player. Overtime penalties "
           "can only be applied after the game is over.";
