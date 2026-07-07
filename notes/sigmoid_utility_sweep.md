@@ -57,3 +57,5 @@ python3 notes/sigmoid_sweep_analyze.py <logdir> u0.25 ...
 - 2026-07-06 16:36:13 u0.10: chunks=20 games=400 pairs=200 | P2 wins=204 P1 wins=194 ties=2 P2 win%=51.25 p_win=0.6520 | spread/pair=+61.60 p_spread=0.0000 | avg score P1=426.9 P2=457.7
 
 - 2026-07-06 17:35:50 u0.25: chunks=20 games=400 pairs=200 | P2 wins=204 P1 wins=194 ties=2 P2 win%=51.25 p_win=0.6520 | spread/pair=+63.84 p_spread=0.0000 | avg score P1=425.8 P2=457.7
+
+- 2026-07-06 18:34:41 u0.50: chunks=20 games=400 pairs=200 | P2 wins=209 P1 wins=190 ties=1 P2 win%=52.38 p_win=0.3675 | spread/pair=+71.97 p_spread=0.0000 | avg score P1=425.9 P2=461.9
