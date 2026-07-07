@@ -29,7 +29,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
-#include <ctype.h>
 
 // Display formatting constants
 enum {
@@ -416,23 +415,10 @@ void string_builder_add_game_internal(
   int num_bag_vowels = 0;
   int num_bag_consonants = 0;
   for (int i = 0; i < num_bag_letters; i++) {
-    if (bag_letters[i] == BLANK_MACHINE_LETTER) {
-      continue;
-    }
-    char *hl = ld_ml_to_hl(ld, bag_letters[i]);
-    const char first_char = (char)toupper((unsigned char)hl[0]);
-    free(hl);
-    switch (first_char) {
-    case 'A':
-    case 'E':
-    case 'I':
-    case 'O':
-    case 'U':
+    if (ld_get_is_vowel(ld, bag_letters[i])) {
       num_bag_vowels++;
-      break;
-    default:
+    } else {
       num_bag_consonants++;
-      break;
     }
   }
 
@@ -446,7 +432,7 @@ void string_builder_add_game_internal(
                                  heat_map, heat_map_type);
     string_builder_add_spaces(game_string, 3);
     if (i == UNSEEN_START_ROW) {
-      string_builder_add_formatted_string(game_string, "Unseen: %d (%d vowels | %d consonants)",
+      string_builder_add_formatted_string(game_string, "Unseen: %d (%dv | %dc)",
                                           num_bag_letters, num_bag_vowels, num_bag_consonants);
     } else if (i > UNSEEN_START_ROW && letter_index < num_bag_letters) {
       for (int j = 0; j < letters_per_row && letter_index < num_bag_letters;
