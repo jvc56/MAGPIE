@@ -1851,11 +1851,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
-      examples[0] = "0.0";
+      examples[0] = "0.5";
       examples[1] = "0.3";
       text = "Weight on (normalized) spread in the BAI sample utility. Default "
-             "0.0 (pure win%). With non-zero uspread the simmer favors plays "
-             "with higher rollout spread in addition to higher win%.";
+             "0.5. With non-zero uspread the simmer favors plays with higher "
+             "rollout spread in addition to higher win%.";
       break;
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
@@ -8405,7 +8405,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->utility_w_winpct = 1.0;
-  config->utility_w_spread = 0.0;
+  config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
   config->time_limit_seconds = 60;
   config->num_threads = get_num_cores();
