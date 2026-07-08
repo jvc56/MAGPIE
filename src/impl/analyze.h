@@ -4,19 +4,22 @@
 #include "../ent/game_history.h"
 #include "../ent/sim_args.h"
 #include "../impl/endgame.h"
+#include "../impl/peg.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
 
 typedef struct AnalyzeCtx AnalyzeCtx;
 
 // All inputs required by analyze_game. Config.c is responsible for filling
-// each field before calling analyze_game; analyze_with_sim and
-// analyze_with_endgame set the remaining per-turn fields (game, move_list,
-// known_opp_rack) on sim_args and endgame_args before forwarding to simulate
-// and endgame_solve.
+// each field before calling analyze_game; analyze_with_sim,
+// analyze_with_endgame, and analyze_with_peg set the remaining per-turn
+// fields (game, move_list, known_opp_rack) on sim_args, endgame_args, and
+// peg_args before forwarding to simulate, endgame_solve, and peg_solve.
 //
 // sim_args.num_plies == 0 selects static analysis (move generation only,
-// no simulation or endgame solving).
+// no simulation or endgame solving). Otherwise, the bag size at the turn
+// being analyzed selects sim (bag > PEG_MAX_BAG), peg (PEG_MIN_BAG..
+// PEG_MAX_BAG), or endgame (empty bag).
 typedef struct AnalyzeArgs {
   GameHistory *game_history;
   bool analyze_players[2]; // true = analyze that player; pre-resolved by caller
@@ -24,6 +27,7 @@ typedef struct AnalyzeArgs {
 
   SimArgs sim_args;
   EndgameArgs endgame_args;
+  PegArgs peg_args;
 
   bool human_readable;
   int max_num_display_plays;

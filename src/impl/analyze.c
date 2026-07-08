@@ -6,6 +6,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
@@ -36,6 +37,7 @@
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "peg.h"
 #include "simmer.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -1148,6 +1150,91 @@ static void analyze_with_endgame(const GameEvent *event,
   }
 }
 
+// Analyzes a single turn using the pre-endgame (PEG) solver, for positions
+// with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag. The peg_args in analyze_args
+// must already be partially filled; this function sets the per-turn game
+// field and protects the actual move from pruning so it always survives to
+// the deepest completed stage, then reads its ranked win%/spread directly out
+// of peg_solve's top_cands.
+static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
+                             const GameHistory *game_history,
+                             const LetterDistribution *ld,
+                             const char *report_path, const AnalyzeCtx *ctx,
+                             AnalyzeArgs *args, bool is_first_analyzed_turn,
+                             ErrorStack *error_stack) {
+  const ValidatedMoves *vms = game_event_get_vms(event);
+  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+
+  args->peg_args.game = ctx->game;
+  const Move *protect_moves[1] = {&actual_move_or_pass_if_phony};
+  args->peg_args.protect_moves = protect_moves;
+  args->peg_args.n_protect_moves = 1;
+
+  PegResult peg_result = {0};
+  peg_solve(&args->peg_args, &peg_result, error_stack);
+
+  args->peg_args.protect_moves = NULL;
+  args->peg_args.n_protect_moves = 0;
+
+  if (!error_stack_is_empty(error_stack)) {
+    peg_result_destroy(&peg_result);
+    return;
+  }
+
+  if (peg_result.n_top_cands == 0) {
+    log_fatal("peg solver failed to find any moves for the position");
+  }
+
+  const PegRankedCand *best_cand = &peg_result.top_cands[0];
+  const PegRankedCand *actual_cand = NULL;
+  int actual_rank_idx = -1;
+  for (int cand_idx = 0; cand_idx < peg_result.n_top_cands; cand_idx++) {
+    if (compare_moves_without_equity(&peg_result.top_cands[cand_idx].move,
+                                     &actual_move_or_pass_if_phony,
+                                     true) == -1) {
+      actual_cand = &peg_result.top_cands[cand_idx];
+      actual_rank_idx = cand_idx;
+      break;
+    }
+  }
+  if (!actual_cand) {
+    log_fatal("failed to find actual move in peg top candidates after protect");
+  }
+  // To silence static warnings about actual_cand potentially being NULL, even
+  // though this is impossible due to the above check and fatal log.
+  assert(actual_cand != NULL);
+
+  turn_result->actual.move = actual_move_or_pass_if_phony;
+  turn_result->actual.win_pct = actual_cand->win_pct * 100.0;
+  turn_result->actual.equity = actual_cand->mean_spread;
+  turn_result->actual.rank_idx = actual_rank_idx;
+
+  if (actual_rank_idx == 0) {
+    // Actual move is optimal; best is a copy of actual.
+    turn_result->best = turn_result->actual;
+  } else {
+    turn_result->best.move = best_cand->move;
+    turn_result->best.win_pct = best_cand->win_pct * 100.0;
+    turn_result->best.equity = best_cand->mean_spread;
+    turn_result->best.rank_idx = 0;
+    populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
+  }
+
+  turn_result->was_endgame = false;
+  turn_result->used_inference = false;
+
+  peg_result_destroy(&peg_result);
+
+  if (args->human_readable) {
+    write_per_turn_human_readable(turn_result, game_history, ld, report_path,
+                                  ctx, args->max_num_display_plays, 0,
+                                  error_stack);
+  } else {
+    write_per_turn_csv(turn_result, game_history, ld, report_path,
+                       is_first_analyzed_turn, error_stack);
+  }
+}
+
 // Analyzes all move events in game_history. Creates *analyze_ctx if NULL
 // on entry; the caller is responsible for calling analyze_ctx_destroy after
 // this returns.
@@ -1240,12 +1327,16 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                    "Event %d: %s\n", turn_counter,
                                    turn_result.actual.display_move);
 
+    const int bag_letters = bag_get_letters(game_get_bag(ctx->game));
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,
                           ctx, analyze_args->max_num_display_plays,
                           analyze_args->human_readable, is_first_analyzed_turn,
                           vertical_opening_is_transposable, error_stack);
-    } else if (bag_get_letters(game_get_bag(ctx->game)) > 0) {
+    } else if (bag_letters >= PEG_MIN_BAG && bag_letters <= PEG_MAX_BAG) {
+      analyze_with_peg(event, &turn_result, game_history, ld, report_path, ctx,
+                       analyze_args, is_first_analyzed_turn, error_stack);
+    } else if (bag_letters > 0) {
       analyze_with_sim(event, &turn_result, game_history, ld, report_path, ctx,
                        analyze_args, is_first_analyzed_turn,
                        vertical_opening_is_transposable, error_stack);
