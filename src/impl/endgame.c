@@ -1343,6 +1343,51 @@ static int generate_single_tile_plays(EndgameCtxWorker *worker) {
   return 1;
 }
 
+// generate_single_tile_plays only keeps the single highest-scoring placement
+// (see above), so the caller-specified actual_move (EndgameArgs.actual_move,
+// pinned to root index 0 for exact-value extraction) can be entirely absent
+// from that one-slot root move list if the move actually played wasn't the
+// greedy best. When that happens, append it as a second root move so
+// force_actual_move_to_front / extract_actual_move_pvline can still find it.
+// Only meaningful at the root (depth == requested_plies): actual_move refers
+// to the real historical position, not any node reached deeper in the search.
+static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
+                                           int move_count) {
+  const EndgameCtx *solver = worker->solver;
+  if (!solver->actual_move) {
+    return move_count;
+  }
+  const Board *board = game_get_board(worker->game_copy);
+  const int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
+  const Rack *mover_rack =
+      player_get_rack(game_get_player(worker->game_copy, on_turn_idx));
+  const uint64_t target_key =
+      move_get_similarity_key(solver->actual_move, mover_rack);
+
+  SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
+  Move candidate;
+  small_move_to_move(&candidate, existing, board);
+  if (move_get_similarity_key(&candidate, mover_rack) == target_key) {
+    return move_count; // already present
+  }
+
+  SmallMove *actual_sm =
+      (SmallMove *)arena_alloc(worker->small_move_arena, sizeof(SmallMove));
+  actual_sm->metadata.estimated_value = 0;
+  if (move_get_type(solver->actual_move) == GAME_EVENT_PASS) {
+    small_move_set_as_pass(actual_sm);
+  } else {
+    small_move_set_all(
+        actual_sm, solver->actual_move->tiles, 0,
+        solver->actual_move->tiles_length - 1, solver->actual_move->score,
+        solver->actual_move->row_start, solver->actual_move->col_start,
+        solver->actual_move->tiles_played,
+        board_is_dir_vertical(solver->actual_move->dir),
+        solver->actual_move->move_type);
+  }
+  return move_count + 1;
+}
+
 int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
   // stm means side to move
   // Lazy cross-set generation: only compute if not already valid.
@@ -1363,7 +1408,11 @@ int generate_stm_plays(EndgameCtxWorker *worker, int depth) {
       player_get_rack(game_get_player(worker->game_copy, stm_idx));
 
   if (stm_rack->number_of_letters == 1) {
-    return generate_single_tile_plays(worker);
+    int move_count = generate_single_tile_plays(worker);
+    if (depth == worker->solver->requested_plies) {
+      move_count = augment_single_tile_actual_move(worker, move_count);
+    }
+    return move_count;
   }
 
   const MoveGenArgs args = {
