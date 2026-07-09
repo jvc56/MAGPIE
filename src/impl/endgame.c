@@ -128,6 +128,10 @@ struct EndgameCtx {
   bool use_heuristics;
   bool forced_pass_bypass;
   PVLine principal_variation;
+  // If non-NULL, guarantee an exact value for this move alongside the best
+  // move (see EndgameArgs.actual_move). Owned by the caller; valid only for
+  // the duration of the solve.
+  const Move *actual_move;
 
   KWG *pruned_kwgs[2];
   dual_lexicon_mode_t dual_lexicon_mode;
@@ -726,6 +730,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
+  es->actual_move = endgame_args->actual_move;
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
   es->before_search_callback = endgame_args->before_search_callback;
@@ -2837,6 +2842,42 @@ static void build_ranked_pvs_and_notify(EndgameCtxWorker *worker, int depth,
                                    worker->solver->per_ply_callback_data);
 }
 
+// If the solver has a caller-specified "actual move" (EndgameArgs.actual_move),
+// find it among the just-(re)sorted root moves and swap it to index 0.
+// The root move loop in abdada_negamax always gives index 0 a full,
+// unnarrowed [alpha, beta] window (nothing has run yet to raise alpha), the
+// same property multi-PV's top-K alpha capping gives the top-ranked moves.
+// Keeping the actual move pinned to index 0 through every IDS depth is what
+// lets extract_actual_move_pvline read an exact value for it later, without
+// a second solve. Root moves are re-sorted by estimated value after every
+// completed depth (see iterative_deepening), so this must be called again
+// after each re-sort, not just once.
+static void force_actual_move_to_front(const EndgameCtxWorker *worker,
+                                       SmallMove *root_moves, int n_root) {
+  const EndgameCtx *solver = worker->solver;
+  if (!solver->actual_move || n_root <= 1) {
+    return;
+  }
+  const Board *board = game_get_board(worker->game_copy);
+  const int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
+  const Rack *mover_rack =
+      player_get_rack(game_get_player(worker->game_copy, on_turn_idx));
+  const uint64_t target_key =
+      move_get_similarity_key(solver->actual_move, mover_rack);
+  Move candidate;
+  for (int idx = 0; idx < n_root; idx++) {
+    small_move_to_move(&candidate, &root_moves[idx], board);
+    if (move_get_similarity_key(&candidate, mover_rack) == target_key) {
+      if (idx != 0) {
+        SmallMove tmp = root_moves[0];
+        root_moves[0] = root_moves[idx];
+        root_moves[idx] = tmp;
+      }
+      return;
+    }
+  }
+}
+
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
 
   int32_t alpha = -LARGE_VALUE;
@@ -2890,6 +2931,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   worker->n_initial_moves = initial_move_count;
   assert((size_t)worker->small_move_arena->size ==
          initial_move_count * sizeof(SmallMove));
+  force_actual_move_to_front(worker,
+                             (SmallMove *)worker->small_move_arena->memory,
+                             initial_move_count);
 
   // Publish the d=0 root-move list to clients before any depth begins.
   // root_moves_total is bumped here (rather than only at depth-loop entry) so
@@ -3116,6 +3160,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     SmallMove *initial_moves = (SmallMove *)(worker->small_move_arena->memory);
     qsort(initial_moves, initial_move_count, sizeof(SmallMove),
           compare_small_moves_by_estimated_value);
+    force_actual_move_to_front(worker, initial_moves, initial_move_count);
 
     // Store result in worker's local tracking
     int32_t pv_value = val - worker->solver->initial_spread;
@@ -3286,6 +3331,46 @@ static int extract_multi_pvs(EndgameCtx *solver, EndgameCtxWorker *best_worker,
   return k;
 }
 
+// Finds solver->actual_move among best_worker's root moves and builds a
+// one-move PVLine (TT-extended, same as extract_multi_pvs's non-best
+// entries) for it. Its estimated_value is exact because
+// force_actual_move_to_front kept it at root index 0 through every IDS
+// depth in every worker, so it always received a full, unnarrowed window.
+// Returns true and fills *out_pv if found; false (leaving *out_pv untouched)
+// if solver->actual_move is NULL or wasn't found among the root moves.
+static bool extract_actual_move_pvline(EndgameCtx *solver,
+                                       EndgameCtxWorker *best_worker,
+                                       const Game *game, PVLine *out_pv) {
+  if (!solver->actual_move) {
+    return false;
+  }
+  int n_root = best_worker->n_initial_moves;
+  SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
+  const Board *board = game_get_board(game);
+  const Rack *mover_rack =
+      player_get_rack(game_get_player(game, solver->solving_player));
+  const uint64_t target_key =
+      move_get_similarity_key(solver->actual_move, mover_rack);
+  Move candidate;
+  for (int idx = 0; idx < n_root; idx++) {
+    small_move_to_move(&candidate, &root_moves[idx], board);
+    if (move_get_similarity_key(&candidate, mover_rack) != target_key) {
+      continue;
+    }
+    out_pv->moves[0] = root_moves[idx];
+    out_pv->num_moves = 1;
+    out_pv->score = small_move_get_estimated_value(&root_moves[idx]) -
+                    solver->initial_spread;
+    out_pv->negamax_depth = 1;
+    out_pv->game = NULL;
+    if (solver->transposition_table) {
+      solver_pvline_extend_from_tt(out_pv, solver, game);
+    }
+    return true;
+  }
+  return false;
+}
+
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads.
 void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
@@ -3433,6 +3518,21 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   // fields under it.
   endgame_results_lock(results, ENDGAME_RESULT_DISPLAY);
 
+  // Find the thread that completed the deepest search for its root move
+  // arena. Used both for multi-PV display extraction below and for reading
+  // back an exact value for actual_move, since only the deepest-completed
+  // worker's root array reflects the final, most authoritative search.
+  int best_thread = 0;
+  int best_depth = solver->workers[0]->completed_depth;
+  const int live = atomic_load(&solver->live_workers);
+  for (int thread_index = 1; thread_index < live; thread_index++) {
+    int thread_depth = solver->workers[thread_index]->completed_depth;
+    if (thread_depth > best_depth) {
+      best_depth = thread_depth;
+      best_thread = thread_index;
+    }
+  }
+
   if (endgame_args->enable_pv_display) {
     // Extract top-K root moves from best thread's arena
     endgame_results_ensure_pvs_capacity(results, solver->num_top_moves);
@@ -3444,23 +3544,18 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
     solver_pvline_extend_from_tt(&multi_pvs[0], solver, endgame_args->game);
     int num_pvs = 1;
     if (solver->num_top_moves > 1) {
-      // Find the thread that completed the deepest search for its root move
-      // arena.
-      int best_thread = 0;
-      int best_depth = solver->workers[0]->completed_depth;
-      const int live = atomic_load(&solver->live_workers);
-      for (int thread_index = 1; thread_index < live; thread_index++) {
-        int thread_depth = solver->workers[thread_index]->completed_depth;
-        if (thread_depth > best_depth) {
-          best_depth = thread_depth;
-          best_thread = thread_index;
-        }
-      }
       num_pvs = extract_multi_pvs(solver, solver->workers[best_thread],
                                   endgame_args->game, multi_pvs,
                                   solver->num_top_moves);
     }
     endgame_results_set_num_pvs(results, num_pvs);
+  }
+
+  PVLine actual_pv;
+  if (extract_actual_move_pvline(solver, solver->workers[best_thread],
+                                 endgame_args->game, &actual_pv)) {
+    endgame_results_set_actual_pvline(results, &actual_pv, actual_pv.score,
+                                      best_depth);
   }
 
   // The stored multi_pvs are already fully extended; null out the TT reference

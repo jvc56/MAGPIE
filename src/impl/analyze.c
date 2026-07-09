@@ -129,11 +129,9 @@ static double compute_win_pct_lost(const TurnResult *tr) {
 
 struct AnalyzeCtx {
   Game *game;
-  Game *actual_play_endgame;
   MoveList *move_list;
   SimResults *sim_results;
   EndgameResults *endgame_results;
-  EndgameResults *actual_play_endgame_results;
   EndgameCtx *endgame_ctx;
   InferenceResults *inference_results;
   SimCtx *sim_ctx; // NULL initially; persisted across sim calls
@@ -151,11 +149,9 @@ void analyze_ctx_destroy(AnalyzeCtx *ctx) {
     return;
   }
   game_destroy(ctx->game);
-  game_destroy(ctx->actual_play_endgame);
   move_list_destroy(ctx->move_list);
   sim_results_destroy(ctx->sim_results);
   endgame_results_destroy(ctx->endgame_results);
-  endgame_results_destroy(ctx->actual_play_endgame_results);
   endgame_ctx_destroy(ctx->endgame_ctx);
   inference_results_destroy(ctx->inference_results);
   sim_ctx_destroy(ctx->sim_ctx);
@@ -195,24 +191,6 @@ static void analyze_ctx_push_turn_result(AnalyzeCtx *ctx,
                        sizeof(TurnResult) * (size_t)ctx->turn_results_capacity);
   }
   ctx->turn_results[ctx->turn_results_count++] = *turn_result;
-}
-
-static Game *analyze_ctx_get_actual_play_endgame(AnalyzeCtx *ctx,
-                                                 const Game *source_game) {
-  if (!ctx->actual_play_endgame) {
-    ctx->actual_play_endgame = game_duplicate(source_game);
-  } else {
-    game_copy(ctx->actual_play_endgame, source_game);
-  }
-  return ctx->actual_play_endgame;
-}
-
-static EndgameResults *
-analyze_ctx_get_actual_play_endgame_results(AnalyzeCtx *ctx) {
-  if (!ctx->actual_play_endgame_results) {
-    ctx->actual_play_endgame_results = endgame_results_create();
-  }
-  return ctx->actual_play_endgame_results;
 }
 
 // Builds a heap-allocated string for rack; caller must free.
@@ -1054,9 +1032,17 @@ static void analyze_with_endgame(const GameEvent *event,
                                  const char *report_path, AnalyzeCtx *ctx,
                                  AnalyzeArgs *args, bool is_first_analyzed_turn,
                                  ErrorStack *error_stack) {
+  const ValidatedMoves *vms = game_event_get_vms(event);
+  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+
+  // actual_move asks the solver to guarantee an exact (non-pruned) value for
+  // the move actually played, in the same search that finds the best move,
+  // so no second endgame_solve call is needed to evaluate it.
   args->endgame_args.game = ctx->game;
+  args->endgame_args.actual_move = &actual_move_or_pass_if_phony;
   endgame_solve(&ctx->endgame_ctx, &args->endgame_args, ctx->endgame_results,
                 error_stack);
+  args->endgame_args.actual_move = NULL;
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -1067,9 +1053,9 @@ static void analyze_with_endgame(const GameEvent *event,
   if (best_pvline->num_moves == 0) {
     log_fatal("endgame solver failed to find any moves for the position");
   }
-
-  const ValidatedMoves *vms = game_event_get_vms(event);
-  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+  if (!endgame_results_get_actual_move_found(ctx->endgame_results)) {
+    log_fatal("endgame solver failed to find the actual move among root moves");
+  }
 
   Move best_move;
   small_move_to_move(&best_move, &best_pvline->moves[0],
@@ -1096,28 +1082,11 @@ static void analyze_with_endgame(const GameEvent *event,
     memcpy(turn_result->best.display_move, turn_result->actual.display_move,
            sizeof(turn_result->best.display_move));
   } else {
-    // Solve from the position after the actual move to evaluate it. The
-    // endgame solver runs from the opponent's perspective after the actual
-    // move is played, so its value must be sign-flipped to get the current
-    // player's spread. We only compare spreads (not values), because the
-    // two solves are one turn apart and their absolute values are not
-    // directly comparable.
-    Game *actual_game_copy =
-        analyze_ctx_get_actual_play_endgame(ctx, ctx->game);
-    play_move(&actual_move_or_pass_if_phony, actual_game_copy, NULL);
-
-    EndgameResults *actual_play_endgame_results =
-        analyze_ctx_get_actual_play_endgame_results(ctx);
-    args->endgame_args.game = actual_game_copy;
-    endgame_solve(&ctx->endgame_ctx, &args->endgame_args,
-                  actual_play_endgame_results, error_stack);
-
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-
-    const int actual_endgame_spread = -endgame_results_get_spread(
-        actual_play_endgame_results, ENDGAME_RESULT_BEST, actual_game_copy);
+    // The actual move's value comes from the same solve as best (see
+    // EndgameArgs.actual_move above), so the two spreads are directly
+    // comparable with no sign flip or off-by-one-ply caveat.
+    const int actual_endgame_spread = endgame_results_get_spread(
+        ctx->endgame_results, ENDGAME_RESULT_ACTUAL, ctx->game);
     const int spread_diff =
         turn_result->best.endgame_spread - actual_endgame_spread;
     if (spread_diff == 0) {
@@ -1132,8 +1101,9 @@ static void analyze_with_endgame(const GameEvent *event,
     } else {
       set_turn_result_endgame_move(
           &turn_result->actual, &actual_move_or_pass_if_phony,
-          turn_result->best.endgame_value - spread_diff, actual_endgame_spread,
-          -1);
+          endgame_results_get_value(ctx->endgame_results,
+                                    ENDGAME_RESULT_ACTUAL),
+          actual_endgame_spread, -1);
     }
     populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
