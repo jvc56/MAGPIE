@@ -2,6 +2,7 @@
 
 #include "../def/cpthread_defs.h"
 #include <assert.h>
+#include <ctype.h>
 #include <dirent.h>
 #include <errno.h>
 #include <pthread.h>
@@ -575,8 +576,38 @@ bool path_is_directory(const char *path) {
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
 }
 
+// Parses a leading "r<digits>_" round-number prefix (e.g. "r10_joel.gcg").
+// Returns true and sets *round_num_out on a match; false otherwise.
+static bool parse_round_prefix(const char *filename,
+                               unsigned long *round_num_out) {
+  if (filename[0] != 'r' || !isdigit((unsigned char)filename[1])) {
+    return false;
+  }
+  char *endptr;
+  unsigned long round_num = strtoul(filename + 1, &endptr, 10);
+  if (endptr == filename + 1 || *endptr != '_') {
+    return false;
+  }
+  *round_num_out = round_num;
+  return true;
+}
+
+// Files named "r<round>_..." sort first, in increasing round order; all
+// other files follow, sorted alphabetically.
 static int compare_filenames_for_sort(const void *a, const void *b) {
-  return strcmp(*(const char *const *)a, *(const char *const *)b);
+  const char *name_a = *(const char *const *)a;
+  const char *name_b = *(const char *const *)b;
+  unsigned long round_a;
+  unsigned long round_b;
+  const bool has_round_a = parse_round_prefix(name_a, &round_a);
+  const bool has_round_b = parse_round_prefix(name_b, &round_b);
+  if (has_round_a != has_round_b) {
+    return has_round_a ? -1 : 1;
+  }
+  if (has_round_a && round_a != round_b) {
+    return (round_a < round_b) ? -1 : 1;
+  }
+  return strcmp(name_a, name_b);
 }
 
 char **get_files_in_directory(const char *dir_path, const char *suffix,
