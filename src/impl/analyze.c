@@ -1205,6 +1205,26 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
   }
 }
 
+// Returns player_index's true rack size as of from_event_idx, read directly
+// from the recorded game history: the size of their rack on their next move
+// at or after from_event_idx, or 0 if they have no more moves. Used to
+// recover a player's actual current holdings independent of how eagerly the
+// live Game object happens to have dealt that player's rack during replay.
+static int get_known_rack_size(const GameHistory *game_history,
+                               int from_event_idx, int player_index) {
+  const int num_events = game_history_get_num_events(game_history);
+  for (int event_idx = from_event_idx; event_idx < num_events; event_idx++) {
+    const GameEvent *event = game_history_get_event(game_history, event_idx);
+    const game_event_t event_type = game_event_get_type(event);
+    if ((event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+         event_type == GAME_EVENT_EXCHANGE || event_type == GAME_EVENT_PASS) &&
+        game_event_get_player_index(event) == player_index) {
+      return rack_get_total_letters(game_event_get_const_rack(event));
+    }
+  }
+  return 0;
+}
+
 // Analyzes all move events in game_history. Creates *analyze_ctx if NULL
 // on entry; the caller is responsible for calling analyze_ctx_destroy after
 // this returns.
@@ -1297,7 +1317,27 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                    "Event %d: %s\n", turn_counter,
                                    turn_result.actual.display_move);
 
-    const int bag_letters = bag_get_letters(game_get_bag(ctx->game));
+    // bag_get_letters() on the live game overstates how many tiles are
+    // still genuinely undetermined: game_play_n_events only eagerly deals
+    // the on-turn player's rack during replay, leaving the off-turn
+    // player's (already historically known) rack undealt in the live game
+    // until their own turn is reached. Until then, bag_get_letters() folds
+    // those known-but-undealt tiles into its count, so it overstates the
+    // number of tiles PEG/endgame need to treat as unknown. Correct for
+    // that by swapping in the off-turn player's true recorded rack size,
+    // but only when the live game hasn't dealt them one yet (rack size 0);
+    // once it has, that rack is already authoritative (e.g. right at the
+    // very end of the game, where no future move event remains to look up).
+    const int off_turn_player_index = 1 - player_index;
+    const int off_turn_rack_in_live_game = rack_get_total_letters(
+        player_get_rack(game_get_player(ctx->game, off_turn_player_index)));
+    int off_turn_rack_size = off_turn_rack_in_live_game;
+    if (off_turn_rack_in_live_game == 0) {
+      off_turn_rack_size = get_known_rack_size(game_history, event_idx + 1,
+                                               off_turn_player_index);
+    }
+    const int bag_letters = bag_get_letters(game_get_bag(ctx->game)) +
+                            off_turn_rack_in_live_game - off_turn_rack_size;
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,
                           ctx, analyze_args->max_num_display_plays,

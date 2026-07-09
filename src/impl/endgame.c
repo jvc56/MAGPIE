@@ -1364,7 +1364,7 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
   const uint64_t target_key =
       move_get_similarity_key(solver->actual_move, mover_rack);
 
-  SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
+  const SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
   Move candidate;
   small_move_to_move(&candidate, existing, board);
   if (move_get_similarity_key(&candidate, mover_rack) == target_key) {
