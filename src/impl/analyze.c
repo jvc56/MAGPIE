@@ -1158,10 +1158,21 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
   const PegRankedCand *best_cand = &peg_result.top_cands[0];
   const PegRankedCand *actual_cand = NULL;
   int actual_rank_idx = -1;
+  // Match by similarity key (the same notion of "same move" peg_solve used
+  // to protect this move from pruning), not by exact struct equality.
+  // compare_moves_without_equity distinguishes which specific rack tile was
+  // blanked when a move plays two of the same letter with one blank and one
+  // natural tile (e.g. a word needing two Zs from a rack holding one real Z
+  // and one blank) - two such assignments render and score identically, but
+  // have different tiles[] arrays. peg's own candidate for this play may
+  // legitimately use the other assignment, so an exact-struct match can
+  // spuriously miss the very candidate the protect mechanism preserved.
+  const Rack *mover_rack = game_event_get_const_rack(event);
+  const uint64_t actual_key =
+      move_get_similarity_key(&actual_move_or_pass_if_phony, mover_rack);
   for (int cand_idx = 0; cand_idx < peg_result.n_top_cands; cand_idx++) {
-    if (compare_moves_without_equity(&peg_result.top_cands[cand_idx].move,
-                                     &actual_move_or_pass_if_phony,
-                                     true) == -1) {
+    if (move_get_similarity_key(&peg_result.top_cands[cand_idx].move,
+                                mover_rack) == actual_key) {
       actual_cand = &peg_result.top_cands[cand_idx];
       actual_rank_idx = cand_idx;
       break;
