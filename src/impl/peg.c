@@ -1988,6 +1988,52 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
   return write_idx;
 }
 
+// Moves any protected candidate to the front of ranked[0..count). A stage's
+// live-mode evaluation (see the sequential per-candidate loop in peg_solve)
+// scores candidates strictly in array order and stops as soon as the
+// deadline passes, so whatever peg_select_survivors appended after the
+// top-K cut is evaluated last and is the first thing dropped under a tight
+// time budget. Moving it to the front instead guarantees it gets scored
+// before the deadline can cut the stage short, mirroring how the endgame
+// solver pins its protected actual move to root index 0.
+static void peg_force_protected_to_front(PegRankedCand *ranked, int count,
+                                         const Rack *rack,
+                                         const uint64_t *protect_keys,
+                                         int n_protect) {
+  if (n_protect <= 0 || count <= 1) {
+    return;
+  }
+  for (int idx = 0; idx < count; idx++) {
+    if (peg_move_protected(&ranked[idx].move, rack, protect_keys, n_protect)) {
+      if (idx != 0) {
+        const PegRankedCand tmp = ranked[0];
+        ranked[0] = ranked[idx];
+        ranked[idx] = tmp;
+      }
+    }
+  }
+}
+
+// Same idea as peg_force_protected_to_front, but for stage 0's plain Move
+// pointer array (built before any PegRankedCand results exist).
+static void peg_force_protected_move_ptrs_to_front(const Move **moves,
+                                                   int count, const Rack *rack,
+                                                   const uint64_t *protect_keys,
+                                                   int n_protect) {
+  if (n_protect <= 0 || count <= 1) {
+    return;
+  }
+  for (int idx = 0; idx < count; idx++) {
+    if (peg_move_protected(moves[idx], rack, protect_keys, n_protect)) {
+      if (idx != 0) {
+        const Move *tmp = moves[0];
+        moves[0] = moves[idx];
+        moves[idx] = tmp;
+      }
+    }
+  }
+}
+
 // Append src[from..to) to the graded list, each tagged with the fidelity (ply
 // count) at which it was last scored — i.e. the deepest stage it reached.
 static void peg_graded_append(PegRankedCand *graded, int *graded_fidelity,
@@ -2633,6 +2679,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         moves[cand_idx] = move_list_get_move(cand_ml, cand_idx);
       }
     }
+    // See peg_force_protected_to_front: give protected candidates the best
+    // chance of finishing within the time budget by having a free worker
+    // pick them up first, rather than leaving their queue position to
+    // whatever movegen's equity sort happened to produce.
+    peg_force_protected_move_ptrs_to_front(moves, n_cands, mover_rack,
+                                           protect_keys, n_protect);
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
     if (args->on_stage_start != NULL) {
@@ -2702,6 +2754,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (eval_count < 2) {
         break;
       }
+      // The sequential live-mode loop below scores ranked[0..eval_count) in
+      // array order and stops as soon as the deadline passes; a protected
+      // straggler peg_select_survivors appended after the top-K cut would
+      // otherwise be scored last, making it the first thing a tight time
+      // budget drops. Move it to the front so it's scored before that can
+      // happen.
+      peg_force_protected_to_front(ranked, eval_count, mover_rack, protect_keys,
+                                   n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
