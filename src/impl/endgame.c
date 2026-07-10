@@ -1358,16 +1358,12 @@ static int augment_single_tile_actual_move(EndgameCtxWorker *worker,
     return move_count;
   }
   const Board *board = game_get_board(worker->game_copy);
-  const int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
-  const Rack *mover_rack =
-      player_get_rack(game_get_player(worker->game_copy, on_turn_idx));
-  const uint64_t target_key =
-      move_get_similarity_key(solver->actual_move, mover_rack);
 
   const SmallMove *existing = (SmallMove *)worker->small_move_arena->memory;
   Move candidate;
   small_move_to_move(&candidate, existing, board);
-  if (move_get_similarity_key(&candidate, mover_rack) == target_key) {
+  if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
+      -1) {
     return move_count; // already present
   }
 
@@ -2908,15 +2904,11 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
     return;
   }
   const Board *board = game_get_board(worker->game_copy);
-  const int on_turn_idx = game_get_player_on_turn_index(worker->game_copy);
-  const Rack *mover_rack =
-      player_get_rack(game_get_player(worker->game_copy, on_turn_idx));
-  const uint64_t target_key =
-      move_get_similarity_key(solver->actual_move, mover_rack);
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (move_get_similarity_key(&candidate, mover_rack) == target_key) {
+    if (compare_moves_without_equity(&candidate, solver->actual_move, true) ==
+        -1) {
       if (idx != 0) {
         SmallMove tmp = root_moves[0];
         root_moves[0] = root_moves[idx];
@@ -3396,14 +3388,11 @@ static bool extract_actual_move_pvline(EndgameCtx *solver,
   int n_root = best_worker->n_initial_moves;
   SmallMove *root_moves = (SmallMove *)best_worker->small_move_arena->memory;
   const Board *board = game_get_board(game);
-  const Rack *mover_rack =
-      player_get_rack(game_get_player(game, solver->solving_player));
-  const uint64_t target_key =
-      move_get_similarity_key(solver->actual_move, mover_rack);
   Move candidate;
   for (int idx = 0; idx < n_root; idx++) {
     small_move_to_move(&candidate, &root_moves[idx], board);
-    if (move_get_similarity_key(&candidate, mover_rack) != target_key) {
+    if (compare_moves_without_equity(&candidate, solver->actual_move, true) !=
+        -1) {
       continue;
     }
     out_pv->moves[0] = root_moves[idx];

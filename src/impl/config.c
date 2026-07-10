@@ -2988,28 +2988,18 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     }
     num_unpruned_moves = validated_moves_get_number_of_moves(unpruned_vms);
     const int num_moves = move_list_get_count(config->move_list);
-    const Rack *move_rack = move_list_get_rack(config->move_list);
     unpruned_move_idxs = malloc_or_die(num_unpruned_moves * sizeof(int));
-    uint64_t *unpruned_moves_keys =
-        malloc_or_die(num_unpruned_moves * sizeof(uint64_t));
+    for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+        unpruned_vm_idx++) {
+      unpruned_move_idxs[unpruned_vm_idx] = -1;
+    }
     for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-      const uint64_t move_key = move_get_similarity_key(
-          move_list_get_move(config->move_list, move_idx), move_rack);
+      const Move *move = move_list_get_move(config->move_list, move_idx);
       for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
            unpruned_vm_idx++) {
-        uint64_t unpruned_move_key;
-        if (move_idx == 0) {
-          // Cache the similarity keys for the unpruned moves to avoid redundant
-          // calculations in the inner loop.
-          unpruned_move_key = move_get_similarity_key(
-              validated_moves_get_move(unpruned_vms, unpruned_vm_idx),
-              move_rack);
-          unpruned_moves_keys[unpruned_vm_idx] = unpruned_move_key;
-          unpruned_move_idxs[unpruned_vm_idx] = -1;
-        } else {
-          unpruned_move_key = unpruned_moves_keys[unpruned_vm_idx];
-        }
-        if (move_key == unpruned_move_key) {
+        const Move *unpruned_move =
+            validated_moves_get_move(unpruned_vms, unpruned_vm_idx);
+        if (compare_moves_without_equity(move, unpruned_move, true) == -1) {
           unpruned_move_idxs[unpruned_vm_idx] = move_idx;
           break;
         }
@@ -3033,7 +3023,6 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
       }
     }
     validated_moves_destroy(unpruned_vms);
-    free(unpruned_moves_keys);
     if (!error_stack_is_empty(error_stack)) {
       free(unpruned_move_idxs);
       return;
