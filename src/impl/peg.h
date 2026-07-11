@@ -296,6 +296,13 @@ typedef struct PegResult {
   // stage = the deepest stage actually run). -1 while running or uninitialized.
   int last_completed_stage;
 
+  // Number of halving stages the solve was SCHEDULED to run (the resolved
+  // schedule length after all adjustments): the default 5-wide ramp, the
+  // narrowed inference ramp when opp_leave_prior is set, a caller stage_top_k,
+  // or 0 for greedy-seed-only / pinned-scenario. Distinct from
+  // last_completed_stage (how many actually ran within budget). 0 until set.
+  int planned_num_stages;
+
   // True when the deepest stage was cut off by the budget/interrupt after
   // scoring only some of its candidates (a partial tier), so it was reached but
   // not completed. False when every stage shown ran to completion.

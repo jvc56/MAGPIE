@@ -159,4 +159,36 @@ static inline bool alias_method_sample(AliasMethod *am, XoshiroPRNG *prng,
   return true;
 }
 
+// If the distribution is a single point mass (exactly one distinct rack),
+// decode it into `out` and return true; otherwise return false. Lets a consumer
+// enumerate that leave's completions EXACTLY instead of sampling -- sampling a
+// degenerate prior with few draws mis-ranks candidates via a winner's curse.
+static inline bool alias_method_single_rack(const AliasMethod *am, Rack *out) {
+  if (am == NULL || am->num_items != 1 || am->total_item_count == 0) {
+    return false;
+  }
+  rack_decode(&am->items[0].rack, out);
+  return true;
+}
+
+// Number of distinct support points (leaves). item->count/rack are preserved by
+// alias_method_generate_tables, so the support can be enumerated exactly rather
+// than sampled (see the point-mass rationale above; this generalizes it).
+static inline int alias_method_num_items(const AliasMethod *am) {
+  return am == NULL ? 0 : (int)am->num_items;
+}
+
+// Decode support point `i` into `out` and return its (relative) weight count.
+static inline uint32_t alias_method_get_item(const AliasMethod *am, int i,
+                                             Rack *out) {
+  rack_decode(&am->items[i].rack, out);
+  return am->items[i].count;
+}
+
+// Support point `i`'s (relative) weight count, without decoding the rack -- for
+// selecting the highest-mass leaves before enumerating.
+static inline uint32_t alias_method_item_count(const AliasMethod *am, int i) {
+  return am->items[i].count;
+}
+
 #endif

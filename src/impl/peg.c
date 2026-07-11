@@ -58,6 +58,16 @@
 // PegArgs.stage_top_k.
 static const int PEG_DEFAULT_HALVING_COUNTS[] = {32, 16, 8, 4, 2};
 
+// Narrowed schedule used automatically in inference mode (opp_leave_prior set,
+// no caller-supplied stage_top_k). The halving stages SAMPLE the opponent rack
+// (inference_samples scenarios per candidate), so with the full 32-wide field
+// the sampled endgame refinement cannot finish in a normal budget and the solve
+// falls back to the greedy seed -- evaluating the opponent info only at stage-0
+// fidelity. Keeping just the top few candidates (the greedy seed still ranks the
+// whole field first) lets the inference solve reach deep fidelity in the same
+// budget. This is the tail of the default schedule.
+static const int PEG_INFERENCE_HALVING_COUNTS[] = {8, 4, 2};
+
 // Solve-scoped cache mapping a post-candidate board signature to its
 // per-candidate pruned KWG. At an emptier (0-in-bag) endgame leaf the pruned
 // KWG depends only on the post-cand board and the union of both racks (all
@@ -877,6 +887,13 @@ typedef struct PegEvalCtx {
   const Game *template_src;
   int mover_idx;
   const uint8_t *unseen;
+  // Pinned opponent leave (per-letter counts, NULL = none). When set,
+  // peg_enum_splits reserves leave[ml] tiles of each letter for the opponent
+  // (avail = unseen[ml] - leave[ml]), so every enumerated split's opponent rack
+  // contains the leave -- an EXACT enumeration of a point-mass prior's
+  // completions, replacing the sampled path (which mis-ranks via a winner's
+  // curse). Lives only for the duration of the enumeration call.
+  const uint8_t *pinned_leave;
   int ld_size;
   const Move *cand;
   int bag_size;
@@ -1745,8 +1762,33 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   }
 }
 
+// Detect a point-mass opponent-leave prior and extract its leave as per-letter
+// counts. A degenerate (single-support) prior sampled with few draws mis-ranks
+// candidates via a winner's curse; enumerating the pinned leave's completions
+// exactly (peg_enum_splits with ctx->pinned_leave set) removes that noise and,
+// unlike the sampled path, is applied at the deep stages too. Returns true and
+// fills leave_counts[0..ld_size) on a point mass, else false.
+static bool peg_prior_point_mass(const InferenceResults *prior, int ld_size,
+                                 uint8_t *leave_counts) {
+  if (prior == NULL) {
+    return false;
+  }
+  AliasMethod *am =
+      inference_results_get_alias_method((InferenceResults *)prior);
+  Rack leave;
+  rack_set_dist_size_and_reset(&leave, ld_size);
+  if (!alias_method_single_rack(am, &leave)) {
+    return false;
+  }
+  for (int ml = 0; ml < ld_size; ml++) {
+    leave_counts[ml] = (uint8_t)rack_get_letter(&leave, ml);
+  }
+  return true;
+}
+
 // Recursively choose, per machine letter, how many tiles go to the mover's
-// draw (m) and to the bag remainder (b), with m+b <= unseen[ml], mover total ==
+// draw (m) and to the bag remainder (b), with m+b <= unseen[ml] - leave[ml]
+// (the pinned leave, if any, is reserved for the opponent), mover total ==
 // k_drawn and bag-remainder total == n_bag_remaining. Opp gets the complement.
 static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
                             int bag_rem_left, int64_t weight,
@@ -1779,14 +1821,27 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
     }
     return;
   }
-  const int avail = ctx->unseen[ml];
+  // Reserve the pinned leave for the opponent: only (unseen - leave) tiles of
+  // this letter are eligible for the mover draw / bag, so `avail` BOUNDS the
+  // split and opp = complement always contains leave[ml]. The split WEIGHT,
+  // however, counts labeled deals over the FULL unseen[ml] pool: restricting the
+  // enumeration to opp >= leave does not change the relative multinomial count
+  // of an allowed split, so weighting over the reduced `avail` would bias win%
+  // (it under-weights splits where opp keeps spare copies of a leave letter).
+  // With no pinned leave, full == avail and this is the original enumeration.
+  const int full = ctx->unseen[ml];
+  const int avail =
+      full - (ctx->pinned_leave != NULL ? (int)ctx->pinned_leave[ml] : 0);
+  // A pinned leave must be a subset of the unseen pool (the same invariant the
+  // sampled path asserts); otherwise avail < 0 and the split is infeasible.
+  assert(avail >= 0);
   const int max_mover = mover_left < avail ? mover_left : avail;
   for (int to_mover = 0; to_mover <= max_mover; to_mover++) {
     const int max_bag =
         bag_rem_left < (avail - to_mover) ? bag_rem_left : (avail - to_mover);
     for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
-      const int64_t add_weight = peg_binomial(avail, to_mover) *
-                                 peg_binomial(avail - to_mover, to_bag);
+      const int64_t add_weight = peg_binomial(full, to_mover) *
+                                 peg_binomial(full - to_mover, to_bag);
       for (int i = 0; i < to_mover; i++) {
         mover_drawn[n_mover + i] = (MachineLetter)ml;
       }
@@ -1798,6 +1853,45 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
                       bag_remaining, n_bag_rem + to_bag);
     }
   }
+}
+
+// Sum over all splits (for a pinned `leave`) of the per-split full_weight -- the
+// same quantity peg_enum_splits accumulates into ctx->total_weight when driven
+// with initial weight 1 -- computed WITHOUT any leaf evaluation. Mirrors
+// peg_enum_splits' avail bound + full-`unseen` multinomial weights + k_drawn!.
+// Lets the COLLECT-mode support enumeration (peg_collect_support) pre-scale each
+// leaf's initial weight to w_i / total_i so the emitted jobs carry the correct
+// prior-weighted conditional weight (the inline path reads total_i from the
+// accumulator instead; collect mode can't, so it needs this).
+static int64_t peg_enum_total(const uint8_t *unseen, const uint8_t *leave,
+                              int ld_size, int k_drawn, int ml, int mover_left,
+                              int bag_rem_left, int64_t weight) {
+  if (ml == ld_size) {
+    if (mover_left == 0 && bag_rem_left == 0) {
+      int64_t full = weight;
+      for (int f = 2; f <= k_drawn; f++) {
+        full *= f;
+      }
+      return full;
+    }
+    return 0;
+  }
+  const int full = unseen[ml];
+  const int avail = full - (leave != NULL ? (int)leave[ml] : 0);
+  const int max_mover = mover_left < avail ? mover_left : avail;
+  int64_t sum = 0;
+  for (int to_mover = 0; to_mover <= max_mover; to_mover++) {
+    const int max_bag =
+        bag_rem_left < (avail - to_mover) ? bag_rem_left : (avail - to_mover);
+    for (int to_bag = 0; to_bag <= max_bag; to_bag++) {
+      const int64_t add_weight = peg_binomial(full, to_mover) *
+                                 peg_binomial(full - to_mover, to_bag);
+      sum += peg_enum_total(unseen, leave, ld_size, k_drawn, ml + 1,
+                            mover_left - to_mover, bag_rem_left - to_bag,
+                            weight * add_weight);
+    }
+  }
+  return sum;
 }
 
 // One candidate-evaluation job (cand at a given fidelity), dispatched to a
@@ -1872,19 +1966,18 @@ static void peg_eval_fixed_ordering(PegEvalCtx *ctx,
   ctx->n_scenarios = 1;
 }
 
-// Inference-weighted scenario sampling (the pre-endgame analogue of the
-// simmer's inference-weighted opponent draws). Instead of enumerating the
-// uniform unseen splits, draw n_samples opponent racks from the leave-inference
-// prior: sample a leave from its AliasMethod, then complete it to a full rack
-// from the remaining unseen (mirroring set_random_rack). The leftover unseen is
-// the bag -- the mover draws its k_drawn tiles off the front and the rest is the
-// bag ordering. peg_make_post_cand_game derives the opponent rack as
-// unseen - (mover_drawn ++ bag_remaining), which equals the sampled rack by
-// construction. Each sample carries weight 1, so the caller reads win%/spread
-// exactly as for the enumerated path.
-static void peg_eval_inference_samples(PegEvalCtx *ctx,
-                                       const InferenceResults *prior,
-                                       int n_samples, XoshiroPRNG *prng) {
+// Collect/inline analog of peg_eval_inference_samples for MULTI-SUPPORT priors:
+// draw n_samples opponent racks from the prior and route each split through
+// peg_eval_split, which emits a scenario job in collect mode (so the DEEP stages
+// evaluate a multi-leave prior instead of ignoring it) or evaluates inline
+// otherwise. A point-mass prior is instead enumerated exactly (peg_enum_splits +
+// pinned_leave); a many-leave prior is sampled here because enumerating every
+// leave's completions is not generally affordable at the deep stages. The
+// sampling carries the usual few-draw variance -- a curse-free exact version
+// would enumerate the support weighted by prior mass (follow-on).
+static void peg_sample_splits_from_prior(PegEvalCtx *ctx,
+                                         const InferenceResults *prior,
+                                         int n_samples, XoshiroPRNG *prng) {
   AliasMethod *am =
       inference_results_get_alias_method((InferenceResults *)prior);
   Rack leave;
@@ -1893,14 +1986,8 @@ static void peg_eval_inference_samples(PegEvalCtx *ctx,
     if (ctx->deadline_ns != 0 && ctimer_monotonic_ns() >= ctx->deadline_ns) {
       break;
     }
-    // Sample an opponent leave from the inference (empty prior => uniform rack).
     rack_reset(&leave);
     alias_method_sample(am, prng, &leave);
-    // Pool = the unseen tiles not pinned by the leave. The inference targets the
-    // opponent's immediately preceding move and only the opponent has acted
-    // since, so every sampled leave is a subset of the mover's unseen (leave <=
-    // opponent rack <= unseen) and rem is never negative -- the same invariant
-    // the simmer relies on when set_random_rack draws the leave strictly.
     MachineLetter pool[RACK_SIZE + PEG_MAX_BAG];
     int pool_n = 0;
     for (int ml = 0; ml < ctx->ld_size; ml++) {
@@ -1910,8 +1997,6 @@ static void peg_eval_inference_samples(PegEvalCtx *ctx,
         pool[pool_n++] = (MachineLetter)ml;
       }
     }
-    // Shuffle: the front completes the opponent's rack (leave + draws); the
-    // remainder is the bag (the mover's k_drawn draws ++ the bag ordering).
     for (int i = 0; i < pool_n; i++) {
       const uint64_t j =
           (uint64_t)i + prng_get_random_number(prng, (uint64_t)(pool_n - i));
@@ -1934,27 +2019,211 @@ static void peg_eval_inference_samples(PegEvalCtx *ctx,
     for (; p < pool_n; p++) {
       bag_remaining[n_bag_rem++] = pool[p];
     }
-    Game *game = peg_make_post_cand_game(
-        ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
-        ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_rem, bag_remaining);
-    const int32_t value = peg_eval_leaf(ctx, game);
-    if (ctx->progress != NULL && ctx->progress->on_scenario_done != NULL) {
-      ctx->progress->on_scenario_done(ctx->progress->stage_idx, ctx->cand_idx,
-                                      ctx->n_scenarios, value, 1,
-                                      ctx->progress->user_data);
-    }
-    ctx->total_weight += 1.0;
-    if (value > 0) {
-      ctx->win_weight += 1.0;
-      ctx->win_count++;
-    } else if (value == 0) {
-      ctx->win_weight += 0.5;
-      ctx->tie_count++;
-    }
-    ctx->spread_weight += (double)value;
-    ctx->weight_sum += 1;
-    ctx->n_scenarios++;
+    // Each sample carries weight 1 (peg_eval_split emits a job in collect mode
+    // or evaluates + accumulates inline).
+    peg_eval_split(ctx, mover_drawn, n_bag_rem, bag_remaining, /*weight=*/1);
   }
+}
+
+// Enumerate a MULTI-SUPPORT prior's support EXACTLY (the curse-free alternative
+// to sampling): for each support leaf L_i (prior weight w_i), pin L_i and
+// enumerate its completions, then combine per-leaf conditional results weighted
+// by prior mass:
+//   win% = (sum_i w_i * win_i/total_i) / (sum_i w_i),
+// where total_i = peg_enum_total(L_i) is that leaf's total enumeration weight
+// (so a leaf with a larger completion space is not over-counted). INLINE ONLY:
+// it drives peg_enum_splits per leaf into the ctx accumulators and diffs them,
+// so ctx must not be in collect mode (out_jobs must be NULL).
+static void peg_enumerate_support(PegEvalCtx *ctx,
+                                  const InferenceResults *prior,
+                                  int n_bag_remaining) {
+  AliasMethod *am =
+      inference_results_get_alias_method((InferenceResults *)prior);
+  const int n_items = alias_method_num_items(am);
+  // Above this support size, exact enumeration evaluates too many completions
+  // (every completion of every leaf, ~N x more scenarios than sampling) and
+  // starves the STAGED solve of depth -- empirically that leaves the candidate
+  // stuck at the weak greedy seed and does WORSE than uniform. So a many-leaf
+  // real-inference prior falls back to uniform enumeration here (safe, coherent,
+  // ignores the prior at this evaluation); only a SMALL support -- where exact
+  // enumeration is cheap and curse-free, the regime where it beats sampling --
+  // is enumerated. (A cheap-enough exact method for large multi-leaf priors, or
+  // deep-stage support enumeration for coherence, is future work.)
+  enum { PEG_SUPPORT_ENUM_MAX = 4 };
+  // Fall back to uniform for an EMPTY support (an inference that found nothing
+  // must not zero out every candidate's win% -- that ranks the field by
+  // garbage) and for a too-large support (cost; see below).
+  if (n_items == 0 || n_items > PEG_SUPPORT_ENUM_MAX) {
+    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    ctx->pinned_leave = NULL;
+    peg_enum_splits(ctx, /*ml=*/0, ctx->k_drawn, n_bag_remaining, /*weight=*/1,
+                    mover_drawn, 0, bag_remaining, 0);
+    return;
+  }
+  // Enumerate the highest-mass leaves first, capped: cost scales with the
+  // support size, so process the top PEG_SUPPORT_ENUM_CAP by weight (descending)
+  // -- a deterministic, mass-prioritized truncation. If the deadline then cuts
+  // the loop it drops the LOWEST-mass leaves (least biasing), and a support
+  // within the cap is enumerated in full. Selection is an insertion into a
+  // sorted top-k array (O(n_items * cap), cap small).
+  enum { PEG_SUPPORT_ENUM_CAP = 64 };
+  int top[PEG_SUPPORT_ENUM_CAP];
+  uint32_t top_w[PEG_SUPPORT_ENUM_CAP];
+  int n_top = 0;
+  for (int i = 0; i < n_items; i++) {
+    const uint32_t c = alias_method_item_count(am, i);
+    if (n_top < PEG_SUPPORT_ENUM_CAP) {
+      int pos = n_top++;
+      while (pos > 0 && top_w[pos - 1] < c) {
+        top[pos] = top[pos - 1];
+        top_w[pos] = top_w[pos - 1];
+        pos--;
+      }
+      top[pos] = i;
+      top_w[pos] = c;
+    } else if (c > top_w[PEG_SUPPORT_ENUM_CAP - 1]) {
+      int pos = PEG_SUPPORT_ENUM_CAP - 1;
+      while (pos > 0 && top_w[pos - 1] < c) {
+        top[pos] = top[pos - 1];
+        top_w[pos] = top_w[pos - 1];
+        pos--;
+      }
+      top[pos] = i;
+      top_w[pos] = c;
+    }
+  }
+  double comb_total = 0.0, comb_win = 0.0, comb_spread = 0.0;
+  int comb_nscen = 0;
+  Rack leaf_rack;
+  rack_set_dist_size_and_reset(&leaf_rack, ctx->ld_size);
+  uint8_t leaf_counts[MAX_ALPHABET_SIZE];
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  for (int t = 0; t < n_top; t++) {
+    if (ctx->deadline_ns != 0 && ctimer_monotonic_ns() >= ctx->deadline_ns) {
+      break;
+    }
+    rack_reset(&leaf_rack);
+    const uint32_t w_i = alias_method_get_item(am, top[t], &leaf_rack);
+    for (int ml = 0; ml < ctx->ld_size; ml++) {
+      leaf_counts[ml] = (uint8_t)rack_get_letter(&leaf_rack, ml);
+    }
+    // Fresh per-leaf accumulation into the ctx accumulators.
+    ctx->total_weight = 0.0;
+    ctx->win_weight = 0.0;
+    ctx->spread_weight = 0.0;
+    ctx->weight_sum = 0;
+    ctx->win_count = 0;
+    ctx->tie_count = 0;
+    ctx->n_scenarios = 0;
+    ctx->sampled_weight_seen = 0; // stride cursor is per-leaf
+    ctx->pinned_leave = leaf_counts;
+    peg_enum_splits(ctx, /*ml=*/0, ctx->k_drawn, n_bag_remaining, /*weight=*/1,
+                    mover_drawn, 0, bag_remaining, 0);
+    if (ctx->total_weight <= 0.0) {
+      continue;
+    }
+    const double norm = (double)w_i / ctx->total_weight; // w_i / total_i
+    comb_total += (double)w_i;
+    comb_win += norm * ctx->win_weight;       // w_i * (win_i / total_i)
+    comb_spread += norm * ctx->spread_weight; // w_i * (spread_i / total_i)
+    comb_nscen += ctx->n_scenarios;
+  }
+  // Publish the prior-weighted combination. Ranking reads the doubles; the
+  // integer tallies are set approximately (display only, not used at stage 0).
+  ctx->pinned_leave = NULL;
+  ctx->total_weight = comb_total;
+  ctx->win_weight = comb_win;
+  ctx->spread_weight = comb_spread;
+  ctx->n_scenarios = comb_nscen;
+  ctx->weight_sum = (int64_t)(comb_total + 0.5);
+  ctx->win_count = (int64_t)(comb_win + 0.5);
+  ctx->tie_count = 0;
+}
+
+// COLLECT-mode support enumeration: the analogue of peg_enumerate_support for
+// the deep halving stages, which run in collect mode (emit scenario jobs for a
+// barrier) and so cannot diff per-leaf ctx accumulators. Instead each leaf L_i
+// is enumerated with an INITIAL weight w_i * K / total_i, where total_i =
+// peg_enum_total(L_i); peg_enum_splits then scales that by the per-split
+// multinomial and peg_eval_split emits jobs carrying it. Summing over a leaf's
+// jobs gives total contribution w_i * K, and win contribution w_i * K *
+// (win_i / total_i), so the reduced win% = (sum_i w_i * win_i/total_i)/(sum_i
+// w_i) -- identical to the inline combine, with K cancelling. K is large enough
+// that w_i*K/total_i stays a precise positive integer; PEG_MAX_BAG bounds every
+// multinomial, so no int64 overflow. The deep stages have FEW candidates, so
+// enumerating the (capped, weight-ordered) support per candidate is affordable
+// even when it would be too costly over the whole stage-0 field.
+static void peg_collect_support(PegEvalCtx *ctx, const InferenceResults *prior,
+                                int n_bag_remaining) {
+  AliasMethod *am =
+      inference_results_get_alias_method((InferenceResults *)prior);
+  const int n_items = alias_method_num_items(am);
+  // Empty support: fall back to uniform (emitting no jobs would zero the
+  // candidate out of the ranking).
+  if (n_items == 0) {
+    MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+    MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+    ctx->pinned_leave = NULL;
+    peg_enum_splits(ctx, /*ml=*/0, ctx->k_drawn, n_bag_remaining, /*weight=*/1,
+                    mover_drawn, 0, bag_remaining, 0);
+    return;
+  }
+  // Weight-ordered top-k selection (see peg_enumerate_support).
+  enum { PEG_COLLECT_SUPPORT_CAP = 32 };
+  int top[PEG_COLLECT_SUPPORT_CAP];
+  uint32_t top_w[PEG_COLLECT_SUPPORT_CAP];
+  int n_top = 0;
+  for (int i = 0; i < n_items; i++) {
+    const uint32_t c = alias_method_item_count(am, i);
+    if (n_top < PEG_COLLECT_SUPPORT_CAP) {
+      int pos = n_top++;
+      while (pos > 0 && top_w[pos - 1] < c) {
+        top[pos] = top[pos - 1];
+        top_w[pos] = top_w[pos - 1];
+        pos--;
+      }
+      top[pos] = i;
+      top_w[pos] = c;
+    } else if (c > top_w[PEG_COLLECT_SUPPORT_CAP - 1]) {
+      int pos = PEG_COLLECT_SUPPORT_CAP - 1;
+      while (pos > 0 && top_w[pos - 1] < c) {
+        top[pos] = top[pos - 1];
+        top_w[pos] = top_w[pos - 1];
+        pos--;
+      }
+      top[pos] = i;
+      top_w[pos] = c;
+    }
+  }
+  const int64_t K = (int64_t)1 << 20; // weight scale (cancels in win%)
+  Rack leaf_rack;
+  rack_set_dist_size_and_reset(&leaf_rack, ctx->ld_size);
+  uint8_t leaf_counts[MAX_ALPHABET_SIZE];
+  MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+  MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+  for (int t = 0; t < n_top; t++) {
+    rack_reset(&leaf_rack);
+    const uint32_t w_i = alias_method_get_item(am, top[t], &leaf_rack);
+    for (int ml = 0; ml < ctx->ld_size; ml++) {
+      leaf_counts[ml] = (uint8_t)rack_get_letter(&leaf_rack, ml);
+    }
+    const int64_t total_i =
+        peg_enum_total(ctx->unseen, leaf_counts, ctx->ld_size, ctx->k_drawn,
+                       /*ml=*/0, ctx->k_drawn, n_bag_remaining, /*weight=*/1);
+    if (total_i <= 0) {
+      continue;
+    }
+    int64_t weight_i = (int64_t)((double)w_i * (double)K / (double)total_i + 0.5);
+    if (weight_i < 1) {
+      weight_i = 1;
+    }
+    ctx->pinned_leave = leaf_counts;
+    peg_enum_splits(ctx, /*ml=*/0, ctx->k_drawn, n_bag_remaining, weight_i,
+                    mover_drawn, 0, bag_remaining, 0);
+  }
+  ctx->pinned_leave = NULL;
 }
 
 static void peg_cand_worker_fn(void *arg, int worker_idx) {
@@ -2004,14 +2273,23 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     // Pinned single scenario: evaluate exactly the caller's bag ordering.
     peg_eval_fixed_ordering(&ctx, job->eval_bag_order, job->eval_bag_order_len);
   } else if (job->opp_leave_prior != NULL) {
-    // Inference-weighted sampling instead of uniform enumeration. Seed a
-    // per-candidate PRNG so the sample is reproducible and independent of how
-    // the pool schedules candidates across worker threads.
-    XoshiroPRNG *prng =
-        prng_create(job->inference_seed + (uint64_t)job->cand_rank + 1);
-    peg_eval_inference_samples(&ctx, job->opp_leave_prior,
-                               job->inference_samples, prng);
-    prng_destroy(prng);
+    uint8_t pinned_leave[MAX_ALPHABET_SIZE];
+    if (peg_prior_point_mass(job->opp_leave_prior, ctx.ld_size, pinned_leave)) {
+      // Point-mass prior (e.g. a pinned "psychic" leave): enumerate the leave's
+      // completions EXACTLY rather than sampling -- sampling a degenerate prior
+      // with few draws mis-ranks candidates via a winner's curse.
+      ctx.pinned_leave = pinned_leave;
+      MachineLetter mover_drawn[PEG_MAX_BAG + 1];
+      MachineLetter bag_remaining[PEG_MAX_BAG + 1];
+      peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining,
+                      /*weight=*/1, mover_drawn, 0, bag_remaining, 0);
+    } else {
+      // General (multi-support) prior: enumerate the support EXACTLY (each
+      // leaf's completions, weighted by prior mass) rather than sampling --
+      // sampling a many-leaf prior with few draws mis-ranks candidates via the
+      // same winner's curse the point-mass path avoids.
+      peg_enumerate_support(&ctx, job->opp_leave_prior, n_bag_remaining);
+    }
   } else {
     MachineLetter mover_drawn[PEG_MAX_BAG + 1];
     MachineLetter bag_remaining[PEG_MAX_BAG + 1];
@@ -2253,7 +2531,31 @@ static void peg_eval_candidates_scenario(
     int inner_top_k, int fidelity_plies, int scenario_stride,
     int64_t deadline_ns, ThreadControl *thread_control,
     const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked,
-    PegCandOutcomes *out_outcomes) {
+    PegCandOutcomes *out_outcomes, const InferenceResults *opp_leave_prior,
+    int inference_samples, uint64_t inference_seed) {
+  // How the DEEP stages model the opponent, so they weight the inference too
+  // (not just the stage-0 filter): a POINT-MASS prior reserves its leave in
+  // every enumerated split (ctx.pinned_leave, exact); a MULTI-SUPPORT prior is
+  // sampled per candidate (peg_sample_splits_from_prior); no prior => uniform
+  // enumeration (unchanged).
+  uint8_t pinned_leave[MAX_ALPHABET_SIZE];
+  const bool has_pinned =
+      peg_prior_point_mass(opp_leave_prior, ld_size, pinned_leave);
+  // How the DEEP stages treat a MULTI-SUPPORT prior. Both non-uniform paths are
+  // OFF BY DEFAULT because, for the REAL pre-endgame inference, trusting the
+  // inferred opponent at the deep stages HURTS -- the inference is inaccurate,
+  // so the more faithfully the final move is optimized against it the worse the
+  // result (real-inference win% delta, seed 7: deep-uniform +0.005 -> deep-SAMPLE
+  // -0.071 -> deep-ENUM (coherent) -0.171). The machinery is not at fault: the
+  // SAME collect_support path scores POSITIVE on a point-mass psychic prior
+  // (+0.0125, PEGBENCH_PSYCHIC_MULTI), so exact deep enumeration is correct and
+  // would help once the inference is accurate enough. Until then the deep stages
+  // enumerate uniformly (ignore the multi-support prior). PEG_DEEP_ENUM /
+  // PEG_DEEP_SAMPLE re-enable the exact / sampled paths for experiments.
+  const bool multi_prior = opp_leave_prior != NULL && !has_pinned;
+  const bool sample_prior = multi_prior && getenv("PEG_DEEP_SAMPLE") != NULL;
+  const bool enum_prior = multi_prior && !sample_prior &&
+                          getenv("PEG_DEEP_ENUM") != NULL;
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -2273,6 +2575,7 @@ static void peg_eval_candidates_scenario(
     ctx.template_src = templates[i];
     ctx.mover_idx = mover_idx;
     ctx.unseen = unseen;
+    ctx.pinned_leave = has_pinned ? pinned_leave : NULL;
     ctx.ld_size = ld_size;
     ctx.opp_model = opp_model;
     ctx.inner_top_k = inner_top_k;
@@ -2290,8 +2593,24 @@ static void peg_eval_candidates_scenario(
     const int n_bag_remaining = bag_size - ctx.k_drawn;
     MachineLetter mover_drawn[PEG_MAX_BAG + 1];
     MachineLetter bag_remaining[PEG_MAX_BAG + 1];
-    peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
-                    mover_drawn, 0, bag_remaining, 0);
+    if (sample_prior) {
+      // Experiment only (PEG_DEEP_SAMPLE): sample opponent racks.
+      XoshiroPRNG *prng = prng_create(inference_seed + (uint64_t)i + 1);
+      peg_sample_splits_from_prior(&ctx, opp_leave_prior, inference_samples,
+                                   prng);
+      prng_destroy(prng);
+    } else if (enum_prior) {
+      // Experiment only (PEG_DEEP_ENUM): enumerate the support exactly at the
+      // deep stages (coherent, curse-free -- correct, but hurts because the real
+      // inference is inaccurate; see the comment above).
+      peg_collect_support(&ctx, opp_leave_prior, n_bag_remaining);
+    } else {
+      // Default: point-mass (ctx.pinned_leave set) uses its pinned enumeration;
+      // a multi-support prior falls through to uniform (ignored) here; no prior
+      // is uniform. All are a single peg_enum_splits.
+      peg_enum_splits(&ctx, /*ml=*/0, ctx.k_drawn, n_bag_remaining, /*weight=*/1,
+                      mover_drawn, 0, bag_remaining, 0);
+    }
   }
 
   // Enable per-ordering capture on every job when the caller asked for it.
@@ -2589,12 +2908,34 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // fixed cap, so a caller may pass a longer stage_top_k.
   const int default_num_stages = (int)(sizeof(PEG_DEFAULT_HALVING_COUNTS) /
                                        sizeof(PEG_DEFAULT_HALVING_COUNTS[0]));
-  const int *counts = (args->stage_top_k && args->num_stages > 0)
-                          ? args->stage_top_k
-                          : PEG_DEFAULT_HALVING_COUNTS;
-  int num_stages = (args->stage_top_k && args->num_stages > 0)
-                       ? args->num_stages
-                       : default_num_stages;
+  const int *counts;
+  int num_stages;
+  if (args->stage_top_k && args->num_stages > 0) {
+    // Caller-supplied schedule always wins (an explicit override opts out of the
+    // inference-mode narrowing below).
+    counts = args->stage_top_k;
+    num_stages = args->num_stages;
+  } else if (args->opp_leave_prior != NULL &&
+             alias_method_num_items(inference_results_get_alias_method(
+                 (InferenceResults *)args->opp_leave_prior)) > 0 &&
+             !peg_prior_point_mass(args->opp_leave_prior,
+                                   ld_get_size(game_get_ld(prepared_base)),
+                                   (uint8_t[MAX_ALPHABET_SIZE]){0})) {
+    // Multi-support prior with no explicit schedule: the deep stages SAMPLE the
+    // opponent rack per candidate (costly), so narrow the field to reach deep
+    // fidelity in budget (see PEG_INFERENCE_HALVING_COUNTS). A point-mass prior
+    // is instead enumerated exactly -- cheaper than the uniform full-field
+    // enumeration -- so it keeps the full-width default schedule below. An
+    // EMPTY-support prior (an inference that found nothing) is treated as no
+    // prior: its evaluation falls back to uniform, so it must keep the uniform
+    // schedule too or the prior's mere presence would change the solve.
+    counts = PEG_INFERENCE_HALVING_COUNTS;
+    num_stages = (int)(sizeof(PEG_INFERENCE_HALVING_COUNTS) /
+                       sizeof(PEG_INFERENCE_HALVING_COUNTS[0]));
+  } else {
+    counts = PEG_DEFAULT_HALVING_COUNTS;
+    num_stages = default_num_stages;
+  }
   if (args->max_stage > 0 && args->max_stage < num_stages) {
     num_stages = args->max_stage;
   }
@@ -2608,6 +2949,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // deterministic (full enumeration, deterministic playout, no deep solves).
     num_stages = 0;
   }
+  out->planned_num_stages = num_stages;
 
   // Exhaustive mode: a single uncapped stage (-pegtopk all / 0). With no
   // narrowing the per-stage fidelity ramp is pointless — re-evaluating the
@@ -2885,7 +3227,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
               args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
-              args->include_per_scenario ? &cand_oc : NULL);
+              args->include_per_scenario ? &cand_oc : NULL,
+              args->opp_leave_prior, args->inference_samples,
+              args->inference_seed);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
@@ -2929,7 +3273,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged, stage_oc);
+            &progress, args->poll, restaged, stage_oc, args->opp_leave_prior,
+            args->inference_samples, args->inference_seed);
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.
@@ -2939,6 +3284,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // complete weight_sum is ranked[0].weight_sum: carried candidates were
         // fully scored at the previous stage and weight_sum (= perm(unseen,
         // bag_size)) is constant across plays.
+        // CAVEAT (multi-support sampled prior only): the deep sampled path routes
+        // each weight-1 sample through peg_eval_split's per-multiset factorial
+        // scaling, so its weight_sum is a sum-of-(n_bag!)'s (N..24*N), not a flat
+        // constant. This completeness gate can then mis-classify a deadline-cut
+        // sampled candidate. It never affects win%/spread ranking (those divide
+        // by total_weight); PEG_MAX_BAG bounds the distortion; and the live poll
+        // path uses whole-candidate done_count, not this gate.
         const int64_t full_weight = ranked[0].weight_sum;
         PegRankedCand *part_new =
             malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
