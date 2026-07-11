@@ -2485,11 +2485,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // anchors at the very start so the budget covers pruning/movegen too.
   ctimer_start(&out->timer);
 
-  // Protected ("never prune") moves: each stage carries these past its
-  // top-K cut so they always end up in the final results.
-  const int n_protect = args->n_protect_moves;
-  const Move *const *protect_moves = args->protect_moves;
-
   // Build the root pruned KWG once and install it on a prepared base game with
   // cross-sets generated a single time. The pre-cand board's playable words are
   // a superset of any post-cand position's, so this one pruned KWG is valid for
@@ -2644,6 +2639,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
 
   if (n_cands > 0) {
+    // Protected ("never prune") moves: each stage carries these past its
+    // top-K cut so they always end up in the final results.
+    const int n_protect = args->n_protect_moves;
+    const Move *const *protect_moves = args->protect_moves;
+
     PegRankedCand *ranked =
         malloc_or_die((size_t)n_cands * sizeof(PegRankedCand));
     const Move **moves = malloc_or_die((size_t)n_cands * sizeof(Move *));
