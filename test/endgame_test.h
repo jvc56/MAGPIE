@@ -3,6 +3,7 @@
 
 void test_endgame(void);
 void test_endgame_wasm(void);
+void test_endgame_outplay_zobrist_overflow(void);
 void test_multi_pv(void);
 void test_topk_no_duplicates(void);
 void test_topk50_overflow_repro(void);
