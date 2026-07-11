@@ -5,6 +5,7 @@
 #include "../def/letter_distribution_defs.h"
 #include "../ent/equity.h"
 #include "../util/fileproxy.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
@@ -43,7 +44,40 @@ typedef struct LetterDistribution {
   size_t max_tile_length;
   char ld_ml_to_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
   char ld_ml_to_alt_hl[MACHINE_LETTER_MAX_VALUE][MAX_LETTER_BYTE_LENGTH];
+  // FNV-1a hash of the distribution's defining content (size, tile counts and
+  // scores, name), computed once at creation. A LetterDistribution is immutable
+  // after load, so this is a stable per-distribution identity. Callers that
+  // cache a by-value copy of an ld (e.g. MoveGen) compare this against the live
+  // source's value to detect a distribution change WITHOUT relying on pointer
+  // identity: the ld pointer -- and its name pointer -- can be reused by a
+  // different distribution the allocator places at a freed one's address (ABA),
+  // which a pointer comparison misses but a content hash does not. Never 0, so
+  // a zero-initialized (never-loaded) cached copy always compares unequal.
+  uint64_t content_fingerprint;
 } LetterDistribution;
+
+// FNV-1a over the fields that define a distribution for move generation and
+// scoring. Computed once at creation and stored in content_fingerprint. Two
+// loads of the same distribution hash equal (so a redundant reload is safely
+// skipped); any two distinct distributions differ in size/scores/counts/name
+// and hash unequal.
+static inline uint64_t
+ld_compute_content_fingerprint(const LetterDistribution *ld) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  hash = fnv64a_step(hash, (uint64_t)ld->size);
+  hash = fnv64a_step(hash, (uint64_t)ld->total_tiles);
+  hash = fnv64a_step(hash, (uint64_t)ld->max_tile_length);
+  for (int ml = 0; ml < MACHINE_LETTER_MAX_VALUE; ml++) {
+    hash = fnv64a_step(hash, (uint64_t)ld->scores[ml]);
+    hash = fnv64a_step(hash, (uint64_t)ld->distribution[ml]);
+  }
+  if (ld->name != NULL) {
+    for (const char *name_char = ld->name; *name_char != '\0'; name_char++) {
+      hash = fnv64a_step(hash, (uint64_t)(unsigned char)*name_char);
+    }
+  }
+  return hash == 0 ? 1 : hash;
+}
 
 // Fast string-to-machine-letter converter using ASCII lookup table.
 // Create once from a LetterDistribution, then use for bulk conversions.
@@ -254,6 +288,7 @@ static inline void ld_create_internal(const char *ld_name,
     sort_score_order(ld);
     ld->max_tile_length = max_tile_length;
     ld->name = string_duplicate(ld_name);
+    ld->content_fingerprint = ld_compute_content_fingerprint(ld);
   }
 }
 
@@ -297,6 +332,11 @@ static inline LetterDistribution *ld_create(const char *data_paths,
 
 static inline const char *ld_get_name(const LetterDistribution *ld) {
   return ld->name;
+}
+
+static inline uint64_t
+ld_get_content_fingerprint(const LetterDistribution *ld) {
+  return ld->content_fingerprint;
 }
 
 static inline int ld_get_size(const LetterDistribution *ld) { return ld->size; }

@@ -2746,8 +2746,21 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Player *player = game_get_player(game, gen->player_index);
   const Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
-  gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
+  // gen->ld is a by-value copy and the per-thread MoveGen is reused across
+  // every node of a solve with a stable game->ld, so skip the ~3.4 KB memcpy
+  // (and the bit_rack compat scan) when the source distribution is unchanged --
+  // pure per-node-setup work removed on the movegen-dominated endgame profile.
+  // The guard is the ld's content fingerprint, NOT its address: the MoveGen
+  // cache outlives the Config that owns an ld, so a freed ld (and its name
+  // string) can be reused by a different distribution at the same address
+  // (ABA), which a pointer comparison misses but the content hash catches. The
+  // cached copy's fingerprint is 0 until the first load (calloc), and a real
+  // fingerprint is never 0, so the first node always loads.
+  const LetterDistribution *ld_src = game_get_ld(game);
+  if (ld_get_content_fingerprint(ld_src) != gen->ld.content_fingerprint) {
+    memcpy(&gen->ld, ld_src, sizeof(LetterDistribution));
+    gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
+  }
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
