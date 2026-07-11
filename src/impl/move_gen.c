@@ -2746,21 +2746,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Player *player = game_get_player(game, gen->player_index);
   const Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  // Only reload the letter distribution when the source changed. gen->ld is a
-  // by-value copy and the per-thread MoveGen is reused across every node of a
-  // solve with a stable game->ld, so this skips a ~3.4 KB memcpy (and the
-  // bit_rack compat scan) on all but the first node -- pure per-node-setup work
-  // on the movegen-dominated endgame profile. Guarded on both the ld pointer
-  // and its name pointer: an ABA reuse of a freed ld's address by a different
-  // distribution has a different name pointer and still reloads, while a
-  // same-distribution reload is byte-identical so skipping it is safe.
-  const LetterDistribution *ld_src = game_get_ld(game);
-  if (ld_src != gen->ld_src_at_load ||
-      ld_get_name(ld_src) != ld_get_name(&gen->ld)) {
-    memcpy(&gen->ld, ld_src, sizeof(LetterDistribution));
-    gen->ld_src_at_load = ld_src;
-    gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
-  }
+  memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
+  gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
   gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
