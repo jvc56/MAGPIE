@@ -8,6 +8,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -488,8 +489,8 @@ void test_benchmark_nonstuck_3v3(void) {
 // on the optimized binary and diff. Correctness = <value> must match exactly on
 // every position (endgame is exact). When run single-threaded (the default),
 // <nodes> is also deterministic, so an unchanged <nodes> proves a refactor left
-// the search tree identical, while a pruning change shows as fewer nodes with an
-// unchanged value.
+// the search tree identical, while a pruning change shows as fewer nodes with
+// an unchanged value.
 //
 // Parameterized entirely by environment so the same binary can sweep depth /
 // thread count / battery without recompiling:
@@ -504,7 +505,7 @@ static int env_int(const char *name, int fallback) {
   if (v == NULL || v[0] == '\0') {
     return fallback;
   }
-  return atoi(v);
+  return (int)strtol(v, NULL, 10);
 }
 
 static double env_double(const char *name, double fallback) {
@@ -512,7 +513,7 @@ static double env_double(const char *name, double fallback) {
   if (v == NULL || v[0] == '\0') {
     return fallback;
   }
-  return atof(v);
+  return strtod(v, NULL);
 }
 
 void test_endgame_speed_bench(void) {
@@ -606,8 +607,8 @@ void test_endgame_speed_bench(void) {
         endgame_results_get_pvline(results, ENDGAME_RESULT_BEST)->score;
     uint64_t nodes = endgame_ctx_get_nodes_searched(solver);
 
-    printf("BENCHROW %d %d %llu %.6f\n", ci, value,
-           (unsigned long long)nodes, elapsed);
+    printf("BENCHROW %d %d %llu %.6f\n", ci, value, (unsigned long long)nodes,
+           elapsed);
     total_time += elapsed;
     total_nodes += nodes;
     if ((ci + 1) % 25 == 0) {
@@ -636,10 +637,10 @@ void test_endgame_speed_bench(void) {
 // realistic time-control scenario -- the solver gets a clock, not a fixed depth
 // -- and exercises the solver repeatedly on the shrinking remaining endgame.
 //
-// Under a per-move time budget both a baseline and an optimized binary spend the
-// same wall clock, so the speedup shows up as MORE NODES searched and DEEPER
-// exact search reached in that budget (stronger play at equal time). Emits, per
-// position:
+// Under a per-move time budget both a baseline and an optimized binary spend
+// the same wall clock, so the speedup shows up as MORE NODES searched and
+// DEEPER exact search reached in that budget (stronger play at equal time).
+// Emits, per position:
 //   POROW <idx> moves=<n> nodes=<N> depthsum=<D> time=<s> ended=<0|1>
 // and a summary. Set MAGPIE_PO_TIMEMS=0 to disable the time limit and instead
 // fully solve each move to MAGPIE_PO_PLIES (a pure speed comparison).
@@ -671,7 +672,6 @@ void test_endgame_playout_bench(void) {
   const int max_plies = env_int("MAGPIE_PO_PLIES", 25);
   const int threads = env_int("MAGPIE_PO_THREADS", 1);
   const int max_moves = env_int("MAGPIE_PO_MAXMOVES", 40);
-  const double budget = (double)time_ms / 1000.0;
 
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
@@ -703,8 +703,8 @@ void test_endgame_playout_bench(void) {
   }
   (void)fclose(fp);
 
-  printf("POCFG tag=%s lex=%s time_ms=%d plies=%d threads=%d positions=%d\n", tag,
-         lex, time_ms, max_plies, threads, num_cgps);
+  printf("POCFG tag=%s lex=%s time_ms=%d plies=%d threads=%d positions=%d\n",
+         tag, lex, time_ms, max_plies, threads, num_cgps);
 
   long total_moves = 0;
   uint64_t total_nodes = 0;
@@ -736,13 +736,12 @@ void test_endgame_playout_bench(void) {
       // Hard wall-clock cutoff: unlimited depth (plies = ceiling), IDS deepens
       // until the external deadline fires MID-depth (checked every 1024 nodes
       // via check_depth_deadline). soft/hard_time_limit stay 0 so the EBF
-      // between-depth stop is off -- the only stop is the hard deadline, so both
-      // engines burn the same T ms and the faster one completes deeper. On
+      // between-depth stop is off -- the only stop is the hard deadline, so
+      // both engines burn the same T ms and the faster one completes deeper. On
       // interrupt the result is the best move from the last COMPLETED depth.
       const int64_t deadline_ns =
-          (time_ms > 0)
-              ? (ctimer_monotonic_ns() + (int64_t)time_ms * 1000000LL)
-              : 0;
+          (time_ms > 0) ? (ctimer_monotonic_ns() + (int64_t)time_ms * 1000000LL)
+                        : 0;
       EndgameArgs args = {.game = game,
                           .thread_control = config_get_thread_control(config),
                           .plies = max_plies,
@@ -808,11 +807,10 @@ void test_endgame_playout_bench(void) {
   printf("POSUM tag=%s positions=%d completed=%d total_moves=%ld "
          "total_nodes=%llu total_depth=%ld avg_depth=%.3f total_time=%.4f "
          "nps=%.0f\n",
-         tag, num_cgps, completed, total_moves,
-         (unsigned long long)total_nodes, total_depth,
+         tag, num_cgps, completed, total_moves, (unsigned long long)total_nodes,
+         total_depth,
          total_moves > 0 ? (double)total_depth / (double)total_moves : 0.0,
-         total_time,
-         total_time > 0 ? (double)total_nodes / total_time : 0.0);
+         total_time, total_time > 0 ? (double)total_nodes / total_time : 0.0);
   (void)fflush(stdout);
 
   free(cgp_lines);
@@ -893,22 +891,21 @@ void test_endgame_move1(void) {
   EndgameCtx *solver = NULL;
   Move *play = move_create();
 
-  EndgameArgs args = {.game = game,
-                      .thread_control = config_get_thread_control(config),
-                      .plies = MAX_SEARCH_DEPTH,
-                      .tt_fraction_of_mem = 0.05,
-                      .initial_small_move_arena_size =
-                          DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
-                      .num_threads = threads,
-                      .num_top_moves = 1,
-                      .use_heuristics = true,
-                      .forced_pass_bypass = true,
-                      .enable_pv_display = false,
-                      .soft_time_limit = soft,
-                      .hard_time_limit = hard,
-                      .external_deadline_ns =
-                          ctimer_monotonic_ns() + (int64_t)(hard * 1e9),
-                      .seed = 42};
+  EndgameArgs args = {
+      .game = game,
+      .thread_control = config_get_thread_control(config),
+      .plies = MAX_SEARCH_DEPTH,
+      .tt_fraction_of_mem = 0.05,
+      .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      .num_threads = threads,
+      .num_top_moves = 1,
+      .use_heuristics = true,
+      .forced_pass_bypass = true,
+      .enable_pv_display = false,
+      .soft_time_limit = soft,
+      .hard_time_limit = hard,
+      .external_deadline_ns = ctimer_monotonic_ns() + (int64_t)(hard * 1e9),
+      .seed = 42};
 
   Timer t;
   ctimer_start(&t);
@@ -930,10 +927,8 @@ void test_endgame_move1(void) {
     play_move(play, game, NULL);
   }
 
-  const int s0 =
-      equity_to_int(player_get_score(game_get_player(game, 0)));
-  const int s1 =
-      equity_to_int(player_get_score(game_get_player(game, 1)));
+  const int s0 = equity_to_int(player_get_score(game_get_player(game, 0)));
+  const int s1 = equity_to_int(player_get_score(game_get_player(game, 1)));
   const int now_on = game_get_player_on_turn_index(game);
   const int ended = game_get_game_end_reason(game) != GAME_END_REASON_NONE;
   char *out_cgp = game_get_cgp(game, true);

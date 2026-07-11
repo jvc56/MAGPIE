@@ -2099,9 +2099,9 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
                sizeof(gen->descending_tile_scores));
         restricted_any_tiles = true;
       }
-      restrict_tile_and_accumulate_score(gen, possible_letters_here,
-                                         letter_multiplier, this_word_multiplier,
-                                         gen->current_right_col);
+      restrict_tile_and_accumulate_score(
+          gen, possible_letters_here, letter_multiplier, this_word_multiplier,
+          gen->current_right_col);
     } else {
       if (!changed_any_restricted_multipliers) {
         // First unrestricted insertion: snapshot the multiplier arrays.
@@ -2813,11 +2813,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // Decide up front whether WMP will be active. It is disabled for
   // ALL_SMALL/TILES_PLAYED (unsupported), when override_kwg is set (WMP data
   // corresponds to the original KWG, not the override), and on a
-  // BitRack-incompatible alphabet (the WMP keys on a BitRack). Passing NULL when
-  // disabled lets wmp_move_gen_init early-return instead of building a BitRack,
-  // clearing the length table, and seeding all anchor slots -- wasted work on
-  // every endgame node, which always passes override_kwg. The seeded fields are
-  // only read while WMP is active, so skipping them when it is NULL is safe.
+  // BitRack-incompatible alphabet (the WMP keys on a BitRack). Passing NULL
+  // when disabled lets wmp_move_gen_init early-return instead of building a
+  // BitRack, clearing the length table, and seeding all anchor slots -- wasted
+  // work on every endgame node, which always passes override_kwg. The seeded
+  // fields are only read while WMP is active, so skipping them when it is NULL
+  // is safe.
   const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
                             gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
                             override_kwg != NULL || !gen->bit_rack_compatible;
