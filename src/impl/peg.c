@@ -2012,10 +2012,10 @@ static void peg_force_protected_to_front(PegRankedCand *ranked, int count,
 
 // Same idea as peg_force_protected_to_front, but for stage 0's plain Move
 // pointer array (built before any PegRankedCand results exist).
-static void peg_force_protected_move_ptrs_to_front(const Move **moves,
-                                                   int count,
-                                                   const Move *const *protect_moves,
-                                                   int n_protect) {
+static void
+peg_force_protected_move_ptrs_to_front(const Move **moves, int count,
+                                       const Move *const *protect_moves,
+                                       int n_protect) {
   if (n_protect <= 0 || count <= 1) {
     return;
   }
@@ -2748,7 +2748,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // otherwise be scored last, making it the first thing a tight time
       // budget drops. Move it to the front so it's scored before that can
       // happen.
-      peg_force_protected_to_front(ranked, eval_count, protect_moves, n_protect);
+      peg_force_protected_to_front(ranked, eval_count, protect_moves,
+                                   n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }

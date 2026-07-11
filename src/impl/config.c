@@ -2990,7 +2990,7 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     const int num_moves = move_list_get_count(config->move_list);
     unpruned_move_idxs = malloc_or_die(num_unpruned_moves * sizeof(int));
     for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
-        unpruned_vm_idx++) {
+         unpruned_vm_idx++) {
       unpruned_move_idxs[unpruned_vm_idx] = -1;
     }
     for (int move_idx = 0; move_idx < num_moves; move_idx++) {
