@@ -1655,3 +1655,53 @@ void test_endgame_wasm(void) {
   test_pass_first();
   test_nonempty_bag();
 }
+
+// Regression: an endgame outplay that plays >= 4 of one letter (e.g. all four
+// S's from EOSSSS) must not overflow the zobrist rack-hash table.
+// play_move_endgame_outplay leaves the mover's rack full (it skips the update
+// because the game is ending), so the search's zobrist_add_move must treat the
+// post-outplay leftover as empty rather than double-counting the played tiles.
+// Otherwise the reconstructed pre-move rack is placed + full = 2*placed, and an
+// outplay of four S's makes placeholder[S] = 8, indexing rack_table[S] one past
+// its RACK_SIZE+1 row (heap-buffer-overflow under ASan; silent TT-key
+// corruption otherwise). Single-threaded and deterministic: the defect is not a
+// race and reproduces on the first solve.
+void test_endgame_outplay_zobrist_overflow(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW24 -s1 score -s2 score -eplies 25");
+  load_and_exec_config_or_die(
+      config,
+      "cgp F6ENDEW2G/Y4AUA2TELCO/ROTARY8R/D2MEARING4I/2KITH3OW4/1QIN5XI4/"
+      "1U6B1V4/DA1DAUPhINE4/AL1H4Z6/EM1U3J7/3T3E7/APRICATE7/VOE4I7/ELEcTION7/"
+      "7G7 BFLNOOR/EOSSSS 442/356 0");
+
+  Game *game = config_get_game(config);
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = config_get_endgame_plies(config);
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 1;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.seed = 42;
+
+  EndgameCtx *endgame_ctx = NULL;
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  const PVLine *pv =
+      endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+  assert(pv != NULL);
+  assert(pv->num_moves > 0);
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(endgame_ctx);
+  config_destroy(config);
+}

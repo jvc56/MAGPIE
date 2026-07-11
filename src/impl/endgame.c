@@ -2503,6 +2503,22 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       const bool is_outplay =
           small_move_get_tiles_played(small_move) == stm_rack_tiles;
 
+      // Outplays use play_move_endgame_outplay (below), which deliberately does
+      // NOT empty the rack, so stm_rack still holds the full pre-move rack.
+      // zobrist_add_move treats its rack arg as the post-move leftover, which
+      // for an outplay is empty; passing the stale full rack double-counts the
+      // played tiles (placeholder = placed + full = 2*placed) and can index the
+      // rack hash table out of bounds -- e.g. outplaying four S's yields
+      // placeholder[S] = 8 into an 8-slot (0..RACK_SIZE) row. Use an empty
+      // leftover for outplays.
+      Rack outplay_leftover;
+      if (is_outplay) {
+        rack_set_dist_size_and_reset(&outplay_leftover,
+                                     rack_get_dist_size(stm_rack));
+      }
+      const Rack *move_leftover_rack =
+          is_outplay ? &outplay_leftover : stm_rack;
+
       // Track whether thread 0 is inside root move #1's subtree
       if (is_root && worker->ordinal == 0 && pass == 0) {
         worker->in_first_root_move = (idx == 0);
@@ -2542,7 +2558,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       if (worker->solver->transposition_table_optim) {
         child_key = zobrist_add_move(
             worker->solver->transposition_table->zobrist, node_key,
-            worker->move_list->spare_move, stm_rack,
+            worker->move_list->spare_move, move_leftover_rack,
             on_turn_idx == worker->solver->solving_player,
             game_get_consecutive_scoreless_turns(worker->game_copy),
             last_consecutive_scoreless_turns);
