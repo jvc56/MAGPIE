@@ -581,6 +581,19 @@ void rv_sim_destroy(RandomVariables *rvs) {
   free(simmer);
 }
 
+// True when the sim args request a resume and the existing results are
+// compatible (same play and ply counts). The reset is skipped in that
+// case so sampling keeps accumulating onto the existing per-play stats
+// — the move list is expected to hold the same plays the SimResults
+// was built from (sampling reads moves from the SimmedPlays).
+static bool rv_sim_can_resume(const SimArgs *sim_args,
+                              const SimResults *sim_results) {
+  return sim_args->resume_results &&
+         sim_results_get_number_of_plays(sim_results) ==
+             move_list_get_count(sim_args->move_list) &&
+         sim_results_get_num_plies(sim_results) == sim_args->num_plies;
+}
+
 RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
                                SimResults *sim_results) {
   rvs->sample_func = rv_sim_sample;
@@ -638,8 +651,10 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
 
   simmer->thread_control = thread_control;
 
-  sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
-                    sim_args->seed, sim_args->use_heat_map);
+  if (!rv_sim_can_resume(sim_args, sim_results)) {
+    sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
+                      sim_args->seed, sim_args->use_heat_map);
+  }
   simmer->sim_results = sim_results;
 
   rvs->data = simmer;
@@ -688,9 +703,11 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
 
-  sim_results_reset(sim_args->move_list, simmer->sim_results,
-                    sim_args->num_plies, sim_args->seed,
-                    sim_args->use_heat_map);
+  if (!rv_sim_can_resume(sim_args, simmer->sim_results)) {
+    sim_results_reset(sim_args->move_list, simmer->sim_results,
+                      sim_args->num_plies, sim_args->seed,
+                      sim_args->use_heat_map);
+  }
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {

@@ -115,10 +115,15 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     (*sim_ctx)->rng = rvs_create(&rng_args);
   }
 
-  sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
-  sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
+  // On resume the existing results already carry the rack / known
+  // opponent rack they were built with — don't stomp them with the
+  // (possibly reconstructed) move list's view.
+  if (!sim_args->resume_results) {
+    sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
+    sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
+    sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
+  }
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
-  sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
       sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));

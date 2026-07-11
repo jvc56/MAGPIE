@@ -31,6 +31,14 @@ typedef struct SimArgs {
   uint64_t seed;
   ThreadControl *thread_control;
   BAIOptions bai_options;
+  // When true and the provided SimResults already holds simmed plays
+  // matching the move list (same play count and ply count), the sim
+  // skips the results reset and keeps accumulating samples onto the
+  // existing per-play stats — resuming a previously stopped (or
+  // saved-and-restored) simulation instead of starting from zero.
+  // The move list must contain the same plays the SimResults was
+  // built from; sampling reads moves from the SimmedPlays themselves.
+  bool resume_results;
   // Utility weights for the BAI sample blend. Defaults (1.0, 0.0, 100.0)
   // are pure win%, backward compatible. See sim_utility_blend below for
   // the formula and the role of utility_spread_scale.
@@ -90,6 +98,12 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = 1.0;
   sim_args->utility_w_spread = 0.0;
   sim_args->utility_spread_scale = 100.0;
+  // Start fresh, not resuming a prior SimResults. Only the TUI's analysis-
+  // resume path sets this true; every other caller fills SimArgs through
+  // here, so leaving it uninitialized let stack garbage spuriously trigger
+  // a resume — skipping sim_results_reset and accumulating samples, which
+  // made multi-threaded sims non-reproducible vs single-threaded.
+  sim_args->resume_results = false;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI
