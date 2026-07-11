@@ -53,13 +53,13 @@ enum {
 
 // Equity loss (EqL) is normally best.equity - actual.equity, but this can go
 // negative when the actual play had lower Wp but higher Eq than best (best
-// is chosen by Wp, not Eq). Adjusted equity loss (AEqL) replaces those
-// negative cases with the Wp lost converted to an equivalent equity value,
-// so the metric always reflects a real cost. This conversion factor was
-// derived by regressing Eq gap against Wp gap across many simulated
-// candidate moves: 1 percentage point of Wp is worth about this many
-// equity points in the well-behaved (non-extreme Wp, non-blowout) part of
-// the curve.
+// is chosen by Wp, not Eq). Adjusted equity loss (AEqL) is the larger of EqL
+// and the Wp lost converted to an equivalent equity value, so the metric
+// never reports less cost than the Wp lost alone would imply. This
+// conversion factor was derived by regressing Eq gap against Wp gap across
+// many simulated candidate moves: 1 percentage point of Wp is worth about
+// this many equity points in the well-behaved (non-extreme Wp, non-blowout)
+// part of the curve.
 #define WPL_TO_EQL_CONVERSION_FACTOR 2.26
 
 typedef enum {
@@ -141,13 +141,16 @@ static double compute_win_pct_lost(const TurnResult *tr) {
 }
 
 // See the WPL_TO_EQL_CONVERSION_FACTOR comment above for what this adjusts
-// and why.
-static double compute_adjusted_equity_lost(double equity_lost,
+// and why. AEqL is only nonzero when the actual play differs from best
+// (rank_idx == 0 means actual was best), same as WPL/EqL are both 0 then.
+static double compute_adjusted_equity_lost(const TurnResult *tr,
+                                           double equity_lost,
                                            double win_pct_lost) {
-  if (equity_lost >= 0.0) {
-    return equity_lost;
+  if (tr->actual.rank_idx == 0) {
+    return 0.0;
   }
-  return win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
+  const double wpl_as_eql = win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
+  return wpl_as_eql > equity_lost ? wpl_as_eql : equity_lost;
 }
 
 struct AnalyzeCtx {
@@ -534,7 +537,7 @@ static void write_per_turn_csv(const TurnResult *turn_result,
       player_name, rack_str, turn_result->actual.display_move,
       turn_result->actual.rank_idx != 0 ? turn_result->best.display_move : "-",
       equity_lost, win_pct_lost,
-      compute_adjusted_equity_lost(equity_lost, win_pct_lost));
+      compute_adjusted_equity_lost(turn_result, equity_lost, win_pct_lost));
 
   free(rack_str);
 
@@ -571,7 +574,7 @@ static void add_summary_event_row(
   const double win_pct_lost = compute_win_pct_lost(tr);
   const double equity_lost = tr->best.equity - tr->actual.equity;
   const double adjusted_equity_lost =
-      compute_adjusted_equity_lost(equity_lost, win_pct_lost);
+      compute_adjusted_equity_lost(tr, equity_lost, win_pct_lost);
 
   int curr_col = 0;
   string_grid_set_cell(sg, row, curr_col++,
