@@ -2462,17 +2462,17 @@ void test_config_exchange_blank(void) {
 void test_config_utility_blend(void) {
   ErrorStack *error_stack = error_stack_create();
 
-  // Defaults: (1.0, 0.0, 100.0), fanned out identically to both players.
+  // Defaults: (1.0, 0.5, 100.0), fanned out identically to both players.
   {
     Config *config = config_create_default_test();
     assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_utility_spread_scale(config), 100.0));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p1_utility_spread_scale(config), 100.0));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
     config_destroy(config);
   }
@@ -2522,11 +2522,11 @@ void test_config_utility_blend(void) {
     Config *config = config_create_default_test();
     load_and_exec_config_or_die(config, "set -uwin1 0.4 -uspread1 0.6");
     assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 0.4));
     assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.6));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.5));
     config_destroy(config);
   }
 
