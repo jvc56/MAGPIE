@@ -112,9 +112,9 @@ a hard-time-limited search plays.
 ## Playing strength under a time control (head-to-head match)
 
 Does the ~4% buy any *points*? An 18-thread, 5 s/player/game, colour-balanced
-head-to-head match between the baseline and optimized solvers (`tools/eg_match.py`,
-cross-process via the `egmove1` transducer, per-turn soft allocation from a
-per-game hard bank), run for 8 hours:
+head-to-head match between the baseline and optimized solvers (cross-process
+via the `egmove1` transducer, per-turn soft allocation from a per-game hard
+bank), run for 8 hours:
 
 | metric | value |
 |---|---|
@@ -251,8 +251,8 @@ multiplicative speedup or a cheaper per-candidate PEG leaf, not micro-refactors.
   identity into a rigorous correctness oracle.
 - **Measurement drift**: back-to-back runs varied <0.15%, but measurements taken
   minutes apart drifted 1–2% (thermal/scheduling). The final headline uses a
-  **drift-immune interleaved A/B** (`tools/eg_final.sh`): baseline and optimized
-  binaries timed in alternation, compared by median, so slow drift cancels.
+  **drift-immune interleaved A/B**: baseline and optimized binaries timed in
+  alternation, compared by median, so slow drift cancels.
 - **Build hygiene**: objects were not keyed by build flavor, so switching
   `dev`↔`release` (or `BOARD_DIM`) relinked stale mixed-flag objects. Fixed by
   keying `obj/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)/`.
@@ -261,11 +261,8 @@ multiplicative speedup or a cheaper per-candidate PEG leaf, not micro-refactors.
 
 - `test/benchmark_endgame_test.c` — `egspeedbench` (fixed-depth) and `egplayout`
   (time-limited full-game playout) harnesses.
-- `tools/eg_ab.sh` — per-change validator (rebuild + suite + value/node match + speed).
-- `tools/eg_final.sh` — drift-immune interleaved fixed-depth baseline-vs-optimized A/B.
-- `tools/eg_playout_ab.sh` — interleaved time-limited playout A/B.
-- `egmove1` (transducer) + `tools/eg_match.py` — cross-process, time-banked,
-  colour-balanced head-to-head strength match (baseline vs optimized).
+- `egmove1` (transducer) — cross-process, time-banked, colour-balanced
+  head-to-head strength match (baseline vs optimized).
 - `pegstage` (test/benchmark_peg_test.c) — PEG move-stability across cascade
   stages + budget A/B, for the pre-endgame strength check.
 - `src/impl/move_gen.c`, `src/impl/move_gen.h` — the five optimizations.
