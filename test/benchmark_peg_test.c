@@ -1073,26 +1073,27 @@ void test_peg_stage_stability(void) {
 // flip_rate x win-delta). Env: MAGPIE_PEG_BA (base budget, 2.0), MAGPIE_PEG_BB
 // (opt budget, 2.08), MAGPIE_PEG_ORACLE (oracle budget, 30), MAGPIE_PEG_MAX
 // (pos/file), MAGPIE_PEG_STRIDE.
-static void run_budget_ab(const char *f, const char *label, double ba,
-                          double bb, int stride, double ob, int maxpos) {
+static void run_budget_ab(const char *cgp_file, const char *label,
+                          double base_budget, double opt_budget, int stride,
+                          double oracle_budget, int maxpos) {
   static const int oracle_k[] = {32, 32, 32};
   const PegBenchConfig cfg_a = {.name = "base",
                                 .num_threads = 18,
-                                .time_budget_seconds = ba,
+                                .time_budget_seconds = base_budget,
                                 .scenario_stride = stride,
                                 .num_stages = 0};
   const PegBenchConfig cfg_b = {.name = "opt+4%",
                                 .num_threads = 18,
-                                .time_budget_seconds = bb,
+                                .time_budget_seconds = opt_budget,
                                 .scenario_stride = stride,
                                 .num_stages = 0};
   const PegBenchConfig oracle = {.name = "top32@4ply",
                                  .num_threads = 18,
-                                 .time_budget_seconds = ob,
+                                 .time_budget_seconds = oracle_budget,
                                  .scenario_stride = 1,
                                  .stage_top_k = oracle_k,
                                  .num_stages = 3};
-  run_peg_utility_benchmark(f, label, &cfg_a, &cfg_b, &oracle, maxpos);
+  run_peg_utility_benchmark(cgp_file, label, &cfg_a, &cfg_b, &oracle, maxpos);
 }
 
 void test_peg_strength_ab(void) {
