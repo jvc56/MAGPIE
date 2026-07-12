@@ -118,6 +118,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_rack(sim_results, move_list_get_rack(sim_args->move_list));
   sim_results_set_known_opp_rack(sim_results, sim_args->known_opp_rack);
   sim_results_set_cutoff(sim_results, sim_args->bai_options.cutoff);
+  sim_results_set_utility_w_spread(sim_results, sim_args->utility_w_spread);
   sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
 
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
