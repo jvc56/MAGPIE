@@ -961,3 +961,337 @@ void test_gen_peg_more(void) {
   generate_peg_cgps(40244777, 4, 75, f, /*append=*/true,
                     /*contested_only=*/true);
 }
+
+// PEG stage-stability / cost harness: for each fixture position, run peg_solve
+// capped at max_stage=k (k=1..KMAX), unbounded (each capped cascade completes),
+// single deterministic config (stride 1, nested off). Emits per (position,k)
+// the published best move + win/spread + per-stage field/fidelity/wall-time, so
+// we can measure (1) whether the top move changes as one more halving stage
+// completes, and (2) the marginal cost of completing the next stage vs the ~4%
+// speedup (which only touches emptier-leaf endgame time). Env: MAGPIE_PEG_MAX
+// (positions/file), MAGPIE_PEG_KMAX (default 5), MAGPIE_PEG_THREADS (default
+// 18).
+void test_peg_stage_stability(void) {
+  log_set_level(LOG_FATAL);
+  const char *em = getenv("MAGPIE_PEG_MAX");
+  const int maxpos = (em && *em) ? (int)strtol(em, NULL, 10) : 100000;
+  const char *ek = getenv("MAGPIE_PEG_KMAX");
+  const int kmax = (ek && *ek) ? (int)strtol(ek, NULL, 10) : 5;
+  const char *ekn = getenv("MAGPIE_PEG_KMIN");
+  const int kmin = (ekn && *ekn) ? (int)strtol(ekn, NULL, 10) : 1;
+  const char *et = getenv("MAGPIE_PEG_THREADS");
+  const int threads = (et && *et) ? (int)strtol(et, NULL, 10) : 18;
+  const char *eb = getenv("MAGPIE_PEG_BUDGET");
+  const double budget = (eb && *eb) ? strtod(eb, NULL) : 0.0;
+  const char *es_ = getenv("MAGPIE_PEG_STRIDE");
+  const int stride = (es_ && *es_) ? (int)strtol(es_, NULL, 10) : 1;
+  const struct {
+    const char *f;
+    int bag;
+  } files[] = {
+      {"notes/peg_positions/random_1peg.txt", 1},
+      {"notes/peg_positions/random_2peg.txt", 2},
+      {"notes/peg_positions/random_3peg.txt", 3},
+      {"notes/peg_positions/random_4peg.txt", 4},
+  };
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 18 -s1 score -s2 score");
+  PegPoll *poll = peg_poll_create();
+  printf("PEGCFG threads=%d kmax=%d maxpos=%d\n", threads, kmax, maxpos);
+  (void)fflush(stdout);
+  for (int fi = 0; fi < 4; fi++) {
+    FILE *fp = fopen(files[fi].f, "re");
+    if (!fp) {
+      printf("PEGERR no %s\n", files[fi].f);
+      continue;
+    }
+    char line[4096];
+    int pos_id = 0;
+    while (pos_id < maxpos && fgets(line, sizeof(line), fp)) {
+      size_t len = strlen(line);
+      if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+      }
+      if (strlen(line) == 0) {
+        continue;
+      }
+      char *cmd = get_formatted_string("cgp %s", line);
+      load_and_exec_config_or_die(config, cmd);
+      free(cmd);
+      Game *game = config_get_game(config);
+      for (int k = kmin; k <= kmax; k++) {
+        PegArgs a;
+        memset(&a, 0, sizeof(a));
+        a.game = game;
+        a.thread_control = config_get_thread_control(config);
+        a.num_threads = threads;
+        a.scenario_stride = stride;
+        a.nested_enabled = false;
+        a.time_budget_seconds = budget;
+        a.max_stage = k;
+        peg_poll_reset(poll);
+        a.poll = poll;
+        PegResult r;
+        ErrorStack *es = error_stack_create();
+        peg_solve(&a, &r, es);
+        if (!error_stack_is_empty(es)) {
+          error_stack_destroy(es);
+          peg_result_destroy(&r);
+          break;
+        }
+        error_stack_destroy(es);
+        char mv[64];
+        move_to_string(game, &r.best_move, mv, sizeof(mv));
+        printf("PEGROW bag=%d pos=%d k=%d move=%s win=%.5f spread=%.2f lcs=%d "
+               "partial=%d elapsed=%.4f",
+               files[fi].bag, pos_id, k, mv, r.best_win, r.best_spread,
+               r.last_completed_stage, r.last_stage_partial ? 1 : 0,
+               ctimer_elapsed_seconds(&r.timer));
+        for (int s = 0; s < r.n_stage_history; s++) {
+          const PegStageSnapshot *ss = &r.stage_history[s];
+          double t =
+              ss->end_ns ? (double)(ss->end_ns - ss->start_ns) / 1e9 : -1.0;
+          printf(" |s%d f%d N%d d%d t%.4f", s, ss->fidelity_plies,
+                 ss->field_size, ss->cands_done, t);
+        }
+        printf("\n");
+        peg_result_destroy(&r);
+      }
+      pos_id++;
+      (void)fflush(stdout);
+    }
+    (void)fclose(fp);
+  }
+  peg_poll_destroy(poll);
+  config_destroy(config);
+}
+
+// PEG strength A/B by TRUE oracle value: run two arms that differ only in time
+// budget (base = T, opt = T*1.04, modelling a 4%-faster engine), then score
+// each arm's chosen move against a deep top-32 oracle. mean_loss_a -
+// mean_loss_b is the expected true win% the extra budget buys per PEG move (=
+// flip_rate x win-delta). Env: MAGPIE_PEG_BA (base budget, 2.0), MAGPIE_PEG_BB
+// (opt budget, 2.08), MAGPIE_PEG_ORACLE (oracle budget, 30), MAGPIE_PEG_MAX
+// (pos/file), MAGPIE_PEG_STRIDE.
+static void run_budget_ab(const char *cgp_file, const char *label,
+                          double base_budget, double opt_budget, int stride,
+                          double oracle_budget, int maxpos) {
+  static const int oracle_k[] = {32, 32, 32};
+  const PegBenchConfig cfg_a = {.name = "base",
+                                .num_threads = 18,
+                                .time_budget_seconds = base_budget,
+                                .scenario_stride = stride,
+                                .num_stages = 0};
+  const PegBenchConfig cfg_b = {.name = "opt+4%",
+                                .num_threads = 18,
+                                .time_budget_seconds = opt_budget,
+                                .scenario_stride = stride,
+                                .num_stages = 0};
+  const PegBenchConfig oracle = {.name = "top32@4ply",
+                                 .num_threads = 18,
+                                 .time_budget_seconds = oracle_budget,
+                                 .scenario_stride = 1,
+                                 .stage_top_k = oracle_k,
+                                 .num_stages = 3};
+  run_peg_utility_benchmark(cgp_file, label, &cfg_a, &cfg_b, &oracle, maxpos);
+}
+
+void test_peg_strength_ab(void) {
+  log_set_level(LOG_FATAL);
+  const char *ea = getenv("MAGPIE_PEG_BA");
+  const double ba = (ea && *ea) ? strtod(ea, NULL) : 2.0;
+  const char *eb = getenv("MAGPIE_PEG_BB");
+  const double bb = (eb && *eb) ? strtod(eb, NULL) : 2.08;
+  const char *eo = getenv("MAGPIE_PEG_ORACLE");
+  const double ob = (eo && *eo) ? strtod(eo, NULL) : 30.0;
+  const char *em = getenv("MAGPIE_PEG_MAX");
+  const int maxpos = (em && *em) ? (int)strtol(em, NULL, 10) : 25;
+  const char *estr = getenv("MAGPIE_PEG_STRIDE");
+  const int stride = (estr && *estr) ? (int)strtol(estr, NULL, 10) : 0;
+  printf("PEGABCFG base=%.2fs opt=%.2fs oracle=%.0fs stride=%d maxpos=%d\n", ba,
+         bb, ob, stride, maxpos);
+  run_budget_ab("notes/peg_positions/random_1peg.txt", "1peg", ba, bb, stride,
+                ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_2peg.txt", "2peg", ba, bb, stride,
+                ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_3peg.txt", "3peg", ba, bb, stride,
+                ob, maxpos);
+  run_budget_ab("notes/peg_positions/random_4peg.txt", "4peg", ba, bb, stride,
+                ob, maxpos);
+}
+
+// Generate a FRESH battery of PEG positions (new seeds, contested) to /tmp for
+// a long strength run, so we are not measuring on the committed fixtures. Env
+// MAGPIE_PEG_GENCOUNT (positions per bag, default 200).
+void test_gen_peg_fresh(void) {
+  log_set_level(LOG_FATAL);
+  const char *ec = getenv("MAGPIE_PEG_GENCOUNT");
+  const int count = (ec && *ec) ? (int)strtol(ec, NULL, 10) : 200;
+  generate_peg_cgps(918273101ULL, 1, count, "/tmp/peg_fresh_1peg.txt", false,
+                    true);
+  generate_peg_cgps(918273202ULL, 2, count, "/tmp/peg_fresh_2peg.txt", false,
+                    true);
+  generate_peg_cgps(918273303ULL, 3, count, "/tmp/peg_fresh_3peg.txt", false,
+                    true);
+  generate_peg_cgps(918273404ULL, 4, count, "/tmp/peg_fresh_4peg.txt", false,
+                    true);
+}
+
+// PEG throughput->strength CURVE: for each position run several arms that
+// differ ONLY in time budget (base T, then T*mult for each multiplier), then
+// ONE deep oracle scores every arm's chosen move. Prints one flushed line per
+// position (interrupt-safe): PEGCURVE bag pos best=<oracle_best_win>
+// aK=<move>|<oracle_win>... mean over positions of (best - oracle_win(arm)) =
+// that arm's utility loss; the base-minus-arm difference is the true win% the
+// extra budget buys. Env: MAGPIE_PEG_BASE (2.0), MAGPIE_PEG_MULTS
+// ("1.04,1.5,2.0"),
+//      MAGPIE_PEG_ORACLE (30), MAGPIE_PEG_STRIDE (0), MAGPIE_PEG_MAX (per
+//      file).
+void test_peg_strength_curve(void) {
+  log_set_level(LOG_FATAL);
+  const char *be = getenv("MAGPIE_PEG_BASE");
+  const double base = (be && *be) ? strtod(be, NULL) : 2.0;
+  const char *oe = getenv("MAGPIE_PEG_ORACLE");
+  const double ob = (oe && *oe) ? strtod(oe, NULL) : 30.0;
+  const char *se = getenv("MAGPIE_PEG_STRIDE");
+  const int stride = (se && *se) ? (int)strtol(se, NULL, 10) : 0;
+  const char *me = getenv("MAGPIE_PEG_MAX");
+  const int maxpos = (me && *me) ? (int)strtol(me, NULL, 10) : 1000000;
+  double mult[8] = {1.04, 1.5, 2.0};
+  int nmult = 3;
+  const char *ms = getenv("MAGPIE_PEG_MULTS");
+  if (ms && *ms) {
+    char buf[128];
+    (void)snprintf(buf, sizeof(buf), "%s", ms);
+    nmult = 0;
+    const char *tok = strtok(buf, ",");
+    while (tok && nmult < 8) {
+      mult[nmult++] = strtod(tok, NULL);
+      tok = strtok(NULL, ",");
+    }
+  }
+  const int narm = nmult + 1;
+  double budget[9];
+  budget[0] = base;
+  for (int i = 0; i < nmult; i++) {
+    budget[i + 1] = base * mult[i];
+  }
+  const struct {
+    const char *f;
+    int bag;
+  } files[] = {
+      {"/tmp/peg_fresh_1peg.txt", 1},
+      {"/tmp/peg_fresh_2peg.txt", 2},
+      {"/tmp/peg_fresh_3peg.txt", 3},
+      {"/tmp/peg_fresh_4peg.txt", 4},
+  };
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  static const int oracle_k[] = {32, 32, 32};
+  printf("PEGCURVECFG base=%.2f oracle=%.0f stride=%d arms=", base, ob, stride);
+  for (int a = 0; a < narm; a++) {
+    printf("%.3f%s", budget[a], a + 1 < narm ? "," : "\n");
+  }
+  (void)fflush(stdout);
+  for (int fi = 0; fi < 4; fi++) {
+    FILE *fp = fopen(files[fi].f, "re");
+    if (!fp) {
+      printf("PEGCURVEERR no %s\n", files[fi].f);
+      continue;
+    }
+    char line[4096];
+    int pos_id = 0;
+    while (pos_id < maxpos && fgets(line, sizeof(line), fp)) {
+      size_t len = strlen(line);
+      if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+      }
+      if (strlen(line) == 0) {
+        continue;
+      }
+      char *cmd = get_formatted_string("cgp %s", line);
+      load_and_exec_config_or_die(config, cmd);
+      free(cmd);
+      const Game *game = config_get_game(config);
+      PegBenchOutcome arm[9];
+      bool all_ok = true;
+      for (int a = 0; a < narm; a++) {
+        PegBenchConfig cfg = {.name = "arm",
+                              .num_threads = 18,
+                              .time_budget_seconds = budget[a],
+                              .scenario_stride = stride,
+                              .num_stages = 0};
+        arm[a] = run_one_peg(config, &cfg);
+        if (!arm[a].ok) {
+          all_ok = false;
+        }
+      }
+      if (!all_ok) {
+        printf("PEGCURVE bag=%d pos=%d SKIP\n", files[fi].bag, pos_id);
+        pos_id++;
+        (void)fflush(stdout);
+        continue;
+      }
+      const Move *protect[9];
+      char pstr[9][32];
+      int np = 0;
+      for (int a = 0; a < narm; a++) {
+        bool dup = false;
+        for (int j = 0; j < np; j++) {
+          if (strcmp(pstr[j], arm[a].move_str) == 0) {
+            dup = true;
+            break;
+          }
+        }
+        if (!dup) {
+          protect[np] = &arm[a].move;
+          (void)snprintf(pstr[np], sizeof(pstr[np]), "%s", arm[a].move_str);
+          np++;
+        }
+      }
+      PegArgs oa;
+      const PegBenchConfig ocfg = {.name = "oracle",
+                                   .num_threads = 18,
+                                   .time_budget_seconds = ob,
+                                   .scenario_stride = 1,
+                                   .stage_top_k = oracle_k,
+                                   .num_stages = 3};
+      fill_peg_args(&oa, config, &ocfg);
+      oa.protect_moves = protect;
+      oa.n_protect_moves = np;
+      PegResult r;
+      ErrorStack *es = error_stack_create();
+      peg_solve(&oa, &r, es);
+      if (error_stack_is_empty(es) && r.n_top_cands > 0) {
+        // top_cands is sorted by the solver's utility (win_pct + 1e-4*spread),
+        // so [0] is the best-utility move. Log both win% and spread so utility
+        // loss = (best_win + 1e-4*best_spread) - (arm_win + 1e-4*arm_spread).
+        printf("PEGCURVE bag=%d pos=%d bestw=%.5f bests=%.2f", files[fi].bag,
+               pos_id, r.top_cands[0].win_pct, r.top_cands[0].mean_spread);
+        for (int a = 0; a < narm; a++) {
+          double ow = -1.0;
+          double os = 0.0;
+          for (int c = 0; c < r.n_top_cands; c++) {
+            char cs[32];
+            move_to_string(game, &r.top_cands[c].move, cs, sizeof(cs));
+            if (strcmp(cs, arm[a].move_str) == 0) {
+              ow = r.top_cands[c].win_pct;
+              os = r.top_cands[c].mean_spread;
+              break;
+            }
+          }
+          printf(" a%d=%s|%.5f|%.2f", a, arm[a].move_str, ow, os);
+        }
+        printf("\n");
+      } else {
+        printf("PEGCURVE bag=%d pos=%d ORACLEFAIL\n", files[fi].bag, pos_id);
+      }
+      error_stack_destroy(es);
+      peg_result_destroy(&r);
+      (void)fflush(stdout);
+      pos_id++;
+    }
+    (void)fclose(fp);
+  }
+  config_destroy(config);
+}
