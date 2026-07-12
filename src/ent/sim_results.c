@@ -56,6 +56,10 @@ struct SimResults {
   BAIResult *bai_result;
   bool valid_for_current_game_state;
   double cutoff;
+  // Utility-blend spread weight the last sim ran with (the SimArgs value,
+  // recorded by simulate()). Selects the best-move path in
+  // sim_results_get_best_move; see the comment there.
+  double utility_w_spread;
   uint64_t num_infer_leaves;
 };
 
@@ -296,6 +300,7 @@ SimResults *sim_results_create(const double cutoff) {
   sim_results->bai_result = bai_result_create();
   sim_results->valid_for_current_game_state = false;
   sim_results->cutoff = cutoff;
+  sim_results->utility_w_spread = 0.0;
   sim_results->num_infer_leaves = 0;
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
   rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
@@ -407,6 +412,11 @@ double sim_results_get_cutoff(const SimResults *sim_results) {
 
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff) {
   sim_results->cutoff = cutoff;
+}
+
+void sim_results_set_utility_w_spread(SimResults *sim_results,
+                                      double utility_w_spread) {
+  sim_results->utility_w_spread = utility_w_spread;
 }
 
 uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results) {
@@ -650,14 +660,28 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  // Prefer BAI's chosen arm: that's the one with highest mean *utility*
-  // (which the simmer blends from wpct + sigmoid(spread) when -uspread is
-  // non-zero). Falling through to sim_results_get_best_move_index would
-  // re-rank by raw win_pct_stat, ignoring the utility blend entirely.
-  int best_play_idx =
-      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
-  if (best_play_idx < 0) {
+  // With a nonzero spread weight, prefer BAI's chosen arm: that's the one
+  // with the highest mean *utility* (wpct blended with sigmoid(spread)).
+  // Falling through to sim_results_get_best_move_index would re-rank by raw
+  // win_pct_stat, ignoring the blend entirely.
+  //
+  // With a ZERO spread weight the sample utility is the raw 0/0.5/1 win
+  // outcome, which loses its gradient whenever win% saturates (decided
+  // games: every arm's mean is ~0 or ~1) or ties exactly. BAI's arm choice
+  // among tied arms is then effectively arbitrary, and measured game-pair
+  // autoplay showed it bleeding 5-60+ points per decided turn (playing
+  // rank-15 moves over same-win% higher-scoring ones). Use the win%
+  // comparator instead: it breaks win%-within-cutoff ties by mean equity,
+  // matching the displayed sort and recovering spread at no win% cost.
+  int best_play_idx;
+  if (sim_results->utility_w_spread == 0.0) {
     best_play_idx = sim_results_get_best_move_index(sim_results);
+  } else {
+    best_play_idx =
+        bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+    if (best_play_idx < 0) {
+      best_play_idx = sim_results_get_best_move_index(sim_results);
+    }
   }
   if (best_play_idx < 0) {
     return NULL;

@@ -6,6 +6,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/bai_result.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -1140,6 +1141,44 @@ void test_snoprune_exchange_and_pass(void) {
   config_destroy(config);
 }
 
+void test_sim_best_move_equity_tiebreak(void) {
+  // Regression for best-move selection under the pure-win% utility default
+  // (uspread = 0). BAI's sample utility is then the raw 0/0.5/1 win outcome,
+  // which loses all gradient once win% saturates: in this fully-determined
+  // endgame (empty bag, both racks known) every candidate's rollout returns
+  // a loss, every arm's sample mean is identical, and BAI's "best arm" is
+  // effectively arbitrary. Game-pair autoplay measured this bleeding 5-60+
+  // points per decided turn (in this exact position it played the rank-7
+  // 28-point SKEIN over the 48-point E8 (A)KES). sim_results_get_best_move
+  // must fall back to the win%-with-equity-tiebreak comparator so the
+  // played move is the equity-best arm among the win%-tied field.
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 15 -plies 4 -threads 1 -iter 1000 -seed 42 "
+      "-uwin 1 -uspread 0 -uspreadscale 100");
+  load_and_exec_config_or_die(
+      config, "cgp IMSHI2F7/2A2B1I3PROG/2G2UPS5B1/2OU1TEC2MEAT1/2uN1AE1WRAXLED/"
+              "2IT1N4l2C1/2NO1O1OILIEST1/3WANTY2G1A2/2JA1E3AN1V2/1VAR5ZE1ORT/"
+              "1RID5OD1Y2/HI13/EL13/L14/E14 EFIKNRS/DEEOQUU 330/478 0");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  const error_code_t status =
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  const Move *best = sim_results_get_best_move(sim_results);
+  assert(best != NULL);
+  StringBuilder *move_string_builder = string_builder_create();
+  string_builder_add_move_description(move_string_builder, best,
+                                      config_get_ld(config));
+  printf("equity tiebreak best move: %s (score %d)\n",
+         string_builder_peek(move_string_builder),
+         equity_to_int(move_get_score(best)));
+  assert(strings_equal(string_builder_peek(move_string_builder), "E8 .KES"));
+  assert(equity_to_int(move_get_score(best)) == 48);
+  string_builder_destroy(move_string_builder);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1161,6 +1200,7 @@ void test_sim(void) {
     test_sim_one_ply();
     test_sim_ctx();
     test_sim_endgame();
+    test_sim_best_move_equity_tiebreak();
     test_sim_avoid_prune();
     test_sim_avoid_prune_multi();
     test_sim_avoid_prune_cmd();

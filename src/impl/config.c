@@ -1862,15 +1862,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
              "spread_sigmoid = 1/(1+exp(-spread/uspreadscale)) is the "
              "logistic sigmoid of the rollout spread (strictly in (0, 1)). "
-             "Default 1.0 (pure win%).";
+             "Default 1.0, blended with the default uspread of 0.5.";
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
-      examples[0] = "0.0";
+      examples[0] = "0.5";
       examples[1] = "0.3";
       text = "Weight on (normalized) spread in the BAI sample utility. Default "
-             "0.0 (pure win%). With non-zero uspread the simmer favors plays "
-             "with higher rollout spread in addition to higher win%.";
+             "0.5. With non-zero uspread the simmer favors plays with higher "
+             "rollout spread in addition to higher win%; set -uspread 0 to "
+             "restore the pure win% utility.";
       break;
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
@@ -8643,7 +8644,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->utility_w_winpct = 1.0;
-  config->utility_w_spread = 0.0;
+  config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
   config->time_limit_seconds = 60;
   config->endgame_time_limit_seconds = 0;
