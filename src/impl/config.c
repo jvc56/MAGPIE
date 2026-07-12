@@ -1847,7 +1847,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
              "spread_sigmoid = 1/(1+exp(-spread/uspreadscale)) is the "
              "logistic sigmoid of the rollout spread (strictly in (0, 1)). "
-             "Default 1.0 (pure win%).";
+             "Default 1.0, blended with the default uspread of 0.5.";
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
@@ -1855,7 +1855,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "0.3";
       text = "Weight on (normalized) spread in the BAI sample utility. Default "
              "0.5. With non-zero uspread the simmer favors plays with higher "
-             "rollout spread in addition to higher win%.";
+             "rollout spread in addition to higher win%; set -uspread 0 to "
+             "restore the pure win% utility.";
       break;
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
