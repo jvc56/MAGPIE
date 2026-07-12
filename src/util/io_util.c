@@ -576,36 +576,38 @@ bool path_is_directory(const char *path) {
   return stat(path, &path_stat) == 0 && S_ISDIR(path_stat.st_mode);
 }
 
-// Parses a leading "r<digits>_" round-number prefix (e.g. "r10_joel.gcg").
-// Returns true and sets *round_num_out on a match; false otherwise.
-static bool parse_round_prefix(const char *filename,
-                               unsigned long *round_num_out) {
-  if (filename[0] != 'r' || !isdigit((unsigned char)filename[1])) {
-    return false;
+enum {
+  FILENAME_SORT_DIGIT_BUFFER_SIZE = 256,
+};
+
+// Strips every non-digit character from filename and parses the remaining
+// digits as a single base-10 number (0 if there are none). Digits beyond
+// FILENAME_SORT_DIGIT_BUFFER_SIZE - 1 are dropped.
+static unsigned long long extract_digits_as_number(const char *filename) {
+  char digits[FILENAME_SORT_DIGIT_BUFFER_SIZE];
+  size_t digit_count = 0;
+  for (const char *ch = filename;
+       *ch != '\0' && digit_count < sizeof(digits) - 1; ch++) {
+    if (isdigit((unsigned char)*ch)) {
+      digits[digit_count++] = *ch;
+    }
   }
-  char *endptr;
-  unsigned long round_num = strtoul(filename + 1, &endptr, 10);
-  if (endptr == filename + 1 || *endptr != '_') {
-    return false;
+  digits[digit_count] = '\0';
+  if (digit_count == 0) {
+    return 0;
   }
-  *round_num_out = round_num;
-  return true;
+  return strtoull(digits, NULL, 10);
 }
 
-// Files named "r<round>_..." sort first, in increasing round order; all
-// other files follow, sorted alphabetically.
+// Sorts ascending by the number formed from each filename's digit
+// characters (non-digits removed); ties fall back to alphabetical order.
 static int compare_filenames_for_sort(const void *a, const void *b) {
   const char *name_a = *(const char *const *)a;
   const char *name_b = *(const char *const *)b;
-  unsigned long round_a;
-  unsigned long round_b;
-  const bool has_round_a = parse_round_prefix(name_a, &round_a);
-  const bool has_round_b = parse_round_prefix(name_b, &round_b);
-  if (has_round_a != has_round_b) {
-    return has_round_a ? -1 : 1;
-  }
-  if (has_round_a && round_a != round_b) {
-    return (round_a < round_b) ? -1 : 1;
+  const unsigned long long num_a = extract_digits_as_number(name_a);
+  const unsigned long long num_b = extract_digits_as_number(name_b);
+  if (num_a != num_b) {
+    return (num_a < num_b) ? -1 : 1;
   }
   return strcmp(name_a, name_b);
 }

@@ -7943,9 +7943,48 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
 typedef struct AnalyzeSummary {
   int success_count;
   int error_count;
+  int skipped_count; // already-complete reports left untouched this run
   int not_started_count;
   bool interrupted;
+  // "<gcg filename>: <error>\n" per failed game; NULL until the first error.
+  StringBuilder *error_details;
+  // Tournament aggregate accumulated across every game in this directory
+  // run (freshly analyzed or skipped), read back from each report's
+  // "=== Analysis Complete: ..." trailer. Losses are already clamped to
+  // >= 0 per turn by the trailer writer in analyze.c.
+  double total_win_pct_lost;
+  double total_equity_lost;
+  double total_adjusted_equity_lost;
+  int turn_count;
+  int game_count;
 } AnalyzeSummary;
+
+// Reads report_path and, if it ends in a "=== Analysis Complete: ..."
+// trailer (written unconditionally by analyze_game on a clean run), parses
+// the turn count and clamped WPL/EqL/AEqL totals out of it. Returns false
+// (leaving the outputs untouched) if the file is missing or has no such
+// trailer, e.g. because it doesn't exist yet or a previous run crashed or
+// errored partway through.
+static bool read_report_completion_stats(const char *report_path, int *turns,
+                                         double *wpl, double *eql,
+                                         double *aeql) {
+  ErrorStack *probe_error_stack = error_stack_create();
+  char *content = get_string_from_file(report_path, probe_error_stack);
+  const bool file_exists = error_stack_is_empty(probe_error_stack);
+  error_stack_destroy(probe_error_stack);
+  if (!file_exists) {
+    return false;
+  }
+  const char *marker = strstr(content, "=== Analysis Complete:");
+  bool ok = false;
+  if (marker) {
+    ok = sscanf(marker,
+                "=== Analysis Complete: turns=%d wpl=%lf eql=%lf aeql=%lf ===",
+                turns, wpl, eql, aeql) == 4;
+  }
+  free(content);
+  return ok;
+}
 
 // If gcg_source is NULL the game history is already loaded and parsing is
 // skipped. When gcg_source is non-NULL the GCG must be parsed from
@@ -8012,7 +8051,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
       game_history_get_gcg_filename(config->game_history);
 
   thread_control_print_formatted(analyze_args->sim_args.thread_control,
-                                 "Analyzing %s\n\n", gcg_filename);
+                                 "\nAnalyzing %s\n\n", gcg_filename);
 
   // Build the report filepath
   char *base = cut_off_after_last_char(gcg_filename, '.');
@@ -8033,6 +8072,124 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
   analyze_args->config_settings_str = NULL;
   free(report_path);
   analyze_args->report_path = NULL;
+}
+
+// Writes <dir_path>/tournament_summary.txt, concatenating every complete
+// game's per-player "=== Game Summary: <player> ===" block (skipping the
+// combined one) plus tournament-wide WPL/EqL/AEqL averages computed from
+// summary's aggregate fields. Rebuilding is skipped when nothing in the
+// directory changed this run (no game was freshly (re)analyzed) and a
+// summary file already exists, to avoid needless rewrites.
+static void write_tournament_summary(const char *dir_path, char **gcg_files,
+                                     int num_gcg_files,
+                                     const AnalyzeSummary *summary,
+                                     bool any_reanalyzed,
+                                     ThreadControl *thread_control) {
+  char *summary_path =
+      get_formatted_string("%s/tournament_summary.txt", dir_path);
+  if (!any_reanalyzed) {
+    ErrorStack *probe_error_stack = error_stack_create();
+    char *existing = get_string_from_file(summary_path, probe_error_stack);
+    const bool summary_exists = error_stack_is_empty(probe_error_stack);
+    error_stack_destroy(probe_error_stack);
+    free(existing);
+    if (summary_exists) {
+      free(summary_path);
+      return;
+    }
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(sb, "Tournament summary for %s\n\n",
+                                      dir_path);
+
+  for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
+    char *gcg_path =
+        get_formatted_string("%s/%s", dir_path, gcg_files[file_idx]);
+    char *report_base = cut_off_after_last_char(gcg_path, '.');
+    char *report_path = get_formatted_string("%s_report.txt", report_base);
+    free(report_base);
+    free(gcg_path);
+
+    ErrorStack *probe_error_stack = error_stack_create();
+    char *content = get_string_from_file(report_path, probe_error_stack);
+    const bool report_exists = error_stack_is_empty(probe_error_stack);
+    error_stack_destroy(probe_error_stack);
+    free(report_path);
+    if (!report_exists || !strstr(content, "=== Analysis Complete:")) {
+      free(content);
+      continue;
+    }
+
+    const int content_length = (int)string_length(content);
+    const char *cursor = content;
+    while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
+      cursor++; // skip the leading '\n' so the block itself starts at "==="
+      const char *next_marker = strstr(cursor + 1, "\n=== ");
+      const int block_start = (int)(cursor - content);
+      const int block_end =
+          next_marker ? (int)(next_marker - content) : content_length;
+      char *block = get_substring(content, block_start, block_end);
+      string_builder_add_formatted_string(sb, "--- %s ---\n",
+                                          gcg_files[file_idx]);
+      string_builder_add_string(sb, block);
+      string_builder_add_string(sb, "\n");
+      free(block);
+      cursor = next_marker ? next_marker : content + content_length;
+    }
+    free(content);
+  }
+
+  const double avg_wpl_per_turn =
+      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
+                          : 0.0;
+  const double avg_eql_per_turn =
+      summary->turn_count ? summary->total_equity_lost / summary->turn_count
+                          : 0.0;
+  const double avg_aeql_per_turn =
+      summary->turn_count
+          ? summary->total_adjusted_equity_lost / summary->turn_count
+          : 0.0;
+  const double avg_wpl_per_game =
+      summary->game_count ? summary->total_win_pct_lost / summary->game_count
+                          : 0.0;
+  const double avg_eql_per_game =
+      summary->game_count ? summary->total_equity_lost / summary->game_count
+                          : 0.0;
+  const double avg_aeql_per_game =
+      summary->game_count
+          ? summary->total_adjusted_equity_lost / summary->game_count
+          : 0.0;
+
+  string_builder_add_string(sb, "=== Tournament Averages ===\n");
+  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
+  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
+  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
+                                      avg_wpl_per_turn);
+  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
+                                      avg_eql_per_turn);
+  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
+                                      avg_aeql_per_turn);
+  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
+                                      avg_wpl_per_game);
+  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
+                                      avg_eql_per_game);
+  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
+                                      avg_aeql_per_game);
+
+  char *summary_str = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  ErrorStack *write_error_stack = error_stack_create();
+  write_string_to_file(summary_path, "w", summary_str, write_error_stack);
+  if (!error_stack_is_empty(write_error_stack)) {
+    char *err_str = error_stack_get_string_and_reset(write_error_stack);
+    thread_control_print_formatted(thread_control, "Failed to write %s: %s\n",
+                                   summary_path, err_str);
+    free(err_str);
+  }
+  error_stack_destroy(write_error_stack);
+  free(summary_str);
+  free(summary_path);
 }
 
 void impl_analyze(Config *config, AnalyzeSummary *summary,
@@ -8100,20 +8257,58 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       return;
     }
     thread_control_print_formatted(analyze_args.sim_args.thread_control,
-                                   "Analyzing %d game(s)\n\n", num_gcg_files);
+                                   "Analyzing %d game(s)\n", num_gcg_files);
+    bool any_reanalyzed = false;
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       char *gcg_path = get_formatted_string("%s/%s", arg0, gcg_files[file_idx]);
+      char *report_base = cut_off_after_last_char(gcg_path, '.');
+      char *report_path = get_formatted_string("%s_report.txt", report_base);
+      free(report_base);
+
+      int turns = 0;
+      double wpl = 0.0;
+      double eql = 0.0;
+      double aeql = 0.0;
+      if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
+                                       &aeql)) {
+        summary->skipped_count++;
+        summary->success_count++;
+        summary->turn_count += turns;
+        summary->total_win_pct_lost += wpl;
+        summary->total_equity_lost += eql;
+        summary->total_adjusted_equity_lost += aeql;
+        summary->game_count++;
+        free(report_path);
+        free(gcg_path);
+        continue;
+      }
+
       analyze_single_game(config, &analyze_args, &ctx, gcg_path,
                           player_list_str, analyze_error_stack);
       free(gcg_path);
       if (!error_stack_is_empty(analyze_error_stack)) {
         char *err_str = error_stack_get_string_and_reset(analyze_error_stack);
         thread_control_print_formatted(thread_control, "%s\n", err_str);
+        if (!summary->error_details) {
+          summary->error_details = string_builder_create();
+        }
+        string_builder_add_formatted_string(summary->error_details, "%s: %s\n",
+                                            gcg_files[file_idx], err_str);
         free(err_str);
         summary->error_count++;
       } else {
         summary->success_count++;
+        any_reanalyzed = true;
+        if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
+                                         &aeql)) {
+          summary->turn_count += turns;
+          summary->total_win_pct_lost += wpl;
+          summary->total_equity_lost += eql;
+          summary->total_adjusted_equity_lost += aeql;
+          summary->game_count++;
+        }
       }
+      free(report_path);
       if (thread_control_get_status(thread_control) ==
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         summary->interrupted = true;
@@ -8121,6 +8316,8 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
         break;
       }
     }
+    write_tournament_summary(arg0, gcg_files, num_gcg_files, summary,
+                             any_reanalyzed, thread_control);
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       free(gcg_files[file_idx]);
     }
@@ -8146,10 +8343,15 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   }
   int curr_row = 0;
   int curr_col = 0;
-  StringGrid *sg = string_grid_create(3, 2, 1);
+  StringGrid *sg = string_grid_create(4, 2, 1);
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
   string_grid_set_cell(sg, curr_row, curr_col,
                        get_formatted_string("%d", summary.success_count));
+  curr_row++;
+  curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Skipped"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary.skipped_count));
   curr_row++;
   curr_col = 0;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Error"));
@@ -8167,6 +8369,13 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   string_builder_add_string(
       summary_sb, summary.interrupted ? "\nFinished (user interrupt)\n"
                                       : "\nFinished (all games analyzed)\n");
+  if (summary.error_details) {
+    string_builder_add_string(summary_sb, "\n=== Errors ===\n");
+    char *error_details_str = string_builder_dump(summary.error_details, NULL);
+    string_builder_add_string(summary_sb, error_details_str);
+    free(error_details_str);
+    string_builder_destroy(summary.error_details);
+  }
   char *summary_str = string_builder_dump(summary_sb, NULL);
   string_builder_destroy(summary_sb);
   thread_control_print(config->thread_control, summary_str);
@@ -8176,6 +8385,9 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
+  if (summary.error_details) {
+    string_builder_destroy(summary.error_details);
+  }
   return empty_string();
 }
 
