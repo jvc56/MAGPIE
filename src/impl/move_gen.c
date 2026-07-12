@@ -2761,7 +2761,6 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     memcpy(&gen->ld, ld_src, sizeof(LetterDistribution));
     gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
   }
-  gen->kwg = player_get_kwg(player);
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
   const uint64_t new_klv_mutation_counter =

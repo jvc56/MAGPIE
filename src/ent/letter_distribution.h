@@ -59,8 +59,11 @@ typedef struct LetterDistribution {
 // FNV-1a over the fields that define a distribution for move generation and
 // scoring. Computed once at creation and stored in content_fingerprint. Two
 // loads of the same distribution hash equal (so a redundant reload is safely
-// skipped); any two distinct distributions differ in size/scores/counts/name
-// and hash unequal.
+// skipped); two distributions that differ in size/scores/counts/name hash
+// unequal with overwhelming probability. This is a best-effort 64-bit
+// fingerprint, not a guarantee -- FNV-1a is not collision-free, so a collision
+// between two genuinely different distributions is possible in principle
+// (~2^-64), just astronomically unlikely.
 static inline uint64_t
 ld_compute_content_fingerprint(const LetterDistribution *ld) {
   uint64_t hash = FNV_64_OFFSET_BASIS;

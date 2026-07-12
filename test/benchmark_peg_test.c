@@ -1036,6 +1036,7 @@ void test_peg_stage_stability(void) {
         peg_solve(&a, &r, es);
         if (!error_stack_is_empty(es)) {
           error_stack_destroy(es);
+          peg_result_destroy(&r);
           break;
         }
         error_stack_destroy(es);
