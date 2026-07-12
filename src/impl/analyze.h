@@ -17,9 +17,12 @@ typedef struct AnalyzeCtx AnalyzeCtx;
 // peg_args before forwarding to simulate, endgame_solve, and peg_solve.
 //
 // sim_args.num_plies == 0 selects static analysis (move generation only,
-// no simulation or endgame solving). Otherwise, the bag size at the turn
-// being analyzed selects sim (bag > PEG_MAX_BAG), peg (PEG_MIN_BAG..
-// PEG_MAX_BAG), or endgame (empty bag).
+// no simulation or endgame solving). Otherwise, peg is selected when the
+// mover has a full rack and the tiles still unseen to them (the bag plus
+// the opponent's true rack) total RACK_SIZE + PEG_MIN_BAG ..
+// RACK_SIZE + PEG_MAX_BAG (matching peg_solve's own bag_size formula in
+// peg.c); sim is selected when the physical bag is nonempty; endgame
+// otherwise (empty bag).
 typedef struct AnalyzeArgs {
   GameHistory *game_history;
   bool analyze_players[2]; // true = analyze that player; pre-resolved by caller

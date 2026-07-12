@@ -153,6 +153,26 @@ static double compute_adjusted_equity_lost(const TurnResult *tr,
   return wpl_as_eql > equity_lost ? wpl_as_eql : equity_lost;
 }
 
+// Computes WPL/EqL/AEqL for a single turn result. WPL and EqL are clamped to
+// >= 0: a negative value (e.g. EqL when the actual play had lower Wp but
+// higher Eq than best, since "best" is chosen by Wp, not Eq) doesn't
+// represent a real cost, and clamping here keeps every consumer (the
+// per-turn table, CSV output, and the report's completion trailer) and every
+// aggregate (Total/Avg rows, tournament stats) consistent with each other.
+static void compute_turn_losses(const TurnResult *tr, double *win_pct_lost_out,
+                                double *equity_lost_out,
+                                double *adjusted_equity_lost_out) {
+  double win_pct_lost = compute_win_pct_lost(tr);
+  double equity_lost = tr->best.equity - tr->actual.equity;
+  win_pct_lost = win_pct_lost > 0.0 ? win_pct_lost : 0.0;
+  equity_lost = equity_lost > 0.0 ? equity_lost : 0.0;
+  const double adjusted_equity_lost =
+      compute_adjusted_equity_lost(tr, equity_lost, win_pct_lost);
+  *win_pct_lost_out = win_pct_lost;
+  *equity_lost_out = equity_lost;
+  *adjusted_equity_lost_out = adjusted_equity_lost;
+}
+
 struct AnalyzeCtx {
   Game *game;
   MoveList *move_list;
@@ -528,16 +548,17 @@ static void write_per_turn_csv(const TurnResult *turn_result,
 
   char *rack_str = analyze_format_rack(&turn_result->rack, ld);
 
-  const double equity_lost =
-      turn_result->best.equity - turn_result->actual.equity;
-  const double win_pct_lost = compute_win_pct_lost(turn_result);
+  double win_pct_lost;
+  double equity_lost;
+  double adjusted_equity_lost;
+  compute_turn_losses(turn_result, &win_pct_lost, &equity_lost,
+                      &adjusted_equity_lost);
 
   string_builder_add_formatted_string(
       sb, "%d,%s,%s,%s,%s,%.2f,%.2f,%.2f\n", turn_result->turn_number,
       player_name, rack_str, turn_result->actual.display_move,
       turn_result->actual.rank_idx != 0 ? turn_result->best.display_move : "-",
-      equity_lost, win_pct_lost,
-      compute_adjusted_equity_lost(turn_result, equity_lost, win_pct_lost));
+      equity_lost, win_pct_lost, adjusted_equity_lost);
 
   free(rack_str);
 
@@ -571,10 +592,10 @@ static void add_summary_event_row(
   const char *player_name =
       game_history_player_get_nickname(game_history, tr->player_index);
 
-  const double win_pct_lost = compute_win_pct_lost(tr);
-  const double equity_lost = tr->best.equity - tr->actual.equity;
-  const double adjusted_equity_lost =
-      compute_adjusted_equity_lost(tr, equity_lost, win_pct_lost);
+  double win_pct_lost;
+  double equity_lost;
+  double adjusted_equity_lost;
+  compute_turn_losses(tr, &win_pct_lost, &equity_lost, &adjusted_equity_lost);
 
   int curr_col = 0;
   string_grid_set_cell(sg, row, curr_col++,
@@ -1263,26 +1284,6 @@ static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
   }
 }
 
-// Returns player_index's true rack size as of from_event_idx, read directly
-// from the recorded game history: the size of their rack on their next move
-// at or after from_event_idx, or 0 if they have no more moves. Used to
-// recover a player's actual current holdings independent of how eagerly the
-// live Game object happens to have dealt that player's rack during replay.
-static int get_known_rack_size(const GameHistory *game_history,
-                               int from_event_idx, int player_index) {
-  const int num_events = game_history_get_num_events(game_history);
-  for (int event_idx = from_event_idx; event_idx < num_events; event_idx++) {
-    const GameEvent *event = game_history_get_event(game_history, event_idx);
-    const game_event_t event_type = game_event_get_type(event);
-    if ((event_type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
-         event_type == GAME_EVENT_EXCHANGE || event_type == GAME_EVENT_PASS) &&
-        game_event_get_player_index(event) == player_index) {
-      return rack_get_total_letters(game_event_get_const_rack(event));
-    }
-  }
-  return 0;
-}
-
 // Analyzes all move events in game_history. Creates *analyze_ctx if NULL
 // on entry; the caller is responsible for calling analyze_ctx_destroy after
 // this returns.
@@ -1375,43 +1376,44 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                    "Event %d: %s\n", turn_counter,
                                    turn_result.actual.display_move);
 
-    // bag_get_letters() on the live game overstates how many tiles are
-    // still genuinely undetermined: game_play_n_events only eagerly deals
-    // the on-turn player's rack during replay, leaving the off-turn
-    // player's (already historically known) rack undealt in the live game
-    // until their own turn is reached. Until then, bag_get_letters() folds
-    // those known-but-undealt tiles into its count, so it overstates the
-    // number of tiles PEG/endgame need to treat as unknown. Correct for
-    // that by swapping in the off-turn player's true recorded rack size,
-    // but only when the live game hasn't dealt them one yet (rack size 0);
-    // once it has, that rack is already authoritative (e.g. right at the
-    // very end of the game, where no future move event remains to look up).
+    // game_play_n_events only eagerly deals the on-turn player's rack during
+    // replay, leaving the off-turn player's rack undealt in the live game
+    // until their own turn is reached; until then, any tiles that would be
+    // theirs are still sitting in the live Bag object. That means bag_letters
+    // (the live bag count) and off_turn_rack_in_live_game (whatever, if
+    // anything, the off-turn player has already been dealt) always sum to
+    // the true total of currently-unseen-to-the-mover tiles, with no need to
+    // look ahead in game_history for the off-turn player's actual holdings.
     const int off_turn_player_index = 1 - player_index;
     const int off_turn_rack_in_live_game = rack_get_total_letters(
         player_get_rack(game_get_player(ctx->game, off_turn_player_index)));
-    int off_turn_rack_size = off_turn_rack_in_live_game;
-    if (off_turn_rack_in_live_game == 0) {
-      off_turn_rack_size = get_known_rack_size(game_history, event_idx + 1,
-                                               off_turn_player_index);
-    }
-    const int bag_letters = bag_get_letters(game_get_bag(ctx->game)) +
-                            off_turn_rack_in_live_game - off_turn_rack_size;
+    const int bag_letters = bag_get_letters(game_get_bag(ctx->game));
+    // unseen_for_peg mirrors peg_solve's own bag_size formula (peg.c):
+    // bag_size = unseen - RACK_SIZE, i.e. it assumes the mover's rack will
+    // be topped back up to a full RACK_SIZE from this pool. PEG only applies
+    // when bag_size lands in [PEG_MIN_BAG, PEG_MAX_BAG], equivalently
+    // unseen_for_peg in [RACK_SIZE + PEG_MIN_BAG, RACK_SIZE + PEG_MAX_BAG],
+    // and only when the mover currently has a full rack to draw back up to.
+    const int unseen_for_peg = bag_letters + off_turn_rack_in_live_game;
+    const int mover_rack_size = rack_get_total_letters(event_rack);
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,
                           ctx, analyze_args->max_num_display_plays,
                           analyze_args->human_readable, is_first_analyzed_turn,
                           vertical_opening_is_transposable, error_stack);
-    } else if (bag_letters >= PEG_MIN_BAG && bag_letters <= PEG_MAX_BAG) {
+    } else if (mover_rack_size == RACK_SIZE &&
+              unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
+              unseen_for_peg <= RACK_SIZE + PEG_MAX_BAG) {
       analyze_with_peg(event, &turn_result, game_history, ld, report_path, ctx,
                        analyze_args, is_first_analyzed_turn, error_stack);
-    } else if (bag_letters > 0) {
-      analyze_with_sim(event, &turn_result, game_history, ld, report_path, ctx,
-                       analyze_args, is_first_analyzed_turn,
-                       vertical_opening_is_transposable, error_stack);
-    } else {
+    } else if (bag_letters == 0) {
       analyze_with_endgame(event, &turn_result, game_history, ld, report_path,
                            ctx, analyze_args, is_first_analyzed_turn,
                            error_stack);
+    } else {
+      analyze_with_sim(event, &turn_result, game_history, ld, report_path, ctx,
+                       analyze_args, is_first_analyzed_turn,
+                       vertical_opening_is_transposable, error_stack);
     }
 
     is_first_analyzed_turn = false;
@@ -1459,5 +1461,34 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                              player_turn_counts[0] + player_turn_counts[1],
                              ctx->game, error_stack);
     }
+  }
+
+  // Write a machine-parseable trailer marking this report as complete,
+  // regardless of output format. This lets a later run skip re-analyzing an
+  // already-complete game and lets directory-mode batches (e.g. tournament
+  // aggregation) read back a game's total losses without reparsing the
+  // human-readable tables. compute_turn_losses already clamps WPL/EqL (and
+  // therefore AEqL) to >= 0 per turn, so these sums need no further clamping.
+  if (error_stack_is_empty(error_stack)) {
+    double total_win_pct_lost = 0.0;
+    double total_equity_lost = 0.0;
+    double total_adjusted_equity_lost = 0.0;
+    for (int result_idx = 0; result_idx < ctx->turn_results_count;
+         result_idx++) {
+      double win_pct_lost;
+      double equity_lost;
+      double adjusted_equity_lost;
+      compute_turn_losses(&ctx->turn_results[result_idx], &win_pct_lost,
+                          &equity_lost, &adjusted_equity_lost);
+      total_win_pct_lost += win_pct_lost;
+      total_equity_lost += equity_lost;
+      total_adjusted_equity_lost += adjusted_equity_lost;
+    }
+    char *trailer = get_formatted_string(
+        "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f ===\n",
+        ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
+        total_adjusted_equity_lost);
+    append_string_to_file(report_path, trailer, error_stack);
+    free(trailer);
   }
 }
