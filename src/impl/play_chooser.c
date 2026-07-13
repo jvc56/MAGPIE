@@ -98,6 +98,15 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
     log_fatal("play chooser pre-endgame evaluation cannot be the endgame "
               "solver");
   }
+  // The endgame (bag-empty) phase has no bag to draw from, so PEG and SIM do
+  // not apply there: endgame_eval must be the exact solver or the static
+  // fallback. (endgame_eval == PEG would silently degrade to STATIC, and SIM
+  // would run a pointless rollout, contradicting the header contract.)
+  if (strategy->endgame_eval != PLAY_CHOOSER_EVAL_STATIC &&
+      strategy->endgame_eval != PLAY_CHOOSER_EVAL_ENDGAME) {
+    log_fatal("play chooser endgame evaluation must be the endgame solver or "
+              "the static fallback");
+  }
   if ((strategy->pre_endgame_eval == PLAY_CHOOSER_EVAL_SIM ||
        strategy->endgame_eval == PLAY_CHOOSER_EVAL_SIM) &&
       strategy->win_pcts == NULL) {
@@ -782,9 +791,16 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     thread_control_destroy(keep_thread_control);
     thread_control_destroy(challenge_thread_control);
     if (!error_stack_is_empty(keep_error_stack)) {
+      // Preserve the keep branch's detailed message(s) rather than dropping
+      // them for a generic string.
+      const error_code_t keep_error_code = error_stack_top(keep_error_stack);
+      char *keep_error_message =
+          error_stack_get_string_and_reset(keep_error_stack);
       error_stack_push(
-          error_stack, error_stack_top(keep_error_stack),
-          string_duplicate("keep branch challenge evaluation failed"));
+          error_stack, keep_error_code,
+          get_formatted_string("keep branch challenge evaluation failed: %s",
+                               keep_error_message));
+      free(keep_error_message);
     }
     error_stack_destroy(keep_error_stack);
     if (!error_stack_is_empty(error_stack)) {
@@ -950,12 +966,24 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
   // Each branch is evaluated with the method for ITS OWN stage: the keep branch
   // draws to full and can fall to an endgame (or low-bag pre-endgame) while the
   // challenge branch (a lost turn, no draw) keeps its bag, so the two can be in
-  // different stages. Every stage projects onto the same [0, 1] utility, so the
-  // branches remain comparable.
-  const play_chooser_eval_t keep_eval =
+  // different stages. SIM/PEG/ENDGAME all project onto the same [0, 1] utility,
+  // so branches in those stages stay comparable.
+  play_chooser_eval_t keep_eval =
       play_chooser_get_eval_for_phase(strategy, keep_game);
-  const play_chooser_eval_t challenge_eval =
+  play_chooser_eval_t challenge_eval =
       play_chooser_get_eval_for_phase(strategy, challenge_game);
+
+  // STATIC (the no-win-model fallback) reports spread points, not the [0, 1]
+  // utility, so a STATIC value is not comparable to a sibling utility -- e.g. a
+  // +30 spread would always dominate a 0.62 win-utility. If either branch is
+  // STATIC, value BOTH with STATIC so the two spread-scale values are
+  // comparable. This is only reachable without win percentages (with them, a
+  // pre-endgame branch is SIM/PEG and an empty-bag branch ENDGAME).
+  if (keep_eval == PLAY_CHOOSER_EVAL_STATIC ||
+      challenge_eval == PLAY_CHOOSER_EVAL_STATIC) {
+    keep_eval = PLAY_CHOOSER_EVAL_STATIC;
+    challenge_eval = PLAY_CHOOSER_EVAL_STATIC;
+  }
 
   if (keep_eval == PLAY_CHOOSER_EVAL_ENDGAME &&
       challenge_eval == PLAY_CHOOSER_EVAL_ENDGAME) {

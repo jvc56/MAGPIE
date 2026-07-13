@@ -630,7 +630,12 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = endgame_args->first_win;
   es->first_win_fallback_moves = endgame_args->first_win_fallback_moves;
-  es->initial_window_optim = endgame_args->use_initial_window;
+  // first_win and an initial window are mutually exclusive: iterative_deepening
+  // treats first_win as a fixed [-1, 1] window and would silently override a
+  // caller's initial window. Make the precedence explicit here (first_win wins)
+  // so every downstream flag check sees a consistent state.
+  es->initial_window_optim =
+      endgame_args->use_initial_window && !endgame_args->first_win;
   es->initial_window_alpha = endgame_args->initial_alpha;
   es->initial_window_beta = endgame_args->initial_beta;
   es->transposition_table_optim = true;
