@@ -6,6 +6,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
@@ -29,6 +30,7 @@
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
 #include "../str/move_string.h"
+#include "../str/peg_string.h"
 #include "../str/rack_string.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
@@ -36,6 +38,7 @@
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
+#include "peg.h"
 #include "simmer.h"
 #include <assert.h>
 #include <stdbool.h>
@@ -44,9 +47,21 @@
 
 enum {
   ANALYZE_NOTE_TRUNCATE_LEN = 40,
-  ANALYZE_SUMMARY_COLS = 9,
+  ANALYZE_SUMMARY_COLS = 10,
   ANALYZE_SUMMARY_COL_PADDING = 2,
 };
+
+// Equity loss (EqL) is normally best.equity - actual.equity, but this can go
+// negative when the actual play had lower Wp but higher Eq than best (best
+// is chosen by Wp, not Eq). Only in that case, adjusted equity loss (AEqL)
+// substitutes the Wp lost converted to an equivalent equity value, so the
+// metric never reports a negative cost for a play that was actually worse by
+// Wp. In every other case AEqL is just EqL. This conversion factor was
+// derived by regressing Eq gap against Wp gap across many simulated
+// candidate moves: 1 percentage point of Wp is worth about this many equity
+// points in the well-behaved (non-extreme Wp, non-blowout) part of the
+// curve.
+#define WPL_TO_EQL_CONVERSION_FACTOR 2.26
 
 typedef enum {
   ANALYSIS_TYPE_STATIC,
@@ -86,6 +101,7 @@ typedef struct TurnResult {
   TurnResultMove actual;
   const char *note_str; // owned by GameHistory; no alloc needed
   bool was_endgame;
+  bool was_peg;
   bool used_inference;
 } TurnResult;
 
@@ -125,14 +141,60 @@ static double compute_win_pct_lost(const TurnResult *tr) {
   return tr->best.win_pct - tr->actual.win_pct;
 }
 
+// See the WPL_TO_EQL_CONVERSION_FACTOR comment above for what this adjusts
+// and why. AEqL is only nonzero when the actual play differs from best
+// (rank_idx == 0 means actual was best), same as WPL/EqL are both 0 then.
+// A negative equity_lost means the actual play had higher equity than best,
+// which only happens because best is chosen by Wp, not Eq -- so the actual
+// play must have had lower Wp in that case, and AEqL substitutes the
+// Wp-derived equity value. If equity_lost is negative but win_pct_lost is
+// also negative, the actual play was better (or equal) in both dimensions
+// tracked here; this can happen with near-tied Wp/Eq values where the actual
+// play still ranked below best on the sim's own ordering, so it is not
+// treated as a logic error -- AEqL is just 0, same as when actual was best.
+static double compute_adjusted_equity_lost(const TurnResult *tr,
+                                           double equity_lost,
+                                           double win_pct_lost) {
+  if (tr->actual.rank_idx == 0 || (equity_lost < 0.0 && win_pct_lost < 0.0)) {
+    return 0.0;
+  }
+  if (equity_lost < 0.0) {
+    return win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
+  }
+  return equity_lost;
+}
+
+// Computes WPL/EqL/AEqL for a single turn result. compute_adjusted_equity_lost
+// needs the raw (possibly negative) win_pct_lost/equity_lost to decide
+// whether to substitute the Wp-derived value, so it must run before the
+// clamp below. WPL and EqL are then clamped to >= 0 for reporting: a
+// negative value (e.g. EqL when the actual play had lower Wp but higher Eq
+// than best, since "best" is chosen by Wp, not Eq) doesn't represent a real
+// cost, and clamping here keeps every consumer (the per-turn table, CSV
+// output, and the report's completion trailer) and every aggregate
+// (Total/Avg rows, tournament stats) consistent with each other. AEqL is
+// already >= 0 by construction and needs no clamping.
+static void compute_turn_losses(const TurnResult *tr, double *win_pct_lost_out,
+                                double *equity_lost_out,
+                                double *adjusted_equity_lost_out) {
+  const double win_pct_lost = compute_win_pct_lost(tr);
+  const double equity_lost = tr->best.equity - tr->actual.equity;
+  const double adjusted_equity_lost =
+      compute_adjusted_equity_lost(tr, equity_lost, win_pct_lost);
+  *win_pct_lost_out = win_pct_lost > 0.0 ? win_pct_lost : 0.0;
+  *equity_lost_out = equity_lost > 0.0 ? equity_lost : 0.0;
+  *adjusted_equity_lost_out = adjusted_equity_lost;
+}
+
 struct AnalyzeCtx {
   Game *game;
-  Game *actual_play_endgame;
   MoveList *move_list;
   SimResults *sim_results;
   EndgameResults *endgame_results;
-  EndgameResults *actual_play_endgame_results;
   EndgameCtx *endgame_ctx;
+  // Reused across peg turns like sim_results/endgame_results; reset via
+  // peg_result_destroy immediately before each peg_solve call.
+  PegResult peg_result;
   InferenceResults *inference_results;
   SimCtx *sim_ctx; // NULL initially; persisted across sim calls
   TurnResult *turn_results;
@@ -149,12 +211,11 @@ void analyze_ctx_destroy(AnalyzeCtx *ctx) {
     return;
   }
   game_destroy(ctx->game);
-  game_destroy(ctx->actual_play_endgame);
   move_list_destroy(ctx->move_list);
   sim_results_destroy(ctx->sim_results);
   endgame_results_destroy(ctx->endgame_results);
-  endgame_results_destroy(ctx->actual_play_endgame_results);
   endgame_ctx_destroy(ctx->endgame_ctx);
+  peg_result_destroy(&ctx->peg_result);
   inference_results_destroy(ctx->inference_results);
   sim_ctx_destroy(ctx->sim_ctx);
   free(ctx->turn_results);
@@ -193,24 +254,6 @@ static void analyze_ctx_push_turn_result(AnalyzeCtx *ctx,
                        sizeof(TurnResult) * (size_t)ctx->turn_results_capacity);
   }
   ctx->turn_results[ctx->turn_results_count++] = *turn_result;
-}
-
-static Game *analyze_ctx_get_actual_play_endgame(AnalyzeCtx *ctx,
-                                                 const Game *source_game) {
-  if (!ctx->actual_play_endgame) {
-    ctx->actual_play_endgame = game_duplicate(source_game);
-  } else {
-    game_copy(ctx->actual_play_endgame, source_game);
-  }
-  return ctx->actual_play_endgame;
-}
-
-static EndgameResults *
-analyze_ctx_get_actual_play_endgame_results(AnalyzeCtx *ctx) {
-  if (!ctx->actual_play_endgame_results) {
-    ctx->actual_play_endgame_results = endgame_results_create();
-  }
-  return ctx->actual_play_endgame_results;
 }
 
 // Builds a heap-allocated string for rack; caller must free.
@@ -405,7 +448,9 @@ static void write_per_turn_human_readable(
   free(rack_str);
 
   const bool is_endgame = turn_result->was_endgame;
-  const bool is_sim = !is_endgame && turn_result->actual.win_pct >= 0.0;
+  const bool is_peg = turn_result->was_peg;
+  const bool is_sim =
+      !is_endgame && !is_peg && turn_result->actual.win_pct >= 0.0;
 
   // Per-turn move grid: label, R, Mv, Lv, S, [Spr (endgame only),] Wp, Eq,
   // StEq, [P1-S, P1-BP, P2-S, P2-BP, ... (sim only, up to
@@ -452,13 +497,20 @@ static void write_per_turn_human_readable(
   // Board state before the actual play (plain text, no colors).
   string_builder_add_game(ctx->game, NULL, NULL, game_history, sb);
 
-  // Sim results, endgame results, or static move list.
+  // Sim results, peg results, endgame results, or static move list.
   if (is_sim) {
     char *sim_str = sim_results_get_string(
         ctx->game, ctx->sim_results, max_num_display_plays,
         max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
+  } else if (is_peg) {
+    char *peg_str = peg_result_get_string(&ctx->peg_result, ctx->game, false,
+                                          NULL, -1, 0, NULL, NULL);
+    if (peg_str) {
+      string_builder_add_formatted_string(sb, "%s\n", peg_str);
+      free(peg_str);
+    }
   } else if (is_endgame) {
     const size_t len_before = string_builder_length(sb);
     string_builder_endgame_single_pv(sb, ctx->endgame_results, ctx->game,
@@ -500,8 +552,8 @@ static void write_per_turn_csv(const TurnResult *turn_result,
   StringBuilder *sb = string_builder_create();
 
   if (is_first_turn) {
-    string_builder_add_string(
-        sb, "turn,player,rack,actual,best,equity_lost,win_pct_lost\n");
+    string_builder_add_string(sb, "turn,player,rack,actual,best,equity_lost,"
+                                  "win_pct_lost,adjusted_equity_lost\n");
   }
 
   const char *player_name =
@@ -509,12 +561,17 @@ static void write_per_turn_csv(const TurnResult *turn_result,
 
   char *rack_str = analyze_format_rack(&turn_result->rack, ld);
 
+  double win_pct_lost;
+  double equity_lost;
+  double adjusted_equity_lost;
+  compute_turn_losses(turn_result, &win_pct_lost, &equity_lost,
+                      &adjusted_equity_lost);
+
   string_builder_add_formatted_string(
-      sb, "%d,%s,%s,%s,%s,%.2f,%.2f\n", turn_result->turn_number, player_name,
-      rack_str, turn_result->actual.display_move,
+      sb, "%d,%s,%s,%s,%s,%.2f,%.2f,%.2f\n", turn_result->turn_number,
+      player_name, rack_str, turn_result->actual.display_move,
       turn_result->actual.rank_idx != 0 ? turn_result->best.display_move : "-",
-      turn_result->best.equity - turn_result->actual.equity,
-      compute_win_pct_lost(turn_result));
+      equity_lost, win_pct_lost, adjusted_equity_lost);
 
   free(rack_str);
 
@@ -527,13 +584,11 @@ static void write_per_turn_csv(const TurnResult *turn_result,
 // Fills one data row of the analysis summary grid for turn_result and updates
 // running totals. Replays game state to event_idx so that board-resolved move
 // strings are accurate.
-static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
-                                  GameHistory *game_history, Game *game,
-                                  const LetterDistribution *ld,
-                                  int player_turn_number,
-                                  double *total_equity_lost,
-                                  double *total_win_pct_lost,
-                                  ErrorStack *error_stack) {
+static void add_summary_event_row(
+    StringGrid *sg, int row, const TurnResult *tr, GameHistory *game_history,
+    Game *game, const LetterDistribution *ld, int player_turn_number,
+    double *total_equity_lost, double *total_win_pct_lost,
+    double *total_adjusted_equity_lost, ErrorStack *error_stack) {
   game_play_n_events(game_history, game, tr->event_idx, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     log_fatal("unexpected error replaying game history events for summary "
@@ -550,8 +605,10 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
   const char *player_name =
       game_history_player_get_nickname(game_history, tr->player_index);
 
-  const double win_pct_lost = compute_win_pct_lost(tr);
-  const double equity_lost = tr->best.equity - tr->actual.equity;
+  double win_pct_lost;
+  double equity_lost;
+  double adjusted_equity_lost;
+  compute_turn_losses(tr, &win_pct_lost, &equity_lost, &adjusted_equity_lost);
 
   int curr_col = 0;
   string_grid_set_cell(sg, row, curr_col++,
@@ -570,6 +627,8 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
                        get_formatted_string("%.2f", win_pct_lost));
   string_grid_set_cell(sg, row, curr_col++,
                        get_formatted_string("%.2f", equity_lost));
+  string_grid_set_cell(sg, row, curr_col++,
+                       get_formatted_string("%.2f", adjusted_equity_lost));
 
   if (tr->note_str) {
     char *trimmed_note = string_duplicate(tr->note_str);
@@ -591,6 +650,7 @@ static void add_summary_event_row(StringGrid *sg, int row, const TurnResult *tr,
 
   *total_equity_lost += equity_lost;
   *total_win_pct_lost += win_pct_lost;
+  *total_adjusted_equity_lost += adjusted_equity_lost;
 }
 
 // Writes a game summary table for turns matching player_filter.
@@ -638,10 +698,12 @@ static void write_analysis_summary(GameHistory *game_history,
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Best"));
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("WPL"));
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("EqL"));
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("AEqL"));
   string_grid_set_cell(sg, curr_row, curr_col, string_duplicate("Note"));
 
   double total_equity_lost = 0;
   double total_win_pct_lost = 0.0;
+  double total_adjusted_equity_lost = 0.0;
   int grid_row = 1;
   int player_turn_counts[2] = {0, 0};
 
@@ -653,7 +715,8 @@ static void write_analysis_summary(GameHistory *game_history,
     }
     add_summary_event_row(sg, grid_row, tr, game_history, game, ld,
                           player_turn_counts[tr->player_index],
-                          &total_equity_lost, &total_win_pct_lost, error_stack);
+                          &total_equity_lost, &total_win_pct_lost,
+                          &total_adjusted_equity_lost, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       log_fatal("unexpected error adding row to analysis summary grid: %s",
                 error_stack_top(error_stack));
@@ -663,23 +726,30 @@ static void write_analysis_summary(GameHistory *game_history,
 
   const double avg_equity = total_equity_lost / (double)matching_count;
   const double avg_win_pct = total_win_pct_lost / (double)matching_count;
+  const double avg_adjusted_equity =
+      total_adjusted_equity_lost / (double)matching_count;
 
-  // Total row: label in Best column, values in WPL and EqL columns.
+  // Total row: label in Best column, values in WPL, EqL, and AEqL columns.
   curr_row = matching_count + 1;
   curr_col = 5;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Total"));
   string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", total_win_pct_lost));
-  string_grid_set_cell(sg, curr_row, curr_col,
+  string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", total_equity_lost));
-  // Avg row: label in Best column, values in WPL and EqL columns.
+  string_grid_set_cell(
+      sg, curr_row, curr_col,
+      get_formatted_string("%.2f", total_adjusted_equity_lost));
+  // Avg row: label in Best column, values in WPL, EqL, and AEqL columns.
   curr_row++;
   curr_col = 5;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Avg"));
   string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", avg_win_pct));
-  string_grid_set_cell(sg, curr_row, curr_col,
+  string_grid_set_cell(sg, curr_row, curr_col++,
                        get_formatted_string("%.2f", avg_equity));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%.2f", avg_adjusted_equity));
 
   StringBuilder *sb = string_builder_create();
   string_builder_add_string_grid(sb, sg, false);
@@ -1052,9 +1122,17 @@ static void analyze_with_endgame(const GameEvent *event,
                                  const char *report_path, AnalyzeCtx *ctx,
                                  AnalyzeArgs *args, bool is_first_analyzed_turn,
                                  ErrorStack *error_stack) {
+  const ValidatedMoves *vms = game_event_get_vms(event);
+  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+
+  // actual_move asks the solver to guarantee an exact (non-pruned) value for
+  // the move actually played, in the same search that finds the best move,
+  // so no second endgame_solve call is needed to evaluate it.
   args->endgame_args.game = ctx->game;
+  args->endgame_args.actual_move = &actual_move_or_pass_if_phony;
   endgame_solve(&ctx->endgame_ctx, &args->endgame_args, ctx->endgame_results,
                 error_stack);
+  args->endgame_args.actual_move = NULL;
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -1065,9 +1143,9 @@ static void analyze_with_endgame(const GameEvent *event,
   if (best_pvline->num_moves == 0) {
     log_fatal("endgame solver failed to find any moves for the position");
   }
-
-  const ValidatedMoves *vms = game_event_get_vms(event);
-  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+  if (!endgame_results_get_actual_move_found(ctx->endgame_results)) {
+    log_fatal("endgame solver failed to find the actual move among root moves");
+  }
 
   Move best_move;
   small_move_to_move(&best_move, &best_pvline->moves[0],
@@ -1094,28 +1172,11 @@ static void analyze_with_endgame(const GameEvent *event,
     memcpy(turn_result->best.display_move, turn_result->actual.display_move,
            sizeof(turn_result->best.display_move));
   } else {
-    // Solve from the position after the actual move to evaluate it. The
-    // endgame solver runs from the opponent's perspective after the actual
-    // move is played, so its value must be sign-flipped to get the current
-    // player's spread. We only compare spreads (not values), because the
-    // two solves are one turn apart and their absolute values are not
-    // directly comparable.
-    Game *actual_game_copy =
-        analyze_ctx_get_actual_play_endgame(ctx, ctx->game);
-    play_move(&actual_move_or_pass_if_phony, actual_game_copy, NULL);
-
-    EndgameResults *actual_play_endgame_results =
-        analyze_ctx_get_actual_play_endgame_results(ctx);
-    args->endgame_args.game = actual_game_copy;
-    endgame_solve(&ctx->endgame_ctx, &args->endgame_args,
-                  actual_play_endgame_results, error_stack);
-
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-
-    const int actual_endgame_spread = -endgame_results_get_spread(
-        actual_play_endgame_results, ENDGAME_RESULT_BEST, actual_game_copy);
+    // The actual move's value comes from the same solve as best (see
+    // EndgameArgs.actual_move above), so the two spreads are directly
+    // comparable with no sign flip or off-by-one-ply caveat.
+    const int actual_endgame_spread = endgame_results_get_spread(
+        ctx->endgame_results, ENDGAME_RESULT_ACTUAL, ctx->game);
     const int spread_diff =
         turn_result->best.endgame_spread - actual_endgame_spread;
     if (spread_diff == 0) {
@@ -1130,8 +1191,9 @@ static void analyze_with_endgame(const GameEvent *event,
     } else {
       set_turn_result_endgame_move(
           &turn_result->actual, &actual_move_or_pass_if_phony,
-          turn_result->best.endgame_value - spread_diff, actual_endgame_spread,
-          -1);
+          endgame_results_get_value(ctx->endgame_results,
+                                    ENDGAME_RESULT_ACTUAL),
+          actual_endgame_spread, -1);
     }
     populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
   }
@@ -1142,6 +1204,93 @@ static void analyze_with_endgame(const GameEvent *event,
   if (args->human_readable) {
     write_per_turn_human_readable(turn_result, game_history, ld, report_path,
                                   ctx, 0, 0, error_stack);
+  } else {
+    write_per_turn_csv(turn_result, game_history, ld, report_path,
+                       is_first_analyzed_turn, error_stack);
+  }
+}
+
+// Analyzes a single turn using the pre-endgame (PEG) solver, for positions
+// with PEG_MIN_BAG..PEG_MAX_BAG tiles in the bag. The peg_args in analyze_args
+// must already be partially filled; this function sets the per-turn game
+// field and protects the actual move from pruning so it always survives to
+// the deepest completed stage, then reads its ranked win%/spread directly out
+// of peg_solve's top_cands.
+static void analyze_with_peg(const GameEvent *event, TurnResult *turn_result,
+                             const GameHistory *game_history,
+                             const LetterDistribution *ld,
+                             const char *report_path, AnalyzeCtx *ctx,
+                             AnalyzeArgs *args, bool is_first_analyzed_turn,
+                             ErrorStack *error_stack) {
+  const ValidatedMoves *vms = game_event_get_vms(event);
+  Move actual_move_or_pass_if_phony = analyze_get_move_or_pass_if_phony(vms);
+
+  args->peg_args.game = ctx->game;
+  const Move *protect_moves[1] = {&actual_move_or_pass_if_phony};
+  args->peg_args.protect_moves = protect_moves;
+  args->peg_args.n_protect_moves = 1;
+
+  // Reused across turns like ctx->sim_results/ctx->endgame_results, and read
+  // back by write_per_turn_human_readable, so it must outlive this call
+  // instead of being destroyed before that write happens. Free the previous
+  // turn's allocations before peg_solve overwrites it.
+  peg_result_destroy(&ctx->peg_result);
+  peg_solve(&args->peg_args, &ctx->peg_result, error_stack);
+
+  args->peg_args.protect_moves = NULL;
+  args->peg_args.n_protect_moves = 0;
+
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  if (ctx->peg_result.n_top_cands == 0) {
+    log_fatal("peg solver failed to find any moves for the position");
+  }
+
+  const PegRankedCand *best_cand = &ctx->peg_result.top_cands[0];
+  const PegRankedCand *actual_cand = NULL;
+  int actual_rank_idx = -1;
+  for (int cand_idx = 0; cand_idx < ctx->peg_result.n_top_cands; cand_idx++) {
+    if (compare_moves_without_equity(&ctx->peg_result.top_cands[cand_idx].move,
+                                     &actual_move_or_pass_if_phony,
+                                     true) == -1) {
+      actual_cand = &ctx->peg_result.top_cands[cand_idx];
+      actual_rank_idx = cand_idx;
+      break;
+    }
+  }
+  if (!actual_cand) {
+    log_fatal("failed to find actual move in peg top candidates after protect");
+  }
+  // To silence static warnings about actual_cand potentially being NULL, even
+  // though this is impossible due to the above check and fatal log.
+  assert(actual_cand != NULL);
+
+  turn_result->actual.move = actual_move_or_pass_if_phony;
+  turn_result->actual.win_pct = actual_cand->win_pct * 100.0;
+  turn_result->actual.equity = actual_cand->mean_spread;
+  turn_result->actual.rank_idx = actual_rank_idx;
+
+  if (actual_rank_idx == 0) {
+    // Actual move is optimal; best is a copy of actual.
+    turn_result->best = turn_result->actual;
+  } else {
+    turn_result->best.move = best_cand->move;
+    turn_result->best.win_pct = best_cand->win_pct * 100.0;
+    turn_result->best.equity = best_cand->mean_spread;
+    turn_result->best.rank_idx = 0;
+    populate_best_display_move(turn_result, game_get_board(ctx->game), ld);
+  }
+
+  turn_result->was_endgame = false;
+  turn_result->was_peg = true;
+  turn_result->used_inference = false;
+
+  if (args->human_readable) {
+    write_per_turn_human_readable(turn_result, game_history, ld, report_path,
+                                  ctx, args->max_num_display_plays, 0,
+                                  error_stack);
   } else {
     write_per_turn_csv(turn_result, game_history, ld, report_path,
                        is_first_analyzed_turn, error_stack);
@@ -1240,19 +1389,44 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                                    "Event %d: %s\n", turn_counter,
                                    turn_result.actual.display_move);
 
+    // game_play_n_events only eagerly deals the on-turn player's rack during
+    // replay, leaving the off-turn player's rack undealt in the live game
+    // until their own turn is reached; until then, any tiles that would be
+    // theirs are still sitting in the live Bag object. That means bag_letters
+    // (the live bag count) and off_turn_rack_in_live_game (whatever, if
+    // anything, the off-turn player has already been dealt) always sum to
+    // the true total of currently-unseen-to-the-mover tiles, with no need to
+    // look ahead in game_history for the off-turn player's actual holdings.
+    const int off_turn_player_index = 1 - player_index;
+    const int off_turn_rack_in_live_game = rack_get_total_letters(
+        player_get_rack(game_get_player(ctx->game, off_turn_player_index)));
+    const int bag_letters = bag_get_letters(game_get_bag(ctx->game));
+    // unseen_for_peg mirrors peg_solve's own bag_size formula (peg.c):
+    // bag_size = unseen - RACK_SIZE, i.e. it assumes the mover's rack will
+    // be topped back up to a full RACK_SIZE from this pool. PEG only applies
+    // when bag_size lands in [PEG_MIN_BAG, PEG_MAX_BAG], equivalently
+    // unseen_for_peg in [RACK_SIZE + PEG_MIN_BAG, RACK_SIZE + PEG_MAX_BAG],
+    // and only when the mover currently has a full rack to draw back up to.
+    const int unseen_for_peg = bag_letters + off_turn_rack_in_live_game;
+    const int mover_rack_size = rack_get_total_letters(event_rack);
     if (analyze_args->sim_args.num_plies == 0) {
       analyze_with_static(event, &turn_result, game_history, ld, report_path,
                           ctx, analyze_args->max_num_display_plays,
                           analyze_args->human_readable, is_first_analyzed_turn,
                           vertical_opening_is_transposable, error_stack);
-    } else if (bag_get_letters(game_get_bag(ctx->game)) > 0) {
-      analyze_with_sim(event, &turn_result, game_history, ld, report_path, ctx,
-                       analyze_args, is_first_analyzed_turn,
-                       vertical_opening_is_transposable, error_stack);
-    } else {
+    } else if (mover_rack_size == RACK_SIZE &&
+               unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
+               unseen_for_peg <= RACK_SIZE + PEG_MAX_BAG) {
+      analyze_with_peg(event, &turn_result, game_history, ld, report_path, ctx,
+                       analyze_args, is_first_analyzed_turn, error_stack);
+    } else if (bag_letters == 0) {
       analyze_with_endgame(event, &turn_result, game_history, ld, report_path,
                            ctx, analyze_args, is_first_analyzed_turn,
                            error_stack);
+    } else {
+      analyze_with_sim(event, &turn_result, game_history, ld, report_path, ctx,
+                       analyze_args, is_first_analyzed_turn,
+                       vertical_opening_is_transposable, error_stack);
     }
 
     is_first_analyzed_turn = false;
@@ -1300,5 +1474,41 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                              player_turn_counts[0] + player_turn_counts[1],
                              ctx->game, error_stack);
     }
+  }
+
+  // Write a machine-parseable trailer marking this report as complete,
+  // regardless of output format. This lets a later run skip re-analyzing an
+  // already-complete game and lets directory-mode batches (e.g. tournament
+  // aggregation) read back a game's total losses without reparsing the
+  // human-readable tables. compute_turn_losses already clamps WPL/EqL (and
+  // therefore AEqL) to >= 0 per turn, so these sums need no further clamping.
+  // Deliberate consequences of always appending this trailer:
+  // - It is appended to CSV-mode reports too, so downstream CSV consumers
+  //   must tolerate this non-CSV footer line.
+  // - Directory-mode skip logic in read_report_completion_stats keys only
+  //   off the trailer's presence, not the analysis settings used to produce
+  //   it. A report re-run under different plies/plays/budgets still counts
+  //   as complete; the only way to force a refresh is to delete the report.
+  if (error_stack_is_empty(error_stack)) {
+    double total_win_pct_lost = 0.0;
+    double total_equity_lost = 0.0;
+    double total_adjusted_equity_lost = 0.0;
+    for (int result_idx = 0; result_idx < ctx->turn_results_count;
+         result_idx++) {
+      double win_pct_lost;
+      double equity_lost;
+      double adjusted_equity_lost;
+      compute_turn_losses(&ctx->turn_results[result_idx], &win_pct_lost,
+                          &equity_lost, &adjusted_equity_lost);
+      total_win_pct_lost += win_pct_lost;
+      total_equity_lost += equity_lost;
+      total_adjusted_equity_lost += adjusted_equity_lost;
+    }
+    char *trailer = get_formatted_string(
+        "\n=== Analysis Complete: turns=%d wpl=%.2f eql=%.2f aeql=%.2f ===\n",
+        ctx->turn_results_count, total_win_pct_lost, total_equity_lost,
+        total_adjusted_equity_lost);
+    append_string_to_file(report_path, trailer, error_stack);
+    free(trailer);
   }
 }

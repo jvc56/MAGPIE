@@ -136,7 +136,9 @@ typedef enum {
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
+  ARG_TOKEN_ENDGAME_TIME_LIMIT,
   ARG_TOKEN_PEG_TOP_K,
+  ARG_TOKEN_PEG_TIME_LIMIT,
   ARG_TOKEN_PEG_STRIDE,
   ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
@@ -325,6 +327,9 @@ struct Config {
   char *settings_filename;
   double tt_fraction_of_mem;
   double time_limit_seconds;
+  // 0 = fall back to time_limit_seconds.
+  double endgame_time_limit_seconds;
+  double peg_time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -1560,6 +1565,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "5";
       text = "Number of top moves to return with full PVs from endgame solver.";
       break;
+    case ARG_TOKEN_ENDGAME_TIME_LIMIT:
+      usages[0] = "<time_limit_seconds>";
+      text = "Specifies the time limit in seconds for the endgame solver. A "
+             "value of 0 (the default) falls back to -tlim.";
+      break;
+    case ARG_TOKEN_PEG_TIME_LIMIT:
+      usages[0] = "<time_limit_seconds>";
+      text = "Specifies the time limit in seconds for the pre-endgame solver. "
+             "A value of 0 (the default) falls back to -tlim.";
+      break;
     case ARG_TOKEN_PEG_TOP_K:
       usages[0] = "<count1>,<count2>,...";
       examples[0] = "32,16,8,4,2";
@@ -2195,6 +2210,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
+        ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
         ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
@@ -2219,6 +2235,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
+        ARG_TOKEN_PEG_TIME_LIMIT,          /* pegtlim */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
         ARG_TOKEN_P1_SIM_PLIES,            /* pl1 */
         ARG_TOKEN_P2_SIM_PLIES,            /* pl2 */
@@ -2972,28 +2989,18 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     }
     num_unpruned_moves = validated_moves_get_number_of_moves(unpruned_vms);
     const int num_moves = move_list_get_count(config->move_list);
-    const Rack *move_rack = move_list_get_rack(config->move_list);
     unpruned_move_idxs = malloc_or_die(num_unpruned_moves * sizeof(int));
-    uint64_t *unpruned_moves_keys =
-        malloc_or_die(num_unpruned_moves * sizeof(uint64_t));
+    for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
+         unpruned_vm_idx++) {
+      unpruned_move_idxs[unpruned_vm_idx] = -1;
+    }
     for (int move_idx = 0; move_idx < num_moves; move_idx++) {
-      const uint64_t move_key = move_get_similarity_key(
-          move_list_get_move(config->move_list, move_idx), move_rack);
+      const Move *move = move_list_get_move(config->move_list, move_idx);
       for (int unpruned_vm_idx = 0; unpruned_vm_idx < num_unpruned_moves;
            unpruned_vm_idx++) {
-        uint64_t unpruned_move_key;
-        if (move_idx == 0) {
-          // Cache the similarity keys for the unpruned moves to avoid redundant
-          // calculations in the inner loop.
-          unpruned_move_key = move_get_similarity_key(
-              validated_moves_get_move(unpruned_vms, unpruned_vm_idx),
-              move_rack);
-          unpruned_moves_keys[unpruned_vm_idx] = unpruned_move_key;
-          unpruned_move_idxs[unpruned_vm_idx] = -1;
-        } else {
-          unpruned_move_key = unpruned_moves_keys[unpruned_vm_idx];
-        }
-        if (move_key == unpruned_move_key) {
+        const Move *unpruned_move =
+            validated_moves_get_move(unpruned_vms, unpruned_vm_idx);
+        if (compare_moves_without_equity(move, unpruned_move, true) == -1) {
           unpruned_move_idxs[unpruned_vm_idx] = move_idx;
           break;
         }
@@ -3017,7 +3024,6 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
       }
     }
     validated_moves_destroy(unpruned_vms);
-    free(unpruned_moves_keys);
     if (!error_stack_is_empty(error_stack)) {
       free(unpruned_move_idxs);
       return;
@@ -3109,8 +3115,11 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
-  endgame_args->soft_time_limit = 0;
-  endgame_args->hard_time_limit = 0;
+  // 0 = unlimited, matching the plain "endgame" command's historical
+  // default. Callers that want -tlim to bound an unset -etlim (e.g.
+  // autoanalyze) must opt in explicitly via config_fill_analyze_args.
+  endgame_args->soft_time_limit = config->endgame_time_limit_seconds;
+  endgame_args->hard_time_limit = config->endgame_time_limit_seconds;
   endgame_args->seed = config->seed;
 }
 
@@ -3214,7 +3223,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->game = config->game;
   peg_args->thread_control = config->thread_control;
   peg_args->num_threads = config->num_threads;
-  peg_args->time_budget_seconds = config->time_limit_seconds;
+  peg_args->time_budget_seconds = config->peg_time_limit_seconds != 0
+                                      ? config->peg_time_limit_seconds
+                                      : config->time_limit_seconds;
   peg_args->opp_model =
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL;
   peg_args->scenario_stride = config->peg_scenario_stride;
@@ -6677,6 +6688,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_double(config, ARG_TOKEN_ENDGAME_TIME_LIMIT, 0, 1e9,
+                     &config->endgame_time_limit_seconds, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_double(config, ARG_TOKEN_PEG_TIME_LIMIT, 0, 1e9,
+                     &config->peg_time_limit_seconds, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_peg_stage_top_k(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -7913,6 +7936,13 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
+  // Unlike the plain "endgame" command, autoanalyze bounds an unset -etlim
+  // with -tlim so a single game's endgame turns can't run unbounded.
+  if (config->endgame_time_limit_seconds == 0) {
+    analyze_args->endgame_args.soft_time_limit = config->time_limit_seconds;
+    analyze_args->endgame_args.hard_time_limit = config->time_limit_seconds;
+  }
+  config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }
@@ -7920,9 +7950,95 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
 typedef struct AnalyzeSummary {
   int success_count;
   int error_count;
+  int skipped_count; // already-complete reports left untouched this run
   int not_started_count;
   bool interrupted;
+  // "<gcg filename>: <error>\n" per failed game; NULL until the first error.
+  StringBuilder *error_details;
+  // Tournament aggregate accumulated across every game in this directory
+  // run (freshly analyzed or skipped), read back from each report's
+  // "=== Analysis Complete: ..." trailer. Losses are already clamped to
+  // >= 0 per turn by the trailer writer in analyze.c.
+  double total_win_pct_lost;
+  double total_equity_lost;
+  double total_adjusted_equity_lost;
+  int turn_count;
+  int game_count;
 } AnalyzeSummary;
+
+// Advances *str past literal if str starts with it, and returns true.
+// Otherwise leaves *str untouched and returns false.
+static bool consume_literal(const char **str, const char *literal) {
+  const size_t literal_length = strlen(literal);
+  if (strncmp(*str, literal, literal_length) != 0) {
+    return false;
+  }
+  *str += literal_length;
+  return true;
+}
+
+// Reads report_path and, if it ends in a "=== Analysis Complete: ..."
+// trailer (written unconditionally by analyze_game on a clean run), parses
+// the turn count and clamped WPL/EqL/AEqL totals out of it. Returns false
+// (leaving the outputs untouched) if the file is missing or has no such
+// trailer, e.g. because it doesn't exist yet or a previous run crashed or
+// errored partway through.
+static bool read_report_completion_stats(const char *report_path, int *turns,
+                                         double *wpl, double *eql,
+                                         double *aeql) {
+  ErrorStack *probe_error_stack = error_stack_create();
+  char *content = get_string_from_file(report_path, probe_error_stack);
+  const bool file_exists = error_stack_is_empty(probe_error_stack);
+  error_stack_destroy(probe_error_stack);
+  if (!file_exists) {
+    return false;
+  }
+  const char *marker = strstr(content, "=== Analysis Complete:");
+  bool ok = false;
+  int parsed_turns = 0;
+  double parsed_wpl = 0.0;
+  double parsed_eql = 0.0;
+  double parsed_aeql = 0.0;
+  if (marker) {
+    ErrorStack *parse_error_stack = error_stack_create();
+    const char *pos = marker;
+    const char *end;
+    ok = consume_literal(&pos, "=== Analysis Complete: turns=");
+    if (ok) {
+      parsed_turns = string_to_int_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " wpl=");
+    }
+    if (ok) {
+      parsed_wpl = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " eql=");
+    }
+    if (ok) {
+      parsed_eql = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " aeql=");
+    }
+    if (ok) {
+      parsed_aeql = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " ===");
+    }
+    error_stack_destroy(parse_error_stack);
+  }
+  free(content);
+  if (ok) {
+    *turns = parsed_turns;
+    *wpl = parsed_wpl;
+    *eql = parsed_eql;
+    *aeql = parsed_aeql;
+  }
+  return ok;
+}
 
 // If gcg_source is NULL the game history is already loaded and parsing is
 // skipped. When gcg_source is non-NULL the GCG must be parsed from
@@ -7989,7 +8105,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
       game_history_get_gcg_filename(config->game_history);
 
   thread_control_print_formatted(analyze_args->sim_args.thread_control,
-                                 "Analyzing %s\n\n", gcg_filename);
+                                 "\nAnalyzing %s\n\n", gcg_filename);
 
   // Build the report filepath
   char *base = cut_off_after_last_char(gcg_filename, '.');
@@ -8010,6 +8126,124 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
   analyze_args->config_settings_str = NULL;
   free(report_path);
   analyze_args->report_path = NULL;
+}
+
+// Writes <dir_path>/tournament_summary.txt, concatenating every complete
+// game's per-player "=== Game Summary: <player> ===" block (skipping the
+// combined one) plus tournament-wide WPL/EqL/AEqL averages computed from
+// summary's aggregate fields. Rebuilding is skipped when nothing in the
+// directory changed this run (no game was freshly (re)analyzed) and a
+// summary file already exists, to avoid needless rewrites.
+static void write_tournament_summary(const char *dir_path, char **gcg_files,
+                                     int num_gcg_files,
+                                     const AnalyzeSummary *summary,
+                                     bool any_reanalyzed,
+                                     ThreadControl *thread_control) {
+  char *summary_path =
+      get_formatted_string("%s/tournament_summary.txt", dir_path);
+  if (!any_reanalyzed) {
+    ErrorStack *probe_error_stack = error_stack_create();
+    char *existing = get_string_from_file(summary_path, probe_error_stack);
+    const bool summary_exists = error_stack_is_empty(probe_error_stack);
+    error_stack_destroy(probe_error_stack);
+    free(existing);
+    if (summary_exists) {
+      free(summary_path);
+      return;
+    }
+  }
+
+  StringBuilder *sb = string_builder_create();
+  string_builder_add_formatted_string(sb, "Tournament summary for %s\n\n",
+                                      dir_path);
+
+  for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
+    char *gcg_path =
+        get_formatted_string("%s/%s", dir_path, gcg_files[file_idx]);
+    char *report_base = cut_off_after_last_char(gcg_path, '.');
+    char *report_path = get_formatted_string("%s_report.txt", report_base);
+    free(report_base);
+    free(gcg_path);
+
+    ErrorStack *probe_error_stack = error_stack_create();
+    char *content = get_string_from_file(report_path, probe_error_stack);
+    const bool report_exists = error_stack_is_empty(probe_error_stack);
+    error_stack_destroy(probe_error_stack);
+    free(report_path);
+    if (!report_exists || !strstr(content, "=== Analysis Complete:")) {
+      free(content);
+      continue;
+    }
+
+    const int content_length = (int)string_length(content);
+    const char *cursor = content;
+    while ((cursor = strstr(cursor, "\n=== Game Summary: ")) != NULL) {
+      cursor++; // skip the leading '\n' so the block itself starts at "==="
+      const char *next_marker = strstr(cursor + 1, "\n=== ");
+      const int block_start = (int)(cursor - content);
+      const int block_end =
+          next_marker ? (int)(next_marker - content) : content_length;
+      char *block = get_substring(content, block_start, block_end);
+      string_builder_add_formatted_string(sb, "--- %s ---\n",
+                                          gcg_files[file_idx]);
+      string_builder_add_string(sb, block);
+      string_builder_add_string(sb, "\n");
+      free(block);
+      cursor = next_marker ? next_marker : content + content_length;
+    }
+    free(content);
+  }
+
+  const double avg_wpl_per_turn =
+      summary->turn_count ? summary->total_win_pct_lost / summary->turn_count
+                          : 0.0;
+  const double avg_eql_per_turn =
+      summary->turn_count ? summary->total_equity_lost / summary->turn_count
+                          : 0.0;
+  const double avg_aeql_per_turn =
+      summary->turn_count
+          ? summary->total_adjusted_equity_lost / summary->turn_count
+          : 0.0;
+  const double avg_wpl_per_game =
+      summary->game_count ? summary->total_win_pct_lost / summary->game_count
+                          : 0.0;
+  const double avg_eql_per_game =
+      summary->game_count ? summary->total_equity_lost / summary->game_count
+                          : 0.0;
+  const double avg_aeql_per_game =
+      summary->game_count
+          ? summary->total_adjusted_equity_lost / summary->game_count
+          : 0.0;
+
+  string_builder_add_string(sb, "=== Tournament Averages ===\n");
+  string_builder_add_formatted_string(sb, "Games: %d\n", summary->game_count);
+  string_builder_add_formatted_string(sb, "Turns: %d\n", summary->turn_count);
+  string_builder_add_formatted_string(sb, "Average WPL per turn: %.2f\n",
+                                      avg_wpl_per_turn);
+  string_builder_add_formatted_string(sb, "Average EqL per turn: %.2f\n",
+                                      avg_eql_per_turn);
+  string_builder_add_formatted_string(sb, "Average AEqL per turn: %.2f\n",
+                                      avg_aeql_per_turn);
+  string_builder_add_formatted_string(sb, "Average WPL per game: %.2f\n",
+                                      avg_wpl_per_game);
+  string_builder_add_formatted_string(sb, "Average EqL per game: %.2f\n",
+                                      avg_eql_per_game);
+  string_builder_add_formatted_string(sb, "Average AEqL per game: %.2f\n",
+                                      avg_aeql_per_game);
+
+  char *summary_str = string_builder_dump(sb, NULL);
+  string_builder_destroy(sb);
+  ErrorStack *write_error_stack = error_stack_create();
+  write_string_to_file(summary_path, "w", summary_str, write_error_stack);
+  if (!error_stack_is_empty(write_error_stack)) {
+    char *err_str = error_stack_get_string_and_reset(write_error_stack);
+    thread_control_print_formatted(thread_control, "Failed to write %s: %s\n",
+                                   summary_path, err_str);
+    free(err_str);
+  }
+  error_stack_destroy(write_error_stack);
+  free(summary_str);
+  free(summary_path);
 }
 
 void impl_analyze(Config *config, AnalyzeSummary *summary,
@@ -8077,20 +8311,58 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
       return;
     }
     thread_control_print_formatted(analyze_args.sim_args.thread_control,
-                                   "Analyzing %d game(s)\n\n", num_gcg_files);
+                                   "Analyzing %d game(s)\n", num_gcg_files);
+    bool any_reanalyzed = false;
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       char *gcg_path = get_formatted_string("%s/%s", arg0, gcg_files[file_idx]);
+      char *report_base = cut_off_after_last_char(gcg_path, '.');
+      char *report_path = get_formatted_string("%s_report.txt", report_base);
+      free(report_base);
+
+      int turns = 0;
+      double wpl = 0.0;
+      double eql = 0.0;
+      double aeql = 0.0;
+      if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
+                                       &aeql)) {
+        summary->skipped_count++;
+        summary->success_count++;
+        summary->turn_count += turns;
+        summary->total_win_pct_lost += wpl;
+        summary->total_equity_lost += eql;
+        summary->total_adjusted_equity_lost += aeql;
+        summary->game_count++;
+        free(report_path);
+        free(gcg_path);
+        continue;
+      }
+
       analyze_single_game(config, &analyze_args, &ctx, gcg_path,
                           player_list_str, analyze_error_stack);
       free(gcg_path);
       if (!error_stack_is_empty(analyze_error_stack)) {
         char *err_str = error_stack_get_string_and_reset(analyze_error_stack);
         thread_control_print_formatted(thread_control, "%s\n", err_str);
+        if (!summary->error_details) {
+          summary->error_details = string_builder_create();
+        }
+        string_builder_add_formatted_string(summary->error_details, "%s: %s\n",
+                                            gcg_files[file_idx], err_str);
         free(err_str);
         summary->error_count++;
       } else {
         summary->success_count++;
+        any_reanalyzed = true;
+        if (read_report_completion_stats(report_path, &turns, &wpl, &eql,
+                                         &aeql)) {
+          summary->turn_count += turns;
+          summary->total_win_pct_lost += wpl;
+          summary->total_equity_lost += eql;
+          summary->total_adjusted_equity_lost += aeql;
+          summary->game_count++;
+        }
       }
+      free(report_path);
       if (thread_control_get_status(thread_control) ==
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         summary->interrupted = true;
@@ -8098,6 +8370,8 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
         break;
       }
     }
+    write_tournament_summary(arg0, gcg_files, num_gcg_files, summary,
+                             any_reanalyzed, thread_control);
     for (int file_idx = 0; file_idx < num_gcg_files; file_idx++) {
       free(gcg_files[file_idx]);
     }
@@ -8123,10 +8397,15 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   }
   int curr_row = 0;
   int curr_col = 0;
-  StringGrid *sg = string_grid_create(3, 2, 1);
+  StringGrid *sg = string_grid_create(4, 2, 1);
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
   string_grid_set_cell(sg, curr_row, curr_col,
                        get_formatted_string("%d", summary.success_count));
+  curr_row++;
+  curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Skipped"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary.skipped_count));
   curr_row++;
   curr_col = 0;
   string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Error"));
@@ -8144,6 +8423,13 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
   string_builder_add_string(
       summary_sb, summary.interrupted ? "\nFinished (user interrupt)\n"
                                       : "\nFinished (all games analyzed)\n");
+  if (summary.error_details) {
+    string_builder_add_string(summary_sb, "\n=== Errors ===\n");
+    char *error_details_str = string_builder_dump(summary.error_details, NULL);
+    string_builder_add_string(summary_sb, error_details_str);
+    free(error_details_str);
+    string_builder_destroy(summary.error_details);
+  }
   char *summary_str = string_builder_dump(summary_sb, NULL);
   string_builder_destroy(summary_sb);
   thread_control_print(config->thread_control, summary_str);
@@ -8153,6 +8439,9 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
+  if (summary.error_details) {
+    string_builder_destroy(summary.error_details);
+  }
   return empty_string();
 }
 
@@ -8273,7 +8562,9 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_TIME_LIMIT, "etlim", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
+  arg(ARG_TOKEN_PEG_TIME_LIMIT, "pegtlim", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
@@ -8409,6 +8700,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
   config->time_limit_seconds = 60;
+  config->endgame_time_limit_seconds = 0;
+  config->peg_time_limit_seconds = 0;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();
@@ -8786,6 +9079,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_top_k);
+      break;
+    case ARG_TOKEN_ENDGAME_TIME_LIMIT:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->endgame_time_limit_seconds);
+      break;
+    case ARG_TOKEN_PEG_TIME_LIMIT:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->peg_time_limit_seconds);
       break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

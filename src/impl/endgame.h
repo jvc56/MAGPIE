@@ -212,6 +212,18 @@ typedef struct EndgameArgs {
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
   // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
   int64_t external_deadline_ns;
+  // If non-NULL, the solver additionally computes an exact (non-pruned)
+  // value for this specific move in the same search that finds the best
+  // move, instead of requiring a second endgame_solve call. Must be a legal
+  // move for the position (game's player-on-turn rack); matched against
+  // generated root moves by board position + tiles (see
+  // move_get_similarity_key), not by pointer identity. Read only during the
+  // call; ownership stays with the caller. If the move can't be found among
+  // the root moves, ENDGAME_RESULT_ACTUAL is left unset (see
+  // endgame_results_get_actual_move_found). Kept at root index 0 through
+  // every IDS depth so it always gets an unnarrowed [alpha, beta] window,
+  // the same guarantee the root's first move always gets.
+  const Move *actual_move;
 } EndgameArgs;
 
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
