@@ -34,6 +34,8 @@ uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
                                         ply_info_count_t count_type);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
+const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
+bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
@@ -44,6 +46,7 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
 
 typedef struct SimResults SimResults;
 
@@ -73,6 +76,7 @@ void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
 // sim_results_get_best_move for how it affects best-move selection.
 void sim_results_set_utility_w_spread(SimResults *sim_results,
                                       double utility_w_spread);
+double sim_results_get_utility_w_spread(const SimResults *sim_results);
 uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results);
 void sim_results_set_num_infer_leaves(SimResults *sim_results,
                                       uint64_t num_infer_leaves);

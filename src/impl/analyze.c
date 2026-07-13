@@ -1402,8 +1402,8 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
                           analyze_args->human_readable, is_first_analyzed_turn,
                           vertical_opening_is_transposable, error_stack);
     } else if (mover_rack_size == RACK_SIZE &&
-              unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
-              unseen_for_peg <= RACK_SIZE + PEG_MAX_BAG) {
+               unseen_for_peg >= RACK_SIZE + PEG_MIN_BAG &&
+               unseen_for_peg <= RACK_SIZE + PEG_MAX_BAG) {
       analyze_with_peg(event, &turn_result, game_history, ld, report_path, ctx,
                        analyze_args, is_first_analyzed_turn, error_stack);
     } else if (bag_letters == 0) {
