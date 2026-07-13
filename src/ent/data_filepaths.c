@@ -7,9 +7,17 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-static const char *const filepath_type_names[] = {
-    "kwg", "klv",    "board layout", "win percentage", "letter distribution",
-    "gcg", "leaves", "lexicon",      "wordmap",        "rack info table"};
+static const char *const filepath_type_names[] = {"kwg",
+                                                  "klv",
+                                                  "board layout",
+                                                  "win percentage",
+                                                  "letter distribution",
+                                                  "gcg",
+                                                  "leaves",
+                                                  "lexicon",
+                                                  "wordmap",
+                                                  "rack info table",
+                                                  "packed dawg"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
@@ -21,6 +29,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   case DATA_FILEPATH_TYPE_WORDMAP:
   case DATA_FILEPATH_TYPE_LEAVES:
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
+  case DATA_FILEPATH_TYPE_DAWG_PACKED:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
@@ -57,6 +66,9 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
     file_ext = RACK_INFO_TABLE_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_DAWG_PACKED:
+    file_ext = DAWG_PACKED_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
     file_ext = TXT_EXTENSION;

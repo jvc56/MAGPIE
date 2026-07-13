@@ -1179,16 +1179,13 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
                                        int rightstrip, bool unique_play,
                                        int main_word_score, int word_multiplier,
                                        Equity cross_score) {
-  const MachineLetter current_letter = gen_cache_get_letter(gen, col);
-  uint64_t possible_letters_here = gen_cache_get_cross_set(gen, col) &
-                                   gen_cache_get_left_extension_set(gen, col);
-  if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
-    possible_letters_here &= gen->anchor_right_extension_set;
-  }
-  if (possible_letters_here == 1) {
-    possible_letters_here = 0;
-  }
+  // Load the row_cache Square once; every field read below goes through it,
+  // giving the compiler a single base for the col*sizeof(Square) arithmetic.
+  const Square *sq = &gen->row_cache[col];
+  const MachineLetter current_letter = square_get_letter(sq);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    // Play-through square: possible_letters_here is dead on this branch (it
+    // reads only raw / next_node_index / accepts), so it is not computed here.
     const MachineLetter raw = get_unblanked_machine_letter(current_letter);
     uint32_t next_node_index = 0;
     bool accepts = false;
@@ -1206,15 +1203,30 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     go_on_small(gen, col, current_letter, next_node_index, accepts, leftstrip,
                 rightstrip, unique_play, main_word_score, word_multiplier,
                 cross_score);
-  } else if (!rack_is_empty(&gen->player_rack) &&
-             ((possible_letters_here & gen->rack_cross_set) != 0)) {
+  } else if (!rack_is_empty(&gen->player_rack)) {
+    // Empty square: compute the placeable-letter set only now -- it is unused
+    // on the play-through branch and when the mover's rack is empty.
+    uint64_t possible_letters_here =
+        square_get_cross_set(sq) & square_get_left_extension_set(sq);
+    if ((gen->tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
+      possible_letters_here &= gen->anchor_right_extension_set;
+    }
+    if (possible_letters_here == 1) {
+      possible_letters_here = 0;
+    }
+    if ((possible_letters_here & gen->rack_cross_set) == 0) {
+      return;
+    }
+    // The rack's blank count is invariant across the sibling loop: each
+    // iteration's take/add of a blank (or a non-blank ml) is balanced and the
+    // go_on_small recursion fully restores player_rack, so hoist it.
+    const uint16_t num_blanks =
+        rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
       const MachineLetter ml = kwg_node_tile(node);
       const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
-      if (ml != 0 &&
-          (number_of_ml != 0 ||
-           rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) != 0) &&
+      if (ml != 0 && (number_of_ml != 0 || num_blanks != 0) &&
           board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
         const uint32_t next_node_index =
             kwg_node_arc_index_prefetch(node, gen->kwg);
@@ -1229,7 +1241,7 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
           rack_add_letter(&gen->player_rack, ml);
         }
         // check blank
-        if (rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER) > 0) {
+        if (num_blanks > 0) {
           rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
           gen->tiles_played++;
           go_on_small(gen, col, get_blanked_machine_letter(ml), next_node_index,
@@ -2023,19 +2035,16 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   const Equity orig_perp_score = gen->shadow_perpendicular_additional_score;
   const int orig_wordmul = gen->shadow_word_multiplier;
 
-  rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+  // The rack/tile-score and multiplier-array snapshots are saved LAZILY on the
+  // first restriction / first unrestricted insertion in the loop below,
+  // mirroring the non-small shadow_play_right. Most rightward shadows over the
+  // short racks of an endgame restrict nothing, so these ~132 bytes of wide
+  // copies are usually never paid. orig_rack_cross_set and
+  // orig_num_unrestricted_multipliers are cheap scalars, kept eager.
   const uint64_t orig_rack_cross_set = gen->rack_cross_set;
-  memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
-         sizeof(gen->descending_tile_scores));
   bool restricted_any_tiles = false;
-
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-         sizeof(gen->descending_cross_word_multipliers));
-  memcpy(gen->desc_eff_letter_muls_copy,
-         gen->descending_effective_letter_multipliers,
-         sizeof(gen->descending_effective_letter_multipliers));
   bool changed_any_restricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
@@ -2080,13 +2089,30 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
         cross_score * this_word_multiplier;
     gen->shadow_word_multiplier *= this_word_multiplier;
 
-    if (try_restrict_tile_and_accumulate_score(
-            gen, possible_letters_here, letter_multiplier, this_word_multiplier,
-            gen->current_right_col)) {
-      restricted_any_tiles = true;
+    if (is_single_bit_set(possible_letters_here)) {
+      if (!restricted_any_tiles) {
+        // First restriction in this rightward shadow: snapshot the rack and
+        // descending tile scores that restrict_tile_and_accumulate_score is
+        // about to mutate. Must save BEFORE the mutating call.
+        rack_copy(&gen->player_rack_shadow_right_copy, &gen->player_rack);
+        memcpy(gen->descending_tile_scores_copy, gen->descending_tile_scores,
+               sizeof(gen->descending_tile_scores));
+        restricted_any_tiles = true;
+      }
+      restrict_tile_and_accumulate_score(
+          gen, possible_letters_here, letter_multiplier, this_word_multiplier,
+          gen->current_right_col);
     } else {
+      if (!changed_any_restricted_multipliers) {
+        // First unrestricted insertion: snapshot the multiplier arrays.
+        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
+               sizeof(gen->descending_cross_word_multipliers));
+        memcpy(gen->desc_eff_letter_muls_copy,
+               gen->descending_effective_letter_multipliers,
+               sizeof(gen->descending_effective_letter_multipliers));
+        changed_any_restricted_multipliers = true;
+      }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
-      changed_any_restricted_multipliers = true;
     }
     if (cross_set == TRIVIAL_CROSS_SET) {
       is_unique = true;
@@ -2720,8 +2746,21 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   const Player *player = game_get_player(game, gen->player_index);
   const Player *opponent = game_get_player(game, 1 - gen->player_index);
 
-  memcpy(&gen->ld, game_get_ld(game), sizeof(LetterDistribution));
-  gen->kwg = player_get_kwg(player);
+  // gen->ld is a by-value copy and the per-thread MoveGen is reused across
+  // every node of a solve with a stable game->ld, so skip the ~3.4 KB memcpy
+  // (and the bit_rack compat scan) when the source distribution is unchanged --
+  // pure per-node-setup work removed on the movegen-dominated endgame profile.
+  // The guard is the ld's content fingerprint, NOT its address: the MoveGen
+  // cache outlives the Config that owns an ld, so a freed ld (and its name
+  // string) can be reused by a different distribution at the same address
+  // (ABA), which a pointer comparison misses but the content hash catches. The
+  // cached copy's fingerprint is 0 until the first load (calloc), and a real
+  // fingerprint is never 0, so the first node always loads.
+  const LetterDistribution *ld_src = game_get_ld(game);
+  if (ld_get_content_fingerprint(ld_src) != gen->ld.content_fingerprint) {
+    memcpy(&gen->ld, ld_src, sizeof(LetterDistribution));
+    gen->bit_rack_compatible = bit_rack_is_compatible_with_ld(&gen->ld);
+  }
   gen->kwg = (override_kwg == NULL) ? player_get_kwg(player) : override_kwg;
   const KLV *new_klv = player_get_klv(player);
   const uint64_t new_klv_mutation_counter =
@@ -2751,7 +2790,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->klv = new_klv;
   gen->klv_mutation_counter_at_load = new_klv_mutation_counter;
   gen->klv_instance_fp_at_load = new_klv_instance_fp;
-  const RackInfoTable *new_rit = player_get_rack_info_table(player);
+  // The RIT keys on a BitRack, so it is unusable for a BitRack-incompatible
+  // alphabet; treat it as absent (the WMP is gated the same way below).
+  const RackInfoTable *new_rit =
+      gen->bit_rack_compatible ? player_get_rack_info_table(player) : NULL;
   if (new_rit != gen->rack_info_table) {
     memset(gen->rit_cache_valid, 0, sizeof(gen->rit_cache_valid));
     // Leave values are stored in the subrack cache; they depend on the
@@ -2767,17 +2809,20 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   const WMP *previous_wmp = gen->wmp_move_gen.wmp;
+  // Decide up front whether WMP will be active. It is disabled for
+  // ALL_SMALL/TILES_PLAYED (unsupported), when override_kwg is set (WMP data
+  // corresponds to the original KWG, not the override), and on a
+  // BitRack-incompatible alphabet (the WMP keys on a BitRack). Passing NULL
+  // when disabled lets wmp_move_gen_init early-return instead of building a
+  // BitRack, clearing the length table, and seeding all anchor slots -- wasted
+  // work on every endgame node, which always passes override_kwg. The seeded
+  // fields are only read while WMP is active, so skipping them when it is NULL
+  // is safe.
+  const bool wmp_disabled = gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
+                            gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
+                            override_kwg != NULL || !gen->bit_rack_compatible;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
-                    player_get_wmp(player));
-
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
-      override_kwg != NULL) {
-    // Disable WMP when using ALL_SMALL/TILES_PLAYED (unsupported) or when
-    // override_kwg is set (WMP data corresponds to the original KWG, not
-    // the override).
-    gen->wmp_move_gen.wmp = NULL;
-  }
+                    wmp_disabled ? NULL : player_get_wmp(player));
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
   // swap (different lexicon) makes those stale -- and "stale" means dangling,
   // since the old WMP's Config may have been freed. Invalidate on a WMP
@@ -2841,7 +2886,14 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                                          gen->row_number_of_anchors_cache);
   gen->lanes_cache = board_get_readonly_lanes(gen->board, gen->cross_index);
 
-  board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+  // opening_move_penalties is read only by gen_get_static_equity (the
+  // equity-recording paths). The endgame's small-record movegen types never
+  // read it, so skip the per-node 120-byte copy for them.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL &&
+      gen->move_record_type != MOVE_RECORD_TILES_PLAYED &&
+      gen->move_record_type != MOVE_RECORD_BEST_SMALL) {
+    board_copy_opening_penalties(gen->board, gen->opening_move_penalties);
+  }
 
   gen->is_wordsmog = game_get_variant(game) == GAME_VARIANT_WORDSMOG;
   gen->threshold_exceeded = false;
@@ -2876,6 +2928,8 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   const RackInfoTable *rit = gen->rack_info_table;
   gen->rit_entry = NULL;
 
+  // rit is NULL for BitRack-incompatible alphabets (gated in
+  // gen_load_position), so this RIT-cache path is already skipped for them.
   if (has_full_rack && rit != NULL) {
     const BitRack player_bit_rack =
         bit_rack_create_from_rack(&gen->ld, &gen->player_rack);
@@ -2933,7 +2987,10 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     // requires recording the actual exchange moves (which goes through
     // the RIT-alike generate_exchange_moves_from_table, skipping the
     // KLV descent either way).
-    const bool kle_eligible = has_full_rack;
+    // Unlike the RIT/WMP caches (gated by being NULL), this KLV-leaves cache is
+    // always available, so it must consult bit_rack_compatible directly: its
+    // key is a BitRack, unrepresentable for a too-large alphabet.
+    const bool kle_eligible = has_full_rack && gen->bit_rack_compatible;
     const BitRack kle_bit_rack =
         kle_eligible ? bit_rack_create_from_rack(&gen->ld, &gen->player_rack)
                      : bit_rack_create_empty();

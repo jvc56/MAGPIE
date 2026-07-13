@@ -12,6 +12,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
+#include "../def/peg_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/sim_defs.h"
@@ -75,6 +76,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <time.h>
 
 enum {
   HELP_INDENT = 10,
@@ -137,6 +141,10 @@ typedef enum {
   ARG_TOKEN_PEG_ONLY,
   ARG_TOKEN_PEG_NOPRUNE,
   ARG_TOKEN_PEG_PESSIMISTIC,
+  ARG_TOKEN_PEG_NESTED,
+  ARG_TOKEN_PEG_OUTCOMES,
+  ARG_TOKEN_PEG_OUT_WIDTH,
+  ARG_TOKEN_PEG_OUT_LINES,
   ARG_TOKEN_NUMBER_OF_PLAYS,
   ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS,
   ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,
@@ -176,6 +184,7 @@ typedef enum {
   ARG_TOKEN_SHOW_MOVES,
   ARG_TOKEN_SHOW_INFERENCE,
   ARG_TOKEN_SHOW_ENDGAME,
+  ARG_TOKEN_SHOW_PEG,
   ARG_TOKEN_SHOW_HEAT_MAP,
   ARG_TOKEN_NEXT,
   ARG_TOKEN_PREVIOUS,
@@ -273,6 +282,17 @@ struct Config {
   int peg_scenario_stride;
   // PEG pessimistic opponent model (-pegpess); else rational (the default).
   bool peg_pessimistic;
+  // PEG nested inner-peg lookahead for non-emptier leaves (-pegnested). On by
+  // default (depth 1); off restores the flat greedy/pessimistic rollout.
+  bool peg_nested;
+  // Show per-scenario outcomes column for the best candidate (-pegoutcomes).
+  bool peg_show_outcomes;
+  // Outcomes-column wrapping: max whole-line width (-pegoutwidth, clamped up so
+  // the cell always fits the label + a worst-case token) and max wrapped lines
+  // per cell (-pegoutlines, 0 = unlimited). When a cell is truncated, the full
+  // chart is written to a timestamped file under data/pegcharts/.
+  int peg_out_width;
+  int peg_out_lines;
   // PEG "only solve" / "never prune" move lists (space-free UCGI, comma-
   // separated), persisted across commands since pargs reset each parse. NULL =
   // solve all moves / no protected moves.
@@ -353,6 +373,7 @@ struct Config {
   InferenceResults *inference_results;
   EndgameResults *endgame_results;
   PegResult peg_result;
+  PegPoll *peg_poll;
   AutoplayResults *autoplay_results;
   ConversionResults *conversion_results;
   GameStringOptions *game_string_options;
@@ -1263,8 +1284,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       break;
     case ARG_TOKEN_OVERTIME:
       usages[0] = "<player_nickname> <overtime_penalty>";
-      examples[0] = "josh 5";
-      examples[1] = "josh 9";
+      examples[0] = "josh -5";
+      examples[1] = "josh -9";
       text =
           "Adds an overtime penalty for the given player. Overtime penalties "
           "can only be applied after the game is over.";
@@ -1309,6 +1330,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Shows the endgame solver result. If a PV index is given, "
              "displays only that PV line (1-indexed) in full move-by-move "
              "detail.";
+      break;
+    case ARG_TOKEN_SHOW_PEG:
+      usages[0] = "";
+      text = "Shows the PEG result.";
       break;
     case ARG_TOKEN_SHOW_HEAT_MAP:
       usages[0] = "<play_index> [<ply> <type>]";
@@ -1591,6 +1616,43 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "worst-for-the-mover reply, i.e. guaranteed-win analysis); false "
              "(default) = rational (the opponent plays its best-equity reply).";
       break;
+    case ARG_TOKEN_PEG_NESTED:
+      usages[0] = "<true/false>";
+      examples[0] = "false";
+      text =
+          "PEG non-emptier leaf evaluation: true (default) = nested inner-peg "
+          "lookahead (solve the opponent's sub-pre-endgame, depth 1); false = "
+          "flat greedy/pessimistic rollout. Nested wins more decisions but "
+          "costs more per solve.";
+      break;
+    case ARG_TOKEN_PEG_OUTCOMES:
+      usages[0] = "<true/false>";
+      examples[0] = "true";
+      text =
+          "When true, adds a per-play outcomes column to the graded table: the "
+          "shorter of the winning / losing draws (the other is implied by the "
+          "counts). A draw is a sorted multiset (FGHI) when order is "
+          "irrelevant, or a slash-joined sequence (F/G/H/I) when it matters; "
+          "each carries an xN labeled-ordering weight. Default false.";
+      break;
+    case ARG_TOKEN_PEG_OUT_WIDTH:
+      usages[0] = "<columns>";
+      examples[0] = "100";
+      examples[1] = "0";
+      text = "Maximum whole-line width for the graded outcomes column "
+             "(default 100). The column wraps at token boundaries, indented "
+             "under its header; the width is clamped up so a cell always fits "
+             "its label plus one worst-case token. 0 = unbounded (no wrap).";
+      break;
+    case ARG_TOKEN_PEG_OUT_LINES:
+      usages[0] = "<lines>";
+      examples[0] = "1";
+      examples[1] = "0";
+      text = "Maximum wrapped lines per outcomes cell (default 1); a truncated "
+             "cell ends with '...'. 0 = unlimited. When any cell is truncated, "
+             "the full untruncated chart is written to a timestamped file "
+             "under data/pegcharts/ and its path is printed above the table.";
+      break;
     case ARG_TOKEN_NUMBER_OF_PLAYS:
       usages[0] = "<number_of_plays>";
       examples[0] = "150";
@@ -1785,15 +1847,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(uwin*wpct + uspread*spread_sigmoid) / (uwin + uspread), where "
              "spread_sigmoid = 1/(1+exp(-spread/uspreadscale)) is the "
              "logistic sigmoid of the rollout spread (strictly in (0, 1)). "
-             "Default 1.0 (pure win%).";
+             "Default 1.0, blended with the default uspread of 0.5.";
       break;
     case ARG_TOKEN_UTILITY_W_SPREAD:
       usages[0] = "<weight>";
-      examples[0] = "0.0";
+      examples[0] = "0.5";
       examples[1] = "0.3";
       text = "Weight on (normalized) spread in the BAI sample utility. Default "
-             "0.0 (pure win%). With non-zero uspread the simmer favors plays "
-             "with higher rollout spread in addition to higher win%.";
+             "0.5. With non-zero uspread the simmer favors plays with higher "
+             "rollout spread in addition to higher win%; set -uspread 0 to "
+             "restore the pure win% utility.";
       break;
     case ARG_TOKEN_UTILITY_SPREAD_SCALE:
       usages[0] = "<points>";
@@ -2087,6 +2150,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_RACK_AND_GEN_AND_SIM, /* rgsimulate */
         ARG_TOKEN_SHOW_ENDGAME,         /* shendgame */
         ARG_TOKEN_SHOW_GAME,            /* shgame */
+        ARG_TOKEN_SHOW_PEG,             /* shpeg */
         ARG_TOKEN_SHOW_INFERENCE,       /* shinference */
         ARG_TOKEN_SHOW_MOVES,           /* shmoves */
         ARG_TOKEN_SIM,                  /* simulate */
@@ -2148,7 +2212,11 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
+        ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
+        ARG_TOKEN_PEG_OUT_LINES,           /* pegoutlines */
+        ARG_TOKEN_PEG_OUT_WIDTH,           /* pegoutwidth */
         ARG_TOKEN_PEG_PESSIMISTIC,         /* pegpess */
         ARG_TOKEN_PEG_STRIDE,              /* pegstride */
         ARG_TOKEN_PEG_TOP_K,               /* pegtopk */
@@ -3136,6 +3204,11 @@ static void config_load_peg_stage_top_k(Config *config,
   config->peg_num_stages = n;
 }
 
+// Default inner-peg stage schedule when nesting is on: the inner cascade keeps
+// 8 candidates at its first stage, then 4, then 2 -- enough lookahead to
+// sharpen the non-emptier leaf decision without paying for a wide inner field.
+static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
+
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   memset(peg_args, 0, sizeof(*peg_args));
   peg_args->game = config->game;
@@ -3149,6 +3222,17 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
   peg_args->stage_top_k =
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
   peg_args->num_stages = config->peg_num_stages;
+  peg_args->include_per_scenario = config->peg_show_outcomes;
+  // Nested inner-peg lookahead for non-emptier leaves, on by default at depth 1
+  // with the inner stage schedule above and the bag-size default scenario
+  // stride. -pegnested false restores the flat rollout. Emptier (bag-empty)
+  // leaves are unaffected -- they always solve exact endgames.
+  peg_args->nested_enabled = config->peg_nested;
+  peg_args->nested_max_depth = PEG_NESTED_DEFAULT_DEPTH;
+  peg_args->nested_cand_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
+  peg_args->nested_n_cand_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
+                                       sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));
+  peg_args->nested_stride = 0; // bag-size default
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -3193,8 +3277,12 @@ static ValidatedMoves *config_parse_peg_move_list(const Config *config,
 void config_peg(Config *config, ErrorStack *error_stack) {
   // Free any prior ranking before overwriting it.
   peg_result_destroy(&config->peg_result);
+  // Fresh poll for this solve; destroy the previous one if it exists.
+  peg_poll_destroy(config->peg_poll);
+  config->peg_poll = peg_poll_create();
   PegArgs peg_args;
   config_fill_peg_args(config, &peg_args);
+  peg_args.poll = config->peg_poll;
 
   // Optional "only solve" set: evaluate exactly these moves as the candidates.
   ValidatedMoves *only_vms = NULL;
@@ -3243,11 +3331,71 @@ void impl_peg(Config *config, ErrorStack *error_stack) {
   config_peg(config, error_stack);
 }
 
+// Writes the untruncated peg chart to data/pegcharts/outcomes_<ts>.txt, where
+// <ts> is the current wall-clock time down to microseconds. Returns the path
+// (caller frees) or NULL on failure.
+static char *config_write_peg_chart_file(const char *contents) {
+  mkdir("data", 0777);
+  mkdir("data/pegcharts", 0777);
+  // struct timeval comes transitively from <sys/time.h> (included), but
+  // include-cleaner maps it to a glibc-internal header that cannot be included
+  // directly. Matches the clock-API suppression in sim_benchmark_test.c.
+  struct timeval now_tv; // NOLINT(misc-include-cleaner)
+  gettimeofday(&now_tv, NULL);
+  const time_t now_secs = now_tv.tv_sec;
+  char stamp[32];
+  stamp[strftime(stamp, sizeof(stamp), "%Y%m%d_%H%M%S", localtime(&now_secs))] =
+      '\0';
+  char *path = get_formatted_string("data/pegcharts/outcomes_%s_%06ld.txt",
+                                    stamp, (long)now_tv.tv_usec);
+  ErrorStack *error_stack = error_stack_create();
+  write_string_to_file(path, "w", contents, error_stack);
+  const bool ok = error_stack_is_empty(error_stack);
+  error_stack_destroy(error_stack);
+  if (!ok) {
+    free(path);
+    return NULL;
+  }
+  return path;
+}
+
+// Renders the peg result for display. When the outcomes column truncates any
+// cell at the configured width/line caps, writes the full (unlimited-lines)
+// chart to a data/pegcharts/ file and embeds its path above the table.
+static char *config_peg_display(const Config *config, PegPoll *poll) {
+  const int width = config->peg_out_width;
+  const int lines = config->peg_out_lines;
+  bool truncated = false;
+  char *display = peg_result_get_string(&config->peg_result, config->game,
+                                        config->peg_show_outcomes, poll, width,
+                                        lines, /*trunc_note=*/NULL, &truncated);
+  if (!truncated) {
+    return display;
+  }
+  free(display);
+  char *full = peg_result_get_string(&config->peg_result, config->game,
+                                     config->peg_show_outcomes, poll, width,
+                                     /*out_max_lines=*/0, NULL, NULL);
+  char *path = config_write_peg_chart_file(full);
+  free(full);
+  char *note =
+      path != NULL
+          ? get_formatted_string("untruncated chart written to: %s", path)
+          : NULL;
+  char *out =
+      peg_result_get_string(&config->peg_result, config->game,
+                            config->peg_show_outcomes, poll, width, lines, note,
+                            /*out_truncated=*/NULL);
+  free(note);
+  free(path);
+  return out;
+}
+
 char *status_peg(Config *config) {
-  if (config->peg_result.last_completed_stage < 0) {
+  if (config->peg_result.last_completed_stage < 0 && config->peg_poll == NULL) {
     return string_duplicate("peg results are not yet initialized.\n");
   }
-  return peg_result_get_string(&config->peg_result, config->game);
+  return config_peg_display(config, config->peg_poll);
 }
 
 // Autoplay
@@ -3825,6 +3973,29 @@ void execute_show_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_show_endgame(Config *config, ErrorStack *error_stack) {
   return impl_show_endgame(config, error_stack);
+}
+
+// Show PEG
+
+char *impl_show_peg(const Config *config, ErrorStack *error_stack) {
+  if (!config->game || config->peg_result.last_completed_stage < 0) {
+    error_stack_push(error_stack, ERROR_STATUS_NO_PEG_TO_SHOW,
+                     string_duplicate("no PEG results to show"));
+    return empty_string();
+  }
+  return config_peg_display(config, /*poll=*/NULL);
+}
+
+void execute_show_peg(Config *config, ErrorStack *error_stack) {
+  char *result = impl_show_peg(config, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    thread_control_print(config->thread_control, result);
+  }
+  free(result);
+}
+
+char *str_api_show_peg(Config *config, ErrorStack *error_stack) {
+  return impl_show_peg(config, error_stack);
 }
 
 // Show heat map
@@ -6517,7 +6688,31 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_PEG_OUT_WIDTH, 0, INT_MAX,
+                  &config->peg_out_width, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_PEG_OUT_LINES, 0, INT_MAX,
+                  &config->peg_out_lines, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_PEG_PESSIMISTIC, &config->peg_pessimistic,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_PEG_NESTED, &config->peg_nested,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_bool(config, ARG_TOKEN_PEG_OUTCOMES, &config->peg_show_outcomes,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -7619,7 +7814,7 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  char *result = peg_result_get_string(&config->peg_result, config->game);
+  char *result = config_peg_display(config, /*poll=*/NULL);
   thread_control_print(config->thread_control, result);
   free(result);
 }
@@ -8024,6 +8219,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_SHOW_INFERENCE, "shinference", 0, 1, show_inference, generic,
       false);
   cmd(ARG_TOKEN_SHOW_ENDGAME, "shendgame", 0, 1, show_endgame, generic, false);
+  cmd(ARG_TOKEN_SHOW_PEG, "shpeg", 0, 0, show_peg, peg, false);
   cmd(ARG_TOKEN_SHOW_HEAT_MAP, "heatmap", 1, 3, show_heat_map, generic, false);
   cmd(ARG_TOKEN_MOVES, "addmoves", 1, 1, add_moves, generic, true);
   cmd(ARG_TOKEN_RACK, "rack", 1, 1, set_rack, generic, true);
@@ -8082,6 +8278,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PEG_ONLY, "pegonly", 1, 1);
   arg(ARG_TOKEN_PEG_NOPRUNE, "pnoprune", 1, 1);
   arg(ARG_TOKEN_PEG_PESSIMISTIC, "pegpess", 1, 1);
+  arg(ARG_TOKEN_PEG_NESTED, "pegnested", 1, 1);
+  arg(ARG_TOKEN_PEG_OUTCOMES, "pegoutcomes", 1, 1);
+  arg(ARG_TOKEN_PEG_OUT_WIDTH, "pegoutwidth", 1, 1);
+  arg(ARG_TOKEN_PEG_OUT_LINES, "pegoutlines", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_PLAYS, "numplays", 1, 1);
   arg(ARG_TOKEN_MAX_NUMBER_OF_DISPLAY_PLAYS, "maxnumdplays", 1, 1);
   arg(ARG_TOKEN_NUMBER_OF_SMALL_PLAYS, "numsmallplays", 1, 1);
@@ -8193,6 +8393,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_num_stages = 0;
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
+  config->peg_nested = true;
+  config->peg_show_outcomes = false;
+  config->peg_out_width = 100;
+  config->peg_out_lines = 1;
   config->peg_only_str = NULL;
   config->peg_noprune_str = NULL;
   config->eq_margin_inference = int_to_equity(5);
@@ -8202,7 +8406,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->stop_cond_pct = 99;
   config->cutoff = convert_user_cutoff_to_cutoff(0.005);
   config->utility_w_winpct = 1.0;
-  config->utility_w_spread = 0.0;
+  config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
   config->time_limit_seconds = 60;
   config->num_threads = get_num_cores();
@@ -8296,6 +8500,7 @@ void config_destroy(Config *config) {
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
+  peg_poll_destroy(config->peg_poll);
   free(config->peg_only_str);
   free(config->peg_noprune_str);
   autoplay_results_destroy(config->autoplay_results);
@@ -8372,6 +8577,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG:
     case ARG_TOKEN_PEG_ONLY:
     case ARG_TOKEN_PEG_NOPRUNE:
+    case ARG_TOKEN_PEG_OUTCOMES:
     case ARG_TOKEN_AUTOPLAY:
     case ARG_TOKEN_CONVERT:
     case ARG_TOKEN_LEAVE_GEN:
@@ -8391,6 +8597,7 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHOW_MOVES:
     case ARG_TOKEN_SHOW_INFERENCE:
     case ARG_TOKEN_SHOW_ENDGAME:
+    case ARG_TOKEN_SHOW_PEG:
     case ARG_TOKEN_SHOW_HEAT_MAP:
     case ARG_TOKEN_NEXT:
     case ARG_TOKEN_PREVIOUS:
@@ -8560,9 +8767,21 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->peg_scenario_stride);
       break;
+    case ARG_TOKEN_PEG_OUT_WIDTH:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_out_width);
+      break;
+    case ARG_TOKEN_PEG_OUT_LINES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->peg_out_lines);
+      break;
     case ARG_TOKEN_PEG_PESSIMISTIC:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->peg_pessimistic);
+      break;
+    case ARG_TOKEN_PEG_NESTED:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->peg_nested);
       break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
