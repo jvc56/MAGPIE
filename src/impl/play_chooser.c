@@ -26,7 +26,6 @@
 #include "../ent/transposition_table.h"
 #include "../ent/words.h"
 #include "../util/io_util.h"
-#include "../util/string_util.h"
 #include "endgame.h"
 #include "gameplay.h"
 #include "move_gen.h"
