@@ -222,9 +222,16 @@ static double play_chooser_util_w_winpct(const PlayChooserStrategy *strategy);
 static double
 play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
 
+// Chooses the on-turn player's best move by simulation, returning it in
+// out_move. out_simulated (optional) reports whether a sim actually ran: a
+// single-candidate position is short-circuited to that move WITHOUT simming, so
+// sim_results is left untouched and callers that read it must not use it.
 static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
                                  double budget_seconds, Move *out_move,
-                                 ErrorStack *error_stack) {
+                                 bool *out_simulated, ErrorStack *error_stack) {
+  if (out_simulated != NULL) {
+    *out_simulated = false;
+  }
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
   MoveList *move_list = play_chooser->move_list;
   move_list_reset(move_list);
@@ -307,6 +314,9 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
     // The sim could not pick a winner; fall back to the top equity move
     // from the candidates already generated.
     best_move = move_list_get_move(move_list, 0);
+  }
+  if (out_simulated != NULL) {
+    *out_simulated = true;
   }
   move_copy(out_move, best_move);
   return true;
@@ -506,8 +516,9 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   case PLAY_CHOOSER_EVAL_STATIC:
     break;
   case PLAY_CHOOSER_EVAL_SIM:
-    chose_move = play_chooser_run_sim(play_chooser, game, budget_seconds,
-                                      out_move, error_stack);
+    chose_move =
+        play_chooser_run_sim(play_chooser, game, budget_seconds, out_move,
+                             /*out_simulated=*/NULL, error_stack);
     break;
   case PLAY_CHOOSER_EVAL_ENDGAME:
     chose_move = play_chooser_run_endgame(
@@ -615,9 +626,17 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
   }
   case PLAY_CHOOSER_EVAL_SIM: {
     Move best_move;
+    bool simulated = false;
     if (!play_chooser_run_sim(play_chooser, game, budget_seconds, &best_move,
-                              error_stack)) {
+                              &simulated, error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
+    }
+    if (!simulated) {
+      // A single forced move was returned without a sim (sim_results is stale);
+      // value that lone move on the utility scale from its static estimate.
+      return play_chooser_branch_value(play_chooser_peg_decided_utility(
+          strategy, play_chooser_get_spread(game) +
+                        equity_to_double(move_get_equity(&best_move))));
     }
     // The sim ranked by (and recorded per rollout) the win%+spread blend; read
     // the best play's mean utility back directly.
@@ -972,12 +991,11 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
   play_chooser_eval_t challenge_eval =
       play_chooser_get_eval_for_phase(strategy, challenge_game);
 
-  // STATIC (the no-win-model fallback) reports spread points, not the [0, 1]
-  // utility, so a STATIC value is not comparable to a sibling utility -- e.g. a
-  // +30 spread would always dominate a 0.62 win-utility. If either branch is
-  // STATIC, value BOTH with STATIC so the two spread-scale values are
-  // comparable. This is only reachable without win percentages (with them, a
-  // pre-endgame branch is SIM/PEG and an empty-bag branch ENDGAME).
+  // STATIC (a strategy's static-eval choice, or the fallback when a SIM/PEG
+  // stage has no win model) reports spread points, not the [0, 1] utility, so a
+  // STATIC value is not comparable to a sibling utility -- e.g. a +30 spread
+  // would always dominate a 0.62 win-utility. If either branch is STATIC, value
+  // BOTH with STATIC so the two spread-scale values are comparable.
   if (keep_eval == PLAY_CHOOSER_EVAL_STATIC ||
       challenge_eval == PLAY_CHOOSER_EVAL_STATIC) {
     keep_eval = PLAY_CHOOSER_EVAL_STATIC;
