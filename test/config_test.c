@@ -1725,6 +1725,13 @@ void test_config_anno(void) {
                             ERROR_STATUS_NO_INFERENCE_TO_SHOW);
   assert_config_exec_status(config, "shendgame",
                             ERROR_STATUS_NO_ENDGAME_TO_SHOW);
+  assert_config_exec_status(config, "shpeg", ERROR_STATUS_NO_PEG_TO_SHOW);
+  // The -pegoutcomes boolean setting (drives the peg/shpeg outcomes column)
+  // parses and loads in both states.
+  assert_config_exec_status(config, "set -pegoutcomes true",
+                            ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "set -pegoutcomes false",
+                            ERROR_STATUS_SUCCESS);
   // Passing a rack to the top commit should commit the best static move
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
@@ -2455,17 +2462,17 @@ void test_config_exchange_blank(void) {
 void test_config_utility_blend(void) {
   ErrorStack *error_stack = error_stack_create();
 
-  // Defaults: (1.0, 0.0, 100.0), fanned out identically to both players.
+  // Defaults: (1.0, 0.5, 100.0), fanned out identically to both players.
   {
     Config *config = config_create_default_test();
     assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_utility_spread_scale(config), 100.0));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p1_utility_spread_scale(config), 100.0));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
     config_destroy(config);
   }
@@ -2515,11 +2522,11 @@ void test_config_utility_blend(void) {
     Config *config = config_create_default_test();
     load_and_exec_config_or_die(config, "set -uwin1 0.4 -uspread1 0.6");
     assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 0.4));
     assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.6));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
-    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
+    assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.5));
     config_destroy(config);
   }
 

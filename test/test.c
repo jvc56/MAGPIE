@@ -21,6 +21,7 @@
 #include "convert_test.h"
 #include "create_data_test.h"
 #include "cross_set_test.h"
+#include "dawg_packed_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -127,6 +128,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
     {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
@@ -156,10 +158,22 @@ static TestEntry on_demand_test_table[] = {
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
     {"genpegcgps", test_generate_peg_cgps},
+    {"pegstage", test_peg_stage_stability},
+    {"pegab", test_peg_strength_ab},
+    {"genpegfresh", test_gen_peg_fresh},
+    {"pegcurve", test_peg_strength_curve},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"egspeedbench", test_endgame_speed_bench},
+    {"egplayout", test_endgame_playout_bench},
+    {"egmove1", test_endgame_move1},
     {"multipv", test_multi_pv},
+    {"kwgtailmerge", test_kwg_tail_merge},
+    {"kwgtailreorder", test_kwg_tail_reorder},
+    {"dawgpacked", test_dawg_packed},
+    {"kwgmergebench", test_kwg_merge_build_bench},
+    {"endgame_stream", test_endgame_progress_stream},
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
@@ -177,6 +191,9 @@ static TestEntry on_demand_test_table[] = {
     {"pegbench2", test_benchmark_peg_2},
     {"pegbench3", test_benchmark_peg_3},
     {"pegbench4", test_benchmark_peg_4},
+    {"pegbfix", test_peg_bench_fixture},
+    {"pegngap", test_peg_nested_gap},
+    {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {NULL, NULL} // Sentinel value to mark end of array

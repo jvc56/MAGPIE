@@ -1,5 +1,6 @@
 #include "peg_test.h"
 
+#include "../src/compat/ctime.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
@@ -15,6 +16,7 @@
 #include "../src/impl/move_gen.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
+#include "../src/str/peg_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
@@ -23,6 +25,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 // Several macondo PEG positions store an empty opponent rack, so MAGPIE loads
@@ -402,9 +405,15 @@ static void test_peg_macondo_only_onyx(void) {
       "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
       "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
   double win = 0.0;
+  // No time limit (budget 0 = unbounded): this case asserts an EXACT endgame
+  // value (7.5/8 = 0.9375), which is only produced when the halving stage runs
+  // to full fidelity. Any wall-clock cap could truncate the deep stage on a
+  // slow (ASAN/instrumented) build and drop the result to the ~0.625
+  // greedy-stage-0 fallback. The position is small and deterministic, so the
+  // solve terminates on its own (sub-second on a release build).
   peg_macondo_case("peg_macondo_only_onyx", cgp, "13L ONYX", "13L OXY",
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
-                   PEG_OPP_RATIONAL, /*time_budget=*/5.0,
+                   PEG_OPP_RATIONAL, /*time_budget=*/0.0,
                    /*expect_best=*/"13L ONYX", &win, /*out_spread=*/NULL);
   assert(win >= (7.5 / 8.0) - 0.005 && win <= (7.5 / 8.0) + 0.005); // 0.9375
 }
@@ -434,9 +443,16 @@ static void test_peg_macondo_axe(void) {
       "NOTArIZE1C2UN1/6ODAH2LA1/3TAHA2I2LED/2JUT4R2A1O/3G5P4D/3R3BrIEFING/"
       "3I5L4E/3K2DESYNES1M AEFGSTX/EEIOOST 370/341 0 -lex CSW21";
   double win = 0.0;
+  // No time limit (budget 0 = unbounded): asserts an EXACT value (70/72), only
+  // produced when the full 2-bag enumeration runs to fidelity. A wall-clock cap
+  // could truncate the deep stage on a slow build and drop the win, failing the
+  // assertion. This is a 2-in-bag position (heavier than the 1-in-bag onyx
+  // case), so it is the most cap-exposed of the macondo cases. (Measured: the
+  // solve completes in ~0.07s on a release build, so the old 5s cap was never
+  // actually hit in CI -- it was only latent risk on slow/instrumented builds.)
   peg_macondo_case("peg_macondo_axe", cgp, "6F (A)X(E)", /*move_str2=*/NULL,
                    /*redistribute_bag=*/0, /*single_ordering=*/false,
-                   PEG_OPP_RATIONAL, /*time_budget=*/5.0, /*expect_best=*/NULL,
+                   PEG_OPP_RATIONAL, /*time_budget=*/0.0, /*expect_best=*/NULL,
                    &win, /*out_spread=*/NULL);
   assert(win >= (70.0 / 72.0) - 0.005 && win <= (70.0 / 72.0) + 0.005);
 }
@@ -644,10 +660,11 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  void *user_data) {
+                                  bool reordered, void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
+  (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
   assert(win_pct >= 0.0 && win_pct <= 1.0);
@@ -933,7 +950,7 @@ static void peg_anchor_protected_move(
   string_builder_add_move(best_sb, board, &result.best_move, ld, false);
   printf("[%s] %s: win=%.4f spread=%+.3f (field best %s, stage %d, %.1fs)\n",
          name, studied_text, win, spread, string_builder_peek(best_sb),
-         result.last_completed_stage, result.elapsed_seconds);
+         result.last_completed_stage, ctimer_elapsed_seconds(&result.timer));
   if (win < 0.0) {
     log_fatal("[%s] protected move '%s' missing from ranking", name,
               studied_text);
@@ -1089,8 +1106,179 @@ void test_peg_4bag_pond_pessimistic(void) {
                             /*win_tol=*/0.02, /*spread_tol=*/12.0);
 }
 
+// Verify that peg_solve accepts a position without returning a
+// bag-out-of-range error. The best-equity move is used as the single
+// candidate so no expensive move search or multi-stage cascade runs.
+static void peg_assert_bag_accepted(const char *name, const char *cgp) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+
+  MoveList *gen_ml = move_list_create(1);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = gen_ml,
+      .move_record_type = MOVE_RECORD_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  assert(move_list_get_count(gen_ml) == 1);
+  const Move *only_moves[1] = {move_list_get_move(gen_ml, 0)};
+
+  ErrorStack *error_stack = error_stack_create();
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = config_get_thread_control(config);
+  args.num_threads = 1;
+  args.only_moves = only_moves;
+  args.n_only_moves = 1;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    char *err = error_stack_get_string_and_reset(error_stack);
+    log_fatal("[%s] peg_solve unexpectedly failed: %s", name, err);
+  }
+  assert(result.n_top_cands == 1);
+  assert(result.top_cands[0].win_pct >= 0.0 &&
+         result.top_cands[0].win_pct <= 1.0);
+  printf("[%s] accepted: win=%.4f spread=%+.3f\n", name,
+         result.top_cands[0].win_pct, result.top_cands[0].mean_spread);
+
+  peg_result_destroy(&result);
+  error_stack_destroy(error_stack);
+  move_list_destroy(gen_ml);
+  config_destroy(config);
+}
+
+// Verifies the opp-rack bag adjustment fix for the direct peg_solve API.
+// Two variants of the 1-in-bag ONYX position are tested:
+//   - Empty opp rack: all opp tiles hidden in the game bag (raw bag = 8,
+//     effective = 1 after subtracting the 7 unknown opp tiles).
+//   - Partial opp rack (3 tiles): 4 opp tiles hidden in the game bag (raw
+//     bag = 5, effective = 1 after subtracting 4 unknown tiles).
+// Both should be accepted as 1-in-bag positions; previously both failed with
+// a bag-out-of-range error.
+static void test_peg_opp_rack_sizes(void) {
+  // Empty opp rack: raw bag = 7 (opp) + 1 (real) = 8; effective = 1.
+  peg_assert_bag_accepted(
+      "peg_opp_empty",
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
+  // Partial opp rack (3 of 7 tiles known): raw bag = 4 (opp) + 1 (real) = 5;
+  // effective = 1. Opp originally held ACEISUY; keeping ACE and leaving ISUY
+  // as unknown tiles in the bag exercises the (RACK_SIZE - opp_rack_size)
+  // subtraction with a non-zero starting count.
+  peg_assert_bag_accepted(
+      "peg_opp_partial",
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
+}
+
+// Verifies the opp-rack bag adjustment fix through the CLI command path
+// (config / cgp / set -pegonly / peg), exercising both the empty and partial
+// opp-rack cases on the same 1-in-bag ONYX board.
+static void test_peg_opp_rack_sizes_cli(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score");
+
+  // Empty opp rack: the game bag holds all 7 opp tiles plus the 1 real bag
+  // tile; peg should subtract the 7 unknown opp tiles and see a 1-in-bag
+  // position.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  printf("[peg_cli_opp_empty] accepted: win=%.4f\n",
+         config_get_peg_result(config)->best_win);
+
+  // Partial opp rack (3 tiles known): the game bag holds 4 unknown opp tiles
+  // plus the 1 real bag tile; peg should subtract (RACK_SIZE - 3) = 4 and
+  // see a 1-in-bag position.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACE 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config, "set -pegonly 13L.ONYX");
+  load_and_exec_config_or_die(config, "peg");
+  assert(config_get_peg_result(config)->last_completed_stage >= 0);
+  printf("[peg_cli_opp_partial] accepted: win=%.4f\n",
+         config_get_peg_result(config)->best_win);
+
+  config_destroy(config);
+}
+
+// Feed synthetic per-ordering rows to the outcomes-cell renderer and assert the
+// compact string. Decouples the rendering from a live solve.
+static void assert_outcomes_eq(const PegPerScenario *rows, int n_rows,
+                               const char *expected) {
+  char *got = peg_build_outcomes_string_rows(rows, n_rows);
+  if (strcmp(got, expected) != 0) {
+    printf("[peg_outcomes] expected '%s' got '%s'\n", expected, got);
+  }
+  assert(strcmp(got, expected) == 0);
+  free(got);
+}
+
+static void test_peg_outcomes_string(void) {
+  // A 2-tile play (drawn pair + one bag tile left): the mover draws its two
+  // tiles together, so every draw must lead with the 2-tile multiset (DH/A, not
+  // D/H/A). Draws with the same total tiles but a different drawn pair stay
+  // distinct (DH/R and DR/H, never a merged D/HR). Three wins, three losses, so
+  // the shorter (here equal -> win) list is the one shown.
+  const PegPerScenario two_tile[] = {
+      {.drawn = "DH", .remaining = "A", .weight = 2, .mover_total = 5},
+      {.drawn = "DH", .remaining = "R", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "H", .weight = 2, .mover_total = 5},
+      {.drawn = "DR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "A", .weight = 2, .mover_total = -5},
+      {.drawn = "FR", .remaining = "D", .weight = 2, .mover_total = -5},
+  };
+  assert_outcomes_eq(two_tile, 6, "W: DH/Ax2 DH/Rx2 DR/Hx2");
+
+  // A play that draws the whole bag (no remainder): the draw is a bare
+  // multiset, no slash.
+  const PegPerScenario no_remainder[] = {
+      {.drawn = "AD", .remaining = "", .weight = 4, .mover_total = 5},
+      {.drawn = "EI", .remaining = "", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(no_remainder, 2, "W: ADx4");
+
+  // A 1-tile draw with a 2-tile bag remainder. When both remainder orderings
+  // share a bucket the remainder collapses to a multiset behind the prefix
+  // (X/YZ); the weights of its orderings sum into the one token.
+  const PegPerScenario rem_multiset[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 3, .mover_total = 5},
+      {.drawn = "X", .remaining = "AB", .weight = 3, .mover_total = -5},
+      {.drawn = "X", .remaining = "BA", .weight = 3, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_multiset, 4, "W: X/YZx6");
+
+  // Same prefix, but the remainder orderings split across buckets, so the
+  // remainder is "/"-segmented behind the drawn prefix (X/Y/Z).
+  const PegPerScenario rem_split[] = {
+      {.drawn = "X", .remaining = "YZ", .weight = 4, .mover_total = 5},
+      {.drawn = "X", .remaining = "ZY", .weight = 4, .mover_total = -5},
+  };
+  assert_outcomes_eq(rem_split, 2, "W: X/Y/Zx4");
+}
+
 void test_peg(void) {
   log_set_level(LOG_FATAL);
+  test_peg_outcomes_string();
   test_peg_main_1bag_pass();
   test_peg_main_2bag_single();
   test_peg_main_3bag_single();
@@ -1106,4 +1294,7 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  // Opp-rack bag adjustment fix: empty and partial opp racks.
+  test_peg_opp_rack_sizes();
+  test_peg_opp_rack_sizes_cli();
 }

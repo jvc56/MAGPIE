@@ -69,6 +69,10 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 
 double sim_results_get_cutoff(const SimResults *sim_results);
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
+// Record the utility-blend spread weight the sim ran with; see
+// sim_results_get_best_move for how it affects best-move selection.
+void sim_results_set_utility_w_spread(SimResults *sim_results,
+                                      double utility_w_spread);
 uint64_t sim_results_get_num_infer_leaves(const SimResults *sim_results);
 void sim_results_set_num_infer_leaves(SimResults *sim_results,
                                       uint64_t num_infer_leaves);
