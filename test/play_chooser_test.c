@@ -819,10 +819,11 @@ static void test_challenge_stage_combinations(void) {
                             /*utility_scale=*/true);
   }
 
-  // SIM/EG: same real bag-5 fixture, but the phony plays five tiles (1I CANOE,
-  // forming the non-word WCANOE off the row-1 W with no cross-words). The keep
-  // branch draws five and empties the bag (endgame); the challenge branch keeps
-  // its bag 5 (sim). Exercises the single-branch endgame -> utility projection.
+  // SIM/EG: same real bag-5 fixture, but the phony 1H (W)CANOE* plays five
+  // tiles that hook the row-1 W into the non-word WCANOE (no cross-words). The
+  // keep branch draws five and empties the bag (endgame); the challenge branch
+  // keeps its bag 5 (sim). Exercises the single-branch endgame -> utility
+  // projection.
   {
     load_and_exec_config_or_die(
         config,
@@ -835,9 +836,9 @@ static void test_challenge_stage_combinations(void) {
                             /*utility_scale=*/true);
   }
 
-  // PEG/EG: the real bag-4 fixture with a four-tile phony (1I CANO, forming the
-  // non-word WCANO). The keep branch draws four and empties the bag (endgame);
-  // the challenge branch keeps its bag 4 (PEG).
+  // PEG/EG: the real bag-4 fixture with the four-tile phony 1H (W)CANO* (hooks
+  // the row-1 W into the non-word WCANO). The keep branch draws four and
+  // empties the bag (endgame); the challenge branch keeps its bag 4 (PEG).
   {
     load_and_exec_config_or_die(
         config,
