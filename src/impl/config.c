@@ -7960,6 +7960,17 @@ typedef struct AnalyzeSummary {
   int game_count;
 } AnalyzeSummary;
 
+// Advances *str past literal if str starts with it, and returns true.
+// Otherwise leaves *str untouched and returns false.
+static bool consume_literal(const char **str, const char *literal) {
+  const size_t literal_length = strlen(literal);
+  if (strncmp(*str, literal, literal_length) != 0) {
+    return false;
+  }
+  *str += literal_length;
+  return true;
+}
+
 // Reads report_path and, if it ends in a "=== Analysis Complete: ..."
 // trailer (written unconditionally by analyze_game on a clean run), parses
 // the turn count and clamped WPL/EqL/AEqL totals out of it. Returns false
@@ -7979,9 +7990,35 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
   const char *marker = strstr(content, "=== Analysis Complete:");
   bool ok = false;
   if (marker) {
-    ok = sscanf(marker,
-                "=== Analysis Complete: turns=%d wpl=%lf eql=%lf aeql=%lf ===",
-                turns, wpl, eql, aeql) == 4;
+    ErrorStack *parse_error_stack = error_stack_create();
+    const char *pos = marker;
+    const char *end;
+    ok = consume_literal(&pos, "=== Analysis Complete: turns=");
+    if (ok) {
+      *turns = string_to_int_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " wpl=");
+    }
+    if (ok) {
+      *wpl = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " eql=");
+    }
+    if (ok) {
+      *eql = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " aeql=");
+    }
+    if (ok) {
+      *aeql = string_to_double_prefix(pos, &end, parse_error_stack);
+      pos = end;
+      ok = error_stack_is_empty(parse_error_stack) &&
+           consume_literal(&pos, " ===");
+    }
+    error_stack_destroy(parse_error_stack);
   }
   free(content);
   return ok;
