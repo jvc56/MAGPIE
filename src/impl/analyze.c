@@ -164,23 +164,25 @@ static double compute_adjusted_equity_lost(const TurnResult *tr,
   return equity_lost;
 }
 
-// Computes WPL/EqL/AEqL for a single turn result. WPL and EqL are clamped to
-// >= 0: a negative value (e.g. EqL when the actual play had lower Wp but
-// higher Eq than best, since "best" is chosen by Wp, not Eq) doesn't
-// represent a real cost, and clamping here keeps every consumer (the
-// per-turn table, CSV output, and the report's completion trailer) and every
-// aggregate (Total/Avg rows, tournament stats) consistent with each other.
+// Computes WPL/EqL/AEqL for a single turn result. compute_adjusted_equity_lost
+// needs the raw (possibly negative) win_pct_lost/equity_lost to decide
+// whether to substitute the Wp-derived value, so it must run before the
+// clamp below. WPL and EqL are then clamped to >= 0 for reporting: a
+// negative value (e.g. EqL when the actual play had lower Wp but higher Eq
+// than best, since "best" is chosen by Wp, not Eq) doesn't represent a real
+// cost, and clamping here keeps every consumer (the per-turn table, CSV
+// output, and the report's completion trailer) and every aggregate
+// (Total/Avg rows, tournament stats) consistent with each other. AEqL is
+// already >= 0 by construction and needs no clamping.
 static void compute_turn_losses(const TurnResult *tr, double *win_pct_lost_out,
                                 double *equity_lost_out,
                                 double *adjusted_equity_lost_out) {
-  double win_pct_lost = compute_win_pct_lost(tr);
-  double equity_lost = tr->best.equity - tr->actual.equity;
-  win_pct_lost = win_pct_lost > 0.0 ? win_pct_lost : 0.0;
-  equity_lost = equity_lost > 0.0 ? equity_lost : 0.0;
+  const double win_pct_lost = compute_win_pct_lost(tr);
+  const double equity_lost = tr->best.equity - tr->actual.equity;
   const double adjusted_equity_lost =
       compute_adjusted_equity_lost(tr, equity_lost, win_pct_lost);
-  *win_pct_lost_out = win_pct_lost;
-  *equity_lost_out = equity_lost;
+  *win_pct_lost_out = win_pct_lost > 0.0 ? win_pct_lost : 0.0;
+  *equity_lost_out = equity_lost > 0.0 ? equity_lost : 0.0;
   *adjusted_equity_lost_out = adjusted_equity_lost;
 }
 
