@@ -53,13 +53,14 @@ enum {
 
 // Equity loss (EqL) is normally best.equity - actual.equity, but this can go
 // negative when the actual play had lower Wp but higher Eq than best (best
-// is chosen by Wp, not Eq). Adjusted equity loss (AEqL) is the larger of EqL
-// and the Wp lost converted to an equivalent equity value, so the metric
-// never reports less cost than the Wp lost alone would imply. This
-// conversion factor was derived by regressing Eq gap against Wp gap across
-// many simulated candidate moves: 1 percentage point of Wp is worth about
-// this many equity points in the well-behaved (non-extreme Wp, non-blowout)
-// part of the curve.
+// is chosen by Wp, not Eq). Only in that case, adjusted equity loss (AEqL)
+// substitutes the Wp lost converted to an equivalent equity value, so the
+// metric never reports a negative cost for a play that was actually worse by
+// Wp. In every other case AEqL is just EqL. This conversion factor was
+// derived by regressing Eq gap against Wp gap across many simulated
+// candidate moves: 1 percentage point of Wp is worth about this many equity
+// points in the well-behaved (non-extreme Wp, non-blowout) part of the
+// curve.
 #define WPL_TO_EQL_CONVERSION_FACTOR 2.26
 
 typedef enum {
@@ -143,14 +144,26 @@ static double compute_win_pct_lost(const TurnResult *tr) {
 // See the WPL_TO_EQL_CONVERSION_FACTOR comment above for what this adjusts
 // and why. AEqL is only nonzero when the actual play differs from best
 // (rank_idx == 0 means actual was best), same as WPL/EqL are both 0 then.
+// A negative equity_lost means the actual play had higher equity than best,
+// which only happens because best is chosen by Wp, not Eq -- so the actual
+// play must have had lower Wp in that case, and AEqL substitutes the
+// Wp-derived equity value. If equity_lost is negative but win_pct_lost is
+// also negative, the actual play was strictly better in both dimensions and
+// should have been best, which is a logic error upstream.
 static double compute_adjusted_equity_lost(const TurnResult *tr,
                                            double equity_lost,
                                            double win_pct_lost) {
   if (tr->actual.rank_idx == 0) {
     return 0.0;
   }
-  const double wpl_as_eql = win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
-  return wpl_as_eql > equity_lost ? wpl_as_eql : equity_lost;
+  if (equity_lost < 0.0) {
+    if (win_pct_lost < 0.0) {
+      log_fatal("actual play was not best but has a negative equity lost and "
+                "negative win_pct lost");
+    }
+    return win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
+  }
+  return equity_lost;
 }
 
 // Computes WPL/EqL/AEqL for a single turn result. WPL and EqL are clamped to
