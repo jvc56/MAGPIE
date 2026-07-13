@@ -20,7 +20,7 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
-#include "../ent/sim_args.h" // sim_utility_blend: shared score+win utility
+#include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
 #include "../ent/thread_control.h"
@@ -428,8 +428,12 @@ static double play_chooser_peg_utility(const PlayChooserStrategy *strategy,
 // narrow one and stays comparable to a pre-endgame branch's utility.
 static double play_chooser_peg_decided_utility(const PlayChooserStrategy *s,
                                                double final_spread) {
-  const double win_pct =
-      final_spread > 0.0 ? 1.0 : (final_spread < 0.0 ? 0.0 : 0.5);
+  double win_pct = 0.5; // tie
+  if (final_spread > 0.0) {
+    win_pct = 1.0;
+  } else if (final_spread < 0.0) {
+    win_pct = 0.0;
+  }
   return play_chooser_peg_utility(s, win_pct, final_spread);
 }
 
@@ -495,12 +499,12 @@ static PlayChooserBranchValue play_chooser_peg_branch_value(
   }
   if (bag_get_letters(game_get_bag(game)) == 0) {
     int32_t endgame_value = 0;
-    if (play_chooser_run_endgame(
-            strategy, endgame_ctx, endgame_results,
-            play_chooser_get_endgame_tt(play_chooser), game, num_threads,
-            budget_seconds, /*external_thread_control=*/NULL,
-            /*use_window=*/false, 0, 0, /*out_move=*/NULL, &endgame_value,
-            error_stack)) {
+    if (play_chooser_run_endgame(strategy, endgame_ctx, endgame_results,
+                                 play_chooser_get_endgame_tt(play_chooser),
+                                 game, num_threads, budget_seconds,
+                                 /*external_thread_control=*/NULL,
+                                 /*use_window=*/false, 0, 0, /*out_move=*/NULL,
+                                 &endgame_value, error_stack)) {
       return play_chooser_branch_value(play_chooser_peg_decided_utility(
           strategy, play_chooser_get_spread(game) + (double)endgame_value));
     }
@@ -563,10 +567,10 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   case PLAY_CHOOSER_EVAL_PEG:
     // Selecting the actual play: run the full cascade so the halving stages'
     // exact endgame refinement picks between the top candidates.
-    chose_move = play_chooser_run_peg(
-        play_chooser, game, budget_seconds,
-        play_chooser_get_num_threads(strategy), /*greedy_only=*/false, out_move,
-        /*out_value=*/NULL, error_stack);
+    chose_move = play_chooser_run_peg(play_chooser, game, budget_seconds,
+                                      play_chooser_get_num_threads(strategy),
+                                      /*greedy_only=*/false, out_move,
+                                      /*out_value=*/NULL, error_stack);
     break;
   }
   if (!error_stack_is_empty(error_stack)) {
@@ -641,9 +645,8 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     // PEG values branches by the score+win utility; keep a game-over branch on
     // that scale so it stays comparable to a sibling scored the same way.
     if (eval == PLAY_CHOOSER_EVAL_PEG) {
-      return play_chooser_branch_value(
-          play_chooser_peg_decided_utility(&play_chooser->strategy,
-                                           final_spread));
+      return play_chooser_branch_value(play_chooser_peg_decided_utility(
+          &play_chooser->strategy, final_spread));
     }
     return play_chooser_branch_value(final_spread);
   }
@@ -679,8 +682,7 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     return play_chooser_peg_branch_value(
         play_chooser, game, budget_seconds,
         play_chooser_get_num_threads(&play_chooser->strategy),
-        &play_chooser->endgame_ctx, play_chooser->endgame_results,
-        error_stack);
+        &play_chooser->endgame_ctx, play_chooser->endgame_results, error_stack);
   }
   return PLAY_CHOOSER_BRANCH_INVALID;
 }
@@ -1053,8 +1055,9 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
         play_chooser, keep_game, eval, per_branch_seconds, error_stack);
     decision->keep_value = keep_bv.value;
     if (error_stack_is_empty(error_stack)) {
-      const PlayChooserBranchValue challenge_bv = play_chooser_evaluate_position(
-          play_chooser, challenge_game, eval, per_branch_seconds, error_stack);
+      const PlayChooserBranchValue challenge_bv =
+          play_chooser_evaluate_position(play_chooser, challenge_game, eval,
+                                         per_branch_seconds, error_stack);
       decision->challenge_value = challenge_bv.value;
       decision->should_challenge =
           play_chooser_should_challenge(keep_bv, challenge_bv);
