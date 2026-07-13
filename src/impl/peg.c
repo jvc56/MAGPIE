@@ -1999,13 +1999,15 @@ static void peg_force_protected_to_front(PegRankedCand *ranked, int count,
   if (n_protect <= 0 || count <= 1) {
     return;
   }
+  int write_idx = 0;
   for (int idx = 0; idx < count; idx++) {
     if (peg_move_protected(&ranked[idx].move, protect_moves, n_protect)) {
-      if (idx != 0) {
-        const PegRankedCand tmp = ranked[0];
-        ranked[0] = ranked[idx];
+      if (idx != write_idx) {
+        const PegRankedCand tmp = ranked[write_idx];
+        ranked[write_idx] = ranked[idx];
         ranked[idx] = tmp;
       }
+      write_idx++;
     }
   }
 }
@@ -2019,13 +2021,15 @@ peg_force_protected_move_ptrs_to_front(const Move **moves, int count,
   if (n_protect <= 0 || count <= 1) {
     return;
   }
+  int write_idx = 0;
   for (int idx = 0; idx < count; idx++) {
     if (peg_move_protected(moves[idx], protect_moves, n_protect)) {
-      if (idx != 0) {
-        const Move *tmp = moves[0];
-        moves[0] = moves[idx];
+      if (idx != write_idx) {
+        const Move *tmp = moves[write_idx];
+        moves[write_idx] = moves[idx];
         moves[idx] = tmp;
       }
+      write_idx++;
     }
   }
 }

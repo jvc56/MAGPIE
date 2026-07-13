@@ -1482,6 +1482,13 @@ void analyze_game(AnalyzeArgs *analyze_args, AnalyzeCtx **analyze_ctx,
   // aggregation) read back a game's total losses without reparsing the
   // human-readable tables. compute_turn_losses already clamps WPL/EqL (and
   // therefore AEqL) to >= 0 per turn, so these sums need no further clamping.
+  // Deliberate consequences of always appending this trailer:
+  // - It is appended to CSV-mode reports too, so downstream CSV consumers
+  //   must tolerate this non-CSV footer line.
+  // - Directory-mode skip logic in read_report_completion_stats keys only
+  //   off the trailer's presence, not the analysis settings used to produce
+  //   it. A report re-run under different plies/plays/budgets still counts
+  //   as complete; the only way to force a refresh is to delete the report.
   if (error_stack_is_empty(error_stack)) {
     double total_win_pct_lost = 0.0;
     double total_equity_lost = 0.0;

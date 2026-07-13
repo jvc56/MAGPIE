@@ -2210,8 +2210,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
-        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
         ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
+        ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
         ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
         ARG_TOKEN_P1_INFERENCE_MARGIN,     /* im1 */
@@ -3115,11 +3115,11 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
-  const double endgame_time_limit = config->endgame_time_limit_seconds != 0
-                                        ? config->endgame_time_limit_seconds
-                                        : config->time_limit_seconds;
-  endgame_args->soft_time_limit = endgame_time_limit;
-  endgame_args->hard_time_limit = endgame_time_limit;
+  // 0 = unlimited, matching the plain "endgame" command's historical
+  // default. Callers that want -tlim to bound an unset -etlim (e.g.
+  // autoanalyze) must opt in explicitly via config_fill_analyze_args.
+  endgame_args->soft_time_limit = config->endgame_time_limit_seconds;
+  endgame_args->hard_time_limit = config->endgame_time_limit_seconds;
   endgame_args->seed = config->seed;
 }
 
@@ -7936,6 +7936,12 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
+  // Unlike the plain "endgame" command, autoanalyze bounds an unset -etlim
+  // with -tlim so a single game's endgame turns can't run unbounded.
+  if (config->endgame_time_limit_seconds == 0) {
+    analyze_args->endgame_args.soft_time_limit = config->time_limit_seconds;
+    analyze_args->endgame_args.hard_time_limit = config->time_limit_seconds;
+  }
   config_fill_peg_args(config, &analyze_args->peg_args);
   analyze_args->human_readable = config->human_readable;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
