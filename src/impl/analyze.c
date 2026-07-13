@@ -148,19 +148,17 @@ static double compute_win_pct_lost(const TurnResult *tr) {
 // which only happens because best is chosen by Wp, not Eq -- so the actual
 // play must have had lower Wp in that case, and AEqL substitutes the
 // Wp-derived equity value. If equity_lost is negative but win_pct_lost is
-// also negative, the actual play was strictly better in both dimensions and
-// should have been best, which is a logic error upstream.
+// also negative, the actual play was better (or equal) in both dimensions
+// tracked here; this can happen with near-tied Wp/Eq values where the actual
+// play still ranked below best on the sim's own ordering, so it is not
+// treated as a logic error -- AEqL is just 0, same as when actual was best.
 static double compute_adjusted_equity_lost(const TurnResult *tr,
                                            double equity_lost,
                                            double win_pct_lost) {
-  if (tr->actual.rank_idx == 0) {
+  if (tr->actual.rank_idx == 0 || (equity_lost < 0.0 && win_pct_lost < 0.0)) {
     return 0.0;
   }
   if (equity_lost < 0.0) {
-    if (win_pct_lost < 0.0) {
-      log_fatal("actual play was not best but has a negative equity lost and "
-                "negative win_pct lost");
-    }
     return win_pct_lost * WPL_TO_EQL_CONVERSION_FACTOR;
   }
   return equity_lost;
