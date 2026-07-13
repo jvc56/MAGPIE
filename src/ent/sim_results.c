@@ -32,6 +32,12 @@ struct SimmedPlay {
   Stat *equity_stat;
   Stat *leftover_stat;
   Stat *win_pct_stat;
+  // Mean of the per-rollout win%+spread blend (sim_utility_blend) that BAI
+  // samples. Its mean is exactly the arm's mean utility BAI ranks by, so a
+  // caller can read the utility the simmer chose without re-blending summary
+  // stats (which would suffer a Jensen gap and use spread-gain, not the
+  // absolute spread the simmer sigmoids).
+  Stat *utility_stat;
   uint64_t similarity_key;
   int play_index_by_sort_type;
   XoshiroPRNG *prng;
@@ -98,6 +104,7 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->equity_stat = stat_create(true);
   simmed_play->leftover_stat = stat_create(true);
   simmed_play->win_pct_stat = stat_create(true);
+  simmed_play->utility_stat = stat_create(true);
   simmed_play->num_alloc_plies = num_plies;
   simmed_play->ply_infos = malloc_or_die(sizeof(PlyInfo) * num_plies);
   for (int j = 0; j < num_plies; j++) {
@@ -119,6 +126,7 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   stat_reset(simmed_play->equity_stat);
   stat_reset(simmed_play->leftover_stat);
   stat_reset(simmed_play->win_pct_stat);
+  stat_reset(simmed_play->utility_stat);
   for (int j = 0; j < simmed_play->num_alloc_plies && j < new_num_plies; j++) {
     ply_info_reset(&simmed_play->ply_infos[j], use_heat_map);
   }
@@ -244,6 +252,7 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
     stat_destroy(simmed_plays[i]->equity_stat);
     stat_destroy(simmed_plays[i]->leftover_stat);
     stat_destroy(simmed_plays[i]->win_pct_stat);
+    stat_destroy(simmed_plays[i]->utility_stat);
     prng_destroy(simmed_plays[i]->prng);
     free(simmed_plays[i]);
   }
@@ -337,6 +346,10 @@ const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
 
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
+}
+
+const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->utility_stat;
 }
 
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play) {
@@ -512,6 +525,12 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
   return wpct;
 }
 
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
+  cpthread_mutex_lock(&simmed_play->mutex);
+  stat_push(simmed_play->utility_stat, utility, 1);
+  cpthread_mutex_unlock(&simmed_play->mutex);
+}
+
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
                                                   bool valid) {
   sim_results->valid_for_current_game_state = valid;
@@ -658,34 +677,50 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
   return best_play_idx;
 }
 
+// Index of the play the finished sim considers best. With a nonzero spread
+// weight, prefer BAI's chosen arm: that's the one with the highest mean
+// *utility* (wpct blended with sigmoid(spread)). Falling through to
+// sim_results_get_best_move_index would re-rank by raw win_pct_stat, ignoring
+// the blend entirely.
+//
+// With a ZERO spread weight the sample utility is the raw 0/0.5/1 win outcome,
+// which loses its gradient whenever win% saturates (decided games: every arm's
+// mean is ~0 or ~1) or ties exactly. BAI's arm choice among tied arms is then
+// effectively arbitrary, and measured game-pair autoplay showed it bleeding
+// 5-60+ points per decided turn (playing rank-15 moves over same-win%
+// higher-scoring ones). Use the win% comparator instead: it breaks
+// win%-within-cutoff ties by mean equity, matching the displayed sort and
+// recovering spread at no win% cost. Returns -1 if there is no best play.
+static int sim_results_get_best_play_index(const SimResults *sim_results) {
+  if (sim_results->utility_w_spread == 0.0) {
+    return sim_results_get_best_move_index(sim_results);
+  }
+  const int best_play_idx =
+      bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
+  if (best_play_idx < 0) {
+    return sim_results_get_best_move_index(sim_results);
+  }
+  return best_play_idx;
+}
+
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  // With a nonzero spread weight, prefer BAI's chosen arm: that's the one
-  // with the highest mean *utility* (wpct blended with sigmoid(spread)).
-  // Falling through to sim_results_get_best_move_index would re-rank by raw
-  // win_pct_stat, ignoring the blend entirely.
-  //
-  // With a ZERO spread weight the sample utility is the raw 0/0.5/1 win
-  // outcome, which loses its gradient whenever win% saturates (decided
-  // games: every arm's mean is ~0 or ~1) or ties exactly. BAI's arm choice
-  // among tied arms is then effectively arbitrary, and measured game-pair
-  // autoplay showed it bleeding 5-60+ points per decided turn (playing
-  // rank-15 moves over same-win% higher-scoring ones). Use the win%
-  // comparator instead: it breaks win%-within-cutoff ties by mean equity,
-  // matching the displayed sort and recovering spread at no win% cost.
-  int best_play_idx;
-  if (sim_results->utility_w_spread == 0.0) {
-    best_play_idx = sim_results_get_best_move_index(sim_results);
-  } else {
-    best_play_idx =
-        bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
-    if (best_play_idx < 0) {
-      best_play_idx = sim_results_get_best_move_index(sim_results);
-    }
-  }
+  const int best_play_idx = sim_results_get_best_play_index(sim_results);
   if (best_play_idx < 0) {
     return NULL;
   }
   return simmed_play_get_move(
       sim_results_get_simmed_play(sim_results, best_play_idx));
+}
+
+// Mean utility (win%+spread blend, in [0, 1]) of the sim's best play -- the
+// exact per-arm mean BAI ranks by, recorded per rollout in utility_stat. Not
+// thread safe, assumes the sim is finished.
+double sim_results_get_best_move_utility(const SimResults *sim_results) {
+  const int best_play_idx = sim_results_get_best_play_index(sim_results);
+  if (best_play_idx < 0) {
+    return 0.0;
+  }
+  return stat_get_mean(simmed_play_get_utility_stat(
+      sim_results_get_simmed_play(sim_results, best_play_idx)));
 }

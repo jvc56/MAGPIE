@@ -555,9 +555,12 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
-                           simmer->utility_w_spread,
-                           simmer->utility_spread_scale);
+  const double utility =
+      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+                        simmer->utility_w_spread, simmer->utility_spread_scale);
+  // Record the exact sample BAI averages so the arm's mean utility is readable.
+  simmed_play_add_utility_stat(simmed_play, utility);
+  return utility;
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {

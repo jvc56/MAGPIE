@@ -34,6 +34,7 @@ uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
                                         ply_info_count_t count_type);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
+const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
 void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
@@ -44,6 +45,9 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);
+// Records one rollout's win%+spread blend (sim_utility_blend value) so the
+// play's mean utility -- what BAI ranks by -- can be read back exactly.
+void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
 
 typedef struct SimResults SimResults;
 
@@ -94,5 +98,7 @@ bool sim_results_display_plays_are_similar(const SimResults *sim_results,
                                            const int sp2_index);
 int sim_results_get_best_move_index(const SimResults *sim_results);
 const Move *sim_results_get_best_move(const SimResults *sim_results);
+// Mean utility (win%+spread blend in [0, 1]) of the sim's best play.
+double sim_results_get_best_move_utility(const SimResults *sim_results);
 
 #endif

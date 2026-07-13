@@ -4,6 +4,7 @@
 #include "../src/def/config_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
@@ -24,6 +25,7 @@
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -711,6 +713,161 @@ static void test_peg_challenge_decision(void) {
   config_destroy(config);
 }
 
+// One stage-combination challenge case: the keep branch (bag B-T, the opponent
+// draws its T replacements) and the challenge branch (bag B, no draw) are each
+// valued by the method for their own stage and projected onto the shared [0, 1]
+// utility. Verifies the per-branch routing runs end to end and both branch
+// values land on that comparable scale. game_before_move keeps ownership.
+static void assert_stage_combo_case(const PlayChooserStrategy *strategy,
+                                    const Game *game_before_move,
+                                    const char *phony_str, bool utility_scale) {
+  ErrorStack *error_stack = error_stack_create();
+  ValidatedMoves *vms = validated_moves_create(game_before_move, 0, phony_str,
+                                               true, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_is_phony(vms, 0));
+  const Move *phony = validated_moves_get_move(vms, 0);
+
+  PlayChooser *play_chooser = play_chooser_create(strategy);
+  ChallengeDecision decision;
+  play_chooser_decide_challenge(play_chooser, game_before_move, phony,
+                                &decision, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(decision.move_is_phony);
+  assert(isfinite(decision.keep_value) && isfinite(decision.challenge_value));
+  // A sim/PEG/endgame-valued branch reports the score+win utility in [0, 1]; a
+  // both-endgame decision keeps its exact-spread scale (its higher-spread
+  // verdict equals the higher-utility one, so the branches stay comparable).
+  if (utility_scale) {
+    assert(decision.keep_value >= 0.0 && decision.keep_value <= 1.0);
+    assert(decision.challenge_value >= 0.0 && decision.challenge_value <= 1.0);
+  }
+
+  play_chooser_destroy(play_chooser);
+  validated_moves_destroy(vms);
+  error_stack_destroy(error_stack);
+}
+
+// Exercises all six keep/challenge game-stage combinations of a challenge
+// decision (challenge/keep): SIM/SIM, SIM/PEG, SIM/EG, PEG/PEG, PEG/EG, EG/EG.
+// The challenge branch keeps the pre-move bag; the keep branch draws the
+// phony's tiles, so it is always at the same or a later stage. Each branch must
+// be valued by the method for its own bag size, all on the shared utility
+// scale.
+static void test_challenge_stage_combinations(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  const PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .enable_challenges = true,
+      .challenge_decision_seconds = 2.0,
+      .num_threads = 2,
+      .win_pcts = win_pcts,
+      .utility_w_winpct = 1.0,
+      .utility_w_spread = 1.0,
+      .utility_spread_scale = 100.0,
+      .seed = 42,
+  };
+
+  // SIM/SIM: the SEALED_CLUSTER board leaves a full (~82-tile) bag, so both
+  // branches (keep bag ~81, challenge bag ~82) are sims. "G4 I.." is a 1-tile
+  // phony. A real bag keeps the game state consistent for the sim's rollouts.
+  {
+    char *cgp = get_formatted_string(
+        "cgp %s IFFGWWY/AEILNOT 300/300 0 -lex CSW21;", SEALED_CLUSTER_ROWS);
+    load_and_exec_config_or_die(config, cgp);
+    free(cgp);
+    const Game *game = config_get_game(config);
+    assert(bag_get_letters(game_get_bag(game)) > PEG_MAX_BAG + 1);
+    assert(game_get_player_on_turn_index(game) == 0);
+    assert_stage_combo_case(&strategy, game, "G4 I..", /*utility_scale=*/true);
+  }
+
+  // PEG/PEG: a real 4-in-the-bag position with a 1-tile hook phony -- the keep
+  // branch draws one (bag 3, PEG) and the challenge branch keeps its bag 4
+  // (PEG). (Same fixture as test_peg_challenge_decision.)
+  {
+    load_and_exec_config_or_die(
+        config,
+        "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+        "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+        "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;");
+    const Game *game = config_get_game(config);
+    assert(bag_get_letters(game_get_bag(game)) == 4);
+    assert_stage_combo_case(&strategy, game, "2A O.....",
+                            /*utility_scale=*/true);
+  }
+
+  // SIM/PEG: the same real fixture with one fewer tile on the mover's rack, so
+  // the bag is 5: the keep branch draws one (bag 4, PEG) and the challenge
+  // branch keeps its bag 5 (sim).
+  {
+    load_and_exec_config_or_die(
+        config,
+        "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+        "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+        "12NaM/12ATE/13ST/14H ACEINO/DEIINOS 361/397 0 -lex CSW24;");
+    const Game *game = config_get_game(config);
+    assert(bag_get_letters(game_get_bag(game)) == 5);
+    assert_stage_combo_case(&strategy, game, "2A O.....",
+                            /*utility_scale=*/true);
+  }
+
+  // SIM/EG: same real bag-5 fixture, but the phony plays five tiles (1I CANOE,
+  // forming the non-word WCANOE off the row-1 W with no cross-words). The keep
+  // branch draws five and empties the bag (endgame); the challenge branch keeps
+  // its bag 5 (sim). Exercises the single-branch endgame -> utility projection.
+  {
+    load_and_exec_config_or_die(
+        config,
+        "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+        "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+        "12NaM/12ATE/13ST/14H ACEINO/DEIINOS 361/397 0 -lex CSW24;");
+    const Game *game = config_get_game(config);
+    assert(bag_get_letters(game_get_bag(game)) == 5);
+    assert_stage_combo_case(&strategy, game, "1H .CANOE",
+                            /*utility_scale=*/true);
+  }
+
+  // PEG/EG: the real bag-4 fixture with a four-tile phony (1I CANO, forming the
+  // non-word WCANO). The keep branch draws four and empties the bag (endgame);
+  // the challenge branch keeps its bag 4 (PEG).
+  {
+    load_and_exec_config_or_die(
+        config,
+        "cgp 3V3W6L/1BEATY1U5GI/2XU3S4FEN/3TA2H4LOY/2GEN1DUCAT1AD1/"
+        "2O1I1I2WRITE1/2V1M1ZOAEA4/3JAGER2DRILL/2BOtONE5O1/1FERER7Q1/4S8U1/"
+        "12NaM/12ATE/13ST/14H ACEINOP/DEIINOS 361/397 0 -lex CSW24;");
+    const Game *game = config_get_game(config);
+    assert(bag_get_letters(game_get_bag(game)) == 4);
+    assert_stage_combo_case(&strategy, game, "1H .CANO",
+                            /*utility_scale=*/true);
+  }
+
+  // EG/EG: drain the bag (both branches at bag 0 -- consistent, since an
+  // endgame draws no tiles). Endgame eval on both.
+  {
+    char *cgp = get_formatted_string(
+        "cgp %s IFFGWWY/AEILNOT 300/300 0 -lex CSW21;", SEALED_CLUSTER_ROWS);
+    load_and_exec_config_or_die(config, cgp);
+    free(cgp);
+    const Game *game = config_get_game(config);
+    drain_bag(game);
+    assert(bag_get_letters(game_get_bag(game)) == 0);
+    assert_stage_combo_case(&strategy, game, "G4 I..", /*utility_scale=*/false);
+  }
+
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 void test_play_chooser(void) {
   test_game_timer();
   test_keep_phony_for_triple_triple();
@@ -720,4 +877,5 @@ void test_play_chooser(void) {
   test_endgame_keep_phony_to_deny_better_replay();
   test_endgame_initial_window();
   test_peg_challenge_decision();
+  test_challenge_stage_combinations();
 }

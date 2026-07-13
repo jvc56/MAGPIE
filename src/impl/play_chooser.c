@@ -22,7 +22,6 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
-#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/words.h"
@@ -211,6 +210,10 @@ static void play_chooser_choose_static_move(PlayChooser *play_chooser,
 
 // Generate the top static candidates and simulate them within the time
 // budget. Returns false if no move could be produced.
+static double play_chooser_util_w_winpct(const PlayChooserStrategy *strategy);
+static double
+play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
+
 static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
                                  double budget_seconds, Move *out_move,
                                  ErrorStack *error_stack) {
@@ -276,9 +279,11 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   sim_args.bai_options.parent_worker_thread_index = 0;
   sim_args.bai_options.arm_avoid_prune = NULL;
   sim_args.bai_options.num_arm_avoid_prune = 0;
-  sim_args.utility_w_winpct = 1.0;
-  sim_args.utility_w_spread = 0.0;
-  sim_args.utility_spread_scale = 100.0;
+  // Run the sim under the chooser's utility weights so it ranks by (and
+  // records) the same win%+spread blend used as the branch's value below.
+  sim_args.utility_w_winpct = play_chooser_util_w_winpct(strategy);
+  sim_args.utility_w_spread = strategy->utility_w_spread;
+  sim_args.utility_spread_scale = play_chooser_util_spread_scale(strategy);
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -481,66 +486,6 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, Game *game,
   return chose;
 }
 
-// Value one branch of a PEG challenge decision by the score+win utility, using
-// an explicit thread count and the caller's endgame scratch so two branches
-// can be valued concurrently without sharing mutable state. A branch that has
-// fallen to an empty bag is a true endgame (solved exactly with the shared TT);
-// a game-over branch is decided outright; otherwise the greedy pre-endgame seed
-// values it. Returns an invalid branch value if the branch could not be
-// evaluated (e.g. the solve produced no usable result within a severe budget).
-static PlayChooserBranchValue play_chooser_peg_branch_value(
-    PlayChooser *play_chooser, Game *game, double budget_seconds,
-    int num_threads, EndgameCtx **endgame_ctx, EndgameResults *endgame_results,
-    ErrorStack *error_stack) {
-  const PlayChooserStrategy *strategy = &play_chooser->strategy;
-  if (game_over(game)) {
-    return play_chooser_branch_value(play_chooser_peg_decided_utility(
-        strategy, play_chooser_get_final_spread(game)));
-  }
-  if (bag_get_letters(game_get_bag(game)) == 0) {
-    int32_t endgame_value = 0;
-    if (play_chooser_run_endgame(strategy, endgame_ctx, endgame_results,
-                                 play_chooser_get_endgame_tt(play_chooser),
-                                 game, num_threads, budget_seconds,
-                                 /*external_thread_control=*/NULL,
-                                 /*use_window=*/false, 0, 0, /*out_move=*/NULL,
-                                 &endgame_value, error_stack)) {
-      return play_chooser_branch_value(play_chooser_peg_decided_utility(
-          strategy, play_chooser_get_spread(game) + (double)endgame_value));
-    }
-    return PLAY_CHOOSER_BRANCH_INVALID;
-  }
-  double branch_utility = 0.0;
-  if (play_chooser_run_peg(play_chooser, game, budget_seconds, num_threads,
-                           /*greedy_only=*/true, /*out_move=*/NULL,
-                           &branch_utility, error_stack)) {
-    return play_chooser_branch_value(branch_utility);
-  }
-  return PLAY_CHOOSER_BRANCH_INVALID;
-}
-
-// The two arms of a PEG challenge decision, valued concurrently: each gets the
-// whole decision budget and its own thread slice and endgame scratch.
-typedef struct PlayChooserPegBranch {
-  PlayChooser *play_chooser;
-  Game *game;
-  double budget_seconds;
-  int num_threads;
-  EndgameCtx **endgame_ctx;
-  EndgameResults *endgame_results;
-  ErrorStack *error_stack;
-  PlayChooserBranchValue result;
-} PlayChooserPegBranch;
-
-static void *play_chooser_peg_branch_thread(void *arg) {
-  PlayChooserPegBranch *branch = arg;
-  branch->result = play_chooser_peg_branch_value(
-      branch->play_chooser, branch->game, branch->budget_seconds,
-      branch->num_threads, branch->endgame_ctx, branch->endgame_results,
-      branch->error_stack);
-  return NULL;
-}
-
 void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
                               Move *out_move, ErrorStack *error_stack) {
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
@@ -630,25 +575,28 @@ static double play_chooser_get_final_spread(const Game *game) {
   return spread;
 }
 
-// Value of the position from the perspective of the player on turn:
-// final spread points for STATIC, win fraction for SIM, the score+win utility
-// for PEG. Values from the same eval mode are comparable across positions. The
-// result is invalid when the branch could not be evaluated (e.g. a sim or PEG
-// solve that produced nothing within the budget). ENDGAME branch evaluations
-// are handled by play_chooser_decide_challenge_endgame.
+// Value one branch of a challenge decision, evaluated with the method for THIS
+// branch's game stage: an exact endgame for an empty bag, PEG for a low bag, or
+// a sim for a full bag -- each projected onto the shared score+win utility in
+// [0, 1] so keep and challenge stay comparable even in different stages.
+// STATIC (the fallback when no win model is available) instead returns an
+// estimated final spread in points: with no win% it cannot join the utility
+// scale, but a STATIC decision uses it for both branches, so they stay
+// comparable. The result is invalid when the branch could not be evaluated
+// (e.g. a sim/PEG/endgame solve that produced nothing within the budget).
 static PlayChooserBranchValue
 play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
                                play_chooser_eval_t eval, double budget_seconds,
                                ErrorStack *error_stack) {
+  const PlayChooserStrategy *strategy = &play_chooser->strategy;
   if (game_over(game)) {
     const double final_spread = play_chooser_get_final_spread(game);
-    // PEG values branches by the score+win utility; keep a game-over branch on
-    // that scale so it stays comparable to a sibling scored the same way.
-    if (eval == PLAY_CHOOSER_EVAL_PEG) {
-      return play_chooser_branch_value(play_chooser_peg_decided_utility(
-          &play_chooser->strategy, final_spread));
+    // Match the sibling's currency: a STATIC decision compares raw spreads.
+    if (eval == PLAY_CHOOSER_EVAL_STATIC) {
+      return play_chooser_branch_value(final_spread);
     }
-    return play_chooser_branch_value(final_spread);
+    return play_chooser_branch_value(
+        play_chooser_peg_decided_utility(strategy, final_spread));
   }
   switch (eval) {
   case PLAY_CHOOSER_EVAL_STATIC: {
@@ -663,26 +611,36 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
                               error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
-    const int best_index =
-        sim_results_get_best_move_index(play_chooser->sim_results);
-    const SimmedPlay *best_play =
-        sim_results_get_simmed_play(play_chooser->sim_results, best_index);
+    // The sim ranked by (and recorded per rollout) the win%+spread blend; read
+    // the best play's mean utility back directly.
     return play_chooser_branch_value(
-        stat_get_mean(simmed_play_get_win_pct_stat(best_play)));
+        sim_results_get_best_move_utility(play_chooser->sim_results));
   }
-  case PLAY_CHOOSER_EVAL_ENDGAME:
-    log_fatal("endgame branch evaluations must go through the endgame "
-              "challenge decider");
-    break;
-  case PLAY_CHOOSER_EVAL_PEG:
-    // Single-arm entry (decide_challenge values the two PEG arms concurrently
-    // via play_chooser_peg_branch_value directly). The greedy seed gives a
-    // bounded, deterministic score+win utility over the full scenario field;
-    // an empty-bag branch is solved exactly instead.
-    return play_chooser_peg_branch_value(
-        play_chooser, game, budget_seconds,
-        play_chooser_get_num_threads(&play_chooser->strategy),
-        &play_chooser->endgame_ctx, play_chooser->endgame_results, error_stack);
+  case PLAY_CHOOSER_EVAL_ENDGAME: {
+    int32_t endgame_value = 0;
+    if (!play_chooser_run_endgame(
+            strategy, &play_chooser->endgame_ctx, play_chooser->endgame_results,
+            play_chooser_get_endgame_tt(play_chooser), game,
+            play_chooser_get_num_threads(strategy), budget_seconds,
+            /*external_thread_control=*/NULL, /*use_window=*/false, 0, 0,
+            /*out_move=*/NULL, &endgame_value, error_stack)) {
+      return PLAY_CHOOSER_BRANCH_INVALID;
+    }
+    return play_chooser_branch_value(play_chooser_peg_decided_utility(
+        strategy, play_chooser_get_spread(game) + (double)endgame_value));
+  }
+  case PLAY_CHOOSER_EVAL_PEG: {
+    // Greedy pre-endgame seed: a bounded, deterministic score+win utility over
+    // the full scenario field.
+    double branch_utility = 0.0;
+    if (!play_chooser_run_peg(play_chooser, game, budget_seconds,
+                              play_chooser_get_num_threads(strategy),
+                              /*greedy_only=*/true, /*out_move=*/NULL,
+                              &branch_utility, error_stack)) {
+      return PLAY_CHOOSER_BRANCH_INVALID;
+    }
+    return play_chooser_branch_value(branch_utility);
+  }
   }
   return PLAY_CHOOSER_BRANCH_INVALID;
 }
@@ -959,11 +917,6 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
                                ld_get_size(game_get_ld(game_before_move)));
   play_chooser_add_played_letters_to_rack(opp_move, &played_letters);
 
-  // Use the same evaluation mode for both branches so their values are
-  // comparable, chosen from the pre-move phase of the game.
-  const play_chooser_eval_t eval =
-      play_chooser_get_eval_for_phase(strategy, game_before_move);
-
   // Keep branch: the phony stands. The opponent's played letters are no
   // longer on their rack, and they replenish from the bag.
   play_move_without_drawing_tiles(opp_move, keep_game);
@@ -994,70 +947,37 @@ void play_chooser_decide_challenge(PlayChooser *play_chooser,
     decision_seconds = PLAY_CHOOSER_DEFAULT_CHALLENGE_SECONDS;
   }
 
-  if (eval == PLAY_CHOOSER_EVAL_ENDGAME) {
+  // Each branch is evaluated with the method for ITS OWN stage: the keep branch
+  // draws to full and can fall to an endgame (or low-bag pre-endgame) while the
+  // challenge branch (a lost turn, no draw) keeps its bag, so the two can be in
+  // different stages. Every stage projects onto the same [0, 1] utility, so the
+  // branches remain comparable.
+  const play_chooser_eval_t keep_eval =
+      play_chooser_get_eval_for_phase(strategy, keep_game);
+  const play_chooser_eval_t challenge_eval =
+      play_chooser_get_eval_for_phase(strategy, challenge_game);
+
+  if (keep_eval == PLAY_CHOOSER_EVAL_ENDGAME &&
+      challenge_eval == PLAY_CHOOSER_EVAL_ENDGAME) {
+    // Both branches are endgames: the concurrent shared-TT null-window decider
+    // is exact, and for two decided positions its higher-spread verdict equals
+    // the higher-utility verdict (utility is monotonic in spread).
     play_chooser_decide_challenge_endgame(play_chooser, keep_game,
                                           challenge_game, decision_seconds,
                                           decision, error_stack);
-  } else if (eval == PLAY_CHOOSER_EVAL_PEG) {
-    // Value both PEG arms concurrently: each gets the whole decision budget
-    // (not half) and its own thread slice and endgame scratch, so neither pays
-    // for going second and both make progress under a tight budget. The arms
-    // share no mutable state: each run_peg solve is self-contained, and only
-    // the keep arm can reach the empty-bag endgame path (the challenge arm
-    // always retains bag tiles), so its endgame ctx/results and the shared TT
-    // are touched by at most one arm.
-    const int total_threads = play_chooser_get_num_threads(strategy);
-    const int keep_threads = (total_threads + 1) / 2;
-    int challenge_threads = total_threads - keep_threads;
-    if (challenge_threads < 1) {
-      challenge_threads = 1;
-    }
-    ErrorStack *keep_error_stack = error_stack_create();
-    PlayChooserPegBranch keep_branch = {
-        .play_chooser = play_chooser,
-        .game = keep_game,
-        .budget_seconds = decision_seconds,
-        .num_threads = keep_threads,
-        .endgame_ctx = &play_chooser->keep_endgame_ctx,
-        .endgame_results = play_chooser->keep_endgame_results,
-        .error_stack = keep_error_stack,
-        .result = PLAY_CHOOSER_BRANCH_INVALID,
-    };
-    PlayChooserPegBranch challenge_branch = {
-        .play_chooser = play_chooser,
-        .game = challenge_game,
-        .budget_seconds = decision_seconds,
-        .num_threads = challenge_threads,
-        .endgame_ctx = &play_chooser->challenge_endgame_ctx,
-        .endgame_results = play_chooser->challenge_endgame_results,
-        .error_stack = error_stack,
-        .result = PLAY_CHOOSER_BRANCH_INVALID,
-    };
-    cpthread_t keep_thread;
-    cpthread_create(&keep_thread, play_chooser_peg_branch_thread, &keep_branch);
-    play_chooser_peg_branch_thread(&challenge_branch);
-    cpthread_join(keep_thread);
-    if (!error_stack_is_empty(keep_error_stack)) {
-      error_stack_push(
-          error_stack, error_stack_top(keep_error_stack),
-          string_duplicate("keep branch challenge evaluation failed"));
-    }
-    error_stack_destroy(keep_error_stack);
-    if (error_stack_is_empty(error_stack)) {
-      decision->keep_value = keep_branch.result.value;
-      decision->challenge_value = challenge_branch.result.value;
-      decision->should_challenge = play_chooser_should_challenge(
-          keep_branch.result, challenge_branch.result);
-    }
   } else {
+    // Mixed / non-endgame stages. Sequential, half the budget each: the SIM
+    // path uses the chooser's shared sim scratch, so two branches cannot be
+    // valued concurrently when either is a sim.
     const double per_branch_seconds = decision_seconds / 2.0;
     const PlayChooserBranchValue keep_bv = play_chooser_evaluate_position(
-        play_chooser, keep_game, eval, per_branch_seconds, error_stack);
+        play_chooser, keep_game, keep_eval, per_branch_seconds, error_stack);
     decision->keep_value = keep_bv.value;
     if (error_stack_is_empty(error_stack)) {
       const PlayChooserBranchValue challenge_bv =
-          play_chooser_evaluate_position(play_chooser, challenge_game, eval,
-                                         per_branch_seconds, error_stack);
+          play_chooser_evaluate_position(play_chooser, challenge_game,
+                                         challenge_eval, per_branch_seconds,
+                                         error_stack);
       decision->challenge_value = challenge_bv.value;
       decision->should_challenge =
           play_chooser_should_challenge(keep_bv, challenge_bv);
