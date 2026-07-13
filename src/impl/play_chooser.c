@@ -632,11 +632,12 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     if (!simulated) {
-      // A single forced move was returned without a sim (sim_results is stale);
-      // value that lone move on the utility scale from its static estimate.
-      return play_chooser_branch_value(play_chooser_peg_decided_utility(
-          strategy, play_chooser_get_spread(game) +
-                        equity_to_double(move_get_equity(&best_move))));
+      // A single forced move was returned without a sim (sim_results is stale),
+      // so this branch has no comparable win-utility: a static spread would be
+      // on a different scale than a sibling's soft sim/PEG utility and could
+      // flip the decision. Report it unevaluated; should_challenge then
+      // conservatively defaults to challenging.
+      return PLAY_CHOOSER_BRANCH_INVALID;
     }
     // The sim ranked by (and recorded per rollout) the win%+spread blend; read
     // the best play's mean utility back directly.

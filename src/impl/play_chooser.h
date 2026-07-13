@@ -98,12 +98,13 @@ typedef struct ChallengeDecision {
   // chooser's lexicon. The chooser never advises challenging valid plays.
   bool move_is_phony;
   bool should_challenge;
-  // Diagnostic branch values from the chooser's perspective. Each branch is
-  // valued by the method for its own game stage (endgame / PEG / sim), all
-  // projected onto the score+win utility in [0, 1] so they are directly
-  // comparable even when the two branches are in different stages. (A STATIC
-  // decision -- the fallback with no win model -- instead reports final spread
-  // points for both branches.)
+  // Diagnostic branch values from the chooser's perspective, always comparable
+  // to each other within a single decision. When the two branches are in mixed
+  // stages they are valued by each stage's method and projected onto the
+  // score+win utility in [0, 1]. Two exceptions report final-spread points
+  // instead: a STATIC decision (the fallback with no win model), and a
+  // both-endgame decision (whose exact-spread verdict equals the utility
+  // verdict, since the utility is monotonic in spread).
   double keep_value;
   double challenge_value;
 } ChallengeDecision;
