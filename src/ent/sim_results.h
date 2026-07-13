@@ -96,7 +96,7 @@ bool sim_results_plays_are_similar(const SimResults *sim_results, int sp1_index,
 bool sim_results_display_plays_are_similar(const SimResults *sim_results,
                                            const int sp1_index,
                                            const int sp2_index);
-int sim_results_get_best_move_index(const SimResults *sim_results);
+int sim_results_get_best_win_pct_index(const SimResults *sim_results);
 const Move *sim_results_get_best_move(const SimResults *sim_results);
 // Mean utility (win%+spread blend in [0, 1]) of the sim's best play.
 double sim_results_get_best_move_utility(const SimResults *sim_results);

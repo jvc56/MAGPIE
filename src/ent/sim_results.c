@@ -658,8 +658,13 @@ bool sim_results_plays_are_similar(const SimResults *sim_results,
   return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
 }
 
-// Not thread safe, assumes the sim is finished.
-int sim_results_get_best_move_index(const SimResults *sim_results) {
+// Index of the play ranked best by win% (compare_simmed_plays: highest mean
+// win% within the cutoff, ties broken by mean equity). This is the display sort
+// and does NOT consult the win%+spread utility -- use
+// sim_results_get_best_utility_index for the sim's actual utility-ranked
+// choice. Not thread safe, assumes the sim is finished. Returns -1 if there are
+// no plays.
+int sim_results_get_best_win_pct_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
   if (num_simmed_plays == 0) {
     return -1;
@@ -680,8 +685,8 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 // Index of the play the finished sim considers best. With a nonzero spread
 // weight, prefer BAI's chosen arm: that's the one with the highest mean
 // *utility* (wpct blended with sigmoid(spread)). Falling through to
-// sim_results_get_best_move_index would re-rank by raw win_pct_stat, ignoring
-// the blend entirely.
+// sim_results_get_best_win_pct_index would re-rank by raw win_pct_stat,
+// ignoring the blend entirely.
 //
 // With a ZERO spread weight the sample utility is the raw 0/0.5/1 win outcome,
 // which loses its gradient whenever win% saturates (decided games: every arm's
@@ -691,21 +696,21 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 // higher-scoring ones). Use the win% comparator instead: it breaks
 // win%-within-cutoff ties by mean equity, matching the displayed sort and
 // recovering spread at no win% cost. Returns -1 if there is no best play.
-static int sim_results_get_best_play_index(const SimResults *sim_results) {
+static int sim_results_get_best_utility_index(const SimResults *sim_results) {
   if (sim_results->utility_w_spread == 0.0) {
-    return sim_results_get_best_move_index(sim_results);
+    return sim_results_get_best_win_pct_index(sim_results);
   }
   const int best_play_idx =
       bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
   if (best_play_idx < 0) {
-    return sim_results_get_best_move_index(sim_results);
+    return sim_results_get_best_win_pct_index(sim_results);
   }
   return best_play_idx;
 }
 
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  const int best_play_idx = sim_results_get_best_play_index(sim_results);
+  const int best_play_idx = sim_results_get_best_utility_index(sim_results);
   if (best_play_idx < 0) {
     return NULL;
   }
@@ -717,7 +722,7 @@ const Move *sim_results_get_best_move(const SimResults *sim_results) {
 // exact per-arm mean BAI ranks by, recorded per rollout in utility_stat. Not
 // thread safe, assumes the sim is finished.
 double sim_results_get_best_move_utility(const SimResults *sim_results) {
-  const int best_play_idx = sim_results_get_best_play_index(sim_results);
+  const int best_play_idx = sim_results_get_best_utility_index(sim_results);
   if (best_play_idx < 0) {
     return 0.0;
   }

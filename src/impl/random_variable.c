@@ -565,7 +565,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
   const Simmer *simmer = (const Simmer *)rvs->data;
-  return sim_results_get_best_move_index(simmer->sim_results);
+  return sim_results_get_best_win_pct_index(simmer->sim_results);
 }
 
 bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
