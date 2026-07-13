@@ -758,13 +758,21 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
       challenge_exact ? play_chooser_get_final_spread(challenge_game) : 0.0;
 
   if (!keep_exact && !challenge_exact) {
-    // Solve both branches concurrently: each gets the whole decision
-    // window and neither benefits from going first or second.
-    const int keep_threads = (total_threads + 1) / 2;
-    int challenge_threads = total_threads - keep_threads;
+    // With >1 thread, solve both branches concurrently: each gets the whole
+    // decision window, neither benefits from going first or second, and the
+    // first to finish exactly interrupts the other (its sibling control) so the
+    // null-window resolve below can take over cheaply. With a single thread,
+    // honor the budget rather than spawning a second solver thread: solve
+    // sequentially, splitting the window in half, with no cross-branch
+    // interrupt (each branch's sibling control points at itself).
+    const bool run_concurrent = total_threads > 1;
+    const int keep_threads = run_concurrent ? (total_threads + 1) / 2 : 1;
+    int challenge_threads = run_concurrent ? total_threads - keep_threads : 1;
     if (challenge_threads < 1) {
       challenge_threads = 1;
     }
+    const double branch_seconds =
+        run_concurrent ? decision_seconds : decision_seconds / 2.0;
     ThreadControl *keep_thread_control = thread_control_create();
     thread_control_set_status(keep_thread_control,
                               THREAD_CONTROL_STATUS_STARTED);
@@ -775,13 +783,14 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     PlayChooserEndgameBranch keep_branch = {
         .play_chooser = play_chooser,
         .game = keep_game,
-        .budget_seconds = decision_seconds,
+        .budget_seconds = branch_seconds,
         .endgame_ctx = &play_chooser->keep_endgame_ctx,
         .endgame_results = play_chooser->keep_endgame_results,
         .endgame_tt = endgame_tt,
         .num_threads = keep_threads,
         .thread_control = keep_thread_control,
-        .sibling_thread_control = challenge_thread_control,
+        .sibling_thread_control =
+            run_concurrent ? challenge_thread_control : keep_thread_control,
         .error_stack = keep_error_stack,
         .value = 0.0,
         .exact = false,
@@ -790,23 +799,29 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     PlayChooserEndgameBranch challenge_branch = {
         .play_chooser = play_chooser,
         .game = challenge_game,
-        .budget_seconds = decision_seconds,
+        .budget_seconds = branch_seconds,
         .endgame_ctx = &play_chooser->challenge_endgame_ctx,
         .endgame_results = play_chooser->challenge_endgame_results,
         .endgame_tt = endgame_tt,
         .num_threads = challenge_threads,
         .thread_control = challenge_thread_control,
-        .sibling_thread_control = keep_thread_control,
+        .sibling_thread_control =
+            run_concurrent ? keep_thread_control : challenge_thread_control,
         .error_stack = error_stack,
         .value = 0.0,
         .exact = false,
         .valid = false,
     };
-    cpthread_t keep_thread;
-    cpthread_create(&keep_thread, play_chooser_endgame_branch_thread,
-                    &keep_branch);
-    play_chooser_solve_endgame_branch(&challenge_branch);
-    cpthread_join(keep_thread);
+    if (run_concurrent) {
+      cpthread_t keep_thread;
+      cpthread_create(&keep_thread, play_chooser_endgame_branch_thread,
+                      &keep_branch);
+      play_chooser_solve_endgame_branch(&challenge_branch);
+      cpthread_join(keep_thread);
+    } else {
+      play_chooser_solve_endgame_branch(&keep_branch);
+      play_chooser_solve_endgame_branch(&challenge_branch);
+    }
     thread_control_destroy(keep_thread_control);
     thread_control_destroy(challenge_thread_control);
     if (!error_stack_is_empty(keep_error_stack)) {

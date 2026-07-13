@@ -864,6 +864,21 @@ static void test_challenge_stage_combinations(void) {
     assert_stage_combo_case(&strategy, game, "G4 I..", /*utility_scale=*/false);
   }
 
+  // EG/EG single-threaded: the decider solves the two branches sequentially
+  // rather than spawning a second solver thread (thread-budget respected).
+  {
+    char *cgp = get_formatted_string(
+        "cgp %s IFFGWWY/AEILNOT 300/300 0 -lex CSW21;", SEALED_CLUSTER_ROWS);
+    load_and_exec_config_or_die(config, cgp);
+    free(cgp);
+    const Game *game = config_get_game(config);
+    drain_bag(game);
+    PlayChooserStrategy single_thread_strategy = strategy;
+    single_thread_strategy.num_threads = 1;
+    assert_stage_combo_case(&single_thread_strategy, game, "G4 I..",
+                            /*utility_scale=*/false);
+  }
+
   win_pct_destroy(win_pcts);
   error_stack_destroy(error_stack);
   config_destroy(config);
