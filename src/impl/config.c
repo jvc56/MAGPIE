@@ -7989,31 +7989,35 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
   }
   const char *marker = strstr(content, "=== Analysis Complete:");
   bool ok = false;
+  int parsed_turns = 0;
+  double parsed_wpl = 0.0;
+  double parsed_eql = 0.0;
+  double parsed_aeql = 0.0;
   if (marker) {
     ErrorStack *parse_error_stack = error_stack_create();
     const char *pos = marker;
     const char *end;
     ok = consume_literal(&pos, "=== Analysis Complete: turns=");
     if (ok) {
-      *turns = string_to_int_prefix(pos, &end, parse_error_stack);
+      parsed_turns = string_to_int_prefix(pos, &end, parse_error_stack);
       pos = end;
       ok = error_stack_is_empty(parse_error_stack) &&
            consume_literal(&pos, " wpl=");
     }
     if (ok) {
-      *wpl = string_to_double_prefix(pos, &end, parse_error_stack);
+      parsed_wpl = string_to_double_prefix(pos, &end, parse_error_stack);
       pos = end;
       ok = error_stack_is_empty(parse_error_stack) &&
            consume_literal(&pos, " eql=");
     }
     if (ok) {
-      *eql = string_to_double_prefix(pos, &end, parse_error_stack);
+      parsed_eql = string_to_double_prefix(pos, &end, parse_error_stack);
       pos = end;
       ok = error_stack_is_empty(parse_error_stack) &&
            consume_literal(&pos, " aeql=");
     }
     if (ok) {
-      *aeql = string_to_double_prefix(pos, &end, parse_error_stack);
+      parsed_aeql = string_to_double_prefix(pos, &end, parse_error_stack);
       pos = end;
       ok = error_stack_is_empty(parse_error_stack) &&
            consume_literal(&pos, " ===");
@@ -8021,6 +8025,12 @@ static bool read_report_completion_stats(const char *report_path, int *turns,
     error_stack_destroy(parse_error_stack);
   }
   free(content);
+  if (ok) {
+    *turns = parsed_turns;
+    *wpl = parsed_wpl;
+    *eql = parsed_eql;
+    *aeql = parsed_aeql;
+  }
   return ok;
 }
 
