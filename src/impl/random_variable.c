@@ -555,9 +555,18 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
-                           simmer->utility_w_spread,
-                           simmer->utility_spread_scale);
+  const double utility =
+      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+                        simmer->utility_w_spread, simmer->utility_spread_scale);
+  // With a zero spread weight, utility_stat is never read: BU is hidden from
+  // display (see show_bu in sim_string.c) and both the best-move choice and
+  // sort comparator fall back to win_pct_stat/equity_stat instead (see
+  // sim_results_get_best_move and compare_simmed_plays). Skip the extra
+  // mutex lock + stat_push on this hot path in that case.
+  if (simmer->utility_w_spread > 0.0) {
+    simmed_play_add_utility_stat(simmed_play, utility);
+  }
+  return utility;
 }
 
 static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {

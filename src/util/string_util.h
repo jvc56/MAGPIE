@@ -96,6 +96,14 @@ int string_to_int(const char *str, ErrorStack *error_stack);
 uint64_t string_to_uint64(const char *str, ErrorStack *error_stack);
 double string_to_double(const char *str, ErrorStack *error_stack);
 
+// Parse a leading int/double prefix of str, without requiring the rest of
+// the string to be consumed. On success, *end points just past the parsed
+// number so the caller can keep parsing the remainder of str.
+int string_to_int_prefix(const char *str, const char **end,
+                         ErrorStack *error_stack);
+double string_to_double_prefix(const char *str, const char **end,
+                               ErrorStack *error_stack);
+
 // JSON utilities
 char *json_unescape_string(const char *json_string);
 char *get_process_output(const char *cmd);

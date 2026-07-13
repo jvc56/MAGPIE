@@ -1949,16 +1949,14 @@ static int peg_rank_cmp(const void *lhs, const void *rhs) {
   return 0;
 }
 
-// True if `move` matches one of the protected move-similarity keys (snoprune
-// analogue). Cheap linear scan: the protected set is tiny.
-static bool peg_move_protected(const Move *move, const Rack *rack,
-                               const uint64_t *protect_keys, int n_protect) {
-  if (n_protect <= 0) {
-    return false;
-  }
-  const uint64_t key = move_get_similarity_key(move, rack);
+// True if `move` matches one of the protected moves (snoprune analogue).
+// Cheap linear scan: the protected set is tiny.
+static bool peg_move_protected(const Move *move,
+                               const Move *const *protect_moves,
+                               int n_protect) {
   for (int protect_idx = 0; protect_idx < n_protect; protect_idx++) {
-    if (protect_keys[protect_idx] == key) {
+    if (compare_moves_without_equity(move, protect_moves[protect_idx], true) ==
+        -1) {
       return true;
     }
   }
@@ -1970,15 +1968,14 @@ static bool peg_move_protected(const Move *move, const Rack *rack,
 // compacted into [0, return) with descending order preserved. Returns the new
 // live count. With no protected stragglers this is just the plain top-`keep`.
 static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
-                                const Rack *rack, const uint64_t *protect_keys,
+                                const Move *const *protect_moves,
                                 int n_protect) {
   if (keep >= live_count) {
     return live_count;
   }
   int write_idx = keep;
   for (int read_idx = keep; read_idx < live_count; read_idx++) {
-    if (peg_move_protected(&ranked[read_idx].move, rack, protect_keys,
-                           n_protect)) {
+    if (peg_move_protected(&ranked[read_idx].move, protect_moves, n_protect)) {
       if (read_idx != write_idx) {
         ranked[write_idx] = ranked[read_idx];
       }
@@ -1986,6 +1983,55 @@ static int peg_select_survivors(PegRankedCand *ranked, int live_count, int keep,
     }
   }
   return write_idx;
+}
+
+// Moves any protected candidate to the front of ranked[0..count). A stage's
+// live-mode evaluation (see the sequential per-candidate loop in peg_solve)
+// scores candidates strictly in array order and stops as soon as the
+// deadline passes, so whatever peg_select_survivors appended after the
+// top-K cut is evaluated last and is the first thing dropped under a tight
+// time budget. Moving it to the front instead guarantees it gets scored
+// before the deadline can cut the stage short, mirroring how the endgame
+// solver pins its protected actual move to root index 0.
+static void peg_force_protected_to_front(PegRankedCand *ranked, int count,
+                                         const Move *const *protect_moves,
+                                         int n_protect) {
+  if (n_protect <= 0 || count <= 1) {
+    return;
+  }
+  int write_idx = 0;
+  for (int idx = 0; idx < count; idx++) {
+    if (peg_move_protected(&ranked[idx].move, protect_moves, n_protect)) {
+      if (idx != write_idx) {
+        const PegRankedCand tmp = ranked[write_idx];
+        ranked[write_idx] = ranked[idx];
+        ranked[idx] = tmp;
+      }
+      write_idx++;
+    }
+  }
+}
+
+// Same idea as peg_force_protected_to_front, but for stage 0's plain Move
+// pointer array (built before any PegRankedCand results exist).
+static void
+peg_force_protected_move_ptrs_to_front(const Move **moves, int count,
+                                       const Move *const *protect_moves,
+                                       int n_protect) {
+  if (n_protect <= 0 || count <= 1) {
+    return;
+  }
+  int write_idx = 0;
+  for (int idx = 0; idx < count; idx++) {
+    if (peg_move_protected(moves[idx], protect_moves, n_protect)) {
+      if (idx != write_idx) {
+        const Move *tmp = moves[write_idx];
+        moves[write_idx] = moves[idx];
+        moves[idx] = tmp;
+      }
+      write_idx++;
+    }
+  }
 }
 
 // Append src[from..to) to the graded list, each tagged with the fidelity (ply
@@ -2443,19 +2489,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // anchors at the very start so the budget covers pruning/movegen too.
   ctimer_start(&out->timer);
 
-  // Protected ("never prune") moves: precompute their similarity keys against
-  // the mover's rack so each stage can carry them past its top-K cut.
-  const Rack *mover_rack = player_get_rack(game_get_player(game, mover_idx));
-  const int n_protect = args->n_protect_moves;
-  uint64_t *protect_keys = NULL;
-  if (n_protect > 0) {
-    protect_keys = malloc_or_die((size_t)n_protect * sizeof(uint64_t));
-    for (int protect_idx = 0; protect_idx < n_protect; protect_idx++) {
-      protect_keys[protect_idx] =
-          move_get_similarity_key(args->protect_moves[protect_idx], mover_rack);
-    }
-  }
-
   // Build the root pruned KWG once and install it on a prepared base game with
   // cross-sets generated a single time. The pre-cand board's playable words are
   // a superset of any post-cand position's, so this one pruned KWG is valid for
@@ -2610,6 +2643,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
 
   if (n_cands > 0) {
+    // Protected ("never prune") moves: each stage carries these past its
+    // top-K cut so they always end up in the final results.
+    const int n_protect = args->n_protect_moves;
+    const Move *const *protect_moves = args->protect_moves;
+
     PegRankedCand *ranked =
         malloc_or_die((size_t)n_cands * sizeof(PegRankedCand));
     const Move **moves = malloc_or_die((size_t)n_cands * sizeof(Move *));
@@ -2633,6 +2671,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         moves[cand_idx] = move_list_get_move(cand_ml, cand_idx);
       }
     }
+    // See peg_force_protected_to_front: give protected candidates the best
+    // chance of finishing within the time budget by having a free worker
+    // pick them up first, rather than leaving their queue position to
+    // whatever movegen's equity sort happened to produce.
+    peg_force_protected_move_ptrs_to_front(moves, n_cands, protect_moves,
+                                           n_protect);
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
     if (args->on_stage_start != NULL) {
@@ -2660,7 +2704,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // as a shrinking live_count so protected moves never leave a stale copy in
     // the unscanned tail.
     int live_count = peg_select_survivors(ranked, n_real, num_kept_after_stage0,
-                                          mover_rack, protect_keys, n_protect);
+                                          protect_moves, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
     peg_poll_replace(args->poll, ranked, live_count, /*stage=*/0,
                      /*fidelity_plies=*/0, live_count);
@@ -2697,11 +2741,19 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       const int keep = live_count < counts[stage_idx - 1]
                            ? live_count
                            : counts[stage_idx - 1];
-      const int eval_count = peg_select_survivors(
-          ranked, live_count, keep, mover_rack, protect_keys, n_protect);
+      const int eval_count = peg_select_survivors(ranked, live_count, keep,
+                                                  protect_moves, n_protect);
       if (eval_count < 2) {
         break;
       }
+      // The sequential live-mode loop below scores ranked[0..eval_count) in
+      // array order and stops as soon as the deadline passes; a protected
+      // straggler peg_select_survivors appended after the top-K cut would
+      // otherwise be scored last, making it the first thing a tight time
+      // budget drops. Move it to the front so it's scored before that can
+      // happen.
+      peg_force_protected_to_front(ranked, eval_count, protect_moves,
+                                   n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
@@ -3010,7 +3062,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   if (cand_ml) {
     move_list_destroy(cand_ml);
   }
-  free(protect_keys);
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     move_list_destroy(workers[worker_idx].playout_ml);
     endgame_ctx_destroy(workers[worker_idx].eg_ctx);

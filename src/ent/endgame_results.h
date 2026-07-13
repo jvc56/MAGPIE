@@ -14,6 +14,10 @@ enum { MAX_VARIANT_LENGTH = 25 };
 typedef enum {
   ENDGAME_RESULT_BEST,
   ENDGAME_RESULT_DISPLAY,
+  // The caller-specified "actual move" (EndgameArgs.actual_move), computed in
+  // the same solve as ENDGAME_RESULT_BEST. Only valid when
+  // endgame_results_get_actual_move_found returns true.
+  ENDGAME_RESULT_ACTUAL,
 } endgame_result_t;
 
 typedef enum {
@@ -57,6 +61,15 @@ void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth);
+// Records the exact value found for EndgameArgs.actual_move, alongside the
+// best move, from the same solve. Called at most once per solve (after all
+// workers join), so unlike endgame_results_set_best_pvline this has no
+// depth-guard against concurrent/older writers.
+void endgame_results_set_actual_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value,
+                                       int depth);
+bool endgame_results_get_actual_move_found(
+    const EndgameResults *endgame_results);
 void endgame_results_set_start_game(EndgameResults *endgame_results,
                                     const Game *game);
 const Game *
