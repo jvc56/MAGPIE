@@ -123,6 +123,9 @@ struct EndgameCtx {
   // Cap on the first-win depth-0 interrupt fallback sweep (root moves greedy-
   // evaluated). 0 = built-in default, <0 = skip the sweep, >0 = explicit cap.
   int first_win_fallback_moves;
+  bool initial_window_optim;
+  int32_t initial_window_alpha;
+  int32_t initial_window_beta;
   bool transposition_table_optim;
   bool negascout_optim;
   bool use_heuristics;
@@ -627,6 +630,9 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
                        const EndgameArgs *endgame_args) {
   es->first_win_optim = endgame_args->first_win;
   es->first_win_fallback_moves = endgame_args->first_win_fallback_moves;
+  es->initial_window_optim = endgame_args->use_initial_window;
+  es->initial_window_alpha = endgame_args->initial_alpha;
+  es->initial_window_beta = endgame_args->initial_beta;
   es->transposition_table_optim = true;
   es->iterative_deepening_optim = true;
   es->negascout_optim = true;
@@ -2570,7 +2576,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       // multi-PV) while still benefiting from narrow windows.
       const bool use_root_aspiration =
           is_root && depth >= 2 && worker->solver->iterative_deepening_optim &&
-          !worker->solver->first_win_optim;
+          !worker->solver->first_win_optim &&
+          !worker->solver->initial_window_optim;
 
       int32_t value = 0;
       if (use_root_aspiration) {
@@ -2860,6 +2867,11 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // a pre-endgame solver.
     alpha = -1;
     beta = 1;
+  } else if (worker->solver->initial_window_optim) {
+    // Caller-provided fixed window: the search proves how the exact value
+    // relates to [initial_alpha, initial_beta] instead of computing it.
+    alpha = worker->solver->initial_window_alpha;
+    beta = worker->solver->initial_window_beta;
   }
   assert(worker->small_move_arena->size == 0); // make sure arena is empty.
 
@@ -3064,7 +3076,8 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     // prior depth — otherwise prev_value is uninitialized and the window
     // is bogus. With ABDADA depth-jitter, threads with thread_index > 0
     // can start at depth > 1, so checking `ply > 1` is insufficient.
-    if (use_aspiration && ply > start && !worker->solver->first_win_optim) {
+    if (use_aspiration && ply > start && !worker->solver->first_win_optim &&
+        !worker->solver->initial_window_optim) {
       int32_t window = ASPIRATION_WINDOW;
       alpha = prev_value - window;
       beta = prev_value + window;

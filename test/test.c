@@ -46,6 +46,7 @@
 #include "peg_poll_test.h"
 #include "peg_pool_test.h"
 #include "peg_test.h"
+#include "play_chooser_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -137,6 +138,7 @@ static TestEntry test_table[] = {
     {"peg", test_peg},
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
+    {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
