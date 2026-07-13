@@ -535,14 +535,23 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
                               leftover);
+  const game_end_reason_t game_end_reason = game_get_game_end_reason(game);
   const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover,
-      game_get_game_end_reason(game),
+      simmer->win_pcts, simmed_play, spread, leftover, game_end_reason,
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
       bag_get_letters(game_get_bag(game)) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
+  // Blend with the same spread the win% lookup used: an unfinished
+  // rollout's spread gets the horizon leftover added (the KLV leave value
+  // the equity stat also credits), so the utility's spread term values
+  // leaves the same way the other two metrics do. A finished rollout's
+  // spread is already exact and gets no leftover, matching
+  // simmed_play_add_win_pct_stat. Captured before game_unplay_last_move
+  // below restores the pre-rollout game state.
+  const Equity blend_spread =
+      game_end_reason == GAME_END_REASON_NONE ? spread + leftover : spread;
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -555,7 +564,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  return sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+  return sim_utility_blend(wpct, blend_spread, simmer->utility_w_winpct,
                            simmer->utility_w_spread,
                            simmer->utility_spread_scale);
 }
