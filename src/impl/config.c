@@ -134,6 +134,7 @@ typedef enum {
   ARG_TOKEN_WIN_PCT,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_SHPLIES,
+  ARG_TOKEN_SHOW_BU,
   ARG_TOKEN_ENDGAME_PLIES,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_ENDGAME_TIME_LIMIT,
@@ -272,6 +273,8 @@ struct Config {
   int num_small_plays;
   int plies;
   int shplies;
+  // Show the blended utility (BU) column when printing sim results.
+  bool show_bu;
   int endgame_plies;
   int endgame_top_k;
   // PEG per-stage candidate counts (halving stages 1..N), parsed from -pegtopk.
@@ -1553,6 +1556,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the number of plies to display when printing sim "
              "results.";
       break;
+    case ARG_TOKEN_SHOW_BU:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not to display the blended utility (BU) "
+             "column when printing sim results.";
+      break;
     case ARG_TOKEN_ENDGAME_PLIES:
       usages[0] = "<endgame_plies>";
       examples[0] = "4";
@@ -2284,6 +2294,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_ON_TURN_SCORE_STYLE,         /* onturnscore */
         ARG_TOKEN_PRETTY,                      /* pretty */
         ARG_TOKEN_PRINT_BOARDS,                /* printboards */
+        ARG_TOKEN_SHOW_BU,                     /* showbu */
         ARG_TOKEN_SHPLIES,                     /* shplies */
         ARG_TOKEN_SHOW_GAME_WITH_MOVES,        /* shwithmoves */
     };
@@ -3060,7 +3071,7 @@ char *status_sim(Config *config) {
   }
   return sim_results_get_string(
       config->game, sim_results, config->max_num_display_plays, config->shplies,
-      -1, -1, NULL, 0, false, !config->human_readable, NULL);
+      -1, -1, NULL, 0, false, !config->human_readable, config->show_bu, NULL);
 }
 
 char *status_snoprune(Config *config) { return status_sim(config); }
@@ -3863,7 +3874,7 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
     result = sim_results_get_string(
         config->game, config->sim_results, max_num_display_plays,
         config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
-        exclude_tile_placement_moves, !config->human_readable,
+        exclude_tile_placement_moves, !config->human_readable, config->show_bu,
         board_display_start);
   } else {
     result = move_list_get_string(
@@ -6676,6 +6687,11 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_bool(config, ARG_TOKEN_SHOW_BU, &config->show_bu, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_int(config, ARG_TOKEN_ENDGAME_PLIES, 1, MAX_VARIANT_LENGTH,
                   &config->endgame_plies, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8560,6 +8576,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
+  arg(ARG_TOKEN_SHOW_BU, "showbu", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TIME_LIMIT, "etlim", 1, 1);
@@ -8676,6 +8693,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->num_small_plays = DEFAULT_SMALL_MOVE_LIST_CAPACITY;
   config->plies = 5;
   config->shplies = 2;
+  config->show_bu = false;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
@@ -9042,6 +9060,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_SHPLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->shplies);
+      break;
+    case ARG_TOKEN_SHOW_BU:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->show_bu);
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,

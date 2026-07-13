@@ -501,7 +501,7 @@ static void write_per_turn_human_readable(
   if (is_sim) {
     char *sim_str = sim_results_get_string(
         ctx->game, ctx->sim_results, max_num_display_plays,
-        max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
+        max_num_display_plies, -1, -1, NULL, 0, false, false, false, NULL);
     string_builder_add_formatted_string(sb, "%s\n", sim_str);
     free(sim_str);
   } else if (is_peg) {

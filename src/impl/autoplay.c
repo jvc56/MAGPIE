@@ -692,7 +692,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     if (sim_args->num_plies > 0) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,
-          sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, NULL);
+          sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, false,
+          NULL);
       string_builder_add_string(output, sim_str);
       free(sim_str);
       if (sim_args->use_inference && game_runner->turn_number > 0 &&
