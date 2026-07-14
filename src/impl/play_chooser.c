@@ -873,6 +873,14 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
   // challenge value (keep must strictly exceed it to avoid the challenge).
   double remaining_seconds =
       decision_seconds - ctimer_elapsed_seconds(&decision_timer);
+  if (remaining_seconds <= 0.0) {
+    // The decision budget is already spent; skip the resolve rather than run a
+    // minimum window past it. Without a completed proof, challenge by default.
+    decision->should_challenge = true;
+    decision->keep_value = keep_value;
+    decision->challenge_value = challenge_value;
+    return;
+  }
   if (remaining_seconds < PLAY_CHOOSER_MIN_RESOLVE_SECONDS) {
     remaining_seconds = PLAY_CHOOSER_MIN_RESOLVE_SECONDS;
   }

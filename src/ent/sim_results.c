@@ -745,8 +745,7 @@ const Move *sim_results_get_best_move(const SimResults *sim_results) {
       sim_results_get_simmed_play(sim_results, best_play_idx));
 }
 
-// Mean utility (win%+spread blend in [0, 1]) of the sim's best play -- the
-// per-arm mean BAI ranks by, recorded per rollout in utility_stat. Uses the
+// Mean utility (win%+spread blend in [0, 1]) of the sim's best play, using the
 // same best-play selection as sim_results_get_best_move. Not thread safe,
 // assumes the sim is finished. Returns 0 if there are no plays.
 double sim_results_get_best_move_utility(const SimResults *sim_results) {
@@ -763,6 +762,13 @@ double sim_results_get_best_move_utility(const SimResults *sim_results) {
   if (best_play_idx < 0) {
     return 0.0;
   }
-  return stat_get_mean(simmed_play_get_utility_stat(
-      sim_results_get_simmed_play(sim_results, best_play_idx)));
+  const SimmedPlay *best_play =
+      sim_results_get_simmed_play(sim_results, best_play_idx);
+  // utility_stat is only recorded on the utility path (the hot pure-win% path
+  // skips it). With a zero spread weight the utility IS the win% -- read it
+  // from win_pct_stat rather than the empty utility_stat, which would report 0.
+  if (sim_results->utility_w_spread == 0.0) {
+    return stat_get_mean(simmed_play_get_win_pct_stat(best_play));
+  }
+  return stat_get_mean(simmed_play_get_utility_stat(best_play));
 }

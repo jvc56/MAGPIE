@@ -879,6 +879,34 @@ static void test_challenge_stage_combinations(void) {
                             /*utility_scale=*/false);
   }
 
+  // SIM/SIM with a zero spread weight (pure win%): the simmer skips the
+  // utility_stat on this path, so the SIM branch must read the win% directly.
+  // The SEALED_CLUSTER position is roughly even, so both branch win%s sit well
+  // inside (0, 1) -- a strictly-positive check catches a regression to the
+  // empty-utility_stat 0.0 sentinel, which the [0, 1] range check would not.
+  {
+    PlayChooserStrategy pure_winpct_strategy = strategy;
+    pure_winpct_strategy.utility_w_spread = 0.0;
+    char *cgp = get_formatted_string(
+        "cgp %s IFFGWWY/AEILNOT 300/300 0 -lex CSW21;", SEALED_CLUSTER_ROWS);
+    load_and_exec_config_or_die(config, cgp);
+    free(cgp);
+    const Game *game = config_get_game(config);
+    ValidatedMoves *vms =
+        validated_moves_create(game, 0, "G4 I..", true, true, error_stack);
+    assert(error_stack_is_empty(error_stack));
+    const Move *phony = validated_moves_get_move(vms, 0);
+    PlayChooser *play_chooser = play_chooser_create(&pure_winpct_strategy);
+    ChallengeDecision decision;
+    play_chooser_decide_challenge(play_chooser, game, phony, &decision,
+                                  error_stack);
+    assert(error_stack_is_empty(error_stack));
+    assert(decision.keep_value > 0.0 && decision.keep_value < 1.0);
+    assert(decision.challenge_value > 0.0 && decision.challenge_value < 1.0);
+    play_chooser_destroy(play_chooser);
+    validated_moves_destroy(vms);
+  }
+
   win_pct_destroy(win_pcts);
   error_stack_destroy(error_stack);
   config_destroy(config);
