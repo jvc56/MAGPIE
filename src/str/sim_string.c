@@ -116,8 +116,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   const int num_plies = sim_results_get_num_plies(sim_results);
   const int num_display_plies =
       max_num_display_plies < num_plies ? max_num_display_plies : num_plies;
-  // BU (blended utility) is only meaningful when the sim was run with a
-  // nonzero spread weight; otherwise it is identical to Wp and is omitted.
+  // BU (blended utility) is opt-in via show_bu, and is only meaningful when
+  // the sim was run with a nonzero spread weight (otherwise it is identical
+  // to Wp), so it is also omitted in that case even if show_bu is true.
   const bool display_bu =
       show_bu && sim_results_get_utility_w_spread(sim_results) > 0.0;
   // UCGI mode adds 2 extra base columns (WpSE, EqSE) and 1 extra per-ply

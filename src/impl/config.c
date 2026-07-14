@@ -505,6 +505,8 @@ int config_get_plies(const Config *config) { return config->plies; }
 
 int config_get_shplies(const Config *config) { return config->shplies; }
 
+bool config_get_show_bu(const Config *config) { return config->show_bu; }
+
 int config_get_endgame_plies(const Config *config) {
   return config->endgame_plies;
 }
@@ -1561,7 +1563,9 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether or not to display the blended utility (BU) "
-             "column when printing sim results.";
+             "column when printing sim results. BU is still omitted even "
+             "when true if the sim was run with a zero spread weight, since "
+             "it would be identical to Wp in that case.";
       break;
     case ARG_TOKEN_ENDGAME_PLIES:
       usages[0] = "<endgame_plies>";
