@@ -723,9 +723,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                               /*is_forced_rack=*/true);
     switch (game_runner->shared_data->rare_rack_mode) {
     case RARE_RACK_MODE_LEAVE_GEN:
-      rack_list_add_rack(game_runner->shared_data->leavegen_shared_data->rack_list,
-                         &rare_rack_or_move_leave,
-                         equity_to_double(move_get_equity(forced_move)));
+      rack_list_add_rack(
+          game_runner->shared_data->leavegen_shared_data->rack_list,
+          &rare_rack_or_move_leave,
+          equity_to_double(move_get_equity(forced_move)));
       break;
     case RARE_RACK_MODE_FORCE_FILE:
       break;
