@@ -39,6 +39,11 @@ typedef struct SimArgs {
   double utility_spread_scale;
 } SimArgs;
 
+// Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
+// for every SimArgs field: bai_options.arm_avoid_prune and
+// parent_worker_thread_index are defaulted here and overwritten by the callers
+// that care. Adding a SimArgs field therefore does not break the call sites the
+// way it does for those two, so audit them by hand until this follows suit.
 static inline void
 sim_args_fill(const int num_plies, const MoveList *move_list,
               const int num_plays, Rack *known_opp_rack, WinPct *win_pcts,
@@ -51,6 +56,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const uint64_t min_play_iterations, const double scond,
               const bai_threshold_t threshold, const double time_limit_seconds,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
+              const double utility_w_winpct, const double utility_w_spread,
+              const double utility_spread_scale,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
@@ -74,6 +81,9 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sample_minimum = min_play_iterations;
   if (scond > 100 || threshold == BAI_THRESHOLD_NONE) {
     sim_args->bai_options.threshold = BAI_THRESHOLD_NONE;
+    // Unread while the threshold is NONE (only GK16 divides by it), but set
+    // so no field is left to whatever the caller's storage happened to hold.
+    sim_args->bai_options.delta = 1.0;
   } else {
     sim_args->bai_options.delta = 1.0 - (scond / 100.0);
     sim_args->bai_options.threshold = threshold;
@@ -86,10 +96,10 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;
   sim_args->bai_options.num_arm_avoid_prune = 0;
-  // Default utility weights: pure win%, no spread contribution.
-  sim_args->utility_w_winpct = 1.0;
-  sim_args->utility_w_spread = 0.0;
-  sim_args->utility_spread_scale = 100.0;
+  // Pure win% (no spread contribution) is (1.0, 0.0, 100.0).
+  sim_args->utility_w_winpct = utility_w_winpct;
+  sim_args->utility_w_spread = utility_w_spread;
+  sim_args->utility_spread_scale = utility_spread_scale;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

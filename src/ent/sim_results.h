@@ -73,7 +73,9 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 double sim_results_get_cutoff(const SimResults *sim_results);
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
 // Record the utility-blend spread weight the sim ran with; see
-// sim_results_get_best_move for how it affects best-move selection.
+// sim_results_get_best_move_index for how it affects best-move selection.
+// Also stamped onto each SimmedPlay, since compare_simmed_plays sees only
+// the plays.
 void sim_results_set_utility_w_spread(SimResults *sim_results,
                                       double utility_w_spread);
 double sim_results_get_utility_w_spread(const SimResults *sim_results);
@@ -98,5 +100,7 @@ bool sim_results_display_plays_are_similar(const SimResults *sim_results,
                                            const int sp2_index);
 int sim_results_get_best_move_index(const SimResults *sim_results);
 const Move *sim_results_get_best_move(const SimResults *sim_results);
+// Mean utility (win%+spread blend in [0, 1]) of the sim's best play.
+double sim_results_get_best_move_utility(const SimResults *sim_results);
 
 #endif

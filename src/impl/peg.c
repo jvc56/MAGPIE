@@ -2527,6 +2527,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // A pinned single scenario has nothing for the halving stages to re-rank.
     num_stages = 0;
   }
+  if (args->greedy_seed_only) {
+    // Greedy seed only: rank the full field by the stage-0 greedy-playout
+    // win%, skipping the halving stages' exact endgame refinement. Bounded and
+    // deterministic (full enumeration, deterministic playout, no deep solves).
+    num_stages = 0;
+  }
 
   // Exhaustive mode: a single uncapped stage (-pegtopk all / 0). With no
   // narrowing the per-stage fidelity ramp is pointless — re-evaluating the

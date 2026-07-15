@@ -16,6 +16,7 @@
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include <stdint.h>
 
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
@@ -194,6 +195,18 @@ typedef struct EndgameArgs {
   // sweep entirely, >0 = evaluate at most this many top moves. Ignored unless
   // first_win is set.
   int first_win_fallback_moves;
+  // Generalization of first_win: search every iterative-deepening pass
+  // with the fixed window [initial_alpha, initial_beta] (in final-spread
+  // units for the solving player, i.e. PVLine score plus the initial
+  // spread) and disable aspiration windows. The solve then answers how
+  // the exact value relates to the window instead of computing it: a
+  // returned value >= initial_beta is a lower bound and a value <=
+  // initial_alpha is an upper bound. A null window [x, x+1] proves
+  // whether the exact value exceeds x. first_win is equivalent to a
+  // [-1, 1] window.
+  bool use_initial_window;
+  int32_t initial_alpha;
+  int32_t initial_beta;
   // Absolute monotonic-ns deadline (ctimer_monotonic_ns()-compatible). If
   // non-zero, workers bail out mid-search once now > deadline. Lets a
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
@@ -212,6 +225,64 @@ typedef struct EndgameArgs {
   // the same guarantee the root's first move always gets.
   const Move *actual_move;
 } EndgameArgs;
+
+// Fills every EndgameArgs field from an explicit argument, so that adding a
+// field to the struct breaks each call site until it is considered. That is the
+// whole point of the parameter count: prefer this to assigning the struct
+// directly, and add a parameter here rather than a default when a field is
+// added. (sim_args_fill deliberately does not go this far; see the note there.)
+// Callers that build an EndgameArgs literal instead -- the tests, and peg.c's
+// internal solves -- opt out of that check knowingly.
+static inline void endgame_args_fill(
+    ThreadControl *thread_control, const Game *game,
+    const double tt_fraction_of_mem, const int plies,
+    const int initial_small_move_arena_size, const int num_threads,
+    const bool use_heuristics, const int num_top_moves,
+    EndgamePerPlyCallback per_ply_callback, void *per_ply_callback_data,
+    EndgameBeforeSearchCallback before_search_callback,
+    void *before_search_callback_data,
+    EndgamePerRootMoveCallback per_root_move_callback,
+    void *per_root_move_callback_data,
+    const dual_lexicon_mode_t dual_lexicon_mode, const bool forced_pass_bypass,
+    const bool enable_pv_display, const double soft_time_limit,
+    const double hard_time_limit, const uint64_t seed,
+    const bool skip_word_pruning, TranspositionTable *shared_tt,
+    const int max_workers, const bool first_win,
+    const int first_win_fallback_moves, const bool use_initial_window,
+    const int32_t initial_alpha, const int32_t initial_beta,
+    const int64_t external_deadline_ns, const Move *actual_move,
+    EndgameArgs *endgame_args) {
+  endgame_args->thread_control = thread_control;
+  endgame_args->game = game;
+  endgame_args->tt_fraction_of_mem = tt_fraction_of_mem;
+  endgame_args->plies = plies;
+  endgame_args->initial_small_move_arena_size = initial_small_move_arena_size;
+  endgame_args->num_threads = num_threads;
+  endgame_args->use_heuristics = use_heuristics;
+  endgame_args->num_top_moves = num_top_moves;
+  endgame_args->per_ply_callback = per_ply_callback;
+  endgame_args->per_ply_callback_data = per_ply_callback_data;
+  endgame_args->before_search_callback = before_search_callback;
+  endgame_args->before_search_callback_data = before_search_callback_data;
+  endgame_args->per_root_move_callback = per_root_move_callback;
+  endgame_args->per_root_move_callback_data = per_root_move_callback_data;
+  endgame_args->dual_lexicon_mode = dual_lexicon_mode;
+  endgame_args->forced_pass_bypass = forced_pass_bypass;
+  endgame_args->enable_pv_display = enable_pv_display;
+  endgame_args->soft_time_limit = soft_time_limit;
+  endgame_args->hard_time_limit = hard_time_limit;
+  endgame_args->seed = seed;
+  endgame_args->skip_word_pruning = skip_word_pruning;
+  endgame_args->shared_tt = shared_tt;
+  endgame_args->max_workers = max_workers;
+  endgame_args->first_win = first_win;
+  endgame_args->first_win_fallback_moves = first_win_fallback_moves;
+  endgame_args->use_initial_window = use_initial_window;
+  endgame_args->initial_alpha = initial_alpha;
+  endgame_args->initial_beta = initial_beta;
+  endgame_args->external_deadline_ns = external_deadline_ns;
+  endgame_args->actual_move = actual_move;
+}
 
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
                            TranspositionTable *tt, int solving_player,

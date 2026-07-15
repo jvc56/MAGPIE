@@ -2770,10 +2770,9 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_num_display_plays, config->shplies, config->seed,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
-      config->sampling_rule, config->cutoff, &inference_args, sim_args);
-  sim_args->utility_w_winpct = config->utility_w_winpct;
-  sim_args->utility_w_spread = config->utility_w_spread;
-  sim_args->utility_spread_scale = config->utility_spread_scale;
+      config->sampling_rule, config->cutoff, config->utility_w_winpct,
+      config->utility_w_spread, config->utility_spread_scale, &inference_args,
+      sim_args);
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -3102,25 +3101,24 @@ char *status_rack_and_gen_and_sim(Config *config) { return status_sim(config); }
 // Endgame
 
 void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
-  memset(endgame_args, 0, sizeof(*endgame_args));
-  endgame_args->thread_control = config->thread_control;
-  endgame_args->game = config->game;
-  endgame_args->plies = config->endgame_plies;
-  endgame_args->tt_fraction_of_mem = config->tt_fraction_of_mem;
-  endgame_args->initial_small_move_arena_size =
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args->num_threads = config->num_threads;
-  endgame_args->num_top_moves = config->endgame_top_k;
-  endgame_args->use_heuristics = true;
-  endgame_args->enable_pv_display = true;
-  endgame_args->per_ply_callback = NULL;
-  endgame_args->per_ply_callback_data = NULL;
-  // 0 = unlimited, matching the plain "endgame" command's historical
-  // default. Callers that want -tlim to bound an unset -etlim (e.g.
+  // The time limits are 0 = unlimited, matching the plain "endgame" command's
+  // historical default. Callers that want -tlim to bound an unset -etlim (e.g.
   // autoanalyze) must opt in explicitly via config_fill_analyze_args.
-  endgame_args->soft_time_limit = config->endgame_time_limit_seconds;
-  endgame_args->hard_time_limit = config->endgame_time_limit_seconds;
-  endgame_args->seed = config->seed;
+  endgame_args_fill(
+      config->thread_control, config->game, config->tt_fraction_of_mem,
+      config->endgame_plies, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      config->num_threads, /*use_heuristics=*/true, config->endgame_top_k,
+      /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
+      /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
+      /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*enable_pv_display=*/true,
+      /*soft_time_limit=*/config->endgame_time_limit_seconds,
+      /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,
+      /*skip_word_pruning=*/false, /*shared_tt=*/NULL, /*max_workers=*/0,
+      /*first_win=*/false, /*first_win_fallback_moves=*/0,
+      /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
+      /*external_deadline_ns=*/0, /*actual_move=*/NULL, endgame_args);
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -3219,31 +3217,34 @@ static void config_load_peg_stage_top_k(Config *config,
 static const int PEG_NESTED_DEFAULT_CAND_CAPS[] = {8, 4, 2};
 
 void config_fill_peg_args(Config *config, PegArgs *peg_args) {
-  memset(peg_args, 0, sizeof(*peg_args));
-  peg_args->game = config->game;
-  peg_args->thread_control = config->thread_control;
-  peg_args->num_threads = config->num_threads;
-  peg_args->time_budget_seconds = config->peg_time_limit_seconds != 0
-                                      ? config->peg_time_limit_seconds
-                                      : config->time_limit_seconds;
-  peg_args->opp_model =
-      config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL;
-  peg_args->scenario_stride = config->peg_scenario_stride;
-  // Per-stage candidate-count override (NULL = built-in default schedule).
-  peg_args->stage_top_k =
-      config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL;
-  peg_args->num_stages = config->peg_num_stages;
-  peg_args->include_per_scenario = config->peg_show_outcomes;
-  // Nested inner-peg lookahead for non-emptier leaves, on by default at depth 1
-  // with the inner stage schedule above and the bag-size default scenario
-  // stride. -pegnested false restores the flat rollout. Emptier (bag-empty)
+  // Nested inner-peg lookahead for non-emptier leaves is on by default at depth
+  // 1 with the default inner stage schedule and the bag-size default scenario
+  // stride (0). -pegnested false restores the flat rollout. Emptier (bag-empty)
   // leaves are unaffected -- they always solve exact endgames.
-  peg_args->nested_enabled = config->peg_nested;
-  peg_args->nested_max_depth = PEG_NESTED_DEFAULT_DEPTH;
-  peg_args->nested_cand_caps = PEG_NESTED_DEFAULT_CAND_CAPS;
-  peg_args->nested_n_cand_caps = (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
-                                       sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0]));
-  peg_args->nested_stride = 0; // bag-size default
+  // stage_top_k is the per-stage candidate-count override (NULL = built-in
+  // default schedule). poll and the only/protect move sets are left unset here;
+  // config_peg installs them after this call.
+  peg_args_fill(
+      config->game, config->thread_control, config->num_threads,
+      /*time_budget_seconds=*/config->peg_time_limit_seconds != 0
+          ? config->peg_time_limit_seconds
+          : config->time_limit_seconds,
+      /*max_stage=*/0, /*greedy_seed_only=*/false,
+      /*stage_top_k=*/
+      config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
+      config->peg_num_stages, /*inner_top_k=*/0,
+      config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
+      config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
+      /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
+      (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
+            sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),
+      /*nested_stride=*/0, /*nested_emptier_ply_cap=*/0,
+      PEG_NESTED_DEFAULT_DEPTH, /*eval_bag_order=*/NULL,
+      /*eval_bag_order_len=*/0, /*only_moves=*/NULL, /*n_only_moves=*/0,
+      /*protect_moves=*/NULL, /*n_protect_moves=*/0,
+      /*include_per_scenario=*/config->peg_show_outcomes,
+      /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
+      /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL, peg_args);
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)
@@ -3489,11 +3490,9 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p1_max_iterations, config->p1_min_play_iterations,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
-      &p1_inference_args, &autoplay_args->p1_sim_args);
-  autoplay_args->p1_sim_args.utility_w_winpct = config->p1_utility_w_winpct;
-  autoplay_args->p1_sim_args.utility_w_spread = config->p1_utility_w_spread;
-  autoplay_args->p1_sim_args.utility_spread_scale =
-      config->p1_utility_spread_scale;
+      config->p1_utility_w_winpct, config->p1_utility_w_spread,
+      config->p1_utility_spread_scale, &p1_inference_args,
+      &autoplay_args->p1_sim_args);
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -3505,11 +3504,9 @@ void config_fill_autoplay_args(const Config *config,
       /*seed=*/0, config->p2_max_iterations, config->p2_min_play_iterations,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
-      &p2_inference_args, &autoplay_args->p2_sim_args);
-  autoplay_args->p2_sim_args.utility_w_winpct = config->p2_utility_w_winpct;
-  autoplay_args->p2_sim_args.utility_w_spread = config->p2_utility_w_spread;
-  autoplay_args->p2_sim_args.utility_spread_scale =
-      config->p2_utility_spread_scale;
+      config->p2_utility_w_winpct, config->p2_utility_w_spread,
+      config->p2_utility_spread_scale, &p2_inference_args,
+      &autoplay_args->p2_sim_args);
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,

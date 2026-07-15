@@ -694,6 +694,14 @@ bool sim_results_plays_are_similar(const SimResults *sim_results,
   return sim_results_simmed_plays_are_similar_internal(sim_results, sp1, sp2);
 }
 
+// Index of the best play under compare_simmed_plays, which is also the order
+// the display is sorted in. With a nonzero spread weight that comparator ranks
+// by mean blended utility -- the same quantity BAI maximizes when it picks its
+// best arm -- so there is no need to consult the BAI result separately. With a
+// ZERO spread weight the sample utility is the raw 0/0.5/1 win outcome, which
+// loses its gradient whenever win% saturates (decided games: every arm's mean
+// is ~0 or ~1) or ties exactly; the comparator's win%-within-cutoff tiebreak on
+// mean equity recovers spread at no win% cost.
 // Not thread safe, assumes the sim is finished.
 int sim_results_get_best_move_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -715,32 +723,29 @@ int sim_results_get_best_move_index(const SimResults *sim_results) {
 
 // Not thread safe, assumes the sim is finished.
 const Move *sim_results_get_best_move(const SimResults *sim_results) {
-  // With a nonzero spread weight, prefer BAI's chosen arm: that's the one
-  // with the highest mean *utility* (wpct blended with sigmoid(spread)).
-  // Falling through to sim_results_get_best_move_index would re-rank by raw
-  // win_pct_stat, ignoring the blend entirely.
-  //
-  // With a ZERO spread weight the sample utility is the raw 0/0.5/1 win
-  // outcome, which loses its gradient whenever win% saturates (decided
-  // games: every arm's mean is ~0 or ~1) or ties exactly. BAI's arm choice
-  // among tied arms is then effectively arbitrary, and measured game-pair
-  // autoplay showed it bleeding 5-60+ points per decided turn (playing
-  // rank-15 moves over same-win% higher-scoring ones). Use the win%
-  // comparator instead: it breaks win%-within-cutoff ties by mean equity,
-  // matching the displayed sort and recovering spread at no win% cost.
-  int best_play_idx;
-  if (sim_results->utility_w_spread == 0.0) {
-    best_play_idx = sim_results_get_best_move_index(sim_results);
-  } else {
-    best_play_idx =
-        bai_result_get_best_arm(sim_results_get_bai_result(sim_results));
-    if (best_play_idx < 0) {
-      best_play_idx = sim_results_get_best_move_index(sim_results);
-    }
-  }
+  const int best_play_idx = sim_results_get_best_move_index(sim_results);
   if (best_play_idx < 0) {
     return NULL;
   }
   return simmed_play_get_move(
       sim_results_get_simmed_play(sim_results, best_play_idx));
+}
+
+// Mean utility (win%+spread blend in [0, 1]) of the sim's best play, using the
+// same best-play selection as sim_results_get_best_move. Not thread safe,
+// assumes the sim is finished. Returns 0 if there are no plays.
+double sim_results_get_best_move_utility(const SimResults *sim_results) {
+  const int best_play_idx = sim_results_get_best_move_index(sim_results);
+  if (best_play_idx < 0) {
+    return 0.0;
+  }
+  const SimmedPlay *best_play =
+      sim_results_get_simmed_play(sim_results, best_play_idx);
+  // utility_stat is only recorded on the utility path (the hot pure-win% path
+  // skips it). With a zero spread weight the utility IS the win% -- read it
+  // from win_pct_stat rather than the empty utility_stat, which would report 0.
+  if (sim_results->utility_w_spread == 0.0) {
+    return stat_get_mean(simmed_play_get_win_pct_stat(best_play));
+  }
+  return stat_get_mean(simmed_play_get_utility_stat(best_play));
 }
