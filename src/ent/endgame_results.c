@@ -20,6 +20,8 @@ typedef struct PVData {
 struct EndgameResults {
   PVData best_pv_data;
   PVData display_pv_data;
+  PVData actual_pv_data;
+  bool actual_move_found;
   bool valid_for_current_game_state;
   Timer timer;
   double seconds_elapsed;
@@ -48,8 +50,13 @@ EndgameResults *endgame_results_create(void) {
   endgame_results->display_pv_data.depth = -1;
   endgame_results->display_pv_data.value = 0;
   endgame_results->display_pv_data.pv_line.num_moves = 0;
+  endgame_results->actual_pv_data.depth = -1;
+  endgame_results->actual_pv_data.value = 0;
+  endgame_results->actual_pv_data.pv_line.num_moves = 0;
+  endgame_results->actual_move_found = false;
   cpthread_mutex_init(&endgame_results->best_pv_data.mutex);
   cpthread_mutex_init(&endgame_results->display_pv_data.mutex);
+  cpthread_mutex_init(&endgame_results->actual_pv_data.mutex);
   endgame_results->valid_for_current_game_state = false;
   ctimer_reset(&endgame_results->timer);
   endgame_results->seconds_elapsed = 0;
@@ -81,6 +88,9 @@ void endgame_results_reset(EndgameResults *endgame_results) {
   endgame_results->best_pv_data.pv_line.num_moves = 0;
   endgame_results->display_pv_data.depth = -1;
   endgame_results->display_pv_data.pv_line.num_moves = 0;
+  endgame_results->actual_pv_data.depth = -1;
+  endgame_results->actual_pv_data.pv_line.num_moves = 0;
+  endgame_results->actual_move_found = false;
   endgame_results->valid_for_current_game_state = false;
   ctimer_start(&endgame_results->timer);
   game_destroy(endgame_results->start_game);
@@ -114,6 +124,9 @@ const PVLine *endgame_results_get_pvline(const EndgameResults *endgame_results,
   case ENDGAME_RESULT_DISPLAY:
     pv_line = &endgame_results->display_pv_data.pv_line;
     break;
+  case ENDGAME_RESULT_ACTUAL:
+    pv_line = &endgame_results->actual_pv_data.pv_line;
+    break;
   }
   return pv_line;
 }
@@ -129,6 +142,9 @@ int endgame_results_get_value(const EndgameResults *endgame_results,
   case ENDGAME_RESULT_DISPLAY:
     value = endgame_results->display_pv_data.value;
     break;
+  case ENDGAME_RESULT_ACTUAL:
+    value = endgame_results->actual_pv_data.value;
+    break;
   }
   return value;
 }
@@ -142,6 +158,9 @@ int endgame_results_get_spread(const EndgameResults *endgame_results,
     break;
   case ENDGAME_RESULT_DISPLAY:
     value = endgame_results->display_pv_data.value;
+    break;
+  case ENDGAME_RESULT_ACTUAL:
+    value = endgame_results->actual_pv_data.value;
     break;
   }
   const int p0_score =
@@ -165,6 +184,9 @@ int endgame_results_get_depth(const EndgameResults *endgame_results,
   case ENDGAME_RESULT_DISPLAY:
     depth = endgame_results->display_pv_data.depth;
     break;
+  case ENDGAME_RESULT_ACTUAL:
+    depth = endgame_results->actual_pv_data.depth;
+    break;
   }
   return depth;
 }
@@ -183,6 +205,9 @@ void endgame_results_lock(EndgameResults *endgame_results,
   case ENDGAME_RESULT_DISPLAY:
     cpthread_mutex_lock(&endgame_results->display_pv_data.mutex);
     break;
+  case ENDGAME_RESULT_ACTUAL:
+    cpthread_mutex_lock(&endgame_results->actual_pv_data.mutex);
+    break;
   }
 }
 
@@ -194,6 +219,9 @@ void endgame_results_unlock(EndgameResults *endgame_results,
     break;
   case ENDGAME_RESULT_DISPLAY:
     cpthread_mutex_unlock(&endgame_results->display_pv_data.mutex);
+    break;
+  case ENDGAME_RESULT_ACTUAL:
+    cpthread_mutex_unlock(&endgame_results->actual_pv_data.mutex);
     break;
   }
 }
@@ -217,6 +245,22 @@ void endgame_results_set_best_pvline(EndgameResults *endgame_results,
     endgame_results->best_pv_data.pv_line = *pv_line;
   }
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
+}
+
+void endgame_results_set_actual_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value,
+                                       int depth) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_ACTUAL);
+  endgame_results->actual_pv_data.depth = depth;
+  endgame_results->actual_pv_data.value = value;
+  endgame_results->actual_pv_data.pv_line = *pv_line;
+  endgame_results->actual_move_found = true;
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_ACTUAL);
+}
+
+bool endgame_results_get_actual_move_found(
+    const EndgameResults *endgame_results) {
+  return endgame_results->actual_move_found;
 }
 
 void endgame_results_set_start_game(EndgameResults *endgame_results,

@@ -8,9 +8,27 @@ endif
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
-OBJ_DIR := obj
 BIN_DIR := bin
 COV_DIR := cov
+
+# Build knobs that change the compiled objects. Defined up here (before OBJ_DIR)
+# so object files can be keyed by them.
+#dev is default, for another flavor : make BUILD=release
+BUILD ?= dev
+ifndef BOARD_DIM
+BOARD_DIM = 15
+endif
+ifndef RACK_SIZE
+RACK_SIZE = 7
+endif
+
+# Key every object (and its .d fragment) by the flags that change its contents:
+# build flavor, board dim, rack size. Switching any of them selects a different
+# obj subtree instead of relinking objects compiled with mismatched flags -- so
+# no `make clean` is needed between flavors, and switching back reuses the cached
+# objects. `clean` wipes the whole OBJ_ROOT.
+OBJ_ROOT := obj
+OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
 TEST := $(wildcard $(TEST_DIR)/*.c)
@@ -24,9 +42,6 @@ SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS
 
 TEST_SUBDIRS := $(shell find $(TEST_DIR) -type d)
 TEST_OBJ_SUBDIRS := $(patsubst $(TEST_DIR)/%,$(OBJ_DIR)/$(TEST_DIR)/%,$(TEST_SUBDIRS))
-
-#dev is default, for another flavor : make BUILD=release
-BUILD ?= dev
 
 ifeq ($(BUILD),thread)
     FSAN_ARG := -fsanitize=thread
@@ -63,14 +78,6 @@ CFLAGS := ${cflags.${BUILD}}
 # a header recompiles exactly the .c files that include it -- no `make clean`.
 DEPFLAGS := -MMD -MP
 
-ifndef BOARD_DIM
-BOARD_DIM = 15
-endif
-
-ifndef RACK_SIZE
-RACK_SIZE = 7
-endif
-
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 
 
@@ -105,7 +112,7 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 	mkdir -p $@
 
 clean:
-	@$(RM) -rv $(BIN_DIR) $(OBJ_DIR) libmagpie_core.a
+	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)

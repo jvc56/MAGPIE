@@ -46,6 +46,7 @@
 #include "peg_poll_test.h"
 #include "peg_pool_test.h"
 #include "peg_test.h"
+#include "play_chooser_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
 #include "rack_list_test.h"
@@ -127,6 +128,7 @@ static TestEntry test_table[] = {
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
     {"endgame", test_endgame},
+    {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
     {"eldar_v", test_eldar_v_stick},
     {"zobrist", test_zobrist},
@@ -136,6 +138,7 @@ static TestEntry test_table[] = {
     {"peg", test_peg},
     {"pegpessdraw", test_peg_pessfull_draw_regression},
     {"pegtopkall", test_peg_pegtopk_all},
+    {"playchooser", test_play_chooser},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 
@@ -155,9 +158,16 @@ static TestEntry on_demand_test_table[] = {
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
     {"genpegcgps", test_generate_peg_cgps},
+    {"pegstage", test_peg_stage_stability},
+    {"pegab", test_peg_strength_ab},
+    {"genpegfresh", test_gen_peg_fresh},
+    {"pegcurve", test_peg_strength_curve},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"egspeedbench", test_endgame_speed_bench},
+    {"egplayout", test_endgame_playout_bench},
+    {"egmove1", test_endgame_move1},
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},
