@@ -231,8 +231,8 @@ typedef struct EndgameArgs {
 // whole point of the parameter count: prefer this to assigning the struct
 // directly, and add a parameter here rather than a default when a field is
 // added. (sim_args_fill deliberately does not go this far; see the note there.)
-// Callers that build an EndgameArgs literal instead -- the tests, and peg.c's
-// internal solves -- opt out of that check knowingly.
+// Callers that build an EndgameArgs literal instead -- the tests -- opt out of
+// that check knowingly.
 static inline void endgame_args_fill(
     ThreadControl *thread_control, const Game *game,
     const double tt_fraction_of_mem, const int plies,

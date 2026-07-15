@@ -1085,25 +1085,27 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   if (plies < 1) {
     plies = 1;
   }
-  EndgameArgs ea;
-  memset(&ea, 0, sizeof(ea));
-  ea.thread_control = worker->thread_control;
-  ea.game = game;
-  ea.plies = plies;
-  ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  ea.num_threads = 1;
-  ea.max_workers = 0; // nested endgames are small and many; no core injection
-  ea.use_heuristics = true;
-  ea.num_top_moves = 1;
-  ea.external_deadline_ns = deadline_ns;
-  ea.shared_tt = worker->eg_tt;
   if (plies >= 2) {
     const KWG *leaf_kwg =
         peg_prune_cache_get(worker->prune_cache, game, on_turn);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
   }
-  ea.skip_word_pruning = true;
-  ea.seed = PEG_ENDGAME_SEED;
+  EndgameArgs ea;
+  endgame_args_fill(
+      worker->thread_control, game, /*tt_fraction_of_mem=*/0.0, plies,
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, /*num_threads=*/1,
+      /*use_heuristics=*/true, /*num_top_moves=*/1,
+      /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
+      /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
+      /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
+      /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
+      worker->eg_tt,
+      // nested endgames are small and many; no core injection
+      /*max_workers=*/0, /*first_win=*/false, /*first_win_fallback_moves=*/0,
+      /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
+      deadline_ns, /*actual_move=*/NULL, &ea);
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
@@ -1527,20 +1529,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // Exact endgame leaf. After the mover plays and draws it is the opponent's
   // turn, so the solved value is from the on-turn player's perspective; fold
   // it into the mover lead accordingly.
-  EndgameArgs ea;
-  memset(&ea, 0, sizeof(ea));
-  ea.thread_control = ctx->thread_control;
-  ea.game = game;
-  ea.plies = ctx->fidelity_plies;
-  ea.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  ea.num_threads = 1;
-  // > num_threads (1) opens the injection window so the monitor can lend idle
-  // cores to this (potentially long) endgame mid-solve.
-  ea.max_workers = ctx->injection_cap;
-  ea.use_heuristics = true;
-  ea.num_top_moves = 1;
-  ea.external_deadline_ns = ctx->deadline_ns;
-  ea.shared_tt = ctx->worker->eg_tt;
+  //
   // Chained re-prune: install this candidate's tighter pruned KWG (built once
   // per board, chained off the root prune already on the game) for the endgame
   // to use. The existing (parent) cross-sets are kept as-is and NOT
@@ -1559,8 +1548,24 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
         peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
   }
-  ea.skip_word_pruning = true;
-  ea.seed = PEG_ENDGAME_SEED;
+  EndgameArgs ea;
+  endgame_args_fill(
+      ctx->thread_control, game, /*tt_fraction_of_mem=*/0.0,
+      ctx->fidelity_plies, DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+      /*num_threads=*/1, /*use_heuristics=*/true, /*num_top_moves=*/1,
+      /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
+      /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
+      /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
+      /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
+      ctx->worker->eg_tt,
+      // > num_threads (1) opens the injection window so the monitor can lend
+      // idle cores to this (potentially long) endgame mid-solve.
+      /*max_workers=*/ctx->injection_cap, /*first_win=*/false,
+      /*first_win_fallback_moves=*/0, /*use_initial_window=*/false,
+      /*initial_alpha=*/0, /*initial_beta=*/0, ctx->deadline_ns,
+      /*actual_move=*/NULL, &ea);
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
   // If the solver was interrupted before completing any search depth (depth
