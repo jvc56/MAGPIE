@@ -40,6 +40,13 @@ typedef struct RecorderArgs {
   uint64_t seed;
   bool divergent;
   bool human_readable;
+  // True if this move was forced onto the player to evaluate a rack (e.g.
+  // autoplay's forceracksfile mode) rather than actually played. Each
+  // recorder's add_move_func decides for itself whether a forced rack is
+  // meaningful to it: most recorders assume every recorded move was really
+  // played and must skip forced racks, but a recorder like rack-equity that
+  // only cares about (rack, equity) pairs can record them.
+  bool is_forced_rack;
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
@@ -551,6 +558,11 @@ void fj_data_destroy(Recorder *recorder) {
 }
 
 void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  if (args->is_forced_rack) {
+    // FJ data is keyed to the game's actual final outcome, so a hypothetical
+    // move that was never played cannot be recorded.
+    return;
+  }
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
@@ -720,6 +732,11 @@ void win_pct_data_destroy(Recorder *recorder) {
 // When the game is passed to this function it is *before* the move has been
 // played.
 void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  if (args->is_forced_rack) {
+    // Win-pct snapshots assume the game continues along its real trajectory,
+    // so a hypothetical forced-rack move is not meaningful here.
+    return;
+  }
   WinPctData *win_pct_data = (WinPctData *)recorder->data;
   if (win_pct_data->turn_snapshot_index >= WIN_PCT_MAX_NUM_TURNS) {
     return;
@@ -938,6 +955,11 @@ void leaves_data_destroy(Recorder *recorder) {
 }
 
 void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  if (args->is_forced_rack) {
+    // Leave counts are derived from real moves actually played; a
+    // hypothetical forced-rack move has no associated leave to count.
+    return;
+  }
   // Don't record the empty or full rack
   const int num_tiles = rack_get_total_letters(args->leave);
   if (num_tiles == 0 || num_tiles == (RACK_SIZE)) {
@@ -1076,6 +1098,16 @@ void rack_equity_data_destroy(Recorder *recorder) {
 }
 
 void rack_equity_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  if (move_get_type(args->move) == GAME_EVENT_PASS) {
+    // A pass's equity is the sentinel EQUITY_PASS_VALUE, not a real value.
+    // equity_to_double() (used when writing the CSV) fatals on it, so passes
+    // - forced or real - are never recorded. This is the only recorder that
+    // records forced racks (see RecorderArgs.is_forced_rack); a forced rack
+    // is under no obligation to have a legal play (autoplay's
+    // forceracksfile is expected to contain deliberately awkward racks like
+    // "QZ" or "JKX"), so its best move can easily be a pass.
+    return;
+  }
   RackEquityData *data = (RackEquityData *)recorder->data;
   if (data->num_entries == data->capacity) {
     data->capacity *= 2;
@@ -1426,13 +1458,21 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
   }
 }
 
+// is_forced_rack is true when move is the best move for a rack that was
+// temporarily forced onto the player to evaluate it (e.g. autoplay's
+// forceracksfile mode), rather than actually played. Each recorder's
+// add_move_func decides for itself whether that's meaningful to record: most
+// recorders assume every recorded move was really played and skip forced
+// racks, but a recorder like rack-equity that only cares about (rack,
+// equity) pairs can still record them.
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave) {
+                               const Rack *leave, bool is_forced_rack) {
   RecorderArgs args;
   args.game = game;
   args.move = move;
   args.leave = leave;
+  args.is_forced_rack = is_forced_rack;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_move(autoplay_results->recorders[i], &args);

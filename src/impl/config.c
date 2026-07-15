@@ -1142,15 +1142,23 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_AUTOPLAY:
       usages[0] = "<type1> <num_games>";
       usages[1] = "<type1>,<type2>,... <num_games>";
+      usages[2] = "<type1>,<type2>,... <num_games> [<forceracksfile>]";
       examples[0] = "games 100";
       examples[1] = "games,winpct 1000";
       examples[2] = "leave,winpct 2000";
       examples[3] = "rackequity 500";
+      examples[4] = "rackequity 500 my_racks.txt";
       text = "Runs the autoplay command with the specified recorder(s). If the "
              "game pairs option is set to true, autoplay will run <num_games> "
              "game pairs resulting in a total of 2 * <num_games> games. The "
              "'rackequity' recorder writes a CSV of rack,equity pairs to "
-             "autoplay_record_rackequity.csv.";
+             "autoplay_record_rackequity.csv. The optional third argument, "
+             "<forceracksfile>, is a path to a file listing racks, one per "
+             "line, to randomly force-draw during autoplay instead of a "
+             "player's normal rack (used to gather rack-equity samples for a "
+             "fixed set of externally-provided racks, e.g. from a "
+             "distributed leavegen run). It requires the 'rackequity' "
+             "recorder to be enabled.";
       break;
     case ARG_TOKEN_CONVERT:
       usages[0] = "<type> <input_name_without_extension> "
@@ -3423,10 +3431,12 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args,
                                autoplay_t autoplay_type,
                                const char *num_games_or_min_rack_targets,
-                               int games_before_force_draw_start) {
+                               int games_before_force_draw_start,
+                               const char *force_racks_filename) {
   autoplay_args->type = autoplay_type;
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
+  autoplay_args->force_racks_filename = force_racks_filename;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -3524,13 +3534,14 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
+                     const char *force_racks_filename,
                      ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
-  config_fill_autoplay_args(config, &args, autoplay_type,
-                            num_games_or_min_rack_targets,
-                            games_before_force_draw_start);
+  config_fill_autoplay_args(
+      config, &args, autoplay_type, num_games_or_min_rack_targets,
+      games_before_force_draw_start, force_racks_filename);
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -3559,8 +3570,14 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
   const char *num_games_str =
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
+  // Optional third argument: a file listing racks to force-draw during
+  // autoplay instead of leavegen's dynamically tracked rare racks. NULL if
+  // not supplied.
+  const char *force_racks_filename =
+      config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 2);
+
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
-                  num_games_str, 0, error_stack);
+                  num_games_str, 0, force_racks_filename, error_stack);
 }
 
 char *status_autoplay(Config *config) {
@@ -3638,7 +3655,7 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
-                  error_stack);
+                  /*force_racks_filename=*/NULL, error_stack);
 }
 
 // Create
@@ -8254,7 +8271,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_INFER, "infer", 0, 5, infer, generic, false);
   cmd(ARG_TOKEN_ENDGAME, "endgame", 0, 0, endgame, endgame, false);
   cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, peg, false);
-  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
+  cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 3, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
   cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);

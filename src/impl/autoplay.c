@@ -34,6 +34,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "force_rack_list.h"
 #include "gameplay.h"
 #include "rack_list.h"
 #include "simmer.h"
@@ -74,6 +75,18 @@ bool autoplay_get_bench_static_move(void) {
                               memory_order_relaxed);
 }
 
+// Identifies which of autoplay's three use cases is active for a run:
+// normal autoplay (no forcing), leavegen (racks forced from a dynamically
+// tracked RackList), or autoplay with forceracksfile (racks forced from a
+// fixed, externally provided ForceRackList). Every switch on this enum in
+// this file must handle all three cases explicitly and must not have a
+// default case, so that -Wswitch catches any case missed if a mode is added.
+typedef enum {
+  RARE_RACK_MODE_NONE,
+  RARE_RACK_MODE_LEAVE_GEN,
+  RARE_RACK_MODE_FORCE_FILE,
+} rare_rack_mode_t;
+
 typedef struct LeavegenSharedData {
   int num_gens;
   int gens_completed;
@@ -101,7 +114,9 @@ typedef struct AutoplaySharedData {
   uint64_t iter_count_completed;
   cpthread_mutex_t iter_completed_mutex;
   ThreadControl *thread_control;
+  rare_rack_mode_t rare_rack_mode;
   LeavegenSharedData *leavegen_shared_data;
+  ForceRackList *force_rack_list;
 } AutoplaySharedData;
 
 typedef struct AutoplayIterOutput {
@@ -317,7 +332,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->autoplay_results =
       autoplay_results_create_empty_copy(target);
   autoplay_worker->prng = NULL;
-  if (shared_data->leavegen_shared_data) {
+  if (shared_data->rare_rack_mode != RARE_RACK_MODE_NONE) {
     autoplay_worker->prng = prng_create(0);
     autoplay_shared_data_copy_to_dst_and_jump(shared_data,
                                               autoplay_worker->prng);
@@ -391,13 +406,16 @@ LeavegenSharedData *leavegen_shared_data_create(
   return shared_data;
 }
 
-// Use NULL for the KLV when not running in leave gen mode.
+// Use NULL for the KLV when not running in leave gen mode. force_rack_list
+// must be NULL unless running autoplay with forceracksfile; klv and
+// force_rack_list are never both non-NULL for a single run.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
-                            int num_gens, int *min_rack_targets) {
+                            int num_gens, int *min_rack_targets,
+                            ForceRackList *force_rack_list) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
@@ -410,12 +428,18 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   shared_data->iter_count_completed = 0;
   cpthread_mutex_init(&shared_data->iter_completed_mutex);
   shared_data->thread_control = args->thread_control;
+  shared_data->rare_rack_mode = RARE_RACK_MODE_NONE;
   shared_data->leavegen_shared_data = NULL;
+  shared_data->force_rack_list = NULL;
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
         args->data_paths, klv, num_autoplay_threads, num_gens,
         min_rack_targets);
+    shared_data->rare_rack_mode = RARE_RACK_MODE_LEAVE_GEN;
+  } else if (force_rack_list) {
+    shared_data->force_rack_list = force_rack_list;
+    shared_data->rare_rack_mode = RARE_RACK_MODE_FORCE_FILE;
   }
   return shared_data;
 }
@@ -436,6 +460,7 @@ void autoplay_shared_data_destroy(AutoplaySharedData *shared_data) {
   }
   prng_destroy(shared_data->prng);
   leavegen_shared_data_destroy(shared_data->leavegen_shared_data);
+  force_rack_list_destroy(shared_data->force_rack_list);
   free(shared_data);
 }
 
@@ -498,14 +523,23 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   }
 
   game_runner->turn_number = 0;
-  game_runner->force_draw = false;
-  if (game_runner->shared_data->leavegen_shared_data &&
-      // We only force draws if we've played enough games for this
-      // generation.
-      (iter_output->iter_count -
-       game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
-          (uint64_t)autoplay_worker->args.games_before_force_draw_start) {
+  switch (game_runner->shared_data->rare_rack_mode) {
+  case RARE_RACK_MODE_LEAVE_GEN:
+    // We only force draws if we've played enough games for this
+    // generation.
+    game_runner->force_draw =
+        (iter_output->iter_count -
+         game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
+        (uint64_t)autoplay_worker->args.games_before_force_draw_start;
+    break;
+  case RARE_RACK_MODE_FORCE_FILE:
+    // There is no warm-up period for a fixed, externally provided list of
+    // racks: every worker forces a rack every turn from the start.
     game_runner->force_draw = true;
+    break;
+  case RARE_RACK_MODE_NONE:
+    game_runner->force_draw = false;
+    break;
   }
 }
 
@@ -639,9 +673,33 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   Rack rare_rack_or_move_leave;
   rack_set_dist_size(&rare_rack_or_move_leave, ld_size);
 
-  if (game_runner->force_draw &&
-      rack_list_get_rare_rack(lg_shared_data->rack_list, autoplay_worker->prng,
-                              &rare_rack_or_move_leave)) {
+  // Selects the rack to force onto the player this turn, if any. Every case
+  // of rare_rack_mode_t is listed explicitly and there is no default case,
+  // so -Wswitch catches a missed mode if one is added.
+  bool got_forced_rack = false;
+  if (game_runner->force_draw) {
+    AutoplaySharedData *shared_data = game_runner->shared_data;
+    switch (shared_data->rare_rack_mode) {
+    case RARE_RACK_MODE_LEAVE_GEN:
+      // Returns false if leavegen has no rare racks left below the target
+      // count.
+      got_forced_rack = rack_list_get_rare_rack(
+          shared_data->leavegen_shared_data->rack_list, autoplay_worker->prng,
+          &rare_rack_or_move_leave);
+      break;
+    case RARE_RACK_MODE_FORCE_FILE:
+      force_rack_list_get_random_rack(shared_data->force_rack_list,
+                                      autoplay_worker->prng,
+                                      &rare_rack_or_move_leave);
+      got_forced_rack = true;
+      break;
+    case RARE_RACK_MODE_NONE:
+      got_forced_rack = false;
+      break;
+    }
+  }
+
+  if (got_forced_rack) {
     // Backup the original rack
     Rack original_rack;
     rack_copy(&original_rack, player_rack);
@@ -651,8 +709,29 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     const Move *forced_move =
         game_runner_get_best_move(autoplay_worker, game_runner);
-    rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
-                       equity_to_double(move_get_equity(forced_move)));
+
+    // Records the result of evaluating the forced rack's best move. This
+    // always records into autoplay_results with is_forced_rack=true, exactly
+    // as if the forced rack were the player's real rack: each recorder
+    // decides for itself whether a hypothetical, never-played move is
+    // meaningful to it (see autoplay_results_add_move). Leavegen
+    // additionally feeds the sample back into its own RackList to track the
+    // rack's observed count and mean equity; force-file mode has no such
+    // tracking structure of its own.
+    autoplay_results_add_move(autoplay_worker->autoplay_results,
+                              game_runner->game, forced_move, NULL,
+                              /*is_forced_rack=*/true);
+    switch (game_runner->shared_data->rare_rack_mode) {
+    case RARE_RACK_MODE_LEAVE_GEN:
+      rack_list_add_rack(game_runner->shared_data->leavegen_shared_data->rack_list,
+                         &rare_rack_or_move_leave,
+                         equity_to_double(move_get_equity(forced_move)));
+      break;
+    case RARE_RACK_MODE_FORCE_FILE:
+      break;
+    case RARE_RACK_MODE_NONE:
+      log_fatal("cannot record a forced rack in RARE_RACK_MODE_NONE");
+    }
 
     rack_copy(player_rack, &original_rack);
   }
@@ -665,7 +744,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
   autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, move, &rare_rack_or_move_leave);
+                            game_runner->game, move, &rare_rack_or_move_leave,
+                            /*is_forced_rack=*/false);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {
@@ -953,6 +1033,21 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
             "the game pairs setting can only be used with the games recorder"));
     return;
   }
+  // Force-file mode temporarily swaps a forced rack into the player's rack
+  // to evaluate its best move, then restores the original rack, and records
+  // that with is_forced_rack=true (see autoplay_results_add_move). Every
+  // recorder except rack-equity ignores forced racks, so without it enabled
+  // forceracksfile would silently do nothing observable; require it
+  // explicitly rather than let the user run a no-op job.
+  if (!is_string_empty_or_null(args->force_racks_filename) &&
+      !(options &
+        autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_RACK_EQUITY))) {
+    error_stack_push(
+        error_stack, ERROR_STATUS_AUTOPLAY_FORCE_RACKS_REQUIRES_RACK_EQUITY,
+        string_duplicate("forceracksfile requires the rackequity recorder to "
+                         "be enabled"));
+    return;
+  }
 }
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
@@ -1008,6 +1103,19 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     show_divergent_results = false;
   }
 
+  // Only autoplay's AUTOPLAY_TYPE_DEFAULT mode can specify a forceracksfile;
+  // leavegen never sets it (see valid_force_racks_options above), so klv and
+  // force_rack_list are never both non-NULL.
+  ForceRackList *force_rack_list = NULL;
+  if (!is_string_empty_or_null(args->force_racks_filename)) {
+    force_rack_list = force_rack_list_create(
+        args->game_args->ld, args->force_racks_filename, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      free(min_rack_targets);
+      return;
+    }
+  }
+
   const int autoplay_num_threads = args->num_threads;
 
   AutoplayResults **autoplay_results_list =
@@ -1015,7 +1123,7 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, autoplay_num_threads, first_gen_num_games, autoplay_results,
-      autoplay_results_list, klv, num_gens, min_rack_targets);
+      autoplay_results_list, klv, num_gens, min_rack_targets, force_rack_list);
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (autoplay_num_threads));

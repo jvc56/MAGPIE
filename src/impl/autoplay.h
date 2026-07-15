@@ -14,6 +14,10 @@ typedef struct GameStringOptions GameStringOptions;
 typedef struct AutoplayArgs {
   const char *num_games_or_min_rack_targets;
   int games_before_force_draw_start;
+  // Optional: path to a file listing racks (one per line) to force-draw from
+  // during autoplay, instead of leavegen's dynamically tracked RackList. Only
+  // valid with AUTOPLAY_TYPE_DEFAULT. NULL means no forced racks.
+  const char *force_racks_filename;
   bool use_game_pairs;
   bool human_readable;
   bool print_boards;
