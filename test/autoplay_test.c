@@ -235,119 +235,67 @@ void test_autoplay_leaves_record(void) {
   config_destroy(csw_config);
 }
 
-void test_autoplay_rack_equity_record(void) {
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1 -gp false -threads 3");
-  load_and_exec_config_or_die(csw_config,
-                              "autoplay rackequity 5 -seed 42 -wb 1000000");
-  config_destroy(csw_config);
+void test_autoplay_leavegen_force_racks(void) {
+  Config *ab_config =
+      config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
+                           "equity -s2 equity -r1 best -r2 "
+                           "best -numplays 1 -threads 1");
 
-  char *csv = get_string_from_file_or_die("autoplay_record_rackequity.csv");
-  assert(csv);
-
-  StringSplitter *lines = split_string_by_newline(csv, true);
-  const int num_lines = string_splitter_get_number_of_items(lines);
-  assert(num_lines > 0);
-
-  for (int line_idx = 0; line_idx < num_lines; line_idx++) {
-    const char *line = string_splitter_get_item(lines, line_idx);
-    StringSplitter *cols = split_string(line, ',', false);
-    const int num_cols = string_splitter_get_number_of_items(cols);
-    // Each row must have at least rack + one equity value
-    assert(num_cols >= 2);
-    // First column is the rack string (non-empty)
-    const char *rack_str = string_splitter_get_item(cols, 0);
-    assert(strlen(rack_str) > 0);
-    // All subsequent columns must be parseable as doubles (equity values)
-    ErrorStack *error_stack = error_stack_create();
-    for (int col_idx = 1; col_idx < num_cols; col_idx++) {
-      const char *equity_str = string_splitter_get_item(cols, col_idx);
-      string_to_double(equity_str, error_stack);
-      assert(error_stack_is_empty(error_stack));
-    }
-    error_stack_destroy(error_stack);
-    string_splitter_destroy(cols);
-  }
-
-  string_splitter_destroy(lines);
-  free(csv);
-  (void)remove("autoplay_record_rackequity.csv");
-}
-
-void test_autoplay_force_racks(void) {
-  Config *csw_config =
-      config_create_or_die("set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 "
-                           "all -numplays 1 -gp false -threads 3");
-
-  const char *force_racks_filename = "test_force_racks.txt";
+  const char *force_racks_filename = "test_leavegen_force_racks.txt";
   ErrorStack *write_error_stack = error_stack_create();
-  write_string_to_file(force_racks_filename, "w", "AEINRST\nQZ\nJKX\n",
+  // Racks must be full RACK_SIZE racks: the file restricts which racks
+  // leavegen's RackList treats as eligible to be forced (see
+  // rack_list_create). CSW21_ab/english_ab only has 8 possible full racks
+  // (see test_rack_list in rack_list_test.c), so restricting to 2 of them
+  // makes the generation converge almost immediately.
+  write_string_to_file(force_racks_filename, "w", "AAAAAAB\nABBBBBB\n",
                        write_error_stack);
   assert(error_stack_is_empty(write_error_stack));
   error_stack_destroy(write_error_stack);
 
-  char *autoplay_cmd = get_formatted_string(
-      "autoplay rackequity 5 %s -seed 42 -wb 1000000", force_racks_filename);
-  load_and_exec_config_or_die(csw_config, autoplay_cmd);
-  free(autoplay_cmd);
-
-  char *csv = get_string_from_file_or_die("autoplay_record_rackequity.csv");
-  assert(csv);
-  // Forced racks are drawn every turn (see game_runner_start's
-  // RARE_RACK_MODE_FORCE_FILE case), so each should show up with many more
-  // equity samples than an organically drawn rack gets in 5 games.
-  assert(has_substring(csv, "AEINRST,"));
-  assert(has_substring(csv, "QZ,"));
-  assert(has_substring(csv, "JKX,"));
-  free(csv);
-  (void)remove("autoplay_record_rackequity.csv");
-
-  // forceracksfile requires the rackequity recorder to be enabled, since the
-  // other recorders assume every recorded move was actually played.
-  char *games_cmd = get_formatted_string("autoplay games 5 %s -seed 42",
-                                         force_racks_filename);
-  assert_config_exec_status(
-      csw_config, games_cmd,
-      ERROR_STATUS_AUTOPLAY_FORCE_RACKS_REQUIRES_RACK_EQUITY);
-  free(games_cmd);
+  char *leavegen_cmd =
+      get_formatted_string("leavegen 1 0 %s -seed 3", force_racks_filename);
+  // The minimum leave count should be achieved quickly, so if this takes too
+  // long, we know it failed.
+  load_and_exec_config_or_die_timed(ab_config, leavegen_cmd, 60);
+  free(leavegen_cmd);
 
   // Missing force racks file.
   assert_config_exec_status(
-      csw_config,
-      "autoplay rackequity 5 does_not_exist_force_racks.txt -seed 42",
+      ab_config, "leavegen 1 0 does_not_exist_force_racks.txt -seed 3",
       ERROR_STATUS_RW_FAILED_TO_OPEN_STREAM);
 
-  // Malformed rack line.
-  const char *bad_force_racks_filename = "test_bad_force_racks.txt";
+  // Malformed rack line (wrong size for RACK_SIZE-tile racks).
+  const char *bad_force_racks_filename = "test_leavegen_bad_force_racks.txt";
   ErrorStack *bad_write_error_stack = error_stack_create();
-  write_string_to_file(bad_force_racks_filename, "w", "AEINRST\n123\n",
+  write_string_to_file(bad_force_racks_filename, "w", "AAAAAAB\nAB\n",
                        bad_write_error_stack);
   assert(error_stack_is_empty(bad_write_error_stack));
   error_stack_destroy(bad_write_error_stack);
-  char *bad_racks_cmd = get_formatted_string(
-      "autoplay rackequity 5 %s -seed 42", bad_force_racks_filename);
-  assert_config_exec_status(csw_config, bad_racks_cmd,
+  char *bad_racks_cmd =
+      get_formatted_string("leavegen 1 0 %s -seed 3", bad_force_racks_filename);
+  assert_config_exec_status(ab_config, bad_racks_cmd,
                             ERROR_STATUS_AUTOPLAY_FORCE_RACKS_MALFORMED_RACK);
   free(bad_racks_cmd);
   (void)remove(bad_force_racks_filename);
 
   // File with no parseable racks.
-  const char *empty_force_racks_filename = "test_empty_force_racks.txt";
+  const char *empty_force_racks_filename =
+      "test_leavegen_empty_force_racks.txt";
   ErrorStack *empty_write_error_stack = error_stack_create();
   write_string_to_file(empty_force_racks_filename, "w", "\n\n   \n",
                        empty_write_error_stack);
   assert(error_stack_is_empty(empty_write_error_stack));
   error_stack_destroy(empty_write_error_stack);
-  char *empty_racks_cmd = get_formatted_string(
-      "autoplay rackequity 5 %s -seed 42", empty_force_racks_filename);
-  assert_config_exec_status(csw_config, empty_racks_cmd,
+  char *empty_racks_cmd = get_formatted_string("leavegen 1 0 %s -seed 3",
+                                               empty_force_racks_filename);
+  assert_config_exec_status(ab_config, empty_racks_cmd,
                             ERROR_STATUS_AUTOPLAY_FORCE_RACKS_FILE_EMPTY);
   free(empty_racks_cmd);
   (void)remove(empty_force_racks_filename);
 
   (void)remove(force_racks_filename);
-  config_destroy(csw_config);
+  config_destroy(ab_config);
 }
 
 // Check wmp movegen correctness by comparing results in gamepair autoplay to
@@ -503,8 +451,7 @@ void test_autoplay_remaining(void) {
   test_autoplay_divergent_games();
   test_autoplay_win_pct_record();
   test_autoplay_leaves_record();
-  test_autoplay_rack_equity_record();
-  test_autoplay_force_racks();
+  test_autoplay_leavegen_force_racks();
   test_autoplay_sim();
 }
 

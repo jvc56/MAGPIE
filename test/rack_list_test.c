@@ -34,7 +34,10 @@ void test_rack_list(void) {
       config_create_or_die("set -lex CSW21 -ld english_ab -s1 equity -s2 "
                            "equity -r1 all -r2 all -numplays 1");
   const LetterDistribution *ld = config_get_ld(config);
-  RackList *rack_list = rack_list_create(ld, 3);
+  ErrorStack *error_stack = error_stack_create();
+  RackList *rack_list = rack_list_create(ld, 3, NULL, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  error_stack_destroy(error_stack);
   const KLV *rack_list_klv = rack_list_get_klv(rack_list);
 
   const int number_of_racks = rack_list_get_number_of_racks(rack_list);

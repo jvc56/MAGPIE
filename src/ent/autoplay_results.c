@@ -13,7 +13,6 @@
 #include "../util/string_util.h"
 #include "bag.h"
 #include "data_filepaths.h"
-#include "encoded_rack.h"
 #include "equity.h"
 #include "game.h"
 #include "klv.h"
@@ -40,13 +39,6 @@ typedef struct RecorderArgs {
   uint64_t seed;
   bool divergent;
   bool human_readable;
-  // True if this move was forced onto the player to evaluate a rack (e.g.
-  // autoplay's forceracksfile mode) rather than actually played. Each
-  // recorder's add_move_func decides for itself whether a forced rack is
-  // meaningful to it: most recorders assume every recorded move was really
-  // played and must skip forced racks, but a recorder like rack-equity that
-  // only cares about (rack, equity) pairs can record them.
-  bool is_forced_rack;
 } RecorderArgs;
 
 // Read-only data shared across all recorder types
@@ -558,11 +550,6 @@ void fj_data_destroy(Recorder *recorder) {
 }
 
 void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  if (args->is_forced_rack) {
-    // FJ data is keyed to the game's actual final outcome, so a hypothetical
-    // move that was never played cannot be recorded.
-    return;
-  }
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
@@ -732,11 +719,6 @@ void win_pct_data_destroy(Recorder *recorder) {
 // When the game is passed to this function it is *before* the move has been
 // played.
 void win_pct_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  if (args->is_forced_rack) {
-    // Win-pct snapshots assume the game continues along its real trajectory,
-    // so a hypothetical forced-rack move is not meaningful here.
-    return;
-  }
   WinPctData *win_pct_data = (WinPctData *)recorder->data;
   if (win_pct_data->turn_snapshot_index >= WIN_PCT_MAX_NUM_TURNS) {
     return;
@@ -955,11 +937,6 @@ void leaves_data_destroy(Recorder *recorder) {
 }
 
 void leaves_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  if (args->is_forced_rack) {
-    // Leave counts are derived from real moves actually played; a
-    // hypothetical forced-rack move has no associated leave to count.
-    return;
-  }
   // Don't record the empty or full rack
   const int num_tiles = rack_get_total_letters(args->leave);
   if (num_tiles == 0 || num_tiles == (RACK_SIZE)) {
@@ -1058,128 +1035,6 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   error_stack_destroy(error_stack);
   free(leaves_count_filename);
   free(leaves_count_name);
-}
-
-// Rack equity recorder
-
-#define RACK_EQUITY_FILENAME "autoplay_record_rackequity.csv"
-
-enum { RACK_EQUITY_INITIAL_CAPACITY = 4096 };
-
-typedef struct RackEquityEntry {
-  EncodedRack encoded_rack;
-  Equity equity;
-} RackEquityEntry;
-
-typedef struct RackEquityData {
-  RackEquityEntry *entries;
-  int num_entries;
-  int capacity;
-} RackEquityData;
-
-void rack_equity_data_reset(Recorder *recorder) {
-  RackEquityData *data = (RackEquityData *)recorder->data;
-  data->num_entries = 0;
-}
-
-void rack_equity_data_create(Recorder *recorder) {
-  RackEquityData *data = malloc_or_die(sizeof(RackEquityData));
-  data->capacity = RACK_EQUITY_INITIAL_CAPACITY;
-  data->entries = malloc_or_die(sizeof(RackEquityEntry) * data->capacity);
-  data->num_entries = 0;
-  recorder->data = data;
-  recorder->thread_shared_data = NULL;
-}
-
-void rack_equity_data_destroy(Recorder *recorder) {
-  RackEquityData *data = (RackEquityData *)recorder->data;
-  free(data->entries);
-  free(data);
-}
-
-void rack_equity_data_add_move(Recorder *recorder, const RecorderArgs *args) {
-  if (move_get_type(args->move) == GAME_EVENT_PASS) {
-    // A pass's equity is the sentinel EQUITY_PASS_VALUE, not a real value.
-    // equity_to_double() (used when writing the CSV) fatals on it, so passes
-    // - forced or real - are never recorded. This is the only recorder that
-    // records forced racks (see RecorderArgs.is_forced_rack); a forced rack
-    // is under no obligation to have a legal play (autoplay's
-    // forceracksfile is expected to contain deliberately awkward racks like
-    // "QZ" or "JKX"), so its best move can easily be a pass.
-    return;
-  }
-  RackEquityData *data = (RackEquityData *)recorder->data;
-  if (data->num_entries == data->capacity) {
-    data->capacity *= 2;
-    data->entries =
-        realloc_or_die(data->entries, sizeof(RackEquityEntry) * data->capacity);
-  }
-  RackEquityEntry *entry = &data->entries[data->num_entries];
-  const Game *game = args->game;
-  const int player_index = game_get_player_on_turn_index(game);
-  const Player *player = game_get_player(game, player_index);
-  rack_encode(player_get_rack(player), &entry->encoded_rack);
-  entry->equity = move_get_equity(args->move);
-  data->num_entries++;
-}
-
-int rack_equity_entry_compare(const void *a, const void *b) {
-  const RackEquityEntry *ea = (const RackEquityEntry *)a;
-  const RackEquityEntry *eb = (const RackEquityEntry *)b;
-  return memcmp(ea->encoded_rack.array, eb->encoded_rack.array,
-                sizeof(ea->encoded_rack.array));
-}
-
-void rack_equity_data_consolidate(Recorder **recorder_list, int list_size,
-                                  Recorder __attribute__((unused)) *
-                                      primary_recorder) {
-  int total = 0;
-  for (int i = 0; i < list_size; i++) {
-    total += ((RackEquityData *)recorder_list[i]->data)->num_entries;
-  }
-
-  RackEquityEntry *all_entries =
-      malloc_or_die(sizeof(RackEquityEntry) * (total > 0 ? total : 1));
-  int pos = 0;
-  for (int i = 0; i < list_size; i++) {
-    const RackEquityData *data = (RackEquityData *)recorder_list[i]->data;
-    memcpy(all_entries + pos, data->entries,
-           sizeof(RackEquityEntry) * data->num_entries);
-    pos += data->num_entries;
-  }
-
-  qsort(all_entries, total, sizeof(RackEquityEntry), rack_equity_entry_compare);
-
-  const LetterDistribution *ld = primary_recorder->recorder_context->ld;
-  Rack decode_rack;
-  rack_set_dist_size(&decode_rack, ld_get_size(ld));
-  StringBuilder *sb = string_builder_create();
-  int entry_idx = 0;
-  while (entry_idx < total) {
-    const EncodedRack *current_encoded = &all_entries[entry_idx].encoded_rack;
-    rack_decode(current_encoded, &decode_rack);
-    string_builder_add_rack(sb, &decode_rack, ld, false);
-    while (entry_idx < total &&
-           memcmp(all_entries[entry_idx].encoded_rack.array,
-                  current_encoded->array,
-                  sizeof(current_encoded->array)) == 0) {
-      string_builder_add_formatted_string(
-          sb, ",%g", equity_to_double(all_entries[entry_idx].equity));
-      entry_idx++;
-    }
-    string_builder_add_char(sb, '\n');
-  }
-
-  ErrorStack *error_stack = error_stack_create();
-  write_string_to_file(RACK_EQUITY_FILENAME, "w", string_builder_peek(sb),
-                       error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    error_stack_print_and_reset(error_stack);
-    log_fatal("error writing rack equity file '%s'", RACK_EQUITY_FILENAME);
-  }
-  error_stack_destroy(error_stack);
-  string_builder_destroy(sb);
-  free(all_entries);
 }
 
 // Generic recorder and autoplay results functions
@@ -1308,11 +1163,6 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
       get_str_noop);
-  autoplay_results_set_recorder(
-      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_RACK_EQUITY,
-      rack_equity_data_reset, rack_equity_data_create, rack_equity_data_destroy,
-      rack_equity_data_add_move, add_game_noop, rack_equity_data_consolidate,
-      get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -1339,9 +1189,6 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
-    } else if (has_iprefix(option_str, "rackequity")) {
-      options |=
-          autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_RACK_EQUITY);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -1458,21 +1305,13 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
   }
 }
 
-// is_forced_rack is true when move is the best move for a rack that was
-// temporarily forced onto the player to evaluate it (e.g. autoplay's
-// forceracksfile mode), rather than actually played. Each recorder's
-// add_move_func decides for itself whether that's meaningful to record: most
-// recorders assume every recorded move was really played and skip forced
-// racks, but a recorder like rack-equity that only cares about (rack,
-// equity) pairs can still record them.
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave, bool is_forced_rack) {
+                               const Rack *leave) {
   RecorderArgs args;
   args.game = game;
   args.move = move;
   args.leave = leave;
-  args.is_forced_rack = is_forced_rack;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_move(autoplay_results->recorders[i], &args);
