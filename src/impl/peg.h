@@ -243,6 +243,60 @@ typedef struct PegArgs {
   PegPoll *poll;
 } PegArgs;
 
+// Fills every PegArgs field from an explicit argument, so that adding a field
+// to the struct breaks each call site until it is considered. That is the whole
+// point of the parameter count: prefer this to assigning the struct directly,
+// and add a parameter here rather than a default when a field is added.
+// (sim_args_fill deliberately does not go this far; see the note there.) The
+// tests build PegArgs literals instead, opting out of that check knowingly.
+static inline void
+peg_args_fill(const Game *game, ThreadControl *thread_control,
+              const int num_threads, const double time_budget_seconds,
+              const int max_stage, const bool greedy_seed_only,
+              const int *stage_top_k, const int num_stages,
+              const int inner_top_k, const PegOppModel opp_model,
+              const int scenario_stride, const bool nested_enabled,
+              const int nested_cand_cap, const int *nested_cand_caps,
+              const int nested_n_cand_caps, const int nested_stride,
+              const int nested_emptier_ply_cap, const int nested_max_depth,
+              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
+              const Move *const *only_moves, const int n_only_moves,
+              const Move *const *protect_moves, const int n_protect_moves,
+              const bool include_per_scenario, PegOnStageStart on_stage_start,
+              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
+              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+  peg_args->game = game;
+  peg_args->thread_control = thread_control;
+  peg_args->num_threads = num_threads;
+  peg_args->time_budget_seconds = time_budget_seconds;
+  peg_args->max_stage = max_stage;
+  peg_args->greedy_seed_only = greedy_seed_only;
+  peg_args->stage_top_k = stage_top_k;
+  peg_args->num_stages = num_stages;
+  peg_args->inner_top_k = inner_top_k;
+  peg_args->opp_model = opp_model;
+  peg_args->scenario_stride = scenario_stride;
+  peg_args->nested_enabled = nested_enabled;
+  peg_args->nested_cand_cap = nested_cand_cap;
+  peg_args->nested_cand_caps = nested_cand_caps;
+  peg_args->nested_n_cand_caps = nested_n_cand_caps;
+  peg_args->nested_stride = nested_stride;
+  peg_args->nested_emptier_ply_cap = nested_emptier_ply_cap;
+  peg_args->nested_max_depth = nested_max_depth;
+  peg_args->eval_bag_order = eval_bag_order;
+  peg_args->eval_bag_order_len = eval_bag_order_len;
+  peg_args->only_moves = only_moves;
+  peg_args->n_only_moves = n_only_moves;
+  peg_args->protect_moves = protect_moves;
+  peg_args->n_protect_moves = n_protect_moves;
+  peg_args->include_per_scenario = include_per_scenario;
+  peg_args->on_stage_start = on_stage_start;
+  peg_args->on_cand_done = on_cand_done;
+  peg_args->on_scenario_done = on_scenario_done;
+  peg_args->user_data = user_data;
+  peg_args->poll = poll;
+}
+
 // ----- Stage progress snapshot ------------------------------------------
 
 // Per-stage progress snapshot. Completed stages have end_ns != 0; the current

@@ -73,7 +73,9 @@ BAIResult *sim_results_get_bai_result(const SimResults *sim_results);
 double sim_results_get_cutoff(const SimResults *sim_results);
 void sim_results_set_cutoff(SimResults *sim_results, double cutoff);
 // Record the utility-blend spread weight the sim ran with; see
-// sim_results_get_best_move for how it affects best-move selection.
+// sim_results_get_best_move_index for how it affects best-move selection.
+// Also stamped onto each SimmedPlay, since compare_simmed_plays sees only
+// the plays.
 void sim_results_set_utility_w_spread(SimResults *sim_results,
                                       double utility_w_spread);
 double sim_results_get_utility_w_spread(const SimResults *sim_results);

@@ -267,38 +267,23 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   const Player *opponent = game_get_player(game, 1 - player_on_turn_index);
 
-  SimArgs sim_args = {0};
-  sim_args.num_plies = sim_plies;
-  sim_args.game = game;
-  sim_args.move_list = move_list;
-  sim_args.num_plays = num_candidates;
-  sim_args.known_opp_rack = player_get_known_rack_from_phonies(opponent);
-  sim_args.win_pcts = strategy->win_pcts;
-  sim_args.use_inference = false;
-  sim_args.use_heat_map = false;
-  sim_args.inference_results = NULL;
-  sim_args.num_threads = num_threads;
-  sim_args.print_interval = 0;
-  sim_args.max_num_display_plays = num_candidates;
-  sim_args.max_num_display_plies = sim_plies;
-  sim_args.seed = strategy->seed;
-  sim_args.thread_control = thread_control;
-  sim_args.bai_options.sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
-  sim_args.bai_options.threshold = BAI_THRESHOLD_NONE;
-  sim_args.bai_options.delta = 1.0;
-  sim_args.bai_options.sample_limit = (uint64_t)1e15;
-  sim_args.bai_options.sample_minimum = 1;
-  sim_args.bai_options.time_limit_seconds = budget_seconds;
-  sim_args.bai_options.num_threads = num_threads;
-  sim_args.bai_options.cutoff = 0.0;
-  sim_args.bai_options.parent_worker_thread_index = 0;
-  sim_args.bai_options.arm_avoid_prune = NULL;
-  sim_args.bai_options.num_arm_avoid_prune = 0;
-  // Run the sim under the chooser's utility weights so it ranks by (and
+  // The utility weights are the chooser's own, so the sim ranks by (and
   // records) the same win%+spread blend used as the branch's value below.
-  sim_args.utility_w_winpct = play_chooser_util_w_winpct(strategy);
-  sim_args.utility_w_spread = strategy->utility_w_spread;
-  sim_args.utility_spread_scale = play_chooser_util_spread_scale(strategy);
+  SimArgs sim_args = {0};
+  sim_args_fill(
+      sim_plies, move_list, num_candidates,
+      player_get_known_rack_from_phonies(opponent), strategy->win_pcts,
+      /*inference_results=*/NULL, thread_control, game,
+      /*sim_with_inference=*/false, /*use_heat_map=*/false, num_threads,
+      /*print_interval=*/0,
+      /*max_num_display_plays=*/num_candidates,
+      /*max_num_display_plies=*/sim_plies, strategy->seed,
+      /*max_iterations=*/(uint64_t)1e15,
+      /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
+      strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
+      /*inference_args=*/NULL, &sim_args);
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -340,8 +325,8 @@ static int play_chooser_get_endgame_plies(const PlayChooserStrategy *strategy) {
 // be produced.
 static bool play_chooser_run_endgame(
     const PlayChooserStrategy *strategy, EndgameCtx **endgame_ctx,
-    EndgameResults *endgame_results, TranspositionTable *shared_tt, Game *game,
-    int num_threads, double budget_seconds,
+    EndgameResults *endgame_results, TranspositionTable *shared_tt,
+    const Game *game, int num_threads, double budget_seconds,
     ThreadControl *external_thread_control, bool use_window,
     int32_t window_alpha, int32_t window_beta, Move *out_move,
     int32_t *out_value, ErrorStack *error_stack) {
@@ -351,21 +336,21 @@ static bool play_chooser_run_endgame(
     thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   }
   EndgameArgs endgame_args = {0};
-  endgame_args.thread_control = thread_control;
-  endgame_args.game = game;
-  endgame_args.shared_tt = shared_tt;
-  endgame_args.plies = play_chooser_get_endgame_plies(strategy);
-  endgame_args.initial_small_move_arena_size =
-      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
-  endgame_args.num_threads = num_threads;
-  endgame_args.use_heuristics = true;
-  endgame_args.num_top_moves = 1;
-  endgame_args.soft_time_limit = budget_seconds * 0.9;
-  endgame_args.hard_time_limit = budget_seconds;
-  endgame_args.seed = strategy->seed;
-  endgame_args.use_initial_window = use_window;
-  endgame_args.initial_alpha = window_alpha;
-  endgame_args.initial_beta = window_beta;
+  endgame_args_fill(
+      thread_control, game, /*tt_fraction_of_mem=*/0.0,
+      play_chooser_get_endgame_plies(strategy),
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE, num_threads,
+      /*use_heuristics=*/true, /*num_top_moves=*/1,
+      /*per_ply_callback=*/NULL, /*per_ply_callback_data=*/NULL,
+      /*before_search_callback=*/NULL, /*before_search_callback_data=*/NULL,
+      /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
+      DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
+      /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
+      /*hard_time_limit=*/budget_seconds, strategy->seed,
+      /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
+      /*first_win=*/false, /*first_win_fallback_moves=*/0, use_window,
+      window_alpha, window_beta, /*external_deadline_ns=*/0,
+      /*actual_move=*/NULL, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
   if (external_thread_control == NULL) {
@@ -466,7 +451,7 @@ static double play_chooser_peg_decided_utility(const PlayChooserStrategy *s,
 // returns false otherwise, or when the solve produced no usable evaluation
 // (no candidate finished within the budget, leaving a negative-win% sentinel),
 // so the caller can fall back.
-static bool play_chooser_run_peg(PlayChooser *play_chooser, Game *game,
+static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                                  double budget_seconds, int num_threads,
                                  bool greedy_only, Move *out_move,
                                  double *out_value, ErrorStack *error_stack) {
@@ -478,13 +463,21 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, Game *game,
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   PegArgs peg_args = {0};
-  peg_args.game = game;
-  peg_args.thread_control = thread_control;
-  peg_args.num_threads = num_threads > 0 ? num_threads : 1;
-  peg_args.time_budget_seconds = budget_seconds;
-  peg_args.scenario_stride = strategy->peg_scenario_stride;
-  peg_args.greedy_seed_only = greedy_only;
-  peg_args.opp_model = PEG_OPP_RATIONAL;
+  peg_args_fill(game, thread_control, /*num_threads=*/
+                num_threads > 0 ? num_threads : 1,
+                /*time_budget_seconds=*/budget_seconds, /*max_stage=*/0,
+                greedy_only, /*stage_top_k=*/NULL, /*num_stages=*/0,
+                /*inner_top_k=*/0, PEG_OPP_RATIONAL,
+                strategy->peg_scenario_stride, /*nested_enabled=*/false,
+                /*nested_cand_cap=*/0, /*nested_cand_caps=*/NULL,
+                /*nested_n_cand_caps=*/0, /*nested_stride=*/0,
+                /*nested_emptier_ply_cap=*/0, /*nested_max_depth=*/0,
+                /*eval_bag_order=*/NULL, /*eval_bag_order_len=*/0,
+                /*only_moves=*/NULL, /*n_only_moves=*/0,
+                /*protect_moves=*/NULL, /*n_protect_moves=*/0,
+                /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
+                /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL,
+                /*user_data=*/NULL, /*poll=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   thread_control_destroy(thread_control);
@@ -885,7 +878,8 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
     remaining_seconds = PLAY_CHOOSER_MIN_RESOLVE_SECONDS;
   }
   const bool resolving_challenge_branch = !challenge_exact;
-  Game *resolve_game = resolving_challenge_branch ? challenge_game : keep_game;
+  const Game *resolve_game =
+      resolving_challenge_branch ? challenge_game : keep_game;
   EndgameCtx **resolve_ctx = resolving_challenge_branch
                                  ? &play_chooser->challenge_endgame_ctx
                                  : &play_chooser->keep_endgame_ctx;
