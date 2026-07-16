@@ -26,7 +26,7 @@
 #include <string.h>
 
 enum {
-  RACK_LIST_FORCED_RACKS_INITIAL_CAPACITY = 64,
+  RACK_LIST_FORCED_RACKS_INITIAL_CAPACITY = 4096,
 };
 
 typedef struct RackListItem {
@@ -622,7 +622,7 @@ void rack_list_write_rack_equity_csv(const RackList *rack_list,
     rack_decode(&item->encoded_rack, &rack);
     string_builder_clear(line_sb);
     string_builder_add_rack(line_sb, &rack, ld, false);
-    write_to_stream(stream, "%s,%d,%g\n", string_builder_peek(line_sb),
+    write_to_stream(stream, "%s,%d,%f\n", string_builder_peek(line_sb),
                     item->count, item->mean);
   }
   string_builder_destroy(line_sb);

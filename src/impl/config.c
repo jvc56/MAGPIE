@@ -1200,7 +1200,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "argument, <forceracksfile>, is a path to a file listing racks, one "
           "per line, that restricts which racks are ever forced as rare (used "
           "to run a distributed leavegen worker on a fixed set of "
-          "externally-provided racks, e.g. from a birdtest coordinator); each "
+          "externally-provided racks; each "
           "generation also writes a *_gen_<gen_number>_forced_racks.csv of "
           "\"<rack>,<count>,<mean>\" rows for just those racks.";
       break;

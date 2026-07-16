@@ -87,8 +87,7 @@ typedef struct LeavegenSharedData {
   RackList *rack_list;
   // Whether each generation should also dump rack_list's
   // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
-  // csv), set once at creation based on whether a forced_racks_filename was
-  // given.
+  // csv).
   bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
@@ -270,7 +269,7 @@ void postgen_prebroadcast_func(void *data) {
   }
 
   // When a forceracksfile was given, also dump rack_list's
-  // "<rack>,<count>,<mean>" data, so a distributed caller (e.g. birdtest)
+  // "<rack>,<count>,<mean>" data, so a distributed caller
   // doesn't have to parse the full per-generation KLV to get results.
   if (lg_shared_data->write_rack_equity_csv) {
     char *forced_racks_csv_name =
@@ -547,7 +546,7 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
       // We only force draws if we've played enough games for this
       // generation. This also applies when leavegen's rack list is
       // restricted to a forceracksfile (see rack_list_create): clients
-      // fulfilling birdtest requests can just pass 0 if they want forcing
+      // fulfilling requests can just pass 0 if they want forcing
       // from the start.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
