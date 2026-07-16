@@ -85,6 +85,11 @@ typedef struct LeavegenSharedData {
   const char *data_paths;
   KLV *klv;
   RackList *rack_list;
+  // Whether each generation should also dump rack_list's
+  // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
+  // csv), set once at creation based on whether a forced_racks_filename was
+  // given.
+  bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
@@ -264,11 +269,10 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write result summary to file");
   }
 
-  // When rack_list is restricted to a forceracksfile, also dump its
-  // "<rack>,<count>,<mean>" data for exactly those racks, so a distributed
-  // caller (e.g. birdtest) doesn't have to parse the full per-generation KLV
-  // to get results for the specific racks it asked about.
-  if (rack_list_has_forced_racks(lg_shared_data->rack_list)) {
+  // When a forceracksfile was given, also dump rack_list's
+  // "<rack>,<count>,<mean>" data, so a distributed caller (e.g. birdtest)
+  // doesn't have to parse the full per-generation KLV to get results.
+  if (lg_shared_data->write_rack_equity_csv) {
     char *forced_racks_csv_name =
         get_formatted_string("%s_forced_racks.csv", report_name_prefix);
     rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
@@ -394,7 +398,7 @@ LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
     const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
     int *min_rack_targets, const char *forced_racks_filename,
-    ErrorStack *error_stack) {
+    bool write_rack_equity_csv, ErrorStack *error_stack) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
@@ -415,15 +419,16 @@ LeavegenSharedData *leavegen_shared_data_create(
     free(shared_data);
     return NULL;
   }
+  shared_data->write_rack_equity_csv = write_rack_equity_csv;
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
 }
 
 // Use NULL for the KLV when not running in leave gen mode. forced_racks_
-// filename is only meaningful when klv is non-NULL (see leavegen_shared_
-// data_create); pushes to error_stack and returns NULL on the same
-// conditions that function does.
+// filename and write_rack_equity_csv are only meaningful when klv is
+// non-NULL (see leavegen_shared_data_create); pushes to error_stack and
+// returns NULL on the same conditions that function does.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
@@ -449,7 +454,7 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
         args->data_paths, klv, num_autoplay_threads, num_gens, min_rack_targets,
-        forced_racks_filename, error_stack);
+        forced_racks_filename, args->write_rack_equity_csv, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       prng_destroy(shared_data->prng);
       free(shared_data);

@@ -29,8 +29,8 @@ void rack_list_reset(RackList *rack_list, int target_rack_count);
 void rack_list_add_rack(RackList *rack_list, const Rack *rack, double equity);
 void rack_list_write_to_klv(RackList *rack_list, const LetterDistribution *ld,
                             KLV *klv);
-// Writes one "<rack>,<count>,<mean>" line per rack that has been observed at
-// least once (0 < count < target_rack_count) directly to filename.
+// Writes one "<rack>,<count>,<mean>" line per rack (not just forced ones)
+// that has been observed at least once, directly to filename.
 void rack_list_write_rack_equity_csv(const RackList *rack_list,
                                      const LetterDistribution *ld,
                                      const char *filename,
@@ -45,8 +45,5 @@ double rack_list_get_mean(const RackList *rack_list, int klv_index);
 const EncodedRack *rack_list_get_encoded_rack(const RackList *rack_list,
                                               int klv_index);
 const KLV *rack_list_get_klv(const RackList *rack_list);
-// True if this RackList was built (or reset) with a forced_racks_filename
-// restricting which racks are eligible to be drawn as rare.
-bool rack_list_has_forced_racks(const RackList *rack_list);
 
 #endif
