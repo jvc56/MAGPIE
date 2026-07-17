@@ -99,12 +99,22 @@ static const double NERFED_DEFAULT_LOGLIT = -1.0;
 // Humans choose endgame moves score-greedily (10 score pts pull +68
 // equity-pts at rating 1000, +9 at 2200 — imperfect opponent-rack
 // tracking) and strongly prefer going out. sigma is residual noise.
-static const double NERFED_ENDGAME_SIGMA_C0 = 2.880;
-static const double NERFED_ENDGAME_SIGMA_C1 = -0.535;
-static const double NERFED_ENDGAME_SCORE_PREF_C0 = 1.616;
-static const double NERFED_ENDGAME_SCORE_PREF_C1 = 0.036;
-static const double NERFED_ENDGAME_OUTPLAY_PREF_C0 = 2.225;
-static const double NERFED_ENDGAME_OUTPLAY_PREF_C1 = 0.120;
+static const double NERFED_ENDGAME_SIGMA_C0 = 2.901;
+static const double NERFED_ENDGAME_SIGMA_C1 = -0.566;
+// Difficulty interaction: hard positions make experts noisier but push
+// weak players onto pure score-greed (lower residual noise).
+static const double NERFED_ENDGAME_SIGMA_HARD = -0.100;
+static const double NERFED_ENDGAME_SIGMA_HARD_RTG = 0.140;
+static const double NERFED_ENDGAME_SCORE_PREF_C0 = 1.617;
+static const double NERFED_ENDGAME_SCORE_PREF_C1 = 0.030;
+static const double NERFED_ENDGAME_OUTPLAY_PREF_C0 = 2.233;
+static const double NERFED_ENDGAME_OUTPLAY_PREF_C1 = 0.101;
+// Runtime hard-position proxy (logistic, AUC 0.85 vs the snapshot-study
+// tiers): tiles remaining, top-2 value gap, and field size.
+static const double NERFED_ENDGAME_HARD_BIAS = -2.696;
+static const double NERFED_ENDGAME_HARD_TILES = 1.375;
+static const double NERFED_ENDGAME_HARD_GAP = -1.041;
+static const double NERFED_ENDGAME_HARD_NMOVES = 0.686;
 
 // Offset applied to the knowledge-only miss logit (the Stage B model's
 // intercept absorbs spotting misses as well as knowledge misses; endgame
@@ -600,15 +610,35 @@ void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
     return;
   }
   const double rating_z = nerfed_player->rating_z;
+  PVLine *pvs_for_gap = endgame_results_get_multi_pvs(endgame_results);
+  const int own_rack_size = rack_get_total_letters(player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game))));
+  const int opp_rack_size = rack_get_total_letters(player_get_rack(
+      game_get_player(game, 1 - game_get_player_on_turn_index(game))));
+  const double tiles_rem = own_rack_size + opp_rack_size;
+  double gap12 = 0.0;
+  if (num_pvs > 1) {
+    gap12 = (double)(pvs_for_gap[0].score - pvs_for_gap[1].score);
+    if (gap12 > 30.0) {
+      gap12 = 30.0;
+    }
+  }
+  const double hard_logit =
+      NERFED_ENDGAME_HARD_BIAS +
+      NERFED_ENDGAME_HARD_TILES * ((tiles_rem - 8.0) / 3.0) +
+      NERFED_ENDGAME_HARD_GAP * (gap12 / 10.0) +
+      NERFED_ENDGAME_HARD_NMOVES * (((double)num_pvs - 30.0) / 15.0);
+  const double hard = hard_logit > 0.0 ? 1.0 : 0.0;
   const double sigma =
-      exp(NERFED_ENDGAME_SIGMA_C0 + NERFED_ENDGAME_SIGMA_C1 * rating_z);
+      exp(NERFED_ENDGAME_SIGMA_C0 + NERFED_ENDGAME_SIGMA_C1 * rating_z +
+          NERFED_ENDGAME_SIGMA_HARD * hard +
+          NERFED_ENDGAME_SIGMA_HARD_RTG * hard * rating_z);
   const double score_pref =
       NERFED_ENDGAME_SCORE_PREF_C0 + NERFED_ENDGAME_SCORE_PREF_C1 * rating_z;
   const double outplay_pref = NERFED_ENDGAME_OUTPLAY_PREF_C0 +
                               NERFED_ENDGAME_OUTPLAY_PREF_C1 * rating_z;
-  const int rack_size = rack_get_total_letters(player_get_rack(
-      game_get_player(game, game_get_player_on_turn_index(game))));
-  PVLine *multi_pvs = endgame_results_get_multi_pvs(endgame_results);
+  const int rack_size = own_rack_size;
+  PVLine *multi_pvs = pvs_for_gap;
   int chosen_idx = 0;
   double chosen_value = 0.0;
   for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
