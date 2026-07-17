@@ -26,22 +26,29 @@ enum {
 };
 
 // Stage B visibility model (dominated-miss logistic, delta = 10 equity pts)
-// fitted on 380,370 corpus positions. Predicts P(MISS play); visibility is
-// its complement. Feature order matches nerfed_player_miss_probability.
-static const double NERFED_MISS_COEFFS[13] = {
-    1.1299,  // bias
-    -1.0000, // rating_z (rating-1500)/300
-    -0.7078, // min log10 playability over formed words
-    -0.1260, // min log10 literacy over formed words
-    0.6341,  // any formed word absent from language
-    0.5222,  // (num formed words - 1) / 2
-    0.5648,  // play uses a blank
-    0.4639,  // play goes through tiles
-    -0.7523, // tiles played / 7
-    -0.2373, // log(best-class size); 1 per play at generation time
-    0.1600,  // rating_z x playability
-    0.0592,  // rating_z x literacy
-    -0.0473, // rating_z x blank
+// fitted on 380,370 corpus positions, with explicit word-length terms.
+// Predicts P(MISS play); visibility is its complement. Feature order
+// matches nerfed_player_miss_probability.
+enum { NERFED_NUM_MISS_COEFFS = 17 };
+
+static const double NERFED_MISS_COEFFS[NERFED_NUM_MISS_COEFFS] = {
+    0.842,  // bias
+    -0.651, // rating_z (rating-1500)/300
+    -0.747, // min log10 playability over formed words
+    -0.167, // min log10 literacy over formed words
+    0.616,  // any formed word absent from language
+    0.526,  // (num formed words - 1) / 2
+    0.522,  // play uses a blank
+    0.583,  // play goes through tiles
+    -0.079, // tiles played / 7
+    -0.233, // log(best-class size); 1 per play at generation time
+    0.436,  // main word length <= 2
+    -0.323, // main word length >= 7
+    0.083,  // rating_z x playability
+    0.053,  // rating_z x literacy
+    0.054,  // rating_z x blank
+    0.081,  // rating_z x len2
+    -0.245, // rating_z x len7plus
 };
 
 // Stage A valuation noise: sigma = exp(C0 + C1 * rating_z) equity points.
@@ -60,12 +67,28 @@ typedef struct NerfedWordFeat {
   float loglit;
 } NerfedWordFeat;
 
+// Per-turn cache of the uniform draw for each distinct rarest-word so that
+// all plays sharing that word share the same visibility draw (a player who
+// does not know a word misses EVERY placement of it, not each
+// independently). Comonotone coupling: the same u is compared against each
+// play's own miss probability, so among plays sharing the word the easier
+// geometry is still seen more often.
+typedef struct NerfedWordDraw {
+  MachineLetter word[BOARD_DIM];
+  uint8_t word_length;
+  double uniform;
+} NerfedWordDraw;
+
+enum { NERFED_MAX_WORD_DRAWS = 512 };
+
 struct NerfedPlayer {
   double rating_z;
   double sigma;
   NerfedWordFeat *feats;
   int num_feats;
   MoveList *move_list;
+  NerfedWordDraw word_draws[NERFED_MAX_WORD_DRAWS];
+  int num_word_draws;
 };
 
 static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
@@ -146,6 +169,7 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
   qsort(nerfed_player->feats, nerfed_player->num_feats, sizeof(NerfedWordFeat),
         nerfed_word_feat_compare);
   nerfed_player->move_list = move_list_create(NERFED_MOVE_LIST_CAPACITY);
+  nerfed_player->num_word_draws = 0;
   return nerfed_player;
 }
 
@@ -164,9 +188,13 @@ static double nerfed_player_uniform(XoshiroPRNG *prng) {
 }
 
 // P(this play is invisible to the player): Stage B miss logistic with a
-// best-class of one (log_class = 0).
+// best-class of one (log_class = 0). Writes the play's rarest formed word
+// (minimum playability) to rare_word/rare_word_length so the caller can
+// share one visibility draw across all plays using that word.
 static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
-                                             Game *game, const Move *move) {
+                                             Game *game, const Move *move,
+                                             MachineLetter *rare_word,
+                                             int *rare_word_length) {
   Board *board = game_get_board(game);
   FormedWords *formed_words = formed_words_create(board, move);
   const int num_words = formed_words_get_num_words(formed_words);
@@ -174,6 +202,7 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
   double min_loglit = 99.0;
   double any_absent = 0.0;
   MachineLetter word[BOARD_DIM];
+  *rare_word_length = 0;
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
     const int word_length =
         formed_words_get_word_length(formed_words, word_idx);
@@ -194,6 +223,8 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
     }
     if (logplay < min_logplay) {
       min_logplay = logplay;
+      memcpy(rare_word, word, word_length);
+      *rare_word_length = word_length;
     }
     if (loglit < min_loglit) {
       min_loglit = loglit;
@@ -216,8 +247,10 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
     }
   }
   const double through = tiles_length > tiles_played ? 1.0 : 0.0;
+  const double len2 = tiles_length <= 2 ? 1.0 : 0.0;
+  const double len7plus = tiles_length >= 7 ? 1.0 : 0.0;
   const double rating_z = nerfed_player->rating_z;
-  const double features[13] = {
+  const double features[NERFED_NUM_MISS_COEFFS] = {
       1.0,
       rating_z,
       min_logplay,
@@ -228,15 +261,44 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
       through,
       tiles_played / 7.0,
       0.0,
+      len2,
+      len7plus,
       rating_z * min_logplay,
       rating_z * min_loglit,
       rating_z * uses_blank,
+      rating_z * len2,
+      rating_z * len7plus,
   };
   double logit = 0.0;
-  for (int coeff_idx = 0; coeff_idx < 13; coeff_idx++) {
+  for (int coeff_idx = 0; coeff_idx < NERFED_NUM_MISS_COEFFS; coeff_idx++) {
     logit += NERFED_MISS_COEFFS[coeff_idx] * features[coeff_idx];
   }
   return 1.0 / (1.0 + exp(-logit));
+}
+
+// Returns the per-turn shared uniform draw for the given rarest word,
+// drawing a fresh one on first sight. Linear scan; a turn rarely has more
+// than a few dozen distinct rare words.
+static double nerfed_player_word_draw(NerfedPlayer *nerfed_player,
+                                      XoshiroPRNG *prng,
+                                      const MachineLetter *word,
+                                      int word_length) {
+  for (int draw_idx = 0; draw_idx < nerfed_player->num_word_draws; draw_idx++) {
+    NerfedWordDraw *draw = &nerfed_player->word_draws[draw_idx];
+    if (draw->word_length == word_length &&
+        memcmp(draw->word, word, word_length) == 0) {
+      return draw->uniform;
+    }
+  }
+  const double uniform = nerfed_player_uniform(prng);
+  if (nerfed_player->num_word_draws < NERFED_MAX_WORD_DRAWS) {
+    NerfedWordDraw *draw =
+        &nerfed_player->word_draws[nerfed_player->num_word_draws++];
+    memcpy(draw->word, word, word_length);
+    draw->word_length = (uint8_t)word_length;
+    draw->uniform = uniform;
+  }
+  return uniform;
 }
 
 const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
@@ -253,6 +315,7 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
                             .target_leave_size_for_exchange_cutoff =
                                 UNSET_LEAVE_SIZE};
   generate_moves(&args);
+  nerfed_player->num_word_draws = 0;
   const int move_count = move_list_get_count(move_list);
   const Move *chosen = NULL;
   double chosen_value = 0.0;
@@ -265,9 +328,18 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
       fallback_equity = move_get_equity(move);
     }
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
-      const double miss_probability =
-          nerfed_player_miss_probability(nerfed_player, game, move);
-      if (nerfed_player_uniform(prng) < miss_probability) {
+      MachineLetter rare_word[BOARD_DIM];
+      int rare_word_length = 0;
+      const double miss_probability = nerfed_player_miss_probability(
+          nerfed_player, game, move, rare_word, &rare_word_length);
+      // Plays sharing their rarest word share one visibility draw so a
+      // word the player does not know is missed at every placement.
+      const double uniform =
+          rare_word_length > 0
+              ? nerfed_player_word_draw(nerfed_player, prng, rare_word,
+                                        rare_word_length)
+              : nerfed_player_uniform(prng);
+      if (uniform < miss_probability) {
         continue;
       }
     }

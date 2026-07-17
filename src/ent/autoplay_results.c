@@ -117,6 +117,9 @@ typedef struct GameData {
   uint64_t p0_losses;
   uint64_t p0_ties;
   uint64_t p0_firsts;
+  uint64_t player_bingos[2];
+  uint64_t player_play_lengths[2][BOARD_DIM + 1];
+  uint64_t player_bingo_lengths[2][BOARD_DIM + 1];
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -131,6 +134,10 @@ void game_data_reset(GameData *gd) {
   gd->p0_losses = 0;
   gd->p0_ties = 0;
   gd->p0_firsts = 0;
+  gd->player_bingos[0] = 0;
+  gd->player_bingos[1] = 0;
+  memset(gd->player_play_lengths, 0, sizeof(gd->player_play_lengths));
+  memset(gd->player_bingo_lengths, 0, sizeof(gd->player_bingo_lengths));
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
   stat_reset(gd->turns);
@@ -287,9 +294,33 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
     return no_games_ret_str;
   }
 
-  string_builder_add_formatted_string(sb, "Turns per Game: %0.2f %0.2f\n\n",
+  string_builder_add_formatted_string(sb, "Turns per Game: %0.2f %0.2f\n",
                                       stat_get_mean(gd->turns),
                                       stat_get_stdev(gd->turns));
+  string_builder_add_formatted_string(
+      sb, "Bingos per Game: %0.2f %0.2f\n",
+      (double)gd->player_bingos[0] / (double)gd->total_games,
+      (double)gd->player_bingos[1] / (double)gd->total_games);
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    string_builder_add_formatted_string(sb, "P%d Plays by Length:", player_idx);
+    for (int len_idx = 2; len_idx <= BOARD_DIM; len_idx++) {
+      string_builder_add_formatted_string(
+          sb, " %d:%0.2f", len_idx,
+          (double)gd->player_play_lengths[player_idx][len_idx] /
+              (double)gd->total_games);
+    }
+    string_builder_add_string(sb, "\n");
+    string_builder_add_formatted_string(sb,
+                                        "P%d Bingos by Length:", player_idx);
+    for (int len_idx = RACK_SIZE; len_idx <= BOARD_DIM; len_idx++) {
+      string_builder_add_formatted_string(
+          sb, " %d:%0.2f", len_idx,
+          (double)gd->player_bingo_lengths[player_idx][len_idx] /
+              (double)gd->total_games);
+    }
+    string_builder_add_string(sb, "\n");
+  }
+  string_builder_add_string(sb, "\n");
 
   const char game_end_reason_strs[NUMBER_OF_GAME_END_REASONS][20] = {
       "None:", "Standard:", "Pass:"};
@@ -381,6 +412,27 @@ void game_data_sets_destroy(Recorder *recorder) {
   free(sets);
 }
 
+void game_data_sets_add_move(Recorder *recorder, const RecorderArgs *args) {
+  if (move_get_type(args->move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  GameData *gd = sets->all_games;
+  const int player_on_turn_index = game_get_player_on_turn_index(args->game);
+  int word_length = move_get_tiles_length(args->move);
+  if (word_length > BOARD_DIM) {
+    word_length = BOARD_DIM;
+  }
+  const bool is_bingo = move_get_tiles_played(args->move) == RACK_SIZE;
+  cpthread_mutex_lock(&gd->mutex);
+  gd->player_play_lengths[player_on_turn_index][word_length]++;
+  if (is_bingo) {
+    gd->player_bingos[player_on_turn_index]++;
+    gd->player_bingo_lengths[player_on_turn_index][word_length]++;
+  }
+  cpthread_mutex_unlock(&gd->mutex);
+}
+
 void game_data_sets_add_game(Recorder *recorder, const RecorderArgs *args) {
   GameDataSets *sets = (GameDataSets *)recorder->data;
   game_data_add_game(sets->all_games, args);
@@ -421,6 +473,16 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
     p1_score_stats[i] = gd_i->p1_score;
     turns_stats[i] = gd_i->turns;
     gd_primary->total_turns += gd_i->total_turns;
+    gd_primary->player_bingos[0] += gd_i->player_bingos[0];
+    gd_primary->player_bingos[1] += gd_i->player_bingos[1];
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      for (int len_idx = 0; len_idx <= BOARD_DIM; len_idx++) {
+        gd_primary->player_play_lengths[player_idx][len_idx] +=
+            gd_i->player_play_lengths[player_idx][len_idx];
+        gd_primary->player_bingo_lengths[player_idx][len_idx] +=
+            gd_i->player_bingo_lengths[player_idx][len_idx];
+      }
+    }
     for (int j = 0; j < NUMBER_OF_GAME_END_REASONS; j++) {
       gd_primary->game_end_reasons[j] += gd_i->game_end_reasons[j];
     }
@@ -1358,8 +1420,8 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_GAME,
       game_data_sets_reset, game_data_sets_create, game_data_sets_destroy,
-      add_move_noop, game_data_sets_add_game, game_data_sets_consolidate,
-      game_data_sets_str);
+      game_data_sets_add_move, game_data_sets_add_game,
+      game_data_sets_consolidate, game_data_sets_str);
   autoplay_results_set_recorder(
       autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_FJ,
       fj_data_reset, fj_data_create, fj_data_destroy, fj_data_add_move,
