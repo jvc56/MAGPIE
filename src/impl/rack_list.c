@@ -19,6 +19,7 @@
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -208,7 +209,7 @@ void rack_list_item_reset(RackListItem *item) {
   item->mean = 0;
 }
 
-void rack_list_swap_items(RackList *rack_list, int i, int j) {
+static void rack_list_swap_items(RackList *rack_list, int i, int j) {
   // Perform the swap
   RackListItem *temp = rack_list->racks_partitioned_by_target_count[i];
   rack_list->racks_partitioned_by_target_count[i] =
@@ -230,7 +231,7 @@ void rack_list_swap_items(RackList *rack_list, int i, int j) {
 // whether the racks are still at their original positions (first call, from
 // rack_list_create) or have moved due to prior rack_list_add_rack calls
 // (subsequent calls, from rack_list_reset).
-void rack_list_restrict_to_forced_racks(RackList *rack_list) {
+static void rack_list_restrict_to_forced_racks(RackList *rack_list) {
   int partition_index = -1;
   for (int i = 0; i < rack_list->num_forced_racks; i++) {
     const RackListItem *item =
@@ -260,11 +261,9 @@ void rack_list_destroy(RackList *rack_list) {
 // use as forced_rack_indices. Pushes an error and returns NULL on a
 // missing/unopenable file, a line that isn't a full RACK_SIZE rack, or a
 // file with no racks at all.
-uint32_t *rack_list_read_forced_rack_indices(const RackList *rack_list,
-                                             const LetterDistribution *ld,
-                                             const char *filename,
-                                             int *num_forced_racks_out,
-                                             ErrorStack *error_stack) {
+static uint32_t *rack_list_read_forced_rack_indices(
+    const RackList *rack_list, const LetterDistribution *ld,
+    const char *filename, int *num_forced_racks_out, ErrorStack *error_stack) {
   FILE *stream = fopen_safe(filename, "r", error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return NULL;
@@ -273,6 +272,11 @@ uint32_t *rack_list_read_forced_rack_indices(const RackList *rack_list,
   int capacity = RACK_LIST_FORCED_RACKS_INITIAL_CAPACITY;
   uint32_t *indices = malloc_or_die(sizeof(uint32_t) * capacity);
   *num_forced_racks_out = 0;
+
+  // Tracks which rack_list indices have already been added to indices, so a
+  // duplicate line in the file can be rejected instead of silently corrupting
+  // the rare partition (see rack_list_restrict_to_forced_racks).
+  bool *index_seen = calloc_or_die(rack_list->number_of_racks, sizeof(bool));
 
   Rack rack;
   rack_set_dist_size(&rack, ld_get_size(ld));
@@ -297,15 +301,26 @@ uint32_t *rack_list_read_forced_rack_indices(const RackList *rack_list,
               filename, (RACK_SIZE), line));
       break;
     }
+    const uint32_t rack_list_index =
+        convert_word_index_to_rack_list_index(word_index);
+    if (index_seen[rack_list_index]) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK,
+          get_formatted_string(
+              "force racks file '%s' contains a duplicate rack: %s", filename,
+              line));
+      break;
+    }
+    index_seen[rack_list_index] = true;
     if (*num_forced_racks_out == capacity) {
       capacity *= 2;
       indices = realloc_or_die(indices, sizeof(uint32_t) * (size_t)capacity);
     }
-    indices[*num_forced_racks_out] =
-        convert_word_index_to_rack_list_index(word_index);
+    indices[*num_forced_racks_out] = rack_list_index;
     (*num_forced_racks_out)++;
   }
   free(line);
+  free(index_seen);
   fclose_or_die(stream);
 
   if (!error_stack_is_empty(error_stack)) {

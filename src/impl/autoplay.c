@@ -268,20 +268,20 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write result summary to file");
   }
 
-  // When a forceracksfile was given, also dump rack_list's
-  // "<rack>,<count>,<mean>" data, so a distributed caller
-  // doesn't have to parse the full per-generation KLV to get results.
+  // When -writerackequitycsv is set, also dump rack_list's
+  // "<rack>,<count>,<mean>" data for every observed rack, so a distributed
+  // caller doesn't have to parse the full per-generation KLV to get results.
   if (lg_shared_data->write_rack_equity_csv) {
-    char *forced_racks_csv_name =
-        get_formatted_string("%s_forced_racks.csv", report_name_prefix);
+    char *rack_equity_csv_name =
+        get_formatted_string("%s_rack_equity.csv", report_name_prefix);
     rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
-                                    lg_shared_data->ld, forced_racks_csv_name,
+                                    lg_shared_data->ld, rack_equity_csv_name,
                                     error_stack);
     if (!error_stack_is_empty(error_stack)) {
       error_stack_print_and_reset(error_stack);
-      log_fatal("leavegen failed to write forced racks results to file");
+      log_fatal("leavegen failed to write rack equity results to file");
     }
-    free(forced_racks_csv_name);
+    free(rack_equity_csv_name);
   }
 
   string_builder_destroy(leave_gen_sb);

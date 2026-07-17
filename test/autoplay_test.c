@@ -279,6 +279,22 @@ void test_autoplay_leavegen_force_racks(void) {
   free(bad_racks_cmd);
   (void)remove(bad_force_racks_filename);
 
+  // Duplicate rack.
+  const char *duplicate_force_racks_filename =
+      "test_leavegen_duplicate_force_racks.txt";
+  ErrorStack *duplicate_write_error_stack = error_stack_create();
+  write_string_to_file(duplicate_force_racks_filename, "w",
+                       "AAAAAAB\nABBBBBB\nAAAAAAB\n",
+                       duplicate_write_error_stack);
+  assert(error_stack_is_empty(duplicate_write_error_stack));
+  error_stack_destroy(duplicate_write_error_stack);
+  char *duplicate_racks_cmd = get_formatted_string(
+      "leavegen 1 0 %s -seed 3", duplicate_force_racks_filename);
+  assert_config_exec_status(ab_config, duplicate_racks_cmd,
+                            ERROR_STATUS_AUTOPLAY_FORCE_RACKS_DUPLICATE_RACK);
+  free(duplicate_racks_cmd);
+  (void)remove(duplicate_force_racks_filename);
+
   // File with no parseable racks.
   const char *empty_force_racks_filename =
       "test_leavegen_empty_force_racks.txt";

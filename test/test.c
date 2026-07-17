@@ -119,6 +119,7 @@ static TestEntry test_table[] = {
     {"kwgmaker", test_kwg_maker},
     {"cgp", test_cgp},
     {"rl", test_rack_list},
+    {"rlfr", test_rack_list_forced_racks},
     {"ch", test_checkpoint},
     {"klv", test_klv},
     {"cv", test_convert},
