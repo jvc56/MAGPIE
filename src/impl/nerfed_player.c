@@ -65,9 +65,9 @@ enum { NERFED_NUM_EXCH_COEFFS = 8 };
 // and rating terms are recalibrated so simulated exchanges per game match
 // the corpus by rating.
 static const double NERFED_EXCH_COEFFS[NERFED_NUM_EXCH_COEFFS] = {
-    -2.397, // intercept (calibrated)
+    -2.344, // intercept (calibrated, 4-point)
     -0.661, // delta / 10
-    0.162,  // rating_z (calibrated)
+    0.157,  // rating_z (calibrated, 4-point)
     -0.149, // (delta / 10) x rating_z
     0.182,  // |vowels - 3|
     0.176,  // duplicate tiles
