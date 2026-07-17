@@ -726,7 +726,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
       if (nerf) {
         DictionaryWordList *known_words = dictionary_word_list_create();
         nerfed_player_filter_word_list(nerf, word_list, known_words,
-                                       endgame_args->nerf_seed);
+                                       endgame_args->nerf_seeds[player_idx]);
         dictionary_word_list_destroy(word_list);
         word_list = known_words;
       }

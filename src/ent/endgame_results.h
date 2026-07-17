@@ -57,6 +57,10 @@ void endgame_results_update_display_data(EndgameResults *endgame_results);
 void endgame_results_set_best_pvline(EndgameResults *endgame_results,
                                      const PVLine *pv_line, int value,
                                      int depth);
+// Unconditionally replaces the best PV and value (keeps the reported
+// depth). Used by nerfed endgame selection after the solve completes.
+void endgame_results_force_best_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value);
 void endgame_results_set_start_game(EndgameResults *endgame_results,
                                     const Game *game);
 const Game *

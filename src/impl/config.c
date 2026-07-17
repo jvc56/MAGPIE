@@ -158,6 +158,7 @@ typedef enum {
   ARG_TOKEN_USE_GAME_PAIRS,
   ARG_TOKEN_P1_NERF_RATING,
   ARG_TOKEN_P2_NERF_RATING,
+  ARG_TOKEN_NERF_SAMPLES,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_USE_HEAT_MAP,
@@ -320,6 +321,8 @@ struct Config {
   // rating; word-feature tables are expensive to load per solve).
   NerfedPlayer *endgame_nerf_players[2];
   int endgame_nerf_ratings_cached[2];
+  uint64_t endgame_nerf_solve_counter;
+  int nerf_samples;
   bool sim_with_inference;
   bool use_heat_map;
   bool print_boards;
@@ -1745,6 +1748,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(the default) disables nerfing. Requires "
              "data/lexica/<lexicon>_wordfeats.csv.";
       break;
+    case ARG_TOKEN_NERF_SAMPLES:
+      usages[0] = "<count>";
+      examples[0] = "1";
+      examples[1] = "16";
+      text = "Endgame contempt sampling: number of Monte Carlo samples of "
+             "the modeled opponent's word knowledge. The on-turn player's "
+             "own vision is sampled once and held fixed; each sample redraws "
+             "the opponent's believed lexicon, and root moves are chosen by "
+             "win fraction across samples (average value as tiebreak). 1 "
+             "(the default) disables sampling.";
+      break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2243,6 +2257,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
         ARG_TOKEN_P1_NERF_RATING,          /* nerf1 */
         ARG_TOKEN_P2_NERF_RATING,          /* nerf2 */
+        ARG_TOKEN_NERF_SAMPLES,            /* nerfsamples */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
@@ -3190,9 +3205,109 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
     endgame_args.nerf_players[player_idx] =
         config->endgame_nerf_players[player_idx];
   }
-  endgame_args.nerf_seed = config->seed;
-  endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
-                error_stack);
+  // Vary the believed lexicon and calculation noise per solve while
+  // staying deterministic for a fixed -seed.
+  const uint64_t solve_seed =
+      config->seed +
+      0x9E3779B97F4A7C15ULL * ++config->endgame_nerf_solve_counter;
+  endgame_args.nerf_seeds[0] = solve_seed;
+  endgame_args.nerf_seeds[1] = solve_seed ^ 0xD1B54A32D192ED03ULL;
+  const int on_turn_index = game_get_player_on_turn_index(config->game);
+  const int opp_index = 1 - on_turn_index;
+  const int num_samples =
+      (config->nerf_samples > 1 && endgame_args.nerf_players[opp_index])
+          ? config->nerf_samples
+          : 1;
+  if (num_samples == 1) {
+    endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
+                  error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    // Calculation noise: the modeled human solves within their believed
+    // lexicon but still misvalues near-best lines; pick among the top-K PVs
+    // with the rating-fitted endgame Gumbel sigma.
+    const NerfedPlayer *on_turn_nerf = endgame_args.nerf_players[on_turn_index];
+    if (on_turn_nerf) {
+      nerfed_player_pick_endgame_pv(on_turn_nerf, endgame_results,
+                                    endgame_args.nerf_seeds[on_turn_index]);
+    }
+    return;
+  }
+  // Monte Carlo contempt: the opponent's knowledge is uncertain, so a
+  // single sampled believed lexicon would let the search exploit "he
+  // cannot see it" with certainty. Redraw the opponent's lexicon per
+  // sample (own vision held fixed), clear the TT between samples (values
+  // are lexicon-dependent), and choose the root move by win fraction
+  // across samples with average value as the tiebreak.
+  enum { NERF_SAMPLE_MAX_MOVES = 128 };
+  uint64_t move_keys[NERF_SAMPLE_MAX_MOVES];
+  double value_sums[NERF_SAMPLE_MAX_MOVES];
+  int win_counts[NERF_SAMPLE_MAX_MOVES];
+  int seen_counts[NERF_SAMPLE_MAX_MOVES];
+  PVLine move_pvs[NERF_SAMPLE_MAX_MOVES];
+  int num_moves = 0;
+  const int current_spread =
+      equity_to_int(
+          player_get_score(game_get_player(config->game, on_turn_index))) -
+      equity_to_int(player_get_score(game_get_player(config->game, opp_index)));
+  for (int sample_idx = 0; sample_idx < num_samples; sample_idx++) {
+    endgame_ctx_clear_transposition_table(&config->endgame_ctx);
+    endgame_args.nerf_seeds[opp_index] =
+        solve_seed ^ (0xD1B54A32D192ED03ULL * (uint64_t)(sample_idx + 1));
+    endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
+                  error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    const int num_pvs = endgame_results_get_num_pvs(endgame_results);
+    const PVLine *multi_pvs = endgame_results_get_multi_pvs(endgame_results);
+    for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+      const uint64_t key = multi_pvs[pv_idx].moves[0].tiny_move;
+      int move_idx = 0;
+      while (move_idx < num_moves && move_keys[move_idx] != key) {
+        move_idx++;
+      }
+      if (move_idx == num_moves) {
+        if (num_moves >= NERF_SAMPLE_MAX_MOVES) {
+          continue;
+        }
+        move_keys[move_idx] = key;
+        value_sums[move_idx] = 0;
+        win_counts[move_idx] = 0;
+        seen_counts[move_idx] = 0;
+        num_moves++;
+      }
+      move_pvs[move_idx] = multi_pvs[pv_idx];
+      value_sums[move_idx] += multi_pvs[pv_idx].score;
+      seen_counts[move_idx]++;
+      if (multi_pvs[pv_idx].score + current_spread > 0) {
+        win_counts[move_idx]++;
+      }
+    }
+  }
+  // Choose by win fraction (moves valued in every sample only), average
+  // value tiebreak.
+  int best_idx = -1;
+  double best_win_frac = -1;
+  double best_avg_value = 0;
+  for (int move_idx = 0; move_idx < num_moves; move_idx++) {
+    if (seen_counts[move_idx] < num_samples) {
+      continue;
+    }
+    const double win_frac = (double)win_counts[move_idx] / num_samples;
+    const double avg_value = value_sums[move_idx] / num_samples;
+    if (best_idx < 0 || win_frac > best_win_frac ||
+        (win_frac == best_win_frac && avg_value > best_avg_value)) {
+      best_idx = move_idx;
+      best_win_frac = win_frac;
+      best_avg_value = avg_value;
+    }
+  }
+  if (best_idx >= 0) {
+    endgame_results_force_best_pvline(endgame_results, &move_pvs[best_idx],
+                                      (int)best_avg_value);
+  }
 }
 
 void impl_endgame(Config *config, ErrorStack *error_stack) {
@@ -6938,6 +7053,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_NERF_SAMPLES, 1, 64, &config->nerf_samples,
+                  error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8389,6 +8510,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_P1_NERF_RATING, "nerf1", 1, 1);
   arg(ARG_TOKEN_P2_NERF_RATING, "nerf2", 1, 1);
+  arg(ARG_TOKEN_NERF_SAMPLES, "nerfsamples", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
@@ -8521,6 +8643,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->endgame_nerf_players[1] = NULL;
   config->endgame_nerf_ratings_cached[0] = 0;
   config->endgame_nerf_ratings_cached[1] = 0;
+  config->endgame_nerf_solve_counter = 0;
+  config->nerf_samples = 1;
   config->human_readable = true;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
@@ -9002,6 +9126,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_NERF_RATING:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->p2_nerf_rating);
+      break;
+    case ARG_TOKEN_NERF_SAMPLES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->nerf_samples);
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

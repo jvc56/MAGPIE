@@ -207,7 +207,10 @@ typedef struct EndgameArgs {
   // modeled human knows. Differing entries force per-player pruned KWGs
   // (contempt mode: own vision perfect, opponent's nerfed).
   const NerfedPlayer *nerf_players[2];
-  uint64_t nerf_seed;
+  // Per-player knowledge seeds: the on-turn player's own vision is an
+  // epistemic fact (sample once, hold fixed), while a modeled opponent's
+  // knowledge is uncertain (vary per sample in Monte Carlo contempt).
+  uint64_t nerf_seeds[2];
 } EndgameArgs;
 
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,

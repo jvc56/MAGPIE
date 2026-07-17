@@ -2,6 +2,7 @@
 #define NERFED_PLAYER_H
 
 #include "../ent/dictionary_word.h"
+#include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/xoshiro.h"
@@ -38,5 +39,12 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
                                     const DictionaryWordList *word_list,
                                     DictionaryWordList *filtered_list,
                                     uint64_t seed);
+
+// Selects among the solve's top-K PVs by value plus Gumbel noise of the
+// rating-fitted endgame sigma, swaps the choice into multi-PV slot 0, and
+// forces it as the best PV. Deterministic per (seed, pv index).
+void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
+                                   EndgameResults *endgame_results,
+                                   uint64_t seed);
 
 #endif

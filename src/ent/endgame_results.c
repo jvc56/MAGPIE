@@ -219,6 +219,14 @@ void endgame_results_set_best_pvline(EndgameResults *endgame_results,
   endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
 }
 
+void endgame_results_force_best_pvline(EndgameResults *endgame_results,
+                                       const PVLine *pv_line, int value) {
+  endgame_results_lock(endgame_results, ENDGAME_RESULT_BEST);
+  endgame_results->best_pv_data.value = value;
+  endgame_results->best_pv_data.pv_line = *pv_line;
+  endgame_results_unlock(endgame_results, ENDGAME_RESULT_BEST);
+}
+
 void endgame_results_set_start_game(EndgameResults *endgame_results,
                                     const Game *game) {
   game_destroy(endgame_results->start_game);

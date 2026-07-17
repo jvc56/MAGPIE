@@ -4,6 +4,7 @@
 #include "../def/equity_defs.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
+#include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/kwg.h"
@@ -92,6 +93,13 @@ static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
+
+// Endgame calculation noise: sigma_e = exp(E0 + E1 * rating_z) spread
+// points, fitted so Gumbel-noisy choice over the converged corpus endgame
+// fields reproduces the human loss curve per rating band (7.5 pts at 1000
+// down to 3.4 at 1800+; closely matches the midgame valuation sigma).
+static const double NERFED_ENDGAME_SIGMA_C0 = 1.653;
+static const double NERFED_ENDGAME_SIGMA_C1 = -0.200;
 
 // Offset applied to the knowledge-only miss logit (the Stage B model's
 // intercept absorbs spotting misses as well as knowledge misses; endgame
@@ -576,4 +584,38 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
       dictionary_word_list_add_word(filtered_list, word, word_length);
     }
   }
+}
+
+void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
+                                   EndgameResults *endgame_results,
+                                   uint64_t seed) {
+  const int num_pvs = endgame_results_get_num_pvs(endgame_results);
+  if (num_pvs <= 1) {
+    return;
+  }
+  const double sigma = exp(NERFED_ENDGAME_SIGMA_C0 +
+                           NERFED_ENDGAME_SIGMA_C1 * nerfed_player->rating_z);
+  PVLine *multi_pvs = endgame_results_get_multi_pvs(endgame_results);
+  int chosen_idx = 0;
+  double chosen_value = 0.0;
+  for (int pv_idx = 0; pv_idx < num_pvs; pv_idx++) {
+    // deterministic per-(seed, pv) uniform via the word-hash finalizer
+    const MachineLetter idx_bytes[2] = {(MachineLetter)(pv_idx + 1),
+                                        (MachineLetter)(pv_idx >> 7)};
+    const uint64_t hash = nerfed_player_word_hash(idx_bytes, 2, seed);
+    const double uniform = ((double)(hash >> 11) + 0.5) / 9007199254740992.0;
+    const double gumbel_noise = -sigma * log(-log(uniform));
+    const double value = (double)multi_pvs[pv_idx].score + gumbel_noise;
+    if (pv_idx == 0 || value > chosen_value) {
+      chosen_idx = pv_idx;
+      chosen_value = value;
+    }
+  }
+  if (chosen_idx != 0) {
+    const PVLine chosen_pv = multi_pvs[chosen_idx];
+    multi_pvs[chosen_idx] = multi_pvs[0];
+    multi_pvs[0] = chosen_pv;
+  }
+  endgame_results_force_best_pvline(endgame_results, &multi_pvs[0],
+                                    multi_pvs[0].score);
 }
