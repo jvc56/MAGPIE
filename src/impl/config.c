@@ -3229,7 +3229,7 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
     // with the rating-fitted endgame Gumbel sigma.
     const NerfedPlayer *on_turn_nerf = endgame_args.nerf_players[on_turn_index];
     if (on_turn_nerf) {
-      nerfed_player_pick_endgame_pv(on_turn_nerf, endgame_results,
+      nerfed_player_pick_endgame_pv(on_turn_nerf, config->game, endgame_results,
                                     endgame_args.nerf_seeds[on_turn_index]);
     }
     return;

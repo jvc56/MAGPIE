@@ -94,12 +94,17 @@ static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
 
-// Endgame calculation noise: sigma_e = exp(E0 + E1 * rating_z) spread
-// points, fitted so Gumbel-noisy choice over the converged corpus endgame
-// fields reproduces the human loss curve per rating band (7.5 pts at 1000
-// down to 3.4 at 1800+; closely matches the midgame valuation sigma).
-static const double NERFED_ENDGAME_SIGMA_C0 = 1.653;
-static const double NERFED_ENDGAME_SIGMA_C1 = -0.200;
+// Endgame choice model (conditional logit on 32,675 corpus endgame
+// choices): utility = value/sigma + score and outplay preferences.
+// Humans choose endgame moves score-greedily (10 score pts pull +68
+// equity-pts at rating 1000, +9 at 2200 — imperfect opponent-rack
+// tracking) and strongly prefer going out. sigma is residual noise.
+static const double NERFED_ENDGAME_SIGMA_C0 = 2.880;
+static const double NERFED_ENDGAME_SIGMA_C1 = -0.535;
+static const double NERFED_ENDGAME_SCORE_PREF_C0 = 1.616;
+static const double NERFED_ENDGAME_SCORE_PREF_C1 = 0.036;
+static const double NERFED_ENDGAME_OUTPLAY_PREF_C0 = 2.225;
+static const double NERFED_ENDGAME_OUTPLAY_PREF_C1 = 0.120;
 
 // Offset applied to the knowledge-only miss logit (the Stage B model's
 // intercept absorbs spotting misses as well as knowledge misses; endgame
@@ -587,14 +592,22 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
 }
 
 void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
+                                   const Game *game,
                                    EndgameResults *endgame_results,
                                    uint64_t seed) {
   const int num_pvs = endgame_results_get_num_pvs(endgame_results);
   if (num_pvs <= 1) {
     return;
   }
-  const double sigma = exp(NERFED_ENDGAME_SIGMA_C0 +
-                           NERFED_ENDGAME_SIGMA_C1 * nerfed_player->rating_z);
+  const double rating_z = nerfed_player->rating_z;
+  const double sigma =
+      exp(NERFED_ENDGAME_SIGMA_C0 + NERFED_ENDGAME_SIGMA_C1 * rating_z);
+  const double score_pref =
+      NERFED_ENDGAME_SCORE_PREF_C0 + NERFED_ENDGAME_SCORE_PREF_C1 * rating_z;
+  const double outplay_pref = NERFED_ENDGAME_OUTPLAY_PREF_C0 +
+                              NERFED_ENDGAME_OUTPLAY_PREF_C1 * rating_z;
+  const int rack_size = rack_get_total_letters(player_get_rack(
+      game_get_player(game, game_get_player_on_turn_index(game))));
   PVLine *multi_pvs = endgame_results_get_multi_pvs(endgame_results);
   int chosen_idx = 0;
   double chosen_value = 0.0;
@@ -604,8 +617,15 @@ void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
                                         (MachineLetter)(pv_idx >> 7)};
     const uint64_t hash = nerfed_player_word_hash(idx_bytes, 2, seed);
     const double uniform = ((double)(hash >> 11) + 0.5) / 9007199254740992.0;
-    const double gumbel_noise = -sigma * log(-log(uniform));
-    const double value = (double)multi_pvs[pv_idx].score + gumbel_noise;
+    const double gumbel_noise = -log(-log(uniform));
+    const SmallMove *root_move = &multi_pvs[pv_idx].moves[0];
+    const double outplay =
+        small_move_get_tiles_played(root_move) >= rack_size ? 1.0 : 0.0;
+    // utility units: value/sigma + fitted preferences + standard Gumbel
+    const double value =
+        (double)multi_pvs[pv_idx].score / sigma +
+        score_pref * ((double)small_move_get_score(root_move) / 10.0) +
+        outplay_pref * outplay + gumbel_noise;
     if (pv_idx == 0 || value > chosen_value) {
       chosen_idx = pv_idx;
       chosen_value = value;

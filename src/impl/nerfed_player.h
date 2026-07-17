@@ -44,6 +44,7 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
 // rating-fitted endgame sigma, swaps the choice into multi-PV slot 0, and
 // forces it as the best PV. Deterministic per (seed, pv index).
 void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
+                                   const Game *game,
                                    EndgameResults *endgame_results,
                                    uint64_t seed);
 
