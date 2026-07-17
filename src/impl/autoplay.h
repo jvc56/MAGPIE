@@ -27,6 +27,9 @@ typedef struct AutoplayArgs {
   const GameStringOptions *game_string_options;
   multi_threading_mode_t multi_threading_mode;
   double cutoff;
+  // Nerfed-player target ratings; 0 disables nerfing for that player.
+  int p1_nerf_rating;
+  int p2_nerf_rating;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
 } AutoplayArgs;

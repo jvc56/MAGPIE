@@ -35,6 +35,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "nerfed_player.h"
 #include "rack_list.h"
 #include "simmer.h"
 #include <stdatomic.h>
@@ -297,6 +298,8 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  // Lazily created when pX_nerf_rating > 0 (per player index).
+  NerfedPlayer *nerfed_players[2];
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -321,7 +324,13 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
     autoplay_worker->prng = prng_create(0);
     autoplay_shared_data_copy_to_dst_and_jump(shared_data,
                                               autoplay_worker->prng);
+  } else if (args->p1_nerf_rating > 0 || args->p2_nerf_rating > 0) {
+    // The nerfed player draws per-move visibility and valuation noise.
+    autoplay_worker->prng = prng_create(
+        args->seed + (uint64_t)(worker_index + 1) * 0x9E3779B97F4A7C15ULL);
   }
+  autoplay_worker->nerfed_players[0] = NULL;
+  autoplay_worker->nerfed_players[1] = NULL;
   autoplay_worker->shared_data = shared_data;
   autoplay_worker->sim_ctx = NULL;
   const AutoplayArgs *ap_args = &autoplay_worker->args;
@@ -357,6 +366,8 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
     return;
   }
   autoplay_results_destroy(autoplay_worker->autoplay_results);
+  nerfed_player_destroy(autoplay_worker->nerfed_players[0]);
+  nerfed_player_destroy(autoplay_worker->nerfed_players[1]);
   prng_destroy(autoplay_worker->prng);
   sim_ctx_destroy(autoplay_worker->sim_ctx);
   sim_results_destroy(autoplay_worker->sim_results);
@@ -617,6 +628,25 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
+  const int nerf_rating = (player_on_turn_index == 0)
+                              ? autoplay_worker->args.p1_nerf_rating
+                              : autoplay_worker->args.p2_nerf_rating;
+  if (nerf_rating > 0) {
+    if (!autoplay_worker->nerfed_players[player_on_turn_index]) {
+      ErrorStack *error_stack = error_stack_create();
+      autoplay_worker->nerfed_players[player_on_turn_index] =
+          nerfed_player_create(game_runner->game, nerf_rating, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_print_and_reset(error_stack);
+        log_fatal("autoplay worker %d failed to create nerfed player",
+                  autoplay_worker->worker_index);
+      }
+      error_stack_destroy(error_stack);
+    }
+    return nerfed_player_select_move(
+        autoplay_worker->nerfed_players[player_on_turn_index],
+        game_runner->game, autoplay_worker->prng);
+  }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;

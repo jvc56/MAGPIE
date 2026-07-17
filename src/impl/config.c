@@ -155,6 +155,8 @@ typedef enum {
   ARG_TOKEN_MOVEGEN_MARGIN,
   ARG_TOKEN_MIN_PLAY_ITERATIONS,
   ARG_TOKEN_USE_GAME_PAIRS,
+  ARG_TOKEN_P1_NERF_RATING,
+  ARG_TOKEN_P2_NERF_RATING,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_USE_HEAT_MAP,
@@ -311,6 +313,8 @@ struct Config {
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
+  int p1_nerf_rating;
+  int p2_nerf_rating;
   bool sim_with_inference;
   bool use_heat_map;
   bool print_boards;
@@ -1724,6 +1728,18 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the minimum number of iterations a candidate move must "
              "receive when running simulations.";
       break;
+    case ARG_TOKEN_P1_NERF_RATING:
+    case ARG_TOKEN_P2_NERF_RATING:
+      usages[0] = "<rating>";
+      examples[0] = "1300";
+      examples[1] = "1900";
+      text = "Autoplay only: models the player as a human of the given "
+             "rating. Each candidate play is independently missed with a "
+             "corpus-fitted probability (word obscurity, blanks, playthrough) "
+             "and visible plays are valued with rating-dependent noise. 0 "
+             "(the default) disables nerfing. Requires "
+             "data/lexica/<lexicon>_wordfeats.csv.";
+      break;
     case ARG_TOKEN_USE_GAME_PAIRS:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2220,6 +2236,8 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_MIN_PLAY_ITERATIONS,     /* minplayiterations */
         ARG_TOKEN_MOVEGEN_MARGIN,          /* mmargin */
         ARG_TOKEN_MULTI_THREADING_MODE,    /* mtmode */
+        ARG_TOKEN_P1_NERF_RATING,          /* nerf1 */
+        ARG_TOKEN_P2_NERF_RATING,          /* nerf2 */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
@@ -3446,6 +3464,8 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  autoplay_args->p1_nerf_rating = config->p1_nerf_rating;
+  autoplay_args->p2_nerf_rating = config->p2_nerf_rating;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -6878,6 +6898,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_int(config, ARG_TOKEN_P1_NERF_RATING, 0, 3000,
+                  &config->p1_nerf_rating, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_P2_NERF_RATING, 0, 3000,
+                  &config->p2_nerf_rating, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8325,6 +8357,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
+  arg(ARG_TOKEN_P1_NERF_RATING, "nerf1", 1, 1);
+  arg(ARG_TOKEN_P2_NERF_RATING, "nerf2", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
@@ -8451,6 +8485,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->threshold = BAI_THRESHOLD_GK16;
   config->use_game_pairs = false;
   config->use_small_plays = false;
+  config->p1_nerf_rating = 0;
+  config->p2_nerf_rating = 0;
   config->human_readable = true;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
@@ -8922,6 +8958,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_GAME_PAIRS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_game_pairs);
+      break;
+    case ARG_TOKEN_P1_NERF_RATING:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_nerf_rating);
+      break;
+    case ARG_TOKEN_P2_NERF_RATING:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_nerf_rating);
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
