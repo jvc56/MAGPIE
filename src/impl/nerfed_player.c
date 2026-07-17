@@ -3,6 +3,7 @@
 #include "../def/board_defs.h"
 #include "../def/equity_defs.h"
 #include "../ent/board.h"
+#include "../ent/dictionary_word.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/kwg.h"
@@ -91,6 +92,12 @@ static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
+
+// Offset applied to the knowledge-only miss logit (the Stage B model's
+// intercept absorbs spotting misses as well as knowledge misses; endgame
+// deliberation is exhaustive, so pure word knowledge should miss less).
+// Calibrate against the corpus endgame rank curves.
+static const double NERFED_KNOW_OFFSET = -1.0;
 
 typedef struct NerfedWordFeat {
   MachineLetter word[BOARD_DIM];
@@ -510,4 +517,63 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
     chosen = fallback;
   }
   return chosen;
+}
+
+// splitmix64 finalizer for the deterministic word-knowledge draw.
+static uint64_t nerfed_player_word_hash(const MachineLetter *word,
+                                        int word_length, uint64_t seed) {
+  uint64_t hash = seed ^ 0x9E3779B97F4A7C15ULL;
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    hash ^= word[letter_idx];
+    hash *= 0xBF58476D1CE4E5B9ULL;
+  }
+  hash ^= hash >> 30;
+  hash *= 0x94D049BB133111EBULL;
+  hash ^= hash >> 31;
+  return hash;
+}
+
+bool nerfed_player_knows_word(const NerfedPlayer *nerfed_player,
+                              const MachineLetter *word, int word_length,
+                              uint64_t seed) {
+  const NerfedWordFeat *feat =
+      nerfed_player_lookup_word(nerfed_player, word, word_length);
+  double logplay = NERFED_DEFAULT_LOGPLAY;
+  double loglit = NERFED_DEFAULT_LOGLIT;
+  double absent = 1.0;
+  if (feat) {
+    logplay = feat->logplay;
+    loglit = feat->loglit;
+    absent = feat->absent ? 1.0 : 0.0;
+  }
+  const double len2 = word_length <= 2 ? 1.0 : 0.0;
+  const double len7plus = word_length >= 7 ? 1.0 : 0.0;
+  const double rating_z = nerfed_player->rating_z;
+  const double *c = nerfed_player->miss_coeffs;
+  // knowledge-only subset of the miss model: geometry terms zeroed.
+  const double logit = NERFED_KNOW_OFFSET + c[0] + c[1] * rating_z +
+                       c[2] * logplay + c[3] * loglit + c[4] * absent +
+                       c[10] * len2 + c[11] * len7plus +
+                       c[12] * rating_z * logplay + c[13] * rating_z * loglit +
+                       c[15] * rating_z * len2 + c[16] * rating_z * len7plus;
+  const double miss_probability = 1.0 / (1.0 + exp(-logit));
+  const uint64_t hash = nerfed_player_word_hash(word, word_length, seed);
+  const double uniform = ((double)(hash >> 11) + 0.5) / 9007199254740992.0;
+  return uniform >= miss_probability;
+}
+
+void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
+                                    const DictionaryWordList *word_list,
+                                    DictionaryWordList *filtered_list,
+                                    uint64_t seed) {
+  const int word_count = dictionary_word_list_get_count(word_list);
+  for (int word_idx = 0; word_idx < word_count; word_idx++) {
+    const DictionaryWord *dictionary_word =
+        dictionary_word_list_get_word(word_list, word_idx);
+    const MachineLetter *word = dictionary_word_get_word(dictionary_word);
+    const int word_length = dictionary_word_get_length(dictionary_word);
+    if (nerfed_player_knows_word(nerfed_player, word, word_length, seed)) {
+      dictionary_word_list_add_word(filtered_list, word, word_length);
+    }
+  }
 }

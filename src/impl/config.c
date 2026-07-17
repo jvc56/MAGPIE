@@ -63,6 +63,7 @@
 #include "get_gcg.h"
 #include "inference.h"
 #include "move_gen.h"
+#include "nerfed_player.h"
 #include "peg.h"
 #include "simmer.h"
 #include <assert.h>
@@ -315,6 +316,10 @@ struct Config {
   bool use_small_plays;
   int p1_nerf_rating;
   int p2_nerf_rating;
+  // Cached nerfed players for endgame nerfed vision (lazily created per
+  // rating; word-feature tables are expensive to load per solve).
+  NerfedPlayer *endgame_nerf_players[2];
+  int endgame_nerf_ratings_cached[2];
   bool sim_with_inference;
   bool use_heat_map;
   bool print_boards;
@@ -3163,6 +3168,29 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
                     ErrorStack *error_stack) {
   EndgameArgs endgame_args;
   config_fill_endgame_args(config, &endgame_args);
+  // Nerfed endgame vision: -nerf1/-nerf2 assign a modeled human per game
+  // player index; the possible-word lists are filtered through sampled word
+  // knowledge before the search (see EndgameArgs.nerf_players).
+  const int nerf_ratings[2] = {config->p1_nerf_rating, config->p2_nerf_rating};
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (nerf_ratings[player_idx] <= 0) {
+      continue;
+    }
+    if (config->endgame_nerf_ratings_cached[player_idx] !=
+        nerf_ratings[player_idx]) {
+      nerfed_player_destroy(config->endgame_nerf_players[player_idx]);
+      config->endgame_nerf_players[player_idx] = nerfed_player_create(
+          config->game, nerf_ratings[player_idx], error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+      config->endgame_nerf_ratings_cached[player_idx] =
+          nerf_ratings[player_idx];
+    }
+    endgame_args.nerf_players[player_idx] =
+        config->endgame_nerf_players[player_idx];
+  }
+  endgame_args.nerf_seed = config->seed;
   endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
                 error_stack);
 }
@@ -7666,6 +7694,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (new_win_pct_name != NULL &&
       (config->win_pcts == NULL ||
        !strings_equal(win_pct_get_name(config->win_pcts), new_win_pct_name))) {
+    nerfed_player_destroy(config->endgame_nerf_players[0]);
+    nerfed_player_destroy(config->endgame_nerf_players[1]);
     win_pct_destroy(config->win_pcts);
     config->win_pcts =
         win_pct_create(config->data_paths, new_win_pct_name, error_stack);
@@ -8487,6 +8517,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_small_plays = false;
   config->p1_nerf_rating = 0;
   config->p2_nerf_rating = 0;
+  config->endgame_nerf_players[0] = NULL;
+  config->endgame_nerf_players[1] = NULL;
+  config->endgame_nerf_ratings_cached[0] = 0;
+  config->endgame_nerf_ratings_cached[1] = 0;
   config->human_readable = true;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
@@ -8556,6 +8590,8 @@ void config_destroy(Config *config) {
   for (int i = 0; i < NUMBER_OF_ARG_TOKENS; i++) {
     parsed_arg_destroy(config->pargs[i]);
   }
+  nerfed_player_destroy(config->endgame_nerf_players[0]);
+  nerfed_player_destroy(config->endgame_nerf_players[1]);
   win_pct_destroy(config->win_pcts);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);

@@ -16,6 +16,7 @@
 #include "../ent/small_move_arena.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
+#include "nerfed_player.h"
 
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
@@ -199,6 +200,14 @@ typedef struct EndgameArgs {
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
   // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
   int64_t external_deadline_ns;
+  // Nerfed vision (per game player index; NULL = perfect vision). When set,
+  // the possible-words list for that player is filtered through the
+  // player's sampled word knowledge (deterministic per nerf_seed) before
+  // the pruned KWG is built, so the whole search plans only with words the
+  // modeled human knows. Differing entries force per-player pruned KWGs
+  // (contempt mode: own vision perfect, opponent's nerfed).
+  const NerfedPlayer *nerf_players[2];
+  uint64_t nerf_seed;
 } EndgameArgs;
 
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,

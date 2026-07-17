@@ -679,19 +679,29 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->pruned_kwgs[1] = NULL;
 
   es->dual_lexicon_mode = endgame_args->dual_lexicon_mode;
+  // Nerfed vision with different per-player models (including one perfect
+  // and one nerfed: contempt mode) requires per-player pruned KWGs even
+  // when the underlying lexicon is shared.
+  const bool nerf_differs =
+      endgame_args->nerf_players[0] != endgame_args->nerf_players[1];
   // INFORMED mode with shared KWGs is meaningless (both players have the same
   // lexicon). Coerce to IGNORANT to avoid building only pruned_kwgs[0] while
   // get_kwg_for_cross_set would try to dereference pruned_kwgs[1] as NULL.
   bool shared_kwg =
       game_get_data_is_shared(endgame_args->game, PLAYERS_DATA_TYPE_KWG);
-  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg) {
+  if (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED && shared_kwg &&
+      !nerf_differs) {
     es->dual_lexicon_mode = DUAL_LEXICON_MODE_IGNORANT;
+  }
+  if (nerf_differs) {
+    es->dual_lexicon_mode = DUAL_LEXICON_MODE_INFORMED;
   }
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
   es->external_deadline_ns = endgame_args->external_deadline_ns;
   bool create_separate_kwgs =
-      (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
+      ((es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg) ||
+      nerf_differs;
 
   // skip_word_pruning: leave pruned_kwgs NULL so move gen uses the full KWG
   // (or any override KWGs the caller set on the game). Used by PEG which
@@ -708,6 +718,18 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
           player_get_kwg(game_get_player(endgame_args->game, player_idx));
       DictionaryWordList *word_list = dictionary_word_list_create();
       generate_possible_words(endgame_args->game, full_kwg, word_list);
+      // Nerfed vision: restrict this player's possible words to the words
+      // the modeled human knows. The draw is deterministic per
+      // (nerf_seed, word), so the entire search plans within one coherent
+      // believed lexicon for each player.
+      const NerfedPlayer *nerf = endgame_args->nerf_players[player_idx];
+      if (nerf) {
+        DictionaryWordList *known_words = dictionary_word_list_create();
+        nerfed_player_filter_word_list(nerf, word_list, known_words,
+                                       endgame_args->nerf_seed);
+        dictionary_word_list_destroy(word_list);
+        word_list = known_words;
+      }
       es->pruned_kwgs[player_idx] = make_kwg_from_words_small(
           word_list, KWG_MAKER_OUTPUT_GADDAG, KWG_MAKER_MERGE_EXACT);
       dictionary_word_list_destroy(word_list);
