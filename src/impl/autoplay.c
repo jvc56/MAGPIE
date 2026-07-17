@@ -37,6 +37,7 @@
 #include "gameplay.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -84,6 +85,10 @@ typedef struct LeavegenSharedData {
   const char *data_paths;
   KLV *klv;
   RackList *rack_list;
+  // Whether each generation should also dump rack_list's
+  // "<rack>,<count>,<mean>" data to a CSV (see rack_list_write_rack_equity_
+  // csv).
+  bool write_rack_equity_csv;
   Checkpoint *postgen_checkpoint;
   AutoplayResults *primary_autoplay_results;
   AutoplayResults **autoplay_results_list;
@@ -263,6 +268,22 @@ void postgen_prebroadcast_func(void *data) {
     log_fatal("leavegen failed to write result summary to file");
   }
 
+  // When -writerackequitycsv is set, also dump rack_list's
+  // "<rack>,<count>,<mean>" data for every observed rack, so a distributed
+  // caller doesn't have to parse the full per-generation KLV to get results.
+  if (lg_shared_data->write_rack_equity_csv) {
+    char *rack_equity_csv_name =
+        get_formatted_string("%s_rack_equity.csv", report_name_prefix);
+    rack_list_write_rack_equity_csv(lg_shared_data->rack_list,
+                                    lg_shared_data->ld, rack_equity_csv_name,
+                                    error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("leavegen failed to write rack equity results to file");
+    }
+    free(rack_equity_csv_name);
+  }
+
   string_builder_destroy(leave_gen_sb);
   error_stack_destroy(error_stack);
 
@@ -367,11 +388,16 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   free(autoplay_worker);
 }
 
+// forced_racks_filename is optional (NULL/empty for an unrestricted run) and
+// is passed straight through to rack_list_create; see its documentation for
+// what it does. Pushes to error_stack and returns NULL if that file can't be
+// read.
 LeavegenSharedData *leavegen_shared_data_create(
     AutoplayResults *primary_autoplay_results,
     AutoplayResults **autoplay_results_list, const LetterDistribution *ld,
     const char *data_paths, KLV *klv, int number_of_threads, int num_gens,
-    int *min_rack_targets) {
+    int *min_rack_targets, const char *forced_racks_filename,
+    bool write_rack_equity_csv, ErrorStack *error_stack) {
   LeavegenSharedData *shared_data = malloc_or_die(sizeof(LeavegenSharedData));
 
   shared_data->num_gens = num_gens;
@@ -385,19 +411,31 @@ LeavegenSharedData *leavegen_shared_data_create(
   shared_data->ld = ld;
   shared_data->data_paths = data_paths;
   shared_data->min_rack_targets = min_rack_targets;
-  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0]);
+  shared_data->rack_list = rack_list_create(ld, min_rack_targets[0],
+                                            forced_racks_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    autoplay_results_destroy(shared_data->gen_autoplay_results);
+    free(shared_data);
+    return NULL;
+  }
+  shared_data->write_rack_equity_csv = write_rack_equity_csv;
   shared_data->postgen_checkpoint =
       checkpoint_create(number_of_threads, postgen_prebroadcast_func);
   return shared_data;
 }
 
-// Use NULL for the KLV when not running in leave gen mode.
+// Use NULL for the KLV when not running in leave gen mode. forced_racks_
+// filename and write_rack_equity_csv are only meaningful when klv is
+// non-NULL (see leavegen_shared_data_create); pushes to error_stack and
+// returns NULL on the same conditions that function does.
 AutoplaySharedData *
 autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
                             const uint64_t first_gen_num_games,
                             AutoplayResults *primary_autoplay_results,
                             AutoplayResults **autoplay_results_list, KLV *klv,
-                            int num_gens, int *min_rack_targets) {
+                            int num_gens, int *min_rack_targets,
+                            const char *forced_racks_filename,
+                            ErrorStack *error_stack) {
   AutoplaySharedData *shared_data = malloc_or_die(sizeof(AutoplaySharedData));
   shared_data->num_threads = num_autoplay_threads;
   shared_data->print_interval = args->print_interval;
@@ -414,8 +452,13 @@ autoplay_shared_data_create(const AutoplayArgs *args, int num_autoplay_threads,
   if (klv) {
     shared_data->leavegen_shared_data = leavegen_shared_data_create(
         primary_autoplay_results, autoplay_results_list, args->game_args->ld,
-        args->data_paths, klv, num_autoplay_threads, num_gens,
-        min_rack_targets);
+        args->data_paths, klv, num_autoplay_threads, num_gens, min_rack_targets,
+        forced_racks_filename, args->write_rack_equity_csv, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      prng_destroy(shared_data->prng);
+      free(shared_data);
+      return NULL;
+    }
   }
   return shared_data;
 }
@@ -501,7 +544,10 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   game_runner->force_draw = false;
   if (game_runner->shared_data->leavegen_shared_data &&
       // We only force draws if we've played enough games for this
-      // generation.
+      // generation. This also applies when leavegen's rack list is
+      // restricted to a forceracksfile (see rack_list_create): clients
+      // fulfilling requests can just pass 0 if they want forcing
+      // from the start.
       (iter_output->iter_count -
        game_runner->shared_data->leavegen_shared_data->gen_start_games) >=
           (uint64_t)autoplay_worker->args.games_before_force_draw_start) {
@@ -651,8 +697,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
     const Move *forced_move =
         game_runner_get_best_move(autoplay_worker, game_runner);
-    rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
-                       equity_to_double(move_get_equity(forced_move)));
+    // A forced rack is under no obligation to have a legal play, and a
+    // pass's equity is a sentinel value that can't be recorded, so passes
+    // are skipped entirely here. This is more likely than usual when
+    // lg_shared_data->rack_list is restricted to a forceracksfile (see
+    // rack_list_create), since those racks are picked externally rather
+    // than drawn from the actual remaining tile pool.
+    if (move_get_type(forced_move) != GAME_EVENT_PASS) {
+      rack_list_add_rack(lg_shared_data->rack_list, &rare_rack_or_move_leave,
+                         equity_to_double(move_get_equity(forced_move)));
+    }
 
     rack_copy(player_rack, &original_rack);
   }
@@ -957,6 +1011,11 @@ void valid_autoplay_results_options(const AutoplayResults *autoplay_results,
 
 void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
               ErrorStack *error_stack) {
+  valid_autoplay_results_options(autoplay_results, args, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
   int num_gens = 1;
   int *min_rack_targets = NULL;
@@ -990,11 +1049,6 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
     }
   }
 
-  valid_autoplay_results_options(autoplay_results, args, error_stack);
-  if (!error_stack_is_empty(error_stack)) {
-    return;
-  }
-
   ThreadControl *thread_control = args->thread_control;
 
   autoplay_results_reset(autoplay_results);
@@ -1015,7 +1069,13 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   AutoplaySharedData *shared_data = autoplay_shared_data_create(
       args, autoplay_num_threads, first_gen_num_games, autoplay_results,
-      autoplay_results_list, klv, num_gens, min_rack_targets);
+      autoplay_results_list, klv, num_gens, min_rack_targets,
+      args->force_racks_filename, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    free(autoplay_results_list);
+    free(min_rack_targets);
+    return;
+  }
 
   AutoplayWorker **autoplay_workers =
       malloc_or_die((sizeof(AutoplayWorker *)) * (autoplay_num_threads));

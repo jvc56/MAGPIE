@@ -236,6 +236,8 @@ typedef enum {
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
+  ARG_TOKEN_VERSION,
+  ARG_TOKEN_WRITE_RACK_EQUITY_CSV,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -323,6 +325,11 @@ struct Config {
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
+  // Whether each leavegen generation should also dump a
+  // "<rack>,<count>,<mean>" CSV of rack_list's current data (see
+  // rack_list_write_rack_equity_csv). Independent of whether a
+  // forceracksfile restriction is in use.
+  bool write_rack_equity_csv;
   char *record_filepath;
   char *settings_filename;
   double tt_fraction_of_mem;
@@ -905,6 +912,18 @@ char *str_api_fatal(Config *config,
   return empty_string();
 }
 
+#define MAGPIE_VERSION "0.0.0"
+
+void execute_version(Config *config,
+                     ErrorStack __attribute__((unused)) * error_stack) {
+  thread_control_print(config->thread_control, MAGPIE_VERSION "\n");
+}
+
+char *str_api_version(Config __attribute__((unused)) * config,
+                      ErrorStack __attribute__((unused)) * error_stack) {
+  return string_duplicate(MAGPIE_VERSION "\n");
+}
+
 // Used for commands that only update the config state
 void execute_noop(Config __attribute__((unused)) * config,
                   ErrorStack __attribute__((unused)) * error_stack) {}
@@ -1156,7 +1175,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
     case ARG_TOKEN_LEAVE_GEN:
       usages[0] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
                   "[<games_before_force_draw>]";
+      usages[1] = "<gen1_min_rack_target>,<gen1_min_rack_target>,... "
+                  "[<games_before_force_draw>] [<forceracksfile>]";
       examples[0] = "100,200,500,1000,1000,1000 100000000";
+      examples[1] = "1000,1000 0 my_racks.txt";
       text =
           "Generates leaves for the current lexicon. The minimum rack targets "
           "specify the required minimum number of rack occurrences for all "
@@ -1174,7 +1196,12 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "last generation, otherwise the leavegen command will start over at "
           "the first generation. It is recommended to use the autoplay command "
           "with game pairs to evaluate the resulting leaves. Depending on your "
-          "hardware, this command could take days or weeks.";
+          "hardware, this command could take days or weeks. The optional third "
+          "argument, <forceracksfile>, is a path to a file listing racks, one "
+          "per line, that restricts which racks are ever forced as rare (used "
+          "to run a distributed leavegen worker on a fixed set of "
+          "externally-provided racks). See -writerackequitycsv for a way to "
+          "dump each generation's rack data to a CSV.";
       break;
     case ARG_TOKEN_CREATE_DATA:
       usages[0] = "<type> <output_name> [<letter_distribution>]";
@@ -1961,6 +1988,17 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies whether or not to print a finished message when a "
              "command completes execution.";
       break;
+    case ARG_TOKEN_WRITE_RACK_EQUITY_CSV:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether or not each leavegen generation should also "
+             "write a '<rack>,<count>,<mean>' CSV of the current rack_list "
+             "data, in addition to the usual KLV/leaves/report files. "
+             "Independent of whether a forceracksfile restriction (the "
+             "optional third leavegen argument) is in use; for an "
+             "unrestricted leavegen run this can produce a very large file.";
+      break;
     case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2065,6 +2103,10 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              " runs N games in parallel "
              "(default). " MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM_STRING
              " runs one game at a time using all threads for simulation.";
+      break;
+    case ARG_TOKEN_VERSION:
+      usages[0] = "";
+      text = "Prints the version of the magpie executable.";
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token in help command");
@@ -2179,7 +2221,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_CREATE_DATA, /* createdata */
         ARG_TOKEN_HELP,        /* help */
         ARG_TOKEN_SET,         /* setoptions */
-
+        ARG_TOKEN_VERSION,     /* version */
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
@@ -2289,16 +2331,17 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Other Options (alphabetical by name)
     static const arg_token_t other_opts[] = {
-        ARG_TOKEN_AUTOSAVE_GCG,      /* autosavegcg */
-        ARG_TOKEN_FG_REQUIRED,       /* fgrequired */
-        ARG_TOKEN_EXEC_MODE,         /* mode */
-        ARG_TOKEN_DATA_PATH,         /* path */
-        ARG_TOKEN_PRINT_INTERVAL,    /* pfrequency */
-        ARG_TOKEN_PRINT_ON_FINISH,   /* printonfinish */
-        ARG_TOKEN_SAVE_SETTINGS,     /* savesettings */
-        ARG_TOKEN_RANDOM_SEED,       /* seed */
-        ARG_TOKEN_SHOW_PROMPT,       /* shprompt */
-        ARG_TOKEN_NUMBER_OF_THREADS, /* threads */
+        ARG_TOKEN_AUTOSAVE_GCG,          /* autosavegcg */
+        ARG_TOKEN_FG_REQUIRED,           /* fgrequired */
+        ARG_TOKEN_EXEC_MODE,             /* mode */
+        ARG_TOKEN_DATA_PATH,             /* path */
+        ARG_TOKEN_PRINT_INTERVAL,        /* pfrequency */
+        ARG_TOKEN_PRINT_ON_FINISH,       /* printonfinish */
+        ARG_TOKEN_SAVE_SETTINGS,         /* savesettings */
+        ARG_TOKEN_RANDOM_SEED,           /* seed */
+        ARG_TOKEN_SHOW_PROMPT,           /* shprompt */
+        ARG_TOKEN_NUMBER_OF_THREADS,     /* threads */
+        ARG_TOKEN_WRITE_RACK_EQUITY_CSV, /* writerackequitycsv */
     };
     int total_tokens = 0;
     string_builder_add_string(sb, "Game Navigation Commands\n\n");
@@ -3416,10 +3459,13 @@ void config_fill_autoplay_args(const Config *config,
                                AutoplayArgs *autoplay_args,
                                autoplay_t autoplay_type,
                                const char *num_games_or_min_rack_targets,
-                               int games_before_force_draw_start) {
+                               int games_before_force_draw_start,
+                               const char *force_racks_filename) {
   autoplay_args->type = autoplay_type;
   autoplay_args->num_games_or_min_rack_targets = num_games_or_min_rack_targets;
   autoplay_args->games_before_force_draw_start = games_before_force_draw_start;
+  autoplay_args->force_racks_filename = force_racks_filename;
+  autoplay_args->write_rack_equity_csv = config->write_rack_equity_csv;
   autoplay_args->use_game_pairs = config_get_use_game_pairs(config);
   autoplay_args->human_readable = config_get_human_readable(config);
   autoplay_args->print_boards = config->print_boards;
@@ -3513,13 +3559,14 @@ void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
                      autoplay_t autoplay_type,
                      const char *num_games_or_min_rack_targets,
                      int games_before_force_draw_start,
+                     const char *force_racks_filename,
                      ErrorStack *error_stack) {
   AutoplayArgs args;
   GameArgs game_args;
   args.game_args = &game_args;
-  config_fill_autoplay_args(config, &args, autoplay_type,
-                            num_games_or_min_rack_targets,
-                            games_before_force_draw_start);
+  config_fill_autoplay_args(
+      config, &args, autoplay_type, num_games_or_min_rack_targets,
+      games_before_force_draw_start, force_racks_filename);
   autoplay(&args, autoplay_results, error_stack);
 }
 
@@ -3549,7 +3596,7 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
       config_get_parg_value(config, ARG_TOKEN_AUTOPLAY, 1);
 
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_DEFAULT,
-                  num_games_str, 0, error_stack);
+                  num_games_str, 0, /*force_racks_filename=*/NULL, error_stack);
 }
 
 char *status_autoplay(Config *config) {
@@ -3625,9 +3672,16 @@ void impl_leave_gen(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Optional third argument: a file listing racks (one per line) that
+  // restricts which racks leavegen's RackList treats as eligible to be
+  // drawn as rare (see rack_list_create). NULL if not supplied, meaning
+  // every rack is eligible, as leavegen normally expects.
+  const char *force_racks_filename =
+      config_get_parg_value(config, ARG_TOKEN_LEAVE_GEN, 2);
+
   config_autoplay(config, config->autoplay_results, AUTOPLAY_TYPE_LEAVE_GEN,
                   min_rack_targets_str, games_before_force_draw_start,
-                  error_stack);
+                  force_racks_filename, error_stack);
 }
 
 // Create
@@ -6911,6 +6965,14 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  // Write rack equity csv
+
+  config_load_bool(config, ARG_TOKEN_WRITE_RACK_EQUITY_CSV,
+                   &config->write_rack_equity_csv, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   // Show game with moves
 
   config_load_bool(config, ARG_TOKEN_SHOW_GAME_WITH_MOVES,
@@ -8485,6 +8547,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
                     str_api_fatal, status_generic, false, false)
 
   cmd(ARG_TOKEN_HELP, "help", 0, 1, help, generic, false);
+  cmd(ARG_TOKEN_VERSION, "version", 0, 0, version, generic, false);
   cmd(ARG_TOKEN_SET, "setoptions", 0, 0, noop, generic, false);
   cmd(ARG_TOKEN_CGP, "cgp", 4, 4, load_cgp, generic, false);
   cmd(ARG_TOKEN_LOAD, "load", 1, 1, load_gcg, generic, false);
@@ -8522,7 +8585,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   cmd(ARG_TOKEN_PEG, "peg", 0, 0, peg, peg, false);
   cmd(ARG_TOKEN_AUTOPLAY, "autoplay", 2, 2, autoplay, autoplay, false);
   cmd(ARG_TOKEN_CONVERT, "convert", 2, 3, convert, generic, false);
-  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 2, leave_gen, generic, false);
+  cmd(ARG_TOKEN_LEAVE_GEN, "leavegen", 2, 3, leave_gen, generic, false);
   cmd(ARG_TOKEN_CREATE_DATA, "createdata", 2, 3, create_data, generic, false);
   cmd(ARG_TOKEN_NEXT, "next", 0, 0, next, generic, true);
   cmd(ARG_TOKEN_PREVIOUS, "previous", 0, 0, previous, generic, true);
@@ -8633,6 +8696,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_ON_TURN_SCORE_STYLE, "onturnscore", 1, 1);
   arg(ARG_TOKEN_PRETTY, "pretty", 1, 1);
   arg(ARG_TOKEN_PRINT_ON_FINISH, "printonfinish", 1, 1);
+  arg(ARG_TOKEN_WRITE_RACK_EQUITY_CSV, "writerackequitycsv", 1, 1);
   arg(ARG_TOKEN_SHOW_PROMPT, "shprompt", 1, 1);
   arg(ARG_TOKEN_SAVE_SETTINGS, "savesettings", 1, 1);
   arg(ARG_TOKEN_AUTOSAVE_GCG, "autosavegcg", 1, 1);
@@ -8738,6 +8802,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->use_heat_map = false;
   config->print_boards = false;
   config->print_on_finish = false;
+  config->write_rack_equity_csv = false;
   config->show_game_with_moves = true;
   config->show_prompt = true;
   config->save_settings = true;
@@ -8852,6 +8917,7 @@ void config_add_settings_to_string_builder(const Config *config,
        arg_token++) {
     switch (arg_token) {
     case ARG_TOKEN_HELP:
+    case ARG_TOKEN_VERSION:
     case ARG_TOKEN_SET:
     case ARG_TOKEN_CGP:
     case ARG_TOKEN_MOVES:
@@ -9367,6 +9433,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PRINT_ON_FINISH:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->print_on_finish);
+      break;
+    case ARG_TOKEN_WRITE_RACK_EQUITY_CSV:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->write_rack_equity_csv);
       break;
     case ARG_TOKEN_SHOW_GAME_WITH_MOVES:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
