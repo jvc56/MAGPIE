@@ -69,6 +69,15 @@ static const double NERFED_EXCH_COEFFS[4] = {
     -0.150, // (delta / 10) x rating_z
 };
 static const double NERFED_EXCH_DELTA_CAP = 60.0;
+
+// Keep-selection model (conditional logit on 6,494 corpus exchanges):
+// utility = equity / sigma_exch + gamma * tiles_thrown, with
+// sigma_exch = exp(K0 + K1 * rating_z). Humans of all ratings throw
+// slightly more tiles than the engine-best keep (gamma > 0), and weak
+// players keep noisier leaves (sigma_exch 4.2 pts at 1000 vs 1.7 at 2200).
+static const double NERFED_KEEP_SIGMA_C0 = 1.045;
+static const double NERFED_KEEP_SIGMA_C1 = -0.229;
+static const double NERFED_KEEP_THROW_BIAS = 0.1075;
 // Equity assigned to "no exchange available" in the fit when movegen had
 // no exchange row (matches the fit's default margin baseline).
 static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
@@ -102,6 +111,7 @@ enum { NERFED_MAX_WORD_DRAWS = 512 };
 struct NerfedPlayer {
   double rating_z;
   double sigma;
+  double keep_sigma;
   NerfedWordFeat *feats;
   int num_feats;
   MoveList *move_list;
@@ -150,6 +160,8 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
   nerfed_player->rating_z = (rating - 1500.0) / 300.0;
   nerfed_player->sigma =
       exp(NERFED_SIGMA_C0 + NERFED_SIGMA_C1 * nerfed_player->rating_z);
+  nerfed_player->keep_sigma = exp(
+      NERFED_KEEP_SIGMA_C0 + NERFED_KEEP_SIGMA_C1 * nerfed_player->rating_z);
   nerfed_player->feats =
       malloc_or_die(sizeof(NerfedWordFeat) * NERFED_MAX_WORD_FEATS);
   nerfed_player->num_feats = 0;

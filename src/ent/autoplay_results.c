@@ -123,6 +123,7 @@ typedef struct GameData {
   uint64_t player_tiles_played[2];
   uint64_t player_tile_plays[2];
   uint64_t player_exchanges[2];
+  uint64_t player_exchange_tiles[2];
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -146,6 +147,8 @@ void game_data_reset(GameData *gd) {
   gd->player_tile_plays[1] = 0;
   gd->player_exchanges[0] = 0;
   gd->player_exchanges[1] = 0;
+  gd->player_exchange_tiles[0] = 0;
+  gd->player_exchange_tiles[1] = 0;
   memset(gd->player_bingo_lengths, 0, sizeof(gd->player_bingo_lengths));
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
@@ -324,6 +327,12 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
       sb, "Exchanges per Game: %0.2f %0.2f\n",
       (double)gd->player_exchanges[0] / (double)gd->total_games,
       (double)gd->player_exchanges[1] / (double)gd->total_games);
+  string_builder_add_formatted_string(
+      sb, "Avg Tiles per Exchange: %0.2f %0.2f\n",
+      (double)gd->player_exchange_tiles[0] /
+          (double)(gd->player_exchanges[0] ? gd->player_exchanges[0] : 1),
+      (double)gd->player_exchange_tiles[1] /
+          (double)(gd->player_exchanges[1] ? gd->player_exchanges[1] : 1));
   for (int player_idx = 0; player_idx < 2; player_idx++) {
     string_builder_add_formatted_string(sb, "P%d Plays by Length:", player_idx);
     for (int len_idx = 2; len_idx <= BOARD_DIM; len_idx++) {
@@ -442,6 +451,8 @@ void game_data_sets_add_move(Recorder *recorder, const RecorderArgs *args) {
   if (move_get_type(args->move) == GAME_EVENT_EXCHANGE) {
     cpthread_mutex_lock(&gd->mutex);
     gd->player_exchanges[player_on_turn_index]++;
+    gd->player_exchange_tiles[player_on_turn_index] +=
+        move_get_tiles_played(args->move);
     cpthread_mutex_unlock(&gd->mutex);
     return;
   }
@@ -514,6 +525,8 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
           gd_i->player_tile_plays[player_idx];
       gd_primary->player_exchanges[player_idx] +=
           gd_i->player_exchanges[player_idx];
+      gd_primary->player_exchange_tiles[player_idx] +=
+          gd_i->player_exchange_tiles[player_idx];
       for (int len_idx = 0; len_idx <= BOARD_DIM; len_idx++) {
         gd_primary->player_play_lengths[player_idx][len_idx] +=
             gd_i->player_play_lengths[player_idx][len_idx];
