@@ -690,8 +690,9 @@ void test_sim_perf(const char *sim_perf_iters) {
           config_simulate_and_return_status(config, NULL, NULL, sim_results);
       assert(status == ERROR_STATUS_SUCCESS);
 
-      char *sim_stats_str = sim_results_get_string(
-          game, sim_results, 100, 100, -1, -1, NULL, 0, false, true, NULL);
+      char *sim_stats_str =
+          sim_results_get_string(game, sim_results, 100, 100, -1, -1, NULL, 0,
+                                 false, true, false, NULL);
       if (i < details_limit) {
         append_content_to_file(sim_perf_game_details_filename, sim_stats_str);
       }
@@ -1179,6 +1180,52 @@ void test_sim_best_move_equity_tiebreak(void) {
   config_destroy(config);
 }
 
+void test_sim_show_bu(void) {
+  // Regression for the -showbu flag: it must parse correctly, default to
+  // false, and gate the BU column in the rendered sim-results string. BU is
+  // still omitted even when -showbu is true if the sim used a zero spread
+  // weight, since BU would then be identical to Wp.
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-numplays 5 -plies 2 -threads 1 -iter 200 -uspread 0.5");
+  assert(!config_get_show_bu(config));
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  SimResults *sim_results = config_get_sim_results(config);
+  error_code_t status =
+      config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+
+  char *sim_str_default = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(!has_substring(sim_str_default, "BU"));
+  free(sim_str_default);
+
+  load_and_exec_config_or_die(config, "set -showbu true");
+  assert(config_get_show_bu(config));
+
+  char *sim_str_shown = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(has_substring(sim_str_shown, "BU"));
+  free(sim_str_shown);
+
+  // -showbu true still hides BU when the sim itself used a zero spread
+  // weight, since BU is then identical to Wp.
+  load_and_exec_config_or_die(config, "set -uspread 0");
+  status = config_simulate_and_return_status(config, NULL, NULL, sim_results);
+  assert(status == ERROR_STATUS_SUCCESS);
+  char *sim_str_zero_spread = sim_results_get_string(
+      config_get_game(config), sim_results, 5, 2, -1, -1, NULL, 0, false, false,
+      config_get_show_bu(config), NULL);
+  assert(!has_substring(sim_str_zero_spread, "BU"));
+  free(sim_str_zero_spread);
+
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1201,6 +1248,7 @@ void test_sim(void) {
     test_sim_ctx();
     test_sim_endgame();
     test_sim_best_move_equity_tiebreak();
+    test_sim_show_bu();
     test_sim_avoid_prune();
     test_sim_avoid_prune_multi();
     test_sim_avoid_prune_cmd();
