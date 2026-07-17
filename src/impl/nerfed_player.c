@@ -55,6 +55,24 @@ static const double NERFED_MISS_COEFFS[NERFED_NUM_MISS_COEFFS] = {
 static const double NERFED_SIGMA_C0 = 1.59233;
 static const double NERFED_SIGMA_C1 = -0.17506;
 
+// Exchange propensity: P(exchange | delta, rating) fitted on 18,077 corpus
+// turns with bag >= 7, where delta = best tile-play equity minus best
+// exchange equity (capped at 60, scaled per 10 pts). Weak players keep
+// exchanging even when strong plays are available (delta x rating term).
+// Intercept and rating terms are calibrated so simulated exchanges per
+// game match the corpus by rating (0.45 at 1000 .. 0.245 at 2200); the
+// margin terms are the corpus logistic fit.
+static const double NERFED_EXCH_COEFFS[4] = {
+    -1.673, // intercept (calibrated)
+    -0.731, // delta / 10
+    0.097,  // rating_z (calibrated)
+    -0.150, // (delta / 10) x rating_z
+};
+static const double NERFED_EXCH_DELTA_CAP = 60.0;
+// Equity assigned to "no exchange available" in the fit when movegen had
+// no exchange row (matches the fit's default margin baseline).
+static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
+
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
@@ -317,6 +335,68 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
   generate_moves(&args);
   nerfed_player->num_word_draws = 0;
   const int move_count = move_list_get_count(move_list);
+
+  // Exchange decision (corpus propensity model): compare the best tile
+  // play against the best exchange and roll P(exchange | margin, rating).
+  // On an exchange, the keep is selected among exchange options with the
+  // same Gumbel valuation noise as plays (weak players keep weaker leaves).
+  bool has_play = false;
+  bool has_exchange = false;
+  double best_play_equity = 0.0;
+  double best_exchange_equity = NERFED_NO_EXCHANGE_EQUITY;
+  for (int move_idx = 0; move_idx < move_count; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    const Equity move_equity = move_get_equity(move);
+    if (move_equity == EQUITY_PASS_VALUE) {
+      continue;
+    }
+    const double equity = equity_to_double(move_equity);
+    if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      if (!has_play || equity > best_play_equity) {
+        has_play = true;
+        best_play_equity = equity;
+      }
+    } else if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+      if (!has_exchange || equity > best_exchange_equity) {
+        has_exchange = true;
+        best_exchange_equity = equity;
+      }
+    }
+  }
+  if (has_exchange) {
+    double delta = (has_play ? best_play_equity : NERFED_NO_EXCHANGE_EQUITY) -
+                   best_exchange_equity;
+    if (delta > NERFED_EXCH_DELTA_CAP) {
+      delta = NERFED_EXCH_DELTA_CAP;
+    }
+    const double delta10 = delta / 10.0;
+    const double rating_z = nerfed_player->rating_z;
+    const double exchange_logit = NERFED_EXCH_COEFFS[0] +
+                                  NERFED_EXCH_COEFFS[1] * delta10 +
+                                  NERFED_EXCH_COEFFS[2] * rating_z +
+                                  NERFED_EXCH_COEFFS[3] * delta10 * rating_z;
+    const double exchange_probability = 1.0 / (1.0 + exp(-exchange_logit));
+    if (nerfed_player_uniform(prng) < exchange_probability) {
+      const Move *chosen_exchange = NULL;
+      double chosen_exchange_value = 0.0;
+      for (int move_idx = 0; move_idx < move_count; move_idx++) {
+        const Move *move = move_list_get_move(move_list, move_idx);
+        if (move_get_type(move) != GAME_EVENT_EXCHANGE) {
+          continue;
+        }
+        const double uniform = nerfed_player_uniform(prng);
+        const double gumbel_noise = -nerfed_player->sigma * log(-log(uniform));
+        const double value =
+            equity_to_double(move_get_equity(move)) + gumbel_noise;
+        if (chosen_exchange == NULL || value > chosen_exchange_value) {
+          chosen_exchange = move;
+          chosen_exchange_value = value;
+        }
+      }
+      return chosen_exchange;
+    }
+  }
+
   const Move *chosen = NULL;
   double chosen_value = 0.0;
   const Move *fallback = NULL;
@@ -326,6 +406,10 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
     if (fallback == NULL || move_get_equity(move) > fallback_equity) {
       fallback = move;
       fallback_equity = move_get_equity(move);
+    }
+    if (move_get_type(move) == GAME_EVENT_EXCHANGE) {
+      // The exchange decision was already rolled (and declined) above.
+      continue;
     }
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       MachineLetter rare_word[BOARD_DIM];
