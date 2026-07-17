@@ -894,6 +894,31 @@ const Move *get_top_equity_move(Game *game, MoveList *move_list) {
   return move_list_get_move(move_list, 0);
 }
 
+// Generates all moves tied for the best equity (up to the move list's
+// capacity) and returns the best move. The resulting move list is an
+// unsorted min-heap; callers scan it for the tie set.
+const Move *get_top_equity_tied_moves(Game *game, MoveList *move_list) {
+  const MoveGenArgs args = {
+      .game = game,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE};
+  generate_moves(&args);
+  const int move_count = move_list_get_count(move_list);
+  const Move *best_move = move_list_get_move(move_list, 0);
+  for (int move_idx = 1; move_idx < move_count; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_equity(move) > move_get_equity(best_move)) {
+      best_move = move;
+    }
+  }
+  return best_move;
+}
+
 Move *get_top_equity_move_for_inferences(
     Game *game, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin) {

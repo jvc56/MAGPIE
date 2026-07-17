@@ -13,6 +13,7 @@ typedef enum {
   AUTOPLAY_RECORDER_TYPE_FJ,
   AUTOPLAY_RECORDER_TYPE_WIN_PCT,
   AUTOPLAY_RECORDER_TYPE_LEAVES,
+  AUTOPLAY_RECORDER_TYPE_WORDS,
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
@@ -26,9 +27,11 @@ void autoplay_results_set_options(AutoplayResults *autoplay_results,
                                   ErrorStack *error_stack);
 void autoplay_results_destroy(AutoplayResults *autoplay_results);
 void autoplay_results_reset(AutoplayResults *autoplay_results);
+// move_list may be NULL; when non-NULL it holds the moves tied for best
+// equity (used by the words recorder to split playability credit).
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave);
+                               const Rack *leave, const MoveList *move_list);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

@@ -605,6 +605,14 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   return move;
 }
 
+// Returns true when the words recorder is active, in which case 0-ply move
+// selection also records the full set of moves tied for best equity so
+// playability credit can be split across ties.
+bool autoplay_worker_records_words(const AutoplayWorker *autoplay_worker) {
+  return (autoplay_results_get_options(autoplay_worker->autoplay_results) &
+          autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WORDS)) != 0;
+}
+
 const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   const int player_on_turn_index =
@@ -613,6 +621,10 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
+    if (autoplay_worker_records_words(autoplay_worker)) {
+      return get_top_equity_tied_moves(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+    }
     return get_top_equity_move(
         game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
   }
@@ -664,8 +676,19 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                        equity_to_double(move_get_equity(move)));
   }
   get_leave_for_move(move, game, &rare_rack_or_move_leave);
+  // Tie information is only valid when 0-ply tie-recording generation was
+  // used; a sim-selected move's list is not an equity tie set.
+  const SimArgs *on_turn_sim_args = (player_on_turn_index == 0)
+                                        ? &autoplay_worker->args.p1_sim_args
+                                        : &autoplay_worker->args.p2_sim_args;
+  const MoveList *tied_move_list = NULL;
+  if (on_turn_sim_args->num_plies == 0 &&
+      autoplay_worker_records_words(autoplay_worker)) {
+    tied_move_list = autoplay_worker->move_lists[player_on_turn_index];
+  }
   autoplay_results_add_move(autoplay_worker->autoplay_results,
-                            game_runner->game, move, &rare_rack_or_move_leave);
+                            game_runner->game, move, &rare_rack_or_move_leave,
+                            tied_move_list);
 
   // Print board with move about to be played if requested
   if (autoplay_worker->args.print_boards) {

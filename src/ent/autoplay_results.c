@@ -23,18 +23,26 @@
 #include "players_data.h"
 #include "rack.h"
 #include "stats.h"
+#include "words.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
-enum { DEFAULT_WRITE_BUFFER_SIZE = 1024 };
+enum {
+  DEFAULT_WRITE_BUFFER_SIZE = 1024,
+  // Open-addressing table size for the words (playability) recorder;
+  // must be a power of two comfortably above the largest lexicon (~281k).
+  WORDS_TABLE_SIZE = 1 << 20,
+};
 
 typedef struct RecorderArgs {
   const Game *game;
   const Move *move;
   const Rack *leave;
+  // Moves tied for best equity (NULL when tie information is unavailable).
+  const MoveList *move_list;
   int number_of_turns;
   uint64_t seed;
   bool divergent;
@@ -1037,6 +1045,209 @@ void leaves_data_consolidate(Recorder **recorder_list, int list_size,
   free(leaves_count_name);
 }
 
+// Words recorder functions
+//
+// Counts how often each word appears among the best plays of autoplay games
+// (playability). A play that forms N words credits each word 1/N. When T
+// plays are tied for best equity (args->move_list holds the tie set), each
+// tied play receives 1/T of the credit, so each of its words gets 1/(T*N).
+
+typedef struct WordsEntry {
+  double count;
+  uint32_t word_length;
+  MachineLetter word[BOARD_DIM];
+} WordsEntry;
+
+typedef struct WordsData {
+  WordsEntry *entries;
+} WordsData;
+
+uint64_t words_hash(const MachineLetter *word, int word_length) {
+  uint64_t hash = 14695981039346656037ULL;
+  for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+    hash ^= word[letter_idx];
+    hash *= 1099511628211ULL;
+  }
+  return hash;
+}
+
+void words_data_increment(WordsData *words_data, const MachineLetter *word,
+                          int word_length, double credit) {
+  uint64_t slot = words_hash(word, word_length) & (WORDS_TABLE_SIZE - 1);
+  for (uint64_t probe_idx = 0; probe_idx < WORDS_TABLE_SIZE; probe_idx++) {
+    WordsEntry *entry = &words_data->entries[slot];
+    if (entry->word_length == 0) {
+      entry->word_length = (uint32_t)word_length;
+      memcpy(entry->word, word, word_length);
+      entry->count = credit;
+      return;
+    }
+    if (entry->word_length == (uint32_t)word_length &&
+        memcmp(entry->word, word, word_length) == 0) {
+      entry->count += credit;
+      return;
+    }
+    slot = (slot + 1) & (WORDS_TABLE_SIZE - 1);
+  }
+  log_fatal("words recorder table is full");
+}
+
+void words_data_reset(Recorder *recorder) {
+  WordsData *words_data = (WordsData *)recorder->data;
+  memset(words_data->entries, 0, sizeof(WordsEntry) * WORDS_TABLE_SIZE);
+}
+
+void words_data_create(Recorder *recorder) {
+  WordsData *words_data = malloc_or_die(sizeof(WordsData));
+  words_data->entries = calloc_or_die(WORDS_TABLE_SIZE, sizeof(WordsEntry));
+  recorder->data = words_data;
+  recorder->thread_shared_data = NULL;
+}
+
+void words_data_destroy(Recorder *recorder) {
+  WordsData *words_data = (WordsData *)recorder->data;
+  free(words_data->entries);
+  free(words_data);
+}
+
+void words_data_add_words_for_move(WordsData *words_data, Board *board,
+                                   const Move *move, double credit) {
+  if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    return;
+  }
+  FormedWords *formed_words = formed_words_create(board, move);
+  const int num_words = formed_words_get_num_words(formed_words);
+  if (num_words > 0) {
+    const double credit_per_word = credit / num_words;
+    MachineLetter word[BOARD_DIM] = {0};
+    for (int word_idx = 0; word_idx < num_words; word_idx++) {
+      const int word_length =
+          formed_words_get_word_length(formed_words, word_idx);
+      const MachineLetter *word_letters =
+          formed_words_get_word(formed_words, word_idx);
+      for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+        word[letter_idx] =
+            get_unblanked_machine_letter(word_letters[letter_idx]);
+      }
+      words_data_increment(words_data, word, word_length, credit_per_word);
+    }
+  }
+  formed_words_destroy(formed_words);
+}
+
+void words_data_add_move(Recorder *recorder, const RecorderArgs *args) {
+  WordsData *words_data = (WordsData *)recorder->data;
+  Board *board = game_get_board(args->game);
+  const MoveList *move_list = args->move_list;
+  int list_count = 0;
+  if (move_list) {
+    list_count = move_list_get_count(move_list);
+  }
+  if (list_count == 0) {
+    // No tie information: full credit to the played move.
+    words_data_add_words_for_move(words_data, board, args->move, 1.0);
+    return;
+  }
+  Equity best_equity = move_get_equity(move_list_get_move(move_list, 0));
+  for (int move_idx = 1; move_idx < list_count; move_idx++) {
+    const Equity move_equity =
+        move_get_equity(move_list_get_move(move_list, move_idx));
+    if (move_equity > best_equity) {
+      best_equity = move_equity;
+    }
+  }
+  int tied_count = 0;
+  for (int move_idx = 0; move_idx < list_count; move_idx++) {
+    if (move_get_equity(move_list_get_move(move_list, move_idx)) ==
+        best_equity) {
+      tied_count++;
+    }
+  }
+  const double credit = 1.0 / tied_count;
+  for (int move_idx = 0; move_idx < list_count; move_idx++) {
+    const Move *tied_move = move_list_get_move(move_list, move_idx);
+    if (move_get_equity(tied_move) == best_equity) {
+      words_data_add_words_for_move(words_data, board, tied_move, credit);
+    }
+  }
+}
+
+int words_entry_compare_desc(const void *entry_a, const void *entry_b) {
+  const WordsEntry *word_entry_a = *(const WordsEntry *const *)entry_a;
+  const WordsEntry *word_entry_b = *(const WordsEntry *const *)entry_b;
+  if (word_entry_a->count > word_entry_b->count) {
+    return -1;
+  }
+  if (word_entry_a->count < word_entry_b->count) {
+    return 1;
+  }
+  const uint32_t min_length =
+      word_entry_a->word_length < word_entry_b->word_length
+          ? word_entry_a->word_length
+          : word_entry_b->word_length;
+  const int letters_cmp =
+      memcmp(word_entry_a->word, word_entry_b->word, min_length);
+  if (letters_cmp != 0) {
+    return letters_cmp;
+  }
+  return (int)word_entry_a->word_length - (int)word_entry_b->word_length;
+}
+
+void words_data_consolidate(Recorder **recorder_list, int list_size,
+                            Recorder *primary_recorder) {
+  WordsData *primary_words_data = (WordsData *)primary_recorder->data;
+  for (int recorder_idx = 0; recorder_idx < list_size; recorder_idx++) {
+    const WordsData *words_data =
+        (const WordsData *)recorder_list[recorder_idx]->data;
+    for (uint64_t slot = 0; slot < WORDS_TABLE_SIZE; slot++) {
+      const WordsEntry *entry = &words_data->entries[slot];
+      if (entry->word_length > 0) {
+        words_data_increment(primary_words_data, entry->word,
+                             (int)entry->word_length, entry->count);
+      }
+    }
+  }
+
+  uint64_t num_used = 0;
+  for (uint64_t slot = 0; slot < WORDS_TABLE_SIZE; slot++) {
+    if (primary_words_data->entries[slot].word_length > 0) {
+      num_used++;
+    }
+  }
+  const WordsEntry **sorted_entries =
+      malloc_or_die(sizeof(WordsEntry *) * num_used);
+  uint64_t sorted_idx = 0;
+  for (uint64_t slot = 0; slot < WORDS_TABLE_SIZE; slot++) {
+    if (primary_words_data->entries[slot].word_length > 0) {
+      sorted_entries[sorted_idx++] = &primary_words_data->entries[slot];
+    }
+  }
+  qsort(sorted_entries, num_used, sizeof(WordsEntry *),
+        words_entry_compare_desc);
+
+  const char *lexicon_name = players_data_get_data_name(
+      primary_recorder->recorder_context->players_data, PLAYERS_DATA_TYPE_KWG,
+      0);
+  char *playability_filename =
+      get_formatted_string("%s_playability.csv", lexicon_name);
+  FILE *playability_file = fopen_or_die(playability_filename, "w");
+  const LetterDistribution *ld = primary_recorder->recorder_context->ld;
+  for (uint64_t entry_idx = 0; entry_idx < num_used; entry_idx++) {
+    const WordsEntry *entry = sorted_entries[entry_idx];
+    fprintf(playability_file, "%.6f,", entry->count);
+    for (uint32_t letter_idx = 0; letter_idx < entry->word_length;
+         letter_idx++) {
+      char *human_readable_letter = ld_ml_to_hl(ld, entry->word[letter_idx]);
+      fputs(human_readable_letter, playability_file);
+      free(human_readable_letter);
+    }
+    fputc('\n', playability_file);
+  }
+  fclose_or_die(playability_file);
+  free(sorted_entries);
+  free(playability_filename);
+}
+
 // Generic recorder and autoplay results functions
 
 Recorder *recorder_create(const Recorder *primary_recorder,
@@ -1163,6 +1374,10 @@ void autoplay_results_set_options_int(AutoplayResults *autoplay_results,
       leaves_data_reset, leaves_data_create, leaves_data_destroy,
       leaves_data_add_move, add_game_noop, leaves_data_consolidate,
       get_str_noop);
+  autoplay_results_set_recorder(
+      autoplay_results, options, primary, AUTOPLAY_RECORDER_TYPE_WORDS,
+      words_data_reset, words_data_create, words_data_destroy,
+      words_data_add_move, add_game_noop, words_data_consolidate, get_str_noop);
   autoplay_results->options = options;
 }
 
@@ -1189,6 +1404,8 @@ void autoplay_results_set_options_with_splitter(
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WIN_PCT);
     } else if (has_iprefix(option_str, "leaves")) {
       options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_LEAVES);
+    } else if (has_iprefix(option_str, "words")) {
+      options |= autoplay_results_build_option(AUTOPLAY_RECORDER_TYPE_WORDS);
     } else {
       error_stack_push(
           error_stack, ERROR_STATUS_AUTOPLAY_INVALID_OPTIONS,
@@ -1307,11 +1524,12 @@ void autoplay_results_reset(AutoplayResults *autoplay_results) {
 
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
-                               const Rack *leave) {
+                               const Rack *leave, const MoveList *move_list) {
   RecorderArgs args;
   args.game = game;
   args.move = move;
   args.leave = leave;
+  args.move_list = move_list;
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (autoplay_results->recorders[i]) {
       recorder_add_move(autoplay_results->recorders[i], &args);

@@ -135,6 +135,7 @@ typedef enum {
   ARG_TOKEN_PLIES,
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_ENDGAME_PLIES,
+  ARG_TOKEN_ENDGAME_TLIM,
   ARG_TOKEN_ENDGAME_TOP_K,
   ARG_TOKEN_PEG_TOP_K,
   ARG_TOKEN_PEG_STRIDE,
@@ -325,6 +326,7 @@ struct Config {
   char *settings_filename;
   double tt_fraction_of_mem;
   double time_limit_seconds;
+  double endgame_time_limit_seconds;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -1554,6 +1556,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[1] = "8";
       text = "Specifies the number of plies to use for solving endgames.";
       break;
+    case ARG_TOKEN_ENDGAME_TLIM:
+      usages[0] = "<endgame_time_limit>";
+      examples[0] = "0.05";
+      examples[1] = "1";
+      text = "Specifies a per-solve wall-clock time limit in seconds for the "
+             "endgame solver. Fractional values (e.g. 0.05 for 50 ms) are "
+             "supported. 0 (the default) means no time limit: the solver runs "
+             "to the full eplies depth.";
+      break;
     case ARG_TOKEN_ENDGAME_TOP_K:
       usages[0] = "<endgame_top_k>";
       examples[0] = "1";
@@ -2195,6 +2206,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
+        ARG_TOKEN_ENDGAME_TLIM,            /* etlim */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
         ARG_TOKEN_USE_GAME_PAIRS,          /* gp */
         ARG_TOKEN_INFERENCE_MARGIN,        /* imargin */
@@ -3109,8 +3121,23 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
   endgame_args->enable_pv_display = true;
   endgame_args->per_ply_callback = NULL;
   endgame_args->per_ply_callback_data = NULL;
-  endgame_args->soft_time_limit = 0;
-  endgame_args->hard_time_limit = 0;
+  // -etlim: a per-solve wall-clock budget. The external_deadline_ns is the hard
+  // backstop that bails mid-depth (via check_depth_deadline), so the solver
+  // returns the best move from the deepest fully-completed IDS depth within the
+  // budget. Mirroring soft/hard into the EBF time manager lets it avoid
+  // starting a depth it cannot finish. 0 (default) leaves all limits disabled
+  // and the solver runs to the full eplies depth.
+  if (config->endgame_time_limit_seconds > 0) {
+    endgame_args->soft_time_limit = config->endgame_time_limit_seconds;
+    endgame_args->hard_time_limit = config->endgame_time_limit_seconds;
+    endgame_args->external_deadline_ns =
+        ctimer_monotonic_ns() +
+        (int64_t)(config->endgame_time_limit_seconds * 1e9);
+  } else {
+    endgame_args->soft_time_limit = 0;
+    endgame_args->hard_time_limit = 0;
+    endgame_args->external_deadline_ns = 0;
+  }
   endgame_args->seed = config->seed;
 }
 
@@ -6677,6 +6704,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_double(config, ARG_TOKEN_ENDGAME_TLIM, 0, 1e9,
+                     &config->endgame_time_limit_seconds, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   config_load_peg_stage_top_k(config, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
@@ -8272,6 +8305,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_ENDGAME_PLIES, "eplies", 1, 1);
+  arg(ARG_TOKEN_ENDGAME_TLIM, "etlim", 1, 1);
   arg(ARG_TOKEN_ENDGAME_TOP_K, "etopk", 1, 1);
   arg(ARG_TOKEN_PEG_TOP_K, "pegtopk", 1, 1);
   arg(ARG_TOKEN_PEG_STRIDE, "pegstride", 1, 1);
@@ -8386,6 +8420,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->plies = 5;
   config->shplies = 2;
   config->endgame_plies = 6;
+  config->endgame_time_limit_seconds = 0;
   config->endgame_top_k = 1;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
   // default; rational opponent; no only-solve / never-prune restrictions.
@@ -8753,6 +8788,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_ENDGAME_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
                                                config->endgame_plies);
+      break;
+    case ARG_TOKEN_ENDGAME_TLIM:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->endgame_time_limit_seconds);
       break;
     case ARG_TOKEN_PEG_TOP_K:
       // Serialize the raw -pegtopk value (e.g. "32,16,8,4,2") if set, so the
