@@ -9,6 +9,7 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/move.h"
 #include "../ent/player.h"
+#include "../ent/rack.h"
 #include "../ent/words.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
@@ -31,24 +32,19 @@ enum {
 // matches nerfed_player_miss_probability.
 enum { NERFED_NUM_MISS_COEFFS = 17 };
 
-static const double NERFED_MISS_COEFFS[NERFED_NUM_MISS_COEFFS] = {
-    0.842,  // bias
-    -0.651, // rating_z (rating-1500)/300
-    -0.747, // min log10 playability over formed words
-    -0.167, // min log10 literacy over formed words
-    0.616,  // any formed word absent from language
-    0.526,  // (num formed words - 1) / 2
-    0.522,  // play uses a blank
-    0.583,  // play goes through tiles
-    -0.079, // tiles played / 7
-    -0.233, // log(best-class size); 1 per play at generation time
-    0.436,  // main word length <= 2
-    -0.323, // main word length >= 7
-    0.083,  // rating_z x playability
-    0.053,  // rating_z x literacy
-    0.054,  // rating_z x blank
-    0.081,  // rating_z x len2
-    -0.245, // rating_z x len7plus
+// Separate coefficient sets per lexicon family: geometry terms transfer
+// almost exactly, but literacy matters ~2x more in CSW and the length
+// effects differ (fit comparison on 314k TWL / 66k CSW positions).
+// Feature order: bias, rating_z, min_logplay, min_loglit, any_absent,
+// (n_words-1)/2, blank, through, new/7, log_class, len2, len7plus,
+// rtg*play, rtg*lit, rtg*blank, rtg*len2, rtg*len7plus.
+static const double NERFED_MISS_COEFFS_TWL[NERFED_NUM_MISS_COEFFS] = {
+    0.805,  -0.656, -0.749, -0.149, 0.584, 0.531, 0.523, 0.610,  -0.056,
+    -0.226, 0.456,  -0.329, 0.082,  0.049, 0.050, 0.097, -0.246,
+};
+static const double NERFED_MISS_COEFFS_CSW[NERFED_NUM_MISS_COEFFS] = {
+    0.810,  -0.624, -0.700, -0.330, 0.671, 0.478, 0.527, 0.466,  -0.120,
+    -0.281, 0.311,  -0.281, 0.083,  0.118, 0.077, 0.041, -0.261,
 };
 
 // Stage A valuation noise: sigma = exp(C0 + C1 * rating_z) equity points.
@@ -62,11 +58,21 @@ static const double NERFED_SIGMA_C1 = -0.17506;
 // Intercept and rating terms are calibrated so simulated exchanges per
 // game match the corpus by rating (0.45 at 1000 .. 0.245 at 2200); the
 // margin terms are the corpus logistic fit.
-static const double NERFED_EXCH_COEFFS[4] = {
-    -1.673, // intercept (calibrated)
-    -0.731, // delta / 10
-    0.097,  // rating_z (calibrated)
-    -0.150, // (delta / 10) x rating_z
+enum { NERFED_NUM_EXCH_COEFFS = 8 };
+// Rack-texture-aware propensity (all texture terms significant): bad
+// vowel balance, duplicates, Q without U, and a held blank all raise the
+// exchange probability beyond what the engine margin explains. Intercept
+// and rating terms are recalibrated so simulated exchanges per game match
+// the corpus by rating.
+static const double NERFED_EXCH_COEFFS[NERFED_NUM_EXCH_COEFFS] = {
+    -2.397, // intercept (calibrated)
+    -0.661, // delta / 10
+    0.162,  // rating_z (calibrated)
+    -0.149, // (delta / 10) x rating_z
+    0.182,  // |vowels - 3|
+    0.176,  // duplicate tiles
+    0.215,  // Q without U
+    0.319,  // holds a blank
 };
 static const double NERFED_EXCH_DELTA_CAP = 60.0;
 
@@ -112,6 +118,10 @@ struct NerfedPlayer {
   double rating_z;
   double sigma;
   double keep_sigma;
+  const double *miss_coeffs;
+  MachineLetter vowel_mls[5];
+  MachineLetter q_ml;
+  MachineLetter u_ml;
   NerfedWordFeat *feats;
   int num_feats;
   MoveList *move_list;
@@ -162,6 +172,22 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
       exp(NERFED_SIGMA_C0 + NERFED_SIGMA_C1 * nerfed_player->rating_z);
   nerfed_player->keep_sigma = exp(
       NERFED_KEEP_SIGMA_C0 + NERFED_KEEP_SIGMA_C1 * nerfed_player->rating_z);
+  // CSW-family lexica (incl. OSWI/SOWPODS) use the CSW coefficient set.
+  if (strncmp(lexicon_name, "CSW", 3) == 0 ||
+      strncmp(lexicon_name, "OSW", 3) == 0 ||
+      strncmp(lexicon_name, "SOWPODS", 7) == 0) {
+    nerfed_player->miss_coeffs = NERFED_MISS_COEFFS_CSW;
+  } else {
+    nerfed_player->miss_coeffs = NERFED_MISS_COEFFS_TWL;
+  }
+  const char *vowels = "AEIOU";
+  for (int vowel_idx = 0; vowel_idx < 5; vowel_idx++) {
+    const char vowel_str[2] = {vowels[vowel_idx], '\0'};
+    ld_str_to_mls(ld, vowel_str, false, &nerfed_player->vowel_mls[vowel_idx],
+                  1);
+  }
+  ld_str_to_mls(ld, "Q", false, &nerfed_player->q_ml, 1);
+  ld_str_to_mls(ld, "U", false, &nerfed_player->u_ml, 1);
   nerfed_player->feats =
       malloc_or_die(sizeof(NerfedWordFeat) * NERFED_MAX_WORD_FEATS);
   nerfed_player->num_feats = 0;
@@ -301,7 +327,7 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
   };
   double logit = 0.0;
   for (int coeff_idx = 0; coeff_idx < NERFED_NUM_MISS_COEFFS; coeff_idx++) {
-    logit += NERFED_MISS_COEFFS[coeff_idx] * features[coeff_idx];
+    logit += nerfed_player->miss_coeffs[coeff_idx] * features[coeff_idx];
   }
   return 1.0 / (1.0 + exp(-logit));
 }
@@ -383,10 +409,35 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
     }
     const double delta10 = delta / 10.0;
     const double rating_z = nerfed_player->rating_z;
-    const double exchange_logit = NERFED_EXCH_COEFFS[0] +
-                                  NERFED_EXCH_COEFFS[1] * delta10 +
-                                  NERFED_EXCH_COEFFS[2] * rating_z +
-                                  NERFED_EXCH_COEFFS[3] * delta10 * rating_z;
+    // Rack texture: bad racks get exchanged beyond what the margin says.
+    const Rack *rack = player_get_rack(
+        game_get_player(game, game_get_player_on_turn_index(game)));
+    int num_vowels = 0;
+    for (int vowel_idx = 0; vowel_idx < 5; vowel_idx++) {
+      num_vowels += rack_get_letter(rack, nerfed_player->vowel_mls[vowel_idx]);
+    }
+    int num_duplicates = 0;
+    const int dist_size = rack_get_dist_size(rack);
+    for (int ml = 0; ml < dist_size; ml++) {
+      const int letter_count = rack_get_letter(rack, (MachineLetter)ml);
+      if (letter_count > 1) {
+        num_duplicates += letter_count - 1;
+      }
+    }
+    const double vowel_dev = fabs((double)num_vowels - 3.0);
+    const double q_no_u = (rack_get_letter(rack, nerfed_player->q_ml) > 0 &&
+                           rack_get_letter(rack, nerfed_player->u_ml) == 0)
+                              ? 1.0
+                              : 0.0;
+    const double has_blank =
+        rack_get_letter(rack, BLANK_MACHINE_LETTER) > 0 ? 1.0 : 0.0;
+    const double exchange_logit =
+        NERFED_EXCH_COEFFS[0] + NERFED_EXCH_COEFFS[1] * delta10 +
+        NERFED_EXCH_COEFFS[2] * rating_z +
+        NERFED_EXCH_COEFFS[3] * delta10 * rating_z +
+        NERFED_EXCH_COEFFS[4] * vowel_dev +
+        NERFED_EXCH_COEFFS[5] * num_duplicates +
+        NERFED_EXCH_COEFFS[6] * q_no_u + NERFED_EXCH_COEFFS[7] * has_blank;
     const double exchange_probability = 1.0 / (1.0 + exp(-exchange_logit));
     if (nerfed_player_uniform(prng) < exchange_probability) {
       const Move *chosen_exchange = NULL;
