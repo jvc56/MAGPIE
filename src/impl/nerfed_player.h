@@ -5,6 +5,7 @@
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
+#include "../ent/sim_results.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
 
@@ -25,6 +26,32 @@ void nerfed_player_destroy(NerfedPlayer *nerfed_player);
 // is valid until the next call.
 const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
                                       XoshiroPRNG *prng);
+
+// Sim-based selection ("noisy simming"): the exchange model and the
+// visibility gate run first; the surviving visible plays become the arms
+// of a BAI sim whose utilities the pick below perturbs with the fitted
+// valuation noise. Generates all moves, rolls the exchange decision, and
+// gates visibility. Returns the selected move directly when no sim is
+// needed (exchange chosen, or zero or one visible play); otherwise fills
+// arms with the visible plays (best static equity first, up to the arms
+// list's capacity) and returns NULL.
+const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
+                                           Game *game, MoveList *arms,
+                                           XoshiroPRNG *prng);
+
+// Picks over ALL visible survivors from the prepare call: simmed arms
+// value as static equity plus a partial glimpse of the sim's
+// disagreement (centered on arm 0), non-simmed survivors keep pure
+// static values, and every survivor gets the challenge-risk discount and
+// the fitted Gumbel valuation noise. The utility weights must match the
+// weights the sim ran with. The returned move points into the nerfed
+// player's internal move list and is valid until the next prepare call.
+const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
+                                           const SimResults *sim_results,
+                                           double utility_w_winpct,
+                                           double utility_w_spread,
+                                           double utility_spread_scale,
+                                           XoshiroPRNG *prng);
 
 // Deterministic word-knowledge draw: whether this player knows the word,
 // decided by a hash of (seed, word) against the knowledge-miss probability.
@@ -54,9 +81,12 @@ double nerfed_player_word_confidence(const NerfedPlayer *nerfed_player,
 
 // Challenge decision against an opponent's selected move under the given
 // challenge rule (true = 5-point per word, false = double challenge).
+// opponent (the mover) sets the phony prior: strong opponents' obscure
+// words are credible; NULL means an unnerfed (full-strength) opponent.
 bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
-                                      Game *game, const Move *move,
-                                      bool rule_5pt, XoshiroPRNG *prng);
+                                      const NerfedPlayer *opponent, Game *game,
+                                      const Move *move, bool rule_5pt,
+                                      XoshiroPRNG *prng);
 
 // Selects among the solve's top-K PVs by value plus Gumbel noise of the
 // rating-fitted endgame sigma, swaps the choice into multi-PV slot 0, and

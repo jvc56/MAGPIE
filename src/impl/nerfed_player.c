@@ -12,6 +12,9 @@
 #include "../ent/move.h"
 #include "../ent/player.h"
 #include "../ent/rack.h"
+#include "../ent/sim_args.h"
+#include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/words.h"
 #include "../ent/xoshiro.h"
 #include "../util/io_util.h"
@@ -108,11 +111,30 @@ static const double NERFED_WIN_SIGMOID_SCALE = 40.0;
 static const double NERFED_TEMPO_VALUE = 30.0;
 static const double NERFED_CHALLENGE_THRESH_C0 = 0.020;
 static const double NERFED_CHALLENGE_THRESH_RTG = -0.004;
+// Calibrated jointly with the opponent-aware prior: TWL/double failed
+// challenges ~0.09/game in the corpus (full-rack midgame passes after an
+// opponent tile play), CSW/5pt challenged-valid plays ~0.12/game.
 static const double NERFED_CHALLENGE_NOISE = 0.004;
+// Under double challenge, challengers undervalue the turn they stand to
+// lose when they smell a phony (risk-seeking on the gotcha): the lost
+// turn enters the challenge EU at this fraction of its true tempo value.
+// This, not EU noise, is what produces real-world failed double
+// challenges (~0.09/game) — noise alone cannot bridge the turn-loss
+// hurdle without flooding the cheap-challenge families first.
+static const double NERFED_CHALLENGE_DOUBLE_TEMPO_FACTOR = 0.35;
 // Prior probability an opponent's play is a phony: the act of playing a
 // word is strong evidence of validity, so the challenge decision uses the
-// Bayesian posterior, not raw unfamiliarity.
+// Bayesian posterior, not raw unfamiliarity. The prior depends on WHO
+// played the word: corpus phony rates per play run ~5x higher at 1000
+// than at 2200, so a strong opponent's obscure word is far more credible
+// (a flat prior floods weak challengers with bad challenges against
+// experts). Scaled by exp(-slope * opponent_rating_z), clamped.
 static const double NERFED_OPP_PHONY_PRIOR = 0.04;
+static const double NERFED_OPP_PHONY_PRIOR_RTG = 0.40;
+static const double NERFED_OPP_PHONY_PRIOR_MIN = 0.005;
+static const double NERFED_OPP_PHONY_PRIOR_MAX = 0.15;
+// Opponent rating z assumed for an unnerfed (full-strength) opponent.
+static const double NERFED_UNNERFED_OPP_RATING_Z = 2.33;
 // Spread term in the challenge utility: keeps the challenge gradient
 // alive when the win sigmoid saturates (players still challenge for
 // spread when far ahead or behind).
@@ -123,8 +145,21 @@ static const double NERFED_COVERAGE_OFFSET = -1.0;
 static const double NERFED_COVERAGE_OFFSET_RTG = -0.4;
 // 5-point challenges are cheap, so Collins players habitually verify:
 // their effective willingness to treat unfamiliarity as evidence is
-// higher (drives the corpus 72% vs 51% family gap).
-static const double NERFED_COVERAGE_5PT_BONUS = -1.0;
+// higher (drives the corpus 72% vs 51% family gap). Rating-dependent:
+// the habit only pays for players whose coverage is actually good —
+// a flat bonus floods weak-vs-weak pairs with bad challenges (measured
+// 0.66/game at 1400v1400 vs the ~0.12 corpus rate).
+static const double NERFED_COVERAGE_5PT_BONUS = -0.4;
+static const double NERFED_COVERAGE_5PT_BONUS_RTG = -0.25;
+// Double-challenge coverage confidence: TWL players also overestimate
+// how completely they know the word classes ("I'd know that word"),
+// which is what makes them occasionally challenge obscure VALID words
+// and eat the lost turn. Paired with the raised double threshold below:
+// the bonus worsens the posterior's phony/valid selectivity (raising the
+// bad-challenge fraction) while the threshold holds the overall phony-
+// challenge rate at the corpus ~51%.
+static const double NERFED_COVERAGE_DOUBLE_BONUS = -0.8;
+static const double NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA = 0.020;
 
 // Expected-challenge discount when PLAYING risky words: the mover's own
 // capped confidence proxies how challengeable the word looks; expected
@@ -133,6 +168,28 @@ static const double NERFED_OPP_CHALLENGE_RATE = 0.5;
 // Residual doubt about words the player believes they know: subjective
 // P(valid | believed) = 1 - NERFED_KNOW_RISK * (1 - prior).
 static const double NERFED_KNOW_RISK = 0.35;
+// Equity points per utility unit for the sim-based pick: converts the
+// sim's [0, 1] win%/spread utility blend into equity-point equivalents.
+// Set from the local slope of utility in spread points for a mid-game
+// position (win% moves ~0.4%/pt plus the sigmoid spread channel at
+// uspread=0.5).
+static const double NERFED_SIM_UTILITY_PER_POINT = 0.0035;
+// Glimpse-of-truth weight for the sim-based pick: arm value is
+// (1 - w) * static equity + w * sim-implied points, with the fitted
+// valuation noise unchanged. At w = 0 the pick reduces to the static
+// path; w is the strength-neutrality knob (a full-sim pick at the fitted
+// sigma won 83% against the static path at equal rating). Blocking and
+// setup intent live exactly where sim and static disagree, so the weight
+// stays deliberately partial.
+static const double NERFED_SIM_GLIMPSE_W = 0.3;
+// Sigma scale for the sim-based pick. The fitted sigma absorbs both
+// human valuation noise AND the static eval's own error; the glimpse
+// removes part of the latter, so dispersion must rise to keep
+// loss-per-turn (and head-to-head strength vs the static path) equal.
+// The glimpse edge is w-insensitive (53-54% at w in [0.1, 0.3]; only
+// the sign of the correction matters at the noise margin), so
+// neutrality is restored here, not by shrinking w.
+static const double NERFED_SIM_SIGMA_SCALE = 1.06;
 
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
@@ -205,6 +262,15 @@ struct NerfedPlayer {
   // the per-turn flip draw; 0 game seed = legacy per-call seeds.
   uint64_t game_seed;
   int turn_number;
+  // Sim-pick state from nerfed_player_prepare_sim_arms: indices into
+  // move_list of ALL visible tile plays this turn (best static equity
+  // first) and their word confidences. The first min(count, arms
+  // capacity) survivors are the simmed arms, in order; the rest keep
+  // pure static values in the pick so the fitted choice dispersion over
+  // the full visible list is preserved.
+  int sim_survivor_indices[NERFED_MOVE_LIST_CAPACITY];
+  double sim_survivor_confidence[NERFED_MOVE_LIST_CAPACITY];
+  int num_sim_survivors;
 };
 
 static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
@@ -469,8 +535,8 @@ static double nerfed_player_word_draw(NerfedPlayer *nerfed_player,
   return uniform;
 }
 
-const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
-                                      XoshiroPRNG *prng) {
+static void nerfed_player_generate_moves(NerfedPlayer *nerfed_player,
+                                         Game *game) {
   MoveList *move_list = nerfed_player->move_list;
   move_list_reset(move_list);
   const MoveGenArgs args = {.game = game,
@@ -484,8 +550,16 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
                                 UNSET_LEAVE_SIZE};
   generate_moves(&args);
   nerfed_player->num_word_draws = 0;
-  const int move_count = move_list_get_count(move_list);
+}
 
+// Rolls the corpus exchange-propensity model over the generated move list
+// and, when it fires, selects the exchange with the noisy keep model.
+// Returns NULL when the player keeps their rack (or has no exchange).
+static const Move *nerfed_player_maybe_exchange(NerfedPlayer *nerfed_player,
+                                                const Game *game,
+                                                XoshiroPRNG *prng) {
+  const MoveList *move_list = nerfed_player->move_list;
+  const int move_count = move_list_get_count(move_list);
   // Exchange decision (corpus propensity model): compare the best tile
   // play against the best exchange and roll P(exchange | margin, rating).
   // On an exchange, the keep is selected among exchange options with the
@@ -560,9 +634,13 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
           continue;
         }
         const double uniform = nerfed_player_uniform(prng);
-        const double gumbel_noise = -nerfed_player->sigma * log(-log(uniform));
+        const double gumbel_noise =
+            -nerfed_player->keep_sigma * log(-log(uniform));
+        // Keep-choice model: noisy leave equity plus the fitted throw
+        // bias (humans throw more tiles than pure leave value says).
         const double value =
-            equity_to_double(move_get_equity(move)) + gumbel_noise;
+            equity_to_double(move_get_equity(move)) +
+            NERFED_KEEP_THROW_BIAS * move_get_tiles_played(move) + gumbel_noise;
         if (chosen_exchange == NULL || value > chosen_exchange_value) {
           chosen_exchange = move;
           chosen_exchange_value = value;
@@ -571,7 +649,19 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
       return chosen_exchange;
     }
   }
+  return NULL;
+}
 
+const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
+                                      XoshiroPRNG *prng) {
+  nerfed_player_generate_moves(nerfed_player, game);
+  const Move *exchange =
+      nerfed_player_maybe_exchange(nerfed_player, game, prng);
+  if (exchange != NULL) {
+    return exchange;
+  }
+  const MoveList *move_list = nerfed_player->move_list;
+  const int move_count = move_list_get_count(move_list);
   const Move *chosen = NULL;
   double chosen_value = 0.0;
   const Move *fallback = NULL;
@@ -632,6 +722,155 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
     // Every play was missed and no pass/exchange was generated; play the
     // best move rather than forfeiting the turn.
     chosen = fallback;
+  }
+  return chosen;
+}
+
+const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
+                                           Game *game, MoveList *arms,
+                                           XoshiroPRNG *prng) {
+  nerfed_player_generate_moves(nerfed_player, game);
+  MoveList *move_list = nerfed_player->move_list;
+  // Sort the generated heap so arms are taken best-static-equity first.
+  move_list_sort_moves(move_list);
+  const Move *exchange =
+      nerfed_player_maybe_exchange(nerfed_player, game, prng);
+  if (exchange != NULL) {
+    return exchange;
+  }
+  const int move_count = move_list_get_count(move_list);
+  const int arm_capacity = move_list_get_capacity(arms);
+  move_list_reset(arms);
+  nerfed_player->num_sim_survivors = 0;
+  for (int move_idx = 0; move_idx < move_count; move_idx++) {
+    const Move *move = move_list_get_move(move_list, move_idx);
+    if (move_get_type(move) != GAME_EVENT_TILE_PLACEMENT_MOVE) {
+      continue;
+    }
+    MachineLetter rare_word[BOARD_DIM];
+    int rare_word_length = 0;
+    double move_confidence = 1.0;
+    const double miss_probability =
+        nerfed_player_miss_probability(nerfed_player, game, move, rare_word,
+                                       &rare_word_length, &move_confidence);
+    // Plays sharing their rarest word share one visibility draw so a
+    // word the player does not know is missed at every placement.
+    const double uniform =
+        rare_word_length > 0
+            ? nerfed_player_word_draw(nerfed_player, prng, rare_word,
+                                      rare_word_length)
+            : nerfed_player_uniform(prng);
+    if (uniform < miss_probability) {
+      continue;
+    }
+    const int survivor_idx = nerfed_player->num_sim_survivors;
+    nerfed_player->sim_survivor_indices[survivor_idx] = move_idx;
+    nerfed_player->sim_survivor_confidence[survivor_idx] = move_confidence;
+    nerfed_player->num_sim_survivors++;
+    // The best static survivors (walk order = descending equity) are
+    // the simmed arms; later survivors stay in the pick with pure
+    // static values.
+    if (move_list_get_count(arms) < arm_capacity) {
+      move_list_add_move(arms, move);
+    }
+  }
+  const int num_survivors = nerfed_player->num_sim_survivors;
+  if (num_survivors == 0) {
+    // Every play was missed; play the best static move rather than
+    // forfeiting the turn (the move list is sorted, so index 0 is best).
+    return move_list_get_move(move_list, 0);
+  }
+  if (num_survivors == 1) {
+    return move_list_get_move(move_list,
+                              nerfed_player->sim_survivor_indices[0]);
+  }
+  move_list_sort_moves(arms);
+  return NULL;
+}
+
+// Sim-implied points advantage of arm play_idx relative to arm 0 (the
+// best static survivor), minus the static advantage — i.e. how much the
+// sim DISAGREES with static valuation, in points. Returns 0.0 (no
+// glimpse) for unsampled arms.
+static double nerfed_player_sim_disagreement(
+    const SimResults *sim_results, int play_idx, double baseline_utility,
+    double baseline_static_points, double static_points,
+    double utility_w_winpct, double utility_w_spread,
+    double utility_spread_scale) {
+  SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, play_idx);
+  if (stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play)) == 0) {
+    return 0.0;
+  }
+  const double win_mean =
+      stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+  const double spread_mean =
+      stat_get_mean(simmed_play_get_equity_stat(simmed_play));
+  const double utility = sim_utility_blend(
+      win_mean, double_to_equity(spread_mean), utility_w_winpct,
+      utility_w_spread, utility_spread_scale);
+  const double sim_advantage_points =
+      (utility - baseline_utility) / NERFED_SIM_UTILITY_PER_POINT;
+  return sim_advantage_points - (static_points - baseline_static_points);
+}
+
+const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
+                                           const SimResults *sim_results,
+                                           double utility_w_winpct,
+                                           double utility_w_spread,
+                                           double utility_spread_scale,
+                                           XoshiroPRNG *prng) {
+  const int num_arms = sim_results_get_number_of_plays(sim_results);
+  const MoveList *move_list = nerfed_player->move_list;
+  // Baseline for centering the glimpse term: arm 0, the best static
+  // survivor, which always has samples once the sim has run.
+  const Move *baseline_move =
+      move_list_get_move(move_list, nerfed_player->sim_survivor_indices[0]);
+  const double baseline_static_points =
+      equity_to_double(move_get_equity(baseline_move));
+  SimmedPlay *baseline_play = sim_results_get_simmed_play(sim_results, 0);
+  const double baseline_utility = sim_utility_blend(
+      stat_get_mean(simmed_play_get_win_pct_stat(baseline_play)),
+      double_to_equity(
+          stat_get_mean(simmed_play_get_equity_stat(baseline_play))),
+      utility_w_winpct, utility_w_spread, utility_spread_scale);
+  const Move *chosen = NULL;
+  double chosen_value = 0.0;
+  for (int survivor_idx = 0; survivor_idx < nerfed_player->num_sim_survivors;
+       survivor_idx++) {
+    const Move *move = move_list_get_move(
+        move_list, nerfed_player->sim_survivor_indices[survivor_idx]);
+    const double static_points = equity_to_double(move_get_equity(move));
+    double value = static_points;
+    // Glimpse of truth: simmed arms feel a fraction of the sim's
+    // disagreement with static valuation; survivors beyond the arm list
+    // keep pure static values, preserving the fitted choice dispersion
+    // over the full visible move list (at w = 0 this pick reduces to
+    // the static path).
+    if (survivor_idx < num_arms) {
+      value += NERFED_SIM_GLIMPSE_W *
+               nerfed_player_sim_disagreement(
+                   sim_results, survivor_idx, baseline_utility,
+                   baseline_static_points, static_points, utility_w_winpct,
+                   utility_w_spread, utility_spread_scale);
+    }
+    // risky-word discount, as in the static path: expected cost of
+    // being challenged off given residual doubt.
+    const double move_confidence =
+        nerfed_player->sim_survivor_confidence[survivor_idx];
+    if (move_confidence < 1.0) {
+      const double subjective_valid =
+          1.0 - NERFED_KNOW_RISK * (1.0 - move_confidence);
+      value -= (1.0 - subjective_valid) * NERFED_OPP_CHALLENGE_RATE *
+               (static_points + NERFED_TEMPO_VALUE);
+    }
+    const double uniform = nerfed_player_uniform(prng);
+    const double gumbel_noise =
+        -nerfed_player->sigma * NERFED_SIM_SIGMA_SCALE * log(-log(uniform));
+    value += gumbel_noise;
+    if (chosen == NULL || value > chosen_value) {
+      chosen = move;
+      chosen_value = value;
+    }
   }
   return chosen;
 }
@@ -872,8 +1111,19 @@ static double nerfed_player_pseudo_logplay(int word_length) {
 }
 
 bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
-                                      Game *game, const Move *move,
-                                      bool rule_5pt, XoshiroPRNG *prng) {
+                                      const NerfedPlayer *opponent, Game *game,
+                                      const Move *move, bool rule_5pt,
+                                      XoshiroPRNG *prng) {
+  const double opponent_rating_z =
+      (opponent != NULL) ? opponent->rating_z : NERFED_UNNERFED_OPP_RATING_Z;
+  double phony_prior = NERFED_OPP_PHONY_PRIOR *
+                       exp(-NERFED_OPP_PHONY_PRIOR_RTG * opponent_rating_z);
+  if (phony_prior < NERFED_OPP_PHONY_PRIOR_MIN) {
+    phony_prior = NERFED_OPP_PHONY_PRIOR_MIN;
+  }
+  if (phony_prior > NERFED_OPP_PHONY_PRIOR_MAX) {
+    phony_prior = NERFED_OPP_PHONY_PRIOR_MAX;
+  }
   Board *board = game_get_board(game);
   FormedWords *formed_words = formed_words_create(board, move);
   const int num_words = formed_words_get_num_words(formed_words);
@@ -904,9 +1154,11 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
     const double len7plus = word_length >= 7 ? 1.0 : 0.0;
     const double miss_logit =
         NERFED_COVERAGE_OFFSET + NERFED_COVERAGE_OFFSET_RTG * rating_z +
-        (rule_5pt ? NERFED_COVERAGE_5PT_BONUS : 0.0) + NERFED_KNOW_OFFSET +
-        c[0] + c[1] * rating_z + c[2] * pseudo_logplay + c[10] * len2 +
-        c[11] * len7plus + c[12] * rating_z * pseudo_logplay +
+        (rule_5pt ? NERFED_COVERAGE_5PT_BONUS +
+                        NERFED_COVERAGE_5PT_BONUS_RTG * rating_z
+                  : NERFED_COVERAGE_DOUBLE_BONUS) +
+        NERFED_KNOW_OFFSET + c[0] + c[1] * rating_z + c[2] * pseudo_logplay +
+        c[10] * len2 + c[11] * len7plus + c[12] * rating_z * pseudo_logplay +
         c[15] * rating_z * len2 + c[16] * rating_z * len7plus;
     double p_unfamiliar_given_valid = 1.0 / (1.0 + exp(-miss_logit));
     if (p_unfamiliar_given_valid < 0.02) {
@@ -915,10 +1167,9 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
     if (p_unfamiliar_given_valid > 0.9) {
       p_unfamiliar_given_valid = 0.9;
     }
-    const double numer = NERFED_OPP_PHONY_PRIOR * (1.0 - word_confidence);
+    const double numer = phony_prior * (1.0 - word_confidence);
     const double word_posterior =
-        numer /
-        (numer + (1.0 - NERFED_OPP_PHONY_PRIOR) * p_unfamiliar_given_valid);
+        numer / (numer + (1.0 - phony_prior) * p_unfamiliar_given_valid);
     if (word_posterior > p_invalid) {
       p_invalid = word_posterior;
     }
@@ -938,11 +1189,14 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
       nerfed_player_win_utility(margin_after + play_score + NERFED_TEMPO_VALUE);
   const double u_penalty =
       rule_5pt ? nerfed_player_win_utility(margin_after - 5.0 * num_words)
-               : nerfed_player_win_utility(margin_after - NERFED_TEMPO_VALUE);
+               : nerfed_player_win_utility(
+                     margin_after -
+                     NERFED_CHALLENGE_DOUBLE_TEMPO_FACTOR * NERFED_TEMPO_VALUE);
   const double eu_challenge = p_invalid * u_off + (1.0 - p_invalid) * u_penalty;
   const double threshold =
       NERFED_CHALLENGE_THRESH_C0 +
-      NERFED_CHALLENGE_THRESH_RTG * nerfed_player->rating_z;
+      NERFED_CHALLENGE_THRESH_RTG * nerfed_player->rating_z +
+      (rule_5pt ? 0.0 : NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA);
   const double noise =
       NERFED_CHALLENGE_NOISE * -log(-log(nerfed_player_uniform(prng)));
   return eu_challenge - u_accept + noise > threshold;

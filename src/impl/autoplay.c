@@ -668,9 +668,52 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
       }
       error_stack_destroy(error_stack);
     }
-    return nerfed_player_select_move(
-        autoplay_worker->nerfed_players[player_on_turn_index],
-        game_runner->game, autoplay_worker->prng);
+    NerfedPlayer *nerfed_player =
+        autoplay_worker->nerfed_players[player_on_turn_index];
+    SimArgs *sim_args = (player_on_turn_index == 0)
+                            ? &autoplay_worker->args.p1_sim_args
+                            : &autoplay_worker->args.p2_sim_args;
+    if (sim_args->num_plies == 0) {
+      return nerfed_player_select_move(nerfed_player, game_runner->game,
+                                       autoplay_worker->prng);
+    }
+    // Noisy simming: the exchange model and visibility gate run first;
+    // the surviving visible plays (up to -numplays) are simmed and the
+    // pick perturbs the arm utilities with the fitted valuation noise.
+    // Inference is not used on this path.
+    MoveList *arms = autoplay_worker->move_lists[player_on_turn_index];
+    const Move *decided = nerfed_player_prepare_sim_arms(
+        nerfed_player, game_runner->game, arms, autoplay_worker->prng);
+    if (decided != NULL) {
+      return decided;
+    }
+    sim_args->move_list = arms;
+    sim_args->game = game_runner->game;
+    const bool player_uses_inference = sim_args->use_inference;
+    sim_args->use_inference = false;
+    ErrorStack *error_stack = autoplay_worker->error_stack;
+    simulate(sim_args, &autoplay_worker->sim_ctx, autoplay_worker->sim_results,
+             error_stack);
+    sim_args->use_inference = player_uses_inference;
+    if (autoplay_worker->sim_results != NULL) {
+      atomic_fetch_add_explicit(
+          &autoplay_total_sim_iterations,
+          sim_results_get_iteration_count(autoplay_worker->sim_results),
+          memory_order_relaxed);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      log_fatal("autoplay worker %d failed to sim nerfed arms for player %d "
+                "on turn %d of game number %llu with seed %llu",
+                autoplay_worker->worker_index, player_on_turn_index,
+                game_runner->turn_number + 1,
+                (unsigned long long)game_runner->game_number + 1,
+                (unsigned long long)game_runner->seed);
+    }
+    return nerfed_player_pick_simmed_move(
+        nerfed_player, autoplay_worker->sim_results, sim_args->utility_w_winpct,
+        sim_args->utility_w_spread, sim_args->utility_spread_scale,
+        autoplay_worker->prng);
   }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
@@ -865,9 +908,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const NerfedPlayer *challenger = autoplay_worker->nerfed_players[opp_index];
     const bool challenged =
         challenger &&
-        nerfed_player_challenge_decision(challenger, game, move,
-                                         autoplay_worker->challenge_rule_5pt,
-                                         autoplay_worker->prng);
+        nerfed_player_challenge_decision(
+            challenger, autoplay_worker->nerfed_players[player_on_turn_index],
+            game, move, autoplay_worker->challenge_rule_5pt,
+            autoplay_worker->prng);
     if (challenged && !all_valid) {
       // phony comes off: the play never commits, the turn is consumed
       autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
