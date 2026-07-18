@@ -113,6 +113,18 @@ static const double NERFED_CHALLENGE_NOISE = 0.004;
 // word is strong evidence of validity, so the challenge decision uses the
 // Bayesian posterior, not raw unfamiliarity.
 static const double NERFED_OPP_PHONY_PRIOR = 0.04;
+// Spread term in the challenge utility: keeps the challenge gradient
+// alive when the win sigmoid saturates (players still challenge for
+// spread when far ahead or behind).
+static const double NERFED_SPREAD_UTIL = 0.004;
+// Extra offset on the pseudo-coverage likelihood: how completely players
+// know the common-shaped word classes (sweep-calibrated).
+static const double NERFED_COVERAGE_OFFSET = -1.0;
+static const double NERFED_COVERAGE_OFFSET_RTG = -0.4;
+// 5-point challenges are cheap, so Collins players habitually verify:
+// their effective willingness to treat unfamiliarity as evidence is
+// higher (drives the corpus 72% vs 51% family gap).
+static const double NERFED_COVERAGE_5PT_BONUS = -1.0;
 
 // Expected-challenge discount when PLAYING risky words: the mover's own
 // capped confidence proxies how challengeable the word looks; expected
@@ -822,7 +834,8 @@ bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
 }
 
 static double nerfed_player_win_utility(double margin) {
-  return 1.0 / (1.0 + exp(-margin / NERFED_WIN_SIGMOID_SCALE));
+  return 1.0 / (1.0 + exp(-margin / NERFED_WIN_SIGMOID_SCALE)) +
+         NERFED_SPREAD_UTIL * margin;
 }
 
 // Static-eval challenge decision with three outcomes valued through the
@@ -835,13 +848,36 @@ static double nerfed_player_win_utility(double margin) {
 // except saturated-playability/literacy words). Desperation challenges
 // emerge when losing: accept ~ certain loss while challenging has
 // variance.
+// Would-be playability of a word of this length: the pseudo-playability
+// signal ("if this were real, how often would it come up?"). Short
+// unknown words are damning -- a decent player knows every common-shaped
+// word -- while long unknowns carry little evidence.
+static double nerfed_player_pseudo_logplay(int word_length) {
+  switch (word_length) {
+  case 2:
+    return 3.5;
+  case 3:
+    return 2.5;
+  case 4:
+    return 1.8;
+  case 5:
+    return 1.2;
+  case 6:
+    return 0.8;
+  case 7:
+    return 0.5;
+  default:
+    return 0.3;
+  }
+}
+
 bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
                                       Game *game, const Move *move,
                                       bool rule_5pt, XoshiroPRNG *prng) {
   Board *board = game_get_board(game);
   FormedWords *formed_words = formed_words_create(board, move);
   const int num_words = formed_words_get_num_words(formed_words);
-  double confidence_all_valid = 1.0;
+  double p_invalid = 0.0;
   MachineLetter word[BOARD_DIM];
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
     const int word_length =
@@ -851,30 +887,43 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
     for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
       word[letter_idx] = get_unblanked_machine_letter(letters[letter_idx]);
     }
-    // a currently-believed word contributes near-certainty; an unknown
-    // word contributes its capped confidence
+    // a currently-believed word contributes no suspicion
     if (nerfed_player_believes_word(nerfed_player, word, word_length)) {
       continue;
     }
-    confidence_all_valid *=
+    const double word_confidence =
         nerfed_player_word_confidence(nerfed_player, word, word_length);
+    // P(I would not know a word of this shape | it is valid): the
+    // knowledge model at the word's pseudo-playability. Tiny for short
+    // unknowns (everyone knows the twos) -> large phony posterior; large
+    // for long obscure words -> unfamiliarity is uninformative.
+    const double pseudo_logplay = nerfed_player_pseudo_logplay(word_length);
+    const double rating_z = nerfed_player->rating_z;
+    const double *c = nerfed_player->miss_coeffs;
+    const double len2 = word_length <= 2 ? 1.0 : 0.0;
+    const double len7plus = word_length >= 7 ? 1.0 : 0.0;
+    const double miss_logit =
+        NERFED_COVERAGE_OFFSET + NERFED_COVERAGE_OFFSET_RTG * rating_z +
+        (rule_5pt ? NERFED_COVERAGE_5PT_BONUS : 0.0) + NERFED_KNOW_OFFSET +
+        c[0] + c[1] * rating_z + c[2] * pseudo_logplay + c[10] * len2 +
+        c[11] * len7plus + c[12] * rating_z * pseudo_logplay +
+        c[15] * rating_z * len2 + c[16] * rating_z * len7plus;
+    double p_unfamiliar_given_valid = 1.0 / (1.0 + exp(-miss_logit));
+    if (p_unfamiliar_given_valid < 0.02) {
+      p_unfamiliar_given_valid = 0.02;
+    }
+    if (p_unfamiliar_given_valid > 0.9) {
+      p_unfamiliar_given_valid = 0.9;
+    }
+    const double numer = NERFED_OPP_PHONY_PRIOR * (1.0 - word_confidence);
+    const double word_posterior =
+        numer /
+        (numer + (1.0 - NERFED_OPP_PHONY_PRIOR) * p_unfamiliar_given_valid);
+    if (word_posterior > p_invalid) {
+      p_invalid = word_posterior;
+    }
   }
   formed_words_destroy(formed_words);
-  // Bayesian posterior: P(invalid | opponent played it, I don't know it).
-  // The key likelihood is P(unfamiliar | valid): a weak player does not
-  // know half the valid words an expert plays, so their unfamiliarity is
-  // nearly uninformative; an expert's unfamiliarity is real evidence.
-  double base_unfamiliar_given_valid = 0.35 - 0.12 * nerfed_player->rating_z;
-  if (base_unfamiliar_given_valid < 0.08) {
-    base_unfamiliar_given_valid = 0.08;
-  }
-  if (base_unfamiliar_given_valid > 0.7) {
-    base_unfamiliar_given_valid = 0.7;
-  }
-  const double unfamiliar = 1.0 - confidence_all_valid;
-  const double numer = NERFED_OPP_PHONY_PRIOR * unfamiliar;
-  const double p_invalid = numer / (numer + (1.0 - NERFED_OPP_PHONY_PRIOR) *
-                                                base_unfamiliar_given_valid);
   // challenger's margin after their opponent's play commits
   const int my_index = 1 - game_get_player_on_turn_index(game);
   const double play_score = equity_to_double(move_get_score(move));
