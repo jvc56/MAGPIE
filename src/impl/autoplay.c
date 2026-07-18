@@ -45,6 +45,7 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Benchmark instrumentation: accumulates total sim iterations across all
 // turns in all games. Read/reset via autoplay_get_total_sim_iterations().
@@ -667,6 +668,14 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                   autoplay_worker->worker_index);
       }
       error_stack_destroy(error_stack);
+      if (autoplay_worker->args.nerf_phony) {
+        // The player's game KWG is their believed lexicon; belief in
+        // phonies (and own-play confidence) comes from membership.
+        nerfed_player_set_believed_kwg(
+            autoplay_worker->nerfed_players[player_on_turn_index],
+            player_get_kwg(
+                game_get_player(game_runner->game, player_on_turn_index)));
+      }
     }
     NerfedPlayer *nerfed_player =
         autoplay_worker->nerfed_players[player_on_turn_index];
@@ -875,6 +884,11 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         base_len -= 2;
       } else {
         base_len = string_length(believed_name);
+        // the PHALL union believed lexicon
+        if (base_len > 5 &&
+            strcmp(believed_name + base_len - 5, "PHALL") == 0) {
+          base_len -= 5;
+        }
       }
       if (base_len >= sizeof(base_name)) {
         base_len = sizeof(base_name) - 1;

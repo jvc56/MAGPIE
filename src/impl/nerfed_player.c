@@ -29,6 +29,7 @@
 enum {
   NERFED_MOVE_LIST_CAPACITY = 1024,
   NERFED_MAX_WORD_FEATS = 400000,
+  NERFED_MAX_PHONY_BELIEFS = 200000,
   NERFED_LINE_BUFFER_SIZE = 128,
 };
 
@@ -150,7 +151,7 @@ static const double NERFED_COVERAGE_OFFSET_RTG = -0.4;
 // a flat bonus floods weak-vs-weak pairs with bad challenges (measured
 // 0.66/game at 1400v1400 vs the ~0.12 corpus rate).
 static const double NERFED_COVERAGE_5PT_BONUS = -0.4;
-static const double NERFED_COVERAGE_5PT_BONUS_RTG = -0.25;
+static const double NERFED_COVERAGE_5PT_BONUS_RTG = -0.05;
 // Double-challenge coverage confidence: TWL players also overestimate
 // how completely they know the word classes ("I'd know that word"),
 // which is what makes them occasionally challenge obscure VALID words
@@ -158,8 +159,15 @@ static const double NERFED_COVERAGE_5PT_BONUS_RTG = -0.25;
 // the bonus worsens the posterior's phony/valid selectivity (raising the
 // bad-challenge fraction) while the threshold holds the overall phony-
 // challenge rate at the corpus ~51%.
-static const double NERFED_COVERAGE_DOUBLE_BONUS = -0.8;
+static const double NERFED_COVERAGE_DOUBLE_BONUS = -1.6;
 static const double NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA = 0.020;
+// Attention: under double challenge most plays are accepted without any
+// phony evaluation at all — challenging is deliberate and risky, and
+// the corpus 51% catch rate reflects attention x accuracy, not low
+// accuracy (the posterior is ~90% accurate when it engages). 5pt
+// culture checks everything (attention 1.0 implicit).
+static const double NERFED_CHALLENGE_DOUBLE_ATTENTION = 0.57;
+static const double NERFED_CHALLENGE_5PT_ATTENTION = 0.80;
 
 // Expected-challenge discount when PLAYING risky words: the mover's own
 // capped confidence proxies how challengeable the word looks; expected
@@ -168,6 +176,44 @@ static const double NERFED_OPP_CHALLENGE_RATE = 0.5;
 // Residual doubt about words the player believes they know: subjective
 // P(valid | believed) = 1 - NERFED_KNOW_RISK * (1 - prior).
 static const double NERFED_KNOW_RISK = 0.35;
+// Own-play confidence in a believed phony (a word from the player's own
+// believed lexicon that is absent from the real one). Corpus phony
+// rates (0.78/game at 1400) prove near-zero self-censorship: people
+// play TE because they think it is a word. Rating the word from the
+// REAL feature table instead (deep obscure -> ~7 pt challenge-risk
+// discount) suppressed phony plays ~10x below corpus.
+// Rating-dependent: weak players are fearless (corpus 1000s play
+// phonies at ~2x the 2000 rate despite believing MORE false words);
+// experts risk-assess even words they believe. This, not belief mass,
+// carries the corpus rating gradient — belief-mass shrinkage alone
+// left rates flat because the believed head saturates.
+static const double NERFED_OWN_BELIEF_CONF_BASE = 0.88;
+static const double NERFED_OWN_BELIEF_CONF_SLOPE = -0.08;
+// Per-word phony belief priors (<real_lex>_phony_beliefs.csv): b0 =
+// log(generator tier weight x orthographic plausibility). Belief is a
+// per-player GAME-LEVEL draw at p = sigmoid(b0 + offset + slope *
+// rating_z), so two same-rated players share the head phonies (TE) but
+// split on the idiosyncratic tail — graded overlap is what makes
+// challenges of phonies possible at matched ratings (a shared fixed
+// believed set collapses the challenge rate to ~4%). Cross-family words
+// get a positive rating slope (experts know the other dictionary),
+// everything else negative (experts hold fewer false beliefs).
+static const double NERFED_PHONY_BELIEF_OFFSET = -1.2;
+// Family split: the TWL candidate pool converts belief mass into plays
+// more readily (larger cross-family pool, denser short-word phonies).
+static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.5;
+static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.25;
+static const double NERFED_PHONY_BELIEF_SLOPE = -0.78;
+static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.60;
+static const double NERFED_PHONY_BELIEF_XFAM_SLOPE = 0.10;
+// Cross-family words are a huge pool (40k CSW-only words on the TWL
+// side): without an extra offset the belief mass dwarfs the corpus
+// phony rate and INVERTS the rating gradient (a 2200 believed ~28k
+// other-dictionary words and played 1.9 phonies/game).
+static const double NERFED_PHONY_BELIEF_XFAM_OFFSET = -1.5;
+// Logit for candidate phonies missing from the belief table (an
+// opponent's phony outside this player's candidate pool).
+static const double NERFED_PHONY_BELIEF_UNKNOWN_LOGIT = -3.9;
 // Equity points per utility unit for the sim-based pick: converts the
 // sim's [0, 1] win%/spread utility blend into equity-point equivalents.
 // Set from the local slope of utility in spread points for a mid-game
@@ -255,6 +301,14 @@ enum { NERFED_MAX_WORD_DRAWS = 512 };
 // Maximum simmed arms per turn regardless of -numplays.
 enum { NERFED_MAX_SIM_ARMS = 64 };
 
+// Per-word phony belief prior (see NERFED_PHONY_BELIEF_* constants).
+typedef struct NerfedPhonyBelief {
+  MachineLetter word[BOARD_DIM];
+  uint8_t word_length;
+  uint8_t xfam;
+  float b0;
+} NerfedPhonyBelief;
+
 struct NerfedPlayer {
   double rating_z;
   double sigma;
@@ -284,6 +338,14 @@ struct NerfedPlayer {
   int num_sim_survivors;
   int sim_arm_survivor_idx[NERFED_MAX_SIM_ARMS];
   int num_sim_arms;
+  // The player's believed lexicon (their game KWG, e.g. NWL23PHALL).
+  // When set, belief in words ABSENT from the real-lexicon feature
+  // table (i.e. phonies) is decided by the per-word belief priors below
+  // via a per-player game-level draw. NULL = hash-draw belief only
+  // (endgame and non-phony paths).
+  const KWG *believed_kwg;
+  NerfedPhonyBelief *phony_beliefs;
+  int num_phony_beliefs;
 };
 
 static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
@@ -293,6 +355,31 @@ static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
     return (int)word_feat_a->word_length - (int)word_feat_b->word_length;
   }
   return memcmp(word_feat_a->word, word_feat_b->word, word_feat_a->word_length);
+}
+
+static int nerfed_phony_belief_compare(const void *belief_a,
+                                       const void *belief_b) {
+  const NerfedPhonyBelief *phony_a = (const NerfedPhonyBelief *)belief_a;
+  const NerfedPhonyBelief *phony_b = (const NerfedPhonyBelief *)belief_b;
+  if (phony_a->word_length != phony_b->word_length) {
+    return (int)phony_a->word_length - (int)phony_b->word_length;
+  }
+  return memcmp(phony_a->word, phony_b->word, phony_a->word_length);
+}
+
+static const NerfedPhonyBelief *
+nerfed_player_lookup_belief(const NerfedPlayer *nerfed_player,
+                            const MachineLetter *word, int word_length) {
+  if (nerfed_player->num_phony_beliefs == 0) {
+    return NULL;
+  }
+  NerfedPhonyBelief key;
+  memset(&key, 0, sizeof(key));
+  key.word_length = (uint8_t)word_length;
+  memcpy(key.word, word, word_length);
+  return (const NerfedPhonyBelief *)bsearch(
+      &key, nerfed_player->phony_beliefs, nerfed_player->num_phony_beliefs,
+      sizeof(NerfedPhonyBelief), nerfed_phony_belief_compare);
 }
 
 static const NerfedWordFeat *
@@ -325,6 +412,11 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
     base_len -= 2;
   } else {
     base_len = string_length(kwg_name);
+    // the PHALL union believed lexicon (all candidate phonies; belief
+    // comes from the per-word priors, not membership)
+    if (base_len > 5 && strcmp(kwg_name + base_len - 5, "PHALL") == 0) {
+      base_len -= 5;
+    }
   }
   if (base_len >= sizeof(lexicon_name)) {
     base_len = sizeof(lexicon_name) - 1;
@@ -400,10 +492,55 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
   free(feats_filename);
   qsort(nerfed_player->feats, nerfed_player->num_feats, sizeof(NerfedWordFeat),
         nerfed_word_feat_compare);
+  // Optional per-word phony belief priors (absent for lexica without a
+  // generated candidate pool; belief then falls back to the unknown
+  // logit for every phony).
+  nerfed_player->phony_beliefs = NULL;
+  nerfed_player->num_phony_beliefs = 0;
+  char *beliefs_filename =
+      get_formatted_string("data/lexica/%s_phony_beliefs.csv", lexicon_name);
+  FILE *beliefs_file = fopen(beliefs_filename, "r");
+  if (beliefs_file) {
+    nerfed_player->phony_beliefs =
+        malloc_or_die(sizeof(NerfedPhonyBelief) * NERFED_MAX_PHONY_BELIEFS);
+    while (fgets(line, sizeof(line), beliefs_file)) {
+      char *comma = strchr(line, ',');
+      if (!comma) {
+        continue;
+      }
+      *comma = '\0';
+      float belief_b0 = 0;
+      int xfam = 0;
+      if (sscanf(comma + 1, "%f,%d", &belief_b0, &xfam) != 2) {
+        continue;
+      }
+      if (nerfed_player->num_phony_beliefs >= NERFED_MAX_PHONY_BELIEFS) {
+        log_fatal("nerfed player phony belief table overflow: %s",
+                  beliefs_filename);
+      }
+      NerfedPhonyBelief *belief =
+          &nerfed_player->phony_beliefs[nerfed_player->num_phony_beliefs];
+      memset(belief, 0, sizeof(*belief));
+      const int num_mls =
+          ld_str_to_mls(ld, line, false, belief->word, BOARD_DIM);
+      if (num_mls <= 1 || num_mls > BOARD_DIM) {
+        continue;
+      }
+      belief->word_length = (uint8_t)num_mls;
+      belief->xfam = (uint8_t)xfam;
+      belief->b0 = belief_b0;
+      nerfed_player->num_phony_beliefs++;
+    }
+    fclose_or_die(beliefs_file);
+    qsort(nerfed_player->phony_beliefs, nerfed_player->num_phony_beliefs,
+          sizeof(NerfedPhonyBelief), nerfed_phony_belief_compare);
+  }
+  free(beliefs_filename);
   nerfed_player->move_list = move_list_create(NERFED_MOVE_LIST_CAPACITY);
   nerfed_player->num_word_draws = 0;
   nerfed_player->game_seed = 0;
   nerfed_player->turn_number = 0;
+  nerfed_player->believed_kwg = NULL;
   return nerfed_player;
 }
 
@@ -413,6 +550,7 @@ void nerfed_player_destroy(NerfedPlayer *nerfed_player) {
   }
   move_list_destroy(nerfed_player->move_list);
   free(nerfed_player->feats);
+  free(nerfed_player->phony_beliefs);
   free(nerfed_player);
 }
 
@@ -448,11 +586,21 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
     }
     const NerfedWordFeat *feat =
         nerfed_player_lookup_word(nerfed_player, word, word_length);
-    // words absent from the REAL-lexicon table can only reach movegen via
-    // the player's believed lexicon: belief sampling already decided they
-    // "know" them, so treat them as decently playable known words
-    // (geometry still gates them; the risk discount handles challenge
-    // expectations)
+    // words absent from the REAL-lexicon table can only reach movegen
+    // via the believed (PHALL union) lexicon: the play is visible only
+    // to a player whose game-level belief draw includes the word.
+    if (feat == NULL && nerfed_player->believed_kwg != NULL &&
+        !nerfed_player_believes_word(nerfed_player, word, word_length)) {
+      formed_words_destroy(formed_words);
+      *rare_word_length = 0;
+      if (min_confidence_out) {
+        *min_confidence_out = 0.0;
+      }
+      return 1.0;
+    }
+    // A believed phony is treated as a decently playable known word
+    // (geometry still gates it; the risk discount handles challenge
+    // expectations).
     double logplay = 2.0;
     double loglit = 1.0;
     double absent = 0.0;
@@ -467,8 +615,16 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
       *rare_word_length = word_length;
     }
     if (min_confidence_out) {
+      // Own-play perspective: a believed phony (absent from the real
+      // table, present only via the player's believed lexicon) carries
+      // the believer's confidence, not the outside view of an obscure
+      // string — that outside view is for CHALLENGERS of other
+      // people's words.
       const double word_confidence =
-          nerfed_player_word_confidence(nerfed_player, word, word_length);
+          (feat == NULL && nerfed_player->believed_kwg != NULL)
+              ? NERFED_OWN_BELIEF_CONF_BASE +
+                    NERFED_OWN_BELIEF_CONF_SLOPE * nerfed_player->rating_z
+              : nerfed_player_word_confidence(nerfed_player, word, word_length);
       if (word_confidence < *min_confidence_out) {
         *min_confidence_out = word_confidence;
       }
@@ -1128,10 +1284,47 @@ void nerfed_player_set_turn(NerfedPlayer *nerfed_player, int turn_number) {
 // Game-level word knowledge with a small per-turn flip. The base draw is
 // deterministic per (game_seed, word) so knowledge is persistent within a
 // game and hidden from the opponent (their draws use their own seed).
+void nerfed_player_set_believed_kwg(NerfedPlayer *nerfed_player,
+                                    const KWG *kwg) {
+  nerfed_player->believed_kwg = kwg;
+}
+
 bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
                                  const MachineLetter *word, int word_length) {
-  const bool base = nerfed_player_knows_word(nerfed_player, word, word_length,
-                                             nerfed_player->game_seed);
+  bool base;
+  const bool is_real_word =
+      nerfed_player_lookup_word(nerfed_player, word, word_length) != NULL;
+  if (nerfed_player->believed_kwg != NULL && !is_real_word) {
+    // A word outside the real lexicon: per-player game-level belief
+    // draw at the word's prior. Head phonies (TE) are believed by
+    // almost everyone; the idiosyncratic tail splits between players,
+    // which is what makes phony challenges possible at matched ratings.
+    const NerfedPhonyBelief *belief =
+        nerfed_player_lookup_belief(nerfed_player, word, word_length);
+    double belief_logit = NERFED_PHONY_BELIEF_UNKNOWN_LOGIT;
+    if (belief != NULL) {
+      const bool is_csw_family =
+          nerfed_player->miss_coeffs == NERFED_MISS_COEFFS_CSW;
+      const double slope = belief->xfam    ? NERFED_PHONY_BELIEF_XFAM_SLOPE
+                           : is_csw_family ? NERFED_PHONY_BELIEF_SLOPE_CSW
+                                           : NERFED_PHONY_BELIEF_SLOPE;
+      belief_logit = belief->b0 + NERFED_PHONY_BELIEF_OFFSET +
+                     (nerfed_player->miss_coeffs == NERFED_MISS_COEFFS_CSW
+                          ? NERFED_PHONY_BELIEF_CSW_EXTRA
+                          : NERFED_PHONY_BELIEF_TWL_EXTRA) +
+                     (belief->xfam ? NERFED_PHONY_BELIEF_XFAM_OFFSET : 0.0) +
+                     slope * nerfed_player->rating_z;
+    }
+    const double p_believe = 1.0 / (1.0 + exp(-belief_logit));
+    const uint64_t belief_hash = nerfed_player_word_hash(
+        word, word_length, nerfed_player->game_seed ^ 0x5851F42D4C957F2DULL);
+    const double belief_uniform =
+        ((double)(belief_hash >> 11) + 0.5) / 9007199254740992.0;
+    base = belief_uniform < p_believe;
+  } else {
+    base = nerfed_player_knows_word(nerfed_player, word, word_length,
+                                    nerfed_player->game_seed);
+  }
   const uint64_t flip_hash = nerfed_player_word_hash(
       word, word_length,
       nerfed_player->game_seed ^
@@ -1186,6 +1379,11 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
                                       const NerfedPlayer *opponent, Game *game,
                                       const Move *move, bool rule_5pt,
                                       XoshiroPRNG *prng) {
+  const double attention = rule_5pt ? NERFED_CHALLENGE_5PT_ATTENTION
+                                    : NERFED_CHALLENGE_DOUBLE_ATTENTION;
+  if (nerfed_player_uniform(prng) > attention) {
+    return false;
+  }
   const double opponent_rating_z =
       (opponent != NULL) ? opponent->rating_z : NERFED_UNNERFED_OPP_RATING_Z;
   double phony_prior = NERFED_OPP_PHONY_PRIOR *

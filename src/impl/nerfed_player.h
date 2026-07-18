@@ -4,6 +4,7 @@
 #include "../ent/dictionary_word.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
+#include "../ent/kwg.h"
 #include "../ent/move.h"
 #include "../ent/sim_results.h"
 #include "../ent/xoshiro.h"
@@ -66,6 +67,14 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
                                     const DictionaryWordList *word_list,
                                     DictionaryWordList *filtered_list,
                                     uint64_t seed);
+
+// The player's believed lexicon (their game KWG, e.g. CSW24PH1400).
+// When set, belief in words absent from the real lexicon (phonies) is
+// decided by membership here: the mover trusts their own lexicon, and a
+// challenger never suspects a phony they themselves believe. Real-word
+// belief keeps the knowledge-model draw.
+void nerfed_player_set_believed_kwg(NerfedPlayer *nerfed_player,
+                                    const KWG *kwg);
 
 // Game-level knowledge lifecycle: call at game start (per-player seed)
 // and per turn (enables the small knowledge-flip probability).
