@@ -40,6 +40,24 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
                                     DictionaryWordList *filtered_list,
                                     uint64_t seed);
 
+// Game-level knowledge lifecycle: call at game start (per-player seed)
+// and per turn (enables the small knowledge-flip probability).
+void nerfed_player_start_game(NerfedPlayer *nerfed_player, uint64_t game_seed);
+void nerfed_player_set_turn(NerfedPlayer *nerfed_player, int turn_number);
+bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
+                                 const MachineLetter *word, int word_length);
+// Subjective P(word is valid), capped away from 0/1 except for
+// saturated-playability (rating-scaled) or saturated-literacy words.
+double nerfed_player_word_confidence(const NerfedPlayer *nerfed_player,
+                                     const MachineLetter *word,
+                                     int word_length);
+
+// Challenge decision against an opponent's selected move under the given
+// challenge rule (true = 5-point per word, false = double challenge).
+bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
+                                      Game *game, const Move *move,
+                                      bool rule_5pt, XoshiroPRNG *prng);
+
 // Selects among the solve's top-K PVs by value plus Gumbel noise of the
 // rating-fitted endgame sigma, swaps the choice into multi-PV slot 0, and
 // forces it as the best PV. Deterministic per (seed, pv index).

@@ -30,6 +30,12 @@ typedef struct AutoplayArgs {
   // Nerfed-player target ratings; 0 disables nerfing for that player.
   int p1_nerf_rating;
   int p2_nerf_rating;
+  // Phony/challenge flow: players play from believed lexicons (their game
+  // KWGs, e.g. CSW24PH1400), plays are adjudicated against the real
+  // lexicon, and nerfed opponents challenge at fitted rates. The
+  // challenge rule follows the real lexicon family: CSW/OSW = 5 points
+  // per word, otherwise double challenge (challenger loses a turn).
+  bool nerf_phony;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
 } AutoplayArgs;

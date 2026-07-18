@@ -17,6 +17,13 @@ typedef enum {
   NUMBER_OF_AUTOPLAY_RECORDERS,
 } autoplay_recorder_t;
 
+typedef enum {
+  PHONY_EVENT_STUCK,          // phony played, not challenged off
+  PHONY_EVENT_CHALLENGED_OFF, // phony played, challenged, removed
+  PHONY_EVENT_BAD_CHALLENGE,  // valid play challenged (challenger penalized)
+  NUMBER_OF_PHONY_EVENTS,
+} phony_event_t;
+
 typedef struct AutoplayResults AutoplayResults;
 
 AutoplayResults *autoplay_results_create(void);
@@ -32,6 +39,10 @@ void autoplay_results_reset(AutoplayResults *autoplay_results);
 void autoplay_results_add_move(AutoplayResults *autoplay_results,
                                const Game *game, const Move *move,
                                const Rack *leave, const MoveList *move_list);
+// player_idx is the player the event is attributed to: the phony player
+// for stuck/challenged-off, the challenger for bad challenges.
+void autoplay_results_add_phony_event(AutoplayResults *autoplay_results,
+                                      int player_idx, phony_event_t event);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

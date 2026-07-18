@@ -27,6 +27,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/words.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -38,6 +39,7 @@
 #include "nerfed_player.h"
 #include "rack_list.h"
 #include "simmer.h"
+#include <ctype.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -300,6 +302,12 @@ typedef struct AutoplayWorker {
   MoveList *move_lists[2];
   // Lazily created when pX_nerf_rating > 0 (per player index).
   NerfedPlayer *nerfed_players[2];
+  // Phony/challenge flow state (nerf_phony): the real-lexicon KWG for
+  // adjudication, the challenge rule, and pending lost turns from double
+  // challenges.
+  KWG *real_kwg;
+  bool challenge_rule_5pt;
+  bool skip_turn[2];
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -331,6 +339,10 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   }
   autoplay_worker->nerfed_players[0] = NULL;
   autoplay_worker->nerfed_players[1] = NULL;
+  autoplay_worker->real_kwg = NULL;
+  autoplay_worker->challenge_rule_5pt = false;
+  autoplay_worker->skip_turn[0] = false;
+  autoplay_worker->skip_turn[1] = false;
   autoplay_worker->shared_data = shared_data;
   autoplay_worker->sim_ctx = NULL;
   const AutoplayArgs *ap_args = &autoplay_worker->args;
@@ -368,6 +380,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   nerfed_player_destroy(autoplay_worker->nerfed_players[0]);
   nerfed_player_destroy(autoplay_worker->nerfed_players[1]);
+  kwg_destroy(autoplay_worker->real_kwg);
   prng_destroy(autoplay_worker->prng);
   sim_ctx_destroy(autoplay_worker->sim_ctx);
   sim_results_destroy(autoplay_worker->sim_results);
@@ -500,6 +513,18 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   autoplay_worker->args.p2_sim_args.seed = iter_output->seed;
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  autoplay_worker->skip_turn[0] = false;
+  autoplay_worker->skip_turn[1] = false;
+  for (int player_idx = 0; player_idx < 2; player_idx++) {
+    if (autoplay_worker->nerfed_players[player_idx]) {
+      // per-player, per-game knowledge seed: persistent within the game
+      // and hidden from the opponent (different player mix constants)
+      nerfed_player_start_game(
+          autoplay_worker->nerfed_players[player_idx],
+          iter_output->seed ^
+              (0xC2B2AE3D27D4EB4FULL * (uint64_t)(player_idx + 1)));
+    }
+  }
   if (game_runner->game_one_move_behind) {
     Game *game_one_move_behind = game_runner->game_one_move_behind;
     game_reset(game_one_move_behind);
@@ -661,6 +686,21 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }
 
+// Commits a forced pass (skipped turn or a phony coming off the board)
+// with the same bookkeeping as a normal play.
+static const Move *game_runner_commit_pass(GameRunner *game_runner) {
+  Move pass_move;
+  move_set_as_pass(&pass_move);
+  play_move(&pass_move, game_runner->game, NULL);
+  if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
+    play_move(&game_runner->previous_move, game_runner->game_one_move_behind,
+              NULL);
+  }
+  move_copy(&game_runner->previous_move, &pass_move);
+  game_runner->turn_number++;
+  return &game_runner->previous_move;
+}
+
 // Returns the played move
 const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
                                   GameRunner *game_runner) {
@@ -669,6 +709,19 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
+  if (autoplay_worker->args.nerf_phony) {
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (autoplay_worker->nerfed_players[player_idx]) {
+        nerfed_player_set_turn(autoplay_worker->nerfed_players[player_idx],
+                               game_runner->turn_number);
+      }
+    }
+    // a lost turn from a failed double challenge
+    if (autoplay_worker->skip_turn[player_on_turn_index]) {
+      autoplay_worker->skip_turn[player_on_turn_index] = false;
+      return game_runner_commit_pass(game_runner);
+    }
+  }
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   // If we are forcing a draw, we need to draw a rare leave. The drawn
@@ -760,6 +813,82 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     string_builder_destroy(output);
   }
 
+  if (autoplay_worker->args.nerf_phony &&
+      move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    const int opp_index = 1 - player_on_turn_index;
+    // lazily load the real-lexicon KWG: strip the PH<rating> believed-
+    // lexicon suffix from the player's KWG name
+    if (!autoplay_worker->real_kwg) {
+      const char *believed_name =
+          kwg_get_name(player_get_kwg(game_get_player(game, 0)));
+      char base_name[64];
+      size_t base_len = string_length(believed_name);
+      while (base_len > 0 &&
+             isdigit((unsigned char)believed_name[base_len - 1])) {
+        base_len--;
+      }
+      if (base_len >= 2 && believed_name[base_len - 2] == 'P' &&
+          believed_name[base_len - 1] == 'H') {
+        base_len -= 2;
+      } else {
+        base_len = string_length(believed_name);
+      }
+      if (base_len >= sizeof(base_name)) {
+        base_len = sizeof(base_name) - 1;
+      }
+      memcpy(base_name, believed_name, base_len);
+      base_name[base_len] = '\0';
+      ErrorStack *kwg_error_stack = error_stack_create();
+      autoplay_worker->real_kwg = kwg_create(autoplay_worker->args.data_paths,
+                                             base_name, kwg_error_stack);
+      if (!error_stack_is_empty(kwg_error_stack)) {
+        error_stack_print_and_reset(kwg_error_stack);
+        log_fatal("nerf_phony: failed to load real lexicon '%s'", base_name);
+      }
+      error_stack_destroy(kwg_error_stack);
+      autoplay_worker->challenge_rule_5pt =
+          base_name[0] == 'C' || base_name[0] == 'O';
+    }
+    // adjudicate validity against the real lexicon
+    FormedWords *formed_words = formed_words_create(game_get_board(game), move);
+    formed_words_populate_validities(autoplay_worker->real_kwg, formed_words,
+                                     false);
+    const int num_formed_words = formed_words_get_num_words(formed_words);
+    bool all_valid = true;
+    for (int word_idx = 0; word_idx < num_formed_words; word_idx++) {
+      if (!formed_words_get_word_valid(formed_words, word_idx)) {
+        all_valid = false;
+        break;
+      }
+    }
+    formed_words_destroy(formed_words);
+    const NerfedPlayer *challenger = autoplay_worker->nerfed_players[opp_index];
+    const bool challenged =
+        challenger &&
+        nerfed_player_challenge_decision(challenger, game, move,
+                                         autoplay_worker->challenge_rule_5pt,
+                                         autoplay_worker->prng);
+    if (challenged && !all_valid) {
+      // phony comes off: the play never commits, the turn is consumed
+      autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
+                                       player_on_turn_index,
+                                       PHONY_EVENT_CHALLENGED_OFF);
+      return game_runner_commit_pass(game_runner);
+    }
+    if (challenged && all_valid) {
+      autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
+                                       opp_index, PHONY_EVENT_BAD_CHALLENGE);
+      if (autoplay_worker->challenge_rule_5pt) {
+        player_add_to_score(game_get_player(game, player_on_turn_index),
+                            int_to_equity(5 * num_formed_words));
+      } else {
+        autoplay_worker->skip_turn[opp_index] = true;
+      }
+    } else if (!all_valid) {
+      autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
+                                       player_on_turn_index, PHONY_EVENT_STUCK);
+    }
+  }
   play_move(move, game, NULL);
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {
     play_move(&game_runner->previous_move, game_runner->game_one_move_behind,

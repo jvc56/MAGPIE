@@ -124,6 +124,7 @@ typedef struct GameData {
   uint64_t player_tile_plays[2];
   uint64_t player_exchanges[2];
   uint64_t player_exchange_tiles[2];
+  uint64_t phony_events[2][NUMBER_OF_PHONY_EVENTS];
   Stat *p0_score;
   Stat *p1_score;
   Stat *turns;
@@ -149,6 +150,7 @@ void game_data_reset(GameData *gd) {
   gd->player_exchanges[1] = 0;
   gd->player_exchange_tiles[0] = 0;
   gd->player_exchange_tiles[1] = 0;
+  memset(gd->phony_events, 0, sizeof(gd->phony_events));
   memset(gd->player_bingo_lengths, 0, sizeof(gd->player_bingo_lengths));
   stat_reset(gd->p0_score);
   stat_reset(gd->p1_score);
@@ -327,6 +329,22 @@ char *game_data_human_readable_str(const GameData *gd, bool divergent) {
       sb, "Exchanges per Game: %0.2f %0.2f\n",
       (double)gd->player_exchanges[0] / (double)gd->total_games,
       (double)gd->player_exchanges[1] / (double)gd->total_games);
+  string_builder_add_formatted_string(
+      sb, "Phonies Stuck per Game: %0.3f %0.3f\n",
+      (double)gd->phony_events[0][PHONY_EVENT_STUCK] / (double)gd->total_games,
+      (double)gd->phony_events[1][PHONY_EVENT_STUCK] / (double)gd->total_games);
+  string_builder_add_formatted_string(
+      sb, "Phonies Challenged Off per Game: %0.3f %0.3f\n",
+      (double)gd->phony_events[0][PHONY_EVENT_CHALLENGED_OFF] /
+          (double)gd->total_games,
+      (double)gd->phony_events[1][PHONY_EVENT_CHALLENGED_OFF] /
+          (double)gd->total_games);
+  string_builder_add_formatted_string(
+      sb, "Bad Challenges per Game: %0.3f %0.3f\n",
+      (double)gd->phony_events[0][PHONY_EVENT_BAD_CHALLENGE] /
+          (double)gd->total_games,
+      (double)gd->phony_events[1][PHONY_EVENT_BAD_CHALLENGE] /
+          (double)gd->total_games);
   string_builder_add_formatted_string(
       sb, "Avg Tiles per Exchange: %0.2f %0.2f\n",
       (double)gd->player_exchange_tiles[0] /
@@ -527,6 +545,10 @@ void game_data_sets_consolidate_subset(Recorder **recorder_list,
           gd_i->player_exchanges[player_idx];
       gd_primary->player_exchange_tiles[player_idx] +=
           gd_i->player_exchange_tiles[player_idx];
+      for (int ev = 0; ev < NUMBER_OF_PHONY_EVENTS; ev++) {
+        gd_primary->phony_events[player_idx][ev] +=
+            gd_i->phony_events[player_idx][ev];
+      }
       for (int len_idx = 0; len_idx <= BOARD_DIM; len_idx++) {
         gd_primary->player_play_lengths[player_idx][len_idx] +=
             gd_i->player_play_lengths[player_idx][len_idx];
@@ -1648,6 +1670,19 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
       recorder_add_move(autoplay_results->recorders[i], &args);
     }
   }
+}
+
+void autoplay_results_add_phony_event(AutoplayResults *autoplay_results,
+                                      int player_idx, phony_event_t event) {
+  Recorder *recorder = autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
+  if (!recorder) {
+    return;
+  }
+  GameDataSets *sets = (GameDataSets *)recorder->data;
+  GameData *gd = sets->all_games;
+  cpthread_mutex_lock(&gd->mutex);
+  gd->phony_events[player_idx][event]++;
+  cpthread_mutex_unlock(&gd->mutex);
 }
 
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
