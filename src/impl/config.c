@@ -6421,7 +6421,7 @@ void config_load_parsed_args(Config *config,
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.
-        char *cmd_content = strchr(cmd, ' ');
+        const char *cmd_content = strchr(cmd, ' ');
         if (cmd_content) {
           cmd_content = cmd_content + 1;
         }
