@@ -190,6 +190,13 @@ static const double NERFED_SIM_GLIMPSE_W = 0.3;
 // the sign of the correction matters at the noise margin), so
 // neutrality is restored here, not by shrinking w.
 static const double NERFED_SIM_SIGMA_SCALE = 1.06;
+// Empirical-Bayes shrinkage of the glimpse by arm sample count:
+// disagreement * n / (n + N0). With stratified arms the per-arm rollout
+// counts get thin (600 iters / 24 arms ~ 25 samples -> +-5 pts of
+// sampling noise in the mean), and an unshrunk glimpse promotes deep
+// arms on noise (measured 47.1% head-to-head, score -14). Shrinkage
+// restores trust proportional to evidence.
+static const double NERFED_SIM_SHRINK_N0 = 60.0;
 
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
@@ -245,6 +252,9 @@ typedef struct NerfedWordDraw {
 
 enum { NERFED_MAX_WORD_DRAWS = 512 };
 
+// Maximum simmed arms per turn regardless of -numplays.
+enum { NERFED_MAX_SIM_ARMS = 64 };
+
 struct NerfedPlayer {
   double rating_z;
   double sigma;
@@ -264,13 +274,16 @@ struct NerfedPlayer {
   int turn_number;
   // Sim-pick state from nerfed_player_prepare_sim_arms: indices into
   // move_list of ALL visible tile plays this turn (best static equity
-  // first) and their word confidences. The first min(count, arms
-  // capacity) survivors are the simmed arms, in order; the rest keep
-  // pure static values in the pick so the fitted choice dispersion over
-  // the full visible list is preserved.
+  // first) and their word confidences. sim_arm_survivor_idx maps arm j
+  // (in sim order) to its survivor index — the stratified subset that
+  // got simmed; the remaining survivors keep pure static values in the
+  // pick so the fitted choice dispersion over the full visible list is
+  // preserved.
   int sim_survivor_indices[NERFED_MOVE_LIST_CAPACITY];
   double sim_survivor_confidence[NERFED_MOVE_LIST_CAPACITY];
   int num_sim_survivors;
+  int sim_arm_survivor_idx[NERFED_MAX_SIM_ARMS];
+  int num_sim_arms;
 };
 
 static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
@@ -767,11 +780,8 @@ const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
     nerfed_player->sim_survivor_indices[survivor_idx] = move_idx;
     nerfed_player->sim_survivor_confidence[survivor_idx] = move_confidence;
     nerfed_player->num_sim_survivors++;
-    // The best static survivors (walk order = descending equity) are
-    // the simmed arms; later survivors stay in the pick with pure
-    // static values.
-    if (move_list_get_count(arms) < arm_capacity) {
-      move_list_add_move(arms, move);
+    if (nerfed_player->num_sim_survivors >= NERFED_MOVE_LIST_CAPACITY) {
+      break;
     }
   }
   const int num_survivors = nerfed_player->num_sim_survivors;
@@ -784,6 +794,59 @@ const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
     return move_list_get_move(move_list,
                               nerfed_player->sim_survivor_indices[0]);
   }
+  // Stratified arm selection: the top half of the arm budget takes the
+  // best static survivors (including arm 0, the glimpse baseline); the
+  // rest are geometrically jittered strata over the remaining
+  // survivors. Blocking and setup plays are often statically mediocre
+  // (they sacrifice points), so head-only arms can never PROMOTE a
+  // sleeper — tiered coverage lets the sim discover them.
+  int num_arms_target = arm_capacity;
+  if (num_arms_target > num_survivors) {
+    num_arms_target = num_survivors;
+  }
+  if (num_arms_target > NERFED_MAX_SIM_ARMS) {
+    num_arms_target = NERFED_MAX_SIM_ARMS;
+  }
+  nerfed_player->num_sim_arms = 0;
+  if (num_arms_target >= num_survivors) {
+    for (int survivor_idx = 0; survivor_idx < num_survivors; survivor_idx++) {
+      nerfed_player->sim_arm_survivor_idx[survivor_idx] = survivor_idx;
+    }
+    nerfed_player->num_sim_arms = num_survivors;
+  } else {
+    const int head_count = (num_arms_target + 1) / 2;
+    for (int arm_idx = 0; arm_idx < head_count; arm_idx++) {
+      nerfed_player->sim_arm_survivor_idx[arm_idx] = arm_idx;
+    }
+    nerfed_player->num_sim_arms = head_count;
+    const int tail_count = num_arms_target - head_count;
+    const double log_span = log((double)num_survivors / (double)head_count);
+    int prev_survivor_idx = head_count - 1;
+    for (int tail_idx = 0; tail_idx < tail_count; tail_idx++) {
+      const double stratum =
+          ((double)tail_idx + nerfed_player_uniform(prng)) / (double)tail_count;
+      int survivor_idx = (int)((double)head_count * exp(stratum * log_span));
+      if (survivor_idx <= prev_survivor_idx) {
+        survivor_idx = prev_survivor_idx + 1;
+      }
+      if (survivor_idx >= num_survivors) {
+        break;
+      }
+      nerfed_player->sim_arm_survivor_idx[nerfed_player->num_sim_arms++] =
+          survivor_idx;
+      prev_survivor_idx = survivor_idx;
+    }
+  }
+  move_list_reset(arms);
+  for (int arm_idx = 0; arm_idx < nerfed_player->num_sim_arms; arm_idx++) {
+    move_list_add_move(
+        arms,
+        move_list_get_move(move_list,
+                           nerfed_player->sim_survivor_indices
+                               [nerfed_player->sim_arm_survivor_idx[arm_idx]]));
+  }
+  // Arms were added in ascending survivor order (= descending static
+  // equity), so sorting restores the same order for the sim.
   move_list_sort_moves(arms);
   return NULL;
 }
@@ -798,7 +861,9 @@ static double nerfed_player_sim_disagreement(
     double utility_w_winpct, double utility_w_spread,
     double utility_spread_scale) {
   SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, play_idx);
-  if (stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play)) == 0) {
+  const uint64_t num_samples =
+      stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play));
+  if (num_samples == 0) {
     return 0.0;
   }
   const double win_mean =
@@ -810,7 +875,10 @@ static double nerfed_player_sim_disagreement(
       utility_w_spread, utility_spread_scale);
   const double sim_advantage_points =
       (utility - baseline_utility) / NERFED_SIM_UTILITY_PER_POINT;
-  return sim_advantage_points - (static_points - baseline_static_points);
+  const double shrink =
+      (double)num_samples / ((double)num_samples + NERFED_SIM_SHRINK_N0);
+  return shrink *
+         (sim_advantage_points - (static_points - baseline_static_points));
 }
 
 const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
@@ -835,6 +903,7 @@ const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
       utility_w_winpct, utility_w_spread, utility_spread_scale);
   const Move *chosen = NULL;
   double chosen_value = 0.0;
+  int arm_cursor = 0;
   for (int survivor_idx = 0; survivor_idx < nerfed_player->num_sim_survivors;
        survivor_idx++) {
     const Move *move = move_list_get_move(
@@ -842,16 +911,19 @@ const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
     const double static_points = equity_to_double(move_get_equity(move));
     double value = static_points;
     // Glimpse of truth: simmed arms feel a fraction of the sim's
-    // disagreement with static valuation; survivors beyond the arm list
-    // keep pure static values, preserving the fitted choice dispersion
-    // over the full visible move list (at w = 0 this pick reduces to
-    // the static path).
-    if (survivor_idx < num_arms) {
+    // disagreement with static valuation; non-simmed survivors keep
+    // pure static values, preserving the fitted choice dispersion over
+    // the full visible move list (at w = 0 this pick reduces to the
+    // static path). Arms and survivors are both in descending static
+    // equity order, so a single cursor aligns them.
+    if (arm_cursor < nerfed_player->num_sim_arms && arm_cursor < num_arms &&
+        nerfed_player->sim_arm_survivor_idx[arm_cursor] == survivor_idx) {
       value += NERFED_SIM_GLIMPSE_W *
                nerfed_player_sim_disagreement(
-                   sim_results, survivor_idx, baseline_utility,
+                   sim_results, arm_cursor, baseline_utility,
                    baseline_static_points, static_points, utility_w_winpct,
                    utility_w_spread, utility_spread_scale);
+      arm_cursor++;
     }
     // risky-word discount, as in the static path: expected cost of
     // being challenged off given residual doubt.
