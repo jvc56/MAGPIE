@@ -3267,7 +3267,9 @@ void config_endgame(Config *config, EndgameResults *endgame_results,
           player_get_score(game_get_player(config->game, on_turn_index))) -
       equity_to_int(player_get_score(game_get_player(config->game, opp_index)));
   for (int sample_idx = 0; sample_idx < num_samples; sample_idx++) {
-    endgame_ctx_clear_transposition_table(&config->endgame_ctx);
+    if (config->endgame_ctx != NULL) {
+      endgame_ctx_clear_transposition_table(config->endgame_ctx);
+    }
     endgame_args.nerf_seeds[opp_index] =
         solve_seed ^ (0xD1B54A32D192ED03ULL * (uint64_t)(sample_idx + 1));
     endgame_solve(&config->endgame_ctx, &endgame_args, endgame_results,
