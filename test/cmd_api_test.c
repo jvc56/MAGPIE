@@ -125,8 +125,89 @@ void test_cmd_api_errors(void) {
   magpie_destroy(mp);
 }
 
+void test_cmd_api_direct_results(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert_run_sync_success(
+      mp, "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all");
+  assert_run_sync_success(mp, TEST_EMPTY_BOARD_CGP);
+  assert_run_sync_success(mp, "generate");
+
+  // Long-running commands return their results directly instead of
+  // requiring a follow-up show command.
+  assert_run_sync_success(mp, "simulate -it 5 -plies 2 -scond none -threads 1");
+  char *sim_output = magpie_get_last_command_output(mp);
+  assert(!strings_equal(sim_output, ""));
+  magpie_free_string(sim_output);
+
+  magpie_destroy(mp);
+}
+
+void test_cmd_api_async(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert_run_sync_success(mp, "set -lex CSW21");
+  assert_run_sync_success(mp, TEST_EMPTY_BOARD_CGP);
+  assert_run_sync_success(mp, "generate");
+
+  // Awaiting with no async command pending returns the last exit code.
+  assert(magpie_await(mp) == MAGPIE_SUCCESS);
+
+  // Start a long-running simulation and stop it from this thread.
+  cmd_exit_code exit_code = magpie_run_async(
+      mp, "simulate -it 100000000 -plies 7 -scond none -threads 1");
+  assert(exit_code == MAGPIE_SUCCESS);
+  assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_STARTED);
+
+  // Only one command may run at a time.
+  assert(magpie_run_async(mp, "generate") == MAGPIE_DID_NOT_RUN);
+  assert(magpie_run_sync(mp, "generate") == MAGPIE_DID_NOT_RUN);
+
+  magpie_stop_current_command(mp);
+  exit_code = magpie_await(mp);
+  assert(exit_code == MAGPIE_SUCCESS);
+  assert(magpie_get_thread_status(mp) == MAGPIE_THREAD_STATUS_FINISHED);
+  char *sim_output = magpie_get_last_command_output(mp);
+  assert(!strings_equal(sim_output, ""));
+  magpie_free_string(sim_output);
+
+  // Async parse errors are reported synchronously.
+  exit_code = magpie_run_async(mp, "notacommand");
+  assert(exit_code == MAGPIE_DID_NOT_RUN);
+  assert(magpie_has_error(mp));
+  char *parse_error = magpie_get_and_clear_error(mp);
+  assert(has_substring(parse_error, "notacommand"));
+  magpie_free_string(parse_error);
+
+  // Run a short async command to completion.
+  exit_code = magpie_run_async(mp, "generate");
+  assert(exit_code == MAGPIE_SUCCESS);
+  assert(magpie_await(mp) == MAGPIE_SUCCESS);
+  char *gen_output = magpie_get_last_command_output(mp);
+  assert(has_substring(gen_output, "Showing"));
+  magpie_free_string(gen_output);
+
+  magpie_destroy(mp);
+}
+
+void test_cmd_api_destroy_while_running(void) {
+  Magpie *mp = magpie_create(DEFAULT_TEST_DATA_PATH);
+  assert(!magpie_has_error(mp));
+  assert_run_sync_success(mp, "set -lex CSW21");
+  assert_run_sync_success(mp, TEST_EMPTY_BOARD_CGP);
+  assert_run_sync_success(mp, "generate");
+  assert(magpie_run_async(
+             mp, "simulate -it 100000000 -plies 7 -scond none -threads 1") ==
+         MAGPIE_SUCCESS);
+  // Destroying while a command is running stops and joins the worker.
+  magpie_destroy(mp);
+}
+
 void test_cmd_api(void) {
   test_cmd_api_create_failure();
   test_cmd_api_run_commands();
   test_cmd_api_errors();
+  test_cmd_api_direct_results();
+  test_cmd_api_async();
+  test_cmd_api_destroy_while_running();
 }

@@ -68,6 +68,12 @@ typedef enum {
 // commands return MAGPIE_DID_NOT_RUN.
 Magpie *magpie_create(const char *data_paths);
 
+// Like magpie_create, with explicit control over the settings filename
+// (NULL for the default) and whether word map (WMP) files are used for
+// move generation.
+Magpie *magpie_create_with_options(const char *data_paths,
+                                   const char *settings_filename, bool use_wmp);
+
 void magpie_destroy(Magpie *mp);
 
 // Runs a command to completion, storing its output in machine-readable
@@ -76,6 +82,22 @@ cmd_exit_code magpie_run_sync(Magpie *mp, const char *command);
 
 // Same as magpie_run_sync, but stores output formatted for human display.
 cmd_exit_code magpie_run_sync_human_readable(Magpie *mp, const char *command);
+
+// Starts a command on a background thread and returns immediately. Returns
+// MAGPIE_SUCCESS if the command started, or MAGPIE_DID_NOT_RUN if it could
+// not (parse and data-loading errors are reported synchronously, and only
+// one command may run at a time). While a command is running, only
+// magpie_get_thread_status, magpie_get_last_command_status_message, and
+// magpie_stop_current_command may be called on this handle; call
+// magpie_await before using any other function.
+cmd_exit_code magpie_run_async(Magpie *mp, const char *command);
+
+// Same as magpie_run_async, but stores output formatted for human display.
+cmd_exit_code magpie_run_async_human_readable(Magpie *mp, const char *command);
+
+// Waits for the running async command (if any) to finish and returns the
+// exit code of the most recently completed command.
+cmd_exit_code magpie_await(Magpie *mp);
 
 // Returns true if an error is pending on the error stack.
 bool magpie_has_error(const Magpie *mp);
@@ -94,6 +116,11 @@ char *magpie_get_last_command_output(const Magpie *mp);
 void magpie_stop_current_command(Magpie *mp);
 
 magpie_thread_status magpie_get_thread_status(const Magpie *mp);
+
+// Frees a string returned by any magpie_* function. Equivalent to free();
+// provided so callers (especially FFI bindings) do not need to share the
+// library's allocator.
+void magpie_free_string(char *str);
 
 #ifdef __cplusplus
 }
