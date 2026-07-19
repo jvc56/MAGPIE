@@ -8,6 +8,7 @@ covhtml
 *.info
 *.out
 magpie*
+!examples/magpie.py
 dev/*.txt
 perf*
 .env

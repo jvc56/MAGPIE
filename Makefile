@@ -88,7 +88,7 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu libmagpie
+.PHONY: all clean iwyu libmagpie examples
 
 all: magpie magpie_test
 
@@ -119,6 +119,16 @@ $(BIN_DIR)/libmagpie.so: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.map | $(BIN_DIR)
 
 $(BIN_DIR)/libmagpie.dylib: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.exports | $(BIN_DIR)
 	$(CC) -dynamiclib $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,-exported_symbols_list,$(OBJ_DIR)/libmagpie.exports -o $@
+
+# Example programs embedding magpie through the shared library
+ifeq ($(UNAME_S),Darwin)
+EXAMPLE_RPATH := -Wl,-rpath,@loader_path
+else
+EXAMPLE_RPATH := -Wl,-rpath,'$$ORIGIN'
+endif
+
+examples: libmagpie
+	$(CC) -O2 -Wall -Werror examples/generate_moves.c -L$(BIN_DIR) -lmagpie $(EXAMPLE_RPATH) -o $(BIN_DIR)/generate_moves
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
