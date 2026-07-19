@@ -1734,7 +1734,9 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // The move that was just committed is still visible for one more
+  // "shmoves" (a one-turn buffer), consuming the buffered view.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
   // if a rack is present but there are no moves, moves should be automatically
   // generated to find the top play
@@ -1744,7 +1746,8 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // Buffered from the auto-generated top play that was just committed.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
@@ -2557,6 +2560,38 @@ void test_config_utility_blend(void) {
   error_stack_destroy(error_stack);
 }
 
+// "shmoves" should still be able to show the results of a gen/sim command
+// for one more command after a commit changes the position, even though
+// the live move_list is (as always) cleared immediately on commit. The
+// buffered view is consumed after being shown once.
+void test_config_move_list_one_turn_buffer(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -mode sync");
+  assert_config_exec_status(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
+      "0/0 0",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert(move_list_get_count(config_get_move_list(config)) > 0);
+
+  // Committing changes the position and clears the live move list right
+  // away, same as always.
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(move_list_get_count(config_get_move_list(config)) == 0);
+
+  // The next "shmoves" still shows what was generated before the commit...
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+
+  // ...but that buffered view is one-shot, so a second "shmoves" finds
+  // nothing.
+  assert_config_exec_status(config, "shmoves",
+                            ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2575,4 +2610,5 @@ void test_config(void) {
   test_config_fg_required();
   test_config_exchange_blank();
   test_config_utility_blend();
+  test_config_move_list_one_turn_buffer();
 }
