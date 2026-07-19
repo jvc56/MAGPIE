@@ -88,10 +88,60 @@ double nerfed_player_word_confidence(const NerfedPlayer *nerfed_player,
                                      const MachineLetter *word,
                                      int word_length);
 
-// Challenge decision against an opponent's selected move under the given
+// Static challenge assessment: the Bayesian posterior that the play is
+// invalid plus the static-utility expected values of challenging and
+// accepting. attended=false means the play was never evaluated (the
+// attention gate) and must not be challenged.
+typedef struct NerfedChallengeAssessment {
+  double p_invalid;
+  double eu_challenge;
+  double u_accept;
+  double threshold;
+  bool attended;
+} NerfedChallengeAssessment;
+
+// Fills the assessment for an opponent's selected move under the given
 // challenge rule (true = 5-point per word, false = double challenge).
 // opponent (the mover) sets the phony prior: strong opponents' obscure
 // words are credible; NULL means an unnerfed (full-strength) opponent.
+void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
+                                    const NerfedPlayer *opponent, Game *game,
+                                    const Move *move, bool rule_5pt,
+                                    XoshiroPRNG *prng,
+                                    NerfedChallengeAssessment *assessment);
+
+// Static decision from an assessment (adds the decision noise).
+bool nerfed_player_challenge_decide(const NerfedPlayer *nerfed_player,
+                                    const NerfedChallengeAssessment *assessment,
+                                    XoshiroPRNG *prng);
+
+// True when the static decision is close enough that the 3-arm sim
+// chooser (accept / challenge-invalid / challenge-valid worlds) is
+// worth running; clear accepts and clear challenges skip the sims.
+bool nerfed_player_challenge_is_marginal(
+    const NerfedChallengeAssessment *assessment);
+
+// Sim-based decision: world utilities from rollouts (in the same
+// utility scale as the static assessment: win probability plus the
+// spread term), mixed by the posterior —
+//   EU(challenge) = p_invalid * u_off + (1 - p_invalid) * u_fail
+// with the fitted decision noise against the assessment's threshold.
+bool nerfed_player_challenge_decide_simmed(
+    const NerfedPlayer *nerfed_player,
+    const NerfedChallengeAssessment *assessment, double u_accept, double u_off,
+    double u_fail, XoshiroPRNG *prng);
+
+// The static win-utility of a score margin from the perspective of the
+// player holding the margin (win sigmoid plus linear spread term).
+// Used as the terminal/fallback state utility by the sim chooser.
+double nerfed_player_margin_utility(double margin);
+
+// Rollout world utility in the assessment scale: win probability plus
+// the challenge spread term.
+double nerfed_player_challenge_state_utility(double win_probability,
+                                             double spread);
+
+// Convenience wrapper: assess then statically decide.
 bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
                                       const NerfedPlayer *opponent, Game *game,
                                       const Move *move, bool rule_5pt,

@@ -36,6 +36,7 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "move_gen.h"
 #include "nerfed_player.h"
 #include "rack_list.h"
 #include "simmer.h"
@@ -303,6 +304,8 @@ typedef struct AutoplayWorker {
   MoveList *move_lists[2];
   // Lazily created when pX_nerf_rating > 0 (per player index).
   NerfedPlayer *nerfed_players[2];
+  // Scratch move list for the 3-arm challenge world sims.
+  MoveList *challenge_move_list;
   // Phony/challenge flow state (nerf_phony): the real-lexicon KWG for
   // adjudication, the challenge rule, and pending lost turns from double
   // challenges.
@@ -340,6 +343,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   }
   autoplay_worker->nerfed_players[0] = NULL;
   autoplay_worker->nerfed_players[1] = NULL;
+  autoplay_worker->challenge_move_list = NULL;
   autoplay_worker->real_kwg = NULL;
   autoplay_worker->challenge_rule_5pt = false;
   autoplay_worker->skip_turn[0] = false;
@@ -381,6 +385,7 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   autoplay_results_destroy(autoplay_worker->autoplay_results);
   nerfed_player_destroy(autoplay_worker->nerfed_players[0]);
   nerfed_player_destroy(autoplay_worker->nerfed_players[1]);
+  move_list_destroy(autoplay_worker->challenge_move_list);
   kwg_destroy(autoplay_worker->real_kwg);
   prng_destroy(autoplay_worker->prng);
   sim_ctx_destroy(autoplay_worker->sim_ctx);
@@ -738,6 +743,144 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
   return game_runner_get_top_simming_move(autoplay_worker, game_runner);
 }
 
+enum {
+  // Rollout budget per challenge world; the chooser fires only on
+  // marginal decisions so the cost stays rare.
+  AUTOPLAY_CHALLENGE_SIM_ITERS = 240,
+  AUTOPLAY_CHALLENGE_SIM_NUM_PLAYS = 8,
+  // Challenge worlds sim deeper than move selection: the tempo swing of
+  // a lost or gained turn (double challenge) compounds beyond 2 plies,
+  // and a uniform deeper horizon also aligns the three worlds' absolute
+  // depths (they enter the rollout at different points in the turn
+  // cycle).
+  AUTOPLAY_CHALLENGE_SIM_PLIES = 4,
+};
+
+// Utility of a challenge-world state for the challenger: rollout win
+// probability plus the assessment-scale spread term, from the
+// challenger's perspective. Falls back to the static margin utility for
+// terminal states and single-move positions.
+static double autoplay_challenge_state_utility(AutoplayWorker *autoplay_worker,
+                                               Game *state,
+                                               int challenger_index) {
+  const int on_turn_index = game_get_player_on_turn_index(state);
+  const double challenger_spread =
+      equity_to_double(
+          player_get_score(game_get_player(state, challenger_index))) -
+      equity_to_double(
+          player_get_score(game_get_player(state, 1 - challenger_index)));
+  if (game_get_game_end_reason(state) != GAME_END_REASON_NONE) {
+    return nerfed_player_margin_utility(challenger_spread);
+  }
+  if (autoplay_worker->challenge_move_list == NULL) {
+    autoplay_worker->challenge_move_list =
+        move_list_create(AUTOPLAY_CHALLENGE_SIM_NUM_PLAYS);
+  }
+  MoveList *move_list = autoplay_worker->challenge_move_list;
+  move_list_reset(move_list);
+  const MoveGenArgs gen_args = {
+      .game = state,
+      .move_list = move_list,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  if (move_list_get_count(move_list) < 2) {
+    return nerfed_player_margin_utility(challenger_spread);
+  }
+  move_list_sort_moves(move_list);
+  // The challenger runs the world sim in their head: their sim budget,
+  // no inference, fixed small iteration count.
+  SimArgs sim_args = (challenger_index == 0)
+                         ? autoplay_worker->args.p1_sim_args
+                         : autoplay_worker->args.p2_sim_args;
+  sim_args.game = state;
+  sim_args.move_list = move_list;
+  sim_args.num_plays = move_list_get_count(move_list);
+  sim_args.use_inference = false;
+  sim_args.num_plies = AUTOPLAY_CHALLENGE_SIM_PLIES;
+  sim_args.bai_options.sample_limit = AUTOPLAY_CHALLENGE_SIM_ITERS;
+  sim_args.bai_options.sample_minimum = 8;
+  sim_args.bai_options.time_limit_seconds = 0;
+  ErrorStack *error_stack = autoplay_worker->error_stack;
+  simulate(&sim_args, &autoplay_worker->sim_ctx, autoplay_worker->sim_results,
+           error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    return nerfed_player_margin_utility(challenger_spread);
+  }
+  if (autoplay_worker->sim_results != NULL) {
+    atomic_fetch_add_explicit(
+        &autoplay_total_sim_iterations,
+        sim_results_get_iteration_count(autoplay_worker->sim_results),
+        memory_order_relaxed);
+  }
+  const int best_index =
+      sim_results_get_best_move_index(autoplay_worker->sim_results);
+  SimmedPlay *best_play =
+      sim_results_get_simmed_play(autoplay_worker->sim_results, best_index);
+  const double win_mean =
+      stat_get_mean(simmed_play_get_win_pct_stat(best_play));
+  const double spread_mean =
+      stat_get_mean(simmed_play_get_equity_stat(best_play));
+  // Convert to the challenger's perspective and mirror the static
+  // assessment scale (win probability + linear spread utility).
+  const double challenger_win =
+      (on_turn_index == challenger_index) ? win_mean : 1.0 - win_mean;
+  const double challenger_state_spread =
+      (on_turn_index == challenger_index) ? spread_mean : -spread_mean;
+  return nerfed_player_challenge_state_utility(challenger_win,
+                                               challenger_state_spread);
+}
+
+// 3-arm challenge chooser: sims the accept / challenge-invalid /
+// challenge-valid worlds and mixes the challenge worlds by the
+// assessment posterior. game is in the pre-commit state with the mover
+// on turn.
+static bool game_runner_sim_challenge_decision(
+    AutoplayWorker *autoplay_worker, Game *game, const Move *move,
+    bool rule_5pt, int num_formed_words,
+    const NerfedChallengeAssessment *assessment) {
+  const int mover_index = game_get_player_on_turn_index(game);
+  const int challenger_index = 1 - mover_index;
+  Move pass_move;
+  move_set_as_pass(&pass_move);
+  // World: challenge succeeds — the play never commits, the mover's
+  // turn is consumed.
+  Game *world = game_duplicate(game);
+  play_move(&pass_move, world, NULL);
+  const double u_off = autoplay_challenge_state_utility(autoplay_worker, world,
+                                                        challenger_index);
+  game_destroy(world);
+  // World: challenge fails — the play stands plus the penalty.
+  world = game_duplicate(game);
+  play_move(move, world, NULL);
+  if (rule_5pt) {
+    player_add_to_score(game_get_player(world, mover_index),
+                        int_to_equity(5 * num_formed_words));
+  } else if (game_get_game_end_reason(world) == GAME_END_REASON_NONE) {
+    // the lost turn; moot when the play was an outplay that ended the
+    // game
+    play_move(&pass_move, world, NULL);
+  }
+  const double u_fail = autoplay_challenge_state_utility(autoplay_worker, world,
+                                                         challenger_index);
+  game_destroy(world);
+  // World: accept.
+  world = game_duplicate(game);
+  play_move(move, world, NULL);
+  const double u_accept = autoplay_challenge_state_utility(
+      autoplay_worker, world, challenger_index);
+  game_destroy(world);
+  return nerfed_player_challenge_decide_simmed(
+      autoplay_worker->nerfed_players[challenger_index], assessment, u_accept,
+      u_off, u_fail, autoplay_worker->prng);
+}
+
 // Commits a forced pass (skipped turn or a phony coming off the board)
 // with the same bookkeeping as a normal play.
 static const Move *game_runner_commit_pass(GameRunner *game_runner) {
@@ -920,12 +1063,25 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     }
     formed_words_destroy(formed_words);
     const NerfedPlayer *challenger = autoplay_worker->nerfed_players[opp_index];
-    const bool challenged =
-        challenger &&
-        nerfed_player_challenge_decision(
-            challenger, autoplay_worker->nerfed_players[player_on_turn_index],
-            game, move, autoplay_worker->challenge_rule_5pt,
-            autoplay_worker->prng);
+    bool challenged = false;
+    if (challenger) {
+      NerfedChallengeAssessment assessment;
+      nerfed_player_challenge_assess(
+          challenger, autoplay_worker->nerfed_players[player_on_turn_index],
+          game, move, autoplay_worker->challenge_rule_5pt,
+          autoplay_worker->prng, &assessment);
+      if (autoplay_worker->sim_results != NULL &&
+          nerfed_player_challenge_is_marginal(&assessment)) {
+        // 3-arm sim chooser on close calls: expected win challenging
+        // under uncertainty about whether the word is good.
+        challenged = game_runner_sim_challenge_decision(
+            autoplay_worker, game, move, autoplay_worker->challenge_rule_5pt,
+            num_formed_words, &assessment);
+      } else {
+        challenged = nerfed_player_challenge_decide(challenger, &assessment,
+                                                    autoplay_worker->prng);
+      }
+    }
     if (challenged && !all_valid) {
       // phony comes off: the play never commits, the turn is consumed
       autoplay_results_add_phony_event(autoplay_worker->autoplay_results,

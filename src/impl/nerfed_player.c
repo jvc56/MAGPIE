@@ -168,6 +168,10 @@ static const double NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA = 0.020;
 // culture checks everything (attention 1.0 implicit).
 static const double NERFED_CHALLENGE_DOUBLE_ATTENTION = 0.57;
 static const double NERFED_CHALLENGE_5PT_ATTENTION = 0.80;
+// Static-EU margin (utility units) within which the 3-arm sim chooser
+// runs; outside the band the static verdict stands (humans only
+// deliberate over close calls, and world-sims are expensive).
+static const double NERFED_CHALLENGE_SIM_BAND = 0.06;
 
 // Expected-challenge discount when PLAYING risky words: the mover's own
 // capped confidence proxies how challengeable the word looks; expected
@@ -1375,15 +1379,19 @@ static double nerfed_player_pseudo_logplay(int word_length) {
   }
 }
 
-bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
-                                      const NerfedPlayer *opponent, Game *game,
-                                      const Move *move, bool rule_5pt,
-                                      XoshiroPRNG *prng) {
+void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
+                                    const NerfedPlayer *opponent, Game *game,
+                                    const Move *move, bool rule_5pt,
+                                    XoshiroPRNG *prng,
+                                    NerfedChallengeAssessment *assessment) {
+  memset(assessment, 0, sizeof(*assessment));
   const double attention = rule_5pt ? NERFED_CHALLENGE_5PT_ATTENTION
                                     : NERFED_CHALLENGE_DOUBLE_ATTENTION;
   if (nerfed_player_uniform(prng) > attention) {
-    return false;
+    assessment->attended = false;
+    return;
   }
+  assessment->attended = true;
   const double opponent_rating_z =
       (opponent != NULL) ? opponent->rating_z : NERFED_UNNERFED_OPP_RATING_Z;
   double phony_prior = NERFED_OPP_PHONY_PRIOR *
@@ -1463,11 +1471,68 @@ bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
                      margin_after -
                      NERFED_CHALLENGE_DOUBLE_TEMPO_FACTOR * NERFED_TEMPO_VALUE);
   const double eu_challenge = p_invalid * u_off + (1.0 - p_invalid) * u_penalty;
-  const double threshold =
+  assessment->p_invalid = p_invalid;
+  assessment->eu_challenge = eu_challenge;
+  assessment->u_accept = u_accept;
+  assessment->threshold =
       NERFED_CHALLENGE_THRESH_C0 +
       NERFED_CHALLENGE_THRESH_RTG * nerfed_player->rating_z +
       (rule_5pt ? 0.0 : NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA);
+}
+
+bool nerfed_player_challenge_decide(const NerfedPlayer *nerfed_player,
+                                    const NerfedChallengeAssessment *assessment,
+                                    XoshiroPRNG *prng) {
+  (void)nerfed_player;
+  if (!assessment->attended) {
+    return false;
+  }
   const double noise =
       NERFED_CHALLENGE_NOISE * -log(-log(nerfed_player_uniform(prng)));
-  return eu_challenge - u_accept + noise > threshold;
+  return assessment->eu_challenge - assessment->u_accept + noise >
+         assessment->threshold;
+}
+
+bool nerfed_player_challenge_is_marginal(
+    const NerfedChallengeAssessment *assessment) {
+  if (!assessment->attended) {
+    return false;
+  }
+  const double margin =
+      assessment->eu_challenge - assessment->u_accept - assessment->threshold;
+  return fabs(margin) < NERFED_CHALLENGE_SIM_BAND;
+}
+
+bool nerfed_player_challenge_decide_simmed(
+    const NerfedPlayer *nerfed_player,
+    const NerfedChallengeAssessment *assessment, double u_accept, double u_off,
+    double u_fail, XoshiroPRNG *prng) {
+  (void)nerfed_player;
+  if (!assessment->attended) {
+    return false;
+  }
+  const double eu_challenge =
+      assessment->p_invalid * u_off + (1.0 - assessment->p_invalid) * u_fail;
+  const double noise =
+      NERFED_CHALLENGE_NOISE * -log(-log(nerfed_player_uniform(prng)));
+  return eu_challenge - u_accept + noise > assessment->threshold;
+}
+
+double nerfed_player_margin_utility(double margin) {
+  return nerfed_player_win_utility(margin);
+}
+
+double nerfed_player_challenge_state_utility(double win_probability,
+                                             double spread) {
+  return win_probability + NERFED_SPREAD_UTIL * spread;
+}
+
+bool nerfed_player_challenge_decision(const NerfedPlayer *nerfed_player,
+                                      const NerfedPlayer *opponent, Game *game,
+                                      const Move *move, bool rule_5pt,
+                                      XoshiroPRNG *prng) {
+  NerfedChallengeAssessment assessment;
+  nerfed_player_challenge_assess(nerfed_player, opponent, game, move, rule_5pt,
+                                 prng, &assessment);
+  return nerfed_player_challenge_decide(nerfed_player, &assessment, prng);
 }
