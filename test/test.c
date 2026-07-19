@@ -41,6 +41,7 @@
 #include "math_util_test.h"
 #include "move_gen_test.h"
 #include "move_test.h"
+#include "nerfed_player_test.h"
 #include "peg_oracle_test.h"
 #include "peg_pess_test.h"
 #include "peg_poll_test.h"
@@ -146,6 +147,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_default", test_autoplay_default},
     {"ap_wmp", test_autoplay_wmp_correctness},
     {"ap_rest", test_autoplay_remaining},
+    {"nerfed", test_nerfed_player_obscure_word_visibility},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
     {"viamover", test_via_mover_must_bingo_every_depth},
