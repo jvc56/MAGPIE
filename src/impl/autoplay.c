@@ -834,7 +834,7 @@ static double autoplay_challenge_state_utility(AutoplayWorker *autoplay_worker,
   }
   const int best_index =
       sim_results_get_best_move_index(autoplay_worker->sim_results);
-  SimmedPlay *best_play =
+  const SimmedPlay *best_play =
       sim_results_get_simmed_play(autoplay_worker->sim_results, best_index);
   const double win_mean =
       stat_get_mean(simmed_play_get_win_pct_stat(best_play));
@@ -848,6 +848,32 @@ static double autoplay_challenge_state_utility(AutoplayWorker *autoplay_worker,
       (on_turn_index == challenger_index) ? spread_mean : -spread_mean;
   return nerfed_player_challenge_state_utility(challenger_win,
                                                challenger_state_spread);
+}
+
+// Challenge results are public: propagate the revealed verdict for
+// every word of the challenged play to BOTH players. verdict semantics
+// per nerfed_player_reveal_word; for a multi-word play that came off,
+// callers pass 0 (suspect) since which word was phony is ambiguous.
+static void autoplay_reveal_challenge_result(AutoplayWorker *autoplay_worker,
+                                             const FormedWords *formed_words,
+                                             int verdict) {
+  const int num_words = formed_words_get_num_words(formed_words);
+  for (int word_idx = 0; word_idx < num_words; word_idx++) {
+    const int word_length =
+        formed_words_get_word_length(formed_words, word_idx);
+    const MachineLetter *letters =
+        formed_words_get_word(formed_words, word_idx);
+    MachineLetter word[BOARD_DIM];
+    for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+      word[letter_idx] = get_unblanked_machine_letter(letters[letter_idx]);
+    }
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      if (autoplay_worker->nerfed_players[player_idx] != NULL) {
+        nerfed_player_reveal_word(autoplay_worker->nerfed_players[player_idx],
+                                  word, word_length, verdict);
+      }
+    }
+  }
 }
 
 // 3-arm challenge chooser: sims the accept / challenge-invalid /
@@ -1096,6 +1122,21 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       autoplay_worker->challenge_rule_5pt =
           base_name[0] == 'C' || base_name[0] == 'O';
     }
+    // Challenge economics context (idempotent): each nerfed player's EV
+    // of being challenged depends on the rule and the OPPONENT's rating.
+    for (int ctx_player_idx = 0; ctx_player_idx < 2; ctx_player_idx++) {
+      if (autoplay_worker->nerfed_players[ctx_player_idx] == NULL) {
+        continue;
+      }
+      const int ctx_opp_rating = (ctx_player_idx == 0)
+                                     ? autoplay_worker->args.p2_nerf_rating
+                                     : autoplay_worker->args.p1_nerf_rating;
+      const double ctx_opp_z =
+          ctx_opp_rating > 0 ? (ctx_opp_rating - 1500.0) / 300.0 : 2.33;
+      nerfed_player_set_challenge_context(
+          autoplay_worker->nerfed_players[ctx_player_idx],
+          autoplay_worker->challenge_rule_5pt, ctx_opp_z);
+    }
     // adjudicate validity against the real lexicon
     FormedWords *formed_words = formed_words_create(game_get_board(game), move);
     formed_words_populate_validities(autoplay_worker->real_kwg, formed_words,
@@ -1108,7 +1149,6 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         break;
       }
     }
-    formed_words_destroy(formed_words);
     const NerfedPlayer *challenger = autoplay_worker->nerfed_players[opp_index];
     bool challenged = false;
     if (challenger) {
@@ -1130,13 +1170,22 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       }
     }
     if (challenged && !all_valid) {
-      // phony comes off: the play never commits, the turn is consumed
+      // phony comes off: the play never commits, the turn is consumed.
+      // The verdict is public: a single-word play proves the word phony
+      // for BOTH players (it is never attempted again); a multi-word
+      // play leaves which word was phony ambiguous (suspect).
+      autoplay_reveal_challenge_result(autoplay_worker, formed_words,
+                                       num_formed_words == 1 ? -1 : 0);
+      formed_words_destroy(formed_words);
       autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
                                        player_on_turn_index,
                                        PHONY_EVENT_CHALLENGED_OFF);
       return game_runner_commit_pass(game_runner);
     }
     if (challenged && all_valid) {
+      // A failed challenge proves every formed word valid for BOTH
+      // players: solidified knowledge, no repeat challenges.
+      autoplay_reveal_challenge_result(autoplay_worker, formed_words, 1);
       autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
                                        opp_index, PHONY_EVENT_BAD_CHALLENGE);
       if (autoplay_worker->challenge_rule_5pt) {
@@ -1149,6 +1198,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       autoplay_results_add_phony_event(autoplay_worker->autoplay_results,
                                        player_on_turn_index, PHONY_EVENT_STUCK);
     }
+    formed_words_destroy(formed_words);
   }
   play_move(move, game, NULL);
   if (game_runner->game_one_move_behind && game_runner->turn_number > 0) {

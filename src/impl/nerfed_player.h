@@ -76,6 +76,26 @@ void nerfed_player_filter_word_list(const NerfedPlayer *nerfed_player,
 void nerfed_player_set_believed_kwg(NerfedPlayer *nerfed_player,
                                     const KWG *kwg);
 
+// Challenge-economics context: the rule and opponent rating drive the
+// expected value of being challenged (risk of losing the play vs the
+// bait value of eliciting a wrong challenge). Set when the phony/
+// challenge flow is active; without it the legacy flat risk discount
+// applies.
+void nerfed_player_set_challenge_context(NerfedPlayer *nerfed_player,
+                                         bool rule_5pt,
+                                         double opponent_rating_z);
+
+// Challenge results are public knowledge: record the revealed verdict
+// for a word (both players should receive the same reveals).
+// verdict > 0: proven valid (failed challenge) — believed and never
+// challenged again; verdict < 0: proven phony (single-word play came
+// off) — never attempted or challenged again this game; verdict == 0:
+// suspect (a multi-word play came off; which word was phony is
+// ambiguous) — belief reduced, not eliminated.
+void nerfed_player_reveal_word(NerfedPlayer *nerfed_player,
+                               const MachineLetter *word, int word_length,
+                               int verdict);
+
 // Game-level knowledge lifecycle: call at game start (per-player seed)
 // and per turn (enables the small knowledge-flip probability).
 void nerfed_player_start_game(NerfedPlayer *nerfed_player, uint64_t game_seed);

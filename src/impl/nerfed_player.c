@@ -180,6 +180,17 @@ static const double NERFED_OPP_CHALLENGE_RATE = 0.5;
 // Residual doubt about words the player believes they know: subjective
 // P(valid | believed) = 1 - NERFED_KNOW_RISK * (1 - prior).
 static const double NERFED_KNOW_RISK = 0.35;
+// Challenge-bait economics: the mover's model of the opponent's
+// challenge propensity for an unfamiliar-looking word — attention x
+// P(opponent unfamiliar) x engagement. A CONFIDENT mover gains from a
+// wrong challenge (5 pts/word, or the challenger's lost turn under
+// double, valued at NERFED_BAIT_DOUBLE_GAIN points); a doubtful mover
+// risks the play plus tempo. This is what makes an expert intentionally
+// play obscure valid words to elicit challenges.
+static const double NERFED_BAIT_ENGAGE = 0.6;
+static const double NERFED_BAIT_DOUBLE_GAIN = 22.0;
+static const double NERFED_BAIT_5PT_GAIN_PER_WORD = 5.0;
+
 // Own-play confidence in a believed phony (a word from the player's own
 // believed lexicon that is absent from the real one). Corpus phony
 // rates (0.78/game at 1400) prove near-zero self-censorship: people
@@ -305,6 +316,15 @@ enum { NERFED_MAX_WORD_DRAWS = 512 };
 // Maximum simmed arms per turn regardless of -numplays.
 enum { NERFED_MAX_SIM_ARMS = 64 };
 
+enum { NERFED_MAX_REVEALS = 64 };
+
+// A publicly revealed challenge verdict for one word (per game).
+typedef struct NerfedWordReveal {
+  MachineLetter word[BOARD_DIM];
+  uint8_t word_length;
+  int8_t verdict;
+} NerfedWordReveal;
+
 // Per-word phony belief prior (see NERFED_PHONY_BELIEF_* constants).
 typedef struct NerfedPhonyBelief {
   MachineLetter word[BOARD_DIM];
@@ -339,6 +359,7 @@ struct NerfedPlayer {
   // preserved.
   int sim_survivor_indices[NERFED_MOVE_LIST_CAPACITY];
   double sim_survivor_confidence[NERFED_MOVE_LIST_CAPACITY];
+  double sim_survivor_challenge_ev[NERFED_MOVE_LIST_CAPACITY];
   int num_sim_survivors;
   int sim_arm_survivor_idx[NERFED_MAX_SIM_ARMS];
   int num_sim_arms;
@@ -350,6 +371,18 @@ struct NerfedPlayer {
   const KWG *believed_kwg;
   NerfedPhonyBelief *phony_beliefs;
   int num_phony_beliefs;
+  // Challenge results are public: per-game revealed verdicts.
+  // verdict > 0: proven valid; < 0: proven phony (never attempted or
+  // challenged again); == 0: suspect (a multi-word play came off and
+  // one of its words was phony — ambiguous).
+  NerfedWordReveal reveals[NERFED_MAX_REVEALS];
+  int num_reveals;
+  // Challenge-economics context (set when the phony/challenge flow is
+  // active): the rule and the opponent's rating drive the expected
+  // value of being challenged.
+  bool challenge_ctx_set;
+  bool challenge_ctx_rule_5pt;
+  double challenge_ctx_opp_rating_z;
 };
 
 static int nerfed_word_feat_compare(const void *feat_a, const void *feat_b) {
@@ -384,6 +417,20 @@ nerfed_player_lookup_belief(const NerfedPlayer *nerfed_player,
   return (const NerfedPhonyBelief *)bsearch(
       &key, nerfed_player->phony_beliefs, nerfed_player->num_phony_beliefs,
       sizeof(NerfedPhonyBelief), nerfed_phony_belief_compare);
+}
+
+static const NerfedWordReveal *
+nerfed_player_lookup_reveal(const NerfedPlayer *nerfed_player,
+                            const MachineLetter *word, int word_length) {
+  for (int reveal_idx = 0; reveal_idx < nerfed_player->num_reveals;
+       reveal_idx++) {
+    const NerfedWordReveal *reveal = &nerfed_player->reveals[reveal_idx];
+    if (reveal->word_length == word_length &&
+        memcmp(reveal->word, word, word_length) == 0) {
+      return reveal;
+    }
+  }
+  return NULL;
 }
 
 static const NerfedWordFeat *
@@ -545,6 +592,10 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
   nerfed_player->game_seed = 0;
   nerfed_player->turn_number = 0;
   nerfed_player->believed_kwg = NULL;
+  nerfed_player->num_reveals = 0;
+  nerfed_player->challenge_ctx_set = false;
+  nerfed_player->challenge_ctx_rule_5pt = false;
+  nerfed_player->challenge_ctx_opp_rating_z = 0.0;
   return nerfed_player;
 }
 
@@ -571,7 +622,8 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
                                              Game *game, const Move *move,
                                              MachineLetter *rare_word,
                                              int *rare_word_length,
-                                             double *min_confidence_out) {
+                                             double *min_confidence_out,
+                                             double *challenge_ev_out) {
   Board *board = game_get_board(game);
   FormedWords *formed_words = formed_words_create(board, move);
   const int num_words = formed_words_get_num_words(formed_words);
@@ -599,6 +651,9 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
       *rare_word_length = 0;
       if (min_confidence_out) {
         *min_confidence_out = 0.0;
+      }
+      if (challenge_ev_out) {
+        *challenge_ev_out = 0.0;
       }
       return 1.0;
     }
@@ -657,6 +712,55 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
   const double len2 = tiles_length <= 2 ? 1.0 : 0.0;
   const double len7plus = tiles_length >= 7 ? 1.0 : 0.0;
   const double rating_z = nerfed_player->rating_z;
+  if (challenge_ev_out != NULL) {
+    *challenge_ev_out = 0.0;
+    double conf = 1.0;
+    if (min_confidence_out != NULL) {
+      conf = *min_confidence_out;
+    }
+    if (conf < 1.0) {
+      const double subjective_valid = 1.0 - NERFED_KNOW_RISK * (1.0 - conf);
+      const double move_points = equity_to_double(move_get_equity(move));
+      if (!nerfed_player->challenge_ctx_set) {
+        // Legacy risk discount (no challenge flow in this game mode).
+        *challenge_ev_out = -(1.0 - subjective_valid) *
+                            NERFED_OPP_CHALLENGE_RATE *
+                            (move_points + NERFED_TEMPO_VALUE);
+      } else {
+        // Challenge-bait economics: the opponent challenges obscure-
+        // looking words at attention x unfamiliarity; a confident mover
+        // GAINS from a wrong challenge (this is what makes an expert
+        // intentionally play obscure valid words), a doubtful mover
+        // risks the play plus tempo.
+        const double opp_z = nerfed_player->challenge_ctx_opp_rating_z;
+        const double *cf = nerfed_player->miss_coeffs;
+        const int rare_len = *rare_word_length;
+        const double len2r = (rare_len > 0 && rare_len <= 2) ? 1.0 : 0.0;
+        const double len7r = rare_len >= 7 ? 1.0 : 0.0;
+        const double opp_unfamiliar_logit =
+            NERFED_KNOW_OFFSET + cf[0] + cf[1] * opp_z + cf[2] * min_logplay +
+            cf[3] * min_loglit + cf[4] * any_absent + cf[10] * len2r +
+            cf[11] * len7r + cf[12] * opp_z * min_logplay +
+            cf[13] * opp_z * min_loglit + cf[15] * opp_z * len2r +
+            cf[16] * opp_z * len7r;
+        const double p_unfamiliar_opp =
+            1.0 / (1.0 + exp(-opp_unfamiliar_logit));
+        const double attention = nerfed_player->challenge_ctx_rule_5pt
+                                     ? NERFED_CHALLENGE_5PT_ATTENTION
+                                     : NERFED_CHALLENGE_DOUBLE_ATTENTION;
+        const double p_challenge =
+            attention * p_unfamiliar_opp * NERFED_BAIT_ENGAGE;
+        const double gain =
+            nerfed_player->challenge_ctx_rule_5pt
+                ? NERFED_BAIT_5PT_GAIN_PER_WORD * (double)num_words
+                : NERFED_BAIT_DOUBLE_GAIN;
+        *challenge_ev_out =
+            p_challenge *
+            (subjective_valid * gain -
+             (1.0 - subjective_valid) * (move_points + NERFED_TEMPO_VALUE));
+      }
+    }
+  }
   const double features[NERFED_NUM_MISS_COEFFS] = {
       1.0,
       rating_z,
@@ -850,13 +954,14 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
       // The exchange decision was already rolled (and declined) above.
       continue;
     }
+    double challenge_ev = 0.0;
     if (move_get_type(move) == GAME_EVENT_TILE_PLACEMENT_MOVE) {
       MachineLetter rare_word[BOARD_DIM];
       int rare_word_length = 0;
       move_confidence = 1.0;
-      const double miss_probability =
-          nerfed_player_miss_probability(nerfed_player, game, move, rare_word,
-                                         &rare_word_length, &move_confidence);
+      const double miss_probability = nerfed_player_miss_probability(
+          nerfed_player, game, move, rare_word, &rare_word_length,
+          &move_confidence, &challenge_ev);
       // Plays sharing their rarest word share one visibility draw so a
       // word the player does not know is missed at every placement.
       const double uniform =
@@ -876,14 +981,11 @@ const Move *nerfed_player_select_move(NerfedPlayer *nerfed_player, Game *game,
     double base_value = (move_equity == EQUITY_PASS_VALUE)
                             ? -1000.0
                             : equity_to_double(move_equity);
-    // risky-word discount: expected cost of being challenged off, using
-    // subjective validity GIVEN the player believes the word (residual
-    // doubt only); phonies and believed reals are indistinguishable here
-    if (move_confidence < 1.0 && move_equity != EQUITY_PASS_VALUE) {
-      const double subjective_valid =
-          1.0 - NERFED_KNOW_RISK * (1.0 - move_confidence);
-      base_value -= (1.0 - subjective_valid) * NERFED_OPP_CHALLENGE_RATE *
-                    (base_value + NERFED_TEMPO_VALUE);
+    // challenge economics: risk of being challenged off vs the bait
+    // value of eliciting a wrong challenge (computed alongside the
+    // visibility features).
+    if (move_equity != EQUITY_PASS_VALUE) {
+      base_value += challenge_ev;
     }
     const double value = base_value + gumbel_noise;
     if (chosen == NULL || value > chosen_value) {
@@ -923,9 +1025,10 @@ const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
     MachineLetter rare_word[BOARD_DIM];
     int rare_word_length = 0;
     double move_confidence = 1.0;
-    const double miss_probability =
-        nerfed_player_miss_probability(nerfed_player, game, move, rare_word,
-                                       &rare_word_length, &move_confidence);
+    double challenge_ev = 0.0;
+    const double miss_probability = nerfed_player_miss_probability(
+        nerfed_player, game, move, rare_word, &rare_word_length,
+        &move_confidence, &challenge_ev);
     // Plays sharing their rarest word share one visibility draw so a
     // word the player does not know is missed at every placement.
     const double uniform =
@@ -939,6 +1042,7 @@ const Move *nerfed_player_prepare_sim_arms(NerfedPlayer *nerfed_player,
     const int survivor_idx = nerfed_player->num_sim_survivors;
     nerfed_player->sim_survivor_indices[survivor_idx] = move_idx;
     nerfed_player->sim_survivor_confidence[survivor_idx] = move_confidence;
+    nerfed_player->sim_survivor_challenge_ev[survivor_idx] = challenge_ev;
     nerfed_player->num_sim_survivors++;
     if (nerfed_player->num_sim_survivors >= NERFED_MOVE_LIST_CAPACITY) {
       break;
@@ -1020,7 +1124,8 @@ static double nerfed_player_sim_disagreement(
     double baseline_static_points, double static_points,
     double utility_w_winpct, double utility_w_spread,
     double utility_spread_scale) {
-  SimmedPlay *simmed_play = sim_results_get_simmed_play(sim_results, play_idx);
+  const SimmedPlay *simmed_play =
+      sim_results_get_simmed_play(sim_results, play_idx);
   const uint64_t num_samples =
       stat_get_num_samples(simmed_play_get_win_pct_stat(simmed_play));
   if (num_samples == 0) {
@@ -1055,7 +1160,7 @@ const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
       move_list_get_move(move_list, nerfed_player->sim_survivor_indices[0]);
   const double baseline_static_points =
       equity_to_double(move_get_equity(baseline_move));
-  SimmedPlay *baseline_play = sim_results_get_simmed_play(sim_results, 0);
+  const SimmedPlay *baseline_play = sim_results_get_simmed_play(sim_results, 0);
   const double baseline_utility = sim_utility_blend(
       stat_get_mean(simmed_play_get_win_pct_stat(baseline_play)),
       double_to_equity(
@@ -1085,16 +1190,9 @@ const Move *nerfed_player_pick_simmed_move(NerfedPlayer *nerfed_player,
                    utility_w_spread, utility_spread_scale);
       arm_cursor++;
     }
-    // risky-word discount, as in the static path: expected cost of
-    // being challenged off given residual doubt.
-    const double move_confidence =
-        nerfed_player->sim_survivor_confidence[survivor_idx];
-    if (move_confidence < 1.0) {
-      const double subjective_valid =
-          1.0 - NERFED_KNOW_RISK * (1.0 - move_confidence);
-      value -= (1.0 - subjective_valid) * NERFED_OPP_CHALLENGE_RATE *
-               (static_points + NERFED_TEMPO_VALUE);
-    }
+    // challenge economics, as in the static path (risk of being
+    // challenged off vs the bait value of eliciting a wrong challenge).
+    value += nerfed_player->sim_survivor_challenge_ev[survivor_idx];
     const double uniform = nerfed_player_uniform(prng);
     const double gumbel_noise =
         -nerfed_player->sigma * NERFED_SIM_SIGMA_SCALE * log(-log(uniform));
@@ -1156,6 +1254,14 @@ bool nerfed_player_knows_word(const NerfedPlayer *nerfed_player,
 double nerfed_player_word_confidence(const NerfedPlayer *nerfed_player,
                                      const MachineLetter *word,
                                      int word_length) {
+  const NerfedWordReveal *reveal =
+      nerfed_player_lookup_reveal(nerfed_player, word, word_length);
+  if (reveal != NULL && reveal->verdict > 0) {
+    return 0.98;
+  }
+  if (reveal != NULL && reveal->verdict < 0) {
+    return 0.02;
+  }
   const NerfedWordFeat *feat =
       nerfed_player_lookup_word(nerfed_player, word, word_length);
   double logplay = NERFED_DEFAULT_LOGPLAY;
@@ -1277,6 +1383,7 @@ void nerfed_player_pick_endgame_pv(const NerfedPlayer *nerfed_player,
 }
 
 void nerfed_player_start_game(NerfedPlayer *nerfed_player, uint64_t game_seed) {
+  nerfed_player->num_reveals = 0;
   nerfed_player->game_seed = game_seed;
   nerfed_player->turn_number = 0;
 }
@@ -1293,8 +1400,48 @@ void nerfed_player_set_believed_kwg(NerfedPlayer *nerfed_player,
   nerfed_player->believed_kwg = kwg;
 }
 
+void nerfed_player_set_challenge_context(NerfedPlayer *nerfed_player,
+                                         bool rule_5pt,
+                                         double opponent_rating_z) {
+  nerfed_player->challenge_ctx_set = true;
+  nerfed_player->challenge_ctx_rule_5pt = rule_5pt;
+  nerfed_player->challenge_ctx_opp_rating_z = opponent_rating_z;
+}
+
+void nerfed_player_reveal_word(NerfedPlayer *nerfed_player,
+                               const MachineLetter *word, int word_length,
+                               int verdict) {
+  NerfedWordReveal *existing = (NerfedWordReveal *)nerfed_player_lookup_reveal(
+      nerfed_player, word, word_length);
+  if (existing != NULL) {
+    // A definitive verdict overrides an earlier suspect marking.
+    if (verdict != 0) {
+      existing->verdict = (int8_t)verdict;
+    }
+    return;
+  }
+  if (nerfed_player->num_reveals >= NERFED_MAX_REVEALS) {
+    return;
+  }
+  NerfedWordReveal *reveal =
+      &nerfed_player->reveals[nerfed_player->num_reveals++];
+  memcpy(reveal->word, word, word_length);
+  reveal->word_length = (uint8_t)word_length;
+  reveal->verdict = (int8_t)verdict;
+}
+
 bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
                                  const MachineLetter *word, int word_length) {
+  const NerfedWordReveal *reveal =
+      nerfed_player_lookup_reveal(nerfed_player, word, word_length);
+  if (reveal != NULL && reveal->verdict > 0) {
+    return true;
+  }
+  if (reveal != NULL && reveal->verdict < 0) {
+    // A challenge proved this word phony; it is never attempted (or
+    // challenged) again this game.
+    return false;
+  }
   bool base;
   const bool is_real_word =
       nerfed_player_lookup_word(nerfed_player, word, word_length) != NULL;
@@ -1318,6 +1465,10 @@ bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
                           : NERFED_PHONY_BELIEF_TWL_EXTRA) +
                      (belief->xfam ? NERFED_PHONY_BELIEF_XFAM_OFFSET : 0.0) +
                      slope * nerfed_player->rating_z;
+    }
+    if (reveal != NULL && reveal->verdict == 0) {
+      // One word of a challenged-off play was phony; this might be it.
+      belief_logit -= 2.0;
     }
     const double p_believe = 1.0 / (1.0 + exp(-belief_logit));
     const uint64_t belief_hash = nerfed_player_word_hash(
