@@ -125,13 +125,24 @@ static const double NERFED_CHALLENGE_NOISE = 0.004;
 static const double NERFED_CHALLENGE_DOUBLE_TEMPO_FACTOR = 0.35;
 // Prior probability an opponent's play is a phony: the act of playing a
 // word is strong evidence of validity, so the challenge decision uses the
-// Bayesian posterior, not raw unfamiliarity. The prior depends on WHO
-// played the word: corpus phony rates per play run ~5x higher at 1000
-// than at 2200, so a strong opponent's obscure word is far more credible
-// (a flat prior floods weak challengers with bad challenges against
-// experts). Scaled by exp(-slope * opponent_rating_z), clamped.
+// Bayesian posterior, not raw unfamiliarity. Two rating dependencies,
+// both keyed on the CHALLENGER's own rating:
+//  - Base prior falls with challenger rating: weak players believe
+//    phonies are everywhere (they and their peers play them constantly)
+//    and challenge liberally; experts hold a low base and challenge
+//    selectively.
+//  - Opponent-strength tracking rises with challenger rating: an expert
+//    correctly credits a strong opponent's obscure word (a 2200's word
+//    is rarely a phony), but a weak player does no such reasoning -- they
+//    challenge the weird-looking word regardless of who played it. The
+//    opponent-rating slope is therefore scaled by a sigmoid of the
+//    challenger's rating (near 0 for beginners, near 1 for experts).
+// Corpus: matched-rating successful challenges run 0.47/game at 1000 ->
+// 0.21 at 2000, and a weak player challenges a strong opponent's obscure
+// words at nearly the same rate as a peer's -- opponent-blind.
 static const double NERFED_OPP_PHONY_PRIOR = 0.04;
 static const double NERFED_OPP_PHONY_PRIOR_RTG = 0.40;
+static const double NERFED_OPP_PHONY_PRIOR_CHALLENGER_RTG = 0.35;
 static const double NERFED_OPP_PHONY_PRIOR_MIN = 0.005;
 static const double NERFED_OPP_PHONY_PRIOR_MAX = 0.15;
 // Opponent rating z assumed for an unnerfed (full-strength) opponent.
@@ -1545,8 +1556,18 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
   assessment->attended = true;
   const double opponent_rating_z =
       (opponent != NULL) ? opponent->rating_z : NERFED_UNNERFED_OPP_RATING_Z;
-  double phony_prior = NERFED_OPP_PHONY_PRIOR *
-                       exp(-NERFED_OPP_PHONY_PRIOR_RTG * opponent_rating_z);
+  const double challenger_z = nerfed_player->rating_z;
+  // Base prior: boosted for weak challengers (they see phonies
+  // everywhere), unchanged at/above average so the calibrated
+  // matched-rating rates for strong players are preserved.
+  const double base_prior =
+      NERFED_OPP_PHONY_PRIOR *
+      exp(-NERFED_OPP_PHONY_PRIOR_CHALLENGER_RTG * fmin(challenger_z, 0.0));
+  // Opponent-strength tracking: ~0 for beginners (opponent-blind), ~1 for
+  // experts (credit a strong opponent's obscure word).
+  const double opponent_tracking = 1.0 / (1.0 + exp(-challenger_z));
+  double phony_prior = base_prior * exp(-NERFED_OPP_PHONY_PRIOR_RTG *
+                                        opponent_tracking * opponent_rating_z);
   if (phony_prior < NERFED_OPP_PHONY_PRIOR_MIN) {
     phony_prior = NERFED_OPP_PHONY_PRIOR_MIN;
   }
