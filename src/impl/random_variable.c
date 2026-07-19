@@ -21,6 +21,7 @@
 #include "../util/io_util.h"
 #include "bai_logger.h"
 #include "gameplay.h"
+#include <float.h>
 #include <math.h>
 #include <stdatomic.h>
 #include <stddef.h>
@@ -375,6 +376,12 @@ typedef struct SimmerWorker {
   Game *game;
   MoveList *move_list;
   XoshiroPRNG *prng;
+  // Nested-lookahead scratch state (lazily created when the nested tier
+  // is enabled): a scratch game for trying candidates and lists for the
+  // candidates and the opponent's best static reply.
+  Game *lookahead_game;
+  MoveList *candidate_list;
+  MoveList *reply_list;
 } SimmerWorker;
 
 typedef struct Simmer {
@@ -403,6 +410,8 @@ typedef struct Simmer {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  int nested_lookahead_plays;
+  double rollout_opp_sigma;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -413,6 +422,9 @@ SimmerWorker *simmer_create_worker(const Game *game) {
   game_set_backup_mode(simmer_worker->game, BACKUP_MODE_SIMULATION);
   simmer_worker->move_list = move_list_create(1);
   simmer_worker->prng = prng_create(0);
+  simmer_worker->lookahead_game = NULL;
+  simmer_worker->candidate_list = NULL;
+  simmer_worker->reply_list = NULL;
   return simmer_worker;
 }
 
@@ -428,6 +440,115 @@ void simmer_worker_destroy(SimmerWorker *simmer_worker) {
   move_list_destroy(simmer_worker->move_list);
   prng_destroy(simmer_worker->prng);
   free(simmer_worker);
+  if (simmer_worker->lookahead_game != NULL) {
+    game_destroy(simmer_worker->lookahead_game);
+  }
+  move_list_destroy(simmer_worker->candidate_list);
+  move_list_destroy(simmer_worker->reply_list);
+}
+
+enum { SIMMER_OPP_NOISE_CANDIDATES = 8 };
+
+// Exploitative rollout policy: the opponent inside the rollout picks
+// among the top static candidates with Gumbel valuation noise of the
+// modeled sigma, instead of playing perfectly.
+static const Move *simmer_get_noisy_opp_move(const Simmer *simmer,
+                                             SimmerWorker *simmer_worker,
+                                             Game *game) {
+  if (simmer_worker->candidate_list == NULL) {
+    simmer_worker->candidate_list =
+        move_list_create(SIMMER_OPP_NOISE_CANDIDATES);
+  }
+  MoveList *candidates = simmer_worker->candidate_list;
+  move_list_reset(candidates);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = candidates,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  const int candidate_count = move_list_get_count(candidates);
+  if (candidate_count == 0) {
+    return get_top_equity_move(game, simmer_worker->move_list);
+  }
+  int best_index = 0;
+  double best_value = -DBL_MAX;
+  for (int candidate_index = 0; candidate_index < candidate_count;
+       candidate_index++) {
+    const Move *candidate = move_list_get_move(candidates, candidate_index);
+    const double uniform =
+        ((double)(prng_next(simmer_worker->prng) >> 11) + 0.5) /
+        9007199254740992.0;
+    const double value = equity_to_double(move_get_equity(candidate)) -
+                         simmer->rollout_opp_sigma * log(-log(uniform));
+    if (value > best_value) {
+      best_value = value;
+      best_index = candidate_index;
+    }
+  }
+  return move_list_get_move(candidates, best_index);
+}
+
+// Nested-sim tier rollout policy: choose among the top-K static
+// candidates by candidate equity minus the opponent's best static reply
+// (1-level lookahead). Falls back to the top candidate when the game
+// ends immediately or only one candidate exists.
+static const Move *simmer_get_lookahead_move(const Simmer *simmer,
+                                             SimmerWorker *simmer_worker,
+                                             Game *game) {
+  if (simmer_worker->lookahead_game == NULL) {
+    simmer_worker->lookahead_game = game_duplicate(game);
+    simmer_worker->candidate_list =
+        move_list_create(simmer->nested_lookahead_plays);
+    simmer_worker->reply_list = move_list_create(1);
+  }
+  MoveList *candidates = simmer_worker->candidate_list;
+  move_list_reset(candidates);
+  const MoveGenArgs gen_args = {
+      .game = game,
+      .move_list = candidates,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  const int candidate_count = move_list_get_count(candidates);
+  if (candidate_count == 0) {
+    return get_top_equity_move(game, simmer_worker->move_list);
+  }
+  move_list_sort_moves(candidates);
+  if (candidate_count == 1) {
+    return move_list_get_move(candidates, 0);
+  }
+  int best_index = 0;
+  double best_value = -DBL_MAX;
+  for (int candidate_index = 0; candidate_index < candidate_count;
+       candidate_index++) {
+    const Move *candidate = move_list_get_move(candidates, candidate_index);
+    game_copy(simmer_worker->lookahead_game, game);
+    game_set_backup_mode(simmer_worker->lookahead_game, BACKUP_MODE_OFF);
+    play_move(candidate, simmer_worker->lookahead_game, NULL);
+    double value = equity_to_double(move_get_equity(candidate));
+    if (game_get_game_end_reason(simmer_worker->lookahead_game) ==
+        GAME_END_REASON_NONE) {
+      const Move *reply = get_top_equity_move(simmer_worker->lookahead_game,
+                                              simmer_worker->reply_list);
+      value -= equity_to_double(move_get_equity(reply));
+    }
+    if (value > best_value) {
+      best_value = value;
+      best_index = candidate_index;
+    }
+  }
+  return move_list_get_move(candidates, best_index);
 }
 
 double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
@@ -506,7 +627,15 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play;
+    if (simmer->rollout_opp_sigma > 0.0 &&
+        player_on_turn_index != simmer->initial_player) {
+      best_play = simmer_get_noisy_opp_move(simmer, simmer_worker, game);
+    } else if (simmer->nested_lookahead_plays > 0) {
+      best_play = simmer_get_lookahead_move(simmer, simmer_worker, game);
+    } else {
+      best_play = get_top_equity_move(game, move_list);
+    }
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
 
     // On the final ply the resulting cross-sets are never read (no further move
@@ -635,6 +764,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->nested_lookahead_plays = sim_args->nested_lookahead_plays;
+  simmer->rollout_opp_sigma = sim_args->rollout_opp_sigma;
 
   simmer->thread_control = thread_control;
 
@@ -687,6 +818,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->nested_lookahead_plays = sim_args->nested_lookahead_plays;
+  simmer->rollout_opp_sigma = sim_args->rollout_opp_sigma;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

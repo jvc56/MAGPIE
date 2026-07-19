@@ -161,6 +161,10 @@ typedef enum {
   ARG_TOKEN_NERF_SAMPLES,
   ARG_TOKEN_NERF_PHONY,
   ARG_TOKEN_PEG_LOG,
+  ARG_TOKEN_P1_NESTED_LOOKAHEAD,
+  ARG_TOKEN_P2_NESTED_LOOKAHEAD,
+  ARG_TOKEN_P1_EXPLOIT_OPP,
+  ARG_TOKEN_P2_EXPLOIT_OPP,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_USE_HEAT_MAP,
@@ -327,6 +331,10 @@ struct Config {
   int nerf_samples;
   bool nerf_phony;
   bool peg_log;
+  int p1_nested_lookahead;
+  int p2_nested_lookahead;
+  bool p1_exploit_opp;
+  bool p2_exploit_opp;
   bool sim_with_inference;
   bool use_heat_map;
   bool print_boards;
@@ -1752,6 +1760,20 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(the default) disables nerfing. Requires "
              "data/lexica/<lexicon>_wordfeats.csv.";
       break;
+    case ARG_TOKEN_P1_EXPLOIT_OPP:
+    case ARG_TOKEN_P2_EXPLOIT_OPP:
+      usages[0] = "<true|false>";
+      text = "Exploitative rollouts for player 1 or 2 during autoplay: the "
+             "sim models the (nerfed) opponent's fitted valuation noise "
+             "instead of a perfect opponent.";
+      break;
+    case ARG_TOKEN_P1_NESTED_LOOKAHEAD:
+    case ARG_TOKEN_P2_NESTED_LOOKAHEAD:
+      usages[0] = "<candidates>";
+      text = "Nested-sim tier for player 1 or 2 during autoplay: rollout "
+             "plies choose among this many top static candidates by 1-level "
+             "lookahead. 0 (the default) disables nesting.";
+      break;
     case ARG_TOKEN_PEG_LOG:
       usages[0] = "<true|false>";
       text = "Autoplay validation logging: append pre-endgame positions "
@@ -2274,12 +2296,16 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_MIN_PLAY_ITERATIONS, /* mi1 */
         ARG_TOKEN_P2_MIN_PLAY_ITERATIONS, /* mi2 */
         ARG_TOKEN_MIN_PLAY_ITERATIONS,    /* minplayiterations */
+        ARG_TOKEN_P1_EXPLOIT_OPP,         /* exploit1 */
+        ARG_TOKEN_P2_EXPLOIT_OPP,         /* exploit2 */
         ARG_TOKEN_MOVEGEN_MARGIN,         /* mmargin */
         ARG_TOKEN_MULTI_THREADING_MODE,   /* mtmode */
         ARG_TOKEN_P1_NERF_RATING,         /* nerf1 */
         ARG_TOKEN_P2_NERF_RATING,         /* nerf2 */
         ARG_TOKEN_NERF_SAMPLES,
         ARG_TOKEN_NERF_PHONY,              /* nerfsamples */
+        ARG_TOKEN_P1_NESTED_LOOKAHEAD,     /* nest1 */
+        ARG_TOKEN_P2_NESTED_LOOKAHEAD,     /* nest2 */
         ARG_TOKEN_NUMBER_OF_PLAYS,         /* numplays */
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
@@ -3636,6 +3662,20 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p2_nerf_rating = config->p2_nerf_rating;
   autoplay_args->nerf_phony = config->nerf_phony;
   autoplay_args->peg_log = config->peg_log;
+  autoplay_args->p1_sim_args.nested_lookahead_plays =
+      config->p1_nested_lookahead;
+  autoplay_args->p2_sim_args.nested_lookahead_plays =
+      config->p2_nested_lookahead;
+  // Exploitative rollouts: model the opponent's fitted valuation noise
+  // inside the sim when the opponent is nerfed.
+  autoplay_args->p1_sim_args.rollout_opp_sigma =
+      (config->p1_exploit_opp && config->p2_nerf_rating > 0)
+          ? nerfed_player_sigma_for_rating(config->p2_nerf_rating)
+          : 0.0;
+  autoplay_args->p2_sim_args.rollout_opp_sigma =
+      (config->p2_exploit_opp && config->p1_nerf_rating > 0)
+          ? nerfed_player_sigma_for_rating(config->p1_nerf_rating)
+          : 0.0;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -7095,6 +7135,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_int(config, ARG_TOKEN_P1_NESTED_LOOKAHEAD, 0, 16,
+                  &config->p1_nested_lookahead, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_P2_NESTED_LOOKAHEAD, 0, 16,
+                  &config->p2_nested_lookahead, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P1_EXPLOIT_OPP, &config->p1_exploit_opp,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_bool(config, ARG_TOKEN_P2_EXPLOIT_OPP, &config->p2_exploit_opp,
+                   error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
@@ -8550,6 +8610,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_NERF_SAMPLES, "nerfsamples", 1, 1);
   arg(ARG_TOKEN_NERF_PHONY, "nerfphony", 1, 1);
   arg(ARG_TOKEN_PEG_LOG, "peglog", 1, 1);
+  arg(ARG_TOKEN_P1_NESTED_LOOKAHEAD, "nest1", 1, 1);
+  arg(ARG_TOKEN_P2_NESTED_LOOKAHEAD, "nest2", 1, 1);
+  arg(ARG_TOKEN_P1_EXPLOIT_OPP, "exploit1", 1, 1);
+  arg(ARG_TOKEN_P2_EXPLOIT_OPP, "exploit2", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
@@ -8686,6 +8750,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->nerf_samples = 1;
   config->nerf_phony = false;
   config->peg_log = false;
+  config->p1_nested_lookahead = 0;
+  config->p2_nested_lookahead = 0;
+  config->p1_exploit_opp = false;
+  config->p2_exploit_opp = false;
   config->human_readable = true;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
@@ -9179,6 +9247,22 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_PEG_LOG:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->peg_log);
+      break;
+    case ARG_TOKEN_P1_NESTED_LOOKAHEAD:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p1_nested_lookahead);
+      break;
+    case ARG_TOKEN_P2_NESTED_LOOKAHEAD:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->p2_nested_lookahead);
+      break;
+    case ARG_TOKEN_P1_EXPLOIT_OPP:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p1_exploit_opp);
+      break;
+    case ARG_TOKEN_P2_EXPLOIT_OPP:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->p2_exploit_opp);
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

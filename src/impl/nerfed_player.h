@@ -131,6 +131,10 @@ bool nerfed_player_challenge_decide_simmed(
     const NerfedChallengeAssessment *assessment, double u_accept, double u_off,
     double u_fail, XoshiroPRNG *prng);
 
+// The fitted valuation-noise sigma (equity points) for a target rating.
+// Used by exploitative rollouts to model a nerfed opponent's dispersion.
+double nerfed_player_sigma_for_rating(int rating);
+
 // The static win-utility of a score margin from the perspective of the
 // player holding the margin (win sigmoid plus linear spread term).
 // Used as the terminal/fallback state utility by the sim chooser.

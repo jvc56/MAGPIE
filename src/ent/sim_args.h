@@ -37,6 +37,16 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Nested-sim tier: when > 0, rollout plies choose among the top-K
+  // static candidates by 1-level lookahead (candidate equity minus the
+  // best static reply) instead of pure top equity — players inside the
+  // rollout think ahead. Roughly K+2x rollout cost.
+  int nested_lookahead_plays;
+  // Exploitative rollouts: when > 0, rollout plies for the NON-initial
+  // player pick among the top static candidates with Gumbel noise of
+  // this sigma (equity points) — the simmer models a fallible opponent
+  // instead of a perfect one.
+  double rollout_opp_sigma;
 } SimArgs;
 
 static inline void
@@ -90,6 +100,8 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = 1.0;
   sim_args->utility_w_spread = 0.0;
   sim_args->utility_spread_scale = 100.0;
+  sim_args->nested_lookahead_plays = 0;
+  sim_args->rollout_opp_sigma = 0.0;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

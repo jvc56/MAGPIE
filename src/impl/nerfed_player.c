@@ -1518,6 +1518,11 @@ bool nerfed_player_challenge_decide_simmed(
   return eu_challenge - u_accept + noise > assessment->threshold;
 }
 
+double nerfed_player_sigma_for_rating(int rating) {
+  const double rating_z = (rating - 1500.0) / 300.0;
+  return exp(NERFED_SIGMA_C0 + NERFED_SIGMA_C1 * rating_z);
+}
+
 double nerfed_player_margin_utility(double margin) {
   return nerfed_player_win_utility(margin);
 }
