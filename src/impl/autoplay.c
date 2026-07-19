@@ -578,7 +578,12 @@ const Move *game_runner_get_top_simming_move(AutoplayWorker *autoplay_worker,
   const bool player_uses_inference = sim_args->use_inference;
   sim_args->use_inference =
       player_uses_inference && game_runner->turn_number > 0 &&
-      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS;
+      move_get_type(&game_runner->previous_move) != GAME_EVENT_PASS &&
+      // Inference cannot reconcile a game history with challenged-off
+      // phonies (returned tiles, skipped turns), and looping to find a
+      // consistent opponent rack hangs. The nerfed sim path disables
+      // inference for the same reason.
+      !autoplay_worker->args.nerf_phony;
   if (sim_args->use_inference) {
     InferenceArgs *infer_args = &sim_args->inference_args;
     // Set target played tiles
@@ -1162,7 +1167,15 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
           challenger, autoplay_worker->nerfed_players[player_on_turn_index],
           game, move, autoplay_worker->challenge_rule_5pt,
           autoplay_worker->prng, &assessment);
+      // The 3-arm chooser sims the challenge worlds using the CHALLENGER's
+      // sim args, so it is only valid when the challenger is itself a
+      // simming player (a static challenger's args are not configured for
+      // simulation). A static challenger uses the static decision.
+      const SimArgs *challenger_sim_args =
+          (opp_index == 0) ? &autoplay_worker->args.p1_sim_args
+                           : &autoplay_worker->args.p2_sim_args;
       if (autoplay_worker->sim_results != NULL &&
+          challenger_sim_args->num_plies > 0 &&
           nerfed_player_challenge_is_marginal(&assessment)) {
         // 3-arm sim chooser on close calls: expected win challenging
         // under uncertainty about whether the word is good.
