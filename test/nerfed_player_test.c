@@ -1,8 +1,12 @@
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
+#include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/nerfed_player.h"
+#include "../src/impl/simmer.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
 #include <assert.h>
@@ -112,4 +116,154 @@ void test_nerfed_player_obscure_word_visibility(void) {
     assert(strong_finds >= strong_min);
     assert(strong_finds > weak_finds);
   }
+}
+
+// ---------------------------------------------------------------------------
+// A simming 2200 facing a 1000, opening rack ACHLMY + blank. The rack makes
+// two same-scoring bingos: ALCHEMY (common, literacy -0.5, blank = E) and
+// ALCHYMY (its floor-obscure archaic variant, blank = Y). On the calibrated
+// model the two sim within ~1% win probability of each other, with the
+// common word marginally ahead -- so a plain simmer has no reason to prefer
+// the obscure one. But against a weak opponent under double challenge the
+// challenge-bait EV (the 1000 is likely unfamiliar with ALCHYMY and may
+// wrongly challenge it, forfeiting a turn) makes the expert prefer the
+// obscure word to invite the challenge.
+//
+// The sim runs once and the noisy pick is looped cheaply; the bait context is
+// the only difference between the two pick batches. Under the null "baiting
+// does not increase obscure picks" the obscure picks are exchangeable between
+// the (independent) batches, so the bait-batch count is Binomial(total, 0.5).
+// The test rejects that null.
+#define BAIT_RACK "ACHLMY?"
+#define BAIT_PICKS 200
+// Visibility seed under which both bingos survive the 2200 gate and are
+// simmed (a floor-obscure word is only visible to a 2200 ~45% of the time,
+// so the arm set is frozen to a seed where ALCHYMY is present).
+#define BAIT_ARM_SEED 8
+#define BAIT_PICK_SEED 999
+#define BAIT_ALPHA 1.0e-4
+// The two bingos must sim within this window (a genuinely close decision) for
+// the bait to be what tips it.
+#define BAIT_SIM_NEAR_TIE 0.06
+
+// Classifies a bingo by the letter its blank represents: 'E' -> ALCHEMY
+// (common), 'Y' -> ALCHYMY (obscure), else other (e.g. CHLAMYS).
+static char bait_blank_letter(const Move *move, MachineLetter e_ml,
+                              MachineLetter y_ml) {
+  const int tiles = move_get_tiles_length(move);
+  for (int i = 0; i < tiles; i++) {
+    const MachineLetter tile = move_get_tile(move, i);
+    if (get_is_blanked(tile)) {
+      const MachineLetter unblanked = get_unblanked_machine_letter(tile);
+      if (unblanked == e_ml) {
+        return 'E';
+      }
+      if (unblanked == y_ml) {
+        return 'Y';
+      }
+    }
+  }
+  return '?';
+}
+
+// Number of the BAIT_PICKS noisy picks (over the shared sim results) that
+// chose the obscure ALCHYMY.
+static int bait_count_obscure(NerfedPlayer *nerfed_player, Config *config,
+                              const SimResults *sim_results, MachineLetter e_ml,
+                              MachineLetter y_ml, uint64_t pick_seed) {
+  XoshiroPRNG *pick_prng = prng_create(pick_seed);
+  int obscure = 0;
+  for (int pick = 0; pick < BAIT_PICKS; pick++) {
+    const Move *move = nerfed_player_pick_simmed_move(
+        nerfed_player, sim_results, config_get_utility_w_winpct(config),
+        config_get_utility_w_spread(config),
+        config_get_utility_spread_scale(config), pick_prng);
+    if (bait_blank_letter(move, e_ml, y_ml) == 'Y') {
+      obscure++;
+    }
+  }
+  prng_destroy(pick_prng);
+  return obscure;
+}
+
+void test_nerfed_player_bait_prefers_obscure(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL23 -wmp true -s1 equity -s2 equity -numplays 20 -plies 2 "
+      "-threads 1 -iter 160 -scond none -seed 3 -uspread 0.5");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 " BAIT_RACK "/ 0/0 0");
+  // Allocate config->move_list (prepare_sim_arms refills it in place, and
+  // config_simulate sims over it).
+  load_and_exec_config_or_die(config, "gen");
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  MachineLetter e_ml, y_ml;
+  ld_str_to_mls(ld, "E", false, &e_ml, 1);
+  ld_str_to_mls(ld, "Y", false, &y_ml, 1);
+  ErrorStack *error_stack = error_stack_create();
+
+  // Baseline expert (no bait): gate + stratify the arms, sim them once.
+  NerfedPlayer *baseline = nerfed_player_create(game, 2200, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  XoshiroPRNG *arm_prng = prng_create(BAIT_ARM_SEED);
+  const Move *decided = nerfed_player_prepare_sim_arms(
+      baseline, game, config_get_move_list(config), arm_prng);
+  assert(decided == NULL);
+  SimCtx *sim_ctx = NULL;
+  config_simulate(config, &sim_ctx, NULL, config_get_sim_results(config), NULL,
+                  0, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  const SimResults *sim_results = config_get_sim_results(config);
+
+  // Premise: both bingos are simmed and the decision is a near-tie.
+  int e_index = -1;
+  int y_index = -1;
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  for (int play = 0; play < num_plays; play++) {
+    const Move *move =
+        simmed_play_get_move(sim_results_get_simmed_play(sim_results, play));
+    const char which = bait_blank_letter(move, e_ml, y_ml);
+    if (which == 'E') {
+      e_index = play;
+    } else if (which == 'Y') {
+      y_index = play;
+    }
+  }
+  assert(e_index >= 0 && y_index >= 0);
+  const double win_common = stat_get_mean(simmed_play_get_win_pct_stat(
+      sim_results_get_simmed_play(sim_results, e_index)));
+  const double win_obscure = stat_get_mean(simmed_play_get_win_pct_stat(
+      sim_results_get_simmed_play(sim_results, y_index)));
+  assert(fabs(win_common - win_obscure) < BAIT_SIM_NEAR_TIE);
+
+  const int baseline_obscure = bait_count_obscure(baseline, config, sim_results,
+                                                  e_ml, y_ml, BAIT_PICK_SEED);
+
+  // Exploitative expert (bait): identical arms (same visibility seed), so the
+  // shared sim results still apply; only the challenge context differs.
+  NerfedPlayer *baiter = nerfed_player_create(game, 2200, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  nerfed_player_set_challenge_context(baiter, false, (1000.0 - 1500.0) / 300.0);
+  XoshiroPRNG *baiter_arm_prng = prng_create(BAIT_ARM_SEED);
+  const Move *baiter_decided = nerfed_player_prepare_sim_arms(
+      baiter, game, config_get_move_list(config), baiter_arm_prng);
+  assert(baiter_decided == NULL);
+  const int bait_obscure = bait_count_obscure(baiter, config, sim_results, e_ml,
+                                              y_ml, BAIT_PICK_SEED + 1);
+
+  // Non-degeneracy, direction, and the exchangeability test.
+  const int total_obscure = baseline_obscure + bait_obscure;
+  assert(total_obscure >= 20);
+  assert(bait_obscure > baseline_obscure);
+  assert(binomial_upper_tail(total_obscure, bait_obscure - 1, 0.5) <
+         BAIT_ALPHA);
+
+  prng_destroy(baiter_arm_prng);
+  nerfed_player_destroy(baiter);
+  sim_ctx_destroy(sim_ctx);
+  prng_destroy(arm_prng);
+  nerfed_player_destroy(baseline);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
 }
