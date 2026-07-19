@@ -8,6 +8,10 @@
 // struct retains the internal game state between commands, and the caller
 // is responsible for freeing all returned strings with free().
 //
+// Build the embeddable shared library with `make libmagpie`; it produces
+// bin/libmagpie.so (bin/libmagpie.dylib on macOS) exporting only the
+// magpie_* functions declared here.
+//
 // Command output is machine readable by default. Use
 // magpie_run_sync_human_readable to get output formatted for display
 // instead. In either case, an explicit -hr argument in the command string
