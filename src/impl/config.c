@@ -7850,7 +7850,10 @@ void execute_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_sim(Config *config, ErrorStack *error_stack) {
   impl_sim(config, ARG_TOKEN_SIM, 0, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_snoprune(Config *config, ErrorStack *error_stack) {
@@ -7863,7 +7866,10 @@ void execute_snoprune(Config *config, ErrorStack *error_stack) {
 
 char *str_api_snoprune(Config *config, ErrorStack *error_stack) {
   impl_snoprune(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -7876,7 +7882,10 @@ void execute_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_gen_and_sim(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
@@ -7889,7 +7898,10 @@ void execute_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
 
 char *str_api_rack_and_gen_and_sim(Config *config, ErrorStack *error_stack) {
   impl_rack_and_gen_and_sim(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_moves_or_sim_results(config, error_stack);
 }
 
 void execute_infer(Config *config, ErrorStack *error_stack) {
@@ -7902,7 +7914,10 @@ void execute_infer(Config *config, ErrorStack *error_stack) {
 
 char *str_api_infer(Config *config, ErrorStack *error_stack) {
   impl_infer(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_inference(config, error_stack);
 }
 
 void execute_endgame(Config *config, ErrorStack *error_stack) {
@@ -7915,7 +7930,10 @@ void execute_endgame(Config *config, ErrorStack *error_stack) {
 
 char *str_api_endgame(Config *config, ErrorStack *error_stack) {
   impl_endgame(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_endgame(config, error_stack);
 }
 
 void execute_peg(Config *config, ErrorStack *error_stack) {
@@ -7930,7 +7948,10 @@ void execute_peg(Config *config, ErrorStack *error_stack) {
 
 char *str_api_peg(Config *config, ErrorStack *error_stack) {
   impl_peg(config, error_stack);
-  return empty_string();
+  if (!error_stack_is_empty(error_stack)) {
+    return empty_string();
+  }
+  return impl_show_peg(config, error_stack);
 }
 
 void execute_autoplay(Config *config, ErrorStack *error_stack) {
@@ -8475,49 +8496,57 @@ void impl_analyze(Config *config, AnalyzeSummary *summary,
   error_stack_destroy(analyze_error_stack);
 }
 
+// Builds the display string for an analyze summary, consuming the
+// summary's error_details string builder.
+char *analyze_summary_to_string(AnalyzeSummary *summary) {
+  int curr_row = 0;
+  int curr_col = 0;
+  StringGrid *sg = string_grid_create(4, 2, 1);
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary->success_count));
+  curr_row++;
+  curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Skipped"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary->skipped_count));
+  curr_row++;
+  curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Error"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary->error_count));
+  curr_row++;
+  curr_col = 0;
+  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Unstarted"));
+  string_grid_set_cell(sg, curr_row, curr_col,
+                       get_formatted_string("%d", summary->not_started_count));
+  StringBuilder *summary_sb = string_builder_create();
+  string_builder_add_string(summary_sb, "\n");
+  string_builder_add_string_grid(summary_sb, sg, false);
+  string_grid_destroy(sg);
+  string_builder_add_string(
+      summary_sb, summary->interrupted ? "\nFinished (user interrupt)\n"
+                                       : "\nFinished (all games analyzed)\n");
+  if (summary->error_details) {
+    string_builder_add_string(summary_sb, "\n=== Errors ===\n");
+    char *error_details_str = string_builder_dump(summary->error_details, NULL);
+    string_builder_add_string(summary_sb, error_details_str);
+    free(error_details_str);
+    string_builder_destroy(summary->error_details);
+    summary->error_details = NULL;
+  }
+  char *summary_str = string_builder_dump(summary_sb, NULL);
+  string_builder_destroy(summary_sb);
+  return summary_str;
+}
+
 void execute_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
-  int curr_row = 0;
-  int curr_col = 0;
-  StringGrid *sg = string_grid_create(4, 2, 1);
-  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Success"));
-  string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.success_count));
-  curr_row++;
-  curr_col = 0;
-  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Skipped"));
-  string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.skipped_count));
-  curr_row++;
-  curr_col = 0;
-  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Error"));
-  string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.error_count));
-  curr_row++;
-  curr_col = 0;
-  string_grid_set_cell(sg, curr_row, curr_col++, string_duplicate("Unstarted"));
-  string_grid_set_cell(sg, curr_row, curr_col,
-                       get_formatted_string("%d", summary.not_started_count));
-  StringBuilder *summary_sb = string_builder_create();
-  string_builder_add_string(summary_sb, "\n");
-  string_builder_add_string_grid(summary_sb, sg, false);
-  string_grid_destroy(sg);
-  string_builder_add_string(
-      summary_sb, summary.interrupted ? "\nFinished (user interrupt)\n"
-                                      : "\nFinished (all games analyzed)\n");
-  if (summary.error_details) {
-    string_builder_add_string(summary_sb, "\n=== Errors ===\n");
-    char *error_details_str = string_builder_dump(summary.error_details, NULL);
-    string_builder_add_string(summary_sb, error_details_str);
-    free(error_details_str);
-    string_builder_destroy(summary.error_details);
-  }
-  char *summary_str = string_builder_dump(summary_sb, NULL);
-  string_builder_destroy(summary_sb);
+  char *summary_str = analyze_summary_to_string(&summary);
   thread_control_print(config->thread_control, summary_str);
   free(summary_str);
 }
@@ -8525,10 +8554,13 @@ void execute_analyze(Config *config, ErrorStack *error_stack) {
 char *str_api_analyze(Config *config, ErrorStack *error_stack) {
   AnalyzeSummary summary = {0};
   impl_analyze(config, &summary, error_stack);
-  if (summary.error_details) {
-    string_builder_destroy(summary.error_details);
+  if (!error_stack_is_empty(error_stack)) {
+    if (summary.error_details) {
+      string_builder_destroy(summary.error_details);
+    }
+    return empty_string();
   }
-  return empty_string();
+  return analyze_summary_to_string(&summary);
 }
 
 Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {

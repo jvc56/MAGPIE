@@ -1,21 +1,8 @@
-#include "../src/compat/cpthread.h"
 #include "../src/impl/cmd_api.h"
 #include "../src/impl/exec.h"
-#include "../src/util/fileproxy.h"
 #include "../src/util/io_util.h"
-#include <stdlib.h>
-#include <string.h>
 
 static Magpie *wasm_magpie = NULL;
-static pthread_t command_handler_thread;
-static bool command_handler_running = false;
-
-// Thread argument for async command execution
-typedef struct {
-  Magpie *mp;
-  char *command;
-  volatile int *done_flag;
-} AsyncCommandArgs;
 
 int wasm_magpie_init(const char *data_paths) {
   if (wasm_magpie) {
@@ -33,65 +20,30 @@ void wasm_magpie_destroy(void) {
   caches_destroy();
 }
 
-// Worker function that runs on a pthread
-void *wasm_command_thread_worker(void *arg) {
-
-  if (!arg) {
-    return NULL;
-  }
-
-  AsyncCommandArgs *args = (AsyncCommandArgs *)arg;
-
-  if (!args->mp) {
-    free(args->command);
-    free(args);
-    return NULL;
-  }
-
-  if (!args->command) {
-    free(args);
-    return NULL;
-  }
-
-  // Now that we've bypassed mutexes for WASM, this should work
-  int result = magpie_run_sync(args->mp, args->command);
-
-  if (args->done_flag) {
-    *args->done_flag = 1;
-  }
-  free(args->command);
-  free(args);
-  return NULL;
-}
-
-// Synchronous version - now works since we bypass mutexes for WASM
 int wasm_run_command(const char *command) {
   if (!wasm_magpie) {
-    return 2; // MAGPIE_DID_NOT_RUN
+    return MAGPIE_DID_NOT_RUN;
   }
   return magpie_run_sync(wasm_magpie, command);
 }
 
-// Async version - spawns a pthread for better responsiveness
+// Async version - runs the command on a worker thread for responsiveness.
+// Poll wasm_get_thread_status for completion, then read the output.
 void wasm_run_command_async(const char *command) {
   if (!wasm_magpie) {
     return;
   }
-
-  // Allocate args on heap - thread will free them
-  AsyncCommandArgs *args = malloc(sizeof(AsyncCommandArgs));
-  args->mp = wasm_magpie;
-  args->command = strdup(command);
-  args->done_flag = NULL;
-
-  cpthread_t thread;
-  cpthread_create(&thread, wasm_command_thread_worker, args);
-  cpthread_detach(thread); // Don't need to join - let it run independently
+  magpie_run_async(wasm_magpie, command);
 }
 
 char *wasm_get_output(void) {
   if (!wasm_magpie) {
     return NULL;
+  }
+  // Reap the worker thread if the async command has finished; if one is
+  // still running this returns the output of the previous command.
+  if (magpie_get_thread_status(wasm_magpie) != MAGPIE_THREAD_STATUS_STARTED) {
+    magpie_await(wasm_magpie);
   }
   return magpie_get_last_command_output(wasm_magpie);
 }
@@ -114,7 +66,7 @@ char *wasm_get_status(void) {
 // Uses lock-free read to avoid deadlock when called from main thread
 int wasm_get_thread_status(void) {
   if (!wasm_magpie) {
-    return 0;
+    return MAGPIE_THREAD_STATUS_UNINITIALIZED;
   }
   return magpie_get_thread_status(wasm_magpie);
 }
