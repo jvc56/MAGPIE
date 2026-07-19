@@ -1685,6 +1685,18 @@ void autoplay_results_add_phony_event(AutoplayResults *autoplay_results,
   cpthread_mutex_unlock(&gd->mutex);
 }
 
+uint64_t
+autoplay_results_get_phony_event(const AutoplayResults *autoplay_results,
+                                 int player_idx, phony_event_t event) {
+  const Recorder *recorder =
+      autoplay_results->recorders[AUTOPLAY_RECORDER_TYPE_GAME];
+  if (!recorder) {
+    return 0;
+  }
+  const GameDataSets *sets = (const GameDataSets *)recorder->data;
+  return sets->all_games->phony_events[player_idx][event];
+}
+
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed) {

@@ -1,3 +1,4 @@
+#include "../src/ent/autoplay_results.h"
 #include "../src/ent/game.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
@@ -302,5 +303,72 @@ void test_nerfed_player_bait_prefers_obscure(void) {
   prng_destroy(arm_prng);
   nerfed_player_destroy(baseline);
   error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+// ---------------------------------------------------------------------------
+// End-to-end: a weak opponent draws challenges from a strong player's obscure
+// words in actual games. Two scenarios, both under the phony/challenge flow:
+//   1. a nerfed 2200 vs a nerfed 1000 (this test, static), and
+//   2. an unnerfed exploiter vs a nerfed 1000 (nerfedexploit, simming).
+// The 1000 is opponent-blind (see nerfed_player.c) so it challenges the
+// strong player's obscure plays: it catches some real phonies (challenged
+// off) and wrongly challenges some valid obscure words (bad challenges).
+#define E2E_GAMES 1000
+#define E2E_ALPHA 1.0e-4
+// "Barely fires" null rates per game: if the true rate were only this high,
+// the loop would essentially not be drawing challenges. The measured rates
+// (0.15 phonies caught, 0.03 bad challenges per game) reject these easily.
+#define E2E_NULL_CAUGHT 0.03
+#define E2E_NULL_BAD 0.006
+
+// P(X > k) for X ~ Poisson(lambda), forward pmf recurrence.
+static double poisson_upper_tail(double lambda, int k) {
+  double pmf = exp(-lambda); // P(X = 0)
+  double cdf = pmf;
+  for (int i = 1; i <= k; i++) {
+    pmf *= lambda / (double)i;
+    cdf += pmf;
+  }
+  return 1.0 - cdf;
+}
+
+// Smallest count T with P(X > T) < alpha under Poisson(lambda): a count above
+// this rejects "the rate is only lambda/games".
+static int poisson_upper_critical(double lambda, double alpha) {
+  for (int k = 0; k < 100000; k++) {
+    if (poisson_upper_tail(lambda, k) < alpha) {
+      return k;
+    }
+  }
+  return 100000;
+}
+
+void test_nerfed_player_weak_draws_challenges(void) {
+  Config *config = config_create_or_die(
+      "set -l1 NWL23PHALL -l2 NWL23PHALL -wmp false -s1 equity -s2 equity "
+      "-r1 all -r2 all -numplays 1 -plies 0 -pl1 0 -pl2 0 -nerf1 2200 "
+      "-nerf2 1000 -nerfphony true -threads 4 -gp false -mode sync");
+  load_and_exec_config_or_die(config, "autoplay games 1000 -seed 11");
+  const AutoplayResults *results = config_get_autoplay_results(config);
+
+  // The 2200 is player 0; its phonies challenged off are challenges the 1000
+  // drew (and won). The 1000 is player 1; its bad challenges are challenges
+  // it drew on the 2200's valid obscure words (and lost).
+  const uint64_t caught =
+      autoplay_results_get_phony_event(results, 0, PHONY_EVENT_CHALLENGED_OFF);
+  const uint64_t bad =
+      autoplay_results_get_phony_event(results, 1, PHONY_EVENT_BAD_CHALLENGE);
+
+  const int caught_min =
+      poisson_upper_critical(E2E_GAMES * E2E_NULL_CAUGHT, E2E_ALPHA);
+  const int bad_min =
+      poisson_upper_critical(E2E_GAMES * E2E_NULL_BAD, E2E_ALPHA);
+  // The weak player challenges the expert's obscure plays: it catches real
+  // phonies and wrongly challenges valid obscure words. Both reject the
+  // "challenges barely drawn" null.
+  assert((int)caught >= caught_min);
+  assert((int)bad >= bad_min);
+
   config_destroy(config);
 }

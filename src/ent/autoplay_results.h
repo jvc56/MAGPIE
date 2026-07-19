@@ -43,6 +43,10 @@ void autoplay_results_add_move(AutoplayResults *autoplay_results,
 // for stuck/challenged-off, the challenger for bad challenges.
 void autoplay_results_add_phony_event(AutoplayResults *autoplay_results,
                                       int player_idx, phony_event_t event);
+// Total count (over all games played) of a phony event for a player.
+uint64_t
+autoplay_results_get_phony_event(const AutoplayResults *autoplay_results,
+                                 int player_idx, phony_event_t event);
 void autoplay_results_add_game(AutoplayResults *autoplay_results,
                                const Game *game, int turns, bool divergent,
                                uint64_t seed);

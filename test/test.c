@@ -149,6 +149,7 @@ static TestEntry on_demand_test_table[] = {
     {"ap_rest", test_autoplay_remaining},
     {"nerfed", test_nerfed_player_obscure_word_visibility},
     {"nerfedbait", test_nerfed_player_bait_prefers_obscure},
+    {"nerfedchallenge", test_nerfed_player_weak_draws_challenges},
     {"endgame_wasm", test_endgame_wasm},
     {"endgameinject", test_endgame_dynamic_worker_injection},
     {"viamover", test_via_mover_must_bingo_every_depth},
