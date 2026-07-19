@@ -35,6 +35,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "cgp.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "nerfed_player.h"
@@ -306,6 +307,8 @@ typedef struct AutoplayWorker {
   NerfedPlayer *nerfed_players[2];
   // Scratch move list for the 3-arm challenge world sims.
   MoveList *challenge_move_list;
+  // Lazily opened per-worker pre-endgame log (see AutoplayArgs.peg_log).
+  FILE *peg_log_file;
   // Phony/challenge flow state (nerf_phony): the real-lexicon KWG for
   // adjudication, the challenge rule, and pending lost turns from double
   // challenges.
@@ -344,6 +347,7 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->nerfed_players[0] = NULL;
   autoplay_worker->nerfed_players[1] = NULL;
   autoplay_worker->challenge_move_list = NULL;
+  autoplay_worker->peg_log_file = NULL;
   autoplay_worker->real_kwg = NULL;
   autoplay_worker->challenge_rule_5pt = false;
   autoplay_worker->skip_turn[0] = false;
@@ -386,6 +390,9 @@ void autoplay_worker_destroy(AutoplayWorker *autoplay_worker) {
   nerfed_player_destroy(autoplay_worker->nerfed_players[0]);
   nerfed_player_destroy(autoplay_worker->nerfed_players[1]);
   move_list_destroy(autoplay_worker->challenge_move_list);
+  if (autoplay_worker->peg_log_file != NULL) {
+    fclose_or_die(autoplay_worker->peg_log_file);
+  }
   kwg_destroy(autoplay_worker->real_kwg);
   prng_destroy(autoplay_worker->prng);
   sim_ctx_destroy(autoplay_worker->sim_ctx);
@@ -687,7 +694,13 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
     SimArgs *sim_args = (player_on_turn_index == 0)
                             ? &autoplay_worker->args.p1_sim_args
                             : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies == 0) {
+    const int bag_tiles = bag_get_letters(game_get_bag(game_runner->game));
+    if (sim_args->num_plies == 0 || (bag_tiles >= 1 && bag_tiles <= 6)) {
+      // Pre-endgame plays the STATIC (points-oriented) pick even in sim
+      // mode: measured human PEG loss is 13-18% win utility per turn
+      // with spread loss matching the noise model — humans keep playing
+      // the midgame points game while the win slips. The win-aware
+      // glimpse is exactly the faculty they lack.
       return nerfed_player_select_move(nerfed_player, game_runner->game,
                                        autoplay_worker->prng);
     }
@@ -881,6 +894,36 @@ static bool game_runner_sim_challenge_decision(
       u_off, u_fail, autoplay_worker->prng);
 }
 
+// Appends "cgp<TAB>ucgi-move<TAB>mover-rating" for pre-endgame turns
+// (bag 1-6) so tools/peg_measure can score the bot's pre-endgame play
+// against the human loss-per-turn targets.
+static void autoplay_worker_log_peg_position(AutoplayWorker *autoplay_worker,
+                                             const Game *game,
+                                             const Move *move) {
+  const int bag_tiles = bag_get_letters(game_get_bag(game));
+  if (bag_tiles < 1 || bag_tiles > 6) {
+    return;
+  }
+  if (autoplay_worker->peg_log_file == NULL) {
+    char *filename =
+        get_formatted_string("peglog_w%d.tsv", autoplay_worker->worker_index);
+    autoplay_worker->peg_log_file = fopen_or_die(filename, "a");
+    free(filename);
+  }
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  const int rating = (player_on_turn_index == 0)
+                         ? autoplay_worker->args.p1_nerf_rating
+                         : autoplay_worker->args.p2_nerf_rating;
+  char *cgp = game_get_cgp(game, true);
+  StringBuilder *move_sb = string_builder_create();
+  string_builder_add_ucgi_move(move_sb, move, game_get_board(game),
+                               game_get_ld(game));
+  fprintf(autoplay_worker->peg_log_file, "%s\t%s\t%d\n", cgp,
+          string_builder_peek(move_sb), rating);
+  string_builder_destroy(move_sb);
+  free(cgp);
+}
+
 // Commits a forced pass (skipped turn or a phony coming off the board)
 // with the same bookkeeping as a normal play.
 static const Move *game_runner_commit_pass(GameRunner *game_runner) {
@@ -948,6 +991,10 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+
+  if (autoplay_worker->args.peg_log) {
+    autoplay_worker_log_peg_position(autoplay_worker, game, move);
+  }
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,

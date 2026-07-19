@@ -160,6 +160,7 @@ typedef enum {
   ARG_TOKEN_P2_NERF_RATING,
   ARG_TOKEN_NERF_SAMPLES,
   ARG_TOKEN_NERF_PHONY,
+  ARG_TOKEN_PEG_LOG,
   ARG_TOKEN_USE_SMALL_PLAYS,
   ARG_TOKEN_SIM_WITH_INFERENCE,
   ARG_TOKEN_USE_HEAT_MAP,
@@ -325,6 +326,7 @@ struct Config {
   uint64_t endgame_nerf_solve_counter;
   int nerf_samples;
   bool nerf_phony;
+  bool peg_log;
   bool sim_with_inference;
   bool use_heat_map;
   bool print_boards;
@@ -1750,6 +1752,11 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "(the default) disables nerfing. Requires "
              "data/lexica/<lexicon>_wordfeats.csv.";
       break;
+    case ARG_TOKEN_PEG_LOG:
+      usages[0] = "<true|false>";
+      text = "Autoplay validation logging: append pre-endgame positions "
+             "(bag 1-6) and the chosen move to peglog_w<worker>.tsv.";
+      break;
     case ARG_TOKEN_NERF_PHONY:
       usages[0] = "<true_or_false>";
       examples[0] = "true";
@@ -2277,6 +2284,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_PEG_LOG,                 /* peglog */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
@@ -3627,6 +3635,7 @@ void config_fill_autoplay_args(const Config *config,
   autoplay_args->p1_nerf_rating = config->p1_nerf_rating;
   autoplay_args->p2_nerf_rating = config->p2_nerf_rating;
   autoplay_args->nerf_phony = config->nerf_phony;
+  autoplay_args->peg_log = config->peg_log;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
@@ -7082,6 +7091,10 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
+  config_load_bool(config, ARG_TOKEN_PEG_LOG, &config->peg_log, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
 
   config_load_bool(config, ARG_TOKEN_USE_SMALL_PLAYS, &config->use_small_plays,
                    error_stack);
@@ -8536,6 +8549,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_NERF_RATING, "nerf2", 1, 1);
   arg(ARG_TOKEN_NERF_SAMPLES, "nerfsamples", 1, 1);
   arg(ARG_TOKEN_NERF_PHONY, "nerfphony", 1, 1);
+  arg(ARG_TOKEN_PEG_LOG, "peglog", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
   arg(ARG_TOKEN_SIM_WITH_INFERENCE, "sinfer", 1, 1);
   arg(ARG_TOKEN_USE_HEAT_MAP, "useheatmap", 1, 1);
@@ -8671,6 +8685,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->endgame_nerf_solve_counter = 0;
   config->nerf_samples = 1;
   config->nerf_phony = false;
+  config->peg_log = false;
   config->human_readable = true;
   config->sim_with_inference = true;
   config->p1_sim_plies = 0;
@@ -9160,6 +9175,10 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_NERF_PHONY:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->nerf_phony);
+      break;
+    case ARG_TOKEN_PEG_LOG:
+      config_add_bool_setting_to_string_builder(config, sb, arg_token,
+                                                config->peg_log);
       break;
     case ARG_TOKEN_USE_SMALL_PLAYS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

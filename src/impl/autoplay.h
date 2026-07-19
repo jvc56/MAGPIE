@@ -36,6 +36,9 @@ typedef struct AutoplayArgs {
   // challenge rule follows the real lexicon family: CSW/OSW = 5 points
   // per word, otherwise double challenge (challenger loses a turn).
   bool nerf_phony;
+  // Validation logging: append pre-endgame positions (bag 1-6) and the
+  // chosen move to peglog_w<worker>.tsv (CGP, UCGI move, mover rating).
+  bool peg_log;
   SimArgs p1_sim_args;
   SimArgs p2_sim_args;
 } AutoplayArgs;
