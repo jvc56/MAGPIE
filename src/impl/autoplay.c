@@ -683,10 +683,28 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
       if (autoplay_worker->args.nerf_phony) {
         // The player's game KWG is their believed lexicon; belief in
         // phonies (and own-play confidence) comes from membership.
+        const KWG *believed_kwg = player_get_kwg(
+            game_get_player(game_runner->game, player_on_turn_index));
         nerfed_player_set_believed_kwg(
             autoplay_worker->nerfed_players[player_on_turn_index],
-            player_get_kwg(
-                game_get_player(game_runner->game, player_on_turn_index)));
+            believed_kwg);
+        // Challenge economics context must be set BEFORE the first
+        // selection so the bait EV fires on turn 1 (not lazily during
+        // the post-selection challenge interception). The rule follows
+        // the real-lexicon family, which shares the believed KWG's
+        // first letter (C/O = 5-point, otherwise double challenge); the
+        // opponent's rating drives P(opponent challenges).
+        const char *believed_name = kwg_get_name(believed_kwg);
+        const bool rule_5pt =
+            believed_name[0] == 'C' || believed_name[0] == 'O';
+        const int opp_rating = (player_on_turn_index == 0)
+                                   ? autoplay_worker->args.p2_nerf_rating
+                                   : autoplay_worker->args.p1_nerf_rating;
+        const double opp_rating_z =
+            opp_rating > 0 ? (opp_rating - 1500.0) / 300.0 : 2.33;
+        nerfed_player_set_challenge_context(
+            autoplay_worker->nerfed_players[player_on_turn_index], rule_5pt,
+            opp_rating_z);
       }
     }
     NerfedPlayer *nerfed_player =
@@ -1122,21 +1140,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       autoplay_worker->challenge_rule_5pt =
           base_name[0] == 'C' || base_name[0] == 'O';
     }
-    // Challenge economics context (idempotent): each nerfed player's EV
-    // of being challenged depends on the rule and the OPPONENT's rating.
-    for (int ctx_player_idx = 0; ctx_player_idx < 2; ctx_player_idx++) {
-      if (autoplay_worker->nerfed_players[ctx_player_idx] == NULL) {
-        continue;
-      }
-      const int ctx_opp_rating = (ctx_player_idx == 0)
-                                     ? autoplay_worker->args.p2_nerf_rating
-                                     : autoplay_worker->args.p1_nerf_rating;
-      const double ctx_opp_z =
-          ctx_opp_rating > 0 ? (ctx_opp_rating - 1500.0) / 300.0 : 2.33;
-      nerfed_player_set_challenge_context(
-          autoplay_worker->nerfed_players[ctx_player_idx],
-          autoplay_worker->challenge_rule_5pt, ctx_opp_z);
-    }
+    // (Challenge economics context is set at nerfed-player creation so
+    // the bait EV is active from the first selection.)
     // adjudicate validity against the real lexicon
     FormedWords *formed_words = formed_words_create(game_get_board(game), move);
     formed_words_populate_validities(autoplay_worker->real_kwg, formed_words,
