@@ -490,12 +490,10 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack .ABC",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack AB.C",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack ABC.",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  // "." is an alias for "?" (blank tile), so these are well-formed racks.
+  assert_config_exec_status(config, "rack .ABC", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack AB.C", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ABC.", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack ABCDEFGH",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCZZZ",

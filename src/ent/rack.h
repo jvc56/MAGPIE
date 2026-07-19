@@ -163,12 +163,28 @@ static inline void rack_add_letters(Rack *rack, MachineLetter letter,
   rack->number_of_letters = rack->number_of_letters + (uint16_t)count;
 }
 
+// "." is accepted as an alias for "?" to denote a blank tile in a rack
+// string. Returns a newly allocated copy of rack_string with any "."
+// replaced by "?"; the caller must free the result.
+static inline char *rack_string_alias_dot_to_blank(const char *rack_string) {
+  char *normalized_rack_string = string_duplicate(rack_string);
+  for (char *c = normalized_rack_string; *c != '\0'; c++) {
+    if (*c == '.') {
+      *c = '?';
+    }
+  }
+  return normalized_rack_string;
+}
+
 static inline int rack_set_to_string(const LetterDistribution *ld, Rack *rack,
                                      const char *rack_string) {
   rack->dist_size = ld_get_size(ld);
   rack_reset(rack);
   MachineLetter mls[MAX_RACK_SIZE];
-  int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);
+  char *normalized_rack_string = rack_string_alias_dot_to_blank(rack_string);
+  int num_mls =
+      ld_str_to_mls(ld, normalized_rack_string, false, mls, MAX_RACK_SIZE);
+  free(normalized_rack_string);
   for (int i = 0; i < num_mls; i++) {
     rack_add_letter(rack, mls[i]);
   }
@@ -181,7 +197,10 @@ static inline int rack_set_to_string_unblanked(const LetterDistribution *ld,
   rack->dist_size = ld_get_size(ld);
   rack_reset(rack);
   MachineLetter mls[MAX_RACK_SIZE];
-  int num_mls = ld_str_to_mls(ld, rack_string, false, mls, MAX_RACK_SIZE);
+  char *normalized_rack_string = rack_string_alias_dot_to_blank(rack_string);
+  int num_mls =
+      ld_str_to_mls(ld, normalized_rack_string, false, mls, MAX_RACK_SIZE);
+  free(normalized_rack_string);
   for (int i = 0; i < num_mls; i++) {
     MachineLetter ml = mls[i];
     if (ml != BLANK_MACHINE_LETTER) {
