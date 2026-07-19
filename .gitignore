@@ -34,6 +34,12 @@ venv/
 
 # Compiled libraries
 *.a
+*.so
+*.dylib
+
+# Editor/debugger scratch
+tags
+.gdb_history
 PR_DESCRIPTION.md
 PR_TITLE.txt
 SPEEDUP_NOTES.md

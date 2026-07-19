@@ -58,12 +58,15 @@ cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototype
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# Shared library flavor: release optimization plus -fPIC, no sanitizers
+cflags.lib := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs -fPIC
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
+ldflags.lib := -pthread
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
 ldflags.release := -pthread
@@ -85,12 +88,37 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu
+.PHONY: all clean iwyu libmagpie
 
 all: magpie magpie_test
 
 libmagpie_core.a: $(OBJ_SRC)
 	ar rcs $@ $^
+
+# Shared library for embedding magpie; the API surface is src/impl/cmd_api.h
+# and only magpie_* symbols are exported. Re-invokes make with BUILD=lib so
+# objects are always compiled with -fPIC and without sanitizers.
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+SHARED_LIB := $(BIN_DIR)/libmagpie.dylib
+else
+SHARED_LIB := $(BIN_DIR)/libmagpie.so
+endif
+
+libmagpie:
+	@$(MAKE) BUILD=lib $(SHARED_LIB)
+
+$(OBJ_DIR)/libmagpie.map: | $(OBJ_DIR)
+	printf '{ global: magpie_*; local: *; };\n' > $@
+
+$(OBJ_DIR)/libmagpie.exports: | $(OBJ_DIR)
+	printf '_magpie_*\n' > $@
+
+$(BIN_DIR)/libmagpie.so: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.map | $(BIN_DIR)
+	$(CC) -shared $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,--version-script=$(OBJ_DIR)/libmagpie.map -o $@
+
+$(BIN_DIR)/libmagpie.dylib: $(OBJ_SRC) $(OBJ_DIR)/libmagpie.exports | $(BIN_DIR)
+	$(CC) -dynamiclib $(LDFLAGS) $(LFLAGS) $(OBJ_SRC) $(LDLIBS) -Wl,-exported_symbols_list,$(OBJ_DIR)/libmagpie.exports -o $@
 
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
