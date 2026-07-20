@@ -96,8 +96,9 @@ void nerfed_player_reveal_word(NerfedPlayer *nerfed_player,
                                const MachineLetter *word, int word_length,
                                int verdict);
 
-// Game-level knowledge lifecycle: call at game start (per-player seed)
-// and per turn (enables the small knowledge-flip probability).
+// Knowledge lifecycle: call at game start (per-player seed) and per
+// turn. Word knowledge is re-realized each turn (never fixed for the
+// whole game); the turn number seeds that per-turn draw.
 void nerfed_player_start_game(NerfedPlayer *nerfed_player, uint64_t game_seed);
 void nerfed_player_set_turn(NerfedPlayer *nerfed_player, int turn_number);
 bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,

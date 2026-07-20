@@ -95,11 +95,6 @@ static const double NERFED_KEEP_THROW_BIAS = 0.1075;
 // no exchange row (matches the fit's default margin baseline).
 static const double NERFED_NO_EXCHANGE_EQUITY = -10.0;
 
-// Word knowledge is decided at the GAME level per player (persistent,
-// hidden from the opponent) with a small per-turn flip probability
-// (momentary rememberings and doubts).
-static const double NERFED_KNOWLEDGE_FLIP_PROB = 0.03;
-
 // Knowledge caps: subjective word confidence almost never reaches 0 or
 // 100%, EXCEPT for the highest-playability words (for higher-rated
 // players) and highest-literacy words, where certainty is released.
@@ -239,20 +234,25 @@ static const double NERFED_OWN_BELIEF_CONF_BASE = 0.88;
 static const double NERFED_OWN_BELIEF_CONF_SLOPE = -0.08;
 // Per-word phony belief priors (<real_lex>_phony_beliefs.csv): b0 =
 // log(generator tier weight x orthographic plausibility). Belief is a
-// per-player GAME-LEVEL draw at p = sigmoid(b0 + offset + slope *
-// rating_z), so two same-rated players share the head phonies (TE) but
-// split on the idiosyncratic tail — graded overlap is what makes
-// challenges of phonies possible at matched ratings (a shared fixed
-// believed set collapses the challenge rate to ~4%). Cross-family words
-// get a positive rating slope (experts know the other dictionary),
-// everything else negative (experts hold fewer false beliefs).
+// per-player PER-TURN draw at p = sigmoid(b0 + offset + slope *
+// rating_z), re-realized each turn (never fixed for the whole game;
+// only challenge-adjudicated words persist). Two same-rated players
+// share the head phonies (TE) but split on the idiosyncratic tail —
+// graded overlap is what makes challenges of phonies possible at
+// matched ratings (a shared fixed believed set collapses the challenge
+// rate to ~4%). Cross-family words get a positive rating slope (experts
+// know the other dictionary); the negative in-family slope is mild —
+// experts hold fewer false beliefs, but the corpus successful-challenge
+// rate at 2200 (~0.24/game CSW) requires them to still play a fair
+// number of marginal phonies (word knowledge at the arsenal's edge is
+// fuzzy). Too steep a slope starves the expert catch rate.
 static const double NERFED_PHONY_BELIEF_OFFSET = -1.2;
 // Family split: the TWL candidate pool converts belief mass into plays
 // more readily (larger cross-family pool, denser short-word phonies).
-static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.5;
-static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.25;
-static const double NERFED_PHONY_BELIEF_SLOPE = -0.78;
-static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.60;
+static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.09;
+static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.53;
+static const double NERFED_PHONY_BELIEF_SLOPE = -0.46;
+static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.41;
 static const double NERFED_PHONY_BELIEF_XFAM_SLOPE = 0.10;
 // Cross-family words are a huge pool (40k CSW-only words on the TWL
 // side): without an extra offset the belief mass dwarfs the corpus
@@ -1475,14 +1475,22 @@ bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
     // challenged) again this game.
     return false;
   }
-  bool base;
+  // Word knowledge is re-realized EACH TURN, never fixed for the whole
+  // game (a word missed one turn can be recalled the next; a marginal
+  // phony can look real one turn and not the next). The only persistent
+  // knowledge is the reveals above, from challenge adjudication. A
+  // per-turn seed drives the draw so it is consistent within a turn
+  // (all decisions this turn agree) but varies across turns.
+  const uint64_t turn_seed =
+      nerfed_player->game_seed ^
+      (0xA24BAED4963EE407ULL * (uint64_t)(nerfed_player->turn_number + 1));
   const bool is_real_word =
       nerfed_player_lookup_word(nerfed_player, word, word_length) != NULL;
   if (nerfed_player->believed_kwg != NULL && !is_real_word) {
-    // A word outside the real lexicon: per-player game-level belief
-    // draw at the word's prior. Head phonies (TE) are believed by
-    // almost everyone; the idiosyncratic tail splits between players,
-    // which is what makes phony challenges possible at matched ratings.
+    // A word outside the real lexicon: per-turn belief draw at the
+    // word's prior. Head phonies (TE) are believed by almost everyone;
+    // the idiosyncratic tail splits, which makes phony challenges
+    // possible at matched ratings.
     const NerfedPhonyBelief *belief =
         nerfed_player_lookup_belief(nerfed_player, word, word_length);
     double belief_logit = NERFED_PHONY_BELIEF_UNKNOWN_LOGIT;
@@ -1505,24 +1513,12 @@ bool nerfed_player_believes_word(const NerfedPlayer *nerfed_player,
     }
     const double p_believe = 1.0 / (1.0 + exp(-belief_logit));
     const uint64_t belief_hash = nerfed_player_word_hash(
-        word, word_length, nerfed_player->game_seed ^ 0x5851F42D4C957F2DULL);
+        word, word_length, turn_seed ^ 0x5851F42D4C957F2DULL);
     const double belief_uniform =
         ((double)(belief_hash >> 11) + 0.5) / 9007199254740992.0;
-    base = belief_uniform < p_believe;
-  } else {
-    base = nerfed_player_knows_word(nerfed_player, word, word_length,
-                                    nerfed_player->game_seed);
+    return belief_uniform < p_believe;
   }
-  const uint64_t flip_hash = nerfed_player_word_hash(
-      word, word_length,
-      nerfed_player->game_seed ^
-          (0xA24BAED4963EE407ULL * (uint64_t)(nerfed_player->turn_number + 1)));
-  const double flip_uniform =
-      ((double)(flip_hash >> 11) + 0.5) / 9007199254740992.0;
-  if (flip_uniform < NERFED_KNOWLEDGE_FLIP_PROB) {
-    return !base;
-  }
-  return base;
+  return nerfed_player_knows_word(nerfed_player, word, word_length, turn_seed);
 }
 
 static double nerfed_player_win_utility(double margin) {

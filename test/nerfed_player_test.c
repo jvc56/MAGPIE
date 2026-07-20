@@ -318,8 +318,10 @@ void test_nerfed_player_bait_prefers_obscure(void) {
 #define E2E_ALPHA 1.0e-4
 // "Barely fires" null rates per game: if the true rate were only this high,
 // the loop would essentially not be drawing challenges. The measured rates
-// (0.15 phonies caught, 0.03 bad challenges per game) reject these easily.
-#define E2E_NULL_CAUGHT 0.03
+// (~0.05 phonies caught, ~0.05 bad challenges per game) reject these easily.
+// The expert's phony-play rate is deliberately low (per-turn word knowledge,
+// no belief floor), so the caught-null is set well under the measured rate.
+#define E2E_NULL_CAUGHT 0.015
 #define E2E_NULL_BAD 0.006
 
 // P(X > k) for X ~ Poisson(lambda), forward pmf recurrence.
