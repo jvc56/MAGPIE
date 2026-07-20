@@ -112,16 +112,38 @@ static const double NERFED_WIN_SIGMOID_SCALE = 40.0;
 static const double NERFED_TEMPO_VALUE = 30.0;
 static const double NERFED_CHALLENGE_THRESH_C0 = 0.020;
 static const double NERFED_CHALLENGE_THRESH_RTG = -0.004;
-// Calibrated jointly with the opponent-aware prior: TWL/double failed
-// challenges ~0.09/game in the corpus (full-rack midgame passes after an
-// opponent tile play), CSW/5pt challenged-valid plays ~0.12/game.
+// Corpus failed-challenge targets (solidified via the canonical GCG token
+// grammar, tools/challenge_measure.py): CSW/5-point failed challenges are
+// 0.47-0.70/game and roughly FLAT across ratings (cheap challenges get
+// thrown liberally at every level); TWL/double failed challenges run
+// ~0.50/game at 1000 down to ~0.14 at 2000.
 static const double NERFED_CHALLENGE_NOISE = 0.004;
+// Speculative challenge: beyond the rational-EV decision, players throw
+// challenges at obscure-LOOKING plays on a hunch, regardless of whether
+// they believe the word. This is what keeps experts challenging (the
+// belief gate leaves them almost no rational opportunities) and what
+// drives the bulk of failed challenges, especially under the cheap
+// 5-point rule. P(speculative challenge) = attention * base(rule) *
+// sigmoid((center - min_logplay)/scale): common plays (high playability)
+// are essentially never speculatively challenged; floor-obscure plays
+// are challenged at the family base rate. Rating-flat by design, so it
+// does not collapse at the expert end the way the EV path does.
+static const double NERFED_CHALLENGE_SPEC_5PT = 0.55;
+static const double NERFED_CHALLENGE_SPEC_DOUBLE = 0.50;
+static const double NERFED_CHALLENGE_SPEC_CENTER = 0.5;
+static const double NERFED_CHALLENGE_SPEC_SCALE = 0.9;
+// Rating dependence of speculation, per family. CSW/5-point is nearly
+// FLAT (the corpus failed-challenge rate barely moves with rating —
+// cheap challenges are thrown at every level); TWL/double falls with
+// rating (an expensive lost turn deters strong players). Scales the base
+// rate by exp(-slope * rating_z).
+static const double NERFED_CHALLENGE_SPEC_RTG_5PT = -0.05;
+static const double NERFED_CHALLENGE_SPEC_RTG_DOUBLE = 0.26;
 // Under double challenge, challengers undervalue the turn they stand to
 // lose when they smell a phony (risk-seeking on the gotcha): the lost
 // turn enters the challenge EU at this fraction of its true tempo value.
-// This, not EU noise, is what produces real-world failed double
-// challenges (~0.09/game) — noise alone cannot bridge the turn-loss
-// hurdle without flooding the cheap-challenge families first.
+// (The bulk of failed double challenges now comes from the speculative
+// term above; this only shapes the rational-EV path.)
 static const double NERFED_CHALLENGE_DOUBLE_TEMPO_FACTOR = 0.35;
 // Prior probability an opponent's play is a phony: the act of playing a
 // word is strong evidence of validity, so the challenge decision uses the
@@ -1578,6 +1600,11 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
   FormedWords *formed_words = formed_words_create(board, move);
   const int num_words = formed_words_get_num_words(formed_words);
   double p_invalid = 0.0;
+  // Play obscurity for the speculative term: the rarest formed word's
+  // playability as the challenger's own lexicon sees it (a word absent
+  // from the real table looks maximally obscure). Common plays are never
+  // speculatively challenged; obscure ones look challengeable.
+  double min_logplay = 99.0;
   MachineLetter word[BOARD_DIM];
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
     const int word_length =
@@ -1586,6 +1613,14 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
         formed_words_get_word(formed_words, word_idx);
     for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
       word[letter_idx] = get_unblanked_machine_letter(letters[letter_idx]);
+    }
+    if (word_length >= 2) {
+      const NerfedWordFeat *feat =
+          nerfed_player_lookup_word(nerfed_player, word, word_length);
+      const double logplay = feat ? feat->logplay : NERFED_DEFAULT_LOGPLAY;
+      if (logplay < min_logplay) {
+        min_logplay = logplay;
+      }
     }
     // a currently-believed word contributes no suspicion
     if (nerfed_player_believes_word(nerfed_player, word, word_length)) {
@@ -1650,6 +1685,19 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
       NERFED_CHALLENGE_THRESH_C0 +
       NERFED_CHALLENGE_THRESH_RTG * nerfed_player->rating_z +
       (rule_5pt ? 0.0 : NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA);
+  // Speculative (hunch) challenge probability from the play's obscurity.
+  if (min_logplay > 90.0) {
+    min_logplay = NERFED_DEFAULT_LOGPLAY;
+  }
+  const double obscurity =
+      1.0 / (1.0 + exp(-(NERFED_CHALLENGE_SPEC_CENTER - min_logplay) /
+                       NERFED_CHALLENGE_SPEC_SCALE));
+  const double spec_base =
+      rule_5pt ? NERFED_CHALLENGE_SPEC_5PT : NERFED_CHALLENGE_SPEC_DOUBLE;
+  const double spec_rtg = rule_5pt ? NERFED_CHALLENGE_SPEC_RTG_5PT
+                                   : NERFED_CHALLENGE_SPEC_RTG_DOUBLE;
+  assessment->p_speculative =
+      spec_base * obscurity * exp(-spec_rtg * nerfed_player->rating_z);
 }
 
 bool nerfed_player_challenge_decide(const NerfedPlayer *nerfed_player,
@@ -1658,6 +1706,9 @@ bool nerfed_player_challenge_decide(const NerfedPlayer *nerfed_player,
   (void)nerfed_player;
   if (!assessment->attended) {
     return false;
+  }
+  if (nerfed_player_uniform(prng) < assessment->p_speculative) {
+    return true;
   }
   const double noise =
       NERFED_CHALLENGE_NOISE * -log(-log(nerfed_player_uniform(prng)));
@@ -1682,6 +1733,9 @@ bool nerfed_player_challenge_decide_simmed(
   (void)nerfed_player;
   if (!assessment->attended) {
     return false;
+  }
+  if (nerfed_player_uniform(prng) < assessment->p_speculative) {
+    return true;
   }
   const double eu_challenge =
       assessment->p_invalid * u_off + (1.0 - assessment->p_invalid) * u_fail;

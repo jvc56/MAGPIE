@@ -117,6 +117,9 @@ typedef struct NerfedChallengeAssessment {
   double eu_challenge;
   double u_accept;
   double threshold;
+  // Probability of a speculative (hunch) challenge on this play, from its
+  // obscurity and the rule; ORed with the rational-EV decision.
+  double p_speculative;
   bool attended;
 } NerfedChallengeAssessment;
 
