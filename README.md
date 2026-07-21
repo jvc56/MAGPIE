@@ -142,9 +142,17 @@ For running many commands programatically from another process, it is recommende
 
 ### API Library
 
-For programs embedding magpie as a library, all commands have a corresponding `str_api_*` function. The `str_api_*` functions all have the signature `char* func(Config*, ErrorStack*, char* cmd)` and use the same parser as the `execute` commands, but return the output as a string instead of printing the output to `stdout`.
+Programs can embed MAGPIE through a string -> string C API. Build the shared library with
 
-Currently, the API library has no clients, so if you are interested in this feature, please feel free to reach out to the developers if you run into any issues.
+```
+make libmagpie
+```
+
+which produces `bin/libmagpie.so` (`bin/libmagpie.dylib` on macOS) exporting only the `magpie_*` functions declared in `src/impl/cmd_api.h` — that header plus the shared library is the entire embedding surface.
+
+The API is command-oriented: callers create an opaque `Magpie` handle, pass it the same command strings the console accepts, and read the resulting output back as a string. Output is machine readable by default; the `*_human_readable` function variants format it for display instead. Commands can run synchronously (`magpie_run_sync`) or on a background thread (`magpie_run_async`), with `magpie_get_last_command_status_message` for mid-run progress, `magpie_stop_current_command` to interrupt, and `magpie_await` to collect the result. All returned strings are owned by the caller and freed with `magpie_free_string`.
+
+See `examples/generate_moves.c` for a minimal C client (build it with `make examples`) and `examples/magpie.py` for a Python ctypes wrapper with an interactive REPL.
 
 ## Data
 
