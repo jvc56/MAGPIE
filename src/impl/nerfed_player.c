@@ -303,6 +303,14 @@ static const double NERFED_SIM_SHRINK_N0 = 60.0;
 // Defaults for words missing from the feature table (centered scales).
 static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
+// Extra visibility miss for 9+ letter plays. The fitted len7plus feature
+// lumps 7/8/9 letter words together, but a 9+ letter play is a through-
+// play bridging two or more board tiles that humans rarely SEE — the
+// model over-surfaces 9-letter bingos ~1.5-1.8x vs corpus while 7- and
+// 8-letter bingos are calibrated. This adds miss log-odds per letter of
+// word length beyond 8 (1 for a 9-letter word, 2 for 10, ...), leaving
+// 7/8 untouched.
+static const double NERFED_LONG9_MISS_PENALTY = 0.8;
 
 // Endgame choice model (conditional logit on 32,675 corpus endgame
 // choices): utility = value/sigma + score and outplay preferences.
@@ -877,6 +885,9 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
   for (int coeff_idx = 0; coeff_idx < NERFED_NUM_MISS_COEFFS; coeff_idx++) {
     logit += nerfed_player->miss_coeffs[coeff_idx] * features[coeff_idx];
   }
+  // Extra miss for 9+ letter through-plays (see NERFED_LONG9_MISS_PENALTY).
+  const double long9 = tiles_length > 8 ? (double)(tiles_length - 8) : 0.0;
+  logit += NERFED_LONG9_MISS_PENALTY * long9;
   return 1.0 / (1.0 + exp(-logit));
 }
 
