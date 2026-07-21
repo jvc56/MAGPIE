@@ -2560,32 +2560,42 @@ void test_config_utility_blend(void) {
   error_stack_destroy(error_stack);
 }
 
-// "shmoves" should still be able to show the results of a gen/sim command
-// for one more command after a commit changes the position, even though
-// the live move_list is (as always) cleared immediately on commit. The
-// buffered view is consumed after being shown once.
+// "shmoves" should still be able to show (and filter/limit into) the
+// results of a gen/sim command for one full turn after a commit changes
+// the position, even though the live move_list is (as always) cleared
+// immediately on commit. The buffered move_list/sim_results are real
+// objects, not a frozen rendering, so ordinary "shmoves" filter args
+// keep working against them; they're replaced (not consumed) by the
+// next invalidation.
 void test_config_move_list_one_turn_buffer(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
-      "-numplays 1 -mode sync");
+      "-numplays 15 -mode sync");
   assert_config_exec_status(
       config,
       "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
       "0/0 0",
       ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
-  assert(move_list_get_count(config_get_move_list(config)) > 0);
+  assert(move_list_get_count(config_get_move_list(config)) > 1);
 
   // Committing changes the position and clears the live move list right
   // away, same as always.
   assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
   assert(move_list_get_count(config_get_move_list(config)) == 0);
 
-  // The next "shmoves" still shows what was generated before the commit...
+  // The buffered results are real objects, so ordinary shmoves args (a
+  // max-count filter, here) still work against them...
+  assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
+
+  // ...and they aren't consumed by being viewed, so a second (unfiltered)
+  // "shmoves" still shows them too.
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
-  // ...but that buffered view is one-shot, so a second "shmoves" finds
-  // nothing.
+  // A second position change with nothing freshly generated in between
+  // replaces the (still-empty) live move list's buffer with nothing,
+  // ending the one-turn window.
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves",
                             ERROR_STATUS_NO_MOVES_TO_SHOW);
 

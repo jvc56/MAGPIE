@@ -383,11 +383,18 @@ struct Config {
   GameHistory *game_history;
   GameHistory *game_history_backup;
   MoveList *move_list;
-  // A one-shot, unfiltered rendering of the move_list/sim_results taken
-  // right before they're invalidated, so "shmoves" can still show what
-  // was just generated/simmed for one more command after the game
-  // position changes. Consumed (and cleared) the first time it's shown.
-  char *buffered_shmoves_output;
+  // The results from just before the last invalidation, so "shmoves" can
+  // still show them for one more command after the game position
+  // changes. Replaced wholesale by the next invalidation, so they're
+  // valid for exactly one turn. Display only: never used as a basis for
+  // a new sim/commit. buffered_move_list is a real (duplicated) object,
+  // so ordinary shmoves filter/index args keep working against it.
+  // SimResults has no safe way to duplicate its mutexes/heat-maps/stats,
+  // and reassigning config->sim_results's identity breaks callers that
+  // cache the pointer across commands, so the sim view is instead a
+  // fixed rendering captured at invalidation time.
+  MoveList *buffered_move_list;
+  char *buffered_sim_results_output;
   EndgameCtx *endgame_ctx;
   SimResults *sim_results;
   InferenceResults *inference_results;
@@ -715,36 +722,18 @@ void config_init_game(Config *config) {
   }
 }
 
-// Renders the current move_list/sim_results as a plain, unfiltered
-// snapshot (matching a bare "shmoves") right before they're invalidated,
-// so they can still be shown once more after the position changes. This
-// is display-only: it must never be treated as a live basis for a new
-// sim/commit, since the moves it describes may no longer be legal.
-static char *config_capture_shmoves_snapshot(const Config *config) {
-  if (!config->game || !config->move_list || !config->ld) {
+// Renders the current sim_results as a plain, unfiltered snapshot
+// (matching a bare "shmoves") right before they're invalidated. Unlike
+// the move_list buffer, this can't be a duplicated SimResults object:
+// see the buffered_sim_results_output comment on the Config struct.
+static char *config_capture_sim_results_snapshot(const Config *config) {
+  if (!config->game || !config->ld ||
+      !sim_results_get_valid_for_current_game_state(config->sim_results)) {
     return NULL;
   }
-  const bool have_sim_results =
-      sim_results_get_valid_for_current_game_state(config->sim_results);
-  if (!have_sim_results && move_list_get_count(config->move_list) == 0) {
-    return NULL;
-  }
-  // Guard against a letter-distribution change (e.g. "set -ld ...") having
-  // already swapped config->ld out from under a move_list/sim_results/game
-  // that were built against the old (possibly already-freed) alphabet;
-  // rendering them would read through stale pointers or index into
-  // machine-letter tables sized for a different alphabet.
   if (game_get_ld(config->game) != config->ld) {
     return NULL;
   }
-  const int ld_size = ld_get_size(config->ld);
-  const Rack *snapshot_rack = have_sim_results
-                                  ? sim_results_get_rack(config->sim_results)
-                                  : move_list_get_rack(config->move_list);
-  if (!snapshot_rack || rack_get_dist_size(snapshot_rack) != ld_size) {
-    return NULL;
-  }
-
   char *game_board_string = NULL;
   const char *board_display_start = NULL;
   if (config->show_game_with_moves) {
@@ -760,26 +749,33 @@ static char *config_capture_shmoves_snapshot(const Config *config) {
       board_display_start++;
     }
   }
-
-  char *result = NULL;
-  if (have_sim_results) {
-    result = sim_results_get_string(
-        config->game, config->sim_results, config->max_num_display_plays,
-        config->shplies, -1, -1, NULL, 0, false, !config->human_readable,
-        config->show_bu, board_display_start);
-  } else {
-    result = move_list_get_string(
-        config->move_list, game_get_board(config->game), config->ld,
-        config->max_num_display_plays, -1, -1, NULL, 0, false,
-        !config->human_readable, board_display_start);
-  }
+  char *result = sim_results_get_string(
+      config->game, config->sim_results, config->max_num_display_plays,
+      config->shplies, -1, -1, NULL, 0, false, !config->human_readable,
+      config->show_bu, board_display_start);
   free(game_board_string);
   return result;
 }
 
 void config_reset_move_list_and_invalidate_sim_results(Config *config) {
-  free(config->buffered_shmoves_output);
-  config->buffered_shmoves_output = config_capture_shmoves_snapshot(config);
+  // The previous turn's buffered results (if any) have had their one
+  // turn; whatever's live right now becomes the new buffer.
+  move_list_destroy(config->buffered_move_list);
+  config->buffered_move_list = NULL;
+  free(config->buffered_sim_results_output);
+  config->buffered_sim_results_output = config_capture_sim_results_snapshot(config);
+  // Guard against a letter-distribution change (e.g. "set -ld ...") having
+  // already swapped config->ld out from under a game/move_list that were
+  // built against the old (possibly already-freed) alphabet; buffering it
+  // would let a later render index into machine-letter tables sized for a
+  // different alphabet.
+  if (config->game && config->ld && game_get_ld(config->game) == config->ld &&
+      config->move_list && move_list_get_count(config->move_list) > 0) {
+    config->buffered_move_list = move_list_duplicate(config->move_list);
+    move_list_set_rack(config->buffered_move_list,
+                       move_list_get_rack(config->move_list));
+  }
+
   if (config->move_list) {
     move_list_reset(config->move_list);
     Rack new_move_list_rack;
@@ -3899,19 +3895,42 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
                      string_duplicate("cannot show game without lexicon"));
     return empty_string();
   }
-  if (!config->game || !config->move_list ||
-      move_list_get_count(config->move_list) == 0) {
-    // A bare "shmoves" with nothing live to show still gets one look at
-    // whatever was last generated/simmed, before the position changed.
-    if (config->buffered_shmoves_output &&
-        config_get_parg_num_set_values(config, ARG_TOKEN_SHOW_MOVES) == 0) {
-      char *buffered_output = config->buffered_shmoves_output;
-      config->buffered_shmoves_output = NULL;
-      return buffered_output;
-    }
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
                      string_duplicate("no moves to show"));
     return empty_string();
+  }
+
+  bool use_sim_results =
+      sim_results_get_valid_for_current_game_state(config->sim_results);
+  MoveList *display_move_list = config->move_list;
+  const bool have_live_results =
+      use_sim_results ||
+      (config->move_list && move_list_get_count(config->move_list) > 0);
+  if (!have_live_results) {
+    // Nothing live to show; fall back to what was generated/simmed before
+    // the position last changed, still available for one more command.
+    const bool have_buffered_move_list =
+        config->buffered_move_list &&
+        move_list_get_count(config->buffered_move_list) > 0;
+    const bool filter_args_requested =
+        config_get_parg_num_set_values(config, ARG_TOKEN_SHOW_MOVES) > 0;
+    if (config->buffered_sim_results_output &&
+        (!filter_args_requested || !have_buffered_move_list)) {
+      // The buffered sim view is a fixed rendering (see the
+      // buffered_sim_results_output comment on the Config struct), so it
+      // can't be re-filtered; requested filter/index args are ignored
+      // when it's all that's available.
+      return string_duplicate(config->buffered_sim_results_output);
+    }
+    if (have_buffered_move_list) {
+      use_sim_results = false;
+      display_move_list = config->buffered_move_list;
+    } else {
+      error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
+                       string_duplicate("no moves to show"));
+      return empty_string();
+    }
   }
 
   const char *arg0 = config_get_parg_value(config, ARG_TOKEN_SHOW_MOVES, 0);
@@ -4002,7 +4021,7 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   }
 
   char *result = NULL;
-  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+  if (use_sim_results) {
     result = sim_results_get_string(
         config->game, config->sim_results, max_num_display_plays,
         config->shplies, filter_row, filter_col, prefix_mls, prefix_len,
@@ -4010,7 +4029,7 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
         board_display_start);
   } else {
     result = move_list_get_string(
-        config->move_list, game_get_board(config->game), config->ld,
+        display_move_list, game_get_board(config->game), config->ld,
         max_num_display_plays, filter_row, filter_col, prefix_mls, prefix_len,
         exclude_tile_placement_moves, !config->human_readable,
         board_display_start);
@@ -8915,7 +8934,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game = NULL;
   config->game_backup = NULL;
   config->move_list = NULL;
-  config->buffered_shmoves_output = NULL;
+  config->buffered_move_list = NULL;
+  config->buffered_sim_results_output = NULL;
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_ctx = NULL;
@@ -8951,8 +8971,9 @@ void config_destroy(Config *config) {
   game_history_destroy(config->game_history_backup);
   endgame_ctx_destroy(config->endgame_ctx);
   move_list_destroy(config->move_list);
-  free(config->buffered_shmoves_output);
+  move_list_destroy(config->buffered_move_list);
   sim_results_destroy(config->sim_results);
+  free(config->buffered_sim_results_output);
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);
