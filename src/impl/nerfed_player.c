@@ -123,8 +123,8 @@ static const double NERFED_CHALLENGE_NOISE = 0.004;
 // are essentially never speculatively challenged; floor-obscure plays
 // are challenged at the family base rate. Rating-flat by design, so it
 // does not collapse at the expert end the way the EV path does.
-static const double NERFED_CHALLENGE_SPEC_5PT = 0.55;
-static const double NERFED_CHALLENGE_SPEC_DOUBLE = 0.42;
+static const double NERFED_CHALLENGE_SPEC_5PT = 0.64;
+static const double NERFED_CHALLENGE_SPEC_DOUBLE = 0.50;
 static const double NERFED_CHALLENGE_SPEC_CENTER = 0.5;
 static const double NERFED_CHALLENGE_SPEC_SCALE = 0.9;
 // Rating dependence of speculation, per family. CSW/5-point is nearly
@@ -320,7 +320,7 @@ static const double NERFED_LONG9_BRIDGE_PENALTY = 0.7;
 // average rating (full for <=1600, ~half by 2200) so the expert 9-bingo
 // rate keeps rising toward the corpus while mid/low players stay
 // suppressed. Beginners are never amplified beyond the full penalty.
-static const double NERFED_LONG9_RTG_TAPER = 0.20;
+static const double NERFED_LONG9_RTG_TAPER = 0.12;
 static const double NERFED_LONG9_RTG_FLOOR = 0.25;
 
 // Endgame choice model (conditional logit on 32,675 corpus endgame
@@ -505,6 +505,106 @@ nerfed_player_lookup_word(const NerfedPlayer *nerfed_player,
       sizeof(NerfedWordFeat), nerfed_word_feat_compare);
 }
 
+// Tests one candidate stem: if it is a valid word more recognizable than
+// the best seen so far, adopt its logplay and loglit.
+static void nerfed_backfill_try(const NerfedPlayer *nerfed_player,
+                                const MachineLetter *cand, int cand_len,
+                                float own_loglit, float *best_logplay,
+                                float *best_loglit) {
+  if (cand_len < 2) {
+    return;
+  }
+  const NerfedWordFeat *stem =
+      nerfed_player_lookup_word(nerfed_player, cand, cand_len);
+  if (stem != NULL && stem->logplay > *best_logplay) {
+    *best_logplay = stem->logplay;
+    *best_loglit = fmaxf(own_loglit, stem->loglit);
+  }
+}
+
+// A productive inflection (a stem plus -ING/-ED/-S/-ER/-EST/-LY, handling
+// e-drop and consonant doubling) should be as VISIBLE as its stem: a
+// literate player reads CONSIDERING off CONSIDER + -ING on sight even
+// though the engine almost never plays the long form, so its self-play
+// logplay floors. Self-play frequency is the wrong signal for visibility;
+// recognizability is. Backfills each inflection's logplay/loglit from its
+// most recognizable valid stem. Runs once at load over the sorted table
+// (stems, being base words, are not themselves rewritten, so order is
+// immaterial). This is a runtime stand-in for a morphology-aware feature
+// that should eventually be precomputed into the wordfeats data.
+static void nerfed_player_backfill_inflections(NerfedPlayer *nerfed_player,
+                                               const LetterDistribution *ld) {
+  MachineLetter s[10];
+  if (ld_str_to_mls(ld, "INGEDSRTLY", false, s, 10) != 10) {
+    return; // non-English distribution: skip morphology backfill
+  }
+  const MachineLetter mI = s[0], mN = s[1], mG = s[2], mE = s[3], mD = s[4];
+  const MachineLetter mS = s[5], mR = s[6], mT = s[7], mL = s[8], mY = s[9];
+  for (int feat_idx = 0; feat_idx < nerfed_player->num_feats; feat_idx++) {
+    NerfedWordFeat *feat = &nerfed_player->feats[feat_idx];
+    const int len = feat->word_length;
+    const MachineLetter *w = feat->word;
+    const float own_loglit = feat->loglit;
+    float best_logplay = feat->logplay;
+    float best_loglit = feat->loglit;
+    MachineLetter cand[BOARD_DIM];
+#define BF_TRY(clen)                                                           \
+  nerfed_backfill_try(nerfed_player, cand, (clen), own_loglit, &best_logplay,  \
+                      &best_loglit)
+    if (len >= 5 && w[len - 3] == mI && w[len - 2] == mN && w[len - 1] == mG) {
+      memcpy(cand, w, (size_t)(len - 3) * sizeof(MachineLetter));
+      BF_TRY(len - 3);                // WALKING -> WALK
+      cand[len - 3] = mE;             // e-drop
+      BF_TRY(len - 2);                // BAKING -> BAKE
+      if (w[len - 4] == w[len - 5]) { // undouble
+        BF_TRY(len - 4);              // STOPPING -> STOP
+      }
+    } else if (len >= 4 && w[len - 2] == mE && w[len - 1] == mD) {
+      memcpy(cand, w, (size_t)(len - 1) * sizeof(MachineLetter));
+      BF_TRY(len - 2); // WALKED -> WALK
+      BF_TRY(len - 1); // BAKED -> BAKE (drop D)
+      if (len >= 5 && w[len - 3] == w[len - 4]) {
+        BF_TRY(len - 3); // STOPPED -> STOP
+      }
+    } else if (len >= 5 && w[len - 3] == mE && w[len - 2] == mS &&
+               w[len - 1] == mT) {
+      memcpy(cand, w, (size_t)(len - 2) * sizeof(MachineLetter));
+      BF_TRY(len - 3); // TALLEST -> TALL
+      BF_TRY(len - 2); // NICEST -> NICE
+      if (w[len - 4] == w[len - 5]) {
+        BF_TRY(len - 4); // BIGGEST -> BIG
+      }
+    } else if (len >= 4 && w[len - 2] == mE && w[len - 1] == mR) {
+      memcpy(cand, w, (size_t)(len - 1) * sizeof(MachineLetter));
+      BF_TRY(len - 2); // WALKER -> WALK
+      BF_TRY(len - 1); // NICER -> NICE
+      if (len >= 5 && w[len - 3] == w[len - 4]) {
+        BF_TRY(len - 3); // BIGGER -> BIG
+      }
+    } else if (len >= 4 && w[len - 2] == mL && w[len - 1] == mY) {
+      memcpy(cand, w, (size_t)(len - 2) * sizeof(MachineLetter));
+      BF_TRY(len - 2); // QUICKLY -> QUICK
+      if (w[len - 3] == mI) {
+        cand[len - 3] = mY;
+        BF_TRY(len - 2); // HAPPILY -> HAPPY (ILY -> Y)
+      }
+    } else if (len >= 3 && w[len - 1] == mS) {
+      memcpy(cand, w, (size_t)(len - 1) * sizeof(MachineLetter));
+      BF_TRY(len - 1); // CATS -> CAT
+      if (len >= 4 && w[len - 2] == mE) {
+        BF_TRY(len - 2); // BOXES -> BOX
+        if (w[len - 3] == mI) {
+          cand[len - 3] = mY;
+          BF_TRY(len - 2); // TRIES -> TRY (IES -> Y)
+        }
+      }
+    }
+#undef BF_TRY
+    feat->logplay = best_logplay;
+    feat->loglit = best_loglit;
+  }
+}
+
 NerfedPlayer *nerfed_player_create(const Game *game, int rating,
                                    ErrorStack *error_stack) {
   const Player *player = game_get_player(game, 0);
@@ -603,6 +703,9 @@ NerfedPlayer *nerfed_player_create(const Game *game, int rating,
   free(feats_filename);
   qsort(nerfed_player->feats, nerfed_player->num_feats, sizeof(NerfedWordFeat),
         nerfed_word_feat_compare);
+  // Visibility of a productive inflection tracks its stem's, not its own
+  // (floored) self-play frequency.
+  nerfed_player_backfill_inflections(nerfed_player, ld);
   // Optional per-word phony belief priors (absent for lexica without a
   // generated candidate pool; belief then falls back to the unknown
   // logit for every phony).
