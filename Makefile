@@ -30,6 +30,22 @@ endif
 OBJ_ROOT := obj
 OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 
+# Profile-guided optimization data. The default lives below OBJ_ROOT so it is
+# ignored by git and removed by `make clean` with the other build artifacts.
+PGO_DIR ?= $(OBJ_ROOT)/pgo-data
+PGO_RAW_DIR ?= $(PGO_DIR)/raw
+PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
+# setup.sh does not generate RIT files, so the source-build default must work
+# with the standard downloaded data. Override this when training with an RIT.
+PGO_TRAIN_ENV ?= SIMBENCH_RIT=false
+PGO_TRAIN_TEST ?= simbench
+PGO_CC ?= clang
+PGO_LDFLAGS ?=
+LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null)
+ifeq ($(LLVM_PROFDATA),)
+LLVM_PROFDATA := xcrun llvm-profdata
+endif
+
 SRC  := $(wildcard $(SRC_DIR)/**/*.c)
 TEST := $(wildcard $(TEST_DIR)/*.c)
 CMD := $(wildcard $(CMD_DIR)/*.c)
@@ -60,13 +76,19 @@ cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
 cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 # Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.pgo_generate := $(cflags.release) -fprofile-instr-generate -fprofile-update=atomic
+cflags.test_pgo_generate := $(cflags.test_release) -fprofile-instr-generate -fprofile-update=atomic
+cflags.pgo_use := $(cflags.release) -fprofile-instr-use=$(PGO_PROFILE) -Wno-profile-instr-unprofiled
+cflags.test_pgo_use := $(cflags.test_release) -fprofile-instr-use=$(PGO_PROFILE) -Wno-profile-instr-unprofiled
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-ldflags.release := -pthread
+ldflags.release := -pthread -flto
+ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
+ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
 ldflags.cov := -pthread
 
@@ -85,7 +107,7 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu
+.PHONY: all clean iwyu pgo pgo-instrument pgo-train pgo-merge pgo-build
 
 all: magpie magpie_test
 
@@ -104,15 +126,47 @@ $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(S
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
-# Test files: use test_release flags if BUILD=release, otherwise use dev flags
+# Compiler and linker flag changes in this file invalidate every object.
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): Makefile
+
+# A newly merged profile must rebuild every profile-use object. Without this
+# dependency, make would reuse objects optimized against an older corpus.
+ifeq ($(BUILD),pgo_use)
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): $(PGO_PROFILE)
+endif
+
+# Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter release,$(BUILD)),${cflags.test_release},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
+
+# `make pgo` performs the complete instrument, train, merge, and optimized
+# build sequence. For a custom training corpus, run `make pgo-instrument`, run
+# one or more workloads with LLVM_PROFILE_FILE set to
+# "$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw", then run `make pgo-build`.
+pgo:
+	$(MAKE) pgo-train
+	$(MAKE) pgo-build
+
+pgo-instrument:
+	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
+	mkdir -p $(PGO_RAW_DIR)
+	$(MAKE) magpie_test BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	@echo 'Write training profiles to $(abspath $(PGO_RAW_DIR))/magpie-%p.profraw'
+
+pgo-train: pgo-instrument
+	LLVM_PROFILE_FILE="$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw" $(PGO_TRAIN_ENV) ./$(BIN_DIR)/magpie_test $(PGO_TRAIN_TEST)
+
+pgo-merge:
+	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
+
+pgo-build: pgo-merge
+	$(MAKE) all BUILD=pgo_use PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)

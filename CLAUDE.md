@@ -20,8 +20,26 @@ make magpie_test               # build test binary
 make magpie_test BUILD=release # release test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
+make pgo                       # train on simbench and build with Clang PGO
 make clean                     # remove build artifacts
 ```
+
+The PGO workflow uses Clang and `llvm-profdata`, and trains on `simbench`.
+Override `PGO_CC` and `LLVM_PROFDATA` when versioned tool names are needed.
+Pass benchmark environment variables through `PGO_TRAIN_ENV`, for example:
+
+```bash
+make pgo PGO_TRAIN_ENV='SIMBENCH_RIT=true SIMBENCH_SEED=17'
+```
+
+The default trains without RIT because `setup.sh` does not generate RIT files.
+Training and the final build run locally, producing code for the current
+architecture and `-march=native` CPU.
+
+For a broader corpus, run `make pgo-instrument`, execute the instrumented
+`./bin/magpie_test simbench` one or more times with `LLVM_PROFILE_FILE` set to
+the path printed by that target, then run `make pgo-build`. Use held-out
+simbench seeds when measuring the optimized binary.
 
 `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `BUILD=release` for anything beyond a few seconds** — dev is `-O0` + ASAN/UBSAN, very slow.
 

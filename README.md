@@ -39,6 +39,26 @@ You should now be able to run the compiled MAGPIE executable:
 ./bin/magpie
 ```
 
+### Profile-guided build
+
+For a faster native build, install Clang and `llvm-profdata`, then run:
+
+```
+make pgo
+```
+
+This builds an instrumented test executable, trains it on `simbench`, and
+replaces `bin/magpie` with a profile-guided build. Training uses WMP without
+RIT by default because `setup.sh` does not generate RIT files. If a CSW24 RIT
+is available, train with it using:
+
+```
+make pgo PGO_TRAIN_ENV='SIMBENCH_RIT=true'
+```
+
+PGO training runs locally and produces code for the current architecture and
+CPU. Run it separately on each machine architecture where Magpie is built.
+
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
 ## Usage

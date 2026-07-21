@@ -1,0 +1,85 @@
+name: pgo-performance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/pgo-performance.yml"
+      - "Makefile"
+      - "pgo_benchmark.py"
+      - "src/**"
+      - "test/sim_benchmark_test.c"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pgo:
+    name: validate-pgo (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86-64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang PGO toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-30
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Build release baseline
+        run: |
+          make clean
+          make magpie_test BUILD=release CC=clang-18 LDFLAGS='-pthread -flto -fuse-ld=lld'
+          mkdir -p obj/pgo-benchmark
+          cp bin/magpie_test obj/pgo-benchmark/magpie_test_release
+
+      - name: Train and build PGO
+        run: >-
+          make pgo
+          PGO_CC=clang-18
+          PGO_LDFLAGS=-fuse-ld=lld
+          LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata
+          PGO_TRAIN_ENV='SIMBENCH_RIT=false SIMBENCH_SEED=42'
+
+      - name: Check PGO correctness
+        run: ./bin/magpie_test movegen shadow sim gameplay
+
+      - name: Preserve PGO benchmark binary
+        run: cp bin/magpie_test obj/pgo-benchmark/magpie_test_pgo
+
+      - name: Validate held-out performance improvement
+        run: >-
+          python3 pgo_benchmark.py
+          --release obj/pgo-benchmark/magpie_test_release
+          --pgo obj/pgo-benchmark/magpie_test_pgo
+          --seeds 17 101 313
+          --min-improvement 2.0
+
+      - name: Upload merged profile
+        uses: actions/upload-artifact@v4
+        with:
+          name: magpie-pgo-profile-${{ matrix.arch }}
+          path: obj/pgo-data/magpie.profdata
+          retention-days: 14
