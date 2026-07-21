@@ -16,6 +16,7 @@
 #include "board_test.h"
 #include "cgp_test.h"
 #include "checkpoint_test.h"
+#include "cmd_api_test.h"
 #include "command_test.h"
 #include "config_test.h"
 #include "convert_test.h"
@@ -111,6 +112,7 @@ static TestEntry test_table[] = {
     {"bai", test_bai},
     {"baiutil", test_bai_utility},
     {"command", test_command},
+    {"cmdapi", test_cmd_api},
     {"gcg", test_gcg},
     {"analyze", test_analyze},
     {"autoplay", test_autoplay},

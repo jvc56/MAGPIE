@@ -582,6 +582,10 @@ bool config_get_human_readable(const Config *config) {
   return config->human_readable;
 }
 
+void config_set_human_readable(Config *config, bool human_readable) {
+  config->human_readable = human_readable;
+}
+
 bool config_get_show_prompt(const Config *config) {
   return config->show_prompt;
 }
@@ -7719,6 +7723,7 @@ void config_load_command(Config *config, const char *cmd,
   // If the command is empty, consider this a set options
   // command where zero options are set and return without error.
   if (is_string_empty_or_whitespace(cmd)) {
+    config->exec_parg_token = NUMBER_OF_ARG_TOKENS;
     return;
   }
 
@@ -7750,6 +7755,8 @@ void config_execute_command(Config *config, ErrorStack *error_stack) {
 bool config_run_str_api_command(Config *config, ErrorStack *error_stack,
                                 char **output) {
   if (!config_exec_parg_is_set(config)) {
+    thread_control_set_status(config_get_thread_control(config),
+                              THREAD_CONTROL_STATUS_FINISHED);
     return false;
   }
   *output = config_get_parg_api_func(config, config->exec_parg_token)(
@@ -8550,6 +8557,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
         error_stack, ERROR_STATUS_CONFIG_LOAD_BOARD_LAYOUT_ERROR,
         string_duplicate(
             "encountered an error loading the default board layout"));
+    config_destroy(config);
     return NULL;
   }
 
