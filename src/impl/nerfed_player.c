@@ -124,7 +124,7 @@ static const double NERFED_CHALLENGE_NOISE = 0.004;
 // are challenged at the family base rate. Rating-flat by design, so it
 // does not collapse at the expert end the way the EV path does.
 static const double NERFED_CHALLENGE_SPEC_5PT = 0.55;
-static const double NERFED_CHALLENGE_SPEC_DOUBLE = 0.50;
+static const double NERFED_CHALLENGE_SPEC_DOUBLE = 0.42;
 static const double NERFED_CHALLENGE_SPEC_CENTER = 0.5;
 static const double NERFED_CHALLENGE_SPEC_SCALE = 0.9;
 // Rating dependence of speculation, per family. CSW/5-point is nearly
@@ -196,6 +196,14 @@ static const double NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA = 0.020;
 // culture checks everything (attention 1.0 implicit).
 static const double NERFED_CHALLENGE_DOUBLE_ATTENTION = 0.57;
 static const double NERFED_CHALLENGE_5PT_ATTENTION = 0.80;
+// Attention rises toward 1.0 for obscure/suspicious plays, scaled by how
+// well the challenger recognizes suspicion (a logistic in the
+// challenger's rating): a strong player attends to a blatant play almost
+// always, a beginner barely more than to an ordinary one. Centered below
+// average so that mid-strength players already recognize most obscure
+// plays and experts are essentially certain to look.
+static const double NERFED_CHALLENGE_ATTN_RECOG_CENTER = -0.5;
+static const double NERFED_CHALLENGE_ATTN_RECOG_SCALE = 0.5;
 // Static-EU margin (utility units) within which the 3-arm sim chooser
 // runs; outside the band the static verdict stands (humans only
 // deliberate over close calls, and world-sims are expensive).
@@ -249,10 +257,10 @@ static const double NERFED_OWN_BELIEF_CONF_SLOPE = -0.08;
 static const double NERFED_PHONY_BELIEF_OFFSET = -1.2;
 // Family split: the TWL candidate pool converts belief mass into plays
 // more readily (larger cross-family pool, denser short-word phonies).
-static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.14;
-static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.44;
-static const double NERFED_PHONY_BELIEF_SLOPE = -0.40;
-static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.37;
+static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.51;
+static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.31;
+static const double NERFED_PHONY_BELIEF_SLOPE = -0.53;
+static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.42;
 static const double NERFED_PHONY_BELIEF_XFAM_SLOPE = 0.10;
 // Cross-family words are a huge pool (40k CSW-only words on the TWL
 // side): without an extra offset the belief mass dwarfs the corpus
@@ -647,6 +655,18 @@ static double nerfed_player_uniform(XoshiroPRNG *prng) {
   return ((double)(prng_next(prng) >> 11) + 0.5) / 9007199254740992.0;
 }
 
+// How obscure/suspicious a play looks, from the playability of its rarest
+// formed word: ~1 for floor-obscure plays (a word absent from the real
+// table looks maximally suspicious), ~0 for common plays. Drives both the
+// speculative-challenge rate and how much attention the play draws.
+static double nerfed_obscurity(double min_logplay) {
+  if (min_logplay > 90.0) {
+    min_logplay = NERFED_DEFAULT_LOGPLAY;
+  }
+  return 1.0 / (1.0 + exp(-(NERFED_CHALLENGE_SPEC_CENTER - min_logplay) /
+                          NERFED_CHALLENGE_SPEC_SCALE));
+}
+
 // P(a rater of rating rater_z speculatively challenges a play whose
 // rarest formed word has playability min_logplay), under the given rule.
 // The single source of truth for the hunch-challenge rate: the actual
@@ -656,17 +676,30 @@ static double nerfed_player_uniform(XoshiroPRNG *prng) {
 static double nerfed_speculative_challenge_prob(bool rule_5pt,
                                                 double min_logplay,
                                                 double rater_z) {
-  if (min_logplay > 90.0) {
-    min_logplay = NERFED_DEFAULT_LOGPLAY;
-  }
-  const double obscurity =
-      1.0 / (1.0 + exp(-(NERFED_CHALLENGE_SPEC_CENTER - min_logplay) /
-                       NERFED_CHALLENGE_SPEC_SCALE));
   const double spec_base =
       rule_5pt ? NERFED_CHALLENGE_SPEC_5PT : NERFED_CHALLENGE_SPEC_DOUBLE;
   const double spec_rtg = rule_5pt ? NERFED_CHALLENGE_SPEC_RTG_5PT
                                    : NERFED_CHALLENGE_SPEC_RTG_DOUBLE;
-  return spec_base * obscurity * exp(-spec_rtg * rater_z);
+  return spec_base * nerfed_obscurity(min_logplay) * exp(-spec_rtg * rater_z);
+}
+
+// P(a challenger of rating rater_z engages the challenge decision at all
+// (the "attention" gate) for a play of the given obscurity. Ordinary
+// plays draw the base engagement rate; obscure/suspicious plays draw
+// near-certain attention from a STRONG challenger (they recognize a
+// blatant play and look hard), but only slightly more from a beginner
+// (who does not register the play as suspicious). Once attended, whether
+// it is actually challenged is the knowledge/EV decision downstream — so
+// exceptionally bad phonies, which look obscure AND score a high
+// p_invalid, are almost always challenged by experts.
+static double nerfed_attention_prob(bool rule_5pt, double obscurity,
+                                    double rater_z) {
+  const double base = rule_5pt ? NERFED_CHALLENGE_5PT_ATTENTION
+                               : NERFED_CHALLENGE_DOUBLE_ATTENTION;
+  const double recognition =
+      1.0 / (1.0 + exp(-(rater_z - NERFED_CHALLENGE_ATTN_RECOG_CENTER) /
+                       NERFED_CHALLENGE_ATTN_RECOG_SCALE));
+  return base + (1.0 - base) * obscurity * recognition;
 }
 
 // P(this play is invisible to the player): Stage B miss logistic with a
@@ -1592,16 +1625,45 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
                                     XoshiroPRNG *prng,
                                     NerfedChallengeAssessment *assessment) {
   memset(assessment, 0, sizeof(*assessment));
-  const double attention = rule_5pt ? NERFED_CHALLENGE_5PT_ATTENTION
-                                    : NERFED_CHALLENGE_DOUBLE_ATTENTION;
+  const double challenger_z = nerfed_player->rating_z;
+  Board *board = game_get_board(game);
+  FormedWords *formed_words = formed_words_create(board, move);
+  const int num_words = formed_words_get_num_words(formed_words);
+  // Rarest formed word's playability -> how obscure/suspicious the play
+  // looks. Computed BEFORE the attention gate so a blatant (floor-
+  // obscure) play draws near-certain attention from a strong challenger
+  // while ordinary plays keep the base engagement rate.
+  double min_logplay = 99.0;
+  MachineLetter word[BOARD_DIM];
+  for (int word_idx = 0; word_idx < num_words; word_idx++) {
+    const int word_length =
+        formed_words_get_word_length(formed_words, word_idx);
+    if (word_length < 2) {
+      continue;
+    }
+    const MachineLetter *letters =
+        formed_words_get_word(formed_words, word_idx);
+    for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
+      word[letter_idx] = get_unblanked_machine_letter(letters[letter_idx]);
+    }
+    const NerfedWordFeat *feat =
+        nerfed_player_lookup_word(nerfed_player, word, word_length);
+    const double logplay = feat ? feat->logplay : NERFED_DEFAULT_LOGPLAY;
+    if (logplay < min_logplay) {
+      min_logplay = logplay;
+    }
+  }
+  const double obscurity = nerfed_obscurity(min_logplay);
+  const double attention =
+      nerfed_attention_prob(rule_5pt, obscurity, challenger_z);
   if (nerfed_player_uniform(prng) > attention) {
+    formed_words_destroy(formed_words);
     assessment->attended = false;
     return;
   }
   assessment->attended = true;
   const double opponent_rating_z =
       (opponent != NULL) ? opponent->rating_z : NERFED_UNNERFED_OPP_RATING_Z;
-  const double challenger_z = nerfed_player->rating_z;
   // Base prior: boosted for weak challengers (they see phonies
   // everywhere), unchanged at/above average so the calibrated
   // matched-rating rates for strong players are preserved.
@@ -1619,16 +1681,9 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
   if (phony_prior > NERFED_OPP_PHONY_PRIOR_MAX) {
     phony_prior = NERFED_OPP_PHONY_PRIOR_MAX;
   }
-  Board *board = game_get_board(game);
-  FormedWords *formed_words = formed_words_create(board, move);
-  const int num_words = formed_words_get_num_words(formed_words);
   double p_invalid = 0.0;
-  // Play obscurity for the speculative term: the rarest formed word's
-  // playability as the challenger's own lexicon sees it (a word absent
-  // from the real table looks maximally obscure). Common plays are never
-  // speculatively challenged; obscure ones look challengeable.
-  double min_logplay = 99.0;
-  MachineLetter word[BOARD_DIM];
+  // Second pass over the formed words: the phony posterior. (min_logplay
+  // and the attention gate above already used the first pass.)
   for (int word_idx = 0; word_idx < num_words; word_idx++) {
     const int word_length =
         formed_words_get_word_length(formed_words, word_idx);
@@ -1636,14 +1691,6 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
         formed_words_get_word(formed_words, word_idx);
     for (int letter_idx = 0; letter_idx < word_length; letter_idx++) {
       word[letter_idx] = get_unblanked_machine_letter(letters[letter_idx]);
-    }
-    if (word_length >= 2) {
-      const NerfedWordFeat *feat =
-          nerfed_player_lookup_word(nerfed_player, word, word_length);
-      const double logplay = feat ? feat->logplay : NERFED_DEFAULT_LOGPLAY;
-      if (logplay < min_logplay) {
-        min_logplay = logplay;
-      }
     }
     // a currently-believed word contributes no suspicion
     if (nerfed_player_believes_word(nerfed_player, word, word_length)) {
