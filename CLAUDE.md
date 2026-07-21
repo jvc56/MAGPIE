@@ -21,6 +21,7 @@ make magpie_test BUILD=release # release test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make pgo                       # train on simbench and build with Clang PGO
+make pgo-use PGO_PROFILE=...   # build with an existing merged Clang profile
 make clean                     # remove build artifacts
 ```
 
@@ -33,8 +34,12 @@ make pgo PGO_TRAIN_ENV='SIMBENCH_RIT=true SIMBENCH_SEED=17'
 ```
 
 The default trains without RIT because `setup.sh` does not generate RIT files.
-Training and the final build run locally, producing code for the current
-architecture and `-march=native` CPU.
+Training and the final build run locally, producing a profile for the current
+architecture and code for the `-march=native` CPU. A profile downloaded from
+the `pgo-performance` GitHub Actions workflow can be consumed with
+`make pgo-use`; select the exact source ref and the same Clang major version
+used to produce the profile. Manual workflow runs default to x86-64, while pull
+request validation profiles both x86-64 and ARM64.
 
 For a broader corpus, run `make pgo-instrument`, execute the instrumented
 `./bin/magpie_test simbench` one or more times with `LLVM_PROFILE_FILE` set to

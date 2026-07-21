@@ -2,6 +2,16 @@ name: pgo-performance
 
 on:
   workflow_dispatch:
+    inputs:
+      architecture:
+        description: Architecture to profile
+        required: true
+        default: x86-64
+        type: choice
+        options:
+          - x86-64
+          - arm64
+          - both
   pull_request:
     paths:
       - ".github/workflows/pgo-performance.yml"
@@ -16,16 +26,20 @@ permissions:
 jobs:
   validate-pgo:
     name: validate-pgo (${{ matrix.arch }})
-    runs-on: ${{ matrix.runner }}
+    runs-on: >-
+      ${{ matrix.arch == 'x86-64' && 'ubuntu-24.04' || 'ubuntu-24.04-arm' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - arch: x86-64
-            runner: ubuntu-24.04
-          - arch: arm64
-            runner: ubuntu-24.04-arm
+        arch: >-
+          ${{ fromJSON(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.architecture == 'x86-64' && '["x86-64"]' ||
+            github.event_name == 'workflow_dispatch' &&
+            inputs.architecture == 'arm64' && '["arm64"]' ||
+            '["x86-64","arm64"]'
+          ) }}
 
     steps:
       - uses: actions/checkout@v4
@@ -77,9 +91,20 @@ jobs:
           --seeds 17 101 313
           --min-improvement 2.0
 
+      - name: Record profile provenance
+        env:
+          PROFILE_ARCH: ${{ matrix.arch }}
+        run: |
+          printf 'source_sha=%s\narchitecture=%s\ntraining_seed=42\ntraining_rit=false\n' \
+            "$GITHUB_SHA" "$PROFILE_ARCH" > obj/pgo-data/profile-metadata.txt
+          clang-18 --version >> obj/pgo-data/profile-metadata.txt
+
       - name: Upload merged profile
         uses: actions/upload-artifact@v4
         with:
           name: magpie-pgo-profile-${{ matrix.arch }}
-          path: obj/pgo-data/magpie.profdata
-          retention-days: 14
+          path: |
+            obj/pgo-data/magpie.profdata
+            obj/pgo-data/profile-metadata.txt
+          if-no-files-found: error
+          retention-days: 30

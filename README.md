@@ -56,8 +56,28 @@ is available, train with it using:
 make pgo PGO_TRAIN_ENV='SIMBENCH_RIT=true'
 ```
 
-PGO training runs locally and produces code for the current architecture and
-CPU. Run it separately on each machine architecture where Magpie is built.
+PGO profiles are architecture- and source-specific, while the final build uses
+`-march=native` for the build machine. Run training separately for each target
+architecture.
+
+The `pgo-performance` GitHub Actions workflow can do the training on a hosted
+x86-64 runner. Run it manually at the exact branch or tag to build, leave the
+architecture at its `x86-64` default, and download the
+`magpie-pgo-profile-x86-64` artifact. From a checkout of that same source
+revision, confirm the commit in `profile-metadata.txt`, then build with the
+downloaded profile and Clang 18:
+
+```
+make pgo-use \
+  PGO_PROFILE=/path/to/magpie.profdata \
+  PGO_CC=clang-18 \
+  PGO_LDFLAGS=-fuse-ld=lld
+```
+
+Manual workflow runs can alternatively select ARM64 or both architectures.
+Pull requests that affect the PGO build or workload always validate both. Clang
+rejects an out-of-date profile rather than silently building against mismatched
+source.
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 

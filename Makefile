@@ -78,8 +78,11 @@ cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
 cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
 cflags.pgo_generate := $(cflags.release) -fprofile-instr-generate -fprofile-update=atomic
 cflags.test_pgo_generate := $(cflags.test_release) -fprofile-instr-generate -fprofile-update=atomic
-cflags.pgo_use := $(cflags.release) -fprofile-instr-use=$(PGO_PROFILE) -Wno-profile-instr-unprofiled
-cflags.test_pgo_use := $(cflags.test_release) -fprofile-instr-use=$(PGO_PROFILE) -Wno-profile-instr-unprofiled
+pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
+                 -Werror=profile-instr-out-of-date \
+                 -Wno-profile-instr-unprofiled
+cflags.pgo_use := $(cflags.release) $(pgo_use_flags)
+cflags.test_pgo_use := $(cflags.test_release) $(pgo_use_flags)
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
@@ -101,13 +104,18 @@ CFLAGS := ${cflags.${BUILD}}
 DEPFLAGS := -MMD -MP
 
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+ifeq ($(BUILD),pgo_use)
+CMD_CFLAGS := $(cflags.release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+else
+CMD_CFLAGS := $(CFLAGS)
+endif
 
 
 LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu pgo pgo-instrument pgo-train pgo-merge pgo-build
+.PHONY: all clean iwyu pgo pgo-instrument pgo-train pgo-merge pgo-build pgo-use
 
 all: magpie magpie_test
 
@@ -123,8 +131,11 @@ magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+# The training executable and CLI executable have different `main` functions.
+# Keep the CLI entry point out of profile use so its shared symbol name is not
+# mistaken for stale profile data; all shared Magpie code remains profiled.
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
-	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+	$(CC) $(CMD_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
 # Compiler and linker flag changes in this file invalidate every object.
 $(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): Makefile
@@ -149,6 +160,8 @@ clean:
 # build sequence. For a custom training corpus, run `make pgo-instrument`, run
 # one or more workloads with LLVM_PROFILE_FILE set to
 # "$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw", then run `make pgo-build`.
+# To consume an already merged profile (for example, one downloaded from
+# GitHub Actions), run `make pgo-use PGO_PROFILE=/path/to/magpie.profdata`.
 pgo:
 	$(MAKE) pgo-train
 	$(MAKE) pgo-build
@@ -166,7 +179,21 @@ pgo-merge:
 	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
 
 pgo-build: pgo-merge
-	$(MAKE) all BUILD=pgo_use PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	$(MAKE) pgo-use \
+		PGO_PROFILE="$(PGO_PROFILE)" \
+		PGO_CC="$(PGO_CC)" \
+		PGO_LDFLAGS="$(PGO_LDFLAGS)"
+
+# Profile identity is not encoded in OBJ_DIR, so always rebuild when a merged
+# profile is explicitly applied.
+pgo-use:
+	@test -f "$(PGO_PROFILE)" || \
+		(echo 'PGO profile not found: $(PGO_PROFILE)' >&2; exit 1)
+	$(MAKE) -B all \
+		BUILD=pgo_use \
+		PGO_PROFILE="$(PGO_PROFILE)" \
+		CC="$(PGO_CC)" \
+		PGO_LDFLAGS="$(PGO_LDFLAGS)"
 
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
