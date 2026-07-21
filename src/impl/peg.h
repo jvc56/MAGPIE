@@ -139,6 +139,17 @@ typedef struct PegArgs {
   const int *stage_top_k;
   int num_stages;
 
+  // Minimum share of a stage's field guaranteed to each bag-emptying class
+  // (plays that empty the bag, and plays that leave tiles in it), as a
+  // fraction in [0, 0.5]. Rounded up, and applied only to the two cuts driven
+  // by the shallow rankings: stage 0's greedy ranking and stage 1's lowest-
+  // fidelity endgame ranking. Those stages rank the classes on an unfair
+  // footing -- too few plies for the opponent to punish an emptier -- so a
+  // narrow cut can drop a whole class before the fidelity that vindicates it
+  // runs. From stage 2 on the ranking is trusted and no quota applies.
+  // 0 (the zero value) disables it: the cuts are plain top-K.
+  double class_quota;
+
   // Pessimistic-opponent cap: in the PEG_OPP_PESSIMISTIC playout, weigh only
   // the inner_top_k highest-equity opponent replies at each opponent turn.
   // 0 = weigh every reply (the unbounded worst case). No effect under
@@ -254,17 +265,18 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
               const int num_threads, const double time_budget_seconds,
               const int max_stage, const bool greedy_seed_only,
               const int *stage_top_k, const int num_stages,
-              const int inner_top_k, const PegOppModel opp_model,
-              const int scenario_stride, const bool nested_enabled,
-              const int nested_cand_cap, const int *nested_cand_caps,
-              const int nested_n_cand_caps, const int nested_stride,
-              const int nested_emptier_ply_cap, const int nested_max_depth,
-              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-              const Move *const *only_moves, const int n_only_moves,
-              const Move *const *protect_moves, const int n_protect_moves,
-              const bool include_per_scenario, PegOnStageStart on_stage_start,
-              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+              const double class_quota, const int inner_top_k,
+              const PegOppModel opp_model, const int scenario_stride,
+              const bool nested_enabled, const int nested_cand_cap,
+              const int *nested_cand_caps, const int nested_n_cand_caps,
+              const int nested_stride, const int nested_emptier_ply_cap,
+              const int nested_max_depth, const MachineLetter *eval_bag_order,
+              const int eval_bag_order_len, const Move *const *only_moves,
+              const int n_only_moves, const Move *const *protect_moves,
+              const int n_protect_moves, const bool include_per_scenario,
+              PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
+              PegOnScenarioDone on_scenario_done, void *user_data,
+              PegPoll *poll, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -273,6 +285,7 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->greedy_seed_only = greedy_seed_only;
   peg_args->stage_top_k = stage_top_k;
   peg_args->num_stages = num_stages;
+  peg_args->class_quota = class_quota;
   peg_args->inner_top_k = inner_top_k;
   peg_args->opp_model = opp_model;
   peg_args->scenario_stride = scenario_stride;

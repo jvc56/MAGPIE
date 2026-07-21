@@ -35,6 +35,7 @@
 #include "peg_pool.h"
 #include "word_prune.h"
 #include <limits.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -1968,6 +1969,220 @@ static bool peg_move_protected(const Move *move,
   return false;
 }
 
+// A candidate empties the bag iff it plays at least as many tiles as the bag
+// holds: the mover draws min(tiles_played, bag_size), so the bag is left empty
+// exactly when tiles_played >= bag_size. The two classes lead to structurally
+// different positions (an emptier hands over a known rack and an exact endgame;
+// a non-emptier leaves tiles to draw), which is why a shallow stage can be
+// systematically wrong about a whole class -- see peg_apply_class_quota.
+static bool peg_cand_empties_bag(const PegRankedCand *cand, int bag_size) {
+  return move_get_tiles_played(&cand->move) >= bag_size;
+}
+
+// Per-class floor for a stage field of `keep`, rounded up, never asking for
+// more of a class than the field actually contains.
+static int peg_class_floor(int keep, double quota, int available) {
+  if (quota <= 0.0) {
+    return 0;
+  }
+  int floor_count = (int)ceil(quota * (double)keep);
+  if (floor_count > available) {
+    floor_count = available;
+  }
+  return floor_count;
+}
+
+// Guarantee each bag-emptying class a minimum share of a stage's field.
+//
+// The shallow stages rank the two classes on an unfair footing: at low fidelity
+// the opponent gets too few plies to punish an emptier, so emptiers look strong
+// and non-emptiers (whose bag-control value only shows up later) look weak. A
+// narrow cut taken on that ranking can therefore drop every play of one class
+// before the fidelity that would have vindicated it ever runs.
+//
+// This reorders a sorted ranked[0..live_count) so the intended field occupies
+// the first `keep` slots, promoting the best-ranked members of any class that
+// falls short of its floor and demoting the worst-ranked members of the other
+// class -- but never below that class's own floor, so an impossible pair of
+// floors (their sum exceeding `keep`) simply leaves the natural top-K alone
+// rather than thrashing. Relative rank order within the field is preserved.
+// Quota <= 0 is a no-op, as is a field that already meets both floors.
+static void peg_apply_class_quota(PegRankedCand *ranked, int live_count,
+                                  int keep, int bag_size, double quota) {
+  if (quota <= 0.0 || keep <= 0 || keep >= live_count) {
+    return;
+  }
+  int total_emptiers = 0;
+  for (int idx = 0; idx < live_count; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size)) {
+      total_emptiers++;
+    }
+  }
+  const int total_non_emptiers = live_count - total_emptiers;
+  const int floor_emptiers = peg_class_floor(keep, quota, total_emptiers);
+  const int floor_non_emptiers =
+      peg_class_floor(keep, quota, total_non_emptiers);
+
+  int kept_emptiers = 0;
+  for (int idx = 0; idx < keep; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size)) {
+      kept_emptiers++;
+    }
+  }
+  const int kept_non_emptiers = keep - kept_emptiers;
+
+  // Only one class can be short: if both were, keep would be under the sum of
+  // the floors and neither could give ground.
+  bool promote_emptiers;
+  int shortfall;
+  if (kept_non_emptiers < floor_non_emptiers) {
+    promote_emptiers = false;
+    shortfall = floor_non_emptiers - kept_non_emptiers;
+    const int spare = kept_emptiers - floor_emptiers;
+    if (shortfall > spare) {
+      shortfall = spare;
+    }
+  } else if (kept_emptiers < floor_emptiers) {
+    promote_emptiers = true;
+    shortfall = floor_emptiers - kept_emptiers;
+    const int spare = kept_non_emptiers - floor_non_emptiers;
+    if (shortfall > spare) {
+      shortfall = spare;
+    }
+  } else {
+    return;
+  }
+  if (shortfall <= 0) {
+    return;
+  }
+
+  // Mark the field: the natural top-K, minus the `shortfall` worst-ranked
+  // members of the surplus class, plus the `shortfall` best-ranked members of
+  // the short class from below the cut.
+  bool *in_field = (bool *)malloc_or_die((size_t)live_count * sizeof(bool));
+  for (int idx = 0; idx < live_count; idx++) {
+    in_field[idx] = idx < keep;
+  }
+  int to_demote = shortfall;
+  for (int idx = keep - 1; idx >= 0 && to_demote > 0; idx--) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size) != promote_emptiers) {
+      in_field[idx] = false;
+      to_demote--;
+    }
+  }
+  int to_promote = shortfall;
+  for (int idx = keep; idx < live_count && to_promote > 0; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size) == promote_emptiers) {
+      in_field[idx] = true;
+      to_promote--;
+    }
+  }
+
+  // Stable partition: field first, in rank order, then the rest.
+  PegRankedCand *reordered = (PegRankedCand *)malloc_or_die(
+      (size_t)live_count * sizeof(PegRankedCand));
+  int write_idx = 0;
+  for (int idx = 0; idx < live_count; idx++) {
+    if (in_field[idx]) {
+      reordered[write_idx++] = ranked[idx];
+    }
+  }
+  for (int idx = 0; idx < live_count; idx++) {
+    if (!in_field[idx]) {
+      reordered[write_idx++] = ranked[idx];
+    }
+  }
+  for (int idx = 0; idx < live_count; idx++) {
+    ranked[idx] = reordered[idx];
+  }
+  free(reordered);
+  free(in_field);
+}
+
+// Reorders ranked[0..count) so the two class champions -- the best-ranked
+// bag-emptier and the best-ranked non-emptier -- take indices 0 and 1, better
+// of the two first, with every other candidate's relative order preserved.
+// Returns false and leaves the array alone when either class is absent (there
+// is then nothing to schedule against).
+//
+// A stage scores its field in array order and stops at the deadline, so array
+// order is the evaluation schedule. The field entering the last quota stage is
+// ordered by the shallow ranking the quota exists to distrust, which would
+// leave the promoted class's champion near the back of the queue -- saved from
+// the cut only to be dropped by the clock. Scoring both champions first makes
+// the quota's guarantee real, and lets this stage's own (deeper) verdict decide
+// where the rest of the budget goes: see peg_order_prefer_class.
+static bool peg_order_class_champions_first(PegRankedCand *ranked, int count,
+                                            int bag_size) {
+  int best_emptier = -1;
+  int best_non_emptier = -1;
+  for (int idx = 0; idx < count; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size)) {
+      if (best_emptier < 0) {
+        best_emptier = idx;
+      }
+    } else if (best_non_emptier < 0) {
+      best_non_emptier = idx;
+    }
+    if (best_emptier >= 0 && best_non_emptier >= 0) {
+      break;
+    }
+  }
+  if (best_emptier < 0 || best_non_emptier < 0) {
+    return false;
+  }
+  // ranked is rank-sorted, so the lower index is the better-ranked champion.
+  const int champion_hi =
+      best_emptier < best_non_emptier ? best_emptier : best_non_emptier;
+  const int champion_lo =
+      best_emptier < best_non_emptier ? best_non_emptier : best_emptier;
+  PegRankedCand *reordered =
+      (PegRankedCand *)malloc_or_die((size_t)count * sizeof(PegRankedCand));
+  reordered[0] = ranked[champion_hi];
+  reordered[1] = ranked[champion_lo];
+  int write_idx = 2;
+  for (int idx = 0; idx < count; idx++) {
+    if (idx != champion_hi && idx != champion_lo) {
+      reordered[write_idx++] = ranked[idx];
+    }
+  }
+  for (int idx = 0; idx < count; idx++) {
+    ranked[idx] = reordered[idx];
+  }
+  free(reordered);
+  return true;
+}
+
+// Stable-partitions ranked[start..count) so the preferred class comes first.
+// Called once both champions have been scored at this stage's fidelity: the
+// class whose champion scored better gets the rest of the budget first, so a
+// truncated stage spends its time on the class this stage's own evidence
+// favors rather than on the order the previous (shallower) stage imposed.
+static void peg_order_prefer_class(PegRankedCand *ranked, int start, int count,
+                                   int bag_size, bool prefer_emptiers) {
+  if (start >= count) {
+    return;
+  }
+  const int span = count - start;
+  PegRankedCand *reordered =
+      (PegRankedCand *)malloc_or_die((size_t)span * sizeof(PegRankedCand));
+  int write_idx = 0;
+  for (int idx = start; idx < count; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size) == prefer_emptiers) {
+      reordered[write_idx++] = ranked[idx];
+    }
+  }
+  for (int idx = start; idx < count; idx++) {
+    if (peg_cand_empties_bag(&ranked[idx], bag_size) != prefer_emptiers) {
+      reordered[write_idx++] = ranked[idx];
+    }
+  }
+  for (int idx = 0; idx < span; idx++) {
+    ranked[start + idx] = reordered[idx];
+  }
+  free(reordered);
+}
+
 // In-place select of the candidates that advance from a sorted ranked[0..
 // live_count): the top `keep` entries plus any protected move below the cut,
 // compacted into [0, return) with descending order preserved. Returns the new
@@ -2546,6 +2761,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // field with full scenario enumeration. The greedy stage 0 still seeds the
   // ranking.
   const bool exhaustive = num_stages == 1 && counts[0] == INT_MAX;
+  // The quota shapes the fields cut from the two shallow rankings (stage 0's
+  // greedy seed and stage 1's lowest-fidelity endgame), so stage 2's field is
+  // the last one it touches -- fewer, if the schedule is shorter than that.
+  const int last_quota_stage = num_stages < 2 ? num_stages : 2;
 
   // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
   // (the bag <= 2 scenario space is too small to sample without destroying
@@ -2711,6 +2930,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       n_real = n_cands; // nothing finished in budget; keep what we have
     }
     const int num_kept_after_stage0 = n_real < counts[0] ? n_real : counts[0];
+    // Stage 0's greedy ranking is the least trustworthy of all, so give each
+    // bag-emptying class its floor before the cut takes the leaders.
+    peg_apply_class_quota(ranked, n_real, num_kept_after_stage0, bag_size,
+                          args->class_quota);
     // Survivors carried forward = top-K plus any protected straggler. Tracked
     // as a shrinking live_count so protected moves never leave a stale copy in
     // the unscanned tail.
@@ -2752,6 +2975,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       const int keep = live_count < counts[stage_idx - 1]
                            ? live_count
                            : counts[stage_idx - 1];
+      // This cut is taken on the ranking stage_idx-1 produced, so the quota
+      // applies while that ranking is a shallow one: stage 0's greedy seed
+      // (stage_idx 1, already cut above) and stage 1's lowest-fidelity endgame
+      // (stage_idx 2). From stage 2's ranking on, the classes are compared
+      // fairly and the plain top-K stands.
+      if (stage_idx <= 2) {
+        peg_apply_class_quota(ranked, live_count, keep, bag_size,
+                              args->class_quota);
+      }
       const int eval_count = peg_select_survivors(ranked, live_count, keep,
                                                   protect_moves, n_protect);
       if (eval_count < 2) {
@@ -2765,6 +2997,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // happen.
       peg_force_protected_to_front(ranked, eval_count, protect_moves,
                                    n_protect);
+      // Class-aware scheduling for the last quota-shaped stage: score both
+      // class champions up front (the rest of the schedule is settled once
+      // they finish, in the live loop below). Protected moves keep priority --
+      // they were just pinned to the front and their own budget guarantee
+      // still holds -- so this only reorders when nothing is protected.
+      const bool schedule_by_class =
+          args->class_quota > 0.0 && stage_idx == last_quota_stage &&
+          n_protect <= 0 &&
+          peg_order_class_champions_first(ranked, eval_count, bag_size);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
         break;
       }
@@ -2846,6 +3087,24 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             break;
           }
           done_count = cand_idx + 1;
+          // Both class champions have now been scored at this stage's own
+          // fidelity, so their verdict -- not the shallower ranking this field
+          // arrived in -- settles the rest of the schedule: finish the class
+          // whose champion came out ahead, then the other. Only the untouched
+          // tail moves, so nothing already scored is disturbed, and the poll's
+          // published move list is refreshed to keep its indices aligned.
+          if (schedule_by_class && cand_idx == 1) {
+            const bool emptier_champion_won =
+                peg_poll_key(&restaged[0]) >= peg_poll_key(&restaged[1])
+                    ? peg_cand_empties_bag(&ranked[0], bag_size)
+                    : peg_cand_empties_bag(&ranked[1], bag_size);
+            peg_order_prefer_class(ranked, /*start=*/2, eval_count, bag_size,
+                                   emptier_champion_won);
+            for (int move_idx = 2; move_idx < eval_count; move_idx++) {
+              moves[move_idx] = &ranked[move_idx].move;
+            }
+            peg_poll_set_stage_moves(args->poll, moves, eval_count);
+          }
           if (args->include_per_scenario) {
             peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &cand_oc);
           }
