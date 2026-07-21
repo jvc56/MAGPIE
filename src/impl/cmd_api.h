@@ -49,6 +49,12 @@ char *magpie_get_last_command_status_message(Magpie *mp);
 
 char *magpie_get_last_command_output(const Magpie *mp);
 
+// JSON views of the current state for UI consumers. Each returns a heap string
+// the caller must free (never NULL). See src/impl/json_api.h for the schema.
+char *magpie_get_state_json(const Magpie *mp);
+char *magpie_get_moves_json(const Magpie *mp);
+char *magpie_get_endgame_json(const Magpie *mp);
+
 void magpie_stop_current_command(const Magpie *mp);
 
 // Returns the current thread status as an int:

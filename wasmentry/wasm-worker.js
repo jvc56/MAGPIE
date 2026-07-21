@@ -12,6 +12,9 @@ let wasmGetError = null;
 let wasmGetStatus = null;
 let wasmGetThreadStatus = null;
 let wasmStop = null;
+let wasmGetStateJson = null;
+let wasmGetMovesJson = null;
+let wasmGetEndgameJson = null;
 
 let isInitialized = false;
 let isRunning = false;
@@ -54,7 +57,16 @@ let statusCheckInterval = null;
           postMessage({ type: 'log', text: 'WASM instantiating... (this is normal on mobile)' });
           return;
         }
-        postMessage({ type: 'error', text: text });
+        // Only treat genuinely fatal runtime output as an error. Benign
+        // Emscripten/pthread chatter on stderr (e.g. terminated-worker notices)
+        // must NOT be posted as 'error', or it would spuriously fail an
+        // in-flight command. True engine command failures are reported via the
+        // structured wasm_get_error channel, and fatal aborts kill the process.
+        if (/abort|RuntimeError|out of memory|Cannot enlarge memory|stack overflow|uncaught exception/i.test(text)) {
+          postMessage({ type: 'error', text: text });
+        } else {
+          postMessage({ type: 'log', text: text });
+        }
       },
       locateFile: (path, prefix) => {
         // Files are in the same directory as the worker
@@ -86,6 +98,9 @@ let statusCheckInterval = null;
     wasmGetStatus = Module.cwrap('wasm_get_status', 'number', []);
     wasmGetThreadStatus = Module.cwrap('wasm_get_thread_status', 'number', []);
     wasmStop = Module.cwrap('wasm_stop_command', null, []);
+    wasmGetStateJson = Module.cwrap('wasm_get_state_json', 'number', []);
+    wasmGetMovesJson = Module.cwrap('wasm_get_moves_json', 'number', []);
+    wasmGetEndgameJson = Module.cwrap('wasm_get_endgame_json', 'number', []);
 
     postMessage({ type: 'ready' });
     postMessage({ type: 'log', text: 'Worker ready!' });
@@ -112,7 +127,7 @@ onmessage = async (e) => {
         break;
 
       case 'run':
-        handleRun(data);
+        await handleRun(data);
         break;
 
       case 'stop':
@@ -123,11 +138,34 @@ onmessage = async (e) => {
         handleDestroy();
         break;
 
+      case 'getState':
+        handleGetJson(wasmGetStateJson, 'state', data && data.requestId);
+        break;
+
+      case 'getMoves':
+        handleGetJson(wasmGetMovesJson, 'moves', data && data.requestId);
+        break;
+
+      case 'getEndgame':
+        handleGetJson(wasmGetEndgameJson, 'endgame', data && data.requestId);
+        break;
+
       default:
         postMessage({ type: 'error', text: `Unknown message type: ${type}` });
     }
   } catch (error) {
-    postMessage({ type: 'error', text: `Error: ${error.message}` });
+    // For JSON getters, reply on their own channel (with the requestId) so the
+    // caller's promise settles instead of hanging; otherwise post a generic error.
+    const replyType = { getState: 'state', getMoves: 'moves', getEndgame: 'endgame' }[type];
+    if (replyType) {
+      postMessage({
+        type: replyType,
+        data: { ok: false, error: error.message },
+        requestId: data && data.requestId,
+      });
+    } else {
+      postMessage({ type: 'error', text: `Error: ${error.message}` });
+    }
   }
 };
 
@@ -201,6 +239,7 @@ async function handleRun({ commands }) {
 
   isRunning = true;
 
+  try {
   // Execute commands sequentially
   for (let i = 0; i < commands.length; i++) {
     const cmd = commands[i];
@@ -272,16 +311,47 @@ async function handleRun({ commands }) {
       Module._free(errorPtr);
       if (error && error.trim()) {
         postMessage({ type: 'error', text: `Command "${cmd}" failed: ${error}` });
-        isRunning = false;
         return;
       }
     }
   }
 
-  // Commands completed successfully
-  postMessage({ type: 'log', text: 'All commands completed' });
-  isRunning = false;
-  postMessage({ type: 'complete' });
+    // Commands completed successfully
+    postMessage({ type: 'log', text: 'All commands completed' });
+    postMessage({ type: 'complete' });
+  } catch (err) {
+    // A synchronous throw (e.g. OOM in stringToNewUTF8) must still post a
+    // terminal message and reset isRunning, or the UI would wedge forever.
+    postMessage({ type: 'error', text: `Command failed: ${err && err.message ? err.message : err}` });
+  } finally {
+    isRunning = false;
+  }
+}
+
+// Calls a JSON-returning WASM export, reads + frees the returned C string,
+// parses it, and posts the result back as { type, data, requestId }. Only call
+// this when no command is running so the read sees a stable game state.
+function handleGetJson(getter, type, requestId) {
+  if (!Module || !isInitialized) {
+    postMessage({ type, data: { ok: false, error: 'MAGPIE not initialized' }, requestId });
+    return;
+  }
+  if (!getter) {
+    postMessage({ type, data: { ok: false, error: 'getter unavailable' }, requestId });
+    return;
+  }
+  const ptr = getter();
+  let parsed = { ok: false, error: 'empty result' };
+  if (ptr) {
+    const json = Module.UTF8ToString(ptr);
+    Module._free(ptr);
+    try {
+      parsed = JSON.parse(json);
+    } catch (err) {
+      parsed = { ok: false, error: `JSON parse error: ${err.message}`, raw: json };
+    }
+  }
+  postMessage({ type, data: parsed, requestId });
 }
 
 function startStatusPolling() {

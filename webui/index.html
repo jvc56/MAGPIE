@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>MAGPIE — Analysis Board</title>
+    <link rel="stylesheet" href="style.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">MAGPIE <span>analysis board</span></div>
+      <div class="topbar-controls">
+        <label class="ctl">Lexicon <select id="lexicon"></select></label>
+        <span class="ctl sample-ctl">
+          <select id="sample"></select>
+          <button type="button" id="btn-sample" class="ghost-btn" data-act="sample">Load</button>
+        </span>
+        <button type="button" id="btn-new" class="ghost-btn" data-act="new">New</button>
+        <button type="button" id="btn-copy-cgp" class="ghost-btn">Copy CGP</button>
+        <button type="button" id="btn-load-cgp" class="ghost-btn">Load CGP…</button>
+      </div>
+    </header>
+
+    <div id="loadcgp-panel" class="loadcgp-panel" hidden>
+      <input
+        type="text"
+        id="cgp-input"
+        class="cgp-input"
+        placeholder="Paste a CGP string and press Load (e.g. 15/15/… AEINRST/ 0/0 0 -lex CSW21)"
+      />
+      <button type="button" id="cgp-load-btn" class="primary" data-act="loadcgp">Load</button>
+      <button type="button" id="cgp-cancel-btn" class="ghost-btn">Cancel</button>
+    </div>
+
+    <div id="status" class="status">Loading…</div>
+
+    <main class="layout">
+      <section class="board-area">
+        <div id="board" class="board"></div>
+        <div class="palette-wrap">
+          <div id="palette-hint" class="palette-hint">Click a board square to start placing tiles.</div>
+          <div id="palette" class="palette"></div>
+        </div>
+      </section>
+
+      <aside class="side">
+        <div class="panel">
+          <div class="panel-head">
+            <span>Players</span>
+            <span id="meta" class="meta"></span>
+          </div>
+          <div id="players" class="players"></div>
+        </div>
+
+        <div class="panel">
+          <div class="panel-head"><span>Analysis</span></div>
+          <div class="actions">
+            <button type="button" id="btn-generate" class="primary" data-act="generate">Generate</button>
+            <button type="button" id="btn-simulate" class="primary" data-act="simulate">Simulate</button>
+            <button type="button" id="btn-endgame" class="primary" data-act="endgame">Endgame</button>
+            <button type="button" id="btn-infer" class="primary" data-act="infer">Infer</button>
+            <button type="button" id="stop" class="danger" disabled>Stop</button>
+          </div>
+          <div class="opts">
+            <label>sim plies <input type="number" id="opt-plies" value="2" min="1" max="10" /></label>
+            <label>sim secs <input type="number" id="opt-tlim" value="5" min="1" max="120" /></label>
+            <label>eg plies <input type="number" id="opt-eplies" value="5" min="1" max="25" /></label>
+          </div>
+        </div>
+
+        <div class="panel grow">
+          <div class="panel-head"><span>Plays</span></div>
+          <div class="moves-scroll">
+            <table class="moves">
+              <thead id="moves-head">
+                <tr>
+                  <th data-sort="i">Play</th>
+                  <th data-sort="score" class="num">Score</th>
+                  <th data-sort="equity" class="num">Equity</th>
+                  <th data-sort="win" data-col="win" class="num">Win%</th>
+                  <th>Leave</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="moves-body"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel out-panel">
+          <div class="panel-head"><span>Engine output</span></div>
+          <pre id="results" class="results"></pre>
+        </div>
+      </aside>
+    </main>
+    <script type="module" src="app.js"></script>
+  </body>
+</html>

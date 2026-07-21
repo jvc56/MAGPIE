@@ -6,6 +6,7 @@
 #include "../util/string_util.h"
 #include "config.h"
 #include "exec.h"
+#include "json_api.h"
 #include <stdlib.h>
 
 struct Magpie {
@@ -53,6 +54,18 @@ char *magpie_get_last_command_status_message(Magpie *mp) {
 
 char *magpie_get_last_command_output(const Magpie *mp) {
   return string_duplicate(mp->output);
+}
+
+char *magpie_get_state_json(const Magpie *mp) {
+  return json_api_get_state(mp->config);
+}
+
+char *magpie_get_moves_json(const Magpie *mp) {
+  return json_api_get_moves(mp->config);
+}
+
+char *magpie_get_endgame_json(const Magpie *mp) {
+  return json_api_get_endgame(mp->config);
 }
 
 void magpie_stop_current_command(const Magpie *mp) {
