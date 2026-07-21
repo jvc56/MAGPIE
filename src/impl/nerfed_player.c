@@ -305,12 +305,23 @@ static const double NERFED_DEFAULT_LOGPLAY = -2.0;
 static const double NERFED_DEFAULT_LOGLIT = -1.0;
 // Extra visibility miss for 9+ letter plays. The fitted len7plus feature
 // lumps 7/8/9 letter words together, but a 9+ letter play is a through-
-// play bridging two or more board tiles that humans rarely SEE — the
-// model over-surfaces 9-letter bingos ~1.5-1.8x vs corpus while 7- and
-// 8-letter bingos are calibrated. This adds miss log-odds per letter of
-// word length beyond 8 (1 for a 9-letter word, 2 for 10, ...), leaving
-// 7/8 untouched.
-static const double NERFED_LONG9_MISS_PENALTY = 0.8;
+// play that humans rarely SEE — the model over-surfaces 9-letter bingos
+// ~1.5-1.8x vs corpus while 7- and 8-letter bingos are calibrated. The
+// real difficulty is not raw length but the geometry: a 9-letter word
+// made by a clean end-hook/extension is far easier to spot than one that
+// BRIDGES interior board tiles. So the miss is a small flat term per
+// letter beyond 8 (the easy extensions) plus a larger term per interior
+// through-tile the play bridges (through-tiles between the first and last
+// placed tile). Both apply only at 9+ letters, leaving the calibrated
+// 7/8-letter hooks untouched regardless of geometry.
+static const double NERFED_LONG9_MISS_PENALTY = 0.35;
+static const double NERFED_LONG9_BRIDGE_PENALTY = 0.7;
+// Experts still spot long/bridging plays: the penalty tapers above
+// average rating (full for <=1600, ~half by 2200) so the expert 9-bingo
+// rate keeps rising toward the corpus while mid/low players stay
+// suppressed. Beginners are never amplified beyond the full penalty.
+static const double NERFED_LONG9_RTG_TAPER = 0.20;
+static const double NERFED_LONG9_RTG_FLOOR = 0.25;
 
 // Endgame choice model (conditional logit on 32,675 corpus endgame
 // choices): utility = value/sigma + score and outplay preferences.
@@ -885,9 +896,34 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
   for (int coeff_idx = 0; coeff_idx < NERFED_NUM_MISS_COEFFS; coeff_idx++) {
     logit += nerfed_player->miss_coeffs[coeff_idx] * features[coeff_idx];
   }
-  // Extra miss for 9+ letter through-plays (see NERFED_LONG9_MISS_PENALTY).
-  const double long9 = tiles_length > 8 ? (double)(tiles_length - 8) : 0.0;
-  logit += NERFED_LONG9_MISS_PENALTY * long9;
+  // Extra miss for 9+ letter through-plays (see NERFED_LONG9_MISS_PENALTY):
+  // a flat term for the easy extensions plus a bridge term counting the
+  // interior board tiles the play threads between (the hard ones humans
+  // miss). Only at 9+ letters, so calibrated 7/8-letter hooks are untouched.
+  if (tiles_length > 8) {
+    const double long9 = (double)(tiles_length - 8);
+    int first_played = -1;
+    int last_played = -1;
+    for (int idx = 0; idx < tiles_length; idx++) {
+      if (move_get_tile(move, idx) != PLAYED_THROUGH_MARKER) {
+        if (first_played < 0) {
+          first_played = idx;
+        }
+        last_played = idx;
+      }
+    }
+    double interior_through = 0.0;
+    for (int idx = first_played; idx <= last_played; idx++) {
+      if (move_get_tile(move, idx) == PLAYED_THROUGH_MARKER) {
+        interior_through += 1.0;
+      }
+    }
+    const double taper =
+        fmin(1.0, fmax(NERFED_LONG9_RTG_FLOOR,
+                       1.0 - NERFED_LONG9_RTG_TAPER * rating_z));
+    logit += taper * (NERFED_LONG9_MISS_PENALTY * long9 +
+                      NERFED_LONG9_BRIDGE_PENALTY * interior_through);
+  }
   return 1.0 / (1.0 + exp(-logit));
 }
 
