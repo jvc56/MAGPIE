@@ -208,14 +208,14 @@ static const double NERFED_OPP_CHALLENGE_RATE = 0.5;
 // Residual doubt about words the player believes they know: subjective
 // P(valid | believed) = 1 - NERFED_KNOW_RISK * (1 - prior).
 static const double NERFED_KNOW_RISK = 0.35;
-// Challenge-bait economics: the mover's model of the opponent's
-// challenge propensity for an unfamiliar-looking word — attention x
-// P(opponent unfamiliar) x engagement. A CONFIDENT mover gains from a
-// wrong challenge (5 pts/word, or the challenger's lost turn under
-// double, valued at NERFED_BAIT_DOUBLE_GAIN points); a doubtful mover
-// risks the play plus tempo. This is what makes an expert intentionally
-// play obscure valid words to elicit challenges.
-static const double NERFED_BAIT_ENGAGE = 0.6;
+// Challenge-bait economics: a CONFIDENT mover gains from a wrong
+// challenge (5 pts/word, or the challenger's lost turn under double,
+// valued at NERFED_BAIT_DOUBLE_GAIN points); a doubtful mover risks the
+// play plus tempo. This is what makes an expert intentionally play
+// obscure valid words to elicit challenges. The mover's estimate of
+// P(opponent challenges) is built from the shared speculative term (at
+// the opponent's rating) OR'd with the rational familiarity channel, so
+// it stays consistent with what the opponent's challenge model does.
 static const double NERFED_BAIT_DOUBLE_GAIN = 22.0;
 static const double NERFED_BAIT_5PT_GAIN_PER_WORD = 5.0;
 
@@ -249,10 +249,10 @@ static const double NERFED_OWN_BELIEF_CONF_SLOPE = -0.08;
 static const double NERFED_PHONY_BELIEF_OFFSET = -1.2;
 // Family split: the TWL candidate pool converts belief mass into plays
 // more readily (larger cross-family pool, denser short-word phonies).
-static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.09;
-static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.53;
-static const double NERFED_PHONY_BELIEF_SLOPE = -0.46;
-static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.41;
+static const double NERFED_PHONY_BELIEF_TWL_EXTRA = -0.14;
+static const double NERFED_PHONY_BELIEF_CSW_EXTRA = 0.44;
+static const double NERFED_PHONY_BELIEF_SLOPE = -0.40;
+static const double NERFED_PHONY_BELIEF_SLOPE_CSW = -0.37;
 static const double NERFED_PHONY_BELIEF_XFAM_SLOPE = 0.10;
 // Cross-family words are a huge pool (40k CSW-only words on the TWL
 // side): without an extra offset the belief mass dwarfs the corpus
@@ -647,6 +647,28 @@ static double nerfed_player_uniform(XoshiroPRNG *prng) {
   return ((double)(prng_next(prng) >> 11) + 0.5) / 9007199254740992.0;
 }
 
+// P(a rater of rating rater_z speculatively challenges a play whose
+// rarest formed word has playability min_logplay), under the given rule.
+// The single source of truth for the hunch-challenge rate: the actual
+// challenger (nerfed_player_challenge_assess) and the mover's model of
+// being baited (nerfed_player_miss_probability) both call this so they
+// agree on how often obscure plays draw challenges.
+static double nerfed_speculative_challenge_prob(bool rule_5pt,
+                                                double min_logplay,
+                                                double rater_z) {
+  if (min_logplay > 90.0) {
+    min_logplay = NERFED_DEFAULT_LOGPLAY;
+  }
+  const double obscurity =
+      1.0 / (1.0 + exp(-(NERFED_CHALLENGE_SPEC_CENTER - min_logplay) /
+                       NERFED_CHALLENGE_SPEC_SCALE));
+  const double spec_base =
+      rule_5pt ? NERFED_CHALLENGE_SPEC_5PT : NERFED_CHALLENGE_SPEC_DOUBLE;
+  const double spec_rtg = rule_5pt ? NERFED_CHALLENGE_SPEC_RTG_5PT
+                                   : NERFED_CHALLENGE_SPEC_RTG_DOUBLE;
+  return spec_base * obscurity * exp(-spec_rtg * rater_z);
+}
+
 // P(this play is invisible to the player): Stage B miss logistic with a
 // best-class of one (log_class = 0). Writes the play's rarest formed word
 // (minimum playability) to rare_word/rare_word_length so the caller can
@@ -760,12 +782,17 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
                             NERFED_OPP_CHALLENGE_RATE *
                             (move_points + NERFED_TEMPO_VALUE);
       } else {
-        // Challenge-bait economics: the opponent challenges obscure-
-        // looking words at attention x unfamiliarity; a confident mover
-        // GAINS from a wrong challenge (this is what makes an expert
-        // intentionally play obscure valid words), a doubtful mover
-        // risks the play plus tempo.
+        // Challenge-bait economics: a confident mover GAINS from a wrong
+        // challenge (this is what makes an expert intentionally play
+        // obscure valid words), a doubtful mover risks the play plus
+        // tempo. The mover's estimate of P(opponent challenges) must
+        // match what the opponent actually does: the opponent fires on a
+        // hunch (the shared speculative term, at the OPPONENT's rating)
+        // OR because it finds the word unfamiliar (the rational
+        // familiarity channel). ORing the two, with no ad-hoc engagement
+        // fudge, keeps the bait EV consistent with the challenge model.
         const double opp_z = nerfed_player->challenge_ctx_opp_rating_z;
+        const bool rule_5pt = nerfed_player->challenge_ctx_rule_5pt;
         const double *cf = nerfed_player->miss_coeffs;
         const int rare_len = *rare_word_length;
         const double len2r = (rare_len > 0 && rare_len <= 2) ? 1.0 : 0.0;
@@ -778,15 +805,15 @@ static double nerfed_player_miss_probability(const NerfedPlayer *nerfed_player,
             cf[16] * opp_z * len7r;
         const double p_unfamiliar_opp =
             1.0 / (1.0 + exp(-opp_unfamiliar_logit));
-        const double attention = nerfed_player->challenge_ctx_rule_5pt
-                                     ? NERFED_CHALLENGE_5PT_ATTENTION
-                                     : NERFED_CHALLENGE_DOUBLE_ATTENTION;
-        const double p_challenge =
-            attention * p_unfamiliar_opp * NERFED_BAIT_ENGAGE;
+        const double attention = rule_5pt ? NERFED_CHALLENGE_5PT_ATTENTION
+                                          : NERFED_CHALLENGE_DOUBLE_ATTENTION;
+        const double p_rational = attention * p_unfamiliar_opp;
+        const double p_spec =
+            nerfed_speculative_challenge_prob(rule_5pt, min_logplay, opp_z);
+        const double p_challenge = 1.0 - (1.0 - p_spec) * (1.0 - p_rational);
         const double gain =
-            nerfed_player->challenge_ctx_rule_5pt
-                ? NERFED_BAIT_5PT_GAIN_PER_WORD * (double)num_words
-                : NERFED_BAIT_DOUBLE_GAIN;
+            rule_5pt ? NERFED_BAIT_5PT_GAIN_PER_WORD * (double)num_words
+                     : NERFED_BAIT_DOUBLE_GAIN;
         *challenge_ev_out =
             p_challenge *
             (subjective_valid * gain -
@@ -1682,18 +1709,8 @@ void nerfed_player_challenge_assess(const NerfedPlayer *nerfed_player,
       NERFED_CHALLENGE_THRESH_RTG * nerfed_player->rating_z +
       (rule_5pt ? 0.0 : NERFED_CHALLENGE_THRESH_DOUBLE_EXTRA);
   // Speculative (hunch) challenge probability from the play's obscurity.
-  if (min_logplay > 90.0) {
-    min_logplay = NERFED_DEFAULT_LOGPLAY;
-  }
-  const double obscurity =
-      1.0 / (1.0 + exp(-(NERFED_CHALLENGE_SPEC_CENTER - min_logplay) /
-                       NERFED_CHALLENGE_SPEC_SCALE));
-  const double spec_base =
-      rule_5pt ? NERFED_CHALLENGE_SPEC_5PT : NERFED_CHALLENGE_SPEC_DOUBLE;
-  const double spec_rtg = rule_5pt ? NERFED_CHALLENGE_SPEC_RTG_5PT
-                                   : NERFED_CHALLENGE_SPEC_RTG_DOUBLE;
-  assessment->p_speculative =
-      spec_base * obscurity * exp(-spec_rtg * nerfed_player->rating_z);
+  assessment->p_speculative = nerfed_speculative_challenge_prob(
+      rule_5pt, min_logplay, nerfed_player->rating_z);
 }
 
 bool nerfed_player_challenge_decide(const NerfedPlayer *nerfed_player,
