@@ -1274,6 +1274,52 @@ static void test_peg_outcomes_string(void) {
       {.drawn = "X", .remaining = "ZY", .weight = 4, .mover_total = -5},
   };
   assert_outcomes_eq(rem_split, 2, "W: X/Y/Zx4");
+
+  // A tie draw with no losing draw (the ONYX case from the bug report). The old
+  // "shorter list wins" logic picked the empty loss list and rendered a bare
+  // "L:". Now wins (the largest list) is left implied and the tie is shown. The
+  // implied list is a win/loss, so no "otherwise" is needed.
+  const PegPerScenario tie_no_loss[] = {
+      {.drawn = "A", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "B", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_no_loss, 3, "T: E");
+
+  // A tie draw with no winning draw: losses are the largest list, left implied.
+  const PegPerScenario tie_no_win[] = {
+      {.drawn = "P", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "Q", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "X", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_no_win, 3, "T: X");
+
+  // All three buckets: the largest list (here losses) is implied; the two
+  // shorter lists -- wins and the tie -- are printed comma-separated, in
+  // wins/ties/loss order.
+  const PegPerScenario win_tie_loss[] = {
+      {.drawn = "C", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "U", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "Y", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "D", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "F", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "G", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "H", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(win_tie_loss, 8, "W: C U Y, T: E");
+
+  // Ties are the most common result: the tie list is the largest, so it is the
+  // one left implied. A tie majority is rare, so it is named explicitly with a
+  // trailing ", otherwise ties" after the shorter win / loss lists.
+  const PegPerScenario tie_majority[] = {
+      {.drawn = "A", .remaining = "", .weight = 1, .mover_total = 5},
+      {.drawn = "B", .remaining = "", .weight = 1, .mover_total = -5},
+      {.drawn = "C", .remaining = "", .weight = 1, .mover_total = 0},
+      {.drawn = "D", .remaining = "", .weight = 1, .mover_total = 0},
+      {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
+  };
+  assert_outcomes_eq(tie_majority, 5, "W: A, L: B, otherwise ties");
 }
 
 void test_peg(void) {
