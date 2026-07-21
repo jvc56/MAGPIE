@@ -74,6 +74,9 @@ jobs:
       - name: Build release test binary
         run: make magpie_test BUILD=release
 
+      - name: Build shared library
+        run: make libmagpie
+
       - name: Run release tests
         run: ./bin/magpie_test
 

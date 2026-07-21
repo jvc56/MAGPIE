@@ -20,6 +20,7 @@ make magpie_test               # build test binary
 make magpie_test BUILD=release # release test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
+make libmagpie                 # shared library (bin/libmagpie.so); API is src/impl/cmd_api.h
 make clean                     # remove build artifacts
 ```
 
