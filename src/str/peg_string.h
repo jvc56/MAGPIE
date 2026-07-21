@@ -28,10 +28,12 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
 // as a sorted multiset prefix, then the bag remainder (a multiset, or
 // "/"-segmented when its orderings split across buckets). The largest of the
 // win/loss/tie lists is left implied (inferred from the count columns) and the
-// smaller ones are printed comma-separated with W:/L:/T: labels; a tie majority
-// is named explicitly as ", otherwise ties". The per-token "xN" weights sum to
-// the count columns. Exposed for unit testing; production reaches it via
-// peg_result_get_string. Caller frees.
+// smaller ones are printed comma-separated with W:/L:/T: labels; the implied
+// list is named as ", otherwise wins/loses/ties" only when the cell is
+// otherwise ambiguous (ties are the implied majority, or the tie list is the
+// only one shown). The per-token "xN" weights sum to the count columns. Exposed
+// for unit testing; production reaches it via peg_result_get_string. Caller
+// frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
 
 #endif // PEG_STRING_H

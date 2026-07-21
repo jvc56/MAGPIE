@@ -319,9 +319,12 @@ static void peg_append_outcome_toks(StringBuilder *sb,
 // lists is left implied (the reader infers it from the count columns); the
 // smaller ones are printed, comma-separated, each with its label ("W:"/"L:"/
 // "T:"). Empty lists are skipped, so a row with no tie draws just shows the
-// shorter of win / loss. A tie majority is rare, so when ties are the implied
-// list it is called out with a trailing ", otherwise ties". When every ordering
-// shares one bucket, says "always wins/loses/ties". Caller frees.
+// shorter of win / loss. The implied list is named with a trailing ", otherwise
+// wins/loses/ties" only when the cell would otherwise be ambiguous: ties are
+// the implied majority (rare), or the tie list is the only list shown (its
+// win/loss counterpart was empty, so "T: E" alone cannot say which of win/loss
+// is implied). When every ordering shares one bucket, says "always
+// wins/loses/ties". Caller frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   if (n_rows <= 0) {
     return string_duplicate("");
@@ -453,9 +456,7 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   // columns -- and print the smaller ones, comma-separated, each with its
   // label. Empty lists are skipped, so a row with no tie draws just shows the
   // shorter of win / loss, exactly as before ties were tracked. On a size tie,
-  // prefer to imply a loss, then a win, so a tie draw stays visible. A tie
-  // majority is rare and surprising, so when ties are the implied list we call
-  // it out explicitly with a trailing ", otherwise ties".
+  // prefer to imply a loss, then a win, so a tie draw stays visible.
   static const int imply_pref[3] = {1, 0, 2}; // loss, then win, then tie
   int implied = imply_pref[0];
   for (int pref_idx = 1; pref_idx < 3; pref_idx++) {
@@ -466,23 +467,33 @@ char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows) {
   }
 
   static const char *const labels[3] = {"W:", "L:", "T:"};
+  static const char *const otherwise_word[3] = {"wins", "loses", "ties"};
   const int display_order[3] = {0, 2, 1}; // wins, ties, losses
   StringBuilder *sb = string_builder_create();
-  bool first = true;
+  int n_shown = 0;
+  int last_shown = -1;
   for (int order_idx = 0; order_idx < 3; order_idx++) {
     const int bucket = display_order[order_idx];
     if (bucket == implied || n_bucket_toks[bucket] == 0) {
       continue;
     }
-    if (!first) {
+    if (n_shown > 0) {
       string_builder_add_string(sb, ", ");
     }
-    first = false;
     string_builder_add_string(sb, labels[bucket]);
     peg_append_outcome_toks(sb, toks, n_toks, bucket);
+    last_shown = bucket;
+    n_shown++;
   }
-  if (implied == 2) { // ties implied: rare, so name it explicitly
-    string_builder_add_string(sb, ", otherwise ties");
+  // Name the implied list when the cell alone would not pin it down: ties are
+  // the implied majority (rare and surprising), or the only list shown is the
+  // tie list -- its win/loss counterpart was empty, so "T: E" alone cannot say
+  // whether the implied majority is wins or losses. Two labeled lists already
+  // imply the third, and a no-tie row implies its win/loss counterpart, so
+  // those stay label-free.
+  if (implied == 2 || (n_shown == 1 && last_shown == 2)) {
+    string_builder_add_formatted_string(sb, ", otherwise %s",
+                                        otherwise_word[implied]);
   }
   free(toks);
   char *out = string_builder_dump(sb, NULL);

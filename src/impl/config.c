@@ -1690,11 +1690,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "the "
           "counts and the smaller ones are shown, comma-separated with "
           "W:/L:/T: "
-          "labels (a tie majority is named as \", otherwise ties\"). A draw is "
-          "a "
-          "sorted multiset (FGHI) when order is irrelevant, or a slash-joined "
-          "sequence (F/G/H/I) when it matters; each carries an xN "
-          "labeled-ordering weight. Default false.";
+          "labels. The implied list is named (\", otherwise wins/loses/ties\") "
+          "only when the cell is otherwise ambiguous: ties are the implied "
+          "majority, or the tie list is the only one shown. A draw is a sorted "
+          "multiset (FGHI) when order is irrelevant, or a slash-joined "
+          "sequence "
+          "(F/G/H/I) when it matters; each carries an xN labeled-ordering "
+          "weight. Default false.";
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       usages[0] = "<columns>";

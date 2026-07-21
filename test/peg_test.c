@@ -1277,22 +1277,24 @@ static void test_peg_outcomes_string(void) {
 
   // A tie draw with no losing draw (the ONYX case from the bug report). The old
   // "shorter list wins" logic picked the empty loss list and rendered a bare
-  // "L:". Now wins (the largest list) is left implied and the tie is shown. The
-  // implied list is a win/loss, so no "otherwise" is needed.
+  // "L:". Now wins (the largest list) is left implied and the tie is shown.
+  // Because the tie list is the only one shown (losses is empty), "T: E" alone
+  // can't say whether the implied majority is wins or losses, so it is named.
   const PegPerScenario tie_no_loss[] = {
       {.drawn = "A", .remaining = "", .weight = 1, .mover_total = 5},
       {.drawn = "B", .remaining = "", .weight = 1, .mover_total = 5},
       {.drawn = "E", .remaining = "", .weight = 1, .mover_total = 0},
   };
-  assert_outcomes_eq(tie_no_loss, 3, "T: E");
+  assert_outcomes_eq(tie_no_loss, 3, "T: E, otherwise wins");
 
-  // A tie draw with no winning draw: losses are the largest list, left implied.
+  // A tie draw with no winning draw: losses are the largest list, left implied,
+  // and the tie is the only list shown, so the implied loss is named.
   const PegPerScenario tie_no_win[] = {
       {.drawn = "P", .remaining = "", .weight = 1, .mover_total = -5},
       {.drawn = "Q", .remaining = "", .weight = 1, .mover_total = -5},
       {.drawn = "X", .remaining = "", .weight = 1, .mover_total = 0},
   };
-  assert_outcomes_eq(tie_no_win, 3, "T: X");
+  assert_outcomes_eq(tie_no_win, 3, "T: X, otherwise loses");
 
   // All three buckets: the largest list (here losses) is implied; the two
   // shorter lists -- wins and the tie -- are printed comma-separated, in
