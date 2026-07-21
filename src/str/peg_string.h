@@ -6,7 +6,8 @@
 #include <stdbool.h>
 
 // Render a PegResult as a human-readable ranking table. When show_outcomes is
-// true, the graded table gets a per-play outcomes column (W/L draws). When poll
+// true, the graded table gets a per-play outcomes column (W/L/T draws). When
+// poll
 // is non-NULL and the solve is still running, renders a live cross-depth merged
 // view instead of the stored result (pass NULL for final/show callers).
 //
@@ -23,11 +24,14 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
                             bool *out_truncated);
 
 // Render one candidate's per-ordering W/L/T rows as the compact outcomes-cell
-// string (e.g. "W: DH/Ax2 DR/Hx2"): the mover's drawn tiles as a sorted
-// multiset prefix, then the bag remainder (a multiset, or "/"-segmented when
-// its orderings split across buckets). Only the shorter of the win/loss lists
-// is shown; the per-token "xN" weights sum to the win/loss columns. Exposed for
-// unit testing; production reaches it via peg_result_get_string. Caller frees.
+// string (e.g. "W: DH/Ax2 DR/Hx2" or "W: C U Y, T: E"): the mover's drawn tiles
+// as a sorted multiset prefix, then the bag remainder (a multiset, or
+// "/"-segmented when its orderings split across buckets). The largest of the
+// win/loss/tie lists is left implied (inferred from the count columns) and the
+// smaller ones are printed comma-separated with W:/L:/T: labels; a tie majority
+// is named explicitly as ", otherwise ties". The per-token "xN" weights sum to
+// the count columns. Exposed for unit testing; production reaches it via
+// peg_result_get_string. Caller frees.
 char *peg_build_outcomes_string_rows(const PegPerScenario *rows, int n_rows);
 
 #endif // PEG_STRING_H

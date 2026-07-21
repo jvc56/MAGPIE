@@ -1686,10 +1686,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       text =
           "When true, adds a per-play outcomes column to the graded table: the "
-          "shorter of the winning / losing draws (the other is implied by the "
-          "counts). A draw is a sorted multiset (FGHI) when order is "
-          "irrelevant, or a slash-joined sequence (F/G/H/I) when it matters; "
-          "each carries an xN labeled-ordering weight. Default false.";
+          "largest of the winning / losing / tying draw lists is implied by "
+          "the "
+          "counts and the smaller ones are shown, comma-separated with "
+          "W:/L:/T: "
+          "labels (a tie majority is named as \", otherwise ties\"). A draw is "
+          "a "
+          "sorted multiset (FGHI) when order is irrelevant, or a slash-joined "
+          "sequence (F/G/H/I) when it matters; each carries an xN "
+          "labeled-ordering weight. Default false.";
       break;
     case ARG_TOKEN_PEG_OUT_WIDTH:
       usages[0] = "<columns>";
