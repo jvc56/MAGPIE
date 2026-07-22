@@ -83,15 +83,17 @@ void test_play_chooser_benchmark(void) {
   const char *threads_env = getenv("PCBENCH_THREADS");
   const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
                                           : get_num_cores();
+  const char *wit_env = getenv("PCBENCH_WIT");
+  const char *wit = wit_env != NULL ? wit_env : "false";
 
   char settings[512];
   (void)snprintf(
       settings, sizeof(settings),
-      "set -lex CSW24 -wmp true -rit true -ritmmap true -s1 equity "
+      "set -lex CSW24 -wmp true -rit true -ritmmap true -wit %s -s1 equity "
       "-s2 equity -r1 best -r2 best -numplays 1 -threads %d "
       "-pfrequency 0 -hr false -savesettings false -autosavegcg false "
       "-fgrequired false",
-      threads);
+      wit, threads);
   Config *config = config_create_or_die(settings);
   char command[256];
   (void)snprintf(command, sizeof(command),
