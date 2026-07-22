@@ -47,13 +47,13 @@ For a faster native build, install Clang and `llvm-profdata`, then run:
 make pgo
 ```
 
-This builds an instrumented test executable, trains it on `simbench`, and
-replaces `bin/magpie` with a profile-guided build. Training uses WMP without
-RIT by default because `setup.sh` does not generate RIT files. If a CSW24 RIT
-is available, train with it using:
+This builds a production CSW24 rack-info table, builds an instrumented test
+executable, trains it on `simbench` with WMP and RIT enabled, and replaces
+`bin/magpie` with a profile-guided build. To use a different lexicon and its
+matching leaves and word map, run:
 
 ```
-make pgo PGO_TRAIN_ENV='SIMBENCH_RIT=true'
+make pgo PGO_LEX=NWL23
 ```
 
 PGO profiles are architecture- and source-specific, while the final build uses
@@ -65,7 +65,10 @@ x86-64 runner. Run it manually at the exact branch or tag to build, leave the
 architecture at its `x86-64` default, and download the
 `magpie-pgo-profile-x86-64` artifact. From a checkout of that same source
 revision, confirm the commit in `profile-metadata.txt`, then build with the
-downloaded profile and Clang 18:
+downloaded profile and Clang 18. This also creates the matching production RIT
+before applying the profile. The build verifies the metadata and rejects the
+profile if its source fingerprint, compiler, architecture, or board and rack
+dimensions do not match:
 
 ```
 make pgo-use \

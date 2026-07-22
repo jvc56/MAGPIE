@@ -55,6 +55,7 @@ jobs:
         with:
           path: |
             data/*
+            !data/lexica/*.rit
             testdata/*
           key: downloaded-data-files-30
 
@@ -65,17 +66,25 @@ jobs:
       - name: Build release baseline
         run: |
           make clean
-          make magpie_test BUILD=release CC=clang-18 LDFLAGS='-pthread -flto -fuse-ld=lld'
+          make magpie magpie_test BUILD=release CC=clang-18 LDFLAGS='-pthread -flto -fuse-ld=lld'
           mkdir -p obj/pgo-benchmark
           cp bin/magpie_test obj/pgo-benchmark/magpie_test_release
 
-      - name: Train and build PGO
+      - name: Build production CSW24 RIT
         run: >-
-          make pgo
+          make pgo-rit
           PGO_CC=clang-18
           PGO_LDFLAGS=-fuse-ld=lld
-          LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata
-          PGO_TRAIN_ENV='SIMBENCH_RIT=false SIMBENCH_SEED=42'
+
+      - name: Train and build PGO
+        run: |
+          make pgo-train \
+            PGO_CC=clang-18 \
+            PGO_TRAIN_ENV='SIMBENCH_LEX=CSW24 SIMBENCH_RIT=true SIMBENCH_SEED=42'
+          make pgo-build \
+            PGO_CC=clang-18 \
+            PGO_LDFLAGS=-fuse-ld=lld \
+            LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata
 
       - name: Check PGO correctness
         run: ./bin/magpie_test movegen shadow sim gameplay
@@ -89,15 +98,15 @@ jobs:
           --release obj/pgo-benchmark/magpie_test_release
           --pgo obj/pgo-benchmark/magpie_test_pgo
           --seeds 17 101 313
+          --rit true
           --min-improvement 2.0
 
       - name: Record profile provenance
         env:
           PROFILE_ARCH: ${{ matrix.arch }}
         run: |
-          printf 'source_sha=%s\narchitecture=%s\ntraining_seed=42\ntraining_rit=false\n' \
-            "$GITHUB_SHA" "$PROFILE_ARCH" > obj/pgo-data/profile-metadata.txt
-          clang-18 --version >> obj/pgo-data/profile-metadata.txt
+          printf 'source_sha=%s\narchitecture=%s\ntraining_seed=42\ntraining_rit=true\n' \
+            "$GITHUB_SHA" "$PROFILE_ARCH" >> obj/pgo-data/profile-metadata.txt
 
       - name: Upload merged profile
         uses: actions/upload-artifact@v4

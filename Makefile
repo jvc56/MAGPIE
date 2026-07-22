@@ -35,9 +35,9 @@ OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 PGO_DIR ?= $(OBJ_ROOT)/pgo-data
 PGO_RAW_DIR ?= $(PGO_DIR)/raw
 PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
-# setup.sh does not generate RIT files, so the source-build default must work
-# with the standard downloaded data. Override this when training with an RIT.
-PGO_TRAIN_ENV ?= SIMBENCH_RIT=false
+PGO_METADATA ?= $(dir $(PGO_PROFILE))profile-metadata.txt
+PGO_LEX ?= CSW24
+PGO_TRAIN_ENV ?= SIMBENCH_LEX=$(PGO_LEX) SIMBENCH_RIT=true
 PGO_TRAIN_TEST ?= simbench
 PGO_CC ?= clang
 PGO_LDFLAGS ?=
@@ -115,7 +115,7 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu pgo pgo-instrument pgo-train pgo-merge pgo-build pgo-use
+.PHONY: all clean iwyu pgo pgo-rit pgo-instrument pgo-train pgo-merge pgo-build pgo-use pgo-apply
 
 all: magpie magpie_test
 
@@ -163,13 +163,27 @@ clean:
 # To consume an already merged profile (for example, one downloaded from
 # GitHub Actions), run `make pgo-use PGO_PROFILE=/path/to/magpie.profdata`.
 pgo:
+	$(MAKE) pgo-rit
 	$(MAKE) pgo-train
 	$(MAKE) pgo-build
 
+pgo-rit:
+	$(MAKE) -B magpie \
+		BUILD=release \
+		CC="$(PGO_CC)" \
+		LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
+	printf 'convert klvwmp2rit %s\n' "$(PGO_LEX)" | \
+		./$(BIN_DIR)/magpie "set -lex $(PGO_LEX) -wmp true -rit false"
+
 pgo-instrument:
-	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
+	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE) $(PGO_METADATA)
 	mkdir -p $(PGO_RAW_DIR)
-	$(MAKE) magpie_test BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	$(MAKE) -B magpie_test BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	python3 pgo_profile.py record \
+		--metadata "$(PGO_METADATA)" \
+		--compiler "$(PGO_CC)" \
+		--board-dim "$(BOARD_DIM)" \
+		--rack-size "$(RACK_SIZE)"
 	@echo 'Write training profiles to $(abspath $(PGO_RAW_DIR))/magpie-%p.profraw'
 
 pgo-train: pgo-instrument
@@ -179,16 +193,35 @@ pgo-merge:
 	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
 
 pgo-build: pgo-merge
-	$(MAKE) pgo-use \
+	$(MAKE) pgo-apply \
+		PGO_PROFILE="$(PGO_PROFILE)" \
+		PGO_CC="$(PGO_CC)" \
+		PGO_LDFLAGS="$(PGO_LDFLAGS)"
+
+pgo-use:
+	@test -f "$(PGO_PROFILE)" || \
+		(echo 'PGO profile not found: $(PGO_PROFILE)' >&2; exit 1)
+	python3 pgo_profile.py verify \
+		--metadata "$(PGO_METADATA)" \
+		--compiler "$(PGO_CC)" \
+		--board-dim "$(BOARD_DIM)" \
+		--rack-size "$(RACK_SIZE)"
+	$(MAKE) pgo-rit
+	$(MAKE) pgo-apply \
 		PGO_PROFILE="$(PGO_PROFILE)" \
 		PGO_CC="$(PGO_CC)" \
 		PGO_LDFLAGS="$(PGO_LDFLAGS)"
 
 # Profile identity is not encoded in OBJ_DIR, so always rebuild when a merged
 # profile is explicitly applied.
-pgo-use:
+pgo-apply:
 	@test -f "$(PGO_PROFILE)" || \
 		(echo 'PGO profile not found: $(PGO_PROFILE)' >&2; exit 1)
+	python3 pgo_profile.py verify \
+		--metadata "$(PGO_METADATA)" \
+		--compiler "$(PGO_CC)" \
+		--board-dim "$(BOARD_DIM)" \
+		--rack-size "$(RACK_SIZE)"
 	$(MAKE) -B all \
 		BUILD=pgo_use \
 		PGO_PROFILE="$(PGO_PROFILE)" \
