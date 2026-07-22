@@ -1031,12 +1031,15 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_node_is_end(node)) {
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
         break;
       }
     }
@@ -1232,12 +1235,15 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_node_is_end(node)) {
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
         break;
       }
     }
@@ -1418,12 +1424,15 @@ static inline void recursive_gen_tiles_played(MoveGen *gen, int col,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_node_is_end(node)) {
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
         break;
       }
     }
@@ -1432,7 +1441,11 @@ static inline void recursive_gen_tiles_played(MoveGen *gen, int col,
     return;
   }
 
-  if (rack_is_empty(&gen->player_rack)) {
+  // This specialized traversal restores every letter count before returning,
+  // so player_rack.number_of_letters can remain at its initial value. Compare
+  // against the by-value played count instead of mutating the redundant total
+  // on every recursive take/restore pair.
+  if (tiles_played == rack_get_total_letters(&gen->player_rack)) {
     return;
   }
 
@@ -1460,16 +1473,16 @@ static inline void recursive_gen_tiles_played(MoveGen *gen, int col,
           kwg_node_arc_index_prefetch(node, gen->kwg);
       const bool accepts = kwg_node_accepts(node);
       if (number_of_ml > 0) {
-        rack_take_letter(&gen->player_rack, ml);
+        gen->player_rack.array[ml]--;
         go_on_tiles_played(gen, col, next_node_index, accepts, tiles_played + 1,
                            played_tiles_bv | ((uint64_t)1 << ml));
-        rack_add_letter(&gen->player_rack, ml);
+        gen->player_rack.array[ml]++;
       }
       if (!gen->threshold_exceeded && num_blanks > 0) {
-        rack_take_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+        gen->player_rack.array[BLANK_MACHINE_LETTER]--;
         go_on_tiles_played(gen, col, next_node_index, accepts, tiles_played + 1,
                            played_tiles_bv | 1);
-        rack_add_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+        gen->player_rack.array[BLANK_MACHINE_LETTER]++;
       }
     }
     if (kwg_node_is_end(node) || gen->threshold_exceeded) {
