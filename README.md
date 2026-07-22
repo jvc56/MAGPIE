@@ -73,8 +73,9 @@ make pgo                   # experimental mixed PlayChooser profile
 
 The defaults train 16 games, give each player a 1000 ms clock in the mixed
 PlayChooser workload, use 0.05 seconds per move in focused game workloads, and
-use 10 worker threads. Override them with `PGO_TRAIN_GAMES`,
-`PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and `PGO_TRAIN_THREADS`.
+use the machine's detected hardware concurrency. Override them with
+`PGO_TRAIN_GAMES`, `PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and
+`PGO_TRAIN_THREADS`.
 
 The result is tailored to the machine that ran the build, making it suitable
 for long-running jobs and release builds on that target.

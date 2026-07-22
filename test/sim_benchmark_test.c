@@ -10,9 +10,11 @@
 //   SIMBENCH_MI     -minplayiterations (default 100000)
 //   SIMBENCH_RIT    "true" / "false" — toggles the RIT file (default true)
 //   SIMBENCH_TLIM   seconds per turn (default 2)
+//   SIMBENCH_THREADS worker threads (default detected hardware concurrency)
 
 #include "sim_benchmark_test.h"
 
+#include "../src/compat/memory_info.h"
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/impl/play_chooser.h"
@@ -46,12 +48,15 @@ void test_sim_benchmark(void) {
   const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
   const char *tlim_env = getenv("SIMBENCH_TLIM");
   const char *tlim = (tlim_env != NULL) ? tlim_env : "2";
+  const char *threads_env = getenv("SIMBENCH_THREADS");
+  const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
+                                          : get_num_cores();
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
                  "set -lex CSW24 -wmp %s -rit %s -s1 equity -s2 equity "
-                 "-r1 all -r2 all -numplays 15 -plies %d -threads 10 "
+                 "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
                  "-tlim %s -seed 42 -sr tt -minplayiterations %s",
-                 wmp, rit, plies, tlim, mi);
+                 wmp, rit, plies, threads, tlim, mi);
   Config *config = config_create_or_die(cmd);
   load_and_exec_config_or_die(config, "autoplay games 1");
 
@@ -72,8 +77,8 @@ void test_play_chooser_benchmark(void) {
   const int clock_ms =
       clock_env != NULL ? (int)strtol(clock_env, NULL, 10) : 5000;
   const char *threads_env = getenv("PCBENCH_THREADS");
-  const int threads =
-      threads_env != NULL ? (int)strtol(threads_env, NULL, 10) : 10;
+  const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
+                                          : get_num_cores();
 
   char settings[512];
   (void)snprintf(

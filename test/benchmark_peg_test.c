@@ -1,6 +1,7 @@
 #include "benchmark_peg_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/compat/memory_info.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -719,8 +720,8 @@ void test_peg_bench_fixture(void) {
   const char *file = "notes/peg_positions/random_3peg.txt";
   const int max_pos = 10;
   const char *threads_env = getenv("PEG_BENCH_THREADS");
-  const int threads =
-      threads_env != NULL ? (int)strtol(threads_env, NULL, 10) : 10;
+  const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
+                                          : get_num_cores();
   const double tlim = 0.0; // 0 = unbounded
 
   FILE *fp = fopen(file, "re");
