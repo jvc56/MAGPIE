@@ -276,7 +276,7 @@ static inline void game_store_wit_block(const WordInfoTable *wit, Board *board,
                                         int row, int block_left,
                                         int block_right, int through_dir,
                                         int csi) {
-  MachineLetter block[BOARD_DIM];
+  MachineLetter block[BOARD_DIM] = {0};
   int len = 0;
   for (int block_col = block_left; block_col <= block_right; block_col++) {
     block[len++] =
