@@ -71,12 +71,19 @@ void test_play_chooser_benchmark(void) {
   const char *clock_env = getenv("PCBENCH_CLOCK_MS");
   const int clock_ms =
       clock_env != NULL ? (int)strtol(clock_env, NULL, 10) : 5000;
+  const char *threads_env = getenv("PCBENCH_THREADS");
+  const int threads =
+      threads_env != NULL ? (int)strtol(threads_env, NULL, 10) : 10;
 
-  Config *config = config_create_or_die(
+  char settings[512];
+  (void)snprintf(
+      settings, sizeof(settings),
       "set -lex CSW24 -wmp true -rit true -ritmmap true -s1 equity "
-      "-s2 equity -r1 best -r2 best -numplays 1 -threads 4 "
+      "-s2 equity -r1 best -r2 best -numplays 1 -threads %d "
       "-pfrequency 0 -hr false -savesettings false -autosavegcg false "
-      "-fgrequired false");
+      "-fgrequired false",
+      threads);
+  Config *config = config_create_or_die(settings);
   char command[256];
   (void)snprintf(command, sizeof(command),
                  "autoplay games %d -pc1 %d -pc2 %d -mtmode igp -gp false "

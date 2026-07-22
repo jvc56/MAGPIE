@@ -5,7 +5,7 @@ if [ "$1" == "u" ]; then
 # First run release magpie_test
 echo "Running release magpie_test first..."
 if [[ $2 =~ ^[0-9]+$ ]]; then
-    make magpie_test BUILD=release BOARD_DIM=$2
+    make magpie_test BUILD=no_pgo_release BOARD_DIM=$2
     if ! ./bin/magpie_test; then
         echo "Release tests failed, not running dev mode tests"
         exit 1
@@ -15,7 +15,7 @@ if [[ $2 =~ ^[0-9]+$ ]]; then
     make magpie_test BOARD_DIM=$2
     ./bin/magpie_test
 else
-    make magpie_test BUILD=release
+    make magpie_test BUILD=no_pgo_release
     if ! ./bin/magpie_test $2; then
         echo "Release tests failed, not running dev mode tests"
         exit 1
@@ -63,9 +63,9 @@ lcov --capture --directory cov --output-file coverage.info
 genhtml coverage.info --output-directory covhtml
 xdg-open covhtml/index.html
 
-# Build release version of magpie
+# Build the production release version of magpie
 elif [ "$1" == "r" ]; then
-make magpie BUILD=release
+make release
 ./bin/magpie
 
 # Run an autoplay perf test
@@ -84,7 +84,7 @@ if [ -z "$2" ]; then
     echo "must provide number of games to play"
     exit 1
 fi
-make magpie BUILD=release
+make magpie BUILD=no_pgo_release
 perf record ./bin/magpie go autoplay lex CSW21 s1 equity r1 best s2 equity r2 best i $2
 perf report
 fi

@@ -20,6 +20,7 @@
 
 typedef enum {
   PGO_MODE_GENERAL,
+  PGO_MODE_STATIC,
   PGO_MODE_SIM,
   PGO_MODE_PEG,
   PGO_MODE_EG,
@@ -69,6 +70,9 @@ static double parse_positive_double(const char *value, const char *name) {
 static pgo_mode_t parse_mode(const char *mode) {
   if (strcmp(mode, "general") == 0) {
     return PGO_MODE_GENERAL;
+  }
+  if (strcmp(mode, "static") == 0) {
+    return PGO_MODE_STATIC;
   }
   if (strcmp(mode, "sim") == 0) {
     return PGO_MODE_SIM;
@@ -143,6 +147,9 @@ static void validate_training_counts(pgo_mode_t mode,
   switch (mode) {
   case PGO_MODE_GENERAL:
     break;
+  case PGO_MODE_STATIC:
+    valid = counts->static_moves > 0;
+    break;
   case PGO_MODE_SIM:
     valid = counts->sim_moves > 0;
     break;
@@ -191,6 +198,8 @@ static void train_games(pgo_mode_t mode, const Config *config, int num_games,
   case PGO_MODE_GENERAL:
     strategy.pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG;
     strategy.endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME;
+    break;
+  case PGO_MODE_STATIC:
     break;
   case PGO_MODE_SIM:
     strategy.pre_endgame_eval = PLAY_CHOOSER_EVAL_SIM;
@@ -261,7 +270,7 @@ static void train_leavegen(Config *config, int target_count,
 int main(int argc, char *argv[]) {
   if (argc != 8) {
     (void)fprintf(stderr,
-                  "usage: %s <general|sim|peg|eg|leavegen> <games> "
+                  "usage: %s <general|static|sim|peg|eg|leavegen> <games> "
                   "<general-time-control-ms> <focused-seconds-per-move> "
                   "<threads> <data-paths> <leavegen-target>\n",
                   argv[0]);

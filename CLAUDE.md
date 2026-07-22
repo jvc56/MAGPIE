@@ -15,24 +15,25 @@ Crossword game engine in C (C99 with some C11). Move generation, Monte Carlo sim
 
 ```bash
 make magpie                    # dev build (ASAN/UBSAN enabled)
-make magpie BUILD=release      # optimized build
+make release                   # production static-trained PGO build
+make magpie BUILD=no_pgo_release # optimized build without PGO
 make magpie_test               # build test binary
-make magpie_test BUILD=release # release test binary
+make magpie_test BUILD=no_pgo_release # optimized test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
-make pgo                       # train mixed PlayChooser games, then use Clang PGO
+make leavegen_pgo_release      # leavegen-trained PGO build
 make clean                     # remove build artifacts
 ```
 
 The local PGO build uses Clang and `llvm-profdata`, reuses an existing production
 CSW24 RIT (or creates it when missing), discards old profile data, and trains
-the current source on short timed PlayChooser games spanning sim, PEG, and
-endgame. Focused `pgo_sim`, `pgo_peg`, `pgo_eg`, and `pgo_leavegen` targets are
-also available. Each produces a `-march=native` binary for the build machine.
-Rerun the selected target after source changes and on each target architecture.
-Override `PGO_CC`, `LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.
+the current source on static autoplay. Experimental `pgo`, `pgo_sim`,
+`pgo_peg`, and `pgo_eg` targets are also available. Each produces a
+`-march=native` binary for the build machine. Rerun the selected target after
+source changes and on each target architecture. Override `PGO_CC`,
+`LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.
 
-`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `BUILD=release` for anything beyond a few seconds** — dev is `-O0` + ASAN/UBSAN, very slow.
+`BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `make release` for production jobs or `BUILD=no_pgo_release` for quick optimized builds** — dev is `-O0` + ASAN/UBSAN, very slow.
 
 ## Tests
 

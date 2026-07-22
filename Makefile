@@ -14,8 +14,12 @@ COV_DIR := cov
 
 # Build knobs that change the compiled objects. Defined up here (before OBJ_DIR)
 # so object files can be keyed by them.
-#dev is default, for another flavor : make BUILD=release
+# dev is the default. Use `make release` for the production PGO build, or
+# BUILD=no_pgo_release for the old optimized build without PGO.
 BUILD ?= dev
+ifeq ($(BUILD),release)
+$(error release is a target; run 'make release', or use BUILD=no_pgo_release)
+endif
 ifndef BOARD_DIM
 BOARD_DIM = 15
 endif
@@ -41,7 +45,7 @@ PGO_LDFLAGS ?=
 PGO_TRAIN_GAMES ?= 16
 PGO_TRAIN_TIME_MS ?= 1000
 PGO_TRAIN_SECONDS ?= 0.05
-PGO_TRAIN_THREADS ?= 4
+PGO_TRAIN_THREADS ?= 10
 PGO_LEAVEGEN_TARGET ?= 100
 PGO_LEAVEGEN_DATA_DIR ?= $(abspath $(PGO_DIR)/leavegen-data)
 LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null)
@@ -77,23 +81,23 @@ cflags.dev := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -
 cflags.thread := -g -O0 -Wall -Wno-trigraphs -Wextra -Wshadow -Wstrict-prototypes -Werror -fsanitize=thread
 cflags.vlg := -g -O0 -Wall -Wno-trigraphs -Wextra
 cflags.cov := -g -O0 -Wall -Wno-trigraphs -Wextra --coverage
-cflags.release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
-# Test-specific flags: like release but without DNDEBUG (asserts always enabled in tests)
-cflags.test_release := -O3 -flto -march=native -Wall -Wno-trigraphs
-cflags.pgo_generate := $(cflags.release) -fprofile-instr-generate -fprofile-update=atomic
-cflags.test_pgo_generate := $(cflags.test_release) -fprofile-instr-generate -fprofile-update=atomic
+cflags.no_pgo_release := -O3 -flto -march=native -DNDEBUG -Wall -Wno-trigraphs
+# Test-specific flags: like no_pgo_release but without DNDEBUG (asserts always enabled in tests)
+cflags.test_no_pgo_release := -O3 -flto -march=native -Wall -Wno-trigraphs
+cflags.pgo_generate := $(cflags.no_pgo_release) -fprofile-instr-generate -fprofile-update=atomic
+cflags.test_pgo_generate := $(cflags.test_no_pgo_release) -fprofile-instr-generate -fprofile-update=atomic
 pgo_use_flags := -fprofile-instr-use=$(PGO_PROFILE) \
                  -Werror=profile-instr-out-of-date \
                  -Wno-profile-instr-unprofiled
-cflags.pgo_use := $(cflags.release) $(pgo_use_flags)
-cflags.test_pgo_use := $(cflags.test_release) $(pgo_use_flags)
+cflags.pgo_use := $(cflags.no_pgo_release) $(pgo_use_flags)
+cflags.test_pgo_use := $(cflags.test_no_pgo_release) $(pgo_use_flags)
 cflags.profile := -O3 -g -march=native -DNDEBUG -Wall -Wno-trigraphs -fno-omit-frame-pointer -mllvm -inline-threshold=0
 lflags.cov := --coverage
 
 ldflags.dev := -pthread $(FSAN_ARG)
 ldflags.thread := -pthread -fsanitize=thread
 ldflags.vlg := -pthread
-ldflags.release := -pthread -flto
+ldflags.no_pgo_release := -pthread -flto
 ldflags.pgo_generate := -pthread -flto -fprofile-instr-generate $(PGO_LDFLAGS)
 ldflags.pgo_use := -pthread -flto -fprofile-instr-use=$(PGO_PROFILE) $(PGO_LDFLAGS)
 ldflags.profile := -pthread
@@ -109,7 +113,7 @@ DEPFLAGS := -MMD -MP
 
 CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 ifeq ($(BUILD),pgo_use)
-CMD_CFLAGS := $(cflags.release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
 else
 CMD_CFLAGS := $(CFLAGS)
 endif
@@ -119,8 +123,8 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu pgo pgo_sim pgo_peg pgo_eg pgo_leavegen peg_eg \
-	peg_leavegen pgo_workload
+.PHONY: all clean iwyu release leavegen_pgo_release pgo pgo_sim pgo_peg \
+	pgo_eg peg_eg pgo_workload
 
 all: magpie magpie_test
 
@@ -159,13 +163,22 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
+
+# The production release is trained on static autoplay, the best general
+# profile in the measured workload matrix.
+release:
+	$(MAKE) pgo_workload PGO_WORKLOAD=static
+
+# Leave generation benefits from its own focused profile.
+leavegen_pgo_release:
+	$(MAKE) pgo_workload PGO_WORKLOAD=leavegen
 
 # Build a balanced profile using fast PlayChooser games. The chooser sims in
 # the midgame, runs PEG with 1..4 tiles in the bag, and solves the endgame.
@@ -183,13 +196,8 @@ pgo_peg:
 pgo_eg:
 	$(MAKE) pgo_workload PGO_WORKLOAD=eg
 
-pgo_leavegen:
-	$(MAKE) pgo_workload PGO_WORKLOAD=leavegen
-
-# Accept the two originally proposed spellings as aliases.
+# Accept the originally proposed endgame spelling as an alias.
 peg_eg: pgo_eg
-
-peg_leavegen: pgo_leavegen
 
 # Reuse or build the production RIT, discard all previous profile data, train
 # a freshly instrumented production engine, and replace bin/magpie with the
@@ -200,7 +208,7 @@ pgo_workload:
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \
 		$(MAKE) -B magpie \
-			BUILD=release \
+			BUILD=no_pgo_release \
 			CC="$(PGO_CC)" \
 			LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"; \
 		printf 'convert klvwmp2rit CSW24\n' | \

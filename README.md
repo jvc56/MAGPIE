@@ -39,45 +39,52 @@ You should now be able to run the compiled MAGPIE executable:
 ./bin/magpie
 ```
 
-### Profile-guided build
+### Release builds
 
-For a faster native build, install Clang and `llvm-profdata`, then run:
+The production release is a native profile-guided build. Install Clang and
+`llvm-profdata`, then run:
 
 ```
-make pgo
+make release
 ```
 
 This always discards old profile data, reuses `data/lexica/CSW24.rit` when it is
 already present (and creates it otherwise), and replaces `bin/magpie` with a
-profile-guided native build. The default profile comes from short timed
-PlayChooser games, so it covers simulation, pre-endgame, and endgame through
-the same autoplay path used for real games. Training uses production WMP and
-RIT data without simbench's measurement code.
+profile-guided native build. The release profile comes from short static
+autoplay games using production WMP and RIT data. This was the fastest general
+profile across simulation, PlayChooser, endgame, and full PEG measurements.
+
+To build the former optimized release without PGO:
+
+```
+make magpie BUILD=no_pgo_release
+```
 
 Focused targets are available when the resulting binary will spend most of a
 long-running job in one workload:
 
 ```
-make pgo_sim       # simulation
-make pgo_peg       # pre-endgame
-make pgo_eg        # endgame (also available as make peg_eg)
-make pgo_leavegen  # leave generation (also available as make peg_leavegen)
+make leavegen_pgo_release  # leave generation
+make pgo_sim               # experimental simulation profile
+make pgo_peg               # experimental pre-endgame profile
+make pgo_eg                # experimental endgame profile
+make pgo                   # experimental mixed PlayChooser profile
 ```
 
-The defaults train 16 games, give each player a 1000 ms clock in the balanced
-autoplay workload, use 0.05 seconds per move in focused game workloads, and use
-four worker threads. Override them with `PGO_TRAIN_GAMES`,
+The defaults train 16 games, give each player a 1000 ms clock in the mixed
+PlayChooser workload, use 0.05 seconds per move in focused game workloads, and
+use 10 worker threads. Override them with `PGO_TRAIN_GAMES`,
 `PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and `PGO_TRAIN_THREADS`.
 
 The result is tailored to the machine that ran the build, making it suitable
 for long-running jobs and release builds on that target.
 
-Run `make pgo` again after changing source, and run it separately on each target
-architecture. Override the tool names when a system installs versioned LLVM
-binaries:
+Run the selected release target again after changing source, and run it
+separately on each target architecture. Override the tool names when a system
+installs versioned LLVM binaries:
 
 ```
-make pgo \
+make release \
   PGO_CC=clang-18 \
   LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata \
   PGO_LDFLAGS=-fuse-ld=lld
@@ -232,7 +239,7 @@ This directory contains the layout files which specify the start square and bonu
 The height and width of the board are denoted by the compile time constant `BOARD_DIM` which can be overwritten during compilation. For example, compiling with:
 
 ```
-make magpie BUILD=release BOARD_DIM=21
+make magpie BUILD=no_pgo_release BOARD_DIM=21
 ```
 
 will compile a MAGPIE executable that only accepts layouts of 21x21.

@@ -47,7 +47,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y clang-tidy-18 && ./tidy.sh clang-tidy-18
 
-  unit-tests-release:
+  unit-tests-no-pgo-release:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
@@ -71,10 +71,10 @@ jobs:
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh && ./convert_lexica.sh
 
-      - name: Build release test binary
-        run: make magpie_test BUILD=release
+      - name: Build no-PGO release test binary
+        run: make magpie_test BUILD=no_pgo_release
 
-      - name: Run release tests
+      - name: Run no-PGO release tests
         run: ./bin/magpie_test
 
   unit-tests-dev:
@@ -124,9 +124,9 @@ jobs:
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh && ./convert_lexica.sh
 
-      - name: Build release binary for RIT construction
+      - name: Build no-PGO release binary for RIT construction
         if: matrix.shard == 'ap_rit'
-        run: make magpie BUILD=release
+        run: make magpie BUILD=no_pgo_release
 
       - name: Build RIT for TWL98
         if: matrix.shard == 'ap_rit'
@@ -162,9 +162,9 @@ jobs:
         if: steps.cache-datafiles.outputs.cache-hit != 'true'
         run: ./download_data.sh && ./convert_lexica.sh
 
-      - name: Build and run super release tests
+      - name: Build and run super no-PGO release tests
         run: |
-          make magpie_test BUILD=release BOARD_DIM=21
+          make magpie_test BUILD=no_pgo_release BOARD_DIM=21
           ./bin/magpie_test
 
       - name: Build and run super dev tests
@@ -207,7 +207,7 @@ jobs:
       - lint-fast
       - cppcheck
       - clang-tidy
-      - unit-tests-release
+      - unit-tests-no-pgo-release
       - unit-tests-dev
       - unit-tests-super
       - wasm-tests
@@ -222,7 +222,7 @@ jobs:
           echo "| lint-fast | \`${{ needs.lint-fast.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| cppcheck | \`${{ needs.cppcheck.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| clang-tidy | \`${{ needs.clang-tidy.result }}\` |" >> $GITHUB_STEP_SUMMARY
-          echo "| unit-tests-release | \`${{ needs.unit-tests-release.result }}\` |" >> $GITHUB_STEP_SUMMARY
+          echo "| unit-tests-no-pgo-release | \`${{ needs.unit-tests-no-pgo-release.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-dev | \`${{ needs.unit-tests-dev.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| unit-tests-super | \`${{ needs.unit-tests-super.result }}\` |" >> $GITHUB_STEP_SUMMARY
           echo "| wasm-tests | \`${{ needs.wasm-tests.result }}\` |" >> $GITHUB_STEP_SUMMARY
@@ -232,7 +232,7 @@ jobs:
           needs.lint-fast.result != 'success' ||
           needs.cppcheck.result != 'success' ||
           needs.clang-tidy.result != 'success' ||
-          needs.unit-tests-release.result != 'success' ||
+          needs.unit-tests-no-pgo-release.result != 'success' ||
           needs.unit-tests-dev.result != 'success' ||
           needs.unit-tests-super.result != 'success' ||
           needs.wasm-tests.result != 'success'
