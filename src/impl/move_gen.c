@@ -936,7 +936,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   // every start column, so this rules out every candidate play at once.
   if (gen->word_info_table != NULL && anchor->playthrough_blocks > 0) {
     const uint32_t letter_universe =
-        (uint32_t)((1u << ld_get_size(&gen->ld)) - 1) & ~1u;
+        (uint32_t)((1U << ld_get_size(&gen->ld)) - 1) & ~1U;
     const uint32_t addable = wgen->playthrough_addable & letter_universe;
     if (addable == 0) {
       return;
@@ -1912,8 +1912,8 @@ static inline bool wit_shadow_right_block_dead(const MoveGen *gen,
   if (min_idx < 0) {
     min_idx = 0;
   }
-  const bool blank_here = (possible_letters_here & 1u) != 0;
-  const uint32_t cand = (uint32_t)possible_letters_here & ~1u;
+  const bool blank_here = (possible_letters_here & 1U) != 0;
+  const uint32_t cand = (uint32_t)possible_letters_here & ~1U;
   const int stride = BOARD_DIM - block_len + 1;
   uint32_t geq = 0;
   for (int idx = min_idx; idx < stride; idx++) {

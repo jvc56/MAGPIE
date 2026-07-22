@@ -53,7 +53,7 @@ static uint32_t reference_value(const DictionaryWordList *words,
       continue;
     }
     for (int k = 0; k < wlen; k++) {
-      result |= 1u << w[k];
+      result |= 1U << w[k];
     }
   }
   return result;
@@ -131,7 +131,7 @@ void test_word_info_table(void) {
     const int wlen = dictionary_word_get_length(dw);
     uint32_t own = 0;
     for (int k = 0; k < wlen; k++) {
-      own |= 1u << w[k];
+      own |= 1U << w[k];
     }
     const uint32_t *row = word_info_table_lookup(wit, w, wlen);
     assert(row != NULL);
@@ -145,10 +145,10 @@ void test_word_info_table(void) {
     const uint32_t *row = word_info_table_lookup(wit, at, 2);
     assert(row != NULL);
     // Entry i = total length (2 + i).
-    assert(row[0] == ((1u << A) | (1u << T)));                         // AT
-    assert(row[1] == ((1u << A) | (1u << T) | (1u << C) |              // CAT
-                      (1u << R)));                                     // RAT
-    assert(row[2] == ((1u << A) | (1u << T) | (1u << C) | (1u << S))); // CATS
+    assert(row[0] == ((1U << A) | (1U << T)));                         // AT
+    assert(row[1] == ((1U << A) | (1U << T) | (1U << C) |              // CAT
+                      (1U << R)));                                     // RAT
+    assert(row[2] == ((1U << A) | (1U << T) | (1U << C) | (1U << S))); // CATS
   }
 
   // Phony 1: a path that exists in the trie but is not a word ("CA" is a
@@ -189,7 +189,7 @@ void test_word_info_table(void) {
   {
     const uint32_t *row = word_info_table_lookup(wit_loaded, at, 2);
     assert(row != NULL);
-    assert(row[1] == ((1u << A) | (1u << T) | (1u << C) | (1u << R)));
+    assert(row[1] == ((1U << A) | (1U << T) | (1U << C) | (1U << R)));
     static const MachineLetter ca[] = {C, A};
     assert(word_info_table_lookup(wit_loaded, ca, 2) == NULL);
   }
