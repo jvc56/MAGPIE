@@ -20,6 +20,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -675,6 +676,44 @@ void test_peg_pegtopk_all(void) {
 // On-demand: run PEG to completion on the first max_pos positions of a fixture
 // file, printing per-position wall time + chosen move/win/spread + the total. A
 // simple timing harness (used to A/B the chained-wordprune cache).
+enum { PEG_BENCH_MAX_CANDIDATE_EVENTS = 16384 };
+
+typedef struct PegBenchCandidateEvent {
+  int stage_idx;
+  int cand_rank;
+  int scenarios_completed;
+  int64_t elapsed_ns;
+} PegBenchCandidateEvent;
+
+typedef struct PegBenchCandidateTrace {
+  _Atomic uint64_t event_count;
+  int64_t start_ns;
+  PegBenchCandidateEvent events[PEG_BENCH_MAX_CANDIDATE_EVENTS];
+} PegBenchCandidateTrace;
+
+static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
+                                        const Move *cand, double win_pct,
+                                        double mean_spread,
+                                        int scenarios_completed,
+                                        int64_t completed_ns, bool reordered,
+                                        void *user_data) {
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)reordered;
+  PegBenchCandidateTrace *trace = user_data;
+  const uint64_t event_idx =
+      atomic_fetch_add_explicit(&trace->event_count, 1, memory_order_relaxed);
+  if (event_idx >= PEG_BENCH_MAX_CANDIDATE_EVENTS) {
+    return;
+  }
+  PegBenchCandidateEvent *event = &trace->events[event_idx];
+  event->stage_idx = stage_idx;
+  event->cand_rank = cand_rank;
+  event->scenarios_completed = scenarios_completed;
+  event->elapsed_ns = completed_ns - trace->start_ns;
+}
+
 void test_peg_bench_fixture(void) {
   log_set_level(LOG_FATAL);
   const char *file = "notes/peg_positions/random_3peg.txt";
@@ -721,14 +760,36 @@ void test_peg_bench_fixture(void) {
     args.time_budget_seconds = tlim;
     args.scenario_stride = 1;
     args.num_stages = 0; // built-in default cascade
+    PegBenchCandidateTrace *trace = calloc_or_die(1, sizeof(*trace));
+    atomic_init(&trace->event_count, 0);
+    args.on_cand_done = peg_bench_on_candidate_done;
+    args.user_data = trace;
 
     PegResult result;
     ErrorStack *err = error_stack_create();
     Timer timer;
     ctimer_start(&timer);
+    trace->start_ns = ctimer_monotonic_ns();
     peg_solve(&args, &result, err);
     const double elapsed = ctimer_elapsed_seconds(&timer);
     sum_elapsed += elapsed;
+
+    const uint64_t reported_event_count =
+        atomic_load_explicit(&trace->event_count, memory_order_relaxed);
+    const uint64_t retained_event_count =
+        reported_event_count < PEG_BENCH_MAX_CANDIDATE_EVENTS
+            ? reported_event_count
+            : PEG_BENCH_MAX_CANDIDATE_EVENTS;
+    uint64_t candidate_scenarios = 0;
+    for (uint64_t event_idx = 0; event_idx < retained_event_count;
+         event_idx++) {
+      const PegBenchCandidateEvent *event = &trace->events[event_idx];
+      candidate_scenarios += (uint64_t)event->scenarios_completed;
+      printf("[pegbcand] pos=%d stage=%d rank=%d scenarios=%d "
+             "elapsed_ms=%.3f\n",
+             pos_idx, event->stage_idx, event->cand_rank,
+             event->scenarios_completed, (double)event->elapsed_ns / 1.0e6);
+    }
 
     char best[32] = "-";
     double win = -1.0;
@@ -739,12 +800,18 @@ void test_peg_bench_fixture(void) {
       win = result.top_cands[0].win_pct;
       spread = result.top_cands[0].mean_spread;
     }
-    printf("[pegb] pos=%2d elapsed=%.2f stage=%d best=%-14s win=%.4f "
+    printf("[pegb] pos=%2d elapsed=%.2f stage=%d candidates=%llu "
+           "candidate_scenarios=%llu event_drops=%llu best=%-14s win=%.4f "
            "spread=%+.3f\n",
-           pos_idx, elapsed, result.last_completed_stage, best, win, spread);
+           pos_idx, elapsed, result.last_completed_stage,
+           (unsigned long long)reported_event_count,
+           (unsigned long long)candidate_scenarios,
+           (unsigned long long)(reported_event_count - retained_event_count),
+           best, win, spread);
     (void)fflush(stdout);
     error_stack_destroy(err);
     peg_result_destroy(&result);
+    free(trace);
   }
   printf("[pegb] TOTAL elapsed=%.2fs over %d positions\n", sum_elapsed,
          num_lines);

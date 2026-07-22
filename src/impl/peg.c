@@ -925,6 +925,10 @@ typedef struct PegScenarioJob {
   int64_t win_count;
   int64_t tie_count;
   int n_scenarios;
+  // Populated only when on_cand_done is active. A scenario-parallel candidate
+  // finishes when its last scenario job finishes.
+  bool completed;
+  int64_t completed_ns;
 } PegScenarioJob;
 
 // A growable list of scenario jobs (collect mode). Not recursive, so defined
@@ -2047,10 +2051,10 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   // poller sees stage 0 fill in as candidates resolve.
   const bool reordered = peg_poll_upsert(job->poll, job->out);
   if (job->progress != NULL && job->progress->on_cand_done != NULL) {
-    job->progress->on_cand_done(job->progress->stage_idx, job->cand_rank,
-                                &job->out->move, job->out->win_pct,
-                                job->out->mean_spread, job->out->n_scenarios,
-                                reordered, job->progress->user_data);
+    job->progress->on_cand_done(
+        job->progress->stage_idx, job->cand_rank, &job->out->move,
+        job->out->win_pct, job->out->mean_spread, job->out->n_scenarios,
+        ctimer_monotonic_ns(), reordered, job->progress->user_data);
   }
 }
 
@@ -2218,11 +2222,17 @@ static void peg_eval_candidates(
 // orderings into the job's own result fields.
 static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   PegScenarioJob *job = (PegScenarioJob *)arg;
+  const bool track_candidate_completion =
+      job->progress != NULL && job->progress->on_cand_done != NULL;
   // Past the deadline: skip this scenario entirely (its result fields are
   // already zero from job creation) so a candidate whose evaluation straddles
   // the cutoff winds down within one in-flight job instead of running every
   // remaining scenario to completion. The caller drops such partial candidates.
   if (peg_should_stop(job->deadline_ns, job->thread_control)) {
+    if (track_candidate_completion) {
+      job->completed = false;
+      job->completed_ns = ctimer_monotonic_ns();
+    }
     return;
   }
   PegEvalCtx ctx;
@@ -2258,6 +2268,10 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   job->win_count = ctx.win_count;
   job->tie_count = ctx.tie_count;
   job->n_scenarios = ctx.n_scenarios;
+  if (track_candidate_completion) {
+    job->completed = !ctx.interrupted;
+    job->completed_ns = ctimer_monotonic_ns();
+  }
 }
 
 // True when two moves are the same play (type, position, tiles).
@@ -2378,6 +2392,14 @@ static void peg_eval_candidates_scenario(
   double *total_w = calloc_or_die((size_t)n, sizeof(double));
   double *win_w = calloc_or_die((size_t)n, sizeof(double));
   double *spread_w = calloc_or_die((size_t)n, sizeof(double));
+  const bool track_candidate_completion =
+      progress != NULL && progress->on_cand_done != NULL;
+  bool *candidate_completed = track_candidate_completion
+                                  ? malloc_or_die((size_t)n * sizeof(bool))
+                                  : NULL;
+  int64_t *candidate_completed_ns =
+      track_candidate_completion ? calloc_or_die((size_t)n, sizeof(int64_t))
+                                 : NULL;
   for (int i = 0; i < n; i++) {
     ranked[i].move = *cands[i];
     ranked[i].weight_sum = 0;
@@ -2385,6 +2407,9 @@ static void peg_eval_candidates_scenario(
     ranked[i].tie_count = 0;
     ranked[i].n_scenarios = 0;
     ranked[i].eval_seconds = 0; // set per candidate by the live caller
+    if (track_candidate_completion) {
+      candidate_completed[i] = true;
+    }
   }
   for (int j = 0; j < list.count; j++) {
     const PegScenarioJob *job = &list.jobs[j];
@@ -2396,6 +2421,12 @@ static void peg_eval_candidates_scenario(
     ranked[i].win_count += job->win_count;
     ranked[i].tie_count += job->tie_count;
     ranked[i].n_scenarios += job->n_scenarios;
+    if (track_candidate_completion) {
+      candidate_completed[i] = candidate_completed[i] && job->completed;
+      if (job->completed_ns > candidate_completed_ns[i]) {
+        candidate_completed_ns[i] = job->completed_ns;
+      }
+    }
   }
   // Concatenate each candidate's per-ordering capture rows (in enumeration
   // order) into out_outcomes, renumbering scenario_idx sequentially per cand.
@@ -2432,19 +2463,22 @@ static void peg_eval_candidates_scenario(
   for (int i = 0; i < n; i++) {
     ranked[i].win_pct = total_w[i] > 0 ? win_w[i] / total_w[i] : 0.0;
     ranked[i].mean_spread = total_w[i] > 0 ? spread_w[i] / total_w[i] : 0.0;
-    if (progress != NULL && progress->on_cand_done != NULL) {
+    if (track_candidate_completion && candidate_completed[i] &&
+        ranked[i].n_scenarios > 0) {
       // This barrier path (benchmarks) has no incremental sorted insert, so
       // there is no append-vs-reorder distinction: treat each as a full redraw.
       progress->on_cand_done(progress->stage_idx, i, &ranked[i].move,
                              ranked[i].win_pct, ranked[i].mean_spread,
-                             ranked[i].n_scenarios, /*reordered=*/true,
-                             progress->user_data);
+                             ranked[i].n_scenarios, candidate_completed_ns[i],
+                             /*reordered=*/true, progress->user_data);
     }
     peg_poll_bump_cand_done(poll);
   }
   free(total_w);
   free(win_w);
   free(spread_w);
+  free(candidate_completed);
+  free(candidate_completed_ns);
   free(list.jobs);
   for (int i = 0; i < n; i++) {
     game_destroy(templates[i]);
@@ -2976,7 +3010,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             args->on_cand_done(
                 stage_idx, cand_idx, &restaged[cand_idx].move,
                 restaged[cand_idx].win_pct, restaged[cand_idx].mean_spread,
-                restaged[cand_idx].n_scenarios, reordered, args->user_data);
+                restaged[cand_idx].n_scenarios, ctimer_monotonic_ns(),
+                reordered, args->user_data);
           }
         }
       } else {

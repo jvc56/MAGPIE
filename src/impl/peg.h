@@ -81,13 +81,17 @@ typedef enum {
 typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
                                 int emptier_plies, void *user_data);
 
-// Fired when a candidate finishes. reordered is true when the candidate slotted
-// in above the bottom of the live ranking (so the displayed order changed and
-// the whole list should be redrawn); false when it sorted to the bottom (the
-// new worst), so a streaming view can just append its one row.
+// Fired when a candidate finishes. completed_ns is its absolute monotonic-clock
+// completion timestamp (ctimer_monotonic_ns-compatible), including in the
+// scenario-parallel path where callbacks are delivered after the stage's work
+// barrier. reordered is true when the candidate slotted in above the bottom of
+// the live ranking (so the displayed order changed and the whole list should be
+// redrawn); false when it sorted to the bottom (the new worst), so a streaming
+// view can just append its one row.
 typedef void (*PegOnCandDone)(int stage_idx, int cand_rank, const Move *cand,
                               double win_pct, double mean_spread, int scen_done,
-                              bool reordered, void *user_data);
+                              int64_t completed_ns, bool reordered,
+                              void *user_data);
 
 typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
                                   int scenario_idx, int32_t mover_total,
