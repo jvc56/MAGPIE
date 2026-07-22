@@ -10,6 +10,7 @@
 #include "rack.h"
 #include "rack_info_table.h"
 #include "wmp.h"
+#include "word_info_table.h"
 #include <stdlib.h>
 
 struct Player {

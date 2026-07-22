@@ -1,6 +1,7 @@
 #include "word_info_table_maker.h"
 
 #include "../def/board_defs.h"
+#include "../def/letter_distribution_defs.h"
 #include "../ent/dictionary_word.h"
 #include "../ent/kwg.h"
 #include "../ent/word_info_table.h"
