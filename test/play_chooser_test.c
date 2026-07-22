@@ -79,7 +79,7 @@ static void test_play_chooser_clock_budget(void) {
   load_and_exec_config_or_die(
       config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
               "AEINRST/DEILNOR 0/0 0 -lex CSW21;");
-  Game *game = config_get_game(config);
+  const Game *game = config_get_game(config);
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   GameTimer game_timer;
   game_timer_reset(&game_timer, 1.0);
@@ -99,14 +99,20 @@ static void test_play_chooser_clock_budget(void) {
   // Once flag fall starts the first penalty period, its remaining paid-for
   // time can be budgeted. Near the next boundary, search stops so static move
   // generation has enough reserve not to start another penalty period.
-  game_timer.seconds_used[player_on_turn_index] = 1.0;
+  GameTimer first_overtime_timer = game_timer;
+  first_overtime_timer.seconds_used[player_on_turn_index] = 1.0;
+  strategy.game_timer = &first_overtime_timer;
   assert(play_chooser_get_seconds_for_move(&strategy, game) > 1.0);
-  game_timer.seconds_used[player_on_turn_index] = 60.9;
+  GameTimer next_period_boundary_timer = game_timer;
+  next_period_boundary_timer.seconds_used[player_on_turn_index] = 60.9;
+  strategy.game_timer = &next_period_boundary_timer;
   assert(play_chooser_get_seconds_for_move(&strategy, game) == 0.0);
 
   // If another period has already started, budget within that period rather
   // than continuing an unbounded overrun.
-  game_timer.seconds_used[player_on_turn_index] = 61.001;
+  GameTimer second_overtime_timer = game_timer;
+  second_overtime_timer.seconds_used[player_on_turn_index] = 61.001;
+  strategy.game_timer = &second_overtime_timer;
   assert(play_chooser_get_seconds_for_move(&strategy, game) > 1.0);
 
   // Callers without an overtime policy fall back to static after flag fall.
