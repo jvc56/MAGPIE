@@ -188,7 +188,7 @@ make_word_info_table_from_words(const DictionaryWordList *words) {
     }
     uint32_t lv = 0;
     for (int k = 0; k < vlen; k++) {
-      lv |= 1u << v[k];
+      lv |= 1U << v[k];
     }
     for (int start = 0; start < vlen; start++) {
       const int max_wlen = vlen - start;
