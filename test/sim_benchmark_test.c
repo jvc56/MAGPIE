@@ -16,6 +16,7 @@
 #include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/impl/play_chooser.h"
+#include "../src/util/io_util.h"
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -92,12 +93,13 @@ void test_play_chooser_benchmark(void) {
   play_chooser_benchmark_get(&stats);
   const size_t peg_event_count =
       play_chooser_benchmark_get_peg_candidate_events(NULL, 0);
-  PlayChooserPegCandidateEvent *peg_events =
-      peg_event_count > 0 ? malloc_or_die(peg_event_count * sizeof(*peg_events))
-                          : NULL;
-  const size_t copied_peg_event_count =
-      play_chooser_benchmark_get_peg_candidate_events(peg_events,
-                                                      peg_event_count);
+  PlayChooserPegCandidateEvent *peg_events = NULL;
+  size_t copied_peg_event_count = 0;
+  if (peg_event_count > 0) {
+    peg_events = malloc_or_die(peg_event_count * sizeof(*peg_events));
+    copied_peg_event_count = play_chooser_benchmark_get_peg_candidate_events(
+        peg_events, peg_event_count);
+  }
   play_chooser_benchmark_stop();
   autoplay_set_bench_static_move(false);
 
