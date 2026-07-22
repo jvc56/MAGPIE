@@ -101,6 +101,7 @@ typedef struct PegWorker {
   // scenarios reach identical board states, so cross-scenario reuse is the
   // dominant endgame speedup.
   TranspositionTable *eg_tt;
+  double eg_tt_fraction;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
 
@@ -122,6 +123,16 @@ typedef struct PegWorker {
   PegNestFrame *nest_free;
   PegNestFrame *nest_all;
 } PegWorker;
+
+// The greedy seed does not use an endgame transposition table. Allocate one
+// only when a worker actually reaches an exact leaf so a short-budget PEG does
+// not spend most of its clock zeroing tables it will never consult.
+static TranspositionTable *peg_worker_get_endgame_tt(PegWorker *worker) {
+  if (worker->eg_tt == NULL) {
+    worker->eg_tt = transposition_table_create(worker->eg_tt_fraction);
+  }
+  return worker->eg_tt;
+}
 
 // Acquire a scratch frame from the worker's free-list (allocating if empty);
 // release returns it. Single-thread-per-worker, so no locking.
@@ -650,12 +661,31 @@ static Game *peg_make_post_cand_game(PegWorker *worker,
       mover_drawn, n_bag_remaining, bag_remaining);
 }
 
+static bool peg_should_stop(int64_t deadline_ns,
+                            ThreadControl *thread_control) {
+  if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+    return true;
+  }
+  return thread_control != NULL && thread_control_get_status(thread_control) ==
+                                       THREAD_CONTROL_STATUS_USER_INTERRUPT;
+}
+
 // Greedy playout to game end; returns signed mover spread (points), with the
-// usual rack-leave adjustment when the game has not actually ended.
+// usual rack-leave adjustment when the game has not actually ended. A timed
+// playout checks between plies so an in-flight PEG scenario can wind down at
+// the same absolute deadline as the surrounding stage.
 static int32_t peg_greedy_playout(Game *game, int mover_idx,
-                                  MoveList *playout_ml) {
+                                  MoveList *playout_ml, int64_t deadline_ns,
+                                  ThreadControl *thread_control,
+                                  bool *interrupted) {
   const LetterDistribution *ld = game_get_ld(game);
   for (int ply = 0; ply < PEG_PLAYOUT_MAX_PLIES; ply++) {
+    if (peg_should_stop(deadline_ns, thread_control)) {
+      if (interrupted != NULL) {
+        *interrupted = true;
+      }
+      break;
+    }
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
@@ -673,6 +703,12 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
         .initial_tiles_bv = 0,
     };
     generate_moves(&args);
+    if (peg_should_stop(deadline_ns, thread_control)) {
+      if (interrupted != NULL) {
+        *interrupted = true;
+      }
+      break;
+    }
     if (move_list_get_count(playout_ml) == 0) {
       break;
     }
@@ -696,12 +732,21 @@ static int32_t peg_greedy_playout(Game *game, int mover_idx,
 // <= the greedy (rational) playout's. Returns the signed mover spread with the
 // same rack-leave adjustment as peg_greedy_playout.
 static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
-                                       MoveList *playout_ml, int inner_top_k) {
+                                       MoveList *playout_ml, int inner_top_k,
+                                       int64_t deadline_ns,
+                                       ThreadControl *thread_control,
+                                       bool *interrupted) {
   const LetterDistribution *ld = game_get_ld(game);
   Game *branch = NULL;         // lazily created scratch for opp-reply trials
   MoveList *opp_ml = NULL;     // opponent's candidate replies
   MoveList *rollout_ml = NULL; // greedy rollout of each trial
   for (int ply = 0; ply < PEG_PLAYOUT_MAX_PLIES; ply++) {
+    if (peg_should_stop(deadline_ns, thread_control)) {
+      if (interrupted != NULL) {
+        *interrupted = true;
+      }
+      break;
+    }
     if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
       break;
     }
@@ -722,6 +767,12 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
           .initial_tiles_bv = 0,
       };
       generate_moves(&ga);
+      if (peg_should_stop(deadline_ns, thread_control)) {
+        if (interrupted != NULL) {
+          *interrupted = true;
+        }
+        break;
+      }
       if (move_list_get_count(playout_ml) == 0) {
         break;
       }
@@ -747,6 +798,12 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
         .initial_tiles_bv = 0,
     };
     generate_moves(&ga);
+    if (peg_should_stop(deadline_ns, thread_control)) {
+      if (interrupted != NULL) {
+        *interrupted = true;
+      }
+      break;
+    }
     const int n_opp = move_list_get_count(opp_ml);
     if (n_opp == 0) {
       break;
@@ -763,14 +820,27 @@ static int32_t peg_pessimistic_playout(Game *game, int mover_idx,
     int worst_idx = 0;
     int32_t worst_for_mover = INT32_MAX;
     for (int i = 0; i < n_consider; i++) {
+      if (peg_should_stop(deadline_ns, thread_control)) {
+        if (interrupted != NULL) {
+          *interrupted = true;
+        }
+        break;
+      }
       game_copy(branch, game);
       play_move(move_list_get_move(opp_ml, i), branch, NULL);
       const int32_t mover_net =
-          peg_greedy_playout(branch, mover_idx, rollout_ml);
+          peg_greedy_playout(branch, mover_idx, rollout_ml, deadline_ns,
+                             thread_control, interrupted);
+      if (interrupted != NULL && *interrupted) {
+        break;
+      }
       if (mover_net < worst_for_mover) {
         worst_for_mover = mover_net;
         worst_idx = i;
       }
+    }
+    if (interrupted != NULL && *interrupted) {
+      break;
     }
     play_move(move_list_get_move(opp_ml, worst_idx), game, NULL);
   }
@@ -923,7 +993,18 @@ typedef struct PegEvalCtx {
   int64_t win_count;
   int64_t tie_count;
   int n_scenarios;
+  // Set when this candidate/scenario hits the wall-clock deadline or a user
+  // interrupt. Its partial score must not enter a stage ranking.
+  bool interrupted;
 } PegEvalCtx;
+
+static bool peg_eval_should_stop(PegEvalCtx *ctx) {
+  if (!peg_should_stop(ctx->deadline_ns, ctx->thread_control)) {
+    return false;
+  }
+  ctx->interrupted = true;
+  return true;
+}
 
 static void peg_scenario_joblist_push(PegScenarioJobList *list,
                                       const PegScenarioJob *job) {
@@ -1046,18 +1127,13 @@ static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
 // endgame. Once stopped, nodes degrade to the cheap greedy floor immediately.
 static bool peg_nested_should_stop(const PegWorker *worker,
                                    int64_t deadline_ns) {
-  if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
-    return true;
-  }
-  return worker->thread_control != NULL &&
-         thread_control_get_status(worker->thread_control) ==
-             THREAD_CONTROL_STATUS_USER_INTERRUPT;
+  return peg_should_stop(deadline_ns, worker->thread_control);
 }
 
 // Greedy-rollout floor value (on-turn perspective) on a scratch copy, since the
 // playout mutates the game it walks.
 static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
-                                int on_turn) {
+                                int on_turn, int64_t deadline_ns) {
   PegNestFrame *frame = peg_nest_acquire(worker);
   if (frame->game == NULL) {
     frame->game = game_duplicate(game);
@@ -1065,7 +1141,8 @@ static int32_t peg_nested_floor(PegWorker *worker, const Game *game,
     game_copy(frame->game, game);
   }
   const int32_t value =
-      peg_greedy_playout(frame->game, on_turn, worker->playout_ml);
+      peg_greedy_playout(frame->game, on_turn, worker->playout_ml, deadline_ns,
+                         worker->thread_control, /*interrupted=*/NULL);
   peg_nest_release(worker, frame);
   return value;
 }
@@ -1101,7 +1178,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
-      worker->eg_tt,
+      peg_worker_get_endgame_tt(worker),
       // nested endgames are small and many; no core injection
       /*max_workers=*/0, /*first_win=*/false, /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
@@ -1109,7 +1186,9 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
-    return peg_greedy_playout(game, on_turn, worker->playout_ml);
+    return peg_greedy_playout(game, on_turn, worker->playout_ml, deadline_ns,
+                              worker->thread_control,
+                              /*interrupted=*/NULL);
   }
   const int32_t eg_val =
       endgame_results_get_value(worker->eg_results, ENDGAME_RESULT_BEST);
@@ -1339,7 +1418,7 @@ static int32_t peg_nested_cand_value(PegWorker *worker, const Game *parent_game,
   free(nc.jobs);
   peg_nest_release(worker, tframe);
   if (weight_sum == 0) {
-    return peg_nested_floor(worker, parent_game, mover_idx);
+    return peg_nested_floor(worker, parent_game, mover_idx, deadline_ns);
   }
   const double avg = value_weight / (double)weight_sum;
   return (int32_t)(avg >= 0 ? avg + 0.5 : avg - 0.5);
@@ -1358,14 +1437,14 @@ static int32_t peg_inner_leaf(PegWorker *worker, Game *game, int stage_fidelity,
     return equity_to_int(player_get_score(me) - player_get_score(op));
   }
   if (peg_nested_should_stop(worker, deadline_ns) || stage_fidelity <= 0) {
-    return peg_nested_floor(worker, game, on_turn);
+    return peg_nested_floor(worker, game, on_turn, deadline_ns);
   }
   if (bag_get_letters(game_get_bag(game)) == 0) {
     return peg_nested_endgame_value(worker, game, on_turn, stage_fidelity,
                                     deadline_ns);
   }
   if (depth <= 1) {
-    return peg_nested_floor(worker, game, on_turn);
+    return peg_nested_floor(worker, game, on_turn, deadline_ns);
   }
   return peg_inner_cascade(worker, game, depth - 1, outer_fidelity,
                            deadline_ns);
@@ -1401,7 +1480,7 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
   const int num_cands = move_list_get_count(cand_moves);
   if (num_cands == 0) {
     peg_nest_release(worker, cframe);
-    return peg_nested_floor(worker, game, on_turn);
+    return peg_nested_floor(worker, game, on_turn, deadline_ns);
   }
   move_list_sort_moves(cand_moves);
   uint8_t unseen[MAX_ALPHABET_SIZE];
@@ -1490,7 +1569,8 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
     }
   }
   const int32_t result =
-      field_n > 0 ? val[0] : peg_nested_floor(worker, game, on_turn);
+      field_n > 0 ? val[0]
+                  : peg_nested_floor(worker, game, on_turn, deadline_ns);
   peg_nest_release(worker, cframe);
   return result;
 }
@@ -1499,6 +1579,9 @@ static int32_t peg_inner_cascade(PegWorker *worker, Game *game, int depth,
 // Returns mover's signed spread (points) — exact via endgame_solve for emptier
 // scenarios at fidelity > 0, else the greedy playout.
 static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
+  if (peg_eval_should_stop(ctx)) {
+    return 0;
+  }
   const bool emptier = bag_get_letters(game_get_bag(game)) == 0 &&
                        game_get_game_end_reason(game) == GAME_END_REASON_NONE;
   if (ctx->fidelity_plies <= 0 || !emptier) {
@@ -1521,10 +1604,13 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       return (turn == ctx->mover_idx) ? on_turn_val : -on_turn_val;
     }
     if (ctx->opp_model == PEG_OPP_PESSIMISTIC) {
-      return peg_pessimistic_playout(game, ctx->mover_idx,
-                                     ctx->worker->playout_ml, ctx->inner_top_k);
+      return peg_pessimistic_playout(
+          game, ctx->mover_idx, ctx->worker->playout_ml, ctx->inner_top_k,
+          ctx->deadline_ns, ctx->thread_control, &ctx->interrupted);
     }
-    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
+    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
+                              ctx->deadline_ns, ctx->thread_control,
+                              &ctx->interrupted);
   }
   // Exact endgame leaf. After the mover plays and draws it is the opponent's
   // turn, so the solved value is from the on-turn player's perspective; fold
@@ -1548,6 +1634,9 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
         peg_prune_cache_get(ctx->worker->prune_cache, game, ctx->mover_idx);
     game_set_override_kwgs(game, leaf_kwg, NULL, DUAL_LEXICON_MODE_IGNORANT);
   }
+  if (peg_eval_should_stop(ctx)) {
+    return 0;
+  }
   EndgameArgs ea;
   endgame_args_fill(
       ctx->thread_control, game, /*tt_fraction_of_mem=*/0.0,
@@ -1559,7 +1648,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/0.0,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
-      ctx->worker->eg_tt,
+      peg_worker_get_endgame_tt(ctx->worker),
       // > num_threads (1) opens the injection window so the monitor can lend
       // idle cores to this (potentially long) endgame mid-solve.
       /*max_workers=*/ctx->injection_cap, /*first_win=*/false,
@@ -1573,7 +1662,9 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
   // solve. Fall back to greedy rather than misreporting the scenario outcome.
   if (endgame_results_get_depth(ctx->worker->eg_results, ENDGAME_RESULT_BEST) <
       0) {
-    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml);
+    return peg_greedy_playout(game, ctx->mover_idx, ctx->worker->playout_ml,
+                              ctx->deadline_ns, ctx->thread_control,
+                              &ctx->interrupted);
   }
   const int eg_val =
       endgame_results_get_value(ctx->worker->eg_results, ENDGAME_RESULT_BEST);
@@ -1631,6 +1722,9 @@ static void peg_capture_row(PegScenarioCapture *capture,
 static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
                            int n_bag_remaining,
                            const MachineLetter *bag_remaining, int64_t weight) {
+  if (peg_eval_should_stop(ctx)) {
+    return;
+  }
   // Collect mode: emit this split as its own job for scenario-level parallelism
   // instead of evaluating it inline.
   if (ctx->out_jobs != NULL) {
@@ -1690,6 +1784,9 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
   // per-ordering labeled count once n_orderings is known (below).
   const int capture_start = ctx->capture != NULL ? ctx->capture->count : 0;
   do {
+    if (peg_eval_should_stop(ctx)) {
+      break;
+    }
     Game *game = peg_make_post_cand_game(
         ctx->worker, ctx->template_src, ctx->mover_idx, ctx->unseen,
         ctx->ld_size, ctx->k_drawn, mover_drawn, n_bag_remaining, bag_perm);
@@ -1713,6 +1810,10 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     ordering_spread += (double)value;
     n_orderings++;
   } while (peg_next_perm(bag_perm, n_bag_remaining));
+
+  if (ctx->interrupted || n_orderings == 0) {
+    return;
+  }
 
   // Each ordering is equally likely within this multiset, so the multiset's
   // weight is split evenly across its orderings.
@@ -1753,6 +1854,9 @@ static void peg_enum_splits(PegEvalCtx *ctx, int ml, int mover_left,
                             int bag_rem_left, int64_t weight,
                             MachineLetter *mover_drawn, int n_mover,
                             MachineLetter *bag_remaining, int n_bag_rem) {
+  if (peg_eval_should_stop(ctx)) {
+    return;
+  }
   if (ml == ctx->ld_size) {
     if (mover_left == 0 && bag_rem_left == 0) {
       // k_drawn! accounts for the order in which the mover draws its tiles.
@@ -1874,7 +1978,7 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   // last (win_pct < 0), so a heavy-rack stage 0 over thousands of candidates
   // cannot blow past the time budget. Candidates dispatched before the deadline
   // still evaluate and rank normally; the partial top-K is what gets published.
-  if (job->deadline_ns != 0 && ctimer_monotonic_ns() >= job->deadline_ns) {
+  if (peg_should_stop(job->deadline_ns, job->thread_control)) {
     job->out->move = *job->cand;
     job->out->win_pct = -1.0;
     job->out->mean_spread = 0.0;
@@ -1920,6 +2024,16 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
                     mover_drawn, 0, bag_remaining, 0);
   }
   job->out->move = *job->cand;
+  if (ctx.interrupted) {
+    job->out->win_pct = -1.0;
+    job->out->mean_spread = 0.0;
+    job->out->weight_sum = 0;
+    job->out->win_count = 0;
+    job->out->tie_count = 0;
+    job->out->n_scenarios = 0;
+    job->out->eval_seconds = 0;
+    return;
+  }
   job->out->win_pct =
       ctx.total_weight > 0 ? ctx.win_weight / ctx.total_weight : 0.0;
   job->out->mean_spread =
@@ -2108,7 +2222,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   // already zero from job creation) so a candidate whose evaluation straddles
   // the cutoff winds down within one in-flight job instead of running every
   // remaining scenario to completion. The caller drops such partial candidates.
-  if (job->deadline_ns != 0 && ctimer_monotonic_ns() >= job->deadline_ns) {
+  if (peg_should_stop(job->deadline_ns, job->thread_control)) {
     return;
   }
   PegEvalCtx ctx;
@@ -2587,7 +2701,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_ctx = endgame_ctx_create();
     workers[worker_idx].template_game = NULL;
     workers[worker_idx].scratch_game = NULL;
-    workers[worker_idx].eg_tt = transposition_table_create(tt_fraction);
+    workers[worker_idx].eg_tt = NULL;
+    workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;

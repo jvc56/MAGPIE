@@ -73,6 +73,52 @@ static void test_game_timer(void) {
   assert(isinf(game_timer_get_seconds_remaining(&game_timer, 1)));
 }
 
+static void test_play_chooser_clock_budget(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  load_and_exec_config_or_die(
+      config, "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 "
+              "AEINRST/DEILNOR 0/0 0 -lex CSW21;");
+  Game *game = config_get_game(config);
+  const int player_on_turn_index = game_get_player_on_turn_index(game);
+  GameTimer game_timer;
+  game_timer_reset(&game_timer, 1.0);
+  PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .game_timer = &game_timer,
+      .overtime_period_seconds = 60.0,
+  };
+
+  // The main clock is split across the estimated remaining plays, with a
+  // reserve rather than a forced minimum that can overspend the clock.
+  const double initial_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  assert(initial_budget >= 0.05 && initial_budget < 0.1);
+
+  // Once flag fall starts the first penalty period, its remaining paid-for
+  // time can be budgeted. Near the next boundary, search stops so static move
+  // generation has enough reserve not to start another penalty period.
+  game_timer.seconds_used[player_on_turn_index] = 1.0;
+  assert(play_chooser_get_seconds_for_move(&strategy, game) > 1.0);
+  game_timer.seconds_used[player_on_turn_index] = 60.9;
+  assert(play_chooser_get_seconds_for_move(&strategy, game) == 0.0);
+
+  // If another period has already started, budget within that period rather
+  // than continuing an unbounded overrun.
+  game_timer.seconds_used[player_on_turn_index] = 61.001;
+  assert(play_chooser_get_seconds_for_move(&strategy, game) > 1.0);
+
+  // Callers without an overtime policy fall back to static after flag fall.
+  strategy.overtime_period_seconds = 0.0;
+  assert(play_chooser_get_seconds_for_move(&strategy, game) == 0.0);
+
+  // An explicit per-move budget remains independent of the game clock.
+  strategy.fixed_seconds_per_move = 0.125;
+  assert(play_chooser_get_seconds_for_move(&strategy, game) == 0.125);
+  config_destroy(config);
+}
+
 static void drain_bag(const Game *game) {
   Bag *bag = game_get_bag(game);
   while (!bag_is_empty(bag)) {
@@ -923,6 +969,7 @@ static void test_challenge_stage_combinations(void) {
 
 void test_play_chooser(void) {
   test_game_timer();
+  test_play_chooser_clock_budget();
   test_keep_phony_for_triple_triple();
   test_challenge_off_blocks_bingo();
   test_endgame_keep_phony_for_only_q_play();
