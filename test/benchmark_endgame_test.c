@@ -494,12 +494,25 @@ static uint64_t tiles_bv_from_small_moves(const MoveList *move_list) {
   return tiles_bv;
 }
 
+static uint64_t tiles_bv_from_rack(const Rack *rack) {
+  uint64_t tiles_bv = 0;
+  const uint16_t dist_size = rack_get_dist_size(rack);
+  for (uint16_t ml = 0; ml < dist_size; ml++) {
+    if (rack_get_letter(rack, ml) > 0) {
+      tiles_bv |= (uint64_t)1 << ml;
+    }
+  }
+  return tiles_bv;
+}
+
 // Isolated MOVE_RECORD_TILES_PLAYED benchmark. This deliberately excludes CGP
 // loading from the timed region and invokes both players so it measures only
-// the move-generation mode used by endgame stuck-tile detection.
+// the move-generation mode used by endgame stuck-tile detection. Every input
+// position is independently verified to have at least one stuck rack before
+// any timed rounds run.
 //
 // Environment:
-//   MAGPIE_TP_CGP      CGP file (default /tmp/nonstuck_cgps.txt)
+//   MAGPIE_TP_CGP      CGP file (default /tmp/stuck_hard_endgame_cgps.txt)
 //   MAGPIE_TP_MAX      positions (default 64)
 //   MAGPIE_TP_REPEATS  calls per player/position/round (default 50)
 //   MAGPIE_TP_ROUNDS   rounds (default 9)
@@ -508,7 +521,7 @@ void test_tiles_played_bench(void) {
 
   const char *cgp_file = getenv("MAGPIE_TP_CGP");
   if (cgp_file == NULL || cgp_file[0] == '\0') {
-    cgp_file = "/tmp/nonstuck_cgps.txt";
+    cgp_file = "/tmp/stuck_hard_endgame_cgps.txt";
   }
   const int max_positions = env_int("MAGPIE_TP_MAX", 64);
   const int repeats = env_int("MAGPIE_TP_REPEATS", 50);
@@ -516,7 +529,7 @@ void test_tiles_played_bench(void) {
 
   FILE *fp = fopen(cgp_file, "re");
   if (!fp) {
-    printf("TPBENCHERR no CGP file at %s\n", cgp_file);
+    printf("TPBENCHERR no CGP file at %s; run genstuck first\n", cgp_file);
     return;
   }
   char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
@@ -550,6 +563,7 @@ void test_tiles_played_bench(void) {
     assert(error_stack_is_empty(err));
     error_stack_destroy(err);
     const int saved_on_turn = game_get_player_on_turn_index(game);
+    bool position_has_stuck_rack = false;
     for (int player_idx = 0; player_idx < 2; player_idx++) {
       game_set_player_on_turn_index(game, player_idx);
       const MoveGenArgs reference_args = {
@@ -564,6 +578,11 @@ void test_tiles_played_bench(void) {
       };
       generate_moves(&reference_args);
       const uint64_t reference_bv = tiles_bv_from_small_moves(reference_moves);
+      const Rack *rack = player_get_rack(game_get_player(game, player_idx));
+      const uint64_t rack_bv = tiles_bv_from_rack(rack);
+      if ((reference_bv & rack_bv) != rack_bv) {
+        position_has_stuck_rack = true;
+      }
 
       const uint64_t initial_bv = reference_bv & UINT64_C(0xAAAAAAAAAAAAAAAA);
       uint64_t actual_bv = 0;
@@ -583,9 +602,11 @@ void test_tiles_played_bench(void) {
       assert(actual_bv == (initial_bv | reference_bv));
       comparisons++;
     }
+    assert(position_has_stuck_rack);
     game_set_player_on_turn_index(game, saved_on_turn);
   }
-  printf("TPBENCH correctness=%d\n", comparisons);
+  printf("TPBENCH verified_stuck_positions=%d correctness=%d\n", num_cgps,
+         comparisons);
 
   for (int round = 0; round < rounds; round++) {
     double total_time = 0.0;
