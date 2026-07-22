@@ -64,6 +64,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "peg.h"
+#include "play_chooser.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>

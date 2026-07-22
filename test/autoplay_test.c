@@ -494,11 +494,15 @@ void test_autoplay_play_chooser(void) {
   double seconds_used_ms[2];
   double overtime_ms[2];
   unsigned long penalty_points[2];
-  assert(sscanf(play_chooser_output,
-                "playchooser %d %d %lf %lf %lf %lf %lf %lf %lu %lu", &active[0],
-                &active[1], &time_control_ms[0], &time_control_ms[1],
-                &seconds_used_ms[0], &seconds_used_ms[1], &overtime_ms[0],
-                &overtime_ms[1], &penalty_points[0], &penalty_points[1]) == 10);
+  // The parsed values are test data, and sscanf's field count is checked
+  // immediately below.
+  // NOLINTNEXTLINE(cert-err34-c)
+  const int parsed_fields = sscanf(
+      play_chooser_output, "playchooser %d %d %lf %lf %lf %lf %lf %lf %lu %lu",
+      &active[0], &active[1], &time_control_ms[0], &time_control_ms[1],
+      &seconds_used_ms[0], &seconds_used_ms[1], &overtime_ms[0],
+      &overtime_ms[1], &penalty_points[0], &penalty_points[1]);
+  assert(parsed_fields == 10);
   assert(active[0] == 1);
   assert(active[1] == 0);
   assert(time_control_ms[0] == 1.0);
