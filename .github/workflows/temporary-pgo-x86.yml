@@ -1,0 +1,61 @@
+name: temporary-pgo-x86
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - ".github/workflows/temporary-pgo-x86.yml"
+      - "Makefile"
+      - "src/**"
+      - "test/**"
+
+permissions:
+  contents: read
+
+jobs:
+  validate-pgo-x86:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Clang PGO toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang-18 lld-18 llvm-18
+
+      - name: Restore data files
+        id: cache-datafiles
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/*
+            !data/lexica/*.rit
+            testdata/*
+          key: downloaded-data-files-30
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Build fresh x86 PGO binary
+        run: >-
+          make pgo
+          PGO_CC=clang-18
+          LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata
+          PGO_LDFLAGS=-fuse-ld=lld
+
+      - name: Build PGO test binary
+        run: >-
+          make -B magpie_test
+          BUILD=pgo_use
+          PGO_PROFILE="$GITHUB_WORKSPACE/obj/pgo-data/magpie.profdata"
+          CC=clang-18
+          PGO_LDFLAGS=-fuse-ld=lld
+
+      - name: Run focused PGO correctness tests
+        run: ./bin/magpie_test movegen shadow sim gameplay
+
+      - name: Smoke-test CLI
+        run: printf 'quit\n' | ./bin/magpie 'set -savesettings false'
