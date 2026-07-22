@@ -4,6 +4,7 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/board.h"
 #include "../src/ent/game.h"
@@ -11,6 +12,7 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
 #include "../src/impl/config.h"
 #include "../src/impl/move_gen.h"
@@ -753,6 +755,92 @@ static void test_peg_main_progress_detail(void) {
   config_destroy(config);
 }
 
+typedef struct PegDiscardStageContext {
+  ThreadControl *thread_control;
+  int interrupted_stage;
+} PegDiscardStageContext;
+
+// Interrupt the second halving stage after its first candidate finishes. The
+// solver must discard that one-candidate stage and keep every published result,
+// including its captured outcomes, at the preceding fidelity.
+static void peg_test_interrupt_discarded_stage(int stage_idx, int cand_rank,
+                                               const Move *cand, double win_pct,
+                                               double mean_spread,
+                                               int scen_done, bool reordered,
+                                               void *user_data) {
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)scen_done;
+  (void)reordered;
+  PegDiscardStageContext *context = user_data;
+  if (stage_idx == 2 && cand_rank == 0) {
+    context->interrupted_stage = stage_idx;
+    thread_control_set_status(context->thread_control,
+                              THREAD_CONTROL_STATUS_USER_INTERRUPT);
+  }
+}
+
+static void test_peg_discarded_stage_outcomes(void) {
+  const char *cgp =
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20";
+  Config *config = config_create_or_die("set -threads 4 -s1 score -s2 score");
+  load_and_exec_config_or_die(config, cgp);
+  Game *game = config_get_game(config);
+  ThreadControl *thread_control = config_get_thread_control(config);
+  ErrorStack *error_stack = error_stack_create();
+
+  ValidatedMoves *moves = validated_moves_create(
+      game, game_get_player_on_turn_index(game), "13L ONYX,13L OXY",
+      /*allow_phonies=*/false, /*allow_playthrough=*/true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(validated_moves_get_number_of_moves(moves) == 2);
+  const Move *only_moves[2] = {validated_moves_get_move(moves, 0),
+                               validated_moves_get_move(moves, 1)};
+
+  PegPoll *poll = peg_poll_create();
+  PegDiscardStageContext context = {
+      .thread_control = thread_control,
+      .interrupted_stage = -1,
+  };
+  static const int stage_top_k[] = {2, 2};
+  PegArgs args;
+  memset(&args, 0, sizeof(args));
+  args.game = game;
+  args.thread_control = thread_control;
+  args.num_threads = 4;
+  args.time_budget_seconds = 10.0;
+  args.stage_top_k = stage_top_k;
+  args.num_stages = 2;
+  args.only_moves = only_moves;
+  args.n_only_moves = 2;
+  args.include_per_scenario = true;
+  args.poll = poll;
+  args.on_cand_done = peg_test_interrupt_discarded_stage;
+  args.user_data = &context;
+
+  PegResult result;
+  memset(&result, 0, sizeof(result));
+  peg_solve(&args, &result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  assert(context.interrupted_stage == 2);
+  assert(result.last_completed_stage == 1);
+  assert(result.n_cand_outcomes == 2);
+  for (int outcome_idx = 0; outcome_idx < result.n_cand_outcomes;
+       outcome_idx++) {
+    assert(result.cand_outcomes[outcome_idx].fidelity == 2);
+  }
+
+  peg_result_destroy(&result);
+  peg_poll_destroy(poll);
+  validated_moves_destroy(moves);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Exercises PegArgs.inner_top_k. On a 2-in-bag board (so non-emptying cands
 // leave the opponent tiles to draw, where the model and its cap actually bite),
 // solve one candidate pessimistically with the cap off (k=0, the unbounded
@@ -1286,6 +1374,7 @@ void test_peg(void) {
   test_peg_main_opp_models();
   test_peg_main_pnoprune();
   test_peg_main_progress_detail();
+  test_peg_discarded_stage_outcomes();
   test_peg_main_inner_top_k();
   // Cases drawn from the macondo codebase + pre-endgame manual.
   test_peg_macondo_only_onyx();
