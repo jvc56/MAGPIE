@@ -8,6 +8,7 @@ endif
 SRC_DIR := src
 TEST_DIR := test
 CMD_DIR := cmd
+TOOLS_DIR := tools
 BIN_DIR := bin
 COV_DIR := cov
 
@@ -37,6 +38,12 @@ PGO_RAW_DIR ?= $(PGO_DIR)/raw
 PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
 PGO_CC ?= clang
 PGO_LDFLAGS ?=
+PGO_TRAIN_GAMES ?= 16
+PGO_TRAIN_TIME_MS ?= 1000
+PGO_TRAIN_SECONDS ?= 0.05
+PGO_TRAIN_THREADS ?= 4
+PGO_LEAVEGEN_TARGET ?= 100
+PGO_LEAVEGEN_DATA_DIR ?= $(abspath $(PGO_DIR)/leavegen-data)
 LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null)
 ifeq ($(LLVM_PROFDATA),)
 LLVM_PROFDATA := xcrun llvm-profdata
@@ -48,6 +55,7 @@ CMD := $(wildcard $(CMD_DIR)/*.c)
 OBJ_SRC := $(SRC:$(SRC_DIR)/%.c=$(OBJ_DIR)/$(SRC_DIR)/%.o)
 OBJ_TEST := $(TEST:$(TEST_DIR)/%.c=$(OBJ_DIR)/$(TEST_DIR)/%.o)
 OBJ_CMD := $(CMD:$(CMD_DIR)/%.c=$(OBJ_DIR)/$(CMD_DIR)/%.o)
+PGO_TRAIN_OBJ := $(OBJ_DIR)/$(TOOLS_DIR)/pgo_train.o
 
 SRC_SUBDIRS := $(shell find $(SRC_DIR) -type d)
 SRC_OBJ_SUBDIRS := $(patsubst $(SRC_DIR)/%,$(OBJ_DIR)/$(SRC_DIR)/%,$(SRC_SUBDIRS))
@@ -111,7 +119,8 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu pgo
+.PHONY: all clean iwyu pgo pgo_sim pgo_peg pgo_eg pgo_leavegen peg_eg \
+	peg_leavegen pgo_workload
 
 all: magpie magpie_test
 
@@ -124,6 +133,9 @@ magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 magpie_test: $(OBJ_SRC) $(OBJ_TEST) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 
+magpie_pgo_train: $(OBJ_SRC) $(PGO_TRAIN_OBJ) | $(BIN_DIR)
+	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
+
 $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(SRC_OBJ_SUBDIRS)
 	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
 
@@ -133,8 +145,11 @@ $(OBJ_DIR)/$(SRC_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(S
 $(OBJ_DIR)/$(CMD_DIR)/%.o: $(CMD_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(CMD_DIR)
 	$(CC) $(CMD_CFLAGS) $(DEPFLAGS) -c $< -o $@
 
+$(OBJ_DIR)/$(TOOLS_DIR)/%.o: $(TOOLS_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TOOLS_DIR)
+	$(CC) $(CFLAGS) $(DEPFLAGS) -c $< -o $@
+
 # Compiler and linker flag changes in this file invalidate every object.
-$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST): Makefile
+$(OBJ_SRC) $(OBJ_CMD) $(OBJ_TEST) $(PGO_TRAIN_OBJ): Makefile
 
 # A newly merged profile must rebuild every profile-use object. Without this
 # dependency, make would reuse objects optimized against an older corpus.
@@ -146,16 +161,41 @@ endif
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
 	$(CC) $(if $(filter release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
-$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
+$(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@
 
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
-# Reuse or build a CSW24 RIT, profile the current source on production-style
-# simbench, and replace bin/magpie with the profile-guided native build. Old
-# profile data is removed first, and both compiler passes are forced rebuilds.
+# Build a balanced profile using fast PlayChooser games. The chooser sims in
+# the midgame, runs PEG with 1..4 tiles in the bag, and solves the endgame.
 pgo:
+	$(MAKE) pgo_workload PGO_WORKLOAD=general
+
+# Focused profiles for long-running workloads. These all replace bin/magpie
+# with a fresh build optimized for the selected workload.
+pgo_sim:
+	$(MAKE) pgo_workload PGO_WORKLOAD=sim
+
+pgo_peg:
+	$(MAKE) pgo_workload PGO_WORKLOAD=peg
+
+pgo_eg:
+	$(MAKE) pgo_workload PGO_WORKLOAD=eg
+
+pgo_leavegen:
+	$(MAKE) pgo_workload PGO_WORKLOAD=leavegen
+
+# Accept the two originally proposed spellings as aliases.
+peg_eg: pgo_eg
+
+peg_leavegen: pgo_leavegen
+
+# Reuse or build the production RIT, discard all previous profile data, train
+# a freshly instrumented production engine, and replace bin/magpie with the
+# profile-guided native build. The dedicated driver contains no benchmark
+# harness; it invokes real engine workloads directly.
+pgo_workload:
 	@if test -f data/lexica/CSW24.rit; then \
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \
@@ -168,9 +208,20 @@ pgo:
 	fi
 	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
 	mkdir -p $(PGO_RAW_DIR)
-	$(MAKE) -B magpie_test BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
+	@if test "$(PGO_WORKLOAD)" = leavegen; then \
+		$(RM) -r "$(PGO_LEAVEGEN_DATA_DIR)"; \
+		mkdir -p "$(PGO_LEAVEGEN_DATA_DIR)/lexica"; \
+	fi
+	$(MAKE) -B magpie_pgo_train BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
 	LLVM_PROFILE_FILE="$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw" \
-		SIMBENCH_RIT=true ./$(BIN_DIR)/magpie_test simbench
+		./$(BIN_DIR)/magpie_pgo_train \
+			"$(PGO_WORKLOAD)" \
+			"$(PGO_TRAIN_GAMES)" \
+			"$(PGO_TRAIN_TIME_MS)" \
+			"$(PGO_TRAIN_SECONDS)" \
+			"$(PGO_TRAIN_THREADS)" \
+			"$(PGO_LEAVEGEN_DATA_DIR):./data" \
+			"$(PGO_LEAVEGEN_TARGET)"
 	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
 	$(MAKE) -B magpie \
 		BUILD=pgo_use \
@@ -181,3 +232,4 @@ pgo:
 -include $(OBJ_SRC:.o=.d)
 -include $(OBJ_CMD:.o=.d)
 -include $(OBJ_TEST:.o=.d)
+-include $(PGO_TRAIN_OBJ:.o=.d)

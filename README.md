@@ -48,11 +48,29 @@ make pgo
 ```
 
 This always discards old profile data, reuses `data/lexica/CSW24.rit` when it is
-already present (and creates it otherwise), trains the current source on
-`simbench` with WMP and RIT enabled, and replaces `bin/magpie` with a
-profile-guided native build. The result is tailored to the machine that ran the
-build, making it suitable for long-running jobs and release builds on that
-target.
+already present (and creates it otherwise), and replaces `bin/magpie` with a
+profile-guided native build. The default profile comes from short timed
+PlayChooser games, so it covers simulation, pre-endgame, and endgame through
+the same autoplay path used for real games. Training uses production WMP and
+RIT data without simbench's measurement code.
+
+Focused targets are available when the resulting binary will spend most of a
+long-running job in one workload:
+
+```
+make pgo_sim       # simulation
+make pgo_peg       # pre-endgame
+make pgo_eg        # endgame (also available as make peg_eg)
+make pgo_leavegen  # leave generation (also available as make peg_leavegen)
+```
+
+The defaults train 16 games, give each player a 1000 ms clock in the balanced
+autoplay workload, use 0.05 seconds per move in focused game workloads, and use
+four worker threads. Override them with `PGO_TRAIN_GAMES`,
+`PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and `PGO_TRAIN_THREADS`.
+
+The result is tailored to the machine that ran the build, making it suitable
+for long-running jobs and release builds on that target.
 
 Run `make pgo` again after changing source, and run it separately on each target
 architecture. Override the tool names when a system installs versioned LLVM

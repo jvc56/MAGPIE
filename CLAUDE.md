@@ -20,16 +20,17 @@ make magpie_test               # build test binary
 make magpie_test BUILD=release # release test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
-make pgo                       # train on simbench and build with Clang PGO
+make pgo                       # train mixed PlayChooser games, then use Clang PGO
 make clean                     # remove build artifacts
 ```
 
 The local PGO build uses Clang and `llvm-profdata`, reuses an existing production
 CSW24 RIT (or creates it when missing), discards old profile data, and trains
-the current source on RIT-enabled `simbench`. It produces a `-march=native`
-binary for the build machine. Rerun it after source changes and on each target
-architecture. Override `PGO_CC`, `LLVM_PROFDATA`, and `PGO_LDFLAGS` for
-versioned toolchains.
+the current source on short timed PlayChooser games spanning sim, PEG, and
+endgame. Focused `pgo_sim`, `pgo_peg`, `pgo_eg`, and `pgo_leavegen` targets are
+also available. Each produces a `-march=native` binary for the build machine.
+Rerun the selected target after source changes and on each target architecture.
+Override `PGO_CC`, `LLVM_PROFDATA`, and `PGO_LDFLAGS` for versioned toolchains.
 
 `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `BUILD=release` for anything beyond a few seconds** — dev is `-O0` + ASAN/UBSAN, very slow.
 
