@@ -178,6 +178,7 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},

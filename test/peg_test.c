@@ -695,13 +695,15 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  bool reordered, void *user_data) {
+                                  int64_t completed_ns, bool reordered,
+                                  void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
   (void)reordered;
   assert(cand != NULL);
   assert(scen_done >= 1);
+  assert(completed_ns > 0);
   assert(win_pct >= 0.0 && win_pct <= 1.0);
   PegCallbackCounters *counters = user_data;
   atomic_fetch_add(&counters->cand_dones, 1);

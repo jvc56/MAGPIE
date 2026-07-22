@@ -32,6 +32,7 @@
 #include "peg.h"
 #include "simmer.h"
 #include <math.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -65,6 +66,159 @@ static const double PLAY_CHOOSER_MIN_RESOLVE_SECONDS = 0.25;
 // deciding whether to challenge seeds the search for the move itself.
 // Two choosers (one per player) stay within the 50% total cap.
 static const double PLAY_CHOOSER_ENDGAME_TT_FRACTION = 0.2;
+
+typedef struct PlayChooserBenchmarkAtomicStats {
+  _Atomic uint64_t static_moves;
+  _Atomic uint64_t fallback_moves;
+  _Atomic uint64_t sim_calls;
+  _Atomic uint64_t sim_iterations;
+  _Atomic uint64_t sim_nodes;
+  _Atomic uint64_t peg_calls;
+  _Atomic uint64_t peg_candidate_completions;
+  _Atomic uint64_t peg_candidate_events_dropped;
+  _Atomic uint64_t peg_completed_stages;
+  _Atomic uint64_t peg_final_candidates;
+  _Atomic uint64_t peg_final_scenarios;
+  _Atomic uint64_t peg_partial_calls;
+  _Atomic uint64_t endgame_calls;
+  _Atomic uint64_t endgame_nodes;
+  _Atomic uint64_t endgame_depth;
+} PlayChooserBenchmarkAtomicStats;
+
+static _Atomic bool play_chooser_benchmark_enabled;
+static PlayChooserBenchmarkAtomicStats play_chooser_benchmark_stats;
+
+enum { PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS = 65536 };
+
+static PlayChooserPegCandidateEvent
+    play_chooser_peg_candidate_events[PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS];
+static _Atomic uint64_t play_chooser_peg_candidate_event_count;
+
+static bool play_chooser_benchmark_is_enabled(void) {
+  return atomic_load_explicit(&play_chooser_benchmark_enabled,
+                              memory_order_relaxed);
+}
+
+static void play_chooser_benchmark_add(_Atomic uint64_t *counter,
+                                       uint64_t value) {
+  atomic_fetch_add_explicit(counter, value, memory_order_relaxed);
+}
+
+void play_chooser_benchmark_reset(void) {
+  atomic_store_explicit(&play_chooser_benchmark_enabled, false,
+                        memory_order_relaxed);
+#define RESET_PLAY_CHOOSER_BENCHMARK_FIELD(field)                              \
+  atomic_store_explicit(&play_chooser_benchmark_stats.field, 0,                \
+                        memory_order_relaxed)
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(static_moves);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(fallback_moves);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_completed_stages);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_candidates);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_scenarios);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_partial_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_depth);
+#undef RESET_PLAY_CHOOSER_BENCHMARK_FIELD
+  atomic_store_explicit(&play_chooser_peg_candidate_event_count, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&play_chooser_benchmark_enabled, true,
+                        memory_order_relaxed);
+}
+
+void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
+#define GET_PLAY_CHOOSER_BENCHMARK_FIELD(field)                                \
+  stats->field = atomic_load_explicit(&play_chooser_benchmark_stats.field,     \
+                                      memory_order_relaxed)
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(static_moves);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(fallback_moves);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_completed_stages);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_candidates);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_scenarios);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_partial_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_depth);
+#undef GET_PLAY_CHOOSER_BENCHMARK_FIELD
+}
+
+size_t play_chooser_benchmark_get_peg_candidate_events(
+    PlayChooserPegCandidateEvent *events, size_t capacity) {
+  uint64_t retained = atomic_load_explicit(
+      &play_chooser_peg_candidate_event_count, memory_order_relaxed);
+  if (retained > PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS) {
+    retained = PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS;
+  }
+  if (events == NULL || capacity == 0) {
+    return (size_t)retained;
+  }
+  if (retained > capacity) {
+    retained = capacity;
+  }
+  for (size_t i = 0; i < (size_t)retained; i++) {
+    events[i] = play_chooser_peg_candidate_events[i];
+  }
+  return (size_t)retained;
+}
+
+void play_chooser_benchmark_stop(void) {
+  atomic_store_explicit(&play_chooser_benchmark_enabled, false,
+                        memory_order_relaxed);
+}
+
+static void play_chooser_benchmark_record_static(bool fallback) {
+  if (!play_chooser_benchmark_is_enabled()) {
+    return;
+  }
+  play_chooser_benchmark_add(&play_chooser_benchmark_stats.static_moves, 1);
+  if (fallback) {
+    play_chooser_benchmark_add(&play_chooser_benchmark_stats.fallback_moves, 1);
+  }
+}
+
+typedef struct PlayChooserPegBenchmarkContext {
+  uint64_t call_index;
+  int64_t start_ns;
+} PlayChooserPegBenchmarkContext;
+
+static void play_chooser_benchmark_peg_candidate_done(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
+    void *user_data) {
+  (void)cand;
+  (void)win_pct;
+  (void)mean_spread;
+  (void)reordered;
+  const PlayChooserPegBenchmarkContext *context = user_data;
+  play_chooser_benchmark_add(
+      &play_chooser_benchmark_stats.peg_candidate_completions, 1);
+  const uint64_t event_index = atomic_fetch_add_explicit(
+      &play_chooser_peg_candidate_event_count, 1, memory_order_relaxed);
+  if (event_index >= PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS) {
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.peg_candidate_events_dropped, 1);
+    return;
+  }
+  PlayChooserPegCandidateEvent *event =
+      &play_chooser_peg_candidate_events[event_index];
+  event->call_index = context->call_index;
+  event->elapsed_ns = (uint64_t)(completed_ns - context->start_ns);
+  event->stage_index = stage_idx;
+  event->candidate_rank = cand_rank;
+  event->scenarios_completed = scen_done;
+}
 
 struct PlayChooser {
   PlayChooserStrategy strategy;
@@ -348,6 +502,15 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   // (samples themselves are reset per simulation by the engine).
   simulate(&sim_args, &play_chooser->sim_ctx, play_chooser->sim_results,
            error_stack);
+  if (play_chooser_benchmark_is_enabled()) {
+    play_chooser_benchmark_add(&play_chooser_benchmark_stats.sim_calls, 1);
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.sim_iterations,
+        sim_results_get_iteration_count(play_chooser->sim_results));
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.sim_nodes,
+        sim_results_get_node_count(play_chooser->sim_results));
+  }
   thread_control_destroy(thread_control);
   if (!error_stack_is_empty(error_stack)) {
     return false;
@@ -416,6 +579,19 @@ static bool play_chooser_run_endgame(
       /*actual_move=*/NULL, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
+  if (play_chooser_benchmark_is_enabled()) {
+    play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_calls, 1);
+    if (*endgame_ctx != NULL) {
+      play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_nodes,
+                                 endgame_ctx_get_nodes_searched(*endgame_ctx));
+    }
+    const PVLine *const benchmark_pv =
+        endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    if (benchmark_pv->num_moves > 0 && benchmark_pv->negamax_depth > 0) {
+      play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_depth,
+                                 (uint64_t)benchmark_pv->negamax_depth);
+    }
+  }
   if (external_thread_control == NULL) {
     thread_control_destroy(thread_control);
   }
@@ -523,6 +699,13 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
     return false;
   }
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  const bool benchmarking = play_chooser_benchmark_is_enabled();
+  PlayChooserPegBenchmarkContext benchmark_context = {0};
+  if (benchmarking) {
+    benchmark_context.call_index = atomic_fetch_add_explicit(
+        &play_chooser_benchmark_stats.peg_calls, 1, memory_order_relaxed);
+    benchmark_context.start_ns = ctimer_monotonic_ns();
+  }
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   PegArgs peg_args = {0};
@@ -539,10 +722,38 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 /*only_moves=*/NULL, /*n_only_moves=*/0,
                 /*protect_moves=*/NULL, /*n_protect_moves=*/0,
                 /*include_per_scenario=*/false, /*on_stage_start=*/NULL,
-                /*on_cand_done=*/NULL, /*on_scenario_done=*/NULL,
-                /*user_data=*/NULL, /*poll=*/NULL, &peg_args);
+                /*on_cand_done=*/
+                benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
+                /*on_scenario_done=*/NULL,
+                /*user_data=*/benchmarking ? &benchmark_context : NULL,
+                /*poll=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
+  if (benchmarking) {
+    uint64_t final_scenarios = 0;
+    for (int cand_idx = 0; cand_idx < peg_result.n_top_cands; cand_idx++) {
+      const int n_scenarios = peg_result.top_cands[cand_idx].n_scenarios;
+      if (n_scenarios > 0) {
+        final_scenarios += (uint64_t)n_scenarios;
+      }
+    }
+    if (peg_result.last_completed_stage >= 0) {
+      play_chooser_benchmark_add(
+          &play_chooser_benchmark_stats.peg_completed_stages,
+          (uint64_t)peg_result.last_completed_stage + 1);
+    }
+    if (peg_result.n_top_cands > 0) {
+      play_chooser_benchmark_add(
+          &play_chooser_benchmark_stats.peg_final_candidates,
+          (uint64_t)peg_result.n_top_cands);
+    }
+    play_chooser_benchmark_add(
+        &play_chooser_benchmark_stats.peg_final_scenarios, final_scenarios);
+    if (peg_result.last_stage_partial) {
+      play_chooser_benchmark_add(
+          &play_chooser_benchmark_stats.peg_partial_calls, 1);
+    }
+  }
   thread_control_destroy(thread_control);
   bool chose = false;
   if (error_stack_is_empty(error_stack) && peg_result.n_top_cands > 0 &&
@@ -569,12 +780,14 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
       play_chooser_get_seconds_for_move(strategy, game);
   if (eval != PLAY_CHOOSER_EVAL_STATIC &&
       budget_seconds < play_chooser_get_min_budget_for_eval(eval)) {
+    play_chooser_benchmark_record_static(/*fallback=*/true);
     play_chooser_choose_static_move(play_chooser, game, out_move);
     return;
   }
   bool chose_move = false;
   switch (eval) {
   case PLAY_CHOOSER_EVAL_STATIC:
+    play_chooser_benchmark_record_static(/*fallback=*/false);
     break;
   case PLAY_CHOOSER_EVAL_SIM:
     chose_move =
@@ -602,6 +815,9 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
     return;
   }
   if (!chose_move) {
+    if (eval != PLAY_CHOOSER_EVAL_STATIC) {
+      play_chooser_benchmark_record_static(/*fallback=*/true);
+    }
     play_chooser_choose_static_move(play_chooser, game, out_move);
   }
 }
