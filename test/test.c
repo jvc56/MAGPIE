@@ -171,6 +171,7 @@ static TestEntry on_demand_test_table[] = {
     {"egspeedbench", test_endgame_speed_bench},
     {"egplayout", test_endgame_playout_bench},
     {"egmove1", test_endgame_move1},
+    {"wmpegbench", test_wmp_endgame_movegen_bench},
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},

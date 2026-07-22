@@ -1000,8 +1000,29 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 // WMP-based small move generation for endgame
 // Records all valid moves using Word Map lookups instead of KWG traversal.
 
+static inline bool wmp_should_record_single_tile_play(const MoveGen *gen,
+                                                      int start_col) {
+  if (gen->dir == BOARD_HORIZONTAL_DIRECTION) {
+    return true;
+  }
+  const WMPMoveGen *wgen = &gen->wmp_move_gen;
+  for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+    const int board_col = letter_idx + start_col;
+    if (gen->playthrough_marked[letter_idx] != PLAYED_THROUGH_MARKER &&
+        gen_cache_get_cross_set(gen, board_col) == TRIVIAL_CROSS_SET) {
+      return true;
+    }
+  }
+  return false;
+}
+
 static inline void record_wmp_small_play(MoveGen *gen, int start_col) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
+
+  if (wgen->tiles_to_play == 1 &&
+      !wmp_should_record_single_tile_play(gen, start_col)) {
+    return;
+  }
   const Equity bingo_bonus =
       wgen->tiles_to_play == RACK_SIZE ? gen->bingo_bonus : 0;
   Equity played_score_total = 0;
@@ -1040,10 +1061,10 @@ static inline void record_wmp_small_play(MoveGen *gen, int start_col) {
       hooked_cross_total + played_cross_total + bingo_bonus;
 
   SmallMove *small_move = small_move_list_get_spare_move(gen->move_list);
-  set_small_play_for_record(small_move, GAME_EVENT_TILE_PLACEMENT_MOVE, 0,
-                            wgen->word_length - 1, score, gen->current_row_index,
-                            start_col, wgen->tiles_to_play, gen->dir,
-                            gen->playthrough_marked);
+  set_small_play_for_record(
+      small_move, GAME_EVENT_TILE_PLACEMENT_MOVE, 0, wgen->word_length - 1,
+      score, gen->current_row_index, start_col, wgen->tiles_to_play, gen->dir,
+      gen->playthrough_marked);
   move_list_insert_spare_small_move(gen->move_list);
 }
 
@@ -1092,8 +1113,8 @@ static void wmp_gen_small_for_position(MoveGen *gen, int start_col,
   if (start_col < 0 || start_col + word_length > BOARD_DIM) {
     return;
   }
-  // Can't start before or at the previous anchor
-  if (start_col <= last_anchor_col) {
+  // Can't start before or at the previous anchor when one exists.
+  if (last_anchor_col < BOARD_DIM && start_col <= last_anchor_col) {
     return;
   }
 
@@ -1126,17 +1147,19 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
   WMPMoveGen *wgen = &gen->wmp_move_gen;
   const int full_rack = wgen->full_rack_size;
 
-  // Determine leftmost valid start column
+  // Determine the leftmost start that can reach this anchor through empty
+  // squares and playthrough blocks.
   int leftmost_start = anchor_col;
-  for (int col = anchor_col - 1; col > last_anchor_col && col >= 0; col--) {
-    if (gen_cache_get_letter(gen, col) != ALPHABET_EMPTY_SQUARE_MARKER) {
-      break; // Hit a tile to the left
-    }
+  const int stop_col = (last_anchor_col < BOARD_DIM) ? last_anchor_col : -1;
+  for (int col = anchor_col - 1; col > stop_col; col--) {
     leftmost_start = col;
   }
 
   // For each possible word start position from leftmost to anchor
   for (int start_col = leftmost_start; start_col <= anchor_col; start_col++) {
+    if (start_col > 0 && !gen_cache_is_empty(gen, start_col - 1)) {
+      continue;
+    }
     // For each word length that includes the anchor
     for (int word_length = MINIMUM_WORD_LENGTH;
          word_length <= BOARD_DIM && start_col + word_length <= BOARD_DIM;
@@ -1145,6 +1168,9 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
       // Word must include the anchor column
       const int end_col = start_col + word_length - 1;
       if (end_col < anchor_col) {
+        continue;
+      }
+      if (end_col < BOARD_DIM - 1 && !gen_cache_is_empty(gen, end_col + 1)) {
         continue;
       }
 
@@ -1175,8 +1201,8 @@ static void gen_record_wmp_small_for_anchor(MoveGen *gen, int anchor_col,
       for (int col = start_col; col < start_col + word_length; col++) {
         const MachineLetter ml = gen_cache_get_letter(gen, col);
         if (ml != ALPHABET_EMPTY_SQUARE_MARKER) {
-          wmp_move_gen_add_playthrough_letter(
-              wgen, get_unblanked_machine_letter(ml));
+          wmp_move_gen_add_playthrough_letter(wgen,
+                                              get_unblanked_machine_letter(ml));
           playthrough_count++;
         }
       }
@@ -1215,7 +1241,11 @@ void gen_record_wmp_small(MoveGen *gen) {
         continue;
       }
       gen->current_row_index = row;
-      board_copy_row_cache(gen->lanes_cache, gen->row_cache, row, dir);
+      gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
+      gen->wit_row_lane =
+          board_get_wit_row_lane(gen->board, row, dir, gen->cross_index);
+      gen->wit_len_lane =
+          board_get_wit_len_lane(gen->board, row, dir, gen->cross_index);
 
       int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
       for (int col = 0; col < BOARD_DIM; col++) {

@@ -75,6 +75,193 @@ static bool play_until_bag_empty(Game *game, MoveList *move_list) {
   return !rack_is_empty(rack0) && !rack_is_empty(rack1);
 }
 
+static int compare_small_move_bytes(const void *a, const void *b) {
+  return memcmp(a, b, sizeof(SmallMove));
+}
+
+static void copy_and_sort_small_moves(const MoveList *move_list,
+                                      SmallMove *moves) {
+  for (int i = 0; i < move_list->count; i++) {
+    moves[i] = *move_list->small_moves[i];
+  }
+  qsort(moves, move_list->count, sizeof(SmallMove), compare_small_move_bytes);
+}
+
+static double run_small_movegen_sweeps(Game **positions, int num_positions,
+                                       int repeats, MoveList *move_list,
+                                       bool use_wmp) {
+  MoveGen *gen = get_movegen();
+  Timer timer;
+  ctimer_start(&timer);
+  for (int repeat = 0; repeat < repeats; repeat++) {
+    for (int i = 0; i < num_positions; i++) {
+      Game *game = positions[i];
+      const int on_turn = game_get_player_on_turn_index(game);
+      const Player *player = game_get_player(game, on_turn);
+      const MoveGenArgs args = {
+          .game = game,
+          .move_list = move_list,
+          .move_record_type = MOVE_RECORD_ALL_SMALL,
+          .move_sort_type = MOVE_SORT_SCORE,
+          // A non-null full KWG keeps WMP disabled for the baseline while
+          // generating exactly the same dictionary as the WMP path.
+          .override_kwg = use_wmp ? NULL : player_get_kwg(player),
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      gen_load_position(gen, &args);
+      if (use_wmp) {
+        gen_record_wmp_small(gen);
+      } else {
+        gen_record_scoring_plays_small(gen);
+      }
+    }
+  }
+  ctimer_stop(&timer);
+  return ctimer_elapsed_seconds(&timer);
+}
+
+static int compare_doubles(const void *a, const void *b) {
+  const double da = *(const double *)a;
+  const double db = *(const double *)b;
+  return (da > db) - (da < db);
+}
+
+static double middle_three_mean(const double samples[9]) {
+  double sorted[9];
+  memcpy(sorted, samples, sizeof(sorted));
+  qsort(sorted, 9, sizeof(double), compare_doubles);
+  return (sorted[3] + sorted[4] + sorted[5]) / 3.0;
+}
+
+// Recheck the abandoned WMP-for-ALL_SMALL experiment on the current movegen.
+// This deliberately compares full-KWG GADDAG generation with full-WMP
+// generation; the production endgame's pruned KWG would only strengthen the
+// GADDAG baseline.
+void test_wmp_endgame_movegen_bench(void) {
+  log_set_level(LOG_FATAL);
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -threads 1 -wmp true -rit false -wit false "
+      "-s1 score -s2 score -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  MoveList *play_move_list = move_list_create(1);
+
+  enum { NUM_POSITIONS = 32, NUM_ROUNDS = 9, REPEATS = 50 };
+  Game *positions[NUM_POSITIONS];
+  int num_positions = 0;
+  for (uint64_t seed = 9001; num_positions < NUM_POSITIONS; seed++) {
+    game_reset(game);
+    game_seed(game, seed);
+    draw_starting_racks(game);
+    if (play_until_bag_empty(game, play_move_list)) {
+      positions[num_positions++] = game_duplicate(game);
+    }
+  }
+
+  MoveList *kwg_moves = move_list_create_small(100000);
+  MoveList *wmp_moves = move_list_create_small(100000);
+  int total_moves = 0;
+  int mismatch_positions = 0;
+  int missing_moves = 0;
+  int extra_moves = 0;
+  for (int i = 0; i < num_positions; i++) {
+    const int on_turn = game_get_player_on_turn_index(positions[i]);
+    const Player *player = game_get_player(positions[i], on_turn);
+    MoveGenArgs args = {
+        .game = positions[i],
+        .move_list = kwg_moves,
+        .move_record_type = MOVE_RECORD_ALL_SMALL,
+        .move_sort_type = MOVE_SORT_SCORE,
+        .override_kwg = player_get_kwg(player),
+        .eq_margin_movegen = 0,
+        .target_equity = EQUITY_MAX_VALUE,
+        .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+    };
+    MoveGen *gen = get_movegen();
+    gen_load_position(gen, &args);
+    gen_record_scoring_plays_small(gen);
+
+    args.move_list = wmp_moves;
+    args.override_kwg = NULL;
+    gen_load_position(gen, &args);
+    gen_record_wmp_small(gen);
+
+    const int kwg_alloc_count = kwg_moves->count > 0 ? kwg_moves->count : 1;
+    const int wmp_alloc_count = wmp_moves->count > 0 ? wmp_moves->count : 1;
+    SmallMove *kwg_sorted =
+        malloc_or_die((size_t)kwg_alloc_count * sizeof(SmallMove));
+    SmallMove *wmp_sorted =
+        malloc_or_die((size_t)wmp_alloc_count * sizeof(SmallMove));
+    copy_and_sort_small_moves(kwg_moves, kwg_sorted);
+    copy_and_sort_small_moves(wmp_moves, wmp_sorted);
+    int kwg_idx = 0;
+    int wmp_idx = 0;
+    int position_missing = 0;
+    int position_extra = 0;
+    while (kwg_idx < kwg_moves->count && wmp_idx < wmp_moves->count) {
+      const int cmp =
+          compare_small_move_bytes(&kwg_sorted[kwg_idx], &wmp_sorted[wmp_idx]);
+      if (cmp < 0) {
+        position_missing++;
+        kwg_idx++;
+      } else if (cmp > 0) {
+        position_extra++;
+        wmp_idx++;
+      } else {
+        kwg_idx++;
+        wmp_idx++;
+      }
+    }
+    position_missing += kwg_moves->count - kwg_idx;
+    position_extra += wmp_moves->count - wmp_idx;
+    if (position_missing != 0 || position_extra != 0) {
+      mismatch_positions++;
+      missing_moves += position_missing;
+      extra_moves += position_extra;
+    }
+    total_moves += kwg_moves->count;
+    free(kwg_sorted);
+    free(wmp_sorted);
+  }
+
+  double kwg_times[NUM_ROUNDS];
+  double wmp_times[NUM_ROUNDS];
+  for (int round = 0; round < NUM_ROUNDS; round++) {
+    if ((round & 1) == 0) {
+      kwg_times[round] = run_small_movegen_sweeps(positions, num_positions,
+                                                  REPEATS, kwg_moves, false);
+      wmp_times[round] = run_small_movegen_sweeps(positions, num_positions,
+                                                  REPEATS, wmp_moves, true);
+    } else {
+      wmp_times[round] = run_small_movegen_sweeps(positions, num_positions,
+                                                  REPEATS, wmp_moves, true);
+      kwg_times[round] = run_small_movegen_sweeps(positions, num_positions,
+                                                  REPEATS, kwg_moves, false);
+    }
+    printf("WMPEGBENCH round=%d kwg=%.6f wmp=%.6f ratio=%.3f\n", round + 1,
+           kwg_times[round], wmp_times[round],
+           wmp_times[round] / kwg_times[round]);
+    (void)fflush(stdout);
+  }
+
+  const double kwg = middle_three_mean(kwg_times);
+  const double wmp = middle_three_mean(wmp_times);
+  printf("WMPEGBENCH positions=%d moves=%d mismatch_positions=%d missing=%d "
+         "extra=%d calls_per_cell=%d kwg=%.6f wmp=%.6f wmp_over_kwg=%.3f\n",
+         num_positions, total_moves, mismatch_positions, missing_moves,
+         extra_moves, num_positions * REPEATS, kwg, wmp, wmp / kwg);
+
+  for (int i = 0; i < num_positions; i++) {
+    game_destroy(positions[i]);
+  }
+  small_move_list_destroy(kwg_moves);
+  small_move_list_destroy(wmp_moves);
+  move_list_destroy(play_move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 // Compute stuck tile fraction for a player: generate moves with
 // TILES_PLAYED mode and check which rack tiles appear in no legal move.
 static float compute_stuck_fraction(Game *game, MoveList *move_list,

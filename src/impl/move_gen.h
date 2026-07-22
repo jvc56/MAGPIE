@@ -302,4 +302,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen);
 
 void gen_shadow(MoveGen *gen);
 
+void gen_record_scoring_plays_small(MoveGen *gen);
+void gen_record_wmp_small(MoveGen *gen);
+
 #endif

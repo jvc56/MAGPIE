@@ -449,10 +449,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
 
 // Optimized subrack enumeration that skips leave_map tracking entirely.
 // Use this for record-all mode where leave values aren't needed.
-static inline void
-wmp_move_gen_enumerate_subracks_no_leaves(WMPMoveGen *wmp_move_gen,
-                                          BitRack *current, int next_ml,
-                                          int count) {
+static inline void wmp_move_gen_enumerate_subracks_no_leaves(
+    WMPMoveGen *wmp_move_gen, BitRack *current, int next_ml, int count) {
   int max_num_this = 0;
   for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
     max_num_this = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, next_ml);
@@ -491,7 +489,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_no_leaves(
                                             BLANK_MACHINE_LETTER, 0);
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, false);
+    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, false,
+                                               false);
   }
 }
 
