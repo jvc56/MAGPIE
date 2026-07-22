@@ -168,6 +168,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"tilesbench", test_tiles_played_bench},
     {"egspeedbench", test_endgame_speed_bench},
     {"egplayout", test_endgame_playout_bench},
     {"egmove1", test_endgame_move1},
