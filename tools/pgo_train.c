@@ -114,7 +114,7 @@ static Config *create_training_config(const char *data_paths, int num_threads,
 
   char command[512];
   (void)snprintf(command, sizeof(command),
-                 "set -lex CSW24 -wmp true -rit true -ritmmap true "
+                 "set -lex CSW24 -wmp true -rit true -ritmmap true -wit true "
                  "-threads %d -s1 equity -s2 equity -r1 best -r2 best "
                  "-numplays 1 -pfrequency 0 -hr false -savesettings false "
                  "-autosavegcg false -fgrequired false",

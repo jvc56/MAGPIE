@@ -1212,9 +1212,9 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
                                        int rightstrip, bool unique_play,
                                        int main_word_score, int word_multiplier,
                                        Equity cross_score) {
-  // Load the row_cache Square once; every field read below goes through it,
+  // Load the row Square once; every field read below goes through it,
   // giving the compiler a single base for the col*sizeof(Square) arithmetic.
-  const Square *sq = &gen->row_cache[col];
+  const Square *sq = &gen->row_squares[col];
   const MachineLetter current_letter = square_get_letter(sq);
   if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
     // Play-through square: possible_letters_here is dead on this branch (it
