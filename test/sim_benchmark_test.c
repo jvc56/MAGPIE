@@ -9,9 +9,6 @@
 //   SIMBENCH_PLIES  sim depth (default 2)
 //   SIMBENCH_MI     -minplayiterations (default 100000)
 //   SIMBENCH_RIT    "true" / "false" — toggles the RIT file (default true)
-//   SIMBENCH_WMP    "true" / "false" — toggles WMP (default true)
-//   SIMBENCH_LEX    lexicon name (default CSW24)
-//   SIMBENCH_SEED   random seed, changing the fixed trajectory (default 42)
 
 #include "sim_benchmark_test.h"
 
@@ -44,16 +41,12 @@ void test_sim_benchmark(void) {
   const char *rit = (rit_env != NULL) ? rit_env : "true";
   const char *wmp_env = getenv("SIMBENCH_WMP");
   const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
-  const char *lex_env = getenv("SIMBENCH_LEX");
-  const char *lex = (lex_env != NULL) ? lex_env : "CSW24";
-  const char *seed_env = getenv("SIMBENCH_SEED");
-  const char *seed = (seed_env != NULL) ? seed_env : "42";
   char cmd[256];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex %s -wmp %s -rit %s -s1 equity -s2 equity "
+                 "set -lex CSW24 -wmp %s -rit %s -s1 equity -s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads 10 -tlim 2 "
-                 "-seed %s -sr tt -minplayiterations %s",
-                 lex, wmp, rit, plies, seed, mi);
+                 "-seed 42 -sr tt -minplayiterations %s",
+                 wmp, rit, plies, mi);
   Config *config = config_create_or_die(cmd);
   load_and_exec_config_or_die(config, "autoplay games 1");
 

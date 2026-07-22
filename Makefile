@@ -35,10 +35,6 @@ OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
 PGO_DIR ?= $(OBJ_ROOT)/pgo-data
 PGO_RAW_DIR ?= $(PGO_DIR)/raw
 PGO_PROFILE ?= $(abspath $(PGO_DIR)/magpie.profdata)
-PGO_METADATA ?= $(dir $(PGO_PROFILE))profile-metadata.txt
-PGO_LEX ?= CSW24
-PGO_TRAIN_ENV ?= SIMBENCH_LEX=$(PGO_LEX) SIMBENCH_RIT=true
-PGO_TRAIN_TEST ?= simbench
 PGO_CC ?= clang
 PGO_LDFLAGS ?=
 LLVM_PROFDATA ?= $(shell command -v llvm-profdata 2>/dev/null)
@@ -115,7 +111,7 @@ LFLAGS := ${lflags.${BUILD}}
 LDFLAGS  := ${ldflags.${BUILD}}
 LDLIBS   := -lm
 
-.PHONY: all clean iwyu pgo pgo-rit pgo-instrument pgo-train pgo-merge pgo-build pgo-use pgo-apply
+.PHONY: all clean iwyu pgo
 
 all: magpie magpie_test
 
@@ -156,73 +152,27 @@ $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(T
 clean:
 	@$(RM) -rv $(BIN_DIR) $(OBJ_ROOT) libmagpie_core.a
 
-# `make pgo` performs the complete instrument, train, merge, and optimized
-# build sequence. For a custom training corpus, run `make pgo-instrument`, run
-# one or more workloads with LLVM_PROFILE_FILE set to
-# "$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw", then run `make pgo-build`.
-# To consume an already merged profile (for example, one downloaded from
-# GitHub Actions), run `make pgo-use PGO_PROFILE=/path/to/magpie.profdata`.
+# Reuse or build a CSW24 RIT, profile the current source on production-style
+# simbench, and replace bin/magpie with the profile-guided native build. Old
+# profile data is removed first, and both compiler passes are forced rebuilds.
 pgo:
-	$(MAKE) pgo-rit
-	$(MAKE) pgo-train
-	$(MAKE) pgo-build
-
-pgo-rit:
-	$(MAKE) -B magpie \
-		BUILD=release \
-		CC="$(PGO_CC)" \
-		LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"
-	printf 'convert klvwmp2rit %s\n' "$(PGO_LEX)" | \
-		./$(BIN_DIR)/magpie "set -lex $(PGO_LEX) -wmp true -rit false"
-
-pgo-instrument:
-	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE) $(PGO_METADATA)
+	@if test -f data/lexica/CSW24.rit; then \
+		echo 'Using existing data/lexica/CSW24.rit'; \
+	else \
+		$(MAKE) -B magpie \
+			BUILD=release \
+			CC="$(PGO_CC)" \
+			LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"; \
+		printf 'convert klvwmp2rit CSW24\n' | \
+			./$(BIN_DIR)/magpie "set -lex CSW24 -wmp true -rit false"; \
+	fi
+	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
 	mkdir -p $(PGO_RAW_DIR)
 	$(MAKE) -B magpie_test BUILD=pgo_generate PGO_PROFILE=$(PGO_PROFILE) CC="$(PGO_CC)"
-	python3 pgo_profile.py record \
-		--metadata "$(PGO_METADATA)" \
-		--compiler "$(PGO_CC)" \
-		--board-dim "$(BOARD_DIM)" \
-		--rack-size "$(RACK_SIZE)"
-	@echo 'Write training profiles to $(abspath $(PGO_RAW_DIR))/magpie-%p.profraw'
-
-pgo-train: pgo-instrument
-	LLVM_PROFILE_FILE="$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw" $(PGO_TRAIN_ENV) ./$(BIN_DIR)/magpie_test $(PGO_TRAIN_TEST)
-
-pgo-merge:
+	LLVM_PROFILE_FILE="$(abspath $(PGO_RAW_DIR))/magpie-%p.profraw" \
+		SIMBENCH_RIT=true ./$(BIN_DIR)/magpie_test simbench
 	$(LLVM_PROFDATA) merge -sparse -o $(PGO_PROFILE) $(PGO_RAW_DIR)/*.profraw
-
-pgo-build: pgo-merge
-	$(MAKE) pgo-apply \
-		PGO_PROFILE="$(PGO_PROFILE)" \
-		PGO_CC="$(PGO_CC)" \
-		PGO_LDFLAGS="$(PGO_LDFLAGS)"
-
-pgo-use:
-	@test -f "$(PGO_PROFILE)" || \
-		(echo 'PGO profile not found: $(PGO_PROFILE)' >&2; exit 1)
-	python3 pgo_profile.py verify \
-		--metadata "$(PGO_METADATA)" \
-		--compiler "$(PGO_CC)" \
-		--board-dim "$(BOARD_DIM)" \
-		--rack-size "$(RACK_SIZE)"
-	$(MAKE) pgo-rit
-	$(MAKE) pgo-apply \
-		PGO_PROFILE="$(PGO_PROFILE)" \
-		PGO_CC="$(PGO_CC)" \
-		PGO_LDFLAGS="$(PGO_LDFLAGS)"
-
-# Profile identity is not encoded in OBJ_DIR, so always rebuild when a merged
-# profile is explicitly applied.
-pgo-apply:
-	@test -f "$(PGO_PROFILE)" || \
-		(echo 'PGO profile not found: $(PGO_PROFILE)' >&2; exit 1)
-	python3 pgo_profile.py verify \
-		--metadata "$(PGO_METADATA)" \
-		--compiler "$(PGO_CC)" \
-		--board-dim "$(BOARD_DIM)" \
-		--rack-size "$(RACK_SIZE)"
-	$(MAKE) -B all \
+	$(MAKE) -B magpie \
 		BUILD=pgo_use \
 		PGO_PROFILE="$(PGO_PROFILE)" \
 		CC="$(PGO_CC)" \

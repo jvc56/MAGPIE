@@ -21,31 +21,15 @@ make magpie_test BUILD=release # release test binary
 make magpie BUILD=profile      # profiling build
 make magpie BUILD=thread       # thread sanitizer build
 make pgo                       # train on simbench and build with Clang PGO
-make pgo-use PGO_PROFILE=...   # build with an existing merged Clang profile
 make clean                     # remove build artifacts
 ```
 
-The PGO workflow uses Clang and `llvm-profdata`, builds a production RIT, and
-trains on `simbench` with WMP and RIT enabled.
-Override `PGO_CC` and `LLVM_PROFDATA` when versioned tool names are needed.
-Pass benchmark environment variables through `PGO_TRAIN_ENV`, for example:
-
-```bash
-make pgo PGO_TRAIN_ENV='SIMBENCH_LEX=CSW24 SIMBENCH_RIT=true SIMBENCH_SEED=17'
-```
-
-Training and the final build run locally, producing a profile for the current
-architecture and code for the `-march=native` CPU. A profile downloaded from
-the `pgo-performance` GitHub Actions workflow can be consumed with
-`make pgo-use`; select the exact source ref and the same Clang major version
-used to produce the profile. PGO builds verify the profile metadata and reject
-source, compiler, architecture, or board/rack mismatches. Manual workflow runs
-default to x86-64, while pull request validation profiles both x86-64 and ARM64.
-
-For a broader corpus, run `make pgo-instrument`, execute the instrumented
-`./bin/magpie_test simbench` one or more times with `LLVM_PROFILE_FILE` set to
-the path printed by that target, then run `make pgo-build`. Use held-out
-simbench seeds when measuring the optimized binary.
+The local PGO build uses Clang and `llvm-profdata`, reuses an existing production
+CSW24 RIT (or creates it when missing), discards old profile data, and trains
+the current source on RIT-enabled `simbench`. It produces a `-march=native`
+binary for the build machine. Rerun it after source changes and on each target
+architecture. Override `PGO_CC`, `LLVM_PROFDATA`, and `PGO_LDFLAGS` for
+versioned toolchains.
 
 `BOARD_DIM` (default 15), `RACK_SIZE` (default 7). Parallel make is automatic. **Use `BUILD=release` for anything beyond a few seconds** — dev is `-O0` + ASAN/UBSAN, very slow.
 

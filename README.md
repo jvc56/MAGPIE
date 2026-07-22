@@ -47,40 +47,23 @@ For a faster native build, install Clang and `llvm-profdata`, then run:
 make pgo
 ```
 
-This builds a production CSW24 rack-info table, builds an instrumented test
-executable, trains it on `simbench` with WMP and RIT enabled, and replaces
-`bin/magpie` with a profile-guided build. To use a different lexicon and its
-matching leaves and word map, run:
+This always discards old profile data, reuses `data/lexica/CSW24.rit` when it is
+already present (and creates it otherwise), trains the current source on
+`simbench` with WMP and RIT enabled, and replaces `bin/magpie` with a
+profile-guided native build. The result is tailored to the machine that ran the
+build, making it suitable for long-running jobs and release builds on that
+target.
+
+Run `make pgo` again after changing source, and run it separately on each target
+architecture. Override the tool names when a system installs versioned LLVM
+binaries:
 
 ```
-make pgo PGO_LEX=NWL23
-```
-
-PGO profiles are architecture- and source-specific, while the final build uses
-`-march=native` for the build machine. Run training separately for each target
-architecture.
-
-The `pgo-performance` GitHub Actions workflow can do the training on a hosted
-x86-64 runner. Run it manually at the exact branch or tag to build, leave the
-architecture at its `x86-64` default, and download the
-`magpie-pgo-profile-x86-64` artifact. From a checkout of that same source
-revision, confirm the commit in `profile-metadata.txt`, then build with the
-downloaded profile and Clang 18. This also creates the matching production RIT
-before applying the profile. The build verifies the metadata and rejects the
-profile if its source fingerprint, compiler, architecture, or board and rack
-dimensions do not match:
-
-```
-make pgo-use \
-  PGO_PROFILE=/path/to/magpie.profdata \
+make pgo \
   PGO_CC=clang-18 \
+  LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata \
   PGO_LDFLAGS=-fuse-ld=lld
 ```
-
-Manual workflow runs can alternatively select ARM64 or both architectures.
-Pull requests that affect the PGO build or workload always validate both. Clang
-rejects an out-of-date profile rather than silently building against mismatched
-source.
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
