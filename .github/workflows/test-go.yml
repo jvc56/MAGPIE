@@ -1,0 +1,45 @@
+name: Test Go (goentry)
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test-go:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v3
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: goentry/go.mod
+
+      - name: Set up GCC
+        uses: egor-tensin/setup-gcc@v1
+        with:
+          version: latest
+          platform: x64
+
+      - name: Get datafile cache
+        id: cache-datafiles
+        uses: actions/cache@v3
+        with:
+          path: |
+            data/*
+            testdata/*
+          key: downloaded-data-files-30
+
+      - name: Download data files and convert lexica
+        if: steps.cache-datafiles.outputs.cache-hit != 'true'
+        run: ./download_data.sh && ./convert_lexica.sh
+
+      - name: Build libmagpie_core.a
+        run: make libmagpie_core.a BUILD=release
+
+      - name: Run goentry tests
+        working-directory: goentry
+        run: go test -v ./...

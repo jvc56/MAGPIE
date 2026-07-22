@@ -79,6 +79,10 @@ all: magpie magpie_test
 libmagpie_core.a: $(OBJ_SRC)
 	ar rcs $@ $^
 
+.PHONY: goentry
+goentry: libmagpie_core.a
+	cd goentry && go build ./...
+
 magpie: $(OBJ_SRC) $(OBJ_CMD) | $(BIN_DIR)
 	$(CC) $(LDFLAGS) $(LFLAGS) $^ $(LDLIBS) -o $(BIN_DIR)/$@
 

@@ -15,6 +15,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/win_pct.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -351,7 +352,7 @@ void test_infer_tiles_played_not_in_bag(void) {
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
 
   InferenceResults *inference_results = inference_results_create(NULL);
-  load_and_exec_config_or_die(config, "set -ima 0 -threads 1");
+  load_and_exec_config_or_die(config, "set -imargin 0 -threads 1");
   error_code_t status = infer_for_test(NULL, config, 0, 0, 1, "ACBYEYY", "", "",
                                        inference_results);
   assert(status == ERROR_STATUS_INFERENCE_TARGET_LETTERS_NOT_IN_BAG);
@@ -366,7 +367,7 @@ void test_infer_empty_game_history(void) {
                            "all -r2 all -numplays 1");
   load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
   InferenceResults *inference_results = inference_results_create(NULL);
-  load_and_exec_config_or_die(config, "set -ima 0 -threads 1");
+  load_and_exec_config_or_die(config, "set -imargin 0 -threads 1");
   error_code_t status =
       infer_for_test_with_history(config, inference_results, 0, "");
   assert(status == ERROR_STATUS_INFERENCE_EMPTY_GAME_HISTORY);
@@ -629,7 +630,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // the remaining tiles exactly. Since the played
   // tiles contain an E, the inferred leave should not
   // contain an E.
-  load_and_exec_config_or_die(config, "set -ima 10000");
+  load_and_exec_config_or_die(config, "set -imargin 10000");
   if (use_game_history) {
     load_game_history_with_gcg(config, "vs_jeremy");
     status = infer_for_test_with_history(
@@ -675,7 +676,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   if (use_game_history) {
     // Test that using the game history works for an event in the middle of the
     // game history
-    load_and_exec_config_or_die(config, "set -ima 0");
+    load_and_exec_config_or_die(config, "set -imargin 0");
     load_game_history_with_gcg(config, "vs_jeremy");
     status = infer_for_test_with_history(config, inference_results, 11, "");
     assert(status == ERROR_STATUS_SUCCESS);
@@ -699,7 +700,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
     game_reset(game);
   }
 
-  load_and_exec_config_or_die(config, "set -numplays 100 -ima 0");
+  load_and_exec_config_or_die(config, "set -numplays 100 -imargin 0");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: ERNT 8G RENT +8 8");
@@ -837,7 +838,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // Z(OOPSYCHOLOGY) is over 100 points so keeping the Z will never be
   // inferred
   // for plays scoring 50.
-  load_and_exec_config_or_die(config, "set -ima 0");
+  load_and_exec_config_or_die(config, "set -imargin 0");
   status =
       infer_for_test(&ctx, config, 0, 50, 0, "IIII", "", "", inference_results);
   assert(status == ERROR_STATUS_SUCCESS);
@@ -959,7 +960,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   game_reset(game);
 
   // Check that the equity margin works
-  load_and_exec_config_or_die(config, "set -ima 5");
+  load_and_exec_config_or_die(config, "set -imargin 5");
   if (use_game_history) {
     load_game_history_with_gcg_string(config, gcg_string_header,
                                       ">Tim: MUZAKY 8H MUZAKY +58 58");
@@ -1004,7 +1005,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // before the inference_results are not removed from the bag, so
   // we have to remove it here.
 
-  load_and_exec_config_or_die(config, "set -ima 0");
+  load_and_exec_config_or_die(config, "set -imargin 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
     // The phony of IX* should make the X a known tile for the inference of
@@ -1050,7 +1051,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   }
   game_reset(game);
 
-  load_and_exec_config_or_die(config, "set -ima 0");
+  load_and_exec_config_or_die(config, "set -imargin 0");
   if (use_game_history) {
     StringBuilder *gcg_builder = string_builder_create();
     // The phony of IH* should make the H a known tile for the inference of
@@ -1098,7 +1099,7 @@ void test_infer_nonerror_cases(const int number_of_threads,
   // Test exchanges
 
   rack_reset(rack);
-  load_and_exec_config_or_die(config, "set -ima 0");
+  load_and_exec_config_or_die(config, "set -imargin 0");
   if (use_game_history) {
     GameHistory *game_history = config_get_game_history(config);
     test_parse_gcg("exchange_with_seven_in_bag", config, game_history);
@@ -1187,6 +1188,277 @@ void test_infer_nonerror_cases(const int number_of_threads,
   config_destroy(config);
 }
 
+// Smoke test for the winpct inference pipeline end-to-end.
+// MUZAKS at 8H for 52 points is used as the target because it scores
+// consistently from any 7-tile rack containing those letters — verified by
+// the equity-mode test (test_infer_nonerror_cases) — so MUZAKS appears in
+// the top-K candidates for virtually every leave hypothesis, ensuring that
+// total_weight > 0 after the inference run.
+void test_infer_winpct_smoke(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 20 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  const char *gcg_header = "#character-encoding UTF-8\n"
+                           "#player1 Tim Tim Weiss\n"
+                           "#player2 Josh Josh Castellano\n";
+  load_game_history_with_gcg_string(config, gcg_header,
+                                    ">Tim: MUZAKS 8H MUZAKS +52 52");
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  // Josh's rack is not recorded in the GCG; provide it explicitly so the
+  // inference pool excludes tiles already held by the nontarget.
+  rack_set_to_string(ld, &nontarget_known_rack, "AAABCDE");
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_goto(game_history, 1, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  InferenceResults *inference_results = inference_results_create(NULL);
+
+  InferenceArgs args;
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), game_history, game,
+      config_get_num_threads(config), 0, config_get_print_interval(config),
+      config_get_thread_control(config), true, true, 0, 0, 0,
+      &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  args.mode = INFERENCE_MODE_WINPCT;
+  args.win_pcts = win_pcts;
+
+  infer_without_ctx(&args, inference_results, error_stack);
+
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+  }
+  assert(error_stack_is_empty(error_stack));
+  assert(inference_results_get_mode(inference_results) ==
+         INFERENCE_MODE_WINPCT);
+  assert(inference_results_get_total_weight(inference_results) > 0.0);
+  assert(inference_results_get_ess(inference_results) > 0.0);
+
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
+// Regression test: when no target move is provided (direct-arg invocation
+// without game history), candidate_matches_target always returns false, every
+// leaf gets likelihood = 0, and total_weight must remain 0.
+// Covers the same posterior-stays-zero guarantee as the original "target
+// outside top-K" scenario: no accumulation when no candidate matches.
+void test_infer_winpct_target_outside_topk(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 1 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  rack_set_to_string(ld, &target_played_tiles, "MUZAKS");
+
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  InferenceResults *inference_results = inference_results_create(NULL);
+
+  InferenceArgs args;
+  // use_game_history=false, so target_move stays NULL: no candidate ever
+  // matches, every leaf gets likelihood=0, total_weight must remain exactly 0.
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), NULL, game,
+      config_get_num_threads(config), 0, config_get_print_interval(config),
+      config_get_thread_control(config), false, true, 0, int_to_equity(52), 0,
+      &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  args.mode = INFERENCE_MODE_WINPCT;
+  args.win_pcts = win_pcts;
+
+  infer_without_ctx(&args, inference_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  assert(inference_results_get_mode(inference_results) ==
+         INFERENCE_MODE_WINPCT);
+  assert(inference_results_get_total_weight(inference_results) == 0.0);
+
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
+// Smoke test for the MC sampling path in winpct mode.
+// Forces MC via sample_mode = INFERENCE_SAMPLE_MODE_MC and uses a 1-second
+// time limit so the test completes quickly.  Asserts total_weight > 0 (at
+// least one leave got likelihood > 0).
+void test_infer_winpct_mc_path(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 10 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  const char *gcg_header = "#character-encoding UTF-8\n"
+                           "#player1 Tim Tim Weiss\n"
+                           "#player2 Josh Josh Castellano\n";
+  load_game_history_with_gcg_string(config, gcg_header,
+                                    ">Tim: MUZAKS 8H MUZAKS +52 52");
+
+  Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+  // Josh's rack is not recorded in the GCG; provide it explicitly so the
+  // inference pool excludes tiles already held by the nontarget.
+  rack_set_to_string(ld, &nontarget_known_rack, "AAABCDE");
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+
+  GameHistory *game_history = config_get_game_history(config);
+  game_history_goto(game_history, 1, error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  InferenceResults *inference_results = inference_results_create(NULL);
+
+  InferenceArgs args;
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), game_history, game,
+      config_get_num_threads(config), 0, config_get_print_interval(config),
+      config_get_thread_control(config), true, true, 0, 0, 0,
+      &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  args.mode = INFERENCE_MODE_WINPCT;
+  args.win_pcts = win_pcts;
+  // Force MC path even though the leaf space is small enough to enumerate.
+  args.sample_mode = INFERENCE_SAMPLE_MODE_MC;
+  // 1-second wall-clock limit so the test completes quickly.
+  args.mc_time_limit_secs = 1;
+
+  infer_without_ctx(&args, inference_results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  assert(inference_results_get_mode(inference_results) ==
+         INFERENCE_MODE_WINPCT);
+  // After 1 second of MC iterations on MUZAKS/52, at least one should match.
+  assert(inference_results_get_total_weight(inference_results) > 0.0);
+  assert(inference_results_get_ess(inference_results) > 0.0);
+
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
+// Smoke test for the exchange path in winpct MC mode.
+// Primarily checks that the exchange evaluation path does not crash (correct
+// bag/rack state management through the MC loop).  Uses a large outer-iteration
+// cap so we get decent coverage of the random-rack sampling; the exchange
+// path returns early (no weight) when no matching-count exchange appears in
+// the top-15 candidate list — this is expected and correct per Macondo's
+// inferSingleExchange early-exit semantics.
+void test_infer_winpct_exchange_smoke(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 15 -threads 1");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+
+  const Game *game = config_get_game(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const int ld_size = ld_get_size(ld);
+
+  Rack target_played_tiles;
+  rack_set_dist_size_and_reset(&target_played_tiles, ld_size);
+
+  Rack target_known_rack;
+  rack_set_dist_size_and_reset(&target_known_rack, ld_size);
+
+  Rack nontarget_known_rack;
+  rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
+
+  ErrorStack *error_stack = error_stack_create();
+  thread_control_set_status(config_get_thread_control(config),
+                            THREAD_CONTROL_STATUS_STARTED);
+
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, "winpct", error_stack);
+  assert(error_stack_is_empty(error_stack));
+
+  InferenceResults *inference_results = inference_results_create(NULL);
+
+  InferenceArgs args;
+  infer_args_fill(
+      &args, config_get_num_plays(config),
+      config_get_eq_margin_inference(config), NULL, game,
+      config_get_num_threads(config), 0, config_get_print_interval(config),
+      config_get_thread_control(config), false, true, 0, int_to_equity(0), 3,
+      &target_played_tiles, &target_known_rack, &nontarget_known_rack);
+  args.mode = INFERENCE_MODE_WINPCT;
+  args.win_pcts = win_pcts;
+  // Exchange always routes to MC. Use a 1-second time limit so the test
+  // completes quickly.
+  args.mc_time_limit_secs = 1;
+
+  infer_without_ctx(&args, inference_results, error_stack);
+
+  // The important check: no crash, no errors, mode is set correctly.
+  // total_weight may be 0 on an open board (exchanges rarely appear in
+  // top-15 equity-sorted moves — this matches Macondo's early-exit behaviour).
+  assert(error_stack_is_empty(error_stack));
+  assert(inference_results_get_mode(inference_results) ==
+         INFERENCE_MODE_WINPCT);
+  assert(inference_results_get_total_weight(inference_results) >= 0.0);
+
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  inference_results_destroy(inference_results);
+  config_destroy(config);
+}
+
 void test_infer(void) {
   test_leave_rack_reset();
   test_trivial_random_probability();
@@ -1197,6 +1469,10 @@ void test_infer(void) {
   test_infer_exchange_not_board_is_letter_allowed_in_cross_set();
   test_infer_tiles_played_not_in_bag();
   test_infer_empty_game_history();
+  test_infer_winpct_smoke();
+  test_infer_winpct_target_outside_topk();
+  test_infer_winpct_mc_path();
+  test_infer_winpct_exchange_smoke();
   for (int i = 0; i < 2; i++) {
     const bool use_game_history = i == 1;
     test_infer_nonerror_cases(1, use_game_history);

@@ -6,8 +6,10 @@
 #include "../ent/game.h"
 #include "../ent/game_history.h"
 #include "../ent/inference_results.h"
+#include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/thread_control.h"
+#include "../ent/win_pct.h"
 #include "../util/io_util.h"
 
 typedef struct InferenceArgs {
@@ -27,6 +29,22 @@ typedef struct InferenceArgs {
   int parent_worker_thread_index;
   int print_interval;
   ThreadControl *thread_control;
+  // Win-probability inference mode fields (unused in equity mode).
+  inference_mode_t mode;
+  double tau;
+  inference_sample_mode_t sample_mode;
+  int mini_sim_plies;
+  int mini_sim_max_plays;
+  uint64_t mc_max_iters;
+  int mc_time_limit_secs;
+  int max_enum_hypotheses;
+  double min_weight_eps;
+  const WinPct *win_pcts;
+  // Full target move (set from game history; NULL when only score+tiles are
+  // known, e.g. direct command invocation).  When non-NULL,
+  // candidate_matches_target uses exact position matching instead of
+  // score+tile-multiset.
+  const Move *target_move;
 } InferenceArgs;
 
 static inline void
@@ -54,6 +72,17 @@ infer_args_fill(InferenceArgs *args, int leave_list_capacity, Equity eq_margin,
   args->parent_worker_thread_index = parent_worker_thread_index;
   args->print_interval = print_interval;
   args->thread_control = thread_control;
+  args->mode = INFERENCE_MODE_EQUITY;
+  args->tau = INFERENCE_WINPCT_DEFAULT_TAU;
+  args->sample_mode = INFERENCE_SAMPLE_MODE_AUTO;
+  args->mini_sim_plies = INFERENCE_WINPCT_DEFAULT_SIM_PLIES;
+  args->mini_sim_max_plays = INFERENCE_WINPCT_DEFAULT_SIM_MAX_PLAYS;
+  args->mc_max_iters = INFERENCE_WINPCT_DEFAULT_MC_MAX_ITERS;
+  args->mc_time_limit_secs = INFERENCE_WINPCT_DEFAULT_TIME_LIMIT_SECS;
+  args->max_enum_hypotheses = INFERENCE_WINPCT_DEFAULT_MAX_ENUM_HYPOTHESES;
+  args->min_weight_eps = INFERENCE_WINPCT_DEFAULT_MIN_WEIGHT_EPS;
+  args->win_pcts = NULL;
+  args->target_move = NULL;
 }
 
 #endif

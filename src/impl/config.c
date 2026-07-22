@@ -10,6 +10,7 @@
 #include "../def/exec_defs.h"
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
+#include "../def/inference_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
@@ -205,6 +206,15 @@ typedef enum {
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
   ARG_TOKEN_ANALYZE,
+  ARG_TOKEN_INFERENCE_MODE,
+  ARG_TOKEN_INFERENCE_TAU,
+  ARG_TOKEN_INFERENCE_SAMPLE_MODE,
+  ARG_TOKEN_INFERENCE_SIM_PLIES,
+  ARG_TOKEN_INFERENCE_SIM_MAX_PLAYS,
+  ARG_TOKEN_INFERENCE_MC_MAX_ITERS,
+  ARG_TOKEN_INFERENCE_TIME_LIMIT,
+  ARG_TOKEN_INFERENCE_MAX_ENUM_HYPOTHESES,
+  ARG_TOKEN_INFERENCE_MIN_WEIGHT_EPS,
   // This must always be the last
   // token for the count to be accurate
   NUMBER_OF_ARG_TOKENS
@@ -249,6 +259,15 @@ struct Config {
   double cutoff;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
+  inference_mode_t inference_mode;
+  double inference_tau;
+  inference_sample_mode_t inference_sample_mode;
+  int inference_sim_plies;
+  int inference_sim_max_plays;
+  uint64_t inference_mc_max_iters;
+  int inference_time_limit_secs;
+  int inference_max_enum_hypotheses;
+  double inference_min_weight_eps;
   bool use_game_pairs;
   bool human_readable;
   bool use_small_plays;
@@ -1498,6 +1517,75 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the maximum equity loss for an opponent's play when "
              "running an inference.";
       break;
+    case ARG_TOKEN_INFERENCE_MODE:
+      usages[0] = "equity|winpct";
+      examples[0] = "equity";
+      examples[1] = "winpct";
+      text = "Sets the inference algorithm. 'equity' uses the equity-margin "
+             "rule (default). 'winpct' uses Bayesian inference with "
+             "win-probability mini-sims and a multivariate-hypergeometric "
+             "prior over opponent leave hypotheses.";
+      break;
+    case ARG_TOKEN_INFERENCE_TAU:
+      usages[0] = "<softmax_temperature>";
+      examples[0] = "0.05";
+      text = "Softmax temperature over logit(WinProb) for the winpct inference "
+             "mode. Lower values make the likelihood sharper. Default 0.05.";
+      break;
+    case ARG_TOKEN_INFERENCE_SAMPLE_MODE:
+      usages[0] = "auto|enum|mc";
+      examples[0] = "auto";
+      examples[1] = "enum";
+      examples[2] = "mc";
+      text = "Sampling strategy for winpct inference. 'auto' enumerates when "
+             "the number of distinct leave multisets is at most -imaxenum, "
+             "otherwise uses Monte Carlo. Default auto.";
+      break;
+    case ARG_TOKEN_INFERENCE_SIM_PLIES:
+      usages[0] = "<plies>";
+      examples[0] = "2";
+      text = "Number of plies in the mini-sim run per leave hypothesis in "
+             "winpct inference mode. Default 2.";
+      break;
+    case ARG_TOKEN_INFERENCE_SIM_MAX_PLAYS:
+      usages[0] = "<num_plays>";
+      examples[0] = "10";
+      text =
+          "Maximum number of top opponent candidate moves to consider per "
+          "leave hypothesis in winpct inference mode. Default 10 (tile "
+          "placement); exchange inference uses 15 regardless of this setting.";
+      break;
+    case ARG_TOKEN_INFERENCE_MC_MAX_ITERS:
+      usages[0] = "<iterations>";
+      examples[0] = "200";
+      text = "Per-leaf mini-sim iteration budget for winpct MC inference. "
+             "Controls the BAI sample limit per leave hypothesis as "
+             "num_candidates * iterations. Default 200.";
+      break;
+    case ARG_TOKEN_INFERENCE_TIME_LIMIT:
+      usages[0] = "<seconds>";
+      examples[0] = "60";
+      examples[1] = "20";
+      text = "Wall-clock time limit in seconds for the Monte Carlo outer loop "
+             "in winpct inference mode. Workers run in parallel for this many "
+             "seconds before stopping, mirroring Macondo's context deadline. "
+             "0 means run until user interrupt. Default 60.";
+      break;
+    case ARG_TOKEN_INFERENCE_MAX_ENUM_HYPOTHESES:
+      usages[0] = "<max_hypotheses>";
+      examples[0] = "750";
+      text = "In auto mode, switches from enumeration to Monte Carlo when the "
+             "number of distinct leave multisets exceeds this value. In enum "
+             "mode, caps the number of hypotheses evaluated (sorted by "
+             "descending prior). Default 750.";
+      break;
+    case ARG_TOKEN_INFERENCE_MIN_WEIGHT_EPS:
+      usages[0] = "<epsilon>";
+      examples[0] = "0.01";
+      text = "Early-exit threshold for enumeration mode: stop enumerating once "
+             "the cumulative prior of evaluated hypotheses reaches "
+             "1 - epsilon. Default 0.01.";
+      break;
     case ARG_TOKEN_MOVEGEN_MARGIN:
       usages[0] = "<movegen_equity_margin>";
       examples[0] = "1";
@@ -2296,6 +2384,25 @@ void impl_move_gen(Config *config, ErrorStack *error_stack) {
 
 // Inference
 
+void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
+  if (config->win_pcts == NULL) {
+    const char *win_pct_name =
+        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
+    if (win_pct_name == NULL) {
+      win_pct_name = DEFAULT_WIN_PCT;
+    }
+    config->win_pcts =
+        win_pct_create(config->data_paths, win_pct_name, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
+          string_duplicate(
+              "encountered an error loading the win percentage file"));
+      return;
+    }
+  }
+}
+
 void config_fill_infer_args(const Config *config, bool use_game_history,
                             int target_index, Equity target_score,
                             int target_num_exch, Rack *target_played_tiles,
@@ -2308,6 +2415,16 @@ void config_fill_infer_args(const Config *config, bool use_game_history,
                   use_game_history, use_infer_cutoff_optimization, target_index,
                   target_score, target_num_exch, target_played_tiles,
                   target_known_rack, nontarget_known_rack);
+  args->mode = config->inference_mode;
+  args->tau = config->inference_tau;
+  args->sample_mode = config->inference_sample_mode;
+  args->mini_sim_plies = config->inference_sim_plies;
+  args->mini_sim_max_plays = config->inference_sim_max_plays;
+  args->mc_max_iters = config->inference_mc_max_iters;
+  args->mc_time_limit_secs = config->inference_time_limit_secs;
+  args->max_enum_hypotheses = config->inference_max_enum_hypotheses;
+  args->min_weight_eps = config->inference_min_weight_eps;
+  args->win_pcts = config->win_pcts;
 }
 
 // Use target_index < 0 to infer using the game history
@@ -2337,6 +2454,13 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  if (config->inference_mode == INFERENCE_MODE_WINPCT) {
+    config_load_win_pcts(config, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
   config_init_game(config);
   const LetterDistribution *ld = game_get_ld(config->game);
   const int ld_size = ld_get_size(game_get_ld(config->game));
@@ -2348,6 +2472,15 @@ void impl_infer(Config *config, ErrorStack *error_stack) {
   rack_set_dist_size_and_reset(&nontarget_known_rack, ld_size);
 
   if (config_get_parg_num_set_values(config, ARG_TOKEN_INFER) == 0) {
+    // If the current on-turn player's rack is known (e.g. set via 'r <rack>'
+    // after 'goto N'), use it as nontarget_known_rack.  The on-turn player is
+    // always the nontarget: the target is whoever just played (off turn).
+    const int on_turn_index = game_get_player_on_turn_index(config->game);
+    const Rack *on_turn_rack =
+        player_get_rack(game_get_player(config->game, on_turn_index));
+    if (!rack_is_empty(on_turn_rack)) {
+      rack_copy(&nontarget_known_rack, on_turn_rack);
+    }
     config_infer(config, true, 0, 0, 0, &target_played_tiles,
                  &target_known_rack, &nontarget_known_rack, true,
                  config->inference_results, error_stack);
@@ -2489,25 +2622,6 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, &inference_args, sim_args);
-}
-
-void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
-  if (config->win_pcts == NULL) {
-    const char *win_pct_name =
-        config_get_parg_value(config, ARG_TOKEN_WIN_PCT, 0);
-    if (win_pct_name == NULL) {
-      win_pct_name = DEFAULT_WIN_PCT;
-    }
-    config->win_pcts =
-        win_pct_create(config->data_paths, win_pct_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      error_stack_push(
-          error_stack, ERROR_STATUS_CONFIG_LOAD_WIN_PCT_ERROR,
-          string_duplicate(
-              "encountered an error loading the win percentage file"));
-      return;
-    }
-  }
 }
 
 void config_simulate(Config *config, SimCtx **sim_ctx, Rack *known_opp_rack,
@@ -5795,7 +5909,7 @@ void config_load_parsed_args(Config *config,
         // Add the rest of the remaining string to the next parg value,
         // which basically treats the rest of the string after the command
         // as a single argument.
-        char *cmd_content = strchr(cmd, ' ');
+        const char *cmd_content = strchr(cmd, ' ');
         if (cmd_content) {
           cmd_content = cmd_content + 1;
         }
@@ -6194,6 +6308,81 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
     config->eq_margin_inference = double_to_equity(eq_margin_inference_double);
+  }
+
+  const char *inference_mode_str =
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_MODE, 0);
+  if (inference_mode_str) {
+    if (has_iprefix(inference_mode_str, "equity")) {
+      config->inference_mode = INFERENCE_MODE_EQUITY;
+    } else if (has_iprefix(inference_mode_str, "winpct")) {
+      config->inference_mode = INFERENCE_MODE_WINPCT;
+    } else {
+      error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+                       get_formatted_string("unrecognized inference mode: %s",
+                                            inference_mode_str));
+      return;
+    }
+  }
+
+  config_load_double(config, ARG_TOKEN_INFERENCE_TAU, 1e-10, 100.0,
+                     &config->inference_tau, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  const char *inference_sample_mode_str =
+      config_get_parg_value(config, ARG_TOKEN_INFERENCE_SAMPLE_MODE, 0);
+  if (inference_sample_mode_str) {
+    if (has_iprefix(inference_sample_mode_str, "auto")) {
+      config->inference_sample_mode = INFERENCE_SAMPLE_MODE_AUTO;
+    } else if (has_iprefix(inference_sample_mode_str, "enum")) {
+      config->inference_sample_mode = INFERENCE_SAMPLE_MODE_ENUM;
+    } else if (has_iprefix(inference_sample_mode_str, "mc")) {
+      config->inference_sample_mode = INFERENCE_SAMPLE_MODE_MC;
+    } else {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONFIG_LOAD_UNRECOGNIZED_ARG,
+          get_formatted_string("unrecognized inference sample mode: %s",
+                               inference_sample_mode_str));
+      return;
+    }
+  }
+
+  config_load_int(config, ARG_TOKEN_INFERENCE_SIM_PLIES, 1, MAX_PLIES,
+                  &config->inference_sim_plies, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_INFERENCE_SIM_MAX_PLAYS, 1, INT_MAX,
+                  &config->inference_sim_max_plays, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_uint64(config, ARG_TOKEN_INFERENCE_MC_MAX_ITERS, 1,
+                     &config->inference_mc_max_iters, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_INFERENCE_TIME_LIMIT, 0, INT_MAX,
+                  &config->inference_time_limit_secs, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_int(config, ARG_TOKEN_INFERENCE_MAX_ENUM_HYPOTHESES, 1, INT_MAX,
+                  &config->inference_max_enum_hypotheses, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  config_load_double(config, ARG_TOKEN_INFERENCE_MIN_WEIGHT_EPS, 0.0, 1.0,
+                     &config->inference_min_weight_eps, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
   }
 
   const char *new_eq_margin_movegen =
@@ -7551,6 +7740,15 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_MIN_PLAY_ITERATIONS, "minplayiterations", 1, 1);
   arg(ARG_TOKEN_STOP_COND_PCT, "scondition", 1, 1);
   arg(ARG_TOKEN_INFERENCE_MARGIN, "imargin", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_MODE, "infmode", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_TAU, "inftau", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_SAMPLE_MODE, "infsmode", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_SIM_PLIES, "infsplies", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_SIM_MAX_PLAYS, "infsmaxk", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_MC_MAX_ITERS, "infmaxiters", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_TIME_LIMIT, "inftimelimit", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_MAX_ENUM_HYPOTHESES, "infmaxenum", 1, 1);
+  arg(ARG_TOKEN_INFERENCE_MIN_WEIGHT_EPS, "infminw", 1, 1);
   arg(ARG_TOKEN_MOVEGEN_MARGIN, "mmargin", 1, 1);
   arg(ARG_TOKEN_USE_GAME_PAIRS, "gp", 1, 1);
   arg(ARG_TOKEN_USE_SMALL_PLAYS, "sp", 1, 1);
@@ -7642,6 +7840,16 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->endgame_top_k = 1;
   config->eq_margin_inference = int_to_equity(5);
   config->eq_margin_movegen = int_to_equity(5);
+  config->inference_mode = INFERENCE_MODE_EQUITY;
+  config->inference_tau = INFERENCE_WINPCT_DEFAULT_TAU;
+  config->inference_sample_mode = INFERENCE_SAMPLE_MODE_AUTO;
+  config->inference_sim_plies = INFERENCE_WINPCT_DEFAULT_SIM_PLIES;
+  config->inference_sim_max_plays = INFERENCE_WINPCT_DEFAULT_SIM_MAX_PLAYS;
+  config->inference_mc_max_iters = INFERENCE_WINPCT_DEFAULT_MC_MAX_ITERS;
+  config->inference_time_limit_secs = INFERENCE_WINPCT_DEFAULT_TIME_LIMIT_SECS;
+  config->inference_max_enum_hypotheses =
+      INFERENCE_WINPCT_DEFAULT_MAX_ENUM_HYPOTHESES;
+  config->inference_min_weight_eps = INFERENCE_WINPCT_DEFAULT_MIN_WEIGHT_EPS;
   config->min_play_iterations = 500;
   config->max_iterations = 1000000000000;
   config->stop_cond_pct = 99;
@@ -8247,6 +8455,53 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_FG_REQUIRED:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->fg_required);
+      break;
+    case ARG_TOKEN_INFERENCE_MODE:
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      string_builder_add_string(
+          sb, config->inference_mode == INFERENCE_MODE_WINPCT ? "winpct"
+                                                              : "equity");
+      break;
+    case ARG_TOKEN_INFERENCE_TAU:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->inference_tau);
+      break;
+    case ARG_TOKEN_INFERENCE_SAMPLE_MODE: {
+      string_builder_add_formatted_string(sb, " -%s ",
+                                          config->pargs[arg_token]->name);
+      const char *smode_str = "auto";
+      if (config->inference_sample_mode == INFERENCE_SAMPLE_MODE_ENUM) {
+        smode_str = "enum";
+      } else if (config->inference_sample_mode == INFERENCE_SAMPLE_MODE_MC) {
+        smode_str = "mc";
+      }
+      string_builder_add_string(sb, smode_str);
+      break;
+    }
+    case ARG_TOKEN_INFERENCE_SIM_PLIES:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->inference_sim_plies);
+      break;
+    case ARG_TOKEN_INFERENCE_SIM_MAX_PLAYS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->inference_sim_max_plays);
+      break;
+    case ARG_TOKEN_INFERENCE_MC_MAX_ITERS:
+      config_add_uint64_setting_to_string_builder(
+          config, sb, arg_token, config->inference_mc_max_iters);
+      break;
+    case ARG_TOKEN_INFERENCE_TIME_LIMIT:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->inference_time_limit_secs);
+      break;
+    case ARG_TOKEN_INFERENCE_MAX_ENUM_HYPOTHESES:
+      config_add_int_setting_to_string_builder(
+          config, sb, arg_token, config->inference_max_enum_hypotheses);
+      break;
+    case ARG_TOKEN_INFERENCE_MIN_WEIGHT_EPS:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->inference_min_weight_eps);
       break;
     case NUMBER_OF_ARG_TOKENS:
       log_fatal("encountered invalid arg token when saving settings");

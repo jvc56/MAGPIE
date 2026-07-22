@@ -36,7 +36,34 @@ struct InferenceResults {
   Rack bag_as_rack;
   bool valid_for_current_game_state;
   bool interrupted;
+
+  // Win-probability mode aggregates (only populated when mode == WINPCT).
+  inference_mode_t mode;
+  double total_weight;
+  // Per inference_stat_t, per letter: sum of w(L) * count_of_letter_in_L.
+  double weighted_letter_count[NUMBER_OF_INFER_TYPES][MAX_ALPHABET_SIZE];
+
+  // Counters for winpct mode.
+  uint64_t sim_count;  // mini-sims actually run (BAI executed)
+  uint64_t iter_count; // hypotheses evaluated (all calls)
+
+  // Per-leaf list for winpct mode: dynamic array, deduped by leave key.
+  WinPctLeave *winpct_leaves;
+  int winpct_leave_count;
+  int winpct_leave_capacity;
 };
+
+static void winpct_leave_ensure_capacity(InferenceResults *results) {
+  if (results->winpct_leave_count < results->winpct_leave_capacity) {
+    return;
+  }
+  const int new_capacity = results->winpct_leave_capacity == 0
+                               ? 64
+                               : results->winpct_leave_capacity * 2;
+  results->winpct_leaves = realloc_or_die(
+      results->winpct_leaves, (size_t)new_capacity * sizeof(WinPctLeave));
+  results->winpct_leave_capacity = new_capacity;
+}
 
 InferenceResults *inference_results_create(AliasMethod *alias_method) {
   InferenceResults *results = malloc_or_die(sizeof(InferenceResults));
@@ -53,6 +80,11 @@ InferenceResults *inference_results_create(AliasMethod *alias_method) {
   }
   results->valid_for_current_game_state = false;
   results->interrupted = false;
+  results->winpct_leaves = NULL;
+  results->winpct_leave_count = 0;
+  results->winpct_leave_capacity = 0;
+  results->sim_count = 0;
+  results->iter_count = 0;
   return results;
 }
 
@@ -67,6 +99,7 @@ void inference_results_destroy(InferenceResults *results) {
   if (results->alias_method_created_internally) {
     alias_method_destroy(results->alias_method);
   }
+  free(results->winpct_leaves);
   free(results);
 }
 
@@ -91,6 +124,13 @@ void inference_results_reset(InferenceResults *results, int leave_list_capacity,
   }
   results->valid_for_current_game_state = false;
   results->interrupted = false;
+  results->mode = INFERENCE_MODE_EQUITY;
+  results->total_weight = 0.0;
+  memset(results->weighted_letter_count, 0,
+         sizeof(results->weighted_letter_count));
+  results->winpct_leave_count = 0;
+  results->sim_count = 0;
+  results->iter_count = 0;
 }
 
 void inference_results_finalize(const Rack *target_played_tiles,
@@ -98,10 +138,12 @@ void inference_results_finalize(const Rack *target_played_tiles,
                                 const Rack *bag_as_rack,
                                 InferenceResults *results, Equity target_score,
                                 int target_number_of_tiles_exchanged,
-                                Equity equity_margin, bool interrupted) {
+                                Equity equity_margin, inference_mode_t mode,
+                                bool interrupted) {
   results->target_score = target_score;
   results->target_number_of_tiles_exchanged = target_number_of_tiles_exchanged;
   results->equity_margin = equity_margin;
+  results->mode = mode;
   rack_copy(&results->target_played_tiles, target_played_tiles);
   rack_copy(&results->target_known_unplayed_tiles, target_known_unplayed_tiles);
   rack_copy(&results->bag_as_rack, bag_as_rack);
@@ -217,6 +259,37 @@ void inference_results_add_subtotals(InferenceResults *result_being_added,
           result_being_added->subtotals[i][j];
     }
   }
+  result_being_updated->total_weight += result_being_added->total_weight;
+  for (int type_idx = 0; type_idx < NUMBER_OF_INFER_TYPES; type_idx++) {
+    for (int ml = 0; ml < MAX_ALPHABET_SIZE; ml++) {
+      result_being_updated->weighted_letter_count[type_idx][ml] +=
+          result_being_added->weighted_letter_count[type_idx][ml];
+    }
+  }
+  result_being_updated->sim_count += result_being_added->sim_count;
+  result_being_updated->iter_count += result_being_added->iter_count;
+  // Merge per-leaf lists with dedup.
+  const size_t key_size = MAX_ALPHABET_SIZE * sizeof(uint16_t);
+  for (int src_idx = 0; src_idx < result_being_added->winpct_leave_count;
+       src_idx++) {
+    const WinPctLeave *src_leaf = &result_being_added->winpct_leaves[src_idx];
+    bool found = false;
+    for (int dst_idx = 0; dst_idx < result_being_updated->winpct_leave_count;
+         dst_idx++) {
+      if (memcmp(result_being_updated->winpct_leaves[dst_idx].counts,
+                 src_leaf->counts, key_size) == 0) {
+        result_being_updated->winpct_leaves[dst_idx].weight += src_leaf->weight;
+        found = true;
+        break;
+      }
+    }
+    if (!found) {
+      winpct_leave_ensure_capacity(result_being_updated);
+      result_being_updated
+          ->winpct_leaves[result_being_updated->winpct_leave_count] = *src_leaf;
+      result_being_updated->winpct_leave_count++;
+    }
+  }
 }
 
 void inference_results_set_stat_for_letter(InferenceResults *inference_results,
@@ -296,4 +369,93 @@ double get_probability_for_random_minimum_draw(
   }
 
   return ((double)total_draws_for_this_letter_minimum) / (double)total_draws;
+}
+
+inference_mode_t inference_results_get_mode(const InferenceResults *results) {
+  return results->mode;
+}
+
+double inference_results_get_total_weight(const InferenceResults *results) {
+  return results->total_weight;
+}
+
+double inference_results_get_ess(const InferenceResults *results) {
+  double sum_w = 0.0;
+  double sum_w_sq = 0.0;
+  for (int leaf_idx = 0; leaf_idx < results->winpct_leave_count; leaf_idx++) {
+    const double leaf_weight = results->winpct_leaves[leaf_idx].weight;
+    sum_w += leaf_weight;
+    sum_w_sq += leaf_weight * leaf_weight;
+  }
+  return sum_w_sq > 0.0 ? (sum_w * sum_w) / sum_w_sq : 0.0;
+}
+
+double inference_results_get_letter_posterior(const InferenceResults *results,
+                                              inference_stat_t type,
+                                              MachineLetter ml) {
+  if (results->total_weight == 0.0) {
+    return 0.0;
+  }
+  return results->weighted_letter_count[(int)type][(int)ml] /
+         results->total_weight;
+}
+
+void inference_results_accumulate_winpct_weight(InferenceResults *results,
+                                                inference_stat_t type,
+                                                const Rack *leave,
+                                                double weight) {
+  results->total_weight += weight;
+  const int dist_size = rack_get_dist_size(leave);
+  for (int ml = 0; ml < dist_size; ml++) {
+    const int count = (int)rack_get_letter(leave, (MachineLetter)ml);
+    if (count > 0) {
+      results->weighted_letter_count[type][ml] += weight * (double)count;
+    }
+  }
+
+  // Build the key array from the leave's letter counts.
+  uint16_t key[MAX_ALPHABET_SIZE];
+  memset(key, 0, sizeof(key));
+  for (int ml = 0; ml < dist_size; ml++) {
+    key[ml] = rack_get_letter(leave, (MachineLetter)ml);
+  }
+
+  // Upsert into per-leaf list.
+  const size_t key_size = MAX_ALPHABET_SIZE * sizeof(uint16_t);
+  for (int leaf_idx = 0; leaf_idx < results->winpct_leave_count; leaf_idx++) {
+    if (memcmp(results->winpct_leaves[leaf_idx].counts, key, key_size) == 0) {
+      results->winpct_leaves[leaf_idx].weight += weight;
+      return;
+    }
+  }
+  winpct_leave_ensure_capacity(results);
+  WinPctLeave *new_leaf = &results->winpct_leaves[results->winpct_leave_count];
+  memcpy(new_leaf->counts, key, key_size);
+  new_leaf->weight = weight;
+  results->winpct_leave_count++;
+}
+
+void inference_results_add_sim(InferenceResults *results) {
+  results->sim_count++;
+}
+
+void inference_results_add_iter(InferenceResults *results) {
+  results->iter_count++;
+}
+
+uint64_t inference_results_get_sim_count(const InferenceResults *results) {
+  return results->sim_count;
+}
+
+uint64_t inference_results_get_iter_count(const InferenceResults *results) {
+  return results->iter_count;
+}
+
+int inference_results_get_winpct_leave_count(const InferenceResults *results) {
+  return results->winpct_leave_count;
+}
+
+const WinPctLeave *
+inference_results_get_winpct_leave(const InferenceResults *results, int idx) {
+  return &results->winpct_leaves[idx];
 }

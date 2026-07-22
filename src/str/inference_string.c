@@ -15,6 +15,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 void print_ucgi_inference_current_rack(uint64_t current_rack_index,
                                        ThreadControl *thread_control) {
@@ -388,11 +389,280 @@ StringGrid *get_common_leaves_string_grid(
   return sg_common_leaves;
 }
 
+// Comparator for sorting WinPctLeave pointers by weight descending.
+static int winpct_leave_cmp_desc(const void *a_ptr, const void *b_ptr) {
+  const WinPctLeave *a = *(const WinPctLeave *const *)a_ptr;
+  const WinPctLeave *b = *(const WinPctLeave *const *)b_ptr;
+  if (b->weight > a->weight) {
+    return 1;
+  }
+  if (b->weight < a->weight) {
+    return -1;
+  }
+  return 0;
+}
+
+static void string_builder_add_winpct_inference(
+    StringBuilder *sb, const InferenceResults *inference_results,
+    const LetterDistribution *ld, bool use_ucgi_format) {
+  const double total_weight =
+      inference_results_get_total_weight(inference_results);
+  const double ess = inference_results_get_ess(inference_results);
+  const int n_unique =
+      inference_results_get_winpct_leave_count(inference_results);
+  const uint64_t iter_count =
+      inference_results_get_iter_count(inference_results);
+  const double accept_pct =
+      iter_count > 0 ? 100.0 * (double)n_unique / (double)iter_count : 0.0;
+
+  // Header line.
+  string_builder_add_formatted_string(
+      sb,
+      "Inferred %d unique racks from %llu iterations (%.1f%% acceptance), "
+      "tau=%.3f, ESS=%.1f\n",
+      n_unique, (long long unsigned int)iter_count, accept_pct,
+      INFERENCE_WINPCT_DEFAULT_TAU, ess);
+
+  if (total_weight == 0.0) {
+    string_builder_add_string(
+        sb, "No inference signal: target move was not found in the top "
+            "candidates for any leave hypothesis.\n");
+    return;
+  }
+
+  // Top-15 leaves table.
+  if (n_unique > 0) {
+    // Build a sorted copy of the leave pointers.
+    const WinPctLeave **sorted_leaves =
+        malloc_or_die((size_t)n_unique * sizeof(WinPctLeave *));
+    for (int leaf_idx = 0; leaf_idx < n_unique; leaf_idx++) {
+      sorted_leaves[leaf_idx] =
+          inference_results_get_winpct_leave(inference_results, leaf_idx);
+    }
+    qsort(sorted_leaves, (size_t)n_unique, sizeof(WinPctLeave *),
+          winpct_leave_cmp_desc);
+
+    const int max_display = 15;
+    const int display_count = n_unique < max_display ? n_unique : max_display;
+
+    // Compute total weight for percentage.
+    const double weight_for_pct = total_weight > 0.0 ? total_weight : 1.0;
+
+    const int ld_size = (int)rack_get_dist_size(
+        inference_results_get_bag_as_rack(inference_results));
+
+    string_builder_add_string(sb, "Top inferred leaves:\n");
+
+    StringGrid *sg_leaves = string_grid_create(display_count + 1, 4, 2);
+    string_grid_set_cell(sg_leaves, 0, 0, string_duplicate("Rank"));
+    string_grid_set_cell(sg_leaves, 0, 1, string_duplicate("Leave"));
+    string_grid_set_cell(sg_leaves, 0, 2, string_duplicate("Weight"));
+    string_grid_set_cell(sg_leaves, 0, 3, string_duplicate("Wt %"));
+
+    StringBuilder *tmp_sb = string_builder_create();
+    for (int display_idx = 0; display_idx < display_count; display_idx++) {
+      const WinPctLeave *leaf = sorted_leaves[display_idx];
+      const int grid_row = display_idx + 1;
+
+      string_grid_set_cell(sg_leaves, grid_row, 0,
+                           get_formatted_string("%d", display_idx + 1));
+
+      // Build a temporary Rack from the leave counts.
+      Rack tmp_rack;
+      rack_set_dist_size_and_reset(&tmp_rack, ld_size);
+      for (int ml = 0; ml < ld_size; ml++) {
+        if (leaf->counts[ml] > 0) {
+          rack_add_letters(&tmp_rack, (MachineLetter)ml, leaf->counts[ml]);
+        }
+      }
+      string_builder_add_rack(tmp_sb, &tmp_rack, ld, false);
+      string_grid_set_cell(sg_leaves, grid_row, 1,
+                           string_builder_dump(tmp_sb, NULL));
+      string_builder_clear(tmp_sb);
+
+      string_grid_set_cell(sg_leaves, grid_row, 2,
+                           get_formatted_string("%.4f", leaf->weight));
+      string_grid_set_cell(
+          sg_leaves, grid_row, 3,
+          get_formatted_string("%.1f", 100.0 * leaf->weight / weight_for_pct));
+    }
+    string_builder_destroy(tmp_sb);
+    string_builder_add_string_grid(sb, sg_leaves, false);
+    string_grid_destroy(sg_leaves);
+
+    if (n_unique > max_display) {
+      string_builder_add_formatted_string(sb, "  (and %d more)\n",
+                                          n_unique - max_display);
+    }
+    string_builder_add_string(sb, "\n");
+    free(sorted_leaves);
+  }
+
+  // Bin stats.
+  const Rack *bag_as_rack =
+      inference_results_get_bag_as_rack(inference_results);
+  const Rack *target_played_tiles =
+      inference_results_get_target_played_tiles(inference_results);
+  const Rack *known_unplayed =
+      inference_results_get_target_known_unplayed_tiles(inference_results);
+  const int target_num_exch =
+      inference_results_get_target_number_of_tiles_exchanged(inference_results);
+
+  const int bag_total = (int)rack_get_total_letters(bag_as_rack);
+  const int known_count = (int)rack_get_total_letters(known_unplayed);
+  const int leave_size =
+      target_num_exch > 0
+          ? RACK_SIZE
+          : RACK_SIZE - (int)rack_get_total_letters(target_played_tiles);
+  const int unknown_leave_size = leave_size - known_count;
+
+  const int ld_size = (int)ld_get_size(ld);
+
+  double posterior[MAX_ALPHABET_SIZE];
+  double prior_count[MAX_ALPHABET_SIZE];
+
+  for (int ml = 0; ml < ld_size; ml++) {
+    const int unseen = (int)rack_get_letter(bag_as_rack, (MachineLetter)ml);
+    posterior[ml] = inference_results_get_letter_posterior(
+        inference_results, INFERENCE_TYPE_LEAVE, (MachineLetter)ml);
+    prior_count[ml] =
+        (bag_total > 0 && unknown_leave_size > 0)
+            ? (double)unknown_leave_size * (double)unseen / (double)bag_total
+            : 0.0;
+  }
+
+  // Define bin categories by ratio = posterior / prior_count.
+  // 8 bins: way_more, more, slightly_more, about, slightly_less, less,
+  //         way_less, not_seen.
+  enum { NUM_BINS = 8 };
+  const char *bin_labels[NUM_BINS] = {
+      "Way more than expected",      "More than expected",
+      "Slightly more than expected", "About as expected",
+      "Slightly less than expected", "Less than expected",
+      "Way less than expected",      "Not seen"};
+
+  // Each bin holds up to ld_size tile indices.
+  int bin_tiles[NUM_BINS][MAX_ALPHABET_SIZE];
+  int bin_counts[NUM_BINS];
+  memset(bin_counts, 0, sizeof(bin_counts));
+
+  for (int ml = 0; ml < ld_size; ml++) {
+    const int unseen = (int)rack_get_letter(bag_as_rack, (MachineLetter)ml);
+    if (prior_count[ml] == 0.0 && posterior[ml] == 0.0) {
+      continue;
+    }
+    if (unseen == 0 && posterior[ml] == 0.0) {
+      continue;
+    }
+    int bin_idx;
+    if (prior_count[ml] == 0.0) {
+      // posterior > 0, prior == 0 → way more
+      bin_idx = 0;
+    } else if (posterior[ml] == 0.0 && unseen > 0) {
+      // ratio == 0, prior > 0 → not seen
+      bin_idx = 7;
+    } else {
+      const double ratio = posterior[ml] / prior_count[ml];
+      if (ratio >= 2.0) {
+        bin_idx = 0;
+      } else if (ratio >= 1.25) {
+        bin_idx = 1;
+      } else if (ratio >= 1.1) {
+        bin_idx = 2;
+      } else if (ratio >= 0.9) {
+        bin_idx = 3;
+      } else if (ratio >= 0.75) {
+        bin_idx = 4;
+      } else if (ratio >= 0.25) {
+        bin_idx = 5;
+      } else {
+        bin_idx = 6;
+      }
+    }
+    bin_tiles[bin_idx][bin_counts[bin_idx]++] = ml;
+  }
+
+  for (int bin_idx = 0; bin_idx < NUM_BINS; bin_idx++) {
+    if (bin_counts[bin_idx] == 0) {
+      continue;
+    }
+    string_builder_add_formatted_string(sb, "%s:", bin_labels[bin_idx]);
+    for (int tile_idx = 0; tile_idx < bin_counts[bin_idx]; tile_idx++) {
+      string_builder_add_string(sb, " ");
+      string_builder_add_user_visible_letter(
+          sb, ld, (MachineLetter)bin_tiles[bin_idx][tile_idx]);
+    }
+    string_builder_add_string(sb, "\n");
+  }
+  string_builder_add_string(sb, "\n");
+
+  // Footer.
+  if (!use_ucgi_format) {
+    int num_footer_rows = 3;
+    if (known_count > 0) {
+      num_footer_rows++;
+    }
+    StringGrid *sg_footer = string_grid_create(num_footer_rows, 2, 1);
+    int footer_row = 0;
+    StringBuilder *footer_sb = string_builder_create();
+
+    if (target_num_exch > 0) {
+      string_grid_set_cell(sg_footer, footer_row, 0,
+                           string_duplicate("Exchanged tiles:"));
+      string_grid_set_cell(sg_footer, footer_row, 1,
+                           get_formatted_string("%d", target_num_exch));
+    } else {
+      string_builder_add_rack(footer_sb, target_played_tiles, ld, false);
+      string_grid_set_cell(sg_footer, footer_row, 0,
+                           string_duplicate("Played tiles:"));
+      string_grid_set_cell(sg_footer, footer_row, 1,
+                           string_builder_dump(footer_sb, NULL));
+      string_builder_clear(footer_sb);
+    }
+    footer_row++;
+
+    string_grid_set_cell(sg_footer, footer_row, 0, string_duplicate("Score:"));
+    string_grid_set_cell(
+        sg_footer, footer_row, 1,
+        get_formatted_string(
+            "%d", equity_to_int(
+                      inference_results_get_target_score(inference_results))));
+    footer_row++;
+
+    if (known_count > 0) {
+      string_builder_add_rack(footer_sb, known_unplayed, ld, false);
+      string_grid_set_cell(sg_footer, footer_row, 0,
+                           string_duplicate("Partial rack:"));
+      string_grid_set_cell(sg_footer, footer_row, 1,
+                           string_builder_dump(footer_sb, NULL));
+      footer_row++;
+    }
+
+    string_grid_set_cell(sg_footer, footer_row, 0,
+                         string_duplicate("Mini-sims run:"));
+    string_grid_set_cell(
+        sg_footer, footer_row, 1,
+        get_formatted_string(
+            "%llu", (long long unsigned int)inference_results_get_sim_count(
+                        inference_results)));
+
+    string_builder_destroy(footer_sb);
+    string_builder_add_string_grid(sb, sg_footer, false);
+    string_grid_destroy(sg_footer);
+    string_builder_add_string(sb, "\n");
+  }
+}
+
 void string_builder_add_inference(StringBuilder *inference_string,
                                   InferenceResults *inference_results,
                                   const LetterDistribution *ld,
                                   int max_num_leaves_to_display,
                                   bool use_ucgi_format) {
+  if (inference_results_get_mode(inference_results) == INFERENCE_MODE_WINPCT) {
+    string_builder_add_winpct_inference(inference_string, inference_results, ld,
+                                        use_ucgi_format);
+    return;
+  }
   StringBuilder *tmp_sb = string_builder_create();
 
   int target_number_of_tiles_exchanged =
