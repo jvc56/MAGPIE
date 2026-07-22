@@ -3,6 +3,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/impl/autoplay.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "../src/util/math_util.h"
@@ -461,6 +462,85 @@ void test_autoplay_sim(void) {
   config_destroy(config);
 }
 
+void test_autoplay_play_chooser(void) {
+  assert(autoplay_overtime_penalty_points(0.0, 10, 60.0) == 0);
+  assert(autoplay_overtime_penalty_points(0.001, 10, 60.0) == 10);
+  assert(autoplay_overtime_penalty_points(60.0, 10, 60.0) == 10);
+  assert(autoplay_overtime_penalty_points(60.001, 10, 60.0) == 20);
+  assert(autoplay_overtime_penalty_points(0.001, 1, 1.0) == 1);
+  assert(autoplay_overtime_penalty_points(1.001, 1, 1.0) == 2);
+  assert(autoplay_overtime_penalty_points(1.0, 0, 1.0) == 0);
+
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
+      "-numplays 1 -gp false -threads 1 -hr true -pc1 1 -pc2 -1 "
+      "-otpenalty 1 -otperiod 1");
+
+  load_and_exec_config_or_die(config, "autoplay games 1 -seed 123");
+  char *human_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), true, false);
+  assert(has_substring(human_output, "PlayChooser Timing"));
+  assert(has_substring(human_output, "Time control (ms):"));
+  assert(has_substring(human_output, "Penalty points:"));
+  assert(has_substring(human_output, "Rate: 1 point per started 1 ms"));
+  free(human_output);
+
+  char *machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 1 0 1 0"));
+  const char *play_chooser_output = strstr(machine_output, "playchooser");
+  int active[2];
+  double time_control_ms[2];
+  double seconds_used_ms[2];
+  double overtime_ms[2];
+  unsigned long penalty_points[2];
+  assert(sscanf(play_chooser_output,
+                "playchooser %d %d %lf %lf %lf %lf %lf %lf %lu %lu", &active[0],
+                &active[1], &time_control_ms[0], &time_control_ms[1],
+                &seconds_used_ms[0], &seconds_used_ms[1], &overtime_ms[0],
+                &overtime_ms[1], &penalty_points[0], &penalty_points[1]) == 10);
+  assert(active[0] == 1);
+  assert(active[1] == 0);
+  assert(time_control_ms[0] == 1.0);
+  assert(seconds_used_ms[0] > 1.0);
+  assert(overtime_ms[0] > 0.0);
+  assert(penalty_points[0] > 0);
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -pc1 -1 -pc2 -1 -seed 124");
+  human_output = autoplay_results_to_string(config_get_autoplay_results(config),
+                                            true, false);
+  assert(!has_substring(human_output, "PlayChooser Timing"));
+  free(human_output);
+
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(!has_substring(machine_output, "playchooser"));
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 0 -hr false -pc1 -1 -pc2 2");
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 0 1 0 2"));
+  free(machine_output);
+
+  load_and_exec_config_or_die(config,
+                              "autoplay games 1 -pc1 3 -pc2 4 -seed 125");
+  machine_output = autoplay_results_to_string(
+      config_get_autoplay_results(config), false, false);
+  assert(has_substring(machine_output, "playchooser 1 1 3 4"));
+  free(machine_output);
+
+  human_output = autoplay_results_to_string(config_get_autoplay_results(config),
+                                            true, false);
+  assert(has_substring(human_output, "PlayChooser Timing"));
+  free(human_output);
+
+  config_destroy(config);
+}
+
 void test_autoplay_remaining(void) {
   test_odds_that_player_is_better();
   test_autoplay_leavegen();
@@ -469,6 +549,7 @@ void test_autoplay_remaining(void) {
   test_autoplay_leaves_record();
   test_autoplay_leavegen_force_racks();
   test_autoplay_sim();
+  test_autoplay_play_chooser();
 }
 
 void test_autoplay(void) {
