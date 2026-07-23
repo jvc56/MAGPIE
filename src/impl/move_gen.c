@@ -904,9 +904,49 @@ void record_wmp_plays_for_word(MoveGen *gen, int subrack_idx, int start_col,
 }
 
 bool wordmap_gen_check_playthrough_and_crosses(MoveGen *gen, int word_idx,
-                                               int start_col) {
+                                               int start_col,
+                                               uint32_t playthrough_positions) {
   const WMPMoveGen *wgen = &gen->wmp_move_gen;
   const MachineLetter *word = wmp_move_gen_get_word(wgen, word_idx);
+  if (playthrough_positions != 0) {
+    // WMP words are anagrams of the rack plus the playthrough tiles, but most
+    // anagrams do not put those tiles at the board's fixed positions. Check
+    // every fixed position before spending time on cross sets at empty
+    // squares. The positions were collected while building the playthrough
+    // BitRack, so this phase visits only actual board tiles.
+    uint32_t positions = playthrough_positions;
+    while (positions != 0) {
+      const int board_col = __builtin_ctz(positions);
+      const int letter_idx = board_col - start_col;
+      assert(board_col < BOARD_DIM);
+      assert(board_col >= 0);
+      assert(letter_idx >= 0);
+      assert(letter_idx < wgen->word_length);
+      const MachineLetter board_letter =
+          get_unblanked_machine_letter(gen_cache_get_letter(gen, board_col));
+      assert(board_letter != ALPHABET_EMPTY_SQUARE_MARKER);
+      assert(
+          !bonus_square_is_brick(gen_cache_get_bonus_square(gen, board_col)));
+      if (board_letter != word[letter_idx]) {
+        return false;
+      }
+      gen->playthrough_marked[letter_idx] = PLAYED_THROUGH_MARKER;
+      positions &= positions - 1;
+    }
+    for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
+      const int board_col = start_col + letter_idx;
+      if ((playthrough_positions & (1U << board_col)) != 0) {
+        continue;
+      }
+      const MachineLetter word_letter = word[letter_idx];
+      if (!board_is_letter_allowed_in_cross_set(
+              gen_cache_get_cross_set(gen, board_col), word_letter)) {
+        return false;
+      }
+      gen->playthrough_marked[letter_idx] = word_letter;
+    }
+    return true;
+  }
   for (int letter_idx = 0; letter_idx < wgen->word_length; letter_idx++) {
     const int board_col = start_col + letter_idx;
     assert(board_col < BOARD_DIM);
@@ -960,7 +1000,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
         wgen->num_words = 1;
         for (int start_col = anchor->leftmost_start_col;
              start_col <= anchor->rightmost_start_col; start_col++) {
-          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col)) {
+          if (wordmap_gen_check_playthrough_and_crosses(gen, 0, start_col, 0)) {
             record_wmp_plays_for_word(gen, 0, start_col, 0, 0);
             if (gen->threshold_exceeded) {
               return;
@@ -1062,8 +1102,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     for (int word_idx = 0; word_idx < wgen->num_words; word_idx++) {
       for (int start_col = anchor->leftmost_start_col;
            start_col <= anchor->rightmost_start_col; start_col++) {
-        if (wordmap_gen_check_playthrough_and_crosses(gen, word_idx,
-                                                      start_col)) {
+        if (wordmap_gen_check_playthrough_and_crosses(
+                gen, word_idx, start_col, wgen->playthrough_positions)) {
           record_wmp_plays_for_word(gen, subrack_idx, start_col, 0, 0);
           if (gen->threshold_exceeded) {
             return;
