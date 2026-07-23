@@ -53,6 +53,7 @@ void assert_move(const Game *game, const MoveList *move_list,
 void assert_bags_are_equal(const Bag *b1, const Bag *b2);
 void assert_boards_are_equal(Board *b1, Board *b2);
 void assert_games_are_equal(const Game *g1, const Game *g2, bool check_scores);
+void assert_moves_are_equal(const Move *m1, const Move *m2);
 void print_game(const Game *game, const MoveList *move_list);
 void print_cgp(const Game *game);
 void print_english_rack(const Rack *rack);
