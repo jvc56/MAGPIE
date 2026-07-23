@@ -138,18 +138,14 @@ static inline uint8_t subracks_get_combination_offset(int size) {
   return subracks_combination_offsets[size];
 }
 
-static inline void
-wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
-                                               BitRack *current, int next_ml,
-                                               int count, LeaveMap *leave_map) {
-  int max_num_this = 0;
-  for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
-    max_num_this = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, next_ml);
-    if (max_num_this > 0) {
-      break;
-    }
-  }
-  if (next_ml >= BIT_RACK_MAX_ALPHABET_SIZE) {
+// Walk only the occupied rack letters. Rescanning every BitRack alphabet lane
+// at each recursion level is expensive when a rack contains at most seven
+// tiles.
+static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+    WMPMoveGen *wmp_move_gen, BitRack *current,
+    const MachineLetter *rack_letters, const uint8_t *rack_letter_counts,
+    int num_rack_letters, int rack_letter_idx, int count, LeaveMap *leave_map) {
+  if (rack_letter_idx >= num_rack_letters) {
     const int insert_index = subracks_get_combination_offset(count) +
                              wmp_move_gen->count_by_size[count];
     SubrackInfo *subrack_info =
@@ -160,18 +156,43 @@ wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
     wmp_move_gen->count_by_size[count]++;
     return;
   }
+
+  const MachineLetter ml = rack_letters[rack_letter_idx];
+  const int max_num_this = rack_letter_counts[rack_letter_idx];
   for (int i = 0; i < max_num_this; i++) {
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, current, next_ml + 1, count + i, leave_map);
-    bit_rack_add_letter(current, next_ml);
-    leave_map_complement_add_letter(leave_map, next_ml, i);
+    wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+        wmp_move_gen, current, rack_letters, rack_letter_counts,
+        num_rack_letters, rack_letter_idx + 1, count + i, leave_map);
+    bit_rack_add_letter(current, ml);
+    leave_map_complement_add_letter(leave_map, ml, i);
   }
-  wmp_move_gen_enumerate_nonplaythrough_subracks(
-      wmp_move_gen, current, next_ml + 1, count + max_num_this, leave_map);
+  wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+      wmp_move_gen, current, rack_letters, rack_letter_counts, num_rack_letters,
+      rack_letter_idx + 1, count + max_num_this, leave_map);
   for (int i = max_num_this - 1; i >= 0; i--) {
-    bit_rack_take_letter(current, next_ml);
-    leave_map_complement_take_letter(leave_map, next_ml, i);
+    bit_rack_take_letter(current, ml);
+    leave_map_complement_take_letter(leave_map, ml, i);
   }
+}
+
+static inline void
+wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
+                                               LeaveMap *leave_map) {
+  MachineLetter rack_letters[RACK_SIZE];
+  uint8_t rack_letter_counts[RACK_SIZE];
+  int num_rack_letters = 0;
+  for (int ml = BLANK_MACHINE_LETTER; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    const int count = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, ml);
+    if (count > 0) {
+      rack_letters[num_rack_letters] = (MachineLetter)ml;
+      rack_letter_counts[num_rack_letters] = (uint8_t)count;
+      num_rack_letters++;
+    }
+  }
+  BitRack empty = bit_rack_create_empty();
+  wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+      wmp_move_gen, &empty, rack_letters, rack_letter_counts, num_rack_letters,
+      0, 0, leave_map);
 }
 
 static inline void
@@ -365,9 +386,7 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
     memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-    BitRack empty = bit_rack_create_empty();
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+    wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
   }
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
@@ -393,9 +412,7 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
     memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-    BitRack empty = bit_rack_create_empty();
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+    wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
   }
 
   // Seed has_word_of_length and best_leave_values from the RIT entry. The
