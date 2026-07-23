@@ -1,6 +1,7 @@
 #include "move_gen.h"
 
 #include "../compat/cpthread.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
@@ -981,6 +982,8 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   assert(anchor->rightmost_start_col <= anchor->col);
   const int num_subrack_combinations =
       wmp_move_gen_get_num_subrack_combinations(wgen);
+  uint64_t forbidden_subrack_low = 0;
+  uint64_t forbidden_subrack_high = 0;
 
   // Word info table prune, lifted entirely out of the loops below. The block
   // scan in wmp_move_gen_set_playthrough_bit_rack already AND-folded each
@@ -989,8 +992,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   // So the rack must supply tiles_to_play tiles that are each addable (blanks
   // are wild). Count the rack tiles that are NOT placeable -- present non-blank
   // letters outside addable, usually just a couple of set bits -- and skip the
-  // whole anchor if too few remain. The blocks (hence addable) are the same for
-  // every start column, so this rules out every candidate play at once.
+  // whole anchor if too few remain. Otherwise, use the same exact condition to
+  // skip individual canonical subracks before hashing or probing the WMP. The
+  // blocks (hence addable) are the same for every start column.
   if (gen->word_info_table != NULL && anchor->playthrough_blocks > 0) {
     const uint32_t letter_universe =
         (uint32_t)((1U << ld_get_size(&gen->ld)) - 1) & ~1U;
@@ -1003,8 +1007,17 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
     uint32_t forbidden = rack_present & ~addable;
     int forbidden_count = 0;
     while (forbidden != 0) {
-      forbidden_count += rack_get_letter(
-          &gen->player_rack, (MachineLetter)__builtin_ctz(forbidden));
+      const MachineLetter forbidden_ml =
+          (MachineLetter)__builtin_ctz(forbidden);
+      forbidden_count += rack_get_letter(&gen->player_rack, forbidden_ml);
+      // BitRack stores a four-bit count for each machine letter. Mask the
+      // entire nibble so any positive count rejects the subrack.
+      const int shift = forbidden_ml * BIT_RACK_BITS_PER_LETTER;
+      if (shift < 64) {
+        forbidden_subrack_low |= 0xFULL << shift;
+      } else {
+        forbidden_subrack_high |= 0xFULL << (shift - 64);
+      }
       forbidden &= forbidden - 1;
     }
     if (gen->number_of_letters_on_rack - forbidden_count <
@@ -1015,6 +1028,14 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
 
   for (int subrack_idx = 0; subrack_idx < num_subrack_combinations;
        subrack_idx++) {
+    if ((forbidden_subrack_low | forbidden_subrack_high) != 0) {
+      const BitRack *subrack =
+          wmp_move_gen_get_nonplaythrough_subrack(wgen, subrack_idx);
+      if ((bit_rack_get_low_64(subrack) & forbidden_subrack_low) != 0 ||
+          (bit_rack_get_high_64(subrack) & forbidden_subrack_high) != 0) {
+        continue;
+      }
+    }
     if (gen->number_of_tiles_in_bag > 0) {
       const Equity leave_value =
           wmp_move_gen_get_leave_value(wgen, subrack_idx);
