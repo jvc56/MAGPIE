@@ -2824,7 +2824,6 @@ static inline void shadow_start(MoveGen *gen) {
   }
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
-  rack_copy(&gen->full_player_rack, &gen->player_rack);
   if (gen->is_wordsmog) {
     rack_copy(&gen->bingo_alpha_rack, &gen->player_rack);
   }
@@ -2838,7 +2837,14 @@ static inline void shadow_start(MoveGen *gen) {
   }
 
   gen->rack_cross_set = original_rack_cross_set;
-  rack_copy(&gen->player_rack, &gen->full_player_rack);
+  // Rightward restrictions restore their own rack snapshot. A lower total
+  // here therefore means the leftward shadow consumed at least one uniquely
+  // forced tile. Restore only in that case; most anchors never mutate the
+  // rack at all.
+  if (rack_get_total_letters(&gen->player_rack) !=
+      gen->number_of_letters_on_rack) {
+    rack_copy(&gen->player_rack, &gen->full_player_rack);
+  }
 }
 
 // Simplified shadow_start for small move types.
@@ -2851,7 +2857,6 @@ static inline void shadow_start_small(MoveGen *gen) {
   }
 
   const uint64_t original_rack_cross_set = gen->rack_cross_set;
-  rack_copy(&gen->full_player_rack, &gen->player_rack);
 
   const MachineLetter current_letter =
       gen_cache_get_letter(gen, gen->current_left_col);
@@ -2862,7 +2867,10 @@ static inline void shadow_start_small(MoveGen *gen) {
   }
 
   gen->rack_cross_set = original_rack_cross_set;
-  rack_copy(&gen->player_rack, &gen->full_player_rack);
+  if (rack_get_total_letters(&gen->player_rack) !=
+      gen->number_of_letters_on_rack) {
+    rack_copy(&gen->player_rack, &gen->full_player_rack);
+  }
 }
 
 // The algorithm used in this file for
@@ -3368,6 +3376,12 @@ void gen_shadow(MoveGen *gen) {
   leave_map_set_current_index(
       &gen->leave_map, (1 << rack_get_total_letters(&gen->player_rack)) - 1);
   anchor_heap_reset(&gen->anchor_heap);
+  // Keep one immutable rack snapshot for all anchors. shadow_start restores
+  // from it only when a leftward unique-hook restriction changed player_rack.
+  // ALL_SMALL bypasses shadow_start entirely and needs no snapshot.
+  if (gen->move_record_type != MOVE_RECORD_ALL_SMALL) {
+    rack_copy(&gen->full_player_rack, &gen->player_rack);
+  }
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
@@ -3385,6 +3399,7 @@ void gen_shadow(MoveGen *gen) {
 // Skips leave_map setup and uses small shadow functions.
 void gen_shadow_small(MoveGen *gen) {
   anchor_heap_reset(&gen->anchor_heap);
+  rack_copy(&gen->full_player_rack, &gen->player_rack);
 
   for (int dir = 0; dir < 2; dir++) {
     gen->dir = dir;
