@@ -1960,6 +1960,10 @@ static inline void shadow_record(MoveGen *gen) {
                                        word_length, gen->current_left_col,
                                        score, equity);
     }
+    // WMP move generation consumes the per-slot bounds above. The global
+    // reductions below are only used to construct a legacy recursive-movegen
+    // anchor, so maintaining them here would duplicate the same maxima.
+    return;
   }
   if (equity > gen->highest_shadow_equity) {
     gen->highest_shadow_equity = equity;
@@ -2989,19 +2993,22 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
   wmp_move_gen_reset_anchors(&gen->wmp_move_gen);
 
   shadow_start(gen);
-  if (gen->max_tiles_to_play == 0) {
-    return;
-  }
-
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+    // A zero touched-anchor mask is already a no-op. In particular, a
+    // one-square perpendicular shadow may record a legacy max without
+    // producing a WMP slot in this orientation; its legal playthrough anchor
+    // is emitted in the opposite orientation.
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
                              gen->target_equity_cutoff, &gen->anchor_heap);
-  } else {
-    anchor_heap_add_unheaped_anchor(
-        &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
-        gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
+    return;
   }
+  if (gen->max_tiles_to_play == 0) {
+    return;
+  }
+  anchor_heap_add_unheaped_anchor(
+      &gen->anchor_heap, gen->current_row_index, col, gen->last_anchor_col,
+      gen->dir, gen->highest_shadow_equity, gen->highest_shadow_score);
 }
 
 // Simplified shadow_play_for_anchor for small move types (BEST_SMALL).
