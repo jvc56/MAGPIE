@@ -506,9 +506,20 @@ void test_autoplay_play_chooser(void) {
   assert(active[0] == 1);
   assert(active[1] == 0);
   assert(time_control_ms[0] == 1.0);
-  assert(seconds_used_ms[0] > 1.0);
-  assert(overtime_ms[0] > 0.0);
-  assert(penalty_points[0] > 0);
+  // The player must have used measurable clock, but whether a 1 ms control
+  // is overrun depends on machine speed and build type (a fast release
+  // build can finish every static-fallback move in under 1 ms total), so
+  // assert the overtime accounting is CONSISTENT rather than that overtime
+  // occurred: any overrun must produce overtime and a penalty (1 point per
+  // started 1 ms period), and no overrun must produce neither.
+  assert(seconds_used_ms[0] > 0.0);
+  if (seconds_used_ms[0] > time_control_ms[0]) {
+    assert(overtime_ms[0] > 0.0);
+    assert(penalty_points[0] > 0);
+  } else {
+    assert(overtime_ms[0] == 0.0);
+    assert(penalty_points[0] == 0);
+  }
   free(machine_output);
 
   load_and_exec_config_or_die(config,
