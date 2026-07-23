@@ -2,7 +2,9 @@
 #include "wmp_move_gen_test.h"
 
 #include "../src/def/kwg_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/bit_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/leave_map.h"
