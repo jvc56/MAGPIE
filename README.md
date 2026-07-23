@@ -63,6 +63,28 @@ magpie> autoplay games 50 -lex CSW21 -threads 4 -hr true
 
 will play 50 games in the CSW21 lexicon with 4 threads and print the results in a human readable format.
 
+Autoplay can use `PlayChooser` for either or both players. `-pc1` and `-pc2`
+set each player's total per-game clock in milliseconds; `-1` disables it (the
+default), and `0` enables it without a clock. For example, this gives both
+players a 30-second clock:
+
+```
+magpie> autoplay games 100 -pc1 30000 -pc2 30000 -hr true
+```
+
+PlayChooser selects its evaluation mode from the position, using simulation,
+pre-endgame, or endgame analysis as appropriate. Timed games deduct 10 points
+per started minute of overtime by default. The penalty and period are
+configurable independently, so blitz runs can deduct one point per started
+second:
+
+```
+magpie> autoplay games 100 -pc1 5000 -pc2 5000 -otpenalty 1 -otperiod 1000 -hr true
+```
+
+When at least one player uses PlayChooser, the final report includes clock
+usage, overtime, and deducted penalty points for each active player.
+
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
 ```

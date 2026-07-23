@@ -62,6 +62,15 @@ static void test_game_timer(void) {
   game_timer_end_turn(&game_timer);
   assert(game_timer_is_expired(&game_timer, 0));
   assert(!game_timer_is_expired(&game_timer, 1));
+  assert(game_timer_get_overtime_seconds(&game_timer, 0) > 0.0);
+  assert(game_timer_get_overtime_seconds(&game_timer, 1) == 0.0);
+
+  game_timer_reset_for_players(&game_timer, 0.01, 0.0);
+  assert(!game_timer_is_untimed(&game_timer));
+  assert(!game_timer_player_is_untimed(&game_timer, 0));
+  assert(game_timer_player_is_untimed(&game_timer, 1));
+  assert(game_timer_get_seconds_remaining(&game_timer, 0) == 0.01);
+  assert(isinf(game_timer_get_seconds_remaining(&game_timer, 1)));
 }
 
 static void drain_bag(const Game *game) {

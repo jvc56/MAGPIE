@@ -64,6 +64,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "peg.h"
+#include "play_chooser.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -223,6 +224,10 @@ typedef enum {
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
+  ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_OVERTIME_PENALTY_POINTS,
+  ARG_TOKEN_OVERTIME_PERIOD,
   ARG_TOKEN_P1_THRESHOLD,
   ARG_TOKEN_P2_THRESHOLD,
   ARG_TOKEN_P1_SAMPLING_RULE,
@@ -360,6 +365,12 @@ struct Config {
   bool p2_sim_with_inference;
   double p1_time_limit_seconds;
   double p2_time_limit_seconds;
+  // Milliseconds per game. Negative disables PlayChooser; zero enables it
+  // without a clock.
+  double p1_play_chooser_time_ms;
+  double p2_play_chooser_time_ms;
+  int overtime_penalty_points;
+  double overtime_period_ms;
   bai_threshold_t p1_threshold;
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
@@ -2090,6 +2101,31 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the time limit in seconds for simulation for player "
              "1 or 2 during autoplay. Fractional values supported.";
       break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      usages[0] = "<milliseconds>";
+      examples[0] = "30000";
+      examples[1] = "-1";
+      text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
+             "that player's total per-game clock in milliseconds. -1 "
+             "disables PlayChooser for the player (the default); 0 enables "
+             "it without a clock.";
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      usages[0] = "<points>";
+      examples[0] = "10";
+      examples[1] = "1";
+      text = "Points deducted for each started overtime period in timed "
+             "PlayChooser autoplay. Defaults to 10.";
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      usages[0] = "<milliseconds>";
+      examples[0] = "60000";
+      examples[1] = "1000";
+      text = "Length in milliseconds of each started overtime penalty "
+             "period. Defaults to 60000 (one minute); use 1000 with "
+             "-otpenalty 1 for one point per started second.";
+      break;
     case ARG_TOKEN_P1_THRESHOLD:
     case ARG_TOKEN_P2_THRESHOLD:
       usages[0] = "<threshold>";
@@ -2284,6 +2320,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
@@ -3492,12 +3532,28 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  const double play_chooser_time_ms[2] = {config->p1_play_chooser_time_ms,
+                                          config->p2_play_chooser_time_ms};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->use_play_chooser[player_index] =
+        autoplay_type == AUTOPLAY_TYPE_DEFAULT &&
+        play_chooser_time_ms[player_index] >= 0.0;
+    autoplay_args->time_control_seconds[player_index] =
+        autoplay_args->use_play_chooser[player_index]
+            ? play_chooser_time_ms[player_index] / 1000.0
+            : 0.0;
+  }
+  autoplay_args->overtime_penalty_points = config->overtime_penalty_points;
+  autoplay_args->overtime_period_seconds = config->overtime_period_ms / 1000.0;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
+  const bool any_player_uses_play_chooser =
+      autoplay_args->use_play_chooser[0] || autoplay_args->use_play_chooser[1];
   if (autoplay_args->multi_threading_mode ==
           MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
-      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0)) {
+      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+       any_player_uses_play_chooser)) {
     autoplay_args->num_threads = 1;
     num_worker_threads_per_sim = config->num_threads;
   }
@@ -3568,6 +3624,26 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
+
+  const double utility_win_pct[2] = {config->p1_utility_w_winpct,
+                                     config->p2_utility_w_winpct};
+  const double utility_spread[2] = {config->p1_utility_w_spread,
+                                    config->p2_utility_w_spread};
+  const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
+                                          config->p2_utility_spread_scale};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->play_chooser_strategies[player_index] =
+        (PlayChooserStrategy){
+            .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+            .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+            .win_pcts = config->win_pcts,
+            .num_threads = num_worker_threads_per_sim,
+            .peg_scenario_stride = config->peg_scenario_stride,
+            .utility_w_winpct = utility_win_pct[player_index],
+            .utility_w_spread = utility_spread[player_index],
+            .utility_spread_scale = utility_spread_scale[player_index],
+        };
+  }
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -3592,7 +3668,9 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+      config->p1_play_chooser_time_ms >= 0.0 ||
+      config->p2_play_chooser_time_ms >= 0.0) {
     config_load_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
@@ -7476,6 +7554,27 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_double(config, ARG_TOKEN_P1_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p1_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_P2_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p2_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_OVERTIME_PENALTY_POINTS, 0, INT_MAX,
+                  &config->overtime_penalty_points, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_OVERTIME_PERIOD, 1, 1e12,
+                     &config->overtime_period_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0) != NULL) {
     config->p1_threshold = config->threshold;
     config->p2_threshold = config->threshold;
@@ -8700,6 +8799,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
+  arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
+  arg(ARG_TOKEN_P2_PLAY_CHOOSER_TIME, "pc2", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PENALTY_POINTS, "otpenalty", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PERIOD, "otperiod", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
   arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
   arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
@@ -8808,6 +8911,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_with_inference = config->sim_with_inference;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
+  config->p1_play_chooser_time_ms = -1.0;
+  config->p2_play_chooser_time_ms = -1.0;
+  config->overtime_penalty_points = 10;
+  config->overtime_period_ms = 60000.0;
   config->p1_threshold = config->threshold;
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
@@ -9337,6 +9444,22 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_time_limit_seconds);
+      break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->overtime_penalty_points);
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->overtime_period_ms);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",
