@@ -2893,12 +2893,9 @@ void shadow_play_for_anchor(MoveGen *gen, int col) {
 
   shadow_start(gen);
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
-    // The WMP slots carry their own bounds. A one-square perpendicular
-    // shadow may produce no slot here; its playthrough anchor is emitted
-    // in the opposite orientation. Avoid scanning an empty slot array.
-    if (gen->wmp_move_gen.num_touched_anchor_slots == 0) {
-      return;
-    }
+    // A one-square perpendicular shadow may touch no slot here (its
+    // playthrough anchor is emitted in the opposite orientation); walking an
+    // empty touched mask is already a no-op.
     wmp_move_gen_add_anchors(&gen->wmp_move_gen, gen->current_row_index, col,
                              gen->last_anchor_col, gen->dir,
                              gen->target_equity_cutoff, &gen->anchor_heap);
