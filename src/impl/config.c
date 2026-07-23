@@ -3362,6 +3362,15 @@ void config_peg(Config *config, ErrorStack *error_stack) {
         config_parse_peg_move_list(config, config->peg_only_str, &only_moves,
                                    &peg_args.n_only_moves, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      // The -pegonly setting is sticky for the whole session, so a move set
+      // for an earlier position surfaces here as a bare validation error;
+      // name the culprit and the remedy.
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_MOVE_LIST,
+          get_formatted_string(
+              "could not validate the -pegonly move list '%s' against the "
+              "current position (use 'set -pegonly -' to clear it)",
+              config->peg_only_str));
       return;
     }
     peg_args.only_moves = only_moves;
@@ -3376,6 +3385,12 @@ void config_peg(Config *config, ErrorStack *error_stack) {
         config, config->peg_noprune_str, &protect_moves,
         &peg_args.n_protect_moves, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_PEG_INVALID_MOVE_LIST,
+          get_formatted_string(
+              "could not validate the -pegnoprune move list '%s' against the "
+              "current position (use 'set -pegnoprune -' to clear it)",
+              config->peg_noprune_str));
       free(only_moves);
       validated_moves_destroy(only_vms);
       return;
