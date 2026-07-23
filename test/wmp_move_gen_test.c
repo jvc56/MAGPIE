@@ -4,6 +4,7 @@
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"
+#include "../src/ent/anchor.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
@@ -24,6 +25,56 @@ void test_wmp_move_gen_inactive(void) {
   // No wmp -> wmp_move_gen unactive and not used by move_gen
   wmp_move_gen_init(&wmg, /*ld=*/NULL, /*rack=*/NULL, /*wmp=*/NULL);
   assert(!wmp_move_gen_is_active(&wmg));
+}
+
+void test_sparse_anchor_slot_order_and_reset(void) {
+  WMPMoveGen wmg = {0};
+  WMP fake_wmp = {0};
+  fake_wmp.board_dim = BOARD_DIM;
+  wmg.wmp = &fake_wmp;
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    wmg.anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+    wmg.anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+    wmg.anchors[i].leftmost_start_col = BOARD_DIM - 1;
+  }
+
+  // Touch slots in descending mask-word/slot order. Emission must retain the
+  // old full-array scan's ascending order, including for super boards where
+  // the final slot is in a second mask word.
+  wmg.playthrough_blocks = MAX_POSSIBLE_PLAYTHROUGH_BLOCKS - 1;
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE, BOARD_DIM, 3,
+                                   int_to_equity(30), int_to_equity(31));
+  wmg.playthrough_blocks = 1;
+  wmp_move_gen_maybe_update_anchor(&wmg, 1, 2, 2, int_to_equity(20),
+                                   int_to_equity(21));
+  wmg.playthrough_blocks = 0;
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE, RACK_SIZE, 1,
+                                   int_to_equity(10), int_to_equity(11));
+
+  AnchorHeap anchor_heap = {0};
+  wmp_move_gen_add_anchors(&wmg, /*row=*/0, /*col=*/0,
+                           /*last_anchor_col=*/0,
+                           /*dir=*/BOARD_HORIZONTAL_DIRECTION,
+                           /*inference_cutoff_equity=*/EQUITY_MAX_VALUE,
+                           &anchor_heap);
+  assert(anchor_heap.count == 3);
+  assert(anchor_heap.anchors[0].playthrough_blocks == 0);
+  assert(anchor_heap.anchors[1].playthrough_blocks == 1);
+  assert(anchor_heap.anchors[2].playthrough_blocks ==
+         MAX_POSSIBLE_PLAYTHROUGH_BLOCKS - 1);
+
+  wmp_move_gen_reset_anchors(&wmg);
+  for (int i = 0; i < WMP_ANCHOR_MASK_WORDS; i++) {
+    assert(wmg.touched_anchor_masks[i] == 0);
+  }
+  for (int i = 0; i < anchor_heap.count; i++) {
+    const Anchor *emitted = &anchor_heap.anchors[i];
+    const Anchor *reset = wmp_move_gen_get_anchor(
+        &wmg, emitted->playthrough_blocks, emitted->tiles_to_play);
+    assert(reset->tiles_to_play == 0);
+    assert(reset->highest_possible_equity == EQUITY_MIN_VALUE);
+    assert(reset->highest_possible_score == EQUITY_MIN_VALUE);
+  }
 }
 
 // Set empty leave to 0.0, all one-tile leaves to +1.0, two-tile leaves to +2.0,
@@ -307,6 +358,7 @@ void test_playthrough_bingo_existence(void) {
 
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
+  test_sparse_anchor_slot_order_and_reset();
   test_nonplaythrough_subrack_enumeration();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
