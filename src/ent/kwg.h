@@ -73,10 +73,12 @@ static inline uint32_t kwg_get_next_node_index(const KWG *kwg,
   uint32_t i = node_index;
   while (1) {
     const uint32_t node = kwg_node(kwg, i);
-    if (kwg_node_tile(node) == letter) {
+    const MachineLetter node_tile = kwg_node_tile(node);
+    if (node_tile == letter) {
       return kwg_node_arc_index_prefetch(node, kwg);
     }
-    if (kwg_node_is_end(node)) {
+    // Serialized sibling lists are alphabetically ordered.
+    if (node_tile > letter || kwg_node_is_end(node)) {
       return 0;
     }
     i++;

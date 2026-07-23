@@ -1031,12 +1031,15 @@ void recursive_gen(MoveGen *gen, int col, uint32_t node_index, int leftstrip,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_node_is_end(node)) {
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
         break;
       }
     }
@@ -1205,6 +1208,14 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
                                Equity main_word_score, int word_multiplier,
                                Equity cross_score);
 
+// Score-free traversal used by MOVE_RECORD_TILES_PLAYED. It only needs to
+// discover which rack tile types occur in at least one legal move, so it does
+// not build a strip or carry scoring state.
+static inline void go_on_tiles_played(MoveGen *gen, int current_col,
+                                      uint32_t new_node_index, bool accepts,
+                                      int tiles_played,
+                                      uint64_t played_tiles_bv);
+
 // Specialized recursive_gen for MOVE_RECORD_ALL_SMALL that skips leave_map
 // operations. Only tracks rack state directly.
 static inline void recursive_gen_small(MoveGen *gen, int col,
@@ -1224,12 +1235,15 @@ static inline void recursive_gen_small(MoveGen *gen, int col,
     bool accepts = false;
     for (uint32_t i = node_index;; i++) {
       const uint32_t node = kwg_node(gen->kwg, i);
-      if (kwg_node_tile(node) == raw) {
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
         next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
         accepts = kwg_node_accepts(node);
         break;
       }
-      if (kwg_node_is_end(node)) {
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
         break;
       }
     }
@@ -1384,6 +1398,153 @@ static inline void go_on_small(MoveGen *gen, int current_col, MachineLetter L,
                           rightstrip, unique_play, inc_main_word_score,
                           inc_word_multiplier, inc_cross_scores);
     }
+  }
+}
+
+static inline void record_tiles_played(MoveGen *gen, uint64_t played_tiles_bv) {
+  gen->tiles_played_bv |= played_tiles_bv;
+  if ((gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv) {
+    gen->threshold_exceeded = true;
+  }
+}
+
+static inline void recursive_gen_tiles_played(MoveGen *gen, int col,
+                                              uint32_t node_index,
+                                              int tiles_played,
+                                              uint64_t played_tiles_bv) {
+  if (gen->threshold_exceeded) {
+    return;
+  }
+
+  const Square *sq = &gen->row_squares[col];
+  const MachineLetter current_letter = square_get_letter(sq);
+  if (current_letter != ALPHABET_EMPTY_SQUARE_MARKER) {
+    const MachineLetter raw = get_unblanked_machine_letter(current_letter);
+    uint32_t next_node_index = 0;
+    bool accepts = false;
+    for (uint32_t i = node_index;; i++) {
+      const uint32_t node = kwg_node(gen->kwg, i);
+      const MachineLetter node_tile = kwg_node_tile(node);
+      if (node_tile == raw) {
+        next_node_index = kwg_node_arc_index_prefetch(node, gen->kwg);
+        accepts = kwg_node_accepts(node);
+        break;
+      }
+      // KWG sibling lists are alphabetically ordered, so once this scan passes
+      // the fixed board letter it cannot appear later in the list.
+      if (node_tile > raw || kwg_node_is_end(node)) {
+        break;
+      }
+    }
+    go_on_tiles_played(gen, col, next_node_index, accepts, tiles_played,
+                       played_tiles_bv);
+    return;
+  }
+
+  // This specialized traversal restores every letter count before returning,
+  // so player_rack.number_of_letters can remain at its initial value. Compare
+  // against the by-value played count instead of mutating the redundant total
+  // on every recursive take/restore pair.
+  if (tiles_played == rack_get_total_letters(&gen->player_rack)) {
+    return;
+  }
+
+  uint64_t possible_letters_here =
+      square_get_cross_set(sq) & square_get_left_extension_set(sq);
+  if ((tiles_played == 0) && (col == gen->current_anchor_col + 1)) {
+    possible_letters_here &= gen->anchor_right_extension_set;
+  }
+  if (possible_letters_here == 1) {
+    possible_letters_here = 0;
+  }
+  if ((possible_letters_here & gen->rack_cross_set) == 0) {
+    return;
+  }
+
+  const uint16_t num_blanks =
+      rack_get_letter(&gen->player_rack, BLANK_MACHINE_LETTER);
+  for (uint32_t i = node_index;; i++) {
+    const uint32_t node = kwg_node(gen->kwg, i);
+    const MachineLetter ml = kwg_node_tile(node);
+    const uint16_t number_of_ml = rack_get_letter(&gen->player_rack, ml);
+    if (ml != 0 && (number_of_ml != 0 || num_blanks != 0) &&
+        board_is_letter_allowed_in_cross_set(possible_letters_here, ml)) {
+      const uint32_t next_node_index =
+          kwg_node_arc_index_prefetch(node, gen->kwg);
+      const bool accepts = kwg_node_accepts(node);
+      if (number_of_ml > 0) {
+        gen->player_rack.array[ml]--;
+        go_on_tiles_played(gen, col, next_node_index, accepts, tiles_played + 1,
+                           played_tiles_bv | ((uint64_t)1 << ml));
+        gen->player_rack.array[ml]++;
+      }
+      if (!gen->threshold_exceeded && num_blanks > 0) {
+        gen->player_rack.array[BLANK_MACHINE_LETTER]--;
+        go_on_tiles_played(gen, col, next_node_index, accepts, tiles_played + 1,
+                           played_tiles_bv | 1);
+        gen->player_rack.array[BLANK_MACHINE_LETTER]++;
+      }
+    }
+    if (kwg_node_is_end(node) || gen->threshold_exceeded) {
+      break;
+    }
+  }
+}
+
+static inline void go_on_tiles_played(MoveGen *gen, int current_col,
+                                      uint32_t new_node_index, bool accepts,
+                                      int tiles_played,
+                                      uint64_t played_tiles_bv) {
+  if (gen->threshold_exceeded) {
+    return;
+  }
+
+  if (current_col <= gen->current_anchor_col) {
+    const bool no_letter_directly_left =
+        (current_col == 0) || gen_cache_is_empty(gen, current_col - 1);
+    // The regular move recorder suppresses duplicate single-tile plays. The
+    // union of tile types is unchanged by duplicates, so only non-emptiness
+    // matters here.
+    if (accepts && no_letter_directly_left && tiles_played > 0) {
+      record_tiles_played(gen, played_tiles_bv);
+      if (gen->threshold_exceeded) {
+        return;
+      }
+    }
+    if (new_node_index == 0) {
+      return;
+    }
+    if (current_col > 0 && current_col - 1 != gen->last_anchor_col) {
+      recursive_gen_tiles_played(gen, current_col - 1, new_node_index,
+                                 tiles_played, played_tiles_bv);
+    }
+    if (!gen->threshold_exceeded &&
+        (tiles_played != 0 ||
+         (gen->anchor_right_extension_set & gen->rack_cross_set) != 0)) {
+      const uint32_t separation_node_index = kwg_get_next_node_index(
+          gen->kwg, new_node_index, SEPARATION_MACHINE_LETTER);
+      if (separation_node_index != 0 && no_letter_directly_left &&
+          gen->current_anchor_col < BOARD_DIM - 1) {
+        recursive_gen_tiles_played(gen, gen->current_anchor_col + 1,
+                                   separation_node_index, tiles_played,
+                                   played_tiles_bv);
+      }
+    }
+    return;
+  }
+
+  const bool no_letter_directly_right =
+      (current_col == BOARD_DIM - 1) ||
+      gen_cache_is_empty(gen, current_col + 1);
+  if (accepts && no_letter_directly_right && tiles_played > 0) {
+    record_tiles_played(gen, played_tiles_bv);
+    if (gen->threshold_exceeded) {
+      return;
+    }
+  }
+  if (new_node_index != 0 && current_col < BOARD_DIM - 1) {
+    recursive_gen_tiles_played(gen, current_col + 1, new_node_index,
+                               tiles_played, played_tiles_bv);
   }
 }
 
@@ -3217,6 +3378,41 @@ void gen_record_scoring_plays_small(MoveGen *gen) {
   }
 }
 
+static void gen_record_tiles_played(MoveGen *gen) {
+  const uint32_t kwg_root_node_index = kwg_get_root_node_index(gen->kwg);
+
+  for (int dir = 0; dir < 2; dir++) {
+    gen->dir = dir;
+    for (int row = 0; row < BOARD_DIM; row++) {
+      if (gen->threshold_exceeded) {
+        return;
+      }
+      if (gen->row_number_of_anchors_cache[BOARD_DIM * dir + row] == 0) {
+        continue;
+      }
+      gen->row_squares = board_get_row_cache(gen->board_lanes, row, dir);
+
+      int last_anchor_col = INITIAL_LAST_ANCHOR_COL;
+      for (int col = 0; col < BOARD_DIM; col++) {
+        if (gen_cache_get_is_anchor(gen, col)) {
+          gen->current_anchor_col = col;
+          gen->last_anchor_col = last_anchor_col;
+          gen->anchor_right_extension_set =
+              gen_cache_get_right_extension_set(gen, col);
+          recursive_gen_tiles_played(gen, col, kwg_root_node_index, 0, 0);
+          last_anchor_col = col;
+          if (!gen_cache_is_empty(gen, col)) {
+            last_anchor_col++;
+          }
+          if (gen->threshold_exceeded) {
+            return;
+          }
+        }
+      }
+    }
+  }
+}
+
 void gen_record_scoring_plays(MoveGen *gen) {
   if (gen->threshold_exceeded) {
     return;
@@ -3320,32 +3516,29 @@ void gen_record_pass(MoveGen *gen) {
 void generate_moves(const MoveGenArgs *args) {
   MoveGen *gen = get_movegen();
   gen_load_position(gen, args);
-  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL ||
-      gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-    if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-      gen->tiles_played_bv = args->initial_tiles_bv;
-      gen->stop_on_threshold = true;
-      // Build target bitvector from the rack
-      gen->target_tiles_bv = 0;
-      const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
-      for (uint16_t ml = 0; ml < dist_size; ml++) {
-        if (rack_get_letter(&gen->player_rack, ml) > 0) {
-          gen->target_tiles_bv |= ((uint64_t)1 << ml);
-        }
+  if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
+    gen->tiles_played_bv = args->initial_tiles_bv;
+    gen->stop_on_threshold = true;
+    // Build target bitvector from the rack
+    gen->target_tiles_bv = 0;
+    const uint16_t dist_size = rack_get_dist_size(&gen->player_rack);
+    for (uint16_t ml = 0; ml < dist_size; ml++) {
+      if (rack_get_letter(&gen->player_rack, ml) > 0) {
+        gen->target_tiles_bv |= ((uint64_t)1 << ml);
       }
-      gen->threshold_exceeded =
-          (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
     }
+    gen->threshold_exceeded =
+        (gen->tiles_played_bv & gen->target_tiles_bv) == gen->target_tiles_bv;
     if (!gen->threshold_exceeded) {
-      gen_record_scoring_plays_small(gen);
+      gen_record_tiles_played(gen);
     }
-    if (gen->move_record_type == MOVE_RECORD_TILES_PLAYED) {
-      // Write the bitvector to the caller's output pointer
-      if (args->tiles_played_bv) {
-        *args->tiles_played_bv = gen->tiles_played_bv;
-      }
-      return; // No pass recording needed
+    if (args->tiles_played_bv) {
+      *args->tiles_played_bv = gen->tiles_played_bv;
     }
+    return; // No pass recording needed
+  }
+  if (gen->move_record_type == MOVE_RECORD_ALL_SMALL) {
+    gen_record_scoring_plays_small(gen);
   } else if (gen->move_record_type == MOVE_RECORD_BEST_SMALL) {
     // BEST_SMALL uses small shadow and small recursive_gen paths that skip
     // leave_map, WMP, and wordsmog operations entirely.

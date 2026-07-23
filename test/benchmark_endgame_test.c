@@ -4,6 +4,7 @@
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bag.h"
@@ -474,6 +475,185 @@ void test_benchmark_nonstuck(void) {
 void test_benchmark_nonstuck_3v3(void) {
   log_set_level(LOG_FATAL);
   run_ab_benchmark("/tmp/nonstuck_cgps.txt", "nonstuck", 3, 3, 500);
+}
+
+static int env_int(const char *name, int fallback);
+
+static uint64_t tiles_bv_from_small_moves(const MoveList *move_list) {
+  uint64_t tiles_bv = 0;
+  for (int move_idx = 0; move_idx < move_list->count; move_idx++) {
+    const SmallMove *move = move_list->small_moves[move_idx];
+    for (int tile_idx = 0; tile_idx < small_move_get_tiles_played(move);
+         tile_idx++) {
+      const uint64_t tiny_move = move->tiny_move;
+      const bool is_blank = (tiny_move & ((uint64_t)1 << (12 + tile_idx))) != 0;
+      const MachineLetter ml =
+          (tiny_move >> (20 + 6 * tile_idx)) & (MachineLetter)63;
+      tiles_bv |= is_blank ? 1 : ((uint64_t)1 << ml);
+    }
+  }
+  return tiles_bv;
+}
+
+static uint64_t tiles_bv_from_rack(const Rack *rack) {
+  uint64_t tiles_bv = 0;
+  const uint16_t dist_size = rack_get_dist_size(rack);
+  for (uint16_t ml = 0; ml < dist_size; ml++) {
+    if (rack_get_letter(rack, ml) > 0) {
+      tiles_bv |= (uint64_t)1 << ml;
+    }
+  }
+  return tiles_bv;
+}
+
+// Isolated MOVE_RECORD_TILES_PLAYED benchmark. This deliberately excludes CGP
+// loading from the timed region and invokes both players so it measures only
+// the move-generation mode used by endgame stuck-tile detection. Every input
+// position is independently verified to have at least one stuck rack before
+// any timed rounds run.
+//
+// Environment:
+//   MAGPIE_TP_CGP      CGP file (default /tmp/stuck_hard_endgame_cgps.txt)
+//   MAGPIE_TP_MAX      positions (default 64)
+//   MAGPIE_TP_REPEATS  calls per player/position/round (default 50)
+//   MAGPIE_TP_ROUNDS   rounds (default 9)
+void test_tiles_played_bench(void) {
+  log_set_level(LOG_FATAL);
+
+  const char *cgp_file = getenv("MAGPIE_TP_CGP");
+  if (cgp_file == NULL || cgp_file[0] == '\0') {
+    cgp_file = "/tmp/stuck_hard_endgame_cgps.txt";
+  }
+  const int max_positions = env_int("MAGPIE_TP_MAX", 64);
+  const int repeats = env_int("MAGPIE_TP_REPEATS", 50);
+  const int rounds = env_int("MAGPIE_TP_ROUNDS", 9);
+
+  FILE *fp = fopen(cgp_file, "re");
+  if (!fp) {
+    printf("TPBENCHERR no CGP file at %s; run genstuck first\n", cgp_file);
+    return;
+  }
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (cgp_lines[num_cgps][0] != '\0') {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  Config *config =
+      config_create_or_die("set -lex CSW21 -threads 1 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  MoveList *move_list = move_list_create_small(1);
+  MoveList *reference_moves = move_list_create_small(250000);
+
+  // Compare against the union of rack tiles in every ALL_SMALL move. This is
+  // slower than the production mode but provides an independent correctness
+  // oracle for every player/position in the benchmark battery.
+  int comparisons = 0;
+  for (int ci = 0; ci < num_cgps; ci++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[ci], err);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    const int saved_on_turn = game_get_player_on_turn_index(game);
+    bool position_has_stuck_rack = false;
+    for (int player_idx = 0; player_idx < 2; player_idx++) {
+      game_set_player_on_turn_index(game, player_idx);
+      const MoveGenArgs reference_args = {
+          .game = game,
+          .move_list = reference_moves,
+          .move_record_type = MOVE_RECORD_ALL_SMALL,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      };
+      generate_moves(&reference_args);
+      const uint64_t reference_bv = tiles_bv_from_small_moves(reference_moves);
+      const Rack *rack = player_get_rack(game_get_player(game, player_idx));
+      const uint64_t rack_bv = tiles_bv_from_rack(rack);
+      if ((reference_bv & rack_bv) != rack_bv) {
+        position_has_stuck_rack = true;
+      }
+
+      const uint64_t initial_bv = reference_bv & UINT64_C(0xAAAAAAAAAAAAAAAA);
+      uint64_t actual_bv = 0;
+      const MoveGenArgs actual_args = {
+          .game = game,
+          .move_list = move_list,
+          .move_record_type = MOVE_RECORD_TILES_PLAYED,
+          .move_sort_type = MOVE_SORT_SCORE,
+          .override_kwg = NULL,
+          .eq_margin_movegen = 0,
+          .target_equity = EQUITY_MAX_VALUE,
+          .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+          .tiles_played_bv = &actual_bv,
+          .initial_tiles_bv = initial_bv,
+      };
+      generate_moves(&actual_args);
+      assert(actual_bv == (initial_bv | reference_bv));
+      comparisons++;
+    }
+    assert(position_has_stuck_rack);
+    game_set_player_on_turn_index(game, saved_on_turn);
+  }
+  printf("TPBENCH verified_stuck_positions=%d correctness=%d\n", num_cgps,
+         comparisons);
+
+  for (int round = 0; round < rounds; round++) {
+    double total_time = 0.0;
+    uint64_t checksum = 0;
+    int calls = 0;
+    for (int ci = 0; ci < num_cgps; ci++) {
+      ErrorStack *err = error_stack_create();
+      game_load_cgp(game, cgp_lines[ci], err);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+      const int saved_on_turn = game_get_player_on_turn_index(game);
+      for (int player_idx = 0; player_idx < 2; player_idx++) {
+        game_set_player_on_turn_index(game, player_idx);
+        for (int repeat = 0; repeat < repeats; repeat++) {
+          uint64_t tiles_bv = 0;
+          const MoveGenArgs args = {
+              .game = game,
+              .move_list = move_list,
+              .move_record_type = MOVE_RECORD_TILES_PLAYED,
+              .move_sort_type = MOVE_SORT_SCORE,
+              .override_kwg = NULL,
+              .eq_margin_movegen = 0,
+              .target_equity = EQUITY_MAX_VALUE,
+              .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+              .tiles_played_bv = &tiles_bv,
+          };
+          Timer timer;
+          ctimer_start(&timer);
+          generate_moves(&args);
+          total_time += ctimer_elapsed_seconds(&timer);
+          checksum += tiles_bv;
+          calls++;
+        }
+      }
+      game_set_player_on_turn_index(game, saved_on_turn);
+    }
+    printf("TPBENCH round=%d positions=%d calls=%d time=%.6f checksum=%llu\n",
+           round + 1, num_cgps, calls, total_time,
+           (unsigned long long)checksum);
+    (void)fflush(stdout);
+  }
+
+  small_move_list_destroy(move_list);
+  small_move_list_destroy(reference_moves);
+  config_destroy(config);
+  free(cgp_lines);
 }
 
 // ---------------------------------------------------------------------------
