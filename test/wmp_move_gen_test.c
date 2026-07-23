@@ -23,7 +23,8 @@ void test_wmp_move_gen_inactive(void) {
   WMPMoveGen wmg;
   // Only wmp is checked by wmp_move_gen_is_active
   // No wmp -> wmp_move_gen unactive and not used by move_gen
-  wmp_move_gen_init(&wmg, /*ld=*/NULL, /*rack=*/NULL, /*wmp=*/NULL);
+  wmp_move_gen_init(&wmg, /*ld=*/NULL, /*rack=*/NULL, /*wmp=*/NULL,
+                    /*anchor_slots_initialized=*/NULL);
   assert(!wmp_move_gen_is_active(&wmg));
 }
 
@@ -77,6 +78,63 @@ void test_sparse_anchor_slot_order_and_reset(void) {
   }
 }
 
+void test_anchor_slot_initialization_lifecycle(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Rack *rack = player_get_rack(player);
+  const WMP *wmp = player_get_wmp(player);
+
+  WMPMoveGen wmg;
+  bool anchor_slots_initialized = false;
+
+  // An inactive first call must not claim to have seeded the slots.
+  wmp_move_gen_init(&wmg, ld, rack, /*wmp=*/NULL, &anchor_slots_initialized);
+  assert(!anchor_slots_initialized);
+
+  wmp_move_gen_init(&wmg, ld, rack, wmp, &anchor_slots_initialized);
+  assert(anchor_slots_initialized);
+  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+    assert(wmg.anchors[i].highest_possible_equity == EQUITY_MIN_VALUE);
+    assert(wmg.anchors[i].highest_possible_score == EQUITY_MIN_VALUE);
+    assert(wmg.anchors[i].rightmost_start_col == 0);
+    assert(wmg.anchors[i].leftmost_start_col == BOARD_DIM - 1);
+    assert(wmg.anchors[i].tiles_to_play == 0);
+  }
+
+  // Touch the final slot. This occupies a second mask word in BOARD_DIM=21
+  // builds and verifies that reinitialization resets every tracker word.
+  wmg.playthrough_blocks = MAX_POSSIBLE_PLAYTHROUGH_BLOCKS - 1;
+  wmp_move_gen_maybe_update_anchor(&wmg, RACK_SIZE, BOARD_DIM, BOARD_DIM - 1,
+                                   int_to_equity(-10), int_to_equity(-9));
+  const int final_slot = MAX_WMP_MOVE_GEN_ANCHORS - 1;
+  assert((wmg.touched_anchor_masks[final_slot / 64] &
+          (1ULL << (final_slot % 64))) != 0);
+
+  // Disabling WMP leaves the tracker intact. The next active initialization
+  // must consume it before any mask is cleared.
+  wmp_move_gen_init(&wmg, ld, rack, /*wmp=*/NULL, &anchor_slots_initialized);
+  assert(!wmp_move_gen_is_active(&wmg));
+  assert((wmg.touched_anchor_masks[final_slot / 64] &
+          (1ULL << (final_slot % 64))) != 0);
+
+  wmp_move_gen_init(&wmg, ld, rack, wmp, &anchor_slots_initialized);
+  assert(wmp_move_gen_is_active(&wmg));
+  for (int i = 0; i < WMP_ANCHOR_MASK_WORDS; i++) {
+    assert(wmg.touched_anchor_masks[i] == 0);
+  }
+  const Anchor *reset = &wmg.anchors[final_slot];
+  assert(reset->highest_possible_equity == EQUITY_MIN_VALUE);
+  assert(reset->highest_possible_score == EQUITY_MIN_VALUE);
+  assert(reset->rightmost_start_col == 0);
+  assert(reset->leftmost_start_col == BOARD_DIM - 1);
+  assert(reset->tiles_to_play == 0);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 // Set empty leave to 0.0, all one-tile leaves to +1.0, two-tile leaves to +2.0,
 // etc.
 void set_dummy_leave_values(LeaveMap *leave_map) {
@@ -101,7 +159,8 @@ static void assert_nonplaythrough_subrack_enumeration(
   assert(rack_size <= RACK_SIZE);
 
   WMPMoveGen wmg;
-  wmp_move_gen_init(&wmg, ld, rack, wmp);
+  wmp_move_gen_init(&wmg, ld, rack, wmp,
+                    /*anchor_slots_initialized=*/NULL);
   for (int size = 0; size <= RACK_SIZE; size++) {
     wmg.count_by_size[size] = 0;
   }
@@ -234,7 +293,8 @@ void test_nonplaythrough_existence(void) {
   leave_map_init(rack, &leave_map);
   leave_map_set_current_index(&leave_map, 0);
 
-  wmp_move_gen_init(&wmg, ld, rack, wmp);
+  wmp_move_gen_init(&wmg, ld, rack, wmp,
+                    /*anchor_slots_initialized=*/NULL);
   wmp_move_gen_reset_playthrough(&wmg);
   assert(wmp_move_gen_is_active(&wmg));
   assert(!wmp_move_gen_has_playthrough(&wmg));
@@ -305,7 +365,8 @@ void test_playthrough_bingo_existence(void) {
   leave_map_init(rack, &leave_map);
   leave_map_set_current_index(&leave_map, 0);
 
-  wmp_move_gen_init(&wmg, ld, rack, wmp);
+  wmp_move_gen_init(&wmg, ld, rack, wmp,
+                    /*anchor_slots_initialized=*/NULL);
   wmp_move_gen_reset_playthrough(&wmg);
   assert(wmp_move_gen_is_active(&wmg));
   assert(!wmp_move_gen_has_playthrough(&wmg));
@@ -359,6 +420,7 @@ void test_playthrough_bingo_existence(void) {
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
   test_sparse_anchor_slot_order_and_reset();
+  test_anchor_slot_initialization_lifecycle();
   test_nonplaythrough_subrack_enumeration();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();

@@ -3212,7 +3212,8 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
                             gen->move_record_type == MOVE_RECORD_TILES_PLAYED ||
                             override_kwg != NULL || !gen->bit_rack_compatible;
   wmp_move_gen_init(&gen->wmp_move_gen, &gen->ld, &gen->player_rack,
-                    wmp_disabled ? NULL : player_get_wmp(player));
+                    wmp_disabled ? NULL : player_get_wmp(player),
+                    &gen->wmp_anchor_slots_initialized);
   // The subrack cache holds wmp_entry pointers derived from the WMP; a WMP
   // swap (different lexicon) makes those stale -- and "stale" means dangling,
   // since the old WMP's Config may have been freed. Invalidate on a WMP
