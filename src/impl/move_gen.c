@@ -669,6 +669,36 @@ static inline Equity get_move_equity_for_sort_type_wmp(MoveGen *gen,
 #endif
 }
 
+// On a nonempty board, static equity depends only on the score, leave, racks,
+// and number of tiles played. Compute it before writing a full Move so bounded
+// record modes can discard a losing candidate without copying its strip.
+// Opening placement penalties inspect the Move and use the regular path
+// instead.
+static inline bool get_wmp_equity_without_move(const MoveGen *gen, Equity score,
+                                               Equity leave_value,
+                                               Equity *equity) {
+  switch (gen->move_sort_type) {
+  case MOVE_SORT_SCORE:
+    *equity = score;
+    return true;
+  case MOVE_SORT_EQUITY:
+    if (gen->board_number_of_tiles_played == 0) {
+      return false;
+    }
+    *equity = static_eval_get_nonopening_move_equity(
+        &gen->ld, &gen->leave, &gen->opponent_rack, gen->max_tiles_to_play,
+        gen->number_of_tiles_in_bag, score, leave_value);
+    return true;
+  default:
+    log_fatal("unhandled move sort type: %d", gen->move_sort_type);
+  }
+#if defined(__has_builtin) && __has_builtin(__builtin_unreachable)
+  __builtin_unreachable();
+#else
+  return false;
+#endif
+}
+
 static inline void
 update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
                                              Equity score, Equity leave_value) {
@@ -677,10 +707,28 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
   switch (gen->move_record_type) {
   case MOVE_RECORD_ALL:
   case MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST: {
+    Equity precomputed_equity = 0;
+    const bool has_precomputed_equity = get_wmp_equity_without_move(
+        gen, score, leave_value, &precomputed_equity);
+    if (has_precomputed_equity && !gen->stop_on_threshold) {
+      if (gen->move_record_type == MOVE_RECORD_ALL &&
+          move_list_get_count(gen->move_list) ==
+              move_list_get_capacity(gen->move_list) &&
+          precomputed_equity < move_list_peek_equity(gen->move_list)) {
+        return;
+      }
+      if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST &&
+          gen->best_move_equity_or_score != EQUITY_INITIAL_VALUE &&
+          precomputed_equity < gen_get_cutoff_equity_or_score(gen)) {
+        return;
+      }
+    }
     Move *move = move_list_get_spare_move(gen->move_list);
     set_play_for_record_wmp(gen, move, start_col, score);
     move_equity_or_score =
-        get_move_equity_for_sort_type_wmp(gen, move, leave_value);
+        has_precomputed_equity
+            ? precomputed_equity
+            : get_move_equity_for_sort_type_wmp(gen, move, leave_value);
     if (gen->move_record_type == MOVE_RECORD_WITHIN_X_EQUITY_OF_BEST) {
       // This updates the cutoff move internally so no update will be pending
       // afterward.
@@ -691,10 +739,19 @@ update_best_move_or_insert_into_movelist_wmp(MoveGen *gen, int start_col,
     break;
   }
   case MOVE_RECORD_BEST: {
+    Equity precomputed_equity = 0;
+    const bool has_precomputed_equity = get_wmp_equity_without_move(
+        gen, score, leave_value, &precomputed_equity);
+    if (has_precomputed_equity &&
+        precomputed_equity < move_get_equity(gen_get_readonly_best_move(gen))) {
+      return;
+    }
     Move *current_move = gen_get_current_move(gen);
     set_play_for_record_wmp(gen, current_move, start_col, score);
     move_equity_or_score =
-        get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
+        has_precomputed_equity
+            ? precomputed_equity
+            : get_move_equity_for_sort_type_wmp(gen, current_move, leave_value);
     move_set_equity(current_move, move_equity_or_score);
     if (compare_moves(current_move, gen_get_readonly_best_move(gen), false)) {
       need_to_update_best_move_equity_or_score = true;
