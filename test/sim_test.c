@@ -251,16 +251,8 @@ void test_all_plays_are_similar(void) {
   config_destroy(config);
 }
 
-void test_sim_round_robin_consistency(void) {
-  Config *config =
-      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
-                           "all -r2 all -numplays 3 -plies "
-                           "2 -threads 1 -iter 52 -scond none -sr rr");
-  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
-  load_and_exec_config_or_die(config, "rack AEIQRST");
-  load_and_exec_config_or_die(config, "gen");
-
-  uint64_t seed = ctime_get_current_time();
+static void assert_sim_thread_counts_are_bit_identical(Config *config,
+                                                       uint64_t seed) {
   SimResults *sim_results_single_threaded = config_get_sim_results(config);
   SimResults *sim_results_multithreaded =
       sim_results_create(convert_user_cutoff_to_cutoff(0.005));
@@ -281,16 +273,44 @@ void test_sim_round_robin_consistency(void) {
     error_code_t status =
         config_simulate_and_return_status(config, NULL, NULL, sim_results);
     assert(status == ERROR_STATUS_SUCCESS);
-    assert(bai_result_get_status(
-               sim_results_get_bai_result(config_get_sim_results(config))) ==
+    assert(bai_result_get_status(sim_results_get_bai_result(sim_results)) ==
            BAI_RESULT_STATUS_SAMPLE_LIMIT);
 
     if (i != 0) {
       assert_sim_results_equal(sim_results_single_threaded, sim_results);
+      assert_sim_results_bit_identical(sim_results_single_threaded,
+                                       sim_results);
     }
   }
 
   sim_results_destroy(sim_results_multithreaded);
+}
+
+void test_sim_round_robin_consistency(void) {
+  Config *config =
+      config_create_or_die("set -lex NWL20 -wmp true -s1 score -s2 score -r1 "
+                           "all -r2 all -numplays 3 -plies "
+                           "2 -threads 1 -iter 52 -scond none -sr rr");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  assert_sim_thread_counts_are_bit_identical(config, 1768329572);
+  config_destroy(config);
+}
+
+void test_sim_exact_thread_consistency(void) {
+  test_sim_round_robin_consistency();
+
+  // Exercise heat maps, the zero-spread path that omits utility stats, and
+  // rollouts that terminate before the requested number of plies.
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -wmp true -s1 score -s2 score -r1 all -r2 all "
+      "-plies 25 -numplays 37 -threads 1 -minp 1 -iter 1000000 "
+      "-scond none -sr rr -useheatmap true -uspread 0");
+  load_and_exec_config_or_die(config, "cgp " VS_JEREMY_WITH_P2_RACK);
+  load_and_exec_config_or_die(config, "rack ??DDESW");
+  load_and_exec_config_or_die(config, "gen");
+  assert_sim_thread_counts_are_bit_identical(config, 1768329572);
   config_destroy(config);
 }
 

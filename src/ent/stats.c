@@ -93,6 +93,16 @@ double stat_get_margin_of_error(const Stat *stat, double zval) {
   return zval * stat_get_sem(stat);
 }
 
+bool stat_is_bit_identical(const Stat *a, const Stat *b) {
+  return a->num_unique_samples == b->num_unique_samples &&
+         a->num_samples == b->num_samples &&
+         memcmp(&a->mean, &b->mean, sizeof(a->mean)) == 0 &&
+         memcmp(&a->sum_of_mean_differences_squared,
+                &b->sum_of_mean_differences_squared,
+                sizeof(a->sum_of_mean_differences_squared)) == 0 &&
+         a->mean_is_estimated == b->mean_is_estimated;
+}
+
 void stats_combine(Stat **stats, int number_of_stats, Stat *combined_stat) {
   uint64_t combined_num_unique_samples = 0;
   uint64_t combined_num_samples = 0;

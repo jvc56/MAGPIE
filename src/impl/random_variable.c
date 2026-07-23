@@ -456,7 +456,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
   // This will shuffle the bag, so there is no need
   // to call bag_shuffle explicitly.
-  const uint64_t seed = simmed_play_get_seed(simmed_play);
+  uint64_t arm_sample_ordinal;
+  const uint64_t seed = simmed_play_get_seed(simmed_play, &arm_sample_ordinal);
   prng_seed(simmer_worker->prng, seed);
   game_seed(game, seed);
 
@@ -498,6 +499,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   game_set_backup_mode(game, BACKUP_MODE_OFF);
   // further plies will NOT be backed up.
   Rack spare_rack;
+  Move ply_moves[MAX_PLIES];
+  int num_completed_plies = 0;
   for (int ply = 0; ply < plies; ply++) {
     const int player_on_turn_index = game_get_player_on_turn_index(game);
     const Player *player_on_turn = game_get_player(game, player_on_turn_index);
@@ -527,22 +530,27 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
         leftover -= this_leftover;
       }
     }
-    simmed_play_add_stats_for_ply(simmed_play, ply, best_play);
+    move_copy(&ply_moves[num_completed_plies], best_play);
+    num_completed_plies++;
   }
 
   const Equity spread =
       player_get_score(game_get_player(game, simmer->initial_player)) -
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
-  simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
-                              leftover);
-  const double wpct = simmed_play_add_win_pct_stat(
-      simmer->win_pcts, simmed_play, spread, leftover,
-      game_get_game_end_reason(game),
+  const double wpct = simmed_play_calculate_win_pct(
+      simmer->win_pcts, spread, leftover, game_get_game_end_reason(game),
       // number of tiles unseen to us: bag tiles + tiles on opp rack.
       bag_get_letters(game_get_bag(game)) +
           rack_get_total_letters(player_get_rack(
               game_get_player(game, 1 - simmer->initial_player))),
       plies % 2);
+  const double utility =
+      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+                        simmer->utility_w_spread, simmer->utility_spread_scale);
+  simmed_play_commit_rollout_stats(
+      simmed_play, arm_sample_ordinal, num_completed_plies, ply_moves,
+      simmer->initial_spread, spread, leftover, wpct, utility,
+      simmer->utility_w_spread > 0.0);
   // reset to first state. we only need to restore one backup.
   game_unplay_last_move(game);
   return_rack_to_bag(game, player_off_turn_index);
@@ -555,17 +563,6 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   }
   sim_results_increment_iteration_count(sim_results);
 
-  const double utility =
-      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
-                        simmer->utility_w_spread, simmer->utility_spread_scale);
-  // With a zero spread weight, utility_stat is never read: BU is hidden from
-  // display (see show_bu in sim_string.c) and both the best-move choice and
-  // sort comparator fall back to win_pct_stat/equity_stat instead (see
-  // sim_results_get_best_move and compare_simmed_plays). Skip the extra
-  // mutex lock + stat_push on this hot path in that case.
-  if (simmer->utility_w_spread > 0.0) {
-    simmed_play_add_utility_stat(simmed_play, utility);
-  }
   return utility;
 }
 
@@ -648,7 +645,8 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->thread_control = thread_control;
 
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
-                    sim_args->seed, sim_args->use_heat_map);
+                    sim_args->seed, sim_args->use_heat_map,
+                    sim_args->num_threads);
   simmer->sim_results = sim_results;
 
   rvs->data = simmer;
@@ -698,8 +696,8 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
-                    sim_args->num_plies, sim_args->seed,
-                    sim_args->use_heat_map);
+                    sim_args->num_plies, sim_args->seed, sim_args->use_heat_map,
+                    sim_args->num_threads);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {

@@ -854,6 +854,10 @@ void assert_stats_are_equal(const Stat *s1, const Stat *s2) {
   assert(within_epsilon(stat_get_variance(s1), stat_get_variance(s2)));
 }
 
+void assert_stats_are_bit_identical(const Stat *s1, const Stat *s2) {
+  assert(stat_is_bit_identical(s1, s2));
+}
+
 void assert_moves_are_equal(const Move *m1, const Move *m2) {
   assert(move_get_type(m1) == move_get_type(m2));
   assert(move_get_row_start(m1) == move_get_row_start(m2));
@@ -904,6 +908,68 @@ void assert_sim_results_equal(const SimResults *sr1, const SimResults *sr2) {
     assert_simmed_plays_are_equal(sim_results_get_simmed_play(sr1, i),
                                   sim_results_get_simmed_play(sr2, i),
                                   sim_results_get_num_plies(sr1));
+  }
+}
+
+static void assert_heat_maps_equal(const HeatMap *hm1, const HeatMap *hm2) {
+  assert((hm1 == NULL) == (hm2 == NULL));
+  if (hm1 == NULL) {
+    return;
+  }
+  for (int type = 0; type < NUM_HEAT_MAP_TYPES; type++) {
+    assert(heat_map_get_board_count_max(hm1, (heat_map_t)type) ==
+           heat_map_get_board_count_max(hm2, (heat_map_t)type));
+    for (int row = 0; row < BOARD_DIM; row++) {
+      for (int col = 0; col < BOARD_DIM; col++) {
+        assert(heat_map_get_count(hm1, row, col, (heat_map_t)type) ==
+               heat_map_get_count(hm2, row, col, (heat_map_t)type));
+      }
+    }
+  }
+}
+
+void assert_sim_results_bit_identical(const SimResults *sr1,
+                                      const SimResults *sr2) {
+  assert(sim_results_get_num_plies(sr1) == sim_results_get_num_plies(sr2));
+  assert(sim_results_get_number_of_plays(sr1) ==
+         sim_results_get_number_of_plays(sr2));
+  assert(sim_results_get_iteration_count(sr1) ==
+         sim_results_get_iteration_count(sr2));
+  assert(sim_results_get_node_count(sr1) == sim_results_get_node_count(sr2));
+  assert(bai_result_get_best_arm(sim_results_get_bai_result(sr1)) ==
+         bai_result_get_best_arm(sim_results_get_bai_result(sr2)));
+  assert(bai_result_get_status(sim_results_get_bai_result(sr1)) ==
+         bai_result_get_status(sim_results_get_bai_result(sr2)));
+
+  const int num_plies = sim_results_get_num_plies(sr1);
+  for (int play = 0; play < sim_results_get_number_of_plays(sr1); play++) {
+    const SimmedPlay *sp1 = sim_results_get_simmed_play(sr1, play);
+    const SimmedPlay *sp2 = sim_results_get_simmed_play(sr2, play);
+    assert_moves_are_equal(simmed_play_get_move(sp1),
+                           simmed_play_get_move(sp2));
+    assert(simmed_play_get_play_index_by_sort_type(sp1) ==
+           simmed_play_get_play_index_by_sort_type(sp2));
+    for (int ply = 0; ply < num_plies; ply++) {
+      assert_stats_are_bit_identical(simmed_play_get_score_stat(sp1, ply),
+                                     simmed_play_get_score_stat(sp2, ply));
+      assert_stats_are_bit_identical(simmed_play_get_bingo_stat(sp1, ply),
+                                     simmed_play_get_bingo_stat(sp2, ply));
+      for (int count = 0; count < NUM_PLY_INFO_COUNT_TYPES; count++) {
+        assert(
+            simmed_play_get_ply_info_count(sp1, ply, (ply_info_count_t)count) ==
+            simmed_play_get_ply_info_count(sp2, ply, (ply_info_count_t)count));
+      }
+      assert_heat_maps_equal(simmed_play_get_heat_map_const(sp1, ply),
+                             simmed_play_get_heat_map_const(sp2, ply));
+    }
+    assert_stats_are_bit_identical(simmed_play_get_equity_stat(sp1),
+                                   simmed_play_get_equity_stat(sp2));
+    assert_stats_are_bit_identical(simmed_play_get_leftover_stat(sp1),
+                                   simmed_play_get_leftover_stat(sp2));
+    assert_stats_are_bit_identical(simmed_play_get_win_pct_stat(sp1),
+                                   simmed_play_get_win_pct_stat(sp2));
+    assert_stats_are_bit_identical(simmed_play_get_utility_stat(sp1),
+                                   simmed_play_get_utility_stat(sp2));
   }
 }
 
