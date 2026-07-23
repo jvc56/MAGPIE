@@ -1998,21 +1998,6 @@ static inline void shadow_record_small(MoveGen *gen) {
   }
 }
 
-static inline void insert_unrestricted_cross_word_multiplier(MoveGen *gen,
-                                                             uint8_t multiplier,
-                                                             int col) {
-  int insert_index = gen->num_unrestricted_multipliers;
-  for (; insert_index > 0 &&
-         gen->descending_cross_word_multipliers[insert_index - 1].multiplier <
-             multiplier;
-       insert_index--) {
-    gen->descending_cross_word_multipliers[insert_index] =
-        gen->descending_cross_word_multipliers[insert_index - 1];
-  }
-  gen->descending_cross_word_multipliers[insert_index].multiplier = multiplier;
-  gen->descending_cross_word_multipliers[insert_index].column = col;
-}
-
 static inline void
 insert_unrestricted_effective_letter_multiplier(MoveGen *gen,
                                                 uint8_t multiplier) {
@@ -2038,13 +2023,9 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
   const int original_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
   gen->num_unrestricted_multipliers = 0;
-  // We insert the columns with highest cross wordletter multipliers first
-  // so the list will mostly sort in the the order it is traversed,
-  // minimizing the number of swaps.
   for (int i = 0; i < original_num_unrestricted_multipliers; i++) {
-    const uint8_t xw_multiplier =
-        gen->descending_cross_word_multipliers[i].multiplier;
-    const uint8_t col = gen->descending_cross_word_multipliers[i].column;
+    const uint8_t xw_multiplier = gen->unrestricted_multipliers[i].multiplier;
+    const uint8_t col = gen->unrestricted_multipliers[i].column;
     const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier =
         bonus_square_get_letter_multiplier(bonus_square);
@@ -2067,8 +2048,13 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
       bonus_square_get_letter_multiplier(bonus_square);
   const uint8_t effective_cross_word_multiplier =
       letter_multiplier * this_word_multiplier * is_cross_word;
-  insert_unrestricted_cross_word_multiplier(
-      gen, effective_cross_word_multiplier, col);
+  // Cross-word multipliers only retain the information needed to rebuild the
+  // effective multipliers after the main-word multiplier changes. Their order
+  // has no effect on the resulting sorted effective-multiplier list, so append
+  // instead of maintaining a second sorted array in the shadow inner loop.
+  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].multiplier =
+      effective_cross_word_multiplier;
+  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].column = col;
   const uint8_t main_word_multiplier =
       gen->shadow_word_multiplier * letter_multiplier;
   insert_unrestricted_effective_letter_multiplier(
@@ -2230,7 +2216,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // they were before looking further left.
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  bool changed_any_restricted_multipliers = false;
+  bool changed_any_unrestricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
@@ -2296,15 +2282,16 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
           gen, possible_letters_here, letter_multiplier, this_word_multiplier,
           gen->current_right_col);
     } else {
-      if (!changed_any_restricted_multipliers) {
+      if (!changed_any_unrestricted_multipliers) {
         // First multiplier-array modification: save the arrays so they can
         // be restored on exit.
-        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-               sizeof(gen->descending_cross_word_multipliers));
+        memcpy(gen->unrestricted_multipliers_copy,
+               gen->unrestricted_multipliers,
+               sizeof(gen->unrestricted_multipliers));
         memcpy(gen->desc_eff_letter_muls_copy,
                gen->descending_effective_letter_multipliers,
                sizeof(gen->descending_effective_letter_multipliers));
-        changed_any_restricted_multipliers = true;
+        changed_any_unrestricted_multipliers = true;
       }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
     }
@@ -2381,10 +2368,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   }
 
   // Restore state for unrestricted squares
-  if (changed_any_restricted_multipliers) {
+  if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-           sizeof(gen->descending_cross_word_multipliers));
+    memcpy(gen->unrestricted_multipliers, gen->unrestricted_multipliers_copy,
+           sizeof(gen->unrestricted_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
            sizeof(gen->descending_effective_letter_multipliers));
@@ -2423,7 +2410,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
   bool restricted_any_tiles = false;
   const int orig_num_unrestricted_multipliers =
       gen->num_unrestricted_multipliers;
-  bool changed_any_restricted_multipliers = false;
+  bool changed_any_unrestricted_multipliers = false;
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
@@ -2481,14 +2468,15 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
           gen, possible_letters_here, letter_multiplier, this_word_multiplier,
           gen->current_right_col);
     } else {
-      if (!changed_any_restricted_multipliers) {
+      if (!changed_any_unrestricted_multipliers) {
         // First unrestricted insertion: snapshot the multiplier arrays.
-        memcpy(gen->desc_xw_muls_copy, gen->descending_cross_word_multipliers,
-               sizeof(gen->descending_cross_word_multipliers));
+        memcpy(gen->unrestricted_multipliers_copy,
+               gen->unrestricted_multipliers,
+               sizeof(gen->unrestricted_multipliers));
         memcpy(gen->desc_eff_letter_muls_copy,
                gen->descending_effective_letter_multipliers,
                sizeof(gen->descending_effective_letter_multipliers));
-        changed_any_restricted_multipliers = true;
+        changed_any_unrestricted_multipliers = true;
       }
       insert_unrestricted_multipliers(gen, gen->current_right_col);
     }
@@ -2522,10 +2510,10 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
            sizeof(gen->descending_tile_scores));
   }
 
-  if (changed_any_restricted_multipliers) {
+  if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->descending_cross_word_multipliers, gen->desc_xw_muls_copy,
-           sizeof(gen->descending_cross_word_multipliers));
+    memcpy(gen->unrestricted_multipliers, gen->unrestricted_multipliers_copy,
+           sizeof(gen->unrestricted_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
            sizeof(gen->descending_effective_letter_multipliers));

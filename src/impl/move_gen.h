@@ -153,20 +153,19 @@ typedef struct MoveGen {
   int current_left_col;
   int current_right_col;
 
-  // Used to insert "unrestricted" multipliers into a descending list for
-  // calculating the maximum score for an anchor. We don't know which tiles will
-  // go in which multipliers so we keep a sorted list. The inner product of
-  // those and the descending tile scores is the highest possible score of a
-  // permutation of tiles in those squares.
-  UnrestrictedMultiplier
-      descending_cross_word_multipliers[WORD_ALIGNING_RACK_SIZE];
+  // Used to calculate the maximum score for an anchor. We don't know which
+  // tiles will go in which unrestricted squares, so effective multipliers are
+  // kept in descending order. The cross-word components need no ordering; they
+  // are retained only to rebuild the effective list when the main-word
+  // multiplier changes.
+  UnrestrictedMultiplier unrestricted_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint8_t num_unrestricted_multipliers;
   uint8_t last_word_multiplier;
 
   // Used to reset the arrays after finishing shadow_play_right, which may have
   // rearranged the ordering of the multipliers used while shadowing left.
-  UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
+  UnrestrictedMultiplier unrestricted_multipliers_copy[WORD_ALIGNING_RACK_SIZE];
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
   // Since shadow does not have backtracking besides when switching from going
