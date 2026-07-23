@@ -1,6 +1,7 @@
 #include "move_gen.h"
 
 #include "../compat/cpthread.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
@@ -2023,8 +2024,7 @@ static inline void maybe_recalculate_effective_multipliers(MoveGen *gen) {
       gen->num_unrestricted_multipliers;
   gen->num_unrestricted_multipliers = 0;
   for (int i = 0; i < original_num_unrestricted_multipliers; i++) {
-    const uint8_t xw_multiplier =
-        gen->unrestricted_multipliers[i].multiplier;
+    const uint8_t xw_multiplier = gen->unrestricted_multipliers[i].multiplier;
     const uint8_t col = gen->unrestricted_multipliers[i].column;
     const BonusSquare bonus_square = gen_cache_get_bonus_square(gen, col);
     const uint8_t letter_multiplier =
@@ -2054,8 +2054,7 @@ static inline void insert_unrestricted_multipliers(MoveGen *gen, int col) {
   // instead of maintaining a second sorted array in the shadow inner loop.
   gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].multiplier =
       effective_cross_word_multiplier;
-  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].column =
-      col;
+  gen->unrestricted_multipliers[gen->num_unrestricted_multipliers].column = col;
   const uint8_t main_word_multiplier =
       gen->shadow_word_multiplier * letter_multiplier;
   insert_unrestricted_effective_letter_multiplier(
@@ -2371,8 +2370,7 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   // Restore state for unrestricted squares
   if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->unrestricted_multipliers,
-           gen->unrestricted_multipliers_copy,
+    memcpy(gen->unrestricted_multipliers, gen->unrestricted_multipliers_copy,
            sizeof(gen->unrestricted_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
@@ -2514,8 +2512,7 @@ static inline void shadow_play_right_small(MoveGen *gen, bool is_unique) {
 
   if (changed_any_unrestricted_multipliers) {
     gen->num_unrestricted_multipliers = orig_num_unrestricted_multipliers;
-    memcpy(gen->unrestricted_multipliers,
-           gen->unrestricted_multipliers_copy,
+    memcpy(gen->unrestricted_multipliers, gen->unrestricted_multipliers_copy,
            sizeof(gen->unrestricted_multipliers));
     memcpy(gen->descending_effective_letter_multipliers,
            gen->desc_eff_letter_muls_copy,
