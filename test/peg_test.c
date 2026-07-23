@@ -773,8 +773,8 @@ static void peg_test_interrupt_discarded_stage(int stage_idx, int cand_rank,
   (void)mean_spread;
   (void)scen_done;
   (void)reordered;
-  PegDiscardStageContext *context = user_data;
   if (stage_idx == 2 && cand_rank == 0) {
+    PegDiscardStageContext *context = user_data;
     context->interrupted_stage = stage_idx;
     thread_control_set_status(context->thread_control,
                               THREAD_CONTROL_STATUS_USER_INTERRUPT);
