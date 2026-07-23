@@ -2799,6 +2799,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       PegRankedCand *restaged =
           malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
       int done_count = eval_count;
+      // Keep this stage's captures separate until the stage is accepted. A
+      // stage with fewer than two completed candidates is rolled back to the
+      // preceding fidelity, so publishing its captures early would pair deeper
+      // outcomes with the restored shallower ranking.
+      PegCandOutcomes *stage_outcomes =
+          args->include_per_scenario
+              ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+              : NULL;
       if (args->poll != NULL) {
         // Live mode: evaluate one candidate at a time so each completion
         // updates the pollable leaderboard (for `sta`/`shpeg`) and so we can
@@ -2827,13 +2835,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           const int64_t cand_start_ns = ctimer_monotonic_ns();
           peg_poll_set_evaluating(args->poll, cand_idx, cand_start_ns);
           ctimer_start(&cand_timer);
-          PegCandOutcomes cand_oc;
           peg_eval_candidates_scenario(
               pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
               bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
               args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
-              args->include_per_scenario ? &cand_oc : NULL);
+              args->include_per_scenario ? &stage_outcomes[cand_idx] : NULL);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
           // If the deadline passed while this candidate was evaluating, some of
@@ -2841,14 +2848,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // rather than show or rank a partial result, and stop the stage.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
             if (args->include_per_scenario) {
-              free(cand_oc.rows);
+              free(stage_outcomes[cand_idx].rows);
             }
             break;
           }
           done_count = cand_idx + 1;
-          if (args->include_per_scenario) {
-            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap, &cand_oc);
-          }
           // Surface this finished candidate into the leaderboard, then stream
           // the updated ranking to the caller right away — every candidate's
           // result prints as soon as it finishes, so the deep stages fill in
@@ -2869,15 +2873,11 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // across all candidates at once — a halving stage has few candidates,
         // so pooling their scenarios keeps all cores busy with a single
         // barrier.
-        PegCandOutcomes *stage_oc =
-            args->include_per_scenario
-                ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
-                : NULL;
         peg_eval_candidates_scenario(
             pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
             bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
             stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged, stage_oc);
+            &progress, args->poll, restaged, stage_outcomes);
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.
@@ -2893,7 +2893,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         PegRankedCand *part_old =
             malloc_or_die((size_t)eval_count * sizeof(PegRankedCand));
         PegCandOutcomes *part_oc =
-            stage_oc != NULL
+            stage_outcomes != NULL
                 ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
                 : NULL;
         int placed = 0;
@@ -2907,7 +2907,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             part_new[placed] = restaged[cand_idx];
             part_old[placed] = ranked[cand_idx];
             if (part_oc != NULL) {
-              part_oc[placed] = stage_oc[cand_idx];
+              part_oc[placed] = stage_outcomes[cand_idx];
             }
             placed++;
           }
@@ -2919,20 +2919,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         memcpy(ranked, part_old, (size_t)eval_count * sizeof(PegRankedCand));
         free(part_new);
         free(part_old);
-        if (stage_oc != NULL) {
-          memcpy(stage_oc, part_oc,
+        if (stage_outcomes != NULL) {
+          memcpy(stage_outcomes, part_oc,
                  (size_t)eval_count * sizeof(PegCandOutcomes));
           free(part_oc);
-          // Publish only the fully-scored candidates' outcomes; discard the cut
-          // candidates' partial captures.
-          for (int cand_idx = 0; cand_idx < done_count; cand_idx++) {
-            peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap,
-                                      &stage_oc[cand_idx]);
-          }
+          // Discard the cut candidates' partial captures. The complete prefix
+          // remains stage-local until the shared acceptance check below.
           for (int cand_idx = done_count; cand_idx < eval_count; cand_idx++) {
-            free(stage_oc[cand_idx].rows);
+            free(stage_outcomes[cand_idx].rows);
           }
-          free(stage_oc);
         }
       }
       // Fewer than 2 finished: nothing to compare at this depth, so discard the
@@ -2941,12 +2936,21 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (done_count < 2) {
         n_graded = n_graded_before_stage;
         free(restaged);
+        peg_cand_outcomes_destroy_array(stage_outcomes, done_count);
         // This stage cleared the live poll at its start but contributed
         // nothing, so restore the previous stage's ranking (still in `ranked`)
         // instead of leaving the final snapshot empty.
         peg_poll_replace(args->poll, ranked, live_count, stage_idx - 1,
                          prev_fidelity, live_count);
         break;
+      }
+      if (stage_outcomes != NULL) {
+        for (int cand_idx = 0; cand_idx < done_count; cand_idx++) {
+          peg_outcomes_store_upsert(&oc_store, &oc_n, &oc_cap,
+                                    &stage_outcomes[cand_idx]);
+        }
+        // Ownership of each rows allocation moved into oc_store.
+        free(stage_outcomes);
       }
       qsort(restaged, (size_t)done_count, sizeof(PegRankedCand), peg_rank_cmp);
       // Partial stage: candidates [done_count, eval_count) were selected but
