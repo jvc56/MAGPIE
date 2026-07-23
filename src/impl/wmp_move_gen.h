@@ -181,8 +181,8 @@ static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
 static inline void
 wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
                                                LeaveMap *leave_map) {
-  MachineLetter rack_letters[RACK_SIZE];
-  uint8_t rack_letter_counts[RACK_SIZE];
+  MachineLetter rack_letters[RACK_SIZE] = {0};
+  uint8_t rack_letter_counts[RACK_SIZE] = {0};
   int num_rack_letters = 0;
   for (int ml = BLANK_MACHINE_LETTER; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
     const int count = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, ml);
