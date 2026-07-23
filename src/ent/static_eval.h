@@ -80,6 +80,27 @@ shadow_endgame_adjustment(const LetterDistribution *ld, const Rack *opp_rack,
   return endgame_outplay_adjustment(rack_get_score(ld, opp_rack));
 }
 
+// Computes the parts of a move's static equity that do not depend on its
+// placement. Callers may use this before materializing a Move when the board
+// is nonempty; opening-move placement_adjustment still requires the Move.
+static inline Equity static_eval_get_nonopening_move_equity(
+    const LetterDistribution *ld, const Rack *player_leave,
+    const Rack *opp_rack, int tiles_played, int number_of_tiles_in_bag,
+    Equity score, Equity leave_value) {
+  Equity equity = score;
+  if (number_of_tiles_in_bag > 0) {
+    equity += leave_value;
+    const int bag_plus_rack_size =
+        number_of_tiles_in_bag - tiles_played + RACK_SIZE;
+    if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
+      equity += peg_adjust_values[bag_plus_rack_size];
+    }
+  } else {
+    equity += standard_endgame_adjustment(ld, player_leave, opp_rack);
+  }
+  return equity;
+}
+
 static inline Equity
 static_eval_get_shadow_equity(const LetterDistribution *ld,
                               const Rack *opp_rack, const Equity *best_leaves,
@@ -116,7 +137,6 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     const Rack *opp_rack, const Equity *opening_move_penalties,
     int board_number_of_tiles_played, int number_of_tiles_in_bag,
     Equity leave_value) {
-  Equity leave_adjustment = 0;
   Equity other_adjustments = 0;
 
   if (board_number_of_tiles_played == 0 &&
@@ -124,18 +144,10 @@ static inline Equity static_eval_get_move_equity_with_leave_value(
     other_adjustments = placement_adjustment(ld, move, opening_move_penalties);
   }
 
-  if (number_of_tiles_in_bag > 0) {
-    leave_adjustment = leave_value;
-    int bag_plus_rack_size =
-        number_of_tiles_in_bag - move_get_tiles_played(move) + RACK_SIZE;
-    if (bag_plus_rack_size < PEG_ADJUST_VALUES_LENGTH) {
-      other_adjustments += peg_adjust_values[bag_plus_rack_size];
-    }
-  } else {
-    other_adjustments +=
-        standard_endgame_adjustment(ld, player_leave, opp_rack);
-  }
-  return move_get_score(move) + leave_adjustment + other_adjustments;
+  return static_eval_get_nonopening_move_equity(
+             ld, player_leave, opp_rack, move_get_tiles_played(move),
+             number_of_tiles_in_bag, move_get_score(move), leave_value) +
+         other_adjustments;
 }
 
 // Assumes all fields of the move are set except the equity.
