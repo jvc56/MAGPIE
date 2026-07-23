@@ -1,6 +1,7 @@
 #include "move_gen.h"
 
 #include "../compat/cpthread.h"
+#include "../def/bit_rack_defs.h"
 #include "../def/board_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/cross_set_defs.h"
