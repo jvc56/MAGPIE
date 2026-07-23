@@ -40,6 +40,133 @@ void set_dummy_leave_values(LeaveMap *leave_map) {
   }
 }
 
+static void assert_nonplaythrough_subrack_enumeration(
+    const LetterDistribution *ld, const WMP *wmp, const char *rack_string,
+    const int expected_counts[RACK_SIZE + 1]) {
+  Rack *rack = rack_create(ld_get_size(ld));
+  const int rack_size = rack_set_to_string(ld, rack, rack_string);
+  assert(rack_size <= RACK_SIZE);
+
+  WMPMoveGen wmg;
+  wmp_move_gen_init(&wmg, ld, rack, wmp);
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wmg.count_by_size[size] = 0;
+  }
+
+  LeaveMap leave_map;
+  leave_map_init(rack, &leave_map);
+  const int full_rack_index = (1 << rack_size) - 1;
+  for (int leave_idx = 0; leave_idx <= full_rack_index; leave_idx++) {
+    leave_map_set_current_index(&leave_map, leave_idx);
+    leave_map_set_current_value(&leave_map, int_to_equity(leave_idx));
+  }
+  leave_map_set_current_index(&leave_map, full_rack_index);
+
+  wmp_move_gen_enumerate_nonplaythrough_subracks(&wmg, &leave_map);
+  assert(leave_map_get_current_index(&leave_map) == full_rack_index);
+
+  MachineLetter tiles[RACK_SIZE];
+  int num_tiles = 0;
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    const int count = rack_get_letter(rack, ml);
+    for (int i = 0; i < count; i++) {
+      tiles[num_tiles++] = (MachineLetter)ml;
+    }
+  }
+  assert(num_tiles == rack_size);
+
+  BitRack expected_subracks[1 << RACK_SIZE];
+  int expected_sizes[1 << RACK_SIZE];
+  bool expected_seen[1 << RACK_SIZE] = {false};
+  int num_expected = 0;
+  for (int mask = 0; mask < 1 << rack_size; mask++) {
+    BitRack subrack = bit_rack_create_empty();
+    int size = 0;
+    for (int tile_idx = 0; tile_idx < rack_size; tile_idx++) {
+      if ((mask & (1 << tile_idx)) != 0) {
+        bit_rack_add_letter(&subrack, tiles[tile_idx]);
+        size++;
+      }
+    }
+
+    bool already_expected = false;
+    for (int expected_idx = 0; expected_idx < num_expected; expected_idx++) {
+      if (bit_rack_equals(&subrack, &expected_subracks[expected_idx])) {
+        already_expected = true;
+        break;
+      }
+    }
+    if (!already_expected) {
+      expected_subracks[num_expected] = subrack;
+      expected_sizes[num_expected] = size;
+      num_expected++;
+    }
+  }
+
+  int num_enumerated = 0;
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    assert(wmg.count_by_size[size] == expected_counts[size]);
+    const int offset = subracks_get_combination_offset(size);
+    for (int idx_for_size = 0; idx_for_size < wmg.count_by_size[size];
+         idx_for_size++) {
+      const SubrackInfo *info =
+          &wmg.nonplaythrough_infos[offset + idx_for_size];
+      int expected_idx = -1;
+      for (int i = 0; i < num_expected; i++) {
+        if (bit_rack_equals(&info->subrack, &expected_subracks[i])) {
+          expected_idx = i;
+          break;
+        }
+      }
+      assert(expected_idx >= 0);
+      assert(expected_sizes[expected_idx] == size);
+      assert(!expected_seen[expected_idx]);
+      expected_seen[expected_idx] = true;
+      assert(!info->wmp_entry_is_set);
+
+      Rack expected_leave;
+      rack_copy(&expected_leave, rack);
+      LeaveMap expected_leave_map;
+      leave_map_init(&expected_leave, &expected_leave_map);
+      for (int ml = 0; ml < ld_get_size(ld); ml++) {
+        const int count = bit_rack_get_letter(&info->subrack, ml);
+        for (int i = 0; i < count; i++) {
+          leave_map_take_letter_and_update_current_index(
+              &expected_leave_map, &expected_leave, (MachineLetter)ml);
+        }
+      }
+      assert(info->leave_value ==
+             int_to_equity(leave_map_get_current_index(&expected_leave_map)));
+      num_enumerated++;
+    }
+  }
+
+  assert(num_enumerated == num_expected);
+  for (int expected_idx = 0; expected_idx < num_expected; expected_idx++) {
+    assert(expected_seen[expected_idx]);
+  }
+
+  rack_destroy(rack);
+}
+
+void test_nonplaythrough_subrack_enumeration(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -wmp true");
+  Game *game = config_game_create(config);
+  const Player *player = game_get_player(game, 0);
+  const LetterDistribution *ld = game_get_ld(game);
+  const WMP *wmp = player_get_wmp(player);
+
+  const int full_rack_counts[RACK_SIZE + 1] = {1, 5, 12, 18, 18, 12, 5, 1};
+  assert_nonplaythrough_subrack_enumeration(ld, wmp, "AABEE?Z",
+                                            full_rack_counts);
+
+  const int short_rack_counts[RACK_SIZE + 1] = {1, 3, 4, 3, 1, 0, 0, 0};
+  assert_nonplaythrough_subrack_enumeration(ld, wmp, "AA?Z", short_rack_counts);
+
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_nonplaythrough_existence(void) {
   Config *config = config_create_or_die("set -lex CSW21 -wmp true");
   Game *game = config_game_create(config);
@@ -178,6 +305,7 @@ void test_playthrough_bingo_existence(void) {
 
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
+  test_nonplaythrough_subrack_enumeration();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
 }
