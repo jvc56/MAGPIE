@@ -2193,7 +2193,9 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
 
   const int original_current_right_col = gen->current_right_col;
   const int original_tiles_played = gen->tiles_played;
-  wmp_move_gen_save_playthrough_state(&gen->wmp_move_gen);
+  // Playthrough state changes only when this shadow crosses an existing board
+  // block. Avoid snapshotting it for the common empty-rightward path.
+  bool changed_wmp_playthrough_state = false;
 
   while (gen->current_right_col < (BOARD_DIM - 1) &&
          gen->tiles_played < gen->number_of_letters_on_rack) {
@@ -2287,6 +2289,10 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
       // Adding a letter here would be unsafe if the LetterDistribution's
       // alphabet size exceeded BIT_RACK_MAX_ALPHABET_SIZE.
       if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
+        if (!changed_wmp_playthrough_state) {
+          wmp_move_gen_save_playthrough_state(&gen->wmp_move_gen);
+          changed_wmp_playthrough_state = true;
+        }
         wmp_move_gen_add_playthrough_letter(&gen->wmp_move_gen,
                                             unblanked_playthrough_ml);
       }
@@ -2349,7 +2355,9 @@ static inline void shadow_play_right(MoveGen *gen, bool is_unique) {
   if (gen->is_wordsmog) {
     rack_copy(&gen->bingo_alpha_rack, &gen->bingo_alpha_rack_shadow_right_copy);
   }
-  wmp_move_gen_restore_playthrough_state(&gen->wmp_move_gen);
+  if (changed_wmp_playthrough_state) {
+    wmp_move_gen_restore_playthrough_state(&gen->wmp_move_gen);
+  }
 
   // The change of shadow_word_multiplier necessitates recalculating effective
   // multipliers.
