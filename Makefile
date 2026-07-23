@@ -17,6 +17,9 @@ COV_DIR := cov
 # dev is the default. Use `make release` for the production PGO build, or
 # BUILD=no_pgo_release for the old optimized build without PGO.
 BUILD ?= dev
+# Diagnostic-only tagged mutex/condition/join timing. Disabled builds compile
+# down to the original synchronization calls.
+LOCK_PROFILE ?= 0
 ifeq ($(BUILD),release)
 $(error release is a target; run 'make release', or use BUILD=no_pgo_release)
 endif
@@ -33,7 +36,7 @@ endif
 # no `make clean` is needed between flavors, and switching back reuses the cached
 # objects. `clean` wipes the whole OBJ_ROOT.
 OBJ_ROOT := obj
-OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)
+OBJ_DIR := $(OBJ_ROOT)/$(BUILD)-b$(BOARD_DIM)-r$(RACK_SIZE)-lp$(LOCK_PROFILE)
 
 # Profile-guided optimization data. The default lives below OBJ_ROOT so it is
 # ignored by git and removed by `make clean` with the other build artifacts.
@@ -104,6 +107,9 @@ ldflags.profile := -pthread
 ldflags.cov := -pthread
 
 CFLAGS := ${cflags.${BUILD}}
+ifeq ($(LOCK_PROFILE),1)
+LOCK_PROFILE_CFLAGS := -DMAGPIE_LOCK_PROFILE
+endif
 
 # Emit a .d makefile fragment next to each .o listing the headers it includes
 # (-MMD) plus phony targets for those headers (-MP, so deleting a header does
@@ -111,9 +117,10 @@ CFLAGS := ${cflags.${BUILD}}
 # a header recompiles exactly the .c files that include it -- no `make clean`.
 DEPFLAGS := -MMD -MP
 
-CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+CFLAGS += -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) $(LOCK_PROFILE_CFLAGS)
 ifeq ($(BUILD),pgo_use)
-CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE)
+CMD_CFLAGS := $(cflags.no_pgo_release) -DBOARD_DIM=$(BOARD_DIM) \
+	-DRACK_SIZE=$(RACK_SIZE) $(LOCK_PROFILE_CFLAGS)
 else
 CMD_CFLAGS := $(CFLAGS)
 endif
@@ -163,7 +170,7 @@ endif
 
 # Optimized test builds keep assertions enabled.
 $(OBJ_DIR)/$(TEST_DIR)/%.o: $(TEST_DIR)/%.c | $(OBJ_DIR) $(OBJ_DIR)/$(TEST_DIR) $(TEST_OBJ_SUBDIRS)
-	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
+	$(CC) $(if $(filter no_pgo_release pgo_generate pgo_use,$(BUILD)),${cflags.test_$(BUILD)},$(CFLAGS)) $(LOCK_PROFILE_CFLAGS) $(DEPFLAGS) -DBOARD_DIM=$(BOARD_DIM) -DRACK_SIZE=$(RACK_SIZE) -c $< -o $@
 
 $(BIN_DIR) $(OBJ_DIR) $(OBJ_DIR)/$(SRC_DIR) $(OBJ_DIR)/$(CMD_DIR) $(OBJ_DIR)/$(TEST_DIR) $(OBJ_DIR)/$(TOOLS_DIR) $(SRC_OBJ_SUBDIRS) $(TEST_OBJ_SUBDIRS):
 	mkdir -p $@

@@ -6,6 +6,7 @@
 #include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include "bai_result.h"
 #include "equity.h"
 #include "heat_map.h"
@@ -275,16 +276,19 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  lock_profile_mutex_lock(&sim_results->simmed_plays_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
 }
 
 void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+  lock_profile_mutex_unlock(&sim_results->simmed_plays_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
                        int num_plies, uint64_t seed, bool use_heat_map) {
-  cpthread_mutex_lock(&sim_results->display_mutex);
+  lock_profile_mutex_lock(&sim_results->display_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
   if (!sim_results->simmed_plays) {
     sim_results_create_simmed_plays(sim_results, move_list, num_plies, seed,
                                     use_heat_map);
@@ -295,7 +299,8 @@ void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
   atomic_init(&sim_results->node_count, 0);
   atomic_init(&sim_results->iteration_count, 0);
   sim_results->valid_for_current_game_state = false;
-  cpthread_mutex_unlock(&sim_results->display_mutex);
+  lock_profile_mutex_unlock(&sim_results->display_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 SimResults *sim_results_create(const double cutoff) {
@@ -366,9 +371,9 @@ int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play) {
 // Returns the current seed and updates the seed using prng_next
 uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
   uint64_t seed;
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex, LOCK_PROFILE_SITE_SIM_SEED);
   seed = prng_next(simmed_play->prng);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex, LOCK_PROFILE_SITE_SIM_SEED);
   return seed;
 }
 
@@ -478,7 +483,7 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     return;
   }
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex, LOCK_PROFILE_SITE_SIM_PLY_STATS);
   stat_push(simmed_play->ply_infos[ply_index].score_stat, move_score, 1);
   stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)(is_bingo),
             1);
@@ -488,16 +493,19 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   simmed_play->ply_infos[ply_index].ply_info_counts[count_type]++;
   simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
       (uint64_t)is_bingo;
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex,
+                            LOCK_PROFILE_SITE_SIM_PLY_STATS);
 }
 
 void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
                                  Equity spread, Equity leftover) {
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex,
+                          LOCK_PROFILE_SITE_SIM_EQUITY_STATS);
   stat_push(simmed_play->equity_stat,
             equity_to_double(spread - initial_spread + leftover), 1);
   stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex,
+                            LOCK_PROFILE_SITE_SIM_EQUITY_STATS);
 }
 
 int round_to_nearest_int(double a) {
@@ -505,9 +513,11 @@ int round_to_nearest_int(double a) {
 }
 
 void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex,
+                          LOCK_PROFILE_SITE_SIM_UTILITY_STATS);
   stat_push(simmed_play->utility_stat, utility, 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex,
+                            LOCK_PROFILE_SITE_SIM_UTILITY_STATS);
 }
 
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
@@ -539,9 +549,11 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
       wpct = 1.0 - wpct;
     }
   }
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex,
+                          LOCK_PROFILE_SITE_SIM_WIN_PCT_STATS);
   stat_push(simmed_play->win_pct_stat, wpct, 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex,
+                            LOCK_PROFILE_SITE_SIM_WIN_PCT_STATS);
   return wpct;
 }
 
@@ -562,9 +574,9 @@ void sim_results_update_display_simmed_play(const SimResults *sim_results,
   SimmedPlay *display_simmed_play =
       sim_results_get_display_simmed_play(sim_results, simmed_play_index);
   const int num_plies = sim_results_get_num_plies(sim_results);
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex, LOCK_PROFILE_SITE_DISPLAY);
   simmed_play_copy(display_simmed_play, simmed_play, num_plies);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex, LOCK_PROFILE_SITE_DISPLAY);
 }
 
 // When simming stuck tile endgames, a pass will sim equivalently to the
@@ -638,9 +650,11 @@ int compare_simmed_plays(const void *a, const void *b) {
 // updated and locked
 // Returns false otherwise
 bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_lock(&sim_results->display_mutex);
+  lock_profile_mutex_lock(&sim_results->display_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
   if (!sim_results->display_simmed_plays) {
-    cpthread_mutex_unlock(&sim_results->display_mutex);
+    lock_profile_mutex_unlock(&sim_results->display_mutex,
+                              LOCK_PROFILE_SITE_DISPLAY);
     return false;
   }
 
@@ -658,7 +672,8 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
 }
 
 void sim_results_unlock_display_infos(SimResults *sim_results) {
-  cpthread_mutex_unlock(&sim_results->display_mutex);
+  lock_profile_mutex_unlock(&sim_results->display_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,

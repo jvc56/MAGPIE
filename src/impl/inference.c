@@ -28,6 +28,7 @@
 #include "../str/inference_string.h"
 #include "../str/rack_string.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include "../util/math_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
@@ -488,7 +489,8 @@ void infer_manager(InferenceCtx *ctx, InferenceResults *results) {
       ctx->worker_inferences[0]->target_number_of_tiles_exchanged > 0;
 
   for (int thread_index = 0; thread_index < ctx->num_workers; thread_index++) {
-    cpthread_join(ctx->worker_inferences[thread_index]->cpthread_id);
+    lock_profile_thread_join(ctx->worker_inferences[thread_index]->cpthread_id,
+                             LOCK_PROFILE_SITE_INFERENCE_WORKER_JOIN);
     InferenceResults *worker_results =
         ctx->worker_inferences[thread_index]->results;
     add_inference_results(worker_results, results);

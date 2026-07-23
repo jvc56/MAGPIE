@@ -35,6 +35,7 @@
 #include "../str/move_string.h"
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
 #include "play_chooser.h"
@@ -1217,7 +1218,8 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
 
   for (int thread_index = 0; thread_index < autoplay_num_threads;
        thread_index++) {
-    cpthread_join(worker_ids[thread_index]);
+    lock_profile_thread_join(worker_ids[thread_index],
+                             LOCK_PROFILE_SITE_AUTOPLAY_WORKER_JOIN);
   }
 
   // The stats have already been combined in leavegen mode
