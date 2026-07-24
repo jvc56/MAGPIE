@@ -1,15 +1,20 @@
 #include "lock_profile.h"
 
-#include "io_util.h"
-#include <errno.h>
-#include <pthread.h>
-#include <stdbool.h>
-#include <stdint.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <time.h>
+#include <assert.h>
 
 #ifdef MAGPIE_LOCK_PROFILE
+
+// The trailing comments keep these conditional includes out of format.py's
+// include block, which must be contiguous. Builds without MAGPIE_LOCK_PROFILE
+// (including CI clang-tidy) compile none of the code that uses them.
+#include "io_util.h" // conditional
+#include <errno.h>   // conditional
+#include <pthread.h> // conditional
+#include <stdbool.h> // conditional
+#include <stdint.h>  // conditional
+#include <stdio.h>   // conditional
+#include <stdlib.h>  // conditional
+#include <time.h>    // conditional
 
 enum {
   LOCK_PROFILE_HOLD_SAMPLE_PERIOD = 64,
@@ -218,5 +223,12 @@ void lock_profile_report(void) {
            estimated_hold_ns, wait_share_pct);
   }
 }
+
+#else
+
+// With profiling disabled the header supplies inline no-ops; reference it so
+// this translation unit is not empty and the include is used.
+static_assert(NUM_LOCK_PROFILE_SITES > 0,
+              "lock profile site enum must be nonempty");
 
 #endif

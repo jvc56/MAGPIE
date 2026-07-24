@@ -17,6 +17,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
+#include "../src/ent/heat_map.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/kwg.h"

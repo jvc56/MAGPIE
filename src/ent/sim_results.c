@@ -5,6 +5,7 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/sim_defs.h"
 #include "../util/io_util.h"
 #include "../util/lock_profile.h"
 #include "bai_result.h"
@@ -693,9 +694,10 @@ void simmed_play_commit_rollout_stats(SimmedPlay *simmed_play,
         simmed_play_find_empty_pending_slot(simmed_play);
     if (pending == NULL) {
       log_fatal("no free pending sim stats slot");
+    } else {
+      *pending = completed;
+      simmed_play->pending_stats_count++;
     }
-    *pending = completed;
-    simmed_play->pending_stats_count++;
   }
   lock_profile_mutex_unlock(&simmed_play->mutex,
                             LOCK_PROFILE_SITE_SIM_PLY_STATS);
