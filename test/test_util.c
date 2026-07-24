@@ -8,6 +8,7 @@
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/anchor.h"
 #include "../src/ent/bag.h"
+#include "../src/ent/bai_result.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
 #include "../src/ent/board_layout.h"
