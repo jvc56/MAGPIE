@@ -1656,16 +1656,85 @@ void test_endgame_wasm(void) {
   test_nonempty_bag();
 }
 
+typedef struct {
+  int rack_tiles;
+  int opponent_bonus;
+  int outplays;
+  int non_outplays;
+} OutplayRootCounts;
+
+static void count_outplay_root_move(int depth, int root_index,
+                                    const SmallMove *move, int32_t value,
+                                    void *user_data) {
+  (void)root_index;
+  assert(depth == 1);
+  OutplayRootCounts *counts = (OutplayRootCounts *)user_data;
+  if (!small_move_is_pass(move) &&
+      small_move_get_tiles_played(move) == counts->rack_tiles) {
+    counts->outplays++;
+    // Root callback values are deltas from the initial spread.
+    assert(value == small_move_get_score(move) + counts->opponent_bonus);
+  } else {
+    counts->non_outplays++;
+  }
+}
+
+// Exercise multiple root outplays with exact per-root reporting. At depth one,
+// every non-outplay enters one leaf node while an analytically scored outplay
+// enters none, so the node count also verifies that the shortcut was taken.
+static void test_endgame_multiple_analytical_outplays(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW24 -s1 score -s2 score -eplies 1");
+  load_and_exec_config_or_die(
+      config,
+      "cgp F6ENDEW2G/Y4AUA2TELCO/ROTARY8R/D2MEARING4I/2KITH3OW4/1QIN5XI4/"
+      "1U6B1V4/DA1DAUPhINE4/AL1H4Z6/EM1U3J7/3T3E7/APRICATE7/VOE4I7/ELEcTION7/"
+      "7G7 LOOSER/BFNOSSS 442/356 0");
+
+  Game *game = config_get_game(config);
+  const int on_turn = game_get_player_on_turn_index(game);
+  const Rack *on_turn_rack = player_get_rack(game_get_player(game, on_turn));
+  const Rack *opponent_rack =
+      player_get_rack(game_get_player(game, 1 - on_turn));
+  OutplayRootCounts counts = {
+      .rack_tiles = rack_get_total_letters(on_turn_rack),
+      .opponent_bonus = equity_to_int(
+          calculate_end_rack_points(opponent_rack, game_get_ld(game))),
+  };
+
+  EndgameArgs args = {0};
+  args.thread_control = config_get_thread_control(config);
+  args.game = game;
+  args.plies = 1;
+  args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  args.initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  args.num_threads = 1;
+  args.use_heuristics = true;
+  args.forced_pass_bypass = true;
+  args.num_top_moves = 1;
+  args.per_root_move_callback = count_outplay_root_move;
+  args.per_root_move_callback_data = &counts;
+  args.seed = 42;
+
+  EndgameCtx *ctx = NULL;
+  EndgameResults *results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&ctx, &args, results, error_stack);
+
+  assert(error_stack_is_empty(error_stack));
+  assert(counts.outplays >= 2);
+  assert(endgame_ctx_get_nodes_searched(ctx) ==
+         (uint64_t)(1 + counts.non_outplays));
+
+  error_stack_destroy(error_stack);
+  endgame_ctx_destroy(ctx);
+  config_destroy(config);
+}
+
 // Regression: an endgame outplay that plays >= 4 of one letter (e.g. all four
-// S's from EOSSSS) must not overflow the zobrist rack-hash table.
-// play_move_endgame_outplay leaves the mover's rack full (it skips the update
-// because the game is ending), so the search's zobrist_add_move must treat the
-// post-outplay leftover as empty rather than double-counting the played tiles.
-// Otherwise the reconstructed pre-move rack is placed + full = 2*placed, and an
-// outplay of four S's makes placeholder[S] = 8, indexing rack_table[S] one past
-// its RACK_SIZE+1 row (heap-buffer-overflow under ASan; silent TT-key
-// corruption otherwise). Single-threaded and deterministic: the defect is not a
-// race and reproduces on the first solve.
+// S's from EOSSSS) must not overflow the zobrist rack-hash table. The
+// analytical outplay path now avoids the child Zobrist update entirely; keep
+// this deep solve under ASan to guard that contract across interior nodes.
 void test_endgame_outplay_zobrist_overflow(void) {
   Config *config =
       config_create_or_die("set -lex CSW24 -s1 score -s2 score -eplies 25");
@@ -1700,8 +1769,11 @@ void test_endgame_outplay_zobrist_overflow(void) {
       endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
   assert(pv != NULL);
   assert(pv->num_moves > 0);
+  assert(pv->score == -17);
 
   error_stack_destroy(error_stack);
   endgame_ctx_destroy(endgame_ctx);
   config_destroy(config);
+
+  test_endgame_multiple_analytical_outplays();
 }
