@@ -370,6 +370,9 @@ SimResults *sim_results_create(const double cutoff) {
 // freshly created rather than copied, matching simmed_play_copy's
 // contract, since the duplicate is never used to continue simulating.
 SimResults *sim_results_duplicate(const SimResults *sim_results) {
+  if (!sim_results) {
+    return NULL;
+  }
   SimResults *new_sim_results = malloc_or_die(sizeof(SimResults));
   new_sim_results->num_simmed_plays = sim_results->num_simmed_plays;
   new_sim_results->num_alloc_simmed_plays = sim_results->num_alloc_simmed_plays;

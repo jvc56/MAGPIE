@@ -383,20 +383,17 @@ struct Config {
   GameHistory *game_history;
   GameHistory *game_history_backup;
   MoveList *move_list;
-  // The results from just before the last invalidation, so "shmoves" can
-  // still show (and filter/index into) them for one more command after
-  // the game position changes. Replaced wholesale by the next
-  // invalidation, so they're valid for exactly one turn. Display only:
-  // never used as a basis for a new sim/commit. Both are real
-  // (duplicated) objects, independent of the live config->move_list /
-  // config->sim_results (whose identity is never reassigned, since other
-  // code caches config_get_sim_results()'s pointer across commands and
-  // expects it to stay stable for the config's lifetime).
-  MoveList *buffered_move_list;
-  SimResults *buffered_sim_results;
   EndgameCtx *endgame_ctx;
   SimResults *sim_results;
   InferenceResults *inference_results;
+  // Set when the most recent sim ran inference internally and it completed
+  // (not interrupted). Separate from inference_results's own valid flag,
+  // which a sim-driven inference deliberately does not set so that an
+  // explicit "infer" command's display isn't clobbered by a sim side
+  // effect; this flag lets config_save_live_results_to_game_event still
+  // archive that inference alongside the sim's results. Cleared whenever
+  // sim_results is invalidated.
+  bool sim_used_valid_inference;
   EndgameResults *endgame_results;
   PegResult peg_result;
   PegPoll *peg_poll;
@@ -722,30 +719,6 @@ void config_init_game(Config *config) {
 }
 
 void config_reset_move_list_and_invalidate_sim_results(Config *config) {
-  // The previous turn's buffered results (if any) have had their one
-  // turn; whatever's live right now becomes the new buffer.
-  move_list_destroy(config->buffered_move_list);
-  config->buffered_move_list = NULL;
-  sim_results_destroy(config->buffered_sim_results);
-  config->buffered_sim_results = NULL;
-  // Guard against a letter-distribution change (e.g. "set -ld ...") having
-  // already swapped config->ld out from under a game/move_list/sim_results
-  // that were built against the old (possibly already-freed) alphabet;
-  // buffering them would let a later render index into machine-letter
-  // tables sized for a different alphabet.
-  const bool ld_still_matches_game =
-      config->game && config->ld && game_get_ld(config->game) == config->ld;
-  if (ld_still_matches_game && config->move_list &&
-      move_list_get_count(config->move_list) > 0) {
-    config->buffered_move_list = move_list_duplicate(config->move_list);
-    move_list_set_rack(config->buffered_move_list,
-                       move_list_get_rack(config->move_list));
-  }
-  if (ld_still_matches_game &&
-      sim_results_get_valid_for_current_game_state(config->sim_results)) {
-    config->buffered_sim_results = sim_results_duplicate(config->sim_results);
-  }
-
   if (config->move_list) {
     move_list_reset(config->move_list);
     Rack new_move_list_rack;
@@ -758,6 +731,7 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
     move_list_set_rack(config->move_list, &new_move_list_rack);
   }
   sim_results_set_valid_for_current_game_state(config->sim_results, false);
+  config->sim_used_valid_inference = false;
 }
 
 void config_init_move_list(Config *config, int capacity) {
@@ -2653,6 +2627,7 @@ void impl_move_gen_override_record_type(Config *config,
   generate_moves_for_game_override_record_type(&args, move_record_type);
   move_list_sort_moves(config->move_list);
   sim_results_set_valid_for_current_game_state(config->sim_results, false);
+  config->sim_used_valid_inference = false;
 }
 
 void impl_move_gen(Config *config, ErrorStack *error_stack) {
@@ -2982,6 +2957,8 @@ void impl_sim(Config *config, const arg_token_t known_opp_rack_arg_token,
     inference_results_set_valid_for_current_game_state(
         config->inference_results, prev_inference_valid);
   }
+  config->sim_used_valid_inference =
+      use_inference_for_this_run && sim_results_valid;
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
 }
@@ -3141,6 +3118,8 @@ void impl_snoprune(Config *config, ErrorStack *error_stack) {
     inference_results_set_valid_for_current_game_state(
         config->inference_results, prev_inference_valid_snoprune);
   }
+  config->sim_used_valid_inference =
+      use_inference_for_this_run && sim_results_valid;
   sim_results_set_valid_for_current_game_state(config->sim_results,
                                                sim_results_valid);
 }
@@ -3859,6 +3838,23 @@ static bool parse_move_coord(const char *str, int *row, int *col,
   return false;
 }
 
+// The GameEvent the game is currently positioned at (i.e. wherever
+// "goto"/"next"/"prev" navigation last left num_played_events), or NULL
+// if no events have been played yet. This is where per-turn results
+// (see config_save_live_results_to_game_event) are looked up when
+// nothing's currently live.
+static const GameEvent *config_get_current_game_event(const Config *config) {
+  if (!config->game_history) {
+    return NULL;
+  }
+  const int num_played_events =
+      game_history_get_num_played_events(config->game_history);
+  if (num_played_events <= 0) {
+    return NULL;
+  }
+  return game_history_get_event(config->game_history, num_played_events - 1);
+}
+
 char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
   if (!config_has_game_data(config)) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_GAME_DATA_MISSING,
@@ -3879,16 +3875,20 @@ char *impl_show_moves_or_sim_results(Config *config, ErrorStack *error_stack) {
       use_sim_results ||
       (config->move_list && move_list_get_count(config->move_list) > 0);
   if (!have_live_results) {
-    // Nothing live to show; fall back to what was generated/simmed before
-    // the position last changed, still available (as real, independent
-    // objects, so filter/index args keep working) for one more command.
-    if (config->buffered_sim_results) {
+    // Nothing live to show; fall back to whatever was generated/simmed
+    // for the game event the history is currently positioned at, if
+    // anything was saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    SimResults *event_sim_results =
+        current_event ? game_event_get_sim_results(current_event) : NULL;
+    MoveList *event_move_list =
+        current_event ? game_event_get_move_list(current_event) : NULL;
+    if (event_sim_results) {
       use_sim_results = true;
-      display_sim_results = config->buffered_sim_results;
-    } else if (config->buffered_move_list &&
-               move_list_get_count(config->buffered_move_list) > 0) {
+      display_sim_results = event_sim_results;
+    } else if (event_move_list && move_list_get_count(event_move_list) > 0) {
       use_sim_results = false;
-      display_move_list = config->buffered_move_list;
+      display_move_list = event_move_list;
     } else {
       error_stack_push(error_stack, ERROR_STATUS_NO_MOVES_TO_SHOW,
                        string_duplicate("no moves to show"));
@@ -4018,11 +4018,27 @@ char *str_api_show_moves_or_sim_results(Config *config,
 // Show inference results
 
 char *impl_show_inference(Config *config, ErrorStack *error_stack) {
-  if (!config->game || !inference_results_get_valid_for_current_game_state(
-                           config->inference_results)) {
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
                      string_duplicate("no inference results to show"));
     return empty_string();
+  }
+
+  InferenceResults *display_inference_results = config->inference_results;
+  if (!inference_results_get_valid_for_current_game_state(
+          config->inference_results)) {
+    // Nothing live to show; fall back to whatever was inferred for the
+    // game event the history is currently positioned at, if anything was
+    // saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    InferenceResults *event_inference_results =
+        current_event ? game_event_get_inference_results(current_event) : NULL;
+    if (!event_inference_results) {
+      error_stack_push(error_stack, ERROR_STATUS_NO_INFERENCE_TO_SHOW,
+                       string_duplicate("no inference results to show"));
+      return empty_string();
+    }
+    display_inference_results = event_inference_results;
   }
 
   const char *max_num_display_leaves_str =
@@ -4039,7 +4055,7 @@ char *impl_show_inference(Config *config, ErrorStack *error_stack) {
     }
   }
 
-  return inference_result_get_string(config->inference_results, config->ld,
+  return inference_result_get_string(display_inference_results, config->ld,
                                      max_num_display_leaves,
                                      !config->human_readable);
 }
@@ -4059,22 +4075,38 @@ char *str_api_show_inference(Config *config, ErrorStack *error_stack) {
 // Show endgame
 
 char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
-  if (!config->game || !endgame_results_get_valid_for_current_game_state(
-                           config->endgame_results)) {
+  if (!config->game) {
     error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
                      string_duplicate("no endgame results to show"));
     return empty_string();
   }
 
+  EndgameResults *display_endgame_results = config->endgame_results;
+  if (!endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    // Nothing live to show; fall back to whatever was solved for the
+    // game event the history is currently positioned at, if anything was
+    // saved for it.
+    const GameEvent *current_event = config_get_current_game_event(config);
+    EndgameResults *event_endgame_results =
+        current_event ? game_event_get_endgame_results(current_event) : NULL;
+    if (!event_endgame_results) {
+      error_stack_push(error_stack, ERROR_STATUS_NO_ENDGAME_TO_SHOW,
+                       string_duplicate("no endgame results to show"));
+      return empty_string();
+    }
+    display_endgame_results = event_endgame_results;
+  }
+
   const char *pv_index_str =
       config_get_parg_value(config, ARG_TOKEN_SHOW_ENDGAME, 0);
   if (!pv_index_str) {
-    return endgame_results_get_string(config->endgame_results, config->game,
+    return endgame_results_get_string(display_endgame_results, config->game,
                                       config->game_history);
   }
 
   // Optional pv_index: show a single PV line in full move-by-move detail.
-  const int num_pvs = endgame_results_get_num_pvs(config->endgame_results);
+  const int num_pvs = endgame_results_get_num_pvs(display_endgame_results);
   int pv_index;
   string_to_int_or_push_error("pv index", pv_index_str, 1, num_pvs,
                               ERROR_STATUS_ENDGAME_PV_INDEX_OUT_OF_RANGE,
@@ -4086,13 +4118,13 @@ char *impl_show_endgame(const Config *config, ErrorStack *error_stack) {
   pv_index--;
 
   const Game *source_game =
-      endgame_results_get_start_game(config->endgame_results);
+      endgame_results_get_start_game(display_endgame_results);
   if (!source_game) {
     source_game = config->game;
   }
 
   StringBuilder *sb = string_builder_create();
-  string_builder_endgame_single_pv(sb, config->endgame_results, source_game,
+  string_builder_endgame_single_pv(sb, display_endgame_results, source_game,
                                    config->game_history, pv_index);
   char *result = string_builder_dump(sb, NULL);
   string_builder_destroy(sb);
@@ -4612,6 +4644,43 @@ void config_add_end_rack_points(Config *config, const int player_index,
   game_history_next(config->game_history, error_stack);
 }
 
+// Duplicates whatever's currently live and valid (move_list/sim_results/
+// inference_results/endgame_results) onto game_event, which represents the
+// position that analysis was actually computed for. Called right before
+// the position changes, so results stay associated with the turn they
+// belong to rather than only the most recently played one. Display-only
+// snapshots: never a basis for a new sim/commit (see
+// config_reset_move_list_and_invalidate_sim_results, which still governs
+// the live config->move_list/config->sim_results).
+void config_save_live_results_to_game_event(const Config *config,
+                                            GameEvent *game_event) {
+  if (config->move_list && move_list_get_count(config->move_list) > 0 &&
+      !config_get_use_small_plays(config)) {
+    game_event_set_move_list(game_event,
+                             move_list_duplicate(config->move_list));
+  }
+  if (sim_results_get_valid_for_current_game_state(config->sim_results)) {
+    game_event_set_sim_results(game_event,
+                               sim_results_duplicate(config->sim_results));
+  }
+  // A sim that ran inference internally leaves inference_results's own
+  // valid flag restored to its pre-sim state (so an explicit "infer"
+  // command's display isn't clobbered by a sim side effect), so also check
+  // sim_used_valid_inference to still archive that inference alongside the
+  // sim's results on this event.
+  if (inference_results_get_valid_for_current_game_state(
+          config->inference_results) ||
+      config->sim_used_valid_inference) {
+    game_event_set_inference_results(
+        game_event, inference_results_duplicate(config->inference_results));
+  }
+  if (endgame_results_get_valid_for_current_game_state(
+          config->endgame_results)) {
+    game_event_set_endgame_results(
+        game_event, endgame_results_duplicate(config->endgame_results));
+  }
+}
+
 void config_add_game_event(Config *config, const int player_index,
                            game_event_t game_event_type, const Move *move,
                            const char *ucgi_move_string,
@@ -4720,6 +4789,7 @@ void config_add_game_event(Config *config, const int player_index,
     game_event_set_cumulative_score(game_event, cumulative_score);
     game_event_set_move_score(game_event, move_score);
     rack_copy(game_event_get_rack(game_event), &game_event_rack);
+    config_save_live_results_to_game_event(config, game_event);
 
     game_history_next(config->game_history, error_stack);
 
@@ -8897,8 +8967,6 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->game = NULL;
   config->game_backup = NULL;
   config->move_list = NULL;
-  config->buffered_move_list = NULL;
-  config->buffered_sim_results = NULL;
   config->game_history = game_history_create();
   config->game_history_backup = NULL;
   config->endgame_ctx = NULL;
@@ -8934,9 +9002,7 @@ void config_destroy(Config *config) {
   game_history_destroy(config->game_history_backup);
   endgame_ctx_destroy(config->endgame_ctx);
   move_list_destroy(config->move_list);
-  move_list_destroy(config->buffered_move_list);
   sim_results_destroy(config->sim_results);
-  sim_results_destroy(config->buffered_sim_results);
   inference_results_destroy(config->inference_results);
   endgame_results_destroy(config->endgame_results);
   peg_result_destroy(&config->peg_result);

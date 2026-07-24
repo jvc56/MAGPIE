@@ -9,6 +9,7 @@
 #include "xoshiro.h"
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 #define INITIAL_AM_ENTRIES_SIZE 1024
 
@@ -38,6 +39,21 @@ static inline AliasMethod *alias_method_create(void) {
   am->total_item_count = 0;
   cpthread_mutex_init(&am->mutex);
   return am;
+}
+
+static inline AliasMethod *alias_method_duplicate(const AliasMethod *am) {
+  if (!am) {
+    return NULL;
+  }
+  AliasMethod *new_am = (AliasMethod *)malloc_or_die(sizeof(AliasMethod));
+  new_am->capacity = am->capacity;
+  new_am->num_items = am->num_items;
+  new_am->total_item_count = am->total_item_count;
+  new_am->items =
+      (AliasMethodItem *)malloc_or_die(sizeof(AliasMethodItem) * am->capacity);
+  memcpy(new_am->items, am->items, sizeof(AliasMethodItem) * am->capacity);
+  cpthread_mutex_init(&new_am->mutex);
+  return new_am;
 }
 
 static inline void alias_method_destroy(AliasMethod *am) {
