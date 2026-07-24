@@ -21,6 +21,7 @@ enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
+  WMP_ANCHOR_MASK_WORDS = (MAX_WMP_MOVE_GEN_ANCHORS + 63) / 64,
 };
 
 typedef struct SubrackInfo {
@@ -50,15 +51,11 @@ typedef struct WMPMoveGen {
   uint8_t count_by_size[RACK_SIZE + 1];
 
   Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
-  // Sparse list of anchor slot indices that have been touched since the
-  // last wmp_move_gen_reset_anchors call. wmp_move_gen_maybe_update_anchor
-  // pushes a slot index here on its first touch (detected via the
-  // tiles_to_play==0 sentinel left by the previous reset); reset only
-  // clears these slots instead of iterating all MAX_WMP_MOVE_GEN_ANCHORS.
-  // Typical shadow_play_for_anchor touches <=8 slots, so this is ~8x
-  // cheaper than the full-array reset on realistic workloads.
-  uint8_t touched_anchor_slots[MAX_WMP_MOVE_GEN_ANCHORS];
-  int num_touched_anchor_slots;
+  // Bit i marks anchor slot i as touched since the last reset. Typical
+  // shadow_play_for_anchor calls touch <=8 of 64 slots. Walking set bits keeps
+  // both reset and emission sparse while preserving the full scan's ascending
+  // slot order (and therefore deterministic tie order).
+  uint64_t touched_anchor_masks[WMP_ANCHOR_MASK_WORDS];
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
@@ -88,16 +85,35 @@ typedef struct WMPMoveGen {
   uint32_t playthrough_positions;
 } WMPMoveGen;
 
-static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
-  for (int i = 0; i < wmp_move_gen->num_touched_anchor_slots; i++) {
-    const int slot_idx = wmp_move_gen->touched_anchor_slots[i];
-    wmp_move_gen->anchors[slot_idx].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
-    wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
+static inline int wmp_move_gen_get_lowest_set_bit(uint64_t bits) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(bits);
+#else
+  int bit = 0;
+  while ((bits & 1ULL) == 0) {
+    bits >>= 1;
+    bit++;
   }
-  wmp_move_gen->num_touched_anchor_slots = 0;
+  return bit;
+#endif
+}
+
+static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wmp_move_gen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      wmp_move_gen->anchors[slot_idx].highest_possible_equity =
+          EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
+      wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
+      wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
+      touched &= touched - 1;
+    }
+    wmp_move_gen->touched_anchor_masks[word_idx] = 0;
+  }
 }
 
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
@@ -114,7 +130,7 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
   // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
-  // is a sparse reset keyed on the touched_anchor_slots list; untouched
+  // is a sparse reset keyed on the touched-anchor masks; untouched
   // slots retain their prior default values rather than being reset. The
   // calloc-zero defaults for highest_possible_equity and leftmost_start_col
   // differ from the expected-on-first-touch sentinels (EQUITY_MIN_VALUE and
@@ -127,7 +143,8 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
     wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
     wmp_move_gen->anchors[i].tiles_to_play = 0;
   }
-  wmp_move_gen->num_touched_anchor_slots = 0;
+  memset(wmp_move_gen->touched_anchor_masks, 0,
+         sizeof(wmp_move_gen->touched_anchor_masks));
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
@@ -550,13 +567,13 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
       wmp_move_gen_anchor_index(wmp_move_gen->playthrough_blocks, tiles_played);
   Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
   // First touch detection: tiles_to_play == 0 means this slot has been
-  // reset (or is initial-state) and isn't already on the touched list.
+  // reset (or is initial-state) and isn't already marked as touched.
   // We set tiles_to_play to a nonzero value below, so subsequent calls
-  // in the same shadow pass won't double-push.
+  // in the same shadow pass won't need to mark it again.
   if (anchor->tiles_to_play == 0) {
-    wmp_move_gen
-        ->touched_anchor_slots[wmp_move_gen->num_touched_anchor_slots++] =
-        (uint8_t)slot_idx;
+    const int mask_idx = slot_idx / 64;
+    const uint64_t slot_mask = 1ULL << (slot_idx % 64);
+    wmp_move_gen->touched_anchor_masks[mask_idx] |= slot_mask;
   }
   anchor->tiles_to_play = tiles_played;
   anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
@@ -687,27 +704,29 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int dir,
                                             Equity inference_cutoff_equity,
                                             AnchorHeap *anchor_heap) {
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    const Anchor *anchor = &wmp_move_gen->anchors[i];
-    if (anchor->tiles_to_play == 0) {
-      continue;
-    }
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wmp_move_gen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      const Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
 
-    // Skip subanchors whose highest possible equity is below the cutoff
-    // threshold. This is safe when cutoff_equity is fixed (as in inference
-    // with stop_on_threshold).
-    if (inference_cutoff_equity != EQUITY_MAX_VALUE &&
-        anchor->highest_possible_equity < inference_cutoff_equity) {
-      continue;
-    }
+      // Skip subanchors whose highest possible equity is below the cutoff
+      // threshold. This is safe when cutoff_equity is fixed (as in inference
+      // with stop_on_threshold).
+      if (inference_cutoff_equity == EQUITY_MAX_VALUE ||
+          anchor->highest_possible_equity >= inference_cutoff_equity) {
+        assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
+        assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
+        anchor_heap_add_unheaped_wmp_anchor(
+            anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
+            anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
+            anchor->highest_possible_score, anchor->tiles_to_play,
+            anchor->playthrough_blocks, anchor->word_length);
+      }
 
-    assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
-    assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
-    anchor_heap_add_unheaped_wmp_anchor(
-        anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
-        anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
-        anchor->highest_possible_score, anchor->tiles_to_play,
-        anchor->playthrough_blocks, anchor->word_length);
+      touched &= touched - 1;
+    }
   }
 }
 
