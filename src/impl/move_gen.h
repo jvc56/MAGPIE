@@ -183,8 +183,8 @@ typedef struct MoveGen {
   const KLV *klv;
   // Snapshot of klv->mutation_counter captured at the last gen_load_position
   // call. If the KLV's leave_values have been mutated in place since then
-  // (test-only set_klv_leave_value path), leave-derived caches (the subrack
-  // cache) must be invalidated even though the KLV pointer is unchanged.
+  // (including between leavegen generations), leave-derived caches must be
+  // invalidated even though the KLV pointer is unchanged.
   uint64_t klv_mutation_counter_at_load;
   // Instance fingerprints of the KLV and WMP captured at the last
   // gen_load_position call. The MoveGen cache is pooled per thread and

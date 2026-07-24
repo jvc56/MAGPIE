@@ -2772,9 +2772,10 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   // placed at the freed KLV's address -- ABA -- which the pointer comparison
   // misses because the move_gen cache outlives the Config that owned the old
   // KLV), OR the same KLV's leave_values have been mutated in place. The
-  // mutation-counter path catches test-only set_klv_leave_value calls between
-  // generate_moves invocations, which would otherwise leave stale leave_values
-  // cached in the subrack cache and anchor-cache upper-bound entries.
+  // mutation-counter path catches both leavegen's bulk updates and test-only
+  // set_klv_leave_value calls between generate_moves invocations, which would
+  // otherwise leave stale leave_values cached in the subrack cache and
+  // anchor-cache upper-bound entries.
   const bool klv_changed =
       (new_klv != gen->klv) ||
       (new_klv_instance_fp != gen->klv_instance_fp_at_load) ||
