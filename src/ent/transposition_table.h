@@ -83,6 +83,18 @@ typedef struct TranspositionTable {
   atomic_int t2_collisions;
 } TranspositionTable;
 
+// TT statistics are useful in tests and diagnostic builds, but updating these
+// shared counters on every lookup and store serializes release search threads
+// on one cache line. Optimized test files are compiled without NDEBUG, so the
+// counter tests still exercise this path even when they link against release
+// engine objects.
+#ifdef NDEBUG
+#define TT_STAT_INCREMENT(counter) ((void)0)
+#else
+#define TT_STAT_INCREMENT(counter)                                             \
+  atomic_fetch_add_explicit(&(counter), 1, memory_order_relaxed)
+#endif
+
 static inline TranspositionTable *
 transposition_table_create(double fraction_of_memory) {
   TranspositionTable *tt = malloc_or_die(sizeof(TranspositionTable));
@@ -148,7 +160,7 @@ static inline void transposition_table_reset(TranspositionTable *tt) {
 static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
                                                  uint64_t zval) {
   uint64_t idx = zval & tt->size_mask;
-  atomic_fetch_add(&tt->lookups, 1);
+  TT_STAT_INCREMENT(tt->lookups);
 
   // Lockless hashing (Hyatt 1999): each TTEntry is stored as two 8-byte
   // halves with the key half XOR'd against the data half. Each half is
@@ -170,13 +182,13 @@ static inline TTEntry transposition_table_lookup(TranspositionTable *tt,
     if (ttentry_valid(entry)) {
       // There is another unrelated node at this position. This is a
       // type 2 collision.
-      atomic_fetch_add(&tt->t2_collisions, 1);
+      TT_STAT_INCREMENT(tt->t2_collisions);
     }
     TTEntry e;
     ttentry_reset(&e);
     return e;
   }
-  atomic_fetch_add(&tt->hits, 1);
+  TT_STAT_INCREMENT(tt->hits);
   // Assume the same zobrist hash is the same position. If it's not, that's
   // a type 1 collision, which we can't do anything about. It should happen
   // extremely rarely.
@@ -190,7 +202,7 @@ static inline void transposition_table_store(TranspositionTable *tt,
   uint64_t stored_hash = zval >> tt->size_power_of_2;
   tentry.top_4_bytes = (uint32_t)(stored_hash >> 8);
   tentry.fifth_byte = (uint8_t)(stored_hash & 0xFF);
-  atomic_fetch_add(&tt->created, 1);
+  TT_STAT_INCREMENT(tt->created);
 
   // Lockless hashing: XOR key half with data half so torn reads
   // (one half from one write, the other from a different write)
@@ -239,5 +251,7 @@ static inline void transposition_table_leave_node(TranspositionTable *tt,
   uint64_t idx = zval & NPROC_MASK;
   atomic_fetch_sub_explicit(&tt->nproc[idx], 1, memory_order_relaxed);
 }
+
+#undef TT_STAT_INCREMENT
 
 #endif
