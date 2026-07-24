@@ -2601,6 +2601,49 @@ void test_config_move_list_one_turn_buffer(void) {
   config_destroy(config);
 }
 
+// The buffered SimResults from a "sim" command is a full deep copy, not
+// just the move_list: it survives the live sim_results being invalidated
+// on commit, supports the usual shmoves filter args, and is completely
+// independent of (doesn't alias) the live, now-invalid sim_results.
+void test_config_sim_results_one_turn_buffer(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -mode sync");
+  assert_config_exec_status(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
+      "0/0 0",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+  const SimResults *live_sim_results = config_get_sim_results(config);
+  assert(sim_results_get_valid_for_current_game_state(live_sim_results));
+  const int num_simmed_plays =
+      sim_results_get_number_of_plays(live_sim_results);
+  assert(num_simmed_plays > 1);
+
+  // Committing changes the position and invalidates the live sim_results
+  // right away, same as always; the object itself is untouched (its
+  // identity never changes), just marked invalid.
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(config_get_sim_results(config) == live_sim_results);
+  assert(!sim_results_get_valid_for_current_game_state(live_sim_results));
+
+  // The buffered sim results are a real, independent SimResults object,
+  // so an ordinary shmoves max-count filter still works against them.
+  assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+
+  // A second position change with nothing freshly simmed in between
+  // replaces the (still-invalid) buffer with nothing, ending the
+  // one-turn window.
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2620,4 +2663,5 @@ void test_config(void) {
   test_config_exchange_blank();
   test_config_utility_blend();
   test_config_move_list_one_turn_buffer();
+  test_config_sim_results_one_turn_buffer();
 }

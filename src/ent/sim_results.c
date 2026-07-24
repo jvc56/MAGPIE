@@ -241,6 +241,49 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   }
 }
 
+// A full, independent copy of src, for a buffered SimResults that must
+// support the same reads (and re-sorts/re-renders) as the original
+// without aliasing any of its memory. The PRNG and mutex are the only
+// exceptions: like simmed_play_copy, a fresh PRNG/mutex is used, since
+// the duplicate is never used to continue an active simulation.
+static SimmedPlay *simmed_play_duplicate(const SimmedPlay *src) {
+  SimmedPlay *dst = malloc_or_die(sizeof(SimmedPlay));
+  move_copy(&dst->move, &src->move);
+  dst->equity_stat = stat_create(true);
+  stat_copy(dst->equity_stat, src->equity_stat);
+  dst->leftover_stat = stat_create(true);
+  stat_copy(dst->leftover_stat, src->leftover_stat);
+  dst->win_pct_stat = stat_create(true);
+  stat_copy(dst->win_pct_stat, src->win_pct_stat);
+  dst->utility_stat = stat_create(true);
+  stat_copy(dst->utility_stat, src->utility_stat);
+  dst->similarity_key = src->similarity_key;
+  dst->play_index_by_sort_type = src->play_index_by_sort_type;
+  dst->num_alloc_plies = src->num_alloc_plies;
+  dst->ply_infos = malloc_or_die(sizeof(PlyInfo) * src->num_alloc_plies);
+  for (int i = 0; i < src->num_alloc_plies; i++) {
+    dst->ply_infos[i].score_stat = stat_create(true);
+    stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);
+    dst->ply_infos[i].bingo_stat = stat_create(true);
+    stat_copy(dst->ply_infos[i].bingo_stat, src->ply_infos[i].bingo_stat);
+    if (src->ply_infos[i].heat_map) {
+      dst->ply_infos[i].heat_map = heat_map_create();
+      // HeatMap is a plain value type (fixed-size arrays, no owned
+      // pointers), so a struct copy is a correct full duplicate.
+      *dst->ply_infos[i].heat_map = *src->ply_infos[i].heat_map;
+    } else {
+      dst->ply_infos[i].heat_map = NULL;
+    }
+    memcpy(dst->ply_infos[i].ply_info_counts, src->ply_infos[i].ply_info_counts,
+           sizeof(dst->ply_infos[i].ply_info_counts));
+  }
+  dst->cutoff = src->cutoff;
+  dst->utility_w_spread = src->utility_w_spread;
+  dst->prng = prng_create(0);
+  cpthread_mutex_init(&dst->mutex);
+  return dst;
+}
+
 void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
   if (!simmed_plays) {
     return;
@@ -317,6 +360,53 @@ SimResults *sim_results_create(const double cutoff) {
   rack_set_dist_size_and_reset(&sim_results->rack, 0);
   rack_set_dist_size_and_reset(&sim_results->known_opp_rack, 0);
   return sim_results;
+}
+
+// A full, independent deep copy: every SimmedPlay (and its stats/heat
+// maps), the BAI result, and the racks are duplicated rather than
+// shared, so the result can be read, re-sorted, and displayed exactly
+// like a SimResults that just finished simulating, without aliasing any
+// memory owned by src. Only the mutexes and each SimmedPlay's PRNG are
+// freshly created rather than copied, matching simmed_play_copy's
+// contract, since the duplicate is never used to continue simulating.
+SimResults *sim_results_duplicate(const SimResults *sim_results) {
+  SimResults *new_sim_results = malloc_or_die(sizeof(SimResults));
+  new_sim_results->num_simmed_plays = sim_results->num_simmed_plays;
+  new_sim_results->num_alloc_simmed_plays = sim_results->num_alloc_simmed_plays;
+  new_sim_results->num_plies = sim_results->num_plies;
+  atomic_init(&new_sim_results->node_count,
+              atomic_load(&sim_results->node_count));
+  atomic_init(&new_sim_results->iteration_count,
+              atomic_load(&sim_results->iteration_count));
+  cpthread_mutex_init(&new_sim_results->simmed_plays_mutex);
+  cpthread_mutex_init(&new_sim_results->display_mutex);
+  new_sim_results->simmed_plays = NULL;
+  if (sim_results->simmed_plays) {
+    new_sim_results->simmed_plays = malloc_or_die(
+        sizeof(SimmedPlay *) * sim_results->num_alloc_simmed_plays);
+    for (int i = 0; i < sim_results->num_alloc_simmed_plays; i++) {
+      new_sim_results->simmed_plays[i] =
+          simmed_play_duplicate(sim_results->simmed_plays[i]);
+    }
+  }
+  new_sim_results->display_simmed_plays = NULL;
+  if (sim_results->display_simmed_plays) {
+    new_sim_results->display_simmed_plays = malloc_or_die(
+        sizeof(SimmedPlay *) * sim_results->num_alloc_simmed_plays);
+    for (int i = 0; i < sim_results->num_alloc_simmed_plays; i++) {
+      new_sim_results->display_simmed_plays[i] =
+          simmed_play_duplicate(sim_results->display_simmed_plays[i]);
+    }
+  }
+  new_sim_results->rack = sim_results->rack;
+  new_sim_results->known_opp_rack = sim_results->known_opp_rack;
+  new_sim_results->bai_result = bai_result_duplicate(sim_results->bai_result);
+  new_sim_results->valid_for_current_game_state =
+      sim_results->valid_for_current_game_state;
+  new_sim_results->cutoff = sim_results->cutoff;
+  new_sim_results->utility_w_spread = sim_results->utility_w_spread;
+  new_sim_results->num_infer_leaves = sim_results->num_infer_leaves;
+  return new_sim_results;
 }
 
 const Move *simmed_play_get_move(const SimmedPlay *simmed_play) {
