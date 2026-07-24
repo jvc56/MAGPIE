@@ -2596,8 +2596,7 @@ void test_config_move_list_one_turn_buffer(void) {
   // replaces the (still-empty) live move list's buffer with nothing,
   // ending the one-turn window.
   assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
-  assert_config_exec_status(config, "shmoves",
-                            ERROR_STATUS_NO_MOVES_TO_SHOW);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
 
   config_destroy(config);
 }

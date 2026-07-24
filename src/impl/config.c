@@ -763,7 +763,8 @@ void config_reset_move_list_and_invalidate_sim_results(Config *config) {
   move_list_destroy(config->buffered_move_list);
   config->buffered_move_list = NULL;
   free(config->buffered_sim_results_output);
-  config->buffered_sim_results_output = config_capture_sim_results_snapshot(config);
+  config->buffered_sim_results_output =
+      config_capture_sim_results_snapshot(config);
   // Guard against a letter-distribution change (e.g. "set -ld ...") having
   // already swapped config->ld out from under a game/move_list that were
   // built against the old (possibly already-freed) alphabet; buffering it
