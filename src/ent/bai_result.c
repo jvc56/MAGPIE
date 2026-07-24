@@ -4,6 +4,7 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -56,7 +57,7 @@ double bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
 // Sets user interrupt or timeout status if the conditions for either are met
 bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
                                                   const bool user_interrupt) {
-  cpthread_mutex_lock(&bai_result->mutex);
+  lock_profile_mutex_lock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
   if (bai_result->status == BAI_RESULT_STATUS_NONE) {
     if (user_interrupt) {
       bai_result->status = BAI_RESULT_STATUS_USER_INTERRUPT;
@@ -67,20 +68,20 @@ bai_result_status_t bai_result_set_and_get_status(BAIResult *bai_result,
     }
   }
   bai_result_status_t status = bai_result->status;
-  cpthread_mutex_unlock(&bai_result->mutex);
+  lock_profile_mutex_unlock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
   return status;
 }
 
 bai_result_status_t bai_result_get_status(BAIResult *bai_result) {
-  cpthread_mutex_lock(&bai_result->mutex);
+  lock_profile_mutex_lock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
   bai_result_status_t status = bai_result->status;
-  cpthread_mutex_unlock(&bai_result->mutex);
+  lock_profile_mutex_unlock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
   return status;
 }
 
 void bai_result_set_status(BAIResult *bai_result,
                            const bai_result_status_t status) {
-  cpthread_mutex_lock(&bai_result->mutex);
+  lock_profile_mutex_lock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
   bai_result->status = status;
-  cpthread_mutex_unlock(&bai_result->mutex);
+  lock_profile_mutex_unlock(&bai_result->mutex, LOCK_PROFILE_SITE_BAI_STATUS);
 }

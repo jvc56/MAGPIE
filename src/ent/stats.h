@@ -18,6 +18,7 @@ double stat_get_variance(const Stat *stat);
 double stat_get_stdev(const Stat *stat);
 double stat_get_sem(const Stat *stat);
 double stat_get_margin_of_error(const Stat *stat, double zval);
+bool stat_is_bit_identical(const Stat *a, const Stat *b);
 
 void stat_push(Stat *stat, double value, uint64_t num_samples);
 

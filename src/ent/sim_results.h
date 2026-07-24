@@ -33,26 +33,33 @@ uint64_t simmed_play_get_ply_info_count(const SimmedPlay *simmed_play,
                                         int ply_index,
                                         ply_info_count_t count_type);
 const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play);
+const Stat *simmed_play_get_leftover_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play);
 const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play);
+const HeatMap *simmed_play_get_heat_map_const(const SimmedPlay *simmed_play,
+                                              int ply_index);
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play);
 int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play);
-uint64_t simmed_play_get_seed(SimmedPlay *simmed_play);
-void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move);
-void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
-                                 Equity spread, Equity leftover);
-double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
-                                    Equity spread, Equity leftover,
-                                    game_end_reason_t game_end_reason,
-                                    int game_unseen_tiles, bool plies_are_odd);
-void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
+uint64_t simmed_play_get_seed(SimmedPlay *simmed_play,
+                              uint64_t *arm_sample_ordinal);
+double simmed_play_calculate_win_pct(const WinPct *wp, Equity spread,
+                                     Equity leftover,
+                                     game_end_reason_t game_end_reason,
+                                     int game_unseen_tiles, bool plies_are_odd);
+void simmed_play_commit_rollout_stats(SimmedPlay *simmed_play,
+                                      uint64_t arm_sample_ordinal,
+                                      int num_completed_plies,
+                                      const Move *ply_moves,
+                                      Equity initial_spread, Equity spread,
+                                      Equity leftover, double win_pct,
+                                      double utility, bool add_utility);
 
 typedef struct SimResults SimResults;
 
 SimResults *sim_results_create(const double cutoff);
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed, bool use_heat_map);
+                       int num_plies, uint64_t seed, bool use_heat_map,
+                       int num_threads);
 void sim_results_destroy(SimResults *sim_results);
 
 int sim_results_get_number_of_plays(const SimResults *sim_results);

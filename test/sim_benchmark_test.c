@@ -20,6 +20,7 @@
 #include "../src/impl/config.h"
 #include "../src/impl/play_chooser.h"
 #include "../src/util/io_util.h"
+#include "../src/util/lock_profile.h"
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
@@ -58,7 +59,8 @@ void test_sim_benchmark(void) {
                  "set -lex CSW24 -wmp %s -rit %s -wit %s -s1 equity "
                  "-s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
-                 "-tlim %s -seed 42 -sr tt -minplayiterations %s",
+                 "-mtmode igp -tlim %s -seed 42 -sr tt "
+                 "-minplayiterations %s",
                  wmp, rit, wit, plies, threads, tlim, mi);
   Config *config = config_create_or_die(cmd);
 
@@ -72,6 +74,7 @@ void test_sim_benchmark(void) {
          (unsigned long long)iters, (double)iters / elapsed);
 
   config_destroy(config);
+  lock_profile_report();
 }
 
 void test_play_chooser_benchmark(void) {

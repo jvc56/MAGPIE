@@ -5,7 +5,9 @@
 #include "../def/game_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/rack_defs.h"
+#include "../def/sim_defs.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include "bai_result.h"
 #include "equity.h"
 #include "heat_map.h"
@@ -14,6 +16,7 @@
 #include "stats.h"
 #include "win_pct.h"
 #include "xoshiro.h"
+#include <assert.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -26,6 +29,19 @@ typedef struct PlyInfo {
   HeatMap *heat_map;
   uint64_t ply_info_counts[NUM_PLY_INFO_COUNT_TYPES];
 } PlyInfo;
+
+typedef struct PendingRolloutStats {
+  uint64_t ordinal;
+  int num_completed_plies;
+  Move ply_moves[MAX_PLIES];
+  Equity initial_spread;
+  Equity spread;
+  Equity leftover;
+  double win_pct;
+  double utility;
+  bool add_utility;
+  bool ready;
+} PendingRolloutStats;
 
 struct SimmedPlay {
   Move move;
@@ -40,7 +56,17 @@ struct SimmedPlay {
   XoshiroPRNG *prng;
   int num_alloc_plies;
   PlyInfo *ply_infos;
+  // Seed assignment is independent of display/stat updates. Keeping it on a
+  // separate mutex prevents a consolidated rollout commit from delaying the
+  // next worker's seed generation.
+  cpthread_mutex_t seed_mutex;
   cpthread_mutex_t mutex;
+  cpthread_cond_t stats_commit_cond;
+  uint64_t next_seed_ordinal;
+  uint64_t next_stats_ordinal;
+  int pending_stats_capacity;
+  int pending_stats_count;
+  PendingRolloutStats *pending_stats;
   double cutoff;
   // Copied from SimResults at the same points cutoff is refreshed. Nonzero
   // means the BU (blended utility) stat is meaningful for this play.
@@ -98,7 +124,7 @@ void ply_info_reset(PlyInfo *ply_info, bool use_heat_map) {
 
 SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
                                uint64_t seed, double cutoff, bool use_heat_map,
-                               const int i) {
+                               int pending_stats_capacity, const int i) {
   SimmedPlay *simmed_play = malloc_or_die(sizeof(SimmedPlay));
   move_copy(&simmed_play->move, move_list_get_move(move_list, i));
   simmed_play->equity_stat = stat_create(true);
@@ -115,14 +141,22 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->cutoff = cutoff;
   simmed_play->utility_w_spread = 0.0;
   simmed_play->prng = prng_create(seed);
+  cpthread_mutex_init(&simmed_play->seed_mutex);
   cpthread_mutex_init(&simmed_play->mutex);
+  cpthread_cond_init(&simmed_play->stats_commit_cond);
+  simmed_play->next_seed_ordinal = 0;
+  simmed_play->next_stats_ordinal = 0;
+  simmed_play->pending_stats_capacity = pending_stats_capacity;
+  simmed_play->pending_stats_count = 0;
+  simmed_play->pending_stats = calloc_or_die(
+      (size_t)pending_stats_capacity, sizeof(*simmed_play->pending_stats));
   return simmed_play;
 }
 
 SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
                               const MoveList *move_list, int new_num_plies,
                               uint64_t seed, double cutoff, bool use_heat_map,
-                              const int i) {
+                              int pending_stats_capacity, const int i) {
   move_copy(&simmed_play->move, move_list_get_move(move_list, i));
   stat_reset(simmed_play->equity_stat);
   stat_reset(simmed_play->leftover_stat);
@@ -143,6 +177,17 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   simmed_play->play_index_by_sort_type = i;
   simmed_play->cutoff = cutoff;
   prng_seed(simmed_play->prng, seed);
+  simmed_play->next_seed_ordinal = 0;
+  simmed_play->next_stats_ordinal = 0;
+  simmed_play->pending_stats_count = 0;
+  if (simmed_play->pending_stats_capacity != pending_stats_capacity) {
+    simmed_play->pending_stats = realloc_or_die(
+        simmed_play->pending_stats,
+        (size_t)pending_stats_capacity * sizeof(*simmed_play->pending_stats));
+    simmed_play->pending_stats_capacity = pending_stats_capacity;
+  }
+  memset(simmed_play->pending_stats, 0,
+         (size_t)pending_stats_capacity * sizeof(*simmed_play->pending_stats));
   return simmed_play;
 }
 
@@ -150,34 +195,37 @@ SimmedPlay **create_simmed_plays_array(const MoveList *move_list,
                                        const int num_simmed_plays,
                                        const int num_plies, const uint64_t seed,
                                        const double cutoff,
-                                       const bool use_heat_map) {
+                                       const bool use_heat_map,
+                                       const int pending_stats_capacity) {
   SimmedPlay **simmed_plays =
       malloc_or_die((sizeof(SimmedPlay *)) * num_simmed_plays);
   for (int i = 0; i < num_simmed_plays; i++) {
     simmed_plays[i] =
-        simmed_play_create(move_list, num_plies, seed, cutoff, use_heat_map, i);
+        simmed_play_create(move_list, num_plies, seed, cutoff, use_heat_map,
+                           pending_stats_capacity, i);
   }
   return simmed_plays;
 }
 
-SimmedPlay **
-realloc_simmed_plays_array(SimmedPlay **simmed_plays, const MoveList *move_list,
-                           const int old_num_alloc_sps,
-                           const int new_num_alloc_sps, const int num_plies,
-                           const uint64_t seed, const double cutoff,
-                           const bool use_heat_map) {
+SimmedPlay **realloc_simmed_plays_array(
+    SimmedPlay **simmed_plays, const MoveList *move_list,
+    const int old_num_alloc_sps, const int new_num_alloc_sps,
+    const int num_plies, const uint64_t seed, const double cutoff,
+    const bool use_heat_map, const int pending_stats_capacity) {
   simmed_plays =
       realloc_or_die(simmed_plays, (sizeof(SimmedPlay *)) * new_num_alloc_sps);
   for (int i = old_num_alloc_sps; i < new_num_alloc_sps; i++) {
     simmed_plays[i] =
-        simmed_play_create(move_list, num_plies, seed, cutoff, use_heat_map, i);
+        simmed_play_create(move_list, num_plies, seed, cutoff, use_heat_map,
+                           pending_stats_capacity, i);
   }
   return simmed_plays;
 }
 
 void sim_results_create_simmed_plays(SimResults *sim_results,
                                      const MoveList *move_list, int num_plies,
-                                     uint64_t seed, bool use_heat_map) {
+                                     uint64_t seed, bool use_heat_map,
+                                     int num_threads) {
   const int num_simmed_plays = move_list_get_count(move_list);
   sim_results->num_simmed_plays = num_simmed_plays;
   sim_results->num_alloc_simmed_plays = num_simmed_plays;
@@ -185,22 +233,23 @@ void sim_results_create_simmed_plays(SimResults *sim_results,
   // FIXME: ensure heatmaps are off for sim autoplay
   sim_results->simmed_plays =
       create_simmed_plays_array(move_list, num_simmed_plays, num_plies, seed,
-                                sim_results->cutoff, use_heat_map);
+                                sim_results->cutoff, use_heat_map, num_threads);
   // FIXME: don't create display simmed plays for sim autoplay
   sim_results->display_simmed_plays = create_simmed_plays_array(
-      move_list, num_simmed_plays, num_plies, 0, 0, false);
+      move_list, num_simmed_plays, num_plies, 0, 0, false, 1);
 }
 
 void sim_results_simmed_plays_reset(SimResults *sim_results,
                                     const MoveList *move_list, int num_plies,
-                                    uint64_t seed, bool use_heat_map) {
+                                    uint64_t seed, bool use_heat_map,
+                                    int num_threads) {
   const int new_num_sps = move_list_get_count(move_list);
   for (int i = 0; i < sim_results->num_alloc_simmed_plays && i < new_num_sps;
        i++) {
     simmed_play_reset(sim_results->simmed_plays[i], move_list, num_plies, seed,
-                      sim_results->cutoff, use_heat_map, i);
+                      sim_results->cutoff, use_heat_map, num_threads, i);
     simmed_play_reset(sim_results->display_simmed_plays[i], move_list,
-                      num_plies, 0, 0, false, i);
+                      num_plies, 0, 0, false, 1, i);
   }
   sim_results->num_plies = num_plies;
   sim_results->num_simmed_plays = new_num_sps;
@@ -208,11 +257,11 @@ void sim_results_simmed_plays_reset(SimResults *sim_results,
     sim_results->simmed_plays = realloc_simmed_plays_array(
         sim_results->simmed_plays, move_list,
         sim_results->num_alloc_simmed_plays, new_num_sps, num_plies, seed,
-        sim_results->cutoff, use_heat_map);
+        sim_results->cutoff, use_heat_map, num_threads);
     sim_results->display_simmed_plays =
         realloc_simmed_plays_array(sim_results->display_simmed_plays, move_list,
                                    sim_results->num_alloc_simmed_plays,
-                                   new_num_sps, num_plies, 0, 0, false);
+                                   new_num_sps, num_plies, 0, 0, false, 1);
     sim_results->num_alloc_simmed_plays = new_num_sps;
   }
 }
@@ -257,6 +306,7 @@ void simmed_plays_destroy(SimmedPlay **simmed_plays, int num_alloc_sps) {
     stat_destroy(simmed_plays[i]->win_pct_stat);
     stat_destroy(simmed_plays[i]->utility_stat);
     prng_destroy(simmed_plays[i]->prng);
+    free(simmed_plays[i]->pending_stats);
     free(simmed_plays[i]);
   }
   free(simmed_plays);
@@ -275,27 +325,33 @@ void sim_results_destroy(SimResults *sim_results) {
 }
 
 void sim_results_lock_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_lock(&sim_results->simmed_plays_mutex);
+  lock_profile_mutex_lock(&sim_results->simmed_plays_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
 }
 
 void sim_results_unlock_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_unlock(&sim_results->simmed_plays_mutex);
+  lock_profile_mutex_unlock(&sim_results->simmed_plays_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 void sim_results_reset(const MoveList *move_list, SimResults *sim_results,
-                       int num_plies, uint64_t seed, bool use_heat_map) {
-  cpthread_mutex_lock(&sim_results->display_mutex);
+                       int num_plies, uint64_t seed, bool use_heat_map,
+                       int num_threads) {
+  assert(num_threads > 0);
+  lock_profile_mutex_lock(&sim_results->display_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
   if (!sim_results->simmed_plays) {
     sim_results_create_simmed_plays(sim_results, move_list, num_plies, seed,
-                                    use_heat_map);
+                                    use_heat_map, num_threads);
   } else {
     sim_results_simmed_plays_reset(sim_results, move_list, num_plies, seed,
-                                   use_heat_map);
+                                   use_heat_map, num_threads);
   }
   atomic_init(&sim_results->node_count, 0);
   atomic_init(&sim_results->iteration_count, 0);
   sim_results->valid_for_current_game_state = false;
-  cpthread_mutex_unlock(&sim_results->display_mutex);
+  lock_profile_mutex_unlock(&sim_results->display_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 SimResults *sim_results_create(const double cutoff) {
@@ -347,12 +403,21 @@ const Stat *simmed_play_get_equity_stat(const SimmedPlay *simmed_play) {
   return simmed_play->equity_stat;
 }
 
+const Stat *simmed_play_get_leftover_stat(const SimmedPlay *simmed_play) {
+  return simmed_play->leftover_stat;
+}
+
 const Stat *simmed_play_get_win_pct_stat(const SimmedPlay *simmed_play) {
   return simmed_play->win_pct_stat;
 }
 
 const Stat *simmed_play_get_utility_stat(const SimmedPlay *simmed_play) {
   return simmed_play->utility_stat;
+}
+
+const HeatMap *simmed_play_get_heat_map_const(const SimmedPlay *simmed_play,
+                                              int ply_index) {
+  return simmed_play->ply_infos[ply_index].heat_map;
 }
 
 bool simmed_play_get_utility_w_spread_is_set(const SimmedPlay *simmed_play) {
@@ -364,11 +429,14 @@ int simmed_play_get_play_index_by_sort_type(const SimmedPlay *simmed_play) {
 }
 
 // Returns the current seed and updates the seed using prng_next
-uint64_t simmed_play_get_seed(SimmedPlay *simmed_play) {
+uint64_t simmed_play_get_seed(SimmedPlay *simmed_play,
+                              uint64_t *arm_sample_ordinal) {
   uint64_t seed;
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->seed_mutex, LOCK_PROFILE_SITE_SIM_SEED);
+  *arm_sample_ordinal = simmed_play->next_seed_ordinal++;
   seed = prng_next(simmed_play->prng);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->seed_mutex,
+                            LOCK_PROFILE_SITE_SIM_SEED);
   return seed;
 }
 
@@ -455,8 +523,9 @@ void sim_results_set_num_infer_leaves(SimResults *sim_results,
   sim_results->num_infer_leaves = num_infer_leaves;
 }
 
-void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
-                                   const Move *move) {
+static void simmed_play_add_stats_for_ply_unlocked(SimmedPlay *simmed_play,
+                                                   int ply_index,
+                                                   const Move *move) {
   const double move_score = equity_to_double(move_get_score(move));
   bool is_bingo = false;
   ply_info_count_t count_type;
@@ -478,7 +547,6 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
     return;
   }
   HeatMap *heat_map = simmed_play_get_heat_map(simmed_play, ply_index);
-  cpthread_mutex_lock(&simmed_play->mutex);
   stat_push(simmed_play->ply_infos[ply_index].score_stat, move_score, 1);
   stat_push(simmed_play->ply_infos[ply_index].bingo_stat, (double)(is_bingo),
             1);
@@ -488,32 +556,17 @@ void simmed_play_add_stats_for_ply(SimmedPlay *simmed_play, int ply_index,
   simmed_play->ply_infos[ply_index].ply_info_counts[count_type]++;
   simmed_play->ply_infos[ply_index].ply_info_counts[PLY_INFO_COUNT_BINGO] +=
       (uint64_t)is_bingo;
-  cpthread_mutex_unlock(&simmed_play->mutex);
-}
-
-void simmed_play_add_equity_stat(SimmedPlay *simmed_play, Equity initial_spread,
-                                 Equity spread, Equity leftover) {
-  cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->equity_stat,
-            equity_to_double(spread - initial_spread + leftover), 1);
-  stat_push(simmed_play->leftover_stat, equity_to_double(leftover), 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
 int round_to_nearest_int(double a) {
   return (int)(a + 0.5 - (a < 0)); // truncated to 55
 }
 
-void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
-  cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->utility_stat, utility, 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
-}
-
-double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
-                                    Equity spread, Equity leftover,
-                                    game_end_reason_t game_end_reason,
-                                    int game_unseen_tiles, bool plies_are_odd) {
+double simmed_play_calculate_win_pct(const WinPct *wp, Equity spread,
+                                     Equity leftover,
+                                     game_end_reason_t game_end_reason,
+                                     int game_unseen_tiles,
+                                     bool plies_are_odd) {
   double wpct = 0.0;
   if (game_end_reason != GAME_END_REASON_NONE) {
     // the game ended; use the actual result.
@@ -539,10 +592,115 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
       wpct = 1.0 - wpct;
     }
   }
-  cpthread_mutex_lock(&simmed_play->mutex);
-  stat_push(simmed_play->win_pct_stat, wpct, 1);
-  cpthread_mutex_unlock(&simmed_play->mutex);
   return wpct;
+}
+
+static void
+simmed_play_apply_rollout_stats_unlocked(SimmedPlay *simmed_play,
+                                         const PendingRolloutStats *pending) {
+  for (int ply = 0; ply < pending->num_completed_plies; ply++) {
+    simmed_play_add_stats_for_ply_unlocked(simmed_play, ply,
+                                           &pending->ply_moves[ply]);
+  }
+  stat_push(simmed_play->equity_stat,
+            equity_to_double(pending->spread - pending->initial_spread +
+                             pending->leftover),
+            1);
+  stat_push(simmed_play->leftover_stat, equity_to_double(pending->leftover), 1);
+  stat_push(simmed_play->win_pct_stat, pending->win_pct, 1);
+  if (pending->add_utility) {
+    stat_push(simmed_play->utility_stat, pending->utility, 1);
+  }
+}
+
+static PendingRolloutStats *
+simmed_play_find_pending_ordinal(SimmedPlay *simmed_play, uint64_t ordinal) {
+  for (int i = 0; i < simmed_play->pending_stats_capacity; i++) {
+    PendingRolloutStats *pending = &simmed_play->pending_stats[i];
+    if (pending->ready && pending->ordinal == ordinal) {
+      return pending;
+    }
+  }
+  return NULL;
+}
+
+static PendingRolloutStats *
+simmed_play_find_empty_pending_slot(SimmedPlay *simmed_play) {
+  for (int i = 0; i < simmed_play->pending_stats_capacity; i++) {
+    PendingRolloutStats *pending = &simmed_play->pending_stats[i];
+    if (!pending->ready) {
+      return pending;
+    }
+  }
+  return NULL;
+}
+
+void simmed_play_commit_rollout_stats(SimmedPlay *simmed_play,
+                                      uint64_t arm_sample_ordinal,
+                                      int num_completed_plies,
+                                      const Move *ply_moves,
+                                      Equity initial_spread, Equity spread,
+                                      Equity leftover, double win_pct,
+                                      double utility, bool add_utility) {
+  // A rollout used to acquire this mutex once per completed ply and once each
+  // for equity, win percentage, and optional utility. Commit the already
+  // computed delta as one transaction so display snapshots remain coherent
+  // while avoiding repeated sleep/wakeup cycles on the same arm.
+  PendingRolloutStats completed = {
+      .ordinal = arm_sample_ordinal,
+      .num_completed_plies = num_completed_plies,
+      .initial_spread = initial_spread,
+      .spread = spread,
+      .leftover = leftover,
+      .win_pct = win_pct,
+      .utility = utility,
+      .add_utility = add_utility,
+      .ready = true,
+  };
+  for (int ply = 0; ply < num_completed_plies; ply++) {
+    move_copy(&completed.ply_moves[ply], &ply_moves[ply]);
+  }
+
+  lock_profile_mutex_lock(&simmed_play->mutex, LOCK_PROFILE_SITE_SIM_PLY_STATS);
+  // Seeds give each arm a stable logical order, but workers can finish in a
+  // different physical order. Publish in seed order so floating Stat updates
+  // remain bit-identical across thread counts. At most num_threads - 1 later
+  // rollouts can be pending; once that bound is reached, later finishers wait
+  // and leave the missing ordinal's worker free to make progress.
+  while (arm_sample_ordinal != simmed_play->next_stats_ordinal &&
+         simmed_play->pending_stats_count >=
+             simmed_play->pending_stats_capacity - 1) {
+    lock_profile_cond_wait(&simmed_play->stats_commit_cond, &simmed_play->mutex,
+                           LOCK_PROFILE_SITE_SIM_PLY_STATS);
+  }
+
+  if (arm_sample_ordinal == simmed_play->next_stats_ordinal) {
+    simmed_play_apply_rollout_stats_unlocked(simmed_play, &completed);
+    simmed_play->next_stats_ordinal++;
+    while (true) {
+      PendingRolloutStats *pending = simmed_play_find_pending_ordinal(
+          simmed_play, simmed_play->next_stats_ordinal);
+      if (pending == NULL) {
+        break;
+      }
+      simmed_play_apply_rollout_stats_unlocked(simmed_play, pending);
+      pending->ready = false;
+      simmed_play->pending_stats_count--;
+      simmed_play->next_stats_ordinal++;
+    }
+    cpthread_cond_broadcast(&simmed_play->stats_commit_cond);
+  } else {
+    PendingRolloutStats *pending =
+        simmed_play_find_empty_pending_slot(simmed_play);
+    if (pending == NULL) {
+      log_fatal("no free pending sim stats slot");
+    } else {
+      *pending = completed;
+      simmed_play->pending_stats_count++;
+    }
+  }
+  lock_profile_mutex_unlock(&simmed_play->mutex,
+                            LOCK_PROFILE_SITE_SIM_PLY_STATS);
 }
 
 void sim_results_set_valid_for_current_game_state(SimResults *sim_results,
@@ -562,9 +720,9 @@ void sim_results_update_display_simmed_play(const SimResults *sim_results,
   SimmedPlay *display_simmed_play =
       sim_results_get_display_simmed_play(sim_results, simmed_play_index);
   const int num_plies = sim_results_get_num_plies(sim_results);
-  cpthread_mutex_lock(&simmed_play->mutex);
+  lock_profile_mutex_lock(&simmed_play->mutex, LOCK_PROFILE_SITE_DISPLAY);
   simmed_play_copy(display_simmed_play, simmed_play, num_plies);
-  cpthread_mutex_unlock(&simmed_play->mutex);
+  lock_profile_mutex_unlock(&simmed_play->mutex, LOCK_PROFILE_SITE_DISPLAY);
 }
 
 // When simming stuck tile endgames, a pass will sim equivalently to the
@@ -638,9 +796,11 @@ int compare_simmed_plays(const void *a, const void *b) {
 // updated and locked
 // Returns false otherwise
 bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
-  cpthread_mutex_lock(&sim_results->display_mutex);
+  lock_profile_mutex_lock(&sim_results->display_mutex,
+                          LOCK_PROFILE_SITE_DISPLAY);
   if (!sim_results->display_simmed_plays) {
-    cpthread_mutex_unlock(&sim_results->display_mutex);
+    lock_profile_mutex_unlock(&sim_results->display_mutex,
+                              LOCK_PROFILE_SITE_DISPLAY);
     return false;
   }
 
@@ -658,7 +818,8 @@ bool sim_results_lock_and_sort_display_simmed_plays(SimResults *sim_results) {
 }
 
 void sim_results_unlock_display_infos(SimResults *sim_results) {
-  cpthread_mutex_unlock(&sim_results->display_mutex);
+  lock_profile_mutex_unlock(&sim_results->display_mutex,
+                            LOCK_PROFILE_SITE_DISPLAY);
 }
 
 SimmedPlay *sim_results_get_display_simmed_play(const SimResults *sim_results,

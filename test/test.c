@@ -109,6 +109,7 @@ static TestEntry test_table[] = {
     {"am", test_alias_method},
     {"hm", test_heat_map},
     {"sim", test_sim},
+    {"simexact", test_sim_exact_thread_consistency},
     {"math", test_math_util},
     {"bai", test_bai},
     {"baiutil", test_bai_utility},

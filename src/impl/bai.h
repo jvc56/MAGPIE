@@ -23,6 +23,7 @@
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include "bai_logger.h"
 #include "random_variable.h"
 #include <assert.h>
@@ -241,9 +242,11 @@ bai_sync_data_get_next_sample_index_while_locked(BAISampleArgs *args) {
 
 static inline int bai_sync_data_get_next_sample_index(BAISampleArgs *args) {
   int arm_index;
-  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+  lock_profile_mutex_lock(&args->bai_sync_data->mutex,
+                          LOCK_PROFILE_SITE_BAI_NEXT_ARM);
   arm_index = bai_sync_data_get_next_sample_index_while_locked(args);
-  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
+  lock_profile_mutex_unlock(&args->bai_sync_data->mutex,
+                            LOCK_PROFILE_SITE_BAI_NEXT_ARM);
   return arm_index;
 }
 
@@ -370,9 +373,11 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
                                             const int arm_index,
                                             const double sample_value) {
-  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+  lock_profile_mutex_lock(&args->bai_sync_data->mutex,
+                          LOCK_PROFILE_SITE_BAI_UPDATE);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
-  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
+  lock_profile_mutex_unlock(&args->bai_sync_data->mutex,
+                            LOCK_PROFILE_SITE_BAI_UPDATE);
 }
 
 typedef struct BAIWorkerArgs {
@@ -434,7 +439,7 @@ static inline void bai_finish_initial_phase(void *uncasted_bai_worker_args) {
 // which tracks the number of samples requested for that arm.
 static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
                                            const uint64_t winner_count) {
-  cpthread_mutex_lock(&sync_data->mutex);
+  lock_profile_mutex_lock(&sync_data->mutex, LOCK_PROFILE_SITE_BAI_NEXT_ARM);
   int result = -1;
   while (sync_data->avoid_prune_count > 0) {
     const int idx =
@@ -453,7 +458,7 @@ static inline int get_avoid_prune_next_idx(BAISyncData *sync_data,
       break;
     }
   }
-  cpthread_mutex_unlock(&sync_data->mutex);
+  lock_profile_mutex_unlock(&sync_data->mutex, LOCK_PROFILE_SITE_BAI_NEXT_ARM);
   return result;
 }
 
@@ -538,6 +543,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
 
   Checkpoint *checkpoint =
       checkpoint_create(bai_options->num_threads, bai_finish_initial_phase);
+  checkpoint_set_lock_profile_site(checkpoint,
+                                   LOCK_PROFILE_SITE_INITIAL_CHECKPOINT);
 
   BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
                                                 (int)rvs_get_num_rvs(rvs), rng);
@@ -550,6 +557,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
 
   Checkpoint *avoid_prune_checkpoint =
       checkpoint_create(bai_options->num_threads, bai_avoid_prune_prebroadcast);
+  checkpoint_set_lock_profile_site(avoid_prune_checkpoint,
+                                   LOCK_PROFILE_SITE_AVOID_PRUNE_CHECKPOINT);
 
   BAIWorkerArgs bai_worker_args = {
       .sync_data = sync_data,
@@ -573,7 +582,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   for (int thread_index = 0; thread_index < bai_options->num_threads;
        thread_index++) {
-    cpthread_join(worker_ids[thread_index]);
+    lock_profile_thread_join(worker_ids[thread_index],
+                             LOCK_PROFILE_SITE_BAI_WORKER_JOIN);
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_stop_timer(bai_result);

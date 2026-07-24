@@ -4,6 +4,7 @@
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
 #include "../util/io_util.h"
+#include "../util/lock_profile.h"
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -48,7 +49,8 @@ bool thread_control_set_status(ThreadControl *thread_control,
   bool success = false;
   // Still hold the mutex here so the cond broadcast is correctly paired
   // with cond_wait in thread_control_wait_for_status_change.
-  cpthread_mutex_lock(&thread_control->status_mutex);
+  lock_profile_mutex_lock(&thread_control->status_mutex,
+                          LOCK_PROFILE_SITE_THREAD_CONTROL);
   const thread_control_status_t old_status =
       (thread_control_status_t)atomic_load_explicit(&thread_control->status,
                                                     memory_order_relaxed);
@@ -61,25 +63,31 @@ bool thread_control_set_status(ThreadControl *thread_control,
       cpthread_cond_broadcast(&thread_control->status_cond);
     }
   }
-  cpthread_mutex_unlock(&thread_control->status_mutex);
+  lock_profile_mutex_unlock(&thread_control->status_mutex,
+                            LOCK_PROFILE_SITE_THREAD_CONTROL);
   return success;
 }
 
 void thread_control_wait_for_status_change(ThreadControl *thread_control) {
-  cpthread_mutex_lock(&thread_control->status_mutex);
+  lock_profile_mutex_lock(&thread_control->status_mutex,
+                          LOCK_PROFILE_SITE_THREAD_CONTROL);
   while ((thread_control_status_t)atomic_load_explicit(&thread_control->status,
                                                        memory_order_relaxed) !=
          THREAD_CONTROL_STATUS_FINISHED) {
-    cpthread_cond_wait(&thread_control->status_cond,
-                       &thread_control->status_mutex);
+    lock_profile_cond_wait(&thread_control->status_cond,
+                           &thread_control->status_mutex,
+                           LOCK_PROFILE_SITE_THREAD_CONTROL);
   }
-  cpthread_mutex_unlock(&thread_control->status_mutex);
+  lock_profile_mutex_unlock(&thread_control->status_mutex,
+                            LOCK_PROFILE_SITE_THREAD_CONTROL);
 }
 
 void thread_control_print(ThreadControl *thread_control, const char *content) {
-  cpthread_mutex_lock(&thread_control->print_mutex);
+  lock_profile_mutex_lock(&thread_control->print_mutex,
+                          LOCK_PROFILE_SITE_THREAD_CONTROL);
   write_to_stream_out("%s", content);
-  cpthread_mutex_unlock(&thread_control->print_mutex);
+  lock_profile_mutex_unlock(&thread_control->print_mutex,
+                            LOCK_PROFILE_SITE_THREAD_CONTROL);
 }
 
 void thread_control_print_formatted(ThreadControl *thread_control,
