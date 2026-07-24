@@ -116,9 +116,13 @@ static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
   }
 }
 
+// anchor_slots_initialized must either be NULL (always seed, for standalone
+// WMPMoveGen storage) or point to state with the same lifetime as wmp_move_gen,
+// initially false.
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
-                                     const Rack *player_rack, const WMP *wmp) {
+                                     const Rack *player_rack, const WMP *wmp,
+                                     bool *anchor_slots_initialized) {
   wmp_move_gen->wmp = wmp;
   wmp_move_gen->nonplaythrough_wmp_entry_cache = NULL;
   wmp_move_gen->nonplaythrough_wmp_entry_cache_set = NULL;
@@ -129,22 +133,29 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
-  // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
-  // is a sparse reset keyed on the touched-anchor masks; untouched
-  // slots retain their prior default values rather than being reset. The
-  // calloc-zero defaults for highest_possible_equity and leftmost_start_col
-  // differ from the expected-on-first-touch sentinels (EQUITY_MIN_VALUE and
-  // BOARD_DIM-1 respectively), so we must seed them once here before the
-  // sparse-reset protocol takes over.
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].rightmost_start_col = 0;
-    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  if (anchor_slots_initialized != NULL && *anchor_slots_initialized) {
+    // The prior position can leave its final board anchor touched. Reset
+    // those slots before reusing the tracker; clearing the masks alone would
+    // lose the only record that their values are stale.
+    wmp_move_gen_reset_anchors(wmp_move_gen);
+  } else {
+    // The calloc-zero defaults for highest_possible_equity and
+    // leftmost_start_col differ from the expected-on-first-touch sentinels
+    // (EQUITY_MIN_VALUE and BOARD_DIM-1 respectively), so seed every slot
+    // before the sparse-reset protocol takes over.
+    for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+      wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[i].rightmost_start_col = 0;
+      wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
+      wmp_move_gen->anchors[i].tiles_to_play = 0;
+    }
+    memset(wmp_move_gen->touched_anchor_masks, 0,
+           sizeof(wmp_move_gen->touched_anchor_masks));
+    if (anchor_slots_initialized != NULL) {
+      *anchor_slots_initialized = true;
+    }
   }
-  memset(wmp_move_gen->touched_anchor_masks, 0,
-         sizeof(wmp_move_gen->touched_anchor_masks));
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {

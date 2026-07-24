@@ -247,6 +247,11 @@ typedef struct MoveGen {
   Equity descending_tile_scores[RACK_SIZE];
   Equity descending_tile_scores_copy[RACK_SIZE];
   WMPMoveGen wmp_move_gen;
+  // WMPMoveGen also has standalone test users whose storage is not
+  // necessarily zero-initialized. Keep this lifecycle bit in the calloc-owned
+  // MoveGen rather than making WMPMoveGen read an indeterminate first-use
+  // flag.
+  bool wmp_anchor_slots_initialized;
   uint64_t rack_cross_set;
   bool target_word_full_rack_existence[RACK_SIZE + 1];
 
