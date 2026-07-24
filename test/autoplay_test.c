@@ -142,8 +142,30 @@ void test_autoplay_leavegen(void) {
   // Explicit shared and per-player RIT options are also ignored by leavegen.
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3 -rit true",
                                     60);
+
+  // Load known-good later-generation outputs. This exercises the full
+  // generation boundary: generation 1 primes MoveGen's leave caches,
+  // rack_list_write_to_klv changes the live KLV, and generations 2 and 3 must
+  // use the new values rather than cached ones.
+  const char *gen_2_csv_filename = "./testdata/lexica/CSW21_ab_gen_2.csv";
+  const char *gen_3_csv_filename = "./testdata/lexica/CSW21_ab_gen_3.csv";
+  char *expected_gen_2_csv = get_string_from_file_or_die(
+      "./test/fixtures/leavegen_CSW21_ab_gen_2.csv");
+  char *expected_gen_3_csv = get_string_from_file_or_die(
+      "./test/fixtures/leavegen_CSW21_ab_gen_3.csv");
+
   load_and_exec_config_or_die_timed(
       ab_config, "leavegen 1,2,1 0 -seed 3 -rit1 true -rit2 true", 60);
+
+  char *actual_gen_2_csv = get_string_from_file_or_die(gen_2_csv_filename);
+  char *actual_gen_3_csv = get_string_from_file_or_die(gen_3_csv_filename);
+  assert_strings_equal(expected_gen_2_csv, actual_gen_2_csv);
+  assert_strings_equal(expected_gen_3_csv, actual_gen_3_csv);
+  free(actual_gen_2_csv);
+  free(actual_gen_3_csv);
+  free(expected_gen_2_csv);
+  free(expected_gen_3_csv);
+
   assert(!players_data_get_use_when_available(players_data,
                                               PLAYERS_DATA_TYPE_RIT, 0));
   assert(!players_data_get_use_when_available(players_data,
