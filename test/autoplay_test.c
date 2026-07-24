@@ -121,11 +121,31 @@ void test_autoplay_leavegen(void) {
       config_create_or_die("set -lex CSW21_ab -ld english_ab -wmp false -s1 "
                            "equity -s2 equity -r1 best -r2 "
                            "best -numplays 1 -threads 1");
+  PlayersData *players_data = config_get_players_data(ab_config);
 
   // The minimum leave count should be achieved quickly, so if this takes too
   // long, we know it failed.
+  // CSW21_ab has no RIT. Pretend one was enabled by an earlier command and
+  // verify that leavegen disables it before attempting to load lexical data.
+  players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 0,
+                                      true);
+  players_data_set_use_when_available(players_data, PLAYERS_DATA_TYPE_RIT, 1,
+                                      true);
   load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3", 60);
-  load_and_exec_config_or_die_timed(ab_config, "leavegen 1,2,1 0 -seed 3", 60);
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 0));
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 1));
+
+  // Explicit shared and per-player RIT options are also ignored by leavegen.
+  load_and_exec_config_or_die_timed(ab_config, "leavegen 1 0 -seed 3 -rit true",
+                                    60);
+  load_and_exec_config_or_die_timed(
+      ab_config, "leavegen 1,2,1 0 -seed 3 -rit1 true -rit2 true", 60);
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 0));
+  assert(!players_data_get_use_when_available(players_data,
+                                              PLAYERS_DATA_TYPE_RIT, 1));
 
   config_destroy(ab_config);
 }
