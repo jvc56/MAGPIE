@@ -490,12 +490,10 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "cgp " EMPTY_CGP, ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack AB3C",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack .ABC",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack AB.C",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
-  assert_config_exec_status(config, "rack ABC.",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
+  // "." is an alias for "?" (blank tile), so these are well-formed racks.
+  assert_config_exec_status(config, "rack .ABC", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack AB.C", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "rack ABC.", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "rack ABCDEFGH",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "rack ABCZZZ",
@@ -1736,7 +1734,9 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "t BARCHAN", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // The move that was just committed is still visible for one more
+  // "shmoves" (a one-turn buffer), consuming the buffered view.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
   // if a rack is present but there are no moves, moves should be automatically
   // generated to find the top play
@@ -1746,7 +1746,8 @@ void test_config_anno(void) {
   assert_config_exec_status(config, "t", ERROR_STATUS_SUCCESS);
   assert(player_get_score(game_get_player(game, 0)) == int_to_equity(86));
   assert(player_get_score(game_get_player(game, 1)) == int_to_equity(0));
-  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+  // Buffered from the auto-generated top play that was just committed.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
 
   assert_config_exec_status(config, "goto start", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
@@ -2559,6 +2560,90 @@ void test_config_utility_blend(void) {
   error_stack_destroy(error_stack);
 }
 
+// "shmoves" should still be able to show (and filter/limit into) the
+// results of a gen/sim command for one full turn after a commit changes
+// the position, even though the live move_list is (as always) cleared
+// immediately on commit. The buffered move_list/sim_results are real
+// objects, not a frozen rendering, so ordinary "shmoves" filter args
+// keep working against them; they're replaced (not consumed) by the
+// next invalidation.
+void test_config_move_list_one_turn_buffer(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 15 -mode sync");
+  assert_config_exec_status(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
+      "0/0 0",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert(move_list_get_count(config_get_move_list(config)) > 1);
+
+  // Committing changes the position and clears the live move list right
+  // away, same as always.
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(move_list_get_count(config_get_move_list(config)) == 0);
+
+  // The buffered results are real objects, so ordinary shmoves args (a
+  // max-count filter, here) still work against them...
+  assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
+
+  // ...and they aren't consumed by being viewed, so a second (unfiltered)
+  // "shmoves" still shows them too.
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+
+  // A second position change with nothing freshly generated in between
+  // replaces the (still-empty) live move list's buffer with nothing,
+  // ending the one-turn window.
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  config_destroy(config);
+}
+
+// The buffered SimResults from a "sim" command is a full deep copy, not
+// just the move_list: it survives the live sim_results being invalidated
+// on commit, supports the usual shmoves filter args, and is completely
+// independent of (doesn't alias) the live, now-invalid sim_results.
+void test_config_sim_results_one_turn_buffer(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -mode sync");
+  assert_config_exec_status(
+      config,
+      "cgp 15/15/15/15/15/15/15/15/15/15/15/15/15/15/15 ABCDEFG/HIJKLM? "
+      "0/0 0",
+      ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "gen", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "sim -iterations 100",
+                            ERROR_STATUS_SUCCESS);
+  const SimResults *live_sim_results = config_get_sim_results(config);
+  assert(sim_results_get_valid_for_current_game_state(live_sim_results));
+  const int num_simmed_plays =
+      sim_results_get_number_of_plays(live_sim_results);
+  assert(num_simmed_plays > 1);
+
+  // Committing changes the position and invalidates the live sim_results
+  // right away, same as always; the object itself is untouched (its
+  // identity never changes), just marked invalid.
+  assert_config_exec_status(config, "com 1", ERROR_STATUS_SUCCESS);
+  assert(config_get_sim_results(config) == live_sim_results);
+  assert(!sim_results_get_valid_for_current_game_state(live_sim_results));
+
+  // The buffered sim results are a real, independent SimResults object,
+  // so an ordinary shmoves max-count filter still works against them.
+  assert_config_exec_status(config, "shmoves 1", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_SUCCESS);
+
+  // A second position change with nothing freshly simmed in between
+  // replaces the (still-invalid) buffer with nothing, ending the
+  // one-turn window.
+  assert_config_exec_status(config, "com pass", ERROR_STATUS_SUCCESS);
+  assert_config_exec_status(config, "shmoves", ERROR_STATUS_NO_MOVES_TO_SHOW);
+
+  config_destroy(config);
+}
+
 void test_config(void) {
   test_game_display();
   test_trie();
@@ -2577,4 +2662,6 @@ void test_config(void) {
   test_config_fg_required();
   test_config_exchange_blank();
   test_config_utility_blend();
+  test_config_move_list_one_turn_buffer();
+  test_config_sim_results_one_turn_buffer();
 }
