@@ -26,9 +26,9 @@ static const char *peg_result_status_to_string(peg_result_status_t status) {
   case PEG_RESULT_STATUS_INTERRUPTED:
     return "interrupted";
   case PEG_RESULT_STATUS_NONE:
-    return "none";
+    return "running";
   }
-  return "none";
+  return "running";
 }
 
 // One displayable outcome token: a draw rendered as the mover's drawn multiset
