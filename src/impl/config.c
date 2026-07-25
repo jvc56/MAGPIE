@@ -85,6 +85,12 @@ enum {
   // Upper bound on the number of per-stage counts the -pegtopk CLI arg accepts.
   // This caps only the parse buffer; the solver itself imposes no stage limit.
   CONFIG_PEG_MAX_STAGES = 16,
+  // Per-turn time limits the "analyze" command falls back to when -etlim /
+  // -pegtlim are left at their unlimited (0) default, so a single game's
+  // turns can't run unbounded. The plain "endgame"/"peg" commands have no
+  // such fallback and stay unlimited unless the user sets a limit.
+  CONFIG_ANALYZE_DEFAULT_ENDGAME_TIME_LIMIT_SECONDS = 600,
+  CONFIG_ANALYZE_DEFAULT_PEG_TIME_LIMIT_SECONDS = 1800,
 };
 
 typedef enum {
@@ -8010,7 +8016,17 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
+  if (config->endgame_time_limit_seconds == 0) {
+    analyze_args->endgame_args.soft_time_limit =
+        CONFIG_ANALYZE_DEFAULT_ENDGAME_TIME_LIMIT_SECONDS;
+    analyze_args->endgame_args.hard_time_limit =
+        CONFIG_ANALYZE_DEFAULT_ENDGAME_TIME_LIMIT_SECONDS;
+  }
   config_fill_peg_args(config, &analyze_args->peg_args);
+  if (config->peg_time_limit_seconds == 0) {
+    analyze_args->peg_args.time_budget_seconds =
+        CONFIG_ANALYZE_DEFAULT_PEG_TIME_LIMIT_SECONDS;
+  }
   analyze_args->human_readable = config->human_readable;
   analyze_args->max_num_display_plays = config->max_num_display_plays;
 }

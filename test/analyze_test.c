@@ -210,7 +210,8 @@ void test_analyze(void) {
 // requested (e.g., ./bin/magpie_test analyze_sim).
 void test_analyze_sim(void) {
   Config *config = config_create_or_die(
-      "set -lex CSW21 -plies 2 -hr true -iter 50 -numplays 5");
+      "set -lex CSW21 -plies 2 -hr true -iter 50 -numplays 5 -etlim 10 "
+      "-pegtlim 20");
   assert_config_exec_status(config, "analyze testdata/gcgs/success.gcg",
                             ERROR_STATUS_SUCCESS);
   config_destroy(config);
