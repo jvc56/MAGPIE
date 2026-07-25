@@ -327,11 +327,21 @@ typedef struct PegRankedCand {
                        // stage (live/CLI solves only; 0 otherwise)
 } PegRankedCand;
 
+typedef enum {
+  PEG_RESULT_STATUS_NONE,
+  PEG_RESULT_STATUS_FINISHED,
+  PEG_RESULT_STATUS_INTERRUPTED,
+} peg_result_status_t;
+
 typedef struct PegResult {
   // Best move = top of the last fully-completed stage.
   Move best_move;
   double best_win;
   double best_spread;
+
+  // Set once peg_solve returns: FINISHED unless the caller's thread_control
+  // was user-interrupted, in which case INTERRUPTED. NONE until then.
+  peg_result_status_t status;
 
   // Index of the deepest stage reached (0 = greedy only; the final halving
   // stage = the deepest stage actually run). -1 while running or uninitialized.

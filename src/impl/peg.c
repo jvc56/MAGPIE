@@ -2409,6 +2409,7 @@ static void *peg_injector_main(void *arg) {
 void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
+  out->status = PEG_RESULT_STATUS_NONE;
 
   // Anchor the wall-clock deadline at the very start so the whole solve —
   // including KWG pruning and the initial greedy move generation, not just the
@@ -3108,6 +3109,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   game_destroy(prepared_base);
   kwg_destroy(pruned_kwg);
   ctimer_stop(&out->timer);
+
+  if (thread_control_get_status(args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    out->status = PEG_RESULT_STATUS_INTERRUPTED;
+  } else {
+    out->status = PEG_RESULT_STATUS_FINISHED;
+  }
 }
 
 void peg_result_destroy(PegResult *r) {

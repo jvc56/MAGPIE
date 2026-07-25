@@ -8782,7 +8782,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->utility_w_winpct = 1.0;
   config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
-  config->time_limit_seconds = 60;
+  config->time_limit_seconds = 0;
   config->endgame_time_limit_seconds = 0;
   config->peg_time_limit_seconds = 0;
   config->num_threads = get_num_cores();

@@ -19,6 +19,18 @@
 #include <stdlib.h>
 #include <string.h>
 
+static const char *peg_result_status_to_string(peg_result_status_t status) {
+  switch (status) {
+  case PEG_RESULT_STATUS_FINISHED:
+    return "finished";
+  case PEG_RESULT_STATUS_INTERRUPTED:
+    return "interrupted";
+  case PEG_RESULT_STATUS_NONE:
+    return "none";
+  }
+  return "none";
+}
+
 // One displayable outcome token: a draw rendered as the mover's drawn multiset
 // followed by the bag remainder -- a sorted multiset ("DH/RS") when its
 // orderings share a bucket, or "/"-segmented ("DH/R/S") when they split --
@@ -1192,18 +1204,21 @@ char *peg_result_get_string(const PegResult *result, const Game *game,
     const int64_t now_ns = ctimer_monotonic_ns();
     const double total_secs =
         (double)(now_ns - result->stage_history[0].start_ns) / 1e9;
-    string_builder_add_formatted_string(sb, "PEG (running): %.1fs\n",
-                                        total_secs);
+    string_builder_add_formatted_string(
+        sb, "PEG (running): %.1fs, status: %s\n", total_secs,
+        peg_result_status_to_string(result->status));
   } else if (result->last_stage_partial) {
     string_builder_add_formatted_string(
-        sb, "PEG (stage %d partial): %d candidates, %.2fs\n",
+        sb, "PEG (stage %d partial): %d candidates, %.2fs, status: %s\n",
         result->last_completed_stage, result->n_top_cands,
-        ctimer_elapsed_seconds(&result->timer));
+        ctimer_elapsed_seconds(&result->timer),
+        peg_result_status_to_string(result->status));
   } else {
     string_builder_add_formatted_string(
-        sb, "PEG (last completed stage %d): %d candidates, %.2fs\n",
+        sb, "PEG (last completed stage %d): %d candidates, %.2fs, status: %s\n",
         result->last_completed_stage, result->n_top_cands,
-        ctimer_elapsed_seconds(&result->timer));
+        ctimer_elapsed_seconds(&result->timer),
+        peg_result_status_to_string(result->status));
   }
 
   if (result->n_stage_history > 0) {
