@@ -1275,7 +1275,7 @@ static void *nested_outer_worker(void *uncasted_worker) {
 
   for (int sample = worker->worker_index; sample < worker->outer_samples;
        sample += worker->num_workers) {
-    HorizonValue root_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+    HorizonValue root_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
     const uint64_t outer_seed =
         worker->position_seed + (uint64_t)sample * KLV3_ORACLE_SEED_STRIDE;
     const uint64_t nested_seed =
