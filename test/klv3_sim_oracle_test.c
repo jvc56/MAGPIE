@@ -1468,13 +1468,11 @@ static void print_nested_corpus_summary(const NestedCorpusAggregate *aggregate,
          aggregate->counters.nested_nodes, elapsed_seconds);
 }
 
-static void run_nested_corpus_oracle(Config *klv2_config, Config *klv3_config,
-                                     const char *corpus_files,
-                                     int outer_samples, int outer_plies,
-                                     int nested_samples_per_candidate,
-                                     int num_threads, int start_disagreement,
-                                     int max_positions, int min_bag_tiles,
-                                     double wall_seconds) {
+static void run_nested_corpus_oracle(
+    const Config *klv2_config, const Config *klv3_config,
+    const char *corpus_files, int outer_samples, int outer_plies,
+    int nested_samples_per_candidate, int num_threads, int start_disagreement,
+    int max_positions, int min_bag_tiles, double wall_seconds) {
   enum {
     CORPUS_FIELD_CAPACITY = 40,
     CORPUS_MIN_FIELDS = 39,
@@ -2272,7 +2270,8 @@ static void run_candidate_selector_online_oracle(
   equal_sample_aggregate_destroy(&aggregate);
 }
 
-static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
+static void run_corpus_oracle(const Config *klv2_config,
+                              const Config *klv3_config,
                               const char *corpus_files, int num_samples,
                               int num_threads, int start_disagreement,
                               int max_disagreements, double wall_seconds) {
