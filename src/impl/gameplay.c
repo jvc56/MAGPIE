@@ -37,7 +37,7 @@ typedef struct PlayEventsData {
   bool played_end_rack_points;
 } PlayEventsData;
 
-Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+static void remove_move_tiles_from_rack(const Move *move, Rack *rack) {
   for (int i = 0; i < move_get_tiles_length(move); i++) {
     if (move_get_tile(move, i) != PLAYED_THROUGH_MARKER) {
       if (get_is_blanked(move_get_tile(move, i))) {
@@ -47,7 +47,52 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
       }
     }
   }
+}
+
+Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
+  remove_move_tiles_from_rack(move, rack);
   return klv_get_leave_value(klv, rack);
+}
+
+// Assumes the move has not been played. Unlike the legacy rack-only helper,
+// this preserves a KLV3 policy at a truncated simulation horizon by valuing
+// the selected move's leave against the current player's public unseen pool.
+Equity get_leave_value_for_move_with_context(const Game *game, const Move *move,
+                                             Rack *rack) {
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  const KLV *klv = player_get_klv(player);
+  if (!klv_has_context_model(klv)) {
+    remove_move_tiles_from_rack(move, rack);
+    return klv_get_leave_value(klv, rack);
+  }
+  const Bag *bag = game_get_bag(game);
+  const int bag_count = bag_get_letters(bag);
+
+  int unseen_counts[MACHINE_LETTER_MAX_VALUE] = {0};
+  bag_increment_unseen_count(bag, unseen_counts);
+  const Player *opponent = game_get_player(game, 1 - player_index);
+  rack_increment_unseen_count(player_get_rack(opponent), unseen_counts);
+  const int unseen_total =
+      bag_count + rack_get_total_letters(player_get_rack(opponent));
+
+  bool use_context_model = true;
+  if (klv->context_fallback_threshold_enabled) {
+    const Equity sampled_magnitude = klv3_sample_rack_adjustment_magnitude(
+        klv, unseen_counts, unseen_total, rack, bag_count);
+    use_context_model = sampled_magnitude > klv->context_fallback_threshold;
+  }
+
+  remove_move_tiles_from_rack(move, rack);
+  int draw_count = move_get_tiles_played(move);
+  if (draw_count > bag_count) {
+    draw_count = bag_count;
+  }
+  if (!use_context_model) {
+    return klv_get_leave_value(klv, rack);
+  }
+  return klv_get_contextual_leave_value(klv, rack, unseen_counts, unseen_total,
+                                        draw_count);
 }
 
 // Assumes the move hasn't been played yet and is in the rack

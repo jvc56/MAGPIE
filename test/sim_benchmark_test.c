@@ -12,6 +12,7 @@
 //   SIMBENCH_TLIM   seconds per turn (default 2)
 //   SIMBENCH_THREADS worker threads (default detected hardware concurrency)
 //   SIMBENCH_WIT    "true" / "false" — toggles the WIT file (default false)
+//   SIMBENCH_KLV    optional KLV/KLV3 name for both players
 
 #include "sim_benchmark_test.h"
 
@@ -44,6 +45,8 @@ void test_sim_benchmark(void) {
   const char *mi = (mi_env != NULL) ? mi_env : "100000";
   const char *rit_env = getenv("SIMBENCH_RIT");
   const char *rit = (rit_env != NULL) ? rit_env : "true";
+  const char *rit_mmap_env = getenv("SIMBENCH_RIT_MMAP");
+  const char *rit_mmap = (rit_mmap_env != NULL) ? rit_mmap_env : "true";
   const char *wmp_env = getenv("SIMBENCH_WMP");
   const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
   const char *wit_env = getenv("SIMBENCH_WIT");
@@ -53,13 +56,19 @@ void test_sim_benchmark(void) {
   const char *threads_env = getenv("SIMBENCH_THREADS");
   const int threads = threads_env != NULL ? (int)strtol(threads_env, NULL, 10)
                                           : get_num_cores();
-  char cmd[256];
+  const char *klv = getenv("SIMBENCH_KLV");
+  char klv_args[160] = "";
+  if (klv != NULL) {
+    (void)snprintf(klv_args, sizeof(klv_args), "-k1 %s -k2 %s ", klv, klv);
+  }
+  char cmd[512];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex CSW24 -wmp %s -rit %s -wit %s -s1 equity "
+                 "set -lex CSW24 %s-wmp %s -rit %s -ritmmap %s -wit %s "
+                 "-s1 equity "
                  "-s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
                  "-tlim %s -seed 42 -sr tt -minplayiterations %s",
-                 wmp, rit, wit, plies, threads, tlim, mi);
+                 klv_args, wmp, rit, rit_mmap, wit, plies, threads, tlim, mi);
   Config *config = config_create_or_die(cmd);
 
   load_and_exec_config_or_die(config, "autoplay games 1");

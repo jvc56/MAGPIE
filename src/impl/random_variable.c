@@ -488,9 +488,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Player *player_on_turn =
         game_get_player(game, simmer->initial_player);
     rack_copy(&candidate_rack, player_get_rack(player_on_turn));
-    leftover += get_leave_value_for_move(player_get_klv(player_on_turn),
-                                         simmed_play_get_move(simmed_play),
-                                         &candidate_rack);
+    leftover += get_leave_value_for_move_with_context(
+        game, simmed_play_get_move(simmed_play), &candidate_rack);
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
@@ -508,6 +507,11 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
 
     const Move *best_play = get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
+    Equity this_leftover = 0;
+    if (ply == plies - 2 || ply == plies - 1) {
+      this_leftover =
+          get_leave_value_for_move_with_context(game, best_play, &spare_rack);
+    }
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
@@ -519,8 +523,6 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     }
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
-      Equity this_leftover = get_leave_value_for_move(
-          player_get_klv(player_on_turn), best_play, &spare_rack);
       if (player_on_turn_index == simmer->initial_player) {
         leftover += this_leftover;
       } else {

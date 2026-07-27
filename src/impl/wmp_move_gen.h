@@ -323,7 +323,7 @@ wmp_move_gen_multi_pt_bitvec_says_prune(const WMPMoveGen *wmp_move_gen,
 // (which IS a valid prune signal -- "no letter is compatible with this
 // rack at this length").
 static inline bool wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
-    const RackInfoTableEntry *rit_entry, int tiles_played, int word_length,
+    const RackInfoTableWordEntry *rit_entry, int tiles_played, int word_length,
     uint32_t *out_bitvec) {
   switch (tiles_played) {
   case RACK_SIZE:
@@ -438,7 +438,8 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
 // cache), so we skip the enumerate_nonplaythrough_subracks step.
 static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    const RackInfoTableEntry *rit_entry, bool subracks_precomputed) {
+    const RackInfoTableEntry *rit_entry,
+    const Equity *best_leave_values_override, bool subracks_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
@@ -458,8 +459,11 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
                                                                 size);
   }
   for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
-    Equity rit_best = rack_info_table_entry_get_nonplaythrough_best_leave_value(
-        rit_entry, leave_size);
+    Equity rit_best =
+        best_leave_values_override == NULL
+            ? rack_info_table_entry_get_nonplaythrough_best_leave_value(
+                  rit_entry, leave_size)
+            : best_leave_values_override[leave_size];
     // The non-RIT path writes 0 instead of EQUITY_MIN_VALUE when
     // check_leaves is false. Match that convention so the field is always
     // well-defined downstream.
@@ -468,6 +472,45 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
           check_leaves ? EQUITY_MIN_VALUE : 0;
     } else {
       wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = rit_best;
+    }
+  }
+}
+
+// Structural-only RIT variant for context-dependent leave evaluators. The
+// entry's word-existence bitmask is independent of leave values and remains
+// exact. Its precomputed best-leave fields are not safe, so use the current
+// position's best leave over all same-sized subracks as a conservative upper
+// bound. This can make shadow looser than the full WMP walk, but cannot prune
+// a legal best move.
+static inline void
+wmp_move_gen_check_nonplaythrough_existence_with_rit_structure(
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    const RackInfoTableWordEntry *rit_entry,
+    const Equity *current_best_leaves) {
+  leave_map_set_current_index(leave_map,
+                              (1 << wmp_move_gen->full_rack_size) - 1);
+  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+  wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
+
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wmp_move_gen->nonplaythrough_has_word_of_length[size] =
+        rack_info_table_word_entry_has_nonplaythrough_word_of_length(rit_entry,
+                                                                     size);
+  }
+  for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+    const int played_size = wmp_move_gen->full_rack_size - leave_size;
+    const bool word_exists =
+        played_size >= 0 &&
+        rack_info_table_word_entry_has_nonplaythrough_word_of_length(
+            rit_entry, played_size);
+    if (!check_leaves) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = 0;
+    } else if (word_exists) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          current_best_leaves[leave_size];
+    } else {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          EQUITY_MIN_VALUE;
     }
   }
 }

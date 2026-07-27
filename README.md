@@ -93,6 +93,13 @@ make release \
 
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
 
+### Contextual leave values
+
+MAGPIE can load `.klv3` files that add fast, pool-aware tile interaction
+adjustments to an ordinary KLV2. See [notes/KLV3.md](notes/KLV3.md) for the
+format, training workflow, slim word-only RIT, hybrid KLV2 fallback,
+contextual RIT experiment, and initial CSW24 evaluation.
+
 ## Usage
 
 ### Commands and Settings

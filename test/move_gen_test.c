@@ -1,10 +1,12 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/klv_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
 #include "../src/ent/dictionary_word.h"
@@ -578,6 +580,154 @@ void equity_test(void) {
 
   sorted_move_list_destroy(equity_test_sorted_move_list);
   rack_destroy(move_rack);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+static Equity assert_contextual_move_equities(const Game *game,
+                                              const MoveList *move_list,
+                                              const KLV *klv,
+                                              const LetterDistribution *ld,
+                                              const char *rack_string,
+                                              MachineLetter adjustment_tile) {
+  int unseen_counts[MACHINE_LETTER_MAX_VALUE] = {0};
+  bag_increment_unseen_count(game_get_bag(game), unseen_counts);
+  const Player *opponent =
+      game_get_player(game, 1 - game_get_player_on_turn_index(game));
+  rack_increment_unseen_count(player_get_rack(opponent), unseen_counts);
+  const int unseen_total = bag_get_letters(game_get_bag(game)) +
+                           rack_get_total_letters(player_get_rack(opponent));
+  Equity adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE];
+  klv3_compute_tile_adjustments(klv, unseen_counts, unseen_total, adjustments);
+
+  Rack *move_rack = rack_create(ld_get_size(ld));
+  Rack *context_rack = rack_create(ld_get_size(ld));
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    rack_set_to_string(ld, context_rack, rack_string);
+    const Equity contextual_leave_value =
+        get_leave_value_for_move_with_context(game, move, context_rack);
+    rack_set_to_string(ld, move_rack, rack_string);
+    Equity expected_leave_value =
+        get_leave_value_for_move(klv, move, move_rack);
+    int draw_count = move_get_tiles_played(move);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+    if (draw_count > bag_count) {
+      draw_count = bag_count;
+    }
+    for (int ml = 0; ml < rack_get_dist_size(move_rack); ml++) {
+      expected_leave_value +=
+          rack_get_letter(move_rack, ml) * adjustments[draw_count][ml];
+    }
+    assert(contextual_leave_value == expected_leave_value);
+    assert(move_get_equity(move) ==
+           move_get_score(move) + expected_leave_value);
+  }
+  rack_destroy(context_rack);
+  rack_destroy(move_rack);
+  return adjustments[2][adjustment_tile];
+}
+
+static void assert_base_move_equities(const Game *game,
+                                      const MoveList *move_list, const KLV *klv,
+                                      const LetterDistribution *ld,
+                                      const char *rack_string) {
+  Rack *move_rack = rack_create(ld_get_size(ld));
+  Rack *context_rack = rack_create(ld_get_size(ld));
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    rack_set_to_string(ld, context_rack, rack_string);
+    const Equity contextual_leave_value =
+        get_leave_value_for_move_with_context(game, move, context_rack);
+    rack_set_to_string(ld, move_rack, rack_string);
+    const Equity expected_leave_value =
+        get_leave_value_for_move(klv, move, move_rack);
+    assert(contextual_leave_value == expected_leave_value);
+    assert(move_get_equity(move) ==
+           move_get_score(move) + expected_leave_value);
+  }
+  rack_destroy(context_rack);
+  rack_destroy(move_rack);
+}
+
+void contextual_leave_draw_count_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  const Player *player = game_get_player(game, 0);
+  KLV *klv = (KLV *)player_get_klv(player);
+  MoveList *move_list = move_list_create(300);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+
+  klv->context_alphabet_size = ld_get_size(ld);
+  klv->context_num_pool_bins = 1;
+  klv->context_pool_bin_upper_bounds = malloc_or_die(sizeof(uint16_t));
+  klv->context_pool_bin_upper_bounds[0] = 100;
+  const size_t num_biases = KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld);
+  const size_t num_weights =
+      KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld) * (size_t)ld_get_size(ld);
+  klv->context_biases = calloc_or_die(num_biases, sizeof(Equity));
+  klv->context_weights = calloc_or_die(num_weights, sizeof(Equity));
+  for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
+    for (int ml = 0; ml < ld_get_size(ld); ml++) {
+      klv->context_biases[klv3_bias_index(
+          klv, 0, draw_count, (MachineLetter)ml)] = int_to_equity(draw_count);
+    }
+  }
+  const MachineLetter e = ld_hl_to_ml(ld, "E");
+  for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
+    for (int held = 0; held < ld_get_size(ld); held++) {
+      klv->context_weights[klv3_weight_index(
+          klv, draw_count, (MachineLetter)held, e)] = int_to_equity(100);
+    }
+  }
+
+  // This middlegame avoids opening/endgame adjustments and has enough tiles
+  // in the bag for exchanges. The test covers every recorded placement and
+  // exchange, so every draw-count head selected by the canonical leave walk
+  // is checked.
+  load_cgp_or_die(game, VS_ED);
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
+  generate_moves_for_game(&move_gen_args);
+  const Equity first_e_adjustment =
+      assert_contextual_move_equities(game, move_list, klv, ld, "AFGIIIS", e);
+
+  // Keep the player rack (and therefore every rack-only cache key) identical,
+  // but replace one board E with Q. That changes the public unseen multiset.
+  // A stale RIT, mini-KLV, subrack/leave, or derived-best-leave cache would
+  // reuse the first position's values and fail the second equity audit.
+  const char *vs_ed_q =
+      "14Q/14N/14d/14U/4GLOWS5R/8PET3E/7FAXING1R/6JAY1TEEMS/"
+      "2B2BOY4N2/2L1DOE5U2/2ANEW5PI2/2MO1LEU3ON2/2EH7HE2/15/15 "
+      "/ 0/0 0 -lex NWL20;";
+  load_cgp_or_die(game, vs_ed_q);
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
+  generate_moves_for_game(&move_gen_args);
+  const Equity second_e_adjustment =
+      assert_contextual_move_equities(game, move_list, klv, ld, "AFGIIIS", e);
+  assert(first_e_adjustment != second_e_adjustment);
+
+  // A threshold above every possible sampled magnitude must select the
+  // embedded KLV2 evaluator. This exercises the hybrid base path with the
+  // same KLV3 object and catches accidental consumption of contextual values.
+  klv_set_context_fallback_threshold(klv, true, EQUITY_MAX_VALUE);
+  generate_moves_for_game(&move_gen_args);
+  assert_base_move_equities(game, move_list, klv, ld, "AFGIIIS");
+
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
@@ -1789,6 +1939,7 @@ void test_move_gen(void) {
   macondo_tests();
   exchange_tests();
   equity_test();
+  contextual_leave_draw_count_test();
   top_equity_play_recorder_test();
   small_play_recorder_test();
   best_small_play_recorder_test();

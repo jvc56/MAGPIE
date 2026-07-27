@@ -190,6 +190,14 @@ typedef struct MoveGen {
   int number_of_letters_on_rack;
   const KWG *kwg;
   const KLV *klv;
+  // KLV3 pool-context adjustment computed once by gen_load_position and then
+  // reused while the canonical leave subsets are enumerated.
+  int unseen_counts[MACHINE_LETTER_MAX_VALUE];
+  int unseen_total;
+  Equity klv3_tile_adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE];
+  // A KLV3 file embeds its ordinary KLV2 base. Hybrid evaluation can choose
+  // that base for positions whose contextual adjustment range is small.
+  bool use_context_model;
   // Snapshot of klv->mutation_counter captured at the last gen_load_position
   // call. If the KLV's leave_values have been mutated in place since then
   // (test-only set_klv_leave_value path), leave-derived caches (the subrack
@@ -216,12 +224,37 @@ typedef struct MoveGen {
   // of this move generation. NULL if rack_info_table is NULL, the rack isn't
   // a full RACK_SIZE rack, or the rack wasn't found in the table.
   const RackInfoTableEntry *rit_entry;
+  // Compact model-independent word facts for the current rack. This points
+  // into the per-thread cache below regardless of whether the source was a
+  // full or word-only RIT, keeping shadow independent of the file layout.
+  const RackInfoTableWordEntry *rit_word_entry;
+  // Whether rit_entry's packed leaves and leave-derived fields match the
+  // active evaluator. KLV3 can still use rit_entry's structural word facts,
+  // but its pool-dependent leave values, bounds, and best exchange must be
+  // computed for the current position.
+  bool rit_leave_values_usable;
+  // A fingerprint-matched KLV3-capable RIT exposes lossy capped-best
+  // overlays. Exact leaves are still computed from the current position; the
+  // overlays are used only for pruning.
+  bool rit_context_caps_usable;
   // Small per-thread RIT lookup cache. In sim rollouts, the same racks
   // recur across iterations within a turn (limited bag composition).
   // Direct-mapped by low bits of BitRack hash.
   BitRack rit_cache_keys[MOVEGEN_RIT_CACHE_SIZE];
   const RackInfoTableEntry *rit_cache_entries[MOVEGEN_RIT_CACHE_SIZE];
+  RackInfoTableWordEntry rit_cache_word_entries[MOVEGEN_RIT_CACHE_SIZE];
+  bool rit_cache_entry_found[MOVEGEN_RIT_CACHE_SIZE];
+  // Copy the contextual overlay into the same small per-thread cache. The
+  // on-disk overlay is separate from the 1.8 GiB base table; repeatedly
+  // touching both random mappings was measurably more expensive than the
+  // pruning saved.
+  Equity rit_cache_context_capped_best_leaves[MOVEGEN_RIT_CACHE_SIZE]
+                                             [RACK_SIZE + 1];
+  Equity rit_cache_context_capped_nonplaythrough_best_leaves
+      [MOVEGEN_RIT_CACHE_SIZE][RACK_SIZE + 1];
   bool rit_cache_valid[MOVEGEN_RIT_CACHE_SIZE];
+  const Equity *rit_context_capped_best_leaves;
+  const Equity *rit_context_capped_nonplaythrough_best_leaves;
   // Cache of wmp_move_gen_enumerate_nonplaythrough_subracks output
   // (purely rack-determined). Hit rate tracks rack-repeat rate in sims.
   SubrackEnumCacheEntry subrack_cache[MOVEGEN_SUBRACK_CACHE_SIZE];
@@ -256,6 +289,11 @@ typedef struct MoveGen {
   bool target_word_full_rack_existence[RACK_SIZE + 1];
 
   Equity best_leaves[RACK_SIZE + 1];
+  // Exact rack-only maxima collected alongside KLV3 evaluation, and the
+  // possibly capped bounds used only by shadow/WMP pruning. best_leaves stays
+  // exact for exchange handling and diagnostics.
+  Equity klv3_base_best_leaves[RACK_SIZE + 1];
+  Equity shadow_best_leaves[RACK_SIZE + 1];
 
   MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;
