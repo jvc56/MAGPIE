@@ -14,6 +14,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
@@ -385,6 +386,7 @@ typedef struct Simmer {
   SimmerWorker **workers;
   // Owned by the caller
   const WinPct *win_pcts;
+  const SpreadForecast *spread_forecast;
   bool use_inference;
   bool use_alias_method;
   const InferenceResults *inference_results;
@@ -535,8 +537,23 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   const Equity spread =
       player_get_score(game_get_player(game, simmer->initial_player)) -
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
+  Equity projected_spread = spread;
+  Equity projected_residual = leftover;
+  if (simmer->spread_forecast != NULL &&
+      game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    projected_spread = spread_forecast_get(simmer->spread_forecast, game,
+                                           simmer->initial_player);
+    const int64_t residual = (int64_t)projected_spread - (int64_t)spread;
+    if (residual > EQUITY_MAX_VALUE || residual < EQUITY_MIN_VALUE) {
+      log_fatal("spread forecast residual out of Equity range");
+    }
+    projected_residual = (Equity)residual;
+  }
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
-                              leftover);
+                              projected_residual);
+  // Keep probability calibration independent from the spread experiment.
+  // -winpct continues to consume the ordinary horizon spread + leave residual;
+  // the forecast supplies only equity and the spread side of blended utility.
   const double wpct = simmed_play_add_win_pct_stat(
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
@@ -558,7 +575,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   sim_results_increment_iteration_count(sim_results);
 
   const double utility =
-      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+      sim_utility_blend(wpct, projected_spread, simmer->utility_w_winpct,
                         simmer->utility_w_spread, simmer->utility_spread_scale);
   // With a zero spread weight, utility_stat is never read: BU is hidden from
   // display (see show_bu in sim_string.c) and both the best-move choice and
@@ -637,6 +654,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   }
 
   simmer->win_pcts = sim_args->win_pcts;
+  simmer->spread_forecast = sim_args->spread_forecast;
   simmer->use_inference = sim_args->use_inference;
   simmer->use_alias_method =
       simmer->use_inference &&
@@ -695,6 +713,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
 
+  simmer->spread_forecast = sim_args->spread_forecast;
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;

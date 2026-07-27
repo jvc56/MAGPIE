@@ -4,6 +4,7 @@
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
 #include <stdbool.h>
@@ -75,8 +76,9 @@ typedef struct PlayChooserStrategy {
   // selects, the preliminary search seeds the move-choosing solve (the
   // post-verdict position is exactly that branch's root).
   double challenge_decision_seconds;
-  WinPct *win_pcts; // required for SIM; not owned
-  int num_threads;  // 0 = 1
+  WinPct *win_pcts;                      // required for SIM; not owned
+  const SpreadForecast *spread_forecast; // optional; not owned
+  int num_threads;                       // 0 = 1
   // PEG scenario stride: 1 = full enumeration, k > 1 = weight-stratified
   // sampling (faster, approximate), 0 = the solver's per-bag default. Only
   // used by PLAY_CHOOSER_EVAL_PEG.

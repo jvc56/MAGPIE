@@ -56,6 +56,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
+#include "spread_forecast_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "transposition_table_test.h"
@@ -105,6 +106,7 @@ static TestEntry test_table[] = {
     {"eqadj", test_equity_adjustments},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
+    {"spreadforecast", test_spread_forecast},
     {"infer", test_infer},
     {"rv", test_random_variable},
     {"am", test_alias_method},

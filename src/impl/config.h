@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/players_data.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../impl/simmer.h"
@@ -50,6 +51,7 @@ int config_get_bingo_bonus(const Config *config);
 BoardLayout *config_get_board_layout(const Config *config);
 game_variant_t config_get_game_variant(const Config *config);
 WinPct *config_get_win_pcts(const Config *config);
+SpreadForecast *config_get_spread_forecast(const Config *config);
 int config_get_num_plays(const Config *config);
 int config_get_num_small_plays(const Config *config);
 int config_get_plies(const Config *config);

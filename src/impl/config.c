@@ -40,6 +40,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
@@ -138,6 +139,7 @@ typedef enum {
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
+  ARG_TOKEN_SPREAD_FORECAST,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_SHOW_BU,
@@ -392,6 +394,7 @@ struct Config {
   Equity p2_eq_margin_inference;
   multi_threading_mode_t multi_threading_mode;
   WinPct *win_pcts;
+  SpreadForecast *spread_forecast;
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -587,6 +590,9 @@ game_variant_t config_get_game_variant(const Config *config) {
 }
 
 WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
+SpreadForecast *config_get_spread_forecast(const Config *config) {
+  return config->spread_forecast;
+}
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
@@ -1619,6 +1625,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "winpct";
       text = "Specifies which win percentage file to use for simulations.";
       break;
+    case ARG_TOKEN_SPREAD_FORECAST:
+      usages[0] = "<forecast_or_none>";
+      examples[0] = "CSW24_spread_v1";
+      examples[1] = "none";
+      text = "Optional expected-final-spread forecast for simulations. The "
+             "forecast uses the exact bag count and both rack sizes at the "
+             "simulation horizon. It affects spread/equity and blended "
+             "utility, while -winpct remains responsible for win probability.";
+      break;
     case ARG_TOKEN_PLIES:
       usages[0] = "<plies>";
       examples[0] = "2";
@@ -2406,6 +2421,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
         ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
         ARG_TOKEN_WIN_PCT,                 /* winpct */
+        ARG_TOKEN_SPREAD_FORECAST,         /* spreadforecast */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -2911,6 +2927,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
       config->utility_w_spread, config->utility_spread_scale, &inference_args,
       sim_args);
+  sim_args->spread_forecast = config->spread_forecast;
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -3650,6 +3667,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
       config->p1_utility_spread_scale, &p1_inference_args,
       &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.spread_forecast = config->spread_forecast;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -3664,6 +3682,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.spread_forecast = config->spread_forecast;
 
   const double utility_win_pct[2] = {config->p1_utility_w_winpct,
                                      config->p2_utility_w_winpct};
@@ -3677,6 +3696,7 @@ void config_fill_autoplay_args(const Config *config,
             .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
             .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
             .win_pcts = config->win_pcts,
+            .spread_forecast = config->spread_forecast,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
             .utility_w_winpct = utility_win_pct[player_index],
@@ -7985,6 +8005,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+
+  // Spread forecasting is opt-in while its model and effect on sim utility
+  // are being validated. "none" unloads it without changing -winpct.
+  const char *new_spread_forecast_name =
+      config_get_parg_value(config, ARG_TOKEN_SPREAD_FORECAST, 0);
+  if (new_spread_forecast_name != NULL) {
+    if (strings_equal(new_spread_forecast_name, "none")) {
+      spread_forecast_destroy(config->spread_forecast);
+      config->spread_forecast = NULL;
+    } else if (config->spread_forecast == NULL ||
+               !strings_equal(spread_forecast_get_name(config->spread_forecast),
+                              new_spread_forecast_name)) {
+      spread_forecast_destroy(config->spread_forecast);
+      config->spread_forecast = spread_forecast_create(
+          config->data_paths, new_spread_forecast_name, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
+    }
+  }
 }
 
 // Parses the arguments given by the cmd string and updates the state of
@@ -8454,6 +8494,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
     return;
   }
   analyze_args->sim_args.win_pcts = config->win_pcts;
+  analyze_args->sim_args.spread_forecast = config->spread_forecast;
 
   const char *gcg_filename =
       game_history_get_gcg_filename(config->game_history);
@@ -8830,6 +8871,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   // win_pcts is loaded lazily on first use (simulation, etc.)
   config->win_pcts = NULL;
+  config->spread_forecast = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -8917,6 +8959,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
+  arg(ARG_TOKEN_SPREAD_FORECAST, "spreadforecast", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_SHOW_BU, "showbu", 1, 1);
@@ -9152,6 +9195,7 @@ void config_destroy(Config *config) {
     parsed_arg_destroy(config->pargs[i]);
   }
   win_pct_destroy(config->win_pcts);
+  spread_forecast_destroy(config->spread_forecast);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
@@ -9420,6 +9464,13 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           config->win_pcts ? win_pct_get_name(config->win_pcts)
                            : DEFAULT_WIN_PCT);
+      break;
+    case ARG_TOKEN_SPREAD_FORECAST:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          config->spread_forecast
+              ? spread_forecast_get_name(config->spread_forecast)
+              : "none");
       break;
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
