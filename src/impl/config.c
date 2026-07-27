@@ -1969,7 +1969,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
           "Specifies the cutoff threshold for determining when simmed plays "
           "are equivalent. If both win percentages are within cutoff of 100.0 "
           "or both are within cutoff of 0.0, they are considered equivalent "
-          "and tiebroken by equity. The default is 0.005.";
+          "and tiebroken by equity. Use -1 to disable extreme-win early "
+          "stopping. The default is 0.005.";
       break;
     case ARG_TOKEN_UTILITY_W_WINPCT:
       usages[0] = "<weight>";
@@ -7559,7 +7560,7 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const char *cutoff = config_get_parg_value(config, ARG_TOKEN_CUTOFF, 0);
   if (cutoff) {
     double user_cutoff = 0;
-    config_load_double(config, ARG_TOKEN_CUTOFF, 0, 100, &user_cutoff,
+    config_load_double(config, ARG_TOKEN_CUTOFF, -1, 100, &user_cutoff,
                        error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;

@@ -75,7 +75,7 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
                                                 ThreadControl *thread_control,
                                                 const int num_initial_arms,
                                                 RandomVariables *rng,
-                                                RandomVariables *rvs) {
+                                                const RandomVariables *rvs) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
   bai_sync_data->num_arms_reached_threshold = 0;

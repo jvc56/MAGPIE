@@ -439,8 +439,9 @@ void test_rack_info_table(void) {
     RackInfoTableWordEntry actual;
     rack_info_table_copy_word_entry(&expected, full_entry);
     const RackInfoTableEntry *unexpected_full_entry = NULL;
-    assert(rack_info_table_lookup_word_entry(word_rit, &rack_bits, &actual,
-                                             &unexpected_full_entry));
+    const bool found_word_entry = rack_info_table_lookup_word_entry(
+        word_rit, &rack_bits, &actual, &unexpected_full_entry);
+    assert(found_word_entry);
     assert(unexpected_full_entry == NULL);
     assert(memcmp(&expected, &actual, sizeof(expected)) == 0);
     assert(rack_info_table_lookup(word_rit, &rack_bits) == NULL);

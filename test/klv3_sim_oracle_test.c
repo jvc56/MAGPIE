@@ -24,6 +24,7 @@
 #include "../src/ent/rack_info_table.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/spread_forecast.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
@@ -286,7 +287,7 @@ static Config *create_oracle_config(const char *klv_name, int num_threads,
   return config;
 }
 
-static void load_position(Config *config, const char *cgp) {
+static void load_position(Config *const config, const char *cgp) {
   ErrorStack *error_stack = error_stack_create();
   game_load_cgp(config_get_game(config), cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -310,8 +311,9 @@ static void nomination_context_destroy(NominationContext *context) {
 }
 
 static NominationResult
-nominate_move_with_fixed_samples(Config *config, NominationContext *context,
-                                 int samples_per_arm, uint64_t fixed_seed) {
+nominate_move_with_fixed_budget(Config *config, NominationContext *context,
+                                int samples_per_arm, int min_samples_per_arm,
+                                uint64_t fixed_seed) {
   Game *game = config_get_game(config);
   MoveList *move_list = config_get_move_list(config);
   const MoveGenArgs gen_args = {
@@ -334,16 +336,21 @@ nominate_move_with_fixed_samples(Config *config, NominationContext *context,
   }
 
   uint64_t expected_iterations = 0;
+  int arm_count = 0;
   if (samples_per_arm > 0) {
-    const int arm_count = move_list_get_count(move_list) < KLV3_ORACLE_NUM_PLAYS
-                              ? move_list_get_count(move_list)
-                              : KLV3_ORACLE_NUM_PLAYS;
+    if (min_samples_per_arm <= 0 || min_samples_per_arm > samples_per_arm) {
+      log_fatal("fixed-budget nomination minimum must be in [1, %d]",
+                samples_per_arm);
+    }
+    arm_count = move_list_get_count(move_list) < KLV3_ORACLE_NUM_PLAYS
+                    ? move_list_get_count(move_list)
+                    : KLV3_ORACLE_NUM_PLAYS;
     expected_iterations = (uint64_t)samples_per_arm * (uint64_t)arm_count;
     char fixed_sample_command[256];
     (void)snprintf(fixed_sample_command, sizeof(fixed_sample_command),
-                   "set -it %" PRIu64
-                   " -minplayiterations %d -tlim 0 -seed %" PRIu64,
-                   expected_iterations, samples_per_arm, fixed_seed);
+                   "set -it %" PRIu64 " -minplayiterations %d -threshold none "
+                   "-cutoff -1 -tlim 0 -seed %" PRIu64,
+                   expected_iterations, min_samples_per_arm, fixed_seed);
     load_and_exec_config_or_die(config, fixed_sample_command);
   }
 
@@ -362,6 +369,42 @@ nominate_move_with_fixed_samples(Config *config, NominationContext *context,
   }
   error_stack_destroy(error_stack);
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
+  result.iterations = sim_results_get_iteration_count(context->sim_results);
+  if (expected_iterations > 0 && result.iterations != expected_iterations) {
+    const uint64_t initial_iterations =
+        (uint64_t)min_samples_per_arm * (uint64_t)arm_count;
+    if (min_samples_per_arm == samples_per_arm ||
+        result.iterations != initial_iterations) {
+      log_fatal("fixed-sample nomination completed %" PRIu64
+                " iterations; expected %" PRIu64,
+                result.iterations, expected_iterations);
+    }
+    // All arms can be structurally similar, leaving top-two BAI with no
+    // challenger after the initial phase. Preserve the fixed-compute A/B
+    // contract by rerunning only that nomination round-robin to the cap.
+    printf("KLV3_FIXED_BUDGET_FALLBACK initial_iterations=%" PRIu64
+           " expected_iterations=%" PRIu64 " reason=structurally_similar\n",
+           result.iterations, expected_iterations);
+    char round_robin_command[256];
+    (void)snprintf(round_robin_command, sizeof(round_robin_command),
+                   "set -it %" PRIu64 " -minplayiterations %d "
+                   "-threshold none -cutoff -1 -tlim 0 -seed %" PRIu64,
+                   expected_iterations, samples_per_arm, fixed_seed);
+    load_and_exec_config_or_die(config, round_robin_command);
+    const bool retry_started = thread_control_set_status(
+        thread_control, THREAD_CONTROL_STATUS_STARTED);
+    assert(retry_started);
+    ErrorStack *retry_error_stack = error_stack_create();
+    config_simulate(config, &context->sim_ctx, &context->known_opponent_rack,
+                    context->sim_results, NULL, 0, retry_error_stack);
+    if (!error_stack_is_empty(retry_error_stack)) {
+      error_stack_print_and_reset(retry_error_stack);
+      log_fatal("round-robin fixed nomination retry failed");
+    }
+    error_stack_destroy(retry_error_stack);
+    thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
+    result.iterations = sim_results_get_iteration_count(context->sim_results);
+  }
   const int best_move_index =
       sim_results_get_best_move_index(context->sim_results);
   assert(best_move_index >= 0);
@@ -370,7 +413,6 @@ nominate_move_with_fixed_samples(Config *config, NominationContext *context,
   const Move *best_move = simmed_play_get_move(best_simmed_play);
   assert(best_move != NULL);
   move_copy(&result.move, best_move);
-  result.iterations = sim_results_get_iteration_count(context->sim_results);
   if (expected_iterations > 0 && result.iterations != expected_iterations) {
     log_fatal("fixed-sample nomination completed %" PRIu64
               " iterations; expected %" PRIu64,
@@ -388,6 +430,13 @@ nominate_move_with_fixed_samples(Config *config, NominationContext *context,
       stat_get_sem(simmed_play_get_equity_stat(best_simmed_play));
   result.best_utility = sim_results_get_best_move_utility(context->sim_results);
   return result;
+}
+
+static NominationResult
+nominate_move_with_fixed_samples(Config *config, NominationContext *context,
+                                 int samples_per_arm, uint64_t fixed_seed) {
+  return nominate_move_with_fixed_budget(config, context, samples_per_arm,
+                                         samples_per_arm, fixed_seed);
 }
 
 static NominationResult nominate_move(Config *config,
@@ -467,7 +516,7 @@ static int build_nonoverlap_candidate_lists(Config *klv2_config,
 // horizon valuation. The exact minimum equals the total cap, which guarantees
 // equal samples per retained arm.
 static NominationResult nominate_candidate_list_with_klv2_policy(
-    Config *klv2_config, NominationContext *context,
+    Config *const klv2_config, NominationContext *context,
     const MoveList *candidate_moves, int samples_per_arm, uint64_t fixed_seed) {
   const int arm_count = move_list_get_count(candidate_moves);
   assert(arm_count > 0);
@@ -905,7 +954,7 @@ static bool parse_record_move(const char *encoding, Move *move) {
   char *saveptr = NULL;
   int values[8 + MOVE_MAX_TILES];
   int count = 0;
-  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+  for (const char *token = strtok_r(copy, ",", &saveptr); token != NULL;
        token = strtok_r(NULL, ",", &saveptr)) {
     if (count >= (int)(sizeof(values) / sizeof(values[0]))) {
       free(copy);
@@ -1103,6 +1152,7 @@ static HorizonValue get_horizon_value(const Config *config, const Game *game,
   const Equity spread =
       player_get_score(game_get_player(game, initial_player)) -
       player_get_score(game_get_player(game, 1 - initial_player));
+  Equity projected_spread = spread;
   double win_pct;
   if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
     if (spread > 0) {
@@ -1126,11 +1176,16 @@ static HorizonValue get_horizon_value(const Config *config, const Game *game,
     if (num_plies % 2 == 0) {
       win_pct = 1.0 - win_pct;
     }
+    const SpreadForecast *spread_forecast = config_get_spread_forecast(config);
+    if (spread_forecast != NULL) {
+      projected_spread =
+          spread_forecast_get(spread_forecast, game, initial_player);
+    }
   }
   return (HorizonValue){
-      .utility = sim_utility_blend(win_pct, spread, 1.0, 0.5, 100.0),
+      .utility = sim_utility_blend(win_pct, projected_spread, 1.0, 0.5, 100.0),
       .win_pct = win_pct,
-      .spread = equity_to_double(spread),
+      .spread = equity_to_double(projected_spread),
   };
 }
 
@@ -1277,7 +1332,7 @@ static void *nested_outer_worker(void *uncasted_worker) {
 
   for (int sample = worker->worker_index; sample < worker->outer_samples;
        sample += worker->num_workers) {
-    HorizonValue root_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+    HorizonValue root_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
     const uint64_t outer_seed =
         worker->position_seed + (uint64_t)sample * KLV3_ORACLE_SEED_STRIDE;
     const uint64_t nested_seed =
@@ -1501,16 +1556,33 @@ static void run_nested_corpus_oracle(Config *klv2_config, Config *klv3_config,
   bool wall_limit_reached = false;
   char *files_copy = string_duplicate(corpus_files);
   char *files_saveptr = NULL;
+  const SpreadForecast *klv2_spread_forecast =
+      config_get_spread_forecast(klv2_config);
+  const SpreadForecast *klv3_spread_forecast =
+      config_get_spread_forecast(klv3_config);
+  if ((klv2_spread_forecast == NULL) != (klv3_spread_forecast == NULL) ||
+      (klv2_spread_forecast != NULL &&
+       !strings_equal(spread_forecast_get_name(klv2_spread_forecast),
+                      spread_forecast_get_name(klv3_spread_forecast)))) {
+    log_fatal("nested oracle continuation policies must use the same "
+              "spread forecast");
+  }
+  const char *spread_forecast_name =
+      klv2_spread_forecast == NULL
+          ? "none"
+          : spread_forecast_get_name(klv2_spread_forecast);
 
   printf("KLV3_NESTED_CONFIG files=%s outer_samples_per_candidate=%d "
          "outer_plies=%d nested_plies=%d nested_samples_per_candidate=%d "
          "nested_policy_split=%d+%d outer_threads=%d nested_threads=1 "
+         "win_target=horizon spread_target=forecast_if_loaded "
+         "judge_spread_forecast=%s "
          "start_disagreement=%d "
          "max_positions=%d min_bag_tiles=%d wall_seconds=%.3f\n",
          corpus_files, outer_samples, outer_plies, KLV3_ORACLE_NESTED_PLIES,
          nested_samples_per_candidate, nested_samples_per_candidate / 2,
-         nested_samples_per_candidate / 2, num_threads, start_disagreement,
-         max_positions, min_bag_tiles, wall_seconds);
+         nested_samples_per_candidate / 2, num_threads, spread_forecast_name,
+         start_disagreement, max_positions, min_bag_tiles, wall_seconds);
   fflush_or_die(stdout);
 
   for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
@@ -1740,11 +1812,13 @@ static void print_equal_sample_summary(const EqualSampleAggregate *aggregate,
 }
 
 static void run_equal_sample_online_oracle(
-    Config *klv2_config, Config *klv3_config, int num_games, int start_game,
+    Config *klv2_config, Config *klv3_config, Config *oracle_klv2_config,
+    Config *oracle_klv3_config, int num_games, int start_game,
     int max_positions, int start_position, int collect_from_position,
     int start_disagreements, int target_disagreements, int samples_per_arm,
-    int outer_samples, int outer_plies, int nested_samples_per_candidate,
-    int num_threads, int min_bag_tiles, double wall_seconds) {
+    int min_samples_per_arm, int outer_samples, int outer_plies,
+    int nested_samples_per_candidate, int num_threads, int min_bag_tiles,
+    double wall_seconds) {
   EqualSampleAggregate aggregate = equal_sample_aggregate_create();
   NominationContext nomination_contexts[2];
   nomination_context_init(&nomination_contexts[0], klv2_config);
@@ -1760,18 +1834,21 @@ static void run_equal_sample_online_oracle(
   printf("KLV3_EQUAL_CONFIG games=%d start_game=%d max_positions=%d "
          "start_position=%d collect_from_position=%d "
          "start_disagreements=%d target_disagreements=%d "
-         "samples_per_arm=%d max_arms=%d nomination_plies=%d "
+         "samples_per_arm=%d min_samples_per_arm=%d "
+         "max_arms=%d nomination_plies=%d "
+         "nomination_threshold=none nomination_cutoff=disabled "
+         "structural_early_stop_fallback=round_robin_to_cap "
          "outer_samples_per_candidate=%d outer_plies=%d nested_plies=%d "
          "nested_samples_per_candidate=%d nested_policy_split=%d+%d "
          "nomination_threads=%d outer_threads=%d nested_threads=1 "
          "min_bag_tiles=%d wall_seconds=%.3f\n",
          num_games, start_game, max_positions, start_position,
          collect_from_position, start_disagreements, target_disagreements,
-         samples_per_arm, KLV3_ORACLE_NUM_PLAYS, KLV3_ORACLE_SIM_PLIES,
-         outer_samples, outer_plies, KLV3_ORACLE_NESTED_PLIES,
-         nested_samples_per_candidate, nested_samples_per_candidate / 2,
-         nested_samples_per_candidate / 2, num_threads, num_threads,
-         min_bag_tiles, wall_seconds);
+         samples_per_arm, min_samples_per_arm, KLV3_ORACLE_NUM_PLAYS,
+         KLV3_ORACLE_SIM_PLIES, outer_samples, outer_plies,
+         KLV3_ORACLE_NESTED_PLIES, nested_samples_per_candidate,
+         nested_samples_per_candidate / 2, nested_samples_per_candidate / 2,
+         num_threads, num_threads, min_bag_tiles, wall_seconds);
   fflush_or_die(stdout);
 
   for (int game_index = start_game;
@@ -1785,6 +1862,12 @@ static void run_equal_sample_online_oracle(
     game_set_starting_player_index(trajectory_game, game_index % 2);
     draw_starting_racks(trajectory_game);
     int turn_index = 0;
+    int game_source_positions = 0;
+    int game_agreements = 0;
+    int game_disagreements = 0;
+    double game_utility_delta_sum = 0.0;
+    double game_win_delta_sum = 0.0;
+    double game_spread_delta_sum = 0.0;
     while (!game_over(trajectory_game) &&
            bag_get_letters(game_get_bag(trajectory_game)) >= min_bag_tiles &&
            position_index < max_positions &&
@@ -1797,6 +1880,15 @@ static void run_equal_sample_online_oracle(
       char *cgp = game_get_cgp(trajectory_game, true);
       load_position(klv2_config, cgp);
       load_position(klv3_config, cgp);
+      if (oracle_klv2_config != klv2_config &&
+          oracle_klv2_config != klv3_config) {
+        load_position(oracle_klv2_config, cgp);
+      }
+      if (oracle_klv3_config != klv2_config &&
+          oracle_klv3_config != klv3_config &&
+          oracle_klv3_config != oracle_klv2_config) {
+        load_position(oracle_klv3_config, cgp);
+      }
 
       if (position_index >= collect_from_position) {
         NominationResult nominations[2];
@@ -1804,21 +1896,22 @@ static void run_equal_sample_online_oracle(
             KLV3_ORACLE_BASE_SEED +
             (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
         if (position_index % 2 == 0) {
-          nominations[0] = nominate_move_with_fixed_samples(
+          nominations[0] = nominate_move_with_fixed_budget(
               klv2_config, &nomination_contexts[0], samples_per_arm,
-              nomination_seed);
-          nominations[1] = nominate_move_with_fixed_samples(
+              min_samples_per_arm, nomination_seed);
+          nominations[1] = nominate_move_with_fixed_budget(
               klv3_config, &nomination_contexts[1], samples_per_arm,
-              nomination_seed);
+              min_samples_per_arm, nomination_seed);
         } else {
-          nominations[1] = nominate_move_with_fixed_samples(
+          nominations[1] = nominate_move_with_fixed_budget(
               klv3_config, &nomination_contexts[1], samples_per_arm,
-              nomination_seed);
-          nominations[0] = nominate_move_with_fixed_samples(
+              min_samples_per_arm, nomination_seed);
+          nominations[0] = nominate_move_with_fixed_budget(
               klv2_config, &nomination_contexts[0], samples_per_arm,
-              nomination_seed);
+              min_samples_per_arm, nomination_seed);
         }
         aggregate.source_positions++;
+        game_source_positions++;
         for (int model = 0; model < 2; model++) {
           aggregate.nomination_iterations[model] +=
               nominations[model].iterations;
@@ -1829,6 +1922,7 @@ static void run_equal_sample_online_oracle(
 
         if (moves_are_equal(&nominations[0].move, &nominations[1].move)) {
           aggregate.agreements++;
+          game_agreements++;
           stat_push(aggregate.all_position_utility_delta, 0.0, 1);
         } else {
           NestedRootStats roots[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
@@ -1855,9 +1949,10 @@ static void run_equal_sample_online_oracle(
               KLV3_ORACLE_BASE_SEED +
               (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
           run_nested_position_samples(
-              klv2_config, klv3_config, roots, root_count, model_root_indices,
-              outer_samples, outer_plies, nested_samples_per_candidate,
-              num_threads, position_seed, position_deltas, &aggregate.counters);
+              oracle_klv2_config, oracle_klv3_config, roots, root_count,
+              model_root_indices, outer_samples, outer_plies,
+              nested_samples_per_candidate, num_threads, position_seed,
+              position_deltas, &aggregate.counters);
 
           const double utility_delta = stat_get_mean(position_deltas[0]);
           const double win_delta = stat_get_mean(roots[klv3_root].win_pct) -
@@ -1869,7 +1964,11 @@ static void run_equal_sample_online_oracle(
           stat_push(aggregate.conditional_spread_delta, spread_delta, 1);
           stat_push(aggregate.all_position_utility_delta, utility_delta, 1);
           aggregate.disagreements++;
+          game_disagreements++;
           global_disagreements++;
+          game_utility_delta_sum += utility_delta;
+          game_win_delta_sum += win_delta;
+          game_spread_delta_sum += spread_delta;
 
           int best_root = 0;
           for (int root_index = 1; root_index < root_count; root_index++) {
@@ -1942,6 +2041,15 @@ static void run_equal_sample_online_oracle(
       free(cgp);
       position_index++;
       turn_index++;
+    }
+    if (game_source_positions > 0) {
+      printf("KLV3_EQUAL_GAME game=%d source_positions=%d agreements=%d "
+             "disagreements=%d utility_delta_sum=%+.9f "
+             "win_delta_sum=%+.9f spread_delta_sum=%+.9f\n",
+             game_index, game_source_positions, game_agreements,
+             game_disagreements, game_utility_delta_sum, game_win_delta_sum,
+             game_spread_delta_sum);
+      fflush_or_die(stdout);
     }
   }
 
@@ -2438,8 +2546,10 @@ void test_klv3_sim_oracle(void) {
       (uint64_t)env_positive_int("KLV3_ORACLE_MAX_ITERATIONS", INT32_MAX);
   const bool calibration_only = env_bool("KLV3_ORACLE_CALIBRATION_ONLY", false);
   const bool three_way = env_bool("KLV3_ORACLE_THREE_WAY", false);
+  const bool static_prior_online =
+      env_bool("KLV3_ORACLE_STATIC_PRIOR_ONLINE", false);
   const bool equal_sample_online =
-      env_bool("KLV3_ORACLE_EQUAL_SAMPLE_ONLINE", false);
+      env_bool("KLV3_ORACLE_EQUAL_SAMPLE_ONLINE", false) || static_prior_online;
   const bool candidate_selector_online =
       env_bool("KLV3_ORACLE_CANDIDATE_SELECTOR_ONLINE", false);
   if (equal_sample_online && candidate_selector_online) {
@@ -2476,6 +2586,12 @@ void test_klv3_sim_oracle(void) {
       env_nonnegative_int("KLV3_ORACLE_NESTED_MIN_BAG", 29);
   const int fixed_samples_per_arm =
       env_positive_int("KLV3_ORACLE_SAMPLES_PER_ARM", 1500);
+  const int fixed_min_samples_per_arm = env_positive_int(
+      "KLV3_ORACLE_MIN_SAMPLES_PER_ARM", fixed_samples_per_arm);
+  if (fixed_min_samples_per_arm > fixed_samples_per_arm) {
+    log_fatal("KLV3_ORACLE_MIN_SAMPLES_PER_ARM cannot exceed "
+              "KLV3_ORACLE_SAMPLES_PER_ARM");
+  }
   double corpus_wall_seconds = 0.0;
   (void)env_optional_nonnegative_double("KLV3_ORACLE_WALL_SECONDS",
                                         &corpus_wall_seconds);
@@ -2490,10 +2606,12 @@ void test_klv3_sim_oracle(void) {
   const char *baseline_klv_name =
       env_string("KLV3_ORACLE_BASELINE_KLV",
                  compare_pruning ? "CSW24_klv3_ctx400" : "CSW24");
-  const char *candidate_klv_name = env_string(
-      "KLV3_ORACLE_CANDIDATE_KLV", compare_pruning && !pruning_cap_enabled
-                                       ? "CSW24_klv3_ctx400_p99100"
-                                       : "CSW24_klv3_ctx400");
+  const char *candidate_klv_name =
+      env_string("KLV3_ORACLE_CANDIDATE_KLV",
+                 static_prior_online ? baseline_klv_name
+                                     : (compare_pruning && !pruning_cap_enabled
+                                            ? "CSW24_klv3_ctx400_p99100"
+                                            : "CSW24_klv3_ctx400"));
   Config *klv2_config =
       create_oracle_config(baseline_klv_name, num_threads, seconds_per_turn,
                            min_play_iterations, max_iterations,
@@ -2507,6 +2625,52 @@ void test_klv3_sim_oracle(void) {
                       min_play_iterations, max_iterations,
                       fallback_threshold_enabled ? fallback_threshold : 1.5)
                 : NULL;
+  const char *judge_spread_forecast =
+      getenv("KLV3_ORACLE_JUDGE_SPREAD_FORECAST");
+  if (judge_spread_forecast != NULL && judge_spread_forecast[0] != '\0') {
+    char command[512];
+    (void)snprintf(command, sizeof(command), "set -spreadforecast %s",
+                   judge_spread_forecast);
+    load_and_exec_config_or_die(klv2_config, command);
+    load_and_exec_config_or_die(klv3_config, command);
+    if (hybrid_config != NULL) {
+      load_and_exec_config_or_die(hybrid_config, command);
+    }
+  }
+  Config *static_prior_oracle_klv3_config = NULL;
+  if (static_prior_online) {
+    double candidate_prior = 25.0;
+    (void)env_optional_nonnegative_double("KLV3_ORACLE_STATIC_PRIOR",
+                                          &candidate_prior);
+    const char *spread_forecast_name =
+        env_string("KLV3_ORACLE_SPREAD_FORECAST", "CSW24_spread_v1");
+    char baseline_command[512];
+    char candidate_command[512];
+    (void)snprintf(baseline_command, sizeof(baseline_command),
+                   "set -spreadforecast %s -staticprior 0",
+                   spread_forecast_name);
+    (void)snprintf(candidate_command, sizeof(candidate_command),
+                   "set -spreadforecast %s -staticprior %.17g",
+                   spread_forecast_name, candidate_prior);
+    load_and_exec_config_or_die(klv2_config, baseline_command);
+    load_and_exec_config_or_die(klv3_config, candidate_command);
+    static_prior_oracle_klv3_config = create_oracle_config(
+        env_string("KLV3_ORACLE_JUDGE_KLV3", "CSW24_klv3_ctx400"), num_threads,
+        seconds_per_turn, min_play_iterations, max_iterations,
+        /*fallback_threshold=*/-1.0);
+    char judge_command[512];
+    (void)snprintf(judge_command, sizeof(judge_command),
+                   "set -spreadforecast %s", spread_forecast_name);
+    load_and_exec_config_or_die(static_prior_oracle_klv3_config, judge_command);
+    printf("KLV3_STATIC_PRIOR_CONFIG baseline_prior=0 candidate_prior=%.17g "
+           "spread_forecast=%s nomination_klv=%s "
+           "judge_klv2=%s judge_klv3=%s "
+           "judge_win_target=horizon judge_spread_target=forecast\n",
+           candidate_prior, spread_forecast_name, baseline_klv_name,
+           baseline_klv_name,
+           env_string("KLV3_ORACLE_JUDGE_KLV3", "CSW24_klv3_ctx400"));
+    fflush_or_die(stdout);
+  }
   if (candidate_selector_online) {
     if (three_way || (corpus_files != NULL && corpus_files[0] != '\0')) {
       log_fatal("candidate-selector online oracle cannot be combined with "
@@ -2535,11 +2699,16 @@ void test_klv3_sim_oracle(void) {
       log_fatal("KLV3_ORACLE_NESTED_SAMPLES must be even");
     }
     run_equal_sample_online_oracle(
-        klv2_config, klv3_config, num_games, start_game, max_positions,
-        start_position, collect_from_position, start_disagreements,
-        target_disagreements, fixed_samples_per_arm, nested_outer_samples,
+        klv2_config, klv3_config, klv2_config,
+        static_prior_oracle_klv3_config != NULL
+            ? static_prior_oracle_klv3_config
+            : klv3_config,
+        num_games, start_game, max_positions, start_position,
+        collect_from_position, start_disagreements, target_disagreements,
+        fixed_samples_per_arm, fixed_min_samples_per_arm, nested_outer_samples,
         nested_outer_plies, nested_samples_per_candidate, num_threads,
         nested_min_bag_tiles, corpus_wall_seconds);
+    config_destroy(static_prior_oracle_klv3_config);
     config_destroy(hybrid_config);
     config_destroy(klv3_config);
     config_destroy(klv2_config);
@@ -2570,7 +2739,7 @@ void test_klv3_sim_oracle(void) {
     return;
   }
   if (pruning_cap_enabled) {
-    Game *klv3_game = config_get_game(klv3_config);
+    const Game *klv3_game = config_get_game(klv3_config);
     for (int player_index = 0; player_index < 2; player_index++) {
       KLV *klv =
           (KLV *)player_get_klv(game_get_player(klv3_game, player_index));

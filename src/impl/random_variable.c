@@ -426,7 +426,8 @@ typedef struct Simmer {
   SimResults *sim_results;
 } Simmer;
 
-static void simmer_set_static_priors(Simmer *simmer, const SimArgs *sim_args) {
+static void simmer_set_static_priors(const Simmer *simmer,
+                                     const SimArgs *sim_args) {
   const double prior_samples = sim_args->static_prior_equivalent_samples;
   if (prior_samples == 0.0) {
     return;
@@ -452,12 +453,12 @@ static void simmer_set_static_priors(Simmer *simmer, const SimArgs *sim_args) {
   // best static move. Anchor that move at the root forecast, then use static
   // equity only for candidates' relative deltas. Without a forecast this
   // reduces to the traditional current-spread-plus-static-equity estimate.
-  double baseline_spread;
+  double baseline_terminal_spread;
   if (sim_args->spread_forecast != NULL) {
-    baseline_spread = equity_to_double(spread_forecast_get(
+    baseline_terminal_spread = equity_to_double(spread_forecast_get(
         sim_args->spread_forecast, sim_args->game, simmer->initial_player));
   } else {
-    baseline_spread =
+    baseline_terminal_spread =
         equity_to_double(simmer->initial_spread) + best_static_equity;
   }
 
@@ -465,6 +466,7 @@ static void simmer_set_static_priors(Simmer *simmer, const SimArgs *sim_args) {
       bag_get_letters(game_get_bag(sim_args->game)) +
       rack_get_total_letters(player_get_rack(
           game_get_player(sim_args->game, 1 - simmer->initial_player)));
+  const double initial_spread = equity_to_double(simmer->initial_spread);
   for (int i = 0; i < num_plays; i++) {
     SimmedPlay *simmed_play =
         sim_results_get_simmed_play(simmer->sim_results, i);
@@ -475,15 +477,22 @@ static void simmer_set_static_priors(Simmer *simmer, const SimArgs *sim_args) {
                                      ? 0.0
                                      : equity_to_double(move_get_equity(move));
     const double static_delta = static_equity - best_static_equity;
-    const Equity prior_spread =
-        double_to_equity(baseline_spread + static_delta);
+    const Equity prior_terminal_spread =
+        double_to_equity(baseline_terminal_spread + static_delta);
+    // win_pct is calibrated on a horizon/current spread plus the number of
+    // unseen tiles. The spread forecast predicts terminal spread, so feeding
+    // it back into win_pct would count the future twice. Use the traditional
+    // root static projection for the win side and the terminal forecast only
+    // for the spread side of blended utility.
+    const Equity prior_win_pct_spread =
+        double_to_equity(initial_spread + static_equity);
     const double prior_win_pct = (double)win_pct_get(
-        simmer->win_pcts, (int)round(equity_to_double(prior_spread)),
+        simmer->win_pcts, (int)round(equity_to_double(prior_win_pct_spread)),
         (unsigned int)unseen_tiles);
     const double prior_utility = sim_utility_blend(
-        prior_win_pct, prior_spread, simmer->utility_w_winpct,
+        prior_win_pct, prior_terminal_spread, simmer->utility_w_winpct,
         simmer->utility_w_spread, simmer->utility_spread_scale);
-    const double prior_equity = equity_to_double(prior_spread) -
+    const double prior_equity = equity_to_double(prior_terminal_spread) -
                                 equity_to_double(simmer->initial_spread);
     simmed_play_set_static_prior(simmed_play, prior_utility, prior_win_pct,
                                  prior_equity, prior_samples);

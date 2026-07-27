@@ -1,5 +1,6 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
+#include "../src/compat/endian_conv.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/game_defs.h"
 #include "../src/def/game_history_defs.h"
@@ -35,6 +36,34 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+
+static const char *const STATIC_PRIOR_FORECAST_PATH =
+    "data/strategy/test_static_prior_spread.sfc";
+
+static void write_static_prior_test_forecast(void) {
+  FILE *stream = fopen(STATIC_PRIOR_FORECAST_PATH, "wbe");
+  assert(stream != NULL);
+  const uint8_t magic[8] = {'M', 'A', 'G', 'S', 'P', 'R', 'D', '\0'};
+  assert(fwrite(magic, sizeof(magic), 1, stream) == 1);
+  // One clamped cell is enough: every game state receives a +100 terminal
+  // spread forecast, deliberately far from its root static projection.
+  const uint32_t header[4] = {
+      convert_uint32_to_le(1),
+      convert_uint32_to_le(0),
+      convert_uint32_to_le(0),
+      convert_uint32_to_le(1),
+  };
+  assert(fwrite(header, sizeof(uint32_t), 4, stream) == 4);
+  const float values[3] = {
+      convert_float_to_le(100.0F),
+      convert_float_to_le(0.0F),
+      convert_float_to_le(0.0F),
+  };
+  const uint32_t samples = convert_uint32_to_le(1);
+  assert(fwrite(values, sizeof(float), 3, stream) == 3);
+  assert(fwrite(&samples, sizeof(samples), 1, stream) == 1);
+  fclose_or_die(stream);
+}
 
 int get_best_simmed_play_index(const SimResults *sim_results) {
   const int num_simmed_plays = sim_results_get_number_of_plays(sim_results);
@@ -1288,6 +1317,20 @@ void test_sim_static_prior(void) {
         (1.0 + prior_samples);
     const double actual_mean = simmed_play_get_posterior_utility_mean(play);
     assert(within_epsilon(actual_mean, expected_mean));
+    const double expected_win_pct =
+        (stat_get_mean(simmed_play_get_win_pct_stat(play)) +
+         prior_samples * prior_win_pct) /
+        (1.0 + prior_samples);
+    assert(within_epsilon(simmed_play_get_posterior_win_pct_mean(play),
+                          expected_win_pct));
+    const double prior_equity =
+        equity_to_double(prior_spread) - equity_to_double(initial_spread);
+    const double expected_equity =
+        (stat_get_mean(simmed_play_get_equity_stat(play)) +
+         prior_samples * prior_equity) /
+        (1.0 + prior_samples);
+    assert(within_epsilon(simmed_play_get_posterior_equity_mean(play),
+                          expected_equity));
     if (expected_best < 0 || expected_mean > expected_best_mean) {
       expected_best = i;
       expected_best_mean = expected_mean;
@@ -1312,7 +1355,68 @@ void test_sim_static_prior(void) {
                         expected_best_mean));
 
   sim_results_destroy(multithreaded);
+
+  // A terminal-spread forecast belongs only in the spread component. win_pct
+  // is conditioned on horizon/current spread and unseen tiles, so its prior
+  // must remain rooted at current spread + static equity.
+  write_static_prior_test_forecast();
+  load_and_exec_config_or_die(
+      config,
+      "set -spreadforecast test_static_prior_spread -threads 1 -seed 42");
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  double best_static_equity = -INFINITY;
+  for (int i = 0; i < num_plays; i++) {
+    const Move *move =
+        simmed_play_get_move(sim_results_get_simmed_play(sim_results, i));
+    const double static_equity = move_get_type(move) == GAME_EVENT_PASS
+                                     ? 0.0
+                                     : equity_to_double(move_get_equity(move));
+    if (static_equity > best_static_equity) {
+      best_static_equity = static_equity;
+    }
+  }
+  for (int i = 0; i < num_plays; i++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
+    const Move *move = simmed_play_get_move(play);
+    const double static_equity = move_get_type(move) == GAME_EVENT_PASS
+                                     ? 0.0
+                                     : equity_to_double(move_get_equity(move));
+    const Equity win_pct_spread =
+        double_to_equity(equity_to_double(initial_spread) + static_equity);
+    const double expected_prior_win_pct = (double)win_pct_get(
+        config_get_win_pcts(config),
+        (int)round(equity_to_double(win_pct_spread)), (unsigned int)unseen);
+    const Equity expected_prior_spread =
+        double_to_equity(equity_to_double(initial_spread) + 100.0 +
+                         static_equity - best_static_equity);
+    const double expected_prior_utility = sim_utility_blend(
+        expected_prior_win_pct, expected_prior_spread, 1.0, 0.5, 100.0);
+    const double expected_posterior_utility =
+        (stat_get_mean(simmed_play_get_utility_stat(play)) +
+         prior_samples * expected_prior_utility) /
+        (1.0 + prior_samples);
+    const double expected_posterior_win_pct =
+        (stat_get_mean(simmed_play_get_win_pct_stat(play)) +
+         prior_samples * expected_prior_win_pct) /
+        (1.0 + prior_samples);
+    const double expected_prior_equity =
+        equity_to_double(expected_prior_spread) -
+        equity_to_double(initial_spread);
+    const double expected_posterior_equity =
+        (stat_get_mean(simmed_play_get_equity_stat(play)) +
+         prior_samples * expected_prior_equity) /
+        (1.0 + prior_samples);
+    assert(within_epsilon(simmed_play_get_posterior_utility_mean(play),
+                          expected_posterior_utility));
+    assert(within_epsilon(simmed_play_get_posterior_win_pct_mean(play),
+                          expected_posterior_win_pct));
+    assert(within_epsilon(simmed_play_get_posterior_equity_mean(play),
+                          expected_posterior_equity));
+  }
+
   config_destroy(config);
+  assert(remove(STATIC_PRIOR_FORECAST_PATH) == 0);
 }
 
 void test_sim(void) {

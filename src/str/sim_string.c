@@ -213,7 +213,8 @@ bool string_builder_add_sim_stats_with_display_lock(
     const Stat *win_pct_stat = simmed_play_get_win_pct_stat(sp);
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%.2f", stat_get_mean(win_pct_stat) * 100));
+        get_formatted_string("%.2f",
+                             simmed_play_get_posterior_win_pct_mean(sp) * 100));
     if (use_ucgi_format) {
       string_grid_set_cell(
           sg, curr_row, curr_col++,
@@ -223,7 +224,8 @@ bool string_builder_add_sim_stats_with_display_lock(
     const Stat *equity_stat = simmed_play_get_equity_stat(sp);
     string_grid_set_cell(
         sg, curr_row, curr_col++,
-        get_formatted_string("%.2f", stat_get_mean(equity_stat)));
+        get_formatted_string("%.2f",
+                             simmed_play_get_posterior_equity_mean(sp)));
     if (use_ucgi_format) {
       string_grid_set_cell(
           sg, curr_row, curr_col++,

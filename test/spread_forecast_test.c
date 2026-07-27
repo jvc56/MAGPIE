@@ -31,14 +31,16 @@ static void write_test_spread_forecast(void) {
   FILE *stream = fopen(TEST_MODEL_PATH, "wbe");
   assert(stream != NULL);
   const uint8_t magic[8] = {'M', 'A', 'G', 'S', 'P', 'R', 'D', '\0'};
-  assert(fwrite(magic, sizeof(magic), 1, stream) == 1);
+  const size_t magic_written = fwrite(magic, sizeof(magic), 1, stream);
+  assert(magic_written == 1);
   const uint32_t header[4] = {
       convert_uint32_to_le(1),
       convert_uint32_to_le(TEST_MAX_BAG),
       convert_uint32_to_le(TEST_MAX_RACK),
       convert_uint32_to_le(TEST_CELL_COUNT),
   };
-  assert(fwrite(header, sizeof(uint32_t), 4, stream) == 4);
+  const size_t header_written = fwrite(header, sizeof(uint32_t), 4, stream);
+  assert(header_written == 4);
   for (int i = 0; i < TEST_CELL_COUNT; i++) {
     float spread = 0.0F;
     float on_turn_turns = 0.0F;
@@ -61,8 +63,11 @@ static void write_test_spread_forecast(void) {
         convert_float_to_le(off_turn_turns),
     };
     const uint32_t le_samples = convert_uint32_to_le(samples);
-    assert(fwrite(values, sizeof(float), 3, stream) == 3);
-    assert(fwrite(&le_samples, sizeof(uint32_t), 1, stream) == 1);
+    const size_t values_written = fwrite(values, sizeof(float), 3, stream);
+    assert(values_written == 3);
+    const size_t samples_written =
+        fwrite(&le_samples, sizeof(uint32_t), 1, stream);
+    assert(samples_written == 1);
   }
   fclose_or_die(stream);
 }
@@ -109,5 +114,6 @@ void test_spread_forecast(void) {
   config_destroy(config);
 
   error_stack_destroy(error_stack);
-  assert(remove(TEST_MODEL_PATH) == 0);
+  const int remove_status = remove(TEST_MODEL_PATH);
+  assert(remove_status == 0);
 }

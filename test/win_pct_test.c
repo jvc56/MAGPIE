@@ -39,5 +39,9 @@ void test_win_pct(void) {
                      180395057 / (double)((uint64_t)2932802774 * 2));
   assert_win_pct_get(win_pct_get(win_pct, 250, 93),
                      5842108920 / (double)((uint64_t)2932802774 * 2));
+  // A negative cutoff is the config-level sentinel for disabling the
+  // extreme-win early stop. Exact 0/1 values must not trigger it.
+  assert(!is_win_pct_within_cutoff(0.0, -0.01));
+  assert(!is_win_pct_within_cutoff(1.0, -0.01));
   config_destroy(config);
 }
