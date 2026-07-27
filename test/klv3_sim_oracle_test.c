@@ -3,9 +3,13 @@
 #include "../src/compat/cpthread.h"
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
+#include "../src/def/bai_defs.h"
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/klv_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/peg_defs.h"
 #include "../src/def/thread_control_defs.h"
@@ -16,10 +20,12 @@
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/rack_info_table.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
+#include "../src/ent/win_pct.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
@@ -27,6 +33,7 @@
 #include "../src/impl/simmer.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <inttypes.h>
@@ -708,11 +715,9 @@ run_terminal_rollouts(const Game *base_game, const Move *klv2_move,
       malloc_or_die(sizeof(*workers) * (size_t)num_threads);
   cpthread_t *worker_ids =
       malloc_or_die(sizeof(*worker_ids) * (size_t)num_threads);
-  Stat **spread_stats =
-      malloc_or_die(sizeof(*spread_stats) * (size_t)num_threads);
-  Stat **win_stats = malloc_or_die(sizeof(*win_stats) * (size_t)num_threads);
-  Stat **utility_stats =
-      malloc_or_die(sizeof(*utility_stats) * (size_t)num_threads);
+  Stat **spread_stats = malloc_or_die(sizeof(Stat *) * (size_t)num_threads);
+  Stat **win_stats = malloc_or_die(sizeof(Stat *) * (size_t)num_threads);
+  Stat **utility_stats = malloc_or_die(sizeof(Stat *) * (size_t)num_threads);
   Timer timer;
   ctimer_start(&timer);
   for (int thread_index = 0; thread_index < num_threads; thread_index++) {
@@ -1097,7 +1102,13 @@ static HorizonValue get_horizon_value(const Config *config, const Game *game,
       player_get_score(game_get_player(game, 1 - initial_player));
   double win_pct;
   if (game_get_game_end_reason(game) != GAME_END_REASON_NONE) {
-    win_pct = spread > 0 ? 1.0 : spread < 0 ? 0.0 : 0.5;
+    if (spread > 0) {
+      win_pct = 1.0;
+    } else if (spread < 0) {
+      win_pct = 0.0;
+    } else {
+      win_pct = 0.5;
+    }
   } else {
     int spread_plus_leftover = (int)(equity_to_double(spread + leftover) + 0.5 -
                                      (spread + leftover < 0));
@@ -1304,8 +1315,7 @@ static void *nested_outer_worker(void *uncasted_worker) {
 static void combine_worker_stat(NestedOuterWorker workers[], int num_workers,
                                 Stat *(*get_stat)(NestedOuterWorker *, int),
                                 int stat_index, Stat *combined) {
-  Stat **worker_stats =
-      malloc_or_die(sizeof(*worker_stats) * (size_t)num_workers);
+  Stat **worker_stats = malloc_or_die(sizeof(Stat *) * (size_t)num_workers);
   for (int worker_index = 0; worker_index < num_workers; worker_index++) {
     worker_stats[worker_index] = get_stat(&workers[worker_index], stat_index);
   }
@@ -1498,15 +1508,16 @@ static void run_nested_corpus_oracle(Config *klv2_config, Config *klv3_config,
          nested_samples_per_candidate, nested_samples_per_candidate / 2,
          nested_samples_per_candidate / 2, num_threads, start_disagreement,
          max_positions, min_bag_tiles, wall_seconds);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
        filename != NULL && !wall_limit_reached;
        filename = strtok_r(NULL, ",", &files_saveptr)) {
-    FILE *stream = fopen(filename, "r");
+    FILE *stream = fopen(filename, "re");
     if (stream == NULL) {
       log_fatal("could not open KLV3 oracle corpus file: %s", filename);
     }
+    assert(stream != NULL);
     char *line = NULL;
     size_t line_capacity = 0;
     while (getline_ignore_carriage_return(&line, &line_capacity, stream) !=
@@ -1634,10 +1645,10 @@ static void run_nested_corpus_oracle(Config *klv2_config, Config *klv3_config,
       if (evaluated % 5 == 0) {
         print_nested_corpus_summary(&aggregate, ctimer_elapsed_seconds(&timer));
       }
-      fflush(stdout);
+      fflush_or_die(stdout);
     }
     free(line);
-    fclose(stream);
+    fclose_or_die(stream);
   }
   free(files_copy);
   print_nested_corpus_summary(&aggregate, ctimer_elapsed_seconds(&timer));
@@ -1646,7 +1657,7 @@ static void run_nested_corpus_oracle(Config *klv2_config, Config *klv3_config,
          "elapsed_seconds=%.6f wall_limit_reached=%d\n",
          rows_read, rows_below_min_bag, all_same_roots, evaluated,
          last_disagreement, ctimer_elapsed_seconds(&timer), wall_limit_reached);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   nested_corpus_aggregate_destroy(&aggregate);
 }
@@ -1758,7 +1769,7 @@ static void run_equal_sample_online_oracle(
          nested_samples_per_candidate, nested_samples_per_candidate / 2,
          nested_samples_per_candidate / 2, num_threads, num_threads,
          min_bag_tiles, wall_seconds);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   for (int game_index = start_game;
        game_index < num_games && position_index < max_positions &&
@@ -1914,7 +1925,7 @@ static void run_equal_sample_online_oracle(
             print_equal_sample_summary(&aggregate, global_disagreements,
                                        ctimer_elapsed_seconds(&timer));
           }
-          fflush(stdout);
+          fflush_or_die(stdout);
         }
       }
 
@@ -1941,7 +1952,7 @@ static void run_equal_sample_online_oracle(
          aggregate.source_positions, aggregate.agreements,
          aggregate.disagreements, global_disagreements, target_disagreements,
          position_index, ctimer_elapsed_seconds(&timer), wall_limit_reached);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   move_list_destroy(trajectory_move_list);
   game_destroy(trajectory_game);
@@ -2050,7 +2061,7 @@ static void run_candidate_selector_online_oracle(
          nested_samples_per_candidate, nested_samples_per_candidate / 2,
          nested_samples_per_candidate / 2, num_threads, num_threads,
          min_bag_tiles, wall_seconds);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   for (int game_index = start_game;
        game_index < num_games && position_index < max_positions &&
@@ -2221,7 +2232,7 @@ static void run_candidate_selector_online_oracle(
                 total_overlap, total_unique_per_selector,
                 ctimer_elapsed_seconds(&timer));
           }
-          fflush(stdout);
+          fflush_or_die(stdout);
         }
       }
 
@@ -2249,7 +2260,7 @@ static void run_candidate_selector_online_oracle(
          aggregate.source_positions, aggregate.agreements,
          aggregate.disagreements, global_comparisons, target_comparisons,
          position_index, ctimer_elapsed_seconds(&timer), wall_limit_reached);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   move_list_destroy(trajectory_move_list);
   game_destroy(trajectory_game);
@@ -2292,15 +2303,16 @@ static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
          "max_disagreements=%d wall_seconds=%.3f\n",
          corpus_files, num_samples, num_threads, start_disagreement,
          max_disagreements, wall_seconds);
-  fflush(stdout);
+  fflush_or_die(stdout);
 
   for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
        filename != NULL && !wall_limit_reached;
        filename = strtok_r(NULL, ",", &files_saveptr)) {
-    FILE *stream = fopen(filename, "r");
+    FILE *stream = fopen(filename, "re");
     if (stream == NULL) {
       log_fatal("could not open KLV3 oracle corpus file: %s", filename);
     }
+    assert(stream != NULL);
     char *line = NULL;
     size_t line_capacity = 0;
     while (getline_ignore_carriage_return(&line, &line_capacity, stream) !=
@@ -2315,6 +2327,8 @@ static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
       if (field_count < CORPUS_MIN_FIELDS) {
         log_fatal("truncated KLV3 oracle corpus row in %s", filename);
       }
+      assert(fields[CORPUS_DISAGREEMENT_FIELD] != NULL);
+      assert(fields[CORPUS_CGP_FIELD] != NULL);
       const int disagreement =
           (int)strtol(fields[CORPUS_DISAGREEMENT_FIELD], NULL, 10);
       if (disagreement <= start_disagreement) {
@@ -2383,10 +2397,10 @@ static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
       if (evaluated % 25 == 0) {
         print_oracle_summary(&aggregate);
       }
-      fflush(stdout);
+      fflush_or_die(stdout);
     }
     free(line);
-    fclose(stream);
+    fclose_or_die(stream);
   }
   free(files_copy);
   print_oracle_summary(&aggregate);
@@ -2395,7 +2409,7 @@ static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
          "wall_limit_reached=%d\n",
          rows_read, same_root_moves, evaluated, last_disagreement,
          ctimer_elapsed_seconds(&timer), wall_limit_reached);
-  fflush(stdout);
+  fflush_or_die(stdout);
   oracle_aggregate_destroy(&aggregate);
 }
 
@@ -2879,7 +2893,7 @@ void test_klv3_sim_oracle(void) {
                      ? (double)nomination_aggregate.iterations[1] /
                            nomination_aggregate.elapsed_seconds[1]
                      : 0.0);
-          fflush(stdout);
+          fflush_or_die(stdout);
         }
       }
 
@@ -2908,7 +2922,7 @@ void test_klv3_sim_oracle(void) {
   } else {
     printf("KLV3_THREEWAY_DONE positions=%d disagreements=%d target=%d\n",
            position_index, three_way_disagreements, target_disagreements);
-    fflush(stdout);
+    fflush_or_die(stdout);
   }
   free(klv2_nominations);
   free(klv3_nominations);

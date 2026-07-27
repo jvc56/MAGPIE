@@ -648,13 +648,10 @@ static void fill_contextual_rit_leaves_and_record_exchanges(MoveGen *gen,
       }
       bool better = contextual_value > best_exchange_equity;
       if (contextual_value == best_exchange_equity) {
-        if (exchange_count < best_exchange_count) {
-          better = true;
-        } else if (exchange_count == best_exchange_count &&
-                   memcmp(exchange_strip, best_exchange_strip,
-                          (size_t)exchange_count * sizeof(MachineLetter)) < 0) {
-          better = true;
-        }
+        better = exchange_count < best_exchange_count ||
+                 (exchange_count == best_exchange_count &&
+                  memcmp(exchange_strip, best_exchange_strip,
+                         (size_t)exchange_count * sizeof(MachineLetter)) < 0);
       }
       if (better) {
         best_exchange_equity = contextual_value;

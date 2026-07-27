@@ -6245,10 +6245,13 @@ void config_load_lexicon_dependent_data(
       }
       error_stack_destroy(probe);
     }
-    p1_rit_name = p1_word_rit_name != NULL ? p1_word_rit_name
-                                           : (klv_has_context_leave_caps(p1_klv)
-                                                  ? klv_get_name(p1_klv)
-                                                  : updated_p1_lexicon_name);
+    if (p1_word_rit_name != NULL) {
+      p1_rit_name = p1_word_rit_name;
+    } else if (klv_has_context_leave_caps(p1_klv)) {
+      p1_rit_name = klv_get_name(p1_klv);
+    } else {
+      p1_rit_name = updated_p1_lexicon_name;
+    }
   }
   char *p2_word_rit_name = NULL;
   const char *p2_rit_name = NULL;
@@ -6269,10 +6272,13 @@ void config_load_lexicon_dependent_data(
       }
       error_stack_destroy(probe);
     }
-    p2_rit_name = p2_word_rit_name != NULL ? p2_word_rit_name
-                                           : (klv_has_context_leave_caps(p2_klv)
-                                                  ? klv_get_name(p2_klv)
-                                                  : updated_p2_lexicon_name);
+    if (p2_word_rit_name != NULL) {
+      p2_rit_name = p2_word_rit_name;
+    } else if (klv_has_context_leave_caps(p2_klv)) {
+      p2_rit_name = klv_get_name(p2_klv);
+    } else {
+      p2_rit_name = updated_p2_lexicon_name;
+    }
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,

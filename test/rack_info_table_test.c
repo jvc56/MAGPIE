@@ -2,6 +2,8 @@
 
 #include "../src/def/bit_rack_defs.h"
 #include "../src/def/board_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/klv_defs.h"
 #include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/rack_defs.h"

@@ -1,8 +1,11 @@
+#include "../src/def/klv_defs.h"
+#include "../src/def/letter_distribution_defs.h"
 #include "../src/ent/data_filepaths.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/klv.h"
 #include "../src/ent/klv_csv.h"
 #include "../src/ent/letter_distribution.h"
+#include "../src/ent/rack.h"
 #include "../src/impl/config.h"
 #include "../src/util/io_util.h"
 #include "test_util.h"
@@ -67,7 +70,8 @@ void test_contextual_klv_adjustments(void) {
   klv->context_pool_bin_upper_bounds = malloc_or_die(2 * sizeof(uint16_t));
   klv->context_pool_bin_upper_bounds[0] = 4;
   klv->context_pool_bin_upper_bounds[1] = 100;
-  const size_t num_biases = 2 * KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld);
+  const size_t num_biases =
+      (size_t)2 * KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld);
   const size_t num_weights =
       KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld) * (size_t)ld_get_size(ld);
   klv->context_biases = calloc_or_die(num_biases, sizeof(Equity));

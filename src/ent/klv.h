@@ -12,6 +12,7 @@
 #include "data_filepaths.h"
 #include "kwg.h"
 #include "rack.h"
+#include <assert.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -514,6 +515,7 @@ static inline uint64_t klv_compute_context_content_fingerprint(const KLV *klv) {
 }
 
 static inline uint64_t klv_get_base_content_fingerprint(const KLV *klv) {
+  assert(klv != NULL);
   if (klv->base_content_fingerprint == 0) {
     ((KLV *)klv)->base_content_fingerprint =
         klv_compute_base_content_fingerprint(klv);
