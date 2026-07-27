@@ -246,10 +246,9 @@ klv3_sample_rack_adjustment_magnitude(const KLV *klv, const int *unseen_counts,
   if (!klv_has_context_model(klv) || unseen_total <= 0 || tiles_in_bag <= 0) {
     return 0;
   }
-  int draw_count = tiles_in_bag < 4 ? tiles_in_bag : 4;
-  if (draw_count >= KLV3_DRAW_COUNT_HEADS) {
-    draw_count = KLV3_DRAW_COUNT_HEADS - 1;
-  }
+  // The sampling heuristic caps at 4 draws, comfortably inside the
+  // KLV3_DRAW_COUNT_HEADS head range.
+  const int draw_count = tiles_in_bag < 4 ? tiles_in_bag : 4;
   const int pool_bin = klv3_get_pool_bin(klv, unseen_total);
   int64_t magnitude = 0;
   for (int held = 0; held < klv->context_alphabet_size; held++) {
