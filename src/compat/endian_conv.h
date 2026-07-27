@@ -1,6 +1,8 @@
 #ifndef ENDIAN_CONV
 #define ENDIAN_CONV
 
+#include <stdint.h>
+
 #if defined(_WIN32)
 
 #include <windows.h>
