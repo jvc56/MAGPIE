@@ -284,8 +284,9 @@ static inline Equity klv3_get_rack_adjustment_range(
     for (int i = 0; i < count; i++) {
       if (num_rack_tiles >= RACK_SIZE) {
         log_fatal("rack exceeds RACK_SIZE while measuring KLV3 adjustment");
+      } else {
+        rack_tiles[num_rack_tiles++] = (MachineLetter)ml;
       }
-      rack_tiles[num_rack_tiles++] = (MachineLetter)ml;
     }
   }
 
