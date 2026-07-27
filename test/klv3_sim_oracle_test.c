@@ -287,7 +287,7 @@ static Config *create_oracle_config(const char *klv_name, int num_threads,
   return config;
 }
 
-static void load_position(Config *const config, const char *cgp) {
+static void load_position(const Config *const config, const char *cgp) {
   ErrorStack *error_stack = error_stack_create();
   game_load_cgp(config_get_game(config), cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -516,7 +516,7 @@ static int build_nonoverlap_candidate_lists(Config *klv2_config,
 // horizon valuation. The exact minimum equals the total cap, which guarantees
 // equal samples per retained arm.
 static NominationResult nominate_candidate_list_with_klv2_policy(
-    Config *const klv2_config, NominationContext *context,
+    const Config *const klv2_config, NominationContext *context,
     const MoveList *candidate_moves, int samples_per_arm, uint64_t fixed_seed) {
   const int arm_count = move_list_get_count(candidate_moves);
   assert(arm_count > 0);
