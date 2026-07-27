@@ -711,7 +711,10 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJData *fj_data = (FJData *)recorder->data;
   const Game *game = args->game;
   const Bag *bag = game_get_bag(game);
-  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES || bag_get_letters(bag) == 0) {
+  // Spread forecasting needs post-bag snapshots: rack sizes determine which
+  // player is likely to receive the remaining turns. KLV3 training ignores
+  // draw_count == 0 rows, so retaining them here does not change its fit.
+  if (fj_data->move_count >= MAX_NUMBER_OF_MOVES) {
     return;
   }
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];

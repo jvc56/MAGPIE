@@ -228,7 +228,11 @@ def load_corpus(
                         f"{path}: expected {FJ_FIXED_COLUMNS + alphabet_size} "
                         f"columns, found {len(row)}"
                     )
-                if int(row[4]):
+                # FJ also contains post-bag rows for terminal-spread training.
+                # They are not leavegen observations: no replacement tiles
+                # can be drawn, so keep KLV3's corpus restricted to moves with
+                # a positive actual draw count.
+                if int(row[4]) and int(row[9]) > 0:
                     static_equity_sum += float(row[5])
                     static_equity_count += 1
                     full_rack = row[6]
@@ -278,7 +282,7 @@ def load_corpus(
     for path in paths:
         with open(path, newline="", encoding="utf-8") as stream:
             for row in csv.reader(stream):
-                if not int(row[4]):
+                if not int(row[4]) or int(row[9]) <= 0:
                     continue
                 seed = int(row[0])
                 turn = int(row[1])

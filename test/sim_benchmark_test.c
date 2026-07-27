@@ -13,6 +13,7 @@
 //   SIMBENCH_THREADS worker threads (default detected hardware concurrency)
 //   SIMBENCH_WIT    "true" / "false" — toggles the WIT file (default false)
 //   SIMBENCH_KLV    optional KLV/KLV3 name for both players
+//   SIMBENCH_SPREAD_FORECAST optional terminal-spread forecast name
 
 #include "sim_benchmark_test.h"
 
@@ -61,14 +62,21 @@ void test_sim_benchmark(void) {
   if (klv != NULL) {
     (void)snprintf(klv_args, sizeof(klv_args), "-k1 %s -k2 %s ", klv, klv);
   }
-  char cmd[512];
+  const char *spread_forecast = getenv("SIMBENCH_SPREAD_FORECAST");
+  char spread_forecast_args[160] = "";
+  if (spread_forecast != NULL) {
+    (void)snprintf(spread_forecast_args, sizeof(spread_forecast_args),
+                   "-spreadforecast %s ", spread_forecast);
+  }
+  char cmd[672];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex CSW24 %s-wmp %s -rit %s -ritmmap %s -wit %s "
+                 "set -lex CSW24 %s%s-wmp %s -rit %s -ritmmap %s -wit %s "
                  "-s1 equity "
                  "-s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
                  "-tlim %s -seed 42 -sr tt -minplayiterations %s",
-                 klv_args, wmp, rit, rit_mmap, wit, plies, threads, tlim, mi);
+                 klv_args, spread_forecast_args, wmp, rit, rit_mmap, wit, plies,
+                 threads, tlim, mi);
   Config *config = config_create_or_die(cmd);
 
   load_and_exec_config_or_die(config, "autoplay games 1");

@@ -1,6 +1,8 @@
 #ifndef ENDIAN_CONV
 #define ENDIAN_CONV
 
+#include <stdint.h>
+
 #if defined(_WIN32)
 
 #include <windows.h>
@@ -102,6 +104,16 @@ static inline uint64_t __bswap64(uint64_t x) {
 #else
 #error "Unsupported platform"
 #endif
+
+// Project-owned wrappers keep callers independent from the platform header
+// that provides htole32/le32toh.
+static inline uint32_t convert_uint32_to_le(const uint32_t value) {
+  return htole32(value);
+}
+
+static inline uint32_t convert_uint32_from_le(const uint32_t value) {
+  return le32toh(value);
+}
 
 static inline float convert_float_to_le(const float input_float) {
 #if IS_LITTLE_ENDIAN
