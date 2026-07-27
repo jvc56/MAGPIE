@@ -23,6 +23,7 @@
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -119,6 +120,7 @@ typedef enum {
   ARG_TOKEN_USE_WMP,
   ARG_TOKEN_USE_RIT,
   ARG_TOKEN_USE_MMAP_FOR_RIT,
+  ARG_TOKEN_KLV3_FALLBACK_THRESHOLD,
   ARG_TOKEN_USE_WIT,
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_LEXICON,
@@ -333,6 +335,8 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool use_mmap_for_rit;
+  bool klv3_fallback_threshold_enabled;
+  Equity klv3_fallback_threshold;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -1508,7 +1512,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "future, other per-rack data) for every possible full rack, "
              "enabling a single hash lookup to replace repeated KLV traversal. "
              "Off by default because .rit files are large and must be built "
-             "with the klvwmp2rit convert command.";
+             "with the klvwmp2rit convert command. Contextual KLVs prefer a "
+             "slim <lexicon>_word.rit built with rit2wordrit when present.";
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
       usages[0] = "<true_or_false>";
@@ -1518,6 +1523,16 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "into allocated memory. This eliminates the startup cost of "
              "loading the file but pages are faulted on demand during play. "
              "Only supported on little-endian architectures.";
+      break;
+    case ARG_TOKEN_KLV3_FALLBACK_THRESHOLD:
+      usages[0] = "<equity_points_or_-1>";
+      examples[0] = "1";
+      examples[1] = "2.5";
+      examples[2] = "-1";
+      text = "Enables hybrid KLV3 evaluation. Positions whose sampled "
+             "contextual-adjustment magnitude is at most this many equity "
+             "points use embedded KLV2 and its full RIT/cache path. -1 "
+             "disables fallback and prefers a slim word-only RIT.";
       break;
     case ARG_TOKEN_USE_WIT:
       usages[0] = "<true_or_false>";
@@ -2312,6 +2327,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P1_USE_RIT,          /* rit1 */
         ARG_TOKEN_P2_USE_RIT,          /* rit2 */
         ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
+        ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, /* klv3fallback */
         ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
         ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
         ARG_TOKEN_GAME_VARIANT,        /* var */
@@ -6198,19 +6214,77 @@ void config_load_lexicon_dependent_data(
     return;
   }
 
-  // Load rack info tables (if enabled). Like the WMP, the .rit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    klv_set_context_fallback_threshold(
+        players_data_get_klv(config->players_data, player_index),
+        config->klv3_fallback_threshold_enabled,
+        config->klv3_fallback_threshold);
+  }
+
+  // Load rack info tables (if enabled). KLV2 uses the full lexicon-named RIT.
+  // A contextual evaluator first looks for <lexicon>_word.rit, which retains
+  // model-independent word facts without mapping the unused KLV2 payload.
+  // Fall back to the legacy full RIT (or a model-named capped experiment) so
+  // existing installations remain usable.
+  char *p1_word_rit_name = NULL;
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    p1_rit_name = updated_p1_lexicon_name;
+    const KLV *p1_klv =
+        players_data_get_klv(config->players_data, 0);
+    if (klv_has_context_model(p1_klv) &&
+        !config->klv3_fallback_threshold_enabled) {
+      p1_word_rit_name =
+          get_formatted_string("%s_word", updated_p1_lexicon_name);
+      ErrorStack *probe = error_stack_create();
+      char *filename = data_filepaths_get_readable_filename(
+          config->data_paths, p1_word_rit_name,
+          DATA_FILEPATH_TYPE_RACK_INFO_TABLE, probe);
+      free(filename);
+      if (!error_stack_is_empty(probe)) {
+        free(p1_word_rit_name);
+        p1_word_rit_name = NULL;
+      }
+      error_stack_destroy(probe);
+    }
+    p1_rit_name =
+        p1_word_rit_name != NULL
+            ? p1_word_rit_name
+            : (klv_has_context_leave_caps(p1_klv)
+                   ? klv_get_name(p1_klv)
+                   : updated_p1_lexicon_name);
   }
+  char *p2_word_rit_name = NULL;
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    p2_rit_name = updated_p2_lexicon_name;
+    const KLV *p2_klv =
+        players_data_get_klv(config->players_data, 1);
+    if (klv_has_context_model(p2_klv) &&
+        !config->klv3_fallback_threshold_enabled) {
+      p2_word_rit_name =
+          get_formatted_string("%s_word", updated_p2_lexicon_name);
+      ErrorStack *probe = error_stack_create();
+      char *filename = data_filepaths_get_readable_filename(
+          config->data_paths, p2_word_rit_name,
+          DATA_FILEPATH_TYPE_RACK_INFO_TABLE, probe);
+      free(filename);
+      if (!error_stack_is_empty(probe)) {
+        free(p2_word_rit_name);
+        p2_word_rit_name = NULL;
+      }
+      error_stack_destroy(probe);
+    }
+    p2_rit_name =
+        p2_word_rit_name != NULL
+            ? p2_word_rit_name
+            : (klv_has_context_leave_caps(p2_klv)
+                   ? klv_get_name(p2_klv)
+                   : updated_p2_lexicon_name);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
+  free(p1_word_rit_name);
+  free(p2_word_rit_name);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6861,6 +6935,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->data_paths = string_duplicate(new_path);
   }
   autoplay_results_set_data_paths(config->autoplay_results, config->data_paths);
+  if (config_get_parg_num_set_values(
+          config, ARG_TOKEN_KLV3_FALLBACK_THRESHOLD) > 0) {
+    double threshold = -1.0;
+    config_load_double(config, ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, -1.0,
+                       EQUITY_MAX_DOUBLE, &threshold, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->klv3_fallback_threshold_enabled = threshold >= 0.0;
+    config->klv3_fallback_threshold =
+        threshold >= 0.0 ? double_to_equity(threshold) : 0;
+  }
   // Exec Mode
 
   const char *new_exec_mode_str =
@@ -8813,6 +8899,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
+  arg(ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, "klv3fallback", 1, 1);
   arg(ARG_TOKEN_USE_WIT, "wit", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
@@ -8955,6 +9042,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->plies = 5;
   config->shplies = 2;
   config->show_bu = false;
+  config->klv3_fallback_threshold_enabled = false;
+  config->klv3_fallback_threshold = 0;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
@@ -9234,6 +9323,13 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_mmap_for_rit);
+      break;
+    case ARG_TOKEN_KLV3_FALLBACK_THRESHOLD:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token,
+          config->klv3_fallback_threshold_enabled
+              ? equity_to_double(config->klv3_fallback_threshold)
+              : -1.0);
       break;
     case ARG_TOKEN_P1_LEXICON:
       config_add_string_setting_to_string_builder(

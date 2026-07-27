@@ -10,6 +10,7 @@
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/klv_csv.h"
 #include "../src/ent/leave_map.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/player.h"
@@ -47,10 +48,16 @@ static uint32_t count_racks_for_ld(const LetterDistribution *ld, int ml,
   return total;
 }
 
+static int rit_test_popcount(unsigned int x);
+
 static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
   assert(a->version == b->version);
   assert(a->rack_size == b->rack_size);
   assert(a->playthrough_min_played_size == b->playthrough_min_played_size);
+  assert(a->flags == b->flags);
+  assert(a->base_klv_fingerprint == b->base_klv_fingerprint);
+  assert(a->context_klv_fingerprint == b->context_klv_fingerprint);
+  assert(a->context_cap_quantile_ppm == b->context_cap_quantile_ppm);
   assert(a->num_buckets == b->num_buckets);
   assert(a->num_entries == b->num_entries);
   for (uint32_t bucket_idx = 0; bucket_idx <= a->num_buckets; bucket_idx++) {
@@ -86,6 +93,70 @@ static void assert_rits_equal(const RackInfoTable *a, const RackInfoTable *b) {
       assert(ea->bit_rack_bytes[byte_idx] == eb->bit_rack_bytes[byte_idx]);
     }
   }
+  assert(rack_info_table_has_context_caps(a) ==
+         rack_info_table_has_context_caps(b));
+  if (rack_info_table_has_context_caps(a)) {
+    for (uint32_t entry_idx = 0; entry_idx < a->num_entries; entry_idx++) {
+      const Equity *a_best =
+          rack_info_table_get_context_capped_best_leaves(
+              a, &a->entries[entry_idx]);
+      const Equity *b_best =
+          rack_info_table_get_context_capped_best_leaves(
+              b, &b->entries[entry_idx]);
+      const Equity *a_nonplay =
+          rack_info_table_get_context_capped_nonplaythrough_best_leaves(
+              a, &a->entries[entry_idx]);
+      const Equity *b_nonplay =
+          rack_info_table_get_context_capped_nonplaythrough_best_leaves(
+              b, &b->entries[entry_idx]);
+      for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+        assert(a_best[leave_size] == b_best[leave_size]);
+        assert(a_nonplay[leave_size] == b_nonplay[leave_size]);
+      }
+    }
+  }
+}
+
+static Equity expected_capped_best_for_mask(const KLV *klv,
+                                            const LetterDistribution *ld,
+                                            const Rack *full_rack,
+                                            int target_leave_size) {
+  if (target_leave_size == 0) {
+    return 0;
+  }
+  MachineLetter tiles[RACK_SIZE];
+  int tile_count = 0;
+  for (int ml = 0; ml < ld_get_size(ld); ml++) {
+    for (int i = 0; i < rack_get_letter(full_rack, ml); i++) {
+      tiles[tile_count++] = (MachineLetter)ml;
+    }
+  }
+  assert(tile_count == RACK_SIZE);
+
+  Equity best = EQUITY_INITIAL_VALUE;
+  for (unsigned int mask = 0; mask < (1U << RACK_SIZE); mask++) {
+    if (rit_test_popcount(mask) != target_leave_size) {
+      continue;
+    }
+    Rack leave;
+    rack_set_dist_size_and_reset(&leave, ld_get_size(ld));
+    for (int tile_idx = 0; tile_idx < RACK_SIZE; tile_idx++) {
+      if ((mask & (1U << tile_idx)) != 0) {
+        rack_add_letter(&leave, tiles[tile_idx]);
+      }
+    }
+    const uint32_t leave_index = klv_get_word_index(klv, &leave);
+    if (leave_index == KLV_UNFOUND_INDEX) {
+      continue;
+    }
+    const Equity capped =
+        klv_get_indexed_leave_value(klv, leave_index) +
+        klv_get_context_leave_cap(klv, leave_index);
+    if (capped > best) {
+      best = capped;
+    }
+  }
+  return best;
 }
 
 // Reference implementation for ground-truth verification: recursively
@@ -343,7 +414,137 @@ void test_rack_info_table(void) {
   assert_rits_equal(rit, rit_loaded);
 
   rack_info_table_destroy(rit_loaded);
+
+  // ---- Word-only projection and mmap roundtrip ----
+  assert(sizeof(RackInfoTableWordEntry) == 128);
+  const char *word_rit_name = "rit_test_csw21_ab_word";
+  char *word_rit_filename = data_filepaths_get_writable_filename(
+      data_paths, word_rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  rack_info_table_write_word_only_copy(rit, word_rit_filename, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  RackInfoTable *word_rit = rack_info_table_create(
+      data_paths, word_rit_name, true, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(word_rit != NULL);
+  assert(rack_info_table_is_word_only(word_rit));
+  assert(word_rit->entries == NULL);
+  assert(word_rit->word_entries != NULL);
+  assert(word_rit->num_buckets == rit->num_buckets);
+  assert(word_rit->num_entries == rit->num_entries);
+  for (uint32_t entry_idx = 0; entry_idx < rit->num_entries; entry_idx++) {
+    const RackInfoTableEntry *full_entry = &rit->entries[entry_idx];
+    const BitRack rack_bits =
+        rack_info_table_entry_read_bit_rack(full_entry);
+    RackInfoTableWordEntry expected;
+    RackInfoTableWordEntry actual;
+    rack_info_table_copy_word_entry(&expected, full_entry);
+    const RackInfoTableEntry *unexpected_full_entry = NULL;
+    assert(rack_info_table_lookup_word_entry(
+        word_rit, &rack_bits, &actual, &unexpected_full_entry));
+    assert(unexpected_full_entry == NULL);
+    assert(memcmp(&expected, &actual, sizeof(expected)) == 0);
+    assert(rack_info_table_lookup(word_rit, &rack_bits) == NULL);
+  }
+  rack_info_table_destroy(word_rit);
   rack_info_table_destroy(rit);
+
+  // ---- Contextual cap overlay ----
+  // Give every leave a distinct base value and cap, then independently
+  // enumerate the 128 tile subsets of every tiny-distribution rack. This
+  // verifies that a KLV3 RIT stores max(base + per-leave cap), not either
+  // component alone, and that the overlay survives file I/O.
+  KLV *context_klv = klv_create_empty(ld, "rit-context-test");
+  context_klv->context_alphabet_size = ld_get_size(ld);
+  context_klv->context_num_pool_bins = 1;
+  context_klv->context_pool_bin_upper_bounds =
+      malloc_or_die(sizeof(uint16_t));
+  context_klv->context_pool_bin_upper_bounds[0] = UINT16_MAX;
+  const size_t num_biases =
+      KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld);
+  const size_t num_weights =
+      KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld) *
+      (size_t)ld_get_size(ld);
+  context_klv->context_biases = calloc_or_die(num_biases, sizeof(Equity));
+  context_klv->context_weights = calloc_or_die(num_weights, sizeof(Equity));
+  context_klv->context_leave_caps = malloc_or_die(
+      (size_t)context_klv->number_of_leaves * sizeof(Equity));
+  context_klv->context_cap_quantile_ppm = 990000;
+  context_klv->context_cap_min_samples = 32;
+  for (uint32_t i = 0; i < context_klv->number_of_leaves; i++) {
+    klv_set_indexed_leave_value(context_klv, i,
+                                double_to_equity((double)i / 10.0));
+    context_klv->context_leave_caps[i] =
+        double_to_equity((double)(i % 5) / 7.0);
+  }
+
+  RackInfoTable *context_rit =
+      make_rack_info_table(context_klv, wmp, ld, 1, min_played);
+  assert(rack_info_table_has_context_caps(context_rit));
+  const uint64_t original_base_fingerprint =
+      klv_get_base_content_fingerprint(context_klv);
+  const uint64_t original_context_fingerprint =
+      klv_get_context_content_fingerprint(context_klv);
+  assert(rack_info_table_base_matches(context_rit,
+                                      original_base_fingerprint));
+  assert(rack_info_table_context_matches(context_rit,
+                                         original_context_fingerprint));
+  for (uint32_t entry_idx = 0; entry_idx < context_rit->num_entries;
+       entry_idx++) {
+    const RackInfoTableEntry *context_entry =
+        &context_rit->entries[entry_idx];
+    const BitRack rack_bits =
+        rack_info_table_entry_read_bit_rack(context_entry);
+    Rack full_rack;
+    rack_set_dist_size_and_reset(&full_rack, ld_get_size(ld));
+    for (int ml = 0; ml < ld_get_size(ld); ml++) {
+      const int count = bit_rack_get_letter(&rack_bits, ml);
+      for (int i = 0; i < count; i++) {
+        rack_add_letter(&full_rack, (MachineLetter)ml);
+      }
+    }
+    const Equity *capped =
+        rack_info_table_get_context_capped_best_leaves(context_rit,
+                                                       context_entry);
+    for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+      assert(capped[leave_size] == expected_capped_best_for_mask(
+                                        context_klv, ld, &full_rack,
+                                        leave_size));
+    }
+  }
+
+  const char *context_rit_name = "rit_test_context_csw21_ab";
+  char *context_rit_filename = data_filepaths_get_writable_filename(
+      data_paths, context_rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+      error_stack);
+  assert(error_stack_is_empty(error_stack));
+  rack_info_table_write_to_file(context_rit, context_rit_filename,
+                                error_stack);
+  assert(error_stack_is_empty(error_stack));
+  RackInfoTable *context_rit_loaded = rack_info_table_create(
+      data_paths, context_rit_name, false, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert_rits_equal(context_rit, context_rit_loaded);
+
+  // A cap-only change keeps the base fingerprint valid but rejects the
+  // contextual overlay. A base-value change rejects both.
+  context_klv->context_leave_caps[0]++;
+  context_klv->context_content_fingerprint = 0;
+  assert(rack_info_table_base_matches(
+      context_rit, klv_get_base_content_fingerprint(context_klv)));
+  assert(!rack_info_table_context_matches(
+      context_rit, klv_get_context_content_fingerprint(context_klv)));
+  klv_set_indexed_leave_value(
+      context_klv, 0, klv_get_indexed_leave_value(context_klv, 0) + 1);
+  assert(!rack_info_table_base_matches(
+      context_rit, klv_get_base_content_fingerprint(context_klv)));
+
+  rack_info_table_destroy(context_rit_loaded);
+  rack_info_table_destroy(context_rit);
+  klv_destroy(context_klv);
+  free(context_rit_filename);
+  free(word_rit_filename);
   free(rit_filename);
   error_stack_destroy(error_stack);
   game_destroy(game);

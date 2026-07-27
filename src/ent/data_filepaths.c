@@ -9,6 +9,7 @@
 
 static const char *const filepath_type_names[] = {"kwg",
                                                   "klv",
+                                                  "klv3",
                                                   "board layout",
                                                   "win percentage",
                                                   "letter distribution",
@@ -26,6 +27,7 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   switch (type) {
   case DATA_FILEPATH_TYPE_KWG:
   case DATA_FILEPATH_TYPE_KLV:
+  case DATA_FILEPATH_TYPE_KLV3:
   case DATA_FILEPATH_TYPE_LEXICON:
   case DATA_FILEPATH_TYPE_WORDMAP:
   case DATA_FILEPATH_TYPE_LEAVES:
@@ -65,6 +67,9 @@ char *get_filepath(const char *data_path, const char *data_name,
     break;
   case DATA_FILEPATH_TYPE_KLV:
     file_ext = KLV_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_KLV3:
+    file_ext = KLV3_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
     file_ext = RACK_INFO_TABLE_EXTENSION;

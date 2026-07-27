@@ -615,8 +615,13 @@ enum { MAX_NUMBER_OF_MOVES = 100, MAX_NUMBER_OF_TILES = 100 };
 
 typedef struct FJMove {
   int unseen_counts[MAX_ALPHABET_SIZE];
+  Rack rack;
   Rack leave;
+  Equity base_leave_value;
+  Equity static_equity;
+  bool static_equity_valid;
   int move_score;
+  int draw_count;
   int score_diff;
   int unseen_total;
   int player_index;
@@ -711,13 +716,24 @@ void fj_data_add_move(Recorder *recorder, const RecorderArgs *args) {
   FJMove *fj_move = &fj_data->moves[fj_data->move_count];
   const Rack *leave = args->leave;
   rack_copy(&fj_move->leave, leave);
-  fj_move->move_score = move_get_score(args->move);
+  fj_move->base_leave_value =
+      klv_get_leave_value(recorder->recorder_context->klv, leave);
+  fj_move->static_equity_valid = move_get_type(args->move) != GAME_EVENT_PASS;
+  fj_move->static_equity =
+      fj_move->static_equity_valid ? move_get_equity(args->move) : 0;
+  fj_move->move_score = equity_to_int(move_get_score(args->move));
+  fj_move->draw_count = RACK_SIZE - rack_get_total_letters(&fj_move->leave);
+  if (fj_move->draw_count > bag_get_letters(bag)) {
+    fj_move->draw_count = bag_get_letters(bag);
+  }
   fj_move->player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, fj_move->player_index);
   const Player *opponent = game_get_player(game, 1 - fj_move->player_index);
+  rack_copy(&fj_move->rack, player_get_rack(player));
   fj_move->score_diff =
       equity_to_int(player_get_score(player) - player_get_score(opponent));
-  fj_move->unseen_total = bag_get_letters(bag) + (RACK_SIZE);
+  fj_move->unseen_total =
+      bag_get_letters(bag) + rack_get_total_letters(player_get_rack(opponent));
   bag_increment_unseen_count(bag, fj_move->unseen_counts);
   rack_increment_unseen_count(player_get_rack(opponent),
                               fj_move->unseen_counts);
@@ -764,14 +780,44 @@ void fj_data_add_game(Recorder *recorder, const RecorderArgs *args) {
       rack_get_dist_size(player_get_rack(game_get_player(game, 0)));
   for (int i = 0; i < fj_data->move_count; i++) {
     FJMove *fj_move = &fj_data->moves[i];
+    const FJMove *next_player_move = NULL;
+    for (int j = i + 1; j < fj_data->move_count; j++) {
+      if (fj_data->moves[j].player_index == fj_move->player_index) {
+        next_player_move = &fj_data->moves[j];
+        break;
+      }
+    }
     const double player_result =
         fj_move->player_index * (1 - player_one_result) +
         (1 - fj_move->player_index) * player_one_result;
+    const int final_spread = fj_move->player_index == 0
+                                 ? player_one_score - player_two_score
+                                 : player_two_score - player_one_score;
     StringBuilder *sb = fj_data->sbs[fj_move->unseen_total];
-    string_builder_add_formatted_string(sb, "%d,", fj_move->move_score);
+    // Versioned, self-contained KLV3 training row:
+    const bool has_next_equity =
+        next_player_move && next_player_move->static_equity_valid;
+    // seed,turn,player,move score,current-equity-valid,current static equity,
+    // full rack,leave,base leave value,draw count,has next player
+    // turn,next-turn static equity,result,score diff before move,final
+    // spread,unseen total,then one count per machine letter. The full rack,
+    // current equity, and unseen pool are sufficient to reproduce ordinary
+    // leavegen's full-rack-to-subleave projection with contextual draw pools.
+    string_builder_add_formatted_string(
+        sb, "%llu,%d,%d,%d,%d,%.3f,", (unsigned long long)args->seed, i,
+        fj_move->player_index, fj_move->move_score,
+        fj_move->static_equity_valid, equity_to_double(fj_move->static_equity));
+    string_builder_add_rack(sb, &fj_move->rack, ld, false);
+    string_builder_add_char(sb, ',');
     string_builder_add_rack(sb, &fj_move->leave, ld, false);
-    string_builder_add_formatted_string(sb, ",%.1f,%d", player_result,
-                                        fj_move->score_diff);
+    string_builder_add_formatted_string(
+        sb, ",%.3f,%d,%d,%.3f,%.1f,%d,%d,%d",
+        equity_to_double(fj_move->base_leave_value), fj_move->draw_count,
+        has_next_equity,
+        has_next_equity ? equity_to_double(next_player_move->static_equity)
+                        : 0.0,
+        player_result, fj_move->score_diff, final_spread,
+        fj_move->unseen_total);
     for (int ml = 0; ml < dist_size; ml++) {
       string_builder_add_formatted_string(sb, ",%d",
                                           fj_move->unseen_counts[ml]);
@@ -1508,11 +1554,19 @@ void autoplay_results_add_game_with_timing(AutoplayResults *autoplay_results,
 void autoplay_results_consolidate(AutoplayResults **autoplay_results_list,
                                   int list_size, AutoplayResults *primary) {
   cpthread_mutex_lock(&primary->mutex);
-  autoplay_results_reset(primary);
   Recorder **recorder_list = malloc_or_die(sizeof(Recorder *) * list_size);
   for (int i = 0; i < NUMBER_OF_AUTOPLAY_RECORDERS; i++) {
     if (!autoplay_results_list[0]->recorders[i]) {
       continue;
+    }
+    // FJ workers stream full buffers directly to shared files throughout the
+    // run. Resetting its primary recorder here reopens those files with "w"
+    // and erases every already-flushed row, leaving only the workers' final
+    // partial buffers. The command-level reset before workers start is the
+    // correct place to truncate FJ output. Other recorder primaries hold
+    // accumulated in-memory stats and still need to be cleared before merge.
+    if (i != AUTOPLAY_RECORDER_TYPE_FJ) {
+      recorder_reset(primary->recorders[i]);
     }
     for (int j = 0; j < list_size; j++) {
       recorder_list[j] = autoplay_results_list[j]->recorders[i];

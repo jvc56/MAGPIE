@@ -538,6 +538,165 @@ static void record_best_exchange_from_table(MoveGen *gen) {
   leave_map_set_current_index(&gen->leave_map, saved_index);
 }
 
+static void generate_exchange_moves_from_table(MoveGen *gen, Rack *leave,
+                                               MachineLetter ml,
+                                               bool add_exchange);
+
+static int movegen_popcount_mask(unsigned int mask) {
+#if defined(__has_builtin) && __has_builtin(__builtin_popcount)
+  return __builtin_popcount(mask);
+#else
+  int count = 0;
+  while (mask != 0) {
+    mask &= mask - 1;
+    count++;
+  }
+  return count;
+#endif
+}
+
+static int movegen_ctz_mask(unsigned int mask) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctz)
+  return __builtin_ctz(mask);
+#else
+  int count = 0;
+  while ((mask & 1U) == 0) {
+    mask >>= 1;
+    count++;
+  }
+  return count;
+#endif
+}
+
+// Contextualize the RIT's 128 KLV2 base leaves with a flat, fixed-size loop.
+// This is substantially cheaper than rebuilding a Rack and walking the KLV
+// trie for every canonical subset. It also finds the exact best contextual
+// exchange while the values are hot, so BEST movegen records it directly.
+static void fill_contextual_rit_leaves_and_record_exchanges(
+    MoveGen *gen, bool add_exchange) {
+  rack_info_table_entry_unpack_leaves(gen->rit_entry,
+                                      gen->leave_map.leave_values);
+
+  MachineLetter tile_for_bit[RACK_SIZE];
+  int bit_index = 0;
+  for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+    const int count = rack_get_letter(&gen->player_rack, ml);
+    for (int i = 0; i < count; i++) {
+      tile_for_bit[bit_index++] = (MachineLetter)ml;
+    }
+  }
+  assert(bit_index == RACK_SIZE);
+
+  Equity best_exchange_equity = EQUITY_INITIAL_VALUE;
+  MachineLetter best_exchange_strip[RACK_SIZE] = {0};
+  int best_exchange_count = 0;
+  int best_exchange_mask = 0;
+
+  // mask == 0 is the empty leave and needs no contextual adjustment.
+  gen->best_leaves[0] = gen->leave_map.leave_values[0];
+  for (unsigned int mask = 1; mask < (1U << RACK_SIZE) - 1; mask++) {
+    // Duplicate tiles have only one canonical mask per retained count: the
+    // low k bits of that letter's contiguous group. Other packed slots were
+    // never populated by the RIT maker and must not influence maxima.
+    bool canonical = true;
+    int group_base = 0;
+    for (int ml = 0; ml < ld_get_size(&gen->ld); ml++) {
+      const int count = rack_get_letter(&gen->player_rack, ml);
+      if (count == 0) {
+        continue;
+      }
+      const unsigned int group_bits =
+          (mask >> group_base) & ((1U << count) - 1);
+      if ((group_bits & (group_bits + 1)) != 0) {
+        canonical = false;
+        break;
+      }
+      group_base += count;
+    }
+    if (!canonical) {
+      continue;
+    }
+    const int leave_size = movegen_popcount_mask(mask);
+    int draw_count = RACK_SIZE - leave_size;
+    if (draw_count > gen->number_of_tiles_in_bag) {
+      draw_count = gen->number_of_tiles_in_bag;
+    }
+    int64_t value = gen->leave_map.leave_values[mask];
+    unsigned int remaining = mask;
+    while (remaining != 0) {
+      const int held_bit = movegen_ctz_mask(remaining);
+      value +=
+          gen->klv3_tile_adjustments[draw_count][tile_for_bit[held_bit]];
+      remaining &= remaining - 1;
+    }
+    if (value > EQUITY_MAX_VALUE || value < EQUITY_MIN_VALUE) {
+      log_fatal("KLV3 RIT leave value out of Equity range");
+    }
+    const Equity contextual_value = (Equity)value;
+    gen->leave_map.leave_values[mask] = contextual_value;
+    if (contextual_value > gen->best_leaves[leave_size]) {
+      gen->best_leaves[leave_size] = contextual_value;
+    }
+
+    if (add_exchange) {
+      const int exchange_count = RACK_SIZE - leave_size;
+      MachineLetter exchange_strip[RACK_SIZE];
+      int strip_index = 0;
+      for (int tile_bit = 0; tile_bit < RACK_SIZE; tile_bit++) {
+        if ((mask & (1U << tile_bit)) == 0) {
+          exchange_strip[strip_index++] = tile_for_bit[tile_bit];
+        }
+      }
+      bool better = contextual_value > best_exchange_equity;
+      if (contextual_value == best_exchange_equity) {
+        if (exchange_count < best_exchange_count) {
+          better = true;
+        } else if (exchange_count == best_exchange_count &&
+                   memcmp(exchange_strip, best_exchange_strip,
+                          (size_t)exchange_count * sizeof(MachineLetter)) < 0) {
+          better = true;
+        }
+      }
+      if (better) {
+        best_exchange_equity = contextual_value;
+        best_exchange_count = exchange_count;
+        best_exchange_mask = (int)mask;
+        memcpy(best_exchange_strip, exchange_strip,
+               (size_t)exchange_count * sizeof(MachineLetter));
+      }
+    }
+  }
+
+  // The empty leave corresponds to exchanging the full rack. Include it in
+  // the best-exchange comparison without entering the mask loop above.
+  if (add_exchange && gen->leave_map.leave_values[0] > best_exchange_equity) {
+    best_exchange_equity = gen->leave_map.leave_values[0];
+    best_exchange_count = RACK_SIZE;
+    best_exchange_mask = 0;
+    memcpy(best_exchange_strip, tile_for_bit, sizeof(best_exchange_strip));
+  }
+
+  if (!add_exchange) {
+    return;
+  }
+  if (gen->move_record_type == MOVE_RECORD_BEST) {
+    if (best_exchange_count > 0 &&
+        !better_play_has_been_found(gen, best_exchange_equity)) {
+      leave_map_set_current_index(&gen->leave_map, best_exchange_mask);
+      memcpy(gen->exchange_strip, best_exchange_strip,
+             (size_t)best_exchange_count * sizeof(MachineLetter));
+      update_best_move_or_insert_into_movelist(
+          gen, 0, best_exchange_count, GAME_EVENT_EXCHANGE, 0, 0, 0,
+          best_exchange_count, BOARD_HORIZONTAL_DIRECTION,
+          gen->exchange_strip);
+    }
+  } else {
+    // Exact values are already in leave_map; use the table walk only to
+    // materialize every exchange requested by an all-moves caller.
+    generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
+  }
+}
+
 // Look up leave values for all subsets of the player's rack and if add_exchange
 // is true, record exchange moves for them. KLV indices are retained to speed up
 // lookup of leaves with common lexicographical "prefixes".
@@ -554,7 +713,26 @@ void generate_exchange_moves(MoveGen *gen, Rack *leave, uint32_t node_index,
     if (number_of_letters_on_rack > 0) {
       Equity value = 0;
       if (word_index != KLV_UNFOUND_INDEX) {
-        value = klv_get_indexed_leave_value(gen->klv, word_index - 1);
+        // The canonical subset walk temporarily removes every retained tile
+        // from player_rack, so its size here is the complement: the number of
+        // tiles played or exchanged, not the original rack size.
+        int draw_count = rack_get_total_letters(&gen->player_rack);
+        if (draw_count > gen->number_of_tiles_in_bag) {
+          draw_count = gen->number_of_tiles_in_bag;
+        }
+        const uint32_t leave_index = word_index - 1;
+        const Equity base_value =
+            klv_get_indexed_leave_value(gen->klv, leave_index);
+        const int leave_size = rack_get_total_letters(leave);
+        if (gen->use_context_model &&
+            base_value > gen->klv3_base_best_leaves[leave_size]) {
+          gen->klv3_base_best_leaves[leave_size] = base_value;
+        }
+        value = gen->use_context_model
+                    ? klv_get_contextual_indexed_leave_value(
+                          gen->klv, leave_index, leave, draw_count,
+                          gen->klv3_tile_adjustments)
+                    : base_value;
       }
       leave_map_set_current_value(&gen->leave_map, value);
       if (value > gen->best_leaves[rack_get_total_letters(leave)]) {
@@ -610,7 +788,7 @@ static void generate_exchange_moves_from_table(MoveGen *gen, Rack *leave,
     const int number_of_letters_on_rack =
         rack_get_total_letters(&gen->player_rack);
     if (number_of_letters_on_rack > 0) {
-      const Equity value = leave_map_get_current_value(&gen->leave_map);
+      Equity value = leave_map_get_current_value(&gen->leave_map);
       if (value > gen->best_leaves[rack_get_total_letters(leave)]) {
         gen->best_leaves[rack_get_total_letters(leave)] = value;
       }
@@ -984,9 +1162,9 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
   // precomputed bingo words, skip subrack enumeration and WMP lookup.
   // Uses record_wmp_plays_for_word with subrack_idx=0 (the only subrack
   // for a full-rack play) so blank assignment is handled correctly.
-  if (gen->rit_entry != NULL && anchor->tiles_to_play == RACK_SIZE &&
+  if (gen->rit_word_entry != NULL && anchor->tiles_to_play == RACK_SIZE &&
       anchor->playthrough_blocks == 0) {
-    const int num_bingos = gen->rit_entry->num_bingo_words;
+    const int num_bingos = gen->rit_word_entry->num_bingo_words;
     if (num_bingos > 0) {
       wgen->word_length = RACK_SIZE;
       wgen->tiles_to_play = RACK_SIZE;
@@ -997,7 +1175,7 @@ void wordmap_gen(MoveGen *gen, const Anchor *anchor) {
       }
       for (int bingo_idx = 0; bingo_idx < num_bingos; bingo_idx++) {
         // Point the word list at the RIT's inline word (no copy).
-        wgen->words = gen->rit_entry->bingo_words[bingo_idx];
+        wgen->words = gen->rit_word_entry->bingo_words[bingo_idx];
         wgen->num_words = 1;
         for (int start_col = anchor->leftmost_start_col;
              start_col <= anchor->rightmost_start_col; start_col++) {
@@ -1818,7 +1996,7 @@ void go_on_alpha(MoveGen *gen, int current_col, MachineLetter L, int leftstrip,
 }
 
 static inline void shadow_record(MoveGen *gen) {
-  const Equity *best_leaves = gen->best_leaves;
+  const Equity *best_leaves = gen->shadow_best_leaves;
   if (wmp_move_gen_is_active(&gen->wmp_move_gen)) {
     if (wmp_move_gen_has_playthrough(&gen->wmp_move_gen)) {
       // RIT fast path for single-playthrough anchors: the RIT's
@@ -1830,22 +2008,22 @@ static inline void shadow_record(MoveGen *gen) {
       // the KWG/WMP hash walk with one array load and one bit test.
       //
       // Preconditions:
-      //   - gen->rit_entry is set (implies number_of_letters_on_rack ==
+      //   - gen->rit_word_entry is set (implies number_of_letters_on_rack ==
       //     RACK_SIZE, since gen_look_up_leaves_and_record_exchanges only
       //     populates rit_entry for full racks)
       //   - exactly one playthrough tile (the RIT's unions are built for
       //     single-blank-equivalent queries, not multi-blank)
       //   - played_size falls in the RIT's coverage interval
       const bool rit_fast_path =
-          gen->rit_entry != NULL &&
+          gen->rit_word_entry != NULL &&
           gen->wmp_move_gen.num_tiles_played_through == 1 &&
           rack_info_table_has_playthrough_coverage(gen->rack_info_table,
                                                    gen->tiles_played);
       if (rit_fast_path) {
         const int leave_size = RACK_SIZE - gen->tiles_played;
         const uint32_t union_bitmask =
-            rack_info_table_entry_get_playthrough_union(gen->rit_entry,
-                                                        leave_size);
+            rack_info_table_word_entry_get_playthrough_union(
+                gen->rit_word_entry, leave_size);
         const MachineLetter playthrough_ml =
             wmp_move_gen_single_playthrough_letter(&gen->wmp_move_gen);
         if (((union_bitmask >> playthrough_ml) & 1U) == 0) {
@@ -1862,7 +2040,8 @@ static inline void shadow_record(MoveGen *gen) {
         // playthrough letter against that single load. Only applies to 7-tile
         // bingo plays (tiles_played == RACK_SIZE) with >=2 playthrough tiles on
         // blankless racks.
-        if (gen->rit_entry != NULL && gen->tiles_played == RACK_SIZE &&
+        if (gen->rit_word_entry != NULL &&
+            gen->tiles_played == RACK_SIZE &&
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
             bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
                                 BLANK_MACHINE_LETTER) == 0) {
@@ -1870,7 +2049,7 @@ static inline void shadow_record(MoveGen *gen) {
               gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
           uint32_t length_bitvec = 0;
           if (wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
-                  gen->rit_entry, gen->tiles_played, word_length,
+                  gen->rit_word_entry, gen->tiles_played, word_length,
                   &length_bitvec) &&
               wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
                                                       length_bitvec)) {
@@ -1891,7 +2070,7 @@ static inline void shadow_record(MoveGen *gen) {
         // was measured and dropped (4.7% prune rate didn't cover the
         // file-size cost); other tiles_played values still fall through
         // with no check.
-        if (gen->rit_entry != NULL &&
+        if (gen->rit_word_entry != NULL &&
             gen->wmp_move_gen.num_tiles_played_through >= 2 &&
             bit_rack_get_letter(&gen->wmp_move_gen.player_bit_rack,
                                 BLANK_MACHINE_LETTER) == 0 &&
@@ -1900,7 +2079,7 @@ static inline void shadow_record(MoveGen *gen) {
               gen->tiles_played + gen->wmp_move_gen.num_tiles_played_through;
           uint32_t length_bitvec = 0;
           if (wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
-                  gen->rit_entry, gen->tiles_played, word_length,
+                  gen->rit_word_entry, gen->tiles_played, word_length,
                   &length_bitvec) &&
               wmp_move_gen_multi_pt_bitvec_says_prune(&gen->wmp_move_gen,
                                                       length_bitvec)) {
@@ -1921,7 +2100,12 @@ static inline void shadow_record(MoveGen *gen) {
         const int leave_size =
             gen->number_of_letters_on_rack - gen->tiles_played;
         (void)leave_size;
-        assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
+        // Exact KLV2 and structural KLV3 bounds cannot exceed the current
+        // exact best leave. A quantile-capped RIT is deliberately an upper
+        // estimate and may be either above or below it.
+        if (!gen->rit_context_caps_usable) {
+          assert(best_leaves[leave_size] <= gen->best_leaves[leave_size]);
+        }
       }
     }
   }
@@ -3181,6 +3365,12 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
   gen->klv_instance_fp_at_load = new_klv_instance_fp;
   // The RIT keys on a BitRack, so it is unusable for a BitRack-incompatible
   // alphabet; treat it as absent (the WMP is gated the same way below).
+  //
+  // KLV3 cannot use the RIT's packed leave values or anything derived from
+  // them: those values depend on the current unseen pool. The entry's word
+  // facts are still exact, though (existence masks, playthrough unions,
+  // multi-playthrough bitvectors, and inline bingos), so retain the RIT and
+  // gate only its leave-valued fields.
   const RackInfoTable *new_rit =
       gen->bit_rack_compatible ? player_get_rack_info_table(player) : NULL;
   if (new_rit != gen->rack_info_table) {
@@ -3192,10 +3382,19 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
     }
   }
   gen->rack_info_table = new_rit;
+  const bool has_context = klv_has_context_model(new_klv);
+  const bool base_rit_matches =
+      new_rit != NULL &&
+      rack_info_table_base_matches(
+          new_rit, klv_get_base_content_fingerprint(new_klv));
   gen->word_info_table = player_get_word_info_table(player);
   gen->board_number_of_tiles_played = board_get_tiles_played(gen->board);
   rack_copy(&gen->opponent_rack, player_get_rack(opponent));
   rack_copy(&gen->player_rack, player_get_rack(player));
+  if (klv_has_context_model(gen->klv) &&
+      gen->klv->context_alphabet_size != ld_get_size(&gen->ld)) {
+    log_fatal("KLV3 alphabet size does not match the letter distribution");
+  }
   move_list_set_rack(move_list, &gen->player_rack);
   rack_set_dist_size(&gen->leave, ld_get_size(&gen->ld));
   const WMP *previous_wmp = gen->wmp_move_gen.wmp;
@@ -3235,6 +3434,37 @@ void gen_load_position(MoveGen *gen, const MoveGenArgs *args) {
 
   gen->bingo_bonus = game_get_bingo_bonus(game);
   gen->number_of_tiles_in_bag = bag_get_letters(game_get_bag(game));
+  memset(gen->unseen_counts, 0, sizeof(gen->unseen_counts));
+  bag_increment_unseen_count(game_get_bag(game), gen->unseen_counts);
+  rack_increment_unseen_count(&gen->opponent_rack, gen->unseen_counts);
+  gen->unseen_total =
+      gen->number_of_tiles_in_bag + rack_get_total_letters(&gen->opponent_rack);
+  gen->use_context_model = has_context;
+  if (has_context && gen->klv->context_fallback_threshold_enabled) {
+    const Equity sampled_magnitude = klv3_sample_rack_adjustment_magnitude(
+        gen->klv, gen->unseen_counts, gen->unseen_total, &gen->player_rack,
+        gen->number_of_tiles_in_bag);
+    gen->use_context_model =
+        sampled_magnitude > gen->klv->context_fallback_threshold;
+  }
+  if (gen->use_context_model) {
+    klv3_compute_rack_tile_adjustments(
+        gen->klv, gen->unseen_counts, gen->unseen_total, &gen->player_rack,
+        gen->klv3_tile_adjustments);
+  } else {
+    memset(gen->klv3_tile_adjustments, 0,
+           sizeof(gen->klv3_tile_adjustments));
+  }
+  // Legacy v11/v12 RITs predate fingerprints. Preserve their existing KLV2
+  // behavior. In hybrid mode the embedded base is an ordinary KLV2, so its
+  // full-RIT leave payload is valid whenever the base fingerprint matches.
+  gen->rit_leave_values_usable =
+      !gen->use_context_model &&
+      (new_rit == NULL || new_rit->version < 13 || base_rit_matches);
+  gen->rit_context_caps_usable =
+      gen->use_context_model && base_rit_matches &&
+      rack_info_table_context_matches(
+          new_rit, klv_get_context_content_fingerprint(new_klv));
   gen->kwgs_are_shared = game_get_data_is_shared(game, PLAYERS_DATA_TYPE_KWG);
   gen->move_list = move_list;
   gen->cross_index =
@@ -3303,6 +3533,7 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   for (int leave_size_idx = 0; leave_size_idx < (RACK_SIZE + 1);
        leave_size_idx++) {
     gen->best_leaves[leave_size_idx] = EQUITY_INITIAL_VALUE;
+    gen->klv3_base_best_leaves[leave_size_idx] = EQUITY_INITIAL_VALUE;
   }
 
   const bool check_leaves = (gen->number_of_tiles_in_bag > 0) &&
@@ -3318,6 +3549,9 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
       rack_get_total_letters(&gen->player_rack) == RACK_SIZE;
   const RackInfoTable *rit = gen->rack_info_table;
   gen->rit_entry = NULL;
+  gen->rit_word_entry = NULL;
+  gen->rit_context_capped_best_leaves = NULL;
+  gen->rit_context_capped_nonplaythrough_best_leaves = NULL;
 
   // rit is NULL for BitRack-incompatible alphabets (gated in
   // gen_load_position), so this RIT-cache path is already skipped for them.
@@ -3327,18 +3561,51 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     // Check per-thread direct-mapped cache before the full hash lookup.
     const uint32_t cache_idx =
         bit_rack_get_bucket_index(&player_bit_rack, MOVEGEN_RIT_CACHE_SIZE);
-    if (gen->rit_cache_valid[cache_idx] &&
-        bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx])) {
+    const bool rit_cache_hit =
+        gen->rit_cache_valid[cache_idx] &&
+        bit_rack_equals(&player_bit_rack, &gen->rit_cache_keys[cache_idx]);
+    if (rit_cache_hit) {
       gen->rit_entry = gen->rit_cache_entries[cache_idx];
+      if (gen->rit_cache_entry_found[cache_idx]) {
+        gen->rit_word_entry = &gen->rit_cache_word_entries[cache_idx];
+      }
     } else {
-      const RackInfoTableEntry *entry =
-          rack_info_table_lookup(rit, &player_bit_rack);
+      const RackInfoTableEntry *entry = NULL;
+      const bool found = rack_info_table_lookup_word_entry(
+          rit, &player_bit_rack, &gen->rit_cache_word_entries[cache_idx],
+          &entry);
       gen->rit_cache_keys[cache_idx] = player_bit_rack;
       gen->rit_cache_entries[cache_idx] = entry;
+      gen->rit_cache_entry_found[cache_idx] = found;
       gen->rit_cache_valid[cache_idx] = true;
-      if (entry != NULL) {
-        gen->rit_entry = entry;
+      gen->rit_entry = entry;
+      if (found) {
+        gen->rit_word_entry = &gen->rit_cache_word_entries[cache_idx];
       }
+    }
+    if (gen->rit_entry != NULL && gen->rit_context_caps_usable) {
+      // The cache-key path above has now established the slot. Copying on
+      // every miss keeps later hits entirely in the per-thread MoveGen
+      // object, avoiding two additional random mmap reads per movegen.
+      if (!rit_cache_hit) {
+        const Equity *capped =
+            rack_info_table_get_context_capped_best_leaves(rit,
+                                                           gen->rit_entry);
+        const Equity *capped_nonplay =
+            rack_info_table_get_context_capped_nonplaythrough_best_leaves(
+                rit, gen->rit_entry);
+        memcpy(gen->rit_cache_context_capped_best_leaves[cache_idx], capped,
+               sizeof(gen->rit_cache_context_capped_best_leaves[cache_idx]));
+        memcpy(
+            gen->rit_cache_context_capped_nonplaythrough_best_leaves[cache_idx],
+            capped_nonplay,
+            sizeof(gen->rit_cache_context_capped_nonplaythrough_best_leaves
+                       [cache_idx]));
+      }
+      gen->rit_context_capped_best_leaves =
+          gen->rit_cache_context_capped_best_leaves[cache_idx];
+      gen->rit_context_capped_nonplaythrough_best_leaves =
+          gen->rit_cache_context_capped_nonplaythrough_best_leaves[cache_idx];
     }
   }
 
@@ -3349,7 +3616,8 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
   leave_map_set_current_index(&gen->leave_map, 0);
   rack_reset(&gen->leave);
 
-  if (gen->rit_entry != NULL) {
+  bool used_context_rit_caps = false;
+  if (gen->rit_entry != NULL && gen->rit_leave_values_usable) {
     // Fast path: unpack the RIT's 24-bit packed leave values to 32-bit
     // in the leave map so play-time leave_map_get_current_value calls
     // and wmp_move_gen's subrack reads return the right value.
@@ -3371,6 +3639,13 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
         generate_exchange_moves_from_table(gen, &gen->leave, 0, true);
       }
     }
+  } else if (gen->rit_entry != NULL && gen->rit_context_caps_usable &&
+             (check_leaves || add_exchange)) {
+    // The RIT supplies base values in leave-map order. Apply KLV3's additive
+    // adjustment in a flat fixed-size pass and find the best contextual
+    // exchange at the same time.
+    fill_contextual_rit_leaves_and_record_exchanges(gen, add_exchange);
+    used_context_rit_caps = true;
   } else if (check_leaves || add_exchange) {
     // Mini-RIT fast path: when the leave_values and best_leaves for this
     // rack have been computed by a previous KLV walk on this thread,
@@ -3381,7 +3656,8 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     // Unlike the RIT/WMP caches (gated by being NULL), this KLV-leaves cache is
     // always available, so it must consult bit_rack_compatible directly: its
     // key is a BitRack, unrepresentable for a too-large alphabet.
-    const bool kle_eligible = has_full_rack && gen->bit_rack_compatible;
+    const bool kle_eligible = has_full_rack && gen->bit_rack_compatible &&
+                              !gen->use_context_model;
     const BitRack kle_bit_rack =
         kle_eligible ? bit_rack_create_from_rack(&gen->ld, &gen->player_rack)
                      : bit_rack_create_empty();
@@ -3418,6 +3694,26 @@ void gen_look_up_leaves_and_record_exchanges(MoveGen *gen) {
     for (int leave_size_idx = 0; leave_size_idx < RACK_SIZE + 1;
          leave_size_idx++) {
       gen->best_leaves[leave_size_idx] = 0;
+    }
+  }
+
+  memcpy(gen->shadow_best_leaves, gen->best_leaves,
+         sizeof(gen->shadow_best_leaves));
+  if (check_leaves && used_context_rit_caps) {
+    memcpy(gen->shadow_best_leaves, gen->rit_context_capped_best_leaves,
+           sizeof(gen->shadow_best_leaves));
+  } else if (check_leaves && gen->use_context_model &&
+      gen->klv->context_pruning_cap_enabled) {
+    for (int leave_size = 1; leave_size <= RACK_SIZE; leave_size++) {
+      if (gen->klv3_base_best_leaves[leave_size] == EQUITY_INITIAL_VALUE) {
+        continue;
+      }
+      const Equity capped_bound =
+          gen->klv3_base_best_leaves[leave_size] +
+          gen->klv->context_pruning_cap;
+      if (capped_bound < gen->shadow_best_leaves[leave_size]) {
+        gen->shadow_best_leaves[leave_size] = capped_bound;
+      }
     }
   }
 
@@ -3706,12 +4002,16 @@ void generate_moves(const MoveGenArgs *args) {
               rack_get_total_letters(&gen->opponent_rack) >=
           (RACK_SIZE * 2);
       const bool leaves_are_populated =
-          (gen->rit_entry != NULL) || check_leaves || add_exchange;
+          (gen->rit_entry != NULL && gen->rit_leave_values_usable) ||
+          (gen->rit_entry != NULL && gen->rit_context_caps_usable &&
+           (check_leaves || add_exchange)) ||
+          check_leaves || add_exchange;
       const uint32_t subrack_slot = bit_rack_get_bucket_index(
           &wgen->player_bit_rack, MOVEGEN_SUBRACK_CACHE_SIZE);
       SubrackEnumCacheEntry *subrack_entry = &gen->subrack_cache[subrack_slot];
       const bool subrack_cache_hit =
-          leaves_are_populated && subrack_entry->valid &&
+          !gen->use_context_model && leaves_are_populated &&
+          subrack_entry->valid &&
           bit_rack_equals(&subrack_entry->key, &wgen->player_bit_rack);
       if (subrack_cache_hit) {
         // Restore the enumeration output and whichever per-subrack WMP
@@ -3728,25 +4028,44 @@ void generate_moves(const MoveGenArgs *args) {
               subrack_entry->wmp_entries_are_set[i];
         }
       }
-      if (leaves_are_populated) {
+      // The subrack cache mixes structural WMP pointers with evaluated leave
+      // values. Do not read from or write through any part of it for KLV3;
+      // keeping this pointer NULL also makes that invariant explicit inside
+      // the lazy WMP-entry path.
+      if (leaves_are_populated && !gen->use_context_model) {
         wgen->nonplaythrough_wmp_entry_cache = subrack_entry->wmp_entries;
         wgen->nonplaythrough_wmp_entry_cache_set =
             subrack_entry->wmp_entries_are_set;
       }
-      if (gen->rit_entry != NULL) {
+      if (gen->rit_entry != NULL && gen->rit_leave_values_usable) {
         // The RIT supplies existence and best-leave bounds. Defer each
         // per-subrack WMP lookup until wordmap generation survives those
         // bounds and actually needs that subrack's words.
         wmp_move_gen_check_nonplaythrough_existence_with_rit(
             wgen, check_leaves, &gen->leave_map, gen->rit_entry,
+            /*best_leave_values_override=*/NULL,
             /*subracks_precomputed=*/subrack_cache_hit);
+      } else if (gen->rit_entry != NULL && gen->rit_context_caps_usable &&
+                 leaves_are_populated) {
+        wmp_move_gen_check_nonplaythrough_existence_with_rit(
+            wgen, check_leaves, &gen->leave_map, gen->rit_entry,
+            gen->rit_context_capped_nonplaythrough_best_leaves,
+            /*subracks_precomputed=*/false);
+      } else if (gen->rit_word_entry != NULL) {
+        // KLV3 may consume the RIT's rack/word structure, but never its
+        // context-free leave values or leave-derived maxima. Use the freshly
+        // evaluated contextual best_leaves as a conservative shadow bound.
+        wmp_move_gen_check_nonplaythrough_existence_with_rit_structure(
+            wgen, check_leaves, &gen->leave_map, gen->rit_word_entry,
+            gen->shadow_best_leaves);
       } else {
         wmp_move_gen_check_nonplaythrough_existence(
             wgen, check_leaves, &gen->leave_map,
             /*subracks_precomputed=*/subrack_cache_hit,
             /*wmp_entries_precomputed=*/subrack_cache_hit);
       }
-      if (!subrack_cache_hit && leaves_are_populated) {
+      if (!gen->use_context_model && !subrack_cache_hit &&
+          leaves_are_populated) {
         // Store the newly computed enumeration and any WMP entries that have
         // already been resolved. Only cache when leaves_are_populated so we
         // don't stash garbage leave_values from an uninitialized leave_map.

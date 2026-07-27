@@ -38,6 +38,8 @@ void return_rack_to_bag(const Game *game, int player_index);
 bool rack_is_drawable(const Game *game, int player_index,
                       const Rack *rack_to_draw);
 Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack);
+Equity get_leave_value_for_move_with_context(const Game *game,
+                                             const Move *move, Rack *rack);
 void return_phony_letters(Game *game);
 
 // Cross-set update for move affected squares
