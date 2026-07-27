@@ -1,11 +1,16 @@
 #include "spread_forecast.h"
 
 #include "../compat/endian_conv.h"
+#include "../def/equity_defs.h"
+#include "../def/rack_defs.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "bag.h"
 #include "data_filepaths.h"
+#include "equity.h"
+#include "game.h"
 #include "player.h"
+#include "rack.h"
 #include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -77,7 +82,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
     return NULL;
   }
 
-  FILE *stream = fopen(filename, "rb");
+  FILE *stream = fopen(filename, "rbe");
   if (stream == NULL) {
     error_stack_push(error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
                      get_formatted_string(
@@ -95,7 +100,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
     error_stack_push(
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
         get_formatted_string("invalid spread forecast header: %s", filename));
-    fclose(stream);
+    fclose_or_die(stream);
     free(filename);
     return NULL;
   }
@@ -113,7 +118,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
         error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
         get_formatted_string("unsupported spread forecast dimensions: %s",
                              filename));
-    fclose(stream);
+    fclose_or_die(stream);
     free(filename);
     return NULL;
   }
@@ -135,7 +140,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
           error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
           get_formatted_string("truncated spread forecast data: %s", filename));
       spread_forecast_destroy(forecast);
-      fclose(stream);
+      fclose_or_die(stream);
       free(filename);
       return NULL;
     }
@@ -143,13 +148,13 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
     const float on_turn_turns = convert_float_to_le(values[1]);
     const float off_turn_turns = convert_float_to_le(values[2]);
     if (!isfinite(spread_swing) || !isfinite(on_turn_turns) ||
-        !isfinite(off_turn_turns) || on_turn_turns < 0.0f ||
-        off_turn_turns < 0.0f) {
+        !isfinite(off_turn_turns) || on_turn_turns < 0.0F ||
+        off_turn_turns < 0.0F) {
       error_stack_push(
           error_stack, ERROR_STATUS_FILEPATH_FILE_NOT_FOUND,
           get_formatted_string("invalid spread forecast value: %s", filename));
       spread_forecast_destroy(forecast);
-      fclose(stream);
+      fclose_or_die(stream);
       free(filename);
       return NULL;
     }
@@ -169,7 +174,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
     spread_forecast_destroy(forecast);
     forecast = NULL;
   }
-  fclose(stream);
+  fclose_or_die(stream);
   free(filename);
   return forecast;
 }

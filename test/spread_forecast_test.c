@@ -1,8 +1,12 @@
 #include "spread_forecast_test.h"
 
 #include "../src/compat/endian_conv.h"
+#include "../src/def/equity_defs.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/spread_forecast.h"
 #include "../src/impl/config.h"
+#include "../src/util/io_util.h"
+#include "../src/util/string_util.h"
 #include "test_util.h"
 #include <assert.h>
 #include <stdint.h>
@@ -25,7 +29,7 @@ static int test_cell_index(int bag, int on_turn_rack, int off_turn_rack) {
 }
 
 static void write_test_spread_forecast(void) {
-  FILE *stream = fopen(TEST_MODEL_PATH, "wb");
+  FILE *stream = fopen(TEST_MODEL_PATH, "wbe");
   assert(stream != NULL);
   const uint8_t magic[8] = {'M', 'A', 'G', 'S', 'P', 'R', 'D', '\0'};
   assert(fwrite(magic, sizeof(magic), 1, stream) == 1);
@@ -37,19 +41,19 @@ static void write_test_spread_forecast(void) {
   };
   assert(fwrite(header, sizeof(uint32_t), 4, stream) == 4);
   for (int i = 0; i < TEST_CELL_COUNT; i++) {
-    float spread = 0.0f;
-    float on_turn_turns = 0.0f;
-    float off_turn_turns = 0.0f;
+    float spread = 0.0F;
+    float on_turn_turns = 0.0F;
+    float off_turn_turns = 0.0F;
     uint32_t samples = 0;
     if (i == test_cell_index(2, 7, 7)) {
-      spread = 12.5f;
-      on_turn_turns = 3.25f;
-      off_turn_turns = 2.75f;
+      spread = 12.5F;
+      on_turn_turns = 3.25F;
+      off_turn_turns = 2.75F;
       samples = 123;
     } else if (i == test_cell_index(0, 4, 7)) {
-      spread = -8.0f;
-      on_turn_turns = 2.0f;
-      off_turn_turns = 3.0f;
+      spread = -8.0F;
+      on_turn_turns = 2.0F;
+      off_turn_turns = 3.0F;
       samples = 456;
     }
     const float values[3] = {
