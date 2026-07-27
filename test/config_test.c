@@ -526,7 +526,7 @@ void test_config_exec_parse_args(void) {
   assert_config_exec_status(config, "set -sinfer false", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -cutoff -1", ERROR_STATUS_SUCCESS);
   assert_config_exec_status(config, "set -cutoff -1.001",
-                            ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG);
+                            ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS);
   assert_config_exec_status(config, "sim AEIN3R -it 1",
                             ERROR_STATUS_CONFIG_LOAD_MALFORMED_RACK_ARG);
   assert_config_exec_status(config, "sim AEIN3R -it 1",

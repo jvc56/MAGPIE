@@ -44,7 +44,8 @@ static void write_static_prior_test_forecast(void) {
   FILE *stream = fopen(STATIC_PRIOR_FORECAST_PATH, "wbe");
   assert(stream != NULL);
   const uint8_t magic[8] = {'M', 'A', 'G', 'S', 'P', 'R', 'D', '\0'};
-  assert(fwrite(magic, sizeof(magic), 1, stream) == 1);
+  const size_t magic_written = fwrite(magic, sizeof(magic), 1, stream);
+  assert(magic_written == 1);
   // One clamped cell is enough: every game state receives a +100 terminal
   // spread forecast, deliberately far from its root static projection.
   const uint32_t header[4] = {
@@ -53,15 +54,18 @@ static void write_static_prior_test_forecast(void) {
       convert_uint32_to_le(0),
       convert_uint32_to_le(1),
   };
-  assert(fwrite(header, sizeof(uint32_t), 4, stream) == 4);
+  const size_t header_written = fwrite(header, sizeof(uint32_t), 4, stream);
+  assert(header_written == 4);
   const float values[3] = {
       convert_float_to_le(100.0F),
       convert_float_to_le(0.0F),
       convert_float_to_le(0.0F),
   };
   const uint32_t samples = convert_uint32_to_le(1);
-  assert(fwrite(values, sizeof(float), 3, stream) == 3);
-  assert(fwrite(&samples, sizeof(samples), 1, stream) == 1);
+  const size_t values_written = fwrite(values, sizeof(float), 3, stream);
+  assert(values_written == 3);
+  const size_t samples_written = fwrite(&samples, sizeof(samples), 1, stream);
+  assert(samples_written == 1);
   fclose_or_die(stream);
 }
 
@@ -1416,7 +1420,8 @@ void test_sim_static_prior(void) {
   }
 
   config_destroy(config);
-  assert(remove(STATIC_PRIOR_FORECAST_PATH) == 0);
+  const int remove_status = remove(STATIC_PRIOR_FORECAST_PATH);
+  assert(remove_status == 0);
 }
 
 void test_sim(void) {

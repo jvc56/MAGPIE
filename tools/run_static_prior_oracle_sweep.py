@@ -66,6 +66,14 @@ def main() -> int:
     parser.add_argument("--nested-samples", type=int, default=100)
     parser.add_argument("--samples-per-arm", type=int, default=1500)
     parser.add_argument("--min-samples-per-arm", type=int, default=500)
+    parser.add_argument(
+        "--candidate-min-samples-per-arm",
+        type=int,
+        help=(
+            "candidate-only initial samples per arm; defaults to "
+            "--min-samples-per-arm"
+        ),
+    )
     parser.add_argument("--threads", type=int, default=os.cpu_count() or 1)
     parser.add_argument("--start-game", type=int, default=0)
     parser.add_argument("--start-position", type=int, default=0)
@@ -78,12 +86,18 @@ def main() -> int:
     parser.add_argument("--overwrite", action="store_true")
     args = parser.parse_args()
 
+    candidate_min_samples_per_arm = (
+        args.min_samples_per_arm
+        if args.candidate_min_samples_per_arm is None
+        else args.candidate_min_samples_per_arm
+    )
     if args.samples_per_arm <= 0 or not (
         1 <= args.min_samples_per_arm <= args.samples_per_arm
+        and 1 <= candidate_min_samples_per_arm <= args.samples_per_arm
     ):
         parser.error(
-            "samples per arm must be positive and min samples must be in "
-            "[1, samples per arm]"
+            "samples per arm must be positive and both min-sample settings "
+            "must be in [1, samples per arm]"
         )
     if args.outer_samples <= 0 or args.outer_plies <= 0:
         parser.error("outer samples and plies must be positive")
@@ -133,6 +147,9 @@ def main() -> int:
         "KLV3_ORACLE_TARGET_DISAGREEMENTS": str(args.target_disagreements),
         "KLV3_ORACLE_SAMPLES_PER_ARM": str(args.samples_per_arm),
         "KLV3_ORACLE_MIN_SAMPLES_PER_ARM": str(args.min_samples_per_arm),
+        "KLV3_ORACLE_CANDIDATE_MIN_SAMPLES_PER_ARM": str(
+            candidate_min_samples_per_arm
+        ),
         "KLV3_ORACLE_OUTER_SAMPLES": str(args.outer_samples),
         "KLV3_ORACLE_OUTER_PLIES": str(args.outer_plies),
         "KLV3_ORACLE_NESTED_SAMPLES": str(args.nested_samples),

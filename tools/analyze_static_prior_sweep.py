@@ -213,7 +213,7 @@ class Run:
     prior_nomination_iterations: int
     baseline_nomination_seconds: float
     prior_nomination_seconds: float
-    protocol: tuple[int, int, int, int, int, int]
+    protocol: tuple[int, int, int, int, int, int, int]
     model_protocol: tuple[str, str, str, str]
     accounting_ok: bool
     complete: bool
@@ -249,7 +249,7 @@ def read_run(path: Path, allow_partial: bool = False) -> Run:
     prior_nomination_iterations = 0
     baseline_nomination_seconds = 0.0
     prior_nomination_seconds = 0.0
-    protocol: tuple[int, int, int, int, int, int] | None = None
+    protocol: tuple[int, int, int, int, int, int, int] | None = None
     model_protocol: tuple[str, str, str, str] | None = None
     collect_from_position: int | None = None
     last_position: int | None = None
@@ -269,9 +269,19 @@ def read_run(path: Path, allow_partial: bool = False) -> Run:
             elif line.startswith("KLV3_EQUAL_CONFIG "):
                 fields = parse_fields(line)
                 collect_from_position = int(fields["collect_from_position"])
+                legacy_min_samples = int(fields.get("min_samples_per_arm", 0))
                 protocol = (
                     int(fields["samples_per_arm"]),
-                    int(fields["min_samples_per_arm"]),
+                    int(
+                        fields.get(
+                            "klv2_min_samples_per_arm", legacy_min_samples
+                        )
+                    ),
+                    int(
+                        fields.get(
+                            "klv3_min_samples_per_arm", legacy_min_samples
+                        )
+                    ),
                     int(fields["outer_samples_per_candidate"]),
                     int(fields["outer_plies"]),
                     int(fields["nested_samples_per_candidate"]),
@@ -678,15 +688,15 @@ def main() -> int:
     conditional_utility = [
         cluster_estimate(run.utility, run.game) for run in runs
     ]
-    adjusted = holm_adjust([item.p for item in conditional_utility])
+    adjusted = holm_adjust([item.p for item in all_utility])
 
     print(
         "| prior weight | source positions | disagreements | rate | "
         "utility / disagreement (game-clustered 95% CI) | "
         "utility / source position (95% CI) | "
-        "cluster p / Holm | root wins |"
+        "conditional p | source p / Holm | root wins |"
     )
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for run, conditional, marginal, holm_p in zip(
         runs, conditional_utility, all_utility, adjusted
     ):
@@ -697,7 +707,7 @@ def main() -> int:
             f"| {run.weight:g} | {run.source_positions} | {len(run.utility)} | "
             f"{len(run.utility) / run.source_positions:.2%} | "
             f"{fmt_est(conditional)} | {fmt_est(marginal)} | "
-            f"{conditional.p:.4g} / {holm_p:.4g} | "
+            f"{conditional.p:.4g} | {marginal.p:.4g} / {holm_p:.4g} | "
             f"{wins}–{losses}–{ties} (p={exact_sign_p(wins, losses):.4g}) |"
         )
         if not run.accounting_ok:
