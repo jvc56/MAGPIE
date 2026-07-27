@@ -57,8 +57,8 @@ Equity get_leave_value_for_move(const KLV *klv, const Move *move, Rack *rack) {
 // Assumes the move has not been played. Unlike the legacy rack-only helper,
 // this preserves a KLV3 policy at a truncated simulation horizon by valuing
 // the selected move's leave against the current player's public unseen pool.
-Equity get_leave_value_for_move_with_context(const Game *game,
-                                             const Move *move, Rack *rack) {
+Equity get_leave_value_for_move_with_context(const Game *game, const Move *move,
+                                             Rack *rack) {
   const int player_index = game_get_player_on_turn_index(game);
   const Player *player = game_get_player(game, player_index);
   const KLV *klv = player_get_klv(player);
@@ -80,8 +80,7 @@ Equity get_leave_value_for_move_with_context(const Game *game,
   if (klv->context_fallback_threshold_enabled) {
     const Equity sampled_magnitude = klv3_sample_rack_adjustment_magnitude(
         klv, unseen_counts, unseen_total, rack, bag_count);
-    use_context_model =
-        sampled_magnitude > klv->context_fallback_threshold;
+    use_context_model = sampled_magnitude > klv->context_fallback_threshold;
   }
 
   remove_move_tiles_from_rack(move, rack);

@@ -2311,32 +2311,32 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,         /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,        /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,     /* cb */
-        ARG_TOKEN_P1_LEAVES,           /* k1 */
-        ARG_TOKEN_P2_LEAVES,           /* k2 */
-        ARG_TOKEN_P1_LEXICON,          /* l1 */
-        ARG_TOKEN_P2_LEXICON,          /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION, /* ld */
-        ARG_TOKEN_LEAVES,              /* leaves */
-        ARG_TOKEN_LEXICON,             /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
-        ARG_TOKEN_USE_RIT,             /* rit */
-        ARG_TOKEN_P1_USE_RIT,          /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,          /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
+        ARG_TOKEN_BINGO_BONUS,             /* bb */
+        ARG_TOKEN_BOARD_LAYOUT,            /* bdn */
+        ARG_TOKEN_CHALLENGE_BONUS,         /* cb */
+        ARG_TOKEN_P1_LEAVES,               /* k1 */
+        ARG_TOKEN_P2_LEAVES,               /* k2 */
+        ARG_TOKEN_P1_LEXICON,              /* l1 */
+        ARG_TOKEN_P2_LEXICON,              /* l2 */
+        ARG_TOKEN_LETTER_DISTRIBUTION,     /* ld */
+        ARG_TOKEN_LEAVES,                  /* leaves */
+        ARG_TOKEN_LEXICON,                 /* lex */
+        ARG_TOKEN_P1_MOVE_RECORD_TYPE,     /* r1 */
+        ARG_TOKEN_P2_MOVE_RECORD_TYPE,     /* r2 */
+        ARG_TOKEN_USE_RIT,                 /* rit */
+        ARG_TOKEN_P1_USE_RIT,              /* rit1 */
+        ARG_TOKEN_P2_USE_RIT,              /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,        /* ritmmap */
         ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, /* klv3fallback */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
-        ARG_TOKEN_GAME_VARIANT,        /* var */
-        ARG_TOKEN_P1_USE_WMP,          /* w1 */
-        ARG_TOKEN_P2_USE_WMP,          /* w2 */
-        ARG_TOKEN_USE_WIT,             /* wit */
-        ARG_TOKEN_P1_USE_WIT,          /* wit1 */
-        ARG_TOKEN_P2_USE_WIT,          /* wit2 */
-        ARG_TOKEN_USE_WMP,             /* wmp */
+        ARG_TOKEN_P1_MOVE_SORT_TYPE,       /* s1 */
+        ARG_TOKEN_P2_MOVE_SORT_TYPE,       /* s2 */
+        ARG_TOKEN_GAME_VARIANT,            /* var */
+        ARG_TOKEN_P1_USE_WMP,              /* w1 */
+        ARG_TOKEN_P2_USE_WMP,              /* w2 */
+        ARG_TOKEN_USE_WIT,                 /* wit */
+        ARG_TOKEN_P1_USE_WIT,              /* wit1 */
+        ARG_TOKEN_P2_USE_WIT,              /* wit2 */
+        ARG_TOKEN_USE_WMP,                 /* wmp */
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
@@ -6229,8 +6229,7 @@ void config_load_lexicon_dependent_data(
   char *p1_word_rit_name = NULL;
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    const KLV *p1_klv =
-        players_data_get_klv(config->players_data, 0);
+    const KLV *p1_klv = players_data_get_klv(config->players_data, 0);
     if (klv_has_context_model(p1_klv) &&
         !config->klv3_fallback_threshold_enabled) {
       p1_word_rit_name =
@@ -6246,18 +6245,15 @@ void config_load_lexicon_dependent_data(
       }
       error_stack_destroy(probe);
     }
-    p1_rit_name =
-        p1_word_rit_name != NULL
-            ? p1_word_rit_name
-            : (klv_has_context_leave_caps(p1_klv)
-                   ? klv_get_name(p1_klv)
-                   : updated_p1_lexicon_name);
+    p1_rit_name = p1_word_rit_name != NULL ? p1_word_rit_name
+                                           : (klv_has_context_leave_caps(p1_klv)
+                                                  ? klv_get_name(p1_klv)
+                                                  : updated_p1_lexicon_name);
   }
   char *p2_word_rit_name = NULL;
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    const KLV *p2_klv =
-        players_data_get_klv(config->players_data, 1);
+    const KLV *p2_klv = players_data_get_klv(config->players_data, 1);
     if (klv_has_context_model(p2_klv) &&
         !config->klv3_fallback_threshold_enabled) {
       p2_word_rit_name =
@@ -6273,12 +6269,10 @@ void config_load_lexicon_dependent_data(
       }
       error_stack_destroy(probe);
     }
-    p2_rit_name =
-        p2_word_rit_name != NULL
-            ? p2_word_rit_name
-            : (klv_has_context_leave_caps(p2_klv)
-                   ? klv_get_name(p2_klv)
-                   : updated_p2_lexicon_name);
+    p2_rit_name = p2_word_rit_name != NULL ? p2_word_rit_name
+                                           : (klv_has_context_leave_caps(p2_klv)
+                                                  ? klv_get_name(p2_klv)
+                                                  : updated_p2_lexicon_name);
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
@@ -6935,8 +6929,8 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->data_paths = string_duplicate(new_path);
   }
   autoplay_results_set_data_paths(config->autoplay_results, config->data_paths);
-  if (config_get_parg_num_set_values(
-          config, ARG_TOKEN_KLV3_FALLBACK_THRESHOLD) > 0) {
+  if (config_get_parg_num_set_values(config,
+                                     ARG_TOKEN_KLV3_FALLBACK_THRESHOLD) > 0) {
     double threshold = -1.0;
     config_load_double(config, ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, -1.0,
                        EQUITY_MAX_DOUBLE, &threshold, error_stack);

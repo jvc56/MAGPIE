@@ -1,6 +1,7 @@
 #ifndef RACK_INFO_TABLE_H
 #define RACK_INFO_TABLE_H
 
+#include "../compat/clonefile_compat.h"
 #include "../compat/endian_conv.h"
 #include "../def/bit_rack_defs.h"
 #include "../def/rack_defs.h"
@@ -10,8 +11,8 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "data_filepaths.h"
-#include <fcntl.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -20,10 +21,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#if defined(__APPLE__)
-#include <sys/clonefile.h>
-#endif
-
 // A RackInfoTable maps full-rack BitRacks to per-rack data computed ahead of
 // time. The table is keyed by BitRack (the multiset of tiles forming a full
 // rack) and uses the same bucket-chaining hash table layout as the WordMap.
@@ -139,8 +136,7 @@ enum {
   // every safe RIT word optimization without mapping unused KLV2 payload.
   RIT_FLAG_WORD_ONLY = 4,
   RIT_KNOWN_FLAGS =
-      RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE |
-      RIT_FLAG_WORD_ONLY,
+      RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE | RIT_FLAG_WORD_ONLY,
   RIT_METADATA_SIZE = 32,
 };
 
@@ -219,8 +215,9 @@ static inline bool rack_info_table_is_word_only(const RackInfoTable *rit) {
   return rit != NULL && (rit->flags & RIT_FLAG_WORD_ONLY) != 0;
 }
 
-static inline void rack_info_table_copy_word_entry(
-    RackInfoTableWordEntry *destination, const RackInfoTableEntry *source) {
+static inline void
+rack_info_table_copy_word_entry(RackInfoTableWordEntry *destination,
+                                const RackInfoTableEntry *source) {
   memcpy(destination->playthrough_union, source->playthrough_union,
          sizeof(destination->playthrough_union));
   memcpy(destination->multi_pt_tp7_bitvec, source->multi_pt_tp7_bitvec,
@@ -301,8 +298,8 @@ rack_info_table_entry_read_bit_rack(const RackInfoTableEntry *entry) {
 #endif
 }
 
-static inline BitRack rack_info_table_word_entry_read_bit_rack(
-    const RackInfoTableWordEntry *entry) {
+static inline BitRack
+rack_info_table_word_entry_read_bit_rack(const RackInfoTableWordEntry *entry) {
 #if IS_LITTLE_ENDIAN
   BitRack bit_rack;
   memcpy(&bit_rack, entry->bit_rack_bytes, RACK_INFO_TABLE_BITRACK_BYTES);
@@ -357,10 +354,11 @@ rack_info_table_lookup(const RackInfoTable *rit, const BitRack *bit_rack) {
 // KLV2 callers can consume its leave payload. For a word-only RIT it is NULL.
 // Copying 128 bytes once per per-thread cache miss keeps the hot shadow path
 // independent of the on-disk entry layout.
-static inline bool rack_info_table_lookup_word_entry(
-    const RackInfoTable *rit, const BitRack *bit_rack,
-    RackInfoTableWordEntry *word_entry_out,
-    const RackInfoTableEntry **full_entry_out) {
+static inline bool
+rack_info_table_lookup_word_entry(const RackInfoTable *rit,
+                                  const BitRack *bit_rack,
+                                  RackInfoTableWordEntry *word_entry_out,
+                                  const RackInfoTableEntry **full_entry_out) {
   *full_entry_out = NULL;
   const uint32_t bucket_idx =
       bit_rack_get_bucket_index(bit_rack, rit->num_buckets);
@@ -428,8 +426,7 @@ static inline bool rack_info_table_entry_has_nonplaythrough_word_of_length(
           1U) != 0U;
 }
 
-static inline bool
-rack_info_table_word_entry_has_nonplaythrough_word_of_length(
+static inline bool rack_info_table_word_entry_has_nonplaythrough_word_of_length(
     const RackInfoTableWordEntry *entry, int word_length) {
   if (word_length < 0 || word_length > RACK_SIZE) {
     return false;
@@ -460,8 +457,7 @@ rack_info_table_entry_get_best_leaves(const RackInfoTableEntry *entry) {
   return entry->best_leaves;
 }
 
-static inline bool
-rack_info_table_has_context_caps(const RackInfoTable *rit) {
+static inline bool rack_info_table_has_context_caps(const RackInfoTable *rit) {
   if (rit == NULL) {
     return false;
   }
@@ -473,21 +469,23 @@ rack_info_table_has_context_caps(const RackInfoTable *rit) {
          rit->context_capped_nonplaythrough_best_leave_values != NULL;
 }
 
-static inline bool rack_info_table_base_matches(
-    const RackInfoTable *rit, uint64_t base_klv_fingerprint) {
+static inline bool rack_info_table_base_matches(const RackInfoTable *rit,
+                                                uint64_t base_klv_fingerprint) {
   return rit != NULL && rit->version >= 13 && base_klv_fingerprint != 0 &&
          rit->base_klv_fingerprint == base_klv_fingerprint;
 }
 
-static inline bool rack_info_table_context_matches(
-    const RackInfoTable *rit, uint64_t context_klv_fingerprint) {
+static inline bool
+rack_info_table_context_matches(const RackInfoTable *rit,
+                                uint64_t context_klv_fingerprint) {
   return rack_info_table_has_context_caps(rit) &&
          context_klv_fingerprint != 0 &&
          rit->context_klv_fingerprint == context_klv_fingerprint;
 }
 
-static inline size_t rack_info_table_entry_index(
-    const RackInfoTable *rit, const RackInfoTableEntry *entry) {
+static inline size_t
+rack_info_table_entry_index(const RackInfoTable *rit,
+                            const RackInfoTableEntry *entry) {
   return (size_t)(entry - rit->entries);
 }
 
@@ -527,8 +525,9 @@ rack_info_table_entry_get_bingo_words(const RackInfoTableEntry *entry,
   return entry->num_bingo_words;
 }
 
-static inline int rack_info_table_word_entry_get_bingo_words(
-    const RackInfoTableWordEntry *entry, const MachineLetter **words_out) {
+static inline int
+rack_info_table_word_entry_get_bingo_words(const RackInfoTableWordEntry *entry,
+                                           const MachineLetter **words_out) {
   *words_out = entry->bingo_words[0];
   return entry->num_bingo_words;
 }
@@ -714,8 +713,9 @@ static inline void rit_write_entries_or_die(const RackInfoTableEntry *entries,
 #endif
 }
 
-static inline void rit_write_word_entries_or_die(
-    const RackInfoTableWordEntry *entries, uint32_t n, FILE *stream) {
+static inline void
+rit_write_word_entries_or_die(const RackInfoTableWordEntry *entries, uint32_t n,
+                              FILE *stream) {
 #if IS_LITTLE_ENDIAN
   fwrite_or_die(entries, sizeof(RackInfoTableWordEntry), n, stream,
                 "rit word entries");
@@ -772,8 +772,7 @@ static inline void rit_write_equities_or_die(const Equity *values, size_t n,
 
 static inline void rit_write_metadata_or_die(const RackInfoTable *rit,
                                              FILE *stream) {
-  static const uint8_t magic[8] = {'R', 'I', 'T', 'M',
-                                   'E', 'T', 'A', '\0'};
+  static const uint8_t magic[8] = {'R', 'I', 'T', 'M', 'E', 'T', 'A', '\0'};
   fwrite_or_die(magic, sizeof(magic), 1, stream, "rit metadata magic");
   const uint64_t base_fp = htole64(rit->base_klv_fingerprint);
   const uint64_t context_fp = htole64(rit->context_klv_fingerprint);
@@ -830,13 +829,14 @@ static inline void rack_info_table_write_to_file(const RackInfoTable *rit,
 // Project a full RIT into its model-independent word subset. The output keeps
 // identical buckets and entry ordering, so conversion is a linear copy and
 // does not need the KLV or WMP that originally built the table.
-static inline void rack_info_table_write_word_only_copy(
-    const RackInfoTable *source, const char *filename,
-    ErrorStack *error_stack) {
+static inline void
+rack_info_table_write_word_only_copy(const RackInfoTable *source,
+                                     const char *filename,
+                                     ErrorStack *error_stack) {
   if (source == NULL || rack_info_table_is_word_only(source)) {
-    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-                     string_duplicate(
-                         "word-only RIT conversion requires a full RIT"));
+    error_stack_push(
+        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+        string_duplicate("word-only RIT conversion requires a full RIT"));
     return;
   }
   FILE *stream = fopen_safe(filename, "wb", error_stack);
@@ -859,16 +859,15 @@ static inline void rack_info_table_write_word_only_copy(
                            "rit bucket starts");
 
   enum { WORD_ENTRY_COPY_BATCH = 4096 };
-  RackInfoTableWordEntry *batch = malloc_or_die(
-      WORD_ENTRY_COPY_BATCH * sizeof(RackInfoTableWordEntry));
+  RackInfoTableWordEntry *batch =
+      malloc_or_die(WORD_ENTRY_COPY_BATCH * sizeof(RackInfoTableWordEntry));
   for (uint32_t start = 0; start < source->num_entries;
        start += WORD_ENTRY_COPY_BATCH) {
     const uint32_t remaining = source->num_entries - start;
     const uint32_t count =
         remaining < WORD_ENTRY_COPY_BATCH ? remaining : WORD_ENTRY_COPY_BATCH;
     for (uint32_t i = 0; i < count; i++) {
-      rack_info_table_copy_word_entry(&batch[i],
-                                      &source->entries[start + i]);
+      rack_info_table_copy_word_entry(&batch[i], &source->entries[start + i]);
     }
     rit_write_word_entries_or_die(batch, count, stream);
   }
@@ -930,10 +929,9 @@ static inline void rack_info_table_write_contextual_clone(
   }
 #if defined(__APPLE__)
   if (clonefile(base_filename, output_filename, 0) != 0) {
-    error_stack_push(
-        error_stack, ERROR_STATUS_RW_WRITE_ERROR,
-        get_formatted_string("could not clone base RIT %s: %s", base_filename,
-                             strerror(errno)));
+    error_stack_push(error_stack, ERROR_STATUS_RW_WRITE_ERROR,
+                     get_formatted_string("could not clone base RIT %s: %s",
+                                          base_filename, strerror(errno)));
     return;
   }
 #else
@@ -1054,8 +1052,8 @@ static inline void rit_read_entries_or_die(RackInfoTableEntry *entries,
 #endif
 }
 
-static inline void rit_read_word_entries_or_die(
-    RackInfoTableWordEntry *entries, uint32_t n, FILE *stream) {
+static inline void rit_read_word_entries_or_die(RackInfoTableWordEntry *entries,
+                                                uint32_t n, FILE *stream) {
   if (fread(entries, sizeof(RackInfoTableWordEntry), n, stream) != n) {
     log_fatal("could not read word entries from rit stream");
   }
@@ -1092,8 +1090,7 @@ static inline void rit_read_equities_or_die(Equity *values, size_t n,
 #endif
 }
 
-static inline void rit_read_metadata_or_die(RackInfoTable *rit,
-                                            FILE *stream) {
+static inline void rit_read_metadata_or_die(RackInfoTable *rit, FILE *stream) {
   static const uint8_t expected_magic[8] = {'R', 'I', 'T', 'M',
                                             'E', 'T', 'A', '\0'};
   uint8_t magic[8];
@@ -1161,8 +1158,8 @@ static inline void rack_info_table_load_from_stream(RackInfoTable *rit,
     log_fatal("rit contains unsupported flags");
   }
   if (rack_info_table_is_word_only(rit) &&
-      (rit->flags &
-       (RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE)) != 0) {
+      (rit->flags & (RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE)) !=
+          0) {
     log_fatal("word-only rit cannot contain contextual leave caps");
   }
 
@@ -1298,8 +1295,8 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
     return;
   }
   if (rack_info_table_is_word_only(rit) &&
-      (rit->flags &
-       (RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE)) != 0) {
+      (rit->flags & (RIT_FLAG_CONTEXT_CAPS | RIT_FLAG_CONTEXT_CAPS_INLINE)) !=
+          0) {
     munmap(mapped, file_size);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
@@ -1329,8 +1326,7 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
   const size_t entry_size = rack_info_table_is_word_only(rit)
                                 ? sizeof(RackInfoTableWordEntry)
                                 : sizeof(RackInfoTableEntry);
-  if ((size_t)rit->num_entries >
-      (file_size - entries_offset) / entry_size) {
+  if ((size_t)rit->num_entries > (file_size - entries_offset) / entry_size) {
     munmap(mapped, file_size);
     error_stack_push(
         error_stack, ERROR_STATUS_RW_READ_ERROR,
@@ -1350,13 +1346,11 @@ static inline void rack_info_table_load_mmap(RackInfoTable *rit,
     if ((rit->flags & RIT_FLAG_CONTEXT_CAPS) != 0) {
       const size_t values_per_overlay =
           (size_t)rit->num_entries * RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
-      if (values_per_overlay >
-          (file_size - cursor) / (2 * sizeof(Equity))) {
+      if (values_per_overlay > (file_size - cursor) / (2 * sizeof(Equity))) {
         munmap(mapped, file_size);
-        error_stack_push(
-            error_stack, ERROR_STATUS_RW_READ_ERROR,
-            get_formatted_string("rit context overlay is truncated: %s",
-                                 filename));
+        error_stack_push(error_stack, ERROR_STATUS_RW_READ_ERROR,
+                         get_formatted_string(
+                             "rit context overlay is truncated: %s", filename));
         return;
       }
       const size_t overlay_bytes = values_per_overlay * sizeof(Equity);

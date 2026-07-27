@@ -479,21 +479,20 @@ static NominationResult nominate_candidate_list_with_klv2_policy(
   assert(started);
   ErrorStack *error_stack = error_stack_create();
   SimArgs sim_args = {0};
-  sim_args_fill(
-      KLV3_ORACLE_SIM_PLIES, candidate_moves, arm_count,
-      &context->known_opponent_rack, config_get_win_pcts(klv2_config),
-      /*inference_results=*/NULL, thread_control,
-      config_get_game(klv2_config), /*sim_with_inference=*/false,
-      /*use_heat_map=*/false, config_get_num_threads(klv2_config),
-      /*print_interval=*/0, /*max_num_display_plays=*/arm_count,
-      /*max_num_display_plies=*/KLV3_ORACLE_SIM_PLIES, fixed_seed,
-      expected_iterations, samples_per_arm, /*scond=*/0.0,
-      BAI_THRESHOLD_NONE, /*time_limit_seconds=*/0.0,
-      BAI_SAMPLING_RULE_ROUND_ROBIN, /*cutoff=*/0.0,
-      config_get_utility_w_winpct(klv2_config),
-      config_get_utility_w_spread(klv2_config),
-      config_get_utility_spread_scale(klv2_config),
-      /*inference_args=*/NULL, &sim_args);
+  sim_args_fill(KLV3_ORACLE_SIM_PLIES, candidate_moves, arm_count,
+                &context->known_opponent_rack, config_get_win_pcts(klv2_config),
+                /*inference_results=*/NULL, thread_control,
+                config_get_game(klv2_config), /*sim_with_inference=*/false,
+                /*use_heat_map=*/false, config_get_num_threads(klv2_config),
+                /*print_interval=*/0, /*max_num_display_plays=*/arm_count,
+                /*max_num_display_plies=*/KLV3_ORACLE_SIM_PLIES, fixed_seed,
+                expected_iterations, samples_per_arm, /*scond=*/0.0,
+                BAI_THRESHOLD_NONE, /*time_limit_seconds=*/0.0,
+                BAI_SAMPLING_RULE_ROUND_ROBIN, /*cutoff=*/0.0,
+                config_get_utility_w_winpct(klv2_config),
+                config_get_utility_w_spread(klv2_config),
+                config_get_utility_spread_scale(klv2_config),
+                /*inference_args=*/NULL, &sim_args);
 
   Timer timer;
   ctimer_start(&timer);
@@ -1955,11 +1954,10 @@ static void print_candidate_selector_summary(
     const EqualSampleAggregate *aggregate, int global_comparisons,
     uint64_t total_top_candidates, uint64_t total_overlap,
     uint64_t total_unique_per_selector, double elapsed_seconds) {
-  const double comparison_rate =
-      aggregate->source_positions > 0
-          ? (double)aggregate->disagreements /
-                (double)aggregate->source_positions
-          : 0.0;
+  const double comparison_rate = aggregate->source_positions > 0
+                                     ? (double)aggregate->disagreements /
+                                           (double)aggregate->source_positions
+                                     : 0.0;
   const double avg_top =
       aggregate->source_positions > 0
           ? (double)total_top_candidates / aggregate->source_positions
@@ -1980,37 +1978,36 @@ static void print_candidate_selector_summary(
                                ? (double)aggregate->nomination_iterations[1] /
                                      aggregate->nomination_seconds[1]
                                : 0.0;
-  printf(
-      "KLV3_CANDIDATE_SUMMARY source_positions=%d full_overlap=%d "
-      "run_comparisons=%d global_comparisons=%d comparison_rate=%.6f "
-      "avg_top_candidates=%.6f avg_overlap=%.6f "
-      "avg_unique_per_selector=%.6f "
-      "klv2_unique_root_wins=%d klv3_unique_root_wins=%d "
-      "conditional_klv3_minus_klv2=%+.9f conditional_sem=%.9f "
-      "conditional_win_delta=%+.9f conditional_win_sem=%.9f "
-      "conditional_spread_delta=%+.9f conditional_spread_sem=%.9f "
-      "all_source_marginal_delta=%+.9f all_source_sem=%.9f "
-      "klv2_unique_iterations=%" PRIu64 " klv3_unique_iterations=%" PRIu64
-      " klv2_unique_iters_per_second=%.3f "
-      "klv3_unique_iters_per_second=%.3f "
-      "outer_candidate_rollouts=%" PRIu64 " nested_policy_samples=%" PRIu64
-      " elapsed_seconds=%.6f\n",
-      aggregate->source_positions, aggregate->agreements,
-      aggregate->disagreements, global_comparisons, comparison_rate, avg_top,
-      avg_overlap, avg_unique, aggregate->model_root_wins[0],
-      aggregate->model_root_wins[1],
-      stat_get_mean(aggregate->conditional_utility_delta),
-      stat_get_sem(aggregate->conditional_utility_delta),
-      stat_get_mean(aggregate->conditional_win_delta),
-      stat_get_sem(aggregate->conditional_win_delta),
-      stat_get_mean(aggregate->conditional_spread_delta),
-      stat_get_sem(aggregate->conditional_spread_delta),
-      stat_get_mean(aggregate->all_position_utility_delta),
-      stat_get_sem(aggregate->all_position_utility_delta),
-      aggregate->nomination_iterations[0],
-      aggregate->nomination_iterations[1], klv2_rate, klv3_rate,
-      aggregate->counters.outer_candidate_rollouts,
-      aggregate->counters.nested_policy_samples, elapsed_seconds);
+  printf("KLV3_CANDIDATE_SUMMARY source_positions=%d full_overlap=%d "
+         "run_comparisons=%d global_comparisons=%d comparison_rate=%.6f "
+         "avg_top_candidates=%.6f avg_overlap=%.6f "
+         "avg_unique_per_selector=%.6f "
+         "klv2_unique_root_wins=%d klv3_unique_root_wins=%d "
+         "conditional_klv3_minus_klv2=%+.9f conditional_sem=%.9f "
+         "conditional_win_delta=%+.9f conditional_win_sem=%.9f "
+         "conditional_spread_delta=%+.9f conditional_spread_sem=%.9f "
+         "all_source_marginal_delta=%+.9f all_source_sem=%.9f "
+         "klv2_unique_iterations=%" PRIu64 " klv3_unique_iterations=%" PRIu64
+         " klv2_unique_iters_per_second=%.3f "
+         "klv3_unique_iters_per_second=%.3f "
+         "outer_candidate_rollouts=%" PRIu64 " nested_policy_samples=%" PRIu64
+         " elapsed_seconds=%.6f\n",
+         aggregate->source_positions, aggregate->agreements,
+         aggregate->disagreements, global_comparisons, comparison_rate, avg_top,
+         avg_overlap, avg_unique, aggregate->model_root_wins[0],
+         aggregate->model_root_wins[1],
+         stat_get_mean(aggregate->conditional_utility_delta),
+         stat_get_sem(aggregate->conditional_utility_delta),
+         stat_get_mean(aggregate->conditional_win_delta),
+         stat_get_sem(aggregate->conditional_win_delta),
+         stat_get_mean(aggregate->conditional_spread_delta),
+         stat_get_sem(aggregate->conditional_spread_delta),
+         stat_get_mean(aggregate->all_position_utility_delta),
+         stat_get_sem(aggregate->all_position_utility_delta),
+         aggregate->nomination_iterations[0],
+         aggregate->nomination_iterations[1], klv2_rate, klv3_rate,
+         aggregate->counters.outer_candidate_rollouts,
+         aggregate->counters.nested_policy_samples, elapsed_seconds);
 }
 
 static void run_candidate_selector_online_oracle(
@@ -2036,24 +2033,23 @@ static void run_candidate_selector_online_oracle(
   uint64_t total_unique_per_selector = 0;
   bool wall_limit_reached = false;
 
-  printf(
-      "KLV3_CANDIDATE_CONFIG games=%d start_game=%d max_positions=%d "
-      "start_position=%d collect_from_position=%d "
-      "start_comparisons=%d target_comparisons=%d "
-      "top_candidates=%d compare_nonoverlap_only=1 "
-      "nomination_policy=klv2 nomination_plies=%d samples_per_unique_arm=%d "
-      "sampling_rule=round_robin "
-      "outer_samples_per_candidate=%d outer_plies=%d nested_plies=%d "
-      "nested_samples_per_candidate=%d nested_policy_split=%d+%d "
-      "nomination_threads=%d outer_threads=%d nested_threads=1 "
-      "min_bag_tiles=%d wall_seconds=%.3f\n",
-      num_games, start_game, max_positions, start_position,
-      collect_from_position, start_comparisons, target_comparisons,
-      KLV3_ORACLE_NUM_PLAYS, KLV3_ORACLE_SIM_PLIES, samples_per_arm,
-      outer_samples, outer_plies, KLV3_ORACLE_NESTED_PLIES,
-      nested_samples_per_candidate, nested_samples_per_candidate / 2,
-      nested_samples_per_candidate / 2, num_threads, num_threads,
-      min_bag_tiles, wall_seconds);
+  printf("KLV3_CANDIDATE_CONFIG games=%d start_game=%d max_positions=%d "
+         "start_position=%d collect_from_position=%d "
+         "start_comparisons=%d target_comparisons=%d "
+         "top_candidates=%d compare_nonoverlap_only=1 "
+         "nomination_policy=klv2 nomination_plies=%d samples_per_unique_arm=%d "
+         "sampling_rule=round_robin "
+         "outer_samples_per_candidate=%d outer_plies=%d nested_plies=%d "
+         "nested_samples_per_candidate=%d nested_policy_split=%d+%d "
+         "nomination_threads=%d outer_threads=%d nested_threads=1 "
+         "min_bag_tiles=%d wall_seconds=%.3f\n",
+         num_games, start_game, max_positions, start_position,
+         collect_from_position, start_comparisons, target_comparisons,
+         KLV3_ORACLE_NUM_PLAYS, KLV3_ORACLE_SIM_PLIES, samples_per_arm,
+         outer_samples, outer_plies, KLV3_ORACLE_NESTED_PLIES,
+         nested_samples_per_candidate, nested_samples_per_candidate / 2,
+         nested_samples_per_candidate / 2, num_threads, num_threads,
+         min_bag_tiles, wall_seconds);
   fflush(stdout);
 
   for (int game_index = start_game;
@@ -2113,13 +2109,11 @@ static void run_candidate_selector_online_oracle(
                 klv2_config, &nomination_contexts[0], klv2_only,
                 samples_per_arm, nomination_seed);
           }
-          assert(!moves_are_equal(&nominations[0].move,
-                                  &nominations[1].move));
+          assert(!moves_are_equal(&nominations[0].move, &nominations[1].move));
           for (int selector = 0; selector < 2; selector++) {
             aggregate.nomination_iterations[selector] +=
                 nominations[selector].iterations;
-            aggregate.nomination_nodes[selector] +=
-                nominations[selector].nodes;
+            aggregate.nomination_nodes[selector] += nominations[selector].nodes;
             aggregate.nomination_seconds[selector] +=
                 nominations[selector].elapsed_seconds;
           }
@@ -2205,13 +2199,13 @@ static void run_candidate_selector_online_oracle(
               "root1_win=%.9f root1_spread=%.6f cgp=%s\n",
               global_comparisons, position_index, game_index, turn_index,
               bag_get_letters(game_get_bag(trajectory_game)), top_count,
-              overlap, unique_count, samples_per_arm,
-              nominations[0].iterations, nominations[1].iterations,
-              nominations[0].nodes, nominations[1].nodes,
-              nominations[0].elapsed_seconds, nominations[1].elapsed_seconds,
-              klv2_move_string, klv3_move_string, klv2_move_raw, klv3_move_raw,
-              best_root, utility_delta, stat_get_sem(position_deltas[0]),
-              win_delta, spread_delta, stat_get_mean(roots[0].utility),
+              overlap, unique_count, samples_per_arm, nominations[0].iterations,
+              nominations[1].iterations, nominations[0].nodes,
+              nominations[1].nodes, nominations[0].elapsed_seconds,
+              nominations[1].elapsed_seconds, klv2_move_string,
+              klv3_move_string, klv2_move_raw, klv3_move_raw, best_root,
+              utility_delta, stat_get_sem(position_deltas[0]), win_delta,
+              spread_delta, stat_get_mean(roots[0].utility),
               stat_get_sem(roots[0].utility), stat_get_mean(roots[0].win_pct),
               stat_get_mean(roots[0].spread), stat_get_mean(roots[1].utility),
               stat_get_sem(roots[1].utility), stat_get_mean(roots[1].win_pct),
@@ -2249,13 +2243,12 @@ static void run_candidate_selector_online_oracle(
         &aggregate, global_comparisons, total_top_candidates, total_overlap,
         total_unique_per_selector, ctimer_elapsed_seconds(&timer));
   }
-  printf(
-      "KLV3_CANDIDATE_DONE source_positions=%d full_overlap=%d "
-      "run_comparisons=%d global_comparisons=%d target=%d last_position=%d "
-      "elapsed_seconds=%.6f wall_limit_reached=%d\n",
-      aggregate.source_positions, aggregate.agreements,
-      aggregate.disagreements, global_comparisons, target_comparisons,
-      position_index, ctimer_elapsed_seconds(&timer), wall_limit_reached);
+  printf("KLV3_CANDIDATE_DONE source_positions=%d full_overlap=%d "
+         "run_comparisons=%d global_comparisons=%d target=%d last_position=%d "
+         "elapsed_seconds=%.6f wall_limit_reached=%d\n",
+         aggregate.source_positions, aggregate.agreements,
+         aggregate.disagreements, global_comparisons, target_comparisons,
+         position_index, ctimer_elapsed_seconds(&timer), wall_limit_reached);
   fflush(stdout);
 
   move_list_destroy(trajectory_move_list);

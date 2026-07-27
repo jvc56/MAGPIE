@@ -46,8 +46,7 @@ void test_sim_benchmark(void) {
   const char *rit_env = getenv("SIMBENCH_RIT");
   const char *rit = (rit_env != NULL) ? rit_env : "true";
   const char *rit_mmap_env = getenv("SIMBENCH_RIT_MMAP");
-  const char *rit_mmap =
-      (rit_mmap_env != NULL) ? rit_mmap_env : "true";
+  const char *rit_mmap = (rit_mmap_env != NULL) ? rit_mmap_env : "true";
   const char *wmp_env = getenv("SIMBENCH_WMP");
   const char *wmp = (wmp_env != NULL) ? wmp_env : "true";
   const char *wit_env = getenv("SIMBENCH_WIT");

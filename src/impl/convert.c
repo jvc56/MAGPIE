@@ -182,8 +182,8 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
 }
 
 static void convert_klv_wmp_to_rit(const LetterDistribution *ld,
-                                   const char *data_paths,
-                                   const char *klv_name, const char *wmp_name,
+                                   const char *data_paths, const char *klv_name,
+                                   const char *wmp_name,
                                    const char *base_rit_name,
                                    const char *output_name, int num_threads,
                                    ErrorStack *error_stack) {
@@ -203,13 +203,13 @@ static void convert_klv_wmp_to_rit(const LetterDistribution *ld,
     // on-demand test showed that widening coverage down to played_size == 1
     // monotonically improves movegen while the base entry size stays fixed.
     const uint8_t playthrough_min_played_size = 1;
-    RackInfoTable *rit = make_rack_info_table(
-        klv, wmp, ld, num_threads, playthrough_min_played_size);
+    RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads,
+                                              playthrough_min_played_size);
     if (base_rit_name == NULL) {
       rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
     } else {
-      RackInfoTable *base_rit = rack_info_table_create(
-          data_paths, base_rit_name, true, error_stack);
+      RackInfoTable *base_rit =
+          rack_info_table_create(data_paths, base_rit_name, true, error_stack);
       char *base_rit_filename = NULL;
       if (error_stack_is_empty(error_stack)) {
         base_rit_filename = data_filepaths_get_readable_filename(
@@ -218,8 +218,7 @@ static void convert_klv_wmp_to_rit(const LetterDistribution *ld,
       }
       if (error_stack_is_empty(error_stack)) {
         rack_info_table_write_contextual_clone(
-            rit, base_rit, base_rit_filename, rit_output_filename,
-            error_stack);
+            rit, base_rit, base_rit_filename, rit_output_filename, error_stack);
       }
       free(base_rit_filename);
       rack_info_table_destroy(base_rit);
@@ -431,8 +430,7 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
     if (name_count != 2) {
       error_stack_push(
           error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
-          string_duplicate(
-              "rit2wordrit expects RIT_NAME,OUTPUT_NAME"));
+          string_duplicate("rit2wordrit expects RIT_NAME,OUTPUT_NAME"));
       string_splitter_destroy(rit_names);
       return;
     }
@@ -461,9 +459,9 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
 
   if (conversion_type == CONVERT_KLVWMP2RIT &&
       (base_rit_name != NULL || !strings_equal(input_name, wmp_name))) {
-    convert_klv_wmp_to_rit(
-        ld, args->data_paths, input_name, wmp_name, base_rit_name, output_name,
-        args->num_threads, error_stack);
+    convert_klv_wmp_to_rit(ld, args->data_paths, input_name, wmp_name,
+                           base_rit_name, output_name, args->num_threads,
+                           error_stack);
   } else {
     convert_with_names(ld, conversion_type, args->data_paths, input_name,
                        output_name, conversion_results, args->num_threads,

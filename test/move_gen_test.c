@@ -631,8 +631,7 @@ static Equity assert_contextual_move_equities(const Game *game,
 }
 
 static void assert_base_move_equities(const Game *game,
-                                      const MoveList *move_list,
-                                      const KLV *klv,
+                                      const MoveList *move_list, const KLV *klv,
                                       const LetterDistribution *ld,
                                       const char *rack_string) {
   Rack *move_rack = rack_create(ld_get_size(ld));

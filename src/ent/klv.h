@@ -126,8 +126,7 @@ static inline void klv_disable_context_pruning_cap(KLV *klv) {
   klv->context_pruning_cap_enabled = false;
 }
 
-static inline Equity klv_get_context_leave_cap(const KLV *klv,
-                                               uint32_t index) {
+static inline Equity klv_get_context_leave_cap(const KLV *klv, uint32_t index) {
   if (!klv_has_context_leave_caps(klv) || index == KLV_UNFOUND_INDEX) {
     return 0;
   }
@@ -159,23 +158,22 @@ static inline int klv3_get_pool_bin(const KLV *klv, int unseen_total) {
   return klv->context_num_pool_bins - 1;
 }
 
-static inline Equity klv3_compute_one_tile_adjustment(
-    const KLV *klv, const int *unseen_counts, int unseen_total, int pool_bin,
-    int draw_count, MachineLetter held) {
+static inline Equity
+klv3_compute_one_tile_adjustment(const KLV *klv, const int *unseen_counts,
+                                 int unseen_total, int pool_bin, int draw_count,
+                                 MachineLetter held) {
   int64_t weighted_sum = 0;
   for (int unseen = 0; unseen < klv->context_alphabet_size; unseen++) {
-    weighted_sum +=
-        (int64_t)klv->context_weights[klv3_weight_index(
-            klv, draw_count, held, (MachineLetter)unseen)] *
-        unseen_counts[unseen];
+    weighted_sum += (int64_t)klv->context_weights[klv3_weight_index(
+                        klv, draw_count, held, (MachineLetter)unseen)] *
+                    unseen_counts[unseen];
   }
   const int64_t rounded_average =
-      weighted_sum >= 0
-          ? (weighted_sum + unseen_total / 2) / unseen_total
-          : -((-weighted_sum + unseen_total / 2) / unseen_total);
+      weighted_sum >= 0 ? (weighted_sum + unseen_total / 2) / unseen_total
+                        : -((-weighted_sum + unseen_total / 2) / unseen_total);
   const int64_t value =
-      (int64_t)klv->context_biases[klv3_bias_index(
-          klv, pool_bin, draw_count, held)] +
+      (int64_t)klv
+          ->context_biases[klv3_bias_index(klv, pool_bin, draw_count, held)] +
       rounded_average;
   if (value > EQUITY_MAX_VALUE || value < EQUITY_MIN_VALUE) {
     log_fatal("KLV3 tile adjustment out of Equity range");
@@ -226,8 +224,7 @@ static inline void klv3_compute_rack_tile_adjustments(
     if (rack_get_letter(held_rack, held) == 0) {
       continue;
     }
-    for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS;
-         draw_count++) {
+    for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
       adjustments[draw_count][held] = klv3_compute_one_tile_adjustment(
           klv, unseen_counts, unseen_total, pool_bin, draw_count,
           (MachineLetter)held);
@@ -241,9 +238,10 @@ static inline void klv3_compute_rack_tile_adjustments(
 // matrix row per distinct held tile instead of every draw-count row and does
 // not enumerate subracks. It is deliberately a heuristic magnitude, not a
 // bound; thresholds must be validated for missed KLV2/KLV3 disagreements.
-static inline Equity klv3_sample_rack_adjustment_magnitude(
-    const KLV *klv, const int *unseen_counts, int unseen_total,
-    const Rack *held_rack, int tiles_in_bag) {
+static inline Equity
+klv3_sample_rack_adjustment_magnitude(const KLV *klv, const int *unseen_counts,
+                                      int unseen_total, const Rack *held_rack,
+                                      int tiles_in_bag) {
   if (!klv_has_context_model(klv) || unseen_total <= 0 || tiles_in_bag <= 0) {
     return 0;
   }
@@ -277,8 +275,7 @@ static inline Equity klv3_sample_rack_adjustment_magnitude(
 // a legal move.
 static inline Equity klv3_get_rack_adjustment_range(
     const Rack *held_rack, int tiles_in_bag,
-    const Equity adjustments[KLV3_DRAW_COUNT_HEADS]
-                            [MACHINE_LETTER_MAX_VALUE]) {
+    const Equity adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE]) {
   MachineLetter rack_tiles[RACK_SIZE];
   int num_rack_tiles = 0;
   for (int ml = 0; ml < rack_get_dist_size(held_rack); ml++) {
@@ -494,13 +491,12 @@ static inline uint64_t klv_compute_context_content_fingerprint(const KLV *klv) {
   for (int i = 0; i < klv->context_num_pool_bins; i++) {
     hash = fnv64a_step(hash, klv->context_pool_bin_upper_bounds[i]);
   }
-  const size_t num_biases =
-      (size_t)klv->context_num_pool_bins * KLV3_DRAW_COUNT_HEADS *
-      (size_t)klv->context_alphabet_size;
-  const size_t num_weights =
-      (size_t)KLV3_DRAW_COUNT_HEADS *
-      (size_t)klv->context_alphabet_size *
-      (size_t)klv->context_alphabet_size;
+  const size_t num_biases = (size_t)klv->context_num_pool_bins *
+                            KLV3_DRAW_COUNT_HEADS *
+                            (size_t)klv->context_alphabet_size;
+  const size_t num_weights = (size_t)KLV3_DRAW_COUNT_HEADS *
+                             (size_t)klv->context_alphabet_size *
+                             (size_t)klv->context_alphabet_size;
   for (size_t i = 0; i < num_biases; i++) {
     hash = fnv64a_step(hash, (uint64_t)(uint32_t)klv->context_biases[i]);
   }
@@ -511,8 +507,7 @@ static inline uint64_t klv_compute_context_content_fingerprint(const KLV *klv) {
   hash = fnv64a_step(hash, klv->context_cap_min_samples);
   if (klv->context_leave_caps != NULL) {
     for (uint32_t i = 0; i < klv->number_of_leaves; i++) {
-      hash =
-          fnv64a_step(hash, (uint64_t)(uint32_t)klv->context_leave_caps[i]);
+      hash = fnv64a_step(hash, (uint64_t)(uint32_t)klv->context_leave_caps[i]);
     }
   }
   return hash == 0 ? 1 : hash;
@@ -551,8 +546,7 @@ static inline void klv3_load_context(FILE *stream, KLV *klv) {
   const uint32_t draw_count_heads = le32toh(header[2]);
   const uint32_t num_pool_bins = le32toh(header[3]);
   if (version < KLV3_EARLIEST_SUPPORTED_VERSION || version > KLV3_VERSION ||
-      alphabet_size == 0 ||
-      alphabet_size > BIT_RACK_MAX_ALPHABET_SIZE ||
+      alphabet_size == 0 || alphabet_size > BIT_RACK_MAX_ALPHABET_SIZE ||
       draw_count_heads != KLV3_DRAW_COUNT_HEADS || num_pool_bins == 0 ||
       num_pool_bins > KLV3_MAX_POOL_SIZE_BINS) {
     log_fatal("unsupported KLV3 context header");
@@ -827,9 +821,11 @@ static inline Equity klv_get_leave_value(const KLV *klv, const Rack *leave) {
 // This is intended for simulation horizon residuals, where only the selected
 // move's leave is needed. KLV2s and missing/empty contexts retain the ordinary
 // rack-only behavior.
-static inline Equity klv_get_contextual_leave_value(
-    const KLV *klv, const Rack *leave, const int *unseen_counts,
-    int unseen_total, int draw_count) {
+static inline Equity klv_get_contextual_leave_value(const KLV *klv,
+                                                    const Rack *leave,
+                                                    const int *unseen_counts,
+                                                    int unseen_total,
+                                                    int draw_count) {
   if (rack_is_empty(leave) || !klv) {
     return 0;
   }
@@ -850,11 +846,9 @@ static inline Equity klv_get_contextual_leave_value(
     if (count == 0) {
       continue;
     }
-    adjusted +=
-        (int64_t)count *
-        klv3_compute_one_tile_adjustment(
-            klv, unseen_counts, unseen_total, pool_bin, draw_count,
-            (MachineLetter)ml);
+    adjusted += (int64_t)count * klv3_compute_one_tile_adjustment(
+                                     klv, unseen_counts, unseen_total, pool_bin,
+                                     draw_count, (MachineLetter)ml);
   }
   if (adjusted > EQUITY_MAX_VALUE || adjusted < EQUITY_MIN_VALUE) {
     log_fatal("KLV3 contextual leave value out of Equity range");

@@ -263,11 +263,11 @@ static void compute_entry_recursive(EntryComputeState *state,
               state->entry->nonplaythrough_best_leave_values[leave_size] =
                   value;
             }
-            if (state->context_capped_nonplaythrough_best_leave_values != NULL &&
+            if (state->context_capped_nonplaythrough_best_leave_values !=
+                    NULL &&
                 context_capped_value >
-                    state
-                        ->context_capped_nonplaythrough_best_leave_values
-                            [leave_size]) {
+                    state->context_capped_nonplaythrough_best_leave_values
+                        [leave_size]) {
               state->context_capped_nonplaythrough_best_leave_values
                   [leave_size] = context_capped_value;
             }
@@ -332,14 +332,11 @@ static void compute_entry_recursive(EntryComputeState *state,
   }
 }
 
-static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
-                                   const LetterDistribution *ld,
-                                   uint8_t playthrough_min_played_size,
-                                   const BitRack *bit_rack,
-                                   RackInfoTableEntry *entry,
-                                   Equity *context_capped_best_leaves,
-                                   Equity
-                                       *context_capped_nonplaythrough_best_leave_values) {
+static void compute_entry_for_rack(
+    const KLV *klv, const WMP *wmp, const LetterDistribution *ld,
+    uint8_t playthrough_min_played_size, const BitRack *bit_rack,
+    RackInfoTableEntry *entry, Equity *context_capped_best_leaves,
+    Equity *context_capped_nonplaythrough_best_leave_values) {
   const int ld_size = ld_get_size(ld);
 
   // Reconstruct Rack from BitRack.
@@ -859,10 +856,9 @@ static void *compute_entries_thread(void *arg) {
             : a->context_capped_nonplaythrough_best_leave_values +
                   (size_t)entry_idx *
                       RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
-    compute_entry_for_rack(a->klv, a->wmp, a->ld,
-                           a->playthrough_min_played_size,
-                           &a->all_racks[rack_idx], entry, context_best,
-                           context_nonplay);
+    compute_entry_for_rack(
+        a->klv, a->wmp, a->ld, a->playthrough_min_played_size,
+        &a->all_racks[rack_idx], entry, context_best, context_nonplay);
   }
   return NULL;
 }
@@ -902,8 +898,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
     rit->base_klv_fingerprint = klv_get_base_content_fingerprint(klv);
     if (klv_has_context_leave_caps(klv)) {
       rit->flags |= RIT_FLAG_CONTEXT_CAPS_INLINE;
-      rit->context_klv_fingerprint =
-          klv_get_context_content_fingerprint(klv);
+      rit->context_klv_fingerprint = klv_get_context_content_fingerprint(klv);
       rit->context_cap_quantile_ppm = klv->context_cap_quantile_ppm;
     }
     rit->name = NULL;
@@ -1042,8 +1037,7 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
              sizeof(entries[entry_idx].best_leaves));
       memcpy(entries[entry_idx].nonplaythrough_best_leave_values,
              context_capped_nonplaythrough_best_leave_values + context_offset,
-             sizeof(entries[entry_idx]
-                        .nonplaythrough_best_leave_values));
+             sizeof(entries[entry_idx].nonplaythrough_best_leave_values));
     }
     free(context_capped_best_leaves);
     free(context_capped_nonplaythrough_best_leave_values);

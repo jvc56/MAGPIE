@@ -75,14 +75,10 @@ void test_contextual_klv_adjustments(void) {
 
   const MachineLetter a = ld_hl_to_ml(ld, "A");
   const MachineLetter b = ld_hl_to_ml(ld, "B");
-  klv->context_biases[klv3_bias_index(klv, 0, 1, a)] =
-      double_to_equity(0.75);
-  klv->context_biases[klv3_bias_index(klv, 1, 1, a)] =
-      double_to_equity(0.75);
-  klv->context_biases[klv3_bias_index(klv, 0, 4, a)] =
-      double_to_equity(-0.25);
-  klv->context_biases[klv3_bias_index(klv, 1, 4, a)] =
-      double_to_equity(-0.25);
+  klv->context_biases[klv3_bias_index(klv, 0, 1, a)] = double_to_equity(0.75);
+  klv->context_biases[klv3_bias_index(klv, 1, 1, a)] = double_to_equity(0.75);
+  klv->context_biases[klv3_bias_index(klv, 0, 4, a)] = double_to_equity(-0.25);
+  klv->context_biases[klv3_bias_index(klv, 1, 4, a)] = double_to_equity(-0.25);
   klv->context_biases[klv3_bias_index(klv, 0, 2, a)] = double_to_equity(1.5);
   klv->context_biases[klv3_bias_index(klv, 1, 2, a)] = double_to_equity(2.5);
   klv->context_weights[klv3_weight_index(klv, 2, a, a)] = double_to_equity(2.0);
@@ -111,14 +107,12 @@ void test_contextual_klv_adjustments(void) {
   klv3_compute_tile_adjustments(klv, unseen_counts, 5, adjustments);
   assert(equity_to_double(adjustments[2][a]) == 6.9);
 
-  Equity rack_adjustments[KLV3_DRAW_COUNT_HEADS]
-                         [MACHINE_LETTER_MAX_VALUE];
+  Equity rack_adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE];
   klv3_compute_rack_tile_adjustments(klv, unseen_counts, 5, &leave,
                                      rack_adjustments);
   for (int draw_count = 0; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
     // Present tile types are byte-for-byte identical to the full calculation.
-    assert(rack_adjustments[draw_count][a] ==
-           adjustments[draw_count][a]);
+    assert(rack_adjustments[draw_count][a] == adjustments[draw_count][a]);
     // Absent tile types remain zero and cannot be read by a leave subrack.
     assert(rack_adjustments[draw_count][b] == 0);
   }
@@ -127,8 +121,8 @@ void test_contextual_klv_adjustments(void) {
   assert(klv3_get_rack_adjustment_range(&leave, 2, rack_adjustments) ==
          double_to_equity(0.75));
   assert(klv3_get_rack_adjustment_range(&leave, 0, rack_adjustments) == 0);
-  assert(klv3_sample_rack_adjustment_magnitude(
-             klv, unseen_counts, 5, &leave, 5) == double_to_equity(0.5));
+  assert(klv3_sample_rack_adjustment_magnitude(klv, unseen_counts, 5, &leave,
+                                               5) == double_to_equity(0.5));
 
   klv_destroy(klv);
   config_destroy(config);

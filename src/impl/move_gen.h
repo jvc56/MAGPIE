@@ -242,15 +242,14 @@ typedef struct MoveGen {
   // Direct-mapped by low bits of BitRack hash.
   BitRack rit_cache_keys[MOVEGEN_RIT_CACHE_SIZE];
   const RackInfoTableEntry *rit_cache_entries[MOVEGEN_RIT_CACHE_SIZE];
-  RackInfoTableWordEntry
-      rit_cache_word_entries[MOVEGEN_RIT_CACHE_SIZE];
+  RackInfoTableWordEntry rit_cache_word_entries[MOVEGEN_RIT_CACHE_SIZE];
   bool rit_cache_entry_found[MOVEGEN_RIT_CACHE_SIZE];
   // Copy the contextual overlay into the same small per-thread cache. The
   // on-disk overlay is separate from the 1.8 GiB base table; repeatedly
   // touching both random mappings was measurably more expensive than the
   // pruning saved.
   Equity rit_cache_context_capped_best_leaves[MOVEGEN_RIT_CACHE_SIZE]
-                                              [RACK_SIZE + 1];
+                                             [RACK_SIZE + 1];
   Equity rit_cache_context_capped_nonplaythrough_best_leaves
       [MOVEGEN_RIT_CACHE_SIZE][RACK_SIZE + 1];
   bool rit_cache_valid[MOVEGEN_RIT_CACHE_SIZE];
