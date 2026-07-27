@@ -182,6 +182,7 @@ typedef enum {
   ARG_TOKEN_UTILITY_W_WINPCT,
   ARG_TOKEN_UTILITY_W_SPREAD,
   ARG_TOKEN_UTILITY_SPREAD_SCALE,
+  ARG_TOKEN_STATIC_PRIOR,
   ARG_TOKEN_LOAD,
   ARG_TOKEN_NEW_GAME,
   ARG_TOKEN_EXPORT,
@@ -245,6 +246,8 @@ typedef enum {
   ARG_TOKEN_P2_UTILITY_W_SPREAD,
   ARG_TOKEN_P1_UTILITY_SPREAD_SCALE,
   ARG_TOKEN_P2_UTILITY_SPREAD_SCALE,
+  ARG_TOKEN_P1_STATIC_PRIOR,
+  ARG_TOKEN_P2_STATIC_PRIOR,
   ARG_TOKEN_P1_INFERENCE_MARGIN,
   ARG_TOKEN_P2_INFERENCE_MARGIN,
   ARG_TOKEN_MULTI_THREADING_MODE,
@@ -324,6 +327,7 @@ struct Config {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  double static_prior_equivalent_samples;
   Equity eq_margin_inference;
   Equity eq_margin_movegen;
   bool use_game_pairs;
@@ -390,6 +394,8 @@ struct Config {
   double p2_utility_w_spread;
   double p1_utility_spread_scale;
   double p2_utility_spread_scale;
+  double p1_static_prior_equivalent_samples;
+  double p2_static_prior_equivalent_samples;
   Equity p1_eq_margin_inference;
   Equity p2_eq_margin_inference;
   multi_threading_mode_t multi_threading_mode;
@@ -562,6 +568,9 @@ double config_get_utility_w_spread(const Config *config) {
 double config_get_utility_spread_scale(const Config *config) {
   return config->utility_spread_scale;
 }
+double config_get_static_prior_equivalent_samples(const Config *config) {
+  return config->static_prior_equivalent_samples;
+}
 double config_get_p1_utility_w_winpct(const Config *config) {
   return config->p1_utility_w_winpct;
 }
@@ -579,6 +588,12 @@ double config_get_p2_utility_w_spread(const Config *config) {
 }
 double config_get_p2_utility_spread_scale(const Config *config) {
   return config->p2_utility_spread_scale;
+}
+double config_get_p1_static_prior_equivalent_samples(const Config *config) {
+  return config->p1_static_prior_equivalent_samples;
+}
+double config_get_p2_static_prior_equivalent_samples(const Config *config) {
+  return config->p2_static_prior_equivalent_samples;
 }
 
 BoardLayout *config_get_board_layout(const Config *config) {
@@ -1986,6 +2001,19 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "At spread = +/-uspreadscale the sigmoid is ~0.731 / ~0.269. "
              "Default 100.";
       break;
+    case ARG_TOKEN_STATIC_PRIOR:
+      usages[0] = "<equivalent_samples>";
+      examples[0] = "25";
+      examples[1] = "100";
+      text =
+          "Mixes root static evaluation into each sim arm as a prior with "
+          "this many equivalent rollout samples. Real rollout counts and "
+          "empirical variances remain unchanged, so the prior's influence "
+          "decays as equivalent_samples/(equivalent_samples + real_samples). "
+          "When -spreadforecast is loaded, its expected terminal spread "
+          "anchors the best static move and static equity supplies relative "
+          "candidate deltas. Zero disables the prior (default).";
+      break;
     case ARG_TOKEN_P1_UTILITY_W_WINPCT:
     case ARG_TOKEN_P2_UTILITY_W_WINPCT:
     case ARG_TOKEN_P1_UTILITY_W_SPREAD:
@@ -1998,6 +2026,13 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "specified, takes precedence over the global setting for the "
              "matching player. Used by autoplay with -gp true to compare "
              "different utility blends head-to-head.";
+      break;
+    case ARG_TOKEN_P1_STATIC_PRIOR:
+    case ARG_TOKEN_P2_STATIC_PRIOR:
+      usages[0] = "<equivalent_samples>";
+      examples[0] = "25";
+      text = "Per-player override of -staticprior for autoplay and "
+             "PlayChooser A/B tests.";
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       usages[0] = "<true_or_false>";
@@ -2396,6 +2431,9 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_SIM_WITH_INFERENCE,      /* sinfer */
         ARG_TOKEN_USE_SMALL_PLAYS,         /* sp */
         ARG_TOKEN_SAMPLING_RULE,           /* sr */
+        ARG_TOKEN_STATIC_PRIOR,            /* staticprior */
+        ARG_TOKEN_P1_STATIC_PRIOR,         /* staticprior1 */
+        ARG_TOKEN_P2_STATIC_PRIOR,         /* staticprior2 */
         ARG_TOKEN_P1_STOP_COND_PCT,        /* sc1 */
         ARG_TOKEN_P2_STOP_COND_PCT,        /* sc2 */
         ARG_TOKEN_P1_SIM_WITH_INFERENCE,   /* si1 */
@@ -2925,8 +2963,8 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->max_iterations, config->min_play_iterations,
       config->stop_cond_pct, config->threshold, config->time_limit_seconds,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
-      config->utility_w_spread, config->utility_spread_scale, &inference_args,
-      sim_args);
+      config->utility_w_spread, config->utility_spread_scale,
+      config->static_prior_equivalent_samples, &inference_args, sim_args);
   sim_args->spread_forecast = config->spread_forecast;
 }
 
@@ -3665,7 +3703,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_stop_cond_pct, config->p1_threshold,
       config->p1_time_limit_seconds, config->p1_sampling_rule, config->cutoff,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
-      config->p1_utility_spread_scale, &p1_inference_args,
+      config->p1_utility_spread_scale,
+      config->p1_static_prior_equivalent_samples, &p1_inference_args,
       &autoplay_args->p1_sim_args);
   autoplay_args->p1_sim_args.spread_forecast = config->spread_forecast;
 
@@ -3680,7 +3719,8 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_stop_cond_pct, config->p2_threshold,
       config->p2_time_limit_seconds, config->p2_sampling_rule, config->cutoff,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
-      config->p2_utility_spread_scale, &p2_inference_args,
+      config->p2_utility_spread_scale,
+      config->p2_static_prior_equivalent_samples, &p2_inference_args,
       &autoplay_args->p2_sim_args);
   autoplay_args->p2_sim_args.spread_forecast = config->spread_forecast;
 
@@ -3690,6 +3730,8 @@ void config_fill_autoplay_args(const Config *config,
                                     config->p2_utility_w_spread};
   const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
                                           config->p2_utility_spread_scale};
+  const double static_prior[2] = {config->p1_static_prior_equivalent_samples,
+                                  config->p2_static_prior_equivalent_samples};
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
@@ -3702,6 +3744,7 @@ void config_fill_autoplay_args(const Config *config,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],
+            .static_prior_equivalent_samples = static_prior[player_index],
         };
   }
 }
@@ -7545,6 +7588,13 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
       return;
     }
   }
+  if (config_get_parg_value(config, ARG_TOKEN_STATIC_PRIOR, 0)) {
+    config_load_double(config, ARG_TOKEN_STATIC_PRIOR, 0, 1e9,
+                       &config->static_prior_equivalent_samples, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
   if (config->utility_w_winpct + config->utility_w_spread <= 0) {
     error_stack_push(error_stack, ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
                      string_duplicate("at least one of -uwin/-uspread must be "
@@ -7565,6 +7615,12 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config_get_parg_value(config, ARG_TOKEN_UTILITY_SPREAD_SCALE, 0)) {
     config->p1_utility_spread_scale = config->utility_spread_scale;
     config->p2_utility_spread_scale = config->utility_spread_scale;
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_STATIC_PRIOR, 0)) {
+    config->p1_static_prior_equivalent_samples =
+        config->static_prior_equivalent_samples;
+    config->p2_static_prior_equivalent_samples =
+        config->static_prior_equivalent_samples;
   }
   if (config_get_parg_value(config, ARG_TOKEN_P1_UTILITY_W_WINPCT, 0)) {
     config_load_double(config, ARG_TOKEN_P1_UTILITY_W_WINPCT, 0, 1e6,
@@ -7604,6 +7660,22 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   if (config_get_parg_value(config, ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, 0)) {
     config_load_double(config, ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, 1e-6, 1e6,
                        &config->p2_utility_spread_scale, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P1_STATIC_PRIOR, 0)) {
+    config_load_double(config, ARG_TOKEN_P1_STATIC_PRIOR, 0, 1e9,
+                       &config->p1_static_prior_equivalent_samples,
+                       error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+  if (config_get_parg_value(config, ARG_TOKEN_P2_STATIC_PRIOR, 0)) {
+    config_load_double(config, ARG_TOKEN_P2_STATIC_PRIOR, 0, 1e9,
+                       &config->p2_static_prior_equivalent_samples,
+                       error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
     }
@@ -9002,12 +9074,15 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_UTILITY_W_WINPCT, "uwin", 1, 1);
   arg(ARG_TOKEN_UTILITY_W_SPREAD, "uspread", 1, 1);
   arg(ARG_TOKEN_UTILITY_SPREAD_SCALE, "uspreadscale", 1, 1);
+  arg(ARG_TOKEN_STATIC_PRIOR, "staticprior", 1, 1);
   arg(ARG_TOKEN_P1_UTILITY_W_WINPCT, "uwin1", 1, 1);
   arg(ARG_TOKEN_P2_UTILITY_W_WINPCT, "uwin2", 1, 1);
   arg(ARG_TOKEN_P1_UTILITY_W_SPREAD, "uspread1", 1, 1);
   arg(ARG_TOKEN_P2_UTILITY_W_SPREAD, "uspread2", 1, 1);
   arg(ARG_TOKEN_P1_UTILITY_SPREAD_SCALE, "uspreadscale1", 1, 1);
   arg(ARG_TOKEN_P2_UTILITY_SPREAD_SCALE, "uspreadscale2", 1, 1);
+  arg(ARG_TOKEN_P1_STATIC_PRIOR, "staticprior1", 1, 1);
+  arg(ARG_TOKEN_P2_STATIC_PRIOR, "staticprior2", 1, 1);
   arg(ARG_TOKEN_P1_SIM_PLIES, "pl1", 1, 1);
   arg(ARG_TOKEN_P2_SIM_PLIES, "pl2", 1, 1);
   arg(ARG_TOKEN_P1_NUM_PLAYS, "np1", 1, 1);
@@ -9110,6 +9185,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->utility_w_winpct = 1.0;
   config->utility_w_spread = 0.5;
   config->utility_spread_scale = 100.0;
+  config->static_prior_equivalent_samples = 0.0;
   config->time_limit_seconds = 60;
   config->endgame_time_limit_seconds = 0;
   config->peg_time_limit_seconds = 0;
@@ -9150,6 +9226,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_utility_w_spread = config->utility_w_spread;
   config->p1_utility_spread_scale = config->utility_spread_scale;
   config->p2_utility_spread_scale = config->utility_spread_scale;
+  config->p1_static_prior_equivalent_samples =
+      config->static_prior_equivalent_samples;
+  config->p2_static_prior_equivalent_samples =
+      config->static_prior_equivalent_samples;
   config->p1_eq_margin_inference = config->eq_margin_inference;
   config->p2_eq_margin_inference = config->eq_margin_inference;
   config->multi_threading_mode = MULTI_THREADING_MODE_PER_GAME_PARALLELISM;
@@ -9760,6 +9840,10 @@ void config_add_settings_to_string_builder(const Config *config,
       config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->utility_spread_scale);
       break;
+    case ARG_TOKEN_STATIC_PRIOR:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->static_prior_equivalent_samples);
+      break;
     case ARG_TOKEN_P1_UTILITY_W_WINPCT:
       config_add_double_setting_to_string_builder(config, sb, arg_token,
                                                   config->p1_utility_w_winpct);
@@ -9783,6 +9867,14 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_UTILITY_SPREAD_SCALE:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_utility_spread_scale);
+      break;
+    case ARG_TOKEN_P1_STATIC_PRIOR:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_static_prior_equivalent_samples);
+      break;
+    case ARG_TOKEN_P2_STATIC_PRIOR:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_static_prior_equivalent_samples);
       break;
     case ARG_TOKEN_PRINT_BOARDS:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,

@@ -41,6 +41,10 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Strength of the root static-evaluation prior, measured in equivalent
+  // rollout samples. Zero disables it. The count is not added to BAI's real
+  // sample accounting.
+  double static_prior_equivalent_samples;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -62,6 +66,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
               const bai_sampling_rule_t sampling_rule, const double cutoff,
               const double utility_w_winpct, const double utility_w_spread,
               const double utility_spread_scale,
+              const double static_prior_equivalent_samples,
               const InferenceArgs *inference_args, SimArgs *sim_args) {
   sim_args->num_plies = num_plies;
   sim_args->move_list = move_list;
@@ -105,6 +110,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
+  sim_args->static_prior_equivalent_samples = static_prior_equivalent_samples;
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

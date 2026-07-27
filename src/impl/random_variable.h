@@ -43,5 +43,10 @@ bool rvs_are_similar(RandomVariables *rvs, int i, int j);
 uint64_t rvs_get_num_rvs(const RandomVariables *rvs);
 uint64_t rvs_get_total_samples(const RandomVariables *rvs);
 int rvs_get_best_arm_index(const RandomVariables *rvs);
+// Read a model-specific mean prior once when BAI initializes an arm. The
+// equivalent samples affect its selection mean but never the real rollout
+// count used by confidence and minimum-play accounting.
+void rvs_get_mean_prior(const RandomVariables *rvs, uint64_t arm_index,
+                        double *prior_mean, double *prior_equivalent_samples);
 
 #endif

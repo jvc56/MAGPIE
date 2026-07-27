@@ -11,6 +11,7 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/rack.h"
+#include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
@@ -27,6 +28,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <errno.h>
+#include <math.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -1226,6 +1228,91 @@ void test_sim_show_bu(void) {
   config_destroy(config);
 }
 
+void test_sim_static_prior(void) {
+  const double prior_samples = 1000000.0;
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 equity -s2 equity -r1 all -r2 all "
+      "-numplays 5 -plies 2 -threads 1 -iter 5 -minp 1 -sr rr "
+      "-scond none -sinfer false -seed 42 -uwin 1 -uspread 0.5 "
+      "-uspreadscale 100 -staticprior 1000000");
+  load_and_exec_config_or_die(config, "cgp " EMPTY_CGP);
+  load_and_exec_config_or_die(config, "rack AEIQRST");
+  load_and_exec_config_or_die(config, "gen");
+  // Pass carries EQUITY_PASS_VALUE as a sort sentinel, not a numeric equity.
+  // Including it here guards the prior builder's zero-equity treatment.
+  move_set_as_pass(move_list_get_move(config_get_move_list(config), 4));
+  load_and_exec_config_or_die(config, "set -seed 42");
+
+  SimResults *sim_results = config_get_sim_results(config);
+  assert(config_simulate_and_return_status(config, NULL, NULL, sim_results) ==
+         ERROR_STATUS_SUCCESS);
+  const int num_plays = sim_results_get_number_of_plays(sim_results);
+  assert(num_plays == 5);
+  assert(sim_results_get_iteration_count(sim_results) == (uint64_t)num_plays);
+
+  const Game *game = config_get_game(config);
+  const int initial_player = game_get_player_on_turn_index(game);
+  const Player *initial = game_get_player(game, initial_player);
+  const Player *opponent = game_get_player(game, 1 - initial_player);
+  const Equity initial_spread =
+      player_get_score(initial) - player_get_score(opponent);
+  const int unseen = bag_get_letters(game_get_bag(game)) +
+                     rack_get_total_letters(player_get_rack(opponent));
+
+  int expected_best = -1;
+  double expected_best_mean = -1.0;
+  for (int i = 0; i < num_plays; i++) {
+    const SimmedPlay *play = sim_results_get_simmed_play(sim_results, i);
+    const Stat *utility_stat = simmed_play_get_utility_stat(play);
+    // The prior must not satisfy minplayiterations or appear as rollout data.
+    assert(stat_get_num_samples(utility_stat) == 1);
+
+    // No spread forecast is loaded in this fixture, so the fallback prior is
+    // current spread + static equity.
+    const Move *move = simmed_play_get_move(play);
+    const double static_equity = move_get_type(move) == GAME_EVENT_PASS
+                                     ? 0.0
+                                     : equity_to_double(move_get_equity(move));
+    const Equity prior_spread =
+        double_to_equity(equity_to_double(initial_spread) + static_equity);
+    const double prior_win_pct = (double)win_pct_get(
+        config_get_win_pcts(config), (int)round(equity_to_double(prior_spread)),
+        (unsigned int)unseen);
+    const double prior_utility =
+        sim_utility_blend(prior_win_pct, prior_spread, 1.0, 0.5, 100.0);
+    const double empirical_mean = stat_get_mean(utility_stat);
+    const double expected_mean =
+        (empirical_mean + prior_samples * prior_utility) /
+        (1.0 + prior_samples);
+    const double actual_mean = simmed_play_get_posterior_utility_mean(play);
+    assert(within_epsilon(actual_mean, expected_mean));
+    if (expected_best < 0 || expected_mean > expected_best_mean) {
+      expected_best = i;
+      expected_best_mean = expected_mean;
+    }
+  }
+
+  // BAI and the final/display comparator must maximize the same posterior.
+  assert(bai_result_get_best_arm(sim_results_get_bai_result(sim_results)) ==
+         expected_best);
+  assert(sim_results_get_best_move_index(sim_results) == expected_best);
+  assert(within_epsilon(sim_results_get_best_move_utility(sim_results),
+                        expected_best_mean));
+
+  SimResults *multithreaded =
+      sim_results_create(convert_user_cutoff_to_cutoff(0.005));
+  load_and_exec_config_or_die(config, "set -threads 4 -seed 42");
+  assert(config_simulate_and_return_status(config, NULL, NULL, multithreaded) ==
+         ERROR_STATUS_SUCCESS);
+  assert_sim_results_equal(sim_results, multithreaded);
+  assert(sim_results_get_best_move_index(multithreaded) == expected_best);
+  assert(within_epsilon(sim_results_get_best_move_utility(multithreaded),
+                        expected_best_mean));
+
+  sim_results_destroy(multithreaded);
+  config_destroy(config);
+}
+
 void test_sim(void) {
   const char *sim_perf_iters = getenv("SIM_PERF_ITERS");
   if (sim_perf_iters) {
@@ -1249,6 +1336,7 @@ void test_sim(void) {
     test_sim_endgame();
     test_sim_best_move_equity_tiebreak();
     test_sim_show_bu();
+    test_sim_static_prior();
     test_sim_avoid_prune();
     test_sim_avoid_prune_multi();
     test_sim_avoid_prune_cmd();

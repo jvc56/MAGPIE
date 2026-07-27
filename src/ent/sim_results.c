@@ -45,6 +45,12 @@ struct SimmedPlay {
   // Copied from SimResults at the same points cutoff is refreshed. Nonzero
   // means the BU (blended utility) stat is meaningful for this play.
   double utility_w_spread;
+  // Static evaluation is a finite-strength prior over the same BAI utility.
+  // These fields are initialized before workers start and then immutable.
+  double static_prior_utility;
+  double static_prior_win_pct;
+  double static_prior_equity;
+  double static_prior_equivalent_samples;
 };
 
 struct SimResults {
@@ -114,6 +120,10 @@ SimmedPlay *simmed_play_create(const MoveList *move_list, int num_plies,
   simmed_play->play_index_by_sort_type = i;
   simmed_play->cutoff = cutoff;
   simmed_play->utility_w_spread = 0.0;
+  simmed_play->static_prior_utility = 0.0;
+  simmed_play->static_prior_win_pct = 0.0;
+  simmed_play->static_prior_equity = 0.0;
+  simmed_play->static_prior_equivalent_samples = 0.0;
   simmed_play->prng = prng_create(seed);
   cpthread_mutex_init(&simmed_play->mutex);
   return simmed_play;
@@ -142,6 +152,10 @@ SimmedPlay *simmed_play_reset(SimmedPlay *simmed_play,
   simmed_play->similarity_key = 0;
   simmed_play->play_index_by_sort_type = i;
   simmed_play->cutoff = cutoff;
+  simmed_play->static_prior_utility = 0.0;
+  simmed_play->static_prior_win_pct = 0.0;
+  simmed_play->static_prior_equity = 0.0;
+  simmed_play->static_prior_equivalent_samples = 0.0;
   prng_seed(simmed_play->prng, seed);
   return simmed_play;
 }
@@ -233,6 +247,10 @@ void simmed_play_copy(SimmedPlay *dst, const SimmedPlay *src,
   stat_copy(dst->utility_stat, src->utility_stat);
   dst->similarity_key = src->similarity_key;
   dst->play_index_by_sort_type = src->play_index_by_sort_type;
+  dst->static_prior_utility = src->static_prior_utility;
+  dst->static_prior_win_pct = src->static_prior_win_pct;
+  dst->static_prior_equity = src->static_prior_equity;
+  dst->static_prior_equivalent_samples = src->static_prior_equivalent_samples;
   for (int i = 0; i < num_plies; i++) {
     stat_copy(dst->ply_infos[i].score_stat, src->ply_infos[i].score_stat);
     stat_copy(dst->ply_infos[i].bingo_stat, src->ply_infos[i].bingo_stat);
@@ -510,6 +528,62 @@ void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility) {
   cpthread_mutex_unlock(&simmed_play->mutex);
 }
 
+void simmed_play_set_static_prior(SimmedPlay *simmed_play, const double utility,
+                                  const double win_pct, const double equity,
+                                  const double equivalent_samples) {
+  simmed_play->static_prior_utility = utility;
+  simmed_play->static_prior_win_pct = win_pct;
+  simmed_play->static_prior_equity = equity;
+  simmed_play->static_prior_equivalent_samples = equivalent_samples;
+}
+
+void simmed_play_get_static_utility_prior(const SimmedPlay *simmed_play,
+                                          double *utility,
+                                          double *equivalent_samples) {
+  *utility = simmed_play->static_prior_utility;
+  *equivalent_samples = simmed_play->static_prior_equivalent_samples;
+}
+
+static double mix_with_prior(const double empirical_mean,
+                             const uint64_t empirical_num_samples,
+                             const double prior_mean,
+                             const double prior_equivalent_samples) {
+  if (prior_equivalent_samples == 0.0) {
+    return empirical_mean;
+  }
+  return (empirical_mean * (double)empirical_num_samples +
+          prior_mean * prior_equivalent_samples) /
+         ((double)empirical_num_samples + prior_equivalent_samples);
+}
+
+double simmed_play_mix_with_static_prior(const SimmedPlay *simmed_play,
+                                         const double empirical_mean,
+                                         const uint64_t empirical_num_samples) {
+  return mix_with_prior(empirical_mean, empirical_num_samples,
+                        simmed_play->static_prior_utility,
+                        simmed_play->static_prior_equivalent_samples);
+}
+
+double simmed_play_get_posterior_utility_mean(const SimmedPlay *simmed_play) {
+  return simmed_play_mix_with_static_prior(
+      simmed_play, stat_get_mean(simmed_play->utility_stat),
+      stat_get_num_samples(simmed_play->utility_stat));
+}
+
+double simmed_play_get_posterior_win_pct_mean(const SimmedPlay *simmed_play) {
+  return mix_with_prior(stat_get_mean(simmed_play->win_pct_stat),
+                        stat_get_num_samples(simmed_play->win_pct_stat),
+                        simmed_play->static_prior_win_pct,
+                        simmed_play->static_prior_equivalent_samples);
+}
+
+double simmed_play_get_posterior_equity_mean(const SimmedPlay *simmed_play) {
+  return mix_with_prior(stat_get_mean(simmed_play->equity_stat),
+                        stat_get_num_samples(simmed_play->equity_stat),
+                        simmed_play->static_prior_equity,
+                        simmed_play->static_prior_equivalent_samples);
+}
+
 double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     Equity spread, Equity leftover,
                                     game_end_reason_t game_end_reason,
@@ -597,8 +671,10 @@ int compare_simmed_plays(const void *a, const void *b) {
   // blended utility (BU); rank the display the same way so the sort order
   // matches sim_results_get_best_move's choice.
   if (play_a->utility_w_spread > 0.0) {
-    const double utility_mean_a = stat_get_mean(play_a->utility_stat);
-    const double utility_mean_b = stat_get_mean(play_b->utility_stat);
+    const double utility_mean_a =
+        simmed_play_get_posterior_utility_mean(play_a);
+    const double utility_mean_b =
+        simmed_play_get_posterior_utility_mean(play_b);
     if (utility_mean_a > utility_mean_b) {
       return -1;
     }
@@ -608,13 +684,13 @@ int compare_simmed_plays(const void *a, const void *b) {
     return compare_simmed_plays_pass_tiebreak(play_a, play_b);
   }
 
-  const double win_pct_mean_a = stat_get_mean(play_a->win_pct_stat);
-  const double win_pct_mean_b = stat_get_mean(play_b->win_pct_stat);
+  const double win_pct_mean_a = simmed_play_get_posterior_win_pct_mean(play_a);
+  const double win_pct_mean_b = simmed_play_get_posterior_win_pct_mean(play_b);
   const double cutoff = play_a->cutoff;
   if (are_win_pcts_within_cutoff_or_equal(win_pct_mean_a, win_pct_mean_b,
                                           cutoff)) {
-    const double equity_mean_a = stat_get_mean(play_a->equity_stat);
-    const double equity_mean_b = stat_get_mean(play_b->equity_stat);
+    const double equity_mean_a = simmed_play_get_posterior_equity_mean(play_a);
+    const double equity_mean_b = simmed_play_get_posterior_equity_mean(play_b);
     // Compare by equity_stat->mean
     if (equity_mean_a > equity_mean_b) {
       return -1;
@@ -745,7 +821,7 @@ double sim_results_get_best_move_utility(const SimResults *sim_results) {
   // skips it). With a zero spread weight the utility IS the win% -- read it
   // from win_pct_stat rather than the empty utility_stat, which would report 0.
   if (sim_results->utility_w_spread == 0.0) {
-    return stat_get_mean(simmed_play_get_win_pct_stat(best_play));
+    return simmed_play_get_posterior_win_pct_mean(best_play);
   }
-  return stat_get_mean(simmed_play_get_utility_stat(best_play));
+  return simmed_play_get_posterior_utility_mean(best_play);
 }

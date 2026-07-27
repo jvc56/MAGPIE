@@ -47,6 +47,18 @@ double simmed_play_add_win_pct_stat(const WinPct *wp, SimmedPlay *simmed_play,
                                     game_end_reason_t game_end_reason,
                                     int game_unseen_tiles, bool plies_are_odd);
 void simmed_play_add_utility_stat(SimmedPlay *simmed_play, double utility);
+void simmed_play_set_static_prior(SimmedPlay *simmed_play, double utility,
+                                  double win_pct, double equity,
+                                  double equivalent_samples);
+void simmed_play_get_static_utility_prior(const SimmedPlay *simmed_play,
+                                          double *utility,
+                                          double *equivalent_samples);
+double simmed_play_mix_with_static_prior(const SimmedPlay *simmed_play,
+                                         double empirical_mean,
+                                         uint64_t empirical_num_samples);
+double simmed_play_get_posterior_utility_mean(const SimmedPlay *simmed_play);
+double simmed_play_get_posterior_win_pct_mean(const SimmedPlay *simmed_play);
+double simmed_play_get_posterior_equity_mean(const SimmedPlay *simmed_play);
 
 typedef struct SimResults SimResults;
 

@@ -2474,35 +2474,48 @@ void test_config_exchange_blank(void) {
 void test_config_utility_blend(void) {
   ErrorStack *error_stack = error_stack_create();
 
-  // Defaults: (1.0, 0.5, 100.0), fanned out identically to both players.
+  // Defaults: (1.0, 0.5, 100.0), with the static prior disabled, fanned out
+  // identically to both players.
   {
     Config *config = config_create_default_test();
     assert(within_epsilon(config_get_utility_w_winpct(config), 1.0));
     assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_utility_spread_scale(config), 100.0));
+    assert(within_epsilon(config_get_static_prior_equivalent_samples(config),
+                          0.0));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 1.0));
     assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p1_utility_spread_scale(config), 100.0));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
     assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.5));
     assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
+    assert(within_epsilon(config_get_p1_static_prior_equivalent_samples(config),
+                          0.0));
+    assert(within_epsilon(config_get_p2_static_prior_equivalent_samples(config),
+                          0.0));
     config_destroy(config);
   }
 
   // Global -uwin / -uspread / -uspreadscale fans out to both players.
   {
     Config *config = config_create_default_test();
-    load_and_exec_config_or_die(config,
-                                "set -uwin 0.7 -uspread 0.3 -uspreadscale 80");
+    load_and_exec_config_or_die(
+        config, "set -uwin 0.7 -uspread 0.3 -uspreadscale 80 -staticprior 40");
     assert(within_epsilon(config_get_utility_w_winpct(config), 0.7));
     assert(within_epsilon(config_get_utility_w_spread(config), 0.3));
     assert(within_epsilon(config_get_utility_spread_scale(config), 80.0));
+    assert(within_epsilon(config_get_static_prior_equivalent_samples(config),
+                          40.0));
     assert(within_epsilon(config_get_p1_utility_w_winpct(config), 0.7));
     assert(within_epsilon(config_get_p1_utility_w_spread(config), 0.3));
     assert(within_epsilon(config_get_p1_utility_spread_scale(config), 80.0));
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 0.7));
     assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.3));
     assert(within_epsilon(config_get_p2_utility_spread_scale(config), 80.0));
+    assert(within_epsilon(config_get_p1_static_prior_equivalent_samples(config),
+                          40.0));
+    assert(within_epsilon(config_get_p2_static_prior_equivalent_samples(config),
+                          40.0));
     config_destroy(config);
   }
 
@@ -2512,7 +2525,9 @@ void test_config_utility_blend(void) {
     load_and_exec_config_or_die(config,
                                 "set -uwin 0.5 -uspread 0.5 -uspreadscale 100 "
                                 "-uwin1 1 -uspread1 2 -uspreadscale1 50 "
-                                "-uwin2 1 -uspread2 0");
+                                "-uwin2 1 -uspread2 0 "
+                                "-staticprior 20 -staticprior1 5 "
+                                "-staticprior2 80");
     // Global retains what was set.
     assert(within_epsilon(config_get_utility_w_winpct(config), 0.5));
     assert(within_epsilon(config_get_utility_w_spread(config), 0.5));
@@ -2525,6 +2540,12 @@ void test_config_utility_blend(void) {
     assert(within_epsilon(config_get_p2_utility_w_winpct(config), 1.0));
     assert(within_epsilon(config_get_p2_utility_w_spread(config), 0.0));
     assert(within_epsilon(config_get_p2_utility_spread_scale(config), 100.0));
+    assert(within_epsilon(config_get_static_prior_equivalent_samples(config),
+                          20.0));
+    assert(within_epsilon(config_get_p1_static_prior_equivalent_samples(config),
+                          5.0));
+    assert(within_epsilon(config_get_p2_static_prior_equivalent_samples(config),
+                          80.0));
     config_destroy(config);
   }
 
@@ -2565,6 +2586,9 @@ void test_config_utility_blend(void) {
   // Non-numeric value is rejected.
   test_config_load_error(err_config, "set -uwin abc",
                          ERROR_STATUS_CONFIG_LOAD_MALFORMED_DOUBLE_ARG,
+                         error_stack);
+  test_config_load_error(err_config, "set -staticprior -1",
+                         ERROR_STATUS_CONFIG_LOAD_DOUBLE_ARG_OUT_OF_BOUNDS,
                          error_stack);
 
   config_destroy(err_config);

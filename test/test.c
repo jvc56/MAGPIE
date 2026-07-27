@@ -160,6 +160,8 @@ static TestEntry on_demand_test_table[] = {
     {"viaopp", test_via_opp_must_block_every_depth},
     {"viastress", test_via_interrupted_reasonable_under_time_pressure},
     {"infercmp", test_infer_cmp},
+    {"configutility", test_config_utility_blend},
+    {"simprior", test_sim_static_prior},
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},

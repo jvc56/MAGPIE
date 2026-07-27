@@ -42,6 +42,11 @@ typedef struct BAIArmDatum {
   double *Zs;
 } BAIArmDatum;
 
+typedef struct BAIMeanPrior {
+  double mean;
+  double equivalent_samples;
+} BAIMeanPrior;
+
 typedef struct BAISyncData {
   int num_arms;
   int num_arms_reached_threshold;
@@ -51,6 +56,9 @@ typedef struct BAISyncData {
   int challenger_index;
   bool initial_phase;
   BAIArmDatum *arm_data;
+  // Kept out of BAIArmDatum so the default no-prior path retains its compact,
+  // hot arm layout. NULL when every arm has a zero-weight prior.
+  BAIMeanPrior *mean_priors;
   RandomVariables *rng;
   cpthread_mutex_t mutex;
   ThreadControl *thread_control;
@@ -66,7 +74,8 @@ typedef struct BAISyncData {
 static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
                                                 ThreadControl *thread_control,
                                                 const int num_initial_arms,
-                                                RandomVariables *rng) {
+                                                RandomVariables *rng,
+                                                RandomVariables *rvs) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
   bai_sync_data->num_arms_reached_threshold = 0;
@@ -78,9 +87,19 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->initial_phase = true;
   bai_sync_data->arm_data =
       calloc_or_die(num_initial_arms, sizeof(BAIArmDatum));
+  bai_sync_data->mean_priors =
+      calloc_or_die(num_initial_arms, sizeof(BAIMeanPrior));
+  bool has_mean_prior = false;
   for (int i = 0; i < num_initial_arms; i++) {
+    rvs_get_mean_prior(rvs, (uint64_t)i, &bai_sync_data->mean_priors[i].mean,
+                       &bai_sync_data->mean_priors[i].equivalent_samples);
+    has_mean_prior |= bai_sync_data->mean_priors[i].equivalent_samples != 0.0;
     bai_sync_data->arm_data[i].Zs =
         malloc_or_die(num_initial_arms * sizeof(double));
+  }
+  if (!has_mean_prior) {
+    free(bai_sync_data->mean_priors);
+    bai_sync_data->mean_priors = NULL;
   }
   bai_sync_data->rng = rng;
   cpthread_mutex_init(&bai_sync_data->mutex);
@@ -97,6 +116,7 @@ static inline void bai_sync_data_destroy(BAISyncData *bai_sync_data) {
     free(bai_sync_data->arm_data[i].Zs);
   }
   free(bai_sync_data->arm_data);
+  free(bai_sync_data->mean_priors);
   free(bai_sync_data);
 }
 
@@ -332,11 +352,20 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
   sample_arm_datum->num_samples++;
   sample_arm_datum->samples_sum += sample_value;
   sample_arm_datum->samples_squared_sum += sample_value * sample_value;
-  sample_arm_datum->mean =
+  const double empirical_mean =
       sample_arm_datum->samples_sum / sample_arm_datum->num_samples;
+  if (args->bai_sync_data->mean_priors == NULL) {
+    sample_arm_datum->mean = empirical_mean;
+  } else {
+    const BAIMeanPrior *prior = &args->bai_sync_data->mean_priors[arm_index];
+    sample_arm_datum->mean =
+        (sample_arm_datum->samples_sum +
+         prior->mean * prior->equivalent_samples) /
+        ((double)sample_arm_datum->num_samples + prior->equivalent_samples);
+  }
   sample_arm_datum->var =
       sample_arm_datum->samples_squared_sum / sample_arm_datum->num_samples -
-      sample_arm_datum->mean * sample_arm_datum->mean;
+      empirical_mean * empirical_mean;
   if (sample_arm_datum->var < MINIMUM_VARIANCE) {
     sample_arm_datum->var = MINIMUM_VARIANCE;
   }
@@ -539,8 +568,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   Checkpoint *checkpoint =
       checkpoint_create(bai_options->num_threads, bai_finish_initial_phase);
 
-  BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
-                                                (int)rvs_get_num_rvs(rvs), rng);
+  BAISyncData *sync_data = bai_sync_data_create(
+      bai_result, thread_control, (int)rvs_get_num_rvs(rvs), rng, rvs);
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
     sync_data->avoid_prune_arms = bai_options->arm_avoid_prune;

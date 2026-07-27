@@ -500,6 +500,7 @@ static NominationResult nominate_candidate_list_with_klv2_policy(
                 config_get_utility_w_winpct(klv2_config),
                 config_get_utility_w_spread(klv2_config),
                 config_get_utility_spread_scale(klv2_config),
+                /*static_prior_equivalent_samples=*/0.0,
                 /*inference_args=*/NULL, &sim_args);
 
   Timer timer;
@@ -1018,6 +1019,7 @@ static void run_nested_policy(NestedPolicyContext *context, const Game *game,
                 /*utility_w_winpct=*/1.0,
                 /*utility_w_spread=*/0.5,
                 /*utility_spread_scale=*/100.0,
+                /*static_prior_equivalent_samples=*/0.0,
                 /*inference_args=*/NULL, &sim_args);
   simulate(&sim_args, &context->sim_ctx, context->sim_results,
            context->error_stack);

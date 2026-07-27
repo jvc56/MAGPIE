@@ -496,6 +496,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
+      strategy->static_prior_equivalent_samples,
       /*inference_args=*/NULL, &sim_args);
   sim_args.spread_forecast = strategy->spread_forecast;
 

@@ -14,6 +14,7 @@
 //   SIMBENCH_WIT    "true" / "false" — toggles the WIT file (default false)
 //   SIMBENCH_KLV    optional KLV/KLV3 name for both players
 //   SIMBENCH_SPREAD_FORECAST optional terminal-spread forecast name
+//   SIMBENCH_STATIC_PRIOR equivalent rollout samples for static prior
 
 #include "sim_benchmark_test.h"
 
@@ -68,15 +69,21 @@ void test_sim_benchmark(void) {
     (void)snprintf(spread_forecast_args, sizeof(spread_forecast_args),
                    "-spreadforecast %s ", spread_forecast);
   }
-  char cmd[672];
+  const char *static_prior = getenv("SIMBENCH_STATIC_PRIOR");
+  char static_prior_args[96] = "";
+  if (static_prior != NULL) {
+    (void)snprintf(static_prior_args, sizeof(static_prior_args),
+                   "-staticprior %s ", static_prior);
+  }
+  char cmd[768];
   (void)snprintf(cmd, sizeof(cmd),
-                 "set -lex CSW24 %s%s-wmp %s -rit %s -ritmmap %s -wit %s "
+                 "set -lex CSW24 %s%s%s-wmp %s -rit %s -ritmmap %s -wit %s "
                  "-s1 equity "
                  "-s2 equity "
                  "-r1 all -r2 all -numplays 15 -plies %d -threads %d "
                  "-tlim %s -seed 42 -sr tt -minplayiterations %s",
-                 klv_args, spread_forecast_args, wmp, rit, rit_mmap, wit, plies,
-                 threads, tlim, mi);
+                 klv_args, spread_forecast_args, static_prior_args, wmp, rit,
+                 rit_mmap, wit, plies, threads, tlim, mi);
   Config *config = config_create_or_die(cmd);
 
   load_and_exec_config_or_die(config, "autoplay games 1");

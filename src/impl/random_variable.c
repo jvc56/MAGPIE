@@ -37,6 +37,8 @@ typedef double (*rvs_sample_func_t)(RandomVariables *, const uint64_t,
 typedef bool (*rvs_similar_func_t)(RandomVariables *, const int, const int);
 typedef void (*rvs_destroy_data_func_t)(RandomVariables *);
 typedef int (*rvs_get_best_arm_index_func_t)(const RandomVariables *);
+typedef void (*rvs_get_mean_prior_func_t)(const RandomVariables *,
+                                          const uint64_t, double *, double *);
 
 struct RandomVariables {
   uint64_t num_rvs;
@@ -45,8 +47,17 @@ struct RandomVariables {
   rvs_similar_func_t similar_func;
   rvs_destroy_data_func_t destroy_data_func;
   rvs_get_best_arm_index_func_t get_best_arm_index_func;
+  rvs_get_mean_prior_func_t get_mean_prior_func;
   void *data;
 };
+
+static void rv_no_mean_prior(const RandomVariables *rvs __attribute__((unused)),
+                             const uint64_t arm_index __attribute__((unused)),
+                             double *prior_mean,
+                             double *prior_equivalent_samples) {
+  *prior_mean = 0.0;
+  *prior_equivalent_samples = 0.0;
+}
 
 // Draws a uniform value in [0, 1) from prng. Caller must hold whatever mutex
 // guards prng (see uniform_sample for the self-locking variant).
@@ -99,6 +110,7 @@ void rv_uniform_create(RandomVariables *rvs, const uint64_t seed) {
   rvs->similar_func = rv_uniform_are_similar;
   rvs->destroy_data_func = rv_uniform_destroy;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->get_mean_prior_func = rv_no_mean_prior;
   RVUniform *rv_uniform = malloc_or_die(sizeof(RVUniform));
   rv_uniform->xoshiro_prng = prng_create(seed);
   cpthread_mutex_init(&rv_uniform->mutex);
@@ -156,6 +168,7 @@ void rv_uniform_predetermined_create(RandomVariables *rvs,
   rvs->similar_func = rv_uniform_predetermined_are_similar;
   rvs->destroy_data_func = rv_uniform_predetermined_destroy;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->get_mean_prior_func = rv_no_mean_prior;
   RVUniformPredetermined *rv_uniform_predetermined =
       malloc_or_die(sizeof(RVUniformPredetermined));
   rv_uniform_predetermined->num_samples = num_samples;
@@ -262,6 +275,7 @@ void rv_normal_create(RandomVariables *rvs, const uint64_t seed,
   rvs->similar_func = rv_normal_are_similar;
   rvs->destroy_data_func = rv_normal_destroy;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->get_mean_prior_func = rv_no_mean_prior;
   RVNormal *rv_normal = malloc_or_die(sizeof(RVNormal));
   rv_normal->num_arms = rvs->num_rvs;
   rv_normal->xoshiro_prngs =
@@ -351,6 +365,7 @@ void rv_normal_predetermined_create(RandomVariables *rvs, const double *samples,
   rvs->similar_func = rv_normal_predetermined_are_similar;
   rvs->destroy_data_func = rv_normal_predetermined_destroy;
   rvs->get_best_arm_index_func = rv_unsupported_get_best_arm_index;
+  rvs->get_mean_prior_func = rv_no_mean_prior;
   RVNormalPredetermined *rv_normal_predetermined =
       malloc_or_die(sizeof(RVNormalPredetermined));
   rv_normal_predetermined->num_samples = num_samples;
@@ -409,6 +424,70 @@ typedef struct Simmer {
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
+
+static void simmer_set_static_priors(Simmer *simmer, const SimArgs *sim_args) {
+  const double prior_samples = sim_args->static_prior_equivalent_samples;
+  if (prior_samples == 0.0) {
+    return;
+  }
+
+  const int num_plays = move_list_get_count(sim_args->move_list);
+  const Move *first_move = move_list_get_move(sim_args->move_list, 0);
+  double best_static_equity =
+      move_get_type(first_move) == GAME_EVENT_PASS
+          ? 0.0
+          : equity_to_double(move_get_equity(first_move));
+  for (int i = 1; i < num_plays; i++) {
+    const Move *move = move_list_get_move(sim_args->move_list, i);
+    const double equity = move_get_type(move) == GAME_EVENT_PASS
+                              ? 0.0
+                              : equity_to_double(move_get_equity(move));
+    if (equity > best_static_equity) {
+      best_static_equity = equity;
+    }
+  }
+
+  // The forecast is calibrated on positions whose continuation chooses the
+  // best static move. Anchor that move at the root forecast, then use static
+  // equity only for candidates' relative deltas. Without a forecast this
+  // reduces to the traditional current-spread-plus-static-equity estimate.
+  double baseline_spread;
+  if (sim_args->spread_forecast != NULL) {
+    baseline_spread = equity_to_double(spread_forecast_get(
+        sim_args->spread_forecast, sim_args->game, simmer->initial_player));
+  } else {
+    baseline_spread =
+        equity_to_double(simmer->initial_spread) + best_static_equity;
+  }
+
+  const int unseen_tiles =
+      bag_get_letters(game_get_bag(sim_args->game)) +
+      rack_get_total_letters(player_get_rack(
+          game_get_player(sim_args->game, 1 - simmer->initial_player)));
+  for (int i = 0; i < num_plays; i++) {
+    SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(simmer->sim_results, i);
+    const Move *move = simmed_play_get_move(simmed_play);
+    // Pass uses an ordering sentinel instead of a numeric equity. Its static
+    // contribution is zero: no score and the rack is unchanged.
+    const double static_equity = move_get_type(move) == GAME_EVENT_PASS
+                                     ? 0.0
+                                     : equity_to_double(move_get_equity(move));
+    const double static_delta = static_equity - best_static_equity;
+    const Equity prior_spread =
+        double_to_equity(baseline_spread + static_delta);
+    const double prior_win_pct = (double)win_pct_get(
+        simmer->win_pcts, (int)round(equity_to_double(prior_spread)),
+        (unsigned int)unseen_tiles);
+    const double prior_utility = sim_utility_blend(
+        prior_win_pct, prior_spread, simmer->utility_w_winpct,
+        simmer->utility_w_spread, simmer->utility_spread_scale);
+    const double prior_equity = equity_to_double(prior_spread) -
+                                equity_to_double(simmer->initial_spread);
+    simmed_play_set_static_prior(simmed_play, prior_utility, prior_win_pct,
+                                 prior_equity, prior_samples);
+  }
+}
 
 SimmerWorker *simmer_create_worker(const Game *game) {
   SimmerWorker *simmer_worker = malloc_or_die(sizeof(SimmerWorker));
@@ -594,6 +673,16 @@ static int rv_sim_get_best_arm_index(const RandomVariables *rvs) {
   return sim_results_get_best_move_index(simmer->sim_results);
 }
 
+static void rv_sim_get_mean_prior(const RandomVariables *rvs,
+                                  const uint64_t play_index, double *prior_mean,
+                                  double *prior_equivalent_samples) {
+  const Simmer *simmer = (const Simmer *)rvs->data;
+  const SimmedPlay *simmed_play =
+      sim_results_get_simmed_play(simmer->sim_results, (int)play_index);
+  simmed_play_get_static_utility_prior(simmed_play, prior_mean,
+                                       prior_equivalent_samples);
+}
+
 bool rv_sim_are_similar(RandomVariables *rvs, const int i, const int j) {
   const Simmer *simmer = (Simmer *)rvs->data;
   return sim_results_plays_are_similar(simmer->sim_results, i, j);
@@ -616,6 +705,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   rvs->similar_func = rv_sim_are_similar;
   rvs->destroy_data_func = rv_sim_destroy;
   rvs->get_best_arm_index_func = rv_sim_get_best_arm_index;
+  rvs->get_mean_prior_func = rv_sim_get_mean_prior;
 
   rvs->num_rvs = move_list_get_count(sim_args->move_list);
 
@@ -671,6 +761,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   sim_results_reset(sim_args->move_list, sim_results, sim_args->num_plies,
                     sim_args->seed, sim_args->use_heat_map);
   simmer->sim_results = sim_results;
+  simmer_set_static_priors(simmer, sim_args);
 
   rvs->data = simmer;
   return rvs;
@@ -722,6 +813,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,
                     sim_args->use_heat_map);
+  simmer_set_static_priors(simmer, sim_args);
 }
 
 RandomVariables *rvs_create(const RandomVariablesArgs *rvs_args) {
@@ -807,4 +899,10 @@ uint64_t rvs_get_total_samples(const RandomVariables *rvs) {
 
 int rvs_get_best_arm_index(const RandomVariables *rvs) {
   return rvs->get_best_arm_index_func(rvs);
+}
+
+void rvs_get_mean_prior(const RandomVariables *rvs, const uint64_t arm_index,
+                        double *prior_mean, double *prior_equivalent_samples) {
+  rvs->get_mean_prior_func(rvs, arm_index, prior_mean,
+                           prior_equivalent_samples);
 }

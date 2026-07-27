@@ -204,10 +204,10 @@ bool string_builder_add_sim_stats_with_display_lock(
     curr_col++;
 
     if (display_bu) {
-      const Stat *utility_stat = simmed_play_get_utility_stat(sp);
       string_grid_set_cell(
           sg, curr_row, curr_col++,
-          get_formatted_string("%.2f", stat_get_mean(utility_stat) * 100));
+          get_formatted_string(
+              "%.2f", simmed_play_get_posterior_utility_mean(sp) * 100));
     }
 
     const Stat *win_pct_stat = simmed_play_get_win_pct_stat(sp);

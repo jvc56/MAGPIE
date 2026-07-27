@@ -96,6 +96,9 @@ typedef struct PlayChooserStrategy {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Root static-equity prior strength in equivalent real rollout samples.
+  // Zero disables the prior.
+  double static_prior_equivalent_samples;
   uint64_t seed;
 } PlayChooserStrategy;
 
