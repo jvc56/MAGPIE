@@ -1,7 +1,6 @@
 #include "spread_forecast_test.h"
 
 #include "../src/compat/endian_conv.h"
-#include "../src/def/equity_defs.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/spread_forecast.h"
 #include "../src/impl/config.h"
@@ -34,10 +33,10 @@ static void write_test_spread_forecast(void) {
   const uint8_t magic[8] = {'M', 'A', 'G', 'S', 'P', 'R', 'D', '\0'};
   assert(fwrite(magic, sizeof(magic), 1, stream) == 1);
   const uint32_t header[4] = {
-      htole32(1),
-      htole32(TEST_MAX_BAG),
-      htole32(TEST_MAX_RACK),
-      htole32(TEST_CELL_COUNT),
+      convert_uint32_to_le(1),
+      convert_uint32_to_le(TEST_MAX_BAG),
+      convert_uint32_to_le(TEST_MAX_RACK),
+      convert_uint32_to_le(TEST_CELL_COUNT),
   };
   assert(fwrite(header, sizeof(uint32_t), 4, stream) == 4);
   for (int i = 0; i < TEST_CELL_COUNT; i++) {
@@ -61,7 +60,7 @@ static void write_test_spread_forecast(void) {
         convert_float_to_le(on_turn_turns),
         convert_float_to_le(off_turn_turns),
     };
-    const uint32_t le_samples = htole32(samples);
+    const uint32_t le_samples = convert_uint32_to_le(samples);
     assert(fwrite(values, sizeof(float), 3, stream) == 3);
     assert(fwrite(&le_samples, sizeof(uint32_t), 1, stream) == 1);
   }

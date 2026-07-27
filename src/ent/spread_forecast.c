@@ -105,10 +105,10 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
     return NULL;
   }
 
-  const uint32_t version = le32toh(header[0]);
-  const uint32_t max_bag_tiles = le32toh(header[1]);
-  const uint32_t max_rack_tiles = le32toh(header[2]);
-  const uint32_t cell_count = le32toh(header[3]);
+  const uint32_t version = convert_uint32_from_le(header[0]);
+  const uint32_t max_bag_tiles = convert_uint32_from_le(header[1]);
+  const uint32_t max_rack_tiles = convert_uint32_from_le(header[2]);
+  const uint32_t cell_count = convert_uint32_from_le(header[3]);
   const uint64_t expected_cell_count = ((uint64_t)max_bag_tiles + 1) *
                                        ((uint64_t)max_rack_tiles + 1) *
                                        ((uint64_t)max_rack_tiles + 1);
@@ -162,7 +162,7 @@ SpreadForecast *spread_forecast_create(const char *data_paths, const char *name,
         .expected_spread_swing = double_to_equity(spread_swing),
         .expected_on_turn_turns = on_turn_turns,
         .expected_off_turn_turns = off_turn_turns,
-        .sample_count = le32toh(sample_count),
+        .sample_count = convert_uint32_from_le(sample_count),
     };
   }
 
