@@ -199,20 +199,37 @@ pgo_eg:
 # Accept the originally proposed endgame spelling as an alias.
 peg_eg: pgo_eg
 
-# Reuse or build the production RIT, discard all previous profile data, train
-# a freshly instrumented production engine, and replace bin/magpie with the
-# profile-guided native build. The dedicated driver contains no benchmark
+# Reuse or build the production RIT and WIT, discard all previous profile data,
+# train a freshly instrumented production engine, and replace bin/magpie with
+# the profile-guided native build. The dedicated driver contains no benchmark
 # harness; it invokes real engine workloads directly.
 pgo_workload:
-	@if test -f data/lexica/CSW24.rit; then \
+	@need_converter=false; \
+	if test -f data/lexica/CSW24.rit; then \
 		echo 'Using existing data/lexica/CSW24.rit'; \
 	else \
+		need_converter=true; \
+	fi; \
+	if test -f data/lexica/CSW24.wit; then \
+		echo 'Using existing data/lexica/CSW24.wit'; \
+	else \
+		need_converter=true; \
+	fi; \
+	if $$need_converter; then \
 		$(MAKE) -B magpie \
 			BUILD=no_pgo_release \
 			CC="$(PGO_CC)" \
 			LDFLAGS="-pthread -flto $(PGO_LDFLAGS)"; \
+	fi; \
+	if ! test -f data/lexica/CSW24.rit; then \
 		printf 'convert klvwmp2rit CSW24\n' | \
-			./$(BIN_DIR)/magpie "set -lex CSW24 -wmp true -rit false"; \
+			./$(BIN_DIR)/magpie \
+				"set -lex CSW24 -wmp true -rit false -wit false"; \
+	fi; \
+	if ! test -f data/lexica/CSW24.wit; then \
+		printf 'convert kwg2wit CSW24\n' | \
+			./$(BIN_DIR)/magpie \
+				"set -lex CSW24 -wmp true -rit false -wit false"; \
 	fi
 	$(RM) -r $(PGO_RAW_DIR) $(PGO_PROFILE)
 	mkdir -p $(PGO_RAW_DIR)

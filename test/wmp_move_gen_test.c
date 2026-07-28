@@ -24,6 +24,33 @@ void test_wmp_move_gen_inactive(void) {
   assert(!wmp_move_gen_is_active(&wmg));
 }
 
+void test_wit_prune_skips_block_longer_than_anchor_word(void) {
+  WMPMoveGen wmg = {0};
+  Anchor anchor = {
+      .playthrough_blocks = 1,
+      .word_length = 2,
+      .rightmost_start_col = 0,
+  };
+  Square row_cache[BOARD_DIM] = {0};
+  row_cache[0].letter = 1;
+  row_cache[1].letter = 2;
+  row_cache[2].letter = 3;
+
+  uint32_t block_row[BOARD_DIM] = {0};
+  const uint32_t *wit_row_lane[BOARD_DIM] = {0};
+  uint8_t wit_len_lane[BOARD_DIM] = {0};
+  wit_row_lane[0] = block_row;
+  wit_len_lane[0] = 3;
+
+  wmp_move_gen_set_playthrough_bit_rack(
+      &wmg, &anchor, row_cache, wit_row_lane, wit_len_lane);
+
+  // The cached block is not wholly contained in this shorter shadow word, so
+  // it cannot constrain the optional WIT prune.
+  assert(wmg.playthrough_addable == UINT32_MAX);
+  assert(wmg.num_tiles_played_through == 3);
+}
+
 // Set empty leave to 0.0, all one-tile leaves to +1.0, two-tile leaves to +2.0,
 // etc.
 void set_dummy_leave_values(LeaveMap *leave_map) {
@@ -178,6 +205,7 @@ void test_playthrough_bingo_existence(void) {
 
 void test_wmp_move_gen(void) {
   test_wmp_move_gen_inactive();
+  test_wit_prune_skips_block_longer_than_anchor_word();
   test_nonplaythrough_existence();
   test_playthrough_bingo_existence();
 }
