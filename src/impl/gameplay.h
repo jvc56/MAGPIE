@@ -7,6 +7,7 @@
 #include "../ent/game_history.h"
 #include "../ent/move.h"
 #include "../ent/move_undo.h"
+#include "../ent/positional_eval.h"
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "move_gen.h"
@@ -21,6 +22,15 @@ void play_move_no_cross_set_update(const Move *move, Game *game, Rack *leave);
 void play_move_without_drawing_tiles(const Move *move, Game *game);
 void set_random_rack(Game *game, int player_index, const Rack *known_rack);
 const Move *get_top_equity_move(Game *game, MoveList *move_list);
+const Move *get_top_positional_move(Game *game, MoveList *move_list);
+const Move *get_top_positional_move_with_options(
+    Game *game, MoveList *move_list, int candidate_count,
+    Equity equity_margin, int adjustment_scale_thousandths,
+    Equity adjustment_cap);
+void get_positional_hook_features(
+    Game *game, const Move *move,
+    int features[POSITIONAL_HOOK_FEATURE_COUNT]);
+Equity get_positional_adjustment(Game *game, const Move *move);
 Move *get_top_equity_move_for_inferences(
     Game *game, MoveList *move_list, Equity target_equity,
     int target_leave_size_for_exchange_cutoff, Equity equity_margin);

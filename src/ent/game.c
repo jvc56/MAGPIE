@@ -288,7 +288,8 @@ static inline void game_store_wit_block(const WordInfoTable *wit, Board *board,
 }
 
 static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
-                                            int dir, int cross_set_index) {
+                                            int dir, int cross_set_index,
+                                            bool feature_only) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
   }
@@ -297,13 +298,17 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
 
   if (board_is_nonempty_or_bricked(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    if (!feature_only) {
+      board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    }
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index,
                         TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    if (!feature_only) {
+      board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    }
     return;
   }
 
@@ -319,12 +324,16 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
   rack_set_dist_size_and_reset(&cross_set_rack, ld_get_size(ld));
   if (left_col < col) {
     traverse_backwards_add_to_rack(board, row, col - 1, &cross_set_rack);
-    score += traverse_backwards_for_score(board, ld, row, col - 1);
+    if (!feature_only) {
+      score += traverse_backwards_for_score(board, ld, row, col - 1);
+    }
   }
 
   if (right_col > col) {
     traverse_backwards_add_to_rack(board, row, right_col, &cross_set_rack);
-    score += traverse_backwards_for_score(board, ld, row, right_col);
+    if (!feature_only) {
+      score += traverse_backwards_for_score(board, ld, row, right_col);
+    }
   }
 
   const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
@@ -332,12 +341,15 @@ static inline void game_gen_alpha_cross_set(const Game *game, int row, int col,
   board_set_cross_set_with_blank(
       board, row, col, dir, cross_set_index,
       kwg_compute_alpha_cross_set(kwg, &cross_set_rack));
-  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+  if (!feature_only) {
+    board_set_cross_score(board, row, col, dir, cross_set_index, score);
+  }
 }
 
 static inline void game_gen_classic_cross_set(const Game *game, int row,
                                               int col, int dir,
-                                              int cross_set_index) {
+                                              int cross_set_index,
+                                              bool feature_only) {
   if (!board_is_position_in_bounds(row, col)) {
     return;
   }
@@ -346,19 +358,23 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
 
   if (board_is_nonempty_or_bricked(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index, 0);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    if (!feature_only) {
+      board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    }
     return;
   }
   if (board_are_left_and_right_empty(board, row, col)) {
     board_set_cross_set(board, row, col, dir, cross_set_index,
                         TRIVIAL_CROSS_SET);
-    board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    if (!feature_only) {
+      board_set_cross_score(board, row, col, dir, cross_set_index, 0);
+    }
     return;
   }
 
   const KWG *kwg = get_kwg_for_cross_set(game, cross_set_index);
   const uint32_t kwg_root = kwg_get_root_node_index(kwg);
-  const LetterDistribution *ld = game_get_ld(game);
+  const LetterDistribution *ld = feature_only ? NULL : game_get_ld(game);
 
   const int through_dir = board_toggle_dir(dir);
 
@@ -370,7 +386,9 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
   // Cache word info table block rows for the blocks flanking this empty square,
   // keyed to each block's leftmost square in the word (through) direction.
   const WordInfoTable *wit =
-      get_word_info_table_for_cross_set(game, cross_set_index);
+      feature_only
+          ? NULL
+          : get_word_info_table_for_cross_set(game, cross_set_index);
   if (wit != NULL) {
     if (left_col < col) {
       game_store_wit_block(wit, board, row, left_col, col - 1, through_dir,
@@ -395,7 +413,9 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     const uint32_t lnode_index =
         traverse_backwards(kwg, board, row, col - 1, kwg_root, false, 0);
     left_lpath_is_valid = lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, col - 1);
+    if (!feature_only) {
+      score += traverse_backwards_for_score(board, ld, row, col - 1);
+    }
     if (left_lpath_is_valid) {
       kwg_get_letter_sets(kwg, lnode_index, &leftside_leftx_set);
       const uint32_t s_index =
@@ -404,17 +424,21 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
         back_hook_set = kwg_get_letter_sets(kwg, s_index, &leftside_rightx_set);
       }
     }
-    board_set_left_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_leftx_set);
-    board_set_right_extension_set_with_blank(
-        board, row, col - 1, through_dir, cross_set_index, leftside_rightx_set);
-    // Mark the empty square left of the leftside played tiles with the leftx
-    // set for this sequence of tiles. Move generation can use this to avoid
-    // trying to play through tiles we can prove to be dead ends.
-    if (left_col > 0) {
-      board_set_left_extension_set_with_blank(board, row, left_col - 1,
-                                              through_dir, cross_set_index,
-                                              leftside_leftx_set);
+    if (!feature_only) {
+      board_set_left_extension_set_with_blank(
+          board, row, col - 1, through_dir, cross_set_index,
+          leftside_leftx_set);
+      board_set_right_extension_set_with_blank(
+          board, row, col - 1, through_dir, cross_set_index,
+          leftside_rightx_set);
+      // Mark the empty square left of the leftside played tiles with the leftx
+      // set for this sequence of tiles. Move generation can use this to avoid
+      // trying to play through tiles we can prove to be dead ends.
+      if (left_col > 0) {
+        board_set_left_extension_set_with_blank(board, row, left_col - 1,
+                                                through_dir, cross_set_index,
+                                                leftside_leftx_set);
+      }
     }
   }
 
@@ -425,7 +449,9 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     right_lnode_index =
         traverse_backwards(kwg, board, row, right_col, kwg_root, false, 0);
     right_lpath_is_valid = right_lnode_index != 0;
-    score += traverse_backwards_for_score(board, ld, row, right_col);
+    if (!feature_only) {
+      score += traverse_backwards_for_score(board, ld, row, right_col);
+    }
     if (right_lpath_is_valid) {
       front_hook_set =
           kwg_get_letter_sets(kwg, right_lnode_index, &rightside_leftx_set);
@@ -435,15 +461,17 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
         kwg_get_letter_sets(kwg, s_index, &rightside_rightx_set);
       }
     }
-    board_set_left_extension_set_with_blank(board, row, right_col, through_dir,
-                                            cross_set_index,
-                                            rightside_leftx_set);
-    board_set_right_extension_set_with_blank(board, row, right_col, through_dir,
-                                             cross_set_index,
-                                             rightside_rightx_set);
-    // Mark this empty square with the leftx set for rightside played tiles.
-    board_set_left_extension_set_with_blank(
-        board, row, col, through_dir, cross_set_index, rightside_leftx_set);
+    if (!feature_only) {
+      board_set_left_extension_set_with_blank(
+          board, row, right_col, through_dir, cross_set_index,
+          rightside_leftx_set);
+      board_set_right_extension_set_with_blank(
+          board, row, right_col, through_dir, cross_set_index,
+          rightside_rightx_set);
+      // Mark this empty square with the leftx set for rightside played tiles.
+      board_set_left_extension_set_with_blank(
+          board, row, col, through_dir, cross_set_index, rightside_leftx_set);
+    }
   }
 
   if (nonempty_to_left && nonempty_to_right) {
@@ -476,15 +504,26 @@ static inline void game_gen_classic_cross_set(const Game *game, int row,
     board_set_cross_set_with_blank(board, row, col, dir, cross_set_index,
                                    front_hook_set);
   }
-  board_set_cross_score(board, row, col, dir, cross_set_index, score);
+  if (!feature_only) {
+    board_set_cross_score(board, row, col, dir, cross_set_index, score);
+  }
 }
 
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index) {
   if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
-    game_gen_classic_cross_set(game, row, col, dir, cross_set_index);
+    game_gen_classic_cross_set(game, row, col, dir, cross_set_index, false);
   } else {
-    game_gen_alpha_cross_set(game, row, col, dir, cross_set_index);
+    game_gen_alpha_cross_set(game, row, col, dir, cross_set_index, false);
+  }
+}
+
+void game_gen_cross_set_for_features(const Game *game, int row, int col,
+                                     int dir, int cross_set_index) {
+  if (game_get_variant(game) == GAME_VARIANT_CLASSIC) {
+    game_gen_classic_cross_set(game, row, col, dir, cross_set_index, true);
+  } else {
+    game_gen_alpha_cross_set(game, row, col, dir, cross_set_index, true);
   }
 }
 

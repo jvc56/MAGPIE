@@ -390,6 +390,7 @@ typedef struct Simmer {
   const SpreadForecast *spread_forecast;
   bool use_inference;
   bool use_alias_method;
+  bool use_positional_rollout;
   const InferenceResults *inference_results;
   int num_threads;
   // In PGP mode, each autoplay worker has its own simmer with num_threads
@@ -508,7 +509,10 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play =
+        simmer->use_positional_rollout
+            ? get_top_positional_move(game, move_list)
+            : get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
     Equity this_leftover = 0;
     if (ply == plies - 2 || ply == plies - 1) {
@@ -657,6 +661,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->win_pcts = sim_args->win_pcts;
   simmer->spread_forecast = sim_args->spread_forecast;
   simmer->use_inference = sim_args->use_inference;
+  simmer->use_positional_rollout = sim_args->use_positional_rollout;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
@@ -710,6 +715,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   }
 
   simmer->use_inference = sim_args->use_inference;
+  simmer->use_positional_rollout = sim_args->use_positional_rollout;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));

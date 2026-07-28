@@ -20,10 +20,12 @@
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
+#include "../src/ent/positional_eval.h"
 #include "../src/ent/rack.h"
 #include "../src/ent/rack_info_table.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/static_eval.h"
 #include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/win_pct.h"
@@ -75,7 +77,13 @@ enum {
   KLV3_ORACLE_KLV3_POLICY = 1,
   KLV3_ORACLE_ENSEMBLE_POLICY = 2,
   KLV3_ORACLE_NUM_POLICIES = 3,
-  KLV3_ORACLE_MAX_ROOT_CANDIDATES = 3,
+  // Candidate-relative positional experiments may overnominate well beyond
+  // the normal 15 sim arms, then select a smaller adjusted set offline.
+  // High-budget extrapolation needs enough headroom to measure the tail of
+  // candidate-exclusion regret without running the high-budget sims
+  // themselves. This is test-harness storage only; production numplays has
+  // its own configuration limit.
+  KLV3_ORACLE_MAX_ROOT_CANDIDATES = 128,
   KLV3_ORACLE_OUTER_PLIES = 4,
   KLV3_ORACLE_NESTED_PLIES = 2,
 };
@@ -254,6 +262,72 @@ static bool env_bool(const char *name, bool default_value) {
 static const char *env_string(const char *name, const char *default_value) {
   const char *value = getenv(name);
   return value == NULL || value[0] == '\0' ? default_value : value;
+}
+
+static int parse_positive_int_list(const char *name, const char *values,
+                                   int parsed_values[], int capacity) {
+  char *copy = string_duplicate(values);
+  char *saveptr = NULL;
+  int count = 0;
+  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+       token = strtok_r(NULL, ",", &saveptr)) {
+    if (count >= capacity) {
+      log_fatal("%s has more than %d values", name, capacity);
+    }
+    char *endptr = NULL;
+    const long parsed = strtol(token, &endptr, 10);
+    if (endptr == token || *endptr != '\0' || parsed <= 0 ||
+        parsed > INT32_MAX) {
+      log_fatal("%s must be a comma-separated list of positive integers",
+                name);
+    }
+    parsed_values[count++] = (int)parsed;
+  }
+  free(copy);
+  if (count == 0) {
+    log_fatal("%s must contain at least one value", name);
+  }
+  return count;
+}
+
+static int parse_positive_int_pairs(const char *name, const char *values,
+                                    int first_values[], int second_values[],
+                                    int capacity) {
+  char *copy = string_duplicate(values);
+  char *saveptr = NULL;
+  int count = 0;
+  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+       token = strtok_r(NULL, ",", &saveptr)) {
+    if (count >= capacity) {
+      log_fatal("%s has more than %d values", name, capacity);
+    }
+    char *separator = strchr(token, ':');
+    if (separator == NULL || strchr(separator + 1, ':') != NULL) {
+      log_fatal("%s must contain comma-separated positive integer pairs "
+                "formatted first:second",
+                name);
+    }
+    *separator = '\0';
+    char *first_end = NULL;
+    char *second_end = NULL;
+    const long first = strtol(token, &first_end, 10);
+    const long second = strtol(separator + 1, &second_end, 10);
+    if (first_end == token || *first_end != '\0' ||
+        second_end == separator + 1 || *second_end != '\0' || first <= 0 ||
+        second <= 0 || first > INT32_MAX || second > INT32_MAX) {
+      log_fatal("%s must contain comma-separated positive integer pairs "
+                "formatted first:second",
+                name);
+    }
+    first_values[count] = (int)first;
+    second_values[count] = (int)second;
+    count++;
+  }
+  free(copy);
+  if (count == 0) {
+    log_fatal("%s must contain at least one pair", name);
+  }
+  return count;
 }
 
 static Config *create_oracle_config(const char *klv_name, int num_threads,
@@ -462,13 +536,88 @@ static int build_nonoverlap_candidate_lists(Config *klv2_config,
   return top_count - move_list_get_count(klv2_only);
 }
 
+// Build the ordinary top-K static sim set and a positional top-K selected
+// from the first M static moves. The returned lists retain their original
+// static equities; positional equity is used only for set membership.
+static int build_positional_selector_lists(
+    Config *config, MoveList *overgenerated, MoveList *static_top,
+    MoveList *positional_top, int keep_count, int overgenerate_count,
+    int adjustment_scale_thousandths) {
+  const MoveGenArgs gen_args = {
+      .game = config_get_game(config),
+      .move_list = overgenerated,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  generate_moves(&gen_args);
+  move_list_sort_moves(overgenerated);
+  if (move_list_get_count(overgenerated) < overgenerate_count) {
+    log_fatal("positional selector requested %d candidates but movegen "
+              "produced only %d",
+              overgenerate_count, move_list_get_count(overgenerated));
+  }
+
+  move_list_reset(static_top);
+  move_list_reset(positional_top);
+  const Rack *rack = move_list_get_rack(overgenerated);
+  move_list_set_rack(static_top, rack);
+  move_list_set_rack(positional_top, rack);
+  for (int index = 0; index < keep_count; index++) {
+    move_list_add_move(static_top, move_list_get_move(overgenerated, index));
+  }
+
+  bool selected[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {false};
+  for (int slot = 0; slot < keep_count; slot++) {
+    int best_index = -1;
+    int64_t best_adjusted_equity = INT64_MIN;
+    for (int index = 0; index < overgenerate_count; index++) {
+      if (selected[index]) {
+        continue;
+      }
+      const Move *move = move_list_get_move(overgenerated, index);
+      const int64_t adjustment =
+          (int64_t)get_positional_adjustment(config_get_game(config), move) *
+          adjustment_scale_thousandths / 1000;
+      const int64_t adjusted_equity =
+          (int64_t)move_get_equity(move) + adjustment;
+      if (best_index < 0 || adjusted_equity > best_adjusted_equity) {
+        best_index = index;
+        best_adjusted_equity = adjusted_equity;
+      }
+    }
+    assert(best_index >= 0);
+    selected[best_index] = true;
+  }
+  // Preserve static-rank order so candidate ordering is canonical within each
+  // selected set rather than depending on positional score.
+  for (int index = 0; index < overgenerate_count; index++) {
+    if (selected[index]) {
+      move_list_add_move(positional_top,
+                         move_list_get_move(overgenerated, index));
+    }
+  }
+
+  int overlap = 0;
+  for (int index = 0; index < keep_count; index++) {
+    overlap += move_list_contains_move(
+        positional_top, move_list_get_move(static_top, index));
+  }
+  return overlap;
+}
+
 // Simulate a caller-supplied candidate set on the KLV2 game. In particular,
 // candidates selected by KLV3 do not bring KLV3 into rollout move selection or
 // horizon valuation. The exact minimum equals the total cap, which guarantees
 // equal samples per retained arm.
-static NominationResult nominate_candidate_list_with_klv2_policy(
+static NominationResult nominate_candidate_list_with_policy(
     Config *klv2_config, NominationContext *context,
-    const MoveList *candidate_moves, int samples_per_arm, uint64_t fixed_seed) {
+    const MoveList *candidate_moves, int samples_per_arm,
+    double time_limit_seconds, bool use_positional_rollout,
+    uint64_t fixed_seed) {
   const int arm_count = move_list_get_count(candidate_moves);
   assert(arm_count > 0);
   NominationResult result = {0};
@@ -477,8 +626,11 @@ static NominationResult nominate_candidate_list_with_klv2_policy(
     return result;
   }
 
+  const bool use_fixed_samples = samples_per_arm > 0;
   const uint64_t expected_iterations =
-      (uint64_t)samples_per_arm * (uint64_t)arm_count;
+      use_fixed_samples
+          ? (uint64_t)samples_per_arm * (uint64_t)arm_count
+          : 0;
   rack_set_dist_size_and_reset(&context->known_opponent_rack,
                                ld_get_size(config_get_ld(klv2_config)));
   ThreadControl *thread_control = config_get_thread_control(klv2_config);
@@ -494,13 +646,18 @@ static NominationResult nominate_candidate_list_with_klv2_policy(
                 /*use_heat_map=*/false, config_get_num_threads(klv2_config),
                 /*print_interval=*/0, /*max_num_display_plays=*/arm_count,
                 /*max_num_display_plies=*/KLV3_ORACLE_SIM_PLIES, fixed_seed,
-                expected_iterations, samples_per_arm, /*scond=*/0.0,
-                BAI_THRESHOLD_NONE, /*time_limit_seconds=*/0.0,
-                BAI_SAMPLING_RULE_ROUND_ROBIN, /*cutoff=*/0.0,
+                use_fixed_samples ? expected_iterations : (uint64_t)1e15,
+                use_fixed_samples ? (uint64_t)samples_per_arm : 100,
+                /*scond=*/0.0, BAI_THRESHOLD_NONE,
+                use_fixed_samples ? 0.0 : time_limit_seconds,
+                use_fixed_samples ? BAI_SAMPLING_RULE_ROUND_ROBIN
+                                  : BAI_SAMPLING_RULE_TOP_TWO_IDS,
+                /*cutoff=*/0.0,
                 config_get_utility_w_winpct(klv2_config),
                 config_get_utility_w_spread(klv2_config),
                 config_get_utility_spread_scale(klv2_config),
                 /*inference_args=*/NULL, &sim_args);
+  sim_args.use_positional_rollout = use_positional_rollout;
 
   Timer timer;
   ctimer_start(&timer);
@@ -513,13 +670,102 @@ static NominationResult nominate_candidate_list_with_klv2_policy(
   error_stack_destroy(error_stack);
 
   result.iterations = sim_results_get_iteration_count(context->sim_results);
-  if (result.iterations != expected_iterations) {
+  if (use_fixed_samples && result.iterations != expected_iterations) {
     log_fatal("candidate-selector nomination completed %" PRIu64
               " iterations; expected %" PRIu64,
               result.iterations, expected_iterations);
   }
   result.nodes = sim_results_get_node_count(context->sim_results);
   result.elapsed_seconds = ctimer_elapsed_seconds(&timer);
+  const int best_move_index =
+      sim_results_get_best_move_index(context->sim_results);
+  assert(best_move_index >= 0);
+  const SimmedPlay *best_simmed_play =
+      sim_results_get_simmed_play(context->sim_results, best_move_index);
+  move_copy(&result.move, simmed_play_get_move(best_simmed_play));
+  result.best_win_pct =
+      stat_get_mean(simmed_play_get_win_pct_stat(best_simmed_play));
+  result.best_win_pct_sem =
+      stat_get_sem(simmed_play_get_win_pct_stat(best_simmed_play));
+  result.best_equity =
+      stat_get_mean(simmed_play_get_equity_stat(best_simmed_play));
+  result.best_equity_sem =
+      stat_get_sem(simmed_play_get_equity_stat(best_simmed_play));
+  result.best_utility = sim_results_get_best_move_utility(context->sim_results);
+  return result;
+}
+
+static NominationResult nominate_candidate_list_with_klv2_policy(
+    Config *klv2_config, NominationContext *context,
+    const MoveList *candidate_moves, int samples_per_arm, uint64_t fixed_seed) {
+  return nominate_candidate_list_with_policy(
+      klv2_config, context, candidate_moves, samples_per_arm,
+      /*time_limit_seconds=*/0.0, /*use_positional_rollout=*/false,
+      fixed_seed);
+}
+
+// Run BAI to an exact total iteration cap. Unlike the equal-sample helper,
+// sample_minimum only controls the mandatory round-robin prefix; TOP_TWO_IDS
+// allocates the remaining samples. A midgame simulation visits one node for
+// the root candidate plus one for each continuation ply, which the caller
+// verifies against its fixed node budget.
+static NominationResult nominate_candidate_list_with_iteration_budget(
+    Config *klv2_config, NominationContext *context,
+    const MoveList *candidate_moves, int num_plies,
+    uint64_t total_iterations, uint64_t min_play_iterations,
+    uint64_t fixed_seed) {
+  const int arm_count = move_list_get_count(candidate_moves);
+  assert(arm_count > 1);
+  if ((uint64_t)arm_count * min_play_iterations > total_iterations) {
+    log_fatal("minimum iterations exceed total nomination budget");
+  }
+
+  rack_set_dist_size_and_reset(&context->known_opponent_rack,
+                               ld_get_size(config_get_ld(klv2_config)));
+  ThreadControl *thread_control = config_get_thread_control(klv2_config);
+  const bool started =
+      thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  assert(started);
+  ErrorStack *error_stack = error_stack_create();
+  SimArgs sim_args = {0};
+  sim_args_fill(
+      num_plies, candidate_moves, arm_count,
+      &context->known_opponent_rack, config_get_win_pcts(klv2_config),
+      /*inference_results=*/NULL, thread_control,
+      config_get_game(klv2_config), /*sim_with_inference=*/false,
+      /*use_heat_map=*/false, config_get_num_threads(klv2_config),
+      /*print_interval=*/0, /*max_num_display_plays=*/arm_count,
+      /*max_num_display_plies=*/num_plies, fixed_seed,
+      total_iterations, min_play_iterations,
+      /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*time_limit_seconds=*/0.0, BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      // A zero cutoff stops immediately when a small initial batch happens
+      // to contain only wins or only losses. Disable that production shortcut
+      // so every sweep cell spends the same requested node budget.
+      /*cutoff=*/-1.0, config_get_utility_w_winpct(klv2_config),
+      config_get_utility_w_spread(klv2_config),
+      config_get_utility_spread_scale(klv2_config),
+      /*inference_args=*/NULL, &sim_args);
+
+  Timer timer;
+  ctimer_start(&timer);
+  simulate(&sim_args, &context->sim_ctx, context->sim_results, error_stack);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("constant-node candidate nomination failed");
+  }
+  error_stack_destroy(error_stack);
+
+  NominationResult result = {0};
+  result.iterations = sim_results_get_iteration_count(context->sim_results);
+  result.nodes = sim_results_get_node_count(context->sim_results);
+  result.elapsed_seconds = ctimer_elapsed_seconds(&timer);
+  if (result.iterations != total_iterations) {
+    log_fatal("constant-node nomination completed %" PRIu64
+              " iterations; expected %" PRIu64,
+              result.iterations, total_iterations);
+  }
   const int best_move_index =
       sim_results_get_best_move_index(context->sim_results);
   assert(best_move_index >= 0);
@@ -936,6 +1182,955 @@ static bool parse_record_move(const char *encoding, Move *move) {
     move_set_tile(move, (MachineLetter)values[8 + tile_index], tile_index);
   }
   return true;
+}
+
+static char *copy_space_delimited_field(const char *line,
+                                        const char *field_name) {
+  const char *start = strstr(line, field_name);
+  if (start == NULL) {
+    return NULL;
+  }
+  start += strlen(field_name);
+  const char *end = strchr(start, ' ');
+  if (end == NULL) {
+    end = start + strcspn(start, "\r\n");
+  }
+  const size_t length = (size_t)(end - start);
+  char *value = malloc_or_die(length + 1);
+  memcpy(value, start, length);
+  value[length] = '\0';
+  return value;
+}
+
+// Reuse already-oracled positional corpora when adding cheap feature families:
+// load each source position and candidate, calculate the lexicon-exact
+// post-play hook/leave interaction, and emit a compact sidecar keyed by
+// position and static rank. No rollout work is repeated.
+static void run_positional_feature_relabel(Config *config,
+                                           const char *corpus_files) {
+  char *files_copy = string_duplicate(corpus_files);
+  char *files_saveptr = NULL;
+  int rows = 0;
+  printf("POSITIONAL_HOOK_FEATURE_CONFIG files=%s\n", corpus_files);
+  for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
+       filename != NULL;
+       filename = strtok_r(NULL, ",", &files_saveptr)) {
+    FILE *stream = fopen(filename, "re");
+    if (stream == NULL) {
+      log_fatal("could not open positional feature corpus: %s", filename);
+    }
+    char *line = NULL;
+    size_t line_capacity = 0;
+    while (getline_ignore_carriage_return(&line, &line_capacity, stream) !=
+           -1) {
+      if (strncmp(line, "POSITIONAL_CANDIDATE ", 21) != 0) {
+        continue;
+      }
+      char *position_string =
+          copy_space_delimited_field(line, "position=");
+      char *rank_string = copy_space_delimited_field(line, "rank=");
+      char *raw_move = copy_space_delimited_field(line, "move_raw=");
+      const char *cgp_start = strstr(line, " cgp=");
+      if (position_string == NULL || rank_string == NULL || raw_move == NULL ||
+          cgp_start == NULL) {
+        log_fatal("malformed positional candidate row in %s", filename);
+      }
+      char *cgp = string_duplicate(cgp_start + strlen(" cgp="));
+      cgp[strcspn(cgp, "\r\n")] = '\0';
+      Move move;
+      if (!parse_record_move(raw_move, &move)) {
+        log_fatal("invalid positional candidate move in %s", filename);
+      }
+      load_position(config, cgp);
+      int features[POSITIONAL_HOOK_FEATURE_COUNT];
+      get_positional_hook_features(config_get_game(config), &move, features);
+      printf(
+          "POSITIONAL_HOOK_FEATURE position=%s rank=%s "
+          "hook_total=%d hook_held=%d hook_held_options=%d "
+          "hook_unique_held=%d hook_premium_held=%d "
+          "hook_specificity_held=%d hook_live=%d hook_live_options=%d "
+          "hook_live_copies=%d hook_premium_live=%d "
+          "hook_specificity_live=%d hook_dead=%d hook_held_safe=%d "
+          "hook_held_contested=%d hook_opponent_only=%d",
+          position_string, rank_string,
+          features[POSITIONAL_HOOK_FEATURE_TOTAL],
+          features[POSITIONAL_HOOK_FEATURE_HELD],
+          features[POSITIONAL_HOOK_FEATURE_HELD_OPTIONS],
+          features[POSITIONAL_HOOK_FEATURE_UNIQUE_HELD],
+          features[POSITIONAL_HOOK_FEATURE_PREMIUM_HELD],
+          features[POSITIONAL_HOOK_FEATURE_SPECIFICITY_HELD],
+          features[POSITIONAL_HOOK_FEATURE_LIVE],
+          features[POSITIONAL_HOOK_FEATURE_LIVE_OPTIONS],
+          features[POSITIONAL_HOOK_FEATURE_LIVE_COPIES],
+          features[POSITIONAL_HOOK_FEATURE_PREMIUM_LIVE],
+          features[POSITIONAL_HOOK_FEATURE_SPECIFICITY_LIVE],
+          features[POSITIONAL_HOOK_FEATURE_DEAD],
+          features[POSITIONAL_HOOK_FEATURE_HELD_SAFE],
+          features[POSITIONAL_HOOK_FEATURE_HELD_CONTESTED],
+          features[POSITIONAL_HOOK_FEATURE_OPPONENT_ONLY]);
+      for (MachineLetter letter = 0; letter < MAX_ALPHABET_SIZE; letter++) {
+        printf(" hook_letter_%d=%d", letter,
+               features[positional_hook_letter_feature(letter)]);
+      }
+      printf("\n");
+      fflush_or_die(stdout);
+      rows++;
+      free(cgp);
+      free(raw_move);
+      free(rank_string);
+      free(position_string);
+    }
+    free(line);
+    fclose_or_die(stream);
+  }
+  free(files_copy);
+  printf("POSITIONAL_HOOK_FEATURE_DONE rows=%d\n", rows);
+  fflush_or_die(stdout);
+}
+
+typedef struct PositionalPolicyCorpusAggregate {
+  int positions;
+  int agreements;
+  int positional_wins;
+  int static_wins;
+  int ties;
+  uint64_t iterations[2];
+  uint64_t nodes[2];
+  double seconds[2];
+  Stat *oracle_spread_delta;
+  Stat *conditional_oracle_spread_delta;
+} PositionalPolicyCorpusAggregate;
+
+static void positional_policy_corpus_aggregate_init(
+    PositionalPolicyCorpusAggregate *aggregate) {
+  memset(aggregate, 0, sizeof(*aggregate));
+  aggregate->oracle_spread_delta = stat_create(true);
+  aggregate->conditional_oracle_spread_delta = stat_create(true);
+}
+
+static void positional_policy_corpus_aggregate_destroy(
+    PositionalPolicyCorpusAggregate *aggregate) {
+  stat_destroy(aggregate->oracle_spread_delta);
+  stat_destroy(aggregate->conditional_oracle_spread_delta);
+}
+
+static void print_positional_policy_corpus_summary(
+    const PositionalPolicyCorpusAggregate *aggregate, int samples_per_arm,
+    double time_limit_seconds, double elapsed_seconds) {
+  const double static_rate =
+      aggregate->seconds[0] > 0.0
+          ? (double)aggregate->iterations[0] / aggregate->seconds[0]
+          : 0.0;
+  const double positional_rate =
+      aggregate->seconds[1] > 0.0
+          ? (double)aggregate->iterations[1] / aggregate->seconds[1]
+          : 0.0;
+  printf(
+      "POSITIONAL_POLICY_SUMMARY positions=%d agreements=%d disagreements=%d "
+      "positional_wins=%d static_wins=%d ties=%d "
+      "samples_per_arm=%d time_limit_seconds=%.6f "
+      "mean_oracle_spread_delta=%+.9f sem=%.9f "
+      "conditional_oracle_spread_delta=%+.9f conditional_sem=%.9f "
+      "static_iterations=%" PRIu64 " positional_iterations=%" PRIu64 " "
+      "static_nodes=%" PRIu64 " positional_nodes=%" PRIu64 " "
+      "static_iters_per_second=%.3f positional_iters_per_second=%.3f "
+      "elapsed_seconds=%.6f\n",
+      aggregate->positions, aggregate->agreements,
+      aggregate->positions - aggregate->agreements,
+      aggregate->positional_wins, aggregate->static_wins, aggregate->ties,
+      samples_per_arm, time_limit_seconds,
+      stat_get_mean(aggregate->oracle_spread_delta),
+      stat_get_sem(aggregate->oracle_spread_delta),
+      stat_get_mean(aggregate->conditional_oracle_spread_delta),
+      stat_get_sem(aggregate->conditional_oracle_spread_delta),
+      aggregate->iterations[0], aggregate->iterations[1],
+      aggregate->nodes[0], aggregate->nodes[1], static_rate, positional_rate,
+      elapsed_seconds);
+}
+
+static void evaluate_positional_policy_corpus_position(
+    Config *config, NominationContext contexts[2], MoveList *candidate_moves,
+    const Move candidate_move_values[], const double oracle_spreads[],
+    int candidate_count, const char *cgp, int position, int game_index,
+    int bag_tiles, int samples_per_arm, double time_limit_seconds,
+    PositionalPolicyCorpusAggregate *aggregate) {
+  load_position(config, cgp);
+  move_list_reset(candidate_moves);
+  const Game *game = config_get_game(config);
+  move_list_set_rack(
+      candidate_moves,
+      player_get_rack(game_get_player(
+          game, game_get_player_on_turn_index(game))));
+  for (int index = 0; index < candidate_count; index++) {
+    move_list_add_move(candidate_moves, &candidate_move_values[index]);
+  }
+
+  const uint64_t seed =
+      KLV3_ORACLE_BASE_SEED +
+      (uint64_t)(position + 1) * KLV3_ORACLE_SEED_STRIDE;
+  NominationResult nominations[2];
+  if (position % 2 == 0) {
+    nominations[0] = nominate_candidate_list_with_policy(
+        config, &contexts[0], candidate_moves, samples_per_arm,
+        time_limit_seconds, false, seed);
+    nominations[1] = nominate_candidate_list_with_policy(
+        config, &contexts[1], candidate_moves, samples_per_arm,
+        time_limit_seconds, true, seed);
+  } else {
+    nominations[1] = nominate_candidate_list_with_policy(
+        config, &contexts[1], candidate_moves, samples_per_arm,
+        time_limit_seconds, true, seed);
+    nominations[0] = nominate_candidate_list_with_policy(
+        config, &contexts[0], candidate_moves, samples_per_arm,
+        time_limit_seconds, false, seed);
+  }
+
+  int selected_indices[2] = {-1, -1};
+  for (int model = 0; model < 2; model++) {
+    for (int index = 0; index < candidate_count; index++) {
+      if (moves_are_equal(&nominations[model].move,
+                          &candidate_move_values[index])) {
+        selected_indices[model] = index;
+        break;
+      }
+    }
+    if (selected_indices[model] < 0) {
+      log_fatal("positional policy corpus lost a root candidate");
+    }
+    aggregate->iterations[model] += nominations[model].iterations;
+    aggregate->nodes[model] += nominations[model].nodes;
+    aggregate->seconds[model] += nominations[model].elapsed_seconds;
+  }
+
+  const bool agreement = selected_indices[0] == selected_indices[1];
+  const double delta =
+      oracle_spreads[selected_indices[1]] - oracle_spreads[selected_indices[0]];
+  stat_push(aggregate->oracle_spread_delta, delta, 1);
+  aggregate->positions++;
+  if (agreement) {
+    aggregate->agreements++;
+  } else {
+    stat_push(aggregate->conditional_oracle_spread_delta, delta, 1);
+    if (delta > 0.0) {
+      aggregate->positional_wins++;
+    } else if (delta < 0.0) {
+      aggregate->static_wins++;
+    } else {
+      aggregate->ties++;
+    }
+  }
+
+  printf(
+      "POSITIONAL_POLICY_POSITION position=%d game=%d bag=%d candidates=%d "
+      "static_rank=%d positional_rank=%d oracle_spread_delta=%+.9f "
+      "static_iterations=%" PRIu64 " positional_iterations=%" PRIu64 " "
+      "static_nodes=%" PRIu64 " positional_nodes=%" PRIu64 " "
+      "static_seconds=%.9f positional_seconds=%.9f\n",
+      position, game_index, bag_tiles, candidate_count, selected_indices[0],
+      selected_indices[1], delta, nominations[0].iterations,
+      nominations[1].iterations, nominations[0].nodes, nominations[1].nodes,
+      nominations[0].elapsed_seconds, nominations[1].elapsed_seconds);
+}
+
+// Compare KLV2-static and positional rollout policies using identical root
+// candidates from an already-oracled positional corpus. This isolates rollout
+// move selection: nomination seeds, roots, KLV2 horizon leaves, and stored
+// four-ply oracle labels are shared.
+static void run_positional_policy_corpus(
+    Config *config, const char *corpus_files, int max_positions,
+    int samples_per_arm, double time_limit_seconds, double wall_seconds) {
+  NominationContext contexts[2];
+  nomination_context_init(&contexts[0], config);
+  nomination_context_init(&contexts[1], config);
+  MoveList *candidate_moves =
+      move_list_create(KLV3_ORACLE_MAX_ROOT_CANDIDATES);
+  PositionalPolicyCorpusAggregate aggregate;
+  positional_policy_corpus_aggregate_init(&aggregate);
+  Timer timer;
+  ctimer_start(&timer);
+  bool wall_limit_reached = false;
+
+  printf(
+      "POSITIONAL_POLICY_CONFIG files=%s max_positions=%d "
+      "samples_per_arm=%d time_limit_seconds=%.6f sim_plies=%d "
+      "roots=corpus_candidates horizon_leave=klv2 "
+      "oracle=four_ply_shared_klv2_static wall_seconds=%.3f\n",
+      corpus_files, max_positions, samples_per_arm, time_limit_seconds,
+      KLV3_ORACLE_SIM_PLIES, wall_seconds);
+  fflush_or_die(stdout);
+
+  char *files_copy = string_duplicate(corpus_files);
+  char *files_saveptr = NULL;
+  Move candidate_move_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+  double oracle_spreads[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+  int current_position = -1;
+  int current_game = -1;
+  int current_bag = -1;
+  int candidate_count = 0;
+  char *current_cgp = NULL;
+
+  for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
+       filename != NULL && aggregate.positions < max_positions &&
+       !wall_limit_reached;
+       filename = strtok_r(NULL, ",", &files_saveptr)) {
+    FILE *stream = fopen(filename, "re");
+    if (stream == NULL) {
+      log_fatal("could not open positional policy corpus: %s", filename);
+    }
+    char *line = NULL;
+    size_t line_capacity = 0;
+    while (getline_ignore_carriage_return(&line, &line_capacity, stream) !=
+               -1 &&
+           aggregate.positions < max_positions && !wall_limit_reached) {
+      if (strncmp(line, "POSITIONAL_CANDIDATE ", 21) != 0) {
+        continue;
+      }
+      char *position_value =
+          copy_space_delimited_field(line, "position=");
+      char *game_value = copy_space_delimited_field(line, "game=");
+      char *bag_value = copy_space_delimited_field(line, "bag=");
+      char *rank_value = copy_space_delimited_field(line, "rank=");
+      char *candidate_count_value =
+          copy_space_delimited_field(line, "candidates=");
+      char *oracle_spread_value =
+          copy_space_delimited_field(line, "oracle_spread=");
+      char *move_raw = copy_space_delimited_field(line, "move_raw=");
+      const char *cgp_start = strstr(line, " cgp=");
+      if (position_value == NULL || game_value == NULL || bag_value == NULL ||
+          rank_value == NULL || candidate_count_value == NULL ||
+          oracle_spread_value == NULL || move_raw == NULL ||
+          cgp_start == NULL) {
+        log_fatal("malformed positional policy corpus row in %s", filename);
+      }
+      const int position = (int)strtol(position_value, NULL, 10);
+      const int rank = (int)strtol(rank_value, NULL, 10);
+      const int expected_candidates =
+          (int)strtol(candidate_count_value, NULL, 10);
+
+      if (current_position >= 0 && position != current_position) {
+        if (candidate_count <= 1) {
+          log_fatal("incomplete positional policy candidate group");
+        }
+        evaluate_positional_policy_corpus_position(
+            config, contexts, candidate_moves, candidate_move_values,
+            oracle_spreads, candidate_count, current_cgp, current_position,
+            current_game, current_bag, samples_per_arm, time_limit_seconds,
+            &aggregate);
+        free(current_cgp);
+        current_cgp = NULL;
+        candidate_count = 0;
+        if (wall_seconds > 0.0 &&
+            ctimer_elapsed_seconds(&timer) >= wall_seconds) {
+          wall_limit_reached = true;
+        }
+      }
+      if (wall_limit_reached || aggregate.positions >= max_positions) {
+        free(position_value);
+        free(game_value);
+        free(bag_value);
+        free(rank_value);
+        free(candidate_count_value);
+        free(oracle_spread_value);
+        free(move_raw);
+        break;
+      }
+
+      if (current_cgp == NULL) {
+        current_position = position;
+        current_game = (int)strtol(game_value, NULL, 10);
+        current_bag = (int)strtol(bag_value, NULL, 10);
+        cgp_start += strlen(" cgp=");
+        current_cgp = string_duplicate(cgp_start);
+        current_cgp[strcspn(current_cgp, "\r\n")] = '\0';
+      }
+      if (position != current_position || rank != candidate_count ||
+          expected_candidates > KLV3_ORACLE_MAX_ROOT_CANDIDATES) {
+        log_fatal("noncanonical positional policy candidate group");
+      }
+      if (!parse_record_move(move_raw,
+                             &candidate_move_values[candidate_count])) {
+        log_fatal("invalid move in positional policy corpus");
+      }
+      oracle_spreads[candidate_count] = strtod(oracle_spread_value, NULL);
+      candidate_count++;
+
+      free(position_value);
+      free(game_value);
+      free(bag_value);
+      free(rank_value);
+      free(candidate_count_value);
+      free(oracle_spread_value);
+      free(move_raw);
+    }
+    free(line);
+    fclose_or_die(stream);
+  }
+  free(files_copy);
+
+  if (!wall_limit_reached && aggregate.positions < max_positions &&
+      current_position >= 0) {
+    evaluate_positional_policy_corpus_position(
+        config, contexts, candidate_moves, candidate_move_values,
+        oracle_spreads, candidate_count, current_cgp, current_position,
+        current_game, current_bag, samples_per_arm, time_limit_seconds,
+        &aggregate);
+  }
+  free(current_cgp);
+
+  print_positional_policy_corpus_summary(
+      &aggregate, samples_per_arm, time_limit_seconds,
+      ctimer_elapsed_seconds(&timer));
+  printf(
+      "POSITIONAL_POLICY_DONE positions=%d target=%d elapsed_seconds=%.6f "
+      "wall_limit_reached=%d\n",
+      aggregate.positions, max_positions, ctimer_elapsed_seconds(&timer),
+      wall_limit_reached);
+  fflush_or_die(stdout);
+
+  positional_policy_corpus_aggregate_destroy(&aggregate);
+  move_list_destroy(candidate_moves);
+  nomination_context_destroy(&contexts[1]);
+  nomination_context_destroy(&contexts[0]);
+}
+
+typedef struct CombinedSweepCandidate {
+  Move move;
+  double oracle_utility;
+  double oracle_spread;
+  double oracle_win;
+  Equity klv3_equity;
+  Equity positional_adjustment;
+  Equity combined_equity;
+} CombinedSweepCandidate;
+
+typedef struct CombinedSweepCell {
+  int num_plays;
+  int min_play_iterations;
+  NominationContext context;
+  Stat *total_regret;
+  Stat *candidate_regret;
+  Stat *sampling_regret;
+  Stat *spread_delta;
+  int oracle_hits;
+  uint64_t iterations;
+  uint64_t nodes;
+  double seconds;
+} CombinedSweepCell;
+
+static Equity get_contextual_static_equity_for_move(const Game *game,
+                                                    const Move *move) {
+  if (move_get_type(move) == GAME_EVENT_PASS) {
+    return EQUITY_PASS_VALUE;
+  }
+  const int player_index = game_get_player_on_turn_index(game);
+  const Player *player = game_get_player(game, player_index);
+  Rack leave;
+  rack_copy(&leave, player_get_rack(player));
+  const Equity leave_value =
+      get_leave_value_for_move_with_context(game, move, &leave);
+  const Board *board = game_get_board(game);
+  return static_eval_get_move_equity_with_leave_value(
+      game_get_ld(game), move, &leave,
+      player_get_rack(game_get_player(game, 1 - player_index)),
+      board_get_opening_move_penalties(board), board_get_tiles_played(board),
+      bag_get_letters(game_get_bag(game)), leave_value);
+}
+
+static void combined_sweep_cell_init(CombinedSweepCell *cell,
+                                     const Config *config, int num_plays,
+                                     int min_play_iterations) {
+  memset(cell, 0, sizeof(*cell));
+  cell->num_plays = num_plays;
+  cell->min_play_iterations = min_play_iterations;
+  nomination_context_init(&cell->context, config);
+  cell->total_regret = stat_create(true);
+  cell->candidate_regret = stat_create(true);
+  cell->sampling_regret = stat_create(true);
+  cell->spread_delta = stat_create(true);
+}
+
+static void combined_sweep_cell_destroy(CombinedSweepCell *cell) {
+  stat_destroy(cell->spread_delta);
+  stat_destroy(cell->sampling_regret);
+  stat_destroy(cell->candidate_regret);
+  stat_destroy(cell->total_regret);
+  nomination_context_destroy(&cell->context);
+}
+
+static void sort_combined_candidate_indices(
+    const CombinedSweepCandidate candidates[], int candidate_count,
+    int indices[]) {
+  for (int index = 0; index < candidate_count; index++) {
+    indices[index] = index;
+  }
+  for (int index = 1; index < candidate_count; index++) {
+    const int value = indices[index];
+    int insert_at = index;
+    while (insert_at > 0) {
+      const int previous = indices[insert_at - 1];
+      if (candidates[previous].combined_equity >
+              candidates[value].combined_equity ||
+          (candidates[previous].combined_equity ==
+               candidates[value].combined_equity &&
+           previous < value)) {
+        break;
+      }
+      indices[insert_at] = previous;
+      insert_at--;
+    }
+    indices[insert_at] = value;
+  }
+}
+
+static bool evaluate_combined_sweep_position(
+    Config *klv2_config, Config *klv3_config,
+    CombinedSweepCandidate candidates[], int candidate_count, const char *cgp,
+    int position, int game_index, int bag_tiles,
+    int adjustment_scale_thousandths, int num_plies,
+    int similarity_check_plays, uint64_t total_iterations,
+    uint64_t expected_nodes, CombinedSweepCell cells[], int cell_count,
+    MoveList *candidate_moves) {
+  load_position(klv2_config, cgp);
+  load_position(klv3_config, cgp);
+  Game *klv3_game = config_get_game(klv3_config);
+  for (int index = 0; index < candidate_count; index++) {
+    candidates[index].klv3_equity =
+        get_contextual_static_equity_for_move(klv3_game,
+                                              &candidates[index].move);
+    candidates[index].positional_adjustment =
+        get_positional_adjustment(klv3_game, &candidates[index].move);
+    const int64_t scaled_adjustment =
+        (int64_t)candidates[index].positional_adjustment *
+        adjustment_scale_thousandths / 1000;
+    const int64_t combined =
+        (int64_t)candidates[index].klv3_equity + scaled_adjustment;
+    if (combined < EQUITY_MIN_VALUE || combined > EQUITY_MAX_VALUE) {
+      log_fatal("combined KLV3/positional equity is out of range");
+    }
+    candidates[index].combined_equity = (Equity)combined;
+  }
+
+  int combined_order[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+  sort_combined_candidate_indices(candidates, candidate_count, combined_order);
+  const Rack *move_rack =
+      player_get_rack(game_get_player(
+          config_get_game(klv2_config),
+          game_get_player_on_turn_index(config_get_game(klv2_config))));
+  const uint64_t first_similarity_key = move_get_similarity_key(
+      &candidates[combined_order[0]].move, move_rack);
+  bool has_distinct_arm = false;
+  for (int rank = 1; rank < similarity_check_plays; rank++) {
+    if (move_get_similarity_key(&candidates[combined_order[rank]].move,
+                                move_rack) != first_similarity_key) {
+      has_distinct_arm = true;
+      break;
+    }
+  }
+  if (!has_distinct_arm) {
+    // Production BAI correctly stops after its initial samples when every arm
+    // is in the same similarity class. There is no meaningful allocation
+    // tradeoff for these positions, so omit them from every cell rather than
+    // violate the constant-node comparison in only the smallest-N cells.
+    printf(
+        "COMBINED_SWEEP_SKIP position=%d game=%d bag=%d "
+        "reason=similarity_check_set_all_similar "
+        "similarity_check_plays=%d\n",
+        position, game_index, bag_tiles, similarity_check_plays);
+    fflush_or_die(stdout);
+    return false;
+  }
+  int oracle_best = 0;
+  for (int index = 1; index < candidate_count; index++) {
+    if (candidates[index].oracle_utility >
+        candidates[oracle_best].oracle_utility) {
+      oracle_best = index;
+    }
+  }
+
+  // Keep nomination scenarios disjoint from the oracle scenarios stored in
+  // the corpus even when both are keyed by the same position identifier.
+  const uint64_t seed =
+      (KLV3_ORACLE_BASE_SEED +
+       (uint64_t)(position + 1) * KLV3_ORACLE_SEED_STRIDE) ^
+      UINT64_C(0xa0761d6478bd642f);
+  for (int cell_index = 0; cell_index < cell_count; cell_index++) {
+    CombinedSweepCell *cell = &cells[cell_index];
+    move_list_reset(candidate_moves);
+    move_list_set_rack(
+        candidate_moves,
+        player_get_rack(game_get_player(
+            config_get_game(klv2_config),
+            game_get_player_on_turn_index(config_get_game(klv2_config)))));
+    for (int rank = 0; rank < cell->num_plays; rank++) {
+      move_list_add_move(candidate_moves,
+                         &candidates[combined_order[rank]].move);
+    }
+    int candidate_best = combined_order[0];
+    for (int rank = 1; rank < cell->num_plays; rank++) {
+      const int candidate_index = combined_order[rank];
+      if (candidates[candidate_index].oracle_utility >
+          candidates[candidate_best].oracle_utility) {
+        candidate_best = candidate_index;
+      }
+    }
+
+    const NominationResult nomination =
+        nominate_candidate_list_with_iteration_budget(
+            klv2_config, &cell->context, candidate_moves, num_plies,
+            total_iterations, (uint64_t)cell->min_play_iterations, seed);
+    if (nomination.iterations != total_iterations) {
+      log_fatal("constant-iteration cell ran %" PRIu64
+                " iterations; expected %" PRIu64,
+                nomination.iterations, total_iterations);
+    }
+    // A rollout that reaches game end before num_plies legitimately visits
+    // fewer nodes. Keep the sweep nearly constant-node while allowing this
+    // unavoidable terminal shortfall; a larger deficit would make the cell
+    // incomparable and is therefore still fatal.
+    const uint64_t node_shortfall =
+        nomination.nodes <= expected_nodes
+            ? expected_nodes - nomination.nodes
+            : 0;
+    const uint64_t max_node_shortfall = expected_nodes / 20;
+    if (nomination.nodes > expected_nodes ||
+        node_shortfall > max_node_shortfall) {
+      log_fatal("constant-node cell visited %" PRIu64
+                " nodes; expected at least %" PRIu64 " and at most %" PRIu64,
+                nomination.nodes, expected_nodes - max_node_shortfall,
+                expected_nodes);
+    }
+    int selected = -1;
+    for (int index = 0; index < candidate_count; index++) {
+      if (moves_are_equal(&nomination.move, &candidates[index].move)) {
+        selected = index;
+        break;
+      }
+    }
+    if (selected < 0) {
+      log_fatal("combined candidate sweep lost its selected move");
+    }
+
+    const double candidate_regret =
+        candidates[oracle_best].oracle_utility -
+        candidates[candidate_best].oracle_utility;
+    const double sampling_regret =
+        candidates[candidate_best].oracle_utility -
+        candidates[selected].oracle_utility;
+    const double total_regret = candidate_regret + sampling_regret;
+    stat_push(cell->candidate_regret, candidate_regret, 1);
+    stat_push(cell->sampling_regret, sampling_regret, 1);
+    stat_push(cell->total_regret, total_regret, 1);
+    stat_push(cell->spread_delta,
+              candidates[selected].oracle_spread -
+                  candidates[oracle_best].oracle_spread,
+              1);
+    cell->oracle_hits += selected == oracle_best;
+    cell->iterations += nomination.iterations;
+    cell->nodes += nomination.nodes;
+    cell->seconds += nomination.elapsed_seconds;
+
+    printf(
+        "COMBINED_SWEEP_POSITION position=%d game=%d bag=%d num_plies=%d "
+        "num_plays=%d min_play_iterations=%d selected_source_rank=%d "
+        "oracle_best_source_rank=%d candidate_best_source_rank=%d "
+        "candidate_regret=%.9f sampling_regret=%.9f total_regret=%.9f "
+        "spread_delta=%+.9f iterations=%" PRIu64 " nodes=%" PRIu64
+        " node_shortfall=%" PRIu64 "\n",
+        position, game_index, bag_tiles, num_plies, cell->num_plays,
+        cell->min_play_iterations, selected, oracle_best, candidate_best,
+        candidate_regret, sampling_regret, total_regret,
+        candidates[selected].oracle_spread -
+            candidates[oracle_best].oracle_spread,
+        nomination.iterations, nomination.nodes, node_shortfall);
+  }
+  fflush_or_die(stdout);
+  return true;
+}
+
+static void print_combined_sweep_summaries(const CombinedSweepCell cells[],
+                                           int cell_count, int positions,
+                                           int num_plies,
+                                           uint64_t node_budget,
+                                           int adjustment_scale_thousandths,
+                                           double elapsed_seconds) {
+  for (int cell_index = 0; cell_index < cell_count; cell_index++) {
+    const CombinedSweepCell *cell = &cells[cell_index];
+    printf(
+        "COMBINED_SWEEP_SUMMARY positions=%d num_plies=%d num_plays=%d "
+        "min_play_iterations=%d node_budget_per_position=%" PRIu64 " "
+        "adjustment_scale_thousandths=%d oracle_hits=%d "
+        "mean_total_regret=%.9f total_regret_sem=%.9f "
+        "mean_candidate_regret=%.9f candidate_regret_sem=%.9f "
+        "mean_sampling_regret=%.9f sampling_regret_sem=%.9f "
+        "mean_spread_delta=%+.9f spread_delta_sem=%.9f "
+        "iterations=%" PRIu64 " nodes=%" PRIu64
+        " iterations_per_second=%.3f elapsed_seconds=%.6f\n",
+        positions, num_plies, cell->num_plays, cell->min_play_iterations,
+        node_budget, adjustment_scale_thousandths, cell->oracle_hits,
+        stat_get_mean(cell->total_regret), stat_get_sem(cell->total_regret),
+        stat_get_mean(cell->candidate_regret),
+        stat_get_sem(cell->candidate_regret),
+        stat_get_mean(cell->sampling_regret),
+        stat_get_sem(cell->sampling_regret),
+        stat_get_mean(cell->spread_delta), stat_get_sem(cell->spread_delta),
+        cell->iterations, cell->nodes,
+        cell->seconds > 0.0 ? (double)cell->iterations / cell->seconds : 0.0,
+        elapsed_seconds);
+  }
+  fflush_or_die(stdout);
+}
+
+static void run_combined_candidate_sweep(
+    Config *klv2_config, Config *klv3_config, const char *corpus_files,
+    int skip_positions, int max_positions, const int num_plays_values[],
+    int num_plays_count, const int min_iteration_values[],
+    int min_iteration_count, bool paired_values, int num_plies,
+    int requested_similarity_check_plays, uint64_t node_budget,
+    int adjustment_scale_thousandths, double wall_seconds) {
+  if (paired_values && num_plays_count != min_iteration_count) {
+    log_fatal("paired combined sweep values must have matching counts");
+  }
+  if (num_plies < 1 || num_plies > MAX_PLIES) {
+    log_fatal("combined sweep plies must be between 1 and %d", MAX_PLIES);
+  }
+  const uint64_t nodes_per_iteration = (uint64_t)num_plies + 1;
+  if (node_budget % nodes_per_iteration != 0) {
+    log_fatal("combined sweep node budget must be divisible by %d",
+              num_plies + 1);
+  }
+  const uint64_t total_iterations = node_budget / nodes_per_iteration;
+  enum { MAX_SWEEP_CELLS = 128 };
+  CombinedSweepCell cells[MAX_SWEEP_CELLS];
+  int cell_count = 0;
+  int maximum_num_plays = 0;
+  for (int plays_index = 0; plays_index < num_plays_count; plays_index++) {
+    const int num_plays = num_plays_values[plays_index];
+    if (num_plays < 2 ||
+        num_plays > KLV3_ORACLE_MAX_ROOT_CANDIDATES) {
+      log_fatal("combined sweep num_plays must be between 2 and %d",
+                KLV3_ORACLE_MAX_ROOT_CANDIDATES);
+    }
+    if (num_plays > maximum_num_plays) {
+      maximum_num_plays = num_plays;
+    }
+    const int min_start = paired_values ? plays_index : 0;
+    const int min_end =
+        paired_values ? plays_index + 1 : min_iteration_count;
+    for (int min_index = min_start; min_index < min_end; min_index++) {
+      const int min_iterations = min_iteration_values[min_index];
+      if ((uint64_t)num_plays * (uint64_t)min_iterations >
+          total_iterations) {
+        continue;
+      }
+      if (cell_count >= MAX_SWEEP_CELLS) {
+        log_fatal("combined candidate sweep exceeds %d cells",
+                  MAX_SWEEP_CELLS);
+      }
+      combined_sweep_cell_init(&cells[cell_count++], klv2_config, num_plays,
+                               min_iterations);
+    }
+  }
+  if (cell_count == 0) {
+    log_fatal("combined candidate sweep has no valid cells");
+  }
+  int minimum_num_plays = cells[0].num_plays;
+  for (int cell_index = 1; cell_index < cell_count; cell_index++) {
+    if (cells[cell_index].num_plays < minimum_num_plays) {
+      minimum_num_plays = cells[cell_index].num_plays;
+    }
+  }
+  const int similarity_check_plays =
+      requested_similarity_check_plays == 0 ? minimum_num_plays
+                                            : requested_similarity_check_plays;
+  if (similarity_check_plays < 2 ||
+      similarity_check_plays > minimum_num_plays) {
+    log_fatal("combined sweep similarity check plays must be between 2 and "
+              "the smallest cell's num_plays (%d)",
+              minimum_num_plays);
+  }
+
+  MoveList *candidate_moves = move_list_create(maximum_num_plays);
+  Timer timer;
+  ctimer_start(&timer);
+  int groups_seen = 0;
+  int evaluated_positions = 0;
+  int all_similar_positions = 0;
+  bool wall_limit_reached = false;
+  CombinedSweepCandidate candidates[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+  int candidate_count = 0;
+  int current_position = -1;
+  int current_game = -1;
+  int current_bag = -1;
+  int current_expected_candidates = -1;
+  char *current_cgp = NULL;
+
+  printf(
+      "COMBINED_SWEEP_CONFIG files=%s skip_positions=%d max_positions=%d "
+      "node_budget_per_position=%" PRIu64 " total_iterations=%" PRIu64 " "
+      "sim_plies=%d selector=klv3_plus_positional "
+      "similarity_check_plays=%d "
+      "adjustment_scale_thousandths=%d rollout=klv2 horizon_leave=klv2 "
+      "sampling_rule=top_two_ids cells=%d wall_seconds=%.3f\n",
+      corpus_files, skip_positions, max_positions, node_budget,
+      total_iterations, num_plies, similarity_check_plays,
+      adjustment_scale_thousandths, cell_count, wall_seconds);
+  fflush_or_die(stdout);
+
+  char *files_copy = string_duplicate(corpus_files);
+  char *files_saveptr = NULL;
+  for (char *filename = strtok_r(files_copy, ",", &files_saveptr);
+       filename != NULL && evaluated_positions < max_positions &&
+       !wall_limit_reached;
+       filename = strtok_r(NULL, ",", &files_saveptr)) {
+    FILE *stream = fopen(filename, "re");
+    if (stream == NULL) {
+      log_fatal("could not open combined candidate sweep corpus: %s",
+                filename);
+    }
+    char *line = NULL;
+    size_t line_capacity = 0;
+    while (getline_ignore_carriage_return(&line, &line_capacity, stream) !=
+               -1 &&
+           evaluated_positions < max_positions && !wall_limit_reached) {
+      if (strncmp(line, "POSITIONAL_CANDIDATE ", 21) != 0) {
+        continue;
+      }
+      char *position_value =
+          copy_space_delimited_field(line, "position=");
+      char *game_value = copy_space_delimited_field(line, "game=");
+      char *bag_value = copy_space_delimited_field(line, "bag=");
+      char *rank_value = copy_space_delimited_field(line, "rank=");
+      char *candidate_count_value =
+          copy_space_delimited_field(line, "candidates=");
+      char *oracle_utility_value =
+          copy_space_delimited_field(line, "oracle_utility=");
+      char *oracle_spread_value =
+          copy_space_delimited_field(line, "oracle_spread=");
+      char *oracle_win_value =
+          copy_space_delimited_field(line, "oracle_win=");
+      char *move_raw = copy_space_delimited_field(line, "move_raw=");
+      const char *cgp_start = strstr(line, " cgp=");
+      if (position_value == NULL || game_value == NULL || bag_value == NULL ||
+          rank_value == NULL || candidate_count_value == NULL ||
+          oracle_utility_value == NULL || oracle_spread_value == NULL ||
+          oracle_win_value == NULL || move_raw == NULL || cgp_start == NULL) {
+        log_fatal("malformed combined candidate sweep row in %s", filename);
+      }
+      const int position = (int)strtol(position_value, NULL, 10);
+      const int rank = (int)strtol(rank_value, NULL, 10);
+      const int expected_candidates =
+          (int)strtol(candidate_count_value, NULL, 10);
+
+      if (current_position >= 0 && position != current_position) {
+        if (candidate_count != current_expected_candidates) {
+          log_fatal("incomplete combined candidate sweep group");
+        }
+        if (groups_seen++ >= skip_positions) {
+          if (candidate_count < maximum_num_plays) {
+            log_fatal("combined sweep corpus has too few candidates");
+          }
+          const bool evaluated = evaluate_combined_sweep_position(
+              klv2_config, klv3_config, candidates, candidate_count,
+              current_cgp, current_position, current_game, current_bag,
+              adjustment_scale_thousandths, num_plies,
+              similarity_check_plays, total_iterations, node_budget, cells,
+              cell_count, candidate_moves);
+          evaluated_positions += evaluated;
+          all_similar_positions += !evaluated;
+        }
+        free(current_cgp);
+        current_cgp = NULL;
+        candidate_count = 0;
+        if (wall_seconds > 0.0 &&
+            ctimer_elapsed_seconds(&timer) >= wall_seconds) {
+          wall_limit_reached = true;
+        }
+      }
+      if (wall_limit_reached || evaluated_positions >= max_positions) {
+        free(position_value);
+        free(game_value);
+        free(bag_value);
+        free(rank_value);
+        free(candidate_count_value);
+        free(oracle_utility_value);
+        free(oracle_spread_value);
+        free(oracle_win_value);
+        free(move_raw);
+        break;
+      }
+
+      if (current_cgp == NULL) {
+        current_position = position;
+        current_game = (int)strtol(game_value, NULL, 10);
+        current_bag = (int)strtol(bag_value, NULL, 10);
+        current_expected_candidates = expected_candidates;
+        cgp_start += strlen(" cgp=");
+        current_cgp = string_duplicate(cgp_start);
+        current_cgp[strcspn(current_cgp, "\r\n")] = '\0';
+      }
+      if (position != current_position || rank != candidate_count ||
+          expected_candidates > KLV3_ORACLE_MAX_ROOT_CANDIDATES) {
+        log_fatal("noncanonical combined candidate sweep group");
+      }
+      if (!parse_record_move(move_raw, &candidates[candidate_count].move)) {
+        log_fatal("invalid move in combined candidate sweep corpus");
+      }
+      candidates[candidate_count].oracle_utility =
+          strtod(oracle_utility_value, NULL);
+      candidates[candidate_count].oracle_spread =
+          strtod(oracle_spread_value, NULL);
+      candidates[candidate_count].oracle_win =
+          strtod(oracle_win_value, NULL);
+      candidate_count++;
+
+      free(position_value);
+      free(game_value);
+      free(bag_value);
+      free(rank_value);
+      free(candidate_count_value);
+      free(oracle_utility_value);
+      free(oracle_spread_value);
+      free(oracle_win_value);
+      free(move_raw);
+    }
+    free(line);
+    fclose_or_die(stream);
+  }
+  free(files_copy);
+
+  if (!wall_limit_reached && evaluated_positions < max_positions &&
+      current_position >= 0) {
+    if (candidate_count != current_expected_candidates ||
+        candidate_count < maximum_num_plays) {
+      log_fatal("combined sweep final corpus group has too few candidates");
+    }
+    if (groups_seen >= skip_positions) {
+      const bool evaluated = evaluate_combined_sweep_position(
+          klv2_config, klv3_config, candidates, candidate_count, current_cgp,
+          current_position, current_game, current_bag,
+          adjustment_scale_thousandths, num_plies, similarity_check_plays,
+          total_iterations, node_budget, cells, cell_count, candidate_moves);
+      evaluated_positions += evaluated;
+      all_similar_positions += !evaluated;
+    }
+  }
+  free(current_cgp);
+
+  print_combined_sweep_summaries(
+      cells, cell_count, evaluated_positions, num_plies, node_budget,
+      adjustment_scale_thousandths, ctimer_elapsed_seconds(&timer));
+  printf(
+      "COMBINED_SWEEP_DONE positions=%d target=%d cells=%d "
+      "all_similar_positions=%d elapsed_seconds=%.6f "
+      "wall_limit_reached=%d\n",
+      evaluated_positions, max_positions, cell_count, all_similar_positions,
+      ctimer_elapsed_seconds(&timer), wall_limit_reached);
+  fflush_or_die(stdout);
+
+  move_list_destroy(candidate_moves);
+  for (int cell_index = 0; cell_index < cell_count; cell_index++) {
+    combined_sweep_cell_destroy(&cells[cell_index]);
+  }
 }
 
 static int split_tab_fields(char *line, char **fields, int capacity) {
@@ -1415,6 +2610,398 @@ static void run_nested_position_samples(
   }
   free(worker_ids);
   free(workers);
+}
+
+// Generate candidate-relative training labels for a cheap positional
+// evaluator.  Every root candidate sees the same shuffled unseen tiles for a
+// scenario, and both "policies" are deliberately the same KLV2 static policy.
+// The resulting spread differences therefore measure the net effect of the
+// root move plus the shared continuation, without introducing KLV3 policy
+// disagreements or candidate-specific draw noise.
+static void run_positional_candidate_oracle(
+    Config *config, int num_games, int start_game, int max_positions,
+    int start_position, int collect_from_position, int top_candidates,
+    int outer_samples, int outer_plies, int num_threads, int min_bag_tiles,
+    double wall_seconds) {
+  if (top_candidates > KLV3_ORACLE_MAX_ROOT_CANDIDATES) {
+    log_fatal("KLV3_ORACLE_POSITIONAL_TOP must be at most %d",
+              KLV3_ORACLE_MAX_ROOT_CANDIDATES);
+  }
+
+  Game *trajectory_game = config_game_create(config);
+  MoveList *trajectory_move_list = move_list_create(1);
+  MoveList *oracle_move_list = config_get_move_list(config);
+  if (move_list_get_capacity(oracle_move_list) < top_candidates) {
+    move_list_reset(oracle_move_list);
+    move_list_resize(oracle_move_list, top_candidates);
+  }
+  Timer timer;
+  ctimer_start(&timer);
+  int position_index = start_position;
+  int emitted_positions = 0;
+  bool wall_limit_reached = false;
+  NestedOracleCounters counters = {0};
+
+  printf("POSITIONAL_ORACLE_CONFIG games=%d start_game=%d "
+         "max_positions=%d start_position=%d collect_from_position=%d "
+         "top_candidates=%d samples_per_candidate=%d "
+         "continuation_plies=%d policy=klv2_static shared_scenarios=1 "
+         "threads=%d min_bag_tiles=%d wall_seconds=%.3f\n",
+         num_games, start_game, max_positions, start_position,
+         collect_from_position, top_candidates, outer_samples, outer_plies,
+         num_threads, min_bag_tiles, wall_seconds);
+  fflush_or_die(stdout);
+
+  for (int game_index = start_game;
+       game_index < num_games && position_index < max_positions &&
+       !wall_limit_reached;
+       game_index++) {
+    game_reset(trajectory_game);
+    game_seed(trajectory_game,
+              KLV3_ORACLE_BASE_SEED +
+                  (uint64_t)game_index * KLV3_ORACLE_SEED_STRIDE);
+    game_set_starting_player_index(trajectory_game, game_index % 2);
+    draw_starting_racks(trajectory_game);
+    int turn_index = 0;
+    while (!game_over(trajectory_game) &&
+           bag_get_letters(game_get_bag(trajectory_game)) >= min_bag_tiles &&
+           position_index < max_positions) {
+      if (wall_seconds > 0.0 &&
+          ctimer_elapsed_seconds(&timer) >= wall_seconds) {
+        wall_limit_reached = true;
+        break;
+      }
+
+      char *cgp = game_get_cgp(trajectory_game, true);
+      load_position(config, cgp);
+      if (position_index >= collect_from_position) {
+        MoveList *move_list = config_get_move_list(config);
+        const MoveGenArgs gen_args = {
+            .game = config_get_game(config),
+            .move_list = move_list,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&gen_args);
+        move_list_sort_moves(move_list);
+        const int root_count = move_list_get_count(move_list) < top_candidates
+                                   ? move_list_get_count(move_list)
+                                   : top_candidates;
+        if (root_count > 1) {
+          NestedRootStats roots[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
+          for (int root_index = 0; root_index < root_count; root_index++) {
+            (void)add_unique_root_move(
+                roots, root_index, move_list_get_move(move_list, root_index));
+          }
+          const int model_root_indices[3] = {0, 0, 0};
+          Stat *unused_deltas[3] = {
+              stat_create(true),
+              stat_create(true),
+              stat_create(true),
+          };
+          const uint64_t position_seed =
+              KLV3_ORACLE_BASE_SEED +
+              (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
+          run_nested_position_samples(
+              config, config, roots, root_count, model_root_indices,
+              outer_samples, outer_plies,
+              /*nested_samples_per_candidate=*/2, num_threads, position_seed,
+              unused_deltas, &counters);
+
+          for (int root_index = 0; root_index < root_count; root_index++) {
+            char move_string[64];
+            char move_raw[256];
+            move_to_string(config_get_game(config), &roots[root_index].move,
+                           move_string, sizeof(move_string));
+            move_to_record_encoding(&roots[root_index].move, move_raw,
+                                    sizeof(move_raw));
+            printf("POSITIONAL_CANDIDATE position=%d game=%d turn=%d bag=%d "
+                   "rank=%d candidates=%d base_equity=%.6f move_score=%.6f "
+                   "compact_adjustment=%.6f "
+                   "oracle_spread=%.9f oracle_spread_sem=%.9f "
+                   "oracle_utility=%.9f oracle_utility_sem=%.9f "
+                   "oracle_win=%.9f move=%s move_raw=%s cgp=%s\n",
+                   position_index, game_index, turn_index,
+                   bag_get_letters(game_get_bag(trajectory_game)), root_index,
+                   root_count,
+                   equity_to_double(move_get_equity(&roots[root_index].move)),
+                   equity_to_double(move_get_score(&roots[root_index].move)),
+                   equity_to_double(get_positional_adjustment(
+                       config_get_game(config), &roots[root_index].move)),
+                   stat_get_mean(roots[root_index].spread),
+                   stat_get_sem(roots[root_index].spread),
+                   stat_get_mean(roots[root_index].utility),
+                   stat_get_sem(roots[root_index].utility),
+                   stat_get_mean(roots[root_index].win_pct), move_string,
+                   move_raw, cgp);
+          }
+          for (int delta = 0; delta < 3; delta++) {
+            stat_destroy(unused_deltas[delta]);
+          }
+          nested_root_stats_destroy(roots, root_count);
+          emitted_positions++;
+          fflush_or_die(stdout);
+        }
+      }
+
+      const Move *trajectory_move =
+          get_top_equity_move(trajectory_game, trajectory_move_list);
+      assert(trajectory_move != NULL);
+      play_move(trajectory_move, trajectory_game, NULL);
+      free(cgp);
+      position_index++;
+      turn_index++;
+    }
+  }
+
+  printf("POSITIONAL_ORACLE_DONE emitted_positions=%d last_position=%d "
+         "candidate_rollouts=%" PRIu64 " continuation_nodes=%" PRIu64 " "
+         "elapsed_seconds=%.6f wall_limit_reached=%d\n",
+         emitted_positions, position_index, counters.outer_candidate_rollouts,
+         counters.outer_continuation_nodes, ctimer_elapsed_seconds(&timer),
+         wall_limit_reached);
+  fflush_or_die(stdout);
+  move_list_destroy(trajectory_move_list);
+  game_destroy(trajectory_game);
+}
+
+// Generate a root corpus whose ordering actually comes from the combined
+// selector under test, rather than rescoring a KLV2-top-N pool. KLV3 first
+// overgenerates a broad list; the deployed positional correction is then
+// added, and the combined top candidates receive shared KLV2-static oracle
+// scenarios. The KLV2 oracle policy is intentional: only root membership and
+// BAI budget allocation vary in the downstream sweep.
+static void run_combined_candidate_oracle(
+    Config *klv2_config, Config *klv3_config, int num_games, int start_game,
+    int max_positions, int start_position, int collect_from_position,
+    int top_candidates, int overgenerate_count,
+    int adjustment_scale_thousandths, int outer_samples, int outer_plies,
+    int num_threads, int min_bag_tiles, double wall_seconds) {
+  enum { MAX_COMBINED_OVERGENERATE = 256 };
+  if (top_candidates > KLV3_ORACLE_MAX_ROOT_CANDIDATES ||
+      top_candidates < 2) {
+    log_fatal("combined candidate oracle top count must be between 2 and %d",
+              KLV3_ORACLE_MAX_ROOT_CANDIDATES);
+  }
+  if (overgenerate_count < top_candidates ||
+      overgenerate_count > MAX_COMBINED_OVERGENERATE) {
+    log_fatal("combined candidate oracle overgenerate count must be between "
+              "top count and %d",
+              MAX_COMBINED_OVERGENERATE);
+  }
+
+  Game *trajectory_game = config_game_create(klv2_config);
+  MoveList *trajectory_move_list = move_list_create(1);
+  MoveList *overgenerated = move_list_create(overgenerate_count);
+  Timer timer;
+  ctimer_start(&timer);
+  int position_index = start_position;
+  int emitted_positions = 0;
+  bool wall_limit_reached = false;
+  NestedOracleCounters counters = {0};
+
+  printf(
+      "COMBINED_ORACLE_CONFIG games=%d start_game=%d max_positions=%d "
+      "start_position=%d collect_from_position=%d top_candidates=%d "
+      "overgenerate_count=%d selector=klv3_plus_positional "
+      "adjustment_scale_thousandths=%d samples_per_candidate=%d "
+      "continuation_plies=%d policy=klv2_static shared_scenarios=1 "
+      "threads=%d min_bag_tiles=%d wall_seconds=%.3f\n",
+      num_games, start_game, max_positions, start_position,
+      collect_from_position, top_candidates, overgenerate_count,
+      adjustment_scale_thousandths, outer_samples, outer_plies, num_threads,
+      min_bag_tiles, wall_seconds);
+  fflush_or_die(stdout);
+
+  for (int game_index = start_game;
+       game_index < num_games && position_index < max_positions &&
+       !wall_limit_reached;
+       game_index++) {
+    game_reset(trajectory_game);
+    game_seed(trajectory_game,
+              KLV3_ORACLE_BASE_SEED +
+                  (uint64_t)game_index * KLV3_ORACLE_SEED_STRIDE);
+    game_set_starting_player_index(trajectory_game, game_index % 2);
+    draw_starting_racks(trajectory_game);
+    int turn_index = 0;
+    while (!game_over(trajectory_game) &&
+           bag_get_letters(game_get_bag(trajectory_game)) >= min_bag_tiles &&
+           position_index < max_positions) {
+      if (wall_seconds > 0.0 &&
+          ctimer_elapsed_seconds(&timer) >= wall_seconds) {
+        wall_limit_reached = true;
+        break;
+      }
+
+      char *cgp = game_get_cgp(trajectory_game, true);
+      load_position(klv2_config, cgp);
+      load_position(klv3_config, cgp);
+      if (position_index >= collect_from_position) {
+        const Game *klv3_game = config_get_game(klv3_config);
+        const MoveGenArgs gen_args = {
+            .game = klv3_game,
+            .move_list = overgenerated,
+            .move_record_type = MOVE_RECORD_ALL,
+            .move_sort_type = MOVE_SORT_EQUITY,
+            .override_kwg = NULL,
+            .eq_margin_movegen = 0,
+            .target_equity = EQUITY_MAX_VALUE,
+            .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+        };
+        generate_moves(&gen_args);
+        move_list_sort_moves(overgenerated);
+        const int available = move_list_get_count(overgenerated);
+        int eligible = 0;
+        for (int index = 0; index < available; index++) {
+          if (move_get_type(move_list_get_move(overgenerated, index)) !=
+              GAME_EVENT_PASS) {
+            eligible++;
+          }
+        }
+        if (eligible < top_candidates) {
+          log_fatal("combined candidate oracle generated only %d of %d "
+                    "requested candidates",
+                    eligible, top_candidates);
+        }
+
+        Equity positional_adjustments[MAX_COMBINED_OVERGENERATE];
+        Equity combined_equities[MAX_COMBINED_OVERGENERATE];
+        for (int index = 0; index < available; index++) {
+          const Move *move = move_list_get_move(overgenerated, index);
+          if (move_get_type(move) == GAME_EVENT_PASS) {
+            positional_adjustments[index] = 0;
+            combined_equities[index] = EQUITY_MIN_VALUE;
+            continue;
+          }
+          positional_adjustments[index] =
+              get_positional_adjustment((Game *)klv3_game, move);
+          const int64_t combined =
+              (int64_t)move_get_equity(move) +
+              (int64_t)positional_adjustments[index] *
+                  adjustment_scale_thousandths / 1000;
+          if (combined < EQUITY_MIN_VALUE || combined > EQUITY_MAX_VALUE) {
+            log_fatal("combined candidate oracle equity is out of range");
+          }
+          combined_equities[index] = (Equity)combined;
+        }
+
+        bool selected[MAX_COMBINED_OVERGENERATE] = {false};
+        int selected_indices[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+        for (int slot = 0; slot < top_candidates; slot++) {
+          int best_index = -1;
+          for (int index = 0; index < available; index++) {
+            if (selected[index] ||
+                move_get_type(move_list_get_move(overgenerated, index)) ==
+                    GAME_EVENT_PASS) {
+              continue;
+            }
+            if (best_index < 0 ||
+                combined_equities[index] > combined_equities[best_index]) {
+              best_index = index;
+            }
+          }
+          assert(best_index >= 0);
+          selected[best_index] = true;
+          selected_indices[slot] = best_index;
+        }
+
+        NestedRootStats roots[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
+        Equity klv3_equities[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+        Equity klv2_equities[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+        Equity selected_adjustments[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+        Equity selected_combined[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+        const Game *klv2_game = config_get_game(klv2_config);
+        for (int root_index = 0; root_index < top_candidates; root_index++) {
+          const int source_index = selected_indices[root_index];
+          Move move;
+          move_copy(&move, move_list_get_move(overgenerated, source_index));
+          klv3_equities[root_index] = move_get_equity(&move);
+          selected_adjustments[root_index] =
+              positional_adjustments[source_index];
+          selected_combined[root_index] = combined_equities[source_index];
+          klv2_equities[root_index] =
+              get_contextual_static_equity_for_move(klv2_game, &move);
+          move_set_equity(&move, klv2_equities[root_index]);
+          (void)add_unique_root_move(roots, root_index, &move);
+        }
+
+        const int model_root_indices[3] = {0, 0, 0};
+        Stat *unused_deltas[3] = {
+            stat_create(true),
+            stat_create(true),
+            stat_create(true),
+        };
+        const uint64_t position_seed =
+            KLV3_ORACLE_BASE_SEED +
+            (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
+        run_nested_position_samples(
+            klv2_config, klv2_config, roots, top_candidates,
+            model_root_indices, outer_samples, outer_plies,
+            /*nested_samples_per_candidate=*/2, num_threads, position_seed,
+            unused_deltas, &counters);
+
+        for (int root_index = 0; root_index < top_candidates; root_index++) {
+          char move_string[64];
+          char move_raw[256];
+          move_to_string(klv2_game, &roots[root_index].move, move_string,
+                         sizeof(move_string));
+          move_to_record_encoding(&roots[root_index].move, move_raw,
+                                  sizeof(move_raw));
+          printf(
+              "POSITIONAL_CANDIDATE position=%d game=%d turn=%d bag=%d "
+              "rank=%d candidates=%d base_equity=%.6f "
+              "klv3_equity=%.6f move_score=%.6f "
+              "compact_adjustment=%.6f combined_equity=%.6f "
+              "oracle_spread=%.9f oracle_spread_sem=%.9f "
+              "oracle_utility=%.9f oracle_utility_sem=%.9f "
+              "oracle_win=%.9f move=%s move_raw=%s cgp=%s\n",
+              position_index, game_index, turn_index,
+              bag_get_letters(game_get_bag(trajectory_game)), root_index,
+              top_candidates, equity_to_double(klv2_equities[root_index]),
+              equity_to_double(klv3_equities[root_index]),
+              equity_to_double(move_get_score(&roots[root_index].move)),
+              equity_to_double(selected_adjustments[root_index]),
+              equity_to_double(selected_combined[root_index]),
+              stat_get_mean(roots[root_index].spread),
+              stat_get_sem(roots[root_index].spread),
+              stat_get_mean(roots[root_index].utility),
+              stat_get_sem(roots[root_index].utility),
+              stat_get_mean(roots[root_index].win_pct), move_string, move_raw,
+              cgp);
+        }
+        for (int delta = 0; delta < 3; delta++) {
+          stat_destroy(unused_deltas[delta]);
+        }
+        nested_root_stats_destroy(roots, top_candidates);
+        emitted_positions++;
+        fflush_or_die(stdout);
+      }
+
+      const Move *trajectory_move =
+          get_top_equity_move(trajectory_game, trajectory_move_list);
+      assert(trajectory_move != NULL);
+      play_move(trajectory_move, trajectory_game, NULL);
+      free(cgp);
+      position_index++;
+      turn_index++;
+    }
+  }
+
+  printf(
+      "COMBINED_ORACLE_DONE emitted_positions=%d last_position=%d "
+      "candidate_rollouts=%" PRIu64 " continuation_nodes=%" PRIu64 " "
+      "elapsed_seconds=%.6f wall_limit_reached=%d\n",
+      emitted_positions, position_index, counters.outer_candidate_rollouts,
+      counters.outer_continuation_nodes, ctimer_elapsed_seconds(&timer),
+      wall_limit_reached);
+  fflush_or_die(stdout);
+  move_list_destroy(overgenerated);
+  move_list_destroy(trajectory_move_list);
+  game_destroy(trajectory_game);
 }
 
 static NestedCorpusAggregate nested_corpus_aggregate_create(void) {
@@ -2272,6 +3859,275 @@ static void run_candidate_selector_online_oracle(
   equal_sample_aggregate_destroy(&aggregate);
 }
 
+static void print_positional_sim_selector_summary(
+    const EqualSampleAggregate *aggregate, int candidate_set_changes,
+    int global_disagreements, uint64_t total_overlap, int keep_count,
+    int overgenerate_count, int adjustment_scale_thousandths,
+    double elapsed_seconds) {
+  const double source_positions = aggregate->source_positions;
+  printf(
+      "POSITIONAL_SIM_SELECTOR_SUMMARY source_positions=%d "
+      "candidate_set_changes=%d selected_move_agreements=%d "
+      "run_disagreements=%d global_disagreements=%d "
+      "keep=%d overgenerate=%d adjustment_scale=%d "
+      "mean_overlap=%.6f mean_unique_per_selector=%.6f "
+      "positional_root_wins=%d static_root_wins=%d "
+      "conditional_positional_minus_static=%+.9f conditional_sem=%.9f "
+      "conditional_win_delta=%+.9f conditional_win_sem=%.9f "
+      "conditional_spread_delta=%+.9f conditional_spread_sem=%.9f "
+      "all_source_marginal_delta=%+.9f all_source_sem=%.9f "
+      "static_nomination_iterations=%" PRIu64
+      " positional_nomination_iterations=%" PRIu64
+      " outer_candidate_rollouts=%" PRIu64 " elapsed_seconds=%.6f\n",
+      aggregate->source_positions, candidate_set_changes,
+      aggregate->agreements, aggregate->disagreements, global_disagreements,
+      keep_count, overgenerate_count, adjustment_scale_thousandths,
+      source_positions > 0.0 ? (double)total_overlap / source_positions : 0.0,
+      source_positions > 0.0
+          ? keep_count - (double)total_overlap / source_positions
+          : 0.0,
+      aggregate->model_root_wins[1], aggregate->model_root_wins[0],
+      stat_get_mean(aggregate->conditional_utility_delta),
+      stat_get_sem(aggregate->conditional_utility_delta),
+      stat_get_mean(aggregate->conditional_win_delta),
+      stat_get_sem(aggregate->conditional_win_delta),
+      stat_get_mean(aggregate->conditional_spread_delta),
+      stat_get_sem(aggregate->conditional_spread_delta),
+      stat_get_mean(aggregate->all_position_utility_delta),
+      stat_get_sem(aggregate->all_position_utility_delta),
+      aggregate->nomination_iterations[0],
+      aggregate->nomination_iterations[1],
+      aggregate->counters.outer_candidate_rollouts, elapsed_seconds);
+}
+
+// Compare equal-sample sims whose only difference is initial candidate-set
+// membership. Ordinary static nomination keeps top K. Positional nomination
+// reranks the first M static candidates and also keeps K. Both sims use the
+// same KLV2 rollout and horizon policy; only selected-move disagreements are
+// sent to the shared-scenario four-ply oracle.
+static void run_positional_sim_selector_oracle(
+    Config *config, int num_games, int start_game, int max_positions,
+    int start_position, int collect_from_position, int start_disagreements,
+    int target_disagreements, int keep_count, int overgenerate_count,
+    int adjustment_scale_thousandths, int samples_per_arm, int outer_samples,
+    int outer_plies, int num_threads, int min_bag_tiles,
+    double wall_seconds) {
+  if (keep_count > overgenerate_count ||
+      overgenerate_count > KLV3_ORACLE_MAX_ROOT_CANDIDATES) {
+    log_fatal("positional selector requires keep <= overgenerate <= %d",
+              KLV3_ORACLE_MAX_ROOT_CANDIDATES);
+  }
+  EqualSampleAggregate aggregate = equal_sample_aggregate_create();
+  NominationContext contexts[2];
+  nomination_context_init(&contexts[0], config);
+  nomination_context_init(&contexts[1], config);
+  MoveList *overgenerated = move_list_create(overgenerate_count);
+  MoveList *static_top = move_list_create(keep_count);
+  MoveList *positional_top = move_list_create(keep_count);
+  Game *trajectory_game = config_game_create(config);
+  MoveList *trajectory_move_list = move_list_create(1);
+  Timer timer;
+  ctimer_start(&timer);
+  int position_index = start_position;
+  int global_disagreements = start_disagreements;
+  int candidate_set_changes = 0;
+  uint64_t total_overlap = 0;
+  bool wall_limit_reached = false;
+
+  printf(
+      "POSITIONAL_SIM_SELECTOR_CONFIG games=%d start_game=%d "
+      "max_positions=%d start_position=%d collect_from_position=%d "
+      "start_disagreements=%d target_disagreements=%d keep=%d "
+      "overgenerate=%d adjustment_scale=%d samples_per_arm=%d "
+      "nomination_plies=%d nomination_policy=klv2 "
+      "outer_samples=%d outer_plies=%d oracle_policy=klv2_static "
+      "threads=%d min_bag_tiles=%d wall_seconds=%.3f\n",
+      num_games, start_game, max_positions, start_position,
+      collect_from_position, start_disagreements, target_disagreements,
+      keep_count, overgenerate_count, adjustment_scale_thousandths,
+      samples_per_arm, KLV3_ORACLE_SIM_PLIES, outer_samples, outer_plies,
+      num_threads, min_bag_tiles, wall_seconds);
+  fflush_or_die(stdout);
+
+  for (int game_index = start_game;
+       game_index < num_games && position_index < max_positions &&
+       global_disagreements < target_disagreements && !wall_limit_reached;
+       game_index++) {
+    game_reset(trajectory_game);
+    game_seed(trajectory_game,
+              KLV3_ORACLE_BASE_SEED +
+                  (uint64_t)game_index * KLV3_ORACLE_SEED_STRIDE);
+    game_set_starting_player_index(trajectory_game, game_index % 2);
+    draw_starting_racks(trajectory_game);
+    int turn_index = 0;
+    while (!game_over(trajectory_game) &&
+           bag_get_letters(game_get_bag(trajectory_game)) >= min_bag_tiles &&
+           position_index < max_positions &&
+           global_disagreements < target_disagreements) {
+      if (wall_seconds > 0.0 &&
+          ctimer_elapsed_seconds(&timer) >= wall_seconds) {
+        wall_limit_reached = true;
+        break;
+      }
+      char *cgp = game_get_cgp(trajectory_game, true);
+      load_position(config, cgp);
+      if (position_index >= collect_from_position) {
+        const int overlap = build_positional_selector_lists(
+            config, overgenerated, static_top, positional_top, keep_count,
+            overgenerate_count, adjustment_scale_thousandths);
+        aggregate.source_positions++;
+        total_overlap += (uint64_t)overlap;
+        if (overlap == keep_count) {
+          aggregate.agreements++;
+          stat_push(aggregate.all_position_utility_delta, 0.0, 1);
+        } else {
+          candidate_set_changes++;
+          NominationResult nominations[2];
+          const uint64_t nomination_seed =
+              KLV3_ORACLE_BASE_SEED +
+              (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
+          if (position_index % 2 == 0) {
+            nominations[0] = nominate_candidate_list_with_klv2_policy(
+                config, &contexts[0], static_top, samples_per_arm,
+                nomination_seed);
+            nominations[1] = nominate_candidate_list_with_klv2_policy(
+                config, &contexts[1], positional_top, samples_per_arm,
+                nomination_seed);
+          } else {
+            nominations[1] = nominate_candidate_list_with_klv2_policy(
+                config, &contexts[1], positional_top, samples_per_arm,
+                nomination_seed);
+            nominations[0] = nominate_candidate_list_with_klv2_policy(
+                config, &contexts[0], static_top, samples_per_arm,
+                nomination_seed);
+          }
+          for (int selector = 0; selector < 2; selector++) {
+            aggregate.nomination_iterations[selector] +=
+                nominations[selector].iterations;
+            aggregate.nomination_nodes[selector] += nominations[selector].nodes;
+            aggregate.nomination_seconds[selector] +=
+                nominations[selector].elapsed_seconds;
+          }
+          if (moves_are_equal(&nominations[0].move, &nominations[1].move)) {
+            aggregate.agreements++;
+            stat_push(aggregate.all_position_utility_delta, 0.0, 1);
+          } else {
+            NestedRootStats roots[KLV3_ORACLE_MAX_ROOT_CANDIDATES] = {0};
+            const int static_root =
+                add_unique_root_move(roots, 0, &nominations[0].move);
+            const int positional_root =
+                add_unique_root_move(roots, 1, &nominations[1].move);
+            assert(static_root == 0 && positional_root == 1);
+            const int selector_roots[3] = {
+                static_root,
+                static_root,
+                positional_root,
+            };
+            Stat *position_deltas[3] = {
+                stat_create(true),
+                stat_create(true),
+                stat_create(true),
+            };
+            const uint64_t oracle_seed =
+                KLV3_ORACLE_BASE_SEED +
+                (uint64_t)(position_index + 1) * KLV3_ORACLE_SEED_STRIDE;
+            run_nested_position_samples(
+                config, config, roots, 2, selector_roots, outer_samples,
+                outer_plies, /*nested_samples_per_candidate=*/2, num_threads,
+                oracle_seed, position_deltas, &aggregate.counters);
+            const double utility_delta = stat_get_mean(position_deltas[0]);
+            const double win_delta =
+                stat_get_mean(roots[positional_root].win_pct) -
+                stat_get_mean(roots[static_root].win_pct);
+            const double spread_delta =
+                stat_get_mean(roots[positional_root].spread) -
+                stat_get_mean(roots[static_root].spread);
+            stat_push(aggregate.conditional_utility_delta, utility_delta, 1);
+            stat_push(aggregate.conditional_win_delta, win_delta, 1);
+            stat_push(aggregate.conditional_spread_delta, spread_delta, 1);
+            stat_push(aggregate.all_position_utility_delta, utility_delta, 1);
+            aggregate.disagreements++;
+            global_disagreements++;
+
+            const int best_root =
+                stat_get_mean(roots[positional_root].utility) >
+                        stat_get_mean(roots[static_root].utility)
+                    ? positional_root
+                    : static_root;
+            aggregate.model_root_wins[0] += best_root == static_root;
+            aggregate.model_root_wins[1] += best_root == positional_root;
+
+            char static_move_string[64];
+            char positional_move_string[64];
+            move_to_string(config_get_game(config), &nominations[0].move,
+                           static_move_string, sizeof(static_move_string));
+            move_to_string(config_get_game(config), &nominations[1].move,
+                           positional_move_string,
+                           sizeof(positional_move_string));
+            printf(
+                "POSITIONAL_SIM_SELECTOR_POSITION disagreement=%d "
+                "position=%d game=%d turn=%d bag=%d overlap=%d "
+                "static_move=%s positional_move=%s "
+                "static_iterations=%" PRIu64
+                " positional_iterations=%" PRIu64
+                " positional_minus_static=%+.9f sem=%.9f "
+                "win_delta=%+.9f spread_delta=%+.9f cgp=%s\n",
+                global_disagreements, position_index, game_index, turn_index,
+                bag_get_letters(game_get_bag(trajectory_game)), overlap,
+                static_move_string, positional_move_string,
+                nominations[0].iterations, nominations[1].iterations,
+                utility_delta, stat_get_sem(position_deltas[0]), win_delta,
+                spread_delta, cgp);
+            for (int delta = 0; delta < 3; delta++) {
+              stat_destroy(position_deltas[delta]);
+            }
+            nested_root_stats_destroy(roots, 2);
+            if (aggregate.disagreements % 5 == 0) {
+              print_positional_sim_selector_summary(
+                  &aggregate, candidate_set_changes, global_disagreements,
+                  total_overlap, keep_count, overgenerate_count,
+                  adjustment_scale_thousandths,
+                  ctimer_elapsed_seconds(&timer));
+            }
+            fflush_or_die(stdout);
+          }
+        }
+      }
+
+      const Move *trajectory_move =
+          get_top_equity_move(trajectory_game, trajectory_move_list);
+      assert(trajectory_move != NULL);
+      play_move(trajectory_move, trajectory_game, NULL);
+      free(cgp);
+      position_index++;
+      turn_index++;
+    }
+  }
+
+  print_positional_sim_selector_summary(
+      &aggregate, candidate_set_changes, global_disagreements, total_overlap,
+      keep_count, overgenerate_count, adjustment_scale_thousandths,
+      ctimer_elapsed_seconds(&timer));
+  printf(
+      "POSITIONAL_SIM_SELECTOR_DONE source_positions=%d "
+      "candidate_set_changes=%d selected_move_agreements=%d "
+      "run_disagreements=%d global_disagreements=%d target=%d "
+      "last_position=%d elapsed_seconds=%.6f wall_limit_reached=%d\n",
+      aggregate.source_positions, candidate_set_changes, aggregate.agreements,
+      aggregate.disagreements, global_disagreements, target_disagreements,
+      position_index, ctimer_elapsed_seconds(&timer), wall_limit_reached);
+  fflush_or_die(stdout);
+
+  move_list_destroy(trajectory_move_list);
+  game_destroy(trajectory_game);
+  move_list_destroy(positional_top);
+  move_list_destroy(static_top);
+  move_list_destroy(overgenerated);
+  nomination_context_destroy(&contexts[1]);
+  nomination_context_destroy(&contexts[0]);
+  equal_sample_aggregate_destroy(&aggregate);
+}
+
 static void run_corpus_oracle(Config *klv2_config, Config *klv3_config,
                               const char *corpus_files, int num_samples,
                               int num_threads, int start_disagreement,
@@ -2440,13 +4296,33 @@ void test_klv3_sim_oracle(void) {
       env_bool("KLV3_ORACLE_EQUAL_SAMPLE_ONLINE", false);
   const bool candidate_selector_online =
       env_bool("KLV3_ORACLE_CANDIDATE_SELECTOR_ONLINE", false);
-  if (equal_sample_online && candidate_selector_online) {
-    log_fatal("equal-sample rollout-policy and candidate-selector modes are "
-              "mutually exclusive");
+  const bool positional_oracle = env_bool("KLV3_ORACLE_POSITIONAL", false);
+  const bool positional_sim_selector_online =
+      env_bool("KLV3_ORACLE_POSITIONAL_SIM_SELECTOR_ONLINE", false);
+  const bool positional_feature_relabel =
+      env_bool("KLV3_ORACLE_POSITIONAL_FEATURE_RELABEL", false);
+  const bool positional_policy_corpus =
+      env_bool("KLV3_ORACLE_POSITIONAL_POLICY_CORPUS", false);
+  const bool combined_candidate_oracle =
+      env_bool("KLV3_ORACLE_COMBINED_CANDIDATE_ORACLE", false);
+  const bool combined_candidate_sweep_corpus =
+      env_bool("KLV3_ORACLE_COMBINED_SWEEP_CORPUS", false);
+  if ((int)equal_sample_online + (int)candidate_selector_online +
+          (int)positional_oracle + (int)positional_sim_selector_online +
+          (int)positional_feature_relabel + (int)positional_policy_corpus +
+          (int)combined_candidate_oracle +
+          (int)combined_candidate_sweep_corpus >
+      1) {
+    log_fatal("equal-sample, candidate-selector, positional-candidate, and "
+              "positional feature/policy/combined modes are mutually "
+              "exclusive");
   }
   const int target_disagreements = env_positive_int(
       "KLV3_ORACLE_TARGET_DISAGREEMENTS",
-      equal_sample_online || candidate_selector_online ? 500 : 10000);
+      equal_sample_online || candidate_selector_online ||
+              positional_sim_selector_online
+          ? 500
+          : 10000);
   const int start_disagreements =
       env_nonnegative_int("KLV3_ORACLE_START_DISAGREEMENTS", 0);
   if (start_game >= num_games) {
@@ -2496,6 +4372,30 @@ void test_klv3_sim_oracle(void) {
       create_oracle_config(baseline_klv_name, num_threads, seconds_per_turn,
                            min_play_iterations, max_iterations,
                            /*fallback_threshold=*/-1.0);
+  if (positional_feature_relabel) {
+    if (corpus_files == NULL || corpus_files[0] == '\0') {
+      log_fatal("positional feature relabel requires "
+                "KLV3_ORACLE_CORPUS_FILES");
+    }
+    run_positional_feature_relabel(klv2_config, corpus_files);
+    config_destroy(klv2_config);
+    return;
+  }
+  if (positional_policy_corpus) {
+    if (corpus_files == NULL || corpus_files[0] == '\0') {
+      log_fatal("positional policy corpus mode requires "
+                "KLV3_ORACLE_CORPUS_FILES");
+    }
+    const int policy_max_positions = env_positive_int(
+        "KLV3_ORACLE_POSITIONAL_POLICY_MAX_POSITIONS", 20000);
+    const int policy_samples_per_arm = env_nonnegative_int(
+        "KLV3_ORACLE_POSITIONAL_POLICY_SAMPLES_PER_ARM", 0);
+    run_positional_policy_corpus(
+        klv2_config, corpus_files, policy_max_positions,
+        policy_samples_per_arm, seconds_per_turn, corpus_wall_seconds);
+    config_destroy(klv2_config);
+    return;
+  }
   Config *klv3_config = create_oracle_config(
       candidate_klv_name, num_threads, seconds_per_turn, min_play_iterations,
       max_iterations, three_way ? -1.0 : fallback_threshold);
@@ -2505,6 +4405,122 @@ void test_klv3_sim_oracle(void) {
                       min_play_iterations, max_iterations,
                       fallback_threshold_enabled ? fallback_threshold : 1.5)
                 : NULL;
+  if (combined_candidate_oracle) {
+    if (three_way || (corpus_files != NULL && corpus_files[0] != '\0')) {
+      log_fatal("combined candidate oracle cannot be combined with three-way "
+                "or corpus-file modes");
+    }
+    const int combined_top = env_positive_int(
+        "KLV3_ORACLE_COMBINED_TOP", 60);
+    const int combined_overgenerate = env_positive_int(
+        "KLV3_ORACLE_COMBINED_OVERGENERATE", 128);
+    const int combined_positional_scale = env_nonnegative_int(
+        "KLV3_ORACLE_COMBINED_POSITIONAL_SCALE", 750);
+    run_combined_candidate_oracle(
+        klv2_config, klv3_config, num_games, start_game, max_positions,
+        start_position, collect_from_position, combined_top,
+        combined_overgenerate, combined_positional_scale,
+        nested_outer_samples, nested_outer_plies, num_threads,
+        nested_min_bag_tiles, corpus_wall_seconds);
+    config_destroy(hybrid_config);
+    config_destroy(klv3_config);
+    config_destroy(klv2_config);
+    return;
+  }
+  if (combined_candidate_sweep_corpus) {
+    if (three_way || corpus_files == NULL || corpus_files[0] == '\0') {
+      log_fatal("combined candidate sweep requires a corpus file and cannot "
+                "be combined with three-way mode");
+    }
+    enum { MAX_SWEEP_VALUES = 16 };
+    int num_plays_values[MAX_SWEEP_VALUES];
+    int min_iteration_values[MAX_SWEEP_VALUES];
+    const char *combined_cell_pairs =
+        getenv("KLV3_ORACLE_COMBINED_CELL_PAIRS");
+    const bool paired_values =
+        combined_cell_pairs != NULL && combined_cell_pairs[0] != '\0';
+    int num_plays_count;
+    int min_iteration_count;
+    if (paired_values) {
+      num_plays_count = parse_positive_int_pairs(
+          "KLV3_ORACLE_COMBINED_CELL_PAIRS", combined_cell_pairs,
+          num_plays_values, min_iteration_values, MAX_SWEEP_VALUES);
+      min_iteration_count = num_plays_count;
+    } else {
+      num_plays_count = parse_positive_int_list(
+          "KLV3_ORACLE_COMBINED_NUM_PLAYS",
+          env_string("KLV3_ORACLE_COMBINED_NUM_PLAYS",
+                     "3,5,8,10,12,15,20"),
+          num_plays_values, MAX_SWEEP_VALUES);
+      min_iteration_count = parse_positive_int_list(
+          "KLV3_ORACLE_COMBINED_MIN_ITERATIONS",
+          env_string("KLV3_ORACLE_COMBINED_MIN_ITERATIONS",
+                     "1,25,50,100,200,400"),
+          min_iteration_values, MAX_SWEEP_VALUES);
+    }
+    const int combined_skip = env_nonnegative_int(
+        "KLV3_ORACLE_COMBINED_SKIP_POSITIONS", 0);
+    const int combined_max = env_positive_int(
+        "KLV3_ORACLE_COMBINED_MAX_POSITIONS", 1000);
+    const uint64_t combined_node_budget = (uint64_t)env_positive_int(
+        "KLV3_ORACLE_COMBINED_NODE_BUDGET", 36000);
+    const int combined_plies =
+        env_positive_int("KLV3_ORACLE_COMBINED_PLIES",
+                         KLV3_ORACLE_SIM_PLIES);
+    const int combined_similarity_check = env_nonnegative_int(
+        "KLV3_ORACLE_COMBINED_SIMILARITY_CHECK_PLAYS", 0);
+    const int combined_positional_scale = env_nonnegative_int(
+        "KLV3_ORACLE_COMBINED_POSITIONAL_SCALE", 750);
+    run_combined_candidate_sweep(
+        klv2_config, klv3_config, corpus_files, combined_skip, combined_max,
+        num_plays_values, num_plays_count, min_iteration_values,
+        min_iteration_count, paired_values, combined_plies,
+        combined_similarity_check, combined_node_budget,
+        combined_positional_scale, corpus_wall_seconds);
+    config_destroy(hybrid_config);
+    config_destroy(klv3_config);
+    config_destroy(klv2_config);
+    return;
+  }
+  if (positional_sim_selector_online) {
+    if (three_way || (corpus_files != NULL && corpus_files[0] != '\0')) {
+      log_fatal("positional sim-selector oracle cannot be combined with "
+                "three-way or corpus-file modes");
+    }
+    const int keep_count =
+        env_positive_int("KLV3_ORACLE_POSITIONAL_KEEP", 15);
+    const int overgenerate_count =
+        env_positive_int("KLV3_ORACLE_POSITIONAL_OVERGENERATE", 30);
+    const int adjustment_scale_thousandths =
+        env_nonnegative_int("KLV3_ORACLE_POSITIONAL_SCALE", 1000);
+    run_positional_sim_selector_oracle(
+        klv2_config, num_games, start_game, max_positions, start_position,
+        collect_from_position, start_disagreements, target_disagreements,
+        keep_count, overgenerate_count, adjustment_scale_thousandths,
+        fixed_samples_per_arm, nested_outer_samples, nested_outer_plies,
+        num_threads, nested_min_bag_tiles, corpus_wall_seconds);
+    config_destroy(hybrid_config);
+    config_destroy(klv3_config);
+    config_destroy(klv2_config);
+    return;
+  }
+  if (positional_oracle) {
+    if (three_way || (corpus_files != NULL && corpus_files[0] != '\0')) {
+      log_fatal("positional oracle cannot be combined with three-way or "
+                "corpus-file modes");
+    }
+    const int positional_top =
+        env_positive_int("KLV3_ORACLE_POSITIONAL_TOP", 8);
+    run_positional_candidate_oracle(
+        klv2_config, num_games, start_game, max_positions, start_position,
+        collect_from_position, positional_top, nested_outer_samples,
+        nested_outer_plies, num_threads, nested_min_bag_tiles,
+        corpus_wall_seconds);
+    config_destroy(hybrid_config);
+    config_destroy(klv3_config);
+    config_destroy(klv2_config);
+    return;
+  }
   if (candidate_selector_online) {
     if (three_way || (corpus_files != NULL && corpus_files[0] != '\0')) {
       log_fatal("candidate-selector online oracle cannot be combined with "

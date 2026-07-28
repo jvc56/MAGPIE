@@ -185,6 +185,7 @@ static TestEntry on_demand_test_table[] = {
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
     {"klv3oracle", test_klv3_sim_oracle},
+    {"poshooks", test_positional_hook_features},
     {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver

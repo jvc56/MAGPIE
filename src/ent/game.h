@@ -63,6 +63,8 @@ void game_set_starting_player_index(Game *game, int starting_player_index);
 void game_gen_all_cross_sets(const Game *game);
 void game_gen_cross_set(const Game *game, int row, int col, int dir,
                         int cross_set_index);
+void game_gen_cross_set_for_features(const Game *game, int row, int col,
+                                     int dir, int cross_set_index);
 
 // Override KWGs for cross-set generation (e.g., word-pruned KWGs in endgame).
 // kwg0/kwg1 are not owned by Game. In IGNORANT mode, kwg0 is used for both
