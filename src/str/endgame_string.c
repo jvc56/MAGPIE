@@ -25,6 +25,8 @@ endgame_result_status_to_string(endgame_result_status_t status) {
     return "finished";
   case ENDGAME_RESULT_STATUS_INTERRUPTED:
     return "interrupted";
+  case ENDGAME_RESULT_STATUS_TIMEOUT:
+    return "timeout";
   case ENDGAME_RESULT_STATUS_NONE:
     return "running";
   }

@@ -25,6 +25,8 @@ static const char *peg_result_status_to_string(peg_result_status_t status) {
     return "finished";
   case PEG_RESULT_STATUS_INTERRUPTED:
     return "interrupted";
+  case PEG_RESULT_STATUS_TIMEOUT:
+    return "timeout";
   case PEG_RESULT_STATUS_NONE:
     return "running";
   }

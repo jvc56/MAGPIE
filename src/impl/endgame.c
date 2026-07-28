@@ -161,6 +161,12 @@ struct EndgameCtx {
   int64_t external_deadline_ns;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
+  // Set when search_complete is triggered by a time budget (per-depth
+  // deadline, soft-limit convergence, or a projected hard-limit overflow)
+  // rather than reaching the full requested depth. Read once after all
+  // workers join to report ENDGAME_RESULT_STATUS_TIMEOUT instead of
+  // FINISHED for a capped solve.
+  atomic_int deadline_exceeded;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
   float initial_opp_stuck_frac;
 
@@ -732,6 +738,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
+  atomic_store(&es->deadline_exceeded, 0);
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
@@ -2094,6 +2101,7 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   int64_t now_ns = ctimer_monotonic_ns();
   if (now_ns > deadline_ns) {
     atomic_store(&worker->solver->search_complete, 1);
+    atomic_store(&worker->solver->deadline_exceeded, 1);
     return true;
   }
   return false;
@@ -3268,6 +3276,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
             // Result unchanged since last soft-limit crossing — stable.
             // Bank the remaining time for future turns.
             atomic_store(&worker->solver->search_complete, 1);
+            atomic_store(&worker->solver->deadline_exceeded, 1);
             break;
           }
           // First crossing or result still changing: record value and fall
@@ -3295,6 +3304,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
           if (elapsed + estimated_next > worker->solver->hard_time_limit) {
             // Next depth would likely exceed hard limit — stop now
             atomic_store(&worker->solver->search_complete, 1);
+            atomic_store(&worker->solver->deadline_exceeded, 1);
             break;
           }
           // Mid-depth bail: set a per-depth deadline so workers abort if a
@@ -3499,6 +3509,8 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   if (thread_control_get_status(endgame_args->thread_control) ==
       THREAD_CONTROL_STATUS_USER_INTERRUPT) {
     endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else if (atomic_load(&solver->deadline_exceeded)) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_TIMEOUT);
   } else {
     endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
   }
@@ -3567,6 +3579,8 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   if (thread_control_get_status(endgame_args->thread_control) ==
       THREAD_CONTROL_STATUS_USER_INTERRUPT) {
     endgame_results_set_status(results, ENDGAME_RESULT_STATUS_INTERRUPTED);
+  } else if (atomic_load(&solver->deadline_exceeded)) {
+    endgame_results_set_status(results, ENDGAME_RESULT_STATUS_TIMEOUT);
   } else {
     endgame_results_set_status(results, ENDGAME_RESULT_STATUS_FINISHED);
   }

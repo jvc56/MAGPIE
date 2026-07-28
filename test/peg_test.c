@@ -633,6 +633,26 @@ static void test_peg_main_cli(void) {
   config_destroy(config);
 }
 
+// A -pegtlim budget so tiny it expires before the first stage can complete
+// must report TIMEOUT, not FINISHED — regression test for the peg.c/
+// endgame.c review comment on PR #629 asking that a time-capped solve be
+// distinguishable from one that genuinely completed.
+static void test_peg_timeout_status(void) {
+  Config *config =
+      config_create_or_die("set -threads 4 -s1 score -s2 score -pegtlim 1e-7");
+  load_and_exec_config_or_die(
+      config,
+      "cgp 15/3Q7U3/3U2TAURINE2/1CHANSONS2W3/2AI6JO3/DIRL1PO3IN3/E1D2EF3V4/"
+      "F1I2p1TRAIK3/O1L2T4E4/ABy1PIT2BRIG2/ME1MOZELLE5/1GRADE1O1NOH3/"
+      "WE3R1V7/AT5E7/G6D7 ENOSTXY/ACEISUY 356/378 0 -lex NWL20");
+  load_and_exec_config_or_die(config, "peg");
+
+  const PegResult *result = config_get_peg_result(config);
+  assert(result->status == PEG_RESULT_STATUS_TIMEOUT);
+
+  config_destroy(config);
+}
+
 // ----- progress callbacks + per-scenario detail -----------------------------
 
 // user_data for the progress callbacks: thread-safe event counters, since the
@@ -1294,6 +1314,7 @@ void test_peg(void) {
   test_peg_macondo_pah_slice();
   test_peg_macondo_pond_slice();
   test_peg_main_cli();
+  test_peg_timeout_status();
   // Opp-rack bag adjustment fix: empty and partial opp racks.
   test_peg_opp_rack_sizes();
   test_peg_opp_rack_sizes_cli();

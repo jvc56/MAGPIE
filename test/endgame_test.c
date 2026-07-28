@@ -278,6 +278,50 @@ void test_pass_first(void) {
       0);
 }
 
+// A solve whose external deadline has already expired before the first
+// depth even starts must report TIMEOUT, not FINISHED — regression test for
+// the peg.c/endgame.c review comment on PR #629 asking that a time-capped
+// solve be distinguishable from one that genuinely completed.
+void test_endgame_timeout_status(void) {
+  Config *config = config_create_or_die("set -s1 score -s2 score -threads 6");
+  load_and_exec_config_or_die(
+      config,
+      "cgp "
+      "AIDER2U7/b1E1E2N1Z5/AWN1T2M1ATT3/LI1COBLE2OW3/OP2U2E2AA3/NE2CUSTARDS1Q1/"
+      "ER1OH5I2U1/S2K2FOB1ERGOT/5HEXYLS2I1/4JIN6N1/2GOOP2NAIVEsT/1DIRE10/"
+      "2GAY10/15/15 AEFILMR/DIV 371/412 0 -lex NWL20;");
+
+  EndgameCtx *endgame_ctx = NULL;
+  Game *game = config_get_game(config);
+  EndgameArgs endgame_args = {0};
+  endgame_args.thread_control = config_get_thread_control(config);
+  endgame_args.game = game;
+  endgame_args.plies = 13;
+  endgame_args.tt_fraction_of_mem = config_get_tt_fraction_of_mem(config);
+  endgame_args.initial_small_move_arena_size =
+      DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE;
+  endgame_args.num_threads = 6;
+  endgame_args.use_heuristics = true;
+  endgame_args.forced_pass_bypass = true;
+  endgame_args.enable_pv_display = true;
+  endgame_args.num_top_moves = 1;
+  endgame_args.seed = 42;
+  // Already in the past, so the very first periodic deadline check inside
+  // the search bails out before depth 13 is ever reached.
+  endgame_args.external_deadline_ns = ctimer_monotonic_ns() - 1;
+
+  EndgameResults *endgame_results = config_get_endgame_results(config);
+  ErrorStack *error_stack = error_stack_create();
+  endgame_solve(&endgame_ctx, &endgame_args, endgame_results, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(endgame_results_get_status(endgame_results) ==
+         ENDGAME_RESULT_STATUS_TIMEOUT);
+
+  endgame_ctx_destroy(endgame_ctx);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
 // Drives endgame_add_worker from inside the running solve: the per-ply
 // callback fires on the master worker after each completed depth, and injects
 // one extra ABDADA worker per ply (up to max_attempts) — modeling a pool that
@@ -1496,6 +1540,7 @@ void test_endgame(void) {
   test_very_deep();
   test_small_arena_realloc();
   test_pass_first();
+  test_endgame_timeout_status();
   test_nonempty_bag();
   // 2-lexicon endgame tests (TWL98 vs CSW24, QI-relevant)
   test_2lex_ignorant();

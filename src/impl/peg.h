@@ -331,6 +331,7 @@ typedef enum {
   PEG_RESULT_STATUS_NONE,
   PEG_RESULT_STATUS_FINISHED,
   PEG_RESULT_STATUS_INTERRUPTED,
+  PEG_RESULT_STATUS_TIMEOUT,
 } peg_result_status_t;
 
 typedef struct PegResult {

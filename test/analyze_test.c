@@ -191,6 +191,37 @@ static void test_analyze_vertical_opening_transposable(void) {
   config_destroy(config);
 }
 
+// Regression for PR #629 review: -etlim/-pegtlim left at their 0 default
+// must still be treated as "unset" (so analyze applies its own 600s/1800s
+// defaults), while an explicit -etlim 0 / -pegtlim 0 must be honored as
+// genuinely unlimited even under analyze. The bug was checking the numeric
+// value alone, which can't tell the two apart.
+static void test_analyze_etlim_pegtlim_explicit_zero(void) {
+  Config *config = config_create_or_die("set -lex CSW21 -plies 0");
+  load_game_history_with_gcg(config, "success");
+  (void)remove(PLAYER_NAMES_REPORT_PATH);
+
+  // Unset: analyze should see "not explicitly set".
+  assert_config_exec_status(config, "analyze", ERROR_STATUS_SUCCESS);
+  assert(!config_get_endgame_time_limit_explicitly_set(config));
+  assert(!config_get_peg_time_limit_explicitly_set(config));
+  assert(config_get_endgame_time_limit_seconds(config) == 0);
+  assert(config_get_peg_time_limit_seconds(config) == 0);
+  remove_or_die(PLAYER_NAMES_REPORT_PATH);
+
+  // Explicit zero: must persist as "explicitly set" through analyze, not get
+  // silently overridden by analyze's own defaults.
+  assert_config_exec_status(config, "analyze -etlim 0 -pegtlim 0",
+                            ERROR_STATUS_SUCCESS);
+  assert(config_get_endgame_time_limit_explicitly_set(config));
+  assert(config_get_peg_time_limit_explicitly_set(config));
+  assert(config_get_endgame_time_limit_seconds(config) == 0);
+  assert(config_get_peg_time_limit_seconds(config) == 0);
+  remove_or_die(PLAYER_NAMES_REPORT_PATH);
+
+  config_destroy(config);
+}
+
 void test_analyze(void) {
   test_analyze_single_file();
   test_analyze_zero_args();
@@ -204,6 +235,7 @@ void test_analyze(void) {
   test_analyze_no_game();
   test_analyze_unknown_player();
   test_analyze_vertical_opening_transposable();
+  test_analyze_etlim_pegtlim_explicit_zero();
 }
 
 // Slow test: plies=2 simulation on a real GCG. Invoked only when explicitly

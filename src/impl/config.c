@@ -345,6 +345,12 @@ struct Config {
   double time_limit_seconds; // sim only; independent of the other two below.
   double endgame_time_limit_seconds; // 0 = unlimited.
   double peg_time_limit_seconds;     // 0 = unlimited.
+  // True once -etlim/-pegtlim has been explicitly supplied by the user, as
+  // opposed to left at its 0 default. Persists across commands since pargs
+  // reset each parse (see peg_only_str above) so analyze can tell "never
+  // set" apart from an explicit -etlim 0 / -pegtlim 0.
+  bool endgame_time_limit_explicitly_set;
+  bool peg_time_limit_explicitly_set;
   int num_threads;
   int print_interval;
   uint64_t seed;
@@ -529,6 +535,22 @@ uint64_t config_get_max_iterations(const Config *config) {
 
 double config_get_stop_cond_pct(const Config *config) {
   return config->stop_cond_pct;
+}
+
+double config_get_endgame_time_limit_seconds(const Config *config) {
+  return config->endgame_time_limit_seconds;
+}
+
+bool config_get_endgame_time_limit_explicitly_set(const Config *config) {
+  return config->endgame_time_limit_explicitly_set;
+}
+
+double config_get_peg_time_limit_seconds(const Config *config) {
+  return config->peg_time_limit_seconds;
+}
+
+bool config_get_peg_time_limit_explicitly_set(const Config *config) {
+  return config->peg_time_limit_explicitly_set;
 }
 
 uint64_t config_get_seed(const Config *config) { return config->seed; }
@@ -6760,12 +6782,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_ENDGAME_TIME_LIMIT, 0) != NULL) {
+    config->endgame_time_limit_explicitly_set = true;
+  }
   config_load_double(config, ARG_TOKEN_ENDGAME_TIME_LIMIT, 0, 1e9,
                      &config->endgame_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
 
+  if (config_get_parg_value(config, ARG_TOKEN_PEG_TIME_LIMIT, 0) != NULL) {
+    config->peg_time_limit_explicitly_set = true;
+  }
   config_load_double(config, ARG_TOKEN_PEG_TIME_LIMIT, 0, 1e9,
                      &config->peg_time_limit_seconds, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -8016,14 +8044,14 @@ static void config_fill_analyze_args(Config *config, AnalyzeArgs *analyze_args,
                        &analyze_args->sim_args);
   config_fill_endgame_args(config, &analyze_args->endgame_args);
   analyze_args->endgame_args.num_top_moves = 1;
-  if (config->endgame_time_limit_seconds == 0) {
+  if (!config->endgame_time_limit_explicitly_set) {
     analyze_args->endgame_args.soft_time_limit =
         CONFIG_ANALYZE_DEFAULT_ENDGAME_TIME_LIMIT_SECONDS;
     analyze_args->endgame_args.hard_time_limit =
         CONFIG_ANALYZE_DEFAULT_ENDGAME_TIME_LIMIT_SECONDS;
   }
   config_fill_peg_args(config, &analyze_args->peg_args);
-  if (config->peg_time_limit_seconds == 0) {
+  if (!config->peg_time_limit_explicitly_set) {
     analyze_args->peg_args.time_budget_seconds =
         CONFIG_ANALYZE_DEFAULT_PEG_TIME_LIMIT_SECONDS;
   }
@@ -8790,6 +8818,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->time_limit_seconds = 60;
   config->endgame_time_limit_seconds = 0;
   config->peg_time_limit_seconds = 0;
+  config->endgame_time_limit_explicitly_set = false;
+  config->peg_time_limit_explicitly_set = false;
   config->num_threads = get_num_cores();
   config->print_interval = 0;
   config->seed = ctime_get_current_time();
