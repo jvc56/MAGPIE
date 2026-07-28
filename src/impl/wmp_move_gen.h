@@ -610,8 +610,15 @@ static inline void wmp_move_gen_set_playthrough_bit_rack(
       const uint32_t *block_row = wit_row_lane[col];
       if (block_row != NULL) {
         const int block_len = wit_len_lane[col];
-        wmp_move_gen->playthrough_addable &=
-            block_row[anchor->word_length - block_len];
+        const int extension_len = anchor->word_length - block_len;
+        // Shadow anchors can begin inside a longer cached board block. That
+        // block is not wholly contained in this candidate word, so its WIT
+        // row has no entry at this (negative) extension length. Skipping this
+        // optional prune is conservative; normal playthrough validation
+        // still rejects candidates that do not match the board.
+        if (extension_len >= 0) {
+          wmp_move_gen->playthrough_addable &= block_row[extension_len];
+        }
       }
     }
   }
