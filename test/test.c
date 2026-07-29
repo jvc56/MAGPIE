@@ -60,6 +60,7 @@
 #include "spread_forecast_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
+#include "thinking_curve_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -188,6 +189,7 @@ static TestEntry on_demand_test_table[] = {
     {"simbench", test_sim_benchmark},
     {"klv3oracle", test_klv3_sim_oracle},
     {"pcbench", test_play_chooser_benchmark},
+    {"thinkingcurve", test_thinking_curve},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},
