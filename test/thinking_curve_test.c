@@ -14,6 +14,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
+#include "../src/ent/stats.h"
 #include "../src/ent/thread_control.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
@@ -61,6 +62,18 @@ typedef struct ThinkingCurveContext {
   SimResults *sim_results;
   Rack known_opponent_rack;
 } ThinkingCurveContext;
+
+typedef struct ThinkingCurveJudgeResult {
+  double utility[THINKING_CURVE_MAX_CANDIDATES];
+  double utility_sem[THINKING_CURVE_MAX_CANDIDATES];
+  double win[THINKING_CURVE_MAX_CANDIDATES];
+  int best_rank;
+  int candidate_count;
+  uint64_t iterations;
+  uint64_t nodes;
+  double elapsed_seconds;
+  bool forced;
+} ThinkingCurveJudgeResult;
 
 static int thinking_curve_env_positive_int(const char *name,
                                            int default_value) {
@@ -282,11 +295,116 @@ static const AnalysisProgressEvent *thinking_curve_find_target(
   return NULL;
 }
 
+static ThinkingCurveJudgeResult thinking_curve_run_judge(
+    Config *config, ThinkingCurveContext *context, MoveList *candidate_moves,
+    const ThinkingCurveCandidate candidates[], const bool selected_ranks[],
+    int candidate_count, int judge_plies, uint64_t samples_per_candidate,
+    int position) {
+  ThinkingCurveJudgeResult result = {
+      .best_rank = -1,
+  };
+  for (int rank = 0; rank < THINKING_CURVE_MAX_CANDIDATES; rank++) {
+    result.utility[rank] = NAN;
+    result.utility_sem[rank] = NAN;
+    result.win[rank] = NAN;
+  }
+  int judge_ranks[THINKING_CURVE_MAX_CANDIDATES];
+  for (int rank = 0; rank < candidate_count; rank++) {
+    if (selected_ranks[rank]) {
+      judge_ranks[result.candidate_count++] = rank;
+    }
+  }
+  if (result.candidate_count == 0) {
+    log_fatal("thinking-curve judge has no checkpoint candidates");
+  }
+  if (result.candidate_count == 1) {
+    const int rank = judge_ranks[0];
+    result.utility[rank] = 0.0;
+    result.utility_sem[rank] = 0.0;
+    result.win[rank] = 0.0;
+    result.best_rank = rank;
+    result.forced = true;
+    return result;
+  }
+
+  const Game *game = config_get_game(config);
+  const int player_index = game_get_player_on_turn_index(game);
+  move_list_reset(candidate_moves);
+  move_list_set_rack(candidate_moves,
+                     player_get_rack(game_get_player(game, player_index)));
+  for (int index = 0; index < result.candidate_count; index++) {
+    move_list_add_move(candidate_moves, &candidates[judge_ranks[index]].move);
+  }
+
+  ThreadControl *thread_control = config_get_thread_control(config);
+  assert(
+      thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED));
+  rack_set_dist_size_and_reset(&context->known_opponent_rack,
+                               ld_get_size(config_get_ld(config)));
+  const uint64_t total_iterations =
+      samples_per_candidate * (uint64_t)result.candidate_count;
+  SimArgs judge_args = {0};
+  sim_args_fill(judge_plies, candidate_moves, result.candidate_count,
+                &context->known_opponent_rack, config_get_win_pcts(config),
+                /*inference_results=*/NULL, thread_control, game,
+                /*sim_with_inference=*/false, /*use_heat_map=*/false,
+                config_get_num_threads(config), /*print_interval=*/0,
+                /*max_num_display_plays=*/result.candidate_count,
+                /*max_num_display_plies=*/judge_plies,
+                (THINKING_CURVE_BASE_SEED +
+                 (uint64_t)(position + 1) * THINKING_CURVE_SEED_STRIDE) ^
+                    UINT64_C(0xd1b54a32d192ed03),
+                total_iterations, samples_per_candidate,
+                /*scond=*/0.0, BAI_THRESHOLD_NONE,
+                /*time_limit_seconds=*/0.0, BAI_SAMPLING_RULE_ROUND_ROBIN,
+                /*cutoff=*/-1.0, config_get_utility_w_winpct(config),
+                config_get_utility_w_spread(config),
+                config_get_utility_spread_scale(config),
+                /*inference_args=*/NULL, &judge_args);
+
+  ErrorStack *error_stack = error_stack_create();
+  Timer timer;
+  ctimer_start(&timer);
+  simulate(&judge_args, &context->sim_ctx, context->sim_results, error_stack);
+  result.elapsed_seconds = ctimer_elapsed_seconds(&timer);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_FINISHED);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("thinking-curve judge failed");
+  }
+  error_stack_destroy(error_stack);
+  result.iterations = sim_results_get_iteration_count(context->sim_results);
+  result.nodes = sim_results_get_node_count(context->sim_results);
+  if (result.iterations != total_iterations) {
+    log_fatal("thinking-curve judge completed %" PRIu64
+              " iterations; expected %" PRIu64,
+              result.iterations, total_iterations);
+  }
+  const bool use_blended_utility = config_get_utility_w_spread(config) > 0.0;
+  for (int index = 0; index < result.candidate_count; index++) {
+    const int rank = judge_ranks[index];
+    const SimmedPlay *play =
+        sim_results_get_simmed_play(context->sim_results, index);
+    const Stat *utility_stat = use_blended_utility
+                                   ? simmed_play_get_utility_stat(play)
+                                   : simmed_play_get_win_pct_stat(play);
+    result.utility[rank] = stat_get_mean(utility_stat);
+    result.utility_sem[rank] = stat_get_sem(utility_stat);
+    result.win[rank] = stat_get_mean(simmed_play_get_win_pct_stat(play));
+    if (result.best_rank < 0 ||
+        result.utility[rank] > result.utility[result.best_rank]) {
+      result.best_rank = rank;
+    }
+  }
+  return result;
+}
+
 static void thinking_curve_print_point(
     int source_index, int position, int game_index, int bag_tiles, int plies,
     uint64_t target_nodes, bool final, const AnalysisProgressEvent *event,
     const ThinkingCurveCandidate candidates[], int candidate_count,
-    int num_plays, int panel_best_index, int candidate_best_index) {
+    int num_plays, int panel_best_index, int candidate_best_index,
+    const ThinkingCurveJudgeResult *judge) {
   const int selected = event->best_index;
   if (selected < 0 || selected >= num_plays || selected >= candidate_count) {
     log_fatal("thinking-curve checkpoint selected invalid arm %d", selected);
@@ -305,7 +423,10 @@ static void thinking_curve_print_point(
          " selected_raw=%s panel_best_rank=%d candidate_best_rank=%d "
          "candidate_regret=%+.9f sampling_regret=%+.9f "
          "provisional_total_regret=%+.9f provisional_win_delta=%+.9f "
-         "provisional_spread_delta=%+.9f estimated_best=%.12f "
+         "provisional_spread_delta=%+.9f judge_best_rank=%d "
+         "judge_utility=%.12f judge_utility_sem=%.12f judge_win=%.12f "
+         "judge_regret=%.12f judge_candidates=%d judge_forced=%d "
+         "estimated_best=%.12f "
          "estimated_challenger=%.12f\n",
          source_index, position, game_index, bag_tiles, plies, target_nodes,
          final, event->elapsed_ns, event->iterations, event->nodes, selected,
@@ -316,7 +437,11 @@ static void thinking_curve_print_point(
              candidates[panel_best_index].oracle_win,
          candidates[selected].oracle_spread -
              candidates[panel_best_index].oracle_spread,
-         event->best_value, event->challenger_value);
+         judge->best_rank, judge->utility[selected],
+         judge->utility_sem[selected], judge->win[selected],
+         judge->utility[judge->best_rank] - judge->utility[selected],
+         judge->candidate_count, judge->forced, event->best_value,
+         event->challenger_value);
 }
 
 static void thinking_curve_run_position(
@@ -325,7 +450,8 @@ static void thinking_curve_run_position(
     const char *cgp, int source_index, int position, int game_index,
     int bag_tiles, int num_plays, int plies, uint64_t max_nodes,
     uint64_t checkpoint_nodes, uint64_t min_play_iterations,
-    const uint64_t targets[], int target_count) {
+    const uint64_t targets[], int target_count, int judge_plies,
+    uint64_t judge_samples) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -427,12 +553,30 @@ static void thinking_curve_run_position(
     log_fatal("thinking-curve trace has no final decision");
   }
 
-  printf(
-      "THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
-      "plies=%d candidates=%d max_nodes=%" PRIu64 " checkpoint_nodes=%" PRIu64
-      " min_play_iterations=%" PRIu64 " panel_best_rank=%d cgp=%s\n",
-      source_index, position, game_index, bag_tiles, plies, num_plays,
-      max_nodes, checkpoint_nodes, min_play_iterations, panel_best_index, cgp);
+  bool selected_ranks[THINKING_CURVE_MAX_CANDIDATES] = {false};
+  selected_ranks[finish->best_index] = true;
+  for (int target_index = 0; target_index < target_count; target_index++) {
+    if (targets[target_index] > max_nodes) {
+      continue;
+    }
+    const AnalysisProgressEvent *event = thinking_curve_find_target(
+        events, event_count, targets[target_index], finish, max_nodes);
+    if (event != NULL) {
+      selected_ranks[event->best_index] = true;
+    }
+  }
+  const ThinkingCurveJudgeResult judge = thinking_curve_run_judge(
+      config, context, candidate_moves, candidates, selected_ranks,
+      candidate_count, judge_plies, judge_samples, position);
+
+  printf("THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
+         "plies=%d candidates=%d max_nodes=%" PRIu64
+         " checkpoint_nodes=%" PRIu64 " min_play_iterations=%" PRIu64
+         " judge_plies=%d judge_samples=%" PRIu64
+         " panel_best_rank=%d cgp=%s\n",
+         source_index, position, game_index, bag_tiles, plies, num_plays,
+         max_nodes, checkpoint_nodes, min_play_iterations, judge_plies,
+         judge_samples, panel_best_index, cgp);
   for (int target_index = 0; target_index < target_count; target_index++) {
     if (targets[target_index] > max_nodes) {
       continue;
@@ -443,18 +587,22 @@ static void thinking_curve_run_position(
       thinking_curve_print_point(source_index, position, game_index, bag_tiles,
                                  plies, targets[target_index], /*final=*/false,
                                  event, candidates, candidate_count, num_plays,
-                                 panel_best_index, candidate_best_index);
+                                 panel_best_index, candidate_best_index,
+                                 &judge);
     }
   }
   thinking_curve_print_point(
       source_index, position, game_index, bag_tiles, plies,
       /*target_nodes=*/0, /*final=*/true, finish, candidates, candidate_count,
-      num_plays, panel_best_index, candidate_best_index);
+      num_plays, panel_best_index, candidate_best_index, &judge);
   printf("THINKING_CURVE_POSITION_DONE source_index=%d position=%d plies=%d "
          "events=%zu dropped=0 final_iterations=%" PRIu64
-         " final_nodes=%" PRIu64 "\n",
+         " final_nodes=%" PRIu64 " judge_candidates=%d "
+         "judge_iterations=%" PRIu64 " judge_nodes=%" PRIu64
+         " judge_seconds=%.6f judge_forced=%d\n",
          source_index, position, plies, event_count, finish->iterations,
-         finish->nodes);
+         finish->nodes, judge.candidate_count, judge.iterations, judge.nodes,
+         judge.elapsed_seconds, judge.forced);
   fflush_or_die(stdout);
 
   free(events);
@@ -481,12 +629,16 @@ void test_thinking_curve(void) {
       "THINKING_CURVE_CHECKPOINT_NODES", UINT64_C(25000));
   const uint64_t min_play_iterations = thinking_curve_env_positive_uint64(
       "THINKING_CURVE_MIN_PLAY_ITERATIONS", UINT64_C(100));
+  const int judge_plies =
+      thinking_curve_env_positive_int("THINKING_CURVE_JUDGE_PLIES", 10);
+  const uint64_t judge_samples = thinking_curve_env_positive_uint64(
+      "THINKING_CURVE_JUDGE_SAMPLES", UINT64_C(100000));
   const double wall_seconds =
       thinking_curve_env_nonnegative_double("THINKING_CURVE_WALL_SECONDS", 0.0);
   const char *target_string = thinking_curve_env_string(
       "THINKING_CURVE_TARGET_NODES",
-      "100000,200000,300000,500000,750000,1000000,1500000,2000000,"
-      "3000000,5000000,7500000,10000000");
+      "50000,75000,100000,200000,300000,500000,750000,1000000,1500000,"
+      "2000000,3000000,5000000,7500000,10000000");
   uint64_t targets[THINKING_CURVE_MAX_TARGETS];
   const int target_count = thinking_curve_parse_targets(target_string, targets);
   if (num_plays < 2 || num_plays > THINKING_CURVE_MAX_CANDIDATES) {
@@ -495,6 +647,11 @@ void test_thinking_curve(void) {
   }
   if (plies < 1 || plies > MAX_PLIES) {
     log_fatal("THINKING_CURVE_PLIES must be between 1 and %d", MAX_PLIES);
+  }
+  if (judge_plies <= plies || judge_plies > MAX_PLIES) {
+    log_fatal("THINKING_CURVE_JUDGE_PLIES must exceed the experiment plies "
+              "and be at most %d",
+              MAX_PLIES);
   }
 
   FILE *stream = fopen(corpus, "re");
@@ -510,11 +667,12 @@ void test_thinking_curve(void) {
   printf("THINKING_CURVE_CONFIG corpus=%s skip_positions=%d max_positions=%d "
          "num_plays=%d plies=%d threads=%d max_nodes=%" PRIu64
          " checkpoint_nodes=%" PRIu64 " min_play_iterations=%" PRIu64
-         " wall_seconds=%.3f targets=%s oracle=provisional_panel "
+         " judge_plies=%d judge_samples=%" PRIu64
+         " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=top_two_ids\n",
          corpus, skip_positions, max_positions, num_plays, plies, num_threads,
-         max_nodes, checkpoint_nodes, min_play_iterations, wall_seconds,
-         target_string);
+         max_nodes, checkpoint_nodes, min_play_iterations, judge_plies,
+         judge_samples, wall_seconds, target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -564,7 +722,8 @@ void test_thinking_curve(void) {
             config, &context, candidate_moves, candidates, candidate_count,
             current_cgp, groups_seen, current_position, current_game,
             current_bag, num_plays, plies, max_nodes, checkpoint_nodes,
-            min_play_iterations, targets, target_count);
+            min_play_iterations, targets, target_count, judge_plies,
+            judge_samples);
         evaluated++;
       }
       groups_seen++;
@@ -630,11 +789,11 @@ void test_thinking_curve(void) {
       log_fatal("incomplete final thinking-curve candidate group");
     }
     if (groups_seen >= skip_positions) {
-      thinking_curve_run_position(config, &context, candidate_moves, candidates,
-                                  candidate_count, current_cgp, groups_seen,
-                                  current_position, current_game, current_bag,
-                                  num_plays, plies, max_nodes, checkpoint_nodes,
-                                  min_play_iterations, targets, target_count);
+      thinking_curve_run_position(
+          config, &context, candidate_moves, candidates, candidate_count,
+          current_cgp, groups_seen, current_position, current_game, current_bag,
+          num_plays, plies, max_nodes, checkpoint_nodes, min_play_iterations,
+          targets, target_count, judge_plies, judge_samples);
       evaluated++;
     }
     groups_seen++;

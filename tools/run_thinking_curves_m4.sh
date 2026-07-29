@@ -67,6 +67,8 @@ while (( $(date +%s) < deadline_epoch )); do
       THINKING_CURVE_MAX_NODES="$max_nodes" \
       THINKING_CURVE_CHECKPOINT_NODES=25000 \
       THINKING_CURVE_MIN_PLAY_ITERATIONS=100 \
+      THINKING_CURVE_JUDGE_PLIES=10 \
+      THINKING_CURVE_JUDGE_SAMPLES=100000 \
       THINKING_CURVE_WALL_SECONDS="$remaining" \
       ./bin/magpie_test thinkingcurve >>"$log" 2>>"$err"
     python3 tools/analyze_thinking_curves.py "$log" --csv "$csv" >"$summary"

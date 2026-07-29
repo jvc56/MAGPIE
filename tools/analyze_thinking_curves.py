@@ -59,11 +59,25 @@ def main() -> None:
 
     output_rows: list[dict[str, object]] = []
     for (plies, target), group in sorted(grouped.items()):
-        regrets = [float(row["provisional_total_regret"]) for row in group]
+        regrets = [float(row["judge_regret"]) for row in group]
         elapsed = [int(row["elapsed_ns"]) / 1e9 for row in group]
         actual_nodes = [int(row["nodes"]) for row in group]
         hits = [
-            int(row["selected_rank"]) == int(row["panel_best_rank"])
+            int(row["selected_rank"]) == int(row["judge_best_rank"])
+            for row in group
+        ]
+        stable = [
+            int(row["selected_rank"])
+            == int(
+                rows[
+                    (
+                        int(row["source_index"]),
+                        int(row["plies"]),
+                        0,
+                        1,
+                    )
+                ]["selected_rank"]
+            )
             for row in group
         ]
         mean, low, high = mean_ci(regrets)
@@ -72,10 +86,11 @@ def main() -> None:
                 "plies": plies,
                 "target_nodes": "final" if target < 0 else target,
                 "positions": len(group),
-                "mean_provisional_regret": mean,
+                "mean_judge_regret": mean,
                 "ci95_low": low,
                 "ci95_high": high,
-                "panel_oracle_hit_rate": statistics.fmean(hits),
+                "judge_best_rate": statistics.fmean(hits),
+                "final_choice_stability": statistics.fmean(stable),
                 "mean_elapsed_seconds": statistics.fmean(elapsed),
                 "mean_actual_nodes": statistics.fmean(actual_nodes),
             }
@@ -95,9 +110,10 @@ def main() -> None:
             "THINKING_CURVE_SUMMARY "
             f"plies={row['plies']} target_nodes={target} "
             f"positions={row['positions']} "
-            f"mean_provisional_regret={row['mean_provisional_regret']:.9f} "
+            f"mean_judge_regret={row['mean_judge_regret']:.9f} "
             f"ci95=[{row['ci95_low']:.9f},{row['ci95_high']:.9f}] "
-            f"panel_oracle_hit_rate={row['panel_oracle_hit_rate']:.4f} "
+            f"judge_best_rate={row['judge_best_rate']:.4f} "
+            f"final_choice_stability={row['final_choice_stability']:.4f} "
             f"mean_elapsed_seconds={row['mean_elapsed_seconds']:.6f} "
             f"mean_actual_nodes={row['mean_actual_nodes']:.1f}"
         )
