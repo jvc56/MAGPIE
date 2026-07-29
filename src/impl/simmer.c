@@ -38,6 +38,32 @@ struct SimCtx {
   InferenceCtx *inference_ctx;
 };
 
+typedef struct SimProgressContext {
+  const AnalysisProgressListener *listener;
+  const SimResults *sim_results;
+  double budget_seconds;
+} SimProgressContext;
+
+static void sim_forward_progress(const AnalysisProgressEvent *event,
+                                 void *user_data) {
+  const SimProgressContext *context = user_data;
+  AnalysisProgressEvent forwarded = *event;
+  forwarded.nodes = sim_results_get_node_count(context->sim_results);
+  forwarded.iterations = sim_results_get_iteration_count(context->sim_results);
+  forwarded.work_units = forwarded.iterations;
+  forwarded.budget_seconds = context->budget_seconds;
+  context->listener->callback(&forwarded, context->listener->user_data);
+}
+
+static void sim_emit_finish(const AnalysisProgressListener *listener,
+                            double budget_seconds, analysis_status_t status) {
+  AnalysisProgressEvent finish =
+      analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_FINISH);
+  finish.status = status;
+  finish.budget_seconds = budget_seconds;
+  analysis_progress_emit(listener, &finish);
+}
+
 void sim_ctx_destroy(SimCtx *sim_ctx) {
   if (!sim_ctx) {
     return;
@@ -50,16 +76,43 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
 
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
+  AnalysisProgressListener progress_listener = sim_args->progress_listener;
+  if (analysis_progress_is_enabled(&progress_listener) &&
+      progress_listener.start_ns <= 0) {
+    progress_listener.start_ns = ctimer_monotonic_ns();
+  }
+  if (analysis_progress_is_enabled(&progress_listener)) {
+    AnalysisProgressEvent start =
+        analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_START);
+    start.budget_seconds = sim_args->bai_options.time_limit_seconds;
+    start.candidates_total =
+        sim_args->move_list ? move_list_get_count(sim_args->move_list) : 0;
+    if (sim_args->game != NULL) {
+      const int player_index = game_get_player_on_turn_index(sim_args->game);
+      start.player_on_turn = player_index;
+      start.bag_tiles = bag_get_letters(game_get_bag(sim_args->game));
+      start.score_spread = equity_to_int(
+          player_get_score(game_get_player(sim_args->game, player_index)) -
+          player_get_score(game_get_player(sim_args->game, 1 - player_index)));
+    }
+    analysis_progress_emit(&progress_listener, &start);
+  }
   if (!sim_args->move_list || move_list_get_count(sim_args->move_list) == 0) {
     error_stack_push(error_stack, ERROR_STATUS_SIM_NO_MOVES,
                      string_duplicate("cannot simulate without moves, use the "
                                       "'generate' command to generate moves"));
+    sim_emit_finish(&progress_listener,
+                    sim_args->bai_options.time_limit_seconds,
+                    ANALYSIS_STATUS_ERROR);
     return;
   }
   if (game_get_game_end_reason(sim_args->game) != GAME_END_REASON_NONE) {
     error_stack_push(
         error_stack, ERROR_STATUS_SIM_GAME_OVER,
         string_duplicate("cannot simulate when the game is already over"));
+    sim_emit_finish(&progress_listener,
+                    sim_args->bai_options.time_limit_seconds,
+                    ANALYSIS_STATUS_ERROR);
     return;
   }
 
@@ -89,6 +142,10 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     if (!error_stack_is_empty(error_stack) ||
         thread_control_get_status(sim_args->thread_control) !=
             THREAD_CONTROL_STATUS_STARTED) {
+      sim_emit_finish(
+          &progress_listener, sim_args->bai_options.time_limit_seconds,
+          error_stack_is_empty(error_stack) ? ANALYSIS_STATUS_INTERRUPTED
+                                            : ANALYSIS_STATUS_ERROR);
       return;
     }
     num_infer_leaves =
@@ -121,8 +178,19 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
   sim_results_set_utility_w_spread(sim_results, sim_args->utility_w_spread);
   sim_results_set_num_infer_leaves(sim_results, num_infer_leaves);
 
+  SimProgressContext progress_context = {
+      .listener = &progress_listener,
+      .sim_results = sim_results,
+      .budget_seconds = sim_args->bai_options.time_limit_seconds,
+  };
+  AnalysisProgressListener bai_listener = progress_listener;
+  if (analysis_progress_is_enabled(&bai_listener)) {
+    bai_listener.callback = sim_forward_progress;
+    bai_listener.user_data = &progress_context;
+  }
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, sim_results_get_bai_result(sim_results));
+      sim_args->thread_control, NULL, &bai_listener,
+      sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for
   // endgame sims

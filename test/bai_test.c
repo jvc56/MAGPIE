@@ -38,7 +38,8 @@ void bai_wrapper(BAIOptions *bai_options, RandomVariables *rvs,
                  BAILogger *bai_logger, BAIResult *bai_result) {
   bai_options->parent_worker_thread_index = 0;
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
-  bai(bai_options, rvs, rng, thread_control, bai_logger, bai_result);
+  bai(bai_options, rvs, rng, thread_control, bai_logger,
+      /*progress_listener=*/NULL, bai_result);
 }
 
 void test_bai_top_two(int num_threads) {

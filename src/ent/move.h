@@ -7,6 +7,7 @@
 #include "../ent/equity.h"
 #include "../ent/letter_distribution.h"
 #include "../ent/rack.h"
+#include "../util/fnv.h"
 #include "../util/io_util.h"
 #include "board.h"
 #include <math.h>
@@ -491,6 +492,29 @@ static inline uint64_t move_get_similarity_key(const Move *m,
   }
   move_key_set_field(&key, &shift, (uint64_t)m->score, 64 - shift);
   return key;
+}
+
+// Stable, copy-safe identity for traces and diagnostics. Unlike a raw struct
+// hash this ignores padding and equity (which evaluators may overwrite) while
+// retaining the complete board effect / exchange strip.
+static inline uint64_t move_get_fingerprint(const Move *move) {
+  uint64_t hash = FNV_64_OFFSET_BASIS;
+  hash = fnv64a_step(hash, (uint64_t)move->move_type);
+  if (move->move_type != GAME_EVENT_TILE_PLACEMENT_MOVE &&
+      move->move_type != GAME_EVENT_EXCHANGE) {
+    return hash;
+  }
+  hash = fnv64a_step(hash, (uint64_t)move->tiles_played);
+  hash = fnv64a_step(hash, (uint64_t)move->tiles_length);
+  if (move->move_type == GAME_EVENT_TILE_PLACEMENT_MOVE) {
+    hash = fnv64a_step(hash, (uint64_t)move->row_start);
+    hash = fnv64a_step(hash, (uint64_t)move->col_start);
+    hash = fnv64a_step(hash, (uint64_t)move->dir);
+  }
+  for (int tile_idx = 0; tile_idx < move->tiles_length; tile_idx++) {
+    hash = fnv64a_step(hash, (uint64_t)move->tiles[tile_idx]);
+  }
+  return hash;
 }
 
 static inline void move_list_insert_spare_move_top_equity(MoveList *ml,

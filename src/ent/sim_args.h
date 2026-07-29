@@ -2,6 +2,7 @@
 #define SIM_ARGS_H
 
 #include "../def/bai_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -41,6 +42,9 @@ typedef struct SimArgs {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Optional observation-only progress listener. A zero-initialized listener
+  // is disabled. The callback cannot stop or otherwise steer the simulation.
+  AnalysisProgressListener progress_listener;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -105,6 +109,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_winpct = utility_w_winpct;
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
+  sim_args->progress_listener = (AnalysisProgressListener){0};
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

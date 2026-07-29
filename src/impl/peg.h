@@ -4,6 +4,7 @@
 #include "../compat/ctime.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/peg_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/game.h"
 #include "../ent/move.h"
 #include "../ent/thread_control.h"
@@ -239,6 +240,8 @@ typedef struct PegArgs {
   PegOnCandDone on_cand_done;
   PegOnScenarioDone on_scenario_done;
   void *user_data;
+  // Optional observation-only, solver-independent progress listener.
+  AnalysisProgressListener progress_listener;
 
   // Optional live poll. NULL = no polling (zero overhead). When set, peg_solve
   // updates it as candidates complete (stage 0) and at each stage boundary, so
@@ -253,22 +256,22 @@ typedef struct PegArgs {
 // and add a parameter here rather than a default when a field is added.
 // (sim_args_fill deliberately does not go this far; see the note there.) The
 // tests build PegArgs literals instead, opting out of that check knowingly.
-static inline void
-peg_args_fill(const Game *game, ThreadControl *thread_control,
-              const int num_threads, const double time_budget_seconds,
-              const int max_stage, const bool greedy_seed_only,
-              const int *stage_top_k, const int num_stages,
-              const int inner_top_k, const PegOppModel opp_model,
-              const int scenario_stride, const bool nested_enabled,
-              const int nested_cand_cap, const int *nested_cand_caps,
-              const int nested_n_cand_caps, const int nested_stride,
-              const int nested_emptier_ply_cap, const int nested_max_depth,
-              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-              const Move *const *only_moves, const int n_only_moves,
-              const Move *const *protect_moves, const int n_protect_moves,
-              const bool include_per_scenario, PegOnStageStart on_stage_start,
-              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+static inline void peg_args_fill(
+    const Game *game, ThreadControl *thread_control, const int num_threads,
+    const double time_budget_seconds, const int max_stage,
+    const bool greedy_seed_only, const int *stage_top_k, const int num_stages,
+    const int inner_top_k, const PegOppModel opp_model,
+    const int scenario_stride, const bool nested_enabled,
+    const int nested_cand_cap, const int *nested_cand_caps,
+    const int nested_n_cand_caps, const int nested_stride,
+    const int nested_emptier_ply_cap, const int nested_max_depth,
+    const MachineLetter *eval_bag_order, const int eval_bag_order_len,
+    const Move *const *only_moves, const int n_only_moves,
+    const Move *const *protect_moves, const int n_protect_moves,
+    const bool include_per_scenario, PegOnStageStart on_stage_start,
+    PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
+    void *user_data, const AnalysisProgressListener *progress_listener,
+    PegPoll *poll, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -298,6 +301,9 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->on_cand_done = on_cand_done;
   peg_args->on_scenario_done = on_scenario_done;
   peg_args->user_data = user_data;
+  peg_args->progress_listener = progress_listener != NULL
+                                    ? *progress_listener
+                                    : (AnalysisProgressListener){0};
   peg_args->poll = poll;
 }
 

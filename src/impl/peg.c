@@ -35,6 +35,7 @@
 #include "peg_pool.h"
 #include "word_prune.h"
 #include <limits.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -873,7 +874,153 @@ typedef struct PegProgress {
   PegOnScenarioDone on_scenario_done;
   void *user_data;
   int stage_idx;
+  int stage_fidelity;
+  int last_completed_fidelity;
+  int last_completed_candidates;
+  int last_completed_candidates_total;
+  int stage_candidates_total;
+  _Atomic int stage_candidates_completed;
+  _Atomic uint64_t total_scenarios_completed;
+  double budget_seconds;
+  AnalysisProgressListener analysis_listener;
 } PegProgress;
+
+static bool peg_progress_wants_candidate_events(const PegProgress *progress) {
+  return progress != NULL &&
+         (progress->on_cand_done != NULL ||
+          analysis_progress_is_enabled(&progress->analysis_listener));
+}
+
+static void peg_progress_begin_stage(PegProgress *progress,
+                                     PegOnStageStart on_stage_start,
+                                     int stage_idx, int candidates_total,
+                                     int fidelity_plies) {
+  progress->stage_idx = stage_idx;
+  progress->stage_fidelity = fidelity_plies;
+  progress->stage_candidates_total = candidates_total;
+  atomic_store_explicit(&progress->stage_candidates_completed, 0,
+                        memory_order_relaxed);
+  if (on_stage_start != NULL) {
+    on_stage_start(stage_idx, candidates_total, /*inner_d=*/0,
+                   /*emptier_plies=*/fidelity_plies, progress->user_data);
+  }
+  if (analysis_progress_is_enabled(&progress->analysis_listener)) {
+    AnalysisProgressEvent event = analysis_progress_event_create(
+        ANALYSIS_MODE_PEG, ANALYSIS_EVENT_CANDIDATE_SET);
+    event.budget_seconds = progress->budget_seconds;
+    event.work_units = atomic_load_explicit(
+        &progress->total_scenarios_completed, memory_order_relaxed);
+    event.scenarios = event.work_units;
+    event.phase = stage_idx;
+    event.depth = fidelity_plies;
+    event.candidates_completed = 0;
+    event.candidates_total = candidates_total;
+    analysis_progress_emit(&progress->analysis_listener, &event);
+  }
+}
+
+static void peg_progress_candidate_done(PegProgress *progress,
+                                        int candidate_rank,
+                                        const Move *candidate, double win_pct,
+                                        double mean_spread,
+                                        int scenarios_completed,
+                                        int64_t completed_ns, bool reordered) {
+  if (progress->on_cand_done != NULL) {
+    progress->on_cand_done(progress->stage_idx, candidate_rank, candidate,
+                           win_pct, mean_spread, scenarios_completed,
+                           completed_ns, reordered, progress->user_data);
+  }
+  if (!analysis_progress_is_enabled(&progress->analysis_listener)) {
+    return;
+  }
+  const uint64_t total_scenarios =
+      atomic_fetch_add_explicit(
+          &progress->total_scenarios_completed,
+          scenarios_completed > 0 ? (uint64_t)scenarios_completed : 0,
+          memory_order_relaxed) +
+      (scenarios_completed > 0 ? (uint64_t)scenarios_completed : 0);
+  const int stage_completed =
+      atomic_fetch_add_explicit(&progress->stage_candidates_completed, 1,
+                                memory_order_relaxed) +
+      1;
+  AnalysisProgressEvent event = analysis_progress_event_create(
+      ANALYSIS_MODE_PEG, ANALYSIS_EVENT_CANDIDATE_DONE);
+  event.elapsed_ns = progress->analysis_listener.start_ns > 0
+                         ? completed_ns - progress->analysis_listener.start_ns
+                         : 0;
+  event.budget_seconds = progress->budget_seconds;
+  event.work_units = total_scenarios;
+  event.scenarios = total_scenarios;
+  event.phase = progress->stage_idx;
+  event.depth = progress->stage_fidelity;
+  event.candidate_index = candidate_rank;
+  event.candidates_completed = stage_completed;
+  event.candidates_total = progress->stage_candidates_total;
+  event.item_id = move_get_fingerprint(candidate);
+  event.value = win_pct;
+  event.secondary_value = mean_spread;
+  analysis_progress_emit(&progress->analysis_listener, &event);
+}
+
+static void peg_progress_stage_done(PegProgress *progress,
+                                    const PegRankedCand *ranked, int count) {
+  progress->last_completed_fidelity = progress->stage_fidelity;
+  progress->last_completed_candidates = atomic_load_explicit(
+      &progress->stage_candidates_completed, memory_order_relaxed);
+  progress->last_completed_candidates_total = progress->stage_candidates_total;
+  if (!analysis_progress_is_enabled(&progress->analysis_listener) ||
+      count <= 0) {
+    return;
+  }
+  AnalysisProgressEvent event = analysis_progress_event_create(
+      ANALYSIS_MODE_PEG, ANALYSIS_EVENT_CHECKPOINT);
+  event.budget_seconds = progress->budget_seconds;
+  event.work_units = atomic_load_explicit(&progress->total_scenarios_completed,
+                                          memory_order_relaxed);
+  event.scenarios = event.work_units;
+  event.phase = progress->stage_idx;
+  event.depth = progress->stage_fidelity;
+  event.candidates_completed = progress->last_completed_candidates;
+  event.candidates_total = progress->stage_candidates_total;
+  event.best_index = 0;
+  event.challenger_index = count > 1 ? 1 : -1;
+  event.item_id = move_get_fingerprint(&ranked[0].move);
+  event.value = ranked[0].win_pct;
+  event.best_value = ranked[0].win_pct;
+  event.challenger_value = count > 1 ? ranked[1].win_pct : NAN;
+  event.secondary_value = ranked[0].mean_spread;
+  analysis_progress_emit(&progress->analysis_listener, &event);
+}
+
+static void peg_progress_finish(const PegProgress *progress,
+                                const PegResult *result,
+                                analysis_status_t status) {
+  if (!analysis_progress_is_enabled(&progress->analysis_listener)) {
+    return;
+  }
+  AnalysisProgressEvent event =
+      analysis_progress_event_create(ANALYSIS_MODE_PEG, ANALYSIS_EVENT_FINISH);
+  event.status = status;
+  event.budget_seconds = progress->budget_seconds;
+  event.work_units = atomic_load_explicit(&progress->total_scenarios_completed,
+                                          memory_order_relaxed);
+  event.scenarios = event.work_units;
+  event.phase = result->last_completed_stage;
+  event.depth = progress->last_completed_fidelity;
+  event.candidates_completed = progress->last_completed_candidates;
+  event.candidates_total = progress->last_completed_candidates_total;
+  if (result->n_top_cands > 0) {
+    event.best_index = 0;
+    event.challenger_index = result->n_top_cands > 1 ? 1 : -1;
+    event.item_id = move_get_fingerprint(&result->best_move);
+    event.value = result->best_win;
+    event.best_value = result->best_win;
+    event.challenger_value =
+        result->n_top_cands > 1 ? result->top_cands[1].win_pct : NAN;
+    event.secondary_value = result->best_spread;
+  }
+  analysis_progress_emit(&progress->analysis_listener, &event);
+}
 
 // Optional per-scenario capture sink (PegArgs.include_per_scenario). Populated
 // single-threaded during a dedicated capture pass over the published best cand,
@@ -908,7 +1055,7 @@ typedef struct PegScenarioJob {
   ThreadControl *thread_control;
   PegWorker *workers;
   int cand_idx;
-  const PegProgress *progress; // optional; cand_idx is the cand rank
+  PegProgress *progress; // optional; cand_idx is the cand rank
   // Optional per-ordering capture (PegArgs.include_per_scenario). When
   // do_capture is set, the worker records this split's orderings into its own
   // job-local `cap` (no cross-job sharing, so no locking); the reducer
@@ -980,7 +1127,7 @@ typedef struct PegEvalCtx {
   PegWorker *workers;
   // Optional progress callbacks (NULL = none). cand_idx is the cand rank passed
   // to on_scenario_done; progress->stage_idx carries the current stage.
-  const PegProgress *progress;
+  PegProgress *progress;
   // Optional per-scenario capture sink (NULL = off). Set only for the
   // single-threaded best-cand capture pass.
   PegScenarioCapture *capture;
@@ -1186,7 +1333,7 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       // nested endgames are small and many; no core injection
       /*max_workers=*/0, /*first_win=*/false, /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
-      deadline_ns, /*actual_move=*/NULL, &ea);
+      deadline_ns, /*actual_move=*/NULL, /*progress_listener=*/NULL, &ea);
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
@@ -1658,7 +1805,7 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       /*max_workers=*/ctx->injection_cap, /*first_win=*/false,
       /*first_win_fallback_moves=*/0, /*use_initial_window=*/false,
       /*initial_alpha=*/0, /*initial_beta=*/0, ctx->deadline_ns,
-      /*actual_move=*/NULL, &ea);
+      /*actual_move=*/NULL, /*progress_listener=*/NULL, &ea);
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
   // If the solver was interrupted before completing any search depth (depth
@@ -1926,9 +2073,9 @@ typedef struct PegCandJob {
   ThreadControl *thread_control;
   PegWorker *workers; // array; indexed by worker_idx
   PegRankedCand *out;
-  PegPoll *poll;               // optional live leaderboard; NULL = no polling
-  const PegProgress *progress; // optional progress callbacks (NULL = none)
-  int cand_rank;               // this cand's index, passed to the callbacks
+  PegPoll *poll;         // optional live leaderboard; NULL = no polling
+  PegProgress *progress; // optional progress callbacks (NULL = none)
+  int cand_rank;         // this cand's index, passed to the callbacks
   // When eval_bag_order_len > 0, evaluate exactly this one bag ordering instead
   // of enumerating scenarios (see PegArgs.eval_bag_order).
   const MachineLetter *eval_bag_order;
@@ -2050,11 +2197,11 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
   // Live poll: surface this finished candidate into the leaderboard so a
   // poller sees stage 0 fill in as candidates resolve.
   const bool reordered = peg_poll_upsert(job->poll, job->out);
-  if (job->progress != NULL && job->progress->on_cand_done != NULL) {
-    job->progress->on_cand_done(
-        job->progress->stage_idx, job->cand_rank, &job->out->move,
-        job->out->win_pct, job->out->mean_spread, job->out->n_scenarios,
-        ctimer_monotonic_ns(), reordered, job->progress->user_data);
+  if (peg_progress_wants_candidate_events(job->progress)) {
+    peg_progress_candidate_done(job->progress, job->cand_rank, &job->out->move,
+                                job->out->win_pct, job->out->mean_spread,
+                                job->out->n_scenarios, ctimer_monotonic_ns(),
+                                reordered);
   }
 }
 
@@ -2176,9 +2323,8 @@ static void peg_eval_candidates(
     const uint8_t *unseen, int ld_size, int bag_size, const Move *const *cands,
     int n, PegOppModel opp_model, int inner_top_k, int fidelity_plies,
     int scenario_stride, int64_t deadline_ns, ThreadControl *thread_control,
-    PegPoll *poll, const PegProgress *progress,
-    const MachineLetter *eval_bag_order, int eval_bag_order_len,
-    PegRankedCand *ranked) {
+    PegPoll *poll, PegProgress *progress, const MachineLetter *eval_bag_order,
+    int eval_bag_order_len, PegRankedCand *ranked) {
   PegCandJob *jobs = malloc_or_die((size_t)n * sizeof(PegCandJob));
   for (int i = 0; i < n; i++) {
     jobs[i].base_game = game;
@@ -2223,7 +2369,7 @@ static void peg_eval_candidates(
 static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   PegScenarioJob *job = (PegScenarioJob *)arg;
   const bool track_candidate_completion =
-      job->progress != NULL && job->progress->on_cand_done != NULL;
+      peg_progress_wants_candidate_events(job->progress);
   // Past the deadline: skip this scenario entirely (its result fields are
   // already zero from job creation) so a candidate whose evaluation straddles
   // the cutoff winds down within one in-flight job instead of running every
@@ -2322,9 +2468,8 @@ static void peg_eval_candidates_scenario(
     const uint8_t *unseen, int ld_size, const LetterDistribution *ld,
     int bag_size, const Move *const *cands, int n, PegOppModel opp_model,
     int inner_top_k, int fidelity_plies, int scenario_stride,
-    int64_t deadline_ns, ThreadControl *thread_control,
-    const PegProgress *progress, PegPoll *poll, PegRankedCand *ranked,
-    PegCandOutcomes *out_outcomes) {
+    int64_t deadline_ns, ThreadControl *thread_control, PegProgress *progress,
+    PegPoll *poll, PegRankedCand *ranked, PegCandOutcomes *out_outcomes) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -2393,7 +2538,7 @@ static void peg_eval_candidates_scenario(
   double *win_w = calloc_or_die((size_t)n, sizeof(double));
   double *spread_w = calloc_or_die((size_t)n, sizeof(double));
   const bool track_candidate_completion =
-      progress != NULL && progress->on_cand_done != NULL;
+      peg_progress_wants_candidate_events(progress);
   bool *candidate_completed = track_candidate_completion
                                   ? malloc_or_die((size_t)n * sizeof(bool))
                                   : NULL;
@@ -2467,10 +2612,10 @@ static void peg_eval_candidates_scenario(
         ranked[i].n_scenarios > 0) {
       // This barrier path (benchmarks) has no incremental sorted insert, so
       // there is no append-vs-reorder distinction: treat each as a full redraw.
-      progress->on_cand_done(progress->stage_idx, i, &ranked[i].move,
-                             ranked[i].win_pct, ranked[i].mean_spread,
-                             ranked[i].n_scenarios, candidate_completed_ns[i],
-                             /*reordered=*/true, progress->user_data);
+      peg_progress_candidate_done(
+          progress, i, &ranked[i].move, ranked[i].win_pct,
+          ranked[i].mean_spread, ranked[i].n_scenarios,
+          candidate_completed_ns[i], /*reordered=*/true);
     }
     peg_poll_bump_cand_done(poll);
   }
@@ -2564,12 +2709,45 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // endgame leaf is also capped by this so a single deep solve cannot overrun.
   // (The result timer itself is started after validation below, so an
   // invalid-args early return leaves it stopped rather than running forever.)
+  const int64_t solve_start_ns = ctimer_monotonic_ns();
   const double budget = args->time_budget_seconds;
   const int64_t deadline_ns =
-      budget > 0.0 ? ctimer_monotonic_ns() + (int64_t)(budget * 1.0e9) : 0;
+      budget > 0.0 ? solve_start_ns + (int64_t)(budget * 1.0e9) : 0;
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
   const int raw_bag_size = bag_get_letters(game_get_bag(game));
+  AnalysisProgressListener analysis_listener = args->progress_listener;
+  if (analysis_progress_is_enabled(&analysis_listener) &&
+      analysis_listener.start_ns <= 0) {
+    analysis_listener.start_ns = solve_start_ns;
+  }
+  PegProgress progress = {
+      .on_cand_done = args->on_cand_done,
+      .on_scenario_done = args->on_scenario_done,
+      .user_data = args->user_data,
+      .stage_idx = -1,
+      .stage_fidelity = -1,
+      .last_completed_fidelity = -1,
+      .last_completed_candidates = -1,
+      .last_completed_candidates_total = -1,
+      .stage_candidates_total = 0,
+      .budget_seconds = budget,
+      .analysis_listener = analysis_listener,
+  };
+  atomic_init(&progress.stage_candidates_completed, 0);
+  atomic_init(&progress.total_scenarios_completed, 0);
+  bool stopped_for_time = false;
+  if (analysis_progress_is_enabled(&analysis_listener)) {
+    AnalysisProgressEvent event =
+        analysis_progress_event_create(ANALYSIS_MODE_PEG, ANALYSIS_EVENT_START);
+    event.budget_seconds = budget;
+    event.player_on_turn = mover_idx;
+    event.bag_tiles = raw_bag_size;
+    event.score_spread =
+        equity_to_int(player_get_score(game_get_player(game, mover_idx)) -
+                      player_get_score(game_get_player(game, 1 - mover_idx)));
+    analysis_progress_emit(&analysis_listener, &event);
+  }
   // The game bag holds the real remaining bag tiles plus any opponent tiles
   // unknown to the mover: (RACK_SIZE - opp_rack_size) tiles are assumed to be
   // in the bag as the opponent's unknown holdings. Tiles explicitly on the
@@ -2585,6 +2763,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         get_formatted_string("PEG requires a bag of %d..%d tiles, but found %d",
                              PEG_MIN_BAG, PEG_MAX_BAG, bag_size));
     peg_poll_finish(args->poll); // so a waiting poller's read loop terminates
+    peg_progress_finish(&progress, out, ANALYSIS_STATUS_ERROR);
     return;
   }
   const LetterDistribution *ld = game_get_ld(game);
@@ -2612,6 +2791,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                            "tiles, all drawable from the unseen pool",
                            bag_size));
       peg_poll_finish(args->poll);
+      peg_progress_finish(&progress, out, ANALYSIS_STATUS_ERROR);
       return;
     }
   }
@@ -2632,6 +2812,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           get_formatted_string("PEG stage_top_k must list num_stages (> 0) "
                                "per-stage counts, each >= 2"));
       peg_poll_finish(args->poll);
+      peg_progress_finish(&progress, out, ANALYSIS_STATUS_ERROR);
       return;
     }
   }
@@ -2812,15 +2993,6 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         malloc_or_die((size_t)n_cands * sizeof(PegRankedCand));
     const Move **moves = malloc_or_die((size_t)n_cands * sizeof(Move *));
 
-    // Progress callbacks (NULL members are simply not fired). stage_idx is
-    // updated before each stage's dispatch and read by the workers.
-    PegProgress progress = {
-        .on_cand_done = args->on_cand_done,
-        .on_scenario_done = args->on_scenario_done,
-        .user_data = args->user_data,
-        .stage_idx = 0,
-    };
-
     // Stage 0: greedy evaluation of every candidate.
     if (args->n_only_moves > 0) {
       for (int cand_idx = 0; cand_idx < n_cands; cand_idx++) {
@@ -2839,10 +3011,9 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
                                            n_protect);
     peg_poll_begin_stage(args->poll, /*stage=*/0, /*fidelity_plies=*/0,
                          n_cands);
-    if (args->on_stage_start != NULL) {
-      args->on_stage_start(/*stage_idx=*/0, n_cands, /*inner_d=*/0,
-                           /*emptier_plies=*/0, args->user_data);
-    }
+    peg_progress_begin_stage(&progress, args->on_stage_start,
+                             /*stage_idx=*/0, n_cands,
+                             /*fidelity_plies=*/0);
     peg_eval_candidates(pool, workers, prepared_base, mover_idx, unseen,
                         ld_size, bag_size, moves, n_cands, args->opp_model,
                         args->inner_top_k, /*fidelity_plies=*/0,
@@ -2866,6 +3037,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     int live_count = peg_select_survivors(ranked, n_real, num_kept_after_stage0,
                                           protect_moves, n_protect);
     peg_publish(out, ranked, live_count, /*stage=*/0);
+    peg_progress_stage_done(&progress, ranked, n_real);
     peg_poll_replace(args->poll, ranked, live_count, /*stage=*/0,
                      /*fidelity_plies=*/0, live_count);
 
@@ -2915,6 +3087,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_force_protected_to_front(ranked, eval_count, protect_moves,
                                    n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+        stopped_for_time = true;
         break;
       }
       if (thread_control_get_status(args->thread_control) ==
@@ -2933,11 +3106,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       // one).
       peg_poll_clear_entries(args->poll);
       peg_poll_begin_stage(args->poll, stage_idx, stage_fidelity, eval_count);
-      progress.stage_idx = stage_idx;
-      if (args->on_stage_start != NULL) {
-        args->on_stage_start(stage_idx, eval_count, /*inner_d=*/0,
-                             /*emptier_plies=*/stage_fidelity, args->user_data);
-      }
+      peg_progress_begin_stage(&progress, args->on_stage_start, stage_idx,
+                               eval_count, stage_fidelity);
       for (int i = 0; i < eval_count; i++) {
         moves[i] = &ranked[i].move;
       }
@@ -2957,8 +3127,23 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         // Publish the whole stage's moves so a live renderer can fix the move
         // column width up front (moves[] aliases ranked[].move for [0,eval)).
         peg_poll_set_stage_moves(args->poll, moves, eval_count);
-        PegProgress inner = progress;
-        inner.on_cand_done = NULL; // fired below, once, after the poll upsert
+        // Candidate completion is fired below, once, after the poll upsert.
+        // This inner adapter carries only the per-scenario callback.
+        PegProgress inner = {
+            .on_cand_done = NULL,
+            .on_scenario_done = progress.on_scenario_done,
+            .user_data = progress.user_data,
+            .stage_idx = progress.stage_idx,
+            .stage_fidelity = progress.stage_fidelity,
+            .last_completed_fidelity = progress.last_completed_fidelity,
+            .last_completed_candidates = progress.last_completed_candidates,
+            .last_completed_candidates_total =
+                progress.last_completed_candidates_total,
+            .stage_candidates_total = progress.stage_candidates_total,
+            .budget_seconds = progress.budget_seconds,
+        };
+        atomic_init(&inner.stage_candidates_completed, 0);
+        atomic_init(&inner.total_scenarios_completed, 0);
         done_count = 0;
         for (int cand_idx = 0; cand_idx < eval_count; cand_idx++) {
           // Stop deepening once the budget or a user interrupt hits. Checked
@@ -2966,6 +3151,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // evaluated within budget; the finished ones (if >= 2) still form a
           // usable, if partial, tier at this stage's depth.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+            stopped_for_time = true;
             break;
           }
           if (thread_control_get_status(args->thread_control) ==
@@ -2989,6 +3175,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // its scenarios bailed (above), so its score is incomplete — drop it
           // rather than show or rank a partial result, and stop the stage.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+            stopped_for_time = true;
             if (args->include_per_scenario) {
               free(cand_oc.rows);
             }
@@ -3006,12 +3193,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // the bottom as the new worst (just append its row).
           const bool reordered =
               peg_poll_upsert(args->poll, &restaged[cand_idx]);
-          if (args->on_cand_done != NULL) {
-            args->on_cand_done(
-                stage_idx, cand_idx, &restaged[cand_idx].move,
+          if (peg_progress_wants_candidate_events(&progress)) {
+            peg_progress_candidate_done(
+                &progress, cand_idx, &restaged[cand_idx].move,
                 restaged[cand_idx].win_pct, restaged[cand_idx].mean_spread,
                 restaged[cand_idx].n_scenarios, ctimer_monotonic_ns(),
-                reordered, args->user_data);
+                reordered);
           }
         }
       } else {
@@ -3085,6 +3272,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           free(stage_oc);
         }
       }
+      if (done_count < eval_count && deadline_ns != 0 &&
+          ctimer_monotonic_ns() >= deadline_ns) {
+        stopped_for_time = true;
+      }
       // Fewer than 2 finished: nothing to compare at this depth, so discard the
       // partial work and undo this stage's drop capture, leaving every
       // candidate at its previous depth (as if the stage never ran).
@@ -3111,6 +3302,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       live_count = done_count;
       prev_fidelity = stage_fidelity; // `ranked` is now scored at this depth
       peg_publish(out, ranked, done_count, stage_idx);
+      peg_progress_stage_done(&progress, ranked, done_count);
       out->last_stage_partial = done_count < eval_count;
       peg_poll_replace(args->poll, ranked, done_count, stage_idx,
                        stage_fidelity, done_count);
@@ -3258,6 +3450,16 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   game_destroy(prepared_base);
   kwg_destroy(pruned_kwg);
   ctimer_stop(&out->timer);
+  analysis_status_t progress_status = ANALYSIS_STATUS_COMPLETED;
+  if (thread_control_get_status(args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    progress_status = ANALYSIS_STATUS_INTERRUPTED;
+  } else if (out->n_top_cands == 0 || out->best_win < 0.0) {
+    progress_status = ANALYSIS_STATUS_NO_RESULT;
+  } else if (out->last_stage_partial || stopped_for_time) {
+    progress_status = ANALYSIS_STATUS_TIME_LIMIT;
+  }
+  peg_progress_finish(&progress, out, progress_status);
 }
 
 void peg_result_destroy(PegResult *r) {

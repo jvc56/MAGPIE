@@ -3,6 +3,7 @@
 #include "../src/util/io_util.h"
 #include "alias_method_test.h"
 #include "alphabet_test.h"
+#include "analysis_progress_test.h"
 #include "analyze_test.h"
 #include "autoplay_test.h"
 #include "bag_test.h"
@@ -81,6 +82,7 @@ typedef struct {
 } TestEntry;
 
 static TestEntry test_table[] = {
+    {"progress", test_analysis_progress},
     {"config", test_config},
     {"players", test_players_data},
     {"string", test_string_util},

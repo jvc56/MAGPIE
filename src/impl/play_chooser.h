@@ -1,6 +1,7 @@
 #ifndef PLAY_CHOOSER_H
 #define PLAY_CHOOSER_H
 
+#include "../ent/analysis_progress.h"
 #include "../ent/game.h"
 #include "../ent/game_timer.h"
 #include "../ent/move.h"
@@ -96,6 +97,12 @@ typedef struct PlayChooserStrategy {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  // Optional observation-only move-selection progress listener template.
+  // play_chooser_choose_move assigns fresh run IDs and start times; callers set
+  // callback, user_data, and the desired SIM checkpoint_interval.
+  // Zero-initialized means disabled. Challenge-decision tracing is deliberately
+  // out of scope for this first schema.
+  AnalysisProgressListener progress_listener;
   uint64_t seed;
 } PlayChooserStrategy;
 

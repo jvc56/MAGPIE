@@ -155,6 +155,10 @@ struct EndgameCtx {
   // Thread 0 sets this after each completed depth (from EBF estimate).
   // All worker threads check it periodically and bail if exceeded.
   _Atomic int64_t depth_deadline_ns;
+  // True when time management, rather than exact/full-depth completion, stops
+  // the search. search_complete cannot carry this distinction because it is
+  // also the normal cross-worker completion signal.
+  atomic_bool time_limit_reached;
   // Caller-supplied absolute deadline (CLOCK_MONOTONIC ns). 0 = disabled.
   // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
   // wall-clock budget always wins over the EBF-projected per-depth budget.
@@ -184,6 +188,7 @@ struct EndgameCtx {
   // (for live per-root leaderboard updates).
   EndgamePerRootMoveCallback per_root_move_callback;
   void *per_root_move_callback_data;
+  AnalysisProgressListener progress_listener;
 
   // Owned by the caller:
   EndgameResults *results;
@@ -733,6 +738,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   // Initialize ABDADA synchronization
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->depth_deadline_ns, 0);
+  atomic_store(&es->time_limit_reached, false);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
   atomic_store(&es->root_moves_total, 0);
@@ -743,6 +749,11 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   es->actual_move = endgame_args->actual_move;
+  es->progress_listener = endgame_args->progress_listener;
+  if (analysis_progress_is_enabled(&es->progress_listener) &&
+      es->progress_listener.start_ns <= 0) {
+    es->progress_listener.start_ns = ctimer_monotonic_ns();
+  }
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
   es->before_search_callback = endgame_args->before_search_callback;
@@ -2093,6 +2104,7 @@ check_depth_deadline(EndgameCtxWorker *worker) {
   }
   int64_t now_ns = ctimer_monotonic_ns();
   if (now_ns > deadline_ns) {
+    atomic_store(&worker->solver->time_limit_reached, true);
     atomic_store(&worker->solver->search_complete, 1);
     return true;
   }
@@ -2773,6 +2785,25 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
                 depth, idx, small_move, reported_value,
                 worker->solver->per_root_move_callback_data);
           }
+          if (analysis_progress_is_enabled(
+                  &worker->solver->progress_listener)) {
+            AnalysisProgressEvent progress = analysis_progress_event_create(
+                ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_CANDIDATE_DONE);
+            progress.budget_seconds = worker->solver->hard_time_limit;
+            progress.work_units =
+                endgame_ctx_get_nodes_searched(worker->solver);
+            progress.nodes = progress.work_units;
+            progress.depth = depth;
+            progress.candidate_index = idx;
+            progress.candidates_completed =
+                atomic_load(&worker->solver->root_moves_completed);
+            progress.candidates_total =
+                atomic_load(&worker->solver->root_moves_total);
+            progress.item_id = small_move->tiny_move;
+            progress.value = (double)reported_value;
+            analysis_progress_emit(&worker->solver->progress_listener,
+                                   &progress);
+          }
           // Live multi-PV: republish the top-K leaderboard with this root's
           // evaluation. Covers all root completions (including ABDADA pass-2
           // deferred re-evaluations), so the displayed leaderboard always
@@ -3001,6 +3032,17 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   // only; the arena holds the sorted moves contiguously from offset 0.
   if (worker->ordinal == 0) {
     atomic_store(&worker->solver->root_moves_total, initial_move_count);
+    if (analysis_progress_is_enabled(&worker->solver->progress_listener)) {
+      AnalysisProgressEvent progress = analysis_progress_event_create(
+          ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_CANDIDATE_SET);
+      progress.budget_seconds = worker->solver->hard_time_limit;
+      progress.work_units = endgame_ctx_get_nodes_searched(worker->solver);
+      progress.nodes = progress.work_units;
+      progress.depth = 0;
+      progress.candidates_completed = 0;
+      progress.candidates_total = initial_move_count;
+      analysis_progress_emit(&worker->solver->progress_listener, &progress);
+    }
     if (worker->solver->before_search_callback) {
       const SmallMove *initial_moves =
           (const SmallMove *)worker->small_move_arena->memory;
@@ -3232,6 +3274,24 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
+    if (worker->ordinal == 0 &&
+        analysis_progress_is_enabled(&worker->solver->progress_listener)) {
+      AnalysisProgressEvent progress = analysis_progress_event_create(
+          ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_DEPTH_DONE);
+      progress.budget_seconds = worker->solver->hard_time_limit;
+      progress.work_units = endgame_ctx_get_nodes_searched(worker->solver);
+      progress.nodes = progress.work_units;
+      progress.depth = ply;
+      progress.candidates_completed =
+          atomic_load(&worker->solver->root_moves_completed);
+      progress.candidates_total =
+          atomic_load(&worker->solver->root_moves_total);
+      progress.item_id = pv.num_moves > 0 ? pv.moves[0].tiny_move : 0;
+      progress.value = (double)pv_value;
+      progress.best_value = (double)pv_value;
+      analysis_progress_emit(&worker->solver->progress_listener, &progress);
+    }
+
     // Call per-ply callback (only this solver's main worker, ordinal 0, to
     // avoid race conditions).
     if (worker->ordinal == 0 && worker->solver->per_ply_callback) {
@@ -3267,6 +3327,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
           if (pv_value == soft_limit_pv_value) {
             // Result unchanged since last soft-limit crossing — stable.
             // Bank the remaining time for future turns.
+            atomic_store(&worker->solver->time_limit_reached, true);
             atomic_store(&worker->solver->search_complete, 1);
             break;
           }
@@ -3294,6 +3355,7 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
           double estimated_next = this_depth_time * ema_ebf_per_ply;
           if (elapsed + estimated_next > worker->solver->hard_time_limit) {
             // Next depth would likely exceed hard limit — stop now
+            atomic_store(&worker->solver->time_limit_reached, true);
             atomic_store(&worker->solver->search_complete, 1);
             break;
           }
@@ -3428,6 +3490,56 @@ static bool extract_actual_move_pvline(EndgameCtx *solver,
   return false;
 }
 
+static void endgame_emit_start(EndgameCtx *solver,
+                               const EndgameArgs *endgame_args) {
+  if (!analysis_progress_is_enabled(&solver->progress_listener)) {
+    return;
+  }
+  AnalysisProgressEvent progress = analysis_progress_event_create(
+      ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_START);
+  progress.budget_seconds = endgame_args->hard_time_limit;
+  progress.depth = endgame_args->plies;
+  progress.player_on_turn = game_get_player_on_turn_index(endgame_args->game);
+  progress.bag_tiles = bag_get_letters(game_get_bag(endgame_args->game));
+  progress.score_spread = solver->initial_spread;
+  analysis_progress_emit(&solver->progress_listener, &progress);
+}
+
+static void endgame_emit_finish(EndgameCtx *solver,
+                                const EndgameArgs *endgame_args,
+                                const EndgameResults *results) {
+  if (!analysis_progress_is_enabled(&solver->progress_listener)) {
+    return;
+  }
+  AnalysisProgressEvent progress = analysis_progress_event_create(
+      ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_FINISH);
+  progress.budget_seconds = endgame_args->hard_time_limit;
+  progress.work_units = endgame_ctx_get_nodes_searched(solver);
+  progress.nodes = progress.work_units;
+  progress.depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+  progress.candidates_completed = atomic_load(&solver->root_moves_completed);
+  progress.candidates_total = atomic_load(&solver->root_moves_total);
+  const PVLine *best_pv =
+      endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+  if (best_pv->num_moves > 0) {
+    progress.item_id = best_pv->moves[0].tiny_move;
+    progress.value =
+        (double)endgame_results_get_value(results, ENDGAME_RESULT_BEST);
+    progress.best_value = progress.value;
+  }
+  if (endgame_results_get_status(results) ==
+      ENDGAME_RESULT_STATUS_INTERRUPTED) {
+    progress.status = ANALYSIS_STATUS_INTERRUPTED;
+  } else if (atomic_load(&solver->time_limit_reached)) {
+    progress.status = ANALYSIS_STATUS_TIME_LIMIT;
+  } else if (progress.depth < 0) {
+    progress.status = ANALYSIS_STATUS_NO_RESULT;
+  } else {
+    progress.status = ANALYSIS_STATUS_COMPLETED;
+  }
+  analysis_progress_emit(&solver->progress_listener, &progress);
+}
+
 // Single-threaded endgame solve that runs in the calling thread (no
 // cpthread_create). Safe for use from concurrent PEG decomp threads.
 void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
@@ -3444,6 +3556,7 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   EndgameCtx *solver = *ctx;
 
   endgame_ctx_reset(solver, results, endgame_args);
+  endgame_emit_start(solver, endgame_args);
   // The inline main worker runs in the calling thread, so the base worker count
   // is always 1 regardless of the caller's num_threads — only injected helpers
   // (ordinals > 0) are spawned. Force threads/live_workers to 1 so injection
@@ -3505,6 +3618,7 @@ void endgame_solve_inline(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   endgame_results_set_pvline_extend_args(
       results, NULL, endgame_results_get_solving_player(results),
       endgame_results_get_max_depth(results));
+  endgame_emit_finish(solver, endgame_args, results);
 }
 
 void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
@@ -3525,6 +3639,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
   }
   EndgameCtx *solver = *ctx;
   endgame_ctx_reset(solver, results, endgame_args);
+  endgame_emit_start(solver, endgame_args);
 
   // Set base seed for ABDADA jitter
   endgame_ctx_prepare_workers(solver, endgame_args->seed);
@@ -3622,6 +3737,7 @@ void endgame_solve(EndgameCtx **ctx, const EndgameArgs *endgame_args,
       results, NULL, endgame_results_get_solving_player(results),
       endgame_results_get_max_depth(results));
   endgame_results_unlock(results, ENDGAME_RESULT_DISPLAY);
+  endgame_emit_finish(solver, endgame_args, results);
 }
 
 int endgame_live_workers(const EndgameCtx *ctx) {

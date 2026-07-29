@@ -3273,7 +3273,8 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       /*skip_word_pruning=*/false, /*shared_tt=*/NULL, /*max_workers=*/0,
       /*first_win=*/false, /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
-      /*external_deadline_ns=*/0, /*actual_move=*/NULL, endgame_args);
+      /*external_deadline_ns=*/0, /*actual_move=*/NULL,
+      /*progress_listener=*/NULL, endgame_args);
 }
 
 void config_endgame(Config *config, EndgameResults *endgame_results,
@@ -3399,7 +3400,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*protect_moves=*/NULL, /*n_protect_moves=*/0,
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
-      /*on_scenario_done=*/NULL, /*user_data=*/NULL, /*poll=*/NULL, peg_args);
+      /*on_scenario_done=*/NULL, /*user_data=*/NULL,
+      /*progress_listener=*/NULL, /*poll=*/NULL, peg_args);
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)

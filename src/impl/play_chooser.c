@@ -87,6 +87,7 @@ typedef struct PlayChooserBenchmarkAtomicStats {
 
 static _Atomic bool play_chooser_benchmark_enabled;
 static PlayChooserBenchmarkAtomicStats play_chooser_benchmark_stats;
+static _Atomic uint64_t play_chooser_progress_next_run_id = 1;
 
 enum { PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS = 65536 };
 
@@ -237,6 +238,36 @@ struct PlayChooser {
   // Lazily created on the first endgame solve; owned.
   TranspositionTable *endgame_tt;
 };
+
+static AnalysisProgressListener
+play_chooser_progress_for_run(const PlayChooser *play_chooser,
+                              uint64_t parent_run_id) {
+  const AnalysisProgressListener *listener =
+      &play_chooser->strategy.progress_listener;
+  if (!analysis_progress_is_enabled(listener)) {
+    return (AnalysisProgressListener){0};
+  }
+  const uint64_t run_id = atomic_fetch_add_explicit(
+      &play_chooser_progress_next_run_id, 1, memory_order_relaxed);
+  return analysis_progress_listener_for_run(listener, run_id, parent_run_id,
+                                            ctimer_monotonic_ns());
+}
+
+static void
+play_chooser_emit_solver_finish(const AnalysisProgressListener *listener,
+                                analysis_mode_t mode, analysis_status_t status,
+                                double budget_seconds, int candidates_total,
+                                const Move *move) {
+  AnalysisProgressEvent finish =
+      analysis_progress_event_create(mode, ANALYSIS_EVENT_FINISH);
+  finish.status = status;
+  finish.budget_seconds = budget_seconds;
+  finish.candidates_total = candidates_total;
+  if (move != NULL) {
+    finish.item_id = move_get_fingerprint(move);
+  }
+  analysis_progress_emit(listener, &finish);
+}
 
 static int
 play_chooser_get_sim_max_candidates(const PlayChooserStrategy *strategy) {
@@ -429,6 +460,23 @@ static void play_chooser_choose_static_move(PlayChooser *play_chooser,
   move_copy(out_move, best_move);
 }
 
+static void play_chooser_choose_static_move_with_progress(
+    PlayChooser *play_chooser, Game *game, double budget_seconds,
+    uint64_t parent_run_id, Move *out_move) {
+  AnalysisProgressListener progress_listener =
+      play_chooser_progress_for_run(play_chooser, parent_run_id);
+  AnalysisProgressEvent start = analysis_progress_event_create(
+      ANALYSIS_MODE_STATIC, ANALYSIS_EVENT_START);
+  start.budget_seconds = budget_seconds;
+  start.player_on_turn = game_get_player_on_turn_index(game);
+  start.bag_tiles = bag_get_letters(game_get_bag(game));
+  analysis_progress_emit(&progress_listener, &start);
+  play_chooser_choose_static_move(play_chooser, game, out_move);
+  play_chooser_emit_solver_finish(&progress_listener, ANALYSIS_MODE_STATIC,
+                                  ANALYSIS_STATUS_COMPLETED, budget_seconds, 1,
+                                  out_move);
+}
+
 // Generate the top static candidates and simulate them within the time
 // budget. Returns false if no move could be produced.
 static double play_chooser_util_w_winpct(const PlayChooserStrategy *strategy);
@@ -441,11 +489,17 @@ play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
 // sim_results is left untouched and callers that read it must not use it.
 static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
                                  double budget_seconds, Move *out_move,
-                                 bool *out_simulated, ErrorStack *error_stack) {
+                                 bool *out_simulated, uint64_t parent_run_id,
+                                 ErrorStack *error_stack) {
   if (out_simulated != NULL) {
     *out_simulated = false;
   }
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  AnalysisProgressListener progress_listener = {0};
+  if (parent_run_id != 0) {
+    progress_listener =
+        play_chooser_progress_for_run(play_chooser, parent_run_id);
+  }
   MoveList *move_list = play_chooser->move_list;
   move_list_reset(move_list);
   const MoveGenArgs gen_args = {
@@ -463,10 +517,26 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   generate_moves(&gen_args);
   const int num_candidates = move_list_get_count(move_list);
   if (num_candidates == 0) {
+    AnalysisProgressEvent start =
+        analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_START);
+    start.budget_seconds = budget_seconds;
+    start.candidates_total = 0;
+    analysis_progress_emit(&progress_listener, &start);
+    play_chooser_emit_solver_finish(&progress_listener, ANALYSIS_MODE_SIM,
+                                    ANALYSIS_STATUS_NO_RESULT, budget_seconds,
+                                    0, NULL);
     return false;
   }
   if (num_candidates == 1) {
     move_copy(out_move, move_list_get_move(move_list, 0));
+    AnalysisProgressEvent start =
+        analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_START);
+    start.budget_seconds = budget_seconds;
+    start.candidates_total = 1;
+    analysis_progress_emit(&progress_listener, &start);
+    play_chooser_emit_solver_finish(&progress_listener, ANALYSIS_MODE_SIM,
+                                    ANALYSIS_STATUS_SKIPPED, budget_seconds, 1,
+                                    out_move);
     return true;
   }
 
@@ -498,6 +568,7 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*inference_args=*/NULL, &sim_args);
   sim_args.spread_forecast = strategy->spread_forecast;
+  sim_args.progress_listener = progress_listener;
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -551,7 +622,8 @@ static bool play_chooser_run_endgame(
     EndgameResults *endgame_results, TranspositionTable *shared_tt,
     const Game *game, int num_threads, double budget_seconds,
     ThreadControl *external_thread_control, bool use_window,
-    int32_t window_alpha, int32_t window_beta, Move *out_move,
+    int32_t window_alpha, int32_t window_beta,
+    const AnalysisProgressListener *progress_listener, Move *out_move,
     int32_t *out_value, ErrorStack *error_stack) {
   const int64_t deadline_ns =
       budget_seconds > 0.0
@@ -577,7 +649,7 @@ static bool play_chooser_run_endgame(
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
       /*first_win=*/false, /*first_win_fallback_moves=*/0, use_window,
       window_alpha, window_beta, deadline_ns,
-      /*actual_move=*/NULL, &endgame_args);
+      /*actual_move=*/NULL, progress_listener, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
   if (play_chooser_benchmark_is_enabled()) {
@@ -694,9 +766,23 @@ static double play_chooser_peg_decided_utility(const PlayChooserStrategy *s,
 static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                                  double budget_seconds, int num_threads,
                                  bool greedy_only, Move *out_move,
-                                 double *out_value, ErrorStack *error_stack) {
+                                 double *out_value, uint64_t parent_run_id,
+                                 ErrorStack *error_stack) {
+  AnalysisProgressListener progress_listener = {0};
+  if (parent_run_id != 0) {
+    progress_listener =
+        play_chooser_progress_for_run(play_chooser, parent_run_id);
+  }
   const int bag_letters = bag_get_letters(game_get_bag(game));
   if (bag_letters < PEG_MIN_BAG || bag_letters > PEG_MAX_BAG) {
+    AnalysisProgressEvent start =
+        analysis_progress_event_create(ANALYSIS_MODE_PEG, ANALYSIS_EVENT_START);
+    start.budget_seconds = budget_seconds;
+    start.bag_tiles = bag_letters;
+    analysis_progress_emit(&progress_listener, &start);
+    play_chooser_emit_solver_finish(&progress_listener, ANALYSIS_MODE_PEG,
+                                    ANALYSIS_STATUS_SKIPPED, budget_seconds, 0,
+                                    NULL);
     return false;
   }
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
@@ -727,7 +813,7 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
                 /*on_scenario_done=*/NULL,
                 /*user_data=*/benchmarking ? &benchmark_context : NULL,
-                /*poll=*/NULL, &peg_args);
+                &progress_listener, /*poll=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   if (benchmarking) {
@@ -775,52 +861,101 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
 void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
                               Move *out_move, ErrorStack *error_stack) {
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  AnalysisProgressListener decision_progress =
+      play_chooser_progress_for_run(play_chooser, /*parent_run_id=*/0);
   const play_chooser_eval_t eval =
       play_chooser_get_eval_for_phase(strategy, game);
   const double budget_seconds =
       play_chooser_get_seconds_for_move(strategy, game);
+  if (analysis_progress_is_enabled(&decision_progress)) {
+    const int player_index = game_get_player_on_turn_index(game);
+    AnalysisProgressEvent start = analysis_progress_event_create(
+        ANALYSIS_MODE_PLAY_CHOOSER, ANALYSIS_EVENT_START);
+    start.budget_seconds = budget_seconds;
+    start.phase = (int)eval;
+    start.player_on_turn = player_index;
+    start.bag_tiles = bag_get_letters(game_get_bag(game));
+    start.score_spread = equity_to_int(
+        player_get_score(game_get_player(game, player_index)) -
+        player_get_score(game_get_player(game, 1 - player_index)));
+    if (strategy->game_timer != NULL) {
+      start.clock_seconds_remaining =
+          game_timer_get_seconds_remaining(strategy->game_timer, player_index);
+    }
+    analysis_progress_emit(&decision_progress, &start);
+  }
   if (eval != PLAY_CHOOSER_EVAL_STATIC &&
       budget_seconds < play_chooser_get_min_budget_for_eval(eval)) {
     play_chooser_benchmark_record_static(/*fallback=*/true);
-    play_chooser_choose_static_move(play_chooser, game, out_move);
+    AnalysisProgressEvent fallback = analysis_progress_event_create(
+        ANALYSIS_MODE_PLAY_CHOOSER, ANALYSIS_EVENT_FALLBACK);
+    fallback.status = ANALYSIS_STATUS_SKIPPED;
+    fallback.budget_seconds = budget_seconds;
+    fallback.phase = (int)eval;
+    analysis_progress_emit(&decision_progress, &fallback);
+    play_chooser_choose_static_move_with_progress(
+        play_chooser, game, budget_seconds, decision_progress.run_id, out_move);
+    play_chooser_emit_solver_finish(
+        &decision_progress, ANALYSIS_MODE_PLAY_CHOOSER,
+        ANALYSIS_STATUS_COMPLETED, budget_seconds, 0, out_move);
     return;
   }
   bool chose_move = false;
   switch (eval) {
   case PLAY_CHOOSER_EVAL_STATIC:
     play_chooser_benchmark_record_static(/*fallback=*/false);
+    play_chooser_choose_static_move_with_progress(
+        play_chooser, game, budget_seconds, decision_progress.run_id, out_move);
+    chose_move = true;
     break;
   case PLAY_CHOOSER_EVAL_SIM:
-    chose_move =
-        play_chooser_run_sim(play_chooser, game, budget_seconds, out_move,
-                             /*out_simulated=*/NULL, error_stack);
+    chose_move = play_chooser_run_sim(
+        play_chooser, game, budget_seconds, out_move,
+        /*out_simulated=*/NULL, decision_progress.run_id, error_stack);
     break;
-  case PLAY_CHOOSER_EVAL_ENDGAME:
+  case PLAY_CHOOSER_EVAL_ENDGAME: {
+    AnalysisProgressListener endgame_progress =
+        play_chooser_progress_for_run(play_chooser, decision_progress.run_id);
     chose_move = play_chooser_run_endgame(
         strategy, &play_chooser->endgame_ctx, play_chooser->endgame_results,
         play_chooser_get_endgame_tt(play_chooser), game,
         play_chooser_get_num_threads(strategy), budget_seconds,
-        /*external_thread_control=*/NULL, /*use_window=*/false, 0, 0, out_move,
-        NULL, error_stack);
+        /*external_thread_control=*/NULL, /*use_window=*/false, 0, 0,
+        &endgame_progress, out_move, /*out_value=*/NULL, error_stack);
     break;
+  }
   case PLAY_CHOOSER_EVAL_PEG:
     // Selecting the actual play: run the full cascade so the halving stages'
     // exact endgame refinement picks between the top candidates.
     chose_move = play_chooser_run_peg(play_chooser, game, budget_seconds,
                                       play_chooser_get_num_threads(strategy),
                                       /*greedy_only=*/false, out_move,
-                                      /*out_value=*/NULL, error_stack);
+                                      /*out_value=*/NULL,
+                                      decision_progress.run_id, error_stack);
     break;
   }
   if (!error_stack_is_empty(error_stack)) {
+    play_chooser_emit_solver_finish(
+        &decision_progress, ANALYSIS_MODE_PLAY_CHOOSER, ANALYSIS_STATUS_ERROR,
+        budget_seconds, 0, NULL);
     return;
   }
   if (!chose_move) {
     if (eval != PLAY_CHOOSER_EVAL_STATIC) {
       play_chooser_benchmark_record_static(/*fallback=*/true);
+      AnalysisProgressEvent fallback = analysis_progress_event_create(
+          ANALYSIS_MODE_PLAY_CHOOSER, ANALYSIS_EVENT_FALLBACK);
+      fallback.status = ANALYSIS_STATUS_NO_RESULT;
+      fallback.budget_seconds = budget_seconds;
+      fallback.phase = (int)eval;
+      analysis_progress_emit(&decision_progress, &fallback);
     }
-    play_chooser_choose_static_move(play_chooser, game, out_move);
+    play_chooser_choose_static_move_with_progress(
+        play_chooser, game, budget_seconds, decision_progress.run_id, out_move);
   }
+  play_chooser_emit_solver_finish(
+      &decision_progress, ANALYSIS_MODE_PLAY_CHOOSER, ANALYSIS_STATUS_COMPLETED,
+      budget_seconds, 0, out_move);
 }
 
 // Adds the letters a tile placement move takes from the player's rack
@@ -906,7 +1041,7 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     Move best_move;
     bool simulated = false;
     if (!play_chooser_run_sim(play_chooser, game, budget_seconds, &best_move,
-                              &simulated, error_stack)) {
+                              &simulated, /*parent_run_id=*/0, error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     if (!simulated) {
@@ -929,7 +1064,8 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
             play_chooser_get_endgame_tt(play_chooser), game,
             play_chooser_get_num_threads(strategy), budget_seconds,
             /*external_thread_control=*/NULL, /*use_window=*/false, 0, 0,
-            /*out_move=*/NULL, &endgame_value, error_stack)) {
+            /*progress_listener=*/NULL, /*out_move=*/NULL, &endgame_value,
+            error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     return play_chooser_branch_value(play_chooser_peg_decided_utility(
@@ -942,7 +1078,8 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     if (!play_chooser_run_peg(play_chooser, game, budget_seconds,
                               play_chooser_get_num_threads(strategy),
                               /*greedy_only=*/true, /*out_move=*/NULL,
-                              &branch_utility, error_stack)) {
+                              &branch_utility, /*parent_run_id=*/0,
+                              error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     return play_chooser_branch_value(branch_utility);
@@ -980,8 +1117,8 @@ play_chooser_solve_endgame_branch(PlayChooserEndgameBranch *branch) {
           &branch->play_chooser->strategy, branch->endgame_ctx,
           branch->endgame_results, branch->endgame_tt, branch->game,
           branch->num_threads, branch->budget_seconds, branch->thread_control,
-          /*use_window=*/false, 0, 0, NULL, &endgame_value,
-          branch->error_stack)) {
+          /*use_window=*/false, 0, 0, /*progress_listener=*/NULL, NULL,
+          &endgame_value, branch->error_stack)) {
     branch->value =
         play_chooser_get_spread(branch->game) + (double)endgame_value;
     branch->valid = true;
@@ -1180,8 +1317,8 @@ static void play_chooser_decide_challenge_endgame(PlayChooser *play_chooser,
   const bool resolved = play_chooser_run_endgame(
       strategy, resolve_ctx, resolve_results, endgame_tt, resolve_game,
       total_threads, remaining_seconds, /*external_thread_control=*/NULL,
-      /*use_window=*/true, window_alpha, window_beta, NULL,
-      &resolve_endgame_value, error_stack);
+      /*use_window=*/true, window_alpha, window_beta,
+      /*progress_listener=*/NULL, NULL, &resolve_endgame_value, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }

@@ -8,6 +8,7 @@
 // tiles_placed_mask.
 
 #include "../def/game_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/endgame_results.h"
 #include "../ent/game.h"
 #include "../ent/game_history.h"
@@ -225,6 +226,8 @@ typedef struct EndgameArgs {
   // every IDS depth so it always gets an unnarrowed [alpha, beta] window,
   // the same guarantee the root's first move always gets.
   const Move *actual_move;
+  // Optional observation-only, solver-independent progress listener.
+  AnalysisProgressListener progress_listener;
 } EndgameArgs;
 
 // Fills every EndgameArgs field from an explicit argument, so that adding a
@@ -252,6 +255,7 @@ static inline void endgame_args_fill(
     const int first_win_fallback_moves, const bool use_initial_window,
     const int32_t initial_alpha, const int32_t initial_beta,
     const int64_t external_deadline_ns, const Move *actual_move,
+    const AnalysisProgressListener *progress_listener,
     EndgameArgs *endgame_args) {
   endgame_args->thread_control = thread_control;
   endgame_args->game = game;
@@ -283,6 +287,9 @@ static inline void endgame_args_fill(
   endgame_args->initial_beta = initial_beta;
   endgame_args->external_deadline_ns = external_deadline_ns;
   endgame_args->actual_move = actual_move;
+  endgame_args->progress_listener = progress_listener != NULL
+                                        ? *progress_listener
+                                        : (AnalysisProgressListener){0};
 }
 
 void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,

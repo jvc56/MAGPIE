@@ -18,6 +18,7 @@
 #include "../def/bai_defs.h"
 #include "../def/cpthread_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"
 #include "../ent/thread_control.h"
@@ -61,12 +62,14 @@ typedef struct BAISyncData {
   int avoid_prune_count;    // remaining arms still needing top-up
   int avoid_prune_next_idx; // round-robin cursor
   int avoid_prune_best_arm_idx;
+  const AnalysisProgressListener *progress_listener;
+  uint64_t next_progress_sample;
 } BAISyncData;
 
-static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
-                                                ThreadControl *thread_control,
-                                                const int num_initial_arms,
-                                                RandomVariables *rng) {
+static inline BAISyncData *
+bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
+                     const int num_initial_arms, RandomVariables *rng,
+                     const AnalysisProgressListener *progress_listener) {
   BAISyncData *bai_sync_data = malloc_or_die(sizeof(BAISyncData));
   bai_sync_data->num_arms = num_initial_arms;
   bai_sync_data->num_arms_reached_threshold = 0;
@@ -89,6 +92,11 @@ static inline BAISyncData *bai_sync_data_create(BAIResult *bai_result,
   bai_sync_data->avoid_prune_arms = NULL;
   bai_sync_data->avoid_prune_count = 0;
   bai_sync_data->avoid_prune_next_idx = 0;
+  bai_sync_data->progress_listener = progress_listener;
+  bai_sync_data->next_progress_sample =
+      analysis_progress_is_enabled(progress_listener)
+          ? progress_listener->checkpoint_interval
+          : 0;
   return bai_sync_data;
 }
 
@@ -231,7 +239,7 @@ bai_sync_data_get_next_initial_sample_index_while_locked(BAISampleArgs *args) {
   return (int)(total_index % (uint64_t)num_arms);
 }
 
-static inline int
+__attribute__((always_inline)) static inline int
 bai_sync_data_get_next_sample_index_while_locked(BAISampleArgs *args) {
   if (args->bai_sync_data->initial_phase) {
     return bai_sync_data_get_next_initial_sample_index_while_locked(args);
@@ -239,7 +247,8 @@ bai_sync_data_get_next_sample_index_while_locked(BAISampleArgs *args) {
   return bai_sync_data_get_next_bai_sample_index_while_locked(args);
 }
 
-static inline int bai_sync_data_get_next_sample_index(BAISampleArgs *args) {
+__attribute__((always_inline)) static inline int
+bai_sync_data_get_next_sample_index(BAISampleArgs *args) {
   int arm_index;
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   arm_index = bai_sync_data_get_next_sample_index_while_locked(args);
@@ -322,7 +331,7 @@ static inline void bai_update_threshold_and_challenger(
 }
 
 // Assumes the caller has locked the bai sync data mutex
-static inline void
+__attribute__((always_inline)) static inline void
 bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
                                       const double sample_value) {
   BAISyncData *bai_sync_data = args->bai_sync_data;
@@ -373,6 +382,60 @@ static inline void bai_sync_data_add_sample(BAISampleArgs *args,
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
+}
+
+// Keep the large copy-safe progress event out of the untraced worker's stack
+// frame. Inlining this rare path makes every simulation worker reserve the
+// event even when progress is disabled.
+__attribute__((noinline)) static void
+bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
+                                       const double sample_value) {
+  bool emit_progress = false;
+  AnalysisProgressEvent progress;
+  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+  bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
+  BAISyncData *sync_data = args->bai_sync_data;
+  if (sync_data->next_progress_sample > 0 &&
+      sync_data->num_total_samples_completed >=
+          sync_data->next_progress_sample) {
+    progress = analysis_progress_event_create(ANALYSIS_MODE_SIM,
+                                              ANALYSIS_EVENT_CHECKPOINT);
+    const int best_index = sync_data->astar_index;
+    const int challenger_index = sync_data->challenger_index;
+    progress.elapsed_ns =
+        sync_data->progress_listener->start_ns > 0
+            ? ctimer_monotonic_ns() - sync_data->progress_listener->start_ns
+            : 0;
+    progress.work_units = sync_data->num_total_samples_completed;
+    progress.iterations = sync_data->num_total_samples_completed;
+    progress.candidate_index = arm_index;
+    progress.candidates_total = sync_data->num_arms;
+    progress.best_index = best_index;
+    progress.challenger_index = challenger_index;
+    progress.item_id = best_index >= 0 ? (uint64_t)best_index : 0;
+    if (best_index >= 0) {
+      progress.best_value = sync_data->arm_data[best_index].mean;
+    }
+    if (challenger_index >= 0) {
+      progress.challenger_value = sync_data->arm_data[challenger_index].mean;
+    }
+    const uint64_t interval = sync_data->progress_listener->checkpoint_interval;
+    do {
+      const uint64_t old_next = sync_data->next_progress_sample;
+      sync_data->next_progress_sample += interval;
+      if (sync_data->next_progress_sample < old_next) {
+        sync_data->next_progress_sample = 0;
+        break;
+      }
+    } while (sync_data->next_progress_sample > 0 &&
+             sync_data->next_progress_sample <=
+                 sync_data->num_total_samples_completed);
+    emit_progress = true;
+  }
+  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
+  if (emit_progress) {
+    analysis_progress_emit(sync_data->progress_listener, &progress);
+  }
 }
 
 typedef struct BAIWorkerArgs {
@@ -475,7 +538,10 @@ static inline void sim_unpruned_to_winner(BAIWorkerArgs *bai_worker_args) {
   }
 }
 
-static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
+// The traced loop is deliberately out of line so its additional control flow
+// and stack use cannot perturb the untraced simulation inner loop.
+__attribute__((noinline)) static void
+bai_worker_sample_loop_with_progress(BAIWorkerArgs *bai_worker_args) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
   ThreadControl *thread_control = bai_worker_args->sync_data->thread_control;
   const BAIOptions *bai_options = bai_worker_args->bai_options;
@@ -513,6 +579,50 @@ static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
       break;
     }
     double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
+    bai_sync_data_add_sample_with_progress(&sample_args, arm_index, sample);
+  }
+}
+
+static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
+  BAISyncData *sync_data = bai_worker_args->sync_data;
+  ThreadControl *thread_control = bai_worker_args->sync_data->thread_control;
+  const BAIOptions *bai_options = bai_worker_args->bai_options;
+  RandomVariables *rvs = bai_worker_args->rvs;
+  const int bai_thread_index = bai_worker_args->thread_index;
+
+  if (bai_thread_index > 0 && bai_options->parent_worker_thread_index > 0) {
+    log_fatal("Both BAI worker thread index (%d) and parent worker "
+              "thread index (%d) are greater than 0.",
+              bai_thread_index, bai_options->parent_worker_thread_index);
+  }
+  // In IGP mode, parent_worker_thread_index == 0 and bai_thread_index
+  // distinguishes concurrent BAI threads. In PGP mode, bai_thread_index == 0
+  // and parent_worker_thread_index distinguishes concurrent autoplay workers.
+  // Using the wrong index causes multiple threads to share cached_gens[0].
+  const int rvs_thread_index =
+      bai_options->parent_worker_thread_index + bai_thread_index;
+
+  BAISampleArgs sample_args = {
+      .bai_sync_data = sync_data,
+      .rvs = rvs,
+      .delta = bai_options->delta,
+      .sample_limit = bai_options->sample_limit,
+      .sample_minimum = bai_options->sample_minimum,
+      .sampling_rule = bai_options->sampling_rule,
+      .threshold = bai_options->threshold,
+      .cutoff = bai_options->cutoff,
+      .initial_batch_next_total_index = 0,
+      .initial_batch_remaining = 0,
+  };
+
+  // This is the original untraced sample-update loop. bai() selects the worker
+  // entry point once, so progress never adds a branch inside an iteration.
+  while (!bai_should_stop(sync_data->bai_result, thread_control)) {
+    const int arm_index = bai_sync_data_get_next_sample_index(&sample_args);
+    if (arm_index < 0) {
+      break;
+    }
+    double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
     bai_sync_data_add_sample(&sample_args, arm_index, sample);
   }
 }
@@ -529,18 +639,33 @@ static inline void *bai_worker(void *args) {
   return NULL;
 }
 
+static void *bai_worker_with_progress(void *args) {
+  BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
+  bai_worker_sample_loop_with_progress(bai_worker_args);
+  checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
+  bai_worker_sample_loop_with_progress(bai_worker_args);
+  if (bai_worker_args->sync_data->avoid_prune_arms) {
+    checkpoint_wait(bai_worker_args->avoid_prune_checkpoint, bai_worker_args);
+    sim_unpruned_to_winner(bai_worker_args);
+  }
+  return NULL;
+}
+
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
-                       BAILogger *bai_logger, BAIResult *bai_result) {
+                       BAILogger *bai_logger,
+                       const AnalysisProgressListener *progress_listener,
+                       BAIResult *bai_result) {
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
   Checkpoint *checkpoint =
       checkpoint_create(bai_options->num_threads, bai_finish_initial_phase);
 
-  BAISyncData *sync_data = bai_sync_data_create(bai_result, thread_control,
-                                                (int)rvs_get_num_rvs(rvs), rng);
+  BAISyncData *sync_data =
+      bai_sync_data_create(bai_result, thread_control,
+                           (int)rvs_get_num_rvs(rvs), rng, progress_listener);
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
     sync_data->avoid_prune_arms = bai_options->arm_avoid_prune;
@@ -564,11 +689,14 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       malloc_or_die((sizeof(cpthread_t)) * bai_options->num_threads);
   BAIWorkerArgs *bai_worker_args_array =
       malloc_or_die((sizeof(BAIWorkerArgs)) * bai_options->num_threads);
+  void *(*worker_start)(void *) = sync_data->next_progress_sample > 0
+                                      ? bai_worker_with_progress
+                                      : bai_worker;
   for (int thread_index = 0; thread_index < bai_options->num_threads;
        thread_index++) {
     bai_worker_args_array[thread_index] = bai_worker_args;
     bai_worker_args_array[thread_index].thread_index = thread_index;
-    cpthread_create(&worker_ids[thread_index], bai_worker,
+    cpthread_create(&worker_ids[thread_index], worker_start,
                     &bai_worker_args_array[thread_index]);
   }
   for (int thread_index = 0; thread_index < bai_options->num_threads;
@@ -577,6 +705,38 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_stop_timer(bai_result);
+  if (analysis_progress_is_enabled(progress_listener)) {
+    AnalysisProgressEvent progress = analysis_progress_event_create(
+        ANALYSIS_MODE_SIM, ANALYSIS_EVENT_FINISH);
+    progress.work_units = sync_data->num_total_samples_completed;
+    progress.iterations = sync_data->num_total_samples_completed;
+    progress.candidates_total = sync_data->num_arms;
+    progress.best_index = sync_data->astar_index;
+    progress.challenger_index = sync_data->challenger_index;
+    if (sync_data->astar_index >= 0) {
+      progress.item_id = (uint64_t)sync_data->astar_index;
+      progress.best_value = sync_data->arm_data[sync_data->astar_index].mean;
+    }
+    if (sync_data->challenger_index >= 0) {
+      progress.challenger_value =
+          sync_data->arm_data[sync_data->challenger_index].mean;
+    }
+    switch (bai_result_get_status(bai_result)) {
+    case BAI_RESULT_STATUS_TIMEOUT:
+      progress.status = ANALYSIS_STATUS_TIME_LIMIT;
+      break;
+    case BAI_RESULT_STATUS_USER_INTERRUPT:
+      progress.status = ANALYSIS_STATUS_INTERRUPTED;
+      break;
+    case BAI_RESULT_STATUS_NONE:
+      progress.status = ANALYSIS_STATUS_NO_RESULT;
+      break;
+    default:
+      progress.status = ANALYSIS_STATUS_COMPLETED;
+      break;
+    }
+    analysis_progress_emit(progress_listener, &progress);
+  }
   free(bai_worker_args_array);
   free(worker_ids);
   bai_sync_data_destroy(sync_data);
