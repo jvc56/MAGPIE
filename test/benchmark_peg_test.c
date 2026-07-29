@@ -1447,21 +1447,27 @@ void test_peg_strength_ab(void) {
                 ob, maxpos);
 }
 
-// Generate a FRESH battery of PEG positions (new seeds, contested) to /tmp for
-// a long strength run, so we are not measuring on the committed fixtures. Env
-// MAGPIE_PEG_GENCOUNT (positions per bag, default 200).
+// Generate a FRESH battery of PEG positions (new seeds, contested) for a long
+// strength run, so we are not measuring on the committed fixtures. Env:
+// MAGPIE_PEG_GENCOUNT (positions per bag, default 200) and
+// MAGPIE_PEG_GENOUT_DIR (required output directory; it must already exist).
 void test_gen_peg_fresh(void) {
   log_set_level(LOG_FATAL);
   const char *ec = getenv("MAGPIE_PEG_GENCOUNT");
   const int count = (ec && *ec) ? (int)strtol(ec, NULL, 10) : 200;
-  generate_peg_cgps(918273101ULL, 1, count, "/tmp/peg_fresh_1peg.txt", false,
-                    true);
-  generate_peg_cgps(918273202ULL, 2, count, "/tmp/peg_fresh_2peg.txt", false,
-                    true);
-  generate_peg_cgps(918273303ULL, 3, count, "/tmp/peg_fresh_3peg.txt", false,
-                    true);
-  generate_peg_cgps(918273404ULL, 4, count, "/tmp/peg_fresh_4peg.txt", false,
-                    true);
+  const char *output_dir = getenv("MAGPIE_PEG_GENOUT_DIR");
+  if (output_dir == NULL || *output_dir == '\0') {
+    log_fatal("MAGPIE_PEG_GENOUT_DIR is required");
+  }
+  char path[1024];
+  for (int bag = 1; bag <= 4; bag++) {
+    (void)snprintf(path, sizeof(path), "%s/peg_fresh_%dpeg.txt", output_dir,
+                   bag);
+    // This calibration panel uses a seed family distinct from the historical
+    // 918273{101,202,303,404} "fresh" strength runs at the PR head.
+    generate_peg_cgps(202607290000ULL + (uint64_t)bag * 1000003ULL, bag, count,
+                      path, false, true);
+  }
 }
 
 // PEG throughput->strength CURVE: for each position run several arms that

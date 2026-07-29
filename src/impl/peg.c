@@ -106,6 +106,8 @@ typedef struct PegWorker {
   double eg_tt_fraction;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+  // Solve-wide exact-endgame work counter shared by every worker.
+  atomic_uint_fast64_t *nested_endgame_nodes;
 
   // Nested-PEG lookahead state. Solve-level knobs copied here so the recursion
   // needn't thread them through every job/ctx.
@@ -3129,6 +3131,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
+  atomic_uint_fast64_t nested_endgame_nodes;
+  atomic_init(&nested_endgame_nodes, 0);
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -3141,6 +3145,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt = NULL;
     workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
+    workers[worker_idx].nested_endgame_nodes = &nested_endgame_nodes;
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
     // Inner-peg scenarios fan out across the shared pool (NULL when single-
@@ -3642,6 +3647,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     memcpy(out->stage_history, poll_snap.stage_history,
            (size_t)poll_snap.n_stage_history * sizeof(PegStageSnapshot));
   }
+  out->nested_endgame_nodes = atomic_load(&nested_endgame_nodes);
 
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {
