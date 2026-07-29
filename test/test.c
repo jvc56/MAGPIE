@@ -47,6 +47,7 @@
 #include "peg_poll_test.h"
 #include "peg_pool_test.h"
 #include "peg_test.h"
+#include "peg_time_calibration_test.h"
 #include "play_chooser_test.h"
 #include "players_data_test.h"
 #include "rack_info_table_test.h"
@@ -206,6 +207,7 @@ static TestEntry on_demand_test_table[] = {
     {"genpegmore", test_gen_peg_more},
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
+    {"pegtimecal", test_peg_time_calibration},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

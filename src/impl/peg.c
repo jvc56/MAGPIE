@@ -104,6 +104,8 @@ typedef struct PegWorker {
   double eg_tt_fraction;
   // Shared per-solve cache of per-candidate leaf prunes (see PegPruneCache).
   PegPruneCache *prune_cache;
+  // Solve-wide exact-endgame work counter shared by every worker.
+  atomic_uint_fast64_t *nested_endgame_nodes;
 
   // Nested-PEG lookahead state. Solve-level knobs copied here so the recursion
   // needn't thread them through every job/ctx.
@@ -1189,6 +1191,8 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       deadline_ns, /*actual_move=*/NULL, &ea);
   endgame_results_reset(worker->eg_results);
   endgame_solve_inline(&worker->eg_ctx, &ea, worker->eg_results);
+  atomic_fetch_add(worker->nested_endgame_nodes,
+                   endgame_ctx_get_nodes_searched(worker->eg_ctx));
   if (endgame_results_get_depth(worker->eg_results, ENDGAME_RESULT_BEST) < 0) {
     return peg_greedy_playout(game, on_turn, worker->playout_ml, deadline_ns,
                               worker->thread_control,
@@ -1661,6 +1665,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       /*actual_move=*/NULL, &ea);
   endgame_results_reset(ctx->worker->eg_results);
   endgame_solve_inline(&ctx->worker->eg_ctx, &ea, ctx->worker->eg_results);
+  atomic_fetch_add(ctx->worker->nested_endgame_nodes,
+                   endgame_ctx_get_nodes_searched(ctx->worker->eg_ctx));
   // If the solver was interrupted before completing any search depth (depth
   // remains -1 after reset), eg_results still holds a stale value from a prior
   // solve. Fall back to greedy rather than misreporting the scenario outcome.
@@ -2695,15 +2701,18 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   // ranking.
   const bool exhaustive = num_stages == 1 && counts[0] == INT_MAX;
 
-  // Scenario sampling: opt-in via scenario_stride > 1, and only for bag >= 3
-  // (the bag <= 2 scenario space is too small to sample without destroying
-  // coverage). Default (<= 1) is full enumeration — exact, just slower.
+  // Scenario sampling: opt-in via scenario_stride > 1, and normally only for
+  // bag >= 3 (the bag <= 2 scenario space is too small to sample without
+  // destroying production coverage). Calibration-only direct judges may
+  // explicitly force the same sampling rule for the small bags.
+  // Default (<= 1) is full enumeration — exact, just slower.
   // Applied to every stage including the greedy seed (stage 0), whose full
   // bag-3+ enumeration over thousands of candidates is the dominant cost.
   // Exhaustive mode always enumerates fully (no stride), regardless of
   // -pegstride.
   const int scenario_stride =
-      (!exhaustive && bag_size >= 3 && args->scenario_stride > 1)
+      (!exhaustive && (bag_size >= 3 || args->force_small_bag_stride) &&
+       args->scenario_stride > 1)
           ? args->scenario_stride
           : 1;
 
@@ -2726,6 +2735,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   }
   // One prune cache shared by every worker (cross-worker board reuse).
   PegPruneCache *prune_cache = peg_prune_cache_create();
+  atomic_uint_fast64_t nested_endgame_nodes;
+  atomic_init(&nested_endgame_nodes, 0);
   PegWorker *workers = malloc_or_die((size_t)n_scratch * sizeof(PegWorker));
   for (int worker_idx = 0; worker_idx < n_scratch; worker_idx++) {
     workers[worker_idx].playout_ml = move_list_create(1);
@@ -2738,6 +2749,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].eg_tt = NULL;
     workers[worker_idx].eg_tt_fraction = tt_fraction;
     workers[worker_idx].prune_cache = prune_cache;
+    workers[worker_idx].nested_endgame_nodes = &nested_endgame_nodes;
     // Nested-PEG lookahead config + free-list scratch.
     workers[worker_idx].thread_control = args->thread_control;
     // Inner-peg scenarios fan out across the shared pool (NULL when single-
@@ -3213,6 +3225,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     memcpy(out->stage_history, poll_snap.stage_history,
            (size_t)poll_snap.n_stage_history * sizeof(PegStageSnapshot));
   }
+  out->nested_endgame_nodes = atomic_load(&nested_endgame_nodes);
 
   // Stop the injection monitor before tearing down the workers it observes.
   if (injector_running) {

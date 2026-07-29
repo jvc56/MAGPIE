@@ -771,6 +771,7 @@ static void test_peg_main_progress_detail(void) {
   // include_per_scenario populated the best cand's per-scenario breakdown.
   assert(result.per_scenario != NULL);
   assert(result.n_per_scenario >= 1);
+  assert(result.nested_endgame_nodes > 0);
   int64_t row_weight_sum = 0;
   for (int i = 0; i < result.n_per_scenario; i++) {
     const PegPerScenario *row = &result.per_scenario[i];
@@ -785,6 +786,25 @@ static void test_peg_main_progress_detail(void) {
          atomic_load(&counters.stage_starts), atomic_load(&counters.cand_dones),
          atomic_load(&counters.scenario_dones), result.n_per_scenario);
 
+  // Production keeps bag-1 enumeration exhaustive, but a direct calibration
+  // judge may explicitly apply its deterministic weight stride there.
+  const int full_scenarios = result.top_cands[0].n_scenarios;
+  PegResult sampled;
+  memset(&sampled, 0, sizeof(sampled));
+  args.on_stage_start = NULL;
+  args.on_cand_done = NULL;
+  args.on_scenario_done = NULL;
+  args.include_per_scenario = false;
+  args.user_data = NULL;
+  args.scenario_stride = 4;
+  args.force_small_bag_stride = true;
+  peg_solve(&args, &sampled, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(sampled.last_completed_stage == 1);
+  assert(sampled.top_cands[0].n_scenarios > 0);
+  assert(sampled.top_cands[0].n_scenarios < full_scenarios);
+
+  peg_result_destroy(&sampled);
   peg_result_destroy(&result);
   error_stack_destroy(error_stack);
   config_destroy(config);

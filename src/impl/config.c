@@ -3389,7 +3389,8 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       config->peg_num_stages > 0 ? config->peg_stage_top_k : NULL,
       config->peg_num_stages, /*inner_top_k=*/0,
       config->peg_pessimistic ? PEG_OPP_PESSIMISTIC : PEG_OPP_RATIONAL,
-      config->peg_scenario_stride, /*nested_enabled=*/config->peg_nested,
+      config->peg_scenario_stride, /*force_small_bag_stride=*/false,
+      /*nested_enabled=*/config->peg_nested,
       /*nested_cand_cap=*/0, PEG_NESTED_DEFAULT_CAND_CAPS,
       (int)(sizeof(PEG_NESTED_DEFAULT_CAND_CAPS) /
             sizeof(PEG_NESTED_DEFAULT_CAND_CAPS[0])),

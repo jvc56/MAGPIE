@@ -158,6 +158,13 @@ typedef struct PegArgs {
   // 0 = use the bag-size default (the solver picks a sane stride per bag size).
   int scenario_stride;
 
+  // Permit an explicit scenario_stride > 1 for bag sizes 1 and 2. Production
+  // callers leave this false because those scenario spaces are normally too
+  // small to sample safely. Direct calibration judges set it true so their
+  // requested stride-4/stride-2 sensitivity protocol applies at every bag
+  // size. Has no effect when scenario_stride <= 1.
+  bool force_small_bag_stride;
+
   // Nested pre-endgame lookahead for NON-EMPTIER leaves. When nested_enabled,
   // a leaf that still has bag tiles is evaluated by recursively solving the
   // opponent's sub-pre-endgame (alternating sides down to emptier endgames)
@@ -259,16 +266,17 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
               const int max_stage, const bool greedy_seed_only,
               const int *stage_top_k, const int num_stages,
               const int inner_top_k, const PegOppModel opp_model,
-              const int scenario_stride, const bool nested_enabled,
-              const int nested_cand_cap, const int *nested_cand_caps,
-              const int nested_n_cand_caps, const int nested_stride,
-              const int nested_emptier_ply_cap, const int nested_max_depth,
-              const MachineLetter *eval_bag_order, const int eval_bag_order_len,
-              const Move *const *only_moves, const int n_only_moves,
-              const Move *const *protect_moves, const int n_protect_moves,
-              const bool include_per_scenario, PegOnStageStart on_stage_start,
-              PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
-              void *user_data, PegPoll *poll, PegArgs *peg_args) {
+              const int scenario_stride, const bool force_small_bag_stride,
+              const bool nested_enabled, const int nested_cand_cap,
+              const int *nested_cand_caps, const int nested_n_cand_caps,
+              const int nested_stride, const int nested_emptier_ply_cap,
+              const int nested_max_depth, const MachineLetter *eval_bag_order,
+              const int eval_bag_order_len, const Move *const *only_moves,
+              const int n_only_moves, const Move *const *protect_moves,
+              const int n_protect_moves, const bool include_per_scenario,
+              PegOnStageStart on_stage_start, PegOnCandDone on_cand_done,
+              PegOnScenarioDone on_scenario_done, void *user_data,
+              PegPoll *poll, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
   peg_args->num_threads = num_threads;
@@ -280,6 +288,7 @@ peg_args_fill(const Game *game, ThreadControl *thread_control,
   peg_args->inner_top_k = inner_top_k;
   peg_args->opp_model = opp_model;
   peg_args->scenario_stride = scenario_stride;
+  peg_args->force_small_bag_stride = force_small_bag_stride;
   peg_args->nested_enabled = nested_enabled;
   peg_args->nested_cand_cap = nested_cand_cap;
   peg_args->nested_cand_caps = nested_cand_caps;
@@ -350,6 +359,12 @@ typedef struct PegResult {
   // while solving, false once done). ctimer_elapsed_seconds reads the live
   // elapsed time while running and the final elapsed time after completion.
   Timer timer;
+
+  // Total nodes searched by the exact endgame solves nested beneath this PEG
+  // solve, accumulated across all worker threads and stages. This is a
+  // machine-independent work counter; unlike wall time it remains meaningful
+  // when the host is carrying another load.
+  uint64_t nested_endgame_nodes;
 
   // Top-K cand list from the last completed stage, sorted descending by
   // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.
