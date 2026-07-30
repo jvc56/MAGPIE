@@ -13,7 +13,7 @@ from collections import defaultdict
 from typing import Any, Callable, Iterable
 
 
-PAIR_SPECS = (("30s", "60s"), ("60s", "120s"))
+PAIR_SPECS = (("greedy", "30s"), ("30s", "60s"), ("60s", "120s"))
 METRICS = ("utility", "win", "spread")
 
 
@@ -117,6 +117,78 @@ def describe(values: list[float]) -> dict[str, Any]:
     }
 
 
+def summarize_sentinel_run(
+    sentinel_records: list[dict[str, Any]], arm_records: list[dict[str, Any]]
+) -> dict[str, Any]:
+    sentinels = latest_by(
+        sentinel_records, lambda record: (str(record["label"]),)
+    )
+    ordered_sentinels = [
+        sentinels[(label,)]
+        for label in ("before", "between", "after")
+        if (label,) in sentinels
+    ]
+    throughputs = [
+        float(record["nested_endgame_nodes"]) / float(record["wall_seconds"])
+        for record in ordered_sentinels
+        if float(record.get("wall_seconds", 0)) > 0
+    ]
+    median_throughput = statistics.median(throughputs) if throughputs else math.nan
+    sentinel_rows = []
+    for record in ordered_sentinels:
+        throughput = float(record["nested_endgame_nodes"]) / float(
+            record["wall_seconds"]
+        )
+        normalized = throughput / median_throughput if median_throughput else math.nan
+        sentinel_rows.append(
+            {
+                "label": record["label"],
+                "throughput_nodes_per_second": throughput,
+                "normalized_throughput": normalized,
+                "occupancy": float(record["scheduled_core_occupancy"]),
+                "noisy": abs(normalized - 1.0) > 0.15
+                or float(record["scheduled_core_occupancy"]) < 0.75,
+            }
+        )
+    throughput_cv = (
+        statistics.pstdev(throughputs) / statistics.fmean(throughputs)
+        if len(throughputs) > 1 and statistics.fmean(throughputs) != 0
+        else 0.0
+    )
+    drift = (
+        throughputs[-1] / throughputs[0] - 1.0
+        if len(throughputs) >= 2 and throughputs[0] != 0
+        else math.nan
+    )
+    segment_noise = {"early": False, "late": False}
+    if len(sentinel_rows) == 3:
+        for segment, endpoints in (
+            ("early", sentinel_rows[:2]),
+            ("late", sentinel_rows[1:]),
+        ):
+            endpoint_ratio = (
+                endpoints[1]["throughput_nodes_per_second"]
+                / endpoints[0]["throughput_nodes_per_second"]
+            )
+            segment_noise[segment] = (
+                any(bool(endpoint["noisy"]) for endpoint in endpoints)
+                or endpoint_ratio < 0.85
+                or endpoint_ratio > 1.15
+            )
+    noisy_quality_rows = sum(
+        1
+        for record in arm_records
+        if segment_noise.get(str(record.get("block")), False)
+    )
+    return {
+        "sentinels": sentinel_rows,
+        "normalized_throughput_cv": throughput_cv,
+        "early_to_late_drift": drift,
+        "segment_noise": segment_noise,
+        "arm_rows_in_flagged_segments": noisy_quality_rows,
+    }
+
+
 def value_maps(
     records: list[dict[str, Any]],
     judges: dict[tuple[Any, ...], dict[str, Any]],
@@ -166,6 +238,7 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
 
     arm_completion: dict[str, Any] = {}
     arm_strength: dict[str, Any] = {}
+    arm_strength_by_bag: dict[str, Any] = {}
     for label in ("greedy", "30s", "60s", "120s"):
         rows = [record for (_, arm_label), record in arms.items() if arm_label == label]
         completed = sum(record.get("status") == "completed" for record in rows)
@@ -201,6 +274,49 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         arm_strength[label]["last_completed_candidate_seconds"] = describe(
             last_completion_times
         )
+        arm_strength_by_bag[label] = {}
+        for bag in range(1, 5):
+            bag_rows = [row for row in rows if int(row["bag"]) == bag]
+            arm_strength_by_bag[label][str(bag)] = {
+                "runs": len(bag_rows),
+                "completed": sum(
+                    row.get("status") == "completed" for row in bag_rows
+                ),
+                "refine_completed_candidates": describe(
+                    [
+                        float(row.get("refine_completed_candidates", 0))
+                        for row in bag_rows
+                    ]
+                ),
+            }
+
+    work_marginals = {}
+    for before_label, after_label in PAIR_SPECS[1:]:
+        rows = []
+        for position in positions:
+            before = arms.get((position, before_label))
+            after = arms.get((position, after_label))
+            if before is None or after is None:
+                continue
+            rows.append(
+                {
+                    field: float(after.get(field, 0))
+                    - float(before.get(field, 0))
+                    for field in (
+                        "refine_completed_candidates",
+                        "cumulative_scenarios",
+                        "nested_endgame_nodes",
+                    )
+                }
+            )
+        work_marginals[f"{before_label}_to_{after_label}"] = {
+            field: describe([row[field] for row in rows])
+            for field in (
+                "refine_completed_candidates",
+                "cumulative_scenarios",
+                "nested_endgame_nodes",
+            )
+        }
 
     marginals: dict[str, Any] = {}
     for before_label, after_label in PAIR_SPECS:
@@ -279,6 +395,27 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         record.get("kind") == "agreement" and int(record.get("accepted", 0)) == 1
         for record in records
     )
+    judge_strength = {}
+    for label in ("stride4", "stride2"):
+        rows = [
+            judge
+            for (_, judge_label), judge in judges.items()
+            if judge_label == label
+        ]
+        judge_strength[label] = {
+            "total": len(rows),
+            "accepted": sum(int(row.get("accepted", 0)) == 1 for row in rows),
+            **{
+                field: describe([float(row.get(field, 0)) for row in rows])
+                for field in (
+                    "cumulative_scenarios",
+                    "nested_endgame_nodes",
+                    "wall_seconds",
+                    "process_cpu_seconds",
+                    "scheduled_core_occupancy",
+                )
+            },
+        }
 
     sensitivity_rows = []
     sensitivity_positions = []
@@ -310,10 +447,25 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
                     ),
                 }
             )
-        best4 = max(common_moves, key=lambda move: stride4_values[move]["utility"])
-        best2 = max(common_moves, key=lambda move: stride2_values[move]["utility"])
+        max4 = max(stride4_values[move]["utility"] for move in common_moves)
+        max2 = max(stride2_values[move]["utility"] for move in common_moves)
+        best4 = {
+            move
+            for move in common_moves
+            if abs(stride4_values[move]["utility"] - max4) <= 1.0e-12
+        }
+        best2 = {
+            move
+            for move in common_moves
+            if abs(stride2_values[move]["utility"] - max2) <= 1.0e-12
+        }
         sensitivity_positions.append(
-            {"position": position, "best_agrees": best4 == best2}
+            {
+                "position": position,
+                "best_agrees": bool(best4 & best2),
+                "stride4_best": ", ".join(sorted(best4)),
+                "stride2_best": ", ".join(sorted(best2)),
+            }
         )
     stride2_total = sum(label == "stride2" for _, label in judges)
     sensitivity = {
@@ -326,6 +478,9 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
             if sensitivity_positions
             else math.nan
         ),
+        "best_disagreement_positions": [
+            row for row in sensitivity_positions if not row["best_agrees"]
+        ],
         "win_abs_diff": describe(
             [float(row["win_abs_diff"]) for row in sensitivity_rows]
         ),
@@ -337,77 +492,30 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         ),
     }
 
-    sentinels = latest_by(
-        [
-            record
-            for record in records
-            if record.get("kind") == "arm" and record.get("mode") == "sentinel"
-        ],
-        lambda record: (str(record["label"]),),
-    )
-    ordered_sentinels = [
-        sentinels[(label,)]
-        for label in ("before", "between", "after")
-        if (label,) in sentinels
+    sentinel_records = [
+        record
+        for record in records
+        if record.get("kind") == "arm" and record.get("mode") == "sentinel"
     ]
-    throughputs = [
-        float(record["nested_endgame_nodes"]) / float(record["wall_seconds"])
-        for record in ordered_sentinels
-        if float(record.get("wall_seconds", 0)) > 0
-    ]
-    median_throughput = statistics.median(throughputs) if throughputs else math.nan
-    sentinel_rows = []
-    for record in ordered_sentinels:
-        throughput = float(record["nested_endgame_nodes"]) / float(
-            record["wall_seconds"]
+    sources = sorted(
+        {str(record.get("_source", "records")) for record in sentinel_records}
+    )
+    monitoring_runs = {}
+    for source in sources:
+        monitoring_runs[source] = summarize_sentinel_run(
+            [
+                record
+                for record in sentinel_records
+                if str(record.get("_source", "records")) == source
+            ],
+            [
+                record
+                for record in arm_records
+                if str(record.get("_source", "records")) == source
+            ],
         )
-        normalized = throughput / median_throughput if median_throughput else math.nan
-        sentinel_rows.append(
-            {
-                "label": record["label"],
-                "throughput_nodes_per_second": throughput,
-                "normalized_throughput": normalized,
-                "occupancy": float(record["scheduled_core_occupancy"]),
-                "noisy": abs(normalized - 1.0) > 0.20
-                or float(record["scheduled_core_occupancy"]) < 0.50,
-            }
-        )
-    throughput_cv = (
-        statistics.pstdev(throughputs) / statistics.fmean(throughputs)
-        if len(throughputs) > 1 and statistics.fmean(throughputs) != 0
-        else 0.0
-    )
-    drift = (
-        throughputs[-1] / throughputs[0] - 1.0
-        if len(throughputs) >= 2 and throughputs[0] != 0
-        else math.nan
-    )
-    segment_noise = {"early": False, "late": False}
-    if len(sentinel_rows) == 3:
-        for segment, endpoints in (
-            ("early", sentinel_rows[:2]),
-            ("late", sentinel_rows[1:]),
-        ):
-            endpoint_ratio = (
-                endpoints[1]["throughput_nodes_per_second"]
-                / endpoints[0]["throughput_nodes_per_second"]
-            )
-            segment_noise[segment] = (
-                any(bool(endpoint["noisy"]) for endpoint in endpoints)
-                or endpoint_ratio < 0.80
-                or endpoint_ratio > 1.20
-            )
-    noisy_quality_rows = sum(
-        1
-        for record in arm_records
-        if segment_noise.get(str(record.get("block")), False)
-    )
     monitoring = {
-        "sentinels": sentinel_rows,
-        "normalized_throughput_cv": throughput_cv,
-        "early_to_late_drift": drift,
-        "segment_noise": segment_noise,
-        "arm_rows_in_flagged_segments": noisy_quality_rows,
+        "runs": monitoring_runs,
         "timing_only_exclusion": False,
     }
 
@@ -428,7 +536,10 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
             "stride4_accepted": accepted_stride4,
             "stride4_censored": censored_stride4,
         },
+        "judge_strength": judge_strength,
         "arm_strength": arm_strength,
+        "arm_strength_by_bag": arm_strength_by_bag,
+        "work_marginals": work_marginals,
         "marginals": marginals,
         "sensitivity": sensitivity,
         "monitoring": monitoring,
@@ -456,7 +567,7 @@ def render_markdown(result: dict[str, Any]) -> str:
         "",
         "## Completion",
         "",
-        "| Arm | Runs | Full 2-ply stage | Partial/censored stage |",
+            "| Arm | Runs | Completed requested work | Partial/censored stage |",
         "| --- | ---: | ---: | ---: |",
     ]
     for label, row in result["arm_completion"].items():
@@ -472,6 +583,22 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"stride-4 3-ply judges accepted: {judge['stride4_accepted']}; "
             f"censored: {judge['stride4_censored']}. No censored judgment is "
             "replaced by a seed or 2-ply value.",
+            "",
+            "| Judge | Accepted/attempted | Scenarios, median | "
+            "Nodes, median | Wall seconds, median | Occupancy, median |",
+            "| --- | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for label, strength in result["judge_strength"].items():
+        lines.append(
+            f"| {label} | {strength['accepted']}/{strength['total']} | "
+            f"{strength['cumulative_scenarios']['median']:.0f} | "
+            f"{strength['nested_endgame_nodes']['median']:.0f} | "
+            f"{strength['wall_seconds']['median']:.2f} | "
+            f"{strength['scheduled_core_occupancy']['median']:.3f} |"
+        )
+    lines.extend(
+        [
             "",
             "## Marginal quality",
             "",
@@ -535,7 +662,57 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{strength['wall_seconds']['median']:.2f} | "
             f"{strength['scheduled_core_occupancy']['median']:.3f} |"
         )
+    lines.extend(
+        [
+            "",
+            "Candidate completion by bag size:",
+            "",
+            "| Bag | 30s median (full) | 60s median (full) | "
+            "120s median (full) |",
+            "| ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for bag in range(1, 5):
+        cells = []
+        for label in ("30s", "60s", "120s"):
+            row = result["arm_strength_by_bag"][label][str(bag)]
+            cells.append(
+                f"{row['refine_completed_candidates']['median']:.1f} "
+                f"({row['completed']}/{row['runs']})"
+            )
+        lines.append(f"| {bag} | {cells[0]} | {cells[1]} | {cells[2]} |")
+    lines.extend(
+        [
+            "",
+            "Incremental work:",
+            "",
+            "| Step | Candidate gain, mean / median | "
+            "Scenario gain, mean / median | Node gain, mean / median |",
+            "| --- | ---: | ---: | ---: |",
+        ]
+    )
+    for name, marginal in result["work_marginals"].items():
+        candidates = marginal["refine_completed_candidates"]
+        scenarios = marginal["cumulative_scenarios"]
+        nodes = marginal["nested_endgame_nodes"]
+        lines.append(
+            f"| {name.replace('_', ' ')} | "
+            f"{candidates['mean']:.2f} / {candidates['median']:.2f} | "
+            f"{scenarios['mean']:.0f} / {scenarios['median']:.0f} | "
+            f"{nodes['mean']:.0f} / {nodes['median']:.0f} |"
+        )
     sensitivity = result["sensitivity"]
+    sensitivity_disagreements = sensitivity["best_disagreement_positions"]
+    sensitivity_disagreement_text = (
+        "; best-nominee disagreements: "
+        + ", ".join(
+            f"{row['position']} ({row['stride4_best']} vs "
+            f"{row['stride2_best']})"
+            for row in sensitivity_disagreements
+        )
+        if sensitivity_disagreements
+        else "; no best-nominee disagreements"
+    )
     lines.extend(
         [
             "",
@@ -547,28 +724,37 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"Across common nominees, median absolute stride-2 versus stride-4 "
             f"difference was {sensitivity['win_abs_diff']['median']:.6f} win, "
             f"{sensitivity['spread_abs_diff']['median']:.3f} spread, and "
-            f"{sensitivity['utility_abs_diff']['median']:.6f} utility.",
+            f"{sensitivity['utility_abs_diff']['median']:.6f} utility"
+            f"{sensitivity_disagreement_text}.",
             "",
             "## Load monitoring",
             "",
-            f"Normalized sentinel throughput CV: "
-            f"{result['monitoring']['normalized_throughput_cv']:.3f}; "
-            f"before-to-after drift: "
-            f"{result['monitoring']['early_to_late_drift']:+.1%}. "
-            f"Flagged segments: {result['monitoring']['segment_noise']}. "
             "Timing flags do not remove structurally valid quality observations.",
-            "",
-            "| Sentinel | Nodes/s | Normalized | CPU/wall/10 occupancy | Noisy |",
-            "| --- | ---: | ---: | ---: | --- |",
         ]
     )
-    for sentinel in result["monitoring"]["sentinels"]:
-        lines.append(
-            f"| {sentinel['label']} | "
-            f"{sentinel['throughput_nodes_per_second']:.0f} | "
-            f"{sentinel['normalized_throughput']:.3f} | "
-            f"{sentinel['occupancy']:.3f} | {sentinel['noisy']} |"
+    for run_name, monitoring in result["monitoring"]["runs"].items():
+        lines.extend(
+            [
+                "",
+                f"### {run_name}",
+                "",
+                f"Normalized throughput CV: "
+                f"{monitoring['normalized_throughput_cv']:.3f}; "
+                f"before-to-after drift: "
+                f"{monitoring['early_to_late_drift']:+.1%}; "
+                f"flagged segments: {monitoring['segment_noise']}.",
+                "",
+                "| Sentinel | Nodes/s | Normalized | CPU/wall/10 occupancy | Noisy |",
+                "| --- | ---: | ---: | ---: | --- |",
+            ]
         )
+        for sentinel in monitoring["sentinels"]:
+            lines.append(
+                f"| {sentinel['label']} | "
+                f"{sentinel['throughput_nodes_per_second']:.0f} | "
+                f"{sentinel['normalized_throughput']:.3f} | "
+                f"{sentinel['occupancy']:.3f} | {sentinel['noisy']} |"
+            )
     lines.extend(
         [
             "",
@@ -589,7 +775,10 @@ def main() -> int:
     args = parser.parse_args()
     records = []
     for records_path in args.records:
-        records.extend(load_records(records_path))
+        source = records_path.parent.name
+        for record in load_records(records_path):
+            record["_source"] = source
+            records.append(record)
     result = analyze(records)
     json_text = json.dumps(result, indent=2, sort_keys=True, allow_nan=True) + "\n"
     markdown = render_markdown(result)
