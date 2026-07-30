@@ -170,6 +170,7 @@ class SequentialRunner:
         block: str,
         moves: list[str] | None = None,
         stride: int | None = None,
+        schedule: list[int] | None = None,
     ) -> list[dict[str, Any]]:
         self.sequence += 1
         environment = os.environ.copy()
@@ -186,6 +187,10 @@ class SequentialRunner:
             environment["PEG_CAL_MOVES"] = "|".join(moves)
         if stride is not None:
             environment["PEG_CAL_STRIDE"] = str(stride)
+        if schedule is not None:
+            environment["PEG_CAL_SCHEDULE"] = ",".join(
+                str(count) for count in schedule
+            )
 
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         header = {
@@ -198,6 +203,7 @@ class SequentialRunner:
             "block": block,
             "budget_seconds": budget,
             "stride": stride,
+            "schedule": schedule,
             "started_utc": started,
         }
         append_jsonl(self.records_path, header)
@@ -274,6 +280,12 @@ class SequentialRunner:
                     f" cands={summary.get('refine_completed_candidates')}/"
                     f"{summary.get('refine_candidate_total')}"
                 )
+                if summary.get("requested_stages", 1) > 1:
+                    detail += (
+                        f" deepest="
+                        f"{summary.get('deepest_completed_candidates')}/"
+                        f"{summary.get('deepest_candidate_total')}"
+                    )
             elif summary:
                 detail = f" accepted={summary.get('accepted')}"
             print(

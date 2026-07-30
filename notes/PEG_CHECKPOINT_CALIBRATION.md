@@ -1,5 +1,8 @@
 # PEG candidate-checkpoint calibration
 
+The follow-up comparison of completed 2-ply and 3-ply stages across halving
+cap schedules is in `notes/PEG_3PLY_STAGE_CAP_CALIBRATION.md`.
+
 ## Decision summary
 
 The 2-ply stage has substantial value, but its value is strongly front-loaded:

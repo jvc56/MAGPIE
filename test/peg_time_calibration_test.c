@@ -23,7 +23,8 @@ enum {
   PEG_CAL_THREADS = 10,
   PEG_CAL_REFINE_CANDS = 32,
   PEG_CAL_MAX_EVENTS = 32768,
-  PEG_CAL_MAX_NOMINEES = 8,
+  PEG_CAL_MAX_NOMINEES = 16,
+  PEG_CAL_MAX_STAGES = 16,
 };
 
 typedef struct PegCalEvent {
@@ -62,6 +63,37 @@ static int peg_cal_env_int(const char *name, int default_value) {
 static double peg_cal_env_double(const char *name, double default_value) {
   const char *value = getenv(name);
   return value != NULL && *value != '\0' ? strtod(value, NULL) : default_value;
+}
+
+static int peg_cal_parse_schedule(const char *text, int *schedule,
+                                  int schedule_capacity) {
+  if (text == NULL || *text == '\0') {
+    schedule[0] = PEG_CAL_REFINE_CANDS;
+    return 1;
+  }
+  char *copy = string_duplicate(text);
+  char *saveptr = NULL;
+  int count = 0;
+  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+       token = strtok_r(NULL, ",", &saveptr)) {
+    if (count >= schedule_capacity) {
+      free(copy);
+      log_fatal("PEG calibration schedule has more than %d stages",
+                schedule_capacity);
+    }
+    char *end = NULL;
+    const long value = strtol(token, &end, 10);
+    if (end == token || *end != '\0' || value < 2 || value > INT32_MAX) {
+      free(copy);
+      log_fatal("invalid PEG calibration stage cap '%s'", token);
+    }
+    schedule[count++] = (int)value;
+  }
+  free(copy);
+  if (count == 0) {
+    log_fatal("PEG calibration schedule is empty");
+  }
+  return count;
 }
 
 static double peg_cal_process_cpu_seconds(void) {
@@ -192,12 +224,18 @@ static void peg_cal_print_stages(const PegResult *result, const char *mode,
 
 static void peg_cal_run_arm(Config *config, const char *mode,
                             const char *position, const char *label) {
-  static const int refine_schedule[] = {PEG_CAL_REFINE_CANDS};
   static const int sentinel_schedule[] = {8};
   const bool greedy = strcmp(label, "greedy") == 0;
   const bool sentinel = strcmp(mode, "sentinel") == 0;
   const double budget =
       sentinel ? 0.0 : peg_cal_env_double("PEG_CAL_BUDGET", 0.0);
+  int refine_schedule[PEG_CAL_MAX_STAGES] = {0};
+  const int refine_stages =
+      sentinel ? 1
+               : peg_cal_parse_schedule(getenv("PEG_CAL_SCHEDULE"),
+                                        refine_schedule, PEG_CAL_MAX_STAGES);
+  const int *schedule = sentinel ? sentinel_schedule : refine_schedule;
+  const int requested_stages = sentinel ? 1 : refine_stages;
 
   PegPoll *poll = peg_poll_create();
   PegCalTrace *trace = calloc_or_die(1, sizeof(*trace));
@@ -211,8 +249,8 @@ static void peg_cal_run_arm(Config *config, const char *mode,
   args.num_threads = PEG_CAL_THREADS;
   args.time_budget_seconds = budget;
   args.greedy_seed_only = greedy;
-  args.stage_top_k = sentinel ? sentinel_schedule : refine_schedule;
-  args.num_stages = 1;
+  args.stage_top_k = schedule;
+  args.num_stages = requested_stages;
   args.scenario_stride = 1;
   args.nested_enabled = false;
   args.on_cand_done = peg_cal_on_cand_done;
@@ -238,18 +276,29 @@ static void peg_cal_run_arm(Config *config, const char *mode,
       stage_idx >= 0 ? result.stage_history[stage_idx].field_size : 0;
   const int refine_completed =
       stage_idx >= 0 ? result.stage_history[stage_idx].cands_done : 0;
+  const int deepest_stage_idx =
+      result.n_stage_history > requested_stages ? requested_stages : -1;
+  const int deepest_total =
+      deepest_stage_idx >= 0
+          ? result.stage_history[deepest_stage_idx].field_size
+          : 0;
+  const int deepest_completed =
+      deepest_stage_idx >= 0
+          ? result.stage_history[deepest_stage_idx].cands_done
+          : 0;
   const int root_total =
       result.n_stage_history > 0 ? result.stage_history[0].field_size : 0;
   const int root_completed =
       result.n_stage_history > 0 ? result.stage_history[0].cands_done : 0;
   const bool refine_is_complete =
       greedy ||
-      (stage_idx >= 0 && result.stage_history[stage_idx].end_ns > 0 &&
-       refine_completed == refine_total && result.last_completed_stage == 1 &&
+      (deepest_stage_idx >= 0 &&
+       result.stage_history[deepest_stage_idx].end_ns > 0 &&
+       deepest_completed == deepest_total &&
+       result.last_completed_stage == requested_stages &&
        !result.last_stage_partial);
   const bool refine_is_partial = !greedy && stage_idx >= 0 &&
-                                 (result.stage_history[stage_idx].end_ns == 0 ||
-                                  refine_completed < refine_total);
+                                 !refine_is_complete;
   const char *status = refine_is_complete
                            ? "completed"
                            : (stage_idx >= 0 ? "partial" : "seed_only");
@@ -266,6 +315,8 @@ static void peg_cal_run_arm(Config *config, const char *mode,
                "\tpublished_partial=%d"
                "\troot_candidate_total=%d\troot_completed_candidates=%d"
                "\trefine_candidate_total=%d\trefine_completed_candidates=%d"
+               "\trequested_stages=%d\tdeepest_candidate_total=%d"
+               "\tdeepest_completed_candidates=%d"
                "\tcumulative_scenarios=%" PRIu64
                "\tnested_endgame_nodes=%" PRIu64
                "\twall_seconds=%.9f\tprocess_cpu_seconds=%.9f"
@@ -274,6 +325,7 @@ static void peg_cal_run_arm(Config *config, const char *mode,
                result.best_spread, result.last_completed_stage, status,
                refine_is_partial ? 1 : 0, result.last_stage_partial ? 1 : 0,
                root_total, root_completed, refine_total, refine_completed,
+               requested_stages, deepest_total, deepest_completed,
                cumulative_scenarios, result.nested_endgame_nodes, wall_seconds,
                cpu_seconds, occupancy, PEG_CAL_THREADS);
   (void)fflush(stdout);
