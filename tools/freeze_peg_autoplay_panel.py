@@ -12,7 +12,9 @@ import argparse
 from collections import deque
 import hashlib
 import json
+import os
 import pathlib
+import subprocess
 from typing import Any
 
 
@@ -173,6 +175,11 @@ def main() -> int:
     parser.add_argument("--per-bag", type=int, required=True)
     parser.add_argument("--seed-family", required=True)
     parser.add_argument(
+        "--generator-commit",
+        required=True,
+        help="commit containing the extractor used to create the inputs",
+    )
+    parser.add_argument(
         "--autoplay-command",
         action="append",
         required=True,
@@ -230,6 +237,23 @@ def main() -> int:
     manifest = {
         "schema_version": 1,
         "cohort": args.cohort,
+        "generator_commit": args.generator_commit,
+        "freezer_commit_base": subprocess.check_output(
+            ["git", "rev-parse", "HEAD"], text=True
+        ).strip(),
+        "freezer_sha256": sha256_file(pathlib.Path(__file__)),
+        "environment": {
+            "build": "no_pgo_release",
+            "lexicon": "CSW24",
+            "rit": True,
+            "hardware_concurrency": os.cpu_count(),
+            "autoplay_binary_sha256": sha256_file(
+                pathlib.Path("bin/magpie")
+            ),
+            "extractor_binary_sha256": sha256_file(
+                pathlib.Path("bin/magpie_test")
+            ),
+        },
         "selection_locked_before_peg": True,
         "selection_inputs": ["source_game", "event", "turn", "bag"],
         "selection_excludes": [
