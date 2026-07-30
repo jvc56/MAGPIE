@@ -1,5 +1,8 @@
 # PEG time-budget calibration
 
+The candidate-by-candidate follow-up, including stage-admission and early-stop
+analysis, is in `notes/PEG_CHECKPOINT_CALIBRATION.md`.
+
 ## Result
 
 On 40 held-out positions balanced across bag sizes 1–4, 2-ply PEG was
