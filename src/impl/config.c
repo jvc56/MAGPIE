@@ -8768,7 +8768,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->peg_scenario_stride = 0;
   config->peg_pessimistic = false;
   config->peg_nested = true;
-  config->peg_show_outcomes = false;
+  config->peg_show_outcomes = true;
   config->peg_out_width = 100;
   config->peg_out_lines = 1;
   config->peg_only_str = NULL;
