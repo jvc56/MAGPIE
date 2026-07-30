@@ -583,11 +583,14 @@ def render_markdown(result: dict[str, Any]) -> str:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("records", type=pathlib.Path)
+    parser.add_argument("records", nargs="+", type=pathlib.Path)
     parser.add_argument("--json", type=pathlib.Path)
     parser.add_argument("--markdown", type=pathlib.Path)
     args = parser.parse_args()
-    result = analyze(load_records(args.records))
+    records = []
+    for records_path in args.records:
+        records.extend(load_records(records_path))
+    result = analyze(records)
     json_text = json.dumps(result, indent=2, sort_keys=True, allow_nan=True) + "\n"
     markdown = render_markdown(result)
     if args.json:
