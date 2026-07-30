@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 """Measure uncensored PEG candidate-completion tails, strictly sequentially.
 
-Bag-1/4 positions complete the greedy seed and two 2-ply candidates. Bag-2/3
-positions complete the greedy seed, the full 16-candidate 2-ply boundary, and
-two 3-ply candidates. The latter trace contains the first-two 2-ply boundary,
-so no position is run twice. Identical eight-candidate sentinels are inserted
-throughout the stable bag-interleaved order.
+Every position gets an explicit two-candidate 2-ply admission wave. Bag-2/3
+positions also get a separate trace through 16 completed 2-ply candidates and
+two completed 3-ply candidates. Keeping the traces separate matters because a
+16-candidate stage may have concurrent work in flight at its first completion
+and therefore cannot measure the cost of admitting only two candidates.
+Identical eight-candidate sentinels are inserted throughout the stable
+bag-interleaved order.
 """
 
 from __future__ import annotations
@@ -32,9 +34,12 @@ from run_peg_time_calibration import (
 )
 
 
-ARM_LABEL = "completion_tail"
+FIRST2_LABEL = "first2_2ply"
+DEEP_LABEL = "deep_16_2"
+LEGACY_LABEL = "completion_tail"
 SENTINEL_EVERY = 32
-SCHEDULE_BY_BAG = {1: [2], 2: [16, 2], 3: [16, 2], 4: [2]}
+FIRST2_SCHEDULE = [2]
+DEEP_SCHEDULE = [16, 2]
 
 
 def resolve(repo: pathlib.Path, path: pathlib.Path) -> pathlib.Path:
@@ -68,6 +73,37 @@ def arm_is_complete(arm: dict[str, Any] | None, schedule: list[int]) -> bool:
     )
 
 
+def completed_arm(
+    records: list[dict[str, Any]],
+    position: dict[str, Any],
+    label: str,
+    schedule: list[int],
+) -> dict[str, Any] | None:
+    arm = latest_arm(records, str(position["position"]), label)
+    if arm_is_complete(arm, schedule):
+        return arm
+    # Reuse the first ten traces written before the explicit-wave distinction
+    # was added. Their exact schedule is recoverable from the arm summary.
+    legacy = latest_arm(records, str(position["position"]), LEGACY_LABEL)
+    if arm_is_complete(legacy, schedule):
+        return legacy
+    return arm
+
+
+def position_is_complete(
+    records: list[dict[str, Any]], position: dict[str, Any]
+) -> bool:
+    first2 = completed_arm(
+        records, position, FIRST2_LABEL, FIRST2_SCHEDULE
+    )
+    if not arm_is_complete(first2, FIRST2_SCHEDULE):
+        return False
+    if int(position["bag"]) not in {2, 3}:
+        return True
+    deep = completed_arm(records, position, DEEP_LABEL, DEEP_SCHEDULE)
+    return arm_is_complete(deep, DEEP_SCHEDULE)
+
+
 def create_manifest(
     repo: pathlib.Path,
     panel: pathlib.Path,
@@ -88,7 +124,7 @@ def create_manifest(
         ["git", "rev-parse", "HEAD"], cwd=repo, text=True
     ).strip()
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "created_utc": dt.datetime.now(dt.timezone.utc).isoformat(),
         "git_head": git_head,
         "command": [sys.executable, *sys.argv],
@@ -101,7 +137,18 @@ def create_manifest(
         "positions": len(positions),
         "per_bag": len(positions) // 4,
         "order": "bag-interleaved; alternating 1,2,3,4 and 4,3,2,1",
-        "schedules": {str(bag): schedule for bag, schedule in SCHEDULE_BY_BAG.items()},
+        "traces": {
+            FIRST2_LABEL: {
+                "bags": [1, 2, 3, 4],
+                "schedule": FIRST2_SCHEDULE,
+                "purpose": "cost of admitting an initial wave of exactly two",
+            },
+            DEEP_LABEL: {
+                "bags": [2, 3],
+                "schedule": DEEP_SCHEDULE,
+                "purpose": "full 2-ply {16} boundary then first two at 3 ply",
+            },
+        },
         "budget_seconds": 0,
         "censoring_policy": "unbounded; rerun any incomplete trace to completion",
         "portable_boundary": "completed candidate",
@@ -194,7 +241,9 @@ def main() -> int:
         records,
         threads=args.threads,
     )
-    sentinel = dict(next(position for position in positions if position["bag"] == 2))
+    sentinel = dict(
+        next(position for position in positions if position["bag"] == 2)
+    )
     sentinel["position"] = "completion-tail-sentinel"
 
     def run_sentinel(ordinal: int) -> None:
@@ -213,15 +262,21 @@ def main() -> int:
         run_sentinel(0)
     for position in selected:
         ordinal = ordered.index(position) + 1
-        schedule = SCHEDULE_BY_BAG[int(position["bag"])]
-        prior = latest_arm(runner.records, position["position"], ARM_LABEL)
-        if not arm_is_complete(prior, schedule):
+        trace_specs = [(FIRST2_LABEL, FIRST2_SCHEDULE)]
+        if int(position["bag"]) in {2, 3}:
+            trace_specs.append((DEEP_LABEL, DEEP_SCHEDULE))
+        for label, schedule in trace_specs:
+            prior = completed_arm(
+                runner.records, position, label, schedule
+            )
+            if arm_is_complete(prior, schedule):
+                continue
             if prior is not None:
                 censor = {
                     "kind": "censored_attempt",
                     "position": position["position"],
                     "bag": position["bag"],
-                    "label": ARM_LABEL,
+                    "label": label,
                     "prior_sequence": prior["sequence"],
                     "reason": "incomplete_trace_resumed_unbounded",
                 }
@@ -230,7 +285,7 @@ def main() -> int:
             runner.run(
                 position=position,
                 mode="arm",
-                label=ARM_LABEL,
+                label=label,
                 budget=0.0,
                 block=f"quartile-{min(4, (ordinal - 1) * 4 // len(ordered) + 1)}",
                 schedule=schedule,
@@ -240,7 +295,9 @@ def main() -> int:
     if args.position is None and len(selected) == len(ordered):
         run_sentinel(len(ordered))
     print(
-        f"completion-tail progress={sum(arm_is_complete(latest_arm(runner.records, p['position'], ARM_LABEL), SCHEDULE_BY_BAG[int(p['bag'])]) for p in ordered)}/{len(ordered)} "
+        f"completion-tail progress="
+        f"{sum(position_is_complete(runner.records, p) for p in ordered)}/"
+        f"{len(ordered)} "
         f"artifacts={output_dir}",
         flush=True,
     )

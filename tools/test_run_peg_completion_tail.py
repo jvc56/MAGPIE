@@ -8,7 +8,7 @@ import unittest
 TOOLS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
 from run_peg_completion_tail import (  # noqa: E402
-    SCHEDULE_BY_BAG,
+    DEEP_SCHEDULE,
     arm_is_complete,
     interleave_by_bag,
 )
@@ -34,9 +34,9 @@ class RunPegCompletionTailTest(unittest.TestCase):
             "deepest_candidate_total": 2,
             "deepest_completed_candidates": 2,
         }
-        self.assertTrue(arm_is_complete(arm, SCHEDULE_BY_BAG[2]))
+        self.assertTrue(arm_is_complete(arm, DEEP_SCHEDULE))
         arm["deepest_completed_candidates"] = 1
-        self.assertFalse(arm_is_complete(arm, SCHEDULE_BY_BAG[2]))
+        self.assertFalse(arm_is_complete(arm, DEEP_SCHEDULE))
 
 
 if __name__ == "__main__":
