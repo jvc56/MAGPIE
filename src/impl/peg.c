@@ -117,6 +117,8 @@ typedef struct PegWorker {
   int nested_stride;
   int nested_emptier_ply_cap;
   int nested_max_depth;
+  // See PegArgs.first_win_optim.
+  bool first_win_optim;
   // Free-list of reusable scratch frames (see PegNestFrame). nest_free holds
   // released frames; nest_all chains every allocated frame for teardown.
   PegNestFrame *nest_free;
@@ -1103,7 +1105,8 @@ static int32_t peg_nested_endgame_value(PegWorker *worker, Game *game,
       /*hard_time_limit=*/0.0, PEG_ENDGAME_SEED, /*skip_word_pruning=*/true,
       worker->eg_tt,
       // nested endgames are small and many; no core injection
-      /*max_workers=*/0, /*first_win=*/false, /*first_win_fallback_moves=*/0,
+      /*max_workers=*/0, /*first_win=*/worker->first_win_optim,
+      /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
       deadline_ns, /*actual_move=*/NULL, &ea);
   endgame_results_reset(worker->eg_results);
@@ -1562,7 +1565,8 @@ static int32_t peg_eval_leaf(PegEvalCtx *ctx, Game *game) {
       ctx->worker->eg_tt,
       // > num_threads (1) opens the injection window so the monitor can lend
       // idle cores to this (potentially long) endgame mid-solve.
-      /*max_workers=*/ctx->injection_cap, /*first_win=*/false,
+      /*max_workers=*/ctx->injection_cap,
+      /*first_win=*/ctx->worker->first_win_optim,
       /*first_win_fallback_moves=*/0, /*use_initial_window=*/false,
       /*initial_alpha=*/0, /*initial_beta=*/0, ctx->deadline_ns,
       /*actual_move=*/NULL, &ea);
@@ -2608,6 +2612,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     workers[worker_idx].nested_stride = args->nested_stride;
     workers[worker_idx].nested_emptier_ply_cap = args->nested_emptier_ply_cap;
     workers[worker_idx].nested_max_depth = args->nested_max_depth;
+    workers[worker_idx].first_win_optim = args->first_win_optim;
     workers[worker_idx].nest_free = NULL;
     workers[worker_idx].nest_all = NULL;
   }
