@@ -1,5 +1,8 @@
 # PEG 3-ply and stage-cap calibration
 
+The follow-up 4-ply depth-versus-width experiment is in
+`notes/PEG_4PLY_CALIBRATION.md`.
+
 ## Decision summary
 
 Completing a 3-ply stage has measurable value, but widening the candidate

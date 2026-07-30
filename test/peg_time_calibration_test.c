@@ -377,7 +377,15 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   char requested_moves[PEG_CAL_MAX_NOMINEES][64] = {{0}};
   const int nominee_count = peg_cal_parse_nominees(
       config_get_game(config), validated, nominees, requested_moves);
-  int judge_schedule[2] = {nominee_count, nominee_count};
+  const int judge_ply = peg_cal_env_int("PEG_CAL_JUDGE_PLY", 3);
+  if (judge_ply < 2 || judge_ply > PEG_CAL_MAX_STAGES + 1) {
+    log_fatal("invalid PEG calibration judge ply %d", judge_ply);
+  }
+  const int judge_stages = judge_ply - 1;
+  int judge_schedule[PEG_CAL_MAX_STAGES] = {0};
+  for (int stage = 0; stage < judge_stages; stage++) {
+    judge_schedule[stage] = nominee_count;
+  }
   const int stride = peg_cal_env_int("PEG_CAL_STRIDE", 4);
   const double budget = peg_cal_env_double("PEG_CAL_BUDGET", 600.0);
   const char *label = peg_cal_required_env("PEG_CAL_LABEL");
@@ -394,7 +402,7 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   args.num_threads = PEG_CAL_THREADS;
   args.time_budget_seconds = budget;
   args.stage_top_k = judge_schedule;
-  args.num_stages = 2;
+  args.num_stages = judge_stages;
   args.scenario_stride = stride;
   args.force_small_bag_stride = true;
   args.nested_enabled = false;
@@ -418,10 +426,11 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   peg_cal_print_stages(&result, "judge", position, label, trace->start_ns);
   const uint64_t cumulative_scenarios = peg_cal_print_events(
       trace, config_get_game(config), "judge", position, label);
-  const bool accepted = result.last_completed_stage == 2 &&
+  const bool accepted = result.last_completed_stage == judge_stages &&
                         !result.last_stage_partial &&
                         result.n_top_cands == nominee_count;
-  const int deepest_stage = result.n_stage_history > 2 ? 2 : -1;
+  const int deepest_stage =
+      result.n_stage_history > judge_stages ? judge_stages : -1;
   const bool partial = result.last_stage_partial ||
                        (deepest_stage >= 0 &&
                         (result.stage_history[deepest_stage].end_ns == 0 ||
@@ -447,17 +456,17 @@ static void peg_cal_run_judge(Config *config, const char *position) {
           ? cpu_seconds / (wall_seconds * (double)PEG_CAL_THREADS)
           : 0.0;
   (void)printf(
-      "PEGCAL_JUDGE\tposition=%s\tlabel=%s\tstride=%d"
+      "PEGCAL_JUDGE\tposition=%s\tlabel=%s\tjudge_ply=%d\tstride=%d"
       "\tbudget_seconds=%.3f\tnominee_count=%d\taccepted=%d"
       "\tlast_completed_stage=%d\tpartial=%d"
       "\tcumulative_scenarios=%" PRIu64 "\tnested_endgame_nodes=%" PRIu64
       "\twall_seconds=%.9f\tprocess_cpu_seconds=%.9f"
       "\tscheduled_core_occupancy=%.9f\tthreads=%d"
       "\tpair_conditioned=1\tcommon_sample=deterministic_weight_strata\n",
-      position, label, stride, budget, nominee_count, accepted ? 1 : 0,
-      result.last_completed_stage, partial ? 1 : 0, cumulative_scenarios,
-      result.nested_endgame_nodes, wall_seconds, cpu_seconds, occupancy,
-      PEG_CAL_THREADS);
+      position, label, judge_ply, stride, budget, nominee_count,
+      accepted ? 1 : 0, result.last_completed_stage, partial ? 1 : 0,
+      cumulative_scenarios, result.nested_endgame_nodes, wall_seconds,
+      cpu_seconds, occupancy, PEG_CAL_THREADS);
   (void)fflush(stdout);
 
   error_stack_destroy(error_stack);
