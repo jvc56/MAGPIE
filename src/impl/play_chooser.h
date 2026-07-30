@@ -123,14 +123,15 @@ typedef struct PlayChooserBenchmarkStats {
 } PlayChooserBenchmarkStats;
 
 // One completed PEG candidate. A call index identifies the PEG solve and the
-// elapsed time is measured from the start of that solve. Stage indices and
-// candidate ranks are zero-based. Events can arrive concurrently and are kept
-// in callback order; elapsed_ns provides the actual within-call completion
-// timeline, including useful work completed before a time limit interrupts a
-// stage.
+// elapsed time and nested-endgame nodes are measured from the start of that
+// solve. Stage indices and candidate ranks are zero-based. Events can arrive
+// concurrently and are kept in callback order; elapsed_ns provides the actual
+// within-call completion timeline, including useful work completed before a
+// time limit interrupts a stage.
 typedef struct PlayChooserPegCandidateEvent {
   uint64_t call_index;
   uint64_t elapsed_ns;
+  uint64_t nested_endgame_nodes;
   int stage_index;
   int candidate_rank;
   int scenarios_completed;

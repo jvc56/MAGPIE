@@ -195,8 +195,8 @@ typedef struct PlayChooserPegBenchmarkContext {
 
 static void play_chooser_benchmark_peg_candidate_done(
     int stage_idx, int cand_rank, const Move *cand, double win_pct,
-    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
-    void *user_data) {
+    double mean_spread, int scen_done, uint64_t nested_endgame_nodes,
+    int64_t completed_ns, bool reordered, void *user_data) {
   (void)cand;
   (void)win_pct;
   (void)mean_spread;
@@ -215,6 +215,7 @@ static void play_chooser_benchmark_peg_candidate_done(
       &play_chooser_peg_candidate_events[event_index];
   event->call_index = context->call_index;
   event->elapsed_ns = (uint64_t)(completed_ns - context->start_ns);
+  event->nested_endgame_nodes = nested_endgame_nodes;
   event->stage_index = stage_idx;
   event->candidate_rank = cand_rank;
   event->scenarios_completed = scen_done;

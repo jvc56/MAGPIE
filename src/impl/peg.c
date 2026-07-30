@@ -875,6 +875,7 @@ typedef struct PegProgress {
   PegOnScenarioDone on_scenario_done;
   void *user_data;
   int stage_idx;
+  atomic_uint_fast64_t *nested_endgame_nodes;
 } PegProgress;
 
 // Optional per-scenario capture sink (PegArgs.include_per_scenario). Populated
@@ -2060,7 +2061,8 @@ static void peg_cand_worker_fn(void *arg, int worker_idx) {
     job->progress->on_cand_done(
         job->progress->stage_idx, job->cand_rank, &job->out->move,
         job->out->win_pct, job->out->mean_spread, job->out->n_scenarios,
-        ctimer_monotonic_ns(), reordered, job->progress->user_data);
+        atomic_load(job->progress->nested_endgame_nodes), ctimer_monotonic_ns(),
+        reordered, job->progress->user_data);
   }
 }
 
@@ -2473,10 +2475,11 @@ static void peg_eval_candidates_scenario(
         ranked[i].n_scenarios > 0) {
       // This barrier path (benchmarks) has no incremental sorted insert, so
       // there is no append-vs-reorder distinction: treat each as a full redraw.
-      progress->on_cand_done(progress->stage_idx, i, &ranked[i].move,
-                             ranked[i].win_pct, ranked[i].mean_spread,
-                             ranked[i].n_scenarios, candidate_completed_ns[i],
-                             /*reordered=*/true, progress->user_data);
+      progress->on_cand_done(
+          progress->stage_idx, i, &ranked[i].move, ranked[i].win_pct,
+          ranked[i].mean_spread, ranked[i].n_scenarios,
+          atomic_load(progress->nested_endgame_nodes),
+          candidate_completed_ns[i], /*reordered=*/true, progress->user_data);
     }
     peg_poll_bump_cand_done(poll);
   }
@@ -2831,6 +2834,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
         .on_scenario_done = args->on_scenario_done,
         .user_data = args->user_data,
         .stage_idx = 0,
+        .nested_endgame_nodes = &nested_endgame_nodes,
     };
 
     // Stage 0: greedy evaluation of every candidate.
@@ -3022,7 +3026,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
             args->on_cand_done(
                 stage_idx, cand_idx, &restaged[cand_idx].move,
                 restaged[cand_idx].win_pct, restaged[cand_idx].mean_spread,
-                restaged[cand_idx].n_scenarios, ctimer_monotonic_ns(),
+                restaged[cand_idx].n_scenarios,
+                atomic_load(&nested_endgame_nodes), ctimer_monotonic_ns(),
                 reordered, args->user_data);
           }
         }

@@ -683,6 +683,7 @@ typedef struct PegBenchCandidateEvent {
   int stage_idx;
   int cand_rank;
   int scenarios_completed;
+  uint64_t nested_endgame_nodes;
   int64_t elapsed_ns;
 } PegBenchCandidateEvent;
 
@@ -692,12 +693,10 @@ typedef struct PegBenchCandidateTrace {
   PegBenchCandidateEvent events[PEG_BENCH_MAX_CANDIDATE_EVENTS];
 } PegBenchCandidateTrace;
 
-static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
-                                        const Move *cand, double win_pct,
-                                        double mean_spread,
-                                        int scenarios_completed,
-                                        int64_t completed_ns, bool reordered,
-                                        void *user_data) {
+static void peg_bench_on_candidate_done(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scenarios_completed, uint64_t nested_endgame_nodes,
+    int64_t completed_ns, bool reordered, void *user_data) {
   (void)cand;
   (void)win_pct;
   (void)mean_spread;
@@ -712,6 +711,7 @@ static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
   event->stage_idx = stage_idx;
   event->cand_rank = cand_rank;
   event->scenarios_completed = scenarios_completed;
+  event->nested_endgame_nodes = nested_endgame_nodes;
   event->elapsed_ns = completed_ns - trace->start_ns;
 }
 
