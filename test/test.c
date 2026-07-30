@@ -218,6 +218,7 @@ static TestEntry on_demand_test_table[] = {
     {"pegpoll", test_peg_poll},
     {"passpegoracle", test_pass_peg_oracle_eval_move},
     {"pegtimecal", test_peg_time_calibration},
+    {"pegextractpanel", test_peg_extract_gcg_panel},
     {NULL, NULL} // Sentinel value to mark end of array
 };
 

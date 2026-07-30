@@ -5,5 +5,6 @@
 // variables and the machine-readable output contract are documented in
 // tools/run_peg_time_calibration.py.
 void test_peg_time_calibration(void);
+void test_peg_extract_gcg_panel(void);
 
 #endif
