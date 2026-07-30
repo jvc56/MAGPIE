@@ -78,29 +78,43 @@ def completed_arm(
     position: dict[str, Any],
     label: str,
     schedule: list[int],
+    arm_index: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> dict[str, Any] | None:
-    arm = latest_arm(records, str(position["position"]), label)
+    position_id = str(position["position"])
+    arm = (
+        arm_index.get((position_id, label))
+        if arm_index is not None
+        else latest_arm(records, position_id, label)
+    )
     if arm_is_complete(arm, schedule):
         return arm
     # Reuse the first ten traces written before the explicit-wave distinction
     # was added. Their exact schedule is recoverable from the arm summary.
-    legacy = latest_arm(records, str(position["position"]), LEGACY_LABEL)
+    legacy = (
+        arm_index.get((position_id, LEGACY_LABEL))
+        if arm_index is not None
+        else latest_arm(records, position_id, LEGACY_LABEL)
+    )
     if arm_is_complete(legacy, schedule):
         return legacy
     return arm
 
 
 def position_is_complete(
-    records: list[dict[str, Any]], position: dict[str, Any]
+    records: list[dict[str, Any]],
+    position: dict[str, Any],
+    arm_index: dict[tuple[str, str], dict[str, Any]] | None = None,
 ) -> bool:
     first2 = completed_arm(
-        records, position, FIRST2_LABEL, FIRST2_SCHEDULE
+        records, position, FIRST2_LABEL, FIRST2_SCHEDULE, arm_index
     )
     if not arm_is_complete(first2, FIRST2_SCHEDULE):
         return False
     if int(position["bag"]) not in {2, 3}:
         return True
-    deep = completed_arm(records, position, DEEP_LABEL, DEEP_SCHEDULE)
+    deep = completed_arm(
+        records, position, DEEP_LABEL, DEEP_SCHEDULE, arm_index
+    )
     return arm_is_complete(deep, DEEP_SCHEDULE)
 
 
@@ -230,6 +244,11 @@ def main() -> int:
     records_path = output_dir / "records.jsonl"
     raw_path = output_dir / "raw.log"
     records = load_records(records_path)
+    arm_index = {
+        (str(record["position"]), str(record["label"])): record
+        for record in records
+        if record.get("kind") == "arm" and record.get("mode") == "arm"
+    }
     create_manifest(
         repo, panel, positions, binary, output_dir, args.threads
     )
@@ -267,7 +286,7 @@ def main() -> int:
             trace_specs.append((DEEP_LABEL, DEEP_SCHEDULE))
         for label, schedule in trace_specs:
             prior = completed_arm(
-                runner.records, position, label, schedule
+                runner.records, position, label, schedule, arm_index
             )
             if arm_is_complete(prior, schedule):
                 continue
@@ -282,7 +301,7 @@ def main() -> int:
                 }
                 append_jsonl(records_path, censor)
                 runner.records.append(censor)
-            runner.run(
+            parsed = runner.run(
                 position=position,
                 mode="arm",
                 label=label,
@@ -290,13 +309,18 @@ def main() -> int:
                 block=f"quartile-{min(4, (ordinal - 1) * 4 // len(ordered) + 1)}",
                 schedule=schedule,
             )
+            for record in parsed:
+                if record.get("kind") == "arm":
+                    arm_index[
+                        (str(record["position"]), str(record["label"]))
+                    ] = record
         if args.position is None and ordinal % SENTINEL_EVERY == 0:
             run_sentinel(ordinal)
     if args.position is None and len(selected) == len(ordered):
         run_sentinel(len(ordered))
     print(
         f"completion-tail progress="
-        f"{sum(position_is_complete(runner.records, p) for p in ordered)}/"
+        f"{sum(position_is_complete(runner.records, p, arm_index) for p in ordered)}/"
         f"{len(ordered)} "
         f"artifacts={output_dir}",
         flush=True,
