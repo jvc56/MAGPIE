@@ -150,12 +150,14 @@ class SequentialRunner:
         records_path: pathlib.Path,
         raw_path: pathlib.Path,
         records: list[dict[str, Any]],
+        threads: int = 10,
     ) -> None:
         self.binary = binary
         self.output_dir = output_dir
         self.records_path = records_path
         self.raw_path = raw_path
         self.records = records
+        self.threads = threads
         self.sequence = max(
             (int(record.get("sequence", -1)) for record in records), default=-1
         )
@@ -182,6 +184,7 @@ class SequentialRunner:
                 "PEG_CAL_CGP": position["cgp"],
                 "PEG_CAL_LABEL": label,
                 "PEG_CAL_BUDGET": str(budget),
+                "PEG_CAL_THREADS": str(self.threads),
             }
         )
         if moves is not None:
@@ -209,6 +212,8 @@ class SequentialRunner:
             "schedule": schedule,
             "judge_ply": judge_ply,
             "started_utc": started,
+            "threads": self.threads,
+            "host_loadavg": list(os.getloadavg()),
         }
         append_jsonl(self.records_path, header)
         self.records.append(header)

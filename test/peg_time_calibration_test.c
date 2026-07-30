@@ -27,7 +27,7 @@
 #include <time.h>
 
 enum {
-  PEG_CAL_THREADS = 10,
+  PEG_CAL_DEFAULT_THREADS = 10,
   PEG_CAL_REFINE_CANDS = 32,
   PEG_CAL_MAX_EVENTS = 32768,
   PEG_CAL_MAX_NOMINEES = 16,
@@ -199,9 +199,14 @@ static uint64_t peg_cal_print_events(PegCalTrace *trace, const Game *game,
 }
 
 static Config *peg_cal_load_config(void) {
-  Config *config = config_create_or_die(
+  const int threads =
+      peg_cal_env_int("PEG_CAL_THREADS", PEG_CAL_DEFAULT_THREADS);
+  char *config_command = get_formatted_string(
       "set -lex CSW24 -wmp true -rit true -ritmmap true -wit false "
-      "-threads 10 -s1 equity -s2 equity -r1 all -r2 all");
+      "-threads %d -s1 equity -s2 equity -r1 all -r2 all",
+      threads);
+  Config *config = config_create_or_die(config_command);
+  free(config_command);
   const char *cgp = peg_cal_required_env("PEG_CAL_CGP");
   char *command = get_formatted_string("cgp %s", cgp);
   load_and_exec_config_or_die(config, command);
@@ -234,6 +239,11 @@ static void peg_cal_run_arm(Config *config, const char *mode,
   static const int sentinel_schedule[] = {8};
   const bool greedy = strcmp(label, "greedy") == 0;
   const bool sentinel = strcmp(mode, "sentinel") == 0;
+  const int threads =
+      peg_cal_env_int("PEG_CAL_THREADS", PEG_CAL_DEFAULT_THREADS);
+  if (threads < 1) {
+    log_fatal("invalid PEG calibration thread count %d", threads);
+  }
   const double budget =
       sentinel ? 0.0 : peg_cal_env_double("PEG_CAL_BUDGET", 0.0);
   int refine_schedule[PEG_CAL_MAX_STAGES] = {0};
@@ -253,7 +263,7 @@ static void peg_cal_run_arm(Config *config, const char *mode,
   PegArgs args = {0};
   args.game = config_get_game(config);
   args.thread_control = config_get_thread_control(config);
-  args.num_threads = PEG_CAL_THREADS;
+  args.num_threads = threads;
   args.time_budget_seconds = budget;
   args.greedy_seed_only = greedy;
   args.stage_top_k = schedule;
@@ -314,7 +324,7 @@ static void peg_cal_run_arm(Config *config, const char *mode,
                       sizeof(move));
   const double occupancy =
       wall_seconds > 0.0
-          ? cpu_seconds / (wall_seconds * (double)PEG_CAL_THREADS)
+          ? cpu_seconds / (wall_seconds * (double)threads)
           : 0.0;
   (void)printf("PEGCAL_ARM\tmode=%s\tposition=%s\tlabel=%s\tbudget_seconds=%.3f"
                "\tmove=%s\tself_win=%.9f\tself_spread=%.6f"
@@ -334,7 +344,7 @@ static void peg_cal_run_arm(Config *config, const char *mode,
                root_total, root_completed, refine_total, refine_completed,
                requested_stages, deepest_total, deepest_completed,
                cumulative_scenarios, result.nested_endgame_nodes, wall_seconds,
-               cpu_seconds, occupancy, PEG_CAL_THREADS);
+               cpu_seconds, occupancy, threads);
   (void)fflush(stdout);
 
   error_stack_destroy(error_stack);
@@ -389,6 +399,11 @@ static void peg_cal_run_judge(Config *config, const char *position) {
     log_fatal("invalid PEG calibration judge ply %d", judge_ply);
   }
   const int judge_stages = judge_ply - 1;
+  const int threads =
+      peg_cal_env_int("PEG_CAL_THREADS", PEG_CAL_DEFAULT_THREADS);
+  if (threads < 1) {
+    log_fatal("invalid PEG calibration thread count %d", threads);
+  }
   int judge_schedule[PEG_CAL_MAX_STAGES] = {0};
   for (int stage = 0; stage < judge_stages; stage++) {
     judge_schedule[stage] = nominee_count;
@@ -406,7 +421,7 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   PegArgs args = {0};
   args.game = config_get_game(config);
   args.thread_control = config_get_thread_control(config);
-  args.num_threads = PEG_CAL_THREADS;
+  args.num_threads = threads;
   args.time_budget_seconds = budget;
   args.stage_top_k = judge_schedule;
   args.num_stages = judge_stages;
@@ -460,7 +475,7 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   }
   const double occupancy =
       wall_seconds > 0.0
-          ? cpu_seconds / (wall_seconds * (double)PEG_CAL_THREADS)
+          ? cpu_seconds / (wall_seconds * (double)threads)
           : 0.0;
   (void)printf(
       "PEGCAL_JUDGE\tposition=%s\tlabel=%s\tjudge_ply=%d\tstride=%d"
@@ -473,7 +488,7 @@ static void peg_cal_run_judge(Config *config, const char *position) {
       position, label, judge_ply, stride, budget, nominee_count,
       accepted ? 1 : 0, result.last_completed_stage, partial ? 1 : 0,
       cumulative_scenarios, result.nested_endgame_nodes, wall_seconds,
-      cpu_seconds, occupancy, PEG_CAL_THREADS);
+      cpu_seconds, occupancy, threads);
   (void)fflush(stdout);
 
   error_stack_destroy(error_stack);
