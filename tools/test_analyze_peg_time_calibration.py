@@ -31,6 +31,34 @@ def arm(sequence, position, bag, label, move):
     }
 
 
+def judge(sequence, position, label, values):
+    records = [
+        {
+            "kind": "judge",
+            "sequence": sequence,
+            "position": position,
+            "bag": 1,
+            "label": label,
+            "accepted": 1,
+            "nominee_count": len(values),
+        }
+    ]
+    for move, win, spread in values:
+        records.append(
+            {
+                "kind": "value",
+                "sequence": sequence,
+                "position": position,
+                "label": label,
+                "move": move,
+                "win": win,
+                "spread": spread,
+                "utility": win + 1.0e-4 * spread,
+            }
+        )
+    return records
+
+
 class AnalyzePegTimeCalibrationTest(unittest.TestCase):
     def test_agreements_are_zero_and_censored_judges_are_not_substituted(self):
         records = []
@@ -130,6 +158,82 @@ class AnalyzePegTimeCalibrationTest(unittest.TestCase):
             second["conditional_disagreement"]["utility"]["mean"], -0.009
         )
         self.assertEqual(result["judge_completion"]["stride4_censored"], 1)
+
+    def test_sensitivity_treats_tied_best_nominees_as_a_set(self):
+        records = [
+            arm(index, "p1", 1, label, move)
+            for index, (label, move) in enumerate(
+                (
+                    ("greedy", "A"),
+                    ("30s", "B"),
+                    ("60s", "B"),
+                    ("120s", "B"),
+                )
+            )
+        ]
+        records.extend(
+            judge(
+                10,
+                "p1",
+                "stride4",
+                (("A", 0.50, 0.0), ("B", 0.50, 0.0)),
+            )
+        )
+        records.extend(
+            judge(
+                11,
+                "p1",
+                "stride2",
+                (("A", 0.49, 0.0), ("B", 0.51, 0.0)),
+            )
+        )
+
+        result = ANALYSIS.analyze(records)
+        self.assertEqual(result["sensitivity"]["accepted_positions"], 1)
+        self.assertEqual(
+            result["sensitivity"]["best_nominee_agreement_rate"], 1.0
+        )
+        self.assertEqual(
+            result["sensitivity"]["best_disagreement_positions"], []
+        )
+
+    def test_sentinels_are_summarized_per_source(self):
+        records = []
+        for source, throughputs in (
+            ("first", (100.0, 100.0, 100.0)),
+            ("second", (200.0, 200.0, 200.0)),
+        ):
+            for sequence, (label, throughput) in enumerate(
+                zip(("before", "between", "after"), throughputs)
+            ):
+                records.append(
+                    {
+                        "kind": "arm",
+                        "mode": "sentinel",
+                        "sequence": sequence,
+                        "position": f"{source}-sentinel",
+                        "label": label,
+                        "nested_endgame_nodes": throughput * 10.0,
+                        "wall_seconds": 10.0,
+                        "scheduled_core_occupancy": 0.9,
+                        "_source": source,
+                    }
+                )
+
+        result = ANALYSIS.analyze(records)
+        self.assertEqual(set(result["monitoring"]["runs"]), {"first", "second"})
+        self.assertEqual(
+            result["monitoring"]["runs"]["first"]["sentinels"][0][
+                "throughput_nodes_per_second"
+            ],
+            100.0,
+        )
+        self.assertEqual(
+            result["monitoring"]["runs"]["second"]["sentinels"][0][
+                "throughput_nodes_per_second"
+            ],
+            200.0,
+        )
 
 
 if __name__ == "__main__":
