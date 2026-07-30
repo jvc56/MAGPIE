@@ -171,6 +171,7 @@ class SequentialRunner:
         moves: list[str] | None = None,
         stride: int | None = None,
         schedule: list[int] | None = None,
+        judge_ply: int | None = None,
     ) -> list[dict[str, Any]]:
         self.sequence += 1
         environment = os.environ.copy()
@@ -191,6 +192,8 @@ class SequentialRunner:
             environment["PEG_CAL_SCHEDULE"] = ",".join(
                 str(count) for count in schedule
             )
+        if judge_ply is not None:
+            environment["PEG_CAL_JUDGE_PLY"] = str(judge_ply)
 
         started = dt.datetime.now(dt.timezone.utc).isoformat()
         header = {
@@ -204,6 +207,7 @@ class SequentialRunner:
             "budget_seconds": budget,
             "stride": stride,
             "schedule": schedule,
+            "judge_ply": judge_ply,
             "started_utc": started,
         }
         append_jsonl(self.records_path, header)
