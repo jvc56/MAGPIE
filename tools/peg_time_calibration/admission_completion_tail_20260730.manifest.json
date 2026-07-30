@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "status": "complete",
+  "corpus": {
+    "positions": 1280,
+    "per_bag": 320,
+    "complete_first2_traces": 1280,
+    "complete_deep_traces": 640,
+    "censored_final_observations": 0,
+    "interrupted_resumed_attempts": 2,
+    "panel": "tools/peg_time_calibration/admission_positions_20260730.tsv",
+    "panel_sha256": "fc7a5f64e4c3b02ed9a36dd06486383fe78bc291fb79005c0aa5e196ce666758"
+  },
+  "run": {
+    "command": "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_completion_tail.py --output-dir obj/peg_completion_tail_20260730 --threads 18",
+    "build": "no_pgo_release",
+    "lexicon": "CSW24",
+    "rit": true,
+    "threads": 18,
+    "detected_hardware_concurrency": 18,
+    "one_process_per_position": true,
+    "budget_seconds": 0,
+    "portable_boundary": "completed candidate",
+    "censoring_policy": "unbounded; safely resume any incomplete trace to completion",
+    "git_head_at_start": "e82c236977bf5fd968b085316d7973ebef8efb5c",
+    "created_utc": "2026-07-30T20:31:48.984870+00:00",
+    "observed_span_seconds": 15127.459817,
+    "observed_span_hours": 4.202072,
+    "interim_projection_at_positions": 163,
+    "interim_projected_remaining_seconds": {
+      "mean": 11644.063626,
+      "median": 4752.76125,
+      "p90": 21891.448715
+    }
+  },
+  "traces": {
+    "first2_2ply": {
+      "bags": [1, 2, 3, 4],
+      "schedule": [2]
+    },
+    "deep_16_2": {
+      "bags": [2, 3],
+      "schedule": [16, 2]
+    },
+    "sentinel": {
+      "interval_positions": 32,
+      "schedule": [8],
+      "position": "admission-20260730-b2-p001",
+      "completed": 41
+    }
+  },
+  "artifacts": {
+    "raw_records": {
+      "path": "obj/peg_completion_tail_20260730/records.jsonl",
+      "sha256": "fffce09e43c8d9dc8d7d95c25e80a40f3caa5be4a0f437b32996883f452c8a00"
+    },
+    "raw_log": {
+      "path": "obj/peg_completion_tail_20260730/raw.log",
+      "sha256": "4bd536e33652f76bfe235aa93983f483dfc86d4a533bceed497ed44134ca0d4e"
+    },
+    "raw_manifest": {
+      "path": "obj/peg_completion_tail_20260730/manifest.json",
+      "sha256": "dab346c49df0e16eb910cd55a07869e35ebc633d83dab38ba1d99fc66a6f0e9d"
+    },
+    "summary": {
+      "path": "tools/peg_time_calibration/admission_completion_tail_20260730.summary.json",
+      "sha256_before_documentation_only_markdown_edit": "ace19e4f3756dbed50fd1a3c5caa69cc96e39caaca15ee73b83be052ffe82f63"
+    },
+    "binary": {
+      "path": "bin/magpie_test",
+      "sha256": "02845990e4900113326a275cd9b97cacb0f13f3834ca599b13df6dca167bf6c1"
+    }
+  },
+  "assets_sha256": {
+    "data/lexica/CSW24.klv2": "b0ef5f6637cca0cd8e0962d6fb7d35b2d22f9bf648015f48fa8f80e24a60610b",
+    "data/lexica/CSW24.kwg": "62ca7a84f07429a9976f77a4f74b94911aca5d49cce050dce72dd0e032c0566f",
+    "data/lexica/CSW24.rit": "15d9057489f1333694cc2a496a9a3665fd73d763e35805237ff3b3e2e1fdcbf3",
+    "data/lexica/CSW24.wmp": "183096e751f5464b43205658c7bcd092575fda1ea13e605ce56198b338292f91"
+  },
+  "load": {
+    "sentinels": 41,
+    "normalized_throughput_cv": 0.026340235924,
+    "early_to_late_drift_fraction": -0.004907815487,
+    "median_scheduled_core_occupancy": 0.944384429,
+    "noisy_segments": 0
+  }
+}
