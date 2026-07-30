@@ -10,6 +10,7 @@ sys.path.insert(0, str(TOOLS))
 from run_peg_completion_tail import (  # noqa: E402
     DEEP_SCHEDULE,
     arm_is_complete,
+    completed_arm,
     interleave_by_bag,
 )
 
@@ -37,6 +38,25 @@ class RunPegCompletionTailTest(unittest.TestCase):
         self.assertTrue(arm_is_complete(arm, DEEP_SCHEDULE))
         arm["deepest_completed_candidates"] = 1
         self.assertFalse(arm_is_complete(arm, DEEP_SCHEDULE))
+
+    def test_completed_arm_can_use_constant_time_index(self):
+        position = {"position": "p", "bag": 2}
+        arm = {
+            "status": "completed",
+            "requested_stages": 2,
+            "deepest_candidate_total": 2,
+            "deepest_completed_candidates": 2,
+        }
+        self.assertIs(
+            completed_arm(
+                [],
+                position,
+                "deep_16_2",
+                DEEP_SCHEDULE,
+                {("p", "deep_16_2"): arm},
+            ),
+            arm,
+        )
 
 
 if __name__ == "__main__":

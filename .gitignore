@@ -31,6 +31,8 @@ playwright/.cache/
 
 # Python venv
 venv/
+__pycache__/
+*.pyc
 
 # Compiled libraries
 *.a
