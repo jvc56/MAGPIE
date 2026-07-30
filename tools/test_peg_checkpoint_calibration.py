@@ -131,6 +131,31 @@ class PegCheckpointCalibrationTest(unittest.TestCase):
             result["checkpoints"][0]["process_cpu_seconds"], 10.0
         )
 
+    def test_frontier_includes_exact_running_best_ties(self):
+        records = [
+            event(1, 0, 0, "A", 0.5, 0.0, 10, 0),
+            event(1, 1, 0, "A", 0.5, 0.0, 10, 100),
+            event(1, 1, 1, "B", 0.5, 0.0, 10, 200),
+            event(1, 1, 2, "C", 0.6, 0.0, 10, 300),
+        ]
+        arm = {
+            "sequence": 1,
+            "move": "C",
+            "status": "completed",
+            "refine_candidate_total": 3,
+        }
+        result = RUNNER.build_checkpoint_map(
+            records, arm, {"position": "p1", "bag": 1}
+        )
+        self.assertEqual(result["schema_version"], 2)
+        self.assertEqual(result["frontier_moves"], ["A", "B", "C"])
+        self.assertEqual(
+            result["checkpoints"][2]["tied_best_moves"], ["A", "B"]
+        )
+        self.assertEqual(
+            result["checkpoints"][3]["tied_best_moves"], ["C"]
+        )
+
     def test_quality_curve_keeps_exact_agreements_and_uses_oracle_values(self):
         records = [
             {
@@ -205,6 +230,14 @@ class PegCheckpointCalibrationTest(unittest.TestCase):
         )
         self.assertEqual(
             result["sensitivity"]["best_nominee_agreement_rate"], 1.0
+        )
+        adaptive = result["stopping_policies"]["min8_patience8"]
+        self.assertEqual(adaptive["stop_candidates"]["mean"], 10.0)
+        self.assertAlmostEqual(
+            adaptive["gain_vs_greedy"]["utility"]["mean"], 0.1
+        )
+        self.assertEqual(
+            result["stage_admission"]["minimum_completed_candidates"], 2
         )
 
 

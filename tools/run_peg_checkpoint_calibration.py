@@ -84,23 +84,33 @@ def build_checkpoint_map(
             )
 
     best = events[0]
+    best_key = float(best["win"]) + 1.0e-4 * float(best["spread"])
     frontier_moves = [str(best["move"])]
+    tied_best_moves = [str(best["move"])]
     checkpoints = []
     for completed in range(0, len(events) + 1):
         if completed > 0:
             event = events[completed - 1]
             event_key = float(event["win"]) + 1.0e-4 * float(event["spread"])
-            best_key = float(best["win"]) + 1.0e-4 * float(best["spread"])
-            if event_key > best_key:
+            if event_key > best_key + 1.0e-12:
                 best = event
+                best_key = event_key
                 move = str(best["move"])
                 if move not in frontier_moves:
                     frontier_moves.append(move)
+                tied_best_moves = [move]
+            elif abs(event_key - best_key) <= 1.0e-12:
+                move = str(event["move"])
+                if move not in frontier_moves:
+                    frontier_moves.append(move)
+                if move not in tied_best_moves:
+                    tied_best_moves.append(move)
         boundary = greedy_boundary if completed == 0 else events[completed - 1]
         checkpoints.append(
             {
                 "completed_candidates": completed,
                 "move": str(best["move"]),
+                "tied_best_moves": list(tied_best_moves),
                 "cumulative_scenarios": int(boundary["cumulative_scenarios"]),
                 "nested_endgame_nodes": int(
                     boundary["nested_endgame_nodes"]
@@ -121,6 +131,7 @@ def build_checkpoint_map(
         checkpoints[-1]["move"] = returned_move
     return {
         "kind": "checkpoint_map",
+        "schema_version": 2,
         "position": position["position"],
         "bag": position["bag"],
         "arm_sequence": int(arm["sequence"]),
@@ -142,6 +153,19 @@ def latest_checkpoint_map(
         for record in records
         if record.get("kind") == "checkpoint_map"
         and record.get("position") == position
+    ]
+    return matches[-1] if matches else None
+
+
+def latest_judge(
+    records: list[dict[str, Any]], position: str, label: str
+) -> dict[str, Any] | None:
+    matches = [
+        record
+        for record in records
+        if record.get("kind") == "judge"
+        and record.get("position") == position
+        and record.get("label") == label
     ]
     return matches[-1] if matches else None
 
@@ -225,6 +249,10 @@ def main() -> int:
     )
     parser.add_argument("--output-dir", type=pathlib.Path, required=True)
     parser.add_argument("--oracle-budget", type=float, default=600.0)
+    parser.add_argument(
+        "--position",
+        help="Resume or audit one position while retaining full-panel provenance",
+    )
     args = parser.parse_args()
 
     repo = pathlib.Path(__file__).resolve().parent.parent
@@ -314,9 +342,17 @@ def main() -> int:
             block=label,
         )
 
+    run_positions = [
+        position
+        for position in positions
+        if args.position is None or position["position"] == args.position
+    ]
+    if args.position is not None and not run_positions:
+        raise ValueError(f"unknown checkpoint position {args.position}")
+
     run_sentinel("before")
-    split = len(positions) // 2
-    for position_index, position in enumerate(positions):
+    split = len(run_positions) // 2
+    for position_index, position in enumerate(run_positions):
         block = "early" if position_index < split else "late"
         if position_index == split:
             run_sentinel("between")
@@ -347,8 +383,10 @@ def main() -> int:
         checkpoint_map = latest_checkpoint_map(
             runner.records, position["position"]
         )
-        if checkpoint_map is None or int(checkpoint_map["arm_sequence"]) != int(
-            arm["sequence"]
+        if (
+            checkpoint_map is None
+            or int(checkpoint_map["arm_sequence"]) != int(arm["sequence"])
+            or int(checkpoint_map.get("schema_version", 1)) < 2
         ):
             checkpoint_map = build_checkpoint_map(
                 runner.records, arm, position
@@ -385,8 +423,13 @@ def main() -> int:
         if position_index % 2 == 1:
             labels.reverse()
         for label in labels:
-            if has_summary(
-                runner.records, "judge", position["position"], label
+            prior_judge = latest_judge(
+                runner.records, position["position"], label
+            )
+            if (
+                prior_judge is not None
+                and int(prior_judge.get("accepted", 0)) == 1
+                and int(prior_judge.get("nominee_count", -1)) == len(moves)
             ):
                 continue
             stride = 2 if label == STRIDE2_LABEL else 4

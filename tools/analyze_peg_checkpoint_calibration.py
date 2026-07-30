@@ -15,6 +15,7 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
 from analyze_peg_time_calibration import (  # noqa: E402
     describe,
     latest_by,
+    percentile,
     stratified_mean_ci,
     summarize_sentinel_run,
     value_maps,
@@ -45,6 +46,10 @@ def metric_delta(
     values: dict[str, dict[str, float]], after: str, before: str, metric: str
 ) -> float:
     return float(values[after][metric]) - float(values[before][metric])
+
+
+def cohort(position: str) -> str:
+    return "expansion" if position.startswith("x-") else "initial"
 
 
 def zero_observation(position: str, bag: int) -> dict[str, Any]:
@@ -93,6 +98,19 @@ def describe_work(rows: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
+def describe_quantiles(values: list[float]) -> dict[str, Any]:
+    result = describe(values)
+    ordered = sorted(values)
+    result.update(
+        {
+            "p75": percentile(ordered, 0.75),
+            "p90": percentile(ordered, 0.90),
+            "p95": percentile(ordered, 0.95),
+        }
+    )
+    return result
+
+
 def checkpoint_work(
     checkpoint: dict[str, Any], bag: int, position: str
 ) -> dict[str, Any]:
@@ -107,6 +125,25 @@ def checkpoint_work(
         "process_cpu_seconds": cpu,
         "scheduled_core_occupancy": cpu / (wall * 10.0) if wall > 0 else 0.0,
     }
+
+
+def patience_stop(
+    checkpoints: list[dict[str, Any]],
+    minimum_candidates: int,
+    patience: int,
+) -> int:
+    last_change = 0
+    for completed in range(1, len(checkpoints)):
+        if str(checkpoints[completed]["move"]) != str(
+            checkpoints[completed - 1]["move"]
+        ):
+            last_change = completed
+        if (
+            completed >= minimum_candidates
+            and completed - last_change >= patience
+        ):
+            return completed
+    return len(checkpoints) - 1
 
 
 def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
@@ -158,6 +195,43 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "total_position_nominees": sum(frontier_counts),
         "exact_all_checkpoint_agreements": sum(count == 1 for count in frontier_counts),
     }
+    self_utility_ties = []
+    for position in positions:
+        arm = arms.get((position,))
+        if arm is None:
+            continue
+        sequence = int(arm["sequence"])
+        events = sorted(
+            (
+                record
+                for record in records
+                if record.get("kind") == "event"
+                and int(record.get("sequence", -1)) == sequence
+                and int(record.get("stage", -1)) == 1
+            ),
+            key=lambda record: int(record["rank"]),
+        )
+        best_key = -math.inf
+        best_move = ""
+        for event in events:
+            key = float(event["win"]) + 1.0e-4 * float(event["spread"])
+            if key > best_key + 1.0e-12:
+                best_key = key
+                best_move = str(event["move"])
+            elif (
+                abs(key - best_key) <= 1.0e-12
+                and str(event["move"]) != best_move
+            ):
+                self_utility_ties.append(
+                    {
+                        "position": position,
+                        "candidate": int(event["rank"]) + 1,
+                        "incumbent_move": best_move,
+                        "tied_move": str(event["move"]),
+                        "self_utility": key,
+                    }
+                )
+    frontier["self_utility_checkpoint_ties"] = self_utility_ties
 
     checkpoint_rows: dict[str, Any] = {}
     previous_k: int | None = None
@@ -285,6 +359,26 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
                 disagree_full, len(eligible)
             ),
             "gain_vs_greedy": summaries(gain_rows),
+            "gain_vs_greedy_by_bag": {
+                str(bag): summaries(
+                    [
+                        row
+                        for row in gain_rows
+                        if int(row["bag"]) == bag
+                    ]
+                )
+                for bag in range(1, 5)
+            },
+            "gain_vs_greedy_by_cohort": {
+                name: summaries(
+                    [
+                        row
+                        for row in gain_rows
+                        if cohort(str(row["position"])) == name
+                    ]
+                )
+                for name in ("initial", "expansion")
+            },
             "gain_vs_greedy_accepted": len(gain_rows),
             "gain_vs_greedy_censored": censored_gain,
             "marginal_vs_previous_checkpoint": summaries(marginal_rows),
@@ -339,6 +433,160 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         },
     }
 
+    admission_rows = []
+    for position in positions:
+        checkpoint_map = maps[(position,)]
+        if int(checkpoint_map["completed_candidates"]) < 2:
+            continue
+        bag = int(checkpoint_map["bag"])
+        before = checkpoint_work(
+            checkpoint_map["checkpoints"][0], bag, position
+        )
+        after = checkpoint_work(
+            checkpoint_map["checkpoints"][2], bag, position
+        )
+        wall = after["completed_seconds"] - before["completed_seconds"]
+        cpu = (
+            after["process_cpu_seconds"] - before["process_cpu_seconds"]
+        )
+        admission_rows.append(
+            {
+                "position": position,
+                "bag": bag,
+                "cumulative_scenarios": (
+                    after["cumulative_scenarios"]
+                    - before["cumulative_scenarios"]
+                ),
+                "nested_endgame_nodes": (
+                    after["nested_endgame_nodes"]
+                    - before["nested_endgame_nodes"]
+                ),
+                "completed_seconds": wall,
+                "process_cpu_seconds": cpu,
+                "scheduled_core_occupancy": (
+                    cpu / (wall * 10.0) if wall > 0 else 0.0
+                ),
+            }
+        )
+    admission = {
+        "minimum_completed_candidates": 2,
+        "overall": {
+            field: describe_quantiles(
+                [float(row[field]) for row in admission_rows]
+            )
+            for field in WORK_FIELDS
+        },
+        "by_bag": {
+            str(bag): {
+                field: describe_quantiles(
+                    [
+                        float(row[field])
+                        for row in admission_rows
+                        if int(row["bag"]) == bag
+                    ]
+                )
+                for field in WORK_FIELDS
+            }
+            for bag in range(1, 5)
+        },
+    }
+
+    stopping_policies = {}
+    for policy_name, minimum_candidates, patience in (
+        ("min8_patience4", 8, 4),
+        ("min8_patience8", 8, 8),
+        ("min12_patience4", 12, 4),
+        ("min12_patience8", 12, 8),
+    ):
+        stops = []
+        stop_rows = []
+        gain_rows = []
+        full_regret_rows = []
+        conditional_full_regret = []
+        work_rows = []
+        disagreements = 0
+        censored = 0
+        for position in positions:
+            checkpoint_map = maps[(position,)]
+            checkpoints = checkpoint_map["checkpoints"]
+            stop = patience_stop(
+                checkpoints, minimum_candidates, patience
+            )
+            stops.append(float(stop))
+            stop_rows.append({"position": position, "stop": float(stop)})
+            bag = int(checkpoint_map["bag"])
+            greedy_move = str(checkpoints[0]["move"])
+            stop_move = str(checkpoints[stop]["move"])
+            full_move = str(checkpoints[-1]["move"])
+            values = oracle_values.get((position, "checkpoint_stride4"))
+            gain = comparison_observation(
+                position=position,
+                bag=bag,
+                before=greedy_move,
+                after=stop_move,
+                values=values,
+            )
+            regret = comparison_observation(
+                position=position,
+                bag=bag,
+                before=stop_move,
+                after=full_move,
+                values=values,
+            )
+            if gain is None or regret is None:
+                censored += 1
+                continue
+            gain_rows.append(gain)
+            full_regret_rows.append(regret)
+            if stop_move != full_move:
+                disagreements += 1
+                conditional_full_regret.append(regret)
+            work_rows.append(
+                checkpoint_work(checkpoints[stop], bag, position)
+            )
+        stopping_policies[policy_name] = {
+            "minimum_candidates": minimum_candidates,
+            "patience": patience,
+            "stop_candidates": describe(stops),
+            "gain_vs_greedy": summaries(gain_rows),
+            "full_minus_stop": summaries(full_regret_rows),
+            "conditional_full_minus_stop": summaries(
+                conditional_full_regret
+            ),
+            "disagreement_with_full": wilson_interval(
+                disagreements, len(stops)
+            ),
+            "work": describe_work(work_rows),
+            "accepted": len(gain_rows),
+            "censored": censored,
+            "by_cohort": {
+                name: {
+                    "stop_candidates": describe(
+                        [
+                            float(row["stop"])
+                            for row in stop_rows
+                            if cohort(str(row["position"])) == name
+                        ]
+                    ),
+                    "gain_vs_greedy": summaries(
+                        [
+                            row
+                            for row in gain_rows
+                            if cohort(str(row["position"])) == name
+                        ]
+                    ),
+                    "full_minus_stop": summaries(
+                        [
+                            row
+                            for row in full_regret_rows
+                            if cohort(str(row["position"])) == name
+                        ]
+                    ),
+                }
+                for name in ("initial", "expansion")
+            },
+        }
+
     judge_completion = {}
     judge_strength = {}
     for label in ("checkpoint_stride4", "checkpoint_stride2"):
@@ -385,7 +633,14 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
             for move in common
             if abs(float(values2[move]["utility"]) - max2) <= 1.0e-12
         }
-        sensitivity_positions.append(bool(best4 & best2))
+        sensitivity_positions.append(
+            {
+                "position": position,
+                "agrees": bool(best4 & best2),
+                "stride4_best": sorted(best4),
+                "stride2_best": sorted(best2),
+            }
+        )
         for move in common:
             sensitivity_nominees.append(
                 {
@@ -399,10 +654,15 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
     sensitivity = {
         "accepted_positions": len(sensitivity_positions),
         "best_nominee_agreement_rate": (
-            statistics.fmean(float(value) for value in sensitivity_positions)
+            statistics.fmean(
+                float(row["agrees"]) for row in sensitivity_positions
+            )
             if sensitivity_positions
             else math.nan
         ),
+        "best_disagreement_positions": [
+            row for row in sensitivity_positions if not row["agrees"]
+        ],
         **{
             f"{metric}_abs_diff": describe(
                 [float(row[metric]) for row in sensitivity_nominees]
@@ -410,6 +670,57 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
             for metric in METRICS
         },
     }
+    sensitivity_curve = {}
+    for k in CHECKPOINTS:
+        stride4_rows = []
+        stride2_rows = []
+        paired_differences = []
+        for position in positions:
+            checkpoint_map = maps[(position,)]
+            if int(checkpoint_map["completed_candidates"]) < k:
+                continue
+            values4 = oracle_values.get((position, "checkpoint_stride4"))
+            values2 = oracle_values.get((position, "checkpoint_stride2"))
+            if values4 is None or values2 is None:
+                continue
+            bag = int(checkpoint_map["bag"])
+            greedy_move = str(checkpoint_map["checkpoints"][0]["move"])
+            current_move = str(checkpoint_map["checkpoints"][k]["move"])
+            gain4 = comparison_observation(
+                position=position,
+                bag=bag,
+                before=greedy_move,
+                after=current_move,
+                values=values4,
+            )
+            gain2 = comparison_observation(
+                position=position,
+                bag=bag,
+                before=greedy_move,
+                after=current_move,
+                values=values2,
+            )
+            if gain4 is None or gain2 is None:
+                continue
+            stride4_rows.append(gain4)
+            stride2_rows.append(gain2)
+            paired_differences.append(
+                {
+                    "position": position,
+                    "bag": bag,
+                    **{
+                        metric: float(gain2[metric])
+                        - float(gain4[metric])
+                        for metric in METRICS
+                    },
+                }
+            )
+        sensitivity_curve[str(k)] = {
+            "stride4_gain_vs_greedy": summaries(stride4_rows),
+            "stride2_gain_vs_greedy": summaries(stride2_rows),
+            "stride2_minus_stride4": summaries(paired_differences),
+        }
+    sensitivity["checkpoint_curve"] = sensitivity_curve
 
     sentinel_records = [
         record
@@ -417,6 +728,35 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         if record.get("kind") == "arm" and record.get("mode") == "sentinel"
     ]
     monitoring = summarize_sentinel_run(sentinel_records, arm_records)
+
+    full_oracle_best_agreements = 0
+    full_oracle_best_accepted = 0
+    for position in positions:
+        checkpoint_map = maps[(position,)]
+        moves = [str(move) for move in checkpoint_map["frontier_moves"]]
+        final_move = str(checkpoint_map["final_move"])
+        if len(moves) == 1:
+            full_oracle_best_agreements += 1
+            full_oracle_best_accepted += 1
+            continue
+        values = oracle_values.get((position, "checkpoint_stride4"))
+        if values is None or any(move not in values for move in moves):
+            continue
+        maximum = max(float(values[move]["utility"]) for move in moves)
+        best = {
+            move
+            for move in moves
+            if abs(float(values[move]["utility"]) - maximum) <= 1.0e-12
+        }
+        full_oracle_best_accepted += 1
+        full_oracle_best_agreements += int(final_move in best)
+    oracle_frontier = {
+        "full_move_best_agreements": full_oracle_best_agreements,
+        "accepted": full_oracle_best_accepted,
+        "best_minus_full": checkpoint_rows["32"][
+            "oracle_frontier_minus_stop"
+        ],
+    }
 
     return {
         "position_count": len(positions),
@@ -430,6 +770,9 @@ def analyze(records: list[dict[str, Any]]) -> dict[str, Any]:
         "frontier": frontier,
         "checkpoint_curve": checkpoint_rows,
         "final_move_stabilization": stabilization_summary,
+        "stage_admission": admission,
+        "stopping_policies": stopping_policies,
+        "oracle_frontier": oracle_frontier,
         "judge_completion": judge_completion,
         "judge_strength": judge_strength,
         "sensitivity": sensitivity,
@@ -524,6 +867,117 @@ def render_markdown(result: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "Initial-panel versus expansion replication:",
+            "",
+            "| Cohort | 8-candidate gain | 12-candidate gain | "
+            "Full gain | min8/patience8 gain | min8/patience8 full-minus-stop "
+            "| Mean adaptive stop |",
+            "| --- | --- | --- | --- | --- | --- | ---: |",
+        ]
+    )
+    adaptive = result["stopping_policies"]["min8_patience8"]
+    for name in ("initial", "expansion"):
+        gain8 = result["checkpoint_curve"]["8"][
+            "gain_vs_greedy_by_cohort"
+        ][name]["utility"]
+        gain12 = result["checkpoint_curve"]["12"][
+            "gain_vs_greedy_by_cohort"
+        ][name]["utility"]
+        gain32 = result["checkpoint_curve"]["32"][
+            "gain_vs_greedy_by_cohort"
+        ][name]["utility"]
+        adaptive_cohort = adaptive["by_cohort"][name]
+        lines.append(
+            f"| {name} | {format_ci(gain8)} | {format_ci(gain12)} | "
+            f"{format_ci(gain32)} | "
+            f"{format_ci(adaptive_cohort['gain_vs_greedy']['utility'])} | "
+            f"{format_ci(adaptive_cohort['full_minus_stop']['utility'])} | "
+            f"{adaptive_cohort['stop_candidates']['mean']:.2f} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Adaptive plateau stopping",
+            "",
+            "A `min N, patience P` rule stops after at least N candidates "
+            "once P consecutive candidates have failed to change the running "
+            "winner. These are retrospective policy simulations; they use no "
+            "oracle information to choose the stop.",
+            "",
+            "| Rule | Stop candidates, mean / median | Disagree with full | "
+            "Gain vs greedy utility | Full minus stop utility | "
+            "Nested nodes, median |",
+            "| --- | ---: | --- | --- | --- | ---: |",
+        ]
+    )
+    for name, policy in result["stopping_policies"].items():
+        stops = policy["stop_candidates"]
+        lines.append(
+            f"| {name.replace('_', ' ')} | "
+            f"{stops['mean']:.2f} / {stops['median']:.1f} | "
+            f"{format_rate(policy['disagreement_with_full'])} | "
+            f"{format_ci(policy['gain_vs_greedy']['utility'])} | "
+            f"{format_ci(policy['full_minus_stop']['utility'])} | "
+            f"{policy['work']['nested_endgame_nodes']['median']:.0f} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "Marginal value and work since the previous reported checkpoint:",
+            "",
+            "| Step | Utility gain (95% CI) | Win gain, pp | Spread gain | "
+            "Scenario gain, mean / median | Nested-node gain, mean / median |",
+            "| --- | --- | --- | --- | ---: | ---: |",
+        ]
+    )
+    previous = None
+    for k in CHECKPOINTS:
+        if previous is None:
+            previous = k
+            continue
+        row = result["checkpoint_curve"][str(k)]
+        marginal = row["marginal_vs_previous_checkpoint"]
+        work = row["incremental_work"]
+        lines.append(
+            f"| {previous} to {k} | "
+            f"{format_ci(marginal['utility'])} | "
+            f"{format_ci(marginal['win'], 100.0)} | "
+            f"{format_ci(marginal['spread'])} | "
+            f"{work['cumulative_scenarios']['mean']:.0f} / "
+            f"{work['cumulative_scenarios']['median']:.0f} | "
+            f"{work['nested_endgame_nodes']['mean']:.0f} / "
+            f"{work['nested_endgame_nodes']['median']:.0f} |"
+        )
+        previous = k
+
+    lines.extend(
+        [
+            "",
+            "Mean utility gain versus greedy by bag size:",
+            "",
+            "| Bag | 2 candidates | 4 candidates | 8 candidates | "
+            "12 candidates | 32 candidates |",
+            "| ---: | ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for bag in range(1, 5):
+        cells = [
+            result["checkpoint_curve"][str(k)]["gain_vs_greedy_by_bag"][
+                str(bag)
+            ]["utility"]["mean"]
+            for k in (2, 4, 8, 12, 32)
+        ]
+        lines.append(
+            f"| {bag} | "
+            + " | ".join(f"{value:+.4f}" for value in cells)
+            + " |"
+        )
+
+    lines.extend(
+        [
+            "",
             "Conditional regret when the checkpoint and full stage nominated "
             "different moves:",
             "",
@@ -563,6 +1017,8 @@ def render_markdown(result: dict[str, Any]) -> str:
         )
 
     stabilization = result["final_move_stabilization"]
+    admission = result["stage_admission"]
+    oracle_frontier = result["oracle_frontier"]
     sensitivity = result["sensitivity"]
     monitoring = result["monitoring"]
     lines.extend(
@@ -588,6 +1044,90 @@ def render_markdown(result: dict[str, Any]) -> str:
             f"{sensitivity['win_abs_diff']['median']:.6f} win, "
             f"{sensitivity['spread_abs_diff']['median']:.3f} spread, "
             f"{sensitivity['utility_abs_diff']['median']:.6f} utility.",
+            "",
+            "On the common stride-sensitivity subset, fixed-stop utility gains "
+            "were:",
+            "",
+            "| Candidates | Stride-4 gain | Stride-2 gain | "
+            "Stride-2 minus stride-4 |",
+            "| ---: | --- | --- | --- |",
+        ]
+    )
+    for k in CHECKPOINTS:
+        row = sensitivity["checkpoint_curve"][str(k)]
+        lines.append(
+            f"| {k} | "
+            f"{format_ci(row['stride4_gain_vs_greedy']['utility'])} | "
+            f"{format_ci(row['stride2_gain_vs_greedy']['utility'])} | "
+            f"{format_ci(row['stride2_minus_stride4']['utility'])} |"
+        )
+    disagreement_text = ", ".join(
+        f"{row['position']} ({'/'.join(row['stride4_best'])} vs "
+        f"{'/'.join(row['stride2_best'])})"
+        for row in sensitivity["best_disagreement_positions"]
+    )
+    lines.extend(
+        [
+            "",
+            (
+                f"Best-frontier sensitivity disagreements: {disagreement_text}."
+                if disagreement_text
+                else "There were no best-frontier sensitivity disagreements."
+            ),
+            "",
+            f"The completed 2-ply move was also in the direct-3-ply best "
+            f"checkpoint-nominee set on "
+            f"{oracle_frontier['full_move_best_agreements']}/"
+            f"{oracle_frontier['accepted']} positions. The hindsight "
+            f"direct-3-ply best frontier nominee minus the full 2-ply move was "
+            f"{format_ci(oracle_frontier['best_minus_full']['utility'])} "
+            f"utility, "
+            f"{format_ci(oracle_frontier['best_minus_full']['win'], 100.0)} "
+            f"win percentage points, and "
+            f"{format_ci(oracle_frontier['best_minus_full']['spread'])} "
+            "spread. This is a diagnostic upper bound, not a deployable "
+            "stopping policy.",
+            "",
+            f"Exact running-best self-utility ties occurred at "
+            f"{len(frontier['self_utility_checkpoint_ties'])} candidate "
+            "boundaries; they are reported as tie diagnostics rather than "
+            "evidence of additional quality.",
+            "",
+            "## Two-candidate stage admission",
+            "",
+            "PEG cannot compare a new stage until two candidates complete; "
+            "work below that boundary is discarded. The incremental cost from "
+            "the greedy boundary through two completed 2-ply candidates was:",
+            "",
+            "| Bag | Scenarios, median / p90 | Nested nodes, median / p90 | "
+            "Local wall seconds, median / p90 | Occupancy, median |",
+            "| ---: | ---: | ---: | ---: | ---: |",
+        ]
+    )
+    for bag in range(1, 5):
+        row = admission["by_bag"][str(bag)]
+        lines.append(
+            f"| {bag} | {row['cumulative_scenarios']['median']:.0f} / "
+            f"{row['cumulative_scenarios']['p90']:.0f} | "
+            f"{row['nested_endgame_nodes']['median']:.0f} / "
+            f"{row['nested_endgame_nodes']['p90']:.0f} | "
+            f"{row['completed_seconds']['median']:.2f} / "
+            f"{row['completed_seconds']['p90']:.2f} | "
+            f"{row['scheduled_core_occupancy']['median']:.3f} |"
+        )
+    overall_admission = admission["overall"]
+    lines.extend(
+        [
+            "",
+            f"Overall two-candidate cost: median/p90 "
+            f"{overall_admission['nested_endgame_nodes']['median']:.0f}/"
+            f"{overall_admission['nested_endgame_nodes']['p90']:.0f} nested "
+            f"nodes and "
+            f"{overall_admission['completed_seconds']['median']:.2f}/"
+            f"{overall_admission['completed_seconds']['p90']:.2f} local "
+            "seconds. A future admission guard should reserve a conservative "
+            "two-candidate envelope before starting the stage; this analysis "
+            "does not change live policy.",
             "",
             "## Load monitoring",
             "",
