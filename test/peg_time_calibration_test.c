@@ -1,16 +1,23 @@
 #include "peg_time_calibration_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/game.h"
+#include "../src/ent/game_history.h"
 #include "../src/ent/move.h"
+#include "../src/ent/player.h"
+#include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/gameplay.h"
 #include "../src/impl/peg.h"
 #include "../src/str/move_string.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
 #include <inttypes.h>
+#include <glob.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -492,5 +499,171 @@ void test_peg_time_calibration(void) {
     config_destroy(config);
     log_fatal("unknown PEG_CAL_MODE '%s'", mode);
   }
+  config_destroy(config);
+}
+
+static const Rack *peg_cal_next_player_rack(const GameHistory *history,
+                                            int event_index,
+                                            int player_index) {
+  const int event_count = game_history_get_num_events(history);
+  for (int index = event_index + 1; index < event_count; index++) {
+    const GameEvent *event = game_history_get_event(history, index);
+    const game_event_t type = game_event_get_type(event);
+    if (game_event_get_player_index(event) == player_index &&
+        (type == GAME_EVENT_TILE_PLACEMENT_MOVE ||
+         type == GAME_EVENT_EXCHANGE || type == GAME_EVENT_PASS)) {
+      return game_event_get_const_rack(event);
+    }
+  }
+  return NULL;
+}
+
+static int peg_cal_gcg_starting_player(const char *path) {
+  FILE *stream = fopen(path, "re");
+  if (stream == NULL) {
+    log_fatal("failed to open autoplay GCG %s", path);
+  }
+  char line[4096];
+  int starting_player = -1;
+  while (fgets(line, sizeof(line), stream) != NULL) {
+    if (line[0] != '>') {
+      continue;
+    }
+    if (has_iprefix(">magpie1:", line)) {
+      starting_player = 0;
+    } else if (has_iprefix(">magpie2:", line)) {
+      starting_player = 1;
+    }
+    break;
+  }
+  (void)fclose(stream);
+  if (starting_player < 0) {
+    log_fatal("failed to find the first autoplay move in %s", path);
+  }
+  return starting_player;
+}
+
+void test_peg_extract_gcg_panel(void) {
+  log_set_level(LOG_FATAL);
+  const char *directory = peg_cal_required_env("PEG_CAL_GCG_DIR");
+  char *pattern = get_formatted_string("%s/*.gcg", directory);
+  glob_t paths = {0};
+  const int glob_status = glob(pattern, 0, NULL, &paths);
+  free(pattern);
+  if (glob_status != 0 || paths.gl_pathc == 0) {
+    globfree(&paths);
+    log_fatal("no GCG files found under %s", directory);
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -wmp true -rit true -ritmmap true -wit false "
+      "-threads 1 -s1 equity -s2 equity -r1 all -r2 all");
+  load_and_exec_config_or_die(config, "new");
+  ErrorStack *error_stack = error_stack_create();
+  int valid_sources = 0;
+  int emitted_by_bag[5] = {0};
+  for (size_t source_index = 0; source_index < paths.gl_pathc;
+       source_index++) {
+    const int starting_player =
+        peg_cal_gcg_starting_player(paths.gl_pathv[source_index]);
+    GameHistory *history = game_history_create();
+    game_reset(config_get_game(config));
+    char *gcg = get_string_from_file(paths.gl_pathv[source_index], error_stack);
+    if (starting_player == 1) {
+      // Autoplay GCGs identify the first mover by nickname but do not emit a
+      // starting-player header. The parser assumes player 1 starts. Since the
+      // two autoplay policies are identical, exchange the player labels for
+      // player-2-start games before replaying the same trajectory.
+      for (char *cursor = gcg; *cursor != '\0'; cursor++) {
+        if (strncmp(cursor, ">magpie1:", 9) == 0) {
+          cursor[7] = '2';
+        } else if (strncmp(cursor, ">magpie2:", 9) == 0) {
+          cursor[7] = '1';
+        }
+      }
+    }
+    config_parse_gcg_string(config, gcg, history, error_stack);
+    free(gcg);
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_print_and_reset(error_stack);
+      game_history_destroy(history);
+      log_fatal("failed to parse autoplay GCG %s",
+                paths.gl_pathv[source_index]);
+    }
+    Game *game = config_game_create(config);
+    game_set_starting_player_index(game, 0);
+    bool emitted[5] = {false};
+    int move_turn = 0;
+    const int event_count = game_history_get_num_events(history);
+    for (int event_index = 0; event_index < event_count; event_index++) {
+      const GameEvent *event = game_history_get_event(history, event_index);
+      const game_event_t type = game_event_get_type(event);
+      if (type != GAME_EVENT_TILE_PLACEMENT_MOVE &&
+          type != GAME_EVENT_EXCHANGE && type != GAME_EVENT_PASS) {
+        continue;
+      }
+      game_set_starting_player_index(game, 0);
+      game_play_n_events(history, game, event_index, false, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        error_stack_print_and_reset(error_stack);
+        game_destroy(game);
+        game_history_destroy(history);
+        log_fatal("failed to replay %s through event %d",
+                  paths.gl_pathv[source_index], event_index);
+      }
+      const int on_turn = game_event_get_player_index(event);
+      const int off_turn = 1 - on_turn;
+      const Rack *on_turn_rack = game_event_get_const_rack(event);
+      const int unseen =
+          bag_get_letters(game_get_bag(game)) +
+          rack_get_total_letters(
+              player_get_rack(game_get_player(game, off_turn)));
+      const int peg_bag = unseen - RACK_SIZE;
+      if (peg_bag >= 1 && peg_bag <= 4 && !emitted[peg_bag] &&
+          rack_get_total_letters(on_turn_rack) == RACK_SIZE) {
+        const Rack *off_turn_rack =
+            peg_cal_next_player_rack(history, event_index, off_turn);
+        if (off_turn_rack != NULL &&
+            rack_get_total_letters(off_turn_rack) == RACK_SIZE) {
+          return_rack_to_bag(game, off_turn);
+          if (!draw_rack_from_bag(game, off_turn, off_turn_rack)) {
+            game_destroy(game);
+            game_history_destroy(history);
+            globfree(&paths);
+            error_stack_destroy(error_stack);
+            config_destroy(config);
+            log_fatal("failed to reconstruct off-turn rack for %s event %d",
+                      paths.gl_pathv[source_index], event_index);
+          }
+          char *cgp = game_get_cgp(game, true);
+          (void)printf(
+              "PEG_PANEL\tsource_index=%zu\tsource=%s\tevent=%d\tturn=%d"
+              "\tbag=%d\tcgp=%s -lex CSW24\n",
+              source_index, paths.gl_pathv[source_index], event_index,
+              move_turn, peg_bag, cgp);
+          free(cgp);
+          emitted[peg_bag] = true;
+          emitted_by_bag[peg_bag]++;
+        }
+      }
+      move_turn++;
+    }
+    bool any = false;
+    for (int bag = 1; bag <= 4; bag++) {
+      any = any || emitted[bag];
+    }
+    valid_sources += any ? 1 : 0;
+    game_destroy(game);
+    game_history_destroy(history);
+  }
+  (void)printf(
+      "PEG_PANEL_DONE\tsources=%zu\tvalid_sources=%d"
+      "\tbag1=%d\tbag2=%d\tbag3=%d\tbag4=%d\n",
+      paths.gl_pathc, valid_sources, emitted_by_bag[1], emitted_by_bag[2],
+      emitted_by_bag[3], emitted_by_bag[4]);
+  (void)fflush(stdout);
+
+  globfree(&paths);
+  error_stack_destroy(error_stack);
   config_destroy(config);
 }
