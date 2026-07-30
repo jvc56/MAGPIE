@@ -2295,6 +2295,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
         ARG_TOKEN_CUTOFF,                  /* cutoff */
+        ARG_TOKEN_ENDGAME_FIRST_WIN,       /* efw */
         ARG_TOKEN_ENDGAME_PLIES,           /* eplies */
         ARG_TOKEN_ENDGAME_TIME_LIMIT,      /* etlim */
         ARG_TOKEN_ENDGAME_TOP_K,           /* etopk */
@@ -2314,6 +2315,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_PEG_FIRST_WIN,           /* pegfw */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
