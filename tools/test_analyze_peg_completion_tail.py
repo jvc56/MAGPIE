@@ -44,6 +44,8 @@ class AnalyzePegCompletionTailTest(unittest.TestCase):
                 "position": f"p{index:03d}",
                 "root_candidate_total": 10 + index,
                 "seed_scenarios": 20 + index,
+                "pre_stage_scenarios": 20 + index,
+                "pre_stage_nested_nodes": index,
                 "scenarios": 30 + index,
                 "nested_nodes": 1000 + index * 10,
             }
