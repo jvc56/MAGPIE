@@ -1194,6 +1194,7 @@ void test_peg_strength_ab(void) {
 // strength run, so we are not measuring on the committed fixtures. Env:
 // MAGPIE_PEG_GENCOUNT (positions per bag, default 200) and
 // MAGPIE_PEG_GENOUT_DIR (required output directory; it must already exist).
+// MAGPIE_PEG_GENBAG optionally limits generation to one bag size.
 void test_gen_peg_fresh(void) {
   log_set_level(LOG_FATAL);
   const char *ec = getenv("MAGPIE_PEG_GENCOUNT");
@@ -1202,8 +1203,17 @@ void test_gen_peg_fresh(void) {
   if (output_dir == NULL || *output_dir == '\0') {
     log_fatal("MAGPIE_PEG_GENOUT_DIR is required");
   }
+  const char *eb = getenv("MAGPIE_PEG_GENBAG");
+  const int only_bag =
+      eb != NULL && *eb != '\0' ? (int)strtol(eb, NULL, 10) : 0;
+  if (only_bag < 0 || only_bag > 4) {
+    log_fatal("MAGPIE_PEG_GENBAG must be 1..4");
+  }
   char path[1024];
   for (int bag = 1; bag <= 4; bag++) {
+    if (only_bag != 0 && bag != only_bag) {
+      continue;
+    }
     (void)snprintf(path, sizeof(path), "%s/peg_fresh_%dpeg.txt", output_dir,
                    bag);
     // This calibration panel uses a seed family distinct from the historical
