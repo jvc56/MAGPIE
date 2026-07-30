@@ -1,0 +1,1093 @@
+{
+  "accounting": {
+    "censored_attempts": 0,
+    "complete_deep_traces": 640,
+    "complete_first2_traces": 1280,
+    "complete_positions": 1280,
+    "failed_processes": 0,
+    "panel_positions": 1280,
+    "timing": {
+      "completed_arm_wall_seconds": 11920.801201,
+      "duration_estimates_by_bag_trace": {
+        "1|first2": {
+          "mean": 0.51947561875,
+          "median": 0.2807055,
+          "p90": 1.17127
+        },
+        "2|deep": {
+          "mean": 10.37155821875,
+          "median": 3.6146735,
+          "p90": 24.687796
+        },
+        "2|first2": {
+          "mean": 0.84688960625,
+          "median": 0.4360805,
+          "p90": 1.678634
+        },
+        "3|deep": {
+          "mean": 13.109346371875,
+          "median": 4.261098499999999,
+          "p90": 26.955749
+        },
+        "3|first2": {
+          "mean": 1.662942125,
+          "median": 0.7413705,
+          "p90": 4.375852
+        },
+        "4|first2": {
+          "mean": 8.367217821875,
+          "median": 3.6589095,
+          "p90": 17.670999
+        }
+      },
+      "invocations": 1963,
+      "orphaned_invocations": [
+        {
+          "label": "completion_tail",
+          "position": "admission-20260730-b3-p003",
+          "sequence": 11
+        },
+        {
+          "label": "deep_16_2",
+          "position": "admission-20260730-b3-p016",
+          "sequence": 95
+        }
+      ],
+      "process_records": 1961,
+      "projected_remaining_arm_wall_seconds": {
+        "mean": 0.0,
+        "median": 0.0,
+        "p90": 0.0
+      },
+      "projection_excludes_future_sentinel_overhead": true,
+      "run_span_seconds": 15127.459817
+    }
+  },
+  "conformal": {
+    "1|first2:2ply_wave": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 2.8142370298841914,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 1,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 7794304.0,
+          "n": 64,
+          "p50": 1592047.0,
+          "p90": 4697125.0,
+          "p95": 5799642.0,
+          "p99": 7794304.0
+        },
+        "scenario_bound": {
+          "max": 283.0,
+          "n": 64,
+          "p50": 250.0,
+          "p90": 283.0,
+          "p95": 283.0,
+          "p99": 283.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 1,
+        "heldout_n": 64,
+        "nested_nodes": 3157139,
+        "scenarios": 16
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    },
+    "2|deep:3ply_wave_2": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 8.30789479203396,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 39153679662.0,
+          "n": 64,
+          "p50": 653673683.0,
+          "p90": 14080230354.0,
+          "p95": 22261141513.0,
+          "p99": 39153679662.0
+        },
+        "scenario_bound": {
+          "max": 412172.0,
+          "n": 64,
+          "p50": 279227.0,
+          "p90": 337926.0,
+          "p95": 393241.0,
+          "p99": 412172.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_nodes": 637317412,
+        "scenarios": 144
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    },
+    "2|first2:2ply_wave": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 6.772136184162067,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 145331361.0,
+          "n": 64,
+          "p50": 43108229.0,
+          "p90": 107411244.0,
+          "p95": 114361145.0,
+          "p99": 145331361.0
+        },
+        "scenario_bound": {
+          "max": 86680.0,
+          "n": 64,
+          "p50": 57509.0,
+          "p90": 72885.0,
+          "p95": 78644.0,
+          "p99": 86680.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_nodes": 5110942,
+        "scenarios": 144
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    },
+    "3|deep:3ply_wave_2": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 8.78727801434936,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 1,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 652183298.0,
+          "n": 64,
+          "p50": 75547407.0,
+          "p90": 201035323.0,
+          "p95": 259198772.0,
+          "p99": 652183298.0
+        },
+        "scenario_bound": {
+          "max": 4546752.0,
+          "n": 64,
+          "p50": 1847406.0,
+          "p90": 3121289.0,
+          "p95": 3468649.0,
+          "p99": 4546752.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_nodes": 452287912,
+        "scenarios": 1440
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    },
+    "3|first2:2ply_wave": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 7.870916077893154,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 1,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 63123283.0,
+          "n": 64,
+          "p50": 9895517.0,
+          "p90": 40499537.0,
+          "p95": 43773773.0,
+          "p99": 63123283.0
+        },
+        "scenario_bound": {
+          "max": 1549223.0,
+          "n": 64,
+          "p50": 683558.0,
+          "p90": 1015385.0,
+          "p95": 1158940.0,
+          "p99": 1549223.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_nodes": 7399314,
+        "scenarios": 1056
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    },
+    "4|first2:2ply_wave": {
+      "conformal_rank": 128,
+      "conformal_residual_quantile": 7.532600230976993,
+      "feature_conditioned_bound": {
+        "candidate_overhead": 2,
+        "coverage_scope": "bag-marginal split-conformal, not conditional",
+        "heldout_false_starts": 1,
+        "heldout_n": 64,
+        "nested_node_bound": {
+          "max": 29401299.0,
+          "n": 64,
+          "p50": 9615892.0,
+          "p90": 16451828.0,
+          "p95": 19043674.0,
+          "p99": 29401299.0
+        },
+        "scenario_bound": {
+          "max": 7927912.0,
+          "n": 64,
+          "p50": 2120929.0,
+          "p90": 3899864.0,
+          "p95": 5222020.0,
+          "p99": 7927912.0
+        }
+      },
+      "features": [
+        "log1p(root_candidate_total)",
+        "log1p(pre_stage_scenarios)",
+        "log1p(pre_stage_nested_nodes)"
+      ],
+      "flat_bound": {
+        "candidate_overhead": 2,
+        "heldout_false_starts": 0,
+        "heldout_n": 64,
+        "nested_nodes": 29684225,
+        "scenarios": 15840
+      },
+      "split": {
+        "calibration": 128,
+        "heldout": 64,
+        "training": 128
+      },
+      "target_miscoverage": 0.01,
+      "timing_feature_used": false
+    }
+  },
+  "local_wall_model": {
+    "coefficients": {
+      "candidates": -0.00018014572308651576,
+      "intercept": 0.6649604943560226,
+      "nested_node_millions": 0.5162207041055367,
+      "scenario_millions": 4.490316923672115
+    },
+    "formula": "wall_s = intercept + scenario_millions*b_s + nested_node_millions*b_n + candidates*b_c",
+    "n": 4480,
+    "purpose": "local seconds conversion only; not a strength feature",
+    "r_squared": 0.8036195669462558
+  },
+  "quantile_definition": "nearest-rank empirical quantiles",
+  "quantiles": {
+    "1|first2:2ply_wave": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 3378394.0,
+        "n": 320,
+        "p50": 62832.0,
+        "p90": 725637.0,
+        "p95": 1073829.0,
+        "p99": 2306677.0
+      },
+      "process_cpu_seconds": {
+        "max": 91.24898,
+        "n": 320,
+        "p50": 1.650507,
+        "p90": 16.267499,
+        "p95": 24.856521,
+        "p99": 50.575005000000004
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 618.0,
+        "p90": 3961.0,
+        "p95": 6769.0,
+        "p99": 11669.0
+      },
+      "scenarios": {
+        "max": 16.0,
+        "n": 320,
+        "p50": 14.0,
+        "p90": 16.0,
+        "p95": 16.0,
+        "p99": 16.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9425761204898049,
+        "n": 320,
+        "p50": 0.3731565351583468,
+        "p90": 0.8163328849874602,
+        "p95": 0.8674136901104732,
+        "p99": 0.916502362793336
+      },
+      "wall_seconds": {
+        "max": 5.381328,
+        "n": 320,
+        "p50": 0.25454,
+        "p90": 1.1295840000000001,
+        "p95": 1.613799,
+        "p99": 3.066798
+      }
+    },
+    "1|first2:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 6.665972,
+        "n": 320,
+        "p50": 0.178632,
+        "p90": 0.938982,
+        "p95": 1.476658,
+        "p99": 2.98318
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 618.0,
+        "p90": 3961.0,
+        "p95": 6769.0,
+        "p99": 11669.0
+      },
+      "scenarios": {
+        "max": 131072.0,
+        "n": 320,
+        "p50": 4326.0,
+        "p90": 26178.0,
+        "p95": 44052.0,
+        "p99": 80395.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9326893747960695,
+        "n": 320,
+        "p50": 0.6276013440277477,
+        "p90": 0.7888495604506097,
+        "p95": 0.8457910762116253,
+        "p99": 0.8758080927636559
+      },
+      "wall_seconds": {
+        "max": 0.397058,
+        "n": 320,
+        "p50": 0.017246,
+        "p90": 0.079281,
+        "p95": 0.104456,
+        "p99": 0.2018
+      }
+    },
+    "2|deep:2ply_to_16": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 26268983.0,
+        "n": 320,
+        "p50": 1524129.0,
+        "p90": 7710183.0,
+        "p95": 11165263.0,
+        "p99": 19115116.0
+      },
+      "process_cpu_seconds": {
+        "max": 1343.063528,
+        "n": 320,
+        "p50": 29.842585999999997,
+        "p90": 199.619144,
+        "p95": 320.337081,
+        "p99": 661.559526
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 521.0,
+        "p90": 3797.0,
+        "p95": 6300.0,
+        "p99": 12304.0
+      },
+      "scenarios": {
+        "max": 1152.0,
+        "n": 320,
+        "p50": 492.0,
+        "p90": 800.0,
+        "p95": 884.0,
+        "p99": 1116.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9790487343251816,
+        "n": 320,
+        "p50": 0.8136497700104814,
+        "p90": 0.9547441273089089,
+        "p95": 0.9660589128819542,
+        "p99": 0.9751047148301487
+      },
+      "wall_seconds": {
+        "max": 76.211365,
+        "n": 320,
+        "p50": 2.095117,
+        "p90": 11.65848,
+        "p95": 18.484362,
+        "p99": 37.777623
+      }
+    },
+    "2|deep:3ply_wave_2": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 637317412.0,
+        "n": 320,
+        "p50": 2417603.0,
+        "p90": 26110044.0,
+        "p95": 56359174.0,
+        "p99": 173175320.0
+      },
+      "process_cpu_seconds": {
+        "max": 4657.939783,
+        "n": 320,
+        "p50": 12.255866999999999,
+        "p90": 210.21431500000003,
+        "p95": 392.05777800000004,
+        "p99": 1399.540924
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 521.0,
+        "p90": 3797.0,
+        "p95": 6300.0,
+        "p99": 12304.0
+      },
+      "scenarios": {
+        "max": 144.0,
+        "n": 320,
+        "p50": 64.0,
+        "p90": 114.0,
+        "p95": 114.0,
+        "p99": 144.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9893406857554244,
+        "n": 320,
+        "p50": 0.9283159995058,
+        "p90": 0.9808412046206039,
+        "p95": 0.9832089867861475,
+        "p99": 0.9857859450711409
+      },
+      "wall_seconds": {
+        "max": 263.364969,
+        "n": 320,
+        "p50": 0.7337739999999999,
+        "p90": 11.897492,
+        "p95": 22.30463,
+        "p99": 78.815447
+      }
+    },
+    "2|deep:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 25.04445,
+        "n": 320,
+        "p50": 0.871999,
+        "p90": 4.670785,
+        "p95": 8.665625,
+        "p99": 13.346415
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 521.0,
+        "p90": 3797.0,
+        "p95": 6300.0,
+        "p99": 12304.0
+      },
+      "scenarios": {
+        "max": 483256.0,
+        "n": 320,
+        "p50": 15422.0,
+        "p90": 102865.0,
+        "p95": 167852.0,
+        "p99": 367992.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9729690103050346,
+        "n": 320,
+        "p50": 0.8428196188099412,
+        "p90": 0.9250818616379584,
+        "p95": 0.9393023992803181,
+        "p99": 0.957586767391279
+      },
+      "wall_seconds": {
+        "max": 1.430013,
+        "n": 320,
+        "p50": 0.059674,
+        "p90": 0.28661,
+        "p95": 0.530251,
+        "p99": 0.800266
+      }
+    },
+    "2|first2:2ply_wave": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 5110942.0,
+        "n": 320,
+        "p50": 155348.0,
+        "p90": 1203892.0,
+        "p95": 1846411.0,
+        "p99": 2790781.0
+      },
+      "process_cpu_seconds": {
+        "max": 272.708113,
+        "n": 320,
+        "p50": 4.500111,
+        "p90": 26.25066,
+        "p95": 46.323923,
+        "p99": 126.293969
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 521.0,
+        "p90": 3797.0,
+        "p95": 6300.0,
+        "p99": 12304.0
+      },
+      "scenarios": {
+        "max": 144.0,
+        "n": 320,
+        "p50": 58.0,
+        "p90": 114.0,
+        "p95": 114.0,
+        "p99": 144.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.977628948146569,
+        "n": 320,
+        "p50": 0.7191064885793728,
+        "p90": 0.9208251461001554,
+        "p95": 0.9445872891007859,
+        "p99": 0.9692894144658506
+      },
+      "wall_seconds": {
+        "max": 15.497138,
+        "n": 320,
+        "p50": 0.339932,
+        "p90": 1.59301,
+        "p95": 2.7385219999999997,
+        "p99": 7.248937
+      }
+    },
+    "2|first2:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 25.258468,
+        "n": 320,
+        "p50": 0.875502,
+        "p90": 4.715069,
+        "p95": 8.639697,
+        "p99": 13.277844
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 521.0,
+        "p90": 3797.0,
+        "p95": 6300.0,
+        "p99": 12304.0
+      },
+      "scenarios": {
+        "max": 483256.0,
+        "n": 320,
+        "p50": 15422.0,
+        "p90": 102865.0,
+        "p95": 167852.0,
+        "p99": 367992.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9739402359268475,
+        "n": 320,
+        "p50": 0.8391709797043634,
+        "p90": 0.9266062586650822,
+        "p95": 0.938043857252409,
+        "p99": 0.9589401984446232
+      },
+      "wall_seconds": {
+        "max": 1.440795,
+        "n": 320,
+        "p50": 0.0596,
+        "p90": 0.282005,
+        "p95": 0.524651,
+        "p99": 0.793975
+      }
+    },
+    "3|deep:2ply_to_16": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 47367860.0,
+        "n": 320,
+        "p50": 1896635.0,
+        "p90": 8719597.0,
+        "p95": 16199550.0,
+        "p99": 33393394.0
+      },
+      "process_cpu_seconds": {
+        "max": 1588.927844,
+        "n": 320,
+        "p50": 41.527633,
+        "p90": 228.693994,
+        "p95": 437.233494,
+        "p99": 1379.471663
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 548.0,
+        "p90": 3945.0,
+        "p95": 6630.0,
+        "p99": 14924.0
+      },
+      "scenarios": {
+        "max": 8400.0,
+        "n": 320,
+        "p50": 2379.0,
+        "p90": 4632.0,
+        "p95": 6000.0,
+        "p99": 7320.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9802279552842587,
+        "n": 320,
+        "p50": 0.8862603492936488,
+        "p90": 0.9652056325179508,
+        "p95": 0.9743881301008844,
+        "p99": 0.9788320020787025
+      },
+      "wall_seconds": {
+        "max": 91.45592,
+        "n": 320,
+        "p50": 2.629805,
+        "p90": 13.431558,
+        "p95": 25.106453000000002,
+        "p99": 78.323336
+      }
+    },
+    "3|deep:3ply_wave_2": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 452287912.0,
+        "n": 320,
+        "p50": 1205910.0,
+        "p90": 21790150.0,
+        "p95": 52044278.0,
+        "p99": 130966268.0
+      },
+      "process_cpu_seconds": {
+        "max": 5202.221599,
+        "n": 320,
+        "p50": 5.296098000000001,
+        "p90": 208.23704499999997,
+        "p95": 384.926194,
+        "p99": 1493.025155
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 548.0,
+        "p90": 3945.0,
+        "p95": 6630.0,
+        "p99": 14924.0
+      },
+      "scenarios": {
+        "max": 1440.0,
+        "n": 320,
+        "p50": 317.0,
+        "p90": 716.0,
+        "p95": 796.0,
+        "p99": 1056.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9876869174292517,
+        "n": 320,
+        "p50": 0.9162350923241517,
+        "p90": 0.9816073711117698,
+        "p95": 0.9840626816126251,
+        "p99": 0.9867492612772916
+      },
+      "wall_seconds": {
+        "max": 293.585522,
+        "n": 320,
+        "p50": 0.32404200000000005,
+        "p90": 11.802919,
+        "p95": 21.741066,
+        "p99": 84.059695
+      }
+    },
+    "3|deep:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 305.303544,
+        "n": 320,
+        "p50": 5.035933,
+        "p90": 32.133451,
+        "p95": 65.32516,
+        "p99": 140.066073
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 548.0,
+        "p90": 3945.0,
+        "p95": 6630.0,
+        "p99": 14924.0
+      },
+      "scenarios": {
+        "max": 2279624.0,
+        "n": 320,
+        "p50": 91692.0,
+        "p90": 440056.0,
+        "p95": 1046108.0,
+        "p99": 1556160.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9832399501322459,
+        "n": 320,
+        "p50": 0.9291315509746977,
+        "p90": 0.9678317425024565,
+        "p95": 0.9743938814916089,
+        "p99": 0.9789605989943713
+      },
+      "wall_seconds": {
+        "max": 17.250426,
+        "n": 320,
+        "p50": 0.307124,
+        "p90": 1.858307,
+        "p95": 3.7291,
+        "p99": 7.96193
+      }
+    },
+    "3|first2:2ply_wave": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 7399314.0,
+        "n": 320,
+        "p50": 212699.0,
+        "p90": 1258342.0,
+        "p95": 2599431.0,
+        "p99": 4571562.0
+      },
+      "process_cpu_seconds": {
+        "max": 235.06269200000003,
+        "n": 320,
+        "p50": 5.473516,
+        "p90": 28.716612999999995,
+        "p95": 59.74604,
+        "p99": 187.234518
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 548.0,
+        "p90": 3945.0,
+        "p95": 6630.0,
+        "p99": 14924.0
+      },
+      "scenarios": {
+        "max": 1056.0,
+        "n": 320,
+        "p50": 266.0,
+        "p90": 620.0,
+        "p95": 756.0,
+        "p99": 1056.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9815141946821475,
+        "n": 320,
+        "p50": 0.8132670990244127,
+        "p90": 0.9302919465059837,
+        "p95": 0.9560813619696001,
+        "p99": 0.974921198581309
+      },
+      "wall_seconds": {
+        "max": 13.825385,
+        "n": 320,
+        "p50": 0.39158799999999994,
+        "p90": 1.747966,
+        "p95": 3.4253560000000003,
+        "p99": 10.644358
+      }
+    },
+    "3|first2:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 308.637323,
+        "n": 320,
+        "p50": 5.03114,
+        "p90": 33.280846,
+        "p95": 64.562412,
+        "p99": 142.355195
+      },
+      "root_candidate_total": {
+        "max": 16384.0,
+        "n": 320,
+        "p50": 548.0,
+        "p90": 3945.0,
+        "p95": 6630.0,
+        "p99": 14924.0
+      },
+      "scenarios": {
+        "max": 2279624.0,
+        "n": 320,
+        "p50": 91692.0,
+        "p90": 440056.0,
+        "p95": 1046108.0,
+        "p99": 1556160.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9812228066919446,
+        "n": 320,
+        "p50": 0.9306454747503217,
+        "p90": 0.9662929747241015,
+        "p95": 0.971074230980317,
+        "p99": 0.9799069054366545
+      },
+      "wall_seconds": {
+        "max": 17.49869,
+        "n": 320,
+        "p50": 0.305176,
+        "p90": 1.914878,
+        "p95": 3.721458,
+        "p99": 8.11261
+      }
+    },
+    "4|first2:2ply_wave": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 29684225.0,
+        "n": 320,
+        "p50": 186176.0,
+        "p90": 2021715.0,
+        "p95": 3818602.0,
+        "p99": 11326478.0
+      },
+      "process_cpu_seconds": {
+        "max": 2767.1588949999996,
+        "n": 320,
+        "p50": 4.9969339999999995,
+        "p90": 50.212194,
+        "p95": 108.59476,
+        "p99": 530.928444
+      },
+      "root_candidate_total": {
+        "max": 13856.0,
+        "n": 320,
+        "p50": 616.0,
+        "p90": 3828.0,
+        "p95": 5540.0,
+        "p99": 10442.0
+      },
+      "scenarios": {
+        "max": 15840.0,
+        "n": 320,
+        "p50": 1208.0,
+        "p90": 4290.0,
+        "p95": 6420.0,
+        "p99": 10944.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9870410587992338,
+        "n": 320,
+        "p50": 0.9016269015632318,
+        "p90": 0.9560129710529252,
+        "p95": 0.9722925578081687,
+        "p99": 0.9812448798648612
+      },
+      "wall_seconds": {
+        "max": 155.749397,
+        "n": 320,
+        "p50": 0.3552120000000001,
+        "p90": 2.929851,
+        "p95": 6.17967,
+        "p99": 30.092231
+      }
+    },
+    "4|first2:greedy_seed": {
+      "n": 320,
+      "nested_nodes": {
+        "max": 0.0,
+        "n": 320,
+        "p50": 0.0,
+        "p90": 0.0,
+        "p95": 0.0,
+        "p99": 0.0
+      },
+      "process_cpu_seconds": {
+        "max": 1922.686493,
+        "n": 320,
+        "p50": 48.728114,
+        "p90": 264.884126,
+        "p95": 478.242056,
+        "p99": 967.702503
+      },
+      "root_candidate_total": {
+        "max": 13856.0,
+        "n": 320,
+        "p50": 616.0,
+        "p90": 3828.0,
+        "p95": 5540.0,
+        "p99": 10442.0
+      },
+      "scenarios": {
+        "max": 15635070.0,
+        "n": 320,
+        "p50": 849365.0,
+        "p90": 2964883.0,
+        "p95": 6286575.0,
+        "p99": 12015318.0
+      },
+      "scheduled_core_occupancy": {
+        "max": 0.9861403241260309,
+        "n": 320,
+        "p50": 0.9556382555866562,
+        "p90": 0.9751364872103339,
+        "p95": 0.980263900449615,
+        "p99": 0.983714390788874
+      },
+      "wall_seconds": {
+        "max": 109.071026,
+        "n": 320,
+        "p50": 2.836396,
+        "p90": 15.172511,
+        "p95": 27.091512,
+        "p99": 55.015428
+      }
+    }
+  },
+  "schema_version": 1,
+  "sentinels": {
+    "early_normalized_mean": 1.0134498857848355,
+    "early_to_late_drift_fraction": -0.004907815487286693,
+    "late_normalized_mean": 1.0084760607397918,
+    "n": 41,
+    "node_throughput_per_wall_second": {
+      "max": 531623.0124539755,
+      "n": 41,
+      "p50": 480520.421361511,
+      "p90": 495917.5646048283,
+      "p95": 499243.059088453,
+      "p99": 531623.0124539755
+    },
+    "noisy_segments": [],
+    "noisy_threshold_fraction_from_median": 0.2,
+    "normalized_throughput_cv": 0.026340235923524306,
+    "scheduled_core_occupancy": {
+      "max": 0.947364365,
+      "n": 41,
+      "p50": 0.944384429,
+      "p90": 0.947037007,
+      "p95": 0.947144959,
+      "p99": 0.947364365
+    }
+  }
+}
