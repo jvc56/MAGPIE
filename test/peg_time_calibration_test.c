@@ -33,11 +33,14 @@ typedef struct PegCalEvent {
   double win;
   double spread;
   int scenarios;
+  uint64_t nested_endgame_nodes;
+  double process_cpu_seconds;
   int64_t completed_ns;
 } PegCalEvent;
 
 typedef struct PegCalTrace {
   int64_t start_ns;
+  double cpu_start;
   atomic_int event_count;
   PegCalEvent events[PEG_CAL_MAX_EVENTS];
 } PegCalTrace;
@@ -80,6 +83,7 @@ static void peg_cal_move_string(const Game *game, const Move *move, char *out,
 
 static void peg_cal_on_cand_done(int stage, int rank, const Move *move,
                                  double win, double spread, int scenarios,
+                                 uint64_t nested_endgame_nodes,
                                  int64_t completed_ns, bool reordered,
                                  void *user_data) {
   (void)reordered;
@@ -96,6 +100,8 @@ static void peg_cal_on_cand_done(int stage, int rank, const Move *move,
   event->win = win;
   event->spread = spread;
   event->scenarios = scenarios;
+  event->nested_endgame_nodes = nested_endgame_nodes;
+  event->process_cpu_seconds = peg_cal_process_cpu_seconds() - trace->cpu_start;
   event->completed_ns = completed_ns;
 }
 
@@ -137,10 +143,13 @@ static uint64_t peg_cal_print_events(PegCalTrace *trace, const Game *game,
     (void)printf(
         "PEGCAL_EVENT\tmode=%s\tposition=%s\tlabel=%s\tstage=%d\trank=%d"
         "\tmove=%s\twin=%.9f\tspread=%.6f\tscenarios=%d"
-        "\tcumulative_scenarios=%" PRIu64 "\tcompleted_seconds=%.9f\n",
+        "\tcumulative_scenarios=%" PRIu64 "\tnested_endgame_nodes=%" PRIu64
+        "\tcompleted_seconds=%.9f\tprocess_cpu_seconds=%.9f\n",
         mode, position, label, event->stage, event->rank, move, event->win,
         event->spread, event->scenarios, cumulative_scenarios,
-        (double)(event->completed_ns - trace->start_ns) / 1.0e9);
+        event->nested_endgame_nodes,
+        (double)(event->completed_ns - trace->start_ns) / 1.0e9,
+        event->process_cpu_seconds);
   }
   if (dropped > 0) {
     (void)printf("PEGCAL_WARNING\tmode=%s\tposition=%s\tlabel=%s"
@@ -194,6 +203,7 @@ static void peg_cal_run_arm(Config *config, const char *mode,
   PegCalTrace *trace = calloc_or_die(1, sizeof(*trace));
   atomic_init(&trace->event_count, 0);
   trace->start_ns = ctimer_monotonic_ns();
+  trace->cpu_start = peg_cal_process_cpu_seconds();
 
   PegArgs args = {0};
   args.game = config_get_game(config);
@@ -318,13 +328,13 @@ static void peg_cal_run_judge(Config *config, const char *position) {
   int judge_schedule[2] = {nominee_count, nominee_count};
   const int stride = peg_cal_env_int("PEG_CAL_STRIDE", 4);
   const double budget = peg_cal_env_double("PEG_CAL_BUDGET", 600.0);
-  char label[32];
-  (void)snprintf(label, sizeof(label), "stride%d", stride);
+  const char *label = peg_cal_required_env("PEG_CAL_LABEL");
 
   PegPoll *poll = peg_poll_create();
   PegCalTrace *trace = calloc_or_die(1, sizeof(*trace));
   atomic_init(&trace->event_count, 0);
   trace->start_ns = ctimer_monotonic_ns();
+  trace->cpu_start = peg_cal_process_cpu_seconds();
 
   PegArgs args = {0};
   args.game = config_get_game(config);
