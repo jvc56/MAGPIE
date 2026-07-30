@@ -380,8 +380,9 @@ def main() -> int:
     records_path = output_dir / "records.jsonl"
     raw_path = output_dir / "raw.log"
     records = load_records(records_path)
-    if not (output_dir / "manifest.json").exists():
-        create_manifest(repo, panel, positions, output_dir, args)
+    # Refresh on resume so a repaired panel or a committed harness update is
+    # reflected in provenance. records.jsonl remains append-only.
+    create_manifest(repo, panel, positions, output_dir, args)
     runner = SequentialRunner(binary, output_dir, records_path, raw_path, records)
 
     sentinel = next(
