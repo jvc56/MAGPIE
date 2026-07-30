@@ -116,6 +116,10 @@ def trace_observations(
             {
                 **common,
                 "stage": "first2:2ply_wave",
+                "pre_stage_scenarios": int(seed["cumulative_scenarios"]),
+                "pre_stage_nested_nodes": int(
+                    seed["nested_endgame_nodes"]
+                ),
                 **work_delta(seed, boundary, 2),
             }
         )
@@ -142,6 +146,12 @@ def trace_observations(
         {
             **common,
             "stage": "deep:3ply_wave_2",
+            "pre_stage_scenarios": int(
+                boundary16["cumulative_scenarios"]
+            ),
+            "pre_stage_nested_nodes": int(
+                boundary16["nested_endgame_nodes"]
+            ),
             **work_delta(boundary16, stage2[-1], 2),
         }
     )
@@ -182,6 +192,8 @@ def ols(features: list[list[float]], outcomes: list[float]) -> list[float]:
         ]
         for left in range(width)
     ]
+    for index in range(width):
+        gram[index][index] += 1.0e-9
     product = [
         sum(row[column] * outcome for row, outcome in zip(features, outcomes, strict=True))
         for column in range(width)
@@ -197,7 +209,8 @@ def admission_features(observation: dict[str, Any]) -> list[float]:
     return [
         1.0,
         math.log1p(float(observation["root_candidate_total"])),
-        math.log1p(float(observation["seed_scenarios"])),
+        math.log1p(float(observation["pre_stage_scenarios"])),
+        math.log1p(float(observation["pre_stage_nested_nodes"])),
     ]
 
 
@@ -257,7 +270,11 @@ def conformal_audit(
         "target_miscoverage": 0.01,
         "conformal_rank": rank,
         "conformal_residual_quantile": conformal_quantile,
-        "features": ["log1p(root_candidate_total)", "log1p(seed_scenarios)"],
+        "features": [
+            "log1p(root_candidate_total)",
+            "log1p(pre_stage_scenarios)",
+            "log1p(pre_stage_nested_nodes)",
+        ],
         "timing_feature_used": False,
         "flat_bound": {
             "scenarios": flat_scenarios,
@@ -511,17 +528,18 @@ def make_markdown(summary: dict[str, Any]) -> str:
         lines.extend(
             [
                 "",
-                "| bag | flat vector bound (scenarios; nodes; candidates) | "
+                "| bag / stage | flat vector bound (scenarios; nodes; candidates) | "
                 "flat false starts | conditioned false starts | "
                 "conditioned median bound (scenarios; nodes; candidates) |",
                 "|---:|---|---:|---:|---|",
             ]
         )
-        for bag, audit in summary["conformal"].items():
+        for key, audit in summary["conformal"].items():
+            bag, stage = key.split("|", 1)
             flat = audit["flat_bound"]
             conditioned = audit["feature_conditioned_bound"]
             lines.append(
-                f"| {bag} | {flat['scenarios']:,}; "
+                f"| {bag} {stage} | {flat['scenarios']:,}; "
                 f"{flat['nested_nodes']:,}; 2 | "
                 f"{flat['heldout_false_starts']}/64 | "
                 f"{conditioned['heldout_false_starts']}/64 | "
@@ -682,16 +700,22 @@ def main() -> int:
                     )
                 },
             }
-    admissions = [
-        row for row in observations if row["stage"] == "first2:2ply_wave"
-    ]
     conformal = {}
-    for bag in range(1, 5):
-        audit = conformal_audit(
-            [row for row in admissions if int(row["bag"]) == bag]
-        )
-        if audit is not None:
-            conformal[str(bag)] = audit
+    for stage, bags in (
+        ("first2:2ply_wave", range(1, 5)),
+        ("deep:3ply_wave_2", (2, 3)),
+    ):
+        for bag in bags:
+            audit = conformal_audit(
+                [
+                    row
+                    for row in observations
+                    if row["stage"] == stage
+                    and int(row["bag"]) == bag
+                ]
+            )
+            if audit is not None:
+                conformal[f"{bag}|{stage}"] = audit
     summary = {
         "schema_version": 1,
         "accounting": {
