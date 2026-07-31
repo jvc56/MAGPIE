@@ -7,7 +7,10 @@ import unittest
 
 TOOLS = pathlib.Path(__file__).resolve().parent
 sys.path.insert(0, str(TOOLS))
-from lock_peg_quality_oracle_pilot import select_pilot  # noqa: E402
+from lock_peg_quality_oracle_pilot import (  # noqa: E402
+    select_all_disagreements,
+    select_pilot,
+)
 
 
 class LockPegQualityOraclePilotTest(unittest.TestCase):
@@ -36,6 +39,31 @@ class LockPegQualityOraclePilotTest(unittest.TestCase):
         )
         self.assertTrue(
             all(row["distinct_nominees"] > 1 for row in first)
+        )
+
+    def test_all_disagreements_is_complete_and_stable(self):
+        maps = [
+            {
+                "position": f"b{bag}-p{index}",
+                "bag": bag,
+                "distinct_nominees": 1 + (index % 2),
+            }
+            for bag in range(1, 5)
+            for index in range(4)
+        ]
+        selected = select_all_disagreements(list(reversed(maps)))
+        self.assertEqual(
+            [row["position"] for row in selected],
+            [
+                "b1-p1",
+                "b1-p3",
+                "b2-p1",
+                "b2-p3",
+                "b3-p1",
+                "b3-p3",
+                "b4-p1",
+                "b4-p3",
+            ],
         )
 
 

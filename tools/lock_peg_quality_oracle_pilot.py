@@ -38,6 +38,19 @@ def select_pilot(
     return selected
 
 
+def select_all_disagreements(
+    maps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return sorted(
+        (
+            row
+            for row in maps
+            if int(row["distinct_nominees"]) > 1
+        ),
+        key=lambda row: (int(row["bag"]), str(row["position"])),
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -54,6 +67,7 @@ def main() -> int:
     )
     parser.add_argument("--output", type=pathlib.Path, required=True)
     parser.add_argument("--per-bag", type=int, default=6)
+    parser.add_argument("--all-disagreements", action="store_true")
     parser.add_argument("--seed", default="quality-direct4-pilot-20260730-v1")
     args = parser.parse_args()
 
@@ -64,7 +78,8 @@ def main() -> int:
     panel = args.panel if args.panel.is_absolute() else repo / args.panel
     output = args.output if args.output.is_absolute() else repo / args.output
     records = load_records(records_path)
-    if any(record.get("kind") == "judge" for record in records):
+    has_judges = any(record.get("kind") == "judge" for record in records)
+    if has_judges and not args.all_disagreements:
         raise RuntimeError(
             "refusing to lock pilot after oracle judgments exist"
         )
@@ -77,16 +92,27 @@ def main() -> int:
         raise RuntimeError(
             f"quality arms incomplete: {len(maps_by_position)}/200 maps"
         )
-    selected = select_pilot(
-        list(maps_by_position.values()), args.per_bag, args.seed
-    )
+    if args.all_disagreements:
+        selected = select_all_disagreements(
+            list(maps_by_position.values())
+        )
+    else:
+        selected = select_pilot(
+            list(maps_by_position.values()), args.per_bag, args.seed
+        )
     manifest = {
         "schema_version": 1,
-        "locked_before_oracle": True,
+        "locked_before_oracle": not has_judges,
         "selection": (
-            "distinct-policy disagreements, then deterministic SHA-256 "
-            "random rank within bag"
+            "all distinct-policy disagreements; selection cannot depend "
+            "on oracle values or runtime"
+            if args.all_disagreements
+            else (
+                "distinct-policy disagreements, then deterministic "
+                "SHA-256 random rank within bag"
+            )
         ),
+        "selection_independent_of_oracle": args.all_disagreements,
         "selection_excludes": [
             "oracle_values",
             "oracle_runtime",
@@ -94,7 +120,7 @@ def main() -> int:
             "direct_4_results",
         ],
         "seed": args.seed,
-        "per_bag": args.per_bag,
+        "per_bag": None if args.all_disagreements else args.per_bag,
         "positions": len(selected),
         "panel": {"path": str(panel), "sha256": sha256(panel)},
         "arm_records": {
