@@ -53,14 +53,51 @@
 // their tuning knobs (threads, time budgets, position counts, nesting schedule)
 // as local constants — edit them in source to sweep different values.
 
+// Candidate completion traces are retained for the structural calibration.
+// The callbacks can arrive concurrently and out of timestamp order, so the
+// atomic slot is only an ownership mechanism; consumers sort by elapsed_ns.
+enum {
+  PEG_BENCH_MAX_CANDIDATE_EVENTS = 16384,
+  PEG_BENCH_MAX_STAGES = 9,
+};
+
+typedef struct PegBenchCandidateEvent {
+  int stage_idx;
+  int depth;
+  int cand_rank;
+  int candidates_completed;
+  int candidates_total;
+  int scenarios_completed;
+  uint64_t endgame_nodes;
+  uint64_t item_id;
+  double win_pct;
+  double mean_spread;
+  int64_t elapsed_ns;
+  int64_t cpu_ns;
+} PegBenchCandidateEvent;
+
+typedef struct PegBenchCandidateTrace {
+  _Atomic uint64_t event_count;
+  int64_t start_ns;
+  int64_t start_cpu_ns;
+  atomic_int_fast64_t stage_start_ns[PEG_BENCH_MAX_STAGES];
+  atomic_int_fast64_t stage_start_cpu_ns[PEG_BENCH_MAX_STAGES];
+  atomic_int stage_depth[PEG_BENCH_MAX_STAGES];
+  atomic_int stage_total[PEG_BENCH_MAX_STAGES];
+  PegBenchCandidateEvent events[PEG_BENCH_MAX_CANDIDATE_EVENTS];
+} PegBenchCandidateTrace;
+
 // One hardcoded PEG solver configuration (an A/B arm or the oracle).
 typedef struct PegBenchConfig {
   const char *name;
   int num_threads;
   double time_budget_seconds; // 0 = unbounded
+  int max_stage;              // 0 = full configured cascade
+  bool greedy_seed_only;
   int scenario_stride;        // <= 1 = full enumeration (bag >= 3 only)
   const int *stage_top_k;     // NULL = built-in default cascade
   int num_stages;             // 0 = default cascade length
+  int stage_fidelity_plies;   // 0 = normal 2,3,4,... ramp
   bool nested_enabled;        // nested-PEG non-emptier lookahead
   int nested_cand_cap;
   const int *nested_cand_caps; // per-level cap sequence (NULL = flat cap)
@@ -69,6 +106,10 @@ typedef struct PegBenchConfig {
   int nested_emptier_ply_cap;
   int nested_max_depth;
   PegPoll *poll; // non-NULL = live mode (publishes partial stages)
+  // Optional caller-owned trace populated from AnalysisProgress candidate
+  // events. This observes both the fast barrier path and live path without
+  // changing solver scheduling.
+  PegBenchCandidateTrace *candidate_trace;
 } PegBenchConfig;
 
 // Result of solving one position with one fast config.
@@ -76,17 +117,18 @@ typedef struct PegBenchOutcome {
   char move_str[32];
   Move move; // kept so the oracle can re-evaluate it via pnoprune
   double elapsed;
+  double cpu_seconds;
   int stage;          // last_completed_stage reached
   bool stage_partial; // true if that stage was cut off mid-way (partial top-K)
   // Deepest stage REACHED (>= stage; one beyond when partial) and its progress.
-  // deep_work is the stage's cands_done counter, which is bumped per candidate
-  // *scenario* completion (peg.c) — a scenario-granular measure of how far into
-  // the stage the arm got. It is comparable across arms: both evaluate the same
-  // candidates over the same scenario set at each stage, so the only difference
-  // is how much of that work each finished in the budget. This credits the arm
-  // that got further within a partial stage, not just for completing one.
+  // deep_work is the number of whole candidates completed in the deepest stage.
+  // The separate scenarios/endgame_nodes fields carry the lower-level work.
+  // Keeping all three is important: PEG can finish candidates with radically
+  // different costs, and a partial stage is a usable result once >= 2 whole
+  // candidates have finished.
   int deep_stage; // index of the deepest stage reached (n_stage_history - 1)
   int deep_work;  // scenario-completions in that deepest stage
+  int deep_total; // candidate total in that deepest stage
   // Per-arm coverage: how many stages the arm completed, the root candidate
   // field size (same for both arms on a position), and the total candidate-
   // scenario evaluations across all stages (the real "how much did this arm
@@ -94,8 +136,147 @@ typedef struct PegBenchOutcome {
   int n_stages;    // stages reached (n_stage_history)
   int root_cands;  // stage-0 candidate field size
   int total_evals; // sum of cands_done across all stages
+  uint64_t scenarios;
+  uint64_t endgame_nodes;
+  double greedy_elapsed;
+  double greedy_cpu_seconds;
+  uint64_t greedy_scenarios;
+  uint64_t greedy_endgame_nodes;
+  bool usable;
   bool ok;
 } PegBenchOutcome;
+
+typedef struct PegBenchWork {
+  atomic_uint_fast64_t scenarios;
+  atomic_uint_fast64_t endgame_nodes;
+  atomic_int deepest_stage;
+  atomic_int deepest_candidates;
+  atomic_int deepest_candidates_total;
+  atomic_int root_candidates;
+  atomic_int candidate_evals;
+  atomic_uint_fast64_t greedy_elapsed_ns;
+  atomic_uint_fast64_t greedy_cpu_ns;
+  atomic_uint_fast64_t greedy_scenarios;
+  atomic_uint_fast64_t greedy_endgame_nodes;
+  PegBenchCandidateTrace *candidate_trace;
+} PegBenchWork;
+
+static void atomic_store_max(atomic_uint_fast64_t *target, uint64_t value) {
+  uint64_t current = atomic_load_explicit(target, memory_order_relaxed);
+  while (current < value &&
+         !atomic_compare_exchange_weak_explicit(
+             target, &current, value, memory_order_relaxed,
+             memory_order_relaxed)) {
+  }
+}
+
+// Candidate completions can be delivered concurrently and therefore observed
+// out of timestamp order. Each progress event carries cumulative work, so keep
+// the maximum rather than the most recently delivered value.
+static void peg_bench_work_record(const AnalysisProgressEvent *event,
+                                  void *user_data) {
+  PegBenchWork *work = user_data;
+  if (event->mode != ANALYSIS_MODE_PEG) {
+    return;
+  }
+  atomic_store_max(&work->scenarios, event->scenarios);
+  atomic_store_max(&work->endgame_nodes, event->nodes);
+  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET &&
+      event->phase == 0 && event->candidates_total > 0) {
+    atomic_store_explicit(&work->root_candidates, event->candidates_total,
+                          memory_order_relaxed);
+  }
+  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET &&
+      event->phase >= 0 && event->phase < PEG_BENCH_MAX_STAGES) {
+    PegBenchCandidateTrace *trace = work->candidate_trace;
+    if (trace != NULL) {
+      atomic_store_explicit(&trace->stage_start_ns[event->phase],
+                            event->elapsed_ns, memory_order_relaxed);
+      atomic_store_explicit(&trace->stage_start_cpu_ns[event->phase],
+                            event->cpu_ns, memory_order_relaxed);
+      atomic_store_explicit(&trace->stage_depth[event->phase], event->depth,
+                            memory_order_relaxed);
+      atomic_store_explicit(&trace->stage_total[event->phase],
+                            event->candidates_total, memory_order_relaxed);
+    }
+  }
+  if (event->event == ANALYSIS_EVENT_CHECKPOINT && event->phase == 0) {
+    atomic_store_explicit(
+        &work->greedy_elapsed_ns,
+        event->elapsed_ns > 0 ? (uint64_t)event->elapsed_ns : 0,
+        memory_order_relaxed);
+    atomic_store_explicit(&work->greedy_cpu_ns,
+                          event->cpu_ns > 0 ? (uint64_t)event->cpu_ns : 0,
+                          memory_order_relaxed);
+    atomic_store_explicit(&work->greedy_scenarios, event->scenarios,
+                          memory_order_relaxed);
+    atomic_store_explicit(&work->greedy_endgame_nodes, event->nodes,
+                          memory_order_relaxed);
+  }
+  if (event->event == ANALYSIS_EVENT_CANDIDATE_DONE) {
+    atomic_fetch_add_explicit(&work->candidate_evals, 1,
+                              memory_order_relaxed);
+    if (work->candidate_trace != NULL) {
+      PegBenchCandidateTrace *trace = work->candidate_trace;
+      const uint64_t event_index = atomic_fetch_add_explicit(
+          &trace->event_count, 1, memory_order_relaxed);
+      if (event_index < PEG_BENCH_MAX_CANDIDATE_EVENTS) {
+        PegBenchCandidateEvent *candidate = &trace->events[event_index];
+        candidate->stage_idx = event->phase;
+        candidate->depth = event->depth;
+        candidate->cand_rank = event->candidate_index;
+        candidate->candidates_completed = event->candidates_completed;
+        candidate->candidates_total = event->candidates_total;
+        candidate->scenarios_completed = (int)event->item_work_units;
+        candidate->endgame_nodes = event->item_nodes;
+        candidate->item_id = event->item_id;
+        candidate->win_pct = event->value;
+        candidate->mean_spread = event->secondary_value;
+        candidate->elapsed_ns = event->elapsed_ns;
+        candidate->cpu_ns = event->cpu_ns;
+      }
+    }
+  }
+  if ((event->event == ANALYSIS_EVENT_CANDIDATE_SET ||
+       event->event == ANALYSIS_EVENT_CANDIDATE_DONE ||
+       event->event == ANALYSIS_EVENT_CHECKPOINT) &&
+      event->phase >= 0) {
+    int deepest =
+        atomic_load_explicit(&work->deepest_stage, memory_order_relaxed);
+    bool advanced = false;
+    while (deepest < event->phase &&
+           !atomic_compare_exchange_weak_explicit(
+               &work->deepest_stage, &deepest, event->phase,
+               memory_order_relaxed, memory_order_relaxed)) {
+    }
+    if (deepest < event->phase) {
+      advanced = true;
+    }
+    if (advanced) {
+      atomic_store_explicit(&work->deepest_candidates, 0,
+                            memory_order_relaxed);
+      atomic_store_explicit(&work->deepest_candidates_total,
+                            event->candidates_total, memory_order_relaxed);
+    }
+    if (event->phase == atomic_load_explicit(&work->deepest_stage,
+                                             memory_order_relaxed) &&
+        event->candidates_completed >= 0) {
+      if (event->candidates_total > 0) {
+        atomic_store_explicit(&work->deepest_candidates_total,
+                              event->candidates_total,
+                              memory_order_relaxed);
+      }
+      int completed = atomic_load_explicit(&work->deepest_candidates,
+                                           memory_order_relaxed);
+      while (completed < event->candidates_completed &&
+             !atomic_compare_exchange_weak_explicit(
+                 &work->deepest_candidates, &completed,
+                 event->candidates_completed, memory_order_relaxed,
+                 memory_order_relaxed)) {
+      }
+    }
+  }
+}
 
 // How far an arm got, crediting partial-stage progress: deeper stage wins; at
 // the same stage, more scenario work finished wins. Returns >0 if `a` got
@@ -149,6 +330,12 @@ static void exec_config_quiet(Config *config, const char *cmd) {
   close(saved_stdout);
 }
 
+static int peg_bench_env_int(const char *name, int fallback) {
+  const char *value = getenv(name);
+  return value != NULL && value[0] != '\0' ? (int)strtol(value, NULL, 10)
+                                           : fallback;
+}
+
 static void fill_peg_args(PegArgs *args, const Config *config,
                           const PegBenchConfig *cfg) {
   memset(args, 0, sizeof(*args));
@@ -156,9 +343,12 @@ static void fill_peg_args(PegArgs *args, const Config *config,
   args->thread_control = config_get_thread_control(config);
   args->num_threads = cfg->num_threads;
   args->time_budget_seconds = cfg->time_budget_seconds;
+  args->max_stage = cfg->max_stage;
+  args->greedy_seed_only = cfg->greedy_seed_only;
   args->scenario_stride = cfg->scenario_stride;
   args->stage_top_k = cfg->num_stages > 0 ? cfg->stage_top_k : NULL;
   args->num_stages = cfg->num_stages;
+  args->stage_fidelity_plies = cfg->stage_fidelity_plies;
   args->nested_enabled = cfg->nested_enabled;
   args->nested_cand_cap = cfg->nested_cand_cap;
   args->nested_cand_caps = cfg->nested_cand_caps;
@@ -182,6 +372,23 @@ static PegBenchOutcome run_one_peg(const Config *config,
                                    const PegBenchConfig *cfg) {
   PegArgs args;
   fill_peg_args(&args, config, cfg);
+  PegBenchWork work;
+  atomic_init(&work.scenarios, 0);
+  atomic_init(&work.endgame_nodes, 0);
+  atomic_init(&work.deepest_stage, -1);
+  atomic_init(&work.deepest_candidates, 0);
+  atomic_init(&work.deepest_candidates_total, 0);
+  atomic_init(&work.root_candidates, 0);
+  atomic_init(&work.candidate_evals, 0);
+  atomic_init(&work.greedy_elapsed_ns, 0);
+  atomic_init(&work.greedy_cpu_ns, 0);
+  atomic_init(&work.greedy_scenarios, 0);
+  atomic_init(&work.greedy_endgame_nodes, 0);
+  work.candidate_trace = cfg->candidate_trace;
+  args.progress_listener = (AnalysisProgressListener){
+      .callback = peg_bench_work_record,
+      .user_data = &work,
+  };
   // Reset the (reused) live poll so this solve's stage history / cands_done
   // start from zero rather than accumulating from prior solves.
   peg_poll_reset(args.poll);
@@ -189,11 +396,14 @@ static PegBenchOutcome run_one_peg(const Config *config,
   ErrorStack *err = error_stack_create();
   Timer timer;
   ctimer_start(&timer);
+  const int64_t cpu_start_ns = ctimer_process_cpu_ns();
   peg_solve(&args, &result, err);
 
   PegBenchOutcome outcome;
   memset(&outcome, 0, sizeof(outcome));
   outcome.elapsed = ctimer_elapsed_seconds(&timer);
+  outcome.cpu_seconds =
+      (double)(ctimer_process_cpu_ns() - cpu_start_ns) / 1.0e9;
   if (error_stack_is_empty(err)) {
     outcome.move = result.best_move;
     move_to_string(config_get_game(config), &outcome.move, outcome.move_str,
@@ -212,7 +422,35 @@ static PegBenchOutcome run_one_peg(const Config *config,
       }
     }
     outcome.ok = true;
+    outcome.usable = result.n_top_cands > 0 && result.best_win >= 0.0;
   }
+  outcome.scenarios =
+      atomic_load_explicit(&work.scenarios, memory_order_relaxed);
+  outcome.endgame_nodes =
+      atomic_load_explicit(&work.endgame_nodes, memory_order_relaxed);
+  outcome.greedy_elapsed =
+      (double)atomic_load_explicit(&work.greedy_elapsed_ns,
+                                   memory_order_relaxed) /
+      1.0e9;
+  outcome.greedy_cpu_seconds =
+      (double)atomic_load_explicit(&work.greedy_cpu_ns, memory_order_relaxed) /
+      1.0e9;
+  outcome.greedy_scenarios =
+      atomic_load_explicit(&work.greedy_scenarios, memory_order_relaxed);
+  outcome.greedy_endgame_nodes =
+      atomic_load_explicit(&work.greedy_endgame_nodes, memory_order_relaxed);
+  if (outcome.n_stages == 0) {
+    outcome.deep_stage =
+        atomic_load_explicit(&work.deepest_stage, memory_order_relaxed);
+    outcome.deep_work =
+        atomic_load_explicit(&work.deepest_candidates, memory_order_relaxed);
+    outcome.root_cands =
+        atomic_load_explicit(&work.root_candidates, memory_order_relaxed);
+    outcome.total_evals =
+        atomic_load_explicit(&work.candidate_evals, memory_order_relaxed);
+  }
+  outcome.deep_total = atomic_load_explicit(
+      &work.deepest_candidates_total, memory_order_relaxed);
   error_stack_destroy(err);
   peg_result_destroy(&result);
   return outcome;
@@ -604,6 +842,26 @@ static void generate_peg_cgps(uint64_t base_seed, int target_bag,
 
 void test_generate_peg_cgps(void) {
   log_set_level(LOG_FATAL);
+  const char *output_dir = getenv("MAGPIE_PEG_GEN_DIR");
+  if (output_dir != NULL && output_dir[0] != '\0') {
+    const int min_bag = peg_bench_env_int("MAGPIE_PEG_GEN_MIN_BAG", 1);
+    const int max_bag = peg_bench_env_int("MAGPIE_PEG_GEN_MAX_BAG", 4);
+    const int count = peg_bench_env_int("MAGPIE_PEG_GEN_COUNT", 25);
+    const int base_seed = peg_bench_env_int("MAGPIE_PEG_GEN_SEED", 752026);
+    const bool contested_only =
+        peg_bench_env_int("MAGPIE_PEG_GEN_CONTESTED", 0) != 0;
+    assert(min_bag >= 1 && max_bag >= min_bag && max_bag <= 4);
+    assert(count > 0);
+    assert(path_is_directory(output_dir));
+    for (int bag = min_bag; bag <= max_bag; bag++) {
+      char outfile[1024];
+      (void)snprintf(outfile, sizeof(outfile), "%s/random_%dpeg.txt",
+                     output_dir, bag);
+      generate_peg_cgps((uint64_t)base_seed + (uint64_t)bag * UINT64_C(100000),
+                        bag, count, outfile, /*append=*/false, contested_only);
+    }
+    return;
+  }
   // All bag counts use CONTESTED positions only (best-move win% in [5,95] by a
   // quick pre-filter solve), so the four utility-loss tables are comparable.
   // Without it, ~80% of random 1-2 in-bag positions are already decided (move
@@ -677,30 +935,14 @@ void test_peg_pegtopk_all(void) {
 // On-demand: run PEG to completion on the first max_pos positions of a fixture
 // file, printing per-position wall time + chosen move/win/spread + the total. A
 // simple timing harness (used to A/B the chained-wordprune cache).
-enum { PEG_BENCH_MAX_CANDIDATE_EVENTS = 16384 };
-
-typedef struct PegBenchCandidateEvent {
-  int stage_idx;
-  int cand_rank;
-  int scenarios_completed;
-  int64_t elapsed_ns;
-} PegBenchCandidateEvent;
-
-typedef struct PegBenchCandidateTrace {
-  _Atomic uint64_t event_count;
-  int64_t start_ns;
-  PegBenchCandidateEvent events[PEG_BENCH_MAX_CANDIDATE_EVENTS];
-} PegBenchCandidateTrace;
 
 static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
                                         const Move *cand, double win_pct,
                                         double mean_spread,
                                         int scenarios_completed,
+                                        uint64_t endgame_nodes,
                                         int64_t completed_ns, bool reordered,
                                         void *user_data) {
-  (void)cand;
-  (void)win_pct;
-  (void)mean_spread;
   (void)reordered;
   PegBenchCandidateTrace *trace = user_data;
   const uint64_t event_idx =
@@ -712,7 +954,12 @@ static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
   event->stage_idx = stage_idx;
   event->cand_rank = cand_rank;
   event->scenarios_completed = scenarios_completed;
+  event->endgame_nodes = endgame_nodes;
+  event->item_id = move_get_fingerprint(cand);
+  event->win_pct = win_pct;
+  event->mean_spread = mean_spread;
   event->elapsed_ns = completed_ns - trace->start_ns;
+  event->cpu_ns = ctimer_process_cpu_ns() - trace->start_cpu_ns;
 }
 
 void test_peg_bench_fixture(void) {
@@ -773,6 +1020,7 @@ void test_peg_bench_fixture(void) {
     Timer timer;
     ctimer_start(&timer);
     trace->start_ns = ctimer_monotonic_ns();
+    trace->start_cpu_ns = ctimer_process_cpu_ns();
     peg_solve(&args, &result, err);
     const double elapsed = ctimer_elapsed_seconds(&timer);
     sum_elapsed += elapsed;
@@ -784,14 +1032,22 @@ void test_peg_bench_fixture(void) {
             ? reported_event_count
             : PEG_BENCH_MAX_CANDIDATE_EVENTS;
     uint64_t candidate_scenarios = 0;
+    uint64_t candidate_endgame_nodes = 0;
     for (uint64_t event_idx = 0; event_idx < retained_event_count;
          event_idx++) {
       const PegBenchCandidateEvent *event = &trace->events[event_idx];
       candidate_scenarios += (uint64_t)event->scenarios_completed;
+      candidate_endgame_nodes += event->endgame_nodes;
       printf("[pegbcand] pos=%d stage=%d rank=%d scenarios=%d "
-             "elapsed_ms=%.3f\n",
+             "endgame_nodes=%llu item=%llu win=%.6f spread=%+.3f "
+             "elapsed_ms=%.3f cpu_ms=%.3f\n",
              pos_idx, event->stage_idx, event->cand_rank,
-             event->scenarios_completed, (double)event->elapsed_ns / 1.0e6);
+             event->scenarios_completed,
+             (unsigned long long)event->endgame_nodes,
+             (unsigned long long)event->item_id, event->win_pct,
+             event->mean_spread,
+             (double)event->elapsed_ns / 1.0e6,
+             (double)event->cpu_ns / 1.0e6);
     }
 
     char best[32] = "-";
@@ -804,11 +1060,12 @@ void test_peg_bench_fixture(void) {
       spread = result.top_cands[0].mean_spread;
     }
     printf("[pegb] pos=%2d elapsed=%.2f stage=%d candidates=%llu "
-           "candidate_scenarios=%llu event_drops=%llu best=%-14s win=%.4f "
-           "spread=%+.3f\n",
+           "candidate_scenarios=%llu candidate_endgame_nodes=%llu "
+           "event_drops=%llu best=%-14s win=%.4f spread=%+.3f\n",
            pos_idx, elapsed, result.last_completed_stage,
            (unsigned long long)reported_event_count,
            (unsigned long long)candidate_scenarios,
+           (unsigned long long)candidate_endgame_nodes,
            (unsigned long long)(reported_event_count - retained_event_count),
            best, win, spread);
     (void)fflush(stdout);
@@ -1211,9 +1468,11 @@ void test_gen_peg_fresh(void) {
 // differ ONLY in time budget (base T, then T*mult for each multiplier), then
 // ONE deep oracle scores every arm's chosen move. Prints one flushed line per
 // position (interrupt-safe): PEGCURVE bag pos best=<oracle_best_win>
-// aK=<move>|<oracle_win>... mean over positions of (best - oracle_win(arm)) =
-// that arm's utility loss; the base-minus-arm difference is the true win% the
-// extra budget buys. Env: MAGPIE_PEG_BASE (2.0), MAGPIE_PEG_MULTS
+// aK=<move>|<oracle_win>|<oracle_spread>|<seconds>|<cpu_seconds>|<scenarios>|
+// <endgame_nodes>|<stage>|<stage_candidates>. Mean over positions of (best -
+// oracle_win(arm)) is that arm's utility loss; the remaining fields separate
+// portable work/structural progress from this run's wall-clock conversion.
+// Env: MAGPIE_PEG_BASE (2.0), MAGPIE_PEG_MULTS
 // ("1.04,1.5,2.0"),
 //      MAGPIE_PEG_ORACLE (30), MAGPIE_PEG_STRIDE (0), MAGPIE_PEG_MAX (per
 //      file).
@@ -1350,7 +1609,11 @@ void test_peg_strength_curve(void) {
               break;
             }
           }
-          printf(" a%d=%s|%.5f|%.2f", a, arm[a].move_str, ow, os);
+          printf(" a%d=%s|%.5f|%.2f|%.6f|%.6f|%llu|%llu|%d|%d", a,
+                 arm[a].move_str, ow, os, arm[a].elapsed, arm[a].cpu_seconds,
+                 (unsigned long long)arm[a].scenarios,
+                 (unsigned long long)arm[a].endgame_nodes, arm[a].deep_stage,
+                 arm[a].deep_work);
         }
         printf("\n");
       } else {
@@ -1360,6 +1623,429 @@ void test_peg_strength_curve(void) {
       peg_result_destroy(&r);
       (void)fflush(stdout);
       pos_id++;
+    }
+    (void)fclose(fp);
+  }
+  config_destroy(config);
+}
+
+// Hardware-independent PEG value curve. Each position is solved to useful
+// result boundaries rather than arbitrary wall-clock cutoffs:
+//
+//   s0 = complete greedy seed
+//   sK = complete greedy seed plus K halving stages
+//
+// Every complete-boundary arm is deterministic; a cap retains usable partial
+// candidate boundaries for the heavy tail. One common pair-conditioned oracle
+// evaluates only the distinct arm moves and carries both through 2/3/4 ply.
+// This estimates the marginal value of refinement without spending the oracle
+// budget on unrelated candidates or biasing a partial top-32 judge toward the
+// protected moves. The arm order alternates by position to keep thermal drift
+// from being confounded with stage depth.
+//
+// PEGSTRUCT arm fields:
+//   move|oracle_win|oracle_spread|seconds|cpu_seconds|scenarios|
+//   nested_endgame_nodes|last_stage|deep_candidates|root_candidates|
+//   total_candidate_evals|greedy_seconds|greedy_cpu_seconds|
+//   greedy_scenarios|greedy_endgame_nodes
+//
+// Environment:
+//   MAGPIE_PEG_STRUCT_DIR       input directory (notes/peg_positions)
+//   MAGPIE_PEG_STRUCT_MAX       source-position upper bound per file (25)
+//   MAGPIE_PEG_STRUCT_START     first source position per file (0)
+//   MAGPIE_PEG_STRUCT_KMAX      deepest completed halving stage (4)
+//   MAGPIE_PEG_STRUCT_THREADS   workers (detected hardware concurrency)
+//   MAGPIE_PEG_STRUCT_ARM_MAX   seconds per structural arm; 0 = unbounded (0)
+//   MAGPIE_PEG_STRUCT_ORACLE    oracle seconds (30)
+//   MAGPIE_PEG_STRUCT_MIN_BAG   first bag-size file (1)
+//   MAGPIE_PEG_STRUCT_MAX_BAG   last bag-size file (4)
+//   MAGPIE_PEG_STRUCT_ONLY      optional comma-separated source positions
+static bool peg_struct_position_selected(const char *only, int position) {
+  if (only == NULL || only[0] == '\0') {
+    return true;
+  }
+  const char *cursor = only;
+  while (*cursor != '\0') {
+    char *end = NULL;
+    const long selected = strtol(cursor, &end, 10);
+    if (end == cursor || selected < 0 || selected > INT_MAX) {
+      return false;
+    }
+    if ((int)selected == position) {
+      return true;
+    }
+    cursor = end;
+    if (*cursor == ',') {
+      cursor++;
+    } else if (*cursor != '\0') {
+      return false;
+    }
+  }
+  return false;
+}
+
+static int peg_struct_candidate_event_cmp(const void *lhs, const void *rhs) {
+  const PegBenchCandidateEvent *a = lhs;
+  const PegBenchCandidateEvent *b = rhs;
+  if (a->elapsed_ns != b->elapsed_ns) {
+    return a->elapsed_ns < b->elapsed_ns ? -1 : 1;
+  }
+  if (a->stage_idx != b->stage_idx) {
+    return a->stage_idx - b->stage_idx;
+  }
+  return a->cand_rank - b->cand_rank;
+}
+
+static void peg_struct_print_candidate_trace(
+    int bag, int pos, int requested_stage, const char *order,
+    PegBenchCandidateTrace *trace) {
+  for (int phase = 0; phase < PEG_BENCH_MAX_STAGES; phase++) {
+    const int total =
+        atomic_load_explicit(&trace->stage_total[phase], memory_order_relaxed);
+    if (total <= 0) {
+      continue;
+    }
+    printf("PEGSTRUCTSTAGE bag=%d pos=%d requested_stage=%d order=%s "
+           "phase=%d depth=%d total=%d start_ns=%lld start_cpu_ns=%lld\n",
+           bag, pos, requested_stage, order, phase,
+           atomic_load_explicit(&trace->stage_depth[phase],
+                                memory_order_relaxed),
+           total,
+           (long long)atomic_load_explicit(&trace->stage_start_ns[phase],
+                                           memory_order_relaxed),
+           (long long)atomic_load_explicit(&trace->stage_start_cpu_ns[phase],
+                                           memory_order_relaxed));
+  }
+  const uint64_t reported = atomic_load_explicit(
+      &trace->event_count, memory_order_relaxed);
+  const uint64_t retained =
+      reported < PEG_BENCH_MAX_CANDIDATE_EVENTS
+          ? reported
+          : PEG_BENCH_MAX_CANDIDATE_EVENTS;
+  qsort(trace->events, (size_t)retained, sizeof(trace->events[0]),
+        peg_struct_candidate_event_cmp);
+  for (uint64_t event_index = 0; event_index < retained; event_index++) {
+    const PegBenchCandidateEvent *event = &trace->events[event_index];
+    printf("PEGSTRUCTCAND bag=%d pos=%d requested_stage=%d order=%s "
+           "phase=%d depth=%d rank=%d completed=%d total=%d elapsed_ns=%lld "
+           "cpu_ns=%lld scenarios=%d endgame_nodes=%llu item=%llu "
+           "win=%.8f spread=%.4f\n",
+           bag, pos, requested_stage, order, event->stage_idx, event->depth,
+           event->cand_rank, event->candidates_completed,
+           event->candidates_total,
+           (long long)event->elapsed_ns, (long long)event->cpu_ns,
+           event->scenarios_completed,
+           (unsigned long long)event->endgame_nodes,
+           (unsigned long long)event->item_id, event->win_pct,
+           event->mean_spread);
+  }
+  if (reported > retained) {
+    printf("PEGSTRUCTCANDDROP bag=%d pos=%d requested_stage=%d order=%s "
+           "reported=%llu retained=%llu\n",
+           bag, pos, requested_stage, order,
+           (unsigned long long)reported, (unsigned long long)retained);
+  }
+}
+
+void test_peg_structural_curve(void) {
+  log_set_level(LOG_FATAL);
+  const char *dir = getenv("MAGPIE_PEG_STRUCT_DIR");
+  if (dir == NULL || dir[0] == '\0') {
+    dir = "notes/peg_positions";
+  }
+  const int max_positions =
+      peg_bench_env_int("MAGPIE_PEG_STRUCT_MAX", 25);
+  const int start_position =
+      peg_bench_env_int("MAGPIE_PEG_STRUCT_START", 0);
+  const int kmax = peg_bench_env_int("MAGPIE_PEG_STRUCT_KMAX", 4);
+  const int threads =
+      peg_bench_env_int("MAGPIE_PEG_STRUCT_THREADS", get_num_cores());
+  const int min_bag = peg_bench_env_int("MAGPIE_PEG_STRUCT_MIN_BAG", 1);
+  const int max_bag = peg_bench_env_int("MAGPIE_PEG_STRUCT_MAX_BAG", 4);
+  const char *only_positions = getenv("MAGPIE_PEG_STRUCT_ONLY");
+  const char *arm_max_env = getenv("MAGPIE_PEG_STRUCT_ARM_MAX");
+  const double arm_max_seconds =
+      arm_max_env && arm_max_env[0] != '\0' ? strtod(arm_max_env, NULL) : 0.0;
+  const char *oracle_env = getenv("MAGPIE_PEG_STRUCT_ORACLE");
+  const double oracle_seconds =
+      oracle_env && oracle_env[0] != '\0' ? strtod(oracle_env, NULL) : 30.0;
+  const int oracle_fidelity =
+      peg_bench_env_int("MAGPIE_PEG_STRUCT_ORACLE_PLIES", 4);
+  const int oracle_stride =
+      peg_bench_env_int("MAGPIE_PEG_STRUCT_ORACLE_STRIDE", 1);
+  assert(max_positions > 0);
+  assert(start_position >= 0 && start_position < max_positions);
+  assert(kmax >= 0 && kmax <= 8);
+  assert(threads > 0);
+  assert(min_bag >= 1 && min_bag <= 4);
+  assert(max_bag >= min_bag && max_bag <= 4);
+  assert(arm_max_seconds >= 0.0);
+  assert(oracle_seconds > 0.0);
+  assert(oracle_fidelity >= 2 &&
+         oracle_fidelity <= PEG_EXHAUSTIVE_PLIES);
+  assert(oracle_stride > 0);
+
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  static const int oracle_k[] = {2};
+  printf("PEGSTRUCTCFG threads=%d kmax=%d start=%d maxpos=%d bags=%d..%d "
+         "arm_max=%.3f oracle=%.3f dir=%s quality_axis=oracle_utility "
+         "work_axes=scenarios,endgame_nodes oracle_fidelity=%d "
+         "oracle_stride=%d only=%s\n",
+         threads, kmax, start_position, max_positions, min_bag, max_bag,
+         arm_max_seconds, oracle_seconds, dir, oracle_fidelity, oracle_stride,
+         only_positions != NULL && only_positions[0] != '\0'
+             ? only_positions
+             : "all");
+  (void)fflush(stdout);
+
+  for (int bag = min_bag; bag <= max_bag; bag++) {
+    char filename[1024];
+    (void)snprintf(filename, sizeof(filename), "%s/random_%dpeg.txt", dir,
+                   bag);
+    FILE *fp = fopen(filename, "re");
+    if (fp == NULL) {
+      printf("PEGSTRUCTERR no %s\n", filename);
+      continue;
+    }
+
+    char line[4096];
+    int pos = 0;
+    while (pos < max_positions && fgets(line, sizeof(line), fp)) {
+      const size_t len = strlen(line);
+      if (len > 0 && line[len - 1] == '\n') {
+        line[len - 1] = '\0';
+      }
+      if (line[0] == '\0') {
+        continue;
+      }
+      if (pos < start_position) {
+        pos++;
+        continue;
+      }
+      if (!peg_struct_position_selected(only_positions, pos)) {
+        pos++;
+        continue;
+      }
+      char *cmd = get_formatted_string("cgp %s", line);
+      exec_config_quiet(config, cmd);
+      free(cmd);
+
+      const int narm = kmax + 1;
+      PegBenchOutcome arms[9];
+      memset(arms, 0, sizeof(arms));
+      bool arm_ran[9] = {false};
+      bool arm_boundary_complete[9] = {false};
+      bool all_boundaries_complete = true;
+      const bool reverse = ((bag + pos) & 1) != 0;
+      for (int slot = 0; slot < narm; slot++) {
+        const int stage = reverse ? narm - 1 - slot : slot;
+        PegBenchCandidateTrace *candidate_trace =
+            calloc_or_die(1, sizeof(*candidate_trace));
+        atomic_init(&candidate_trace->event_count, 0);
+        for (int phase = 0; phase < PEG_BENCH_MAX_STAGES; phase++) {
+          atomic_init(&candidate_trace->stage_start_ns[phase], 0);
+          atomic_init(&candidate_trace->stage_start_cpu_ns[phase], 0);
+          atomic_init(&candidate_trace->stage_depth[phase], -1);
+          atomic_init(&candidate_trace->stage_total[phase], 0);
+        }
+        const PegBenchConfig arm_cfg = {
+            .name = "structural",
+            .num_threads = threads,
+            .time_budget_seconds = arm_max_seconds,
+            .max_stage = stage,
+            .greedy_seed_only = stage == 0,
+            .scenario_stride = 1,
+            .candidate_trace = candidate_trace,
+        };
+        arms[stage] = run_one_peg(config, &arm_cfg);
+        arm_ran[stage] = true;
+        peg_struct_print_candidate_trace(
+            bag, pos, stage, reverse ? "desc" : "asc", candidate_trace);
+        free(candidate_trace);
+        const bool boundary_complete =
+            arms[stage].ok && arms[stage].usable &&
+            !arms[stage].stage_partial && arms[stage].stage >= stage &&
+            arms[stage].deep_stage >= stage && arms[stage].deep_total > 0 &&
+            arms[stage].deep_work >= arms[stage].deep_total;
+        arm_boundary_complete[stage] = boundary_complete;
+        if (!boundary_complete) {
+          printf("PEGSTRUCTTRUNC bag=%d pos=%d requested_stage=%d "
+                 "last_stage=%d partial=%d elapsed=%.6f scenarios=%llu "
+                 "endgame_nodes=%llu deep_stage=%d deep_candidates=%d "
+                 "deep_total=%d usable=%d\n",
+                 bag, pos, stage, arms[stage].stage,
+                 arms[stage].stage_partial ? 1 : 0, arms[stage].elapsed,
+                 (unsigned long long)arms[stage].scenarios,
+                 (unsigned long long)arms[stage].endgame_nodes,
+                 arms[stage].deep_stage, arms[stage].deep_work,
+                 arms[stage].deep_total, arms[stage].usable ? 1 : 0);
+          all_boundaries_complete = false;
+          // When deep-first ordering caps, still run the cheaper arms that
+          // follow it. The common oracle then scores both the greedy and
+          // partial/deep choices, avoiding the severe optimism of judging one
+          // protected move by itself. With shallow-first ordering, remaining
+          // arms are even deeper and cannot supply the missing baseline.
+          if (!reverse) {
+            break;
+          }
+        }
+      }
+      int usable_arms = 0;
+      for (int stage = 0; stage < narm; stage++) {
+        if (arm_ran[stage] && arms[stage].ok && arms[stage].usable) {
+          usable_arms++;
+        }
+      }
+      if (usable_arms == 0) {
+        printf("PEGSTRUCT bag=%d pos=%d SKIP no_usable_arm\n", bag, pos);
+        pos++;
+        (void)fflush(stdout);
+        continue;
+      }
+
+      const Move *protected_moves[9];
+      char protected_strings[9][32];
+      int num_protected = 0;
+      for (int stage = 0; stage < narm; stage++) {
+        if (!arm_ran[stage] || !arms[stage].ok || !arms[stage].usable) {
+          continue;
+        }
+        bool duplicate = false;
+        for (int i = 0; i < num_protected; i++) {
+          if (strcmp(protected_strings[i], arms[stage].move_str) == 0) {
+            duplicate = true;
+            break;
+          }
+        }
+        if (!duplicate) {
+          protected_moves[num_protected] = &arms[stage].move;
+          (void)snprintf(protected_strings[num_protected],
+                         sizeof(protected_strings[num_protected]), "%s",
+                         arms[stage].move_str);
+          num_protected++;
+        }
+      }
+
+      PegBenchCandidateTrace *oracle_candidate_trace =
+          calloc_or_die(1, sizeof(*oracle_candidate_trace));
+      atomic_init(&oracle_candidate_trace->event_count, 0);
+      for (int phase = 0; phase < PEG_BENCH_MAX_STAGES; phase++) {
+        atomic_init(&oracle_candidate_trace->stage_start_ns[phase], 0);
+        atomic_init(&oracle_candidate_trace->stage_start_cpu_ns[phase], 0);
+        atomic_init(&oracle_candidate_trace->stage_depth[phase], -1);
+        atomic_init(&oracle_candidate_trace->stage_total[phase], 0);
+      }
+      const PegBenchConfig oracle_cfg = {
+          .name = "arm-pair-direct",
+          .num_threads = threads,
+          .time_budget_seconds = oracle_seconds,
+          .scenario_stride = oracle_stride,
+          .stage_top_k = oracle_k,
+          .num_stages = 1,
+          .stage_fidelity_plies = oracle_fidelity,
+          .candidate_trace = oracle_candidate_trace,
+      };
+      PegArgs oracle_args;
+      fill_peg_args(&oracle_args, config, &oracle_cfg);
+      oracle_args.only_moves = protected_moves;
+      oracle_args.n_only_moves = num_protected;
+      oracle_args.protect_moves = protected_moves;
+      oracle_args.n_protect_moves = num_protected;
+      PegResult oracle;
+      ErrorStack *error_stack = error_stack_create();
+      peg_solve(&oracle_args, &oracle, error_stack);
+      if (!error_stack_is_empty(error_stack) || oracle.n_top_cands <= 0) {
+        printf("PEGSTRUCT bag=%d pos=%d SKIP oracle_error\n", bag, pos);
+        error_stack_destroy(error_stack);
+        peg_result_destroy(&oracle);
+        free(oracle_candidate_trace);
+        pos++;
+        (void)fflush(stdout);
+        continue;
+      }
+      peg_struct_print_candidate_trace(bag, pos, kmax, "oracle",
+                                      oracle_candidate_trace);
+
+      const Game *game = config_get_game(config);
+      int protected_scored = 0;
+      for (int protected_idx = 0; protected_idx < num_protected;
+           protected_idx++) {
+        bool found = false;
+        for (int candidate = 0; candidate < oracle.n_top_cands; candidate++) {
+          char candidate_string[32];
+          move_to_string(game, &oracle.top_cands[candidate].move,
+                         candidate_string, sizeof(candidate_string));
+          if (strcmp(candidate_string,
+                     protected_strings[protected_idx]) == 0) {
+            found = true;
+            break;
+          }
+        }
+        protected_scored += found ? 1 : 0;
+      }
+      const bool oracle_complete =
+          num_protected <= 1 ||
+          (oracle.last_completed_stage >= 1 &&
+           !oracle.last_stage_partial &&
+           protected_scored == num_protected);
+      printf("PEGSTRUCTORACLE bag=%d pos=%d requested_stage=%d "
+             "last_stage=%d partial=%d elapsed=%.6f candidates=%d "
+             "protected=%d scored=%d scope=arm_moves target_depth=%d "
+             "direct_fidelity=%d scenario_stride=%d complete=%d\n",
+             bag, pos, kmax, oracle.last_completed_stage,
+             oracle.last_stage_partial ? 1 : 0,
+             ctimer_elapsed_seconds(&oracle.timer), oracle.n_top_cands,
+             num_protected, protected_scored, oracle_fidelity,
+             oracle_cfg.stage_fidelity_plies, oracle_stride,
+             oracle_complete ? 1 : 0);
+      printf("%s bag=%d pos=%d order=%s bestw=%.5f bests=%.2f",
+             all_boundaries_complete ? "PEGSTRUCT" : "PEGSTRUCTPARTIAL", bag,
+             pos, reverse ? "desc" : "asc",
+             oracle_complete ? oracle.top_cands[0].win_pct : -1.0,
+             oracle_complete ? oracle.top_cands[0].mean_spread : 0.0);
+      for (int stage = 0; stage < narm; stage++) {
+        if (!arm_ran[stage] || !arms[stage].ok || !arms[stage].usable) {
+          continue;
+        }
+        double oracle_win = -1.0;
+        double oracle_spread = 0.0;
+        if (oracle_complete) {
+          for (int candidate = 0; candidate < oracle.n_top_cands; candidate++) {
+            char candidate_string[32];
+            move_to_string(game, &oracle.top_cands[candidate].move,
+                           candidate_string, sizeof(candidate_string));
+            if (strcmp(candidate_string, arms[stage].move_str) == 0) {
+              oracle_win = oracle.top_cands[candidate].win_pct;
+              oracle_spread = oracle.top_cands[candidate].mean_spread;
+              break;
+            }
+          }
+        }
+        printf(" s%d=%s|%.5f|%.2f|%.6f|%.6f|%llu|%llu|%d|%d|%d|%d|"
+               "%.6f|%.6f|%llu|%llu",
+               stage, arms[stage].move_str, oracle_win, oracle_spread,
+               arms[stage].elapsed, arms[stage].cpu_seconds,
+               (unsigned long long)arms[stage].scenarios,
+               (unsigned long long)arms[stage].endgame_nodes,
+               arms[stage].stage, arms[stage].deep_work,
+               arms[stage].root_cands, arms[stage].total_evals,
+               arms[stage].greedy_elapsed, arms[stage].greedy_cpu_seconds,
+               (unsigned long long)arms[stage].greedy_scenarios,
+               (unsigned long long)arms[stage].greedy_endgame_nodes);
+        if (!all_boundaries_complete) {
+          printf("|%d|%d|%d", arms[stage].deep_total,
+                 arms[stage].stage_partial ? 1 : 0,
+                 arm_boundary_complete[stage] ? 1 : 0);
+        }
+      }
+      printf("\n");
+      (void)fflush(stdout);
+
+      error_stack_destroy(error_stack);
+      peg_result_destroy(&oracle);
+      free(oracle_candidate_trace);
+      pos++;
     }
     (void)fclose(fp);
   }

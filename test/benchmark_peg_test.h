@@ -24,5 +24,6 @@ void test_peg_stage_stability(void);
 void test_peg_strength_ab(void);
 void test_gen_peg_fresh(void);
 void test_peg_strength_curve(void);
+void test_peg_structural_curve(void);
 
 #endif

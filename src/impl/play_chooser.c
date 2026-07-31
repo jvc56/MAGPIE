@@ -27,6 +27,7 @@
 #include "../ent/words.h"
 #include "../util/io_util.h"
 #include "endgame.h"
+#include "endgame_admission_model.h"
 #include "gameplay.h"
 #include "move_gen.h"
 #include "peg.h"
@@ -79,6 +80,7 @@ typedef struct PlayChooserBenchmarkAtomicStats {
   _Atomic uint64_t peg_completed_stages;
   _Atomic uint64_t peg_final_candidates;
   _Atomic uint64_t peg_final_scenarios;
+  _Atomic uint64_t peg_endgame_nodes;
   _Atomic uint64_t peg_partial_calls;
   _Atomic uint64_t endgame_calls;
   _Atomic uint64_t endgame_nodes;
@@ -122,6 +124,7 @@ void play_chooser_benchmark_reset(void) {
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_completed_stages);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_candidates);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_scenarios);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_endgame_nodes);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_partial_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
@@ -148,6 +151,7 @@ void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_completed_stages);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_candidates);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_final_scenarios);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_endgame_nodes);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_partial_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
@@ -192,19 +196,19 @@ static void play_chooser_benchmark_record_static(bool fallback) {
 typedef struct PlayChooserPegBenchmarkContext {
   uint64_t call_index;
   int64_t start_ns;
+  int64_t start_cpu_ns;
 } PlayChooserPegBenchmarkContext;
 
 static void play_chooser_benchmark_peg_candidate_done(
     int stage_idx, int cand_rank, const Move *cand, double win_pct,
-    double mean_spread, int scen_done, int64_t completed_ns, bool reordered,
-    void *user_data) {
-  (void)cand;
-  (void)win_pct;
-  (void)mean_spread;
+    double mean_spread, int scen_done, uint64_t endgame_nodes,
+    int64_t completed_ns, bool reordered, void *user_data) {
   (void)reordered;
   const PlayChooserPegBenchmarkContext *context = user_data;
   play_chooser_benchmark_add(
       &play_chooser_benchmark_stats.peg_candidate_completions, 1);
+  play_chooser_benchmark_add(&play_chooser_benchmark_stats.peg_endgame_nodes,
+                             endgame_nodes);
   const uint64_t event_index = atomic_fetch_add_explicit(
       &play_chooser_peg_candidate_event_count, 1, memory_order_relaxed);
   if (event_index >= PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS) {
@@ -216,9 +220,14 @@ static void play_chooser_benchmark_peg_candidate_done(
       &play_chooser_peg_candidate_events[event_index];
   event->call_index = context->call_index;
   event->elapsed_ns = (uint64_t)(completed_ns - context->start_ns);
+  event->cpu_ns = (uint64_t)(ctimer_process_cpu_ns() - context->start_cpu_ns);
   event->stage_index = stage_idx;
   event->candidate_rank = cand_rank;
   event->scenarios_completed = scen_done;
+  event->endgame_nodes = endgame_nodes;
+  event->item_id = move_get_fingerprint(cand);
+  event->win_pct = win_pct;
+  event->mean_spread = mean_spread;
 }
 
 struct PlayChooser {
@@ -635,6 +644,24 @@ static bool play_chooser_run_endgame(
     thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
   }
   EndgameArgs endgame_args = {0};
+  EndgameAdmissionPolicy admission_policy = {
+      .model = endgame_admission_default_model(),
+      .tt_fraction_of_mem = 0.0,
+      .use_heuristics = true,
+      .uses_external_tt = shared_tt != NULL,
+      .reserve_seconds = 0.0,
+  };
+  EndgameDepthAdmissionCallback admission_callback =
+      strategy->endgame_admission_shadow ? endgame_admission_model_callback
+                                         : NULL;
+  const int player_index = game_get_player_on_turn_index(game);
+  const bool has_player_clock =
+      strategy->game_timer != NULL &&
+      !game_timer_player_is_untimed(strategy->game_timer, player_index);
+  const double player_clock_seconds_at_start =
+      has_player_clock ? fmax(0.0, game_timer_get_seconds_remaining(
+                                       strategy->game_timer, player_index))
+                       : 0.0;
   endgame_args_fill(
       thread_control, game, /*tt_fraction_of_mem=*/0.0,
       play_chooser_get_endgame_plies(strategy),
@@ -645,10 +672,18 @@ static bool play_chooser_run_endgame(
       /*per_root_move_callback=*/NULL, /*per_root_move_callback_data=*/NULL,
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
       /*enable_pv_display=*/false, /*soft_time_limit=*/budget_seconds * 0.9,
-      /*hard_time_limit=*/budget_seconds, strategy->seed,
+      /*hard_time_limit=*/budget_seconds, admission_callback,
+      strategy->endgame_admission_shadow ? &admission_policy : NULL,
+      // Models exist for depths 4 and 5, so the first prediction boundary is
+      // the completed depth 3. Missing ABDADA history is an explicit feature.
+      /*depth_admission_min_depth=*/strategy->endgame_admission_shadow
+          ? 3
+          : DEFAULT_ENDGAME_ADMISSION_MIN_DEPTH,
+      /*enforce_depth_admission=*/false, strategy->seed,
       /*skip_word_pruning=*/false, shared_tt, /*max_workers=*/0,
       /*first_win=*/false, /*first_win_fallback_moves=*/0, use_window,
-      window_alpha, window_beta, deadline_ns,
+      window_alpha, window_beta, has_player_clock,
+      player_clock_seconds_at_start, deadline_ns, /*node_limit=*/0,
       /*actual_move=*/NULL, progress_listener, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
@@ -792,9 +827,18 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
     benchmark_context.call_index = atomic_fetch_add_explicit(
         &play_chooser_benchmark_stats.peg_calls, 1, memory_order_relaxed);
     benchmark_context.start_ns = ctimer_monotonic_ns();
+    benchmark_context.start_cpu_ns = ctimer_process_cpu_ns();
   }
   ThreadControl *thread_control = thread_control_create();
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  const int player_index = game_get_player_on_turn_index(game);
+  const bool has_player_clock =
+      strategy->game_timer != NULL &&
+      !game_timer_player_is_untimed(strategy->game_timer, player_index);
+  const double player_clock_seconds_at_start =
+      has_player_clock ? fmax(0.0, game_timer_get_seconds_remaining(
+                                       strategy->game_timer, player_index))
+                       : 0.0;
   PegArgs peg_args = {0};
   peg_args_fill(game, thread_control, /*num_threads=*/
                 num_threads > 0 ? num_threads : 1,
@@ -813,7 +857,9 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                 benchmarking ? play_chooser_benchmark_peg_candidate_done : NULL,
                 /*on_scenario_done=*/NULL,
                 /*user_data=*/benchmarking ? &benchmark_context : NULL,
-                &progress_listener, /*poll=*/NULL, &peg_args);
+                &progress_listener, /*time_manager_policy=*/NULL,
+                /*enforce_time_manager=*/false, has_player_clock,
+                player_clock_seconds_at_start, /*poll=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
   if (benchmarking) {

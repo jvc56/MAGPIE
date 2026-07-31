@@ -11,5 +11,7 @@ void test_tiles_played_bench(void);
 void test_endgame_speed_bench(void);
 void test_endgame_playout_bench(void);
 void test_endgame_move1(void);
+void test_generate_endgame_curve_cgps(void);
+void test_endgame_value_curve(void);
 
 #endif

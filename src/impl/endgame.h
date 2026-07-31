@@ -22,6 +22,9 @@
 enum {
   DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE = 1024 * 1024,
   MAX_ENDGAME_DISPLAY_PVS = 100,
+  // Depths through this one are the warm-up needed to form a useful
+  // next-depth cost prediction. A caller may override it per solve.
+  DEFAULT_ENDGAME_ADMISSION_MIN_DEPTH = 4,
 };
 
 typedef struct EndgameCtx EndgameCtx;
@@ -52,8 +55,10 @@ typedef struct EndgameCtx EndgameCtx;
 //     snapshot may be a few nodes stale, which is fine for a heartbeat or a
 //     leaderboard.
 //
-// Everything here is observation only: nothing feeds back into the search, and
-// whether or not it is read does not change the result.
+// The live-view callbacks and accessors here are observation only: nothing
+// they report feeds back into the search. The separately documented
+// whole-depth admission callback on EndgameArgs is the one explicit exception;
+// it changes search only when enforce_depth_admission is true.
 //
 // Conventions shared by the whole interface:
 //
@@ -140,6 +145,77 @@ typedef void (*EndgamePerRootMoveCallback)(int depth, int root_index,
                                            const struct SmallMove *move,
                                            int32_t value, void *user_data);
 
+// Exact observation at a globally useful completed-depth boundary. With
+// ABDADA this can be produced by any worker: whichever worker first advances
+// the solver's highest completed depth owns the boundary.
+typedef struct EndgameCompletedDepth {
+  int depth;
+  uint64_t cumulative_nodes;
+  double elapsed_seconds;
+  int root_moves_total;
+  int ply2_moves_total;
+  uint64_t best_move;
+  int32_t value;
+} EndgameCompletedDepth;
+
+// Input to a whole-depth admission model. Previous observations are the last
+// globally published boundaries, not necessarily adjacent depths: ABDADA
+// jitter can legitimately complete a deeper warm-up depth first. Models must
+// honor has_previous/has_prior instead of assuming both exist.
+typedef struct EndgameDepthAdmissionRequest {
+  EndgameCompletedDepth current;
+  EndgameCompletedDepth previous;
+  EndgameCompletedDepth prior;
+  bool has_previous;
+  bool has_prior;
+  int next_depth;
+  int requested_plies;
+  int workers;
+  int player_rack_tiles;
+  int opponent_rack_tiles;
+  int score_spread;
+  int consecutive_scoreless_turns;
+  double hard_time_limit;
+  double remaining_seconds;
+  // The player's total game clock is distinct from this solve's hard window.
+  // TimeManager prices current versus future turns against this value while
+  // `remaining_seconds` remains the physical current-search completion gate.
+  bool has_player_clock;
+  double player_clock_remaining_seconds;
+  uint64_t node_limit;
+  uint64_t remaining_nodes;
+} EndgameDepthAdmissionRequest;
+
+typedef struct EndgameDepthAdmissionDecision {
+  // A false valid flag means the model cannot price this boundary. Enforced
+  // mode fails closed; shadow mode records the missing prediction and runs.
+  bool valid;
+  // A prediction may still be useful in shadow outside its calibrated solver
+  // configuration. Enforced mode additionally requires safe_to_enforce.
+  bool safe_to_enforce;
+  bool should_start;
+  uint64_t expected_nodes;
+  uint64_t completion_bound_nodes;
+  double expected_seconds;
+  double completion_bound_seconds;
+  double completion_confidence;
+  // Optional scheduler diagnostics. The admission result remains fully
+  // defined without these; a TimeManager-backed callback fills them so shadow
+  // traces can audit value, reserve, and completion decisions separately.
+  bool has_time_manager_plan;
+  double expected_regret_reduction;
+  double current_value_per_second;
+  double future_value_per_second;
+  double maximum_current_seconds;
+  double deposit_seconds;
+} EndgameDepthAdmissionDecision;
+
+// Called synchronously on the worker that first publishes a completed depth.
+// It may therefore run on any solver worker and must be thread-safe, bounded,
+// and nonblocking. The request owns no engine pointers.
+typedef EndgameDepthAdmissionDecision (*EndgameDepthAdmissionCallback)(
+    const EndgameDepthAdmissionRequest *request, void *user_data);
+
 typedef struct EndgameArgs {
   ThreadControl *thread_control;
   const Game *game;
@@ -168,6 +244,17 @@ typedef struct EndgameArgs {
   // If estimated completion > hard_time_limit, stop to bank remaining time.
   double soft_time_limit;
   double hard_time_limit;
+  // Optional whole-depth gate. The callback begins after
+  // depth_admission_min_depth has completed and predicts the next indivisible
+  // IDS depth. In shadow mode (enforce_depth_admission=false), decisions are
+  // traced on the ordinary ungated ABDADA schedule. In enforced mode, no
+  // worker may enter a depth above the warm-up until the callback admits it; a
+  // missing/invalid bound fails closed. Zero min depth selects
+  // DEFAULT_ENDGAME_ADMISSION_MIN_DEPTH.
+  EndgameDepthAdmissionCallback depth_admission_callback;
+  void *depth_admission_callback_data;
+  int depth_admission_min_depth;
+  bool enforce_depth_admission;
   uint64_t seed;
   // If true, skip word pruning (KWG build) during reset. Move generation will
   // use the full KWG (or any override KWGs set by the caller on the game).
@@ -208,11 +295,22 @@ typedef struct EndgameArgs {
   bool use_initial_window;
   int32_t initial_alpha;
   int32_t initial_beta;
+  // Optional total game clock at solve start. This is deliberately separate
+  // from hard_time_limit/external_deadline_ns, which bound only this solver
+  // call. Admission requests subtract live solve elapsed time before exposing
+  // it to a cross-turn TimeManager.
+  bool has_player_clock;
+  double player_clock_seconds_at_start;
   // Absolute monotonic-ns deadline (ctimer_monotonic_ns()-compatible). If
   // non-zero, workers bail out mid-search once now > deadline. Lets a
   // caller (e.g. PEG) impose a wall-clock budget that propagates through
   // alpha-beta, not just between IDS depth iterations. 0 = no deadline.
   int64_t external_deadline_ns;
+  // Aggregate search-node ceiling across all workers. Checked on the existing
+  // deadline cadence, so a multithreaded solve may overshoot by roughly
+  // DEPTH_DEADLINE_CHECK_INTERVAL nodes per worker. The last fully completed
+  // IDS depth remains the published result. 0 = no node ceiling.
+  uint64_t node_limit;
   // If non-NULL, the solver additionally computes an exact (non-pruned)
   // value for this specific move in the same search that finds the best
   // move, instead of requiring a second endgame_solve call. Must be a legal
@@ -249,13 +347,17 @@ static inline void endgame_args_fill(
     void *per_root_move_callback_data,
     const dual_lexicon_mode_t dual_lexicon_mode, const bool forced_pass_bypass,
     const bool enable_pv_display, const double soft_time_limit,
-    const double hard_time_limit, const uint64_t seed,
+    const double hard_time_limit,
+    EndgameDepthAdmissionCallback depth_admission_callback,
+    void *depth_admission_callback_data, const int depth_admission_min_depth,
+    const bool enforce_depth_admission, const uint64_t seed,
     const bool skip_word_pruning, TranspositionTable *shared_tt,
     const int max_workers, const bool first_win,
     const int first_win_fallback_moves, const bool use_initial_window,
     const int32_t initial_alpha, const int32_t initial_beta,
-    const int64_t external_deadline_ns, const Move *actual_move,
-    const AnalysisProgressListener *progress_listener,
+    const bool has_player_clock, const double player_clock_seconds_at_start,
+    const int64_t external_deadline_ns, const uint64_t node_limit,
+    const Move *actual_move, const AnalysisProgressListener *progress_listener,
     EndgameArgs *endgame_args) {
   endgame_args->thread_control = thread_control;
   endgame_args->game = game;
@@ -276,6 +378,10 @@ static inline void endgame_args_fill(
   endgame_args->enable_pv_display = enable_pv_display;
   endgame_args->soft_time_limit = soft_time_limit;
   endgame_args->hard_time_limit = hard_time_limit;
+  endgame_args->depth_admission_callback = depth_admission_callback;
+  endgame_args->depth_admission_callback_data = depth_admission_callback_data;
+  endgame_args->depth_admission_min_depth = depth_admission_min_depth;
+  endgame_args->enforce_depth_admission = enforce_depth_admission;
   endgame_args->seed = seed;
   endgame_args->skip_word_pruning = skip_word_pruning;
   endgame_args->shared_tt = shared_tt;
@@ -285,7 +391,10 @@ static inline void endgame_args_fill(
   endgame_args->use_initial_window = use_initial_window;
   endgame_args->initial_alpha = initial_alpha;
   endgame_args->initial_beta = initial_beta;
+  endgame_args->has_player_clock = has_player_clock;
+  endgame_args->player_clock_seconds_at_start = player_clock_seconds_at_start;
   endgame_args->external_deadline_ns = external_deadline_ns;
+  endgame_args->node_limit = node_limit;
   endgame_args->actual_move = actual_move;
   endgame_args->progress_listener = progress_listener != NULL
                                         ? *progress_listener

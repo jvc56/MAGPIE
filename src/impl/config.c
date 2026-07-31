@@ -3269,11 +3269,16 @@ void config_fill_endgame_args(Config *config, EndgameArgs *endgame_args) {
       DUAL_LEXICON_MODE_IGNORANT, /*forced_pass_bypass=*/false,
       /*enable_pv_display=*/true,
       /*soft_time_limit=*/config->endgame_time_limit_seconds,
-      /*hard_time_limit=*/config->endgame_time_limit_seconds, config->seed,
+      /*hard_time_limit=*/config->endgame_time_limit_seconds,
+      /*depth_admission_callback=*/NULL,
+      /*depth_admission_callback_data=*/NULL,
+      /*depth_admission_min_depth=*/DEFAULT_ENDGAME_ADMISSION_MIN_DEPTH,
+      /*enforce_depth_admission=*/false, config->seed,
       /*skip_word_pruning=*/false, /*shared_tt=*/NULL, /*max_workers=*/0,
       /*first_win=*/false, /*first_win_fallback_moves=*/0,
       /*use_initial_window=*/false, /*initial_alpha=*/0, /*initial_beta=*/0,
-      /*external_deadline_ns=*/0, /*actual_move=*/NULL,
+      /*has_player_clock=*/false, /*player_clock_seconds_at_start=*/0.0,
+      /*external_deadline_ns=*/0, /*node_limit=*/0, /*actual_move=*/NULL,
       /*progress_listener=*/NULL, endgame_args);
 }
 
@@ -3401,7 +3406,9 @@ void config_fill_peg_args(Config *config, PegArgs *peg_args) {
       /*include_per_scenario=*/config->peg_show_outcomes,
       /*on_stage_start=*/NULL, /*on_cand_done=*/NULL,
       /*on_scenario_done=*/NULL, /*user_data=*/NULL,
-      /*progress_listener=*/NULL, /*poll=*/NULL, peg_args);
+      /*progress_listener=*/NULL, /*time_manager_policy=*/NULL,
+      /*enforce_time_manager=*/false, /*has_player_clock=*/false,
+      /*player_clock_seconds_at_start=*/0.0, /*poll=*/NULL, peg_args);
 }
 
 // Parses a space-free UCGI PEG move list (coordinate.tiles, comma-separated)

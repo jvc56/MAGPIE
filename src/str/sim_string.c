@@ -328,6 +328,9 @@ bool string_builder_add_sim_stats_with_display_lock(
   case BAI_RESULT_STATUS_SAMPLE_LIMIT:
     status_str = get_formatted_string("Finished (max iterations reached)\n");
     break;
+  case BAI_RESULT_STATUS_REGRET_LIMIT:
+    status_str = get_formatted_string("Finished (regret target reached)\n");
+    break;
   case BAI_RESULT_STATUS_TIMEOUT:
     status_str = get_formatted_string("Finished (time limit exceeded)\n");
     break;

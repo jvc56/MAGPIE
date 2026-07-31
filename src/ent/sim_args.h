@@ -15,6 +15,25 @@
 #include <math.h>
 #include <stdint.h>
 
+typedef struct SimSampleEvent {
+  // Every SimmedPlay starts from the same PRNG seed and advances its own copy
+  // independently. Matching scenario_seed across plays therefore identifies
+  // common-random-number rollouts without changing BAI's sampling policy.
+  uint64_t scenario_seed;
+  uint64_t sample_number;
+  int play_index;
+  double utility;
+  double win_pct;
+  double spread;
+} SimSampleEvent;
+
+typedef void (*SimSampleCallback)(const SimSampleEvent *event, void *user_data);
+
+typedef struct SimSampleListener {
+  SimSampleCallback callback;
+  void *user_data;
+} SimSampleListener;
+
 typedef struct SimArgs {
   int num_plies;
   const Game *game;
@@ -45,6 +64,11 @@ typedef struct SimArgs {
   // Optional observation-only progress listener. A zero-initialized listener
   // is disabled. The callback cannot stop or otherwise steer the simulation.
   AnalysisProgressListener progress_listener;
+  // Optional rollout listener. It is invoked on a worker thread after a
+  // sample is complete, so callbacks must be thread-safe and cheap. Even an
+  // observation-only callback can perturb asynchronous BAI scheduling; use it
+  // only for fixed-allocation probes, never a decision-bearing BAI run.
+  SimSampleListener sample_listener;
 } SimArgs;
 
 // Unlike endgame_args_fill and peg_args_fill, this does NOT take a parameter
@@ -101,6 +125,11 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.sampling_rule = sampling_rule;
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
+  sim_args->bai_options.regret_stop_target = 0.0;
+  sim_args->bai_options.regret_cross_arm_correlation = 0.48;
+  sim_args->bai_options.regret_calibration = 1.0;
+  sim_args->bai_options.regret_check_interval = 256;
+  sim_args->bai_options.regret_min_samples_per_arm = 32;
   // This will be overwritten in autoplay
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;
@@ -110,6 +139,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->utility_w_spread = utility_w_spread;
   sim_args->utility_spread_scale = utility_spread_scale;
   sim_args->progress_listener = (AnalysisProgressListener){0};
+  sim_args->sample_listener = (SimSampleListener){0};
 }
 
 // Blend rollout win% and (sigmoid-normalized) spread into a single BAI

@@ -23,6 +23,7 @@
 #include "create_data_test.h"
 #include "cross_set_test.h"
 #include "dawg_packed_test.h"
+#include "endgame_admission_model_test.h"
 #include "endgame_test.h"
 #include "equity_adjustment_test.h"
 #include "equity_test.h"
@@ -61,6 +62,7 @@
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "thinking_curve_test.h"
+#include "time_manager_test.h"
 #include "transposition_table_test.h"
 #include "validated_move_test.h"
 #include "win_pct_test.h"
@@ -110,6 +112,7 @@ static TestEntry test_table[] = {
     {"gameplay", test_gameplay},
     {"stats", test_stats},
     {"spreadforecast", test_spread_forecast},
+    {"timemanager", test_time_manager},
     {"infer", test_infer},
     {"rv", test_random_variable},
     {"am", test_alias_method},
@@ -136,6 +139,7 @@ static TestEntry test_table[] = {
     {"wmpmaker", test_wmp_maker},
     {"wmg", test_wmp_move_gen},
     {"winpct", test_win_pct},
+    {"egadmission", test_endgame_admission_model},
     {"endgame", test_endgame},
     {"endgameoutplay", test_endgame_outplay_zobrist_overflow},
     {"endgamefirstwin", test_endgame_first_win_sign},
@@ -166,11 +170,13 @@ static TestEntry on_demand_test_table[] = {
     {"genstuck", test_generate_stuck_cgps},
     {"gennonstuck", test_generate_nonstuck_cgps},
     {"gennonstuck2", test_generate_nonstuck_cgps2},
+    {"genegcurve", test_generate_endgame_curve_cgps},
     {"genpegcgps", test_generate_peg_cgps},
     {"pegstage", test_peg_stage_stability},
     {"pegab", test_peg_strength_ab},
     {"genpegfresh", test_gen_peg_fresh},
     {"pegcurve", test_peg_strength_curve},
+    {"pegstructcurve", test_peg_structural_curve},
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
@@ -178,6 +184,7 @@ static TestEntry on_demand_test_table[] = {
     {"egspeedbench", test_endgame_speed_bench},
     {"egplayout", test_endgame_playout_bench},
     {"egmove1", test_endgame_move1},
+    {"egcurve", test_endgame_value_curve},
     {"multipv", test_multi_pv},
     {"kwgtailmerge", test_kwg_tail_merge},
     {"kwgtailreorder", test_kwg_tail_reorder},

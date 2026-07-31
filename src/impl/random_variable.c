@@ -406,6 +406,7 @@ typedef struct Simmer {
   double utility_w_winpct;
   double utility_w_spread;
   double utility_spread_scale;
+  SimSampleListener sample_listener;
   ThreadControl *thread_control;
   SimResults *sim_results;
 } Simmer;
@@ -586,6 +587,17 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   if (simmer->utility_w_spread > 0.0) {
     simmed_play_add_utility_stat(simmed_play, utility);
   }
+  if (simmer->sample_listener.callback != NULL) {
+    const SimSampleEvent event = {
+        .scenario_seed = seed,
+        .sample_number = sample_count,
+        .play_index = (int)play_index,
+        .utility = utility,
+        .win_pct = wpct,
+        .spread = equity_to_double(projected_spread),
+    };
+    simmer->sample_listener.callback(&event, simmer->sample_listener.user_data);
+  }
   return utility;
 }
 
@@ -665,6 +677,7 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->sample_listener = sim_args->sample_listener;
 
   simmer->thread_control = thread_control;
 
@@ -718,6 +731,7 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;
+  simmer->sample_listener = sim_args->sample_listener;
 
   sim_results_reset(sim_args->move_list, simmer->sim_results,
                     sim_args->num_plies, sim_args->seed,

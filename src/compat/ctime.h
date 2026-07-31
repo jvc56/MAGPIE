@@ -7,6 +7,7 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/resource.h>
 #include <sys/time.h>
 #include <time.h>
 
@@ -85,6 +86,25 @@ static inline int64_t ctimer_monotonic_ns(void) {
   TimeSpec ts;
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return (int64_t)ts.tv_sec * 1000000000LL + (int64_t)ts.tv_nsec;
+}
+
+// Aggregate user + system CPU consumed by this process across all threads.
+// Comparing its delta with a monotonic wall-clock delta gives the average
+// number of CPU cores actually scheduled during an interval. This is useful
+// for spotting background contention in multithreaded benchmark traces; it is
+// deliberately separate from wall time, which remains the game-clock currency.
+static inline int64_t ctimer_process_cpu_ns(void) {
+  struct rusage usage;
+  if (getrusage(RUSAGE_SELF, &usage) != 0) {
+    return 0;
+  }
+  const int64_t user_ns =
+      (int64_t)usage.ru_utime.tv_sec * 1000000000LL +
+      (int64_t)usage.ru_utime.tv_usec * 1000LL;
+  const int64_t system_ns =
+      (int64_t)usage.ru_stime.tv_sec * 1000000000LL +
+      (int64_t)usage.ru_stime.tv_usec * 1000LL;
+  return user_ns + system_ns;
 }
 
 #endif

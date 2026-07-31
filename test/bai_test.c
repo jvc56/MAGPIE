@@ -13,6 +13,7 @@
 #include "../src/util/string_util.h"
 #include <assert.h>
 #include <inttypes.h>
+#include <math.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -133,6 +134,61 @@ void test_bai_sample_limit(int num_threads) {
   const double bai_time_elapsed = bai_result_get_elapsed_seconds(bai_result);
   ctime_nap(0.2);
   assert(bai_time_elapsed == bai_result_get_elapsed_seconds(bai_result));
+  bai_result_destroy(bai_result);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+void test_bai_regret_limit(int num_threads) {
+  // The winner is deliberately well separated so this test exercises the
+  // value-of-computation exit without depending on a marginal noisy ranking.
+  const double means_and_vars[] = {
+      0.2, 0.0025, 0.7, 0.0025, 0.1, 0.0025,
+  };
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 32,
+      .sample_limit = 100000,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0,
+      .regret_stop_target = 0.0001,
+      .regret_cross_arm_correlation = 0.48,
+      .regret_calibration = 1.0,
+      .regret_check_interval = 32,
+      .regret_min_samples_per_arm = 32,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_REGRET_LIMIT);
+  assert(bai_result_get_best_arm(bai_result) == 1);
+  assert(rvs_get_total_samples(rvs) < bai_options.sample_limit);
+  const double estimated_regret = bai_result_get_estimated_regret(bai_result);
+  const double regret_at_stop = bai_result_get_regret_at_stop(bai_result);
+  assert(isfinite(estimated_regret));
+  assert(isfinite(regret_at_stop));
+  assert(regret_at_stop <= bai_options.regret_stop_target);
+
+  thread_control_destroy(thread_control);
   bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);
@@ -525,6 +581,7 @@ void test_bai(void) {
     for (int i = 0; i < num_thread_tests; i++) {
       const int num_threads_i = num_threads[i];
       test_bai_sample_limit(num_threads_i);
+      test_bai_regret_limit(num_threads_i);
       test_bai_win_pct_cutoff(num_threads_i);
       test_bai_time_limit(num_threads_i);
       test_bai_interrupt(num_threads_i);

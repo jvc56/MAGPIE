@@ -4,6 +4,7 @@
 #include "../compat/ctime.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include <math.h>
 #include <stdint.h>
 #include <stdlib.h>
 
@@ -12,6 +13,8 @@ struct BAIResult {
   int best_arm;
   Timer timer;
   double time_limit_seconds;
+  double estimated_regret;
+  double regret_at_stop;
   cpthread_mutex_t mutex;
 };
 
@@ -19,6 +22,8 @@ void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
   bai_result->status = BAI_RESULT_STATUS_NONE;
   bai_result->best_arm = -1;
   bai_result->time_limit_seconds = time_limit_seconds;
+  bai_result->estimated_regret = NAN;
+  bai_result->regret_at_stop = NAN;
   ctimer_start(&bai_result->timer);
 }
 
@@ -51,6 +56,34 @@ void bai_result_stop_timer(BAIResult *bai_result) {
 
 double bai_result_get_time_limit_seconds(const BAIResult *bai_result) {
   return bai_result->time_limit_seconds;
+}
+
+double bai_result_get_estimated_regret(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const double estimated_regret = bai_result->estimated_regret;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return estimated_regret;
+}
+
+void bai_result_set_estimated_regret(BAIResult *bai_result,
+                                     double estimated_regret) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->estimated_regret = estimated_regret;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+double bai_result_get_regret_at_stop(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const double regret_at_stop = bai_result->regret_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return regret_at_stop;
+}
+
+void bai_result_set_regret_at_stop(BAIResult *bai_result,
+                                   double regret_at_stop) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->regret_at_stop = regret_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
 }
 
 // Sets user interrupt or timeout status if the conditions for either are met

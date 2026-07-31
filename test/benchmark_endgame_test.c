@@ -7,6 +7,7 @@
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/analysis_trace.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
@@ -19,6 +20,7 @@
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
+#include "../src/impl/endgame_admission_model.h"
 #include "../src/impl/gameplay.h"
 #include "../src/impl/move_gen.h"
 #include "../src/util/io_util.h"
@@ -696,6 +698,701 @@ static double env_double(const char *name, double fallback) {
   return strtod(v, NULL);
 }
 
+// Generate a persistent, modest-complexity endgame corpus for calibrating the
+// value of additional search work. Each source game contributes at most one
+// position, at a deterministically varied total-rack size, which avoids
+// treating several adjacent turns from one game as independent observations.
+//
+// Environment:
+//   MAGPIE_EG_CURVE_CGP        output (default obj/endgame-value-cgps.txt)
+//   MAGPIE_EG_CURVE_COUNT      positions (default 40)
+//   MAGPIE_EG_CURVE_MIN_TILES  minimum total rack tiles (default 6)
+//   MAGPIE_EG_CURVE_MAX_TILES  maximum total rack tiles (default 10)
+//   MAGPIE_EG_CURVE_SEED       first game seed (default 7292026)
+void test_generate_endgame_curve_cgps(void) {
+  log_set_level(LOG_FATAL);
+  const char *outfile = getenv("MAGPIE_EG_CURVE_CGP");
+  if (outfile == NULL || outfile[0] == '\0') {
+    outfile = "obj/endgame-value-cgps.txt";
+  }
+  const int target_count = env_int("MAGPIE_EG_CURVE_COUNT", 40);
+  const int min_tiles = env_int("MAGPIE_EG_CURVE_MIN_TILES", 6);
+  const int max_tiles = env_int("MAGPIE_EG_CURVE_MAX_TILES", 10);
+  const uint64_t base_seed = (uint64_t)env_int("MAGPIE_EG_CURVE_SEED", 7292026);
+  assert(target_count > 0);
+  assert(min_tiles >= 2);
+  assert(max_tiles >= min_tiles);
+
+  Config *config =
+      config_create_or_die("set -lex CSW24 -threads 1 -s1 score -s2 score");
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  MoveList *move_list = move_list_create(1);
+  FILE *fp = fopen(outfile, "we");
+  assert(fp);
+
+  int found = 0;
+  const int tile_span = max_tiles - min_tiles + 1;
+  for (int attempt = 0; found < target_count && attempt < target_count * 100;
+       attempt++) {
+    game_reset(game);
+    game_seed(game, base_seed + (uint64_t)attempt);
+    draw_starting_racks(game);
+    if (!play_until_bag_empty(game, move_list)) {
+      continue;
+    }
+
+    const int wanted = min_tiles + (found % tile_span);
+    while (game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+      const Rack *rack0 = player_get_rack(game_get_player(game, 0));
+      const Rack *rack1 = player_get_rack(game_get_player(game, 1));
+      const int total_tiles = (int)rack_get_total_letters(rack0) +
+                              (int)rack_get_total_letters(rack1);
+      if (total_tiles == wanted && !rack_is_empty(rack0) &&
+          !rack_is_empty(rack1)) {
+        char *cgp = game_get_cgp(game, true);
+        (void)fprintf(fp, "%s\n", cgp);
+        free(cgp);
+        found++;
+        break;
+      }
+      if (total_tiles < wanted) {
+        // This game skipped the requested rack total; keep the corpus
+        // stratified by trying the same `wanted` value in the next game.
+        break;
+      }
+      const Move *move = get_top_equity_move(game, move_list);
+      play_move(move, game, NULL);
+    }
+  }
+  (void)fclose(fp);
+  printf("EGCURVEGEN positions=%d requested=%d tiles=%d..%d seed=%llu "
+         "file=%s\n",
+         found, target_count, min_tiles, max_tiles,
+         (unsigned long long)base_seed, outfile);
+  (void)fflush(stdout);
+
+  move_list_destroy(move_list);
+  config_destroy(config);
+}
+
+typedef struct EndgameCurvePoint {
+  int depth;
+  uint64_t nodes;
+  int64_t elapsed_ns;
+  int64_t cpu_ns;
+  int root_completed;
+  int root_total;
+  int ply2_completed;
+  int ply2_total;
+  uint64_t tiny_move;
+  int32_t search_value;
+} EndgameCurvePoint;
+
+enum { ENDGAME_CURVE_MAX_POINTS = MAX_SEARCH_DEPTH + 1 };
+
+typedef struct EndgameCurveTrace {
+  EndgameCurvePoint points[ENDGAME_CURVE_MAX_POINTS];
+  int count;
+  AnalysisProgressEvent admission_points[ENDGAME_CURVE_MAX_POINTS];
+  int admission_count;
+  SmallMove *root_moves;
+  int root_move_count;
+  analysis_status_t finish_status;
+} EndgameCurveTrace;
+
+typedef struct EndgameCurveAdmissionPolicy {
+  bool use_time_manager;
+  EndgameAdmissionPolicy prediction;
+  EndgameAdmissionTimeManagerPolicy time_manager;
+} EndgameCurveAdmissionPolicy;
+
+static EndgameDepthAdmissionDecision
+endgame_curve_admission_callback(const EndgameDepthAdmissionRequest *request,
+                                 void *user_data) {
+  EndgameCurveAdmissionPolicy *policy = user_data;
+  if (policy->use_time_manager && request->next_depth == 5) {
+    return endgame_admission_time_manager_callback(request,
+                                                   &policy->time_manager);
+  }
+  return endgame_admission_model_callback(request, &policy->prediction);
+}
+
+static void endgame_curve_record(const AnalysisProgressEvent *event,
+                                 void *user_data) {
+  if (event->mode != ANALYSIS_MODE_ENDGAME) {
+    return;
+  }
+  EndgameCurveTrace *trace = user_data;
+  if (event->event == ANALYSIS_EVENT_FINISH) {
+    trace->finish_status = event->status;
+    return;
+  }
+  if (event->event == ANALYSIS_EVENT_ADMISSION) {
+    assert(trace->admission_count < ENDGAME_CURVE_MAX_POINTS);
+    trace->admission_points[trace->admission_count++] = *event;
+    return;
+  }
+  if (event->event != ANALYSIS_EVENT_DEPTH_DONE) {
+    return;
+  }
+  assert(trace->count < ENDGAME_CURVE_MAX_POINTS);
+  trace->points[trace->count++] =
+      (EndgameCurvePoint){.depth = event->depth,
+                          .nodes = event->nodes,
+                          .elapsed_ns = event->elapsed_ns,
+                          .cpu_ns = event->cpu_ns,
+                          .root_completed = event->candidates_completed,
+                          .root_total = event->candidates_total,
+                          .ply2_completed = event->subcandidates_completed,
+                          .ply2_total = event->subcandidates_total,
+                          .tiny_move = event->item_id,
+                          .search_value = (int32_t)event->value};
+}
+
+static void endgame_curve_record_root_moves(
+    const Game *game, const SmallMove *initial_moves, int initial_move_count,
+    int initial_spread, int solving_player, void *user_data) {
+  (void)game;
+  (void)initial_spread;
+  (void)solving_player;
+  EndgameCurveTrace *trace = user_data;
+  free(trace->root_moves);
+  trace->root_moves =
+      malloc((size_t)initial_move_count * sizeof(*trace->root_moves));
+  assert(trace->root_moves);
+  memcpy(trace->root_moves, initial_moves,
+         (size_t)initial_move_count * sizeof(*trace->root_moves));
+  trace->root_move_count = initial_move_count;
+}
+
+static const SmallMove *
+endgame_curve_find_root_move(const EndgameCurveTrace *trace,
+                             uint64_t tiny_move) {
+  for (int move_idx = 0; move_idx < trace->root_move_count; move_idx++) {
+    if (trace->root_moves[move_idx].tiny_move == tiny_move) {
+      return &trace->root_moves[move_idx];
+    }
+  }
+  return NULL;
+}
+
+static bool endgame_curve_find_exact_value(const uint64_t tiny_move,
+                                           const uint64_t exact_tiny_moves[],
+                                           const int32_t exact_values[],
+                                           int exact_count, int32_t *value) {
+  for (int i = 0; i < exact_count; i++) {
+    if (exact_tiny_moves[i] == tiny_move) {
+      *value = exact_values[i];
+      return true;
+    }
+  }
+  return false;
+}
+
+// Hardware-agnostic endgame value curve. One unbounded iterative-deepening
+// solve records the returned move after every completed depth together with
+// cumulative search nodes. Every distinct returned move is then evaluated at
+// the same ample oracle depth using EndgameArgs.actual_move. This makes regret
+// exact in spread points while the x-axis is deterministic work rather than
+// elapsed time.
+//
+// EGCURVEPOINT fields:
+//   nodes       cumulative nodes needed to complete this depth
+//   elapsed_ns  wall-clock conversion measured on this run
+//   cpu_ns      aggregate process CPU; cpu_ns/elapsed_ns is scheduled cores
+//   root/ply2   structural coverage at the completed IDS boundary
+//   exact       oracle value of the move returned at this depth
+//   regret      oracle best value - exact
+//
+// Environment:
+//   MAGPIE_EG_CURVE_CGP      input (default obj/endgame-value-cgps.txt)
+//   MAGPIE_EG_CURVE_MAX      positions (default 40)
+//   MAGPIE_EG_CURVE_START    first source position (default 0)
+//   MAGPIE_EG_CURVE_THREADS  solver threads (default 10)
+//   MAGPIE_EG_CURVE_PLIES    iterative-deepening arm ceiling
+//                            (default MAX_SEARCH_DEPTH)
+//   MAGPIE_EG_CURVE_JUDGE_PLIES  forced-move judge depth; at least PLIES
+//                                (default PLIES)
+//   MAGPIE_EG_CURVE_MAX_SECONDS  per-position arm ceiling; 0 = unbounded
+//   MAGPIE_EG_CURVE_JUDGE_MAX_SECONDS  per-distinct-nominee judge ceiling;
+//                                      0 = unbounded
+//   MAGPIE_EG_CURVE_JUDGE    1 evaluates depth nominees (default); 0 emits
+//                            admission-only traces without oracle re-searches
+//   MAGPIE_EG_CURVE_JUDGE_MIN_DEPTH  only oracle/emit nominees at or above
+//                                    this depth (default 1)
+//   MAGPIE_EG_CURVE_SOLVE_MIN_TILES  minimum actual rack total (0)
+//   MAGPIE_EG_CURVE_SOLVE_MAX_TILES  maximum actual rack total (2*RACK_SIZE)
+//   MAGPIE_EG_CURVE_ADMISSION_SHADOW  emit frozen-model predictions (0)
+//   MAGPIE_EG_CURVE_TIME_MANAGER_SHADOW  apply the frozen target-5 value prior
+//                                        and TimeManager in shadow (0)
+//   MAGPIE_EG_CURVE_TM_SAFETY_SECONDS  protected response/overtime time (0)
+//   MAGPIE_EG_CURVE_TM_FUTURE_SECONDS  protected future-turn demand (0)
+//   MAGPIE_EG_CURVE_TM_FUTURE_VALUE   future utility gain per second (0)
+//   MAGPIE_EG_CURVE_TM_AUTO_FUTURE_NODES  reserve the shadow-only fixed-depth-5
+//                                          future-work envelope (0)
+//   MAGPIE_EG_CURVE_TM_FUTURE_RATE_MULTIPLIER  live seconds/node safety
+//                                               multiplier (1.5)
+//   MAGPIE_EG_CURVE_TM_TOTAL_CLOCK_SECONDS  player's clock at solve start;
+//                                           separate from MAX_SECONDS (0)
+void test_endgame_value_curve(void) {
+  log_set_level(LOG_FATAL);
+  const char *cgp_file = getenv("MAGPIE_EG_CURVE_CGP");
+  if (cgp_file == NULL || cgp_file[0] == '\0') {
+    cgp_file = "obj/endgame-value-cgps.txt";
+  }
+  const int max_positions = env_int("MAGPIE_EG_CURVE_MAX", 40);
+  const int start_position = env_int("MAGPIE_EG_CURVE_START", 0);
+  const int threads = env_int("MAGPIE_EG_CURVE_THREADS", 10);
+  const int plies = env_int("MAGPIE_EG_CURVE_PLIES", MAX_SEARCH_DEPTH);
+  const int judge_plies = env_int("MAGPIE_EG_CURVE_JUDGE_PLIES", plies);
+  const double max_seconds = env_double("MAGPIE_EG_CURVE_MAX_SECONDS", 0.0);
+  const double judge_max_seconds =
+      env_double("MAGPIE_EG_CURVE_JUDGE_MAX_SECONDS", 0.0);
+  const int judge = env_int("MAGPIE_EG_CURVE_JUDGE", 1);
+  const int judge_min_depth = env_int("MAGPIE_EG_CURVE_JUDGE_MIN_DEPTH", 1);
+  const int solve_min_tiles = env_int("MAGPIE_EG_CURVE_SOLVE_MIN_TILES", 0);
+  const int solve_max_tiles =
+      env_int("MAGPIE_EG_CURVE_SOLVE_MAX_TILES", 2 * RACK_SIZE);
+  const int admission_shadow = env_int("MAGPIE_EG_CURVE_ADMISSION_SHADOW", 0);
+  const int time_manager_shadow =
+      env_int("MAGPIE_EG_CURVE_TIME_MANAGER_SHADOW", 0);
+  const double tm_safety_seconds =
+      env_double("MAGPIE_EG_CURVE_TM_SAFETY_SECONDS", 0.0);
+  const double tm_future_seconds =
+      env_double("MAGPIE_EG_CURVE_TM_FUTURE_SECONDS", 0.0);
+  const double tm_future_value =
+      env_double("MAGPIE_EG_CURVE_TM_FUTURE_VALUE", 0.0);
+  const int tm_auto_future_nodes =
+      env_int("MAGPIE_EG_CURVE_TM_AUTO_FUTURE_NODES", 0);
+  const double tm_future_rate_multiplier =
+      env_double("MAGPIE_EG_CURVE_TM_FUTURE_RATE_MULTIPLIER", 1.5);
+  const double tm_total_clock_seconds =
+      env_double("MAGPIE_EG_CURVE_TM_TOTAL_CLOCK_SECONDS", 0.0);
+  assert(max_positions > 0);
+  assert(start_position >= 0 && start_position < max_positions);
+  assert(threads > 0);
+  assert(plies > 0 && plies <= MAX_SEARCH_DEPTH);
+  assert(judge_plies >= plies && judge_plies <= MAX_SEARCH_DEPTH);
+  assert(max_seconds >= 0.0);
+  assert(judge_max_seconds >= 0.0);
+  assert(judge == 0 || judge == 1);
+  assert(judge_min_depth > 0 && judge_min_depth <= plies);
+  assert(solve_min_tiles >= 0 && solve_max_tiles >= solve_min_tiles);
+  assert(admission_shadow == 0 || admission_shadow == 1);
+  assert(time_manager_shadow == 0 || time_manager_shadow == 1);
+  assert(!time_manager_shadow || admission_shadow);
+  assert(tm_safety_seconds >= 0.0);
+  assert(tm_future_seconds >= 0.0);
+  assert(tm_future_value >= 0.0);
+  assert(tm_auto_future_nodes == 0 || tm_auto_future_nodes == 1);
+  assert(tm_future_rate_multiplier >= 1.0);
+  assert(tm_total_clock_seconds >= 0.0);
+
+  FILE *fp = fopen(cgp_file, "re");
+  if (fp == NULL) {
+    printf("EGCURVEERR no CGP file at %s; run genegcurve first\n", cgp_file);
+    return;
+  }
+  char (*cgp_lines)[4096] = malloc((size_t)max_positions * 4096);
+  assert(cgp_lines);
+  int num_cgps = 0;
+  while (num_cgps < max_positions && fgets(cgp_lines[num_cgps], 4096, fp)) {
+    size_t len = strlen(cgp_lines[num_cgps]);
+    if (len > 0 && cgp_lines[num_cgps][len - 1] == '\n') {
+      cgp_lines[num_cgps][len - 1] = '\0';
+    }
+    if (cgp_lines[num_cgps][0] != '\0') {
+      num_cgps++;
+    }
+  }
+  (void)fclose(fp);
+
+  char settings[256];
+  (void)snprintf(settings, sizeof(settings),
+                 "set -lex CSW24 -threads %d -s1 score -s2 score", threads);
+  Config *config = config_create_or_die(settings);
+  exec_config_quiet(config, "new");
+  Game *game = config_get_game(config);
+  EndgameCtx *solver = NULL;
+  EndgameResults *results = endgame_results_create();
+  printf("EGCURVECFG positions=%d start=%d threads=%d plies=%d "
+         "judge_plies=%d judge=%d judge_min_depth=%d "
+         "max_seconds=%.3f judge_max_seconds=%.3f tiles=%d..%d "
+         "admission_shadow=%d time_manager_shadow=%d "
+         "tm_safety=%.3f tm_future=%.3f tm_future_value=%.9f "
+         "tm_auto_future_nodes=%d tm_future_rate_multiplier=%.3f "
+         "tm_total_clock=%.3f "
+         "file=%s unit=nodes\n",
+         num_cgps - start_position, start_position, threads, plies, judge_plies,
+         judge, judge_min_depth, max_seconds, judge_max_seconds,
+         solve_min_tiles, solve_max_tiles, admission_shadow,
+         time_manager_shadow, tm_safety_seconds, tm_future_seconds,
+         tm_future_value, tm_auto_future_nodes, tm_future_rate_multiplier,
+         tm_total_clock_seconds, cgp_file);
+  (void)fflush(stdout);
+
+  for (int pos = start_position; pos < num_cgps; pos++) {
+    ErrorStack *err = error_stack_create();
+    game_load_cgp(game, cgp_lines[pos], err);
+    if (!error_stack_is_empty(err)) {
+      printf("EGCURVEERR pos=%d load\n", pos);
+      error_stack_destroy(err);
+      continue;
+    }
+    error_stack_destroy(err);
+    const int rack_tiles =
+        (int)rack_get_total_letters(player_get_rack(game_get_player(game, 0))) +
+        (int)rack_get_total_letters(player_get_rack(game_get_player(game, 1)));
+    if (rack_tiles < solve_min_tiles || rack_tiles > solve_max_tiles) {
+      continue;
+    }
+
+    EndgameCurveTrace trace = {0};
+    AnalysisProgressListener listener = {
+        .callback = endgame_curve_record,
+        .user_data = &trace,
+        .run_id = (uint64_t)pos + 1,
+    };
+    const int solving_player = game_get_player_on_turn_index(game);
+    const int turns_remaining =
+        MAX(1, (int)rack_get_total_letters(
+                   player_get_rack(game_get_player(game, solving_player))));
+    const uint64_t tm_future_reserve_nodes =
+        tm_auto_future_nodes ? endgame_future_depth5_reserve_nodes(rack_tiles)
+                             : 0;
+    EndgameCurveAdmissionPolicy admission_policy = {
+        .use_time_manager = time_manager_shadow,
+        .prediction =
+            {
+                .model = endgame_admission_default_model(),
+                .tt_fraction_of_mem = 0.05,
+                .use_heuristics = true,
+                .uses_external_tt = false,
+                .reserve_seconds = 0.0,
+            },
+        .time_manager =
+            {
+                .prediction_policy =
+                    {
+                        .model = endgame_admission_default_model(),
+                        .tt_fraction_of_mem = 0.05,
+                        .use_heuristics = true,
+                        .uses_external_tt = false,
+                        .reserve_seconds = 0.0,
+                    },
+                .clock =
+                    {
+                        .turns_remaining = turns_remaining,
+                        .safety_reserve_seconds = tm_safety_seconds,
+                        .future_reserve_seconds = tm_future_seconds,
+                        .future_value_per_second = tm_future_value,
+                        .minimum_completion_confidence = 0.99,
+                    },
+                .regret_callback = endgame_admission_target5_regret_prior,
+                .future_reserve_nodes = tm_future_reserve_nodes,
+                .future_rate_safety_multiplier = tm_future_rate_multiplier,
+            },
+    };
+    EndgameArgs args = {
+        .game = game,
+        .thread_control = config_get_thread_control(config),
+        .plies = plies,
+        .tt_fraction_of_mem = 0.05,
+        .initial_small_move_arena_size = DEFAULT_INITIAL_SMALL_MOVE_ARENA_SIZE,
+        .num_threads = threads,
+        .num_top_moves = 1,
+        .use_heuristics = true,
+        .forced_pass_bypass = true,
+        .enable_pv_display = false,
+        .before_search_callback = endgame_curve_record_root_moves,
+        .before_search_callback_data = &trace,
+        .depth_admission_callback =
+            admission_shadow ? endgame_curve_admission_callback : NULL,
+        .depth_admission_callback_data =
+            admission_shadow ? &admission_policy : NULL,
+        .depth_admission_min_depth = admission_shadow ? 3 : 0,
+        .enforce_depth_admission = false,
+        .has_player_clock = tm_total_clock_seconds > 0.0,
+        .player_clock_seconds_at_start = tm_total_clock_seconds,
+        .seed = 42,
+        .progress_listener = listener,
+    };
+    if (max_seconds > 0.0) {
+      args.external_deadline_ns =
+          ctimer_monotonic_ns() + (int64_t)(max_seconds * 1.0e9);
+    }
+    err = error_stack_create();
+    Timer solve_timer;
+    ctimer_start(&solve_timer);
+    const int64_t solve_cpu_start_ns = ctimer_process_cpu_ns();
+    endgame_solve(&solver, &args, results, err);
+    const int64_t solve_cpu_ns = ctimer_process_cpu_ns() - solve_cpu_start_ns;
+    const int64_t solve_elapsed_ns =
+        (int64_t)(ctimer_elapsed_seconds(&solve_timer) * 1.0e9);
+    assert(error_stack_is_empty(err));
+    error_stack_destroy(err);
+    const PVLine *oracle_pv =
+        endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
+    for (int admission_idx = 0; admission_idx < trace.admission_count;
+         admission_idx++) {
+      const AnalysisProgressEvent *admission =
+          &trace.admission_points[admission_idx];
+      printf("EGADMITSHADOW pos=%d completed_depth=%d target_depth=%d "
+             "nodes=%llu expected_nodes=%llu bound_nodes=%llu "
+             "expected_seconds=%.9f bound_seconds=%.9f confidence=%.6f "
+             "decision=%s safe=%d tm=%d regret=%.9f current_vps=%.9f "
+             "future_vps=%.9f future_nodes=%llu future_rate_multiplier=%.3f "
+             "max_current=%.9f deposit=%.9f\n",
+             pos, admission->phase, admission->depth,
+             (unsigned long long)admission->nodes,
+             (unsigned long long)admission->expected_next_work_units,
+             (unsigned long long)admission->completion_bound_work_units,
+             admission->expected_next_seconds,
+             admission->completion_bound_seconds,
+             admission->completion_confidence,
+             analysis_admission_name(admission->admission),
+             admission->admission_safe_to_enforce ? 1 : 0,
+             admission->has_time_manager_plan ? 1 : 0,
+             admission->expected_regret_reduction,
+             admission->current_value_per_second,
+             admission->future_value_per_second,
+             (unsigned long long)tm_future_reserve_nodes,
+             tm_future_rate_multiplier, admission->maximum_current_seconds,
+             admission->deposit_seconds);
+    }
+    if (!judge) {
+      const int result_depth =
+          endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
+      const uint64_t total_nodes = endgame_ctx_get_nodes_searched(solver);
+      const bool censored = trace.finish_status == ANALYSIS_STATUS_TIME_LIMIT ||
+                            trace.finish_status == ANALYSIS_STATUS_WORK_LIMIT ||
+                            trace.finish_status == ANALYSIS_STATUS_INTERRUPTED;
+      printf("EGADMITPOS pos=%d rack_tiles=%d points=%d depth=%d "
+             "nodes=%llu elapsed_ns=%lld cpu_ns=%lld status=%d censored=%d\n",
+             pos, rack_tiles, trace.count, result_depth,
+             (unsigned long long)total_nodes, (long long)solve_elapsed_ns,
+             (long long)solve_cpu_ns, trace.finish_status, censored ? 1 : 0);
+      for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+        const EndgameCurvePoint *point = &trace.points[point_idx];
+        printf("EGADMITPOINT pos=%d depth=%d nodes=%llu elapsed_ns=%lld "
+               "cpu_ns=%lld root=%d/%d ply2=%d/%d tiny=%llu search=%d\n",
+               pos, point->depth, (unsigned long long)point->nodes,
+               (long long)point->elapsed_ns, (long long)point->cpu_ns,
+               point->root_completed, point->root_total, point->ply2_completed,
+               point->ply2_total, (unsigned long long)point->tiny_move,
+               point->search_value);
+      }
+      if (censored) {
+        const int prior_depth =
+            trace.count > 0 ? trace.points[trace.count - 1].depth : 0;
+        const uint64_t prior_nodes =
+            trace.count > 0 ? trace.points[trace.count - 1].nodes : 0;
+        printf("EGADMITCENSOR pos=%d target_depth=%d "
+               "lower_added_nodes=%llu total_nodes=%llu\n",
+               pos, prior_depth + 1,
+               (unsigned long long)(total_nodes - prior_nodes),
+               (unsigned long long)total_nodes);
+      }
+      (void)fflush(stdout);
+      free(trace.root_moves);
+      continue;
+    }
+    if (oracle_pv->num_moves <= 0 ||
+        endgame_results_get_depth(results, ENDGAME_RESULT_BEST) < plies) {
+      printf("EGCURVETRUNC pos=%d rack_tiles=%d points=%d depth=%d "
+             "nodes=%llu elapsed_ns=%lld cpu_ns=%lld max_seconds=%.3f\n",
+             pos, rack_tiles, trace.count,
+             endgame_results_get_depth(results, ENDGAME_RESULT_BEST),
+             (unsigned long long)endgame_ctx_get_nodes_searched(solver),
+             (long long)solve_elapsed_ns, (long long)solve_cpu_ns, max_seconds);
+      (void)fflush(stdout);
+      free(trace.root_moves);
+      continue;
+    }
+    const uint64_t search_nodes = endgame_ctx_get_nodes_searched(solver);
+    uint64_t exact_tiny_moves[ENDGAME_CURVE_MAX_POINTS] = {0};
+    int32_t exact_values[ENDGAME_CURVE_MAX_POINTS] = {0};
+    int exact_count = 0;
+    uint64_t judge_nodes = 0;
+    bool judge_truncated = false;
+    bool truncated_actual_found = false;
+    uint64_t truncated_tiny_move = 0;
+    uint64_t truncated_nodes = 0;
+    int truncated_actual_depth = -1;
+    int64_t truncated_elapsed_ns = 0;
+    endgame_result_status_t truncated_status = ENDGAME_RESULT_STATUS_NONE;
+    Timer judge_timer;
+    ctimer_start(&judge_timer);
+    const int64_t judge_cpu_start_ns = ctimer_process_cpu_ns();
+    for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+      if (trace.points[point_idx].depth < judge_min_depth) {
+        continue;
+      }
+      const uint64_t tiny_move = trace.points[point_idx].tiny_move;
+      int32_t unused;
+      // tiny_move == 0 is PASS, a legal root move that must be judged like
+      // every other completed-depth nominee. It is not a missing identity.
+      if (endgame_curve_find_exact_value(tiny_move, exact_tiny_moves,
+                                         exact_values, exact_count, &unused)) {
+        continue;
+      }
+      const SmallMove *small_move =
+          endgame_curve_find_root_move(&trace, tiny_move);
+      assert(small_move);
+      Move actual_move = {0};
+      small_move_to_move(&actual_move, small_move, game_get_board(game));
+      args.progress_listener = (AnalysisProgressListener){0};
+      args.before_search_callback = NULL;
+      args.before_search_callback_data = NULL;
+      args.external_deadline_ns =
+          judge_max_seconds > 0.0
+              ? ctimer_monotonic_ns() + (int64_t)(judge_max_seconds * 1.0e9)
+              : 0;
+      args.plies = judge_plies;
+      args.actual_move = &actual_move;
+      Timer candidate_judge_timer;
+      ctimer_start(&candidate_judge_timer);
+      err = error_stack_create();
+      endgame_solve(&solver, &args, results, err);
+      assert(error_stack_is_empty(err));
+      error_stack_destroy(err);
+      const int64_t candidate_elapsed_ns =
+          (int64_t)(ctimer_elapsed_seconds(&candidate_judge_timer) * 1.0e9);
+      const uint64_t candidate_nodes = endgame_ctx_get_nodes_searched(solver);
+      judge_nodes += candidate_nodes;
+      const bool actual_found = endgame_results_get_actual_move_found(results);
+      const int actual_depth =
+          actual_found
+              ? endgame_results_get_depth(results, ENDGAME_RESULT_ACTUAL)
+              : -1;
+      if (!actual_found || actual_depth < judge_plies) {
+        judge_truncated = true;
+        truncated_actual_found = actual_found;
+        truncated_tiny_move = tiny_move;
+        truncated_nodes = candidate_nodes;
+        truncated_actual_depth = actual_depth;
+        truncated_elapsed_ns = candidate_elapsed_ns;
+        truncated_status = endgame_results_get_status(results);
+        break;
+      }
+      exact_tiny_moves[exact_count] = tiny_move;
+      exact_values[exact_count] =
+          endgame_results_get_value(results, ENDGAME_RESULT_ACTUAL);
+      exact_count++;
+    }
+    const int64_t judge_cpu_ns = ctimer_process_cpu_ns() - judge_cpu_start_ns;
+    const int64_t judge_elapsed_ns =
+        (int64_t)(ctimer_elapsed_seconds(&judge_timer) * 1.0e9);
+    int scored_points = 0;
+    for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+      scored_points += trace.points[point_idx].depth >= judge_min_depth;
+    }
+    if (judge_truncated) {
+      printf("EGCURVEJUDGETRUNC pos=%d rack_tiles=%d points=%d "
+             "distinct_complete=%d failed_tiny=%llu actual_found=%d "
+             "actual_depth=%d status=%d candidate_nodes=%llu "
+             "candidate_elapsed_ns=%lld search_depth=%d search_nodes=%llu "
+             "judge_depth=%d judge_nodes=%llu judge_elapsed_ns=%lld "
+             "judge_cpu_ns=%lld "
+             "max_seconds=%.3f judge_max_seconds=%.3f\n",
+             pos, rack_tiles, scored_points, exact_count,
+             (unsigned long long)truncated_tiny_move,
+             truncated_actual_found ? 1 : 0, truncated_actual_depth,
+             truncated_status, (unsigned long long)truncated_nodes,
+             (long long)truncated_elapsed_ns, plies,
+             (unsigned long long)search_nodes, judge_plies,
+             (unsigned long long)judge_nodes, (long long)judge_elapsed_ns,
+             (long long)judge_cpu_ns, max_seconds, judge_max_seconds);
+      for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+        const EndgameCurvePoint *point = &trace.points[point_idx];
+        const char *record_name = point->depth < judge_min_depth
+                                      ? "EGCURVEJUDGECONTEXT"
+                                      : "EGCURVEJUDGEPOINT";
+        printf("%s pos=%d depth=%d nodes=%llu elapsed_ns=%lld cpu_ns=%lld "
+               "root=%d/%d ply2=%d/%d tiny=%llu search=%d\n",
+               record_name, pos, point->depth, (unsigned long long)point->nodes,
+               (long long)point->elapsed_ns, (long long)point->cpu_ns,
+               point->root_completed, point->root_total, point->ply2_completed,
+               point->ply2_total, (unsigned long long)point->tiny_move,
+               point->search_value);
+      }
+      (void)fflush(stdout);
+      free(trace.root_moves);
+      continue;
+    }
+    assert(exact_count > 0);
+
+    // The fixed-depth root search can rank its own candidates imperfectly.
+    // Once every distinct nominee has been evaluated at the same fixed depth,
+    // the oracle is the best of those exact values, not automatically the
+    // move that the unrestricted root search happened to return.
+    int32_t oracle_value = exact_values[0];
+    uint64_t oracle_tiny = exact_tiny_moves[0];
+    for (int exact_idx = 1; exact_idx < exact_count; exact_idx++) {
+      if (exact_values[exact_idx] > oracle_value) {
+        oracle_value = exact_values[exact_idx];
+        oracle_tiny = exact_tiny_moves[exact_idx];
+      }
+    }
+
+    printf("EGCURVEPOS pos=%d rack_tiles=%d points=%d distinct=%d "
+           "search_depth=%d search_nodes=%llu oracle_depth=%d "
+           "oracle_nodes=%llu oracle_tiny=%llu oracle_value=%d "
+           "elapsed_ns=%lld cpu_ns=%lld oracle_elapsed_ns=%lld "
+           "oracle_cpu_ns=%lld\n",
+           pos, rack_tiles, scored_points, exact_count, plies,
+           (unsigned long long)search_nodes, judge_plies,
+           (unsigned long long)judge_nodes, (unsigned long long)oracle_tiny,
+           oracle_value, (long long)solve_elapsed_ns, (long long)solve_cpu_ns,
+           (long long)judge_elapsed_ns, (long long)judge_cpu_ns);
+    // The immediately preceding boundary supplies the observable
+    // move/value-settling feature without paying to oracle-score an otherwise
+    // irrelevant shallow nominee.
+    if (judge_min_depth > 1) {
+      for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+        const EndgameCurvePoint *point = &trace.points[point_idx];
+        if (point->depth != judge_min_depth - 1) {
+          continue;
+        }
+        printf("EGCURVECONTEXT pos=%d depth=%d nodes=%llu elapsed_ns=%lld "
+               "cpu_ns=%lld root=%d/%d ply2=%d/%d tiny=%llu search=%d\n",
+               pos, point->depth, (unsigned long long)point->nodes,
+               (long long)point->elapsed_ns, (long long)point->cpu_ns,
+               point->root_completed, point->root_total, point->ply2_completed,
+               point->ply2_total, (unsigned long long)point->tiny_move,
+               point->search_value);
+        break;
+      }
+    }
+    for (int point_idx = 0; point_idx < trace.count; point_idx++) {
+      const EndgameCurvePoint *point = &trace.points[point_idx];
+      if (point->depth < judge_min_depth) {
+        continue;
+      }
+      int32_t exact_value = 0;
+      assert(endgame_curve_find_exact_value(point->tiny_move, exact_tiny_moves,
+                                            exact_values, exact_count,
+                                            &exact_value));
+      printf("EGCURVEPOINT pos=%d depth=%d nodes=%llu elapsed_ns=%lld "
+             "cpu_ns=%lld root=%d/%d ply2=%d/%d tiny=%llu search=%d "
+             "exact=%d regret=%d\n",
+             pos, point->depth, (unsigned long long)point->nodes,
+             (long long)point->elapsed_ns, (long long)point->cpu_ns,
+             point->root_completed, point->root_total, point->ply2_completed,
+             point->ply2_total, (unsigned long long)point->tiny_move,
+             point->search_value, exact_value, oracle_value - exact_value);
+    }
+    (void)fflush(stdout);
+    free(trace.root_moves);
+  }
+
+  free(cgp_lines);
+  endgame_results_destroy(results);
+  endgame_ctx_destroy(solver);
+  config_destroy(config);
+}
+
 void test_endgame_speed_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -832,6 +1529,7 @@ void test_endgame_speed_bench(void) {
 //   MAGPIE_PO_THREADS solver threads (default 1)
 //   MAGPIE_PO_MAXMOVES per-playout move cap (default 40, safety)
 //   MAGPIE_PO_TAG    label           (default "playout")
+//   MAGPIE_PO_PRINTTRACE emit one POTURN row per searched game state
 void test_endgame_playout_bench(void) {
   log_set_level(LOG_FATAL);
 
@@ -913,9 +1611,17 @@ void test_endgame_playout_bench(void) {
         ended = true;
         break;
       }
+      const int player_on_turn = game_get_player_on_turn_index(game);
+      const int player_rack_tiles = (int)rack_get_total_letters(
+          player_get_rack(game_get_player(game, player_on_turn)));
+      const int combined_rack_tiles =
+          (int)rack_get_total_letters(
+              player_get_rack(game_get_player(game, 0))) +
+          (int)rack_get_total_letters(
+              player_get_rack(game_get_player(game, 1)));
       // Hard wall-clock cutoff: unlimited depth (plies = ceiling), IDS deepens
       // until the external deadline fires MID-depth (checked every 1024 nodes
-      // via check_depth_deadline). soft/hard_time_limit stay 0 so the EBF
+      // via check_search_limits). soft/hard_time_limit stay 0 so the EBF
       // between-depth stop is off -- the only stop is the hard deadline, so
       // both engines burn the same T ms and the faster one completes deeper. On
       // interrupt the result is the best move from the last COMPLETED depth.
@@ -942,7 +1648,8 @@ void test_endgame_playout_bench(void) {
       ctimer_start(&t);
       err = error_stack_create();
       endgame_solve(&solver, &args, results, err);
-      pos_time += ctimer_elapsed_seconds(&t);
+      const double turn_time = ctimer_elapsed_seconds(&t);
+      pos_time += turn_time;
       assert(error_stack_is_empty(err));
       error_stack_destroy(err);
 
@@ -951,8 +1658,23 @@ void test_endgame_playout_bench(void) {
       if (pv->num_moves == 0) {
         break;
       }
-      pos_nodes += endgame_ctx_get_nodes_searched(solver);
+      const uint64_t turn_nodes = endgame_ctx_get_nodes_searched(solver);
+      pos_nodes += turn_nodes;
       pos_depth += pv->negamax_depth;
+
+      if (getenv("MAGPIE_PO_PRINTTRACE") != NULL) {
+        printf("POTURN pos=%d ply=%d player=%d rack_tiles=%d "
+               "player_rack_tiles=%d nodes=%llu depth=%d time=%.6f "
+               "completed=%d tiny=%llu score=%d\n",
+               ci, moves, player_on_turn, combined_rack_tiles,
+               player_rack_tiles, (unsigned long long)turn_nodes,
+               pv->negamax_depth, turn_time,
+               endgame_results_get_status(results) ==
+                       ENDGAME_RESULT_STATUS_FINISHED
+                   ? 1
+                   : 0,
+               (unsigned long long)pv->moves[0].tiny_move, pv->score);
+      }
 
       // Per-move move+value dump (for baseline-vs-optimized move-agreement /
       // points comparison): tiny_move identifies the played move; score is the

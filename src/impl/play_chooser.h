@@ -50,6 +50,11 @@ typedef struct PlayChooserStrategy {
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;
+  // Observation-only audit of the calibrated whole-depth model. This inserts
+  // a synchronized completed-depth boundary and emits ADMISSION events, but
+  // never changes which depth is allowed to run. It is opt-in because the
+  // extra boundary can perturb ABDADA scheduling slightly.
+  bool endgame_admission_shadow;
   // Per-move time budget in seconds. If > 0, a flat budget is used.
   // Otherwise, if game_timer is set and the game is timed, the budget is
   // the player's remaining clock split across an estimate of their
@@ -123,6 +128,7 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t peg_completed_stages;
   uint64_t peg_final_candidates;
   uint64_t peg_final_scenarios;
+  uint64_t peg_endgame_nodes;
   uint64_t peg_partial_calls;
   uint64_t endgame_calls;
   uint64_t endgame_nodes;
@@ -130,17 +136,23 @@ typedef struct PlayChooserBenchmarkStats {
 } PlayChooserBenchmarkStats;
 
 // One completed PEG candidate. A call index identifies the PEG solve and the
-// elapsed time is measured from the start of that solve. Stage indices and
-// candidate ranks are zero-based. Events can arrive concurrently and are kept
-// in callback order; elapsed_ns provides the actual within-call completion
-// timeline, including useful work completed before a time limit interrupts a
-// stage.
+// elapsed and process CPU time are measured from the start of that solve.
+// Stage indices and candidate ranks are zero-based. Events can arrive
+// concurrently and are kept in callback order; elapsed_ns provides the actual
+// within-call completion timeline, including useful work completed before a
+// time limit interrupts a stage. cpu_ns / elapsed_ns is the average scheduled
+// core count over the interval.
 typedef struct PlayChooserPegCandidateEvent {
   uint64_t call_index;
   uint64_t elapsed_ns;
+  uint64_t cpu_ns;
   int stage_index;
   int candidate_rank;
   int scenarios_completed;
+  uint64_t endgame_nodes;
+  uint64_t item_id;
+  double win_pct;
+  double mean_spread;
 } PlayChooserPegCandidateEvent;
 
 typedef struct ChallengeDecision {

@@ -141,6 +141,8 @@ struct EndgameCtx {
   dual_lexicon_mode_t dual_lexicon_mode;
   double soft_time_limit;
   double hard_time_limit;
+  bool has_player_clock;
+  double player_clock_seconds_at_start;
 
   int num_top_moves;
   int requested_plies;
@@ -159,10 +161,14 @@ struct EndgameCtx {
   // the search. search_complete cannot carry this distinction because it is
   // also the normal cross-worker completion signal.
   atomic_bool time_limit_reached;
+  // True when EndgameArgs.node_limit stops the search. Kept separate from the
+  // time flag so progress traces can distinguish clock and work ceilings.
+  atomic_bool node_limit_reached;
   // Caller-supplied absolute deadline (CLOCK_MONOTONIC ns). 0 = disabled.
-  // check_depth_deadline takes min(this, depth_deadline_ns) so a caller's
+  // check_search_limits takes min(this, depth_deadline_ns) so a caller's
   // wall-clock budget always wins over the EBF-projected per-depth budget.
   int64_t external_deadline_ns;
+  uint64_t node_limit;
   // Flag: stuck-tile mode has been logged (0=not yet, 1=logged)
   atomic_int stuck_tile_logged;
   // Fraction of opponent's tiles that are stuck at the root (0.0 = none)
@@ -176,6 +182,26 @@ struct EndgameCtx {
   // Ply-2 progress tracking (children of root move #1, thread 0 only)
   atomic_int ply2_moves_completed;
   atomic_int ply2_moves_total;
+  // Highest completed depth already published to the generic progress trace.
+  // Any ABDADA worker may advance it because jittered workers can complete a
+  // useful deeper result before thread 0.
+  atomic_int progress_depth_emitted;
+
+  // Whole-depth admission. Enforced mode pre-admits depths through
+  // depth_admission_min_depth so ABDADA retains its shallow-depth jitter, then
+  // blocks the next depth until the publishing worker admits it. Shadow mode
+  // pre-admits the entire solve: it observes the same ungated schedule used by
+  // calibration and cannot perturb worker startup.
+  EndgameDepthAdmissionCallback depth_admission_callback;
+  void *depth_admission_callback_data;
+  int depth_admission_min_depth;
+  bool enforce_depth_admission;
+  atomic_int max_admitted_depth;
+  cpthread_mutex_t depth_admission_mutex;
+  EndgameCompletedDepth last_admission_boundary;
+  EndgameCompletedDepth prior_admission_boundary;
+  bool has_last_admission_boundary;
+  bool has_prior_admission_boundary;
 
   // Per-ply callback for iterative deepening progress
   EndgamePerPlyCallback per_ply_callback;
@@ -249,7 +275,14 @@ struct EndgameCtxWorker {
   int32_t best_pv_value;   // Thread-local best value
   int completed_depth;     // Depth this thread completed
   int n_initial_moves;     // Number of root moves (thread-local to avoid races)
-  bool in_first_root_move; // True when thread 0 is inside root move idx==0
+  bool in_first_root_move; // True while this worker is inside root move idx 0
+  // Per-worker structural coverage for a DEPTH_DONE event. The externally
+  // polled atomics above intentionally remain thread-0-only, while these make
+  // a jittered worker's newly published best result self-describing.
+  int progress_root_moves_completed;
+  int progress_root_moves_total;
+  int progress_ply2_moves_completed;
+  int progress_ply2_moves_total;
   // Counter for throttling per-depth deadline checks in abdada_negamax
   uint64_t nodes_since_deadline_check;
 
@@ -512,6 +545,17 @@ void pvline_extend_from_tt(PVLine *pv_line, Game *game_copy,
 
 static bool iterative_deepening_should_stop(EndgameCtx *solver);
 
+static bool
+endgame_depth_admission_controls_boundaries(const EndgameCtx *solver) {
+  return solver->depth_admission_callback != NULL ||
+         solver->enforce_depth_admission;
+}
+
+static bool endgame_tracks_worker_structure(const EndgameCtx *solver) {
+  return analysis_progress_is_enabled(&solver->progress_listener) ||
+         endgame_depth_admission_controls_boundaries(solver);
+}
+
 // Returns the pruned KWG for the given player index.
 // In shared-KWG mode, only pruned_kwgs[0] exists, so it is always returned.
 // In non-shared mode, each player index maps to its own pruned KWG.
@@ -710,7 +754,24 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   }
   es->soft_time_limit = endgame_args->soft_time_limit;
   es->hard_time_limit = endgame_args->hard_time_limit;
+  es->has_player_clock = endgame_args->has_player_clock;
+  es->player_clock_seconds_at_start =
+      endgame_args->player_clock_seconds_at_start;
+  assert(!es->has_player_clock ||
+         (isfinite(es->player_clock_seconds_at_start) &&
+          es->player_clock_seconds_at_start >= 0.0));
+  es->depth_admission_callback = endgame_args->depth_admission_callback;
+  es->depth_admission_callback_data =
+      endgame_args->depth_admission_callback_data;
+  es->depth_admission_min_depth = endgame_args->depth_admission_min_depth > 0
+                                      ? endgame_args->depth_admission_min_depth
+                                      : DEFAULT_ENDGAME_ADMISSION_MIN_DEPTH;
+  if (es->depth_admission_min_depth > es->requested_plies) {
+    es->depth_admission_min_depth = es->requested_plies;
+  }
+  es->enforce_depth_admission = endgame_args->enforce_depth_admission;
   es->external_deadline_ns = endgame_args->external_deadline_ns;
+  es->node_limit = endgame_args->node_limit;
   bool create_separate_kwgs =
       (es->dual_lexicon_mode == DUAL_LEXICON_MODE_INFORMED) && !shared_kwg;
 
@@ -739,20 +800,31 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
   atomic_store(&es->search_complete, 0);
   atomic_store(&es->depth_deadline_ns, 0);
   atomic_store(&es->time_limit_reached, false);
+  atomic_store(&es->node_limit_reached, false);
   atomic_store(&es->stuck_tile_logged, 0);
   atomic_store(&es->root_moves_completed, 0);
   atomic_store(&es->root_moves_total, 0);
   atomic_store(&es->current_depth, 0);
   atomic_store(&es->ply2_moves_completed, 0);
   atomic_store(&es->ply2_moves_total, 0);
+  atomic_store(&es->progress_depth_emitted, 0);
+  atomic_store(&es->max_admitted_depth, es->enforce_depth_admission
+                                            ? es->depth_admission_min_depth
+                                            : es->requested_plies);
+  es->has_last_admission_boundary = false;
+  es->has_prior_admission_boundary = false;
 
   es->thread_control = endgame_args->thread_control;
   es->game = endgame_args->game;
   es->actual_move = endgame_args->actual_move;
   es->progress_listener = endgame_args->progress_listener;
-  if (analysis_progress_is_enabled(&es->progress_listener) &&
-      es->progress_listener.start_ns <= 0) {
-    es->progress_listener.start_ns = ctimer_monotonic_ns();
+  if (analysis_progress_is_enabled(&es->progress_listener)) {
+    if (es->progress_listener.start_ns <= 0) {
+      es->progress_listener.start_ns = ctimer_monotonic_ns();
+    }
+    if (es->progress_listener.start_cpu_ns <= 0) {
+      es->progress_listener.start_cpu_ns = ctimer_process_cpu_ns();
+    }
   }
   es->per_ply_callback = endgame_args->per_ply_callback;
   es->per_ply_callback_data = endgame_args->per_ply_callback_data;
@@ -816,6 +888,7 @@ void endgame_ctx_reset(EndgameCtx *es, EndgameResults *results,
 EndgameCtx *endgame_ctx_create(void) {
   EndgameCtx *solver = calloc_or_die(1, sizeof(EndgameCtx));
   cpthread_mutex_init(&solver->add_mutex);
+  cpthread_mutex_init(&solver->depth_admission_mutex);
   // Closed until a solve opens the window; otherwise a never-solved ctx (calloc
   // zeroes adding_closed) would look injectable to an external monitor.
   atomic_store(&solver->adding_closed, 1);
@@ -1051,6 +1124,10 @@ static EndgameCtxWorker *endgame_ctx_create_worker(EndgameCtx *solver,
   solver_worker->best_pv.num_moves = 0;
   solver_worker->best_pv_value = -LARGE_VALUE;
   solver_worker->completed_depth = 0;
+  solver_worker->progress_root_moves_completed = 0;
+  solver_worker->progress_root_moves_total = 0;
+  solver_worker->progress_ply2_moves_completed = 0;
+  solver_worker->progress_ply2_moves_total = 0;
   solver_worker->nodes_since_deadline_check = 0;
   reset_worker_analysis_state(solver_worker);
 
@@ -2085,12 +2162,19 @@ static int negamax_generate_and_estimate_moves(EndgameCtxWorker *worker,
   return nplays;
 }
 
-// Checks whether the per-depth deadline has been exceeded and signals all
-// workers to stop if so. Marked noinline to keep struct timespec off the hot
-// abdada_negamax stack frame — deep searches (25-ply) would otherwise
-// overflow the stack under ASAN's enlarged frames.
+// Checks whether the aggregate node ceiling or per-depth deadline has been
+// exceeded and signals all workers to stop if so. Marked noinline to keep
+// struct timespec off the hot abdada_negamax stack frame — deep searches
+// (25-ply) would otherwise overflow the stack under ASAN's enlarged frames.
 __attribute__((noinline)) static bool
-check_depth_deadline(EndgameCtxWorker *worker) {
+check_search_limits(EndgameCtxWorker *worker) {
+  if (worker->solver->node_limit > 0 &&
+      endgame_ctx_get_nodes_searched(worker->solver) >=
+          worker->solver->node_limit) {
+    atomic_store(&worker->solver->node_limit_reached, true);
+    atomic_store(&worker->solver->search_complete, 1);
+    return true;
+  }
   int64_t deadline_ns = atomic_load_explicit(&worker->solver->depth_deadline_ns,
                                              memory_order_relaxed);
   // External deadline (e.g. PEG's wall-clock cap) takes precedence if it
@@ -2243,7 +2327,7 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
     // updates ~once per DEPTH_DEADLINE_CHECK_INTERVAL nodes per worker.
     atomic_store_explicit(&worker->published_nodes_searched,
                           worker->local_nodes_searched, memory_order_relaxed);
-    if (check_depth_deadline(worker)) {
+    if (check_search_limits(worker)) {
       return ABDADA_INTERRUPTED;
     }
   }
@@ -2476,12 +2560,19 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
 
   // Multi-PV: track top-K values at root to widen alpha
   const bool is_root = (worker->current_iterative_deepening_depth == depth);
+  const bool track_analysis = endgame_tracks_worker_structure(worker->solver);
   const bool is_ply2 =
       (worker->current_iterative_deepening_depth - 1 == depth) &&
-      worker->ordinal == 0 && worker->in_first_root_move;
+      worker->in_first_root_move && (worker->ordinal == 0 || track_analysis);
   if (is_ply2) {
-    atomic_store(&worker->solver->ply2_moves_total, nplays);
-    atomic_store(&worker->solver->ply2_moves_completed, 0);
+    if (track_analysis) {
+      worker->progress_ply2_moves_total = nplays;
+      worker->progress_ply2_moves_completed = 0;
+    }
+    if (worker->ordinal == 0) {
+      atomic_store(&worker->solver->ply2_moves_total, nplays);
+      atomic_store(&worker->solver->ply2_moves_completed, 0);
+    }
   }
   const int multi_pv_k = worker->solver->num_top_moves;
   const bool multi_pv = is_root && multi_pv_k > 1;
@@ -2593,8 +2684,8 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
       const Rack *move_leftover_rack =
           is_outplay ? &outplay_leftover : stm_rack;
 
-      // Track whether thread 0 is inside root move #1's subtree
-      if (is_root && worker->ordinal == 0 && pass == 0) {
+      // Track whether this worker is inside root move #1's subtree.
+      if (is_root && pass == 0 && (worker->ordinal == 0 || track_analysis)) {
         worker->in_first_root_move = (idx == 0);
       }
 
@@ -2775,6 +2866,9 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         // Track root move progress (thread 0 only, for external polling).
         // Count on any pass so ABDADA deferred moves that complete on pass 1+
         // are not missed.
+        if (track_analysis) {
+          worker->progress_root_moves_completed++;
+        }
         if (worker->ordinal == 0) {
           atomic_fetch_add(&worker->solver->root_moves_completed, 1);
           // Spread-adjusted value, same sign convention as PVLine.score.
@@ -2795,10 +2889,21 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
             progress.nodes = progress.work_units;
             progress.depth = depth;
             progress.candidate_index = idx;
-            progress.candidates_completed =
-                atomic_load(&worker->solver->root_moves_completed);
-            progress.candidates_total =
+            const int root_total =
                 atomic_load(&worker->solver->root_moves_total);
+            const int root_completed =
+                atomic_load(&worker->solver->root_moves_completed);
+            const int ply2_total =
+                atomic_load(&worker->solver->ply2_moves_total);
+            const int ply2_completed =
+                atomic_load(&worker->solver->ply2_moves_completed);
+            // Aspiration failures can re-search the whole root and therefore
+            // revisit a move. These are completion events, not unique-root
+            // identities, so never present their count as >100% coverage.
+            progress.candidates_completed = MIN(root_completed, root_total);
+            progress.candidates_total = root_total;
+            progress.subcandidates_completed = MIN(ply2_completed, ply2_total);
+            progress.subcandidates_total = ply2_total;
             progress.item_id = small_move->tiny_move;
             progress.value = (double)reported_value;
             analysis_progress_emit(&worker->solver->progress_listener,
@@ -2814,7 +2919,12 @@ int32_t abdada_negamax(EndgameCtxWorker *worker, uint64_t node_key, int depth,
         }
       }
       if (is_ply2) {
-        atomic_fetch_add(&worker->solver->ply2_moves_completed, 1);
+        if (track_analysis) {
+          worker->progress_ply2_moves_completed++;
+        }
+        if (worker->ordinal == 0) {
+          atomic_fetch_add(&worker->solver->ply2_moves_completed, 1);
+        }
       }
       if (multi_pv) {
         // Multi-PV: insert value into sorted top-K array and set alpha to
@@ -2961,6 +3071,227 @@ static void force_actual_move_to_front(const EndgameCtxWorker *worker,
       return;
     }
   }
+}
+
+static bool endgame_wait_for_depth_admission(EndgameCtxWorker *worker,
+                                             int depth) {
+  EndgameCtx *solver = worker->solver;
+  if (!endgame_depth_admission_controls_boundaries(solver)) {
+    return true;
+  }
+  while (depth > atomic_load_explicit(&solver->max_admitted_depth,
+                                      memory_order_acquire)) {
+    if (iterative_deepening_should_stop(solver)) {
+      return false;
+    }
+    // The publishing worker runs the in-process predictor synchronously and
+    // opens or closes the gate immediately. A yield avoids wasting a core in
+    // the uncommon race where another worker reaches the boundary first.
+    compat_sched_yield();
+  }
+  return !iterative_deepening_should_stop(solver);
+}
+
+static bool endgame_depth_admission_decision_is_valid(
+    const EndgameDepthAdmissionDecision *decision) {
+  const bool has_no_wall_prediction = decision->expected_seconds == 0.0 &&
+                                      decision->completion_bound_seconds == 0.0;
+  const bool has_valid_wall_prediction =
+      isfinite(decision->expected_seconds) &&
+      isfinite(decision->completion_bound_seconds) &&
+      decision->expected_seconds > 0.0 &&
+      decision->completion_bound_seconds >= decision->expected_seconds;
+  const bool has_valid_time_manager_plan =
+      !decision->has_time_manager_plan ||
+      (isfinite(decision->expected_regret_reduction) &&
+       decision->expected_regret_reduction >= 0.0 &&
+       isfinite(decision->current_value_per_second) &&
+       decision->current_value_per_second >= 0.0 &&
+       isfinite(decision->future_value_per_second) &&
+       decision->future_value_per_second >= 0.0 &&
+       isfinite(decision->maximum_current_seconds) &&
+       decision->maximum_current_seconds >= 0.0 &&
+       isfinite(decision->deposit_seconds));
+  return decision->valid && decision->expected_nodes > 0 &&
+         decision->completion_bound_nodes >= decision->expected_nodes &&
+         (has_no_wall_prediction || has_valid_wall_prediction) &&
+         isfinite(decision->completion_confidence) &&
+         decision->completion_confidence > 0.0 &&
+         decision->completion_confidence <= 1.0 && has_valid_time_manager_plan;
+}
+
+// Records one globally advancing completed-depth boundary and, once the
+// configured warm-up depth has completed, predicts whether the next whole
+// depth may start. Returns false only when enforced admission refuses/fails
+// closed. The caller still publishes the just-completed result before exiting.
+static bool endgame_handle_depth_admission(EndgameCtxWorker *worker, int depth,
+                                           double elapsed_seconds,
+                                           int32_t value, const PVLine *pv) {
+  EndgameCtx *solver = worker->solver;
+  EndgameCompletedDepth current = {
+      .depth = depth,
+      .cumulative_nodes = endgame_ctx_get_nodes_searched(solver),
+      .elapsed_seconds = elapsed_seconds,
+      .root_moves_total = worker->progress_root_moves_total,
+      .ply2_moves_total = worker->progress_ply2_moves_total,
+      .best_move = pv->num_moves > 0 ? pv->moves[0].tiny_move : 0,
+      .value = value,
+  };
+
+  cpthread_mutex_lock(&solver->depth_admission_mutex);
+  EndgameDepthAdmissionRequest request = {
+      .current = current,
+      .previous = solver->last_admission_boundary,
+      .prior = solver->prior_admission_boundary,
+      .has_previous = solver->has_last_admission_boundary,
+      .has_prior = solver->has_prior_admission_boundary,
+      .next_depth = depth + 1,
+      .requested_plies = solver->requested_plies,
+      .workers = endgame_active_worker_count(solver),
+      .score_spread = solver->initial_spread,
+      .consecutive_scoreless_turns =
+          game_get_consecutive_scoreless_turns(solver->game),
+      .hard_time_limit = solver->hard_time_limit,
+      .remaining_seconds = INFINITY,
+      .has_player_clock = solver->has_player_clock,
+      .player_clock_remaining_seconds = INFINITY,
+      .node_limit = solver->node_limit,
+      .remaining_nodes = solver->node_limit > current.cumulative_nodes
+                             ? solver->node_limit - current.cumulative_nodes
+                         : solver->node_limit > 0 ? 0
+                                                  : UINT64_MAX,
+  };
+  if (solver->hard_time_limit > 0.0) {
+    request.remaining_seconds =
+        fmax(0.0, solver->hard_time_limit - elapsed_seconds);
+  }
+  if (solver->external_deadline_ns > 0) {
+    const double external_remaining = fmax(
+        0.0,
+        (double)(solver->external_deadline_ns - ctimer_monotonic_ns()) / 1.0e9);
+    request.remaining_seconds =
+        fmin(request.remaining_seconds, external_remaining);
+  }
+  if (solver->has_player_clock) {
+    request.player_clock_remaining_seconds =
+        fmax(0.0, solver->player_clock_seconds_at_start - elapsed_seconds);
+  }
+  const Player *player = game_get_player(solver->game, solver->solving_player);
+  const Player *opponent =
+      game_get_player(solver->game, 1 - solver->solving_player);
+  request.player_rack_tiles =
+      (int)rack_get_total_letters(player_get_rack(player));
+  request.opponent_rack_tiles =
+      (int)rack_get_total_letters(player_get_rack(opponent));
+
+  EndgameDepthAdmissionDecision decision = {0};
+  const bool is_admission_boundary =
+      depth >= solver->depth_admission_min_depth &&
+      depth < solver->requested_plies;
+  if (is_admission_boundary && solver->depth_admission_callback != NULL) {
+    decision = solver->depth_admission_callback(
+        &request, solver->depth_admission_callback_data);
+  }
+  const bool valid = endgame_depth_admission_decision_is_valid(&decision);
+
+  if (is_admission_boundary &&
+      analysis_progress_is_enabled(&solver->progress_listener)) {
+    AnalysisProgressEvent progress = analysis_progress_event_create(
+        ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_ADMISSION);
+    progress.budget_seconds = solver->hard_time_limit;
+    progress.workers = request.workers;
+    progress.work_units = current.cumulative_nodes;
+    progress.nodes = current.cumulative_nodes;
+    if (request.has_previous &&
+        current.cumulative_nodes > request.previous.cumulative_nodes) {
+      progress.item_work_units =
+          current.cumulative_nodes - request.previous.cumulative_nodes;
+      progress.item_nodes = progress.item_work_units;
+    }
+    progress.expected_next_work_units = valid ? decision.expected_nodes : 0;
+    progress.completion_bound_work_units =
+        valid ? decision.completion_bound_nodes : 0;
+    progress.expected_next_nodes = valid ? decision.expected_nodes : 0;
+    progress.completion_bound_nodes =
+        valid ? decision.completion_bound_nodes : 0;
+    progress.expected_next_seconds = valid ? decision.expected_seconds : NAN;
+    progress.completion_bound_seconds =
+        valid ? decision.completion_bound_seconds : NAN;
+    progress.completion_confidence =
+        valid ? decision.completion_confidence : NAN;
+    progress.has_time_manager_plan = valid && decision.has_time_manager_plan;
+    progress.expected_regret_reduction =
+        progress.has_time_manager_plan ? decision.expected_regret_reduction
+                                       : NAN;
+    progress.current_value_per_second = progress.has_time_manager_plan
+                                            ? decision.current_value_per_second
+                                            : NAN;
+    progress.future_value_per_second =
+        progress.has_time_manager_plan ? decision.future_value_per_second : NAN;
+    progress.maximum_current_seconds =
+        progress.has_time_manager_plan ? decision.maximum_current_seconds : NAN;
+    progress.deposit_seconds =
+        progress.has_time_manager_plan ? decision.deposit_seconds : NAN;
+    if (!valid) {
+      progress.admission = solver->enforce_depth_admission
+                               ? ANALYSIS_ADMISSION_REFUSE
+                               : ANALYSIS_ADMISSION_NONE;
+    } else {
+      // In shadow mode this is the model's recommendation. In enforced mode
+      // it is the actual gate outcome, so a well-formed prediction from an
+      // uncalibrated solver topology is recorded as a refusal rather than a
+      // misleading admit.
+      const bool admission_allows_start =
+          decision.should_start &&
+          (!solver->enforce_depth_admission || decision.safe_to_enforce);
+      progress.admission = admission_allows_start ? ANALYSIS_ADMISSION_ADMIT
+                                                  : ANALYSIS_ADMISSION_REFUSE;
+    }
+    progress.admission_safe_to_enforce = valid && decision.safe_to_enforce;
+    progress.admission_enforced = solver->enforce_depth_admission;
+    // phase is the completed boundary; depth is the proposed next depth.
+    progress.phase = depth;
+    progress.depth = request.next_depth;
+    progress.candidates_completed = current.root_moves_total;
+    progress.candidates_total = current.root_moves_total;
+    progress.subcandidates_completed = current.ply2_moves_total;
+    progress.subcandidates_total = current.ply2_moves_total;
+    progress.item_id = current.best_move;
+    progress.value = (double)current.value;
+    progress.best_value = progress.value;
+    progress.player_on_turn = solver->solving_player;
+    progress.bag_tiles = 0;
+    progress.player_rack_tiles = request.player_rack_tiles;
+    progress.opponent_rack_tiles = request.opponent_rack_tiles;
+    progress.consecutive_scoreless_turns = request.consecutive_scoreless_turns;
+    progress.score_spread = request.score_spread;
+    progress.clock_seconds_remaining =
+        request.has_player_clock ? request.player_clock_remaining_seconds
+                                 : request.remaining_seconds;
+    analysis_progress_emit(&solver->progress_listener, &progress);
+  }
+
+  if (solver->has_last_admission_boundary) {
+    solver->prior_admission_boundary = solver->last_admission_boundary;
+    solver->has_prior_admission_boundary = true;
+  }
+  solver->last_admission_boundary = current;
+  solver->has_last_admission_boundary = true;
+
+  const bool admit =
+      !is_admission_boundary || !solver->enforce_depth_admission ||
+      (valid && decision.safe_to_enforce && decision.should_start);
+  if (is_admission_boundary) {
+    if (admit) {
+      atomic_store_explicit(&solver->max_admitted_depth, request.next_depth,
+                            memory_order_release);
+    } else {
+      atomic_store(&solver->time_limit_reached, true);
+      atomic_store(&solver->search_complete, 1);
+    }
+  }
+  cpthread_mutex_unlock(&solver->depth_admission_mutex);
+  return admit;
 }
 
 void iterative_deepening(EndgameCtxWorker *worker, int plies) {
@@ -3168,6 +3499,9 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
   }
 
   for (int ply = start; ply <= plies; ply++) {
+    if (!endgame_wait_for_depth_admission(worker, ply)) {
+      break;
+    }
     // Check if another thread has completed the full search
     if (iterative_deepening_should_stop(worker->solver)) {
       break;
@@ -3192,6 +3526,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
                             memory_order_relaxed);
       atomic_store_explicit(&worker->live_top_k_seq, topk_seq_before + 2,
                             memory_order_release);
+      worker->in_first_root_move = false;
+    }
+    if (endgame_tracks_worker_structure(worker->solver)) {
+      worker->progress_root_moves_completed = 0;
+      worker->progress_root_moves_total = worker->n_initial_moves;
+      worker->progress_ply2_moves_completed = 0;
+      worker->progress_ply2_moves_total = 0;
       worker->in_first_root_move = false;
     }
     double depth_start_time = ctimer_elapsed_seconds(&ids_timer);
@@ -3274,22 +3615,53 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     endgame_results_set_best_pvline(worker->solver->results, &pv, pv_value,
                                     ply);
 
-    if (worker->ordinal == 0 &&
-        analysis_progress_is_enabled(&worker->solver->progress_listener)) {
-      AnalysisProgressEvent progress = analysis_progress_event_create(
-          ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_DEPTH_DONE);
-      progress.budget_seconds = worker->solver->hard_time_limit;
-      progress.work_units = endgame_ctx_get_nodes_searched(worker->solver);
-      progress.nodes = progress.work_units;
-      progress.depth = ply;
-      progress.candidates_completed =
-          atomic_load(&worker->solver->root_moves_completed);
-      progress.candidates_total =
-          atomic_load(&worker->solver->root_moves_total);
-      progress.item_id = pv.num_moves > 0 ? pv.moves[0].tiny_move : 0;
-      progress.value = (double)pv_value;
-      progress.best_value = (double)pv_value;
-      analysis_progress_emit(&worker->solver->progress_listener, &progress);
+    bool publish_depth = false;
+    if (analysis_progress_is_enabled(&worker->solver->progress_listener) ||
+        endgame_depth_admission_controls_boundaries(worker->solver)) {
+      int prior_emitted = atomic_load_explicit(
+          &worker->solver->progress_depth_emitted, memory_order_relaxed);
+      while (ply > prior_emitted) {
+        if (atomic_compare_exchange_weak_explicit(
+                &worker->solver->progress_depth_emitted, &prior_emitted, ply,
+                memory_order_relaxed, memory_order_relaxed)) {
+          publish_depth = true;
+          break;
+        }
+      }
+    }
+    if (publish_depth) {
+      // The live counter normally lags by up to one polling tranche. A
+      // completed-depth trace is a calibration boundary, so flush this
+      // worker's exact count before taking the aggregate snapshot.
+      atomic_store_explicit(&worker->published_nodes_searched,
+                            worker->local_nodes_searched, memory_order_relaxed);
+      if (analysis_progress_is_enabled(&worker->solver->progress_listener)) {
+        AnalysisProgressEvent progress = analysis_progress_event_create(
+            ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_DEPTH_DONE);
+        progress.budget_seconds = worker->solver->hard_time_limit;
+        progress.work_units = endgame_ctx_get_nodes_searched(worker->solver);
+        progress.nodes = progress.work_units;
+        progress.depth = ply;
+        progress.candidates_total = worker->progress_root_moves_total;
+        // A published IDS depth is complete by definition. The raw counter may
+        // exceed the field size when an aspiration failure re-searches roots.
+        progress.candidates_completed = progress.candidates_total;
+        progress.subcandidates_completed =
+            MIN(worker->progress_ply2_moves_completed,
+                worker->progress_ply2_moves_total);
+        progress.subcandidates_total = worker->progress_ply2_moves_total;
+        progress.item_id = pv.num_moves > 0 ? pv.moves[0].tiny_move : 0;
+        progress.value = (double)pv_value;
+        progress.best_value = (double)pv_value;
+        analysis_progress_emit(&worker->solver->progress_listener, &progress);
+      }
+    }
+
+    bool admission_allows_next = true;
+    if (publish_depth &&
+        endgame_depth_admission_controls_boundaries(worker->solver)) {
+      admission_allows_next = endgame_handle_depth_admission(
+          worker, ply, ctimer_elapsed_seconds(&ids_timer), pv_value, &pv);
     }
 
     // Call per-ply callback (only this solver's main worker, ordinal 0, to
@@ -3306,6 +3678,10 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
                                   initial_moves, initial_move_count);
     }
 
+    if (!admission_allows_next) {
+      break;
+    }
+
     // EBF-based time management: decide whether to start the next depth.
     // Only thread 0 checks (other threads follow via search_complete signal).
     // Require a minimum depth before applying any time management so the solver
@@ -3317,9 +3693,13 @@ void iterative_deepening(EndgameCtxWorker *worker, int plies) {
     const int min_depth_for_time_mgmt = 4;
     // EBF time management is active only when soft_time_limit > 0.
     // Callers using only hard_time_limit rely on the external timer thread
-    // and check_depth_deadline instead; soft_time_limit = 0 disables this
+    // and check_search_limits instead; soft_time_limit = 0 disables this
     // block intentionally (e.g. baseline time_mode=0 via endgame_time.c).
-    if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0) {
+    // Enforced whole-depth admission replaces this legacy mean-EBF policy.
+    // Running both would let one gate admit a depth while the other refuses it
+    // a few microseconds later, after a helper had already begun the work.
+    if (worker->ordinal == 0 && worker->solver->soft_time_limit > 0 &&
+        !worker->solver->enforce_depth_admission) {
       double elapsed = ctimer_elapsed_seconds(&ids_timer);
       double this_depth_time = elapsed - depth_start_time;
       if (ply >= min_depth_for_time_mgmt) {
@@ -3498,9 +3878,20 @@ static void endgame_emit_start(EndgameCtx *solver,
   AnalysisProgressEvent progress = analysis_progress_event_create(
       ANALYSIS_MODE_ENDGAME, ANALYSIS_EVENT_START);
   progress.budget_seconds = endgame_args->hard_time_limit;
+  progress.workers = endgame_args->num_threads;
   progress.depth = endgame_args->plies;
   progress.player_on_turn = game_get_player_on_turn_index(endgame_args->game);
   progress.bag_tiles = bag_get_letters(game_get_bag(endgame_args->game));
+  const Player *player =
+      game_get_player(endgame_args->game, progress.player_on_turn);
+  const Player *opponent =
+      game_get_player(endgame_args->game, 1 - progress.player_on_turn);
+  progress.player_rack_tiles =
+      (int)rack_get_total_letters(player_get_rack(player));
+  progress.opponent_rack_tiles =
+      (int)rack_get_total_letters(player_get_rack(opponent));
+  progress.consecutive_scoreless_turns =
+      game_get_consecutive_scoreless_turns(endgame_args->game);
   progress.score_spread = solver->initial_spread;
   analysis_progress_emit(&solver->progress_listener, &progress);
 }
@@ -3517,8 +3908,12 @@ static void endgame_emit_finish(EndgameCtx *solver,
   progress.work_units = endgame_ctx_get_nodes_searched(solver);
   progress.nodes = progress.work_units;
   progress.depth = endgame_results_get_depth(results, ENDGAME_RESULT_BEST);
-  progress.candidates_completed = atomic_load(&solver->root_moves_completed);
   progress.candidates_total = atomic_load(&solver->root_moves_total);
+  progress.candidates_completed = MIN(
+      atomic_load(&solver->root_moves_completed), progress.candidates_total);
+  progress.subcandidates_total = atomic_load(&solver->ply2_moves_total);
+  progress.subcandidates_completed = MIN(
+      atomic_load(&solver->ply2_moves_completed), progress.subcandidates_total);
   const PVLine *best_pv =
       endgame_results_get_pvline(results, ENDGAME_RESULT_BEST);
   if (best_pv->num_moves > 0) {
@@ -3530,6 +3925,8 @@ static void endgame_emit_finish(EndgameCtx *solver,
   if (endgame_results_get_status(results) ==
       ENDGAME_RESULT_STATUS_INTERRUPTED) {
     progress.status = ANALYSIS_STATUS_INTERRUPTED;
+  } else if (atomic_load(&solver->node_limit_reached)) {
+    progress.status = ANALYSIS_STATUS_WORK_LIMIT;
   } else if (atomic_load(&solver->time_limit_reached)) {
     progress.status = ANALYSIS_STATUS_TIME_LIMIT;
   } else if (progress.depth < 0) {

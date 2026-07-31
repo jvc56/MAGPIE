@@ -11,19 +11,35 @@ AnalysisProgressEvent analysis_progress_event_create(analysis_mode_t mode,
       .mode = mode,
       .event = event,
       .elapsed_ns = ANALYSIS_PROGRESS_ELAPSED_NOW,
+      .cpu_ns = ANALYSIS_PROGRESS_CPU_NOW,
+      .workers = -1,
       .phase = -1,
       .depth = -1,
       .candidate_index = -1,
       .candidates_completed = -1,
       .candidates_total = -1,
+      .subcandidates_completed = -1,
+      .subcandidates_total = -1,
       .best_index = -1,
       .challenger_index = -1,
       .value = NAN,
       .best_value = NAN,
       .challenger_value = NAN,
       .secondary_value = NAN,
+      .expected_next_seconds = NAN,
+      .completion_bound_seconds = NAN,
+      .completion_confidence = NAN,
+      .admission = ANALYSIS_ADMISSION_NONE,
+      .expected_regret_reduction = NAN,
+      .current_value_per_second = NAN,
+      .future_value_per_second = NAN,
+      .maximum_current_seconds = NAN,
+      .deposit_seconds = NAN,
       .player_on_turn = -1,
       .bag_tiles = -1,
+      .player_rack_tiles = -1,
+      .opponent_rack_tiles = -1,
+      .consecutive_scoreless_turns = -1,
       .score_spread = ANALYSIS_PROGRESS_SCORE_SPREAD_UNSET,
       .clock_seconds_remaining = NAN,
   };
@@ -40,6 +56,7 @@ AnalysisProgressListener analysis_progress_listener_for_run(
   listener.run_id = run_id;
   listener.parent_run_id = parent_run_id;
   listener.start_ns = start_ns;
+  listener.start_cpu_ns = start_ns > 0 ? ctimer_process_cpu_ns() : 0;
   return listener;
 }
 
@@ -60,6 +77,11 @@ void analysis_progress_emit(const AnalysisProgressListener *listener,
   if (stamped.elapsed_ns == ANALYSIS_PROGRESS_ELAPSED_NOW) {
     stamped.elapsed_ns =
         listener->start_ns > 0 ? ctimer_monotonic_ns() - listener->start_ns : 0;
+  }
+  if (stamped.cpu_ns == ANALYSIS_PROGRESS_CPU_NOW) {
+    stamped.cpu_ns = listener->start_cpu_ns > 0
+                         ? ctimer_process_cpu_ns() - listener->start_cpu_ns
+                         : 0;
   }
   listener->callback(&stamped, listener->user_data);
 }
@@ -94,10 +116,24 @@ const char *analysis_event_name(analysis_event_t event) {
     return "candidate_done";
   case ANALYSIS_EVENT_DEPTH_DONE:
     return "depth_done";
+  case ANALYSIS_EVENT_ADMISSION:
+    return "admission";
   case ANALYSIS_EVENT_FALLBACK:
     return "fallback";
   case ANALYSIS_EVENT_FINISH:
     return "finish";
+  }
+  return "unknown";
+}
+
+const char *analysis_admission_name(analysis_admission_t admission) {
+  switch (admission) {
+  case ANALYSIS_ADMISSION_NONE:
+    return "none";
+  case ANALYSIS_ADMISSION_ADMIT:
+    return "admit";
+  case ANALYSIS_ADMISSION_REFUSE:
+    return "refuse";
   }
   return "unknown";
 }
@@ -110,6 +146,8 @@ const char *analysis_status_name(analysis_status_t status) {
     return "completed";
   case ANALYSIS_STATUS_TIME_LIMIT:
     return "time_limit";
+  case ANALYSIS_STATUS_WORK_LIMIT:
+    return "work_limit";
   case ANALYSIS_STATUS_INTERRUPTED:
     return "interrupted";
   case ANALYSIS_STATUS_ERROR:

@@ -82,17 +82,19 @@ typedef enum {
 typedef void (*PegOnStageStart)(int stage_idx, int k_cands, int inner_d,
                                 int emptier_plies, void *user_data);
 
-// Fired when a candidate finishes. completed_ns is its absolute monotonic-clock
-// completion timestamp (ctimer_monotonic_ns-compatible), including in the
-// scenario-parallel path where callbacks are delivered after the stage's work
-// barrier. reordered is true when the candidate slotted in above the bottom of
-// the live ranking (so the displayed order changed and the whole list should be
-// redrawn); false when it sorted to the bottom (the new worst), so a streaming
-// view can just append its one row.
+// Fired when a candidate finishes. endgame_nodes is the candidate's nested
+// endgame work (zero for stages that do not invoke the endgame solver).
+// completed_ns is its absolute monotonic-clock completion timestamp
+// (ctimer_monotonic_ns-compatible), including in the scenario-parallel path
+// where callbacks are delivered after the stage's work barrier. reordered is
+// true when the candidate slotted in above the bottom of the live ranking (so
+// the displayed order changed and the whole list should be redrawn); false
+// when it sorted to the bottom (the new worst), so a streaming view can just
+// append its one row.
 typedef void (*PegOnCandDone)(int stage_idx, int cand_rank, const Move *cand,
                               double win_pct, double mean_spread, int scen_done,
-                              int64_t completed_ns, bool reordered,
-                              void *user_data);
+                              uint64_t endgame_nodes, int64_t completed_ns,
+                              bool reordered, void *user_data);
 
 typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
                                   int scenario_idx, int32_t mover_total,
@@ -102,6 +104,7 @@ typedef void (*PegOnScenarioDone)(int stage_idx, int cand_rank,
 
 // Thread-safe, caller-owned live view of the in-progress ranking (see below).
 typedef struct PegPoll PegPoll;
+typedef struct PegTimeManagerPolicy PegTimeManagerPolicy;
 
 typedef struct PegArgs {
   // Required: PEG position to analyze. Must have bag size in [PEG_MIN_BAG,
@@ -143,6 +146,14 @@ typedef struct PegArgs {
   // required.
   const int *stage_top_k;
   int num_stages;
+
+  // Optional direct fidelity for a single configured halving stage. Zero uses
+  // the normal stage ramp (2, 3, 4, ... plies). A positive value requires
+  // stage_top_k with num_stages == 1 and evaluates that stage directly at the
+  // requested endgame ply depth. This is primarily useful for a small,
+  // candidate-conditioned oracle that should not pay for shallower tiers
+  // first.
+  int stage_fidelity_plies;
 
   // Pessimistic-opponent cap: in the PEG_OPP_PESSIMISTIC playout, weigh only
   // the inner_top_k highest-equity opponent replies at each opponent turn.
@@ -243,6 +254,20 @@ typedef struct PegArgs {
   // Optional observation-only, solver-independent progress listener.
   AnalysisProgressListener progress_listener;
 
+  // Optional TimeManager shadow/admission policy. The current v1 PEG
+  // calibration covers exact first-two-candidate waves but is deliberately
+  // unsafe to enforce, so normal callers leave this NULL. The ordinary
+  // no-poll production stages are larger and fail calibration matching rather
+  // than borrowing a two-candidate completion bound. In shadow mode the
+  // decision is emitted as an ADMISSION progress event and never changes the
+  // result.
+  PegTimeManagerPolicy *time_manager_policy;
+  bool enforce_time_manager;
+  // TimeManager plans against the player's game clock when present. The
+  // solver's current hard window remains a separate completion gate.
+  bool has_player_clock;
+  double player_clock_seconds_at_start;
+
   // Optional live poll. NULL = no polling (zero overhead). When set, peg_solve
   // updates it as candidates complete (stage 0) and at each stage boundary, so
   // a separate thread (e.g. a TUI render loop) can read the current ranking
@@ -271,6 +296,8 @@ static inline void peg_args_fill(
     const bool include_per_scenario, PegOnStageStart on_stage_start,
     PegOnCandDone on_cand_done, PegOnScenarioDone on_scenario_done,
     void *user_data, const AnalysisProgressListener *progress_listener,
+    PegTimeManagerPolicy *time_manager_policy, const bool enforce_time_manager,
+    const bool has_player_clock, const double player_clock_seconds_at_start,
     PegPoll *poll, PegArgs *peg_args) {
   peg_args->game = game;
   peg_args->thread_control = thread_control;
@@ -304,6 +331,10 @@ static inline void peg_args_fill(
   peg_args->progress_listener = progress_listener != NULL
                                     ? *progress_listener
                                     : (AnalysisProgressListener){0};
+  peg_args->time_manager_policy = time_manager_policy;
+  peg_args->enforce_time_manager = enforce_time_manager;
+  peg_args->has_player_clock = has_player_clock;
+  peg_args->player_clock_seconds_at_start = player_clock_seconds_at_start;
   peg_args->poll = poll;
 }
 
@@ -323,18 +354,20 @@ typedef struct PegStageSnapshot {
 // ----- Solver outputs ---------------------------------------------------
 
 typedef struct PegRankedCand {
-  Move move;           // the cand
-  double win_pct;      // 0..1
-  double mean_spread;  // signed (mover - opp), in points
-  int64_t weight_sum;  // labeled ordered-draw count = perm(unseen, bag_size),
-                       // the "weighted orderings" denominator (constant across
-                       // all plays in a position)
-  int64_t win_count;   // labeled bag-orderings won (leaf value > 0)
-  int64_t tie_count;   // labeled bag-orderings tied (leaf value == 0); losses
-                       // are weight_sum - win_count - tie_count
-  int n_scenarios;     // distinct (multiset, bag-ordering) scenarios evaluated
-  double eval_seconds; // wall-clock time to score this cand at its deepest
-                       // stage (live/CLI solves only; 0 otherwise)
+  Move move;          // the cand
+  double win_pct;     // 0..1
+  double mean_spread; // signed (mover - opp), in points
+  int64_t weight_sum; // labeled ordered-draw count = perm(unseen, bag_size),
+                      // the "weighted orderings" denominator (constant across
+                      // all plays in a position)
+  int64_t win_count;  // labeled bag-orderings won (leaf value > 0)
+  int64_t tie_count;  // labeled bag-orderings tied (leaf value == 0); losses
+                      // are weight_sum - win_count - tie_count
+  int n_scenarios;    // distinct (multiset, bag-ordering) scenarios evaluated
+  uint64_t endgame_nodes; // aggregate nodes searched by this candidate's
+                          // direct and nested endgame leaves
+  double eval_seconds;    // wall-clock time to score this cand at its deepest
+                          // stage (live/CLI solves only; 0 otherwise)
 } PegRankedCand;
 
 typedef struct PegResult {

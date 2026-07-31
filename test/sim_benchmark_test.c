@@ -142,7 +142,8 @@ void test_play_chooser_benchmark(void) {
          "sim_calls=%llu sim_iters=%llu sim_nodes=%llu peg_calls=%llu "
          "peg_candidate_completions=%llu peg_event_drops=%llu "
          "peg_stages=%llu peg_candidates=%llu peg_scenarios=%llu "
-         "peg_partials=%llu eg_calls=%llu eg_nodes=%llu eg_depth=%llu\n",
+         "peg_endgame_nodes=%llu peg_partials=%llu eg_calls=%llu "
+         "eg_nodes=%llu eg_depth=%llu\n",
          games, clock_ms, (unsigned long long)stats.static_moves,
          (unsigned long long)stats.fallback_moves,
          (unsigned long long)stats.sim_calls,
@@ -154,6 +155,7 @@ void test_play_chooser_benchmark(void) {
          (unsigned long long)stats.peg_completed_stages,
          (unsigned long long)stats.peg_final_candidates,
          (unsigned long long)stats.peg_final_scenarios,
+         (unsigned long long)stats.peg_endgame_nodes,
          (unsigned long long)stats.peg_partial_calls,
          (unsigned long long)stats.endgame_calls,
          (unsigned long long)stats.endgame_nodes,
@@ -162,10 +164,15 @@ void test_play_chooser_benchmark(void) {
   for (size_t i = 0; i < copied_peg_event_count; i++) {
     const PlayChooserPegCandidateEvent *event = &peg_events[i];
     printf("PCPEGCAND call=%llu stage=%d rank=%d scenarios=%d "
-           "elapsed_ms=%.3f\n",
+           "endgame_nodes=%llu item=%llu win=%.6f spread=%+.3f "
+           "elapsed_ms=%.3f cpu_ms=%.3f\n",
            (unsigned long long)event->call_index, event->stage_index,
            event->candidate_rank, event->scenarios_completed,
-           (double)event->elapsed_ns / 1.0e6);
+           (unsigned long long)event->endgame_nodes,
+           (unsigned long long)event->item_id, event->win_pct,
+           event->mean_spread,
+           (double)event->elapsed_ns / 1.0e6,
+           (double)event->cpu_ns / 1.0e6);
   }
   free(peg_events);
 

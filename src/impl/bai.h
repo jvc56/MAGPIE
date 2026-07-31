@@ -28,6 +28,7 @@
 #include "random_variable.h"
 #include <assert.h>
 #include <limits.h>
+#include <math.h>
 #include <stdbool.h>
 
 #define MINIMUM_VARIANCE 1e-10
@@ -64,6 +65,12 @@ typedef struct BAISyncData {
   int avoid_prune_best_arm_idx;
   const AnalysisProgressListener *progress_listener;
   uint64_t next_progress_sample;
+  double regret_stop_target;
+  double regret_cross_arm_correlation;
+  double regret_calibration;
+  uint64_t regret_check_interval;
+  uint64_t regret_min_samples_per_arm;
+  uint64_t next_regret_check_sample;
 } BAISyncData;
 
 static inline BAISyncData *
@@ -97,6 +104,12 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
       analysis_progress_is_enabled(progress_listener)
           ? progress_listener->checkpoint_interval
           : 0;
+  bai_sync_data->regret_stop_target = 0.0;
+  bai_sync_data->regret_cross_arm_correlation = 0.0;
+  bai_sync_data->regret_calibration = 1.0;
+  bai_sync_data->regret_check_interval = 0;
+  bai_sync_data->regret_min_samples_per_arm = 0;
+  bai_sync_data->next_regret_check_sample = 0;
   return bai_sync_data;
 }
 
@@ -166,6 +179,74 @@ static inline double bai_get_arm_z(BAISyncData *bai_sync_data,
       bai_d(challenger_arm_data->mean, challenger_arm_data->var, alt_lambda);
   return (double)astar_arm_data->num_samples * d_astar +
          (double)challenger_arm_data->num_samples * d_a;
+}
+
+static inline double bai_standard_normal_pdf(const double value) {
+  static const double inv_sqrt_two_pi = 0.39894228040143267794;
+  return inv_sqrt_two_pi * exp(-0.5 * value * value);
+}
+
+static inline double bai_standard_normal_cdf(const double value) {
+  static const double inv_sqrt_two = 0.70710678118654752440;
+  return 0.5 * erfc(-value * inv_sqrt_two);
+}
+
+// Expected loss from returning astar under a joint Gaussian approximation.
+// Each challenger contributes E[max(U_i - U_astar, 0)]; the maximum
+// contribution is used rather than their sum because only one alternative can
+// be selected. Simulation arms consume identical scenario-seed prefixes, so
+// Cov(mean_i, mean_j) = Cov(sample_i, sample_j) / max(n_i, n_j).
+//
+// Assumes the caller has locked bai_sync_data or all workers have joined.
+static inline double
+bai_estimate_expected_regret(const BAISyncData *bai_sync_data,
+                             RandomVariables *rvs) {
+  (void)rvs;
+  const int best_index = bai_sync_data->astar_index;
+  if (best_index < 0) {
+    return INFINITY;
+  }
+  const BAIArmDatum *best = &bai_sync_data->arm_data[best_index];
+  if (best->num_samples == 0) {
+    return INFINITY;
+  }
+  const double correlation =
+      fmax(-0.99, fmin(0.99, bai_sync_data->regret_cross_arm_correlation));
+  double expected_regret = 0.0;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (arm_index == best_index) {
+      continue;
+    }
+    const BAIArmDatum *arm = &bai_sync_data->arm_data[arm_index];
+    if (arm->num_samples == 0) {
+      return INFINITY;
+    }
+    const double covariance =
+        correlation * sqrt(best->var * arm->var) /
+        (double)(best->num_samples > arm->num_samples ? best->num_samples
+                                                      : arm->num_samples);
+    double difference_variance = best->var / (double)best->num_samples +
+                                 arm->var / (double)arm->num_samples -
+                                 2.0 * covariance;
+    if (difference_variance < MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
+      difference_variance = MINIMUM_VARIANCE * MINIMUM_VARIANCE;
+    }
+    const double difference_sd = sqrt(difference_variance);
+    const double difference_mean = arm->mean - best->mean;
+    const double z = difference_mean / difference_sd;
+    double arm_regret = difference_sd * bai_standard_normal_pdf(z) +
+                        difference_mean * bai_standard_normal_cdf(z);
+    if (arm_regret < 0.0) {
+      arm_regret = 0.0;
+    }
+    if (arm_regret > expected_regret) {
+      expected_regret = arm_regret;
+    }
+  }
+  const double calibration = bai_sync_data->regret_calibration > 0.0
+                                 ? bai_sync_data->regret_calibration
+                                 : 1.0;
+  return calibration * expected_regret;
 }
 
 static inline int
@@ -376,11 +457,57 @@ bai_sync_data_add_sample_while_locked(BAISampleArgs *args, const int arm_index,
   }
 }
 
+// Assumes the caller has locked bai_sync_data.
+static inline void bai_maybe_stop_for_regret_while_locked(BAISampleArgs *args) {
+  BAISyncData *sync_data = args->bai_sync_data;
+  if (sync_data->regret_stop_target <= 0.0 || sync_data->initial_phase ||
+      sync_data->next_regret_check_sample == 0 ||
+      sync_data->num_total_samples_completed <
+          sync_data->next_regret_check_sample) {
+    return;
+  }
+
+  const uint64_t interval = sync_data->regret_check_interval;
+  do {
+    const uint64_t old_next = sync_data->next_regret_check_sample;
+    sync_data->next_regret_check_sample += interval;
+    if (sync_data->next_regret_check_sample < old_next) {
+      sync_data->next_regret_check_sample = 0;
+      break;
+    }
+  } while (sync_data->next_regret_check_sample > 0 &&
+           sync_data->next_regret_check_sample <=
+               sync_data->num_total_samples_completed);
+
+  for (int arm_index = 0; arm_index < sync_data->num_arms; arm_index++) {
+    if (sync_data->arm_data[arm_index].num_samples <
+        sync_data->regret_min_samples_per_arm) {
+      return;
+    }
+  }
+  const double estimated_regret =
+      bai_estimate_expected_regret(sync_data, args->rvs);
+  bai_result_set_estimated_regret(sync_data->bai_result, estimated_regret);
+  if (estimated_regret <= sync_data->regret_stop_target) {
+    bai_result_set_regret_at_stop(sync_data->bai_result, estimated_regret);
+    bai_result_set_status(sync_data->bai_result,
+                          BAI_RESULT_STATUS_REGRET_LIMIT);
+  }
+}
+
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
                                             const int arm_index,
                                             const double sample_value) {
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
+  cpthread_mutex_unlock(&args->bai_sync_data->mutex);
+}
+
+static inline void bai_sync_data_add_sample_with_regret_stop(
+    BAISampleArgs *args, const int arm_index, const double sample_value) {
+  cpthread_mutex_lock(&args->bai_sync_data->mutex);
+  bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
+  bai_maybe_stop_for_regret_while_locked(args);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
 
@@ -394,6 +521,7 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
   AnalysisProgressEvent progress;
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
+  bai_maybe_stop_for_regret_while_locked(args);
   BAISyncData *sync_data = args->bai_sync_data;
   if (sync_data->next_progress_sample > 0 &&
       sync_data->num_total_samples_completed >=
@@ -419,6 +547,7 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
     if (challenger_index >= 0) {
       progress.challenger_value = sync_data->arm_data[challenger_index].mean;
     }
+    progress.value = bai_estimate_expected_regret(sync_data, args->rvs);
     const uint64_t interval = sync_data->progress_listener->checkpoint_interval;
     do {
       const uint64_t old_next = sync_data->next_progress_sample;
@@ -583,6 +712,46 @@ bai_worker_sample_loop_with_progress(BAIWorkerArgs *bai_worker_args) {
   }
 }
 
+// Separate from the original worker loop so disabled value-of-computation
+// stopping adds no branch to the simulation inner loop.
+__attribute__((noinline)) static void
+bai_worker_sample_loop_with_regret_stop(BAIWorkerArgs *bai_worker_args) {
+  BAISyncData *sync_data = bai_worker_args->sync_data;
+  ThreadControl *thread_control = sync_data->thread_control;
+  const BAIOptions *bai_options = bai_worker_args->bai_options;
+  RandomVariables *rvs = bai_worker_args->rvs;
+  const int bai_thread_index = bai_worker_args->thread_index;
+
+  if (bai_thread_index > 0 && bai_options->parent_worker_thread_index > 0) {
+    log_fatal("Both BAI worker thread index (%d) and parent worker "
+              "thread index (%d) are greater than 0.",
+              bai_thread_index, bai_options->parent_worker_thread_index);
+  }
+  const int rvs_thread_index =
+      bai_options->parent_worker_thread_index + bai_thread_index;
+  BAISampleArgs sample_args = {
+      .bai_sync_data = sync_data,
+      .rvs = rvs,
+      .delta = bai_options->delta,
+      .sample_limit = bai_options->sample_limit,
+      .sample_minimum = bai_options->sample_minimum,
+      .sampling_rule = bai_options->sampling_rule,
+      .threshold = bai_options->threshold,
+      .cutoff = bai_options->cutoff,
+      .initial_batch_next_total_index = 0,
+      .initial_batch_remaining = 0,
+  };
+
+  while (!bai_should_stop(sync_data->bai_result, thread_control)) {
+    const int arm_index = bai_sync_data_get_next_sample_index(&sample_args);
+    if (arm_index < 0) {
+      break;
+    }
+    const double sample = rvs_sample(rvs, arm_index, rvs_thread_index, NULL);
+    bai_sync_data_add_sample_with_regret_stop(&sample_args, arm_index, sample);
+  }
+}
+
 static inline void bai_worker_sample_loop(BAIWorkerArgs *bai_worker_args) {
   BAISyncData *sync_data = bai_worker_args->sync_data;
   ThreadControl *thread_control = bai_worker_args->sync_data->thread_control;
@@ -651,6 +820,18 @@ static void *bai_worker_with_progress(void *args) {
   return NULL;
 }
 
+static void *bai_worker_with_regret_stop(void *args) {
+  BAIWorkerArgs *bai_worker_args = (BAIWorkerArgs *)args;
+  bai_worker_sample_loop_with_regret_stop(bai_worker_args);
+  checkpoint_wait(bai_worker_args->checkpoint, bai_worker_args);
+  bai_worker_sample_loop_with_regret_stop(bai_worker_args);
+  if (bai_worker_args->sync_data->avoid_prune_arms) {
+    checkpoint_wait(bai_worker_args->avoid_prune_checkpoint, bai_worker_args);
+    sim_unpruned_to_winner(bai_worker_args);
+  }
+  return NULL;
+}
+
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
@@ -666,6 +847,25 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   BAISyncData *sync_data =
       bai_sync_data_create(bai_result, thread_control,
                            (int)rvs_get_num_rvs(rvs), rng, progress_listener);
+  sync_data->regret_stop_target = bai_options->regret_stop_target;
+  sync_data->regret_cross_arm_correlation =
+      bai_options->regret_cross_arm_correlation;
+  sync_data->regret_calibration = bai_options->regret_calibration;
+  sync_data->regret_check_interval = bai_options->regret_check_interval > 0
+                                         ? bai_options->regret_check_interval
+                                         : 256;
+  sync_data->regret_min_samples_per_arm =
+      bai_options->regret_min_samples_per_arm > 0
+          ? bai_options->regret_min_samples_per_arm
+          : 32;
+  if (sync_data->regret_stop_target > 0.0) {
+    const uint64_t minimum_total =
+        (uint64_t)sync_data->num_arms * sync_data->regret_min_samples_per_arm;
+    sync_data->next_regret_check_sample =
+        minimum_total > sync_data->regret_check_interval
+            ? minimum_total
+            : sync_data->regret_check_interval;
+  }
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
     sync_data->avoid_prune_arms = bai_options->arm_avoid_prune;
@@ -689,9 +889,12 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       malloc_or_die((sizeof(cpthread_t)) * bai_options->num_threads);
   BAIWorkerArgs *bai_worker_args_array =
       malloc_or_die((sizeof(BAIWorkerArgs)) * bai_options->num_threads);
-  void *(*worker_start)(void *) = sync_data->next_progress_sample > 0
-                                      ? bai_worker_with_progress
-                                      : bai_worker;
+  void *(*worker_start)(void *) = bai_worker;
+  if (sync_data->next_progress_sample > 0) {
+    worker_start = bai_worker_with_progress;
+  } else if (sync_data->regret_stop_target > 0.0) {
+    worker_start = bai_worker_with_regret_stop;
+  }
   for (int thread_index = 0; thread_index < bai_options->num_threads;
        thread_index++) {
     bai_worker_args_array[thread_index] = bai_worker_args;
@@ -703,6 +906,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
        thread_index++) {
     cpthread_join(worker_ids[thread_index]);
   }
+  bai_result_set_estimated_regret(bai_result,
+                                  bai_estimate_expected_regret(sync_data, rvs));
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_stop_timer(bai_result);
   if (analysis_progress_is_enabled(progress_listener)) {
@@ -721,6 +926,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       progress.challenger_value =
           sync_data->arm_data[sync_data->challenger_index].mean;
     }
+    progress.value = bai_result_get_estimated_regret(bai_result);
     switch (bai_result_get_status(bai_result)) {
     case BAI_RESULT_STATUS_TIMEOUT:
       progress.status = ANALYSIS_STATUS_TIME_LIMIT;

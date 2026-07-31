@@ -77,14 +77,19 @@ void sim_ctx_destroy(SimCtx *sim_ctx) {
 void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
               ErrorStack *error_stack) {
   AnalysisProgressListener progress_listener = sim_args->progress_listener;
-  if (analysis_progress_is_enabled(&progress_listener) &&
-      progress_listener.start_ns <= 0) {
-    progress_listener.start_ns = ctimer_monotonic_ns();
+  if (analysis_progress_is_enabled(&progress_listener)) {
+    if (progress_listener.start_ns <= 0) {
+      progress_listener.start_ns = ctimer_monotonic_ns();
+    }
+    if (progress_listener.start_cpu_ns <= 0) {
+      progress_listener.start_cpu_ns = ctimer_process_cpu_ns();
+    }
   }
   if (analysis_progress_is_enabled(&progress_listener)) {
     AnalysisProgressEvent start =
         analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_START);
     start.budget_seconds = sim_args->bai_options.time_limit_seconds;
+    start.workers = sim_args->num_threads;
     start.candidates_total =
         sim_args->move_list ? move_list_get_count(sim_args->move_list) : 0;
     if (sim_args->game != NULL) {
