@@ -1,0 +1,220 @@
+{
+  "schema_version": 1,
+  "experiment": "fresh representative PEG quality corpus",
+  "panel": {
+    "path": "tools/peg_time_calibration/quality_positions_20260730.tsv",
+    "sha256": "cac6348b3b6bef27d0886ee76286a0adef4d5bea549aa46599750e55695cfd17",
+    "positions": 200,
+    "per_bag": 50,
+    "independent_source_games": 200,
+    "frozen_before_arms": true
+  },
+  "build": {
+    "configuration": "no_pgo_release",
+    "binary": "bin/magpie_test",
+    "binary_sha256": "02845990e4900113326a275cd9b97cacb0f13f3834ca599b13df6dca167bf6c1",
+    "lexicon": "CSW24",
+    "rit": true,
+    "threads": 18,
+    "detected_hardware_concurrency": 18
+  },
+  "commands": [
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_fresh_quality.py --output-dir obj/peg_quality_20260730 --threads 18 --max-positions 1",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_fresh_quality.py --output-dir obj/peg_quality_20260730 --threads 18",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/lock_peg_quality_oracle_pilot.py --records obj/peg_quality_20260730/records.jsonl --panel tools/peg_time_calibration/quality_positions_20260730.tsv --output tools/peg_time_calibration/quality_oracle_pilot_20260730.json --per-bag 6 --seed peg-quality-oracle-pilot-20260730",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_quality_oracles.py --records obj/peg_quality_20260730/records.jsonl --selection tools/peg_time_calibration/quality_oracle_pilot_20260730.json --output-dir obj/peg_quality_oracle_pilot_20260730 --judge-ply 3 --judge-ply 4 --stride 4 --budget 0 --threads 18",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/analyze_peg_quality_oracle_pilot.py --records obj/peg_quality_20260730/records.jsonl --selection tools/peg_time_calibration/quality_oracle_pilot_20260730.json --json tools/peg_time_calibration/quality_oracle_pilot_20260730.summary.json --markdown notes/PEG_QUALITY_ORACLE_PILOT.md",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/lock_peg_quality_oracle_pilot.py --records obj/peg_quality_20260730/records.jsonl --panel tools/peg_time_calibration/quality_positions_20260730.tsv --output tools/peg_time_calibration/quality_oracle_full_20260730.json --all-disagreements --seed all-disagreements-no-sampling",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_quality_oracles.py --records obj/peg_quality_20260730/records.jsonl --selection tools/peg_time_calibration/quality_oracle_full_20260730.json --output-dir obj/peg_quality_oracle_full_20260730 --judge-ply 3 --judge-ply 4 --stride 4 --budget 0 --threads 18",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/lock_peg_quality_sensitivity.py --source-selection tools/peg_time_calibration/quality_oracle_full_20260730.json --records obj/peg_quality_20260730/records.jsonl --output tools/peg_time_calibration/quality_oracle_stride2_20260730.json --per-bag 2 --seed quality-stride2-sensitivity-20260730-v1",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/run_peg_quality_oracles.py --records obj/peg_quality_20260730/records.jsonl --selection tools/peg_time_calibration/quality_oracle_stride2_20260730.json --output-dir obj/peg_quality_oracle_stride2_20260730 --judge-ply 3 --judge-ply 4 --stride 2 --budget 0 --threads 18",
+    "PYTHONDONTWRITEBYTECODE=1 python3 -B tools/analyze_peg_fresh_quality.py --records obj/peg_quality_20260730/records.jsonl --json tools/peg_time_calibration/fresh_quality_20260730.summary.json --markdown notes/PEG_FRESH_QUALITY_RESULTS.md --bootstrap 10000"
+  ],
+  "accounting": {
+    "maps": {
+      "completed": 200,
+      "target": 200
+    },
+    "arms": {
+      "checkpoint32": {
+        "completed": 200,
+        "partial_or_censored": 0
+      },
+      "deep16": {
+        "completed": 200,
+        "partial_or_censored": 0
+      },
+      "deep24": {
+        "completed": 200,
+        "partial_or_censored": 0
+      }
+    },
+    "policy_disagreements": {
+      "total": 73,
+      "by_bag": {
+        "1": 22,
+        "2": 27,
+        "3": 15,
+        "4": 9
+      }
+    },
+    "judges": {
+      "direct3_stride4": {
+        "accepted": 73,
+        "partial_rejected_or_censored": 0
+      },
+      "direct4_stride4": {
+        "accepted": 73,
+        "partial_rejected_or_censored": 0
+      },
+      "direct3_stride2": {
+        "accepted": 8,
+        "partial_rejected_or_censored": 0
+      },
+      "direct4_stride2": {
+        "accepted": 8,
+        "partial_rejected_or_censored": 0
+      }
+    },
+    "processes": {
+      "completed_zero_exit": 803,
+      "nonzero_exit": 0
+    },
+    "agreements": "Every policy agreement contributes exact zero; no oracle was required solely for an identical pair."
+  },
+  "work": {
+    "arms": {
+      "checkpoint32": {
+        "wall_seconds": 3442.502,
+        "process_cpu_seconds": 57286.825,
+        "scheduled_core_occupancy": 0.925,
+        "cumulative_scenarios": 120934546,
+        "nested_endgame_nodes": 1557808791
+      },
+      "deep16": {
+        "wall_seconds": 10336.279,
+        "process_cpu_seconds": 179253.568,
+        "scheduled_core_occupancy": 0.963,
+        "cumulative_scenarios": 120279448,
+        "nested_endgame_nodes": 16417470453
+      },
+      "deep24": {
+        "wall_seconds": 13952.854,
+        "process_cpu_seconds": 242505.634,
+        "scheduled_core_occupancy": 0.966,
+        "cumulative_scenarios": 121264430,
+        "nested_endgame_nodes": 22757828710
+      }
+    },
+    "judges": {
+      "direct3_stride4": {
+        "wall_seconds": 1376.874,
+        "process_cpu_seconds": 23907.043,
+        "scheduled_core_occupancy": 0.965,
+        "cumulative_scenarios": 42609,
+        "nested_endgame_nodes": 2244406388
+      },
+      "direct4_stride4": {
+        "wall_seconds": 4324.752,
+        "process_cpu_seconds": 76078.704,
+        "scheduled_core_occupancy": 0.978,
+        "cumulative_scenarios": 56812,
+        "nested_endgame_nodes": 8351150833
+      },
+      "direct3_stride2": {
+        "wall_seconds": 102.133,
+        "process_cpu_seconds": 1711.046,
+        "scheduled_core_occupancy": 0.931,
+        "cumulative_scenarios": 7797,
+        "nested_endgame_nodes": 184170236
+      },
+      "direct4_stride2": {
+        "wall_seconds": 312.391,
+        "process_cpu_seconds": 5443.397,
+        "scheduled_core_occupancy": 0.968,
+        "cumulative_scenarios": 10396,
+        "nested_endgame_nodes": 725424571
+      }
+    }
+  },
+  "wall_time": {
+    "arm_trace": {
+      "started_utc": "2026-07-30T23:47:50.011979+00:00",
+      "finished_utc": "2026-07-31T07:33:38.420759+00:00",
+      "span_seconds": 27948.409,
+      "prospective_projection": "No wall projection; arms were completion-bounded and unbounded."
+    },
+    "oracle_pilot": {
+      "started_utc": "2026-07-31T07:35:22.197390+00:00",
+      "finished_utc": "2026-07-31T08:37:32.441271+00:00",
+      "span_seconds": 3730.244
+    },
+    "oracle_full_resume": {
+      "started_utc": "2026-07-31T08:40:22.214077+00:00",
+      "finished_utc": "2026-07-31T09:15:03.681391+00:00",
+      "span_seconds": 2081.467
+    },
+    "stride2_sensitivity": {
+      "started_utc": "2026-07-31T09:16:27.736474+00:00",
+      "finished_utc": "2026-07-31T09:23:23.439033+00:00",
+      "span_seconds": 415.703
+    },
+    "oracle_projection": {
+      "direct4_all_73_hours_from_pilot_mean": 2.39,
+      "actual_direct4_process_wall_hours": 1.201,
+      "actual_paired_stride4_phase_span_hours": 1.614,
+      "note": "Projection was a scheduling estimate, not a strength feature."
+    },
+    "first_to_last_span_seconds": 34533.427,
+    "sum_of_phase_spans_seconds": 34175.823
+  },
+  "load_diagnostics": {
+    "identical_sentinels": 41,
+    "normalized_throughput_cv": 0.0850070591,
+    "early_to_late_drift_fraction": -0.0414596297,
+    "median_scheduled_core_occupancy": 0.852742696,
+    "noisy_threshold_fraction_from_median": 0.2156845956,
+    "flagged_noisy_segments": 0,
+    "interpretation": "Quality observations remain valid by completed work; wall time is only an M5 conversion."
+  },
+  "validation": [
+    {
+      "command": "./bin/magpie_test peg",
+      "result": "pass",
+      "exit_code": 0
+    },
+    {
+      "command": "PYTHONDONTWRITEBYTECODE=1 python3 -B -m unittest discover -s tools -p 'test_*peg*.py'",
+      "result": "32 tests passed",
+      "exit_code": 0
+    }
+  ],
+  "raw_artifacts": [
+    {
+      "path": "obj/peg_quality_20260730/records.jsonl",
+      "bytes": 334190782,
+      "sha256": "d8247bb106bbffacc61d2ceecc06872fd28a679c461850d272af0c07fe053b0c"
+    },
+    {
+      "path": "obj/peg_quality_20260730/raw.log",
+      "bytes": 237661760,
+      "sha256": "37e98cf5096bc095a5248df7fe4a2dac56a429f9277a51b1e0e1f6bd19fc5ae8"
+    },
+    {
+      "path": "obj/peg_quality_oracle_pilot_20260730/raw.log",
+      "bytes": 773169,
+      "sha256": "b295e083e61a07720215a19a8b218aa36bbf9ac8b3a34bc7711e8a9bb6c7167c"
+    },
+    {
+      "path": "obj/peg_quality_oracle_full_20260730/raw.log",
+      "bytes": 1513578,
+      "sha256": "e49a60f642ab40568051a44024e095a7ae3b76207e4704775276d9d7bb8d7e3e"
+    },
+    {
+      "path": "obj/peg_quality_oracle_stride2_20260730/raw.log",
+      "bytes": 75449,
+      "sha256": "ede424241d460341713f27a22b4696fd36c3ce3954315afa3c8039133835792f"
+    }
+  ],
+  "raw_logs_committed": false
+}
