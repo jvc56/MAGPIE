@@ -1,0 +1,1886 @@
+{
+  "arm_records": {
+    "path": "/Users/john/Documents/Codex/2026-07-29/work-autonomously-on-peg-calibration-for/MAGPIE-peg-calibration/obj/peg_quality_20260730/records.jsonl",
+    "sha256_at_lock": "9cc4469293c0503e4798cdc10fb2c9dad27b7feb3ccdfe2a5bbe6ff027f526c5"
+  },
+  "locked_before_oracle": false,
+  "panel": {
+    "path": "/Users/john/Documents/Codex/2026-07-29/work-autonomously-on-peg-calibration-for/MAGPIE-peg-calibration/tools/peg_time_calibration/quality_positions_20260730.tsv",
+    "sha256": "cac6348b3b6bef27d0886ee76286a0adef4d5bea549aa46599750e55695cfd17"
+  },
+  "per_bag": null,
+  "positions": 73,
+  "schema_version": 1,
+  "seed": "all-disagreements-no-sampling",
+  "selected": [
+    {
+      "arm_sequences": {
+        "checkpoint32": 1,
+        "deep16": 2,
+        "deep24": 3
+      },
+      "bag": 1,
+      "nominees": [
+        "b1 DOD",
+        "b1 POD",
+        "6b DAYNT"
+      ],
+      "policy_moves": {
+        "deep_16_8": "b1 POD",
+        "deep_24_12": "6b DAYNT",
+        "fixed_12": "b1 POD",
+        "fixed_2": "b1 DOD",
+        "fixed_32": "6b DAYNT",
+        "fixed_4": "b1 POD",
+        "fixed_8": "b1 POD",
+        "min12_patience8": "b1 POD",
+        "min8_patience4": "b1 POD",
+        "min8_patience8": "b1 POD"
+      },
+      "position": "quality-20260730-b1-p001"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 24,
+        "deep16": 23,
+        "deep24": 22
+      },
+      "bag": 1,
+      "nominees": [
+        "12k ERBIA",
+        "12j GEBUR"
+      ],
+      "policy_moves": {
+        "deep_16_8": "12j GEBUR",
+        "deep_24_12": "12j GEBUR",
+        "fixed_12": "12j GEBUR",
+        "fixed_2": "12k ERBIA",
+        "fixed_32": "12j GEBUR",
+        "fixed_4": "12k ERBIA",
+        "fixed_8": "12j GEBUR",
+        "min12_patience8": "12j GEBUR",
+        "min8_patience4": "12j GEBUR",
+        "min8_patience8": "12j GEBUR"
+      },
+      "position": "quality-20260730-b1-p002"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 50,
+        "deep16": 51,
+        "deep24": 52
+      },
+      "bag": 1,
+      "nominees": [
+        "7h DUE",
+        "g6 DUG",
+        "g6 FUG"
+      ],
+      "policy_moves": {
+        "deep_16_8": "g6 FUG",
+        "deep_24_12": "g6 FUG",
+        "fixed_12": "g6 DUG",
+        "fixed_2": "7h DUE",
+        "fixed_32": "g6 DUG",
+        "fixed_4": "g6 DUG",
+        "fixed_8": "g6 DUG",
+        "min12_patience8": "g6 DUG",
+        "min8_patience4": "g6 DUG",
+        "min8_patience8": "g6 DUG"
+      },
+      "position": "quality-20260730-b1-p005"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 74,
+        "deep16": 73,
+        "deep24": 72
+      },
+      "bag": 1,
+      "nominees": [
+        "b5 AH",
+        "b10 HARPIN"
+      ],
+      "policy_moves": {
+        "deep_16_8": "b10 HARPIN",
+        "deep_24_12": "b10 HARPIN",
+        "fixed_12": "b10 HARPIN",
+        "fixed_2": "b5 AH",
+        "fixed_32": "b10 HARPIN",
+        "fixed_4": "b10 HARPIN",
+        "fixed_8": "b10 HARPIN",
+        "min12_patience8": "b10 HARPIN",
+        "min8_patience4": "b10 HARPIN",
+        "min8_patience8": "b10 HARPIN"
+      },
+      "position": "quality-20260730-b1-p006"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 75,
+        "deep16": 76,
+        "deep24": 77
+      },
+      "bag": 1,
+      "nominees": [
+        "4j TATH",
+        "pass"
+      ],
+      "policy_moves": {
+        "deep_16_8": "pass",
+        "deep_24_12": "pass",
+        "fixed_12": "pass",
+        "fixed_2": "4j TATH",
+        "fixed_32": "pass",
+        "fixed_4": "4j TATH",
+        "fixed_8": "pass",
+        "min12_patience8": "pass",
+        "min8_patience4": "pass",
+        "min8_patience8": "pass"
+      },
+      "position": "quality-20260730-b1-p007"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 99,
+        "deep16": 98,
+        "deep24": 97
+      },
+      "bag": 1,
+      "nominees": [
+        "n2 ON",
+        "i3 VINO"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n2 ON",
+        "deep_24_12": "i3 VINO",
+        "fixed_12": "n2 ON",
+        "fixed_2": "n2 ON",
+        "fixed_32": "i3 VINO",
+        "fixed_4": "n2 ON",
+        "fixed_8": "n2 ON",
+        "min12_patience8": "n2 ON",
+        "min8_patience4": "n2 ON",
+        "min8_patience8": "n2 ON"
+      },
+      "position": "quality-20260730-b1-p008"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 149,
+        "deep16": 150,
+        "deep24": 151
+      },
+      "bag": 1,
+      "nominees": [
+        "9c FY",
+        "m12 FID"
+      ],
+      "policy_moves": {
+        "deep_16_8": "m12 FID",
+        "deep_24_12": "m12 FID",
+        "fixed_12": "m12 FID",
+        "fixed_2": "9c FY",
+        "fixed_32": "m12 FID",
+        "fixed_4": "m12 FID",
+        "fixed_8": "m12 FID",
+        "min12_patience8": "m12 FID",
+        "min8_patience4": "m12 FID",
+        "min8_patience8": "m12 FID"
+      },
+      "position": "quality-20260730-b1-p013"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 173,
+        "deep16": 172,
+        "deep24": 171
+      },
+      "bag": 1,
+      "nominees": [
+        "n8 DEV",
+        "n9 DEV"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n8 DEV",
+        "deep_24_12": "n8 DEV",
+        "fixed_12": "n8 DEV",
+        "fixed_2": "n8 DEV",
+        "fixed_32": "n9 DEV",
+        "fixed_4": "n8 DEV",
+        "fixed_8": "n8 DEV",
+        "min12_patience8": "n8 DEV",
+        "min8_patience4": "n8 DEV",
+        "min8_patience8": "n8 DEV"
+      },
+      "position": "quality-20260730-b1-p014"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 198,
+        "deep16": 197,
+        "deep24": 196
+      },
+      "bag": 1,
+      "nominees": [
+        "l2 FAA",
+        "g1 APT",
+        "g1 AIT",
+        "13h NAIFEST"
+      ],
+      "policy_moves": {
+        "deep_16_8": "13h NAIFEST",
+        "deep_24_12": "13h NAIFEST",
+        "fixed_12": "g1 AIT",
+        "fixed_2": "l2 FAA",
+        "fixed_32": "13h NAIFEST",
+        "fixed_4": "g1 APT",
+        "fixed_8": "g1 APT",
+        "min12_patience8": "13h NAIFEST",
+        "min8_patience4": "g1 APT",
+        "min8_patience8": "13h NAIFEST"
+      },
+      "position": "quality-20260730-b1-p016"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 223,
+        "deep16": 222,
+        "deep24": 221
+      },
+      "bag": 1,
+      "nominees": [
+        "d11 SYNC",
+        "3a NYS",
+        "3a SYN"
+      ],
+      "policy_moves": {
+        "deep_16_8": "d11 SYNC",
+        "deep_24_12": "3a SYN",
+        "fixed_12": "3a NYS",
+        "fixed_2": "d11 SYNC",
+        "fixed_32": "3a SYN",
+        "fixed_4": "3a NYS",
+        "fixed_8": "3a NYS",
+        "min12_patience8": "3a NYS",
+        "min8_patience4": "3a NYS",
+        "min8_patience8": "3a NYS"
+      },
+      "position": "quality-20260730-b1-p018"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 247,
+        "deep16": 246,
+        "deep24": 245
+      },
+      "bag": 1,
+      "nominees": [
+        "c7 RID",
+        "1k RUN",
+        "1k DUN",
+        "b2 DIV",
+        "1k RUD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "1k RUD",
+        "deep_24_12": "1k RUD",
+        "fixed_12": "1k DUN",
+        "fixed_2": "c7 RID",
+        "fixed_32": "b2 DIV",
+        "fixed_4": "1k RUN",
+        "fixed_8": "1k DUN",
+        "min12_patience8": "1k DUN",
+        "min8_patience4": "1k DUN",
+        "min8_patience8": "1k DUN"
+      },
+      "position": "quality-20260730-b1-p020"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 297,
+        "deep16": 296,
+        "deep24": 295
+      },
+      "bag": 1,
+      "nominees": [
+        "1f AIN",
+        "1g ONION"
+      ],
+      "policy_moves": {
+        "deep_16_8": "1g ONION",
+        "deep_24_12": "1g ONION",
+        "fixed_12": "1g ONION",
+        "fixed_2": "1f AIN",
+        "fixed_32": "1g ONION",
+        "fixed_4": "1f AIN",
+        "fixed_8": "1g ONION",
+        "min12_patience8": "1g ONION",
+        "min8_patience4": "1g ONION",
+        "min8_patience8": "1g ONION"
+      },
+      "position": "quality-20260730-b1-p024"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 298,
+        "deep16": 299,
+        "deep24": 300
+      },
+      "bag": 1,
+      "nominees": [
+        "c9 EMU",
+        "8l DOME"
+      ],
+      "policy_moves": {
+        "deep_16_8": "8l DOME",
+        "deep_24_12": "8l DOME",
+        "fixed_12": "c9 EMU",
+        "fixed_2": "c9 EMU",
+        "fixed_32": "c9 EMU",
+        "fixed_4": "c9 EMU",
+        "fixed_8": "c9 EMU",
+        "min12_patience8": "c9 EMU",
+        "min8_patience4": "c9 EMU",
+        "min8_patience8": "c9 EMU"
+      },
+      "position": "quality-20260730-b1-p025"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 322,
+        "deep16": 321,
+        "deep24": 320
+      },
+      "bag": 1,
+      "nominees": [
+        "12j NEEP",
+        "m9 PENIE",
+        "n9 PENIE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n9 PENIE",
+        "deep_24_12": "m9 PENIE",
+        "fixed_12": "12j NEEP",
+        "fixed_2": "12j NEEP",
+        "fixed_32": "m9 PENIE",
+        "fixed_4": "12j NEEP",
+        "fixed_8": "12j NEEP",
+        "min12_patience8": "12j NEEP",
+        "min8_patience4": "12j NEEP",
+        "min8_patience8": "12j NEEP"
+      },
+      "position": "quality-20260730-b1-p026"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 371,
+        "deep16": 370,
+        "deep24": 369
+      },
+      "bag": 1,
+      "nominees": [
+        "7e ADZE",
+        "14a NOSHERIE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "7e ADZE",
+        "deep_24_12": "7e ADZE",
+        "fixed_12": "7e ADZE",
+        "fixed_2": "7e ADZE",
+        "fixed_32": "14a NOSHERIE",
+        "fixed_4": "7e ADZE",
+        "fixed_8": "7e ADZE",
+        "min12_patience8": "7e ADZE",
+        "min8_patience4": "7e ADZE",
+        "min8_patience8": "7e ADZE"
+      },
+      "position": "quality-20260730-b1-p030"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 396,
+        "deep16": 395,
+        "deep24": 394
+      },
+      "bag": 1,
+      "nominees": [
+        "9c UN",
+        "3m PIN",
+        "o12 CIDE",
+        "o12 CEDI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "o12 CEDI",
+        "deep_24_12": "o12 CIDE",
+        "fixed_12": "o12 CIDE",
+        "fixed_2": "9c UN",
+        "fixed_32": "o12 CEDI",
+        "fixed_4": "3m PIN",
+        "fixed_8": "o12 CIDE",
+        "min12_patience8": "o12 CIDE",
+        "min8_patience4": "o12 CIDE",
+        "min8_patience8": "o12 CIDE"
+      },
+      "position": "quality-20260730-b1-p032"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 421,
+        "deep16": 420,
+        "deep24": 419
+      },
+      "bag": 1,
+      "nominees": [
+        "f9 EW",
+        "f9 MEM",
+        "m3 IMMEWS",
+        "pass"
+      ],
+      "policy_moves": {
+        "deep_16_8": "pass",
+        "deep_24_12": "m3 IMMEWS",
+        "fixed_12": "f9 MEM",
+        "fixed_2": "f9 EW",
+        "fixed_32": "m3 IMMEWS",
+        "fixed_4": "f9 EW",
+        "fixed_8": "f9 EW",
+        "min12_patience8": "m3 IMMEWS",
+        "min8_patience4": "f9 EW",
+        "min8_patience8": "f9 EW"
+      },
+      "position": "quality-20260730-b1-p034"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 422,
+        "deep16": 423,
+        "deep24": 424
+      },
+      "bag": 1,
+      "nominees": [
+        "11e CODA",
+        "k8 CRUDS"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k8 CRUDS",
+        "deep_24_12": "k8 CRUDS",
+        "fixed_12": "11e CODA",
+        "fixed_2": "11e CODA",
+        "fixed_32": "k8 CRUDS",
+        "fixed_4": "11e CODA",
+        "fixed_8": "11e CODA",
+        "min12_patience8": "11e CODA",
+        "min8_patience4": "11e CODA",
+        "min8_patience8": "11e CODA"
+      },
+      "position": "quality-20260730-b1-p035"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 495,
+        "deep16": 494,
+        "deep24": 493
+      },
+      "bag": 1,
+      "nominees": [
+        "6n QI",
+        "n6 QAdI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n6 QAdI",
+        "deep_24_12": "n6 QAdI",
+        "fixed_12": "n6 QAdI",
+        "fixed_2": "6n QI",
+        "fixed_32": "n6 QAdI",
+        "fixed_4": "6n QI",
+        "fixed_8": "6n QI",
+        "min12_patience8": "n6 QAdI",
+        "min8_patience4": "6n QI",
+        "min8_patience8": "6n QI"
+      },
+      "position": "quality-20260730-b1-p040"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 520,
+        "deep16": 519,
+        "deep24": 518
+      },
+      "bag": 1,
+      "nominees": [
+        "c11 TAPE",
+        "d10 NUDIST",
+        "l6 SCUT",
+        "k1 LYTIC"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k1 LYTIC",
+        "deep_24_12": "k1 LYTIC",
+        "fixed_12": "l6 SCUT",
+        "fixed_2": "c11 TAPE",
+        "fixed_32": "l6 SCUT",
+        "fixed_4": "d10 NUDIST",
+        "fixed_8": "l6 SCUT",
+        "min12_patience8": "l6 SCUT",
+        "min8_patience4": "l6 SCUT",
+        "min8_patience8": "l6 SCUT"
+      },
+      "position": "quality-20260730-b1-p042"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 521,
+        "deep16": 522,
+        "deep24": 523
+      },
+      "bag": 1,
+      "nominees": [
+        "13g NIFE",
+        "13g NEF"
+      ],
+      "policy_moves": {
+        "deep_16_8": "13g NEF",
+        "deep_24_12": "13g NEF",
+        "fixed_12": "13g NEF",
+        "fixed_2": "13g NIFE",
+        "fixed_32": "13g NEF",
+        "fixed_4": "13g NEF",
+        "fixed_8": "13g NEF",
+        "min12_patience8": "13g NEF",
+        "min8_patience4": "13g NEF",
+        "min8_patience8": "13g NEF"
+      },
+      "position": "quality-20260730-b1-p043"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 570,
+        "deep16": 569,
+        "deep24": 568
+      },
+      "bag": 1,
+      "nominees": [
+        "10e NTH",
+        "k9 LICH",
+        "3h CUTCH"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3h CUTCH",
+        "deep_24_12": "3h CUTCH",
+        "fixed_12": "k9 LICH",
+        "fixed_2": "10e NTH",
+        "fixed_32": "k9 LICH",
+        "fixed_4": "10e NTH",
+        "fixed_8": "k9 LICH",
+        "min12_patience8": "k9 LICH",
+        "min8_patience4": "k9 LICH",
+        "min8_patience8": "k9 LICH"
+      },
+      "position": "quality-20260730-b1-p046"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 55,
+        "deep16": 54,
+        "deep24": 53
+      },
+      "bag": 2,
+      "nominees": [
+        "c3 OWL",
+        "3h OM"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3h OM",
+        "deep_24_12": "3h OM",
+        "fixed_12": "3h OM",
+        "fixed_2": "c3 OWL",
+        "fixed_32": "3h OM",
+        "fixed_4": "3h OM",
+        "fixed_8": "3h OM",
+        "min12_patience8": "3h OM",
+        "min8_patience4": "3h OM",
+        "min8_patience8": "3h OM"
+      },
+      "position": "quality-20260730-b2-p005"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 80,
+        "deep16": 79,
+        "deep24": 78
+      },
+      "bag": 2,
+      "nominees": [
+        "6l ARVO",
+        "a11 BI",
+        "4l GI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "4l GI",
+        "deep_24_12": "4l GI",
+        "fixed_12": "a11 BI",
+        "fixed_2": "6l ARVO",
+        "fixed_32": "a11 BI",
+        "fixed_4": "6l ARVO",
+        "fixed_8": "6l ARVO",
+        "min12_patience8": "a11 BI",
+        "min8_patience4": "6l ARVO",
+        "min8_patience8": "6l ARVO"
+      },
+      "position": "quality-20260730-b2-p007"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 94,
+        "deep16": 95,
+        "deep24": 96
+      },
+      "bag": 2,
+      "nominees": [
+        "9i AGA",
+        "j5 JIN"
+      ],
+      "policy_moves": {
+        "deep_16_8": "j5 JIN",
+        "deep_24_12": "j5 JIN",
+        "fixed_12": "j5 JIN",
+        "fixed_2": "9i AGA",
+        "fixed_32": "j5 JIN",
+        "fixed_4": "9i AGA",
+        "fixed_8": "j5 JIN",
+        "min12_patience8": "j5 JIN",
+        "min8_patience4": "j5 JIN",
+        "min8_patience8": "j5 JIN"
+      },
+      "position": "quality-20260730-b2-p008"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 105,
+        "deep16": 104,
+        "deep24": 103
+      },
+      "bag": 2,
+      "nominees": [
+        "13m IT",
+        "b10 QAID",
+        "m10 QASIDA",
+        "n8 QAID",
+        "9c AR"
+      ],
+      "policy_moves": {
+        "deep_16_8": "9c AR",
+        "deep_24_12": "9c AR",
+        "fixed_12": "m10 QASIDA",
+        "fixed_2": "13m IT",
+        "fixed_32": "n8 QAID",
+        "fixed_4": "b10 QAID",
+        "fixed_8": "m10 QASIDA",
+        "min12_patience8": "m10 QASIDA",
+        "min8_patience4": "m10 QASIDA",
+        "min8_patience8": "m10 QASIDA"
+      },
+      "position": "quality-20260730-b2-p009"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 143,
+        "deep16": 144,
+        "deep24": 145
+      },
+      "bag": 2,
+      "nominees": [
+        "14a BOK",
+        "3n KI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3n KI",
+        "deep_24_12": "3n KI",
+        "fixed_12": "3n KI",
+        "fixed_2": "14a BOK",
+        "fixed_32": "3n KI",
+        "fixed_4": "14a BOK",
+        "fixed_8": "3n KI",
+        "min12_patience8": "3n KI",
+        "min8_patience4": "3n KI",
+        "min8_patience8": "3n KI"
+      },
+      "position": "quality-20260730-b2-p012"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 179,
+        "deep16": 178,
+        "deep24": 177
+      },
+      "bag": 2,
+      "nominees": [
+        "12h FA",
+        "m11 OAF"
+      ],
+      "policy_moves": {
+        "deep_16_8": "m11 OAF",
+        "deep_24_12": "m11 OAF",
+        "fixed_12": "m11 OAF",
+        "fixed_2": "12h FA",
+        "fixed_32": "m11 OAF",
+        "fixed_4": "m11 OAF",
+        "fixed_8": "m11 OAF",
+        "min12_patience8": "m11 OAF",
+        "min8_patience4": "m11 OAF",
+        "min8_patience8": "m11 OAF"
+      },
+      "position": "quality-20260730-b2-p015"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 193,
+        "deep16": 194,
+        "deep24": 195
+      },
+      "bag": 2,
+      "nominees": [
+        "12a OI",
+        "14f TI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "14f TI",
+        "deep_24_12": "14f TI",
+        "fixed_12": "12a OI",
+        "fixed_2": "12a OI",
+        "fixed_32": "12a OI",
+        "fixed_4": "12a OI",
+        "fixed_8": "12a OI",
+        "min12_patience8": "12a OI",
+        "min8_patience4": "12a OI",
+        "min8_patience8": "12a OI"
+      },
+      "position": "quality-20260730-b2-p016"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 204,
+        "deep16": 203,
+        "deep24": 202
+      },
+      "bag": 2,
+      "nominees": [
+        "e9 LIT",
+        "l1 BYRL",
+        "e9 OI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "e9 OI",
+        "deep_24_12": "e9 OI",
+        "fixed_12": "e9 OI",
+        "fixed_2": "e9 LIT",
+        "fixed_32": "e9 OI",
+        "fixed_4": "l1 BYRL",
+        "fixed_8": "e9 OI",
+        "min12_patience8": "e9 OI",
+        "min8_patience4": "e9 OI",
+        "min8_patience8": "e9 OI"
+      },
+      "position": "quality-20260730-b2-p017"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 229,
+        "deep16": 228,
+        "deep24": 227
+      },
+      "bag": 2,
+      "nominees": [
+        "6m OOF",
+        "13c OOsE",
+        "b6 FOO"
+      ],
+      "policy_moves": {
+        "deep_16_8": "13c OOsE",
+        "deep_24_12": "b6 FOO",
+        "fixed_12": "13c OOsE",
+        "fixed_2": "6m OOF",
+        "fixed_32": "13c OOsE",
+        "fixed_4": "6m OOF",
+        "fixed_8": "6m OOF",
+        "min12_patience8": "13c OOsE",
+        "min8_patience4": "6m OOF",
+        "min8_patience8": "6m OOF"
+      },
+      "position": "quality-20260730-b2-p019"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 254,
+        "deep16": 253,
+        "deep24": 252
+      },
+      "bag": 2,
+      "nominees": [
+        "14e AW",
+        "14d NOWT",
+        "14d NOWTY"
+      ],
+      "policy_moves": {
+        "deep_16_8": "14d NOWTY",
+        "deep_24_12": "14d NOWTY",
+        "fixed_12": "14d NOWT",
+        "fixed_2": "14e AW",
+        "fixed_32": "14d NOWTY",
+        "fixed_4": "14e AW",
+        "fixed_8": "14e AW",
+        "min12_patience8": "14d NOWTY",
+        "min8_patience4": "14e AW",
+        "min8_patience8": "14e AW"
+      },
+      "position": "quality-20260730-b2-p021"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 267,
+        "deep16": 268,
+        "deep24": 269
+      },
+      "bag": 2,
+      "nominees": [
+        "1h DAM",
+        "h1 GED",
+        "h1 DEG",
+        "h1 MED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "h1 DEG",
+        "deep_24_12": "h1 MED",
+        "fixed_12": "1h DAM",
+        "fixed_2": "1h DAM",
+        "fixed_32": "h1 GED",
+        "fixed_4": "1h DAM",
+        "fixed_8": "1h DAM",
+        "min12_patience8": "1h DAM",
+        "min8_patience4": "1h DAM",
+        "min8_patience8": "1h DAM"
+      },
+      "position": "quality-20260730-b2-p022"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 303,
+        "deep16": 302,
+        "deep24": 301
+      },
+      "bag": 2,
+      "nominees": [
+        "a11 UTERI",
+        "1f ABYE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "1f ABYE",
+        "deep_24_12": "1f ABYE",
+        "fixed_12": "a11 UTERI",
+        "fixed_2": "a11 UTERI",
+        "fixed_32": "a11 UTERI",
+        "fixed_4": "a11 UTERI",
+        "fixed_8": "a11 UTERI",
+        "min12_patience8": "a11 UTERI",
+        "min8_patience4": "a11 UTERI",
+        "min8_patience8": "a11 UTERI"
+      },
+      "position": "quality-20260730-b2-p025"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 317,
+        "deep16": 318,
+        "deep24": 319
+      },
+      "bag": 2,
+      "nominees": [
+        "m9 DOMED",
+        "m9 MIKED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "m9 MIKED",
+        "deep_24_12": "m9 MIKED",
+        "fixed_12": "m9 MIKED",
+        "fixed_2": "m9 DOMED",
+        "fixed_32": "m9 MIKED",
+        "fixed_4": "m9 MIKED",
+        "fixed_8": "m9 MIKED",
+        "min12_patience8": "m9 MIKED",
+        "min8_patience4": "m9 MIKED",
+        "min8_patience8": "m9 MIKED"
+      },
+      "position": "quality-20260730-b2-p026"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 342,
+        "deep16": 343,
+        "deep24": 344
+      },
+      "bag": 2,
+      "nominees": [
+        "n1 EVO",
+        "2m AD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "2m AD",
+        "deep_24_12": "2m AD",
+        "fixed_12": "2m AD",
+        "fixed_2": "n1 EVO",
+        "fixed_32": "2m AD",
+        "fixed_4": "n1 EVO",
+        "fixed_8": "2m AD",
+        "min12_patience8": "2m AD",
+        "min8_patience4": "2m AD",
+        "min8_patience8": "2m AD"
+      },
+      "position": "quality-20260730-b2-p028"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 378,
+        "deep16": 377,
+        "deep24": 376
+      },
+      "bag": 2,
+      "nominees": [
+        "b13 VIA",
+        "c13 LAG"
+      ],
+      "policy_moves": {
+        "deep_16_8": "c13 LAG",
+        "deep_24_12": "c13 LAG",
+        "fixed_12": "b13 VIA",
+        "fixed_2": "b13 VIA",
+        "fixed_32": "b13 VIA",
+        "fixed_4": "b13 VIA",
+        "fixed_8": "b13 VIA",
+        "min12_patience8": "b13 VIA",
+        "min8_patience4": "b13 VIA",
+        "min8_patience8": "b13 VIA"
+      },
+      "position": "quality-20260730-b2-p031"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 391,
+        "deep16": 392,
+        "deep24": 393
+      },
+      "bag": 2,
+      "nominees": [
+        "7c LIFT",
+        "14k LO"
+      ],
+      "policy_moves": {
+        "deep_16_8": "14k LO",
+        "deep_24_12": "14k LO",
+        "fixed_12": "14k LO",
+        "fixed_2": "7c LIFT",
+        "fixed_32": "14k LO",
+        "fixed_4": "14k LO",
+        "fixed_8": "14k LO",
+        "min12_patience8": "14k LO",
+        "min8_patience4": "14k LO",
+        "min8_patience8": "14k LO"
+      },
+      "position": "quality-20260730-b2-p032"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 441,
+        "deep16": 442,
+        "deep24": 443
+      },
+      "bag": 2,
+      "nominees": [
+        "12l RACH",
+        "f2 FERN",
+        "d1 CRINAL"
+      ],
+      "policy_moves": {
+        "deep_16_8": "d1 CRINAL",
+        "deep_24_12": "d1 CRINAL",
+        "fixed_12": "f2 FERN",
+        "fixed_2": "12l RACH",
+        "fixed_32": "f2 FERN",
+        "fixed_4": "f2 FERN",
+        "fixed_8": "f2 FERN",
+        "min12_patience8": "f2 FERN",
+        "min8_patience4": "f2 FERN",
+        "min8_patience8": "f2 FERN"
+      },
+      "position": "quality-20260730-b2-p036"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 466,
+        "deep16": 467,
+        "deep24": 468
+      },
+      "bag": 2,
+      "nominees": [
+        "b1 IN",
+        "2j HI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "2j HI",
+        "deep_24_12": "2j HI",
+        "fixed_12": "2j HI",
+        "fixed_2": "b1 IN",
+        "fixed_32": "2j HI",
+        "fixed_4": "2j HI",
+        "fixed_8": "2j HI",
+        "min12_patience8": "2j HI",
+        "min8_patience4": "2j HI",
+        "min8_patience8": "2j HI"
+      },
+      "position": "quality-20260730-b2-p038"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 477,
+        "deep16": 476,
+        "deep24": 475
+      },
+      "bag": 2,
+      "nominees": [
+        "11i CLEG",
+        "c9 CLANG",
+        "12l LEEK"
+      ],
+      "policy_moves": {
+        "deep_16_8": "12l LEEK",
+        "deep_24_12": "12l LEEK",
+        "fixed_12": "c9 CLANG",
+        "fixed_2": "11i CLEG",
+        "fixed_32": "c9 CLANG",
+        "fixed_4": "c9 CLANG",
+        "fixed_8": "c9 CLANG",
+        "min12_patience8": "c9 CLANG",
+        "min8_patience4": "c9 CLANG",
+        "min8_patience8": "c9 CLANG"
+      },
+      "position": "quality-20260730-b2-p039"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 502,
+        "deep16": 501,
+        "deep24": 500
+      },
+      "bag": 2,
+      "nominees": [
+        "5h CIEL",
+        "14d PE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "14d PE",
+        "deep_24_12": "14d PE",
+        "fixed_12": "14d PE",
+        "fixed_2": "5h CIEL",
+        "fixed_32": "14d PE",
+        "fixed_4": "14d PE",
+        "fixed_8": "14d PE",
+        "min12_patience8": "14d PE",
+        "min8_patience4": "14d PE",
+        "min8_patience8": "14d PE"
+      },
+      "position": "quality-20260730-b2-p041"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 515,
+        "deep16": 516,
+        "deep24": 517
+      },
+      "bag": 2,
+      "nominees": [
+        "2f BARnIER",
+        "2f BARkIER"
+      ],
+      "policy_moves": {
+        "deep_16_8": "2f BARkIER",
+        "deep_24_12": "2f BARkIER",
+        "fixed_12": "2f BARkIER",
+        "fixed_2": "2f BARnIER",
+        "fixed_32": "2f BARkIER",
+        "fixed_4": "2f BARnIER",
+        "fixed_8": "2f BARkIER",
+        "min12_patience8": "2f BARkIER",
+        "min8_patience4": "2f BARkIER",
+        "min8_patience8": "2f BARkIER"
+      },
+      "position": "quality-20260730-b2-p042"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 526,
+        "deep16": 525,
+        "deep24": 524
+      },
+      "bag": 2,
+      "nominees": [
+        "4h DOE",
+        "10k EAU",
+        "2h LEU"
+      ],
+      "policy_moves": {
+        "deep_16_8": "10k EAU",
+        "deep_24_12": "10k EAU",
+        "fixed_12": "2h LEU",
+        "fixed_2": "4h DOE",
+        "fixed_32": "2h LEU",
+        "fixed_4": "4h DOE",
+        "fixed_8": "10k EAU",
+        "min12_patience8": "2h LEU",
+        "min8_patience4": "2h LEU",
+        "min8_patience8": "2h LEU"
+      },
+      "position": "quality-20260730-b2-p043"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 540,
+        "deep16": 541,
+        "deep24": 542
+      },
+      "bag": 2,
+      "nominees": [
+        "h1 NGRAM",
+        "10j QI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "10j QI",
+        "deep_24_12": "10j QI",
+        "fixed_12": "10j QI",
+        "fixed_2": "h1 NGRAM",
+        "fixed_32": "10j QI",
+        "fixed_4": "h1 NGRAM",
+        "fixed_8": "h1 NGRAM",
+        "min12_patience8": "10j QI",
+        "min8_patience4": "h1 NGRAM",
+        "min8_patience8": "h1 NGRAM"
+      },
+      "position": "quality-20260730-b2-p044"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 551,
+        "deep16": 550,
+        "deep24": 549
+      },
+      "bag": 2,
+      "nominees": [
+        "n12 CUE",
+        "i13 OU"
+      ],
+      "policy_moves": {
+        "deep_16_8": "i13 OU",
+        "deep_24_12": "i13 OU",
+        "fixed_12": "i13 OU",
+        "fixed_2": "n12 CUE",
+        "fixed_32": "i13 OU",
+        "fixed_4": "i13 OU",
+        "fixed_8": "i13 OU",
+        "min12_patience8": "i13 OU",
+        "min8_patience4": "i13 OU",
+        "min8_patience8": "i13 OU"
+      },
+      "position": "quality-20260730-b2-p045"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 565,
+        "deep16": 566,
+        "deep24": 567
+      },
+      "bag": 2,
+      "nominees": [
+        "n4 CLAN",
+        "n3 ACNED",
+        "n4 CLAD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n3 ACNED",
+        "deep_24_12": "n3 ACNED",
+        "fixed_12": "n4 CLAD",
+        "fixed_2": "n4 CLAN",
+        "fixed_32": "n4 CLAD",
+        "fixed_4": "n3 ACNED",
+        "fixed_8": "n4 CLAD",
+        "min12_patience8": "n4 CLAD",
+        "min8_patience4": "n4 CLAD",
+        "min8_patience8": "n4 CLAD"
+      },
+      "position": "quality-20260730-b2-p046"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 590,
+        "deep16": 591,
+        "deep24": 592
+      },
+      "bag": 2,
+      "nominees": [
+        "k4 DIN",
+        "8a ED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k4 DIN",
+        "deep_24_12": "8a ED",
+        "fixed_12": "k4 DIN",
+        "fixed_2": "k4 DIN",
+        "fixed_32": "8a ED",
+        "fixed_4": "k4 DIN",
+        "fixed_8": "k4 DIN",
+        "min12_patience8": "k4 DIN",
+        "min8_patience4": "k4 DIN",
+        "min8_patience8": "k4 DIN"
+      },
+      "position": "quality-20260730-b2-p048"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 614,
+        "deep16": 615,
+        "deep24": 616
+      },
+      "bag": 2,
+      "nominees": [
+        "n14 AB",
+        "2f OE",
+        "n10 ABELE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n10 ABELE",
+        "deep_24_12": "n10 ABELE",
+        "fixed_12": "2f OE",
+        "fixed_2": "n14 AB",
+        "fixed_32": "n10 ABELE",
+        "fixed_4": "2f OE",
+        "fixed_8": "2f OE",
+        "min12_patience8": "2f OE",
+        "min8_patience4": "2f OE",
+        "min8_patience8": "2f OE"
+      },
+      "position": "quality-20260730-b2-p050"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 18,
+        "deep16": 17,
+        "deep24": 16
+      },
+      "bag": 3,
+      "nominees": [
+        "4i WANG",
+        "5g WIVING",
+        "5i WIG"
+      ],
+      "policy_moves": {
+        "deep_16_8": "5i WIG",
+        "deep_24_12": "5i WIG",
+        "fixed_12": "5i WIG",
+        "fixed_2": "4i WANG",
+        "fixed_32": "5i WIG",
+        "fixed_4": "5g WIVING",
+        "fixed_8": "5i WIG",
+        "min12_patience8": "5i WIG",
+        "min8_patience4": "5i WIG",
+        "min8_patience8": "5i WIG"
+      },
+      "position": "quality-20260730-b3-p002"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 32,
+        "deep16": 33,
+        "deep24": 34
+      },
+      "bag": 3,
+      "nominees": [
+        "10e MU",
+        "a8 DENTURES"
+      ],
+      "policy_moves": {
+        "deep_16_8": "10e MU",
+        "deep_24_12": "10e MU",
+        "fixed_12": "10e MU",
+        "fixed_2": "10e MU",
+        "fixed_32": "a8 DENTURES",
+        "fixed_4": "10e MU",
+        "fixed_8": "10e MU",
+        "min12_patience8": "10e MU",
+        "min8_patience4": "10e MU",
+        "min8_patience8": "10e MU"
+      },
+      "position": "quality-20260730-b3-p003"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 43,
+        "deep16": 42,
+        "deep24": 41
+      },
+      "bag": 3,
+      "nominees": [
+        "k1 NIe",
+        "3h IMP"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3h IMP",
+        "deep_24_12": "3h IMP",
+        "fixed_12": "3h IMP",
+        "fixed_2": "k1 NIe",
+        "fixed_32": "3h IMP",
+        "fixed_4": "3h IMP",
+        "fixed_8": "3h IMP",
+        "min12_patience8": "3h IMP",
+        "min8_patience4": "3h IMP",
+        "min8_patience8": "3h IMP"
+      },
+      "position": "quality-20260730-b3-p004"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 81,
+        "deep16": 82,
+        "deep24": 83
+      },
+      "bag": 3,
+      "nominees": [
+        "8a BAHU",
+        "8a YEH",
+        "12j AYU"
+      ],
+      "policy_moves": {
+        "deep_16_8": "8a YEH",
+        "deep_24_12": "8a YEH",
+        "fixed_12": "12j AYU",
+        "fixed_2": "8a BAHU",
+        "fixed_32": "12j AYU",
+        "fixed_4": "8a YEH",
+        "fixed_8": "12j AYU",
+        "min12_patience8": "12j AYU",
+        "min8_patience4": "12j AYU",
+        "min8_patience8": "12j AYU"
+      },
+      "position": "quality-20260730-b3-p007"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 180,
+        "deep16": 181,
+        "deep24": 182
+      },
+      "bag": 3,
+      "nominees": [
+        "f10 HOT",
+        "14f HART",
+        "d10 GOT"
+      ],
+      "policy_moves": {
+        "deep_16_8": "d10 GOT",
+        "deep_24_12": "14f HART",
+        "fixed_12": "f10 HOT",
+        "fixed_2": "f10 HOT",
+        "fixed_32": "14f HART",
+        "fixed_4": "f10 HOT",
+        "fixed_8": "f10 HOT",
+        "min12_patience8": "f10 HOT",
+        "min8_patience4": "f10 HOT",
+        "min8_patience8": "f10 HOT"
+      },
+      "position": "quality-20260730-b3-p015"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 230,
+        "deep16": 231,
+        "deep24": 232
+      },
+      "bag": 3,
+      "nominees": [
+        "1a VIVE",
+        "1c AM"
+      ],
+      "policy_moves": {
+        "deep_16_8": "1c AM",
+        "deep_24_12": "1c AM",
+        "fixed_12": "1a VIVE",
+        "fixed_2": "1a VIVE",
+        "fixed_32": "1a VIVE",
+        "fixed_4": "1a VIVE",
+        "fixed_8": "1a VIVE",
+        "min12_patience8": "1a VIVE",
+        "min8_patience4": "1a VIVE",
+        "min8_patience8": "1a VIVE"
+      },
+      "position": "quality-20260730-b3-p019"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 241,
+        "deep16": 240,
+        "deep24": 239
+      },
+      "bag": 3,
+      "nominees": [
+        "15h BEDE",
+        "15h BEDES"
+      ],
+      "policy_moves": {
+        "deep_16_8": "15h BEDES",
+        "deep_24_12": "15h BEDES",
+        "fixed_12": "15h BEDE",
+        "fixed_2": "15h BEDE",
+        "fixed_32": "15h BEDE",
+        "fixed_4": "15h BEDE",
+        "fixed_8": "15h BEDE",
+        "min12_patience8": "15h BEDE",
+        "min8_patience4": "15h BEDE",
+        "min8_patience8": "15h BEDE"
+      },
+      "position": "quality-20260730-b3-p020"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 266,
+        "deep16": 265,
+        "deep24": 264
+      },
+      "bag": 3,
+      "nominees": [
+        "d4 UEY",
+        "n2 YE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n2 YE",
+        "deep_24_12": "n2 YE",
+        "fixed_12": "d4 UEY",
+        "fixed_2": "d4 UEY",
+        "fixed_32": "d4 UEY",
+        "fixed_4": "d4 UEY",
+        "fixed_8": "d4 UEY",
+        "min12_patience8": "d4 UEY",
+        "min8_patience4": "d4 UEY",
+        "min8_patience8": "d4 UEY"
+      },
+      "position": "quality-20260730-b3-p022"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 316,
+        "deep16": 315,
+        "deep24": 314
+      },
+      "bag": 3,
+      "nominees": [
+        "10c RIAD",
+        "3l FAD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3l FAD",
+        "deep_24_12": "3l FAD",
+        "fixed_12": "10c RIAD",
+        "fixed_2": "10c RIAD",
+        "fixed_32": "10c RIAD",
+        "fixed_4": "10c RIAD",
+        "fixed_8": "10c RIAD",
+        "min12_patience8": "10c RIAD",
+        "min8_patience4": "10c RIAD",
+        "min8_patience8": "10c RIAD"
+      },
+      "position": "quality-20260730-b3-p026"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 329,
+        "deep16": 330,
+        "deep24": 331
+      },
+      "bag": 3,
+      "nominees": [
+        "b2 FIE",
+        "l9 GRUFF",
+        "k9 VAG"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k9 VAG",
+        "deep_24_12": "k9 VAG",
+        "fixed_12": "l9 GRUFF",
+        "fixed_2": "b2 FIE",
+        "fixed_32": "l9 GRUFF",
+        "fixed_4": "b2 FIE",
+        "fixed_8": "b2 FIE",
+        "min12_patience8": "l9 GRUFF",
+        "min8_patience4": "b2 FIE",
+        "min8_patience8": "b2 FIE"
+      },
+      "position": "quality-20260730-b3-p027"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 453,
+        "deep16": 454,
+        "deep24": 455
+      },
+      "bag": 3,
+      "nominees": [
+        "14g sRI",
+        "10i RE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "10i RE",
+        "deep_24_12": "10i RE",
+        "fixed_12": "14g sRI",
+        "fixed_2": "14g sRI",
+        "fixed_32": "14g sRI",
+        "fixed_4": "14g sRI",
+        "fixed_8": "14g sRI",
+        "min12_patience8": "14g sRI",
+        "min8_patience4": "14g sRI",
+        "min8_patience8": "14g sRI"
+      },
+      "position": "quality-20260730-b3-p037"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 464,
+        "deep16": 463,
+        "deep24": 462
+      },
+      "bag": 3,
+      "nominees": [
+        "n1 PONEY",
+        "e11 ION"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n1 PONEY",
+        "deep_24_12": "n1 PONEY",
+        "fixed_12": "e11 ION",
+        "fixed_2": "n1 PONEY",
+        "fixed_32": "e11 ION",
+        "fixed_4": "n1 PONEY",
+        "fixed_8": "n1 PONEY",
+        "min12_patience8": "e11 ION",
+        "min8_patience4": "n1 PONEY",
+        "min8_patience8": "n1 PONEY"
+      },
+      "position": "quality-20260730-b3-p038"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 478,
+        "deep16": 479,
+        "deep24": 480
+      },
+      "bag": 3,
+      "nominees": [
+        "4l SLID",
+        "8k MARD",
+        "j1 OWER"
+      ],
+      "policy_moves": {
+        "deep_16_8": "j1 OWER",
+        "deep_24_12": "j1 OWER",
+        "fixed_12": "8k MARD",
+        "fixed_2": "4l SLID",
+        "fixed_32": "8k MARD",
+        "fixed_4": "4l SLID",
+        "fixed_8": "8k MARD",
+        "min12_patience8": "8k MARD",
+        "min8_patience4": "8k MARD",
+        "min8_patience8": "8k MARD"
+      },
+      "position": "quality-20260730-b3-p039"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 503,
+        "deep16": 504,
+        "deep24": 505
+      },
+      "bag": 3,
+      "nominees": [
+        "n4 GIP",
+        "n3 GRIP"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n3 GRIP",
+        "deep_24_12": "n3 GRIP",
+        "fixed_12": "n3 GRIP",
+        "fixed_2": "n4 GIP",
+        "fixed_32": "n3 GRIP",
+        "fixed_4": "n3 GRIP",
+        "fixed_8": "n3 GRIP",
+        "min12_patience8": "n3 GRIP",
+        "min8_patience4": "n3 GRIP",
+        "min8_patience8": "n3 GRIP"
+      },
+      "position": "quality-20260730-b3-p041"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 564,
+        "deep16": 563,
+        "deep24": 562
+      },
+      "bag": 3,
+      "nominees": [
+        "1a JEE",
+        "n2 JO"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n2 JO",
+        "deep_24_12": "n2 JO",
+        "fixed_12": "1a JEE",
+        "fixed_2": "1a JEE",
+        "fixed_32": "1a JEE",
+        "fixed_4": "1a JEE",
+        "fixed_8": "1a JEE",
+        "min12_patience8": "1a JEE",
+        "min8_patience4": "1a JEE",
+        "min8_patience8": "1a JEE"
+      },
+      "position": "quality-20260730-b3-p046"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 61,
+        "deep16": 60,
+        "deep24": 59
+      },
+      "bag": 4,
+      "nominees": [
+        "2j VOLAE",
+        "a14 DA"
+      ],
+      "policy_moves": {
+        "deep_16_8": "a14 DA",
+        "deep_24_12": "a14 DA",
+        "fixed_12": "2j VOLAE",
+        "fixed_2": "2j VOLAE",
+        "fixed_32": "2j VOLAE",
+        "fixed_4": "2j VOLAE",
+        "fixed_8": "2j VOLAE",
+        "min12_patience8": "2j VOLAE",
+        "min8_patience4": "2j VOLAE",
+        "min8_patience8": "2j VOLAE"
+      },
+      "position": "quality-20260730-b4-p005"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 87,
+        "deep16": 88,
+        "deep24": 89
+      },
+      "bag": 4,
+      "nominees": [
+        "12i ENATE",
+        "12j CANT"
+      ],
+      "policy_moves": {
+        "deep_16_8": "12j CANT",
+        "deep_24_12": "12j CANT",
+        "fixed_12": "12i ENATE",
+        "fixed_2": "12i ENATE",
+        "fixed_32": "12i ENATE",
+        "fixed_4": "12i ENATE",
+        "fixed_8": "12i ENATE",
+        "min12_patience8": "12i ENATE",
+        "min8_patience4": "12i ENATE",
+        "min8_patience8": "12i ENATE"
+      },
+      "position": "quality-20260730-b4-p008"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 111,
+        "deep16": 110,
+        "deep24": 109
+      },
+      "bag": 4,
+      "nominees": [
+        "n2 CAGED",
+        "n4 GED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n4 GED",
+        "deep_24_12": "n4 GED",
+        "fixed_12": "n4 GED",
+        "fixed_2": "n2 CAGED",
+        "fixed_32": "n4 GED",
+        "fixed_4": "n4 GED",
+        "fixed_8": "n4 GED",
+        "min12_patience8": "n4 GED",
+        "min8_patience4": "n4 GED",
+        "min8_patience8": "n4 GED"
+      },
+      "position": "quality-20260730-b4-p009"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 309,
+        "deep16": 308,
+        "deep24": 307
+      },
+      "bag": 4,
+      "nominees": [
+        "12k ENJOY",
+        "12l JEON"
+      ],
+      "policy_moves": {
+        "deep_16_8": "12l JEON",
+        "deep_24_12": "12l JEON",
+        "fixed_12": "12k ENJOY",
+        "fixed_2": "12k ENJOY",
+        "fixed_32": "12k ENJOY",
+        "fixed_4": "12k ENJOY",
+        "fixed_8": "12k ENJOY",
+        "min12_patience8": "12k ENJOY",
+        "min8_patience4": "12k ENJOY",
+        "min8_patience8": "12k ENJOY"
+      },
+      "position": "quality-20260730-b4-p025"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 335,
+        "deep16": 336,
+        "deep24": 337
+      },
+      "bag": 4,
+      "nominees": [
+        "2j WOOER",
+        "n10 WOS"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n10 WOS",
+        "deep_24_12": "n10 WOS",
+        "fixed_12": "2j WOOER",
+        "fixed_2": "2j WOOER",
+        "fixed_32": "2j WOOER",
+        "fixed_4": "2j WOOER",
+        "fixed_8": "2j WOOER",
+        "min12_patience8": "2j WOOER",
+        "min8_patience4": "2j WOOER",
+        "min8_patience8": "2j WOOER"
+      },
+      "position": "quality-20260730-b4-p028"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 458,
+        "deep16": 457,
+        "deep24": 456
+      },
+      "bag": 4,
+      "nominees": [
+        "e1 MIRI",
+        "e2 REI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "e2 REI",
+        "deep_24_12": "e2 REI",
+        "fixed_12": "e1 MIRI",
+        "fixed_2": "e1 MIRI",
+        "fixed_32": "e1 MIRI",
+        "fixed_4": "e1 MIRI",
+        "fixed_8": "e1 MIRI",
+        "min12_patience8": "e1 MIRI",
+        "min8_patience4": "e1 MIRI",
+        "min8_patience8": "e1 MIRI"
+      },
+      "position": "quality-20260730-b4-p037"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 484,
+        "deep16": 485,
+        "deep24": 486
+      },
+      "bag": 4,
+      "nominees": [
+        "a7 AXAL",
+        "f10 NAV"
+      ],
+      "policy_moves": {
+        "deep_16_8": "f10 NAV",
+        "deep_24_12": "f10 NAV",
+        "fixed_12": "f10 NAV",
+        "fixed_2": "a7 AXAL",
+        "fixed_32": "f10 NAV",
+        "fixed_4": "f10 NAV",
+        "fixed_8": "f10 NAV",
+        "min12_patience8": "f10 NAV",
+        "min8_patience4": "f10 NAV",
+        "min8_patience8": "f10 NAV"
+      },
+      "position": "quality-20260730-b4-p040"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 508,
+        "deep16": 507,
+        "deep24": 506
+      },
+      "bag": 4,
+      "nominees": [
+        "c1 GROVE",
+        "c2 ROVE",
+        "m5 LIGER"
+      ],
+      "policy_moves": {
+        "deep_16_8": "c2 ROVE",
+        "deep_24_12": "c2 ROVE",
+        "fixed_12": "m5 LIGER",
+        "fixed_2": "c1 GROVE",
+        "fixed_32": "m5 LIGER",
+        "fixed_4": "c2 ROVE",
+        "fixed_8": "c2 ROVE",
+        "min12_patience8": "m5 LIGER",
+        "min8_patience4": "c2 ROVE",
+        "min8_patience8": "m5 LIGER"
+      },
+      "position": "quality-20260730-b4-p041"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 559,
+        "deep16": 560,
+        "deep24": 561
+      },
+      "bag": 4,
+      "nominees": [
+        "14g NIBLETS",
+        "m2 BIN"
+      ],
+      "policy_moves": {
+        "deep_16_8": "m2 BIN",
+        "deep_24_12": "m2 BIN",
+        "fixed_12": "14g NIBLETS",
+        "fixed_2": "14g NIBLETS",
+        "fixed_32": "14g NIBLETS",
+        "fixed_4": "14g NIBLETS",
+        "fixed_8": "14g NIBLETS",
+        "min12_patience8": "14g NIBLETS",
+        "min8_patience4": "14g NIBLETS",
+        "min8_patience8": "14g NIBLETS"
+      },
+      "position": "quality-20260730-b4-p046"
+    }
+  ],
+  "selection": "all distinct-policy disagreements; selection cannot depend on oracle values or runtime",
+  "selection_excludes": [
+    "oracle_values",
+    "oracle_runtime",
+    "direct_3_results",
+    "direct_4_results"
+  ],
+  "selection_independent_of_oracle": true
+}
