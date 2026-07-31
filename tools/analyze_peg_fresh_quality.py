@@ -21,6 +21,17 @@ PRIMARY_COMPARISONS = {
     "deep16_minus_adaptive": ("min8_patience8", "deep_16_8"),
     "deep24_minus_deep16": ("deep_16_8", "deep_24_12"),
 }
+STOPPING_COMPARISONS = {
+    "full32_minus_min8p4": ("min8_patience4", "fixed_32"),
+    "full32_minus_min12p8": ("min12_patience8", "fixed_32"),
+    "min8p8_minus_min8p4": ("min8_patience4", "min8_patience8"),
+    "min12p8_minus_min8p8": ("min8_patience8", "min12_patience8"),
+}
+STAGE_COMPARISONS = {
+    "fixed4_minus_fixed2": ("fixed_2", "fixed_4"),
+    "fixed8_minus_fixed4": ("fixed_4", "fixed_8"),
+    "fixed12_minus_fixed8": ("fixed_8", "fixed_12"),
+}
 CURVE_COUNTS = (2, 4, 8, 12, 32)
 
 
@@ -356,10 +367,37 @@ def comparison_summary(
         )
         adjusted, correction, direct4_complete = adjusted_rows(rows, metric)
         conditional = [row["value"] for row in adjusted if row["disagree"]]
+        direct3_panel = [
+            float(row["direct3"][metric])
+            for row in rows
+            if row["direct3"][metric] is not None
+        ]
+        direct4_panel = [
+            float(row["direct4"][metric])
+            for row in rows
+            if row["direct4"][metric] is not None
+        ]
         result["metrics"][metric] = {
             **inference(point, bootstraps),
             "oracle_source": source,
             "conditional_disagreement": describe(conditional),
+            "direct3_panel_mean": (
+                statistics.mean(direct3_panel)
+                if direct3_panel
+                else math.nan
+            ),
+            "direct4_panel_mean": (
+                statistics.mean(direct4_panel)
+                if direct4_panel
+                else math.nan
+            ),
+            "direct4_minus_direct3_panel_mean": (
+                statistics.mean(direct4_panel)
+                - statistics.mean(direct3_panel)
+                if len(direct3_panel) == len(direct4_panel)
+                and direct3_panel
+                else math.nan
+            ),
             "bag_direct4_minus_direct3_correction": {
                 str(bag): correction[bag] for bag in range(1, 5)
             },
@@ -372,7 +410,25 @@ def comparison_summary(
                 for row in adjusted
                 if int(row["bag"]) == bag
             ]
-            result["by_bag"][metric][str(bag)] = describe(bag_values)
+            bag_summary = describe(bag_values)
+            if bag_values:
+                rng = random.Random(
+                    stable_seed(f"{name}|{metric}|bag{bag}")
+                )
+                bag_bootstraps = [
+                    statistics.mean(
+                        rng.choice(bag_values)
+                        for _ in range(len(bag_values))
+                    )
+                    for _ in range(replicates)
+                ]
+                bag_summary.update(
+                    {
+                        "ci_low": percentile(bag_bootstraps, 0.025),
+                        "ci_high": percentile(bag_bootstraps, 0.975),
+                    }
+                )
+            result["by_bag"][metric][str(bag)] = bag_summary
 
     direct3 = [
         float(row["direct3"]["utility"])
@@ -402,6 +458,7 @@ def comparison_summary(
 def policy_work(policy: dict[str, Any]) -> dict[str, float]:
     work = policy["work"]
     return {
+        "completed_candidates": float(work["completed_candidates"]),
         "scenarios": float(work["cumulative_scenarios"]),
         "nested_nodes": float(work["nested_endgame_nodes"]),
         "wall_seconds": float(work["completed_seconds"]),
@@ -503,6 +560,180 @@ def oracle_sensitivity(
     }
 
 
+def stride_sensitivity(
+    maps: list[dict[str, Any]],
+    judges: dict[tuple[str, str], dict[str, Any]],
+    values: dict[int, dict[str, dict[str, float]]],
+) -> dict[str, Any]:
+    result: dict[str, Any] = {"depths": {}, "primary_comparisons": {}}
+    common_positions: dict[int, list[dict[str, Any]]] = {3: [], 4: []}
+    for depth in (3, 4):
+        flips = []
+        nominee_differences = []
+        for quality_map in maps:
+            position = str(quality_map["position"])
+            nominees = [str(move) for move in quality_map["nominees"]]
+            stride4 = oracle_values(
+                judges,
+                values,
+                position,
+                f"fresh_direct{depth}_stride4",
+                nominees,
+            )
+            stride2 = oracle_values(
+                judges,
+                values,
+                position,
+                f"fresh_direct{depth}_stride2",
+                nominees,
+            )
+            if stride4 is None or stride2 is None:
+                continue
+            common_positions[depth].append(quality_map)
+            best4 = max(
+                nominees, key=lambda move: stride4[move]["utility"]
+            )
+            best2 = max(
+                nominees, key=lambda move: stride2[move]["utility"]
+            )
+            if best4 != best2:
+                flips.append(
+                    {
+                        "position": position,
+                        "bag": int(quality_map["bag"]),
+                        "stride4_best": best4,
+                        "stride2_best": best2,
+                    }
+                )
+            nominee_differences.extend(
+                float(stride2[move]["utility"])
+                - float(stride4[move]["utility"])
+                for move in nominees
+            )
+        result["depths"][str(depth)] = {
+            "common_positions": len(common_positions[depth]),
+            "best_nominee_flips": len(flips),
+            "best_nominee_flip_rate": (
+                len(flips) / len(common_positions[depth])
+                if common_positions[depth]
+                else math.nan
+            ),
+            "nominee_utility_stride2_minus_stride4": describe(
+                nominee_differences
+            ),
+            "mean_absolute_nominee_utility_difference": (
+                statistics.mean(abs(value) for value in nominee_differences)
+                if nominee_differences
+                else math.nan
+            ),
+            "flip_details": flips,
+        }
+
+    for name, (before_policy, after_policy) in PRIMARY_COMPARISONS.items():
+        differences = []
+        sign_flips = 0
+        comparable_disagreements = 0
+        for quality_map in common_positions[4]:
+            position = str(quality_map["position"])
+            nominees = [str(move) for move in quality_map["nominees"]]
+            stride4 = oracle_values(
+                judges,
+                values,
+                position,
+                "fresh_direct4_stride4",
+                nominees,
+            )
+            stride2 = oracle_values(
+                judges,
+                values,
+                position,
+                "fresh_direct4_stride2",
+                nominees,
+            )
+            if stride4 is None or stride2 is None:
+                continue
+            before = str(
+                quality_map["policies"][before_policy]["move"]
+            )
+            after = str(quality_map["policies"][after_policy]["move"])
+            delta4 = (
+                0.0
+                if before == after
+                else delta(stride4, before, after, "utility")
+            )
+            delta2 = (
+                0.0
+                if before == after
+                else delta(stride2, before, after, "utility")
+            )
+            differences.append(delta2 - delta4)
+            if before != after:
+                comparable_disagreements += 1
+                if delta4 * delta2 < 0:
+                    sign_flips += 1
+        result["primary_comparisons"][name] = {
+            "positions": len(differences),
+            "policy_disagreements": comparable_disagreements,
+            "utility_stride2_minus_stride4": describe(differences),
+            "sign_flips": sign_flips,
+        }
+    return result
+
+
+def sentinel_diagnostics(records: list[dict[str, Any]]) -> dict[str, Any]:
+    sentinels = sorted(
+        (
+            record
+            for record in records
+            if record.get("kind") == "arm"
+            and record.get("mode") == "sentinel"
+            and record.get("position") == "fresh-quality-sentinel"
+            and record.get("status") == "completed"
+        ),
+        key=lambda row: int(row["sequence"]),
+    )
+    if not sentinels:
+        return {"n": 0}
+    throughput = [
+        float(row["nested_endgame_nodes"]) / float(row["wall_seconds"])
+        for row in sentinels
+    ]
+    median = statistics.median(throughput)
+    normalized = [value / median for value in throughput]
+    mean_normalized = statistics.mean(normalized)
+    cv = (
+        statistics.pstdev(normalized) / mean_normalized
+        if len(normalized) > 1 and mean_normalized
+        else 0.0
+    )
+    deviations = [abs(value - 1.0) for value in normalized]
+    mad = statistics.median(deviations)
+    noisy_threshold = max(0.20, 3.0 * mad)
+    width = max(1, len(normalized) // 4)
+    early = statistics.mean(normalized[:width])
+    late = statistics.mean(normalized[-width:])
+    return {
+        "n": len(sentinels),
+        "normalized_throughput_cv": cv,
+        "early_to_late_drift_fraction": (
+            late / early - 1.0 if early else math.nan
+        ),
+        "scheduled_core_occupancy": describe(
+            [float(row["scheduled_core_occupancy"]) for row in sentinels]
+        ),
+        "noisy_threshold_fraction_from_median": noisy_threshold,
+        "noisy_segments": [
+            {
+                "label": str(row["label"]),
+                "sequence": int(row["sequence"]),
+                "normalized_throughput": value,
+            }
+            for row, value in zip(sentinels, normalized, strict=True)
+            if abs(value - 1.0) > noisy_threshold
+        ],
+    }
+
+
 def analyze(
     records: list[dict[str, Any]], replicates: int
 ) -> dict[str, Any]:
@@ -517,6 +748,8 @@ def analyze(
     )
     judges, values = values_index(records)
     comparisons = dict(PRIMARY_COMPARISONS)
+    comparisons.update(STOPPING_COMPARISONS)
+    comparisons.update(STAGE_COMPARISONS)
     comparisons.update(
         {
             f"full32_minus_fixed{count}": (
@@ -615,6 +848,10 @@ def analyze(
         "oracle_sensitivity": oracle_sensitivity(
             maps, judges, values
         ),
+        "stride_sensitivity": stride_sensitivity(
+            maps, judges, values
+        ),
+        "sentinels": sentinel_diagnostics(records),
         "interpretation": (
             "measured when direct 4 covers every disagreement; otherwise "
             "model-based direct-3 full panel plus bag-conditioned direct-4 "
@@ -662,6 +899,47 @@ def make_markdown(result: dict[str, Any]) -> str:
     lines.extend(
         [
             "",
+            "Panel-wide values above include agreements as exact zero. "
+            "Conditional disagreement means and exact root-win counts are:",
+            "",
+            "| comparison | conditional utility | conditional win pp | "
+            "conditional spread | direct-4 after/before/tie |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    for name in PRIMARY_COMPARISONS:
+        row = result["quality"][name]
+        wins = row["direct4_common_exact_root_wins"]
+        lines.append(
+            f"| {name} | "
+            f"{row['metrics']['utility']['conditional_disagreement']['mean']:+.5f} | "
+            f"{row['metrics']['win']['conditional_disagreement']['mean'] * 100:+.3f} | "
+            f"{row['metrics']['spread']['conditional_disagreement']['mean']:+.3f} | "
+            f"{wins['after']}/{wins['before']}/{wins['ties']} |"
+        )
+    lines.extend(
+        [
+            "",
+            "### Bag-conditioned primary effects",
+            "",
+            "| comparison | bag | utility (95% CI) | win pp (95% CI) | "
+            "spread (95% CI) |",
+            "|---|---:|---:|---:|---:|",
+        ]
+    )
+    for name in PRIMARY_COMPARISONS:
+        row = result["quality"][name]
+        for bag in range(1, 5):
+            key = str(bag)
+            lines.append(
+                f"| {name} | {bag} | "
+                f"{fmt_ci(row['by_bag']['utility'][key])} | "
+                f"{fmt_ci(row['by_bag']['win'][key], 100.0)} | "
+                f"{fmt_ci(row['by_bag']['spread'][key])} |"
+            )
+    lines.extend(
+        [
+            "",
             "## Adaptive noninferiority",
             "",
             "Regret is `full 32 - min 8 / patience 8`; noninferiority requires "
@@ -693,7 +971,89 @@ def make_markdown(result: dict[str, Any]) -> str:
             f"| {count} | {row['disagreements']}/{row['positions']} | "
             f"{fmt_ci(row['metrics']['utility'])} |"
         )
+    lines.extend(
+        [
+            "",
+            "## Value of each completed 2-ply stage",
+            "",
+            "| added completed candidates | panel utility gain (95% CI) | "
+            "disagreements | mean added scenarios | mean added nested nodes | "
+            "M5 mean added s |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    stage_rows = [
+        ("2→4", "fixed4_minus_fixed2"),
+        ("4→8", "fixed8_minus_fixed4"),
+        ("8→12", "fixed12_minus_fixed8"),
+        ("12→32", "full32_minus_fixed12"),
+    ]
+    for label, name in stage_rows:
+        quality = result["quality"][name]
+        work = result["work"]["marginal_efficiency"][name][
+            "mean_incremental_work"
+        ]
+        lines.append(
+            f"| {label} | {fmt_ci(quality['metrics']['utility'])} | "
+            f"{quality['disagreements']}/{quality['positions']} | "
+            f"{work['scenarios']:.0f} | {work['nested_nodes']:.0f} | "
+            f"{work['wall_seconds']:.2f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "## Adaptive stopping choices",
+            "",
+            "| stop policy | disagreement with full 32 | full-minus-stop "
+            "utility (95% CI) | mean completed candidates | mean scenarios | "
+            "mean nested nodes | M5 mean s |",
+            "|---|---:|---:|---:|---:|---:|---:|",
+        ]
+    )
+    stopping_rows = [
+        ("min 8 / patience 4", "min8_patience4", "full32_minus_min8p4"),
+        ("min 8 / patience 8", "min8_patience8", "full32_minus_adaptive"),
+        ("min 12 / patience 8", "min12_patience8", "full32_minus_min12p8"),
+        ("full 32", "fixed_32", "full32_minus_fixed32"),
+    ]
+    for label, policy, comparison in stopping_rows:
+        quality = result["quality"][comparison]
+        work = result["work"]["policies"][policy]
+        lines.append(
+            f"| {label} | {quality['disagreements']}/"
+            f"{quality['positions']} | "
+            f"{fmt_ci(quality['metrics']['utility'])} | "
+            f"{work['completed_candidates']['mean']:.2f} | "
+            f"{work['scenarios']['mean']:.0f} | "
+            f"{work['nested_nodes']['mean']:.0f} | "
+            f"{work['wall_seconds']['mean']:.2f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "| adaptive extension | panel utility gain (95% CI) | "
+            "disagreements | mean added candidates | mean added nested nodes | "
+            "M5 mean added s |",
+            "|---|---:|---:|---:|---:|---:|",
+        ]
+    )
+    adaptive_extensions = [
+        ("patience 4→8 after min 8", "min8p8_minus_min8p4"),
+        ("min 8→12 at patience 8", "min12p8_minus_min8p8"),
+    ]
+    for label, name in adaptive_extensions:
+        quality = result["quality"][name]
+        work = result["work"]["marginal_efficiency"][name][
+            "mean_incremental_work"
+        ]
+        lines.append(
+            f"| {label} | {fmt_ci(quality['metrics']['utility'])} | "
+            f"{quality['disagreements']}/{quality['positions']} | "
+            f"{work['completed_candidates']:.2f} | "
+            f"{work['nested_nodes']:.0f} | {work['wall_seconds']:.2f} |"
+        )
     sensitivity = result["oracle_sensitivity"]
+    stride = result["stride_sensitivity"]
     lines.extend(
         [
             "",
@@ -704,11 +1064,73 @@ def make_markdown(result: dict[str, Any]) -> str:
             f"{sensitivity['best_nominee_flips']} "
             f"({sensitivity['best_nominee_flip_rate']:.1%}).",
             "",
+            "| comparison | direct-3 panel utility | direct-4 panel utility | "
+            "direct-4 minus direct-3 |",
+            "|---|---:|---:|---:|",
+        ]
+    )
+    for name in PRIMARY_COMPARISONS:
+        metric = result["quality"][name]["metrics"]["utility"]
+        lines.append(
+            f"| {name} | {metric['direct3_panel_mean']:+.5f} | "
+            f"{metric['direct4_panel_mean']:+.5f} | "
+            f"{metric['direct4_minus_direct3_panel_mean']:+.5f} |"
+        )
+    lines.extend(
+        [
+            "",
+            "Stride-2 sensitivity was prospectively checked on two positions "
+            "per bag:",
+            "",
+            "| depth | common | stride-4/stride-2 best flips | mean absolute "
+            "nominee utility difference |",
+            "|---:|---:|---:|---:|",
+        ]
+    )
+    for depth in ("3", "4"):
+        row = stride["depths"][depth]
+        lines.append(
+            f"| {depth} | {row['common_positions']} | "
+            f"{row['best_nominee_flips']} "
+            f"({row['best_nominee_flip_rate']:.1%}) | "
+            f"{row['mean_absolute_nominee_utility_difference']:.5f} |"
+        )
+    lines.extend(
+        [
+            "",
             "## Work interpretation",
             "",
             "Scenarios, nested nodes, and completed candidates are the "
             "strength/work axes. Utility per second is an M5 scheduling "
             "conversion only; selected-machine NPS is never a strength feature.",
+            "",
+            "| comparison | utility / M scenarios | utility / M nested nodes | "
+            "utility / M5 local s |",
+            "|---|---:|---:|---:|",
+        ]
+    )
+    for name in PRIMARY_COMPARISONS:
+        row = result["work"]["marginal_efficiency"][name]
+        lines.append(
+            f"| {name} | {row['utility_per_million_scenarios']:.6f} | "
+            f"{row['utility_per_million_nested_nodes']:.6f} | "
+            f"{row['utility_per_local_predicted_second']:.6f} |"
+        )
+    sentinels = result["sentinels"]
+    lines.extend(
+        [
+            "",
+            "## Load diagnostics",
+            "",
+            f"{sentinels['n']} identical sentinels: normalized-throughput CV "
+            f"{sentinels['normalized_throughput_cv']:.3f}; early/late drift "
+            f"{sentinels['early_to_late_drift_fraction']:+.1%}; median "
+            f"scheduled-core occupancy "
+            f"{sentinels['scheduled_core_occupancy']['median']:.3f}. "
+            f"Noisy segments: {len(sentinels['noisy_segments'])}.",
+            "",
+            "Timing from a noisy segment is only a local conversion; completed "
+            "quality observations remain structurally valid.",
             "",
         ]
     )
