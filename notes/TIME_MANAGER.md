@@ -632,24 +632,51 @@ first-two 3-ply completion tails exist only for bags 2--3. The small older
 width and a completed 3-ply stage over starting 4 ply at roughly ten local
 minutes.
 
-`src/impl/peg_time_manager.[ch]` freezes these observations as shadow artifact
-v1. It can plan exact first-two 2-ply waves for bags 1--4 and exact first-two
-3-ply waves after a completed 16-candidate 2-ply boundary for bags 2--3. It
-also exposes the direct-4 2-ply value observations without automatically using
-them as priors. A normal 0.99 policy fails closed on the 95.99% tail evidence,
-and every decision is still marked unsafe to enforce.
+`src/impl/peg_time_manager.[ch]` freezes these observations as artifact v1.
+Its default API remains fail-closed: a normal 0.99 policy rejects the 95.99%
+tail evidence, and enforcement additionally requires an explicit provisional
+opt-in. It can plan exact first-two 2-ply waves for bags 1--4 and exact
+first-two 3-ply waves after a completed 16-candidate 2-ply boundary for bags
+2--3. It also exposes the direct-4 2-ply value observations.
 
-Ordinary production PEG remains stage-wide: it launches 8/16/32 candidates
-behind one barrier. Those requests now deliberately fail the exact-wave
-configuration match instead of borrowing a two-candidate envelope. The next
-dispatcher change is to submit the first two as one wave, publish a usable
-result, then submit one candidate at a time and replan only after completion.
-Before enabling it, calibrate single-candidate post-wave tails, choose and
-validate a safety factor, and add online miss telemetry. The direct-4 value
-curve supports aiming for eight 2-ply candidates when work fits, but not a
-hard strength-preserving stop at eight.
+The experimental PlayChooser policy now opts into that finite-corpus evidence
+without mislabeling it as certified p99. It uses a 0.95 evidence threshold,
+multiplies the empirical maximum's portable nodes and scenarios by 1.5, and
+uses a separate 1.5 slowdown in the deadline wall conversion. The 1.5 factors
+are conservative engineering choices, not values selected on an untouched
+safety-factor sweep. They require an online audit before a release default.
 
-`src/impl/time_manager.c` is the policy boundary. It keeps portable work
+Enforced PEG changes only the no-poll 2-ply dispatcher. It submits the first
+two candidates together, then submits one candidate at a time with the whole
+worker pool and replans after every completed candidate. The default stopping
+rule completes at least eight candidates, then stops after four consecutive
+candidate completions without a change in the leading move, with a hard cap
+of 32. A deliberate stop publishes the completed prefix as a usable partial
+2-ply tier; a deadline-interrupted candidate is discarded. Shadow and
+interactive-poll solves preserve their old topology.
+
+The first-two price is the calibration median. A later single-candidate price
+uses half that median, but its admission bound deliberately retains the
+*whole* first-two empirical maximum before applying the 1.5 multiplier. This
+is a conservative proxy, not a separately measured post-wave tail. The value
+prior spreads the measured 2→4 and 4→8 direct-4 gains over their candidates;
+beyond eight it uses the much smaller full-32-minus-fixed-8 rare-rescue mean.
+The unmeasured greedy→2 gain borrows the 2→4 block only as a weak prior.
+
+Wall conversion starts from the loaded-M5 fit, adjusted inversely for the
+current worker count. Once the same solve has completed its greedy prefix, the
+policy rescales both expected and deadline models by actual/modelled prefix
+time, clamped to 0.25×--4×. This is a load-adaptive bridge, not a replacement
+for a larger cross-hardware calibration. Benchmark telemetry reports admitted
+chunks and deadline false starts; user interrupts are excluded from the miss
+count.
+
+The live policy currently buys only a 2-ply tier. It does not yet attempt the
+calibrated 3-ply boundary because the complete path to 16 shallow candidates,
+the post-wave deep-candidate tail, and a sufficiently precise deep value prior
+have not all been validated together.
+
+`src/impl/time_manager.c` remains the policy boundary. It keeps portable work
 coordinates separate, converts each proposed result-boundary chunk into local
 seconds, and buys sequential chunks only while:
 
@@ -658,8 +685,14 @@ expected regret reduction / predicted seconds > future shadow price
 ```
 
 The plan reports its deposit (positive) or withdrawal (negative) relative to
-equal slicing. It is not connected to live PlayChooser decisions yet; that
-waits for held-out calibration strong enough to supply the chunk values.
+equal slicing. For timed autoplay PEG, the player's real remaining clock is
+now the bank: a clock/latency reserve and the observed-max future depth-5
+endgame trajectory are protected, and the rest becomes the current physical
+window. That allows a late pre-endgame turn to withdraw beyond equal slicing
+when future endgame work is forecast to be cheap. The future reserve stays in
+portable nodes until runtime, when the live PEG nested-endgame rate and a 1.5
+lower-throughput factor convert it to seconds. Overtime and untimed/fixed-time
+paths retain their legacy behavior.
 
 The endgame admission model now has a one-boundary TimeManager bridge for
 shadow evaluation. At every completed depth it places expected nodes and the

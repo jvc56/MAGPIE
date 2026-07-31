@@ -142,8 +142,9 @@ void test_play_chooser_benchmark(void) {
          "sim_calls=%llu sim_iters=%llu sim_nodes=%llu peg_calls=%llu "
          "peg_candidate_completions=%llu peg_event_drops=%llu "
          "peg_stages=%llu peg_candidates=%llu peg_scenarios=%llu "
-         "peg_endgame_nodes=%llu peg_partials=%llu eg_calls=%llu "
-         "eg_nodes=%llu eg_depth=%llu\n",
+         "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
+         "peg_tm_false_starts=%llu eg_calls=%llu eg_nodes=%llu "
+         "eg_depth=%llu\n",
          games, clock_ms, (unsigned long long)stats.static_moves,
          (unsigned long long)stats.fallback_moves,
          (unsigned long long)stats.sim_calls,
@@ -157,6 +158,8 @@ void test_play_chooser_benchmark(void) {
          (unsigned long long)stats.peg_final_scenarios,
          (unsigned long long)stats.peg_endgame_nodes,
          (unsigned long long)stats.peg_partial_calls,
+         (unsigned long long)stats.peg_time_manager_admissions,
+         (unsigned long long)stats.peg_time_manager_false_starts,
          (unsigned long long)stats.endgame_calls,
          (unsigned long long)stats.endgame_nodes,
          (unsigned long long)stats.endgame_depth);
@@ -170,8 +173,7 @@ void test_play_chooser_benchmark(void) {
            event->candidate_rank, event->scenarios_completed,
            (unsigned long long)event->endgame_nodes,
            (unsigned long long)event->item_id, event->win_pct,
-           event->mean_spread,
-           (double)event->elapsed_ns / 1.0e6,
+           event->mean_spread, (double)event->elapsed_ns / 1.0e6,
            (double)event->cpu_ns / 1.0e6);
   }
   free(peg_events);

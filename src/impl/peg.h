@@ -261,13 +261,12 @@ typedef struct PegArgs {
   // Optional observation-only, solver-independent progress listener.
   AnalysisProgressListener progress_listener;
 
-  // Optional TimeManager shadow/admission policy. The current v1 PEG
-  // calibration covers exact first-two-candidate waves but is deliberately
-  // unsafe to enforce, so normal callers leave this NULL. The ordinary
-  // no-poll production stages are larger and fail calibration matching rather
-  // than borrowing a two-candidate completion bound. In shadow mode the
-  // decision is emitted as an ADMISSION progress event and never changes the
-  // result.
+  // Optional TimeManager shadow/admission policy. Shadow mode emits ADMISSION
+  // events without changing dispatcher topology or results. Enforced no-poll
+  // mode splits the 2-ply stage into the calibrated first-two wave followed by
+  // individually replanned candidates. The policy must explicitly opt into
+  // the provisional finite-corpus envelope; zero-initialized policies remain
+  // fail-closed.
   PegTimeManagerPolicy *time_manager_policy;
   bool enforce_time_manager;
   // TimeManager plans against the player's game clock when present. The
@@ -389,10 +388,24 @@ typedef struct PegResult {
   // stage = the deepest stage actually run). -1 while running or uninitialized.
   int last_completed_stage;
 
-  // True when the deepest stage was cut off by the budget/interrupt after
-  // scoring only some of its candidates (a partial tier), so it was reached but
-  // not completed. False when every stage shown ran to completion.
+  // True when the deepest stage ended after scoring only some of its candidate
+  // field (a partial tier), whether at a budget/interrupt or a calibrated
+  // completed-candidate stop. See stopped_by_time_manager to distinguish the
+  // latter. False when every candidate in every stage shown was scored.
   bool last_stage_partial;
+
+  // True when the calibrated candidate policy deliberately stopped at a
+  // completed boundary (value/reserve gate or stability patience), rather than
+  // because the physical deadline interrupted work. A partial final tier is a
+  // normal completed result in this case.
+  bool stopped_by_time_manager;
+
+  // Number of calibrated result-boundary chunks that TimeManager admitted,
+  // and the subset that failed to complete before the physical deadline.
+  // User interrupts are not false starts. These counters make the provisional
+  // completion envelope and its safety factor auditable in ordinary games.
+  uint64_t time_manager_admitted_chunks;
+  uint64_t time_manager_false_starts;
 
   // Wall-clock timer: started at the top of peg_solve (is_running == true
   // while solving, false once done). ctimer_elapsed_seconds reads the live

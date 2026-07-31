@@ -89,6 +89,12 @@ typedef struct PlayChooserStrategy {
   // sampling (faster, approximate), 0 = the solver's per-bag default. Only
   // used by PLAY_CHOOSER_EVAL_PEG.
   int peg_scenario_stride;
+  // Use the calibrated PEG candidate-wave TimeManager: admit the first two
+  // candidates with the frozen completion envelope, then replan one completed
+  // candidate at a time and stop with the min-8/patience-4 policy. This is
+  // independent of the challenge evaluator, whose PEG branch intentionally
+  // remains the bounded greedy seed.
+  bool use_calibrated_peg_time_manager;
   // Score+win utility for valuing a branch, identical to the simmer's
   // sim_utility_blend (see sim_args.h): the branch value is
   //   (w_winpct * win% + w_spread * sigmoid(spread / spread_scale))
@@ -130,6 +136,8 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t peg_final_scenarios;
   uint64_t peg_endgame_nodes;
   uint64_t peg_partial_calls;
+  uint64_t peg_time_manager_admissions;
+  uint64_t peg_time_manager_false_starts;
   uint64_t endgame_calls;
   uint64_t endgame_nodes;
   uint64_t endgame_depth;

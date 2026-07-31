@@ -1052,8 +1052,9 @@ static void peg_progress_finish(const PegProgress *progress,
 static bool peg_time_manager_allows_stage(
     const PegArgs *args, const PegProgress *progress, const Game *game,
     int mover_idx, int bag_size, int stage_idx, int stage_fidelity,
-    int candidates, int workers, int scenario_stride, int64_t solve_start_ns,
-    int64_t deadline_ns, const PegRankedCand *current_ranked) {
+    int candidates, int completed_at_fidelity, int workers, int scenario_stride,
+    int64_t solve_start_ns, int64_t deadline_ns,
+    const PegRankedCand *current_ranked) {
   if (args->time_manager_policy == NULL) {
     return true;
   }
@@ -1066,8 +1067,13 @@ static bool peg_time_manager_allows_stage(
                       : INFINITY;
   PegTimeManagerBoundaryKind boundary_kind = PEG_TIME_MANAGER_BOUNDARY_INVALID;
   int completed_2ply_candidates = 0;
-  if (stage_idx == 1 && stage_fidelity == 2) {
+  if (stage_idx == 1 && stage_fidelity == 2 && candidates == 2 &&
+      completed_at_fidelity == 0) {
     boundary_kind = PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY;
+  } else if (stage_idx == 1 && stage_fidelity == 2 && candidates == 1 &&
+             completed_at_fidelity >= 2) {
+    boundary_kind = PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE;
+    completed_2ply_candidates = completed_at_fidelity;
   } else if (stage_idx == 2 && stage_fidelity == 3 &&
              progress->last_completed_fidelity == 2) {
     boundary_kind = PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_3PLY_AFTER_16;
@@ -1157,7 +1163,7 @@ static bool peg_time_manager_allows_stage(
     event.admission_enforced = args->enforce_time_manager;
     event.phase = stage_idx;
     event.depth = stage_fidelity;
-    event.candidates_completed = 0;
+    event.candidates_completed = completed_at_fidelity;
     event.candidates_total = candidates;
     if (current_ranked != NULL && candidates > 0) {
       event.item_id = move_get_fingerprint(&current_ranked[0].move);
@@ -1221,8 +1227,9 @@ typedef struct PegScenarioJob {
   int64_t deadline_ns;
   ThreadControl *thread_control;
   PegWorker *workers;
-  int cand_idx;
-  PegProgress *progress; // optional; cand_idx is the cand rank
+  int cand_idx;  // local index in this submitted wave, used for reduction
+  int cand_rank; // stage-wide rank passed to progress callbacks
+  PegProgress *progress;
   // Optional per-ordering capture (PegArgs.include_per_scenario). When
   // do_capture is set, the worker records this split's orderings into its own
   // job-local `cap` (no cross-job sharing, so no locking); the reducer
@@ -1292,6 +1299,7 @@ typedef struct PegEvalCtx {
   // inline. cand_idx tags the pushed jobs; workers is the shared scratch array.
   PegScenarioJobList *out_jobs;
   int cand_idx;
+  int cand_rank;
   PegWorker *workers;
   // Optional progress callbacks (NULL = none). cand_idx is the cand rank passed
   // to on_scenario_done; progress->stage_idx carries the current stage.
@@ -2094,6 +2102,7 @@ static void peg_eval_split(PegEvalCtx *ctx, const MachineLetter *mover_drawn,
     job.thread_control = ctx->thread_control;
     job.workers = ctx->workers;
     job.cand_idx = ctx->cand_idx;
+    job.cand_rank = ctx->cand_rank;
     job.progress = ctx->progress;
     peg_scenario_joblist_push(ctx->out_jobs, &job);
     return;
@@ -2592,7 +2601,7 @@ static void peg_scenario_worker_fn(void *arg, int worker_idx) {
   ctx.worker = &job->workers[worker_idx];
   // Progress: cand_idx carries this cand's rank for on_scenario_done.
   ctx.progress = job->progress;
-  ctx.cand_idx = job->cand_idx;
+  ctx.cand_idx = job->cand_rank;
   // Per-ordering capture into the job's own sink (single-threaded per job).
   if (job->do_capture) {
     job->cap.ld = job->ld;
@@ -2665,7 +2674,8 @@ static void peg_eval_candidates_scenario(
     int bag_size, const Move *const *cands, int n, PegOppModel opp_model,
     int inner_top_k, int fidelity_plies, int scenario_stride,
     int64_t deadline_ns, ThreadControl *thread_control, PegProgress *progress,
-    PegPoll *poll, PegRankedCand *ranked, PegCandOutcomes *out_outcomes) {
+    PegPoll *poll, int candidate_rank_offset, PegRankedCand *ranked,
+    PegCandOutcomes *out_outcomes) {
   // Shared per-cand templates: post-cand board + cross-sets + pruned override,
   // built once and read concurrently by the scenario workers.
   Game **templates = malloc_or_die((size_t)n * sizeof(Game *));
@@ -2696,6 +2706,7 @@ static void peg_eval_candidates_scenario(
     ctx.workers = workers;
     ctx.out_jobs = &list;
     ctx.cand_idx = i;
+    ctx.cand_rank = candidate_rank_offset + i;
     ctx.progress = progress;
     const int tiles_played = move_get_tiles_played(cands[i]);
     ctx.k_drawn = tiles_played < bag_size ? tiles_played : bag_size;
@@ -2811,9 +2822,9 @@ static void peg_eval_candidates_scenario(
       // This barrier path (benchmarks) has no incremental sorted insert, so
       // there is no append-vs-reorder distinction: treat each as a full redraw.
       peg_progress_candidate_done(
-          progress, i, &ranked[i].move, ranked[i].win_pct,
-          ranked[i].mean_spread, ranked[i].n_scenarios, ranked[i].endgame_nodes,
-          candidate_completed_ns[i],
+          progress, candidate_rank_offset + i, &ranked[i].move,
+          ranked[i].win_pct, ranked[i].mean_spread, ranked[i].n_scenarios,
+          ranked[i].endgame_nodes, candidate_completed_ns[i],
           /*reordered=*/true);
     }
     peg_poll_bump_cand_done(poll);
@@ -3323,14 +3334,23 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           THREAD_CONTROL_STATUS_USER_INTERRUPT) {
         break;
       }
-      if (!peg_time_manager_allows_stage(args, &progress, game, mover_idx,
-                                         bag_size, stage_idx, stage_fidelity,
-                                         eval_count, n_threads, scenario_stride,
-                                         solve_start_ns, deadline_ns, ranked)) {
+      const bool calibrated_candidate_dispatch =
+          args->time_manager_policy != NULL && args->enforce_time_manager &&
+          args->poll == NULL && stage_idx == 1 && stage_fidelity == 2;
+      const int admission_candidates =
+          calibrated_candidate_dispatch ? 2 : eval_count;
+      if (!peg_time_manager_allows_stage(
+              args, &progress, game, mover_idx, bag_size, stage_idx,
+              stage_fidelity, admission_candidates,
+              /*completed_at_fidelity=*/0, n_threads, scenario_stride,
+              solve_start_ns, deadline_ns, ranked)) {
         // Enforced admission is fail-closed. The complete previous-stage
         // result remains published; no part of the refused batch was launched.
-        stopped_for_time = true;
+        out->stopped_by_time_manager = args->enforce_time_manager;
         break;
+      }
+      if (calibrated_candidate_dispatch) {
+        out->time_manager_admitted_chunks++;
       }
       // Candidates that don't advance past this stage reached only
       // prev_fidelity (their last scoring). Record them before they fall out of
@@ -3406,7 +3426,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
               pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
               bag_size, &moves[cand_idx], 1, args->opp_model, args->inner_top_k,
               stage_fidelity, scenario_stride, deadline_ns,
-              args->thread_control, &inner, /*poll=*/NULL, &restaged[cand_idx],
+              args->thread_control, &inner, /*poll=*/NULL,
+              /*candidate_rank_offset=*/cand_idx, &restaged[cand_idx],
               args->include_per_scenario ? &cand_oc : NULL);
           restaged[cand_idx].eval_seconds = ctimer_elapsed_seconds(&cand_timer);
           peg_poll_set_evaluating(args->poll, -1, 0);
@@ -3442,19 +3463,118 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           }
         }
       } else {
-        // Fast path (no live poll, e.g. benchmarks): scenario-level parallelism
-        // across all candidates at once — a halving stage has few candidates,
-        // so pooling their scenarios keeps all cores busy with a single
-        // barrier.
+        // No-poll path. Ordinary solves submit the whole stage behind one
+        // scenario-parallel barrier. A calibrated solve instead submits the
+        // first two candidates as the measured minimum-useful wave, then one
+        // candidate at a time and replans only after each completed boundary.
+        // Every submission still fans its scenarios across the whole pool.
         PegCandOutcomes *stage_oc =
             args->include_per_scenario
-                ? malloc_or_die((size_t)eval_count * sizeof(PegCandOutcomes))
+                ? calloc_or_die((size_t)eval_count, sizeof(PegCandOutcomes))
                 : NULL;
-        peg_eval_candidates_scenario(
-            pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
-            bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
-            stage_fidelity, scenario_stride, deadline_ns, args->thread_control,
-            &progress, args->poll, restaged, stage_oc);
+        if (calibrated_candidate_dispatch) {
+          memset(restaged, 0, (size_t)eval_count * sizeof(PegRankedCand));
+          const PegTimeManagerPolicy *time_policy = args->time_manager_policy;
+          int minimum_candidates = time_policy->minimum_2ply_candidates > 0
+                                       ? time_policy->minimum_2ply_candidates
+                                       : 8;
+          int patience = time_policy->stability_patience_candidates > 0
+                             ? time_policy->stability_patience_candidates
+                             : 4;
+          int candidate_limit = time_policy->maximum_2ply_candidates > 0
+                                    ? time_policy->maximum_2ply_candidates
+                                    : 32;
+          if (candidate_limit > eval_count) {
+            candidate_limit = eval_count;
+          }
+          if (candidate_limit < 2) {
+            candidate_limit = 2;
+          }
+          if (minimum_candidates > candidate_limit) {
+            minimum_candidates = candidate_limit;
+          }
+          if (minimum_candidates < 2) {
+            minimum_candidates = 2;
+          }
+
+          int launched = 0;
+          int last_best_change = 0;
+          uint64_t best_fingerprint = 0;
+          while (launched < candidate_limit) {
+            if (launched >= minimum_candidates &&
+                launched - last_best_change >= patience) {
+              out->stopped_by_time_manager = true;
+              break;
+            }
+            const int wave_count = launched == 0 ? 2 : 1;
+            if (launched > 0 &&
+                !peg_time_manager_allows_stage(
+                    args, &progress, game, mover_idx, bag_size, stage_idx,
+                    stage_fidelity, /*candidates=*/1,
+                    /*completed_at_fidelity=*/launched, n_threads,
+                    scenario_stride, solve_start_ns, deadline_ns, ranked)) {
+              out->stopped_by_time_manager = args->enforce_time_manager;
+              break;
+            }
+            if (launched > 0) {
+              out->time_manager_admitted_chunks++;
+            }
+            peg_eval_candidates_scenario(
+                pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
+                bag_size, &moves[launched], wave_count, args->opp_model,
+                args->inner_top_k, stage_fidelity, scenario_stride, deadline_ns,
+                args->thread_control, &progress, args->poll,
+                /*candidate_rank_offset=*/launched, &restaged[launched],
+                stage_oc != NULL ? &stage_oc[launched] : NULL);
+            launched += wave_count;
+
+            const int64_t full_weight = ranked[0].weight_sum;
+            bool wave_completed = true;
+            for (int cand_idx = launched - wave_count; cand_idx < launched;
+                 cand_idx++) {
+              if (restaged[cand_idx].weight_sum < full_weight) {
+                wave_completed = false;
+                break;
+              }
+            }
+            if (!wave_completed) {
+              if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns &&
+                  thread_control_get_status(args->thread_control) !=
+                      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+                out->time_manager_false_starts++;
+              }
+              break;
+            }
+
+            int best_idx = 0;
+            double best_key = -INFINITY;
+            for (int cand_idx = 0; cand_idx < launched; cand_idx++) {
+              const double key = restaged[cand_idx].win_pct +
+                                 1e-4 * restaged[cand_idx].mean_spread;
+              if (key > best_key) {
+                best_key = key;
+                best_idx = cand_idx;
+              }
+            }
+            const uint64_t fingerprint =
+                move_get_fingerprint(&restaged[best_idx].move);
+            if (best_fingerprint == 0 || fingerprint != best_fingerprint) {
+              best_fingerprint = fingerprint;
+              last_best_change = launched;
+            }
+          }
+          if (launched == candidate_limit && candidate_limit < eval_count) {
+            out->stopped_by_time_manager = true;
+          }
+        } else {
+          // Existing fast path: a single stage-wide barrier.
+          peg_eval_candidates_scenario(
+              pool, workers, prepared_base, mover_idx, unseen, ld_size, ld,
+              bag_size, moves, eval_count, args->opp_model, args->inner_top_k,
+              stage_fidelity, scenario_stride, deadline_ns,
+              args->thread_control, &progress, args->poll,
+              /*candidate_rank_offset=*/0, restaged, stage_oc);
+        }
         // A deadline can cut the stage mid-flight: a candidate whose scenario
         // jobs bailed has a short weight_sum, so keep only the fully-scored
         // ones (as the live path does) instead of ranking partial scores.
@@ -3699,7 +3819,8 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     progress_status = ANALYSIS_STATUS_INTERRUPTED;
   } else if (out->n_top_cands == 0 || out->best_win < 0.0) {
     progress_status = ANALYSIS_STATUS_NO_RESULT;
-  } else if (out->last_stage_partial || stopped_for_time) {
+  } else if ((out->last_stage_partial && !out->stopped_by_time_manager) ||
+             stopped_for_time) {
     progress_status = ANALYSIS_STATUS_TIME_LIMIT;
   }
   peg_progress_finish(&progress, out, progress_status);

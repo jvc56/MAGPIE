@@ -22,6 +22,14 @@ static const double PEG_TIME_MANAGER_REFERENCE_SECONDS_PER_SCENARIO =
 static const double PEG_TIME_MANAGER_REFERENCE_SECONDS_PER_ENDGAME_NODE =
     5.162207041055367e-7;
 
+// Direct-4 panel mean for full 32 candidates minus fixed 8, divided over the
+// 24 extra candidates. This is deliberately a small rare-rescue prior: the
+// raw 8->12 point estimate was negative while 12->32 was positive, so forcing
+// the finite-sample curve to be monotone would overstate what candidate 9 is
+// worth.
+static const double PEG_TIME_MANAGER_POST8_VALUE_PER_CANDIDATE =
+    0.000530145705 / 24.0;
+
 #define PEG_WORK(node_count, scenario_count, candidate_count)                  \
   {                                                                            \
       .mode = ANALYSIS_MODE_PEG,                                               \
@@ -303,12 +311,84 @@ peg_time_manager_default_2ply_value_observation(
   return NULL;
 }
 
+double peg_time_manager_default_regret_reduction(
+    const PegTimeManagerRequest *request,
+    const PegTimeManagerCalibration *calibration, void *user_data) {
+  (void)calibration;
+  (void)user_data;
+  if (request == NULL) {
+    return NAN;
+  }
+  if (request->boundary_kind == PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY) {
+    // The quality panel begins at the first-two checkpoint and therefore does
+    // not identify greedy->2 directly. Give the minimum useful wave the same
+    // order of value as the measured 2->4 block; completion risk, not this
+    // weak prior, is intended to be its dominant admission gate.
+    const PegTimeManagerValueObservation *two_to_four =
+        peg_time_manager_default_2ply_value_observation(2, 4);
+    return two_to_four != NULL ? two_to_four->observed_utility_gain : NAN;
+  }
+  if (request->boundary_kind != PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE) {
+    return NAN;
+  }
+  const int completed = request->completed_2ply_candidates;
+  if (completed >= 2 && completed < 4) {
+    const PegTimeManagerValueObservation *two_to_four =
+        peg_time_manager_default_2ply_value_observation(2, 4);
+    return two_to_four != NULL ? two_to_four->observed_utility_gain / 2.0 : NAN;
+  }
+  if (completed >= 4 && completed < 8) {
+    const PegTimeManagerValueObservation *four_to_eight =
+        peg_time_manager_default_2ply_value_observation(4, 8);
+    return four_to_eight != NULL ? four_to_eight->observed_utility_gain / 4.0
+                                 : NAN;
+  }
+  return completed >= 8 ? PEG_TIME_MANAGER_POST8_VALUE_PER_CANDIDATE : NAN;
+}
+
 static bool peg_time_manager_positive_finite(double value) {
   return isfinite(value) && value > 0.0;
 }
 
 static bool peg_time_manager_nonnegative_finite(double value) {
   return isfinite(value) && value >= 0.0;
+}
+
+static bool peg_time_manager_scale_work(TimeManagerWork *work,
+                                        double multiplier) {
+  if (work == NULL || !isfinite(multiplier) || multiplier < 1.0) {
+    return false;
+  }
+  const long double nodes = (long double)work->nodes * multiplier;
+  const long double scenarios = (long double)work->scenarios * multiplier;
+  const long double fixed_seconds =
+      (long double)work->fixed_seconds * multiplier;
+  if (nodes > UINT64_MAX || scenarios > UINT64_MAX ||
+      !isfinite((double)fixed_seconds)) {
+    return false;
+  }
+  work->nodes = (uint64_t)ceill(nodes);
+  work->scenarios = (uint64_t)ceill(scenarios);
+  work->fixed_seconds = (double)fixed_seconds;
+  return isfinite(work->fixed_seconds);
+}
+
+static TimeManagerWork
+peg_time_manager_half_expected_work(const TimeManagerWork *pair_work) {
+  TimeManagerWork work = *pair_work;
+  work.nodes = (work.nodes + 1) / 2;
+  work.scenarios = (work.scenarios + 1) / 2;
+  work.candidates = 1;
+  work.fixed_seconds *= 0.5;
+  return work;
+}
+
+static void peg_time_manager_scale_cost_model(TimeManagerCostModel *model,
+                                              double scale) {
+  model->peg_fixed_seconds_per_chunk *= scale;
+  model->peg_seconds_per_scenario *= scale;
+  model->peg_seconds_per_endgame_node *= scale;
+  model->peg_seconds_per_candidate *= scale;
 }
 
 bool peg_time_manager_reference_cost_models(
@@ -356,17 +436,24 @@ bool peg_time_manager_reference_cost_models(
 static bool
 peg_time_manager_request_matches(const PegTimeManagerCalibration *calibration,
                                  const PegTimeManagerRequest *request) {
-  return request->boundary_kind == calibration->boundary_kind &&
-         request->bag_tiles == calibration->bag_tiles &&
+  const bool is_post_wave =
+      request->boundary_kind == PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE;
+  const bool boundary_matches =
+      request->boundary_kind == calibration->boundary_kind ||
+      (is_post_wave &&
+       calibration->boundary_kind == PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY);
+  return boundary_matches && request->bag_tiles == calibration->bag_tiles &&
          request->stage_index == calibration->stage_index &&
          request->fidelity_plies == calibration->fidelity_plies &&
          request->workers > 0 &&
-         request->candidates == calibration->candidates &&
-         request->completed_2ply_candidates ==
-             calibration->required_completed_2ply_candidates &&
+         request->candidates == (is_post_wave ? 1 : calibration->candidates) &&
+         (is_post_wave ? request->completed_2ply_candidates >= 2
+                       : request->completed_2ply_candidates ==
+                             calibration->required_completed_2ply_candidates) &&
          request->nested_enabled == calibration->nested_enabled &&
          request->scenario_stride == calibration->scenario_stride &&
-         request->parallel_wave_dispatch == calibration->parallel_wave_dispatch;
+         request->parallel_wave_dispatch ==
+             (is_post_wave ? false : calibration->parallel_wave_dispatch);
 }
 
 PegTimeManagerDecision
@@ -385,27 +472,81 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
   }
 
   const PegTimeManagerCalibration *calibration =
-      peg_time_manager_default_calibration(request->boundary_kind,
-                                           request->bag_tiles);
+      peg_time_manager_default_calibration(
+          request->boundary_kind ==
+                  PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE
+              ? PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY
+              : request->boundary_kind,
+          request->bag_tiles);
   if (calibration == NULL) {
     return decision;
   }
-  decision.pricing_work = calibration->median_work;
+  decision.uses_post_wave_tail_proxy =
+      request->boundary_kind == PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE;
+  decision.pricing_work =
+      decision.uses_post_wave_tail_proxy
+          ? peg_time_manager_half_expected_work(&calibration->median_work)
+          : calibration->median_work;
+  // A separately calibrated one-candidate tail is still missing. Do not halve
+  // the pair's p99/max: retaining the whole first-two envelope is the explicit
+  // conservative proxy for each later candidate.
   decision.empirical_p99_work = calibration->empirical_p99_work;
   decision.provisional_completion_bound_work = calibration->empirical_max_work;
+  if (decision.uses_post_wave_tail_proxy) {
+    decision.empirical_p99_work.candidates = 1;
+    decision.provisional_completion_bound_work.candidates = 1;
+  }
+  const double completion_bound_multiplier =
+      policy->completion_bound_multiplier > 0.0
+          ? policy->completion_bound_multiplier
+          : 1.0;
+  if (!peg_time_manager_scale_work(&decision.provisional_completion_bound_work,
+                                   completion_bound_multiplier)) {
+    return decision;
+  }
   decision.configuration_matches =
       peg_time_manager_request_matches(calibration, request);
   if (!decision.configuration_matches) {
     return decision;
   }
 
+  TimeManagerCostModel expected_cost_model = policy->expected_cost_model;
+  TimeManagerCostModel deadline_cost_model = policy->deadline_cost_model;
+  decision.live_cost_scale = 1.0;
+  if (policy->use_live_cost_scale && request->elapsed_seconds >= 0.01 &&
+      (request->completed_scenarios > 0 ||
+       request->completed_endgame_nodes > 0)) {
+    const TimeManagerWork completed_work = {
+        .mode = ANALYSIS_MODE_PEG,
+        .nodes = request->completed_endgame_nodes,
+        .scenarios = request->completed_scenarios,
+    };
+    const double modeled_elapsed =
+        time_manager_estimate_seconds(&expected_cost_model, &completed_work);
+    if (isfinite(modeled_elapsed) && modeled_elapsed > 0.0) {
+      // The completed prefix includes pruning/movegen work not represented by
+      // the two portable coordinates. Treating it as PEG work makes the scale
+      // conservative. Clamp a single short prefix so timer noise or a very
+      // unusual position cannot make the next deadline estimate absurd.
+      decision.live_cost_scale = request->elapsed_seconds / modeled_elapsed;
+      if (decision.live_cost_scale < 0.25) {
+        decision.live_cost_scale = 0.25;
+      } else if (decision.live_cost_scale > 4.0) {
+        decision.live_cost_scale = 4.0;
+      }
+      peg_time_manager_scale_cost_model(&expected_cost_model,
+                                        decision.live_cost_scale);
+      peg_time_manager_scale_cost_model(&deadline_cost_model,
+                                        decision.live_cost_scale);
+    }
+  }
+
   decision.pricing_seconds = time_manager_estimate_seconds(
-      &policy->expected_cost_model, &decision.pricing_work);
+      &expected_cost_model, &decision.pricing_work);
   decision.empirical_p99_seconds = time_manager_estimate_seconds(
-      &policy->deadline_cost_model, &decision.empirical_p99_work);
+      &deadline_cost_model, &decision.empirical_p99_work);
   decision.provisional_completion_bound_seconds = time_manager_estimate_seconds(
-      &policy->deadline_cost_model,
-      &decision.provisional_completion_bound_work);
+      &deadline_cost_model, &decision.provisional_completion_bound_work);
   if (!isfinite(decision.pricing_seconds) || decision.pricing_seconds < 0.0 ||
       !isfinite(decision.empirical_p99_seconds) ||
       decision.empirical_p99_seconds < decision.pricing_seconds ||
@@ -434,20 +575,42 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
           : NAN;
 
   TimeManagerClock clock = policy->clock;
-  clock.remaining_seconds = request->has_player_clock
-                                ? request->player_clock_remaining_seconds
-                                : request->remaining_seconds;
+  // Requests report the clock/window still available *now*. Reconstruct the
+  // turn-start bank before adding elapsed work as the committed current cost;
+  // otherwise elapsed time would be charged twice.
+  clock.remaining_seconds =
+      (request->has_player_clock ? request->player_clock_remaining_seconds
+                                 : request->remaining_seconds) +
+      request->elapsed_seconds;
   clock.committed_current_seconds = request->elapsed_seconds;
+  if (policy->future_reserve_endgame_nodes > 0) {
+    if (!isfinite(policy->future_rate_safety_multiplier) ||
+        policy->future_rate_safety_multiplier < 1.0 ||
+        !peg_time_manager_nonnegative_finite(
+            expected_cost_model.peg_seconds_per_endgame_node)) {
+      return (PegTimeManagerDecision){0};
+    }
+    const double future_node_seconds =
+        (double)policy->future_reserve_endgame_nodes *
+        expected_cost_model.peg_seconds_per_endgame_node *
+        policy->future_rate_safety_multiplier;
+    if (!peg_time_manager_nonnegative_finite(future_node_seconds)) {
+      return (PegTimeManagerDecision){0};
+    }
+    clock.future_reserve_seconds += future_node_seconds;
+  }
   const TimeManagerChunk chunk = {
-      .boundary = TIME_MANAGER_BOUNDARY_PEG_WAVE,
+      .boundary = decision.uses_post_wave_tail_proxy
+                      ? TIME_MANAGER_BOUNDARY_PEG_CANDIDATE
+                      : TIME_MANAGER_BOUNDARY_PEG_WAVE,
       .work = decision.pricing_work,
       .has_completion_bound = decision.has_provisional_completion_bound,
       .completion_bound_work = decision.provisional_completion_bound_work,
       .completion_confidence = decision.completion_confidence,
       .expected_regret_reduction = expected_regret_reduction,
   };
-  decision.plan = time_manager_plan(&clock, &policy->expected_cost_model,
-                                    &policy->deadline_cost_model, &chunk, 1);
+  decision.plan = time_manager_plan(&clock, &expected_cost_model,
+                                    &deadline_cost_model, &chunk, 1);
   if (!decision.plan.valid) {
     return (PegTimeManagerDecision){0};
   }
@@ -456,11 +619,14 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
                                decision.provisional_completion_bound_seconds <=
                                    request->remaining_seconds;
   decision.valid = true;
-  // v1 records the correct work boundary but is still shadow-only. The
-  // empirical maximum lacks the configured 99% evidence, no production safety
-  // factor has been chosen, and the ordinary dispatcher launches larger
-  // stages rather than this exact wave.
-  decision.safe_to_enforce = false;
+  // The default remains shadow-only. This branch's live PlayChooser policy
+  // explicitly opts into the finite-corpus empirical maximum, a safety
+  // multiplier, and the lower 95% evidence threshold. That is operationally
+  // enforceable but must not be described as a certified p99 guarantee.
+  decision.safe_to_enforce =
+      policy->allow_provisional_enforcement &&
+      completion_bound_multiplier >= 1.0 &&
+      decision.completion_confidence >= clock.minimum_completion_confidence;
   decision.should_start = physically_fits && decision.plan.chunks_bought == 1;
   return decision;
 }

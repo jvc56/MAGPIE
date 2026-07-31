@@ -741,6 +741,23 @@ static void test_peg_challenge_decision(void) {
       .seed = 42,
   };
 
+  // The calibrated PEG policy treats the real clock as a bank. At this last
+  // pre-endgame turn it reserves the portable future-endgame envelope but can
+  // withdraw substantially beyond the legacy equal slice.
+  GameTimer time_manager_timer;
+  game_timer_reset(&time_manager_timer, 120.0);
+  PlayChooserStrategy legacy_clock_strategy = strategy;
+  legacy_clock_strategy.fixed_seconds_per_move = 0.0;
+  legacy_clock_strategy.game_timer = &time_manager_timer;
+  const double legacy_budget =
+      play_chooser_get_seconds_for_move(&legacy_clock_strategy, game);
+  PlayChooserStrategy calibrated_clock_strategy = legacy_clock_strategy;
+  calibrated_clock_strategy.use_calibrated_peg_time_manager = true;
+  const double calibrated_budget =
+      play_chooser_get_seconds_for_move(&calibrated_clock_strategy, game);
+  assert(calibrated_budget > legacy_budget);
+  assert(calibrated_budget < 120.0);
+
   ChallengeDecision o_decision;
   test_peg_challenge_decision_case(&strategy, game, "2A O.....",
                                    /*expect_challenge=*/true, &o_decision);

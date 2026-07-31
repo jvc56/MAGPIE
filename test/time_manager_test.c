@@ -458,8 +458,57 @@ static void test_peg_time_manager_fails_closed_on_tail(void) {
   assert(decision.should_start);
   assert(!decision.safe_to_enforce);
 
+  // The live experimental policy must opt in explicitly. Its safety
+  // multiplier enlarges only the deadline envelope; expected work/value
+  // pricing stays at the measured median.
+  policy.allow_provisional_enforcement = true;
+  policy.completion_bound_multiplier = 1.5;
+  decision = peg_time_manager_plan_boundary(&policy, &request);
+  assert(decision.valid);
+  assert(decision.safe_to_enforce);
+  assert(decision.should_start);
+  assert(decision.pricing_work.nodes == bag1->median_work.nodes);
+  assert(decision.provisional_completion_bound_work.nodes == UINT64_C(5067591));
+
+  // Later candidates are admitted singly, but conservatively retain the
+  // whole first-two empirical maximum as a visible proxy tail.
+  request.boundary_kind = PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE;
+  request.candidates = 1;
+  request.completed_2ply_candidates = 2;
+  request.parallel_wave_dispatch = false;
+  policy.regret_callback = peg_time_manager_default_regret_reduction;
+  decision = peg_time_manager_plan_boundary(&policy, &request);
+  assert(decision.valid);
+  assert(decision.configuration_matches);
+  assert(decision.uses_post_wave_tail_proxy);
+  assert(decision.safe_to_enforce);
+  assert(decision.pricing_work.nodes == UINT64_C(31416));
+  assert(decision.pricing_work.candidates == 1);
+  assert(decision.provisional_completion_bound_work.nodes == UINT64_C(5067591));
+  assert(decision.provisional_completion_bound_work.candidates == 1);
+  assert_near(decision.expected_regret_reduction, 0.00780361263 / 2.0);
+
+  request.completed_2ply_candidates = 4;
+  decision = peg_time_manager_plan_boundary(&policy, &request);
+  assert_near(decision.expected_regret_reduction, 0.00491625556 / 4.0);
+  request.completed_2ply_candidates = 8;
+  decision = peg_time_manager_plan_boundary(&policy, &request);
+  assert_near(decision.expected_regret_reduction, 0.000530145705 / 24.0);
+
+  // The completed greedy prefix can rescale the hardware conversion before
+  // the first refinement admission; the single-prefix estimate is clamped.
+  policy.use_live_cost_scale = true;
+  request.elapsed_seconds = 100.0;
+  decision = peg_time_manager_plan_boundary(&policy, &request);
+  assert(decision.valid);
+  assert_near(decision.live_cost_scale, 4.0);
+
   // TimeManager plans against the total player clock, while the current
   // solver window remains a separate physical completion gate.
+  request = peg_time_manager_test_request(
+      PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY, 1);
+  policy.regret_callback = NULL;
+  policy.use_live_cost_scale = false;
   request.remaining_seconds = 1.0;
   decision = peg_time_manager_plan_boundary(&policy, &request);
   assert(decision.valid);

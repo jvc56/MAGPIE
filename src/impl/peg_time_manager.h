@@ -19,6 +19,11 @@
 typedef enum PegTimeManagerBoundaryKind {
   PEG_TIME_MANAGER_BOUNDARY_INVALID = 0,
   PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY,
+  // One additional 2-ply candidate after the calibrated first-two wave. The
+  // v1 corpus did not freeze a separate single-candidate tail, so the planner
+  // deliberately uses the entire first-two empirical maximum as a
+  // conservative proxy and reports that fact in the decision.
+  PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE,
   PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_3PLY_AFTER_16,
 } PegTimeManagerBoundaryKind;
 
@@ -113,15 +118,40 @@ typedef struct PegTimeManagerPolicy {
   PegTimeManagerRegretReductionCallback regret_callback;
   void *regret_callback_data;
   double fixed_expected_regret_reduction;
+  // Zero means 1.0 for backwards-compatible shadow callers. The multiplier is
+  // applied only to the empirical completion envelope, never to expected work
+  // used for value pricing.
+  double completion_bound_multiplier;
+  // The empirical maximum has 95.99% evidence of covering population p99, not
+  // the normal 99% production evidence target. A caller must explicitly opt
+  // into enforcing that provisional envelope; otherwise decisions remain
+  // shadow-only even when `clock.minimum_completion_confidence` is lowered.
+  bool allow_provisional_enforcement;
+  // Rescale the supplied local cost models from work already completed in the
+  // current solve. This lets the portable calibration adapt to hardware,
+  // thermal state, and co-load before admitting the first refinement wave.
+  bool use_live_cost_scale;
+  // Portable reserve for later same-player endgame work. It is converted with
+  // the effective live PEG endgame-node rate and this safety multiplier.
+  uint64_t future_reserve_endgame_nodes;
+  double future_rate_safety_multiplier;
+  // Candidate-wave stopping policy. Zero selects the calibrated defaults
+  // (minimum 8, stability patience 4, maximum 32).
+  int minimum_2ply_candidates;
+  int stability_patience_candidates;
+  int maximum_2ply_candidates;
 } PegTimeManagerPolicy;
 
 typedef struct PegTimeManagerDecision {
   bool valid;
   bool configuration_matches;
-  // False for v1: candidate-wave execution, a production safety factor, and
-  // online miss telemetry are not all present yet.
+  // False by default. True only for a policy that explicitly accepts the
+  // provisional 95.99%-evidence envelope; it is not a certified p99 claim.
   bool safe_to_enforce;
   bool should_start;
+  // True for a post-wave candidate because its deadline envelope is the whole
+  // first-two maximum, not a separately calibrated single-candidate tail.
+  bool uses_post_wave_tail_proxy;
   bool has_provisional_completion_bound;
   TimeManagerWork pricing_work;
   TimeManagerWork empirical_p99_work;
@@ -130,6 +160,9 @@ typedef struct PegTimeManagerDecision {
   double empirical_p99_seconds;
   double provisional_completion_bound_seconds;
   double completion_confidence;
+  // Multiplicative adjustment inferred from this solve's completed work. 1.0
+  // means the caller's supplied model was retained.
+  double live_cost_scale;
   double expected_regret_reduction;
   TimeManagerPlan plan;
 } PegTimeManagerDecision;
@@ -142,6 +175,15 @@ const PegTimeManagerValueObservation *
 peg_time_manager_default_2ply_value_observation(int completed_candidates_before,
                                                 int completed_candidates_after);
 
+// Smoothed per-boundary scheduler prior derived from the direct-4 panel. The
+// strong 2->4 and 4->8 increments are spread uniformly over their newly
+// completed candidates. Beyond eight, use the much smaller measured
+// full-32-minus-fixed-8 rare-rescue mean rather than the negative finite-panel
+// 8->12 point estimate.
+double peg_time_manager_default_regret_reduction(
+    const PegTimeManagerRequest *request,
+    const PegTimeManagerCalibration *calibration, void *user_data);
+
 // Reconstructs the loaded M5's local cost model, scaled to a caller's local
 // wall time. The fitted negative candidate coefficient is clamped to zero;
 // the intercept is represented explicitly as a per-wave fixed cost. This
@@ -152,11 +194,10 @@ bool peg_time_manager_reference_cost_models(
     TimeManagerCostModel *expected_cost_model,
     TimeManagerCostModel *deadline_cost_model);
 
-// Plans one exactly-two-candidate boundary. The empirical maximum is offered
-// as a provisional completion envelope, but its 95.99% p99-coverage evidence
-// makes a normal 0.99 policy fail closed. Current production PEG still
-// dispatches larger stages; those requests deliberately fail configuration
-// matching rather than pretending the first-two bound covers the whole stage.
+// Plans either the exact first-two wave or one subsequent 2-ply candidate. The
+// latter keeps the whole pair maximum as a conservative, clearly labeled
+// proxy. The 95.99% p99-coverage evidence makes a normal 0.99 policy fail
+// closed; enforcement requires an explicit lower threshold and opt-in.
 PegTimeManagerDecision
 peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
                                const PegTimeManagerRequest *request);

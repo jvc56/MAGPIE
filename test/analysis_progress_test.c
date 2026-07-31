@@ -677,6 +677,62 @@ static void test_peg_progress_is_observation_only(void) {
   assert(finish.nodes == final_stage_nodes);
   assert(finish.work_units == finish.scenarios);
 
+  // Enforced mode changes the dispatcher topology: first two together, then
+  // one completed candidate at a time. Cap at eight here so the test does not
+  // depend on the position's winner-stability history.
+  MoveList *wave_move_list = move_list_create(16);
+  const MoveGenArgs wave_movegen_args = {
+      .game = game,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = wave_move_list,
+  };
+  generate_moves(&wave_movegen_args);
+  assert(move_list_get_count(wave_move_list) >= 10);
+  const Move *wave_moves[10];
+  for (int move_idx = 0; move_idx < 10; move_idx++) {
+    wave_moves[move_idx] = move_list_get_move(wave_move_list, move_idx);
+  }
+  PegTimeManagerPolicy enforced_policy = peg_time_manager;
+  enforced_policy.clock.minimum_completion_confidence = 0.95;
+  enforced_policy.regret_callback = peg_time_manager_default_regret_reduction;
+  enforced_policy.completion_bound_multiplier = 1.5;
+  enforced_policy.allow_provisional_enforcement = true;
+  enforced_policy.minimum_2ply_candidates = 8;
+  enforced_policy.stability_patience_candidates = 4;
+  enforced_policy.maximum_2ply_candidates = 8;
+  PegArgs wave_args = baseline_args;
+  wave_args.only_moves = wave_moves;
+  wave_args.n_only_moves = 10;
+  wave_args.time_budget_seconds = 100.0;
+  wave_args.progress_listener = (AnalysisProgressListener){
+      .callback = analysis_trace_record,
+      .user_data = trace,
+      .run_id = 304,
+  };
+  wave_args.time_manager_policy = &enforced_policy;
+  wave_args.enforce_time_manager = true;
+  wave_args.has_player_clock = true;
+  wave_args.player_clock_seconds_at_start = 100.0;
+  analysis_trace_reset(trace);
+  thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);
+  PegResult wave_result = {0};
+  peg_solve(&wave_args, &wave_result, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  assert(wave_result.last_completed_stage == 1);
+  assert(wave_result.n_top_cands == 8);
+  assert(wave_result.last_stage_partial);
+  assert(wave_result.stopped_by_time_manager);
+  assert(wave_result.time_manager_admitted_chunks == 7);
+  assert(wave_result.time_manager_false_starts == 0);
+  assert(trace_find_event(trace, ANALYSIS_MODE_PEG, ANALYSIS_EVENT_FINISH,
+                          &finish));
+  assert(finish.status == ANALYSIS_STATUS_COMPLETED);
+  peg_result_destroy(&wave_result);
+  move_list_destroy(wave_move_list);
+
   analysis_trace_destroy(trace);
   peg_result_destroy(&traced_result);
   peg_result_destroy(&baseline_result);
