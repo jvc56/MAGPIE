@@ -1,0 +1,228 @@
+{
+  "locked_before_stride2": true,
+  "per_bag": 2,
+  "positions": 8,
+  "records": {
+    "path": "/Users/john/Documents/Codex/2026-07-29/work-autonomously-on-peg-calibration-for/MAGPIE-peg-calibration/obj/peg_quality_20260730/records.jsonl",
+    "sha256_at_lock": "081dc1ffed6bffa7cc7981a47c7f30167dca98aef0ae4cf0f3a096178d08d30d"
+  },
+  "schema_version": 1,
+  "seed": "quality-stride2-sensitivity-20260730-v1",
+  "selected": [
+    {
+      "arm_sequences": {
+        "checkpoint32": 520,
+        "deep16": 519,
+        "deep24": 518
+      },
+      "bag": 1,
+      "nominees": [
+        "c11 TAPE",
+        "d10 NUDIST",
+        "l6 SCUT",
+        "k1 LYTIC"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k1 LYTIC",
+        "deep_24_12": "k1 LYTIC",
+        "fixed_12": "l6 SCUT",
+        "fixed_2": "c11 TAPE",
+        "fixed_32": "l6 SCUT",
+        "fixed_4": "d10 NUDIST",
+        "fixed_8": "l6 SCUT",
+        "min12_patience8": "l6 SCUT",
+        "min8_patience4": "l6 SCUT",
+        "min8_patience8": "l6 SCUT"
+      },
+      "position": "quality-20260730-b1-p042"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 198,
+        "deep16": 197,
+        "deep24": 196
+      },
+      "bag": 1,
+      "nominees": [
+        "l2 FAA",
+        "g1 APT",
+        "g1 AIT",
+        "13h NAIFEST"
+      ],
+      "policy_moves": {
+        "deep_16_8": "13h NAIFEST",
+        "deep_24_12": "13h NAIFEST",
+        "fixed_12": "g1 AIT",
+        "fixed_2": "l2 FAA",
+        "fixed_32": "13h NAIFEST",
+        "fixed_4": "g1 APT",
+        "fixed_8": "g1 APT",
+        "min12_patience8": "13h NAIFEST",
+        "min8_patience4": "g1 APT",
+        "min8_patience8": "13h NAIFEST"
+      },
+      "position": "quality-20260730-b1-p016"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 565,
+        "deep16": 566,
+        "deep24": 567
+      },
+      "bag": 2,
+      "nominees": [
+        "n4 CLAN",
+        "n3 ACNED",
+        "n4 CLAD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n3 ACNED",
+        "deep_24_12": "n3 ACNED",
+        "fixed_12": "n4 CLAD",
+        "fixed_2": "n4 CLAN",
+        "fixed_32": "n4 CLAD",
+        "fixed_4": "n3 ACNED",
+        "fixed_8": "n4 CLAD",
+        "min12_patience8": "n4 CLAD",
+        "min8_patience4": "n4 CLAD",
+        "min8_patience8": "n4 CLAD"
+      },
+      "position": "quality-20260730-b2-p046"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 590,
+        "deep16": 591,
+        "deep24": 592
+      },
+      "bag": 2,
+      "nominees": [
+        "k4 DIN",
+        "8a ED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "k4 DIN",
+        "deep_24_12": "8a ED",
+        "fixed_12": "k4 DIN",
+        "fixed_2": "k4 DIN",
+        "fixed_32": "8a ED",
+        "fixed_4": "k4 DIN",
+        "fixed_8": "k4 DIN",
+        "min12_patience8": "k4 DIN",
+        "min8_patience4": "k4 DIN",
+        "min8_patience8": "k4 DIN"
+      },
+      "position": "quality-20260730-b2-p048"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 316,
+        "deep16": 315,
+        "deep24": 314
+      },
+      "bag": 3,
+      "nominees": [
+        "10c RIAD",
+        "3l FAD"
+      ],
+      "policy_moves": {
+        "deep_16_8": "3l FAD",
+        "deep_24_12": "3l FAD",
+        "fixed_12": "10c RIAD",
+        "fixed_2": "10c RIAD",
+        "fixed_32": "10c RIAD",
+        "fixed_4": "10c RIAD",
+        "fixed_8": "10c RIAD",
+        "min12_patience8": "10c RIAD",
+        "min8_patience4": "10c RIAD",
+        "min8_patience8": "10c RIAD"
+      },
+      "position": "quality-20260730-b3-p026"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 453,
+        "deep16": 454,
+        "deep24": 455
+      },
+      "bag": 3,
+      "nominees": [
+        "14g sRI",
+        "10i RE"
+      ],
+      "policy_moves": {
+        "deep_16_8": "10i RE",
+        "deep_24_12": "10i RE",
+        "fixed_12": "14g sRI",
+        "fixed_2": "14g sRI",
+        "fixed_32": "14g sRI",
+        "fixed_4": "14g sRI",
+        "fixed_8": "14g sRI",
+        "min12_patience8": "14g sRI",
+        "min8_patience4": "14g sRI",
+        "min8_patience8": "14g sRI"
+      },
+      "position": "quality-20260730-b3-p037"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 458,
+        "deep16": 457,
+        "deep24": 456
+      },
+      "bag": 4,
+      "nominees": [
+        "e1 MIRI",
+        "e2 REI"
+      ],
+      "policy_moves": {
+        "deep_16_8": "e2 REI",
+        "deep_24_12": "e2 REI",
+        "fixed_12": "e1 MIRI",
+        "fixed_2": "e1 MIRI",
+        "fixed_32": "e1 MIRI",
+        "fixed_4": "e1 MIRI",
+        "fixed_8": "e1 MIRI",
+        "min12_patience8": "e1 MIRI",
+        "min8_patience4": "e1 MIRI",
+        "min8_patience8": "e1 MIRI"
+      },
+      "position": "quality-20260730-b4-p037"
+    },
+    {
+      "arm_sequences": {
+        "checkpoint32": 111,
+        "deep16": 110,
+        "deep24": 109
+      },
+      "bag": 4,
+      "nominees": [
+        "n2 CAGED",
+        "n4 GED"
+      ],
+      "policy_moves": {
+        "deep_16_8": "n4 GED",
+        "deep_24_12": "n4 GED",
+        "fixed_12": "n4 GED",
+        "fixed_2": "n2 CAGED",
+        "fixed_32": "n4 GED",
+        "fixed_4": "n4 GED",
+        "fixed_8": "n4 GED",
+        "min12_patience8": "n4 GED",
+        "min8_patience4": "n4 GED",
+        "min8_patience8": "n4 GED"
+      },
+      "position": "quality-20260730-b4-p009"
+    }
+  ],
+  "selection": "deterministic SHA-256 random rank within bag from the complete policy-disagreement set",
+  "selection_excludes": [
+    "direct_3_values",
+    "direct_4_values",
+    "oracle_runtime"
+  ],
+  "source_selection": {
+    "path": "/Users/john/Documents/Codex/2026-07-29/work-autonomously-on-peg-calibration-for/MAGPIE-peg-calibration/tools/peg_time_calibration/quality_oracle_full_20260730.json",
+    "sha256": "d093e16ae2ab03a787496a783db0a932fb722633e44d8b5bd9cb169c53267b94"
+  }
+}
