@@ -122,6 +122,61 @@ static void test_play_chooser_clock_budget(void) {
   // An explicit per-move budget remains independent of the game clock.
   strategy.fixed_seconds_per_move = 0.125;
   assert(play_chooser_get_seconds_for_move(&strategy, game) == 0.125);
+
+  assert(play_chooser_estimated_sim_plays_before_peg(4) == 0);
+  assert(play_chooser_estimated_sim_plays_before_peg(5) == 2);
+  assert(play_chooser_estimated_sim_plays_before_peg(12) == 2);
+  assert(play_chooser_estimated_sim_plays_before_peg(13) == 3);
+  assert(play_chooser_estimated_sim_plays_before_peg(86) == 12);
+
+  // Before PEG, calibrated TimeManager spends down predictable surplus into
+  // sim turns while protecting the minimum useful PEG prefix and a future
+  // depth-5 endgame. It can only increase the legacy equal slice. On a much
+  // slower hardware model the reserves do not fit and it falls back exactly
+  // to the legacy budget.
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  Bag *budget_bag = game_get_bag(game);
+  while (bag_get_letters(budget_bag) > 35) {
+    bag_draw_random_letter(budget_bag, 0);
+  }
+  game_timer_reset(&game_timer, 180.0);
+  strategy = (PlayChooserStrategy){
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .game_timer = &game_timer,
+      .overtime_period_seconds = 1.0,
+      .win_pcts = win_pcts,
+      .num_threads = 10,
+      .peg_scenario_stride = 1,
+  };
+  const double legacy_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  strategy.use_calibrated_peg_time_manager = true;
+  const double spend_down_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  assert(spend_down_budget > legacy_budget);
+  assert(spend_down_budget < 180.0);
+  strategy.num_threads = 1;
+  assert(fabs(play_chooser_get_seconds_for_move(&strategy, game) -
+              legacy_budget) < 1.0e-9);
+
+  // A bag-4 PEG turn can be followed by another PEG turn at bag 1. Protect a
+  // second minimum prefix rather than exposing the whole clock above the
+  // endgame reserve to an indivisible first PEG stage.
+  while (bag_get_letters(budget_bag) > 4) {
+    bag_draw_random_letter(budget_bag, 0);
+  }
+  game_timer_reset(&game_timer, 47.6);
+  strategy.num_threads = 10;
+  const double bag_four_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  assert(bag_four_budget > 0.0);
+  assert(bag_four_budget < 28.0);
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
   config_destroy(config);
 }
 

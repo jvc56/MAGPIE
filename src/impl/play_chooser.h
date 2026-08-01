@@ -128,6 +128,7 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t sim_calls;
   uint64_t sim_iterations;
   uint64_t sim_nodes;
+  uint64_t sim_candidate_events_dropped;
   uint64_t peg_calls;
   uint64_t peg_candidate_completions;
   uint64_t peg_candidate_events_dropped;
@@ -141,7 +142,22 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t endgame_calls;
   uint64_t endgame_nodes;
   uint64_t endgame_depth;
+  uint64_t endgame_events_dropped;
 } PlayChooserBenchmarkStats;
+
+// One arm snapshot at the end of a simulation call. The call index joins the
+// row to aggregate benchmark counters and, in the autoplay match harness, to
+// the turn that owned the call.
+typedef struct PlayChooserSimCandidateEvent {
+  uint64_t call_index;
+  uint64_t iterations;
+  uint64_t item_id;
+  int candidate_rank;
+  bool selected;
+  double win_pct;
+  double utility;
+  double equity;
+} PlayChooserSimCandidateEvent;
 
 // One completed PEG candidate. A call index identifies the PEG solve and the
 // elapsed and process CPU time are measured from the start of that solve.
@@ -162,6 +178,19 @@ typedef struct PlayChooserPegCandidateEvent {
   double win_pct;
   double mean_spread;
 } PlayChooserPegCandidateEvent;
+
+// One completed PlayChooser endgame call. Nodes and depth describe the last
+// usable result returned by the call; elapsed time is measured around the
+// solver invocation. Windowed calls are challenge-decision subsolves and can
+// be separated from ordinary move selection by offline analysis.
+typedef struct PlayChooserEndgameEvent {
+  uint64_t call_index;
+  uint64_t elapsed_ns;
+  uint64_t nodes;
+  int depth;
+  bool completed;
+  bool windowed;
+} PlayChooserEndgameEvent;
 
 typedef struct ChallengeDecision {
   // True if the move forms at least one word that is invalid in the
@@ -188,12 +217,17 @@ void play_chooser_destroy(PlayChooser *play_chooser);
 // chooser operation when unused.
 void play_chooser_benchmark_reset(void);
 void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats);
+size_t play_chooser_benchmark_get_sim_candidate_events(
+    PlayChooserSimCandidateEvent *events, size_t capacity);
 // Copies up to capacity PEG candidate events into events and returns the
 // number copied. With a NULL events pointer or zero capacity, returns the
 // number currently retained without copying. The stats snapshot reports any
 // events dropped because the fixed process-wide event buffer filled.
 size_t play_chooser_benchmark_get_peg_candidate_events(
     PlayChooserPegCandidateEvent *events, size_t capacity);
+size_t
+play_chooser_benchmark_get_endgame_events(PlayChooserEndgameEvent *events,
+                                          size_t capacity);
 void play_chooser_benchmark_stop(void);
 
 // Choose a move for the player on turn in game, delegating to static
@@ -207,6 +241,11 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
 // is not enough safely spendable clock for a non-static search.
 double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
                                          const Game *game);
+
+// Conservative count of the on-turn player's remaining sim decisions before
+// the bag reaches PEG range. Includes one contingency turn because the usual
+// eight-tiles-per-pair estimate can undercount low-tile plays.
+int play_chooser_estimated_sim_plays_before_peg(int bag_tiles);
 
 // Decide whether opp_move, announced by the player on turn in
 // game_before_move, should be challenged off. game_before_move must be

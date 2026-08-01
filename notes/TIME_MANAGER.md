@@ -718,6 +718,91 @@ position-aware regret-reduction callback and production shared-TT calibration
 are still missing; neither should be replaced by an arbitrary constant in a
 shipping policy.
 
+### Cross-phase spend-down bridge (2026-07-31)
+
+The first common-RNG game-pair match exposed a different integration failure:
+the calibrated PEG policy saved `108.7` seconds over 20 games, but only `9.6`
+seconds reappeared as additional simulation time. TimeManager consequently
+finished with about `5.5` more unused seconds per game. Its 9--11 game result
+and `-17.4` spread/game estimate were inconclusive, but the clock accounting
+was decisive: a deposit with no later withdrawal has no game value.
+
+Before PEG, the timed PlayChooser now forecasts the protected late-phase work
+instead of assigning it equal future slices. The forecast consists of:
+
+- the worst expected bag-1--4 time to complete PEG's minimum useful
+  eight-candidate 2-ply prefix; the measured first pair pays one boundary
+  setup cost and each later single candidate pays a fresh setup cost plus half
+  the pair's portable variable work;
+- the existing depth-5 future endgame trajectory in portable nodes, converted
+  at runtime with the local PEG nested-endgame rate and the existing 1.5
+  lower-throughput factor; and
+- the ordinary response/overtime safety reserve.
+
+The remaining discretionary clock is divided only across the estimated sim
+turns before PEG. This releases predicted PEG savings early enough for sims to
+use them. The bridge is deliberately one-sided: its budget is
+`max(legacy_equal_slice, spend_down_slice)`. Missing calibration, an invalid
+forecast, or a sufficiently slow worker topology therefore preserves the old
+allocation exactly. It cannot make a sim turn shorter, and it does not weaken
+PEG candidate or endgame-depth completion gates. At the opening the protected
+late work is typically close to the equal slices it replaces, so the policy
+does not manufacture a large speculative withdrawal; it releases time as the
+real clock moves ahead of the remaining-work forecast.
+
+The remaining-sim-turn divisor keeps the ordinary eight-tiles-per-pair mean
+but adds one contingency turn. In a 12-pair/24-game trace panel, the raw mean
+estimate undercounted 40 of 463 pre-PEG decisions, always by exactly one turn;
+adding one covered all 463. This matters most near the boundary: an initial
+validation run spent down at bag 12, the next two plays removed only seven
+tiles, and an unforecast bag-5 sim turn then consumed the intended PEG reserve.
+That run was stopped and excluded. The contingency preserves the observed
+coverage without replacing the useful mean by an overly pessimistic
+five-tiles-per-pair rate across the entire game.
+
+The corrected validation then exposed the analogous boundary inside PEG. In
+3 of 42 observed player/game trajectories that reached PEG, the player had two
+PEG turns; all three were bag 4 followed by bag 1. An indivisible bag-4 first
+stage once consumed its entire 28.7-second physical window and left the bag-1
+turn with no clock above the protected endgame reserve. Reserving a second full
+eight-candidate proxy proved too pessimistic: two validation pairs then made no
+cross-phase withdrawal because that model serializes a fresh fixed boundary
+cost for every later candidate, while observed second-turn prefixes completed
+in roughly 0.7--0.9 seconds. The refined pre-sim forecast protects one full
+minimum eight-candidate prefix plus the worst expected bag-1--3 first-two entry
+wave. A live bag-4 PEG budget separately holds back that entry wave; its live
+measurement then admits toward eight. Other PEG entries keep the single-prefix
+policy. The validation gate counts any TimeManager static fallback at bag 0--4
+as a failure.
+
+Before a long strength match, require a five-pair operational panel with
+mirrored RNG streams and full turn/candidate/depth traces. Admission requires
+zero penalties, zero trace drops, no low-bag TimeManager fallbacks for lack of
+budget, no PEG candidate false starts, and clear accounting evidence that
+reduced PEG time is reallocated to earlier sims rather than merely increasing
+the terminal clock. Match strength remains a separate, much larger experiment.
+
+`tools/run_time_manager_match.py` preserves that protocol for both the gate and
+the subsequent long match. It writes every turn, sim-arm sample count, PEG
+candidate completion, and endgame call to joinable CSVs; records terminal
+clocks and per-mode time in the pair summary; and treats the two-game pair as
+the inference unit. A time-based run persists its original wall-clock deadline
+before launching the first pair, so restarting cannot silently extend a
+24-hour experiment. Resume also fails closed if its base seed, binary hash,
+runner hash, thread count, clock, or other recorded protocol settings differ.
+
+The final five-pair gate passed on the 10-core M4 Mini. All 10 games and their
+candidate/depth joins audited with zero event drops, penalties, low-bag static
+fallbacks, or PEG false starts. The spend-down policy released `4.803` seconds
+of direct legacy-counterfactual sim budget over 13 turns. It retained `31.971`
+seconds per player/game at the terminal position versus `25.960` for equal
+slicing, so this conservative bridge still leaves room for a later online
+hardware/position calibration. The five-pair strength point estimates favored
+equal slicing (`-39.4` spread/game, `-0.200` win score, and `-0.1627` terminal
+utility for TimeManager), but none was significant (`p = 0.091`, `0.178`, and
+`0.158`, respectively). This panel is an operational admission test, not
+strength evidence; the common-prefix median was only 11 turns.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

@@ -194,6 +194,15 @@ bool peg_time_manager_reference_cost_models(
     TimeManagerCostModel *expected_cost_model,
     TimeManagerCostModel *deadline_cost_model);
 
+// Forecast the expected wall time to reach the minimum usable 2-ply prefix.
+// The first two candidates use the measured pair work. Later candidates use
+// the live policy's one-candidate proxy: half the pair's variable work plus a
+// fresh per-boundary fixed cost. Returns NAN for an invalid calibration,
+// model, or candidate count.
+double peg_time_manager_estimate_minimum_2ply_seconds(
+    const PegTimeManagerCalibration *calibration,
+    const TimeManagerCostModel *expected_cost_model, int minimum_candidates);
+
 // Plans either the exact first-two wave or one subsequent 2-ply candidate. The
 // latter keeps the whole pair maximum as a conservative, clearly labeled
 // proxy. The 95.99% p99-coverage evidence makes a normal 0.99 policy fail

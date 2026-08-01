@@ -3700,6 +3700,12 @@ void config_fill_autoplay_args(const Config *config,
                                     config->p2_utility_w_spread};
   const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
                                           config->p2_utility_spread_scale};
+  const char *time_manager_p0_only_env = getenv("PCBENCH_TM_P0_ONLY");
+  const bool time_manager_p0_only =
+      time_manager_p0_only_env != NULL &&
+      (strcmp(time_manager_p0_only_env, "1") == 0 ||
+       strcmp(time_manager_p0_only_env, "true") == 0 ||
+       strcmp(time_manager_p0_only_env, "yes") == 0);
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
@@ -3709,7 +3715,8 @@ void config_fill_autoplay_args(const Config *config,
             .spread_forecast = config->spread_forecast,
             .num_threads = num_worker_threads_per_sim,
             .peg_scenario_stride = config->peg_scenario_stride,
-            .use_calibrated_peg_time_manager = true,
+            .use_calibrated_peg_time_manager =
+                !time_manager_p0_only || player_index == 0,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],

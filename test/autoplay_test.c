@@ -471,9 +471,12 @@ void test_autoplay_play_chooser(void) {
   assert(autoplay_overtime_penalty_points(1.001, 1, 1.0) == 2);
   assert(autoplay_overtime_penalty_points(1.0, 0, 1.0) == 0);
 
+  // The clock-aware chooser falls back to static when no useful analysis fits;
+  // leave enough room for deterministic static movegen and verify that this
+  // safety behavior avoids starting an overtime penalty period.
   Config *config = config_create_or_die(
       "set -lex CSW21 -wmp false -s1 equity -s2 equity -r1 best -r2 best "
-      "-numplays 1 -gp false -threads 1 -hr true -pc1 1 -pc2 -1 "
+      "-numplays 1 -gp false -threads 1 -hr true -pc1 50 -pc2 -1 "
       "-otpenalty 1 -otperiod 1");
 
   load_and_exec_config_or_die(config, "autoplay games 1 -seed 123");
@@ -487,7 +490,7 @@ void test_autoplay_play_chooser(void) {
 
   char *machine_output = autoplay_results_to_string(
       config_get_autoplay_results(config), false, false);
-  assert(has_substring(machine_output, "playchooser 1 0 1 0"));
+  assert(has_substring(machine_output, "playchooser 1 0 50 0"));
   const char *play_chooser_output = strstr(machine_output, "playchooser");
   int active[2];
   double time_control_ms[2];
@@ -505,10 +508,10 @@ void test_autoplay_play_chooser(void) {
   assert(parsed_fields == 10);
   assert(active[0] == 1);
   assert(active[1] == 0);
-  assert(time_control_ms[0] == 1.0);
-  assert(seconds_used_ms[0] > 1.0);
-  assert(overtime_ms[0] > 0.0);
-  assert(penalty_points[0] > 0);
+  assert(time_control_ms[0] == 50.0);
+  assert(seconds_used_ms[0] <= time_control_ms[0]);
+  assert(overtime_ms[0] == 0.0);
+  assert(penalty_points[0] == 0);
   free(machine_output);
 
   load_and_exec_config_or_die(config,

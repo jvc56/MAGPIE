@@ -383,6 +383,31 @@ peg_time_manager_half_expected_work(const TimeManagerWork *pair_work) {
   return work;
 }
 
+double peg_time_manager_estimate_minimum_2ply_seconds(
+    const PegTimeManagerCalibration *calibration,
+    const TimeManagerCostModel *expected_cost_model, int minimum_candidates) {
+  if (calibration == NULL || expected_cost_model == NULL ||
+      calibration->boundary_kind != PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY ||
+      calibration->candidates != 2 || minimum_candidates < 2) {
+    return NAN;
+  }
+  const double first_wave_seconds = time_manager_estimate_seconds(
+      expected_cost_model, &calibration->median_work);
+  const TimeManagerWork single_candidate_work =
+      peg_time_manager_half_expected_work(&calibration->median_work);
+  const double single_candidate_seconds = time_manager_estimate_seconds(
+      expected_cost_model, &single_candidate_work);
+  if (!peg_time_manager_nonnegative_finite(first_wave_seconds) ||
+      !peg_time_manager_nonnegative_finite(single_candidate_seconds)) {
+    return NAN;
+  }
+  const double total_seconds =
+      first_wave_seconds +
+      (double)(minimum_candidates - 2) * single_candidate_seconds;
+  return peg_time_manager_nonnegative_finite(total_seconds) ? total_seconds
+                                                            : NAN;
+}
+
 static void peg_time_manager_scale_cost_model(TimeManagerCostModel *model,
                                               double scale) {
   model->peg_fixed_seconds_per_chunk *= scale;

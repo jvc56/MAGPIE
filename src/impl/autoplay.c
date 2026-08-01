@@ -46,10 +46,18 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Benchmark instrumentation: accumulates total sim iterations across all
 // turns in all games. Read/reset via autoplay_get_total_sim_iterations().
 static _Atomic uint64_t autoplay_total_sim_iterations;
+
+static bool autoplay_env_true(const char *name) {
+  const char *value = getenv(name);
+  return value != NULL &&
+         (strcmp(value, "1") == 0 || strcmp(value, "true") == 0 ||
+          strcmp(value, "yes") == 0);
+}
 
 uint64_t autoplay_get_total_sim_iterations(void) {
   return atomic_load_explicit(&autoplay_total_sim_iterations,
@@ -574,9 +582,87 @@ static void game_runner_create_play_choosers(AutoplayWorker *autoplay_worker,
     PlayChooserStrategy strategy = args->play_chooser_strategies[player_index];
     strategy.game_timer = &game_runner->game_timer;
     strategy.overtime_period_seconds = args->overtime_period_seconds;
-    strategy.seed = seed + (uint64_t)player_index;
+    int rng_stream = player_index;
+    if (autoplay_env_true("PCBENCH_COMMON_RNG")) {
+      rng_stream =
+          player_index == game_get_starting_player_index(game_runner->game) ? 0
+                                                                            : 1;
+    }
+    strategy.seed = seed + (uint64_t)rng_stream;
     game_runner->play_choosers[player_index] = play_chooser_create(&strategy);
+    if (autoplay_env_true("PCBENCH_COMMON_RNG")) {
+      printf("PCRNG game=%d start=%d player=%d stream=%d seed=%llu\n",
+             game_runner->pair_game_number,
+             game_get_starting_player_index(game_runner->game), player_index,
+             rng_stream, (unsigned long long)strategy.seed);
+      fflush(stdout);
+    }
   }
+}
+
+static uint64_t autoplay_benchmark_delta(uint64_t after, uint64_t before) {
+  return after >= before ? after - before : 0;
+}
+
+static void game_runner_print_benchmark_turn(
+    const AutoplayWorker *autoplay_worker, const GameRunner *game_runner,
+    const Move *move, int player_on_turn_index, int bag_tiles, int score_spread,
+    double clock_before_seconds, double clock_after_seconds, int64_t elapsed_ns,
+    double budget_seconds, double legacy_budget_seconds,
+    const PlayChooserBenchmarkStats *before,
+    const PlayChooserBenchmarkStats *after) {
+  StringBuilder *move_builder = string_builder_create();
+  string_builder_add_ucgi_move(move_builder, move,
+                               game_get_board(game_runner->game),
+                               game_get_ld(game_runner->game));
+  char *move_string = string_builder_dump(move_builder, NULL);
+  const bool time_manager =
+      autoplay_worker->args.play_chooser_strategies[player_on_turn_index]
+          .use_calibrated_peg_time_manager;
+  const int starting_player = game_get_starting_player_index(game_runner->game);
+  const int rng_stream = player_on_turn_index == starting_player ? 0 : 1;
+#define BENCHMARK_DELTA(field)                                                 \
+  autoplay_benchmark_delta(after->field, before->field)
+  printf("PCTURN game=%d turn=%d start=%d player=%d policy=%s rng_stream=%d "
+         "bag=%d spread_before=%d clock_before_ms=%.3f clock_after_ms=%.3f "
+         "elapsed_ms=%.3f budget_ms=%.3f legacy_budget_ms=%.3f move=\"%s\" "
+         "move_score=%d static=%llu fallbacks=%llu "
+         "sim_call_first=%llu sim_calls=%llu sim_iters=%llu sim_nodes=%llu "
+         "peg_call_first=%llu peg_calls=%llu peg_candidate_completions=%llu "
+         "peg_stages=%llu peg_final_candidates=%llu peg_scenarios=%llu "
+         "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
+         "peg_tm_false_starts=%llu eg_call_first=%llu eg_calls=%llu "
+         "eg_nodes=%llu eg_depth_sum=%llu\n",
+         game_runner->pair_game_number, game_runner->turn_number + 1,
+         starting_player, player_on_turn_index,
+         time_manager ? "timemanager" : "equal", rng_stream, bag_tiles,
+         score_spread, clock_before_seconds * 1000.0,
+         clock_after_seconds * 1000.0, (double)elapsed_ns / 1.0e6,
+         budget_seconds * 1000.0, legacy_budget_seconds * 1000.0, move_string,
+         equity_to_int(move_get_score(move)),
+         (unsigned long long)BENCHMARK_DELTA(static_moves),
+         (unsigned long long)BENCHMARK_DELTA(fallback_moves),
+         (unsigned long long)before->sim_calls,
+         (unsigned long long)BENCHMARK_DELTA(sim_calls),
+         (unsigned long long)BENCHMARK_DELTA(sim_iterations),
+         (unsigned long long)BENCHMARK_DELTA(sim_nodes),
+         (unsigned long long)before->peg_calls,
+         (unsigned long long)BENCHMARK_DELTA(peg_calls),
+         (unsigned long long)BENCHMARK_DELTA(peg_candidate_completions),
+         (unsigned long long)BENCHMARK_DELTA(peg_completed_stages),
+         (unsigned long long)BENCHMARK_DELTA(peg_final_candidates),
+         (unsigned long long)BENCHMARK_DELTA(peg_final_scenarios),
+         (unsigned long long)BENCHMARK_DELTA(peg_endgame_nodes),
+         (unsigned long long)BENCHMARK_DELTA(peg_partial_calls),
+         (unsigned long long)BENCHMARK_DELTA(peg_time_manager_admissions),
+         (unsigned long long)BENCHMARK_DELTA(peg_time_manager_false_starts),
+         (unsigned long long)before->endgame_calls,
+         (unsigned long long)BENCHMARK_DELTA(endgame_calls),
+         (unsigned long long)BENCHMARK_DELTA(endgame_nodes),
+         (unsigned long long)BENCHMARK_DELTA(endgame_depth));
+#undef BENCHMARK_DELTA
+  fflush(stdout);
+  free(move_string);
 }
 
 void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
@@ -760,6 +846,32 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
   Game *game = game_runner->game;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
+  const bool print_benchmark_turn = autoplay_env_true("PCBENCH_TURN_ROWS");
+  PlayChooserBenchmarkStats benchmark_before = {0};
+  PlayChooserBenchmarkStats benchmark_after = {0};
+  const int benchmark_bag_tiles = bag_get_letters(game_get_bag(game));
+  const int benchmark_score_spread = equity_to_int(
+      player_get_score(game_get_player(game, player_on_turn_index)) -
+      player_get_score(game_get_player(game, 1 - player_on_turn_index)));
+  const double benchmark_clock_before = game_timer_get_seconds_remaining(
+      &game_runner->game_timer, player_on_turn_index);
+  const int64_t benchmark_start_ns =
+      print_benchmark_turn ? ctimer_monotonic_ns() : 0;
+  double benchmark_budget_seconds = 0.0;
+  double benchmark_legacy_budget_seconds = 0.0;
+  if (print_benchmark_turn) {
+    play_chooser_benchmark_get(&benchmark_before);
+    PlayChooserStrategy benchmark_strategy =
+        autoplay_worker->args.play_chooser_strategies[player_on_turn_index];
+    benchmark_strategy.game_timer = &game_runner->game_timer;
+    benchmark_strategy.overtime_period_seconds =
+        autoplay_worker->args.overtime_period_seconds;
+    benchmark_budget_seconds =
+        play_chooser_get_seconds_for_move(&benchmark_strategy, game);
+    benchmark_strategy.use_calibrated_peg_time_manager = false;
+    benchmark_legacy_budget_seconds =
+        play_chooser_get_seconds_for_move(&benchmark_strategy, game);
+  }
   LeavegenSharedData *lg_shared_data =
       game_runner->shared_data->leavegen_shared_data;
   // If we are forcing a draw, we need to draw a rare leave. The drawn
@@ -799,6 +911,17 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+
+  if (print_benchmark_turn) {
+    play_chooser_benchmark_get(&benchmark_after);
+    game_runner_print_benchmark_turn(
+        autoplay_worker, game_runner, move, player_on_turn_index,
+        benchmark_bag_tiles, benchmark_score_spread, benchmark_clock_before,
+        game_timer_get_seconds_remaining(&game_runner->game_timer,
+                                         player_on_turn_index),
+        ctimer_monotonic_ns() - benchmark_start_ns, benchmark_budget_seconds,
+        benchmark_legacy_budget_seconds, &benchmark_before, &benchmark_after);
+  }
 
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
@@ -914,6 +1037,25 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
       autoplay_worker->autoplay_results, game_runner->game,
       game_runner->turn_number, divergent, game_runner->seed,
       &game_runner->timing);
+  if (autoplay_env_true("PCBENCH_GAME_ROWS")) {
+    const Game *game = game_runner->game;
+    printf("PCGAME seed=%llu start=%d p0_score=%d p1_score=%d turns=%d "
+           "divergent=%d p0_time_ms=%.3f p1_time_ms=%.3f "
+           "p0_overtime_ms=%.3f p1_overtime_ms=%.3f p0_penalty=%d "
+           "p1_penalty=%d\n",
+           (unsigned long long)game_runner->seed,
+           game_get_starting_player_index(game),
+           equity_to_int(player_get_score(game_get_player(game, 0))),
+           equity_to_int(player_get_score(game_get_player(game, 1))),
+           game_runner->turn_number, divergent ? 1 : 0,
+           game_runner->timing.seconds_used[0] * 1000.0,
+           game_runner->timing.seconds_used[1] * 1000.0,
+           game_runner->timing.overtime_seconds[0] * 1000.0,
+           game_runner->timing.overtime_seconds[1] * 1000.0,
+           game_runner->timing.penalty_points[0],
+           game_runner->timing.penalty_points[1]);
+    fflush(stdout);
+  }
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {

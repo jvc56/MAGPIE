@@ -428,6 +428,28 @@ static void test_peg_time_manager_frozen_calibration(void) {
               2.0 * 1.25 * 0.6649604943560226);
   assert(!peg_time_manager_reference_cost_models(bag4, 0.0, 1.25, &expected,
                                                  &deadline));
+
+  // The protected PEG forecast pays one fixed boundary cost for the first
+  // pair and another for every later single-candidate admission. Only the
+  // pair's portable variable work is halved for those later candidates.
+  TimeManagerCostModel forecast_cost = TEST_COST;
+  forecast_cost.peg_fixed_seconds_per_chunk = 0.2;
+  TimeManagerWork single_candidate_work = bag1->median_work;
+  single_candidate_work.nodes = (single_candidate_work.nodes + 1) / 2;
+  single_candidate_work.scenarios = (single_candidate_work.scenarios + 1) / 2;
+  single_candidate_work.candidates = 1;
+  single_candidate_work.fixed_seconds *= 0.5;
+  const double expected_minimum_seconds =
+      time_manager_estimate_seconds(&forecast_cost, &bag1->median_work) +
+      6.0 *
+          time_manager_estimate_seconds(&forecast_cost, &single_candidate_work);
+  assert_near(
+      peg_time_manager_estimate_minimum_2ply_seconds(bag1, &forecast_cost, 8),
+      expected_minimum_seconds);
+  assert(isnan(
+      peg_time_manager_estimate_minimum_2ply_seconds(NULL, &forecast_cost, 8)));
+  assert(isnan(
+      peg_time_manager_estimate_minimum_2ply_seconds(bag1, &forecast_cost, 1)));
 }
 
 static void test_peg_time_manager_fails_closed_on_tail(void) {
