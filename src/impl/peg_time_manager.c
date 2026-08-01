@@ -408,12 +408,24 @@ double peg_time_manager_estimate_minimum_2ply_seconds(
                                                             : NAN;
 }
 
-static void peg_time_manager_scale_cost_model(TimeManagerCostModel *model,
-                                              double scale) {
+// A completed prefix can only calibrate the work dimensions it actually
+// exercised. In particular, a cheap greedy/2-ply prefix with zero endgame
+// nodes says nothing about the rate of a later candidate whose tail is
+// dominated by an exact endgame. Scaling that unobserved coefficient down was
+// enough to admit such a candidate in pair 45 of the 2026-07-31 match; it then
+// consumed the rest of the PEG window without completing. Keep the cold-start
+// estimate for unobserved dimensions so the completion gate remains
+// conservative.
+static void
+peg_time_manager_scale_observed_costs(TimeManagerCostModel *model, double scale,
+                                      const PegTimeManagerRequest *request) {
   model->peg_fixed_seconds_per_chunk *= scale;
-  model->peg_seconds_per_scenario *= scale;
-  model->peg_seconds_per_endgame_node *= scale;
-  model->peg_seconds_per_candidate *= scale;
+  if (request->completed_scenarios > 0) {
+    model->peg_seconds_per_scenario *= scale;
+  }
+  if (request->completed_endgame_nodes > 0) {
+    model->peg_seconds_per_endgame_node *= scale;
+  }
 }
 
 bool peg_time_manager_reference_cost_models(
@@ -559,10 +571,10 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
       } else if (decision.live_cost_scale > 4.0) {
         decision.live_cost_scale = 4.0;
       }
-      peg_time_manager_scale_cost_model(&expected_cost_model,
-                                        decision.live_cost_scale);
-      peg_time_manager_scale_cost_model(&deadline_cost_model,
-                                        decision.live_cost_scale);
+      peg_time_manager_scale_observed_costs(&expected_cost_model,
+                                            decision.live_cost_scale, request);
+      peg_time_manager_scale_observed_costs(&deadline_cost_model,
+                                            decision.live_cost_scale, request);
     }
   }
 

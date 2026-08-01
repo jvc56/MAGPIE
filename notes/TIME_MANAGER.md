@@ -665,11 +665,21 @@ The unmeasured greedy→2 gain borrows the 2→4 block only as a weak prior.
 
 Wall conversion starts from the loaded-M5 fit, adjusted inversely for the
 current worker count. Once the same solve has completed its greedy prefix, the
-policy rescales both expected and deadline models by actual/modelled prefix
-time, clamped to 0.25×--4×. This is a load-adaptive bridge, not a replacement
-for a larger cross-hardware calibration. Benchmark telemetry reports admitted
-chunks and deadline false starts; user interrupts are excluded from the miss
-count.
+policy rescales the observed work coordinates in both expected and deadline
+models by actual/modelled prefix time, clamped to 0.25×--4×. Unobserved
+coordinates retain their cold-start rates. This is a load-adaptive bridge, not
+a replacement for a larger cross-hardware calibration. Benchmark telemetry
+reports admitted chunks and deadline false starts; user interrupts are
+excluded from the miss count.
+
+Pair 45 of the first long match demonstrated why that qualification matters.
+Its bag-3 prefix completed 49,276 scenarios in 0.691 seconds but searched zero
+endgame nodes. The old uniform 0.43× live scale was nevertheless applied to
+the endgame-node coefficient and admitted candidate three; that candidate then
+consumed the remaining 15-second window without completing. The corrected
+planner scales scenario/fixed overhead from this prefix but leaves the
+unobserved endgame-node rate conservative, so the same recorded request is
+refused before launch.
 
 The live policy currently buys only a 2-ply tier. It does not yet attempt the
 calibrated 3-ply boundary because the complete path to 16 shallow candidates,
@@ -749,6 +759,12 @@ PEG candidate or endgame-depth completion gates. At the opening the protected
 late work is typically close to the equal slices it replaces, so the policy
 does not manufacture a large speculative withdrawal; it releases time as the
 real clock moves ahead of the remaining-work forecast.
+
+The same floor applies inside the low-bag PEG budget. Pair 68 exposed a path
+that subtracted the PEG/endgame reserves and returned zero with 20.267 seconds
+still on the player's clock, although legacy equal slicing offered 6.737
+seconds. When the protected forecast does not fit, that path now returns the
+legacy slice rather than forcing a static fallback.
 
 The remaining-sim-turn divisor keeps the ordinary eight-tiles-per-pair mean
 but adds one contingency turn. In a 12-pair/24-game trace panel, the raw mean

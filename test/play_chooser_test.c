@@ -175,6 +175,20 @@ static void test_play_chooser_clock_budget(void) {
       play_chooser_get_seconds_for_move(&strategy, game);
   assert(bag_four_budget > 0.0);
   assert(bag_four_budget < 28.0);
+
+  // Regression for pair 68 of the 2026-07-31 match: when the calibrated PEG
+  // and future-endgame reserves do not fit, usable clock must fall back to the
+  // legacy equal slice rather than producing a zero-budget static move.
+  game_timer_reset(&game_timer, 20.266620);
+  strategy.use_calibrated_peg_time_manager = false;
+  const double low_clock_legacy_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  strategy.use_calibrated_peg_time_manager = true;
+  const double low_clock_time_manager_budget =
+      play_chooser_get_seconds_for_move(&strategy, game);
+  assert(low_clock_legacy_budget > 0.0);
+  assert(fabs(low_clock_time_manager_budget - low_clock_legacy_budget) <
+         1.0e-9);
   win_pct_destroy(win_pcts);
   error_stack_destroy(error_stack);
   config_destroy(config);

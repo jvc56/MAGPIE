@@ -717,8 +717,14 @@ double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
           play_chooser_get_clock_safety_reserve(plays_remaining_for_player);
       const double available = seconds_remaining - safety_seconds -
                                future_seconds - future_peg_seconds;
-      return available >= PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS ? available
-                                                               : 0.0;
+      const double equal_slice = (seconds_remaining - safety_seconds) /
+                                 (double)plays_remaining_for_player;
+      // A conservative late-phase forecast may not fit on slower hardware or
+      // in an unusually expensive position. Fail back to the legacy equal
+      // slice instead of returning a zero budget while usable clock remains.
+      // Calibrated scheduling may spend more than legacy, never less.
+      const double adjusted = fmax(available, equal_slice);
+      return adjusted >= PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS ? adjusted : 0.0;
     }
   }
 

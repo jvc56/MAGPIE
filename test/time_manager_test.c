@@ -517,6 +517,54 @@ static void test_peg_time_manager_fails_closed_on_tail(void) {
   decision = peg_time_manager_plan_boundary(&policy, &request);
   assert_near(decision.expected_regret_reduction, 0.000530145705 / 24.0);
 
+  // Regression for pair 45 of the 2026-07-31 match. The completed bag-3
+  // prefix was fast but searched zero endgame nodes. It therefore may rescale
+  // scenario/fixed overhead, but must not use that observation to make the
+  // unobserved endgame-node tail look faster. With the actual prefix work and
+  // remaining PEG window, the next candidate must be refused.
+  const PegTimeManagerCalibration *bag3 = peg_time_manager_default_calibration(
+      PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY, 3);
+  PegTimeManagerPolicy pair45_policy = {
+      .clock =
+          {
+              .remaining_seconds = 34.572579,
+              .turns_remaining = 2,
+              .minimum_completion_confidence = 0.95,
+          },
+      .fixed_expected_regret_reduction = 0.01,
+      .completion_bound_multiplier = 1.5,
+      .allow_provisional_enforcement = true,
+      .use_live_cost_scale = true,
+  };
+  assert(peg_time_manager_reference_cost_models(
+      bag3, /*local_time_scale=*/1.8,
+      /*deadline_slowdown_multiplier=*/1.5, &pair45_policy.expected_cost_model,
+      &pair45_policy.deadline_cost_model));
+  PegTimeManagerRequest pair45_request = {
+      .boundary_kind = PEG_TIME_MANAGER_BOUNDARY_NEXT_2PLY_CANDIDATE,
+      .bag_tiles = 3,
+      .stage_index = 1,
+      .fidelity_plies = 2,
+      .workers = 10,
+      .candidates = 1,
+      .completed_2ply_candidates = 2,
+      .nested_enabled = false,
+      .scenario_stride = 1,
+      .parallel_wave_dispatch = false,
+      .completed_scenarios = 49276,
+      .completed_endgame_nodes = 0,
+      .elapsed_seconds = 0.691038,
+      .remaining_seconds = 15.007188,
+      .has_player_clock = true,
+      .player_clock_remaining_seconds = 33.881541,
+  };
+  decision = peg_time_manager_plan_boundary(&pair45_policy, &pair45_request);
+  assert(decision.valid);
+  assert(decision.live_cost_scale < 0.5);
+  assert(decision.provisional_completion_bound_seconds >
+         pair45_request.remaining_seconds);
+  assert(!decision.should_start);
+
   // The completed greedy prefix can rescale the hardware conversion before
   // the first refinement admission; the single-prefix estimate is clamped.
   policy.use_live_cost_scale = true;

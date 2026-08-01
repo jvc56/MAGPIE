@@ -130,6 +130,8 @@ typedef struct PegTimeManagerPolicy {
   // Rescale the supplied local cost models from work already completed in the
   // current solve. This lets the portable calibration adapt to hardware,
   // thermal state, and co-load before admitting the first refinement wave.
+  // The scale is applied only to work coordinates observed in that prefix;
+  // an unobserved endgame-node rate retains its conservative cold estimate.
   bool use_live_cost_scale;
   // Portable reserve for later same-player endgame work. It is converted with
   // the effective live PEG endgame-node rate and this safety multiplier.
@@ -160,8 +162,9 @@ typedef struct PegTimeManagerDecision {
   double empirical_p99_seconds;
   double provisional_completion_bound_seconds;
   double completion_confidence;
-  // Multiplicative adjustment inferred from this solve's completed work. 1.0
-  // means the caller's supplied model was retained.
+  // Multiplicative adjustment inferred from this solve's completed work. It
+  // applies only to observed work coordinates; 1.0 means the caller's supplied
+  // model was retained throughout.
   double live_cost_scale;
   double expected_regret_reduction;
   TimeManagerPlan plan;
