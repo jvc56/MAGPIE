@@ -14,7 +14,11 @@ struct BAIResult {
   Timer timer;
   double time_limit_seconds;
   double estimated_regret;
+  double joint_estimated_regret;
   double regret_at_stop;
+  double joint_regret_at_stop;
+  int near_tie_challengers;
+  int near_tie_challengers_at_stop;
   cpthread_mutex_t mutex;
 };
 
@@ -23,7 +27,11 @@ void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
   bai_result->best_arm = -1;
   bai_result->time_limit_seconds = time_limit_seconds;
   bai_result->estimated_regret = NAN;
+  bai_result->joint_estimated_regret = NAN;
   bai_result->regret_at_stop = NAN;
+  bai_result->joint_regret_at_stop = NAN;
+  bai_result->near_tie_challengers = -1;
+  bai_result->near_tie_challengers_at_stop = -1;
   ctimer_start(&bai_result->timer);
 }
 
@@ -72,6 +80,20 @@ void bai_result_set_estimated_regret(BAIResult *bai_result,
   cpthread_mutex_unlock(&bai_result->mutex);
 }
 
+double bai_result_get_joint_estimated_regret(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const double estimated_regret = bai_result->joint_estimated_regret;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return estimated_regret;
+}
+
+void bai_result_set_joint_estimated_regret(BAIResult *bai_result,
+                                           double estimated_regret) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->joint_estimated_regret = estimated_regret;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
 double bai_result_get_regret_at_stop(BAIResult *bai_result) {
   cpthread_mutex_lock(&bai_result->mutex);
   const double regret_at_stop = bai_result->regret_at_stop;
@@ -83,6 +105,48 @@ void bai_result_set_regret_at_stop(BAIResult *bai_result,
                                    double regret_at_stop) {
   cpthread_mutex_lock(&bai_result->mutex);
   bai_result->regret_at_stop = regret_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+double bai_result_get_joint_regret_at_stop(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const double regret_at_stop = bai_result->joint_regret_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return regret_at_stop;
+}
+
+void bai_result_set_joint_regret_at_stop(BAIResult *bai_result,
+                                         double regret_at_stop) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->joint_regret_at_stop = regret_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+int bai_result_get_near_tie_challengers(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const int near_tie_challengers = bai_result->near_tie_challengers;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return near_tie_challengers;
+}
+
+void bai_result_set_near_tie_challengers(BAIResult *bai_result,
+                                         int near_tie_challengers) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->near_tie_challengers = near_tie_challengers;
+  cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+int bai_result_get_near_tie_challengers_at_stop(BAIResult *bai_result) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const int near_tie_challengers = bai_result->near_tie_challengers_at_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return near_tie_challengers;
+}
+
+void bai_result_set_near_tie_challengers_at_stop(BAIResult *bai_result,
+                                                 int near_tie_challengers) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->near_tie_challengers_at_stop = near_tie_challengers;
   cpthread_mutex_unlock(&bai_result->mutex);
 }
 

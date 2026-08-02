@@ -32,8 +32,20 @@ double bai_result_get_time_limit_seconds(const BAIResult *bai_result);
 double bai_result_get_estimated_regret(BAIResult *bai_result);
 void bai_result_set_estimated_regret(BAIResult *bai_result,
                                      double estimated_regret);
+double bai_result_get_joint_estimated_regret(BAIResult *bai_result);
+void bai_result_set_joint_estimated_regret(BAIResult *bai_result,
+                                           double estimated_regret);
 double bai_result_get_regret_at_stop(BAIResult *bai_result);
 void bai_result_set_regret_at_stop(BAIResult *bai_result,
                                    double regret_at_stop);
+double bai_result_get_joint_regret_at_stop(BAIResult *bai_result);
+void bai_result_set_joint_regret_at_stop(BAIResult *bai_result,
+                                         double regret_at_stop);
+int bai_result_get_near_tie_challengers(BAIResult *bai_result);
+void bai_result_set_near_tie_challengers(BAIResult *bai_result,
+                                         int near_tie_challengers);
+int bai_result_get_near_tie_challengers_at_stop(BAIResult *bai_result);
+void bai_result_set_near_tie_challengers_at_stop(BAIResult *bai_result,
+                                                 int near_tie_challengers);
 
 #endif

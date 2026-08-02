@@ -185,10 +185,11 @@ def _normalize_turn_rows(
         if previous is None or expected_regret < previous[0] - 1.0e-15:
             by_units[units] = (expected_regret, actual_regret, row_index)
 
-    # Discard an option that is no better than a cheaper one. This is also the
-    # monotone lower envelope required by a rational allocator: it can always
-    # retain the cheaper completed result instead of paying more for a worse
-    # oracle expectation.
+    # For a start-of-turn allocator, discard an absolute boundary predicted no
+    # better than a cheaper boundary: it can plan to stop at the cheaper one.
+    # Keep all_options unchanged for equal slicing and sequential-package
+    # analysis. This pruning does not claim that a live solver may revert to an
+    # earlier move after it has completed and published a deeper boundary.
     all_options = [
         WorkOption(units, expected_regret, actual_regret)
         for units, (expected_regret, actual_regret, _) in sorted(

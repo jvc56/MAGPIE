@@ -175,7 +175,7 @@ static void test_time_manager_reserve_and_sequential_boundaries(void) {
   const TimeManagerClock value_clock = {
       .remaining_seconds = 10.0,
       .turns_remaining = 2,
-      .future_value_per_second = 0.02,
+      .future_value_per_second = 0.001,
       .minimum_completion_confidence = 0.99,
   };
   const TimeManagerChunk chunks[] = {
@@ -186,7 +186,7 @@ static void test_time_manager_reserve_and_sequential_boundaries(void) {
           .completion_bound_work = {.mode = ANALYSIS_MODE_PEG,
                                     .scenarios = 1200},
           .completion_confidence = 0.99,
-          .expected_regret_reduction = 0.001,
+          .expected_regret_reduction = -0.00357,
       },
       {
           .boundary = TIME_MANAGER_BOUNDARY_PEG_STAGE,
@@ -195,7 +195,7 @@ static void test_time_manager_reserve_and_sequential_boundaries(void) {
           .completion_bound_work = {.mode = ANALYSIS_MODE_PEG,
                                     .scenarios = 1200},
           .completion_confidence = 0.99,
-          .expected_regret_reduction = 1.0,
+          .expected_regret_reduction = 0.00410,
       },
   };
   plan = time_manager_plan(&value_clock, &TEST_COST, &TEST_DEADLINE_COST,
@@ -205,7 +205,7 @@ static void test_time_manager_reserve_and_sequential_boundaries(void) {
   // valuable second boundary. Package-aware planning buys both.
   assert(plan.chunks_bought == 2);
   assert(plan.stop_reason == TIME_MANAGER_STOP_NO_MORE_CHUNKS);
-  assert_near(plan.expected_regret_reduction, 1.001);
+  assert_near(plan.expected_regret_reduction, 0.00053);
 }
 
 static void test_time_manager_completion_admission(void) {
@@ -310,8 +310,7 @@ static void test_time_manager_learned_value_to_go(void) {
   assert(time_manager_value_curve_is_valid(&curve));
   assert_near(time_manager_value_curve_predict(&curve, 5.0), 0.15);
   assert_near(time_manager_value_curve_predict(&curve, 30.0), 0.08);
-  assert_near(time_manager_value_curve_future_loss(15.0, 5.0, &curve),
-              0.01);
+  assert_near(time_manager_value_curve_future_loss(15.0, 5.0, &curve), 0.01);
 
   // The first five-second tranche is worth more than the exact suffix loss
   // from 16s -> 11s. Once it is bought, curvature makes the next identical
@@ -337,9 +336,9 @@ static void test_time_manager_learned_value_to_go(void) {
           .expected_regret_reduction = 0.03,
       },
   };
-  TimeManagerPlan plan = time_manager_plan(
-      &clock, &TEST_COST, &TEST_DEADLINE_COST, chunks,
-      sizeof(chunks) / sizeof(chunks[0]));
+  TimeManagerPlan plan =
+      time_manager_plan(&clock, &TEST_COST, &TEST_DEADLINE_COST, chunks,
+                        sizeof(chunks) / sizeof(chunks[0]));
   assert(plan.valid);
   assert(plan.chunks_bought == 1);
   assert(plan.stop_reason == TIME_MANAGER_STOP_FUTURE_VALUE);
@@ -380,7 +379,7 @@ static void test_time_manager_invalid_input(void) {
   clock.minimum_completion_confidence = 0.99;
   const TimeManagerChunk invalid_chunk = {
       .work = {.mode = ANALYSIS_MODE_SIM, .nodes = 1},
-      .expected_regret_reduction = -1.0,
+      .expected_regret_reduction = NAN,
   };
   plan = time_manager_plan(&clock, &TEST_COST, &TEST_DEADLINE_COST,
                            &invalid_chunk, 1);

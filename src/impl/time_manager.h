@@ -96,7 +96,9 @@ typedef struct TimeManagerChunk {
   // conservative-throughput uncertainty.
   double completion_confidence;
   // Expected reduction in the decision's utility regret if this whole chunk
-  // completes. Partial chunks are never credited.
+  // completes. This may be negative for a weak intermediate boundary needed
+  // to reach a later rescue; only a positive-value cumulative prefix is
+  // bought. Partial chunks are never credited.
   double expected_regret_reduction;
 } TimeManagerChunk;
 

@@ -1295,6 +1295,13 @@ in each of four bag phases. It measures independent 300K/1M/3M/10M arms at
 4 and 6 ply and judges the union of eight-play checkpoint risk sets. Live
 rest-of-game allocation remains off.
 
+New risk sets rank challengers by the upper confidence bound of their utility
+*difference from the incumbent*, including the configured shared-scenario
+correlation, rather than by each arm's marginal upper bound. This avoids
+spending scarce judge slots on high-variance arms whose uncertainty is mostly
+common with the incumbent. The paired-sample covariance audit remains the gate
+for replacing the scalar correlation with an empirical matrix.
+
 `tools/fit_sim_checkpoint_regret.py` implements the first of those gates. It
 splits by complete source game and emits two distinct cross-fitted estimates.
 The state estimate uses only pre-search state, candidate count, ply, and the
@@ -1339,13 +1346,37 @@ a 0.005 utility effect and roughly 640 for a 0.002 effect at conventional
 80% power. Future surrogate tests should emphasize preregistered,
 game-clustered same-root divergences and report shared-root coverage.
 
-Two first-order SIM issues remain open. The BAI currently estimates the
-maximum of pairwise expected positive regrets rather than the expected regret
-of the maximum challenger, which is optimistic when many moves are near tied.
-Also, its correction model is trained on fixed-budget arms while a live rule
-would stop on downward excursions of a cumulative trace. A joint-max shadow
-estimator and cumulative optional-stopping replay are required before the
-checkpoint signal can control time. Live allocation remains disabled.
+Two first-order SIM issues remain open. The live BAI stopping signal estimates
+the maximum of pairwise expected positive regrets rather than the expected
+regret of the maximum challenger, which is optimistic when many moves are near
+tied. BAI now also computes a Clark recursive joint-Gaussian maximum in shadow
+mode, using the same shared-seed covariance convention, and records both
+values at completion and at the exact legacy stop boundary. It also records
+the number of challengers whose 99% difference interval still reaches the
+incumbent. Two-arm, flat-six-arm, and separated-arm regression tests establish
+the intended structural behavior. The joint estimate is deliberately not yet
+allowed to stop production: common-scenario samples must first test the scalar
+covariance approximation and calibrate error by near-tie count.
+
+The correction model is still trained on independent fixed-budget arms while
+a live rule would stop on downward excursions of a cumulative trace. The
+thinking-curve harness can now retain the legacy and joint regrets at the
+stopping boundary alongside a same-seed fixed-budget control. The next SIM
+gate is therefore a cumulative optional-stopping replay scored by the common
+10-ply judge, stratified by near-tie count. Passing fixed-budget reliability is
+not sufficient. Live allocation remains disabled.
+
+The learned value table is no longer the sole production candidate. Once the
+nonanticipating per-turn curves are calibrated, a dual water-filling replay
+will choose a phase/rate-conditioned shadow price by bisection so expected
+spend exhausts the available clock. This directly prevents systematic hoarding
+and will be compared against one-step improvement over evaluated equal slicing.
+The prophet DP remains only an upper bound. PEG/endgame boundary PAVA has been
+removed because the solver currently plays the deepest completed move rather
+than retaining an earlier result. Nonmonotone marginal values, including a
+negative intermediate chunk followed by a positive rescue, now remain visible
+to package planning. Censored hard roots must still enter value-side
+sensitivity bounds rather than being silently dropped.
 
 ## Validation
 

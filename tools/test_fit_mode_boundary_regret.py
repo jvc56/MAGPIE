@@ -16,7 +16,9 @@ from tools.fit_mode_boundary_regret import (
 
 
 class FitModeBoundaryRegretTest(unittest.TestCase):
-    def test_predictions_are_game_heldout_and_monotone(self) -> None:
+    def test_predictions_are_game_heldout_and_preserve_nonmonotonicity(
+        self,
+    ) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             source = root / "curves.csv"
@@ -26,7 +28,7 @@ class FitModeBoundaryRegretTest(unittest.TestCase):
                 "candidates,regret"
             ]
             for game in range(20):
-                for option, regret in ((3, 0.03), (4, 0.01), (5, 0.0)):
+                for option, regret in ((3, 0.03), (4, 0.05), (5, 0.0)):
                     rows.append(
                         f"g{game},1,0,endgame,{option},0,0,7,7,20,"
                         f"{regret + 0.001 * (game % 3)}"
@@ -47,7 +49,9 @@ class FitModeBoundaryRegretTest(unittest.TestCase):
             )
         for curve in by_game.values():
             curve.sort()
-            self.assertGreaterEqual(curve[0][1], curve[1][1])
+            # A worse intermediate depth remains visible. Production cannot
+            # claim the earlier result after publishing the deeper move.
+            self.assertLess(curve[0][1], curve[1][1])
             self.assertGreaterEqual(curve[1][1], curve[2][1])
         self.assertTrue(all(row["expected_regret"] for row in predicted_rows))
 

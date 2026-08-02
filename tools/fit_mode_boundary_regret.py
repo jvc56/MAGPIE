@@ -8,9 +8,10 @@ the input schema and can be joined with SIM curves for an oracle-independent
 allocation replay.
 
 This first model is intentionally auditable: hierarchical shrunken tables over
-mode, boundary, phase, rack size, spread, and candidate count. Expected regret
-is forced nonincreasing over successively deeper stages/depths. Oracle labels
-never enter a feature or a tie-break at prediction time.
+mode, boundary, phase, rack size, spread, and candidate count. Successively
+deeper stages/depths remain separate predictions: deeper-is-worse outcomes are
+not erased because production plays the deepest completed result. Oracle
+labels never enter a feature or a tie-break at prediction time.
 """
 
 from __future__ import annotations
@@ -107,34 +108,6 @@ def finite_nonnegative(raw: str, name: str) -> float:
     return value
 
 
-def pava_nonincreasing(values: list[float], weights: list[float]) -> list[float]:
-    blocks: list[list[float | int]] = []
-    for index, (value, weight) in enumerate(zip(values, weights)):
-        if not math.isfinite(value) or not math.isfinite(weight) or weight <= 0.0:
-            raise ValueError("PAVA requires finite values and positive weights")
-        blocks.append([index, index, value * weight, weight])
-        while len(blocks) >= 2:
-            previous, current = blocks[-2:]
-            if float(previous[2]) / float(previous[3]) >= float(
-                current[2]
-            ) / float(current[3]):
-                break
-            blocks[-2:] = [
-                [
-                    int(previous[0]),
-                    int(current[1]),
-                    float(previous[2]) + float(current[2]),
-                    float(previous[3]) + float(current[3]),
-                ]
-            ]
-    fitted = [0.0] * len(values)
-    for start, end, total, weight in blocks:
-        mean = float(total) / float(weight)
-        for index in range(int(start), int(end) + 1):
-            fitted[index] = mean
-    return fitted
-
-
 LEVELS: tuple[
     tuple[str, Callable[[Boundary], tuple[object, ...]]], ...
 ] = (
@@ -188,34 +161,19 @@ def fit_model(boundaries: list[Boundary], prior_strength: float) -> Model:
         grouped: dict[tuple[object, ...], list[float]] = defaultdict(list)
         for point in boundaries:
             grouped[key_function(point)].append(point.actual_regret)
-        raw: dict[tuple[object, ...], tuple[float, float, int]] = {}
         for key, values in grouped.items():
             observations = len(values)
             if level_index == 0:
                 fitted = sum(values) / observations
-                weight = float(observations)
             else:
                 parent_level = LEVELS[level_index - 1][0]
                 parent = cells[(parent_level, parent_key(key))]
-                weight = observations + prior_strength
-                fitted = (sum(values) + prior_strength * parent.mean) / weight
-            raw[key] = fitted, weight, observations
-
-        by_state: dict[
-            tuple[object, ...], list[tuple[int, tuple[object, ...]]]
-        ] = defaultdict(list)
-        for key in raw:
-            by_state[key[:-1]].append((int(key[-1]), key))
-        for boundary_cells in by_state.values():
-            boundary_cells.sort()
-            fitted = pava_nonincreasing(
-                [raw[key][0] for _, key in boundary_cells],
-                [raw[key][1] for _, key in boundary_cells],
+                fitted = (
+                    sum(values) + prior_strength * parent.mean
+                ) / (observations + prior_strength)
+            cells[(level, key)] = Cell(
+                max(0.0, fitted), observations
             )
-            for (_, key), mean in zip(boundary_cells, fitted):
-                cells[(level, key)] = Cell(
-                    max(0.0, mean), raw[key][2]
-                )
     return Model(cells)
 
 
@@ -542,7 +500,7 @@ def main() -> None:
     model = fit_model(boundaries, args.prior_strength)
     document = {
         "artifact_kind": "mode_boundary_regret_shadow",
-        "artifact_version": 1,
+        "artifact_version": 2,
         "source": str(args.curves),
         "source_sha256": hashlib.sha256(args.curves.read_bytes()).hexdigest(),
         "split_unit": "complete_source_game",
@@ -550,6 +508,7 @@ def main() -> None:
         "split_seed": args.split_seed,
         "prior_strength": args.prior_strength,
         "oracle_role": "held_out_scoring_only",
+        "boundary_semantics": "play_deepest_completed_no_monotone_forcing",
         "metrics": metrics(predictions),
         "boundary_summaries": boundary_summaries(predictions),
         "live_enabled": False,

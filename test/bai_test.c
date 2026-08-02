@@ -183,15 +183,92 @@ void test_bai_regret_limit(int num_threads) {
   assert(bai_result_get_best_arm(bai_result) == 1);
   assert(rvs_get_total_samples(rvs) < bai_options.sample_limit);
   const double estimated_regret = bai_result_get_estimated_regret(bai_result);
+  const double joint_estimated_regret =
+      bai_result_get_joint_estimated_regret(bai_result);
   const double regret_at_stop = bai_result_get_regret_at_stop(bai_result);
+  const double joint_regret_at_stop =
+      bai_result_get_joint_regret_at_stop(bai_result);
   assert(isfinite(estimated_regret));
+  assert(isfinite(joint_estimated_regret));
   assert(isfinite(regret_at_stop));
+  assert(isfinite(joint_regret_at_stop));
+  assert(joint_estimated_regret >= estimated_regret);
+  assert(joint_regret_at_stop >= regret_at_stop);
+  assert(bai_result_get_near_tie_challengers(bai_result) >= 0);
+  assert(bai_result_get_near_tie_challengers_at_stop(bai_result) >= 0);
   assert(regret_at_stop <= bai_options.regret_stop_target);
 
   thread_control_destroy(thread_control);
   bai_result_destroy(bai_result);
   rvs_destroy(rng);
   rvs_destroy(rvs);
+}
+
+static void bai_test_set_regret_arm(BAIArmDatum *arm, double mean,
+                                    double sample_variance,
+                                    uint64_t num_samples) {
+  *arm = (BAIArmDatum){0};
+  arm->mean = mean;
+  arm->num_samples = num_samples;
+  arm->var = sample_variance * (double)(num_samples - 1) / (double)num_samples;
+}
+
+static void test_bai_joint_max_regret_estimator(void) {
+  BAIArmDatum two_arms[2];
+  bai_test_set_regret_arm(&two_arms[0], 0.0, 1.0, 100);
+  bai_test_set_regret_arm(&two_arms[1], -0.1, 1.0, 100);
+  BAISyncData two_arm_sync = {
+      .num_arms = 2,
+      .astar_index = 0,
+      .arm_data = two_arms,
+      .regret_cross_arm_correlation = 0.4,
+      .regret_calibration = 1.0,
+      .regret_min_samples_per_arm = 32,
+  };
+  const double pairwise = bai_estimate_expected_regret(&two_arm_sync, NULL);
+  const double joint = bai_estimate_joint_expected_regret(&two_arm_sync, NULL);
+  // With one challenger, E[max(U0,U1)] - E[U0] is exactly the pairwise
+  // positive-part expectation.
+  assert(fabs(pairwise - joint) < 1e-12);
+  assert(bai_count_near_tie_challengers(&two_arm_sync) == 1);
+
+  BAIArmDatum flat_arms[6];
+  for (int arm_index = 0; arm_index < 6; arm_index++) {
+    bai_test_set_regret_arm(&flat_arms[arm_index], 0.0, 1.0, 100);
+  }
+  BAISyncData flat_sync = {
+      .num_arms = 6,
+      .astar_index = 0,
+      .arm_data = flat_arms,
+      .regret_cross_arm_correlation = 0.0,
+      .regret_calibration = 1.0,
+      .regret_min_samples_per_arm = 32,
+  };
+  const double flat_pairwise = bai_estimate_expected_regret(&flat_sync, NULL);
+  const double flat_joint =
+      bai_estimate_joint_expected_regret(&flat_sync, NULL);
+  // The legacy maximum of pairwise regrets ignores that any of several tied
+  // challengers can win. The joint maximum must expose that multiplicity.
+  assert(flat_joint > flat_pairwise * 1.5);
+  assert(bai_count_near_tie_challengers(&flat_sync) == 5);
+
+  BAIArmDatum separated_arms[3];
+  bai_test_set_regret_arm(&separated_arms[0], 1.0, 0.01, 100);
+  bai_test_set_regret_arm(&separated_arms[1], 0.0, 0.01, 100);
+  bai_test_set_regret_arm(&separated_arms[2], -1.0, 0.01, 100);
+  BAISyncData separated_sync = {
+      .num_arms = 3,
+      .astar_index = 0,
+      .arm_data = separated_arms,
+      .regret_cross_arm_correlation = 0.4,
+      .regret_calibration = 1.0,
+      .regret_min_samples_per_arm = 32,
+  };
+  const double separated_joint =
+      bai_estimate_joint_expected_regret(&separated_sync, NULL);
+  assert(isfinite(separated_joint));
+  assert(separated_joint < 1e-9);
+  assert(bai_count_near_tie_challengers(&separated_sync) == 0);
 }
 
 // A finite regret estimate is a statistical claim, not merely a formatting
@@ -231,11 +308,9 @@ static void test_bai_regret_requires_minimum_arm_evidence(int num_threads) {
 
   rvs_reset(rvs, &rv_args);
   bai_options.sample_minimum = BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
-  bai_options.sample_limit =
-      num_rvs * BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
+  bai_options.sample_limit = num_rvs * BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
   bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
-  const double estimated_regret =
-      bai_result_get_estimated_regret(bai_result);
+  const double estimated_regret = bai_result_get_estimated_regret(bai_result);
   assert(isfinite(estimated_regret));
   assert(estimated_regret >= 0.0);
 
@@ -627,6 +702,7 @@ void test_bai(void) {
   if (bai_seed) {
     test_bai_from_seed(bai_seed);
   } else {
+    test_bai_joint_max_regret_estimator();
     const int num_threads[] = {1, 11};
     const int num_thread_tests = sizeof(num_threads) / sizeof(int);
     for (int i = 0; i < num_thread_tests; i++) {

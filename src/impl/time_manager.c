@@ -44,14 +44,12 @@ double time_manager_value_curve_predict(const TimeManagerValueCurve *curve,
   if (budget_seconds >= curve->knots[curve->num_knots - 1].budget_seconds) {
     return curve->knots[curve->num_knots - 1].expected_future_regret;
   }
-  for (size_t upper_index = 1; upper_index < curve->num_knots;
-       upper_index++) {
+  for (size_t upper_index = 1; upper_index < curve->num_knots; upper_index++) {
     const TimeManagerValueKnot *upper = &curve->knots[upper_index];
     if (budget_seconds <= upper->budget_seconds) {
       const TimeManagerValueKnot *lower = &curve->knots[upper_index - 1];
-      const double fraction =
-          (budget_seconds - lower->budget_seconds) /
-          (upper->budget_seconds - lower->budget_seconds);
+      const double fraction = (budget_seconds - lower->budget_seconds) /
+                              (upper->budget_seconds - lower->budget_seconds);
       return lower->expected_future_regret +
              fraction * (upper->expected_future_regret -
                          lower->expected_future_regret);
@@ -236,7 +234,7 @@ time_manager_plan(const TimeManagerClock *clock,
           chunk->completion_confidence <= 1.0));
     if (!time_manager_nonnegative_finite(expected_seconds) ||
         !valid_completion_bound ||
-        !time_manager_nonnegative_finite(chunk->expected_regret_reduction)) {
+        !isfinite(chunk->expected_regret_reduction)) {
       plan.valid = false;
       plan.stop_reason = TIME_MANAGER_STOP_INVALID_INPUT;
       plan.stopped_chunk_seconds = expected_seconds;
@@ -249,8 +247,9 @@ time_manager_plan(const TimeManagerClock *clock,
 
     double value_per_second = 0.0;
     if (expected_seconds == 0.0) {
-      value_per_second =
-          chunk->expected_regret_reduction > 0.0 ? INFINITY : 0.0;
+      value_per_second = chunk->expected_regret_reduction > 0.0   ? INFINITY
+                         : chunk->expected_regret_reduction < 0.0 ? -INFINITY
+                                                                  : 0.0;
     } else {
       value_per_second = chunk->expected_regret_reduction / expected_seconds;
     }
@@ -274,8 +273,8 @@ time_manager_plan(const TimeManagerClock *clock,
       hard_stop_value_per_second = value_per_second;
       break;
     }
-    if (clock->committed_current_seconds +
-            cumulative_completion_bound_seconds + completion_bound_seconds >
+    if (clock->committed_current_seconds + cumulative_completion_bound_seconds +
+            completion_bound_seconds >
         maximum_current_seconds) {
       hard_stop = true;
       hard_stop_reason = chunk->has_completion_bound
@@ -332,8 +331,7 @@ time_manager_plan(const TimeManagerClock *clock,
     plan.stopped_chunk_seconds = hard_stop_seconds;
     plan.stopped_chunk_completion_bound_seconds =
         hard_stop_completion_bound_seconds;
-    plan.stopped_chunk_completion_confidence =
-        hard_stop_completion_confidence;
+    plan.stopped_chunk_completion_confidence = hard_stop_completion_confidence;
     plan.stopped_chunk_value_per_second = hard_stop_value_per_second;
   } else {
     plan.stop_reason = TIME_MANAGER_STOP_FUTURE_VALUE;
@@ -348,11 +346,12 @@ time_manager_plan(const TimeManagerClock *clock,
     plan.stopped_chunk_completion_confidence = stopped->completion_confidence;
     plan.stopped_chunk_value_per_second =
         plan.stopped_chunk_seconds == 0.0
-            ? stopped->expected_regret_reduction > 0.0 ? INFINITY : 0.0
+            ? stopped->expected_regret_reduction > 0.0   ? INFINITY
+              : stopped->expected_regret_reduction < 0.0 ? -INFINITY
+                                                         : 0.0
             : stopped->expected_regret_reduction / plan.stopped_chunk_seconds;
     plan.stopped_chunk_future_regret_increase = time_manager_get_future_loss(
-        clock,
-        fmax(0.0, initial_future_clock_seconds - best_expected_seconds),
+        clock, fmax(0.0, initial_future_clock_seconds - best_expected_seconds),
         plan.stopped_chunk_seconds);
   }
 
