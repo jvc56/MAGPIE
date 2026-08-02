@@ -165,10 +165,11 @@ double time_manager_value_curve_future_loss(double future_clock_seconds,
                                             double spend_seconds,
                                             const void *context);
 
-// Buy sequential result-boundary chunks while they fit under the protected
-// clock and their marginal value is strictly greater than the future shadow
-// price. A low-value chunk blocks all later chunks because the work is
-// sequential: TimeManager cannot skip half an IDS depth or PEG stage.
+// Choose the best sequential result-boundary prefix that fits under the
+// protected clock and whose cumulative value exceeds its exact future-clock
+// cost. A weak intermediate chunk may be bought when it is required to reach
+// a later high-value boundary; TimeManager still cannot skip that intermediate
+// work.
 // `chunks_bought` is a forecast, not permission to run every listed boundary
 // without another check. Execute at most the next chunk, record its actual
 // work/rate, and replan before starting another indivisible unit.

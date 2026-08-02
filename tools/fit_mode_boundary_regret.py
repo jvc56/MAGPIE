@@ -25,6 +25,17 @@ import math
 from pathlib import Path
 from typing import Callable
 
+try:
+    from tools.clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
+except ModuleNotFoundError:
+    from clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
+
 
 BAG_UPPER_BOUNDS = (0, 1, 2, 3, 4, 15, 35, 60, 100)
 RACK_UPPER_BOUNDS = (2, 4, 6, 8, 10, 12, 14)
@@ -329,7 +340,9 @@ def metrics(predictions: list[Prediction]) -> dict[str, object]:
         variance = sum((value - mean) ** 2 for value in game_errors) / (
             len(game_errors) - 1
         )
-        half_width = 1.96 * math.sqrt(variance / len(game_errors))
+        half_width = student_t_critical(
+            0.95, len(game_errors) - 1
+        ) * math.sqrt(variance / len(game_errors))
         ci95: list[float] | None = [mean - half_width, mean + half_width]
     else:
         ci95 = None
@@ -351,21 +364,36 @@ def clustered_summary(values: list[tuple[str, float]]) -> dict[str, object]:
             by_game[game].append(value)
     clustered = [sum(group) / len(group) for group in by_game.values()]
     if not clustered:
-        return {"rows": 0, "games": 0, "mean": None, "ci95": None}
+        return {
+            "rows": 0,
+            "games": 0,
+            "mean": None,
+            "ci95": None,
+            "p_value": None,
+        }
     mean = sum(clustered) / len(clustered)
     if len(clustered) >= 2:
         variance = sum((value - mean) ** 2 for value in clustered) / (
             len(clustered) - 1
         )
-        half_width = 1.96 * math.sqrt(variance / len(clustered))
+        degrees_freedom = len(clustered) - 1
+        standard_error = math.sqrt(variance / len(clustered))
+        half_width = student_t_critical(0.95, degrees_freedom) * standard_error
         ci95: list[float] | None = [mean - half_width, mean + half_width]
+        p_value: float | None = (
+            student_t_two_sided_p_value(mean / standard_error, degrees_freedom)
+            if standard_error > 0.0
+            else 0.0 if mean != 0.0 else 1.0
+        )
     else:
         ci95 = None
+        p_value = None
     return {
         "rows": len(values),
         "games": len(clustered),
         "mean": mean,
         "ci95": ci95,
+        "p_value": p_value,
     }
 
 

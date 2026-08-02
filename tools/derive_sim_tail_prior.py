@@ -23,6 +23,17 @@ import json
 import math
 from pathlib import Path
 
+try:
+    from tools.clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
+except ModuleNotFoundError:
+    from clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
+
 
 def fields(line: str) -> dict[str, str]:
     result: dict[str, str] = {}
@@ -148,14 +159,21 @@ def summarize(
             standard_error = math.sqrt(variance / len(gains))
         else:
             standard_error = math.nan
-        half_width = 1.96 * standard_error
+        half_width = (
+            student_t_critical(0.95, len(gains) - 1) * standard_error
+            if len(gains) >= 2
+            else math.nan
+        )
         ci_low = gain - half_width
         ci_high = gain + half_width
-        p_value = (
-            math.erfc(abs(gain / standard_error) / math.sqrt(2.0))
-            if standard_error > 0.0
-            else 0.0 if gain != 0.0 else 1.0
-        )
+        if len(gains) < 2:
+            p_value = math.nan
+        elif standard_error > 0.0:
+            p_value = student_t_two_sided_p_value(
+                gain / standard_error, len(gains) - 1
+            )
+        else:
+            p_value = 0.0 if gain != 0.0 else 1.0
         target_mean = mean(target_by_game)
         central = min(
             previous_central,

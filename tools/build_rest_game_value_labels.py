@@ -16,12 +16,12 @@ portable cost unit. To keep the eventual runtime artifact hardware-independent,
 generate labels under several mode-rate scenarios rather than baking one
 machine's wall clock into the source curves.
 
-For every current turn and requested remaining-cost budget, this tool solves
-the multiple-choice suffix allocation problem over that player's *later*
-turns using the planning-regret column. The output is supervision for a
-value-to-go model; it is not itself a runtime predictor. Complete source games
-must remain intact when splitting the result into training/calibration/test
-sets.
+For every current turn and requested remaining-cost budget, this tool
+evaluates a realizable equal-slice policy over that player's *later* turns
+using the planning-regret column. The historical hindsight-optimal suffix
+allocator remains available as an explicitly labeled prophet bound, but it is
+not a valid runtime value-to-go target. Complete source games must remain
+intact when splitting the result into training/calibration/test sets.
 """
 
 from __future__ import annotations
@@ -83,6 +83,7 @@ class ValueLabel:
     future_gain_per_cost: float
     features: dict[str, str]
     planning_regret_valid: bool
+    allocation_policy: str
 
 
 REQUIRED_FIELDS = {"game", "turn", "player", "cost", "regret"}
@@ -110,6 +111,13 @@ OPTION_FIELDS = {
     "tail_imputed",
     "tail_scenario",
 }
+
+ALLOCATION_POLICY_EQUAL_SLICE = "equal_slice_policy"
+ALLOCATION_POLICY_PROPHET_BOUND = "prophet_bound"
+ALLOCATION_POLICIES = (
+    ALLOCATION_POLICY_EQUAL_SLICE,
+    ALLOCATION_POLICY_PROPHET_BOUND,
+)
 
 
 def _finite_nonnegative(value: str, field: str) -> float:
@@ -262,9 +270,75 @@ def _suffix_regret_tables(
     return tables
 
 
+def _predicted_turns_remaining(curve: TurnCurve) -> int:
+    raw = curve.features.get("predicted_future_turns", "0")
+    try:
+        future = int(raw)
+    except ValueError as error:
+        raise ValueError(
+            "predicted_future_turns must be an integer for "
+            f"game={curve.game} turn={curve.turn}"
+        ) from error
+    if future < 0:
+        raise ValueError("predicted_future_turns must be nonnegative")
+    return future + 1
+
+
+def _equal_slice_policy_tables(
+    curves: list[TurnCurve],
+    maximum_units: int,
+    cost_quantum: float,
+    mandatory_suffix: list[float],
+) -> list[list[float]]:
+    """Evaluate equal slicing without seeing later-turn curve difficulty."""
+
+    tables = [[math.inf] * (maximum_units + 1) for _ in range(len(curves) + 1)]
+    tables[-1] = [0.0] * (maximum_units + 1)
+    for index in range(len(curves) - 1, -1, -1):
+        curve = curves[index]
+        following = tables[index + 1]
+        current = tables[index]
+        turns_remaining = _predicted_turns_remaining(curve)
+        for capacity in range(maximum_units + 1):
+            remaining_budget = mandatory_suffix[index] + capacity * cost_quantum
+            slice_budget = remaining_budget / turns_remaining
+            affordable = [
+                option
+                for option in (curve.all_options or curve.options)
+                if curve.mandatory_cost + option.cost_units * cost_quantum
+                <= slice_budget + 1.0e-12
+            ]
+            if affordable:
+                # Equal slicing commits to the deepest completed boundary that
+                # fits its state-derived slice. Expected or oracle regret does
+                # not break ties or choose the boundary.
+                choice = max(affordable, key=lambda option: option.cost_units)
+            else:
+                # The live fallback must still return a legal result when the
+                # nominal slice is below mandatory work.
+                choice = min(
+                    curve.all_options or curve.options,
+                    key=lambda option: option.cost_units,
+                )
+            if choice.cost_units > capacity:
+                # A bad turn-count forecast can consume clock needed for a
+                # later mandatory boundary. That is a genuine policy failure,
+                # not an invitation to choose a different action in hindsight.
+                continue
+            suffix_regret = following[capacity - choice.cost_units]
+            if math.isfinite(suffix_regret):
+                current[capacity] = choice.regret + suffix_regret
+    return tables
+
+
 def build_value_labels(
-    curves: Iterable[TurnCurve], budgets: Iterable[float], cost_quantum: float
+    curves: Iterable[TurnCurve],
+    budgets: Iterable[float],
+    cost_quantum: float,
+    allocation_policy: str = ALLOCATION_POLICY_EQUAL_SLICE,
 ) -> list[ValueLabel]:
+    if allocation_policy not in ALLOCATION_POLICIES:
+        raise ValueError(f"unknown allocation policy {allocation_policy!r}")
     budget_values = sorted(set(float(value) for value in budgets))
     if not budget_values:
         raise ValueError("at least one budget is required")
@@ -285,12 +359,18 @@ def build_value_labels(
     maximum_units = int(math.floor(max(budget_values) / cost_quantum + 1.0e-12))
     labels: list[ValueLabel] = []
     for sequence in by_game_player.values():
-        tables = _suffix_regret_tables(sequence, maximum_units)
         mandatory_suffix = [0.0] * (len(sequence) + 1)
         for index in range(len(sequence) - 1, -1, -1):
             mandatory_suffix[index] = (
                 sequence[index].mandatory_cost + mandatory_suffix[index + 1]
             )
+        tables = (
+            _equal_slice_policy_tables(
+                sequence, maximum_units, cost_quantum, mandatory_suffix
+            )
+            if allocation_policy == ALLOCATION_POLICY_EQUAL_SLICE
+            else _suffix_regret_tables(sequence, maximum_units)
+        )
 
         for index, current_curve in enumerate(sequence):
             # The future opportunity set deliberately excludes the current
@@ -322,6 +402,7 @@ def build_value_labels(
                             future_gain_per_cost=math.nan,
                             features=current_curve.features,
                             planning_regret_valid=planning_regret_valid,
+                            allocation_policy=allocation_policy,
                         )
                     )
                     continue
@@ -332,6 +413,27 @@ def build_value_labels(
                     int(math.floor(discretionary / cost_quantum + 1.0e-12)),
                 )
                 regret = table[units]
+                if not math.isfinite(regret):
+                    labels.append(
+                        ValueLabel(
+                            game=current_curve.game,
+                            turn=current_curve.turn,
+                            player=current_curve.player,
+                            rate_profile=current_curve.rate_profile,
+                            budget=budget,
+                            forecast_valid=False,
+                            future_turns=future_turns,
+                            mandatory_future_cost=required,
+                            discretionary_future_cost=discretionary,
+                            oracle_future_regret=math.nan,
+                            future_loss_per_cost=math.nan,
+                            future_gain_per_cost=math.nan,
+                            features=current_curve.features,
+                            planning_regret_valid=planning_regret_valid,
+                            allocation_policy=allocation_policy,
+                        )
+                    )
+                    continue
                 loss = (
                     max(0.0, table[units - 1] - regret) / cost_quantum
                     if units > 0
@@ -358,6 +460,7 @@ def build_value_labels(
                         future_gain_per_cost=gain,
                         features=current_curve.features,
                         planning_regret_valid=planning_regret_valid,
+                        allocation_policy=allocation_policy,
                     )
                 )
     labels.sort(
@@ -399,6 +502,7 @@ def write_labels(labels: list[ValueLabel], stream: TextIO) -> None:
         "future_loss_per_cost",
         "future_gain_per_cost",
         "planning_regret_valid",
+        "allocation_policy",
         "label_scope",
         *feature_fields,
     ]
@@ -421,10 +525,15 @@ def write_labels(labels: list[ValueLabel], stream: TextIO) -> None:
             "future_loss_per_cost": _format_float(label.future_loss_per_cost),
             "future_gain_per_cost": _format_float(label.future_gain_per_cost),
             "planning_regret_valid": int(label.planning_regret_valid),
+            "allocation_policy": label.allocation_policy,
             "label_scope": (
-                "realized_suffix_expected_regret_allocator"
+                (
+                    "realized_trajectory_equal_slice_policy_evaluation"
+                    if label.allocation_policy == ALLOCATION_POLICY_EQUAL_SLICE
+                    else "realized_suffix_expected_regret_prophet_bound"
+                )
                 if label.planning_regret_valid
-                else "realized_suffix_oracle_choice_contaminated"
+                else "realized_trajectory_oracle_choice_contaminated"
             ),
         }
         row.update(
@@ -451,12 +560,22 @@ def main() -> None:
     parser.add_argument("curves", type=Path)
     parser.add_argument("--budgets", required=True, type=_comma_floats)
     parser.add_argument("--cost-quantum", required=True, type=float)
+    parser.add_argument(
+        "--allocation-policy",
+        choices=ALLOCATION_POLICIES,
+        default=ALLOCATION_POLICY_EQUAL_SLICE,
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
     with args.curves.open(newline="", encoding="utf-8") as stream:
         curves = read_turn_curves(stream, args.cost_quantum)
-    labels = build_value_labels(curves, args.budgets, args.cost_quantum)
+    labels = build_value_labels(
+        curves,
+        args.budgets,
+        args.cost_quantum,
+        allocation_policy=args.allocation_policy,
+    )
 
     if args.output is None:
         write_labels(labels, sys.stdout)

@@ -7,6 +7,7 @@ import math
 import unittest
 
 from tools.build_rest_game_value_labels import (
+    ALLOCATION_POLICY_PROPHET_BOUND,
     build_value_labels,
     read_turn_curves,
 )
@@ -28,7 +29,12 @@ g,4,0,1,0,0
 g,1,1,0,7,8
 g,1,1,1,0,8
 """
-        labels = build_value_labels(curves(source), [0, 1, 2], 1.0)
+        labels = build_value_labels(
+            curves(source),
+            [0, 1, 2],
+            1.0,
+            allocation_policy=ALLOCATION_POLICY_PROPHET_BOUND,
+        )
         by_key = {
             (label.turn, label.player, label.budget): label for label in labels
         }
@@ -46,6 +52,32 @@ g,1,1,1,0,8
         self.assertEqual(by_key[(1, 1, 2.0)].future_turns, 0)
         self.assertEqual(by_key[(1, 1, 2.0)].oracle_future_regret, 0.0)
         self.assertEqual(by_key[(1, 1, 2.0)].future_loss_per_cost, 0.0)
+
+    def test_default_labels_evaluate_a_nonanticipating_equal_policy(self) -> None:
+        source = """game,turn,player,cost,regret,expected_regret,predicted_future_turns
+g,0,0,0,0,0,2
+g,2,0,0,1,1,0
+g,2,0,1,0,0,0
+g,4,0,0,10,10,0
+g,4,0,1,0,0,0
+"""
+        parsed = curves(source)
+
+        equal_labels = build_value_labels(parsed, [1], 1.0)
+        prophet_labels = build_value_labels(
+            parsed,
+            [1],
+            1.0,
+            allocation_policy=ALLOCATION_POLICY_PROPHET_BOUND,
+        )
+        equal = next(label for label in equal_labels if label.turn == 0)
+        prophet = next(label for label in prophet_labels if label.turn == 0)
+
+        # Turn 2 believes it is the last turn, so equal slicing spends the
+        # unit there and cannot know turn 4 will be much more valuable.
+        self.assertEqual(equal.oracle_future_regret, 10.0)
+        self.assertEqual(prophet.oracle_future_regret, 1.0)
+        self.assertNotEqual(equal.allocation_policy, prophet.allocation_policy)
 
     def test_mandatory_minimum_cost_is_reserved_before_discretionary_work(self) -> None:
         source = """game,turn,player,cost,regret

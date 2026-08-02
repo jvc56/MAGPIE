@@ -31,7 +31,7 @@ import random
 from typing import Iterable
 
 
-ARTIFACT_VERSION = 1
+ARTIFACT_VERSION = 2
 BAG_UPPER_BOUNDS = (0, 4, 15, 35, 60, 100)
 TURN_UPPER_BOUNDS = (0, 1, 2, 3, 5, 8, 64)
 SPREAD_UPPER_BOUNDS = (-100, -30, 30, 100, 10000)
@@ -60,6 +60,7 @@ class Label:
     own_rack: int = 7
     opp_rack: int = 7
     planning_regret_valid: bool = False
+    allocation_policy: str = "legacy_unknown"
 
     @property
     def phase(self) -> int:
@@ -124,6 +125,9 @@ def read_labels(path: Path) -> list[Label]:
                 opp_rack=int(row.get("opp_rack", "7")),
                 planning_regret_valid=bool(
                     int(row.get("planning_regret_valid", "0"))
+                ),
+                allocation_policy=row.get(
+                    "allocation_policy", "legacy_unknown"
                 ),
             )
             if (
@@ -360,6 +364,7 @@ def artifact(
     calibration_metrics: dict[str, float | int],
     test_metrics: dict[str, float | int],
     planning_regret_valid: bool,
+    allocation_policy: str,
 ) -> dict[str, object]:
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     return {
@@ -372,11 +377,12 @@ def artifact(
         "terminal_game_gate_passed": False,
         "gate_reason": "allocation and terminal game gates not yet supplied",
         "label_scope": (
-            "realized_suffix_expected_regret_allocator"
+            "realized_trajectory_equal_slice_policy_evaluation"
             if planning_regret_valid
-            else "realized_suffix_oracle_choice_contaminated"
+            else "non_live_prophet_or_contaminated_labels"
         ),
         "planning_regret_valid": planning_regret_valid,
+        "allocation_policy": allocation_policy,
         "feature_contract": {
             "future_turns": "predicted_from_current_state_only",
             "spread": "player_on_turn_point_of_view",
@@ -421,6 +427,16 @@ def main() -> None:
     calibration = [label for label in labels if label.game in calibration_games]
     test = [label for label in labels if label.game in test_games]
     model = fit_model(train, args.prior_strength)
+    allocation_policies = {label.allocation_policy for label in labels}
+    allocation_policy = (
+        next(iter(allocation_policies))
+        if len(allocation_policies) == 1
+        else "mixed"
+    )
+    planning_regret_valid = (
+        allocation_policy == "equal_slice_policy"
+        and all(label.planning_regret_valid for label in labels)
+    )
     document = artifact(
         model,
         args.labels,
@@ -431,7 +447,8 @@ def main() -> None:
         test_games,
         metrics(model, calibration),
         metrics(model, test),
-        all(label.planning_regret_valid for label in labels),
+        planning_regret_valid,
+        allocation_policy,
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as stream:

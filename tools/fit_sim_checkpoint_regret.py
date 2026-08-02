@@ -29,8 +29,16 @@ from pathlib import Path
 from typing import Callable, Iterable
 
 try:
+    from tools.clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
     from tools.extract_time_value_positions import fields
 except ModuleNotFoundError:
+    from clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
     from extract_time_value_positions import fields
 
 
@@ -481,7 +489,9 @@ def metrics(predictions: list[Prediction], attribute: str) -> dict[str, object]:
         variance = sum((value - mean_game_error) ** 2 for value in game_errors) / (
             len(game_errors) - 1
         )
-        half_width = 1.96 * math.sqrt(variance / len(game_errors))
+        half_width = student_t_critical(
+            0.95, len(game_errors) - 1
+        ) * math.sqrt(variance / len(game_errors))
     else:
         half_width = math.nan
     return {
@@ -519,9 +529,10 @@ def clustered_summary(values: Iterable[tuple[str, float]]) -> dict[str, object]:
         len(clustered) - 1
     )
     standard_error = math.sqrt(variance / len(clustered))
-    half_width = 1.96 * standard_error
+    degrees_freedom = len(clustered) - 1
+    half_width = student_t_critical(0.95, degrees_freedom) * standard_error
     p_value = (
-        math.erfc(abs(mean / standard_error) / math.sqrt(2.0))
+        student_t_two_sided_p_value(mean / standard_error, degrees_freedom)
         if standard_error > 0.0
         else 0.0 if mean != 0.0 else 1.0
     )

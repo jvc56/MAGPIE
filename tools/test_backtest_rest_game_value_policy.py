@@ -92,6 +92,34 @@ class BacktestRestGameValuePolicyTest(unittest.TestCase):
         self.assertEqual(result.equal_regret, 0.0)
         self.assertEqual(result.oracle_regret, 0.0)
 
+    def test_replay_uses_predicted_not_realized_turns_remaining(self) -> None:
+        source = io.StringIO(
+            "game,turn,player,rate_profile,cost,regret,expected_regret,bag,"
+            "spread,predicted_future_turns\n"
+            # Although the corpus contains a later turn, the state forecast
+            # says this is the last one. Both policies must spend the full
+            # one-unit slice instead of dividing by the realized suffix.
+            "test,0,0,0,0,1,1,0,0,0\n"
+            "test,0,0,0,1,0,0,0,0,0\n"
+            "test,2,0,0,0,0,0,0,0,0\n"
+        )
+        curves = read_turn_curves(source, 1.0)
+        model = fit_model(
+            [
+                Label("a", 0.0, 0.0, 0, 0, 0),
+                Label("b", 0.0, 0.0, 0, 0, 0),
+                Label("c", 0.0, 0.0, 0, 0, 0),
+            ]
+        )
+
+        result = replay_sequence(model, curves, 1.0, 1.0)
+
+        assert result is not None
+        self.assertEqual(result.learned_spent, 1.0)
+        self.assertEqual(result.equal_spent, 1.0)
+        self.assertEqual(result.learned_regret, 0.0)
+        self.assertEqual(result.equal_regret, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

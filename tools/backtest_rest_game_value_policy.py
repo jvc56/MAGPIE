@@ -35,6 +35,10 @@ from typing import Iterable
 
 try:
     from tools.build_rest_game_value_labels import TurnCurve, read_turn_curves
+    from tools.clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
     from tools.fit_rest_game_value_model import (
         Label,
         Model,
@@ -45,6 +49,10 @@ try:
     )
 except ModuleNotFoundError:
     from build_rest_game_value_labels import TurnCurve, read_turn_curves
+    from clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
     from fit_rest_game_value_model import (
         Label,
         Model,
@@ -228,8 +236,14 @@ def replay_sequence(
     equal_regret = 0.0
     learned_expected_regret = 0.0
     equal_expected_regret = 0.0
-    for index, curve in enumerate(curves):
-        remaining_turns = len(curves) - index
+    for curve in curves:
+        # Both policies must use the same state-derived forecast available in
+        # production. The realized suffix length is an offline oracle and can
+        # materially alter both equal slicing and the last-turn branch.
+        remaining_turns = max(
+            1,
+            _feature_int(curve, "predicted_future_turns", 0) + 1,
+        )
         learned = choose_learned(
             model,
             curve,
@@ -320,9 +334,14 @@ def clustered_summary(
             len(game_deltas) - 1
         )
         standard_error = math.sqrt(variance / len(game_deltas))
-        half_width = 1.96 * standard_error
+        degrees_freedom = len(game_deltas) - 1
+        half_width = (
+            student_t_critical(0.95, degrees_freedom) * standard_error
+        )
         if standard_error > 0.0:
-            p_value = math.erfc(abs(mean / standard_error) / math.sqrt(2.0))
+            p_value = student_t_two_sided_p_value(
+                mean / standard_error, degrees_freedom
+            )
         else:
             p_value = 0.0 if mean != 0.0 else 1.0
     else:
@@ -391,7 +410,8 @@ def clustered_summary(
 def labels_have_honest_planning(path: Path) -> bool:
     with path.open(newline="", encoding="utf-8") as stream:
         reader = csv.DictReader(stream)
-        if "planning_regret_valid" not in (reader.fieldnames or []):
+        required = {"planning_regret_valid", "allocation_policy"}
+        if not required.issubset(reader.fieldnames or []):
             return False
         relevant = [
             row
@@ -399,7 +419,9 @@ def labels_have_honest_planning(path: Path) -> bool:
             if int(row["forecast_valid"]) and int(row["future_turns"]) > 0
         ]
     return bool(relevant) and all(
-        int(row["planning_regret_valid"]) for row in relevant
+        int(row["planning_regret_valid"])
+        and row["allocation_policy"] == "equal_slice_policy"
+        for row in relevant
     )
 
 

@@ -201,8 +201,11 @@ static void test_time_manager_reserve_and_sequential_boundaries(void) {
   plan = time_manager_plan(&value_clock, &TEST_COST, &TEST_DEADLINE_COST,
                            chunks, 2);
   assert(plan.valid);
-  assert(plan.chunks_bought == 0);
-  assert(plan.stop_reason == TIME_MANAGER_STOP_FUTURE_VALUE);
+  // The first boundary is weak in isolation, but it is required to reach the
+  // valuable second boundary. Package-aware planning buys both.
+  assert(plan.chunks_bought == 2);
+  assert(plan.stop_reason == TIME_MANAGER_STOP_NO_MORE_CHUNKS);
+  assert_near(plan.expected_regret_reduction, 1.001);
 }
 
 static void test_time_manager_completion_admission(void) {

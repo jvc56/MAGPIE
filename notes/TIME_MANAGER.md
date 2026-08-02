@@ -1306,6 +1306,47 @@ win, and spread labels only after every arm has finished. It is never a model
 feature or an allocator input. The fitted artifact is shadow-only, and fixed
 budget plus paired-tail summaries remain clustered by source game.
 
+### Nonanticipating-policy correction (2026-08-02)
+
+An external methodological review found a deeper problem in the first
+rest-of-game target. Cross-fitted per-turn planning regrets prevented oracle
+scores from choosing a boundary, but `_suffix_regret_tables` still allocated
+clock after seeing the difficulty of every realized later turn. That is a
+prophet bound, not the value of a policy that can run online. Its finite
+differences can overprice saved clock by concentrating it on whichever future
+turn happened to be hard.
+
+`build_rest_game_value_labels.py` therefore defaults to evaluating the
+realizable equal-slice policy. It uses each future position's state-derived
+`predicted_future_turns`, commits to the deepest measured boundary fitting the
+slice, and never reallocates after inspecting later curves. The old dynamic
+program remains available only as `prophet_bound` and its label scope cannot
+pass a live gate. The backtest likewise uses predicted rather than realized
+turn counts for both policies, including its last-turn decision.
+
+The generic planner now compares complete sequential prefixes. A weak PEG
+wave or IDS depth can be bought when it is required to reach a later boundary
+whose cumulative value exceeds the exact cumulative loss of future clock.
+Hard completion bounds still truncate the admissible prefix, and callers
+still execute only the next chunk before replanning. Current production
+admission callers supply one chunk, so this fixes the multi-boundary contract
+before it becomes live rather than changing their present behavior.
+
+Small held-out panels now use Student-t rather than normal intervals. The
+minimum of 20 held-out games remains a validity floor, not a powered sample
+size: the observed per-game standard deviation implies roughly 100 games for
+a 0.005 utility effect and roughly 640 for a 0.002 effect at conventional
+80% power. Future surrogate tests should emphasize preregistered,
+game-clustered same-root divergences and report shared-root coverage.
+
+Two first-order SIM issues remain open. The BAI currently estimates the
+maximum of pairwise expected positive regrets rather than the expected regret
+of the maximum challenger, which is optimistic when many moves are near tied.
+Also, its correction model is trained on fixed-budget arms while a live rule
+would stop on downward excursions of a cumulative trace. A joint-max shadow
+estimator and cumulative optional-stopping replay are required before the
+checkpoint signal can control time. Live allocation remains disabled.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
