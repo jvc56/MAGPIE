@@ -7,13 +7,46 @@ import tempfile
 import unittest
 
 from tools.fit_sim_checkpoint_regret import (
+    Point,
     cross_fit,
+    matched_depth_summaries,
+    nonzero_regret_summary,
     read_metadata,
     read_points,
 )
 
 
 class FitSimCheckpointRegretTest(unittest.TestCase):
+    @staticmethod
+    def point(
+        game: str,
+        position: int,
+        plies: int,
+        regret: float,
+        selected_rank: int,
+        *,
+        bag: int = 40,
+        policy: str = "static",
+    ) -> Point:
+        return Point(
+            game=game,
+            position=position,
+            bag=bag,
+            spread=0,
+            policy=policy,
+            plies=plies,
+            target_nodes=1000,
+            actual_nodes=1000,
+            candidates=15,
+            selected_rank=selected_rank,
+            estimated_regret=0.0,
+            estimated_gap=0.01,
+            challenger_valid=True,
+            actual_regret=regret,
+            actual_win_regret=regret / 2.0,
+            actual_spread_regret=regret * 100.0,
+        )
+
     def test_cross_fitted_state_curves_are_monotone(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -68,6 +101,52 @@ class FitSimCheckpointRegretTest(unittest.TestCase):
         for curve in by_position.values():
             curve.sort()
             self.assertGreaterEqual(curve[0][1], curve[1][1])
+
+    def test_zero_event_bound_counts_source_games(self) -> None:
+        points = [
+            self.point("a", 0, 4, 0.0, 0),
+            self.point("a", 1, 4, 0.0, 0),
+            self.point("b", 2, 4, 0.0, 0),
+            self.point("c", 3, 4, 0.0, 0),
+            self.point("d", 4, 4, 0.0, 0),
+        ]
+        summary = nonzero_regret_summary(points)
+
+        self.assertEqual(summary["positions"], 5)
+        self.assertEqual(summary["games"], 4)
+        self.assertEqual(summary["nonzero_games"], 0)
+        self.assertAlmostEqual(
+            summary["one_sided_upper95_if_zero"],
+            1.0 - 0.05 ** (1.0 / 4.0),
+        )
+
+    def test_matched_depth_comparison_never_selects_by_oracle(self) -> None:
+        points = [
+            self.point("a", 0, 4, 0.03, 1, bag=10, policy="static"),
+            self.point("a", 0, 6, 0.01, 2, bag=10, policy="static"),
+            self.point(
+                "b", 1, 4, 0.01, 3, bag=70, policy="playchooser-g3000ms"
+            ),
+            self.point(
+                "b", 1, 6, 0.02, 3, bag=70, policy="playchooser-g3000ms"
+            ),
+        ]
+        summary = matched_depth_summaries(points)
+        row = summary["overall"][0]
+
+        self.assertEqual(row["shallow_plies"], 4)
+        self.assertEqual(row["deep_plies"], 6)
+        self.assertEqual(row["positions"], 2)
+        self.assertAlmostEqual(
+            row["utility_regret_reduction"]["mean"], 0.005
+        )
+        self.assertAlmostEqual(row["choice_change"]["mean"], 0.5)
+        self.assertEqual(
+            row["selection_counts"],
+            {"deep_better": 1, "shallow_better": 1, "tied": 0},
+        )
+        self.assertEqual(len(summary["by_bag"]), 2)
+        self.assertEqual(len(summary["by_policy"]), 2)
 
 
 if __name__ == "__main__":

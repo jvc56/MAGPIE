@@ -22,6 +22,7 @@ from collections import defaultdict
 import csv
 from dataclasses import dataclass
 import hashlib
+from itertools import combinations
 import json
 import math
 from pathlib import Path
@@ -533,6 +534,68 @@ def clustered_summary(values: Iterable[tuple[str, float]]) -> dict[str, object]:
     }
 
 
+def nonzero_regret_summary(points: Iterable[Point]) -> dict[str, object]:
+    """Summarize whether a source game contains any observed regret event.
+
+    The exact zero-event upper bound uses source games rather than positions,
+    so repeated roots from one game cannot create artificial precision. The
+    Wilson interval is descriptive for nonzero panels; inference on regret
+    magnitude remains in :func:`clustered_summary`.
+    """
+
+    by_game: dict[str, list[bool]] = defaultdict(list)
+    positions = 0
+    nonzero_positions = 0
+    for point in points:
+        event = point.actual_regret > 0.0
+        by_game[point.game].append(event)
+        positions += 1
+        nonzero_positions += int(event)
+    games = len(by_game)
+    nonzero_games = sum(any(events) for events in by_game.values())
+    if games == 0:
+        return {
+            "positions": 0,
+            "nonzero_positions": 0,
+            "games": 0,
+            "nonzero_games": 0,
+            "game_event_rate": None,
+            "wilson_ci95": None,
+            "one_sided_upper95_if_zero": None,
+        }
+
+    rate = nonzero_games / games
+    z = 1.959963984540054
+    denominator = 1.0 + z * z / games
+    center = (rate + z * z / (2.0 * games)) / denominator
+    half_width = (
+        z
+        * math.sqrt(
+            rate * (1.0 - rate) / games
+            + z * z / (4.0 * games * games)
+        )
+        / denominator
+    )
+    return {
+        "positions": positions,
+        "nonzero_positions": nonzero_positions,
+        "games": games,
+        "nonzero_games": nonzero_games,
+        "game_event_rate": rate,
+        "wilson_ci95": [
+            max(0.0, center - half_width),
+            min(1.0, center + half_width),
+        ],
+        # With no event in n independent source-game clusters, solve
+        # (1 - p)^n = .05 for the one-sided 95% upper bound.
+        "one_sided_upper95_if_zero": (
+            1.0 - math.pow(0.05, 1.0 / games)
+            if nonzero_games == 0
+            else None
+        ),
+    }
+
+
 def fixed_budget_summaries(predictions: list[Prediction]) -> list[dict[str, object]]:
     grouped: dict[tuple[int, int], list[Prediction]] = defaultdict(list)
     for prediction in predictions:
@@ -557,6 +620,9 @@ def fixed_budget_summaries(predictions: list[Prediction]) -> list[dict[str, obje
                     (item.point.game, item.point.actual_spread_regret)
                     for item in group
                     if item.point.actual_spread_regret is not None
+                ),
+                "nonzero_utility_regret": nonzero_regret_summary(
+                    item.point for item in group
                 ),
                 "state_prediction": clustered_summary(
                     (item.point.game, item.state_expected_regret) for item in group
@@ -679,6 +745,142 @@ def paired_tail_summaries(points: list[Point]) -> dict[str, object]:
     return {"overall": overall, "by_bag": by_bag, "by_policy": by_policy}
 
 
+def _matched_depth_row(
+    pairs: list[tuple[Point, Point]],
+    shallow_plies: int,
+    deep_plies: int,
+    target_nodes: int,
+) -> dict[str, object]:
+    utility = [
+        (shallow.game, shallow.actual_regret - deep.actual_regret)
+        for shallow, deep in pairs
+    ]
+    win = [
+        (
+            shallow.game,
+            shallow.actual_win_regret - deep.actual_win_regret,
+        )
+        for shallow, deep in pairs
+        if shallow.actual_win_regret is not None
+        and deep.actual_win_regret is not None
+    ]
+    spread = [
+        (
+            shallow.game,
+            shallow.actual_spread_regret - deep.actual_spread_regret,
+        )
+        for shallow, deep in pairs
+        if shallow.actual_spread_regret is not None
+        and deep.actual_spread_regret is not None
+    ]
+    comparable_choices = [
+        (shallow, deep)
+        for shallow, deep in pairs
+        if shallow.selected_rank >= 0 and deep.selected_rank >= 0
+    ]
+    return {
+        "shallow_plies": shallow_plies,
+        "deep_plies": deep_plies,
+        "target_nodes": target_nodes,
+        "positions": len(pairs),
+        # Positive regret reduction means the deeper arm is better.
+        "utility_regret_reduction": clustered_summary(utility),
+        "win_regret_reduction": clustered_summary(win),
+        "spread_regret_reduction": clustered_summary(spread),
+        "choice_change": clustered_summary(
+            (
+                shallow.game,
+                float(shallow.selected_rank != deep.selected_rank),
+            )
+            for shallow, deep in comparable_choices
+        ),
+        "selection_counts": {
+            "deep_better": sum(
+                deep.actual_regret < shallow.actual_regret
+                for shallow, deep in pairs
+            ),
+            "shallow_better": sum(
+                shallow.actual_regret < deep.actual_regret
+                for shallow, deep in pairs
+            ),
+            "tied": sum(
+                shallow.actual_regret == deep.actual_regret
+                for shallow, deep in pairs
+            ),
+        },
+        "shallow_nonzero_utility_regret": nonzero_regret_summary(
+            shallow for shallow, _ in pairs
+        ),
+        "deep_nonzero_utility_regret": nonzero_regret_summary(
+            deep for _, deep in pairs
+        ),
+    }
+
+
+def matched_depth_summaries(points: list[Point]) -> dict[str, object]:
+    """Compare depths at identical roots and fixed node budgets.
+
+    This deliberately compares the moves selected by each fixed arm. It does
+    not choose a budget or depth after looking at oracle regret.
+    """
+
+    series: dict[tuple[str, int, int], dict[int, Point]] = defaultdict(dict)
+    for point in points:
+        key = (point.game, point.position, point.target_nodes)
+        previous = series[key].setdefault(point.plies, point)
+        if previous != point:
+            raise ValueError(
+                "conflicting matched-depth point "
+                f"game={point.game} position={point.position} "
+                f"nodes={point.target_nodes} plies={point.plies}"
+            )
+
+    plies_values = sorted({point.plies for point in points})
+    overall: list[dict[str, object]] = []
+    by_bag: list[dict[str, object]] = []
+    by_policy: list[dict[str, object]] = []
+    for shallow_plies, deep_plies in combinations(plies_values, 2):
+        targets = sorted(
+            {
+                target_nodes
+                for (_, _, target_nodes), depths in series.items()
+                if shallow_plies in depths and deep_plies in depths
+            }
+        )
+        for target_nodes in targets:
+            pairs = [
+                (depths[shallow_plies], depths[deep_plies])
+                for (_, _, nodes), depths in series.items()
+                if nodes == target_nodes
+                and shallow_plies in depths
+                and deep_plies in depths
+            ]
+            overall.append(
+                _matched_depth_row(
+                    pairs, shallow_plies, deep_plies, target_nodes
+                )
+            )
+            for bag_band in sorted({shallow.bag_band for shallow, _ in pairs}):
+                bag_pairs = [
+                    pair for pair in pairs if pair[0].bag_band == bag_band
+                ]
+                row = _matched_depth_row(
+                    bag_pairs, shallow_plies, deep_plies, target_nodes
+                )
+                row["bag_band"] = bag_band
+                by_bag.append(row)
+            for policy in sorted({shallow.policy for shallow, _ in pairs}):
+                policy_pairs = [
+                    pair for pair in pairs if pair[0].policy == policy
+                ]
+                row = _matched_depth_row(
+                    policy_pairs, shallow_plies, deep_plies, target_nodes
+                )
+                row["policy"] = policy
+                by_policy.append(row)
+    return {"overall": overall, "by_bag": by_bag, "by_policy": by_policy}
+
+
 def write_predictions(path: Path, predictions: list[Prediction]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames = [
@@ -756,7 +958,7 @@ def build_artifact(
     correction_model = fit_correction_model(points, state_model, prior_strength)
     return {
         "artifact_kind": "sim_checkpoint_regret_shadow",
-        "artifact_version": 1,
+        "artifact_version": 2,
         "source_log": str(log),
         "source_log_sha256": hashlib.sha256(log.read_bytes()).hexdigest(),
         "source_corpus": str(corpus),
@@ -774,6 +976,7 @@ def build_artifact(
         ),
         "fixed_budget_summaries": fixed_budget_summaries(predictions),
         "paired_tail_summaries": paired_tail_summaries(points),
+        "matched_depth_summaries": matched_depth_summaries(points),
         "state_cells": _cells_json(state_model.cells),
         "checkpoint_correction_cells": _cells_json(correction_model.cells),
         "bucket_contract": {
