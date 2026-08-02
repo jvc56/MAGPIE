@@ -261,8 +261,10 @@ The concrete shadow pipeline is:
    for later PEG/endgame joins.
 3. `tools/convert_time_value_work_costs.py` applies a grid of runtime-rate
    scenarios to native work coordinates.
-4. `tools/build_rest_game_value_labels.py` solves each same-player realized
-   suffix independently for every rate profile and clock budget.
+4. `tools/build_rest_game_value_labels.py` evaluates a declared
+   nonanticipating baseline policy on each same-player suffix for every rate
+   profile and clock budget. Its old hindsight optimizer is retained only as
+   an explicitly labeled prophet bound.
 5. `tools/fit_rest_game_value_model.py` fits the monotone hierarchical table.
    It always emits a shadow artifact: predictive error alone cannot enable it.
 6. `tools/backtest_rest_game_value_policy.py` replays the learned allocator and
@@ -1292,6 +1294,19 @@ strength result because the broad SIM score still comes from the old
 nominee-only judge and can miss a better move outside the nominees. The
 matched risk-set tail panel supplies the next correction.
 
+The backtest gate is now conditional on allocation-changing replays and can
+apply a CUPED slope fitted only on calibration games. In this panel, 1,405 of
+1,472 test replays diverged and covered all 20 test games. Calibration-trained
+CUPED gives a test delta of `-0.001951`, 95% CI
+`[-0.007834,+0.003932]`, `p=0.496`; it does not change the mean and only
+modestly narrows the interval. The raw divergent calibration SD is `0.01387`,
+which implies about 61 games for a 0.005 effect or 378 for a 0.002 effect by
+the normal planning approximation. Those estimates themselves come from only
+20 games, so the next gate should conservatively preregister at least 100 and
+640 games respectively unless a larger calibration corpus justifies less.
+The old `>=20 games && CI upper < 0` rule can no longer arm the gate: both a
+minimum detectable effect and a preregistered minimum game count are required.
+
 The next honest gate must choose current-turn work using only information
 available at that checkpoint: either a cross-fitted expected-regret model or a
 true cumulative solver trace carrying its contemporaneous regret estimate.
@@ -1385,6 +1400,29 @@ than retaining an earlier result. Nonmonotone marginal values, including a
 negative intermediate chunk followed by a positive rescue, now remain visible
 to package planning. Censored hard roots must still enter value-side
 sensitivity bounds rather than being silently dropped.
+
+The first dual comparator now evaluates future spend under each *fixed* lambda
+on training games, fits that expected-demand curve from current-state features,
+and only then chooses lambda on a held-out turn. It never chooses a separate
+lambda after seeing each realized suffix. Replanning with the remaining clock
+provides the feedback correction. On the historical split, water-filling
+minus equal slicing is `-0.003892` on calibration (95% CI
+`[-0.008589,+0.000805]`, `p=0.099`) and `-0.006577` on test (95% CI
+`[-0.013375,+0.000222]`, `p=0.057`). The allocation-divergent,
+calibration-CUPED test estimate is `-0.007221`, with CI
+`[-0.014447,+0.000004]`, `p=0.0501`. Directly against one-step improvement
+over evaluated equal slicing, the test delta is `-0.004047`, CI
+`[-0.008219,+0.000125]`, `p=0.0566`; calibration has the same direction.
+
+These are encouraging exploratory comparisons, not a gate. The held-out split
+had already been inspected during earlier allocator development, the current
+turn scores still use the nominee-only broad judge, and the 300K broad curves
+do not cover a three-minute clock. At an average accepted test budget of
+`58.68s`, water-filling could spend only `11.04s` and equal slicing `11.63s`
+before the measured option sets saturated. Thus this panel shows better
+allocation *within the measured envelope*, not successful full-clock
+water-filling. The risk-set 300K--10M tail must extend those curves before the
+dual policy is frozen and tested on new complete games.
 
 ## Validation
 
