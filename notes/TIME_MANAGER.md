@@ -1273,6 +1273,17 @@ in each of four bag phases. It measures independent 300K/1M/3M/10M arms at
 4 and 6 ply and judges the union of eight-play checkpoint risk sets. Live
 rest-of-game allocation remains off.
 
+`tools/fit_sim_checkpoint_regret.py` implements the first of those gates. It
+splits by complete source game and emits two distinct cross-fitted estimates.
+The state estimate uses only pre-search state, candidate count, ply, and the
+fixed node budget; its node curve is forced nonincreasing and can supply
+future-turn opportunity curves. The checkpoint estimate adds only the BAI
+regret estimate and best/challenger gap observed at that checkpoint; it is the
+candidate current-turn stopping signal. The common judge supplies utility,
+win, and spread labels only after every arm has finished. It is never a model
+feature or an allocator input. The fitted artifact is shadow-only, and fixed
+budget plus paired-tail summaries remain clustered by source game.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

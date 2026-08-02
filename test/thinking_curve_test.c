@@ -508,7 +508,8 @@ static void thinking_curve_print_point(
       "provisional_total_regret=%+.9f provisional_win_delta=%+.9f "
       "provisional_spread_delta=%+.9f judge_best_rank=%d "
       "judge_utility=%.12f judge_utility_sem=%.12f judge_win=%.12f "
-      "judge_regret=%.12f judge_candidates=%d judge_forced=%d "
+      "judge_regret=%.12f judge_win_regret=%+.12f "
+      "judge_spread_regret=%+.12f judge_candidates=%d judge_forced=%d "
       "estimated_best=%.12f estimated_challenger=%.12f "
       "estimated_regret=%.12f regret_at_stop=%.12f "
       "regret_stop_target=%.12f bai_status=%d\n",
@@ -525,6 +526,8 @@ static void thinking_curve_print_point(
       judge->best_rank, judge->utility[selected], judge->utility_sem[selected],
       judge->win[selected],
       judge->utility[judge->best_rank] - judge->utility[selected],
+      judge->win[judge->best_rank] - judge->win[selected],
+      judge->spread[judge->best_rank] - judge->spread[selected],
       judge->candidate_count, judge->forced, event->best_value,
       event->challenger_value, estimated_regret, regret_at_stop,
       regret_stop_target, bai_status);
