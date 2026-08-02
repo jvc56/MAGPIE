@@ -941,11 +941,15 @@ static void thinking_curve_print_regret_panel(
          " probe_nodes=%" PRIu64 " probe_seconds=%.6f"
          " probe_mode=independent_fixed_allocation"
          " selected_rank=%d judge_best_rank=%d "
+         "estimated_regret=%.12f joint_estimated_regret=%.12f "
+         "near_tie_challengers=%d "
          "actual_utility_regret=%.12f actual_win_regret=%+.12f "
          "actual_spread_regret=%+.12f\n",
          source_index, position, game_index, bag_tiles, plies, target_nodes,
          risk_count, paired_rows, result->probe_iterations, result->probe_nodes,
          result->probe_seconds, selected, risk_judge_best,
+         result->estimated_regret, result->joint_estimated_regret,
+         result->near_tie_challengers,
          judge->utility[risk_judge_best] - judge->utility[selected],
          judge->win[risk_judge_best] - judge->win[selected],
          judge->spread[risk_judge_best] - judge->spread[selected]);

@@ -13,10 +13,22 @@ import argparse
 import csv
 import math
 import statistics
+from collections import defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+
+try:
+    from clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
+except ModuleNotFoundError:  # pragma: no cover - package-style test import
+    from tools.clustered_inference import (
+        student_t_critical,
+        student_t_two_sided_p_value,
+    )
 
 
 METRICS = ("utility", "win", "spread")
@@ -215,6 +227,68 @@ def summarize_draws(
     }
 
 
+def expected_positive_normal(mean: float, variance: float) -> float:
+    """Return E[max(X, 0)] for a normal random variable X."""
+    if variance <= 1e-20:
+        return max(mean, 0.0)
+    standard_deviation = math.sqrt(variance)
+    z = mean / standard_deviation
+    density = math.exp(-0.5 * z * z) / math.sqrt(2.0 * math.pi)
+    distribution = 0.5 * math.erfc(-z / math.sqrt(2.0))
+    return max(0.0, standard_deviation * density + mean * distribution)
+
+
+def pairwise_expected_regret(
+    means: np.ndarray, covariance: np.ndarray, selected: int
+) -> float:
+    """Reproduce max_i E[(U_i - U_selected)+] on a supplied covariance."""
+    metric_count = len(METRICS)
+    selected_utility = selected * metric_count
+    maximum = 0.0
+    for challenger in range(len(means)):
+        if challenger == selected:
+            continue
+        challenger_utility = challenger * metric_count
+        difference_variance = (
+            covariance[selected_utility, selected_utility]
+            + covariance[challenger_utility, challenger_utility]
+            - 2.0 * covariance[selected_utility, challenger_utility]
+        )
+        maximum = max(
+            maximum,
+            expected_positive_normal(
+                means[challenger, 0] - means[selected, 0],
+                max(float(difference_variance), 0.0),
+            ),
+        )
+    return maximum
+
+
+def count_near_ties(
+    means: np.ndarray,
+    covariance: np.ndarray,
+    selected: int,
+    z_value: float = 2.5758293035489004,
+) -> int:
+    """Count challengers whose two-sided 99% difference UCB reaches zero."""
+    metric_count = len(METRICS)
+    selected_utility = selected * metric_count
+    count = 0
+    for challenger in range(len(means)):
+        if challenger == selected:
+            continue
+        challenger_utility = challenger * metric_count
+        difference_variance = (
+            covariance[selected_utility, selected_utility]
+            + covariance[challenger_utility, challenger_utility]
+            - 2.0 * covariance[selected_utility, challenger_utility]
+        )
+        difference_mean = means[challenger, 0] - means[selected, 0]
+        if difference_mean + z_value * math.sqrt(max(difference_variance, 0.0)) >= 0:
+            count += 1
+    return count
+
+
 def pair_calibration(
     means: np.ndarray,
     judge_means: np.ndarray,
@@ -312,6 +386,20 @@ def analyze_panel(
         normal_draws(means.reshape(-1), correlated_covariance, standard_normals),
         rank_to_arm[selected_rank],
     )
+    independent_pairwise = pairwise_expected_regret(
+        means, independent_covariance, rank_to_arm[selected_rank]
+    )
+    correlated_pairwise = pairwise_expected_regret(
+        means, correlated_covariance, rank_to_arm[selected_rank]
+    )
+    # Monte Carlo error must not reverse the mathematical lower-bound
+    # relationship that the production shadow estimator enforces.
+    independent["predicted_utility_regret"] = max(
+        independent["predicted_utility_regret"], independent_pairwise
+    )
+    correlated["predicted_utility_regret"] = max(
+        correlated["predicted_utility_regret"], correlated_pairwise
+    )
     judge_means = np.asarray(
         [float(panel.arms[rank]["judge_utility"]) for rank in ranks]
     )
@@ -353,6 +441,7 @@ def analyze_panel(
 
     result: dict[str, object] = {
         "source_index": key[0],
+        "game": int(panel.fields["game"]),
         "plies": key[1],
         "target_nodes": key[2],
         "bag": int(panel.fields["bag"]),
@@ -367,6 +456,29 @@ def analyze_panel(
         "median_pairwise_utility_correlation": float(np.median(off_diagonal)),
         "median_correlated_to_independent_delta_se": float(
             np.median(se_ratios)
+        ),
+        "independent_pairwise_predicted_utility_regret": independent_pairwise,
+        "correlated_pairwise_predicted_utility_regret": correlated_pairwise,
+        "independent_joint_minus_pairwise": (
+            independent["predicted_utility_regret"] - independent_pairwise
+        ),
+        "correlated_joint_minus_pairwise": (
+            correlated["predicted_utility_regret"] - correlated_pairwise
+        ),
+        "independent_near_tie_challengers": count_near_ties(
+            means, independent_covariance, rank_to_arm[selected_rank]
+        ),
+        "correlated_near_tie_challengers": count_near_ties(
+            means, correlated_covariance, rank_to_arm[selected_rank]
+        ),
+        "logged_estimated_regret": float(
+            panel.fields.get("estimated_regret", "nan")
+        ),
+        "logged_joint_estimated_regret": float(
+            panel.fields.get("joint_estimated_regret", "nan")
+        ),
+        "logged_near_tie_challengers": int(
+            panel.fields.get("near_tie_challengers", "-1")
         ),
     }
     for estimator_name, estimate in (
@@ -384,93 +496,127 @@ def analyze_panel(
     return result
 
 
-def mean_ci(values: list[float]) -> tuple[float, float, float]:
-    mean = statistics.fmean(values)
+@dataclass(frozen=True)
+class ClusterSummary:
+    rows: int
+    games: int
+    mean: float
+    low: float
+    high: float
+    p_value: float
+
+
+def clustered_summary(
+    results: list[dict[str, object]], value_key: str
+) -> ClusterSummary:
+    """Summarize game means, treating the source game as the inference unit."""
+    by_game: dict[int, list[float]] = defaultdict(list)
+    for row in results:
+        value = float(row[value_key])
+        if math.isfinite(value):
+            by_game[int(row["game"])].append(value)
+    values = [statistics.fmean(group) for group in by_game.values()]
+    if not values:
+        return ClusterSummary(0, 0, math.nan, math.nan, math.nan, math.nan)
+    center = statistics.fmean(values)
     if len(values) < 2:
-        return mean, mean, mean
-    sem = statistics.stdev(values) / math.sqrt(len(values))
-    return mean, mean - 1.96 * sem, mean + 1.96 * sem
+        return ClusterSummary(len(results), 1, center, math.nan, math.nan, math.nan)
+    standard_error = statistics.stdev(values) / math.sqrt(len(values))
+    if standard_error == 0.0:
+        p_value = 0.0 if center != 0.0 else 1.0
+    else:
+        p_value = student_t_two_sided_p_value(
+            center / standard_error, len(values) - 1
+        )
+    radius = student_t_critical(0.95, len(values) - 1) * standard_error
+    return ClusterSummary(
+        len(results),
+        len(values),
+        center,
+        center - radius,
+        center + radius,
+        p_value,
+    )
 
 
-def bootstrap_mean_ci(
-    values: np.ndarray, seed: int, replicates: int = 50_000
-) -> tuple[float, float]:
-    if len(values) < 2:
-        value = float(values[0])
-        return value, value
-    rng = np.random.default_rng(seed)
-    indices = rng.integers(0, len(values), size=(replicates, len(values)))
-    means = np.mean(values[indices], axis=1)
-    return float(np.quantile(means, 0.025)), float(np.quantile(means, 0.975))
+def add_derived_field(
+    results: list[dict[str, object]],
+    name: str,
+    function,
+) -> ClusterSummary:
+    for row in results:
+        row[name] = function(row)
+    return clustered_summary(results, name)
 
 
-def paired_randomization_pvalue(values: np.ndarray, seed: int) -> float:
-    if len(values) == 0 or np.all(values == 0):
-        return 1.0
-    rng = np.random.default_rng(seed)
-    observed = abs(float(np.mean(values)))
-    exceedances = 0
-    permutations = 100_000
-    chunk = 2_000
-    for start in range(0, permutations, chunk):
-        count = min(chunk, permutations - start)
-        signs = rng.choice((-1.0, 1.0), size=(count, len(values)))
-        permuted = np.abs(np.mean(signs * values, axis=1))
-        exceedances += int(np.count_nonzero(permuted >= observed))
-    return (exceedances + 1) / (permutations + 1)
+def near_tie_label(count: int) -> str:
+    if count <= 0:
+        return "0"
+    if count == 1:
+        return "1"
+    if count <= 3:
+        return "2-3"
+    return "4+"
 
 
 def print_summary(results: list[dict[str, object]]) -> None:
-    actual = [float(row["actual_utility_regret"]) for row in results]
-    actual_mean = statistics.fmean(actual)
-    actual_low, actual_high = bootstrap_mean_ci(np.asarray(actual), 0xAC7)
+    actual = clustered_summary(results, "actual_utility_regret")
     print(
         "REGRET_ESTIMATOR_ACTUAL "
-        f"panels={len(results)} mean_utility_regret={actual_mean:.9f} "
-        f"bootstrap_ci95=[{actual_low:.9f},{actual_high:.9f}]"
+        f"panels={len(results)} games={actual.games} "
+        f"mean_utility_regret={actual.mean:.9f} "
+        f"game_clustered_t_ci95=[{actual.low:.9f},{actual.high:.9f}]"
     )
-    errors: dict[str, np.ndarray] = {}
+    error_keys: dict[str, str] = {}
     for estimator in ("independent", "correlated"):
-        predicted = [
-            float(row[f"{estimator}_predicted_utility_regret"])
-            for row in results
-        ]
-        residuals = np.asarray(predicted) - np.asarray(actual)
-        errors[estimator] = np.abs(residuals)
-        mean_predicted, low, high = mean_ci(predicted)
-        bias, bias_low, bias_high = mean_ci(residuals.tolist())
-        bias_pvalue = paired_randomization_pvalue(
-            residuals, 0x1DE0 if estimator == "independent" else 0xC0DE
+        predicted_key = f"{estimator}_predicted_utility_regret"
+        predicted = clustered_summary(results, predicted_key)
+        bias = add_derived_field(
+            results,
+            f"{estimator}_utility_bias",
+            lambda row, key=predicted_key: float(row[key])
+            - float(row["actual_utility_regret"]),
         )
-        win_prediction = statistics.fmean(
-            float(row[f"{estimator}_predicted_win_error"]) for row in results
+        mae_key = f"{estimator}_utility_absolute_error"
+        mae = add_derived_field(
+            results,
+            mae_key,
+            lambda row, key=predicted_key: abs(
+                float(row[key]) - float(row["actual_utility_regret"])
+            ),
         )
-        actual_win_values = np.asarray(
-            [float(row["actual_win_regret"]) for row in results]
-        )
-        predicted_win_values = np.asarray(
-            [
-                float(row[f"{estimator}_predicted_win_error"])
+        error_keys[estimator] = mae_key
+        rmse = math.sqrt(
+            statistics.fmean(
+                (float(row[predicted_key]) - float(row["actual_utility_regret"]))
+                ** 2
                 for row in results
-            ]
+            )
         )
-        win_actual = float(np.mean(actual_win_values))
-        win_residuals = predicted_win_values - actual_win_values
-        spread_prediction = statistics.fmean(
-            float(row[f"{estimator}_predicted_spread_error"])
-            for row in results
+        win_prediction = clustered_summary(
+            results, f"{estimator}_predicted_win_error"
         )
-        actual_spread_values = np.asarray(
-            [float(row["actual_spread_regret"]) for row in results]
+        win_actual = clustered_summary(results, "actual_win_regret")
+        win_bias = add_derived_field(
+            results,
+            f"{estimator}_win_bias",
+            lambda row, name=estimator: float(
+                row[f"{name}_predicted_win_error"]
+            )
+            - float(row["actual_win_regret"]),
         )
-        predicted_spread_values = np.asarray(
-            [
-                float(row[f"{estimator}_predicted_spread_error"])
-                for row in results
-            ]
+        spread_prediction = clustered_summary(
+            results, f"{estimator}_predicted_spread_error"
         )
-        spread_actual = float(np.mean(actual_spread_values))
-        spread_residuals = predicted_spread_values - actual_spread_values
+        spread_actual = clustered_summary(results, "actual_spread_regret")
+        spread_bias = add_derived_field(
+            results,
+            f"{estimator}_spread_bias",
+            lambda row, name=estimator: float(
+                row[f"{name}_predicted_spread_error"]
+            )
+            - float(row["actual_spread_regret"]),
+        )
         p90_coverage = statistics.fmean(
             float(row["actual_utility_regret"])
             <= float(row[f"{estimator}_predicted_utility_p90"])
@@ -483,23 +629,51 @@ def print_summary(results: list[dict[str, object]]) -> None:
         )
         print(
             "REGRET_ESTIMATOR_SUMMARY "
-            f"estimator={estimator} panels={len(results)} "
-            f"mean_predicted_utility_regret={mean_predicted:.9f} "
-            f"ci95=[{low:.9f},{high:.9f}] "
-            f"bias={bias:+.9f} "
-            f"bias_ci95=[{bias_low:+.9f},{bias_high:+.9f}] "
-            f"bias_p={bias_pvalue:.6g} "
-            f"mae={float(np.mean(np.abs(residuals))):.9f} "
-            f"rmse={float(np.sqrt(np.mean(residuals**2))):.9f} "
+            f"estimator=joint_{estimator} panels={len(results)} "
+            f"games={predicted.games} "
+            f"mean_predicted_utility_regret={predicted.mean:.9f} "
+            f"game_clustered_t_ci95=[{predicted.low:.9f},{predicted.high:.9f}] "
+            f"bias={bias.mean:+.9f} "
+            f"bias_ci95=[{bias.low:+.9f},{bias.high:+.9f}] "
+            f"bias_p={bias.p_value:.6g} "
+            f"mae={mae.mean:.9f} rmse={rmse:.9f} "
             f"p90_coverage={p90_coverage:.4f} p95_coverage={p95_coverage:.4f} "
-            f"mean_predicted_win_error={win_prediction:+.9f} "
-            f"mean_actual_win_error={win_actual:+.9f} "
-            f"win_bias={float(np.mean(win_residuals)):+.9f} "
-            f"win_mae={float(np.mean(np.abs(win_residuals))):.9f} "
-            f"mean_predicted_spread_error={spread_prediction:+.6f} "
-            f"mean_actual_spread_error={spread_actual:+.6f} "
-            f"spread_bias={float(np.mean(spread_residuals)):+.6f} "
-            f"spread_mae={float(np.mean(np.abs(spread_residuals))):.6f}"
+            f"mean_predicted_win_error={win_prediction.mean:+.9f} "
+            f"mean_actual_win_error={win_actual.mean:+.9f} "
+            f"win_bias={win_bias.mean:+.9f} "
+            f"mean_predicted_spread_error={spread_prediction.mean:+.6f} "
+            f"mean_actual_spread_error={spread_actual.mean:+.6f} "
+            f"spread_bias={spread_bias.mean:+.6f}"
+        )
+
+        pairwise_key = f"{estimator}_pairwise_predicted_utility_regret"
+        pairwise = clustered_summary(results, pairwise_key)
+        pairwise_bias = add_derived_field(
+            results,
+            f"{estimator}_pairwise_bias",
+            lambda row, key=pairwise_key: float(row[key])
+            - float(row["actual_utility_regret"]),
+        )
+        structural_gap = clustered_summary(
+            results, f"{estimator}_joint_minus_pairwise"
+        )
+        pairwise_mae = add_derived_field(
+            results,
+            f"{estimator}_pairwise_absolute_error",
+            lambda row, key=pairwise_key: abs(
+                float(row[key]) - float(row["actual_utility_regret"])
+            ),
+        )
+        print(
+            "REGRET_MAX_COMPARISON "
+            f"covariance={estimator} panels={len(results)} games={pairwise.games} "
+            f"pairwise_mean={pairwise.mean:.9f} joint_mean={predicted.mean:.9f} "
+            f"joint_minus_pairwise={structural_gap.mean:+.9f} "
+            f"gap_ci95=[{structural_gap.low:+.9f},{structural_gap.high:+.9f}] "
+            f"gap_p={structural_gap.p_value:.6g} "
+            f"pairwise_bias={pairwise_bias.mean:+.9f} "
+            f"joint_bias={bias.mean:+.9f} "
+            f"pairwise_mae={pairwise_mae.mean:.9f} joint_mae={mae.mean:.9f}"
         )
 
     correlations = [
@@ -509,28 +683,25 @@ def print_summary(results: list[dict[str, object]]) -> None:
         float(row["median_correlated_to_independent_delta_se"])
         for row in results
     ]
-    for comparison_index, (left, right) in enumerate(
-        (("correlated", "independent"),)
-    ):
-        mae_delta = errors[left] - errors[right]
-        delta_mean = float(np.mean(mae_delta))
-        delta_low, delta_high = bootstrap_mean_ci(
-            mae_delta, 0xD311A + comparison_index
+    for left, right in (("correlated", "independent"),):
+        mae_delta = add_derived_field(
+            results,
+            f"{left}_minus_{right}_absolute_error",
+            lambda row, left_key=error_keys[left], right_key=error_keys[right]: (
+                float(row[left_key]) - float(row[right_key])
+            ),
         )
-        pvalue = paired_randomization_pvalue(
-            mae_delta, 0xBA1 + comparison_index
-        )
-        baseline_mae = float(np.mean(errors[right]))
+        baseline_mae = clustered_summary(results, error_keys[right]).mean
         relative_change = (
-            delta_mean / baseline_mae if baseline_mae > 0.0 else 0.0
+            mae_delta.mean / baseline_mae if baseline_mae > 0.0 else 0.0
         )
         print(
             "REGRET_ESTIMATOR_COMPARISON "
             f"metric=absolute_error_{left}_minus_{right} "
-            f"mean={delta_mean:+.9f} "
+            f"mean={mae_delta.mean:+.9f} "
             f"relative_change={relative_change:+.4f} "
-            f"bootstrap_ci95=[{delta_low:+.9f},{delta_high:+.9f}] "
-            f"paired_randomization_p={pvalue:.6g} "
+            f"game_clustered_t_ci95=[{mae_delta.low:+.9f},{mae_delta.high:+.9f}] "
+            f"p={mae_delta.p_value:.6g} "
             f"pairwise_utility_correlation_p10={float(np.quantile(correlations, 0.1)):+.4f} "
             f"median_pairwise_utility_correlation={statistics.median(correlations):+.4f} "
             f"pairwise_utility_correlation_p90={float(np.quantile(correlations, 0.9)):+.4f} "
@@ -547,20 +718,39 @@ def print_summary(results: list[dict[str, object]]) -> None:
             "mean_absolute_z="
             f"{statistics.fmean(float(row[f'{estimator}_pair_mean_absolute_z']) for row in results):.6f}"
         )
-    pair_nll_delta = np.asarray(
-        [
-            float(row["correlated_pair_nll"])
-            - float(row["independent_pair_nll"])
-            for row in results
-        ]
+    pair_nll_delta = add_derived_field(
+        results,
+        "correlated_minus_independent_pair_nll",
+        lambda row: float(row["correlated_pair_nll"])
+        - float(row["independent_pair_nll"]),
     )
-    pair_nll_low, pair_nll_high = bootstrap_mean_ci(pair_nll_delta, 0xC411B)
     print(
         "REGRET_PAIR_COMPARISON metric=nll_correlated_minus_independent "
-        f"mean={float(np.mean(pair_nll_delta)):+.6f} "
-        f"bootstrap_ci95=[{pair_nll_low:+.6f},{pair_nll_high:+.6f}] "
-        f"paired_randomization_p={paired_randomization_pvalue(pair_nll_delta, 0xCA11):.6g}"
+        f"mean={pair_nll_delta.mean:+.6f} "
+        f"game_clustered_t_ci95=[{pair_nll_delta.low:+.6f},{pair_nll_delta.high:+.6f}] "
+        f"p={pair_nll_delta.p_value:.6g}"
     )
+
+    near_tie_strata: dict[str, list[dict[str, object]]] = defaultdict(list)
+    for row in results:
+        near_tie_strata[
+            near_tie_label(int(row["correlated_near_tie_challengers"]))
+        ].append(row)
+    for label in ("0", "1", "2-3", "4+"):
+        group = near_tie_strata.get(label, [])
+        if not group:
+            continue
+        gap = clustered_summary(group, "correlated_joint_minus_pairwise")
+        pairwise_bias = clustered_summary(group, "correlated_pairwise_bias")
+        joint_bias = clustered_summary(group, "correlated_utility_bias")
+        print(
+            "REGRET_MAX_NEAR_TIE_STRATUM "
+            f"near_ties={label} panels={len(group)} games={gap.games} "
+            f"joint_minus_pairwise={gap.mean:+.9f} "
+            f"gap_ci95=[{gap.low:+.9f},{gap.high:+.9f}] "
+            f"pairwise_bias={pairwise_bias.mean:+.9f} "
+            f"joint_bias={joint_bias.mean:+.9f}"
+        )
 
     strata: dict[int, list[dict[str, object]]] = {}
     for row in results:

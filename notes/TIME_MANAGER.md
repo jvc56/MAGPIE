@@ -1381,6 +1381,17 @@ the intended structural behavior. The joint estimate is deliberately not yet
 allowed to stop production: common-scenario samples must first test the scalar
 covariance approximation and calibrate error by near-tie count.
 
+`tools/analyze_regret_estimators.py` now makes that audit explicit. For each
+trace panel it reconstructs the deployed `max_i E[(U_i-U*)+]` lower bound and
+Monte Carlo `E[(max_i U_i-U*)+]` under both independent and empirical
+common-scenario covariance, while retaining the exact legacy and Clark shadow
+values logged by the solver. It reports the structural joint-minus-pairwise
+gap by 0, 1, 2--3, and 4+ near-tie challengers, calibration against the common
+10-ply judge, and source-game-clustered Student-t intervals. Per-panel normal
+or bootstrap intervals are no longer accepted as inferential evidence. The
+active frozen tail predates these extra trace fields and remains untouched;
+the optional-stopping panel will use the corrected binary after that run.
+
 The correction model is still trained on independent fixed-budget arms while
 a live rule would stop on downward excursions of a cumulative trace. The
 thinking-curve harness can now retain the legacy and joint regrets at the
