@@ -654,20 +654,20 @@ static void game_runner_print_benchmark_turn(
          "peg_tm_false_starts=%llu eg_call_first=%llu eg_calls=%llu "
          "eg_nodes=%llu eg_depth_sum=%llu cgp=\"%s\"\n",
          game_runner->pair_game_number, (unsigned long long)game_runner->seed,
-         game_runner->turn_number + 1,
-         starting_player, player_on_turn_index,
+         game_runner->turn_number + 1, starting_player, player_on_turn_index,
          time_manager ? "timemanager" : "equal", rng_stream, bag_tiles,
-         (unsigned int)rack_get_total_letters(player_get_rack(game_get_player(
-             game_runner->game, player_on_turn_index))),
-         (unsigned int)rack_get_total_letters(player_get_rack(game_get_player(
-             game_runner->game, 1 - player_on_turn_index))),
+         (unsigned int)rack_get_total_letters(player_get_rack(
+             game_get_player(game_runner->game, player_on_turn_index))),
+         (unsigned int)rack_get_total_letters(player_get_rack(
+             game_get_player(game_runner->game, 1 - player_on_turn_index))),
          score_spread, clock_before_seconds * 1000.0,
          clock_after_seconds * 1000.0, (double)elapsed_ns / 1.0e6,
          budget_seconds * 1000.0, legacy_budget_seconds * 1000.0, move_string,
          equity_to_int(move_get_score(move)), reserve_shortfall,
          peg_shadow_seconds * 1000.0, peg_deposit_capped, peg_withdrawal_capped,
          regret_estimate->valid,
-         regret_estimate->valid ? regret_estimate->expected_utility_regret : NAN,
+         regret_estimate->valid ? regret_estimate->expected_utility_regret
+                                : NAN,
          play_chooser_regret_model_string(regret_estimate->model),
          play_chooser_regret_scope_string(regret_estimate->model),
          (unsigned long long)BENCHMARK_DELTA(static_moves),
@@ -955,8 +955,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   const PlayChooser *const turn_play_chooser =
       game_runner->play_choosers[player_on_turn_index];
   if (turn_play_chooser != NULL) {
-    regret_estimate =
-        play_chooser_get_last_regret_estimate(turn_play_chooser);
+    regret_estimate = play_chooser_get_last_regret_estimate(turn_play_chooser);
     if (regret_estimate.valid) {
       game_runner->expected_utility_regret[player_on_turn_index] +=
           regret_estimate.expected_utility_regret;
@@ -987,8 +986,7 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         benchmark_move_budget.peg_shadow_seconds,
         benchmark_move_budget.peg_deposit_capped,
         benchmark_move_budget.peg_withdrawal_capped, &regret_estimate,
-        benchmark_cgp,
-        &benchmark_before, &benchmark_after);
+        benchmark_cgp, &benchmark_before, &benchmark_after);
     free(benchmark_cgp);
   }
 

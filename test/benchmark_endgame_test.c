@@ -1055,9 +1055,9 @@ void test_endgame_value_curve(void) {
         .run_id = (uint64_t)pos + 1,
     };
     const int solving_player = game_get_player_on_turn_index(game);
-    const int turns_remaining =
-        MAX(1, (int)rack_get_total_letters(
-                   player_get_rack(game_get_player(game, solving_player))));
+    const int solving_rack_tiles = (int)rack_get_total_letters(
+        player_get_rack(game_get_player(game, solving_player)));
+    const int turns_remaining = solving_rack_tiles > 1 ? solving_rack_tiles : 1;
     const uint64_t tm_future_reserve_nodes =
         tm_auto_future_nodes ? endgame_future_depth5_reserve_nodes(rack_tiles)
                              : 0;

@@ -1,10 +1,9 @@
 #include "endgame_admission_model.h"
 
 #include "../ent/analysis_progress.h"
+#include "endgame_admission_model_default_data.h"
 #include <math.h>
 #include <stdint.h>
-
-#include "endgame_admission_model_default_data.h"
 
 static const EndgameAdmissionDepthModel *
 endgame_admission_find_depth_model(const EndgameAdmissionModel *model,
