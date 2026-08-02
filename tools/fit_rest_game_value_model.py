@@ -59,6 +59,7 @@ class Label:
     rate_profile: int = 0
     own_rack: int = 7
     opp_rack: int = 7
+    planning_regret_valid: bool = False
 
     @property
     def phase(self) -> int:
@@ -121,6 +122,9 @@ def read_labels(path: Path) -> list[Label]:
                 rate_profile=int(row.get("rate_profile", "0")),
                 own_rack=int(row.get("own_rack", "7")),
                 opp_rack=int(row.get("opp_rack", "7")),
+                planning_regret_valid=bool(
+                    int(row.get("planning_regret_valid", "0"))
+                ),
             )
             if (
                 not math.isfinite(label.budget)
@@ -355,6 +359,7 @@ def artifact(
     test_games: set[str],
     calibration_metrics: dict[str, float | int],
     test_metrics: dict[str, float | int],
+    planning_regret_valid: bool,
 ) -> dict[str, object]:
     digest = hashlib.sha256(source.read_bytes()).hexdigest()
     return {
@@ -366,7 +371,12 @@ def artifact(
         "surrogate_allocation_gate_passed": False,
         "terminal_game_gate_passed": False,
         "gate_reason": "allocation and terminal game gates not yet supplied",
-        "label_scope": "realized_suffix_oracle_allocator_surrogate",
+        "label_scope": (
+            "realized_suffix_expected_regret_allocator"
+            if planning_regret_valid
+            else "realized_suffix_oracle_choice_contaminated"
+        ),
+        "planning_regret_valid": planning_regret_valid,
         "feature_contract": {
             "future_turns": "predicted_from_current_state_only",
             "spread": "player_on_turn_point_of_view",
@@ -421,6 +431,7 @@ def main() -> None:
         test_games,
         metrics(model, calibration),
         metrics(model, test),
+        all(label.planning_regret_valid for label in labels),
     )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     with args.output.open("w", encoding="utf-8") as stream:

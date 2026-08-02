@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import math
 from pathlib import Path
 
 
@@ -24,17 +25,61 @@ def fields(line: str) -> dict[str, str]:
     return result
 
 
+def load_predictions(
+    path: Path, plies: int, column: str
+) -> dict[tuple[int, int], tuple[float, float]]:
+    predictions: dict[tuple[int, int], tuple[float, float]] = {}
+    with path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        required = {"position", "plies", "target_nodes", "actual_regret", column}
+        missing = required - set(reader.fieldnames or [])
+        if missing:
+            raise ValueError(
+                f"prediction CSV missing fields: {','.join(sorted(missing))}"
+            )
+        for row in reader:
+            if int(row["plies"]) != plies:
+                continue
+            expected = float(row[column])
+            actual = float(row["actual_regret"])
+            if (
+                not math.isfinite(expected)
+                or expected < 0.0
+                or not math.isfinite(actual)
+                or actual < 0.0
+            ):
+                raise ValueError("prediction regrets must be finite and nonnegative")
+            key = (int(row["position"]), int(row["target_nodes"]))
+            previous = predictions.setdefault(key, (expected, actual))
+            if previous != (expected, actual):
+                raise ValueError(f"conflicting prediction row {key}")
+    if not predictions:
+        raise ValueError(f"prediction CSV has no plies={plies} rows")
+    return predictions
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate_corpus", type=Path)
     parser.add_argument("thinking_curve_log", type=Path)
     parser.add_argument("--plies", type=int, required=True)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--regret-predictions", type=Path)
+    parser.add_argument(
+        "--prediction-column", default="state_expected_regret"
+    )
     parser.add_argument(
         "--trajectory-scope",
         default="observed_partial_bag50_plus_top60",
     )
     args = parser.parse_args()
+    predictions = (
+        load_predictions(
+            args.regret_predictions, args.plies, args.prediction_column
+        )
+        if args.regret_predictions is not None
+        else None
+    )
 
     metadata: dict[int, dict[str, str]] = {}
     with args.candidate_corpus.open(encoding="utf-8") as stream:
@@ -123,6 +168,23 @@ def main() -> None:
         if position not in metadata:
             raise ValueError(f"position {position} missing from candidate corpus")
         meta = metadata[position]
+        expected_regret = ""
+        if predictions is not None:
+            prediction = predictions.get((position, target))
+            if prediction is None:
+                raise ValueError(
+                    f"missing regret prediction position={position} target={target}"
+                )
+            expected, predicted_actual = prediction
+            observed_actual = float(point["judge_regret"])
+            if not math.isclose(
+                predicted_actual, observed_actual, rel_tol=0.0, abs_tol=5.0e-12
+            ):
+                raise ValueError(
+                    f"prediction/log oracle mismatch position={position} "
+                    f"target={target}"
+                )
+            expected_regret = f"{expected:.12g}"
         rows.append(
             {
                 **meta,
@@ -138,6 +200,7 @@ def main() -> None:
                 "added_candidates": 0,
                 "observed_seconds": f"{int(point.get('elapsed_ns', '0')) / 1.0e9:.9f}",
                 "regret": point["judge_regret"],
+                "expected_regret": expected_regret,
                 "option": target,
                 "mode": "sim",
                 "plies": args.plies,
@@ -169,6 +232,7 @@ def main() -> None:
                 "added_candidates": 0,
                 "observed_seconds": 0,
                 "regret": 0,
+                "expected_regret": 0,
                 "option": "forced",
                 "mode": "sim",
                 "plies": args.plies,

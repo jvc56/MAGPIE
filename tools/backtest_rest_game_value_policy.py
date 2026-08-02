@@ -4,13 +4,18 @@
 This is a decision test, not another regression metric.  At each realized
 turn the learned policy chooses one legal completed-work boundary by minimizing
 
-    current oracle regret + predicted regret of the later-turn suffix
+    current cross-fitted expected regret + predicted regret of the later-turn
+    suffix
 
-under its remaining clock.  Equal slicing chooses the best boundary fitting
-an equal share of that same clock.  Both policies then advance along the same
-held-out source trajectory, so the comparison isolates allocation quality but
-does not model positions changed by a different move.  It is therefore a
-necessary surrogate gate, never the terminal live-policy gate.
+under its remaining clock. Equal slicing chooses the deepest boundary fitting
+an equal share of that same clock. Only after those choices are frozen does
+the replay read their held-out oracle regret. Inputs without a separate
+``expected_regret`` column retain the legacy oracle-choice behavior and are
+reported as such; they cannot pass the honest-choice gate. Both policies then
+advance along the same held-out source trajectory, so the comparison isolates
+allocation quality but does not model positions changed by a different move.
+It is therefore a necessary surrogate gate, never the terminal live-policy
+gate.
 
 Inference and confidence intervals are clustered by complete source game.
 Rate profiles, player trajectories, and starting budgets within a source game
@@ -21,6 +26,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import csv
 from dataclasses import dataclass
 import json
 import math
@@ -57,9 +63,12 @@ class ReplayResult:
     starting_budget: float
     learned_regret: float
     equal_regret: float
+    learned_expected_regret: float
+    equal_expected_regret: float
     oracle_regret: float
     learned_spent: float
     equal_spent: float
+    honest_choice: bool
 
     @property
     def learned_minus_equal(self) -> float:
@@ -101,21 +110,29 @@ def probe_for(curve: TurnCurve, budget: float) -> Label:
 
 
 def absolute_options(
-    curve: TurnCurve, cost_quantum: float
-) -> list[tuple[float, float]]:
+    curve: TurnCurve, cost_quantum: float, *, include_dominated: bool = False
+) -> list[tuple[float, float, float]]:
+    options = curve.all_options if include_dominated else curve.options
     return [
-        (curve.mandatory_cost + option.cost_units * cost_quantum, option.regret)
-        for option in curve.options
+        (
+            curve.mandatory_cost + option.cost_units * cost_quantum,
+            option.regret,
+            option.score_regret,
+        )
+        for option in options
     ]
 
 
 def _best_fitting_option(
-    options: list[tuple[float, float]], limit: float
-) -> tuple[float, float] | None:
+    options: list[tuple[float, float, float]], limit: float
+) -> tuple[float, float, float] | None:
     fitting = [option for option in options if option[0] <= limit + 1.0e-12]
     if not fitting:
         return None
-    return min(fitting, key=lambda option: (option[1], option[0]))
+    # Equal slicing chooses its work budget before seeing a search result. It
+    # therefore buys the deepest completed boundary that fits, not the
+    # held-out oracle-best affordable boundary.
+    return max(fitting, key=lambda option: option[0])
 
 
 def choose_learned(
@@ -124,9 +141,11 @@ def choose_learned(
     remaining_budget: float,
     is_last_turn: bool,
     cost_quantum: float,
-) -> tuple[float, float] | None:
-    choices: list[tuple[float, float, float]] = []
-    for cost, regret in absolute_options(curve, cost_quantum):
+) -> tuple[float, float, float] | None:
+    choices: list[tuple[float, float, float, float]] = []
+    for cost, expected_regret, actual_regret in absolute_options(
+        curve, cost_quantum
+    ):
         future_budget = remaining_budget - cost
         if future_budget < -1.0e-12:
             continue
@@ -137,11 +156,20 @@ def choose_learned(
         )
         if not math.isfinite(future_regret) or future_regret < 0.0:
             continue
-        choices.append((regret + future_regret, regret, cost))
+        choices.append(
+            (
+                expected_regret + future_regret,
+                cost,
+                expected_regret,
+                actual_regret,
+            )
+        )
     if not choices:
         return None
-    _, regret, cost = min(choices, key=lambda choice: (choice[0], choice[2]))
-    return cost, regret
+    _, cost, expected_regret, actual_regret = min(
+        choices, key=lambda choice: (choice[0], choice[1])
+    )
+    return cost, expected_regret, actual_regret
 
 
 def choose_equal(
@@ -149,8 +177,8 @@ def choose_equal(
     remaining_budget: float,
     turns_remaining: int,
     cost_quantum: float,
-) -> tuple[float, float] | None:
-    options = absolute_options(curve, cost_quantum)
+) -> tuple[float, float, float] | None:
+    options = absolute_options(curve, cost_quantum, include_dominated=True)
     choice = _best_fitting_option(
         options, remaining_budget / float(turns_remaining)
     )
@@ -160,7 +188,7 @@ def choose_equal(
     # below mandatory work, buy the cheapest boundary that fits the full clock
     # and let later turns absorb the shortfall.
     fitting = [option for option in options if option[0] <= remaining_budget + 1e-12]
-    return min(fitting, key=lambda option: (option[0], option[1])) if fitting else None
+    return min(fitting, key=lambda option: option[0]) if fitting else None
 
 
 def oracle_suffix_regret(
@@ -176,12 +204,13 @@ def oracle_suffix_regret(
     for curve in reversed(curves):
         current = [math.inf] * (maximum_units + 1)
         for capacity in range(maximum_units + 1):
-            for option in curve.options:
+            for option in (curve.all_options or curve.options):
                 if option.cost_units > capacity:
                     break
                 current[capacity] = min(
                     current[capacity],
-                    option.regret + following[capacity - option.cost_units],
+                    option.score_regret
+                    + following[capacity - option.cost_units],
                 )
         following = current
     return following[maximum_units]
@@ -197,6 +226,8 @@ def replay_sequence(
     equal_budget = starting_budget
     learned_regret = 0.0
     equal_regret = 0.0
+    learned_expected_regret = 0.0
+    equal_expected_regret = 0.0
     for index, curve in enumerate(curves):
         remaining_turns = len(curves) - index
         learned = choose_learned(
@@ -213,8 +244,10 @@ def replay_sequence(
             return None
         learned_budget -= learned[0]
         equal_budget -= equal[0]
-        learned_regret += learned[1]
-        equal_regret += equal[1]
+        learned_expected_regret += learned[1]
+        equal_expected_regret += equal[1]
+        learned_regret += learned[2]
+        equal_regret += equal[2]
 
     oracle_regret = oracle_suffix_regret(curves, starting_budget, cost_quantum)
     if not math.isfinite(oracle_regret):
@@ -227,9 +260,14 @@ def replay_sequence(
         starting_budget=starting_budget,
         learned_regret=learned_regret,
         equal_regret=equal_regret,
+        learned_expected_regret=learned_expected_regret,
+        equal_expected_regret=equal_expected_regret,
         oracle_regret=oracle_regret,
         learned_spent=starting_budget - learned_budget,
         equal_spent=starting_budget - equal_budget,
+        honest_choice=all(
+            curve.has_separate_expected_regret for curve in curves
+        ),
     )
 
 
@@ -254,7 +292,9 @@ def replay_heldout(
     return results
 
 
-def clustered_summary(results: list[ReplayResult]) -> dict[str, object]:
+def clustered_summary(
+    results: list[ReplayResult], planning_model_honest: bool = False
+) -> dict[str, object]:
     if not results:
         return {
             "source_games": 0,
@@ -262,6 +302,9 @@ def clustered_summary(results: list[ReplayResult]) -> dict[str, object]:
             "mean_learned_minus_equal": None,
             "ci95": [None, None],
             "p_value": None,
+            "honest_choice_replays": 0,
+            "legacy_oracle_choice_replays": 0,
+            "planning_model_honest": planning_model_honest,
             "surrogate_gate_passed": False,
         }
     by_game: dict[str, list[ReplayResult]] = defaultdict(list)
@@ -297,6 +340,29 @@ def clustered_summary(results: list[ReplayResult]) -> dict[str, object]:
         / len(results),
         "mean_equal_regret": sum(item.equal_regret for item in results)
         / len(results),
+        "mean_learned_expected_regret": sum(
+            item.learned_expected_regret for item in results
+        )
+        / len(results),
+        "mean_equal_expected_regret": sum(
+            item.equal_expected_regret for item in results
+        )
+        / len(results),
+        "mean_learned_calibration_residual": sum(
+            item.learned_regret - item.learned_expected_regret
+            for item in results
+        )
+        / len(results),
+        "mean_equal_calibration_residual": sum(
+            item.equal_regret - item.equal_expected_regret
+            for item in results
+        )
+        / len(results),
+        "honest_choice_replays": sum(item.honest_choice for item in results),
+        "legacy_oracle_choice_replays": sum(
+            not item.honest_choice for item in results
+        ),
+        "planning_model_honest": planning_model_honest,
         "mean_oracle_regret": sum(item.oracle_regret for item in results)
         / len(results),
         "mean_learned_excess_oracle": sum(
@@ -313,9 +379,28 @@ def clustered_summary(results: list[ReplayResult]) -> dict[str, object]:
         # Passing this gate means only that the allocator improved the
         # realized-trajectory oracle-regret surrogate on held-out games.
         "surrogate_gate_passed": (
-            len(by_game) >= 20 and ci[1] is not None and ci[1] < 0.0
+            len(by_game) >= 20
+            and planning_model_honest
+            and all(item.honest_choice for item in results)
+            and ci[1] is not None
+            and ci[1] < 0.0
         ),
     }
+
+
+def labels_have_honest_planning(path: Path) -> bool:
+    with path.open(newline="", encoding="utf-8") as stream:
+        reader = csv.DictReader(stream)
+        if "planning_regret_valid" not in (reader.fieldnames or []):
+            return False
+        relevant = [
+            row
+            for row in reader
+            if int(row["forecast_valid"]) and int(row["future_turns"]) > 0
+        ]
+    return bool(relevant) and all(
+        int(row["planning_regret_valid"]) for row in relevant
+    )
 
 
 def main() -> None:
@@ -329,6 +414,7 @@ def main() -> None:
     args = parser.parse_args()
 
     labels = read_labels(args.labels)
+    planning_model_honest = labels_have_honest_planning(args.labels)
     train_games, calibration_games, test_games = split_games(
         (label.game for label in labels), args.split_seed
     )
@@ -346,7 +432,8 @@ def main() -> None:
             calibration_games,
             model.budgets,
             args.cost_quantum,
-        )
+        ),
+        planning_model_honest,
     )
     test = clustered_summary(
         replay_heldout(
@@ -355,11 +442,12 @@ def main() -> None:
             test_games,
             model.budgets,
             args.cost_quantum,
-        )
+        ),
+        planning_model_honest,
     )
     document = {
         "artifact_kind": "rest_game_value_policy_backtest",
-        "scope": "heldout_realized_trajectory_oracle_regret_surrogate",
+        "scope": "heldout_realized_trajectory_expected_choice_oracle_score",
         "split_seed": args.split_seed,
         "calibration": calibration,
         "test": test,

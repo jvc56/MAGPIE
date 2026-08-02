@@ -40,6 +40,7 @@ g,1,1,1,0,8
         self.assertEqual(by_key[(0, 0, 2.0)].oracle_future_regret, 0.0)
         self.assertEqual(by_key[(0, 0, 1.0)].future_loss_per_cost, 2.0)
         self.assertEqual(by_key[(0, 0, 2.0)].future_loss_per_cost, 1.0)
+        self.assertFalse(by_key[(0, 0, 2.0)].planning_regret_valid)
 
         # A player's suffix contains only that player's later decisions.
         self.assertEqual(by_key[(1, 1, 2.0)].future_turns, 0)
@@ -68,6 +69,29 @@ g,0,0,2,0
 """
         parsed = curves(source)
         self.assertEqual([(option.cost_units, option.regret) for option in parsed[0].options], [(0, 1.0), (2, 0.0)])
+        self.assertEqual(
+            [option.cost_units for option in parsed[0].all_options],
+            [0, 1, 2],
+        )
+
+    def test_expected_regret_selects_without_reading_actual_regret(self) -> None:
+        source = """game,turn,player,cost,regret,expected_regret
+g,0,0,0,9,0
+g,0,0,1,0,1
+g,2,0,0,1,0.2
+g,2,0,1,0,0.1
+"""
+        parsed = curves(source)
+        self.assertTrue(parsed[0].has_separate_expected_regret)
+        # The planning envelope keeps the cheap option because its expected
+        # regret is lower, even though the held-out oracle prefers the other.
+        self.assertEqual(len(parsed[0].options), 1)
+        self.assertEqual(parsed[0].options[0].regret, 0.0)
+        self.assertEqual(parsed[0].options[0].score_regret, 9.0)
+        self.assertEqual(len(parsed[0].all_options), 2)
+        labels = build_value_labels(parsed, [1], 1.0)
+        at_turn_zero = next(label for label in labels if label.turn == 0)
+        self.assertTrue(at_turn_zero.planning_regret_valid)
 
     def test_runtime_rate_profiles_are_allocated_independently(self) -> None:
         source = """game,turn,player,rate_profile,cost,regret,bag

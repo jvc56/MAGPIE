@@ -1,12 +1,16 @@
 #!/usr/bin/env python3
-"""Build oracle rest-of-game allocation labels from complete turn curves.
+"""Build rest-of-game allocation labels from complete turn curves.
 
 The input is a CSV with one row per legal work boundary and these required
 columns:
 
-    game, turn, player, cost, regret
+    game, turn, player, cost, regret[, expected_regret]
 
 All rows for one (game, turn, player) form that turn's work/regret curve.
+``regret`` is always the held-out score. When ``expected_regret`` is present,
+the allocator uses it and retains ``regret`` only for later policy scoring.
+Legacy inputs without it use the oracle score for both roles and therefore
+cannot establish an oracle-independent policy gate.
 `cost` may be seconds for one runtime-rate scenario or any other consistent
 portable cost unit. To keep the eventual runtime artifact hardware-independent,
 generate labels under several mode-rate scenarios rather than baking one
@@ -14,9 +18,10 @@ machine's wall clock into the source curves.
 
 For every current turn and requested remaining-cost budget, this tool solves
 the multiple-choice suffix allocation problem over that player's *later*
-turns. The output is supervision for a value-to-go model; it is not itself a
-runtime predictor. Complete source games must remain intact when splitting the
-result into training/calibration/test sets.
+turns using the planning-regret column. The output is supervision for a
+value-to-go model; it is not itself a runtime predictor. Complete source games
+must remain intact when splitting the result into training/calibration/test
+sets.
 """
 
 from __future__ import annotations
@@ -33,7 +38,17 @@ from typing import Iterable, TextIO
 @dataclass(frozen=True)
 class WorkOption:
     cost_units: int
+    # Regret available to the offline/runtime allocator. In legacy inputs this
+    # falls back to the oracle score; honest policy tests provide a separately
+    # cross-fitted ``expected_regret`` column.
     regret: float
+    # Held-out score for evaluating the choice. It must never break a tie or
+    # otherwise affect selection when expected_regret was supplied.
+    actual_regret: float | None = None
+
+    @property
+    def score_regret(self) -> float:
+        return self.regret if self.actual_regret is None else self.actual_regret
 
 
 @dataclass(frozen=True)
@@ -45,6 +60,11 @@ class TurnCurve:
     mandatory_cost: float
     options: tuple[WorkOption, ...]
     features: dict[str, str]
+    has_separate_expected_regret: bool = False
+    # Exact measured boundaries before expected-regret dominance pruning.
+    # Baseline policies that commit to a fixed budget must select from these,
+    # because a held-out score may worsen at a later boundary.
+    all_options: tuple[WorkOption, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -62,12 +82,14 @@ class ValueLabel:
     future_loss_per_cost: float
     future_gain_per_cost: float
     features: dict[str, str]
+    planning_regret_valid: bool
 
 
 REQUIRED_FIELDS = {"game", "turn", "player", "cost", "regret"}
 OPTION_FIELDS = {
     "cost",
     "regret",
+    "expected_regret",
     "option",
     # Native work coordinates vary between legal result boundaries and are
     # inputs to cost conversion, not state features for value-to-go fitting.
@@ -117,33 +139,60 @@ def _normalize_turn_rows(
                     f"inconsistent {field} for game={game} turn={turn} player={player}"
                 )
 
-    raw_options = [
-        (
-            _finite_nonnegative(row["cost"], "cost"),
-            _finite_nonnegative(row["regret"], "regret"),
+    expected_presence = {
+        row.get("expected_regret", "").strip() != "" for row in rows
+    }
+    if len(expected_presence) != 1:
+        raise ValueError(
+            f"partial expected_regret curve for game={game} turn={turn}"
         )
-        for row in rows
-    ]
-    mandatory_cost = min(cost for cost, _ in raw_options)
+    has_expected_regret = expected_presence.pop()
+    raw_options = []
+    for row_index, row in enumerate(rows):
+        actual_regret = _finite_nonnegative(row["regret"], "regret")
+        expected_regret = (
+            _finite_nonnegative(row["expected_regret"], "expected_regret")
+            if has_expected_regret
+            else actual_regret
+        )
+        raw_options.append(
+            (
+                _finite_nonnegative(row["cost"], "cost"),
+                expected_regret,
+                actual_regret,
+                row_index,
+            )
+        )
+    mandatory_cost = min(cost for cost, _, _, _ in raw_options)
 
     # Round incremental costs upward. A training label must never buy work that
     # does not actually fit the advertised budget merely because of binning.
-    by_units: dict[int, float] = {}
-    for cost, regret in raw_options:
+    by_units: dict[int, tuple[float, float, int]] = {}
+    for cost, expected_regret, actual_regret, row_index in raw_options:
         incremental = max(0.0, cost - mandatory_cost)
         units = int(math.ceil(incremental / cost_quantum - 1.0e-12))
-        by_units[units] = min(regret, by_units.get(units, math.inf))
+        previous = by_units.get(units)
+        # Equal-cost ties are resolved by the original stable row order, not
+        # by the held-out oracle score.
+        if previous is None or expected_regret < previous[0] - 1.0e-15:
+            by_units[units] = (expected_regret, actual_regret, row_index)
 
     # Discard an option that is no better than a cheaper one. This is also the
     # monotone lower envelope required by a rational allocator: it can always
     # retain the cheaper completed result instead of paying more for a worse
     # oracle expectation.
+    all_options = [
+        WorkOption(units, expected_regret, actual_regret)
+        for units, (expected_regret, actual_regret, _) in sorted(
+            by_units.items()
+        )
+    ]
     options: list[WorkOption] = []
     best_regret = math.inf
-    for units, regret in sorted(by_units.items()):
-        if regret + 1.0e-15 < best_regret:
-            options.append(WorkOption(units, regret))
-            best_regret = regret
+    for option in all_options:
+        if option.regret + 1.0e-15 < best_regret:
+            options.append(option)
+            best_regret = option.regret
     if not options or options[0].cost_units != 0:
         raise ValueError(
             f"turn curve lacks a minimum-cost option for game={game} turn={turn}"
@@ -156,6 +205,8 @@ def _normalize_turn_rows(
         mandatory_cost=mandatory_cost,
         options=tuple(options),
         features=features,
+        has_separate_expected_regret=has_expected_regret,
+        all_options=tuple(all_options),
     )
 
 
@@ -247,6 +298,10 @@ def build_value_labels(
             # this label prices preserving clock for later turns.
             future_index = index + 1
             future_turns = len(sequence) - future_index
+            planning_regret_valid = all(
+                curve.has_separate_expected_regret
+                for curve in sequence[future_index:]
+            )
             required = mandatory_suffix[future_index]
             table = tables[future_index]
             for budget in budget_values:
@@ -266,6 +321,7 @@ def build_value_labels(
                             future_loss_per_cost=math.nan,
                             future_gain_per_cost=math.nan,
                             features=current_curve.features,
+                            planning_regret_valid=planning_regret_valid,
                         )
                     )
                     continue
@@ -301,6 +357,7 @@ def build_value_labels(
                         future_loss_per_cost=loss,
                         future_gain_per_cost=gain,
                         features=current_curve.features,
+                        planning_regret_valid=planning_regret_valid,
                     )
                 )
     labels.sort(
@@ -341,6 +398,7 @@ def write_labels(labels: list[ValueLabel], stream: TextIO) -> None:
         "oracle_future_regret",
         "future_loss_per_cost",
         "future_gain_per_cost",
+        "planning_regret_valid",
         "label_scope",
         *feature_fields,
     ]
@@ -362,7 +420,12 @@ def write_labels(labels: list[ValueLabel], stream: TextIO) -> None:
             "oracle_future_regret": _format_float(label.oracle_future_regret),
             "future_loss_per_cost": _format_float(label.future_loss_per_cost),
             "future_gain_per_cost": _format_float(label.future_gain_per_cost),
-            "label_scope": "realized_suffix_oracle_allocator",
+            "planning_regret_valid": int(label.planning_regret_valid),
+            "label_scope": (
+                "realized_suffix_expected_regret_allocator"
+                if label.planning_regret_valid
+                else "realized_suffix_oracle_choice_contaminated"
+            ),
         }
         row.update(
             {

@@ -1262,6 +1262,15 @@ panel's oracle envelope and their backtests are therefore exactly unchanged.
 The top-60/top-15 topology mismatch is an additional reason these priors are
 not live-eligible.
 
+The replay itself now represents planning and scoring separately. A curve may
+carry cross-fitted `expected_regret` for allocation and held-out `regret` for
+scoring. Learned allocation can only see the former. Equal slicing commits to
+the deepest completed boundary fitting its slice rather than selecting the
+oracle-best affordable result after the fact. A legacy curve without the
+separate expected field remains readable for diagnosis, but its replay is
+explicitly counted as oracle-choice contamination and cannot pass the honest
+surrogate gate.
+
 The next honest gate must choose current-turn work using only information
 available at that checkpoint: either a cross-fitted expected-regret model or a
 true cumulative solver trace carrying its contemporaneous regret estimate.

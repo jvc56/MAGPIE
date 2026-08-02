@@ -65,6 +65,33 @@ class BacktestRestGameValuePolicyTest(unittest.TestCase):
         self.assertEqual(summary["replays"], 2)
         self.assertFalse(summary["surrogate_gate_passed"])
 
+    def test_expected_choice_is_frozen_before_heldout_scoring(self) -> None:
+        source = io.StringIO(
+            "game,turn,player,rate_profile,cost,regret,expected_regret,bag,"
+            "spread,predicted_future_turns\n"
+            # Expected regret says stop cheaply; the held-out oracle says the
+            # exact opposite. Learned must not peek, while equal slicing buys
+            # the deepest boundary fitting its committed slice.
+            "test,0,0,0,0,9,0,0,0,0\n"
+            "test,0,0,0,1,0,1,0,0,0\n"
+        )
+        curves = read_turn_curves(source, 1.0)
+        model = fit_model(
+            [
+                Label("a", 0.0, 0.0, 0, 0, 0),
+                Label("b", 0.0, 0.0, 0, 0, 0),
+                Label("c", 0.0, 0.0, 0, 0, 0),
+            ]
+        )
+        result = replay_sequence(model, curves, 1.0, 1.0)
+        assert result is not None
+        self.assertTrue(result.honest_choice)
+        self.assertEqual(result.learned_expected_regret, 0.0)
+        self.assertEqual(result.learned_regret, 9.0)
+        self.assertEqual(result.equal_expected_regret, 1.0)
+        self.assertEqual(result.equal_regret, 0.0)
+        self.assertEqual(result.oracle_regret, 0.0)
+
 
 if __name__ == "__main__":
     unittest.main()

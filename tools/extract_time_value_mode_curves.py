@@ -64,6 +64,7 @@ CURVE_FIELDS = (
     "added_candidates",
     "observed_seconds",
     "regret",
+    "expected_regret",
     "option",
     "mode",
     "plies",
