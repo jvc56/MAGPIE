@@ -8,6 +8,9 @@ import unittest
 
 from tools.fit_sim_checkpoint_regret import (
     Point,
+    Prediction,
+    adjacent_tail_summaries,
+    calibration_summary,
     cross_fit,
     matched_depth_summaries,
     nonzero_regret_summary,
@@ -27,6 +30,7 @@ class FitSimCheckpointRegretTest(unittest.TestCase):
         *,
         bag: int = 40,
         policy: str = "static",
+        target_nodes: int = 1000,
     ) -> Point:
         return Point(
             game=game,
@@ -35,8 +39,8 @@ class FitSimCheckpointRegretTest(unittest.TestCase):
             spread=0,
             policy=policy,
             plies=plies,
-            target_nodes=1000,
-            actual_nodes=1000,
+            target_nodes=target_nodes,
+            actual_nodes=target_nodes,
             candidates=15,
             selected_rank=selected_rank,
             estimated_regret=0.0,
@@ -147,6 +151,48 @@ class FitSimCheckpointRegretTest(unittest.TestCase):
         )
         self.assertEqual(len(summary["by_bag"]), 2)
         self.assertEqual(len(summary["by_policy"]), 2)
+
+    def test_calibration_keeps_zero_prediction_atom_together(self) -> None:
+        predictions = [
+            Prediction(self.point(f"z{i}", i, 4, 0.01, 0), 0, 0.0, 0.0)
+            for i in range(12)
+        ] + [
+            Prediction(self.point(f"p{i}", 20 + i, 4, 0.02, 0), 1, 0.01, 0.01)
+            for i in range(8)
+        ]
+
+        summary = calibration_summary(predictions, "checkpoint_expected_regret")
+
+        self.assertEqual(summary["bins"][0]["rows"], 12)
+        self.assertTrue(summary["bins"][0]["infinite_underprediction"])
+        self.assertGreaterEqual(summary["underpredicting_bins"], 1)
+        self.assertFalse(summary["gate_pass"])
+
+    def test_adjacent_tail_reports_zero_change_upper_bound(self) -> None:
+        points: list[Point] = []
+        for index in range(10):
+            points.extend(
+                [
+                    self.point(
+                        str(index), index, 6, 0.01, 2, target_nodes=1000
+                    ),
+                    self.point(
+                        str(index), index, 6, 0.01, 2, target_nodes=2000
+                    ),
+                ]
+            )
+
+        row = adjacent_tail_summaries(points)[0]
+
+        self.assertEqual(row["choice_change_events"]["changed_games"], 0)
+        self.assertAlmostEqual(
+            row["choice_change_events"]["one_sided_upper95_if_zero"],
+            1.0 - 0.05 ** (1.0 / 10.0),
+        )
+        self.assertEqual(
+            row["selection_counts"],
+            {"later_better": 0, "earlier_better": 0, "tied": 10},
+        )
 
 
 if __name__ == "__main__":

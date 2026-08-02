@@ -508,6 +508,94 @@ def metrics(predictions: list[Prediction], attribute: str) -> dict[str, object]:
     }
 
 
+def calibration_summary(
+    predictions: list[Prediction], attribute: str
+) -> dict[str, object]:
+    """Describe cross-fitted reliability without splitting prediction ties.
+
+    Equal-count reliability bins can make a large atom at zero look better or
+    worse depending on row order.  Keep equal predictions in the same bin so
+    that a zero prediction with positive judge regret is exposed directly.
+    The slope is through the origin because both prediction and regret have a
+    meaningful zero.
+    """
+
+    observations = sorted(
+        (
+            float(getattr(prediction, attribute)),
+            prediction.point.actual_regret,
+        )
+        for prediction in predictions
+    )
+    denominator = sum(predicted * predicted for predicted, _ in observations)
+    slope = (
+        sum(predicted * actual for predicted, actual in observations)
+        / denominator
+        if denominator > 0.0
+        else None
+    )
+
+    bins: list[dict[str, object]] = []
+    start = 0
+    while start < len(observations) and len(bins) < 10:
+        bins_left = 10 - len(bins)
+        target_size = math.ceil((len(observations) - start) / bins_left)
+        end = min(len(observations), start + target_size)
+        while (
+            end < len(observations)
+            and observations[end][0] == observations[end - 1][0]
+        ):
+            end += 1
+        group = observations[start:end]
+        predicted_mean = sum(row[0] for row in group) / len(group)
+        actual_mean = sum(row[1] for row in group) / len(group)
+        infinite_underprediction = predicted_mean == 0.0 and actual_mean > 0.0
+        ratio = (
+            actual_mean / predicted_mean
+            if predicted_mean > 0.0
+            else None
+        )
+        bins.append(
+            {
+                "rows": len(group),
+                "prediction_min": group[0][0],
+                "prediction_max": group[-1][0],
+                "predicted_mean": predicted_mean,
+                "actual_mean": actual_mean,
+                "actual_over_predicted": ratio,
+                "infinite_underprediction": infinite_underprediction,
+                "underpredicts_by_more_than_2x": infinite_underprediction
+                or (ratio is not None and ratio > 2.0),
+            }
+        )
+        start = end
+
+    finite_ratios = [
+        float(row["actual_over_predicted"])
+        for row in bins
+        if row["actual_over_predicted"] is not None
+    ]
+    underpredicting_bins = sum(
+        bool(row["underpredicts_by_more_than_2x"]) for row in bins
+    )
+    slope_gate = slope is not None and 0.7 <= slope <= 1.4
+    decile_gate = underpredicting_bins == 0
+    return {
+        "rows": len(observations),
+        "calibration_slope": slope,
+        "slope_gate_range": [0.7, 1.4],
+        "slope_gate_pass": slope_gate,
+        "bins": bins,
+        "underpredicting_bins": underpredicting_bins,
+        "infinite_underprediction": any(
+            bool(row["infinite_underprediction"]) for row in bins
+        ),
+        "worst_finite_actual_over_predicted": max(finite_ratios, default=None),
+        "bin_gate_pass": decile_gate,
+        "gate_pass": slope_gate and decile_gate,
+    }
+
+
 def clustered_summary(values: Iterable[tuple[str, float]]) -> dict[str, object]:
     by_game: dict[str, list[float]] = defaultdict(list)
     for game, value in values:
@@ -756,6 +844,122 @@ def paired_tail_summaries(points: list[Point]) -> dict[str, object]:
     return {"overall": overall, "by_bag": by_bag, "by_policy": by_policy}
 
 
+def choice_change_event_summary(
+    pairs: Iterable[tuple[Point, Point]],
+) -> dict[str, object]:
+    by_game: dict[str, list[bool]] = defaultdict(list)
+    positions = 0
+    changed_positions = 0
+    for before, after in pairs:
+        if before.selected_rank < 0 or after.selected_rank < 0:
+            continue
+        changed = before.selected_rank != after.selected_rank
+        by_game[before.game].append(changed)
+        positions += 1
+        changed_positions += int(changed)
+    games = len(by_game)
+    changed_games = sum(any(events) for events in by_game.values())
+    return {
+        "positions": positions,
+        "changed_positions": changed_positions,
+        "games": games,
+        "changed_games": changed_games,
+        "game_event_rate": changed_games / games if games else None,
+        "one_sided_upper95_if_zero": (
+            1.0 - math.pow(0.05, 1.0 / games)
+            if games > 0 and changed_games == 0
+            else None
+        ),
+    }
+
+
+def adjacent_tail_summaries(points: list[Point]) -> list[dict[str, object]]:
+    """Compare each fixed-budget arm only with its immediate successor."""
+
+    series: dict[tuple[str, int, int], dict[int, Point]] = defaultdict(dict)
+    for point in points:
+        series[(point.game, point.position, point.plies)][point.target_nodes] = point
+    nodes_by_plies: dict[int, set[int]] = defaultdict(set)
+    for point in points:
+        nodes_by_plies[point.plies].add(point.target_nodes)
+
+    rows: list[dict[str, object]] = []
+    for plies, node_values in sorted(nodes_by_plies.items()):
+        ordered_nodes = sorted(node_values)
+        for before_nodes, after_nodes in zip(ordered_nodes, ordered_nodes[1:]):
+            pairs = [
+                (values[before_nodes], values[after_nodes])
+                for (game, _, point_plies), values in series.items()
+                if point_plies == plies
+                and before_nodes in values
+                and after_nodes in values
+            ]
+            comparable = [
+                pair
+                for pair in pairs
+                if pair[0].selected_rank >= 0 and pair[1].selected_rank >= 0
+            ]
+            rows.append(
+                {
+                    "plies": plies,
+                    "before_nodes": before_nodes,
+                    "after_nodes": after_nodes,
+                    "positions": len(pairs),
+                    "utility_regret_reduction": clustered_summary(
+                        (
+                            before.game,
+                            before.actual_regret - after.actual_regret,
+                        )
+                        for before, after in pairs
+                    ),
+                    "win_regret_reduction": clustered_summary(
+                        (
+                            before.game,
+                            before.actual_win_regret - after.actual_win_regret,
+                        )
+                        for before, after in pairs
+                        if before.actual_win_regret is not None
+                        and after.actual_win_regret is not None
+                    ),
+                    "spread_regret_reduction": clustered_summary(
+                        (
+                            before.game,
+                            before.actual_spread_regret
+                            - after.actual_spread_regret,
+                        )
+                        for before, after in pairs
+                        if before.actual_spread_regret is not None
+                        and after.actual_spread_regret is not None
+                    ),
+                    "choice_change": clustered_summary(
+                        (
+                            before.game,
+                            float(before.selected_rank != after.selected_rank),
+                        )
+                        for before, after in comparable
+                    ),
+                    "choice_change_events": choice_change_event_summary(
+                        comparable
+                    ),
+                    "selection_counts": {
+                        "later_better": sum(
+                            after.actual_regret < before.actual_regret
+                            for before, after in pairs
+                        ),
+                        "earlier_better": sum(
+                            before.actual_regret < after.actual_regret
+                            for before, after in pairs
+                        ),
+                        "tied": sum(
+                            before.actual_regret == after.actual_regret
+                            for before, after in pairs
+                        ),
+                    },
+                }
+            )
+    return rows
+
+
 def _matched_depth_row(
     pairs: list[tuple[Point, Point]],
     shallow_plies: int,
@@ -969,7 +1173,7 @@ def build_artifact(
     correction_model = fit_correction_model(points, state_model, prior_strength)
     return {
         "artifact_kind": "sim_checkpoint_regret_shadow",
-        "artifact_version": 2,
+        "artifact_version": 3,
         "source_log": str(log),
         "source_log_sha256": hashlib.sha256(log.read_bytes()).hexdigest(),
         "source_corpus": str(corpus),
@@ -985,8 +1189,15 @@ def build_artifact(
         "checkpoint_metrics": metrics(
             predictions, "checkpoint_expected_regret"
         ),
+        "state_calibration": calibration_summary(
+            predictions, "state_expected_regret"
+        ),
+        "checkpoint_calibration": calibration_summary(
+            predictions, "checkpoint_expected_regret"
+        ),
         "fixed_budget_summaries": fixed_budget_summaries(predictions),
         "paired_tail_summaries": paired_tail_summaries(points),
+        "adjacent_tail_summaries": adjacent_tail_summaries(points),
         "matched_depth_summaries": matched_depth_summaries(points),
         "state_cells": _cells_json(state_model.cells),
         "checkpoint_correction_cells": _cells_json(correction_model.cells),

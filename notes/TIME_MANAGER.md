@@ -1435,6 +1435,88 @@ allocation *within the measured envelope*, not successful full-clock
 water-filling. The risk-set 300K--10M tail must extend those curves before the
 dual policy is frozen and tested on new complete games.
 
+### Matched risk-set SIM tail (2026-08-02)
+
+The 80-root correction panel finished all 160 depth cells. It contains one
+root from each of 80 source games, balanced 40/40 between static and
+PlayChooser trajectories and 20 roots in each bag band (`<=15`, `16--35`,
+`36--60`, `61--100`). Every p4 and p6 cell completed independent
+300K/1M/3M/10M-node arms with the 10% uniform floor. All 160 accepted logs
+have four exact iteration schedules, nodes at or below their requested cap,
+`events=8`, `dropped=0`, and a non-forced 10-ply common-seed judge over the
+8--13 distinct checkpoint-risk nominees. Judge iterations equal
+`100000 * nominees`; there were no partial or rejected terminal cells. The
+frozen binary and corpus hashes match the manifest.
+
+The fixed-arm oracle means below are utility regret, win-probability delta,
+and spread delta against the best utility nominee in the risk-set union. The
+unit of inference is the source game and intervals are Student-t intervals.
+The signed win/spread columns need not be nonnegative because the
+utility-best nominee need not maximize either component separately.
+
+| Ply | Nodes | Utility regret (95% CI) | Win delta | Spread delta | Nonzero utility roots |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4 | 300K | 0.000744 [0.000019, 0.001469] | 0.000811 | 0.285 | 11/80 |
+| 4 | 1M | 0.000653 [-0.000068, 0.001375] | 0.000700 | 0.271 | 9/80 |
+| 4 | 3M | 0.000655 [-0.000067, 0.001377] | 0.000695 | 0.277 | 8/80 |
+| 4 | 10M | 0.000661 [-0.000061, 0.001382] | 0.000709 | 0.273 | 9/80 |
+| 6 | 300K | 0.000233 [-0.000082, 0.000548] | 0.000249 | 0.120 | 5/80 |
+| 6 | 1M | 0.000221 [-0.000093, 0.000536] | 0.000255 | 0.089 | 3/80 |
+| 6 | 3M | 0.000057 [-0.000011, 0.000125] | 0.000019 | 0.087 | 4/80 |
+| 6 | 10M | 0.000057 [-0.000011, 0.000125] | 0.000019 | 0.087 | 4/80 |
+
+At equal node budgets, p6-minus-p4 is directionally favorable at all four
+checkpoints. Expressed as p4 regret minus p6 regret, the utility reductions
+are `+0.000511` at 300K (95% CI `[-0.000030,+0.001052]`, `p=0.064`),
+`+0.000432` at 1M (`[-0.000114,+0.000978]`, `p=0.119`), `+0.000598` at
+3M (`[-0.000125,+0.001321]`, `p=0.104`), and `+0.000604` at 10M
+(`[-0.000119,+0.001326]`, `p=0.100`). The corresponding win reductions are
+`+0.000563`, `+0.000445`, `+0.000676`, and `+0.000690`; only the 300K win
+comparison is nominally significant (`p=0.0416`), and it is not significant
+after accounting for the multiple exploratory comparisons. Spread reductions
+are `+0.165`, `+0.182`, `+0.190`, and `+0.186`, all `p>=0.244`.
+
+The p6-versus-p4 choice differs on 7.5--11.25% of roots. Its apparent utility
+advantage is concentrated in bag `<=35`; no bag or source-policy stratum is
+individually significant. At 3M nodes, the matched utility reductions are
+`+0.000451` on PlayChooser roots and `+0.000745` on static roots, again with
+wide intervals crossing zero. This supports p6 as the more promising
+equal-node arm, but does not establish a live depth rule.
+
+Additional nodes rarely change the selected move. For p4, adjacent choice
+changes are 5/80 from 300K to 1M, 3/80 from 1M to 3M, and 3/80 from 3M to
+10M; none of the adjacent utility improvements is significant. For p6 they
+are 2/80, 4/80, and **0/80**. The p6 3M and 10M arms select the same move and
+therefore have exactly the same judged utility, win, and spread on every root.
+The exact one-sided 95% upper bound on the population probability of a p6
+3M-to-10M choice change is 3.68%. This is evidence of saturation within the
+top-15 risk-set panel, not proof that 10M nodes have no value in the full move
+space or on a different state distribution.
+
+The five-fold, complete-game cross-fitted model has state-only RMSE
+`0.002519` and checkpoint RMSE `0.002516`; the extra checkpoint features add
+almost no aggregate accuracy. More decisively, both models fail the
+preregistered reliability-shape gate even though their aggregate bias is near
+zero. The state model's through-origin calibration slope is `0.240`, with 4
+of 10 tie-preserving reliability bins underpredicting actual regret by more
+than 2x. The checkpoint model's slope is `0.305`; 326/640 rows receive an
+exact zero prediction despite positive mean judge regret, and 7 of 10 bins
+underpredict by more than 2x. Its worst finite bin ratio is 13.62. Aggregate
+mean calibration is therefore hiding severe conditional miscalibration in
+the sparse hard roots that matter for stopping.
+
+This panel is a correction/sensitivity sample, not a rescoring of the full
+complete-game corpus. It measures only nominees reachable inside the static
+top 15, so the outside-top-15 candidate-miss floor remains unknown. It also
+contains independent fixed-budget arms, not cumulative traces stopped on a
+downward estimator excursion, and its frozen binary predates the new joint
+multi-arm regret telemetry. Consequently it fails the current-turn stopping
+gate and cannot enable live allocation. The next decisive SIM experiment is
+the corrected cumulative optional-stopping panel with a matched fixed-budget
+control, common-scenario covariance, near-tie strata, and the common risk-set
+judge. Water-filling may use these curves only in offline sensitivity replay
+until that gate and a fresh terminal-game gate both pass.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
