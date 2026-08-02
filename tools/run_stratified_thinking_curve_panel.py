@@ -124,6 +124,7 @@ def main() -> None:
     parser.add_argument("--maximum-bag", type=int, default=100)
     parser.add_argument("--judge-plies", type=int, default=10)
     parser.add_argument("--judge-samples", type=int, default=100000)
+    parser.add_argument("--judge-risk-plays", type=int, default=0)
     parser.add_argument("--uniform-floor-per-mille", type=int, default=100)
     parser.add_argument("--chunk-positions", type=int, default=8)
     parser.add_argument("--wall-seconds", type=float, default=0.0)
@@ -147,6 +148,9 @@ def main() -> None:
         or args.chunk_positions <= 0
         or args.judge_plies <= max(plies_values)
         or args.judge_samples <= 0
+        or args.judge_risk_plays == 1
+        or args.judge_risk_plays < 0
+        or args.judge_risk_plays > args.num_plays
         or args.minimum_bag < 0
         or args.maximum_bag < args.minimum_bag
         or not 0 < args.uniform_floor_per_mille <= 1000
@@ -175,6 +179,7 @@ def main() -> None:
         "maximum_bag": args.maximum_bag,
         "judge_plies": args.judge_plies,
         "judge_samples": args.judge_samples,
+        "judge_risk_plays": args.judge_risk_plays,
         "uniform_floor_per_mille": args.uniform_floor_per_mille,
         "chunk_positions": args.chunk_positions,
     }
@@ -236,6 +241,9 @@ def main() -> None:
                     ),
                     "THINKING_CURVE_JUDGE_PLIES": str(args.judge_plies),
                     "THINKING_CURVE_JUDGE_SAMPLES": str(args.judge_samples),
+                    "THINKING_CURVE_JUDGE_RISK_PLAYS": str(
+                        args.judge_risk_plays
+                    ),
                     "THINKING_CURVE_REGRET_TRACE": "0",
                     "THINKING_CURVE_REGRET_STOP_TARGET": "0",
                     "THINKING_CURVE_WALL_SECONDS": (

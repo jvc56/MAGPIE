@@ -1240,6 +1240,19 @@ allocator cannot know which independently sampled arm happened to match the
 judge. The replay is therefore an optimistic allocation upper bound, not a
 valid three-minute stopping-policy test.
 
+There is a second optimism bug in that panel: the online judge received only
+the distinct moves nominated by the tested budgets. If every budget returned
+the same wrong move, the single-candidate judge was forced to assign it zero
+regret. The corrected harness can add a *checkpoint-observable risk set* for
+each arm: its selected move plus the highest uncertainty-bound challengers,
+chosen from that arm's means, variances, and sample counts. The union is sent
+to the common-seed judge only after every nomination finishes. Oracle values
+therefore score choices but cannot affect nomination, risk-set construction,
+or stopping. A one-root top-15 smoke exposed the practical difference: the
+4-ply policy returned the same move from 300K through 10M nodes, while the
+eight-move risk-set judge found a different move worth `0.02335` utility. The
+old nominee-only protocol would have reported zero at all four budgets.
+
 An independent top-60 deep panel was retained only as a sensitivity prior.
 After clustering by its 19--21 source games, lower-95% evidence credits a
 6-ply regret retention of 0.846 at 1M nodes, 0.811 at 3M, and 0.629 at 10M
@@ -1254,7 +1267,11 @@ available at that checkpoint: either a cross-fitted expected-regret model or a
 true cumulative solver trace carrying its contemporaneous regret estimate.
 Held-out oracle regret may score that choice, but may not choose it. A matched
 top-15 deep subset is also required to calibrate the 300K--10M tail relevant
-to game-in-three-minutes clocks. Live rest-of-game allocation remains off.
+to game-in-three-minutes clocks. The frozen follow-up panel contains 80 roots
+from 80 distinct games, balanced 40/40 by trajectory policy and 10 per policy
+in each of four bag phases. It measures independent 300K/1M/3M/10M arms at
+4 and 6 ply and judges the union of eight-play checkpoint risk sets. Live
+rest-of-game allocation remains off.
 
 ## Validation
 
