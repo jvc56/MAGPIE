@@ -55,6 +55,51 @@ class SelectMatchedSimTailPanelTest(unittest.TestCase):
         self.assertEqual(set(manifest["strata_selected"].values()), {2})
         self.assertEqual(on_disk["mapping"], manifest["mapping"])
 
+    def test_excludes_games_from_prior_manifest(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.positions"
+            lines: list[str] = []
+            position = 0
+            for game in range(12):
+                for turn, (_, minimum, _) in enumerate(BAG_BANDS, start=1):
+                    lines.append(
+                        "TIME_VALUE_POSITION "
+                        f"position={position} game={game} "
+                        f"source_seed={1000 + game} start=0 turn={turn} "
+                        f"player=0 bag={minimum} own_rack=7 opp_rack=7 "
+                        "spread=0 predicted_future_turns=2 "
+                        "trajectory_policy=static cgp=15 A/B 0/0 0\n"
+                    )
+                    position += 1
+            source.write_text("".join(lines), encoding="utf-8")
+            exclusion = root / "old.json"
+            exclusion.write_text(
+                json.dumps(
+                    {
+                        "mapping": [
+                            {"source_seed": str(1000 + game), "start": "0"}
+                            for game in range(4)
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            output = root / "tail.positions"
+            manifest = select_tail_panel(
+                source,
+                output,
+                root / "manifest.json",
+                {"static": 4},
+                7,
+                [exclusion],
+            )
+
+        self.assertEqual(manifest["excluded_source_games"], 4)
+        self.assertTrue(
+            all(int(row["source_seed"]) >= 1004 for row in manifest["mapping"])
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

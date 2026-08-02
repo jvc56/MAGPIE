@@ -251,6 +251,11 @@ static void test_bai_joint_max_regret_estimator(void) {
   // challengers can win. The joint maximum must expose that multiplicity.
   assert(flat_joint > flat_pairwise * 1.5);
   assert(bai_count_near_tie_challengers(&flat_sync) == 5);
+  assert(bai_regret_stop_estimate(&flat_sync, flat_pairwise, flat_joint) ==
+         flat_pairwise);
+  flat_sync.regret_stop_use_joint = true;
+  assert(bai_regret_stop_estimate(&flat_sync, flat_pairwise, flat_joint) ==
+         flat_joint);
 
   BAIArmDatum separated_arms[3];
   bai_test_set_regret_arm(&separated_arms[0], 1.0, 0.01, 100);

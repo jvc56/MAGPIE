@@ -66,6 +66,7 @@ typedef struct BAISyncData {
   const AnalysisProgressListener *progress_listener;
   uint64_t next_progress_sample;
   double regret_stop_target;
+  bool regret_stop_use_joint;
   double regret_cross_arm_correlation;
   double regret_calibration;
   uint64_t regret_check_interval;
@@ -105,6 +106,7 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
           ? progress_listener->checkpoint_interval
           : 0;
   bai_sync_data->regret_stop_target = 0.0;
+  bai_sync_data->regret_stop_use_joint = false;
   bai_sync_data->regret_cross_arm_correlation = 0.0;
   bai_sync_data->regret_calibration = 1.0;
   bai_sync_data->regret_check_interval = 0;
@@ -425,6 +427,13 @@ bai_count_near_tie_challengers(const BAISyncData *bai_sync_data) {
   return count;
 }
 
+static inline double bai_regret_stop_estimate(const BAISyncData *bai_sync_data,
+                                              double legacy_estimate,
+                                              double joint_estimate) {
+  return bai_sync_data->regret_stop_use_joint ? joint_estimate
+                                              : legacy_estimate;
+}
+
 static inline int
 bai_sync_data_sample_limit_reached(const BAISyncData *bai_sync_data,
                                    uint64_t sample_limit) {
@@ -663,10 +672,14 @@ static inline void bai_maybe_stop_for_regret_while_locked(BAISampleArgs *args) {
   }
   const double estimated_regret =
       bai_estimate_expected_regret(sync_data, args->rvs);
+  const double joint_estimated_regret =
+      bai_estimate_joint_expected_regret(sync_data, args->rvs);
   bai_result_set_estimated_regret(sync_data->bai_result, estimated_regret);
-  if (estimated_regret <= sync_data->regret_stop_target) {
-    const double joint_estimated_regret =
-        bai_estimate_joint_expected_regret(sync_data, args->rvs);
+  bai_result_set_joint_estimated_regret(sync_data->bai_result,
+                                        joint_estimated_regret);
+  const double stopping_estimate = bai_regret_stop_estimate(
+      sync_data, estimated_regret, joint_estimated_regret);
+  if (stopping_estimate <= sync_data->regret_stop_target) {
     const int near_tie_challengers = bai_count_near_tie_challengers(sync_data);
     bai_result_set_regret_at_stop(sync_data->bai_result, estimated_regret);
     bai_result_set_joint_regret_at_stop(sync_data->bai_result,
@@ -1033,6 +1046,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       bai_sync_data_create(bai_result, thread_control,
                            (int)rvs_get_num_rvs(rvs), rng, progress_listener);
   sync_data->regret_stop_target = bai_options->regret_stop_target;
+  sync_data->regret_stop_use_joint = bai_options->regret_stop_use_joint;
   sync_data->regret_cross_arm_correlation =
       bai_options->regret_cross_arm_correlation;
   sync_data->regret_calibration = bai_options->regret_calibration;

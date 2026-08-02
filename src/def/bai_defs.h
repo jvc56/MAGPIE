@@ -41,6 +41,11 @@ typedef struct BAIOptions {
   // disables the rule. Cross-arm correlation models the common random
   // scenarios used by simulation arms; 0 is the independent-arm estimate.
   double regret_stop_target;
+  // Experimental selector for the regret-limit boundary. False preserves the
+  // deployed max-of-pairwise lower bound. True uses the shadow joint-maximum
+  // estimate; production callers leave this false until prospective
+  // calibration and optional-stopping gates pass.
+  bool regret_stop_use_joint;
   double regret_cross_arm_correlation;
   double regret_calibration;
   uint64_t regret_check_interval;

@@ -126,6 +126,7 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.num_threads = num_threads;
   sim_args->bai_options.cutoff = cutoff;
   sim_args->bai_options.regret_stop_target = 0.0;
+  sim_args->bai_options.regret_stop_use_joint = false;
   sim_args->bai_options.regret_cross_arm_correlation = 0.48;
   sim_args->bai_options.regret_calibration = 1.0;
   sim_args->bai_options.regret_check_interval = 256;

@@ -1517,6 +1517,40 @@ control, common-scenario covariance, near-tie strata, and the common risk-set
 judge. Water-filling may use these curves only in offline sensitivity replay
 until that gate and a fresh terminal-game gate both pass.
 
+### Cumulative optional-stopping protocol (2026-08-02)
+
+The thinking-curve harness now separates two questions that the earlier
+same-seed control conflated. For every root it can run (1) the cumulative BAI
+arm stopped by the selected regret estimator, (2) an independent arm with the
+same sampling policy and **exactly the stopped iteration count**, and (3) a
+same-seed arm continuing to the preregistered maximum. The independent
+matched-n comparison measures optional-stopping selection bias; the full arm
+measures the quality/cost tradeoff from continuing. All three choices and
+their checkpoint-observable risk sets enter one 10-ply common-seed judge.
+The joint-max estimator may control only this experimental arm; its default
+remains off for every production caller.
+
+The resumable runner now refuses to append a root unless stopped, matched,
+full, progress-event, judge, and covariance-probe accounting all reconcile.
+The matched target must equal `stopped_iterations * (plies + 1)`, and the
+matched arm must complete exactly that many iterations. The covariance probe
+must retain every requested common-scenario sample for every risk move. New
+panels can exclude source-game identities from prior manifests, making the
+next panel fresh to the 80-root matched risk-set tail while preserving policy
+and bag-band balance.
+
+An eight-game, p6, 300K-node smoke test passed all structural checks. Seven
+arms hit the joint-regret boundary and one hit the cap; median stopped work
+was 20.9% of the cap. This is deliberately not efficacy evidence: only eight
+games and 2,000 judge samples were used. Indeed, raw stopped regret was badly
+underpredicted (joint through-origin slope 15.9), confirming that the
+uncalibrated estimator cannot be enabled merely because the harness works.
+The powered panel therefore remains a diagnostic gate, not a route around
+calibration. It will use fresh, game-clustered roots, 100,000 judge samples,
+near-tie strata, and paired stopped-versus-matched-n inference. Live allocation
+stays disabled regardless of nominal node savings unless reliability,
+optional-stopping, and later terminal-game gates all pass.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

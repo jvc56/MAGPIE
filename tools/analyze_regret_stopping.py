@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Audit paired regret-stopped and same-seed fixed-budget SIM arms."""
+"""Audit regret stopping against matched-n and full-budget SIM controls."""
 
 from __future__ import annotations
 
 import argparse
+from collections import defaultdict
 import math
 import statistics
 from dataclasses import dataclass
@@ -50,6 +51,8 @@ class Point:
     plies: int
     target_nodes: int
     control: bool
+    control_kind: str
+    iterations: int
     nodes: int
     elapsed_seconds: float
     selected_rank: int
@@ -84,8 +87,8 @@ class Point:
 PointKey = tuple[int, int, int]
 
 
-def load_points(path: Path) -> dict[PointKey, dict[bool, Point]]:
-    points: dict[PointKey, dict[bool, Point]] = {}
+def load_points(path: Path) -> dict[PointKey, dict[str, Point]]:
+    points: dict[PointKey, dict[str, Point]] = {}
     with path.open(encoding="utf-8") as stream:
         for line in stream:
             if not line.startswith("THINKING_CURVE_POINT "):
@@ -93,6 +96,10 @@ def load_points(path: Path) -> dict[PointKey, dict[bool, Point]]:
             fields = parse_fields(line)
             if fields.get("final") != "0":
                 continue
+            control = fields.get("control", "0") == "1"
+            control_kind = fields.get(
+                "control_kind", "full" if control else "stopped"
+            )
             point = Point(
                 source_index=int(fields["source_index"]),
                 position=optional_int(
@@ -102,7 +109,9 @@ def load_points(path: Path) -> dict[PointKey, dict[bool, Point]]:
                 bag=int(fields["bag"]),
                 plies=int(fields["plies"]),
                 target_nodes=int(fields["target_nodes"]),
-                control=fields.get("control", "0") == "1",
+                control=control,
+                control_kind=control_kind,
+                iterations=optional_int(fields, "iterations", 0),
                 nodes=int(fields["nodes"]),
                 elapsed_seconds=int(fields["elapsed_ns"]) / 1e9,
                 selected_rank=int(fields["selected_rank"]),
@@ -125,23 +134,52 @@ def load_points(path: Path) -> dict[PointKey, dict[bool, Point]]:
             )
             key = (point.source_index, point.plies, point.target_nodes)
             by_mode = points.setdefault(key, {})
-            if point.control in by_mode:
-                raise ValueError(
-                    f"duplicate {'control' if point.control else 'stopped'} "
-                    f"point for {key}"
-                )
-            by_mode[point.control] = point
+            if point.control_kind in by_mode:
+                raise ValueError(f"duplicate {point.control_kind} point for {key}")
+            by_mode[point.control_kind] = point
     return points
 
 
 def pair_points(
-    points: dict[PointKey, dict[bool, Point]],
+    points: dict[PointKey, dict[str, Point]],
 ) -> list[tuple[Point, Point]]:
     return [
-        (by_mode[False], by_mode[True])
+        (by_mode["stopped"], by_mode["full"])
         for by_mode in points.values()
-        if False in by_mode and True in by_mode
+        if "stopped" in by_mode and "full" in by_mode
     ]
+
+
+def matched_points(
+    points: dict[PointKey, dict[str, Point]],
+) -> list[tuple[Point, Point]]:
+    """Join the dynamic matched-n control to its stopped arm."""
+
+    grouped: dict[tuple[int, int], dict[str, list[Point]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for by_mode in points.values():
+        for point in by_mode.values():
+            grouped[(point.source_index, point.plies)][point.control_kind].append(
+                point
+            )
+    result: list[tuple[Point, Point]] = []
+    for key, by_kind in grouped.items():
+        matches = by_kind.get("matched", [])
+        if not matches:
+            continue
+        if len(matches) != 1:
+            raise ValueError(f"multiple matched controls for {key}")
+        matched = matches[0]
+        stopped = [
+            point
+            for point in by_kind.get("stopped", [])
+            if point.iterations == matched.iterations
+        ]
+        if len(stopped) != 1:
+            raise ValueError(f"matched control for {key} has no unique stopped arm")
+        result.append((stopped[0], matched))
+    return result
 
 
 @dataclass(frozen=True)
@@ -200,7 +238,12 @@ def format_summary(summary: Summary, signed: bool = False) -> str:
     )
 
 
-def summarize(label: str, pairs: list[tuple[Point, Point]], margin: float) -> None:
+def summarize(
+    label: str,
+    pairs: list[tuple[Point, Point]],
+    margin: float,
+    comparison: str = "stopped_vs_full",
+) -> None:
     node_fractions = [a.nodes / b.nodes for a, b in pairs]
     stopped_regret = summarize_values(
         clustered_values(pairs, lambda a, _b: a.judge_regret)
@@ -223,7 +266,8 @@ def summarize(label: str, pairs: list[tuple[Point, Point]], margin: float) -> No
         else "fail"
     )
     print(
-        f"REGRET_STOP_SUMMARY stratum={label} positions={len(pairs)} "
+        f"REGRET_STOP_SUMMARY comparison={comparison} stratum={label} "
+        f"positions={len(pairs)} "
         f"games={regret_delta.clusters} "
         f"stopped_regret={format_summary(stopped_regret)} "
         f"control_regret={format_summary(control_regret)} "
@@ -233,7 +277,7 @@ def summarize(label: str, pairs: list[tuple[Point, Point]], margin: float) -> No
         f"median_node_fraction={statistics.median(node_fractions):.6f} "
         f"p90_node_fraction={percentile(node_fractions, 0.90):.6f} "
         f"choice_agreement={agreement:.4%} margin={margin:.9f} "
-        f"optional_stopping_gate={gate}"
+        f"noninferiority_gate={gate}"
     )
 
 
@@ -310,26 +354,61 @@ def main() -> None:
     )
     args = parser.parse_args()
 
-    all_pairs: list[tuple[Point, Point]] = []
+    all_quality_pairs: list[tuple[Point, Point]] = []
+    all_optional_pairs: list[tuple[Point, Point]] = []
     for path in args.logs:
-        complete = pair_points(load_points(path))
-        if not complete:
-            raise ValueError(f"{path}: no exact-target stopped/control pairs")
-        print(f"REGRET_STOP_FILE path={path} complete_pairs={len(complete)}")
-        summarize("file", complete, args.noninferiority_margin)
-        all_pairs.extend(complete)
+        points = load_points(path)
+        quality = pair_points(points)
+        optional = matched_points(points)
+        if not quality and not optional:
+            raise ValueError(f"{path}: no stopped/control pairs")
+        print(
+            f"REGRET_STOP_FILE path={path} full_pairs={len(quality)} "
+            f"matched_pairs={len(optional)}"
+        )
+        if quality:
+            summarize(
+                "file", quality, args.noninferiority_margin, "stopped_vs_full"
+            )
+            all_quality_pairs.extend(quality)
+        if optional:
+            if any(stopped.iterations != control.iterations for stopped, control in optional):
+                raise ValueError(f"{path}: matched controls differ in iterations")
+            summarize(
+                "file",
+                optional,
+                args.noninferiority_margin,
+                "stopped_vs_matched_n",
+            )
+            all_optional_pairs.extend(optional)
 
-    summarize("all", all_pairs, args.noninferiority_margin)
-    reliability("legacy", all_pairs)
-    reliability("joint", all_pairs)
+    if all_quality_pairs:
+        summarize(
+            "all",
+            all_quality_pairs,
+            args.noninferiority_margin,
+            "stopped_vs_full",
+        )
+    if all_optional_pairs:
+        summarize(
+            "all",
+            all_optional_pairs,
+            args.noninferiority_margin,
+            "stopped_vs_matched_n",
+        )
+    calibration_pairs = all_optional_pairs or all_quality_pairs
+    reliability("legacy", calibration_pairs)
+    reliability("joint", calibration_pairs)
     for label, low, high in (
         ("opening", 61, 100),
         ("midgame", 25, 60),
         ("preendgame", 1, 24),
     ):
-        stratum = [pair for pair in all_pairs if low <= pair[0].bag <= high]
+        stratum = [
+            pair for pair in calibration_pairs if low <= pair[0].bag <= high
+        ]
         if len({pair[0].game for pair in stratum}) >= 2:
-            summarize(label, stratum, args.noninferiority_margin)
+            summarize(label, stratum, args.noninferiority_margin, "calibration")
     for label, predicate in (
         ("ties0", lambda value: value == 0),
         ("ties1", lambda value: value == 1),
@@ -338,11 +417,11 @@ def main() -> None:
     ):
         stratum = [
             pair
-            for pair in all_pairs
+            for pair in calibration_pairs
             if predicate(pair[0].near_ties_at_stop)
         ]
         if len({pair[0].game for pair in stratum}) >= 2:
-            summarize(label, stratum, args.noninferiority_margin)
+            summarize(label, stratum, args.noninferiority_margin, "calibration")
 
 
 if __name__ == "__main__":

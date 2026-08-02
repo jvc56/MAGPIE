@@ -9,6 +9,7 @@ import unittest
 from tools.analyze_regret_stopping import (
     clustered_values,
     load_points,
+    matched_points,
     pair_points,
     summarize_values,
 )
@@ -65,6 +66,32 @@ class AnalyzeRegretStoppingTest(unittest.TestCase):
         self.assertAlmostEqual(summary.mean, 0.001)
         self.assertEqual(summary.clusters, 4)
         self.assertEqual(summary.p_value, 0.0)
+
+    def test_joins_dynamic_matched_iteration_control(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "matched.log"
+            path.write_text(
+                "THINKING_CURVE_POINT source_index=0 position=0 game=7 bag=40 "
+                "plies=6 target_nodes=3000000 final=0 control=0 "
+                "control_kind=stopped elapsed_ns=1 iterations=12000 nodes=80000 "
+                "selected_rank=0 judge_regret=.004 estimated_regret=.001 "
+                "joint_estimated_regret=.002 regret_at_stop=.001 "
+                "joint_regret_at_stop=.002 near_tie_challengers=3 "
+                "near_tie_challengers_at_stop=3 bai_status=4\n"
+                "THINKING_CURVE_POINT source_index=0 position=0 game=7 bag=40 "
+                "plies=6 target_nodes=84000 final=0 control=1 "
+                "control_kind=matched elapsed_ns=1 iterations=12000 nodes=81000 "
+                "selected_rank=1 judge_regret=.001 estimated_regret=.001 "
+                "joint_estimated_regret=.001 regret_at_stop=nan "
+                "joint_regret_at_stop=nan near_tie_challengers=1 "
+                "near_tie_challengers_at_stop=-1 bai_status=3\n",
+                encoding="utf-8",
+            )
+            pairs = matched_points(load_points(path))
+
+        self.assertEqual(len(pairs), 1)
+        self.assertEqual(pairs[0][0].iterations, pairs[0][1].iterations)
+        self.assertEqual(pairs[0][1].control_kind, "matched")
 
 
 if __name__ == "__main__":

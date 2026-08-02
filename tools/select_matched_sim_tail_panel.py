@@ -73,7 +73,26 @@ def select_tail_panel(
     manifest_path: Path,
     policy_targets: dict[str, int],
     seed: int,
+    exclude_manifests: list[Path] | None = None,
 ) -> dict[str, object]:
+    exclude_manifests = exclude_manifests or []
+    excluded_games: set[tuple[str, str]] = set()
+    exclusion_records: list[dict[str, object]] = []
+    for path in exclude_manifests:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        records = document.get("mapping", document.get("selected_games", []))
+        before = len(excluded_games)
+        for record in records:
+            if "source_seed" not in record or "start" not in record:
+                raise ValueError(f"exclusion manifest {path} lacks game identity")
+            excluded_games.add((str(record["source_seed"]), str(record["start"])))
+        exclusion_records.append(
+            {
+                "path": str(path),
+                "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                "new_games": len(excluded_games) - before,
+            }
+        )
     rows_by_policy_band_game: dict[
         tuple[str, str, tuple[str, str]], list[tuple[str, dict[str, str]]]
     ] = defaultdict(list)
@@ -88,6 +107,8 @@ def select_tail_panel(
         if band is None:
             continue
         identity = (row["source_seed"], row["start"])
+        if identity in excluded_games:
+            continue
         rows_by_policy_band_game[
             (row["trajectory_policy"], band, identity)
         ].append((line, row))
@@ -181,6 +202,8 @@ def select_tail_panel(
         "policy_targets": policy_targets,
         "roots": len(selected),
         "source_games": len(used_games),
+        "excluded_source_games": len(excluded_games),
+        "exclusion_manifests": exclusion_records,
         "bag_bands": [
             {"name": name, "minimum": minimum, "maximum": maximum}
             for name, minimum, maximum in BAG_BANDS
@@ -206,6 +229,7 @@ def main() -> None:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--policy-target", action="append", default=[])
+    parser.add_argument("--exclude-manifest", action="append", type=Path, default=[])
     parser.add_argument("--seed", type=int, default=82402)
     args = parser.parse_args()
     manifest = select_tail_panel(
@@ -214,6 +238,7 @@ def main() -> None:
         args.manifest,
         parse_policy_targets(args.policy_target),
         args.seed,
+        args.exclude_manifest,
     )
     print(
         f"roots={manifest['roots']} source_games={manifest['source_games']} "
