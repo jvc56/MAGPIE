@@ -1271,16 +1271,24 @@ separate expected field remains readable for diagnosis, but its replay is
 explicitly counted as oracle-choice contamination and cannot pass the honest
 surrogate gate.
 
-Replaying the 133 complete games with cross-fitted planning regret for every
-SIM, PEG, and endgame boundary removes the earlier directional result. On the
-20 untouched games, learned-minus-equal scored regret is `+0.000763`, with 95%
-CI `[-0.007069,+0.008594]` and `p=0.849`; calibration is `-0.001729`, with
-95% CI `[-0.006864,+0.003407]` and `p=0.509`. All 2,986 accepted replays used
-separate planning estimates and none used oracle regret to choose a boundary.
-The estimator was conservative on selected actions: test actual-minus-
-expected regret averaged `-0.004511` for learned allocation and `-0.006160`
-for equal slicing. This is a valid null result for the choice protocol, but
-not a final strength result: the broad SIM score still comes from the old
+The first 133-game replay with cross-fitted planning regret removed the
+oracle-envelope choice but still priced the suffix with hindsight-optimal
+allocation. Its test delta was `+0.000763`; that number is retained only as a
+historical diagnostic and is not a valid value-to-go result.
+
+Regenerating all labels under nonanticipating equal-slice policy evaluation
+changes the 20 untouched games to learned-minus-equal scored regret
+`-0.001664`, with game-clustered Student-t 95% CI
+`[-0.007950,+0.004622]` and `p=0.586`. Calibration is essentially flat at
+`-0.000118`, with 95% CI `[-0.006552,+0.006315]` and `p=0.970`. All 2,996
+accepted replays used separate planning estimates, predicted rather than
+realized turn counts, and `allocation_policy=equal_slice_policy`; none used
+oracle regret to choose a boundary. The estimator remained conservative on
+selected actions: test actual-minus-expected regret averaged `-0.005350` for
+learned allocation and `-0.008190` for equal slicing. This is the honest
+nonanticipating null: directionally favorable on test, but radically
+underpowered and nowhere near a surrogate gate. It is also not a final
+strength result because the broad SIM score still comes from the old
 nominee-only judge and can miss a better move outside the nominees. The
 matched risk-set tail panel supplies the next correction.
 
