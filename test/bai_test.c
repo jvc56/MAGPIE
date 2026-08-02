@@ -194,6 +194,57 @@ void test_bai_regret_limit(int num_threads) {
   rvs_destroy(rvs);
 }
 
+// A finite regret estimate is a statistical claim, not merely a formatting
+// convenience. In particular, one draw gives an arm empirical variance zero;
+// the numerical variance floor must not turn that into apparent certainty.
+static void test_bai_regret_requires_minimum_arm_evidence(int num_threads) {
+  const double means_and_vars[] = {0.6, 0.04, 0.5, 0.04};
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 9182,
+  };
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 9182,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  RandomVariables *rng = rvs_create(&rng_args);
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 1,
+      .sample_limit = num_rvs,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0,
+  };
+
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(isinf(bai_result_get_estimated_regret(bai_result)));
+
+  rvs_reset(rvs, &rv_args);
+  bai_options.sample_minimum = BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
+  bai_options.sample_limit =
+      num_rvs * BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  const double estimated_regret =
+      bai_result_get_estimated_regret(bai_result);
+  assert(isfinite(estimated_regret));
+  assert(estimated_regret >= 0.0);
+
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
 void test_bai_win_pct_cutoff_helper(int num_threads,
                                     const double *means_and_vars,
                                     const uint64_t num_rvs) {
@@ -582,6 +633,7 @@ void test_bai(void) {
       const int num_threads_i = num_threads[i];
       test_bai_sample_limit(num_threads_i);
       test_bai_regret_limit(num_threads_i);
+      test_bai_regret_requires_minimum_arm_evidence(num_threads_i);
       test_bai_win_pct_cutoff(num_threads_i);
       test_bai_time_limit(num_threads_i);
       test_bai_interrupt(num_threads_i);

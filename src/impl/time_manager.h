@@ -47,6 +47,40 @@ typedef enum TimeManagerBoundary {
   TIME_MANAGER_BOUNDARY_ENDGAME_DEPTH,
 } TimeManagerBoundary;
 
+// Learned rest-of-game value is supplied as a state-bound callback. The
+// caller binds current game features, the calibrated artifact cell, and live
+// mode-specific work rates in `context`. The callback returns the increase in
+// expected future utility regret caused by removing `spend_seconds` from
+// `future_clock_seconds`. This finite difference correctly prices a lumpy PEG
+// wave or endgame depth; a local derivative is only an approximation for a
+// tiny simulation checkpoint.
+typedef double (*TimeManagerFutureLossCallback)(double future_clock_seconds,
+                                                double spend_seconds,
+                                                const void *context);
+
+typedef struct TimeManagerValueKnot {
+  double budget_seconds;
+  double expected_future_regret;
+} TimeManagerValueKnot;
+
+// One already-selected state cell from a learned value-to-go artifact. State
+// lookup happens outside this generic interpolation layer. Knots must have
+// strictly increasing budget and nonincreasing regret. Above the last knot,
+// extra clock has zero fitted value; below the first knot the forecast is out
+// of domain and fails closed.
+typedef struct TimeManagerValueCurve {
+  const TimeManagerValueKnot *knots;
+  size_t num_knots;
+  // The first gate replays allocation over held-out realized trajectories.
+  // It catches a model that cannot even move clock toward the better measured
+  // opportunities, but it does not include positions changed by its moves.
+  bool surrogate_allocation_gate_passed;
+  // The second gate is terminal win/spread utility from mirrored games. Both
+  // gates are required because per-turn oracle-regret sums are only a
+  // surrogate for the actual rest-of-game objective.
+  bool terminal_game_gate_passed;
+} TimeManagerValueCurve;
+
 typedef struct TimeManagerChunk {
   TimeManagerBoundary boundary;
   // Expected work prices this chunk against other current/future work.
@@ -78,8 +112,12 @@ typedef struct TimeManagerClock {
   // Irreducible current-turn work needed to return a legal fallback.
   double committed_current_seconds;
   // Expected utility-regret reduction per second available on future turns.
-  // This is the shadow price lambda.
+  // This is the fallback shadow price lambda. A validated learned model uses
+  // future_loss_callback so indivisible chunks get an exact finite-difference
+  // price from F(state, clock).
   double future_value_per_second;
+  TimeManagerFutureLossCallback future_loss_callback;
+  const void *future_loss_context;
   // Minimum one-sided completion confidence for indivisible solver work.
   // The initial production target is 0.99. A statistically valid bound below
   // this policy threshold is still refused.
@@ -101,6 +139,7 @@ typedef struct TimeManagerPlan {
   // Conservative cumulative wall bound used only for hard admission.
   double planned_completion_bound_seconds;
   double expected_regret_reduction;
+  double expected_future_regret_increase;
   double maximum_current_seconds;
   double equal_slice_seconds;
   // Positive means the plan deposits time relative to equal slicing; negative
@@ -110,6 +149,7 @@ typedef struct TimeManagerPlan {
   double stopped_chunk_completion_bound_seconds;
   double stopped_chunk_completion_confidence;
   double stopped_chunk_value_per_second;
+  double stopped_chunk_future_regret_increase;
   TimeManagerStopReason stop_reason;
   bool valid;
 } TimeManagerPlan;
@@ -117,6 +157,13 @@ typedef struct TimeManagerPlan {
 // Returns NAN when the model/work combination is invalid or unsupported.
 double time_manager_estimate_seconds(const TimeManagerCostModel *model,
                                      const TimeManagerWork *work);
+
+bool time_manager_value_curve_is_valid(const TimeManagerValueCurve *curve);
+double time_manager_value_curve_predict(const TimeManagerValueCurve *curve,
+                                        double budget_seconds);
+double time_manager_value_curve_future_loss(double future_clock_seconds,
+                                            double spend_seconds,
+                                            const void *context);
 
 // Buy sequential result-boundary chunks while they fit under the protected
 // clock and their marginal value is strictly greater than the future shadow

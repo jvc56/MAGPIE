@@ -695,9 +695,8 @@ static void peg_test_on_stage_start(int stage_idx, int k_cands, int inner_d,
 static void peg_test_on_cand_done(int stage_idx, int cand_rank,
                                   const Move *cand, double win_pct,
                                   double mean_spread, int scen_done,
-                                  uint64_t endgame_nodes,
-                                  int64_t completed_ns, bool reordered,
-                                  void *user_data) {
+                                  uint64_t endgame_nodes, int64_t completed_ns,
+                                  bool reordered, void *user_data) {
   (void)stage_idx;
   (void)cand_rank;
   (void)mean_spread;
@@ -790,7 +789,8 @@ static void test_peg_main_progress_detail(void) {
 
   // Production keeps bag-1 enumeration exhaustive, but a direct calibration
   // judge may explicitly apply its deterministic weight stride there.
-  const int full_scenarios = result.top_cands[0].n_scenarios;
+  const Move *stride_moves[2] = {&result.top_cands[0].move,
+                                 &result.top_cands[1].move};
   PegResult sampled;
   memset(&sampled, 0, sizeof(sampled));
   args.on_stage_start = NULL;
@@ -798,13 +798,33 @@ static void test_peg_main_progress_detail(void) {
   args.on_scenario_done = NULL;
   args.include_per_scenario = false;
   args.user_data = NULL;
+  // Hold the candidate set fixed. Comparing only each run's winning move is
+  // invalid because weight-stratified evaluation can legitimately reorder the
+  // two candidates, whose full scenario counts need not match.
+  args.only_moves = stride_moves;
+  args.n_only_moves = 2;
   args.scenario_stride = 4;
   args.force_small_bag_stride = true;
   peg_solve(&args, &sampled, error_stack);
   assert(error_stack_is_empty(error_stack));
   assert(sampled.last_completed_stage == 1);
   assert(sampled.top_cands[0].n_scenarios > 0);
-  assert(sampled.top_cands[0].n_scenarios < full_scenarios);
+  bool saw_stride_reduction = false;
+  for (int sampled_idx = 0; sampled_idx < sampled.n_top_cands; sampled_idx++) {
+    const uint64_t fingerprint =
+        move_get_fingerprint(&sampled.top_cands[sampled_idx].move);
+    for (int full_idx = 0; full_idx < result.n_top_cands; full_idx++) {
+      if (move_get_fingerprint(&result.top_cands[full_idx].move) ==
+          fingerprint) {
+        assert(sampled.top_cands[sampled_idx].n_scenarios <=
+               result.top_cands[full_idx].n_scenarios);
+        saw_stride_reduction =
+            saw_stride_reduction || sampled.top_cands[sampled_idx].n_scenarios <
+                                        result.top_cands[full_idx].n_scenarios;
+      }
+    }
+  }
+  assert(saw_stride_reduction);
 
   peg_result_destroy(&sampled);
   peg_result_destroy(&result);

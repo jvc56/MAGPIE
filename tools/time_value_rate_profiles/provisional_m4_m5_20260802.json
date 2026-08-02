@@ -1,0 +1,56 @@
+{
+  "artifact_kind": "time_value_rate_profile_grid",
+  "live_enabled": false,
+  "notes": [
+    "M4 SIM rates are medians from the complete 140-game top-15 panel.",
+    "The M5 profile normalizes 4-ply SIM to the independently observed 1M nodes/second and preserves the M4 per-ply ratios.",
+    "PEG coefficients are provisional: the source fit had R2 0.537 and its normalized sentinel CV was 0.1058, so these profiles are suitable only for shadow-model sensitivity analysis."
+  ],
+  "profiles": [
+    {
+      "id": 0,
+      "name": "m4_panel_observed",
+      "sim_seconds_per_node": 0.000003838785,
+      "sim_seconds_per_node_p2": 0.0000030711267808105896,
+      "sim_seconds_per_node_p4": 0.000003838785,
+      "sim_seconds_per_node_p6": 0.000004220492386075233,
+      "endgame_seconds_per_node": 0.000003420868430924359,
+      "peg_fixed_seconds_per_chunk": 0.0,
+      "peg_seconds_per_scenario": 0.000047170230,
+      "peg_seconds_per_greedy_scenario": 0.000047170230,
+      "peg_seconds_per_added_scenario": 0.0,
+      "peg_seconds_per_endgame_node": 0.000007967738355,
+      "peg_seconds_per_candidate": 0.221560961
+    },
+    {
+      "id": 1,
+      "name": "two_x_m4",
+      "sim_seconds_per_node": 0.0000019193925,
+      "sim_seconds_per_node_p2": 0.0000015355633904052948,
+      "sim_seconds_per_node_p4": 0.0000019193925,
+      "sim_seconds_per_node_p6": 0.0000021102461930376165,
+      "endgame_seconds_per_node": 0.0000017104342154621795,
+      "peg_fixed_seconds_per_chunk": 0.0,
+      "peg_seconds_per_scenario": 0.000023585115,
+      "peg_seconds_per_greedy_scenario": 0.000023585115,
+      "peg_seconds_per_added_scenario": 0.0,
+      "peg_seconds_per_endgame_node": 0.0000039838691775,
+      "peg_seconds_per_candidate": 0.1107804805
+    },
+    {
+      "id": 2,
+      "name": "m5_one_million_p4_nps",
+      "sim_seconds_per_node": 0.000001,
+      "sim_seconds_per_node_p2": 0.0000008000257323112883,
+      "sim_seconds_per_node_p4": 0.000001,
+      "sim_seconds_per_node_p6": 0.0000010994344267978624,
+      "endgame_seconds_per_node": 0.0000008911331139733949,
+      "peg_fixed_seconds_per_chunk": 0.0,
+      "peg_seconds_per_scenario": 0.000012287801999851513,
+      "peg_seconds_per_greedy_scenario": 0.000012287801999851513,
+      "peg_seconds_per_added_scenario": 0.0,
+      "peg_seconds_per_endgame_node": 0.0000020755885924843404,
+      "peg_seconds_per_candidate": 0.057716428765872525
+    }
+  ]
+}

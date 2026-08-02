@@ -23,9 +23,28 @@ CSV_FIELDS = [
     "pair", "seed", "game_seed", "started_utc", "finished_utc", "elapsed_s",
     "game1_turns", "game2_turns", "identical_prefix_turns",
     "first_divergence_turn", "first_divergence_bag", "game1_divergence_move",
-    "game2_divergence_move", "fully_identical", "game1_spread",
+    "game2_divergence_move", "first_divergence_cgp", "fully_identical", "game1_spread",
     "game1_win", "game1_utility", "game2_spread", "game2_win",
     "game2_utility", "pair_spread_mean", "pair_win_score", "pair_utility",
+    "game1_p0_policy", "game1_p0_expected_game_regret",
+    "game1_p0_regret_estimated_turns", "game1_p0_regret_unknown_turns",
+    "game1_p1_policy", "game1_p1_expected_game_regret",
+    "game1_p1_regret_estimated_turns", "game1_p1_regret_unknown_turns",
+    "game2_p0_policy", "game2_p0_expected_game_regret",
+    "game2_p0_regret_estimated_turns", "game2_p0_regret_unknown_turns",
+    "game2_p1_policy", "game2_p1_expected_game_regret",
+    "game2_p1_regret_estimated_turns", "game2_p1_regret_unknown_turns",
+    "tm_expected_game_regret", "equal_expected_game_regret",
+    "tm_regret_estimated_turns", "equal_regret_estimated_turns",
+    "tm_regret_unknown_turns", "equal_regret_unknown_turns",
+    "tm_expected_post_divergence_regret",
+    "equal_expected_post_divergence_regret",
+    "tm_post_divergence_regret_estimated_turns",
+    "equal_post_divergence_regret_estimated_turns",
+    "tm_post_divergence_regret_unknown_turns",
+    "equal_post_divergence_regret_unknown_turns",
+    "shared_regret_comparisons", "shared_regret_unknown_roots",
+    "predicted_shared_utility_delta", "actual_minus_predicted_utility_delta",
     "tm_time_ms", "equal_time_ms", "tm_terminal_remaining_ms",
     "equal_terminal_remaining_ms", "tm_overtime_ms", "equal_overtime_ms",
     "tm_penalty", "equal_penalty", "tm_sim_ms", "equal_sim_ms",
@@ -33,7 +52,9 @@ CSV_FIELDS = [
     "tm_static_ms", "equal_static_ms", "tm_sim_calls", "equal_sim_calls",
     "tm_sim_planned_budget_ms", "tm_sim_legacy_budget_ms",
     "tm_sim_released_budget_ms", "tm_sim_released_turns",
-    "tm_low_bag_fallbacks",
+    "tm_low_bag_fallbacks", "tm_peg_reserve_shortfalls",
+    "tm_peg_shadow_budget_ms", "tm_peg_legacy_budget_ms",
+    "tm_peg_deposit_caps", "tm_peg_withdrawal_caps",
     "tm_peg_calls", "equal_peg_calls", "tm_endgame_calls",
     "equal_endgame_calls", "sim_calls", "sim_iters", "sim_nodes",
     "sim_candidate_rows", "peg_calls", "peg_candidate_completions",
@@ -59,6 +80,41 @@ def rows_with_prefix(lines: list[str], prefix: str) -> list[dict[str, str]]:
 
 def integer(row: dict[str, str], key: str) -> int:
     return int(row[key])
+
+
+def turn_regret(turn: dict[str, str]) -> float | None:
+    if integer(turn, "regret_valid") == 0:
+        return None
+    value = float(turn["expected_utility_regret"])
+    assert math.isfinite(value) and value >= 0.0
+    return value
+
+
+def add_realized_path_rest_regret(
+    turns_by_game: dict[int, list[dict[str, str]]]
+) -> None:
+    """Annotate each turn with later ex-ante estimates on its realized path.
+
+    This reverse sum is useful for retrospective calibration, but it is not an
+    online forecast of positions that had not yet been reached. Unknown-mode
+    counts stay explicit so an uncovered PEG/endgame/static turn cannot be
+    silently treated as zero regret.
+    """
+    for game_turns in turns_by_game.values():
+        regret = [0.0, 0.0]
+        estimated = [0, 0]
+        unknown = [0, 0]
+        for turn in reversed(game_turns):
+            player = integer(turn, "player")
+            value = turn_regret(turn)
+            if value is None:
+                unknown[player] += 1
+            else:
+                regret[player] += value
+                estimated[player] += 1
+            turn["realized_path_rest_game_expected_regret"] = f"{regret[player]:.12f}"
+            turn["realized_path_rest_game_estimated_turns"] = str(estimated[player])
+            turn["realized_path_rest_game_unknown_turns"] = str(unknown[player])
 
 
 def atomic_write(path: Path, value: str) -> None:
@@ -143,17 +199,99 @@ def audit_trace(log_path: Path) -> dict[str, object]:
 
     turns_by_game: dict[int, list[dict[str, str]]] = defaultdict(list)
     for turn in turns:
+        regret_valid = integer(turn, "regret_valid")
+        assert regret_valid in (0, 1)
+        regret = turn_regret(turn)
+        if regret_valid:
+            assert regret is not None
+            assert turn["regret_model"] in ("forced", "sim_bai")
+            expected_scope = (
+                "exact_forced_current_turn"
+                if turn["regret_model"] == "forced"
+                else "conditional_candidate_sampling"
+            )
+            assert turn["regret_scope"] == expected_scope
+            if turn["regret_model"] == "sim_bai":
+                assert integer(turn, "sim_calls") == 1
+        else:
+            assert regret is None
+            assert turn["regret_model"] == "none"
+            assert turn["regret_scope"] == "none"
+            assert math.isnan(float(turn["expected_utility_regret"]))
+        # There is no learned forecast of unseen future turns yet. Keep that
+        # absence machine-readable so the retrospective reverse sum cannot be
+        # mistaken for a pre-move value-to-go prediction.
+        assert integer(turn, "value_to_go_valid") == 0
+        reserve_shortfall = integer(turn, "reserve_shortfall")
+        peg_shadow_budget_ms = float(turn["peg_shadow_budget_ms"])
+        peg_deposit_capped = integer(turn, "peg_deposit_capped")
+        peg_withdrawal_capped = integer(turn, "peg_withdrawal_capped")
+        assert reserve_shortfall in (0, 1)
+        assert peg_shadow_budget_ms >= 0.0
+        assert peg_deposit_capped in (0, 1)
+        assert peg_withdrawal_capped in (0, 1)
+        assert reserve_shortfall <= peg_deposit_capped
+        assert not (peg_deposit_capped and peg_withdrawal_capped)
+        if turn["policy"] == "timemanager":
+            # Candidate-level PEG admission is intentionally shadow-only
+            # until a completed-depth policy passes held-out oracle replay.
+            assert integer(turn, "peg_tm_admissions") == 0
+        if reserve_shortfall:
+            assert turn["policy"] == "timemanager"
+            assert integer(turn, "bag") <= 4
+            assert integer(turn, "peg_calls") == 1
+            assert integer(turn, "fallbacks") == 0
+        if peg_deposit_capped or peg_withdrawal_capped:
+            assert turn["policy"] == "timemanager"
+            assert integer(turn, "bag") <= 4
+            assert integer(turn, "peg_calls") == 1
+            # PEG calibration is deliberately shadow-only after the first
+            # live oracle audit. Both proposed deposits and withdrawals must
+            # leave the production budget at the proven equal slice.
+            assert abs(
+                float(turn["budget_ms"]) - float(turn["legacy_budget_ms"])
+            ) <= 5.0
+            if peg_deposit_capped:
+                assert peg_shadow_budget_ms < float(turn["legacy_budget_ms"])
+            else:
+                assert peg_shadow_budget_ms > float(turn["legacy_budget_ms"])
+        elif turn["policy"] != "timemanager" or integer(turn, "bag") > 4:
+            assert peg_shadow_budget_ms == 0.0
+
         turns_by_game[integer(turn, "game")].append(turn)
     assert set(turns_by_game) == {1, 2}
     games_by_start = {integer(game, "start"): game for game in games}
     assert set(games_by_start) == {0, 1}
     for game_number, game_turns in turns_by_game.items():
         start = integer(game_turns[0], "start")
-        assert len(game_turns) == integer(games_by_start[start], "turns")
+        game = games_by_start[start]
+        assert (
+            game["regret_sum_scope"]
+            == "observed_path_conditional_not_forecast"
+        )
+        assert len(game_turns) == integer(game, "turns")
         assert [integer(turn, "turn") for turn in game_turns] == list(
             range(1, len(game_turns) + 1)
         )
         assert all(integer(turn, "game") == game_number for turn in game_turns)
+        for player in (0, 1):
+            player_turns = [
+                turn for turn in game_turns if integer(turn, "player") == player
+            ]
+            known = [turn_regret(turn) for turn in player_turns]
+            known_values = [value for value in known if value is not None]
+            assert len(known_values) == integer(
+                game, f"p{player}_regret_estimated_turns"
+            )
+            assert len(player_turns) - len(known_values) == integer(
+                game, f"p{player}_regret_unknown_turns"
+            )
+            assert math.isclose(
+                sum(known_values),
+                float(game[f"p{player}_expected_utility_regret"]),
+                rel_tol=0.0,
+                abs_tol=5.0e-10,
+            )
 
     sim_map = call_to_turn(turns, "sim")
     peg_map = call_to_turn(turns, "peg")
@@ -203,6 +341,10 @@ def audit_trace(log_path: Path) -> dict[str, object]:
     first_divergence: int | None = None
     for index in range(paired_turns):
         first, second = turns_by_game[1][index], turns_by_game[2][index]
+        # PCTURN captures the root before either policy chooses. Mirrored games
+        # must therefore have the exact same replayable position through and
+        # including their first move disagreement.
+        assert first["cgp"] == second["cgp"]
         if first["move"] != second["move"]:
             first_divergence = index + 1
             break
@@ -211,6 +353,7 @@ def audit_trace(log_path: Path) -> dict[str, object]:
     if first_divergence is None and len(turns_by_game[1]) != len(turns_by_game[2]):
         first_divergence = paired_turns + 1
 
+    add_realized_path_rest_regret(turns_by_game)
     stem = log_path.with_suffix("")
     write_rows(Path(str(stem) + ".turns.csv"), turns)
     write_rows(Path(str(stem) + ".sim_candidates.csv"), add_turn_context(sims, sim_map))
@@ -262,11 +405,13 @@ def parse_pair(
     paired_turns = min(len(turns_by_game[1]), len(turns_by_game[2]))
     identical_prefix = paired_turns if first_divergence is None else first_divergence - 1
     divergence_bag = ""
+    divergence_cgp = ""
     moves = ["", ""]
     if first_divergence is not None:
         first = turns_by_game[1][first_divergence - 1]
         second = turns_by_game[2][first_divergence - 1]
         divergence_bag = first["bag"]
+        divergence_cgp = first["cgp"]
         moves = [first["move"], second["move"]]
 
     spreads = [float(game["p0_score"]) - float(game["p1_score"]) for game in games]
@@ -277,12 +422,59 @@ def parse_pair(
 
     mode_ms = defaultdict(float)
     mode_calls = defaultdict(int)
+    player_regret_fields: dict[str, object] = {}
+    for game_number in (1, 2):
+        for player in (0, 1):
+            player_turns = [
+                turn for turn in turns_by_game[game_number]
+                if integer(turn, "player") == player
+            ]
+            policies = {turn["policy"] for turn in player_turns}
+            assert len(policies) == 1
+            known_values = [
+                value for value in (turn_regret(turn) for turn in player_turns)
+                if value is not None
+            ]
+            prefix = f"game{game_number}_p{player}"
+            player_regret_fields[f"{prefix}_policy"] = next(iter(policies))
+            player_regret_fields[f"{prefix}_expected_game_regret"] = (
+                f"{sum(known_values):.12f}"
+            )
+            player_regret_fields[f"{prefix}_regret_estimated_turns"] = len(
+                known_values
+            )
+            player_regret_fields[f"{prefix}_regret_unknown_turns"] = (
+                len(player_turns) - len(known_values)
+            )
+    expected_regret = defaultdict(float)
+    regret_estimated_turns = defaultdict(int)
+    regret_unknown_turns = defaultdict(int)
+    expected_post_divergence_regret = defaultdict(float)
+    post_divergence_regret_estimated_turns = defaultdict(int)
+    post_divergence_regret_unknown_turns = defaultdict(int)
     tm_sim_planned_budget_ms = 0.0
     tm_sim_legacy_budget_ms = 0.0
     tm_sim_released_turns = 0
     tm_low_bag_fallbacks = 0
+    tm_peg_reserve_shortfalls = 0
+    tm_peg_shadow_budget_ms = 0.0
+    tm_peg_legacy_budget_ms = 0.0
+    tm_peg_deposit_caps = 0
+    tm_peg_withdrawal_caps = 0
     for turn in turns:
         policy = turn["policy"]
+        regret = turn_regret(turn)
+        if regret is None:
+            regret_unknown_turns[policy] += 1
+        else:
+            expected_regret[policy] += regret
+            regret_estimated_turns[policy] += 1
+        if first_divergence is not None and integer(turn, "turn") >= first_divergence:
+            if regret is None:
+                post_divergence_regret_unknown_turns[policy] += 1
+            else:
+                expected_post_divergence_regret[policy] += regret
+                post_divergence_regret_estimated_turns[policy] += 1
         mode = mode_for_turn(turn)
         mode_ms[(policy, mode)] += float(turn["elapsed_ms"])
         if policy == "timemanager" and mode == "sim":
@@ -302,8 +494,38 @@ def parse_pair(
             and integer(turn, "fallbacks") > 0
         ):
             tm_low_bag_fallbacks += integer(turn, "fallbacks")
+        if policy == "timemanager":
+            tm_peg_reserve_shortfalls += integer(turn, "reserve_shortfall")
+            tm_peg_deposit_caps += integer(turn, "peg_deposit_capped")
+            tm_peg_withdrawal_caps += integer(turn, "peg_withdrawal_capped")
+            if mode == "peg":
+                tm_peg_shadow_budget_ms += float(turn["peg_shadow_budget_ms"])
+                tm_peg_legacy_budget_ms += float(turn["legacy_budget_ms"])
         for family, label in (("sim", "sim"), ("peg", "peg"), ("eg", "endgame")):
             mode_calls[(policy, label)] += integer(turn, f"{family}_calls")
+
+    # Before and including the first differing move, each normalized turn is
+    # the same root with one policy in each mirrored game. The difference in
+    # their residual-regret estimates is therefore the model's causal utility
+    # prediction for the extra/withheld computation. Later roots are different
+    # positions and are intentionally excluded from this paired prediction.
+    shared_regret_comparisons = 0
+    shared_regret_unknown_roots = 0
+    predicted_shared_utility_delta = 0.0
+    shared_limit = (
+        paired_turns if first_divergence is None else min(first_divergence, paired_turns)
+    )
+    for index in range(shared_limit):
+        root_turns = [turns_by_game[1][index], turns_by_game[2][index]]
+        by_policy = {turn["policy"]: turn for turn in root_turns}
+        assert set(by_policy) == {"timemanager", "equal"}
+        tm_regret = turn_regret(by_policy["timemanager"])
+        equal_regret = turn_regret(by_policy["equal"])
+        if tm_regret is None or equal_regret is None:
+            shared_regret_unknown_roots += 1
+            continue
+        shared_regret_comparisons += 1
+        predicted_shared_utility_delta += equal_regret - tm_regret
 
     tm_time = sum(float(game["p0_time_ms"]) for game in games)
     equal_time = sum(float(game["p1_time_ms"]) for game in games)
@@ -321,6 +543,7 @@ def parse_pair(
         "first_divergence_bag": divergence_bag,
         "game1_divergence_move": moves[0],
         "game2_divergence_move": moves[1],
+        "first_divergence_cgp": divergence_cgp,
         "fully_identical": int(first_divergence is None),
         "game1_spread": f"{spreads[0]:.6f}",
         "game1_win": f"{wins[0]:.6f}",
@@ -331,6 +554,32 @@ def parse_pair(
         "pair_spread_mean": f"{statistics.fmean(spreads):.6f}",
         "pair_win_score": f"{statistics.fmean(wins):.12f}",
         "pair_utility": f"{statistics.fmean(utilities):.12f}",
+        **player_regret_fields,
+        "tm_expected_game_regret":
+            f"{expected_regret['timemanager']:.12f}",
+        "equal_expected_game_regret": f"{expected_regret['equal']:.12f}",
+        "tm_regret_estimated_turns": regret_estimated_turns["timemanager"],
+        "equal_regret_estimated_turns": regret_estimated_turns["equal"],
+        "tm_regret_unknown_turns": regret_unknown_turns["timemanager"],
+        "equal_regret_unknown_turns": regret_unknown_turns["equal"],
+        "tm_expected_post_divergence_regret":
+            f"{expected_post_divergence_regret['timemanager']:.12f}",
+        "equal_expected_post_divergence_regret":
+            f"{expected_post_divergence_regret['equal']:.12f}",
+        "tm_post_divergence_regret_estimated_turns":
+            post_divergence_regret_estimated_turns["timemanager"],
+        "equal_post_divergence_regret_estimated_turns":
+            post_divergence_regret_estimated_turns["equal"],
+        "tm_post_divergence_regret_unknown_turns":
+            post_divergence_regret_unknown_turns["timemanager"],
+        "equal_post_divergence_regret_unknown_turns":
+            post_divergence_regret_unknown_turns["equal"],
+        "shared_regret_comparisons": shared_regret_comparisons,
+        "shared_regret_unknown_roots": shared_regret_unknown_roots,
+        "predicted_shared_utility_delta":
+            f"{predicted_shared_utility_delta:.12f}",
+        "actual_minus_predicted_utility_delta":
+            f"{statistics.fmean(utilities) - 0.5 - predicted_shared_utility_delta:.12f}",
         "tm_time_ms": f"{tm_time:.3f}",
         "equal_time_ms": f"{equal_time:.3f}",
         "tm_terminal_remaining_ms": f"{2 * clock_ms - tm_time:.3f}",
@@ -355,6 +604,11 @@ def parse_pair(
             f"{tm_sim_planned_budget_ms - tm_sim_legacy_budget_ms:.3f}",
         "tm_sim_released_turns": tm_sim_released_turns,
         "tm_low_bag_fallbacks": tm_low_bag_fallbacks,
+        "tm_peg_reserve_shortfalls": tm_peg_reserve_shortfalls,
+        "tm_peg_shadow_budget_ms": f"{tm_peg_shadow_budget_ms:.3f}",
+        "tm_peg_legacy_budget_ms": f"{tm_peg_legacy_budget_ms:.3f}",
+        "tm_peg_deposit_caps": tm_peg_deposit_caps,
+        "tm_peg_withdrawal_caps": tm_peg_withdrawal_caps,
         "sim_calls": benchmark["sim_calls"],
         "sim_iters": benchmark["sim_iters"],
         "sim_nodes": benchmark["sim_nodes"],
@@ -447,10 +701,33 @@ def build_report(rows: list[dict[str, str]], target: str) -> str:
     spreads = [float(row["pair_spread_mean"]) for row in rows]
     wins = [float(row["pair_win_score"]) - 0.5 for row in rows]
     utilities = [float(row["pair_utility"]) - 0.5 for row in rows]
+    predicted_utilities = [
+        float(row["predicted_shared_utility_delta"]) for row in rows
+    ]
+    prediction_residuals = [
+        float(row["actual_minus_predicted_utility_delta"]) for row in rows
+    ]
+    expected_game_regret = {
+        policy: [float(row[f"{policy}_expected_game_regret"]) for row in rows]
+        for policy in ("tm", "equal")
+    }
+    regret_estimated_turns = {
+        policy: sum(integer(row, f"{policy}_regret_estimated_turns") for row in rows)
+        for policy in ("tm", "equal")
+    }
+    regret_unknown_turns = {
+        policy: sum(integer(row, f"{policy}_regret_unknown_turns") for row in rows)
+        for policy in ("tm", "equal")
+    }
     tm_reserve = [float(row["tm_terminal_remaining_ms"]) / 2000.0 for row in rows]
     equal_reserve = [float(row["equal_terminal_remaining_ms"]) / 2000.0 for row in rows]
     released_budget_seconds = sum(
         float(row["tm_sim_released_budget_ms"]) for row in rows
+    ) / 1000.0
+    peg_shadow_budget_delta_seconds = sum(
+        float(row["tm_peg_shadow_budget_ms"])
+        - float(row["tm_peg_legacy_budget_ms"])
+        for row in rows
     ) / 1000.0
     released_turns = sum(integer(row, "tm_sim_released_turns") for row in rows)
     low_bag_fallbacks = sum(integer(row, "tm_low_bag_fallbacks") for row in rows)
@@ -488,6 +765,22 @@ def build_report(rows: list[dict[str, str]], target: str) -> str:
         and released_turns > 0
         and released_budget_seconds > 0.0
     )
+    latest_player_regret_lines = []
+    for game_number in (1, 2):
+        player_parts = []
+        for player in (0, 1):
+            prefix = f"game{game_number}_p{player}"
+            estimated = integer(rows[-1], f"{prefix}_regret_estimated_turns")
+            unknown = integer(rows[-1], f"{prefix}_regret_unknown_turns")
+            player_parts.append(
+                f"p{player}/{rows[-1][f'{prefix}_policy']}="
+                f"{float(rows[-1][f'{prefix}_expected_game_regret']):.6f} "
+                f"coverage={estimated}/{estimated + unknown}"
+            )
+        latest_player_regret_lines.append(
+            f"latest_pair_observed_path_conditional_regret_sum game={game_number} "
+            + " ".join(player_parts)
+        )
     lines = [
         f"MATCH_UPDATE pairs={len(rows)} target={target}",
         f"first_divergence={','.join(divergences)} fully_identical="
@@ -497,6 +790,31 @@ def build_report(rows: list[dict[str, str]], target: str) -> str:
         "spread_delta " + metric_summary(spreads),
         "win_score_delta " + metric_summary(wins),
         "utility_delta " + metric_summary(utilities),
+        "observed_path_conditional_regret_sum mean_per_player_game tm/equal="
+        f"{statistics.fmean(expected_game_regret['tm']) / 2.0:.6f}/"
+        f"{statistics.fmean(expected_game_regret['equal']) / 2.0:.6f} "
+        "coverage_turns="
+        f"{regret_estimated_turns['tm']}/"
+        f"{regret_estimated_turns['tm'] + regret_unknown_turns['tm']} vs "
+        f"{regret_estimated_turns['equal']}/"
+        f"{regret_estimated_turns['equal'] + regret_unknown_turns['equal']}",
+        *latest_player_regret_lines,
+        "latest_post_divergence_conditional_regret_sum tm/equal="
+        f"{float(rows[-1]['tm_expected_post_divergence_regret']):.6f}/"
+        f"{float(rows[-1]['equal_expected_post_divergence_regret']):.6f} "
+        "estimated_unknown_turns="
+        f"{rows[-1]['tm_post_divergence_regret_estimated_turns']}/"
+        f"{rows[-1]['tm_post_divergence_regret_unknown_turns']} vs "
+        f"{rows[-1]['equal_post_divergence_regret_estimated_turns']}/"
+        f"{rows[-1]['equal_post_divergence_regret_unknown_turns']}",
+        "shared_root_conditional_bai_predicted_utility_delta "
+        + metric_summary(predicted_utilities)
+        + " comparisons="
+        + str(sum(integer(row, "shared_regret_comparisons") for row in rows))
+        + " unknown_roots="
+        + str(sum(integer(row, "shared_regret_unknown_roots") for row in rows)),
+        "utility_prediction_residual actual_minus_predicted "
+        + metric_summary(prediction_residuals),
         f"mean_terminal_seconds tm/equal={statistics.fmean(tm_reserve):.3f}/"
         f"{statistics.fmean(equal_reserve):.3f}",
         "mode_seconds tm/equal "
@@ -510,15 +828,24 @@ def build_report(rows: list[dict[str, str]], target: str) -> str:
         f"ratio={reinvestment_fraction:.3f} noncausal_after_divergence=1",
         f"planned_sim_release seconds={released_budget_seconds:.3f} "
         f"turns={released_turns}",
+        "shadow_peg_budget_delta seconds="
+        f"{peg_shadow_budget_delta_seconds:+.3f}",
         f"timemanager_low_bag_fallbacks={low_bag_fallbacks}",
+        "timemanager_peg_reserve_shortfalls="
+        f"{sum(integer(row, 'tm_peg_reserve_shortfalls') for row in rows)}",
+        "timemanager_peg_deposit_caps="
+        f"{sum(integer(row, 'tm_peg_deposit_caps') for row in rows)}",
+        "timemanager_peg_withdrawal_caps="
+        f"{sum(integer(row, 'tm_peg_withdrawal_caps') for row in rows)}",
         f"timemanager_peg_false_starts={peg_false_starts}",
         f"penalties tm/equal={sum(integer(row, 'tm_penalty') for row in rows)}/"
         f"{sum(integer(row, 'equal_penalty') for row in rows)}",
         "operational_gate "
         + ("PENDING" if not gate_ready else "PASS" if gate_passes else "FAIL")
         + f" pairs={len(rows)}/5 trace_audit=pass",
-        "method mirrored seat RNG; game pair is inference unit; later moves "
-        "after first divergence are incomparable",
+        "method mirrored seat RNG; game pair is inference unit; regret values "
+        "are BAI utility estimates; PEG/endgame/static remain explicit unknowns; "
+        "later moves after first divergence are incomparable",
     ]
     return "\n".join(lines)
 
@@ -601,7 +928,10 @@ def main() -> int:
     )
     protocol_path = run_dir / "protocol.json"
     protocol = {
-        "players": {"p0": "calibrated TimeManager", "p1": "equal slicing"},
+        "players": {
+            "p0": "TimeManager with PEG allocation shadowed",
+            "p1": "equal slicing",
+        },
         "target": target,
         "base_seed": args.base_seed,
         "seed_schedule": "base_seed + pair_number - 1",
@@ -610,7 +940,18 @@ def main() -> int:
         "lexicon": "CSW24",
         "lookup_configuration": "WMP + RIT mmap + WIT",
         "common_rng": "stream 0 starting seat; stream 1 replying seat; mirrored",
-        "trace": "every turn, every sim arm, PEG candidate completion, endgame call",
+        "trace": (
+            "every turn with normalized root CGP and budget-decision flags, "
+            "conditional current-candidate BAI regret, an explicit invalid "
+            "value-to-go marker, retrospective realized-path sums, "
+            "every sim arm, PEG candidate completion, endgame call"
+        ),
+        "regret_model": (
+            "BAI expected sampling regret conditional on the sim candidate set "
+            "and rollout policy, and zero only for a forced single candidate; "
+            "this is not oracle turn regret or rest-of-game value; "
+            "PEG/endgame/static are unknown, never zero-filled"
+        ),
         "overtime_penalty": "1 point per 1000 ms",
         "terminal_utility": "(win_score + 0.5 * logistic(spread / 100)) / 1.5",
         "binary": str(binary),

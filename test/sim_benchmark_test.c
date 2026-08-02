@@ -113,6 +113,8 @@ void test_play_chooser_benchmark(void) {
   const char *seed_env = getenv("PCBENCH_SEED");
   const int seed = seed_env != NULL ? (int)strtol(seed_env, NULL, 10) : 24301;
   const bool game_pairs = benchmark_env_true("PCBENCH_GAME_PAIR");
+  const bool play_analyzed_moves =
+      game_pairs || benchmark_env_true("PCBENCH_PLAY_MOVES");
   const bool detail_events = benchmark_env_true("PCBENCH_DETAIL_EVENTS");
 
   char settings[512];
@@ -131,10 +133,11 @@ void test_play_chooser_benchmark(void) {
                  games, clock_ms, clock_ms, game_pairs ? "true" : "false",
                  game_pairs ? 1 : 0, seed);
 
-  // Run every analysis but pin the played move to top static equity, as
-  // simbench does. Every binary therefore sees the same positions; the
-  // comparison is how much search work it completes under the same clocks.
-  autoplay_set_bench_static_move(!game_pairs);
+  // The ordinary benchmark pins the played move to top static equity, as
+  // simbench does, so binaries see the same positions. Complete-trajectory
+  // collection may opt into the analyzed move to sample the state
+  // distribution induced by PlayChooser itself.
+  autoplay_set_bench_static_move(!play_analyzed_moves);
   play_chooser_benchmark_reset();
   load_and_exec_config_or_die(config, command);
   PlayChooserBenchmarkStats stats;
@@ -170,7 +173,8 @@ void test_play_chooser_benchmark(void) {
   play_chooser_benchmark_stop();
   autoplay_set_bench_static_move(false);
 
-  printf("PCBENCH games=%d clock_ms=%d static=%llu fallbacks=%llu "
+  printf("PCBENCH games=%d clock_ms=%d played_analysis=%d static=%llu "
+         "fallbacks=%llu "
          "sim_calls=%llu sim_iters=%llu sim_nodes=%llu sim_event_drops=%llu "
          "peg_calls=%llu "
          "peg_candidate_completions=%llu peg_event_drops=%llu "
@@ -178,7 +182,8 @@ void test_play_chooser_benchmark(void) {
          "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
          "peg_tm_false_starts=%llu eg_calls=%llu eg_nodes=%llu "
          "eg_depth=%llu eg_event_drops=%llu\n",
-         games, clock_ms, (unsigned long long)stats.static_moves,
+         games, clock_ms, play_analyzed_moves ? 1 : 0,
+         (unsigned long long)stats.static_moves,
          (unsigned long long)stats.fallback_moves,
          (unsigned long long)stats.sim_calls,
          (unsigned long long)stats.sim_iterations,

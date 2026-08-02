@@ -119,6 +119,41 @@ typedef struct PlayChooserStrategy {
 
 typedef struct PlayChooser PlayChooser;
 
+// Search budget selected for the current move. The first live PEG calibration
+// did not establish a monotone value curve for either shortening or extending
+// the ordinary depth cascade, so calibrated PEG budgets are shadow-only for
+// now. The two cap flags record which direction the shadow recommendation
+// differed from the legacy equal slice; reserve_shortfall is the stronger case
+// where the protected future forecast did not leave even a minimum move
+// budget. Actual PEG search still receives the equal slice in all three cases.
+typedef struct PlayChooserMoveBudget {
+  double seconds;
+  double peg_shadow_seconds;
+  bool reserve_shortfall;
+  bool peg_deposit_capped;
+  bool peg_withdrawal_capped;
+} PlayChooserMoveBudget;
+
+// Residual current-search regret reported by the chooser after one move
+// selection. The value is in the same [0, 1] blended-utility units used to
+// rank the candidate arms. SIM_BAI is conditional on the generated candidate
+// set, rollout horizon/policy, and BAI sampling model: it is not oracle
+// current-turn regret and is not a rest-of-game forecast. `valid == false` is
+// deliberately distinct from zero: PEG, endgame, and static play do not yet
+// have a calibrated residual-regret model and must not look exact in
+// retrospective accounting.
+typedef enum PlayChooserRegretModel {
+  PLAY_CHOOSER_REGRET_MODEL_NONE,
+  PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE,
+  PLAY_CHOOSER_REGRET_MODEL_SIM_BAI,
+} PlayChooserRegretModel;
+
+typedef struct PlayChooserRegretEstimate {
+  double expected_utility_regret;
+  PlayChooserRegretModel model;
+  bool valid;
+} PlayChooserRegretEstimate;
+
 // Aggregate work completed by PlayChooser while benchmark collection is
 // enabled. Timed searches should be compared by this work, not by wall time:
 // their wall time is intentionally bounded by the same clock.
@@ -241,6 +276,27 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
 // is not enough safely spendable clock for a non-static search.
 double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
                                          const Game *game);
+
+// Returns the live budget together with the shadow PEG recommendation and its
+// fail-safe reason. Ordinary callers can use play_chooser_get_seconds_for_move;
+// move selection and audit tooling use this form to prove that a reserve
+// shortfall still runs the ordinary equal-slice cascade.
+PlayChooserMoveBudget
+play_chooser_get_move_budget(const PlayChooserStrategy *strategy,
+                             const Game *game);
+
+// Returns the exact budget decision used by the most recent
+// play_chooser_choose_move call. This avoids benchmark telemetry recomputing a
+// clock-sensitive decision after the game timer has advanced.
+PlayChooserMoveBudget
+play_chooser_get_last_move_budget(const PlayChooser *play_chooser);
+PlayChooserRegretEstimate
+play_chooser_get_last_regret_estimate(const PlayChooser *play_chooser);
+const char *play_chooser_regret_model_string(PlayChooserRegretModel model);
+// Human-readable statistical scope for trace schemas. Keep this separate from
+// the model name so audit tooling cannot accidentally present SIM_BAI as a
+// learned value-to-go estimate.
+const char *play_chooser_regret_scope_string(PlayChooserRegretModel model);
 
 // Conservative count of the on-turn player's remaining sim decisions before
 // the bag reaches PEG range. Includes one contingency turn because the usual

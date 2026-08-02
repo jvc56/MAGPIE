@@ -14,6 +14,72 @@ time_manager_boundary_requires_completion_bound(TimeManagerBoundary boundary) {
          boundary == TIME_MANAGER_BOUNDARY_PEG_STAGE;
 }
 
+bool time_manager_value_curve_is_valid(const TimeManagerValueCurve *curve) {
+  if (curve == NULL || curve->knots == NULL || curve->num_knots == 0 ||
+      !curve->surrogate_allocation_gate_passed ||
+      !curve->terminal_game_gate_passed) {
+    return false;
+  }
+  for (size_t index = 0; index < curve->num_knots; index++) {
+    const TimeManagerValueKnot *knot = &curve->knots[index];
+    if (!time_manager_nonnegative_finite(knot->budget_seconds) ||
+        !time_manager_nonnegative_finite(knot->expected_future_regret) ||
+        (index > 0 &&
+         (knot->budget_seconds <= curve->knots[index - 1].budget_seconds ||
+          knot->expected_future_regret >
+              curve->knots[index - 1].expected_future_regret))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+double time_manager_value_curve_predict(const TimeManagerValueCurve *curve,
+                                        double budget_seconds) {
+  if (!time_manager_value_curve_is_valid(curve) ||
+      !time_manager_nonnegative_finite(budget_seconds) ||
+      budget_seconds < curve->knots[0].budget_seconds) {
+    return NAN;
+  }
+  if (budget_seconds >= curve->knots[curve->num_knots - 1].budget_seconds) {
+    return curve->knots[curve->num_knots - 1].expected_future_regret;
+  }
+  for (size_t upper_index = 1; upper_index < curve->num_knots;
+       upper_index++) {
+    const TimeManagerValueKnot *upper = &curve->knots[upper_index];
+    if (budget_seconds <= upper->budget_seconds) {
+      const TimeManagerValueKnot *lower = &curve->knots[upper_index - 1];
+      const double fraction =
+          (budget_seconds - lower->budget_seconds) /
+          (upper->budget_seconds - lower->budget_seconds);
+      return lower->expected_future_regret +
+             fraction * (upper->expected_future_regret -
+                         lower->expected_future_regret);
+    }
+  }
+  return NAN;
+}
+
+double time_manager_value_curve_future_loss(double future_clock_seconds,
+                                            double spend_seconds,
+                                            const void *context) {
+  const TimeManagerValueCurve *curve = context;
+  if (!time_manager_nonnegative_finite(future_clock_seconds) ||
+      !time_manager_nonnegative_finite(spend_seconds) ||
+      spend_seconds > future_clock_seconds) {
+    return NAN;
+  }
+  const double before =
+      time_manager_value_curve_predict(curve, future_clock_seconds);
+  const double after = time_manager_value_curve_predict(
+      curve, future_clock_seconds - spend_seconds);
+  if (!time_manager_nonnegative_finite(before) ||
+      !time_manager_nonnegative_finite(after) || after < before) {
+    return NAN;
+  }
+  return after - before;
+}
+
 double time_manager_estimate_seconds(const TimeManagerCostModel *model,
                                      const TimeManagerWork *work) {
   if (model == NULL || work == NULL ||
@@ -71,7 +137,18 @@ static TimeManagerPlan time_manager_invalid_plan(void) {
   plan.stopped_chunk_completion_bound_seconds = NAN;
   plan.stopped_chunk_completion_confidence = NAN;
   plan.stopped_chunk_value_per_second = NAN;
+  plan.stopped_chunk_future_regret_increase = NAN;
   return plan;
+}
+
+static double time_manager_get_future_loss(const TimeManagerClock *clock,
+                                           double future_clock_seconds,
+                                           double spend_seconds) {
+  if (clock->future_loss_callback != NULL) {
+    return clock->future_loss_callback(future_clock_seconds, spend_seconds,
+                                       clock->future_loss_context);
+  }
+  return spend_seconds * clock->future_value_per_second;
 }
 
 TimeManagerPlan
@@ -110,6 +187,7 @@ time_manager_plan(const TimeManagerClock *clock,
   plan.stopped_chunk_completion_bound_seconds = NAN;
   plan.stopped_chunk_completion_confidence = NAN;
   plan.stopped_chunk_value_per_second = NAN;
+  plan.stopped_chunk_future_regret_increase = NAN;
 
   if (plan.planned_seconds > maximum_current_seconds) {
     plan.stop_reason = TIME_MANAGER_STOP_CLOCK_RESERVE;
@@ -183,12 +261,28 @@ time_manager_plan(const TimeManagerClock *clock,
       plan.stopped_chunk_value_per_second = value_per_second;
       break;
     }
-    if (value_per_second <= clock->future_value_per_second) {
+    const double future_clock_seconds =
+        fmax(0.0, clock_after_safety - plan.planned_seconds);
+    const double future_regret_increase = time_manager_get_future_loss(
+        clock, future_clock_seconds, expected_seconds);
+    if (!time_manager_nonnegative_finite(future_regret_increase)) {
+      plan.valid = false;
+      plan.stop_reason = TIME_MANAGER_STOP_INVALID_INPUT;
+      plan.stopped_chunk_seconds = expected_seconds;
+      plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
+      plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
+      plan.stopped_chunk_value_per_second = value_per_second;
+      plan.stopped_chunk_future_regret_increase = future_regret_increase;
+      plan.deposit_seconds = plan.equal_slice_seconds - plan.planned_seconds;
+      return plan;
+    }
+    if (chunk->expected_regret_reduction <= future_regret_increase) {
       plan.stop_reason = TIME_MANAGER_STOP_FUTURE_VALUE;
       plan.stopped_chunk_seconds = expected_seconds;
       plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
       plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
       plan.stopped_chunk_value_per_second = value_per_second;
+      plan.stopped_chunk_future_regret_increase = future_regret_increase;
       break;
     }
 
@@ -196,6 +290,7 @@ time_manager_plan(const TimeManagerClock *clock,
     plan.planned_seconds += expected_seconds;
     plan.planned_completion_bound_seconds += completion_bound_seconds;
     plan.expected_regret_reduction += chunk->expected_regret_reduction;
+    plan.expected_future_regret_increase += future_regret_increase;
   }
 
   plan.deposit_seconds = plan.equal_slice_seconds - plan.planned_seconds;

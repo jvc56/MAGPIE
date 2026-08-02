@@ -17,4 +17,14 @@
 //                           (default 30).
 void test_pass_peg_oracle_eval_move(void);
 
+// Reconstructs an autoplay position from its game seed and common-prefix move
+// list, then prints a replayable CGP. This is analysis tooling for historical
+// match logs that predate per-turn CGP capture.
+//
+// Env knobs:
+//   TM_REPLAY_GAME_SEED — autoplay PCGAME seed.
+//   TM_REPLAY_START     — starting player index (0 or 1).
+//   TM_REPLAY_MOVES     — pipe-separated UCGI moves before the target root.
+void test_time_manager_match_replay(void);
+
 #endif // PEG_ORACLE_TEST_H

@@ -4,6 +4,11 @@
 #include <stdbool.h>
 #include <stdint.h>
 
+// A residual-regret estimate is not considered identified until every arm has
+// at least this many observations. Keep this public because callers that want
+// finite telemetry should use the same value for their initial sampling floor.
+#define BAI_MINIMUM_REGRET_SAMPLES_PER_ARM 32
+
 typedef enum {
   BAI_THRESHOLD_NONE,
   BAI_THRESHOLD_GK16,

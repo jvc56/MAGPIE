@@ -36,6 +36,7 @@
 #include "../str/sim_string.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
+#include "cgp.h"
 #include "gameplay.h"
 #include "play_chooser.h"
 #include "rack_list.h"
@@ -532,6 +533,9 @@ typedef struct GameRunner {
   PlayChooser *play_choosers[2];
   GameTimer game_timer;
   AutoplayGameTiming timing;
+  double expected_utility_regret[2];
+  int regret_estimated_turns[2];
+  int regret_unknown_turns[2];
   AutoplaySharedData *shared_data;
 } GameRunner;
 
@@ -557,6 +561,12 @@ GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   game_runner->play_choosers[1] = NULL;
   game_timer_reset(&game_runner->game_timer, 0.0);
   game_runner->timing = (AutoplayGameTiming){0};
+  memset(game_runner->expected_utility_regret, 0,
+         sizeof(game_runner->expected_utility_regret));
+  memset(game_runner->regret_estimated_turns, 0,
+         sizeof(game_runner->regret_estimated_turns));
+  memset(game_runner->regret_unknown_turns, 0,
+         sizeof(game_runner->regret_unknown_turns));
   return game_runner;
 }
 
@@ -608,7 +618,10 @@ static void game_runner_print_benchmark_turn(
     const AutoplayWorker *autoplay_worker, const GameRunner *game_runner,
     const Move *move, int player_on_turn_index, int bag_tiles, int score_spread,
     double clock_before_seconds, double clock_after_seconds, int64_t elapsed_ns,
-    double budget_seconds, double legacy_budget_seconds,
+    double budget_seconds, double legacy_budget_seconds, bool reserve_shortfall,
+    double peg_shadow_seconds, bool peg_deposit_capped,
+    bool peg_withdrawal_capped,
+    const PlayChooserRegretEstimate *regret_estimate, const char *cgp,
     const PlayChooserBenchmarkStats *before,
     const PlayChooserBenchmarkStats *after) {
   StringBuilder *move_builder = string_builder_create();
@@ -623,23 +636,40 @@ static void game_runner_print_benchmark_turn(
   const int rng_stream = player_on_turn_index == starting_player ? 0 : 1;
 #define BENCHMARK_DELTA(field)                                                 \
   autoplay_benchmark_delta(after->field, before->field)
-  printf("PCTURN game=%d turn=%d start=%d player=%d policy=%s rng_stream=%d "
-         "bag=%d spread_before=%d clock_before_ms=%.3f clock_after_ms=%.3f "
+  printf("PCTURN game=%d seed=%llu turn=%d start=%d player=%d policy=%s "
+         "rng_stream=%d "
+         "bag=%d own_rack=%u opp_rack=%u spread_before=%d "
+         "clock_before_ms=%.3f clock_after_ms=%.3f "
          "elapsed_ms=%.3f budget_ms=%.3f legacy_budget_ms=%.3f move=\"%s\" "
-         "move_score=%d static=%llu fallbacks=%llu "
+         "move_score=%d reserve_shortfall=%d peg_shadow_budget_ms=%.3f "
+         "peg_deposit_capped=%d "
+         "peg_withdrawal_capped=%d "
+         "regret_valid=%d expected_utility_regret=%.12f regret_model=%s "
+         "regret_scope=%s value_to_go_valid=0 "
+         "static=%llu fallbacks=%llu "
          "sim_call_first=%llu sim_calls=%llu sim_iters=%llu sim_nodes=%llu "
          "peg_call_first=%llu peg_calls=%llu peg_candidate_completions=%llu "
          "peg_stages=%llu peg_final_candidates=%llu peg_scenarios=%llu "
          "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
          "peg_tm_false_starts=%llu eg_call_first=%llu eg_calls=%llu "
-         "eg_nodes=%llu eg_depth_sum=%llu\n",
-         game_runner->pair_game_number, game_runner->turn_number + 1,
+         "eg_nodes=%llu eg_depth_sum=%llu cgp=\"%s\"\n",
+         game_runner->pair_game_number, (unsigned long long)game_runner->seed,
+         game_runner->turn_number + 1,
          starting_player, player_on_turn_index,
          time_manager ? "timemanager" : "equal", rng_stream, bag_tiles,
+         (unsigned int)rack_get_total_letters(player_get_rack(game_get_player(
+             game_runner->game, player_on_turn_index))),
+         (unsigned int)rack_get_total_letters(player_get_rack(game_get_player(
+             game_runner->game, 1 - player_on_turn_index))),
          score_spread, clock_before_seconds * 1000.0,
          clock_after_seconds * 1000.0, (double)elapsed_ns / 1.0e6,
          budget_seconds * 1000.0, legacy_budget_seconds * 1000.0, move_string,
-         equity_to_int(move_get_score(move)),
+         equity_to_int(move_get_score(move)), reserve_shortfall,
+         peg_shadow_seconds * 1000.0, peg_deposit_capped, peg_withdrawal_capped,
+         regret_estimate->valid,
+         regret_estimate->valid ? regret_estimate->expected_utility_regret : NAN,
+         play_chooser_regret_model_string(regret_estimate->model),
+         play_chooser_regret_scope_string(regret_estimate->model),
          (unsigned long long)BENCHMARK_DELTA(static_moves),
          (unsigned long long)BENCHMARK_DELTA(fallback_moves),
          (unsigned long long)before->sim_calls,
@@ -659,7 +689,7 @@ static void game_runner_print_benchmark_turn(
          (unsigned long long)before->endgame_calls,
          (unsigned long long)BENCHMARK_DELTA(endgame_calls),
          (unsigned long long)BENCHMARK_DELTA(endgame_nodes),
-         (unsigned long long)BENCHMARK_DELTA(endgame_depth));
+         (unsigned long long)BENCHMARK_DELTA(endgame_depth), cgp);
 #undef BENCHMARK_DELTA
   fflush(stdout);
   free(move_string);
@@ -682,6 +712,12 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
                                autoplay_worker->args.time_control_seconds[0],
                                autoplay_worker->args.time_control_seconds[1]);
   game_runner->timing = (AutoplayGameTiming){0};
+  memset(game_runner->expected_utility_regret, 0,
+         sizeof(game_runner->expected_utility_regret));
+  memset(game_runner->regret_estimated_turns, 0,
+         sizeof(game_runner->regret_estimated_turns));
+  memset(game_runner->regret_unknown_turns, 0,
+         sizeof(game_runner->regret_unknown_turns));
   game_runner_create_play_choosers(autoplay_worker, game_runner,
                                    iter_output->seed);
   if (game_runner->game_one_move_behind) {
@@ -859,15 +895,19 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
       print_benchmark_turn ? ctimer_monotonic_ns() : 0;
   double benchmark_budget_seconds = 0.0;
   double benchmark_legacy_budget_seconds = 0.0;
+  PlayChooserMoveBudget benchmark_move_budget = {0};
+  char *benchmark_cgp = NULL;
   if (print_benchmark_turn) {
+    benchmark_cgp = game_get_cgp(game, true);
     play_chooser_benchmark_get(&benchmark_before);
     PlayChooserStrategy benchmark_strategy =
         autoplay_worker->args.play_chooser_strategies[player_on_turn_index];
     benchmark_strategy.game_timer = &game_runner->game_timer;
     benchmark_strategy.overtime_period_seconds =
         autoplay_worker->args.overtime_period_seconds;
-    benchmark_budget_seconds =
-        play_chooser_get_seconds_for_move(&benchmark_strategy, game);
+    benchmark_move_budget =
+        play_chooser_get_move_budget(&benchmark_strategy, game);
+    benchmark_budget_seconds = benchmark_move_budget.seconds;
     benchmark_strategy.use_calibrated_peg_time_manager = false;
     benchmark_legacy_budget_seconds =
         play_chooser_get_seconds_for_move(&benchmark_strategy, game);
@@ -911,8 +951,30 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   }
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
+  PlayChooserRegretEstimate regret_estimate = {0};
+  const PlayChooser *const turn_play_chooser =
+      game_runner->play_choosers[player_on_turn_index];
+  if (turn_play_chooser != NULL) {
+    regret_estimate =
+        play_chooser_get_last_regret_estimate(turn_play_chooser);
+    if (regret_estimate.valid) {
+      game_runner->expected_utility_regret[player_on_turn_index] +=
+          regret_estimate.expected_utility_regret;
+      game_runner->regret_estimated_turns[player_on_turn_index]++;
+    } else {
+      game_runner->regret_unknown_turns[player_on_turn_index]++;
+    }
+  }
 
   if (print_benchmark_turn) {
+    const PlayChooser *play_chooser = turn_play_chooser;
+    if (play_chooser != NULL) {
+      // The clock advances between the pre-turn counterfactual and the actual
+      // chooser call. Report the exact decision the chooser used, especially
+      // its reserve-shortfall mode, rather than a near-boundary recomputation.
+      benchmark_move_budget = play_chooser_get_last_move_budget(play_chooser);
+      benchmark_budget_seconds = benchmark_move_budget.seconds;
+    }
     play_chooser_benchmark_get(&benchmark_after);
     game_runner_print_benchmark_turn(
         autoplay_worker, game_runner, move, player_on_turn_index,
@@ -920,7 +982,14 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         game_timer_get_seconds_remaining(&game_runner->game_timer,
                                          player_on_turn_index),
         ctimer_monotonic_ns() - benchmark_start_ns, benchmark_budget_seconds,
-        benchmark_legacy_budget_seconds, &benchmark_before, &benchmark_after);
+        benchmark_legacy_budget_seconds,
+        benchmark_move_budget.reserve_shortfall,
+        benchmark_move_budget.peg_shadow_seconds,
+        benchmark_move_budget.peg_deposit_capped,
+        benchmark_move_budget.peg_withdrawal_capped, &regret_estimate,
+        benchmark_cgp,
+        &benchmark_before, &benchmark_after);
+    free(benchmark_cgp);
   }
 
   if (lg_shared_data) {
@@ -1042,7 +1111,11 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
     printf("PCGAME seed=%llu start=%d p0_score=%d p1_score=%d turns=%d "
            "divergent=%d p0_time_ms=%.3f p1_time_ms=%.3f "
            "p0_overtime_ms=%.3f p1_overtime_ms=%.3f p0_penalty=%d "
-           "p1_penalty=%d\n",
+           "p1_penalty=%d p0_expected_utility_regret=%.12f "
+           "p1_expected_utility_regret=%.12f "
+           "regret_sum_scope=observed_path_conditional_not_forecast "
+           "p0_regret_estimated_turns=%d p1_regret_estimated_turns=%d "
+           "p0_regret_unknown_turns=%d p1_regret_unknown_turns=%d\n",
            (unsigned long long)game_runner->seed,
            game_get_starting_player_index(game),
            equity_to_int(player_get_score(game_get_player(game, 0))),
@@ -1053,7 +1126,13 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
            game_runner->timing.overtime_seconds[0] * 1000.0,
            game_runner->timing.overtime_seconds[1] * 1000.0,
            game_runner->timing.penalty_points[0],
-           game_runner->timing.penalty_points[1]);
+           game_runner->timing.penalty_points[1],
+           game_runner->expected_utility_regret[0],
+           game_runner->expected_utility_regret[1],
+           game_runner->regret_estimated_turns[0],
+           game_runner->regret_estimated_turns[1],
+           game_runner->regret_unknown_turns[0],
+           game_runner->regret_unknown_turns[1]);
     fflush(stdout);
   }
   AutoplayIterCompletedOutput iter_completed_output;

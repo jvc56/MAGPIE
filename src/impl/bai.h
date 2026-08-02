@@ -207,7 +207,14 @@ bai_estimate_expected_regret(const BAISyncData *bai_sync_data,
     return INFINITY;
   }
   const BAIArmDatum *best = &bai_sync_data->arm_data[best_index];
-  if (best->num_samples == 0) {
+  // A one-sample arm has empirical variance zero. Treating the variance floor
+  // as evidence in that state can make a plausible arm look certain and drive
+  // estimated regret to zero. Regret is therefore unknown until every arm has
+  // the same minimum evidence required by the stopping rule. This remains a
+  // separate requirement from BAI's sampling policy: callers that choose a
+  // smaller initial phase may still select a move, but they may not claim a
+  // finite residual-regret estimate.
+  if (best->num_samples < bai_sync_data->regret_min_samples_per_arm) {
     return INFINITY;
   }
   const double correlation =
@@ -218,16 +225,27 @@ bai_estimate_expected_regret(const BAISyncData *bai_sync_data,
       continue;
     }
     const BAIArmDatum *arm = &bai_sync_data->arm_data[arm_index];
-    if (arm->num_samples == 0) {
+    if (arm->num_samples < bai_sync_data->regret_min_samples_per_arm) {
       return INFINITY;
     }
+    // BAIArmDatum stores the population-form empirical variance (M2 / n).
+    // Convert it to the unbiased sample variance before estimating the
+    // variance of a mean. At the enforced n >= 32 floor this is a small
+    // correction, but it keeps the estimator from being systematically
+    // overconfident.
+    const double best_sample_variance =
+        best->var * (double)best->num_samples /
+        (double)(best->num_samples - 1);
+    const double arm_sample_variance =
+        arm->var * (double)arm->num_samples /
+        (double)(arm->num_samples - 1);
     const double covariance =
-        correlation * sqrt(best->var * arm->var) /
+        correlation * sqrt(best_sample_variance * arm_sample_variance) /
         (double)(best->num_samples > arm->num_samples ? best->num_samples
                                                       : arm->num_samples);
-    double difference_variance = best->var / (double)best->num_samples +
-                                 arm->var / (double)arm->num_samples -
-                                 2.0 * covariance;
+    double difference_variance =
+        best_sample_variance / (double)best->num_samples +
+        arm_sample_variance / (double)arm->num_samples - 2.0 * covariance;
     if (difference_variance < MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
       difference_variance = MINIMUM_VARIANCE * MINIMUM_VARIANCE;
     }
@@ -855,9 +873,10 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                                          ? bai_options->regret_check_interval
                                          : 256;
   sync_data->regret_min_samples_per_arm =
-      bai_options->regret_min_samples_per_arm > 0
+      bai_options->regret_min_samples_per_arm >
+              BAI_MINIMUM_REGRET_SAMPLES_PER_ARM
           ? bai_options->regret_min_samples_per_arm
-          : 32;
+          : BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
   if (sync_data->regret_stop_target > 0.0) {
     const uint64_t minimum_total =
         (uint64_t)sync_data->num_arms * sync_data->regret_min_samples_per_arm;

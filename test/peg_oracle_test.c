@@ -15,6 +15,7 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/validated_move.h"
+#include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/gameplay.h"
@@ -22,6 +23,61 @@
 #include "test_util.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+void test_time_manager_match_replay(void) {
+  const char *seed_text = getenv("TM_REPLAY_GAME_SEED");
+  const char *start_text = getenv("TM_REPLAY_START");
+  const char *moves_text = getenv("TM_REPLAY_MOVES");
+  if (seed_text == NULL || start_text == NULL || moves_text == NULL) {
+    log_fatal("tm replay requires TM_REPLAY_GAME_SEED, TM_REPLAY_START, and "
+              "TM_REPLAY_MOVES");
+  }
+  char *seed_end = NULL;
+  const uint64_t seed = strtoull(seed_text, &seed_end, 10);
+  if (seed_end == seed_text || *seed_end != '\0') {
+    log_fatal("invalid TM_REPLAY_GAME_SEED: %s", seed_text);
+  }
+  char *start_end = NULL;
+  const long starting_player = strtol(start_text, &start_end, 10);
+  if (start_end == start_text || *start_end != '\0' || starting_player < 0 ||
+      starting_player > 1) {
+    log_fatal("invalid TM_REPLAY_START: %s", start_text);
+  }
+
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  Game *game = config_game_create(config);
+  game_seed(game, seed);
+  game_set_starting_player_index(game, (int)starting_player);
+  draw_starting_racks(game);
+
+  char *moves = malloc_or_die(strlen(moves_text) + 1);
+  strcpy(moves, moves_text);
+  ErrorStack *error_stack = error_stack_create();
+  char *saveptr = NULL;
+  for (char *move_text = strtok_r(moves, "|", &saveptr); move_text != NULL;
+       move_text = strtok_r(NULL, "|", &saveptr)) {
+    ValidatedMoves *validated = validated_moves_create(
+        game, game_get_player_on_turn_index(game), move_text,
+        /*allow_phonies=*/false, /*allow_playthrough=*/true, error_stack);
+    if (!error_stack_is_empty(error_stack) ||
+        validated_moves_get_number_of_moves(validated) != 1) {
+      log_fatal("tm replay failed to validate move: %s", move_text);
+    }
+    play_move(validated_moves_get_move(validated, 0), game, NULL);
+    validated_moves_destroy(validated);
+  }
+
+  char *cgp = game_get_cgp(game, true);
+  printf("TMREPLAY cgp=\"%s\"\n", cgp);
+  free(cgp);
+  error_stack_destroy(error_stack);
+  free(moves);
+  game_destroy(game);
+  config_destroy(config);
+}
 
 // ---------------------------------------------------------------------------
 // Oracle eval: evaluate a fixed candidate move on a 1-in-bag PEG by direct

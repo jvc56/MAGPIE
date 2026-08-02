@@ -18,6 +18,7 @@
 #include "../src/ent/thread_control.h"
 #include "../src/impl/cgp.h"
 #include "../src/impl/config.h"
+#include "../src/impl/move_gen.h"
 #include "../src/impl/simmer.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
@@ -50,6 +51,12 @@ static const uint64_t THINKING_CURVE_BASE_SEED = UINT64_C(0x4b4c56334f524143);
 static const uint64_t THINKING_CURVE_SEED_STRIDE = UINT64_C(0x9e3779b97f4a7c15);
 static const uint64_t THINKING_CURVE_NOMINATION_SEED_XOR =
     UINT64_C(0xa0761d6478bd642f);
+
+static bool thinking_curve_bai_can_finish_before_sample_limit(
+    bai_result_status_t status) {
+  return status == BAI_RESULT_STATUS_REGRET_LIMIT ||
+         status == BAI_RESULT_STATUS_THRESHOLD;
+}
 
 typedef struct ThinkingCurveCandidate {
   Move move;
@@ -488,7 +495,8 @@ static void thinking_curve_print_point(
   const double total_regret = candidate_regret + sampling_regret;
   printf(
       "THINKING_CURVE_POINT source_index=%d position=%d game=%d bag=%d "
-      "plies=%d target_nodes=%" PRIu64 " final=%d control=%d "
+      "plies=%d candidates=%d target_nodes=%" PRIu64
+      " final=%d control=%d "
       "elapsed_ns=%" PRId64 " cpu_ns=%" PRId64
       " iterations=%" PRIu64 " nodes=%" PRIu64
       " min_play_iterations=%" PRIu64 " selected_rank=%d selected_id=%" PRIu64
@@ -501,8 +509,9 @@ static void thinking_curve_print_point(
       "estimated_best=%.12f estimated_challenger=%.12f "
       "estimated_regret=%.12f regret_at_stop=%.12f "
       "regret_stop_target=%.12f bai_status=%d\n",
-      source_index, position, game_index, bag_tiles, plies, target_nodes, final,
-      control, event->elapsed_ns, event->cpu_ns, event->iterations,
+      source_index, position, game_index, bag_tiles, plies, candidate_count,
+      target_nodes, final, control, event->elapsed_ns, event->cpu_ns,
+      event->iterations,
       event->nodes, min_play_iterations, selected,
       move_get_fingerprint(&candidates[selected].move),
       candidates[selected].raw_move, panel_best_index, candidate_best_index,
@@ -598,11 +607,19 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   result.bai_status = bai_result_get_status(bai_result);
   result.estimated_regret = bai_result_get_estimated_regret(bai_result);
   result.regret_at_stop = bai_result_get_regret_at_stop(bai_result);
-  const bool stopped_for_regret =
-      result.bai_status == BAI_RESULT_STATUS_REGRET_LIMIT;
+  // TOP_TWO_IDS deliberately collapses plays with the same similarity key.
+  // If every candidate is in that one equivalence class, BAI reports
+  // THRESHOLD immediately after the uniform-sampling floor even when the
+  // statistical threshold is disabled.  That is a valid completed arm, not a
+  // broken fixed-budget run: no further samples can distinguish candidates
+  // under the controller's equivalence model.  Keep the stricter exact sample
+  // accounting for ordinary SAMPLE_LIMIT arms.
+  const bool stopped_before_sample_limit =
+      thinking_curve_bai_can_finish_before_sample_limit(result.bai_status);
   if (finish == NULL || finish->nodes > target_nodes ||
-      (!stopped_for_regret && finish->iterations != max_iterations) ||
-      (stopped_for_regret && finish->iterations > max_iterations)) {
+      (!stopped_before_sample_limit &&
+       finish->iterations != max_iterations) ||
+      (stopped_before_sample_limit && finish->iterations > max_iterations)) {
     log_fatal("thinking-curve arm has invalid final accounting: "
               "finish=%d status=%d iterations=%" PRIu64 "/%" PRIu64
               " nodes=%" PRIu64 "/%" PRIu64
@@ -1140,7 +1157,54 @@ static void thinking_curve_run_position(
   fflush_or_die(stdout);
 }
 
+// Full-game value-to-go calibration starts from raw positions rather than a
+// pre-oracled candidate corpus. Generate candidates with the same settings as
+// production PlayChooser so candidate topology cannot silently differ from
+// the live policy. The online common-seed judge remains the only strength
+// label; the legacy oracle fields are diagnostics and therefore zero here.
+static int thinking_curve_generate_candidates(
+    Config *config, const char *cgp, MoveList *generated_moves, int num_plays,
+    ThinkingCurveCandidate candidates[]) {
+  thinking_curve_load_position(config, cgp);
+  move_list_reset(generated_moves);
+  const MoveGenArgs gen_args = {
+      .game = config_get_game(config),
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_EQUITY,
+      .override_kwg = NULL,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+      .move_list = generated_moves,
+      .tiles_played_bv = NULL,
+      .initial_tiles_bv = 0,
+  };
+  generate_moves(&gen_args);
+  int count = move_list_get_count(generated_moves);
+  if (count > num_plays) {
+    count = num_plays;
+  }
+  for (int rank = 0; rank < count; rank++) {
+    ThinkingCurveCandidate *candidate = &candidates[rank];
+    move_copy(&candidate->move, move_list_get_move(generated_moves, rank));
+    (void)snprintf(candidate->raw_move, sizeof(candidate->raw_move),
+                   "generated-rank-%d", rank);
+    candidate->oracle_utility = 0.0;
+    candidate->oracle_win = 0.0;
+    candidate->oracle_spread = 0.0;
+  }
+  return count;
+}
+
 void test_thinking_curve(void) {
+  // Regression guard for all-similar candidate panels: TOP_TWO_IDS reports
+  // THRESHOLD after the uniform floor even when GK16 thresholding is disabled.
+  assert(thinking_curve_bai_can_finish_before_sample_limit(
+      BAI_RESULT_STATUS_THRESHOLD));
+  assert(thinking_curve_bai_can_finish_before_sample_limit(
+      BAI_RESULT_STATUS_REGRET_LIMIT));
+  assert(!thinking_curve_bai_can_finish_before_sample_limit(
+      BAI_RESULT_STATUS_SAMPLE_LIMIT));
   log_set_level(LOG_FATAL);
   const char *corpus = thinking_curve_env_string(
       "THINKING_CURVE_CORPUS",
@@ -1149,6 +1213,10 @@ void test_thinking_curve(void) {
       thinking_curve_env_nonnegative_int("THINKING_CURVE_SKIP_POSITIONS", 0);
   const int max_positions =
       thinking_curve_env_positive_int("THINKING_CURVE_MAX_POSITIONS", 8);
+  const int minimum_bag =
+      thinking_curve_env_nonnegative_int("THINKING_CURVE_MIN_BAG", 0);
+  const int maximum_bag =
+      thinking_curve_env_nonnegative_int("THINKING_CURVE_MAX_BAG", 100);
   const int num_plays =
       thinking_curve_env_positive_int("THINKING_CURVE_NUM_PLAYS", 60);
   const int plies = thinking_curve_env_positive_int("THINKING_CURVE_PLIES", 4);
@@ -1193,6 +1261,10 @@ void test_thinking_curve(void) {
     log_fatal("THINKING_CURVE_NUM_PLAYS must be between 2 and %d",
               THINKING_CURVE_MAX_CANDIDATES);
   }
+  if (maximum_bag < minimum_bag) {
+    log_fatal("THINKING_CURVE_MAX_BAG must be at least "
+              "THINKING_CURVE_MIN_BAG");
+  }
   if (plies < 1 || plies > MAX_PLIES) {
     log_fatal("THINKING_CURVE_PLIES must be between 1 and %d", MAX_PLIES);
   }
@@ -1223,9 +1295,11 @@ void test_thinking_curve(void) {
   ThinkingCurveContext context;
   thinking_curve_context_init(&context, config);
   MoveList *candidate_moves = move_list_create(num_plays);
+  MoveList *generated_moves = move_list_create(num_plays);
   Timer timer;
   ctimer_start(&timer);
   printf("THINKING_CURVE_CONFIG corpus=%s skip_positions=%d max_positions=%d "
+         "minimum_bag=%d maximum_bag=%d "
          "num_plays=%d plies=%d threads=%d max_nodes=%" PRIu64
          " uniform_floor_per_mille=%d"
          " judge_plies=%d judge_samples=%" PRIu64
@@ -1235,7 +1309,8 @@ void test_thinking_curve(void) {
          " regret_min_samples_per_arm=%" PRIu64 " fixed_control=%d"
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
-         corpus, skip_positions, max_positions, num_plays, plies, num_threads,
+         corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
+         num_plays, plies, num_threads,
          max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
          capture_regret_samples, regret_risk_plays, regret_paired_samples,
          regret_stop_target, regret_cross_arm_correlation, regret_calibration,
@@ -1256,6 +1331,68 @@ void test_thinking_curve(void) {
   char *line = NULL;
   size_t line_capacity = 0;
   while (getline_ignore_carriage_return(&line, &line_capacity, stream) != -1) {
+    if (strncmp(line, "TIME_VALUE_POSITION ", 20) == 0) {
+      if (current_position >= 0) {
+        log_fatal("thinking-curve corpus mixes generated and candidate rows");
+      }
+      char *position_value = thinking_curve_copy_field(line, "position=");
+      char *game_value = thinking_curve_copy_field(line, "game=");
+      char *bag_value = thinking_curve_copy_field(line, "bag=");
+      const char *cgp_start = strstr(line, " cgp=");
+      if (position_value == NULL || game_value == NULL || bag_value == NULL ||
+          cgp_start == NULL) {
+        log_fatal("malformed TIME_VALUE_POSITION row");
+      }
+      cgp_start += strlen(" cgp=");
+      char *cgp = string_duplicate(cgp_start);
+      cgp[strcspn(cgp, "\r\n")] = '\0';
+      const int position = (int)strtol(position_value, NULL, 10);
+      const int game_index = (int)strtol(game_value, NULL, 10);
+      const int bag_tiles = (int)strtol(bag_value, NULL, 10);
+
+      const bool in_bag_range =
+          bag_tiles >= minimum_bag && bag_tiles <= maximum_bag;
+      if (in_bag_range && groups_seen >= skip_positions &&
+          evaluated < max_positions) {
+        const int generated_count = thinking_curve_generate_candidates(
+            config, cgp, generated_moves, num_plays, candidates);
+        if (generated_count >= 2) {
+          const int position_risk_plays =
+              regret_risk_plays < generated_count ? regret_risk_plays
+                                                  : generated_count;
+          thinking_curve_run_position(
+              config, &context, candidate_moves, candidates, generated_count,
+              cgp, groups_seen, position, game_index, bag_tiles,
+              generated_count, plies, max_nodes, uniform_floor_per_mille,
+              targets, target_count, judge_plies, judge_samples,
+              capture_regret_samples, position_risk_plays,
+              regret_paired_samples, regret_stop_target,
+              regret_cross_arm_correlation, regret_calibration,
+              regret_check_interval, regret_min_samples_per_arm,
+              fixed_control);
+        } else {
+          printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
+                 "game=%d bag=%d plies=%d candidates=%d regret=0 cgp=%s\n",
+                 groups_seen, position, game_index, bag_tiles, plies,
+                 generated_count, cgp);
+          fflush_or_die(stdout);
+        }
+        evaluated++;
+      }
+      groups_seen++;
+      free(cgp);
+      free(position_value);
+      free(game_value);
+      free(bag_value);
+      if (evaluated >= max_positions ||
+          (wall_seconds > 0.0 &&
+           ctimer_elapsed_seconds(&timer) >= wall_seconds)) {
+        wall_limit_reached = wall_seconds > 0.0 &&
+                             ctimer_elapsed_seconds(&timer) >= wall_seconds;
+        break;
+      }
+      continue;
+    }
     if (strncmp(line, "POSITIONAL_CANDIDATE ", 21) != 0) {
       continue;
     }
@@ -1383,6 +1520,7 @@ void test_thinking_curve(void) {
   fflush_or_die(stdout);
 
   move_list_destroy(candidate_moves);
+  move_list_destroy(generated_moves);
   thinking_curve_context_destroy(&context);
   config_destroy(config);
 }

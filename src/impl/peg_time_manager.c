@@ -215,6 +215,116 @@ static const PegTimeManagerCalibration PEG_TIME_MANAGER_CALIBRATIONS[] = {
     },
 };
 
+// Complete-stage v6 is intentionally a shadow artifact. The cold 2-ply rates
+// began as direct whole-stage ratios from the development panel, rounded
+// outward. The first prospective expansion exposed a bag-3 tail at roughly
+// 9,821 nodes/scenario, versus v1's 3,450 after its global safety multiplier.
+// V2 folded that failed panel into training and rounded the bag-3 envelope out
+// to 12,000 before the same multiplier. It had to pass a new untouched replay;
+// the failed v1 panel is no longer eligible as validation evidence.
+//
+// V2's first prospective multi-depth replay then exposed a different error:
+// after a runtime NPS sample existed, it removed the bag-specific wall/node
+// residual. A bag-1 stage used 7.80M nodes (well below its 16.5M-node bound)
+// but took 44.43s versus a 31.99s wall bound. Hardware throughput and
+// position-specific cost per counted node are distinct effects. V3 therefore
+// raises the persistent deadline-rate safety from 1.0 to the outward-rounded
+// 1.75 that first covers the failed sequence. A fresh v3 panel then showed
+// that a single warm node rate was still insufficient: bag-2 took 99.47s
+// against a 43.34s bound, and bag-3 reached only 25/32 candidates in 178.71s
+// against an 87.63s bound. V4 keeps the portable warm rate but adds a smaller
+// bag-conditioned residual fitted to all failed prospective sequences. The
+// outward-rounded warm residuals are 2.0x/3.0x/2.5x/1.25x for bags 1..4.
+// Deeper stages retain 1.0x because their immediately preceding stage gives
+// position-local work evidence. The bag-1 value is widened again to 2.0x
+// because the strict replay of its known 44.43s tail exceeded the initial
+// 1.5x proposal's 40.39s bound. All failed panels are training evidence only;
+// every live gate remains closed pending a new untouched replay. V4's first
+// untouched expansion was safe but admitted only 3/14 2-ply opportunities,
+// 5/13 3-ply opportunities, and 3/12 4-ply opportunities. V5 therefore keeps
+// the same conservative work envelope but, before launching anything, tests
+// the ordinary halving prefixes and selects the largest of 32/16/8 which can
+// finish. Its first prefix-8 panel exposed a runtime-observation bookkeeping
+// bug rather than an envelope miss: a later zero-node depth erased a valid
+// shallower positive-node sample. V6 preserves the deepest positive-node
+// stage for the next-call hardware rate. The chosen prefix remains one
+// indivisible publication boundary.
+//
+// The earlier attempt scaled the empirical maximum of
+// a *two-candidate* wave across 32 candidates; it admitted only 2/20
+// development stages and therefore was safe but operationally useless. The
+// model below predicts the unit actually dispatched: every survivor at the
+// next depth. Bag-specific deadline multipliers cover the largest observed
+// whole-stage wall/work residual after the normal deadline and completion
+// multipliers are applied.
+//
+// For the next two depths, the same survivors' previous-depth node count is
+// available. A 6x expected / 16x completion growth envelope covers the pilot
+// 2->3 observations while retaining the cold per-scenario floor. It remains
+// unapproved for enforcement until a prospective replay populates the heldout
+// fields below. Depths 5 and 6 deliberately have no entry and fail closed.
+#define PEG_STAGE_CAL(bag, stage, fidelity, previous, maximum, positions,      \
+                      evidence, expected_rate, bound_rate, absolute_nodes,     \
+                      expected_growth, bound_growth, deadline_multiplier,      \
+                      warm_deadline_multiplier, regret)                        \
+  {                                                                            \
+      .bag_tiles = (bag),                                                      \
+      .stage_index = (stage),                                                  \
+      .fidelity_plies = (fidelity),                                            \
+      .previous_fidelity_plies = (previous),                                   \
+      .maximum_candidates = (maximum),                                         \
+      .source_positions = (positions),                                         \
+      .heldout_positions = 0,                                                  \
+      .heldout_false_starts = 0,                                               \
+      .target_completion_quantile = 0.95,                                      \
+      .source_quantile_evidence = (evidence),                                  \
+      .expected_nodes_per_scenario = (expected_rate),                          \
+      .completion_nodes_per_scenario = (bound_rate),                           \
+      .completion_absolute_nodes = UINT64_C(absolute_nodes),                   \
+      .expected_previous_node_multiplier = (expected_growth),                  \
+      .completion_previous_node_multiplier = (bound_growth),                   \
+      .deadline_cost_multiplier = (deadline_multiplier),                       \
+      .warm_deadline_cost_multiplier = (warm_deadline_multiplier),             \
+      .expected_regret_reduction = (regret),                                   \
+      .provisional_completion_confidence = 0.95,                               \
+      .heldout_gate_passed = false,                                            \
+  }
+
+static const PegTimeManagerStageCalibration
+    PEG_TIME_MANAGER_STAGE_CALIBRATIONS[] = {
+        // The untouched live gate remains mandatory before any
+        // heldout_gate_passed field may change.
+        PEG_STAGE_CAL(1, 1, 2, 0, 32, 28, 0.7621731147, 5200.0, 50000.0,
+                      11000000, 0.0, 0.0, 5.0, 2.0, 0.0903),
+        PEG_STAGE_CAL(2, 1, 2, 0, 32, 28, 0.7621731147, 1900.0, 30000.0,
+                      19000000, 0.0, 0.0, 2.0, 3.0, 0.0903),
+        // The failed v1 panel is explicitly reclassified as training.
+        PEG_STAGE_CAL(3, 1, 2, 0, 32, 28, 0.7621731147, 425.0, 12000.0,
+                      37000000, 0.0, 0.0, 1.35, 2.5, 0.0903),
+        PEG_STAGE_CAL(4, 1, 2, 0, 32, 26, 0.7364799055, 190.0, 3000.0, 50000000,
+                      0.0, 0.0, 1.0, 1.25, 0.0903),
+        // 1 - 0.95^40 = 87.15%; these depth-growth entries are also shadow
+        // until the same prospective gate is met.
+        PEG_STAGE_CAL(1, 2, 3, 2, 16, 40, 0.8714878434, 5200.0, 30000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.000530145705),
+        PEG_STAGE_CAL(2, 2, 3, 2, 16, 40, 0.8714878434, 1900.0, 22000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.000530145705),
+        PEG_STAGE_CAL(3, 2, 3, 2, 16, 40, 0.8714878434, 425.0, 12000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.000530145705),
+        PEG_STAGE_CAL(4, 2, 3, 2, 16, 40, 0.8714878434, 190.0, 3000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.000530145705),
+        PEG_STAGE_CAL(1, 3, 4, 3, 8, 40, 0.8714878434, 5200.0, 30000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.00164917222),
+        PEG_STAGE_CAL(2, 3, 4, 3, 8, 40, 0.8714878434, 1900.0, 22000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.00164917222),
+        PEG_STAGE_CAL(3, 3, 4, 3, 8, 40, 0.8714878434, 425.0, 12000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.00164917222),
+        PEG_STAGE_CAL(4, 3, 4, 3, 8, 40, 0.8714878434, 190.0, 3000.0, 0, 6.0,
+                      16.0, 1.0, 1.0, 0.00164917222),
+};
+
+#undef PEG_STAGE_CAL
+
 #undef PEG_WORK
 
 static const PegTimeManagerValueObservation
@@ -287,6 +397,24 @@ peg_time_manager_default_calibration(PegTimeManagerBoundaryKind boundary_kind,
         &PEG_TIME_MANAGER_CALIBRATIONS[index];
     if (calibration->boundary_kind == boundary_kind &&
         calibration->bag_tiles == bag_tiles) {
+      return calibration;
+    }
+  }
+  return NULL;
+}
+
+const PegTimeManagerStageCalibration *
+peg_time_manager_default_stage_calibration(int bag_tiles, int stage_index,
+                                           int fidelity_plies) {
+  for (size_t index = 0;
+       index < sizeof(PEG_TIME_MANAGER_STAGE_CALIBRATIONS) /
+                   sizeof(PEG_TIME_MANAGER_STAGE_CALIBRATIONS[0]);
+       index++) {
+    const PegTimeManagerStageCalibration *calibration =
+        &PEG_TIME_MANAGER_STAGE_CALIBRATIONS[index];
+    if (calibration->bag_tiles == bag_tiles &&
+        calibration->stage_index == stage_index &&
+        calibration->fidelity_plies == fidelity_plies) {
       return calibration;
     }
   }
@@ -418,12 +546,17 @@ double peg_time_manager_estimate_minimum_2ply_seconds(
 // conservative.
 static void
 peg_time_manager_scale_observed_costs(TimeManagerCostModel *model, double scale,
-                                      const PegTimeManagerRequest *request) {
+                                      uint64_t completed_scenarios,
+                                      uint64_t completed_endgame_nodes) {
   model->peg_fixed_seconds_per_chunk *= scale;
-  if (request->completed_scenarios > 0) {
+  if (completed_scenarios > 0) {
     model->peg_seconds_per_scenario *= scale;
   }
-  if (request->completed_endgame_nodes > 0) {
+  // A completed prefix cannot justify scaling an unseen dimension downward,
+  // but a slow prefix is evidence that every cold coefficient should become
+  // more conservative. This asymmetry fixes the pair-45 failure without
+  // ignoring thermal/load slowdowns before the first exact-endgame leaf.
+  if (completed_endgame_nodes > 0 || scale > 1.0) {
     model->peg_seconds_per_endgame_node *= scale;
   }
 }
@@ -467,6 +600,72 @@ bool peg_time_manager_reference_cost_models(
       deadline_slowdown_multiplier;
   deadline_cost_model->peg_seconds_per_candidate *=
       deadline_slowdown_multiplier;
+  return true;
+}
+
+bool peg_time_manager_runtime_rate_update(PegTimeManagerRuntimeRate *rate,
+                                          int workers, double stage_seconds,
+                                          uint64_t stage_endgame_nodes) {
+  if (rate == NULL || workers < 1 || !isfinite(stage_seconds) ||
+      stage_seconds < 0.01 || stage_endgame_nodes == 0) {
+    return false;
+  }
+  const double observed_normalized_rate =
+      stage_seconds / (double)stage_endgame_nodes * (double)workers;
+  if (!peg_time_manager_positive_finite(observed_normalized_rate)) {
+    return false;
+  }
+  if (rate->observations == 0) {
+    rate->expected_normalized_seconds_per_endgame_node =
+        observed_normalized_rate;
+    rate->deadline_normalized_seconds_per_endgame_node =
+        observed_normalized_rate;
+  } else {
+    if (!peg_time_manager_positive_finite(
+            rate->expected_normalized_seconds_per_endgame_node) ||
+        !peg_time_manager_positive_finite(
+            rate->deadline_normalized_seconds_per_endgame_node)) {
+      return false;
+    }
+    rate->expected_normalized_seconds_per_endgame_node =
+        0.8 * rate->expected_normalized_seconds_per_endgame_node +
+        0.2 * observed_normalized_rate;
+    rate->deadline_normalized_seconds_per_endgame_node =
+        fmax(0.98 * rate->deadline_normalized_seconds_per_endgame_node,
+             observed_normalized_rate);
+  }
+  rate->observations++;
+  return true;
+}
+
+bool peg_time_manager_runtime_rate_apply(const PegTimeManagerRuntimeRate *rate,
+                                         int workers,
+                                         double deadline_safety_multiplier,
+                                         TimeManagerCostModel *expected_cost,
+                                         TimeManagerCostModel *deadline_cost) {
+  if (rate == NULL || rate->observations == 0 || workers < 1 ||
+      !isfinite(deadline_safety_multiplier) ||
+      deadline_safety_multiplier < 1.0 || expected_cost == NULL ||
+      deadline_cost == NULL ||
+      !peg_time_manager_positive_finite(
+          rate->expected_normalized_seconds_per_endgame_node) ||
+      !peg_time_manager_positive_finite(
+          rate->deadline_normalized_seconds_per_endgame_node)) {
+    return false;
+  }
+  const double expected_rate =
+      rate->expected_normalized_seconds_per_endgame_node / (double)workers;
+  const double deadline_rate =
+      rate->deadline_normalized_seconds_per_endgame_node / (double)workers *
+      deadline_safety_multiplier;
+  if (!peg_time_manager_positive_finite(expected_rate) ||
+      !peg_time_manager_positive_finite(deadline_rate)) {
+    return false;
+  }
+  expected_cost->peg_seconds_per_endgame_node =
+      fmax(expected_cost->peg_seconds_per_endgame_node, expected_rate);
+  deadline_cost->peg_seconds_per_endgame_node =
+      fmax(deadline_cost->peg_seconds_per_endgame_node, deadline_rate);
   return true;
 }
 
@@ -571,10 +770,12 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
       } else if (decision.live_cost_scale > 4.0) {
         decision.live_cost_scale = 4.0;
       }
-      peg_time_manager_scale_observed_costs(&expected_cost_model,
-                                            decision.live_cost_scale, request);
-      peg_time_manager_scale_observed_costs(&deadline_cost_model,
-                                            decision.live_cost_scale, request);
+      peg_time_manager_scale_observed_costs(
+          &expected_cost_model, decision.live_cost_scale,
+          request->completed_scenarios, request->completed_endgame_nodes);
+      peg_time_manager_scale_observed_costs(
+          &deadline_cost_model, decision.live_cost_scale,
+          request->completed_scenarios, request->completed_endgame_nodes);
     }
   }
 
@@ -664,6 +865,252 @@ peg_time_manager_plan_boundary(const PegTimeManagerPolicy *policy,
       policy->allow_provisional_enforcement &&
       completion_bound_multiplier >= 1.0 &&
       decision.completion_confidence >= clock.minimum_completion_confidence;
+  decision.should_start = physically_fits && decision.plan.chunks_bought == 1;
+  return decision;
+}
+
+static bool peg_time_manager_predict_stage_nodes(
+    const PegTimeManagerStageCalibration *calibration,
+    const PegTimeManagerStageRequest *request, bool completion_bound,
+    uint64_t *nodes_out) {
+  if (calibration == NULL || request == NULL || nodes_out == NULL) {
+    return false;
+  }
+  const double nodes_per_scenario =
+      completion_bound ? calibration->completion_nodes_per_scenario
+                       : calibration->expected_nodes_per_scenario;
+  const double previous_node_multiplier =
+      completion_bound ? calibration->completion_previous_node_multiplier
+                       : calibration->expected_previous_node_multiplier;
+  if (!peg_time_manager_nonnegative_finite(nodes_per_scenario) ||
+      !peg_time_manager_nonnegative_finite(previous_node_multiplier)) {
+    return false;
+  }
+  const long double cold_nodes =
+      (long double)request->stage_scenarios * nodes_per_scenario;
+  const long double bounded_cold_nodes =
+      completion_bound && calibration->completion_absolute_nodes > 0
+          ? fminl(cold_nodes,
+                  (long double)calibration->completion_absolute_nodes)
+          : cold_nodes;
+  const long double prior_nodes =
+      (long double)request->previous_stage_endgame_nodes *
+      previous_node_multiplier;
+  const long double predicted_nodes = fmaxl(bounded_cold_nodes, prior_nodes);
+  if (predicted_nodes < 0.0L || predicted_nodes > UINT64_MAX) {
+    return false;
+  }
+  *nodes_out = (uint64_t)ceill(predicted_nodes);
+  return true;
+}
+
+static bool peg_time_manager_stage_request_matches(
+    const PegTimeManagerPolicy *policy,
+    const PegTimeManagerStageCalibration *calibration,
+    const PegTimeManagerStageRequest *request) {
+  if (policy == NULL || calibration == NULL || request == NULL) {
+    return false;
+  }
+  const bool previous_work_matches =
+      calibration->previous_fidelity_plies == 0
+          ? request->previous_stage_endgame_nodes == 0
+          : request->previous_stage_scenarios == request->stage_scenarios;
+  return policy->use_complete_stage_admission &&
+         request->bag_tiles == calibration->bag_tiles &&
+         request->stage_index == calibration->stage_index &&
+         request->fidelity_plies == calibration->fidelity_plies &&
+         request->previous_fidelity_plies ==
+             calibration->previous_fidelity_plies &&
+         request->workers > 0 && request->candidates >= 2 &&
+         request->candidates <= calibration->maximum_candidates &&
+         !request->nested_enabled && request->scenario_stride == 1 &&
+         request->parallel_stage_dispatch && request->stage_scenarios > 0 &&
+         previous_work_matches;
+}
+
+PegTimeManagerDecision
+peg_time_manager_plan_stage(const PegTimeManagerPolicy *policy,
+                            const PegTimeManagerStageRequest *request) {
+  PegTimeManagerDecision decision = {.is_complete_stage = true};
+  if (policy == NULL || request == NULL || request->bag_tiles < 1 ||
+      request->bag_tiles > 4 || request->stage_index < 1 ||
+      request->fidelity_plies < 2 || !isfinite(request->elapsed_seconds) ||
+      request->elapsed_seconds < 0.0 ||
+      !isfinite(request->observed_previous_stage_elapsed_seconds) ||
+      request->observed_previous_stage_elapsed_seconds < 0.0 ||
+      isnan(request->remaining_seconds) || request->remaining_seconds < 0.0 ||
+      (request->has_player_clock &&
+       (!isfinite(request->player_clock_remaining_seconds) ||
+        request->player_clock_remaining_seconds < 0.0))) {
+    return decision;
+  }
+
+  const PegTimeManagerStageCalibration *calibration =
+      peg_time_manager_default_stage_calibration(
+          request->bag_tiles, request->stage_index, request->fidelity_plies);
+  if (calibration == NULL) {
+    return decision;
+  }
+  decision.configuration_matches =
+      peg_time_manager_stage_request_matches(policy, calibration, request);
+  if (!decision.configuration_matches) {
+    return decision;
+  }
+
+  decision.pricing_work = (TimeManagerWork){
+      .mode = ANALYSIS_MODE_PEG,
+      .scenarios = request->stage_scenarios,
+      .candidates = (uint64_t)request->candidates,
+  };
+  decision.empirical_p99_work = decision.pricing_work;
+  if (!peg_time_manager_predict_stage_nodes(calibration, request,
+                                            /*completion_bound=*/false,
+                                            &decision.pricing_work.nodes) ||
+      !peg_time_manager_predict_stage_nodes(
+          calibration, request, /*completion_bound=*/true,
+          &decision.empirical_p99_work.nodes)) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+  decision.provisional_completion_bound_work = decision.empirical_p99_work;
+  const double completion_bound_multiplier =
+      policy->completion_bound_multiplier > 0.0
+          ? policy->completion_bound_multiplier
+          : 1.0;
+  if (!peg_time_manager_scale_work(&decision.provisional_completion_bound_work,
+                                   completion_bound_multiplier)) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+
+  TimeManagerCostModel expected_cost_model = policy->expected_cost_model;
+  TimeManagerCostModel deadline_cost_model = policy->deadline_cost_model;
+  const double deadline_residual =
+      policy->has_runtime_endgame_rate
+          ? calibration->warm_deadline_cost_multiplier
+          : calibration->deadline_cost_multiplier;
+  if (!isfinite(deadline_residual) || deadline_residual < 1.0) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+  deadline_cost_model.peg_fixed_seconds_per_chunk *= deadline_residual;
+  deadline_cost_model.peg_seconds_per_scenario *= deadline_residual;
+  deadline_cost_model.peg_seconds_per_endgame_node *= deadline_residual;
+  deadline_cost_model.peg_seconds_per_candidate *= deadline_residual;
+  decision.live_cost_scale = 1.0;
+  const bool has_previous_stage_rate =
+      request->observed_previous_stage_elapsed_seconds >= 0.01 &&
+      (request->observed_previous_stage_scenarios > 0 ||
+       request->observed_previous_stage_endgame_nodes > 0);
+  const double observed_elapsed =
+      has_previous_stage_rate ? request->observed_previous_stage_elapsed_seconds
+                              : request->elapsed_seconds;
+  const uint64_t observed_scenarios =
+      has_previous_stage_rate ? request->observed_previous_stage_scenarios
+                              : request->completed_scenarios;
+  const uint64_t observed_endgame_nodes =
+      has_previous_stage_rate ? request->observed_previous_stage_endgame_nodes
+                              : request->completed_endgame_nodes;
+  if (policy->use_live_cost_scale && observed_elapsed >= 0.01 &&
+      (observed_scenarios > 0 || observed_endgame_nodes > 0)) {
+    const TimeManagerWork completed_work = {
+        .mode = ANALYSIS_MODE_PEG,
+        .nodes = observed_endgame_nodes,
+        .scenarios = observed_scenarios,
+    };
+    const double modeled_elapsed =
+        time_manager_estimate_seconds(&expected_cost_model, &completed_work);
+    if (isfinite(modeled_elapsed) && modeled_elapsed > 0.0) {
+      decision.live_cost_scale = observed_elapsed / modeled_elapsed;
+      if (decision.live_cost_scale < 0.25) {
+        decision.live_cost_scale = 0.25;
+      } else if (decision.live_cost_scale > 4.0) {
+        decision.live_cost_scale = 4.0;
+      }
+      peg_time_manager_scale_observed_costs(
+          &expected_cost_model, decision.live_cost_scale, observed_scenarios,
+          observed_endgame_nodes);
+      // Greedy work can show that move generation is fast, but it cannot show
+      // that this position's exact-endgame leaves are fast. Until a completed
+      // endgame-bearing stage exists, never shrink any part of the deadline
+      // envelope from that node-free observation. A slow greedy prefix still
+      // expands every coefficient.
+      const double deadline_live_scale =
+          observed_endgame_nodes > 0 ? decision.live_cost_scale
+                                     : fmax(1.0, decision.live_cost_scale);
+      peg_time_manager_scale_observed_costs(
+          &deadline_cost_model, deadline_live_scale, observed_scenarios,
+          observed_endgame_nodes);
+    }
+  }
+
+  decision.pricing_seconds = time_manager_estimate_seconds(
+      &expected_cost_model, &decision.pricing_work);
+  decision.empirical_p99_seconds = time_manager_estimate_seconds(
+      &deadline_cost_model, &decision.empirical_p99_work);
+  decision.provisional_completion_bound_seconds = time_manager_estimate_seconds(
+      &deadline_cost_model, &decision.provisional_completion_bound_work);
+  if (!peg_time_manager_nonnegative_finite(decision.pricing_seconds) ||
+      !peg_time_manager_nonnegative_finite(decision.empirical_p99_seconds) ||
+      decision.empirical_p99_seconds < decision.pricing_seconds ||
+      !peg_time_manager_nonnegative_finite(
+          decision.provisional_completion_bound_seconds) ||
+      decision.provisional_completion_bound_seconds <
+          decision.empirical_p99_seconds) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+
+  decision.expected_regret_reduction = calibration->expected_regret_reduction;
+  if (!peg_time_manager_nonnegative_finite(
+          decision.expected_regret_reduction)) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+  decision.has_provisional_completion_bound = true;
+  decision.completion_confidence =
+      calibration->provisional_completion_confidence;
+  decision.heldout_gate_passed = calibration->heldout_gate_passed;
+
+  TimeManagerClock clock = policy->clock;
+  clock.remaining_seconds =
+      (request->has_player_clock ? request->player_clock_remaining_seconds
+                                 : request->remaining_seconds) +
+      request->elapsed_seconds;
+  clock.committed_current_seconds = request->elapsed_seconds;
+  if (policy->future_reserve_endgame_nodes > 0) {
+    if (!isfinite(policy->future_rate_safety_multiplier) ||
+        policy->future_rate_safety_multiplier < 1.0 ||
+        !peg_time_manager_nonnegative_finite(
+            expected_cost_model.peg_seconds_per_endgame_node)) {
+      return (PegTimeManagerDecision){.is_complete_stage = true};
+    }
+    const double future_node_seconds =
+        (double)policy->future_reserve_endgame_nodes *
+        expected_cost_model.peg_seconds_per_endgame_node *
+        policy->future_rate_safety_multiplier;
+    if (!peg_time_manager_nonnegative_finite(future_node_seconds)) {
+      return (PegTimeManagerDecision){.is_complete_stage = true};
+    }
+    clock.future_reserve_seconds += future_node_seconds;
+  }
+  const TimeManagerChunk chunk = {
+      .boundary = TIME_MANAGER_BOUNDARY_PEG_STAGE,
+      .work = decision.pricing_work,
+      .has_completion_bound = true,
+      .completion_bound_work = decision.provisional_completion_bound_work,
+      .completion_confidence = decision.completion_confidence,
+      .expected_regret_reduction = decision.expected_regret_reduction,
+  };
+  decision.plan = time_manager_plan(&clock, &expected_cost_model,
+                                    &deadline_cost_model, &chunk, 1);
+  if (!decision.plan.valid) {
+    return (PegTimeManagerDecision){.is_complete_stage = true};
+  }
+
+  const bool physically_fits = decision.provisional_completion_bound_seconds <=
+                               request->remaining_seconds;
+  decision.valid = true;
+  decision.safe_to_enforce =
+      policy->allow_provisional_enforcement &&
+      calibration->heldout_gate_passed && completion_bound_multiplier >= 1.0 &&
+      decision.completion_confidence >= clock.minimum_completion_confidence &&
+      (request->stage_index > 1 || policy->has_runtime_endgame_rate);
   decision.should_start = physically_fits && decision.plan.chunks_bought == 1;
   return decision;
 }

@@ -1,0 +1,72 @@
+{
+  "artifact_id": "csw24-peg-complete-stage-shadow-v4-20260801",
+  "schema_version": 4,
+  "status": "shadow_only",
+  "fit": {
+    "audit_definition": "an admitted stage fails if incomplete at the physical deadline or if its observed complete duration exceeds its predicted completion bound",
+    "build": "no_pgo_release",
+    "completion_multiplier": 1.5,
+    "deadline_slowdown": 1.5,
+    "positions": 91,
+    "refit_reason": "v3's one warm endgame-node rate still missed position-specific counted-node wall cost: quality p013 bag 2 completed in 99.47s against a 43.34s bound and bag 3 reached only 25/32 candidates in 178.71s against an 87.63s bound; v4 adds outward-rounded bag-conditioned warm residuals fitted to all failed prospective sequences, including widening bag 1 from the initial 1.5x proposal to 2.0x after strict replay of the known 44.43s tail",
+    "training_records": [
+      {"path": "obj/peg-stage-admission-fit-20260801/records.jsonl", "sha256": "e677916ddbb1d4a4d7617b63ce8bb57bd27d3c99477c6c2d68ea438f5306d840"},
+      {"path": "obj/peg-stage-admission-heldout-20260801/records.jsonl", "sha256": "474af2eeb3fd5c20c49792693ce65f350e8185ab99b1afe06da1601d257ff9e2"},
+      {"path": "obj/peg-stage-admission-heldout-quality48-20260801/records.jsonl", "sha256": "a1b217f0b32495c202fb74851a6e2ca0ef63a05b5a4a8c1edfa03d69c726d2f2"},
+      {"path": "obj/peg-stage-admission-v2-heldout-depths-20260801/records.jsonl", "sha256": "667ca4793c1e77230b15fe8c8ca360ce91392e6a9590880d5f4a54e9e119fd40"},
+      {"path": "obj/peg-stage-admission-v2-heldout-depths-continuation-20260801/records.jsonl", "sha256": "6e43277cc9c60b54b33470cbfcd682f8a1f54ca3815188aa83109d1a950628ec"},
+      {"path": "obj/peg-stage-admission-v3-heldout-depths-20260801/records.jsonl", "sha256": "eefbf7c1d88b8ea3687fdff826fd0a9a01768c483ec021fdbda87d042c21d8bd"}
+    ],
+    "threads": 10
+  },
+  "depth_growth_fit": {
+    "completion_previous_node_multiplier": 16.0,
+    "expected_previous_node_multiplier": 6.0,
+    "positions": 40,
+    "source": "prospectively locked PEG 3-ply and 4-ply calibration panels"
+  },
+  "gate": {
+    "minimum_admitted_stages": 59,
+    "minimum_positions_per_bag": 16,
+    "required_false_starts": 0,
+    "target_completion_quantile": 0.95,
+    "target_quantile_evidence": 0.95,
+    "note": "each depth is gated independently; 1 - 0.95^59 = 95.15%; only admitted stages count; observed duration must fit the predicted bound"
+  },
+  "runtime_rate": {
+    "deadline_decay": 0.98,
+    "deadline_safety_multiplier": 1.75,
+    "expected_new_sample_weight": 0.2,
+    "minimum_prior_observations_for_stage_1": 1,
+    "normalization": "wall seconds per endgame node multiplied by source workers"
+  },
+  "reference_cost": {
+    "fixed_seconds": 0.6649604943560226,
+    "reference_workers": 18,
+    "seconds_per_endgame_node": 5.162207041055367e-7,
+    "seconds_per_scenario": 4.490316923672115e-6
+  },
+  "stage_1": {
+    "1": {"completion_absolute_nodes": 11000000, "completion_nodes_per_scenario": 50000.0, "completion_previous_node_multiplier": 0.0, "deadline_cost_multiplier": 5.0, "warm_deadline_cost_multiplier": 2.0, "expected_nodes_per_scenario": 5200.0, "expected_previous_node_multiplier": 0.0},
+    "2": {"completion_absolute_nodes": 19000000, "completion_nodes_per_scenario": 30000.0, "completion_previous_node_multiplier": 0.0, "deadline_cost_multiplier": 2.0, "warm_deadline_cost_multiplier": 3.0, "expected_nodes_per_scenario": 1900.0, "expected_previous_node_multiplier": 0.0},
+    "3": {"completion_absolute_nodes": 37000000, "completion_nodes_per_scenario": 12000.0, "completion_previous_node_multiplier": 0.0, "deadline_cost_multiplier": 1.35, "warm_deadline_cost_multiplier": 2.5, "expected_nodes_per_scenario": 425.0, "expected_previous_node_multiplier": 0.0},
+    "4": {"completion_absolute_nodes": 50000000, "completion_nodes_per_scenario": 3000.0, "completion_previous_node_multiplier": 0.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.25, "expected_nodes_per_scenario": 190.0, "expected_previous_node_multiplier": 0.0}
+  },
+  "stage_2": {
+    "1": {"completion_nodes_per_scenario": 30000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 5200.0, "expected_previous_node_multiplier": 6.0},
+    "2": {"completion_nodes_per_scenario": 22000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 1900.0, "expected_previous_node_multiplier": 6.0},
+    "3": {"completion_nodes_per_scenario": 12000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 425.0, "expected_previous_node_multiplier": 6.0},
+    "4": {"completion_nodes_per_scenario": 3000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 190.0, "expected_previous_node_multiplier": 6.0}
+  },
+  "stage_3": {
+    "1": {"completion_nodes_per_scenario": 30000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 5200.0, "expected_previous_node_multiplier": 6.0},
+    "2": {"completion_nodes_per_scenario": 22000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 1900.0, "expected_previous_node_multiplier": 6.0},
+    "3": {"completion_nodes_per_scenario": 12000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 425.0, "expected_previous_node_multiplier": 6.0},
+    "4": {"completion_nodes_per_scenario": 3000.0, "completion_previous_node_multiplier": 16.0, "deadline_cost_multiplier": 1.0, "warm_deadline_cost_multiplier": 1.0, "expected_nodes_per_scenario": 190.0, "expected_previous_node_multiplier": 6.0}
+  },
+  "validation": {
+    "stage_1": {"gate_passed": false, "heldout_admitted_stages": 0, "heldout_false_starts": 0, "heldout_positions": 0},
+    "stage_2": {"gate_passed": false, "heldout_admitted_stages": 0, "heldout_false_starts": 0, "heldout_positions": 0},
+    "stage_3": {"gate_passed": false, "heldout_admitted_stages": 0, "heldout_false_starts": 0, "heldout_positions": 0}
+  }
+}

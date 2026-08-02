@@ -262,11 +262,12 @@ typedef struct PegArgs {
   AnalysisProgressListener progress_listener;
 
   // Optional TimeManager shadow/admission policy. Shadow mode emits ADMISSION
-  // events without changing dispatcher topology or results. Enforced no-poll
-  // mode splits the 2-ply stage into the calibrated first-two wave followed by
-  // individually replanned candidates. The policy must explicitly opt into
-  // the provisional finite-corpus envelope; zero-initialized policies remain
-  // fail-closed.
+  // events without changing dispatcher topology or results. The current model
+  // admits only a complete no-poll depth: enforcement either submits the
+  // ordinary stage-wide barrier or retains the previous fully completed
+  // depth. The legacy first-two/single-candidate dispatcher remains available
+  // only when use_complete_stage_admission is false. Every enforcement mode
+  // is explicit opt-in; zero-initialized policies remain fail-closed.
   PegTimeManagerPolicy *time_manager_policy;
   bool enforce_time_manager;
   // TimeManager plans against the player's game clock when present. The
@@ -417,6 +418,17 @@ typedef struct PegResult {
   // machine-independent work counter; unlike wall time it remains meaningful
   // when the host is carrying another load.
   uint64_t nested_endgame_nodes;
+
+  // Work and wall time observed in the most recently scored non-greedy stage
+  // with positive exact-endgame-node work, including a legacy
+  // deadline-truncated stage. A later zero-node depth does not erase this
+  // usable hardware-rate sample. This is throughput calibration only;
+  // `last_completed_stage` remains the publication boundary. A persistent
+  // TimeManager can use these values to price the next PEG call on the current
+  // hardware without treating partial values as a completed ranking.
+  double last_stage_work_seconds;
+  uint64_t last_stage_work_scenarios;
+  uint64_t last_stage_work_endgame_nodes;
 
   // Top-K cand list from the last completed stage, sorted descending by
   // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.

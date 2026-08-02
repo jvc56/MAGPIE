@@ -1,0 +1,59 @@
+{
+  "artifact_id": "csw24-peg-complete-stage-shadow-v1-20260801",
+  "schema_version": 1,
+  "status": "shadow_only",
+  "fit": {
+    "build": "no_pgo_release",
+    "completion_multiplier": 1.5,
+    "deadline_slowdown": 1.5,
+    "panel": "tools/peg_time_calibration/heldout_positions.tsv",
+    "panel_sha256": "80844b1007e0870b48e34eab7382ef8e2ceb19d442382602b2a2ce720fc1806c",
+    "positions": 20,
+    "positions_per_bag": 5,
+    "raw_records_sha256": "e677916ddbb1d4a4d7617b63ce8bb57bd27d3c99477c6c2d68ea438f5306d840",
+    "schedule": [32],
+    "threads": 10
+  },
+  "gate": {
+    "minimum_admitted_stages": 59,
+    "minimum_positions_per_bag": 16,
+    "required_false_starts": 0,
+    "target_completion_quantile": 0.95,
+    "target_quantile_evidence": 0.95,
+    "note": "1 - 0.95^59 = 95.15%; only admitted stages count toward completion evidence"
+  },
+  "reference_cost": {
+    "fixed_seconds": 0.6649604943560226,
+    "reference_workers": 18,
+    "seconds_per_endgame_node": 5.162207041055367e-7,
+    "seconds_per_scenario": 4.490316923672115e-6
+  },
+  "stage_1": {
+    "1": {
+      "completion_nodes_per_scenario": 30000.0,
+      "deadline_cost_multiplier": 5.0,
+      "expected_nodes_per_scenario": 5200.0
+    },
+    "2": {
+      "completion_nodes_per_scenario": 22000.0,
+      "deadline_cost_multiplier": 2.0,
+      "expected_nodes_per_scenario": 1900.0
+    },
+    "3": {
+      "completion_nodes_per_scenario": 2300.0,
+      "deadline_cost_multiplier": 1.35,
+      "expected_nodes_per_scenario": 425.0
+    },
+    "4": {
+      "completion_nodes_per_scenario": 3000.0,
+      "deadline_cost_multiplier": 1.0,
+      "expected_nodes_per_scenario": 190.0
+    }
+  },
+  "validation": {
+    "gate_passed": false,
+    "heldout_admitted_stages": 0,
+    "heldout_false_starts": 0,
+    "heldout_positions": 0
+  }
+}

@@ -97,8 +97,13 @@ future turns under the remaining clock and predicted mode/phase mix.
 Take another computation chunk only when:
 
 ```text
-expected current regret reduction / predicted chunk seconds > lambda
+expected current regret reduction
+    > F(future state, future clock - predicted chunk seconds)
+      - F(future state, future clock)
 ```
+
+For a sufficiently small interruptible checkpoint, dividing both sides by its
+seconds recovers the local `current value/second > lambda` rule.
 
 and the safety reserve remains intact. Stopping before the old equal slice is a
 deposit. Continuing past it is a withdrawal. The equal slice is a comparison
@@ -110,6 +115,165 @@ Chunks align with useful result boundaries:
 - endgame: the predicted nodes needed to finish the next IDS depth;
 - PEG: the predicted nodes needed to finish the current candidate, then the
   current stage. Do not buy half a candidate whose result will be discarded.
+
+## Learned rest-of-game value
+
+Current-search confidence is not a time-allocation policy. A BAI posterior can
+estimate sampling regret inside the candidates and rollout policy it has seen;
+a PEG or endgame trace can estimate the value of its next completed boundary.
+Neither says how valuable the same second would be on positions that have not
+yet occurred. TimeManager therefore needs two independently calibrated sides
+of every decision:
+
+```text
+current gain = E[R_current(work now) - R_current(work after next chunk)]
+future loss  = F(next state, future clock - chunk seconds)
+             - F(next state, future clock)
+```
+
+The true target is game-level, not a sum invented for convenient telemetry:
+
+```text
+J(state, clock) = maximum expected terminal win/spread utility achievable
+                  by the search-and-play policy over the rest of the game
+F(state, clock) = J(state, unlimited clock) - J(state, clock)
+```
+
+Its finite difference is the price of a proposed chunk. For an indivisible
+PEG wave or endgame depth use
+`F(state, clock - chunk_seconds) - F(state, clock)` directly; a single local
+slope `lambda` is only an approximation for a tiny simulation checkpoint.
+Recompute after every completed boundary because the curve can steepen as the
+clock shrinks. Buy the next chunk only when current gain exceeds that future
+loss, subject to the separate hard completion and clock-safety gates. A fixed
+residual-regret target is not a substitute for `F`: it spends the same way in
+a trivial position with surplus clock and in a hard position before several
+more valuable turns.
+
+The first offline labeler uses the minimum expected sum of oracle decision
+regrets over later turns as a *surrogate* for `F`. That decomposition is valid
+in the ideal performance-difference setting only when every per-turn oracle is
+a consistent action-value estimate for the same continuation policy and the
+expectation uses the evaluated policy's state distribution. Our finite-horizon
+judges and fixed observed trajectories do not fully meet those conditions.
+Suffix-DP labels can therefore train and debug the first model, but cannot by
+themselves pass the live gate. Held-out complete-game allocation backtests must
+verify terminal win/spread utility, including changed future positions.
+
+Training labels come from full-game, source-game-grouped work/value curves.
+For every observed turn, retain discrete legal result boundaries:
+
+```text
+(mode, work, oracle regret, result identity)
+```
+
+Then solve an offline suffix allocation problem for many remaining-clock
+budgets. For a realized sequence of same-player turns `t..T`:
+
+```text
+F_t(B) = min over legal work choices n_t..n_T
+         sum_i R_i(n_i), subject to sum_i seconds_i(n_i) <= B
+```
+
+This dynamic program creates initial supervision for both total rest-of-game
+regret and the marginal value of the next unit of clock. It must include a terminal
+state where unused time has zero value and the configured overtime penalty,
+otherwise a model can learn to hoard clock forever. Training, calibration, and
+test splits are by complete source game, never by position, so future turns of
+the same game cannot leak into the fitted value-to-go.
+
+The runtime artifact should remain hardware-independent. Source curves store
+mode-native opportunity curves (simulation rollout nodes, endgame nodes at
+completed depths, and PEG scenarios/candidates/nested-endgame nodes). Runtime
+rate profiles convert those opportunities to seconds during suffix-label
+generation; the model is conditioned on that rate-profile grid. Live robust
+work rates select/interpolate a profile. Given the remaining clock and
+predicted future phase mix, a small monotone solver evaluates `F` and its exact
+finite difference. This lets the same portable artifact react to throttling or
+contention rather than learning the calibration machine as a hidden feature.
+
+The first auditable predictor is a hierarchical monotone table:
+
+```text
+rate profile -> bag phase -> expected future own turns -> score-spread band
+             -> combined rack-size band
+```
+
+Sparse cells shrink toward their parent and every clock curve is forced
+nonincreasing in expected regret. This is intentionally less expressive than
+a generic tree ensemble: it is fast enough for every SIM checkpoint and makes
+bad extrapolation visible. More state features earn their way in only through
+source-game-held-out policy regret, not in-sample fit.
+
+Useful state features must be known before the future positions occur:
+
+- bag count, both rack sizes, score spread/win region, and expected own turns;
+- predicted counts of future SIM, PEG, and endgame decisions;
+- current clock, overtime schedule, and live mode-specific work rates; and
+- only for the current opportunity, search-progress features such as candidate
+  count, arm gaps/variances, completed PEG stage, or completed endgame depth.
+
+Current-search features must not be smuggled into forecasts for unknown future
+turns. Position-specific future difficulty is integrated out by the learned
+conditional distribution. The first model can be a conservative monotone
+table/spline by phase and clock pressure; a more expressive model is justified
+only if held-out source games show better regret calibration.
+
+The existing experiments do not yet identify this full model. They provide
+three important ingredients: average SIM regret-versus-node curves, one
+operating-point calibration of conditional BAI sampling regret, and discrete
+PEG/endgame cost/value boundaries. They do **not** provide a matched
+production-topology curve at every turn of complete games, nor an online
+forecast of the unseen suffix. In particular, the current thinking-curve
+corpus ends around bag 50, uses top-60 candidates, and most regret panels use
+6-ply at 300K nodes, while production PlayChooser uses top-15 and defaults to
+2-ply. Those data may initialize priors, but they cannot certify a live
+rest-of-game allocator.
+Concretely, the reusable July 29 panel contains 168 SIM turn curves from 21
+source games, all at bag 50--86. The 72-pair live TimeManager run recorded
+3,388 turns but predates replayable per-turn CGP and seed fields, so it cannot
+be converted into the missing full-game opportunity corpus after the fact.
+
+Before allocation changes are re-enabled, collect matched top-15 curves along
+complete game trajectories, join the held-out PEG/endgame boundary data, fit
+the suffix value model, and back-test these separately:
+
+1. conditional current-search regret;
+2. oracle current-turn regret, including candidate/depth/horizon bias;
+3. predicted value of the next work tranche; and
+4. predicted rest-of-game regret and shadow price.
+
+The game-pair trace should log all four. A reverse sum of estimates observed on
+the eventual path is useful retrospective accounting, but it is not (4) and
+must never be labeled as a pre-turn rest-of-game prediction.
+
+The concrete shadow pipeline is:
+
+1. `tools/collect_time_value_positions.py` records complete sequential source
+   games with every pre-move CGP and rejects killed/truncated games. Collect a
+   declared mixture of static trajectories and trajectories that actually
+   play short-PlayChooser moves; the former are cheap and reproducible while
+   the latter cover policy-induced states. The trajectory policy is retained
+   as provenance and never inferred from a post-game outcome.
+2. `thinkingcurve` accepts raw positions, generates the production top-15
+   panel, and measures independent fixed-node SIM arms with a common deeper
+   judge. Bag filters keep SIM at bag > 4 while preserving source-position IDs
+   for later PEG/endgame joins.
+3. `tools/convert_time_value_work_costs.py` applies a grid of runtime-rate
+   scenarios to native work coordinates.
+4. `tools/build_rest_game_value_labels.py` solves each same-player realized
+   suffix independently for every rate profile and clock budget.
+5. `tools/fit_rest_game_value_model.py` fits the monotone hierarchical table.
+   It always emits a shadow artifact: predictive error alone cannot enable it.
+6. `tools/backtest_rest_game_value_policy.py` replays the learned allocator and
+   equal slicing turn by turn on held-out complete source games. It clusters
+   uncertainty by source game and may pass only the realized-trajectory
+   oracle-regret *surrogate* gate.
+7. Mirrored game pairs must then improve terminal utility before the compiled
+   artifact's live gate is set. A source game is keyed by seed and starting
+   seat, not a corpus-local game number, and predicted future-turn features
+   are computed from the current bag/rack state rather than realized suffix
+   length.
 
 Completion is a hard gate independent of value. Before starting an endgame
 depth, estimate the conditional distribution of its added nodes from the
@@ -639,20 +803,22 @@ opt-in. It can plan exact first-two 2-ply waves for bags 1--4 and exact
 first-two 3-ply waves after a completed 16-candidate 2-ply boundary for bags
 2--3. It also exposes the direct-4 2-ply value observations.
 
-The experimental PlayChooser policy now opts into that finite-corpus evidence
+The first experimental PlayChooser policy opted into that finite-corpus evidence
 without mislabeling it as certified p99. It uses a 0.95 evidence threshold,
 multiplies the empirical maximum's portable nodes and scenarios by 1.5, and
 uses a separate 1.5 slowdown in the deadline wall conversion. The 1.5 factors
 are conservative engineering choices, not values selected on an untouched
 safety-factor sweep. They require an online audit before a release default.
 
-Enforced PEG changes only the no-poll 2-ply dispatcher. It submits the first
+Candidate-level enforcement changes only the no-poll 2-ply dispatcher. It submits the first
 two candidates together, then submits one candidate at a time with the whole
-worker pool and replans after every completed candidate. The default stopping
-rule completes at least eight candidates, then stops after four consecutive
-candidate completions without a change in the leading move, with a hard cap
-of 32. A deliberate stop publishes the completed prefix as a usable partial
-2-ply tier; a deadline-interrupted candidate is discarded. Shadow and
+worker pool and replans after every completed candidate. The intended
+stability rule cannot stop before eight candidates and then stops after four
+consecutive candidate completions without a change in the leading move, with a
+hard cap of 32. Admission was nevertheless independent and could refuse a
+candidate before eight; the long-match audit below showed that this distinction
+was unsafe. A deliberate stop publishes the completed prefix as a usable
+partial 2-ply tier; a deadline-interrupted candidate is discarded. Shadow and
 interactive-poll solves preserve their old topology.
 
 The first-two price is the calibration median. A later single-candidate price
@@ -681,7 +847,7 @@ planner scales scenario/fixed overhead from this prefix but leaves the
 unobserved endgame-node rate conservative, so the same recorded request is
 refused before launch.
 
-The live policy currently buys only a 2-ply tier. It does not yet attempt the
+The candidate experiment buys only a 2-ply tier. It does not attempt the
 calibrated 3-ply boundary because the complete path to 16 shallow candidates,
 the post-wave deep-candidate tail, and a sufficiently precise deep value prior
 have not all been validated together.
@@ -695,14 +861,13 @@ expected regret reduction / predicted seconds > future shadow price
 ```
 
 The plan reports its deposit (positive) or withdrawal (negative) relative to
-equal slicing. For timed autoplay PEG, the player's real remaining clock is
-now the bank: a clock/latency reserve and the observed-max future depth-5
-endgame trajectory are protected, and the rest becomes the current physical
-window. That allows a late pre-endgame turn to withdraw beyond equal slicing
-when future endgame work is forecast to be cheap. The future reserve stays in
-portable nodes until runtime, when the live PEG nested-endgame rate and a 1.5
-lower-throughput factor convert it to seconds. Overtime and untimed/fixed-time
-paths retain their legacy behavior.
+equal slicing. The original timed-autoplay integration treated the player's
+real remaining clock as the bank: a clock/latency reserve and the observed-max
+future depth-5 endgame trajectory were protected, and the rest became the
+current physical window. The future reserve stays in portable nodes until
+runtime, when the live PEG nested-endgame rate and a 1.5 lower-throughput
+factor convert it to seconds. The audit below moved both PEG directions behind
+a shadow gate; overtime and untimed/fixed-time paths retain legacy behavior.
 
 The endgame admission model now has a one-boundary TimeManager bridge for
 shadow evaluation. At every completed depth it places expected nodes and the
@@ -760,11 +925,13 @@ late work is typically close to the equal slices it replaces, so the policy
 does not manufacture a large speculative withdrawal; it releases time as the
 real clock moves ahead of the remaining-work forecast.
 
-The same floor applies inside the low-bag PEG budget. Pair 68 exposed a path
+The original integration applied the same floor inside the low-bag PEG budget.
+Pair 68 exposed a path
 that subtracted the PEG/endgame reserves and returned zero with 20.267 seconds
 still on the player's clock, although legacy equal slicing offered 6.737
 seconds. When the protected forecast does not fit, that path now returns the
-legacy slice rather than forcing a static fallback.
+legacy slice rather than forcing a static fallback; the later audit also
+restored the ordinary depth cascade and shadowed all PEG budget differences.
 
 The remaining-sim-turn divisor keeps the ordinary eight-tiles-per-pair mean
 but adds one contingency turn. In a 12-pair/24-game trace panel, the raw mean
@@ -818,6 +985,276 @@ equal slicing (`-39.4` spread/game, `-0.200` win score, and `-0.1627` terminal
 utility for TimeManager), but none was significant (`p = 0.091`, `0.178`, and
 `0.158`, respectively). This panel is an operational admission test, not
 strength evidence; the common-prefix median was only 11 turns.
+
+### First long-match audit and constrained PEG fallback (2026-08-01)
+
+The first long match was stopped after 72 complete game pairs when the trace
+found one candidate false start (pair 45) and one zero-budget low-bag fallback
+(pair 68). Its aggregate result was still inconclusive: TimeManager's paired
+spread was `-3.26` points/game with 95% CI `[-11.88, +5.35]` (`p = 0.453`),
+and neither win score nor terminal utility was significant. More importantly,
+the common-RNG trace separated allocation effects from ordinary wall-timed
+search noise:
+
+- 12 pairs played identical moves throughout;
+- 49 of the 60 first divergences occurred in SIM (47) or endgame (2) with
+  exactly the same nominal move budget, so they do not test a TimeManager
+  allocation decision; multithreaded, deadline-limited search can complete a
+  different number of iterations despite identical RNG streams; and
+- only 11 first divergences coincided with an allocation change: ten PEG roots
+  and one SIM root. Their descriptive mean spread was `-10.77`, with 95% CI
+  `[-23.84, +2.29]`. That small, selected subset is concerning enough to
+  oracle, but terminal play after the first split is not causal evidence about
+  the root move.
+
+Clock accounting showed a real policy weakness independent of game outcomes.
+Across the 72 pairs, TimeManager used `511.112` seconds in PEG versus
+`1369.584` for equal slicing, but only `45.101` seconds was explicitly released
+into earlier SIM turns. It finished with `28.280` seconds per player/game
+versus `20.716`: useful reserve, but too much of the PEG deposit still reached
+the terminal position unspent. Further strength tuning should therefore use
+oracle regret at the ten differing PEG roots before either relaxing or
+tightening admissions globally.
+
+Pair 68 showed that a future-reserve shortfall must never turn usable clock
+into a zero-budget static move. The first repair gave the legacy equal slice
+only to PEG's greedy ranking. The broader oracle audit below rejected that
+restriction too: shallow PEG checkpoints are not reliable substitutes for a
+completed deeper stage. The production fallback now runs the ordinary PEG
+cascade under the legacy equal slice. The turn trace records
+`reserve_shortfall` and the match audit requires the turn to complete PEG
+without a static fallback. A bag-4 shadow plan still prices the calibrated
+entry wave for a possible bag-1 follow-up, but it cannot yet shorten live PEG.
+Fixed-per-move and untimed analyses do not carry this cross-turn reserve.
+
+The first oracle follow-up exposed a second, distinct PEG hazard. At pair 4's
+bag-3 root, TimeManager spent `23.900` seconds versus an equal slice of
+`14.240` and chose `WEM`; equal slicing chose `pass`. Common-sample direct
+2/3/4-ply judges all preferred `pass` (by about 15, 25, and 24
+spread-equivalent points respectively). A controlled 6/12/24-second PEG sweep
+returned three different moves; the 6- and 12-second runs never finished root
+nomination, while the 24-second run finished root but only one of 32 refinement
+candidates. Thus extra time was changing an interrupted shallow incumbent,
+not purchasing a calibrated quality boundary.
+
+The ten allocation-linked PEG roots then received common-sample direct-3
+judges. The old live policy won only one root and lost nine; its selected-root
+mean utility delta was `-0.07089`. This is not a population strength estimate,
+but it exposed a categorical implementation error. The advertised minimum of
+eight 2-ply candidates constrained only the stability stop; candidate
+admission could still refuse candidates 3--8. At pair 15 the live policy used
+only `1.922` of its `19.250` seconds, stopped after six 2-ply candidates, and
+played `EN`. The direct-3 judge preferred equal slicing's `GRIM` by `0.564875`
+utility. Fixed 8, 12, and 16-candidate 2-ply replays all still chose `EN`; the
+ordinary cascade completed 32 at 2 ply and 16 at 3 ply and recovered `GRIM`.
+The problem is therefore depth allocation, not merely an off-by-two minimum.
+
+Replaying all ten roots with the ordinary PEG cascade and the proposed outer
+caps exactly recovered the equal-slice move in five cases. It also found two
+oracle improvements (`AWN` over `pass` at pair 4 and `MEL` over `dON` at pair
+47), one small loss (`HIRE` versus `HIE` at pair 46), and retained the two
+larger losses at pairs 33 and 43. The selected-root mean delta improved to
+`-0.01369`, but remained negative and was dominated by pair 43's incomplete
+bag-4 root nomination. That is not sufficient evidence to enforce deposits.
+
+The live gate is consequently symmetric and fail-safe: calibrated PEG
+deposits and withdrawals are both shadow-only, actual PEG receives exactly the
+legacy equal slice, and candidate-level admission is disabled in PlayChooser.
+`peg_deposit_capped` and `peg_withdrawal_capped` record the shadow direction;
+`reserve_shortfall` identifies a shadow recommendation below the minimum move
+budget, and `peg_shadow_budget_ms` preserves the rejected recommendation's
+magnitude whenever it is executable (otherwise zero). The generic candidate
+dispatcher and its calibration remain
+available for experiments. Unused time from an early-completing ordinary
+cascade is still banked naturally by the game clock, while earlier SIM
+spend-down remains enabled. Re-enforcement requires a depth-aware policy that
+predicts complete stages and passes held-out oracle replay.
+
+Finally, every traced turn now includes a player-on-turn-normalized CGP. The
+two mirrored roots must be identical through the first divergence. This makes
+the exact candidate disagreement directly replayable and removes seed-plus-
+history reconstruction from future oracle analysis.
+
+### Complete-stage PEG admission (2026-08-01)
+
+The replacement policy plans at PEG's actual publication boundary: every
+survivor at the next depth. It makes one decision before the stage-wide
+scenario barrier. A refusal launches no work and leaves the previous complete
+depth published. If an enforced admitted stage nevertheless reaches its hard
+deadline before every candidate finishes, PEG counts one false start,
+discards every result and per-scenario outcome from that depth, and restores
+the previous complete ranking. Candidate-level admission is disabled whenever
+this mode is selected, so a collection of individually admitted candidates
+cannot masquerade as a completed depth.
+
+The portable predictor uses information that exists at the boundary:
+
+- the exact sum of scenario counts for all selected survivors;
+- for 3 ply and later, the exact node count those same survivors used at the
+  preceding depth; and
+- the immediately preceding whole-stage scenarios, nodes, and elapsed time to
+  rescale the hardware conversion under current thermal/load conditions.
+
+The first 2-ply depth has no exact-endgame observation from the current solve.
+PlayChooser therefore retains a normalized seconds-per-endgame-node rate from
+completed PEG work on prior turns. Its first PEG call remains legacy-only to
+warm that rate. A larger bag-conditioned residual protects the cold case; a
+smaller residual remains even after the rate is warm because the wall cost of
+a counted endgame node is position dependent. A node-free greedy prefix may
+make expected pricing cheaper, but it may not shrink an unseen node tail. A
+slow prefix still expands the deadline envelope. Later depths use the maximum
+of a scenarios-based floor and a conservative multiplier on the selected
+survivors' preceding nodes. Unsupported depth/topology combinations fail
+closed.
+
+An initial implementation incorrectly extrapolated a two-candidate empirical
+maximum across 32 candidates and was operationally useless. The direct
+whole-stage v1 replacement looked safe under an audit that counted any stage
+finishing inside the generous 180-second observation window. That audit was
+too weak: production would start as soon as the model's much smaller bound fit
+the clock. Under the corrected definition, an admitted stage is a false start
+if it is incomplete *or completes after its own predicted bound*. Replaying 47
+prospective roots found 40 v1 admissions and nine false starts.
+
+Each failed panel was then reclassified as training before a new artifact was
+frozen. V2 widened the node envelope but missed a warm bag-1 root: 44.43s
+actual versus a 31.99s bound even though its 7.80M nodes were below the 16.5M
+node cap. V3 added a persistent hardware/load rate with 1.75x deadline safety,
+but a fresh balanced block still found a bag-2 stage at 99.47s versus 43.34s
+and a bag-3 stage that completed only 25/32 candidates in 178.71s versus an
+87.63s bound. A single normalized NPS rate was not enough.
+
+V4 retains the portable rate and adds outward-rounded warm residuals by bag
+(2.0x, 3.0x, 2.5x, 1.25x for bags 1--4). Deeper stages use the immediately
+preceding depth and retain a 1.0x residual. It replays every v1--v3 failure
+panel with zero strict false starts. Its first untouched four-root smoke block
+also had zero strict misses: 2/3 warm 2-ply stages, 3/3 warm 3-ply stages, and
+2/3 4-ply stages were admitted and completed within their bounds. The bag-4
+root warmed the runtime rate and is excluded from the gate. The subsequent
+expansion stayed safe but was stopped after 14 roots because the full-32 rule
+was operationally useless: it admitted only 3/14 warm 2-ply, 5/13 warm 3-ply,
+and 3/12 warm 4-ply opportunities.
+
+V5 kept the conservative envelope and, before launching any work, tried the
+ordinary complete survivor prefixes 32, 16, and 8. The selected depth remains
+indivisible: a deadline-truncated admitted depth is discarded in full and the
+exact previous-depth ranking is restored. Its first direct prefix-8 block
+found no envelope miss, but exposed a bookkeeping defect: if the deepest
+scored stage used zero exact-endgame nodes, it erased a valid shallower
+positive-node hardware-rate sample. That panel is training evidence, not
+held-out evidence.
+
+V6 fixes both production and replay to retain the deepest positive-node stage.
+It also refuses invalid candidate pointers and restricts adaptive narrowing to
+the frozen 16/8 cutoffs rather than inventing an uncalibrated midpoint. Three
+untouched balanced blocks directly exercised every possible adaptive
+trajectory: 8/8/8, 16/16/8, and 32/16/8. Across the combined 12 roots, the one
+cold hardware-rate root was excluded as preregistered. The strict replay then
+had 8/11 warm 2-ply admissions, 4/11 warm 3-ply admissions, and 2/10 warm
+4-ply admissions, with zero false starts. Every incomplete observed depth was
+prospectively refused, including bag 2 at 1/8 candidates in the prefix-8 block,
+bag 4 before completing its second prefix-16 depth, and bag 3 at 5/8 in the
+full-prefix block. This is encouraging safety evidence, but still far short of
+the usefulness and sample-size gates. The frozen artifact SHA-256 is
+`35a445a9bfefc11674bc8a100f2fef69099700bcd2fa41ecf82103c9376426c4`;
+the validating binary SHA-256 is
+`8c0dee86beffdec70c38deeb71582ff7b517b7b0accfb3a4d067d2d4abf812d6`;
+and the combined strict-analysis SHA-256 is
+`06ff8d2f9c325220a8dc193e10d301bcdec4b530a37423884b48f8b21682b07a`.
+
+The preregistered live gate requires at least 59 independently admitted stages
+with zero false starts (`1 - 0.95^59 = 95.15%` evidence for p95) and at least
+16 held-out roots in every bag stratum. Only admitted stages count toward the
+evidence; refusing everything cannot pass. `heldout_gate_passed` remains false
+in every compiled calibration and PlayChooser's live allocation switch remains
+off. V1--v5 are retained to reproduce the failed analyses. The active frozen
+artifact, resumable sequential runner, and strict replay audit are:
+
+- `tools/peg_time_calibration/adaptive_complete_stage_admission_v6_20260801.json`;
+- `tools/run_peg_stage_admission_validation.py`; and
+- `tools/analyze_peg_stage_admission.py`.
+
+### Game-pair regret back-test trace (2026-08-01)
+
+The paired-match harness now records residual decision regret rather than only
+terminal strength and work. After every simulation, PlayChooser copies BAI's
+final expected regret in the exact blended-utility units used to rank its arms.
+A genuinely forced one-candidate decision is zero. Static, PEG, and endgame
+turns remain explicitly unknown: their marginal-value observations do not yet
+constitute calibrated residual-regret models, so filling them with zero would
+make the game forecast look much more certain than it is.
+
+Each `PCTURN` row contains `regret_valid`, `expected_utility_regret`, and the
+model name. Each `PCGAME` row independently totals known regret and
+known/unknown turn counts for both players. The match auditor verifies those
+totals against the turn rows and writes a reverse cumulative sum for every turn
+on the *realized* later path. That rest-of-game column is retrospective
+accounting over estimates that were individually made before their moves; it is
+not presented as an online prediction of positions that had not yet occurred.
+The human-readable match update also prints the latest pair's four separate
+game/player totals and coverage, rather than hiding them in a policy average.
+
+The pair summary reports two complementary back-tests:
+
+- whole-game and post-first-divergence expected regret per policy, always with
+  coverage counts; and
+- before and including the first different move, `equal regret - TimeManager
+  regret` on the identical mirrored roots. This is the model-predicted utility
+  benefit of the allocation change. Later roots are deliberately excluded from
+  that paired prediction because the game states are no longer comparable.
+
+It also reports terminal utility minus the same-root prediction. Across many
+independent game pairs, a calibrated estimator should have a mean residual near
+zero and the predicted deltas should explain some of the observed utility
+deltas. This is a calibration test, not a license to interpret uncovered
+late-phase decisions as regret-free.
+
+A one-pair 10-second-clock smoke test exercised the complete schema: all 44
+turn rows reconciled with the two game totals, 34 turns had BAI estimates, ten
+PEG/endgame turns remained unknown, 17 identical roots were comparable, and
+the pair audit passed with no trace drops.
+
+### Stratified rest-of-game value panel (2026-08-02)
+
+The complete-game panel now has strict, mode-native curves for 133/140 source
+games (68 PlayChooser trajectories and 65 static trajectories). A sparse
+180-second continuation resolved 52/60 originally hard roots. All 366
+endgames are usable; eight PEG roots across seven games remain censored. The
+joined complete-game corpus has 3,006 turn roots and 31,530 measured work
+boundaries. Source-game splitting leaves 93 training, 20 calibration, and 20
+untouched test games.
+
+The first shadow allocator favors learned allocation over equal slicing, but
+does not pass its held-out surrogate gate. On the untouched games its mean
+learned-minus-equal utility regret is `-0.001305`, with 95% CI
+`[-0.003066,+0.000456]` and `p=0.146`. Calibration is `-0.003651`, with 95%
+CI `[-0.007869,+0.000567]` and `p=0.090`. These are directional results, not
+live-policy evidence; the terminal game gate also remains absent.
+
+More importantly, the broad SIM panel stops at 300K nodes. Every one of its
+2,493 SIM roots has at least one zero-oracle-regret hit among the 12
+independently sampled depth/budget arms. Consequently the per-root lower
+envelope saturates around 35 seconds of whole-game clock and an imputed tail
+cannot improve it. This exposes oracle selection in the replay: a runtime
+allocator cannot know which independently sampled arm happened to match the
+judge. The replay is therefore an optimistic allocation upper bound, not a
+valid three-minute stopping-policy test.
+
+An independent top-60 deep panel was retained only as a sensitivity prior.
+After clustering by its 19--21 source games, lower-95% evidence credits a
+6-ply regret retention of 0.846 at 1M nodes, 0.811 at 3M, and 0.629 at 10M
+relative to 300K. It credits no p2/p4 tail improvement. Central and lower-95%
+tail scenarios were both generated, but zero tail options survive the broad
+panel's oracle envelope and their backtests are therefore exactly unchanged.
+The top-60/top-15 topology mismatch is an additional reason these priors are
+not live-eligible.
+
+The next honest gate must choose current-turn work using only information
+available at that checkpoint: either a cross-fitted expected-regret model or a
+true cumulative solver trace carrying its contemporaneous regret estimate.
+Held-out oracle regret may score that choice, but may not choose it. A matched
+top-15 deep subset is also required to calibrate the 300K--10M tail relevant
+to game-in-three-minutes clocks. Live rest-of-game allocation remains off.
 
 ## Validation
 

@@ -171,10 +171,19 @@ static void test_play_chooser_clock_budget(void) {
   }
   game_timer_reset(&game_timer, 47.6);
   strategy.num_threads = 10;
-  const double bag_four_budget =
+  strategy.use_calibrated_peg_time_manager = false;
+  const double bag_four_legacy_budget =
       play_chooser_get_seconds_for_move(&strategy, game);
-  assert(bag_four_budget > 0.0);
-  assert(bag_four_budget < 28.0);
+  strategy.use_calibrated_peg_time_manager = true;
+  const PlayChooserMoveBudget bag_four_budget =
+      play_chooser_get_move_budget(&strategy, game);
+  assert(bag_four_budget.seconds > 0.0);
+  assert(bag_four_budget.seconds < 28.0);
+  assert(fabs(bag_four_budget.seconds - bag_four_legacy_budget) < 1.0e-9);
+  assert(bag_four_budget.peg_shadow_seconds > 0.0);
+  assert(!bag_four_budget.reserve_shortfall);
+  assert(bag_four_budget.peg_deposit_capped !=
+         bag_four_budget.peg_withdrawal_capped);
 
   // Regression for pair 68 of the 2026-07-31 match: when the calibrated PEG
   // and future-endgame reserves do not fit, usable clock must fall back to the
@@ -184,11 +193,130 @@ static void test_play_chooser_clock_budget(void) {
   const double low_clock_legacy_budget =
       play_chooser_get_seconds_for_move(&strategy, game);
   strategy.use_calibrated_peg_time_manager = true;
-  const double low_clock_time_manager_budget =
-      play_chooser_get_seconds_for_move(&strategy, game);
+  const PlayChooserMoveBudget low_clock_time_manager_budget =
+      play_chooser_get_move_budget(&strategy, game);
   assert(low_clock_legacy_budget > 0.0);
-  assert(fabs(low_clock_time_manager_budget - low_clock_legacy_budget) <
+  assert(fabs(low_clock_time_manager_budget.seconds - low_clock_legacy_budget) <
          1.0e-9);
+  assert(low_clock_time_manager_budget.reserve_shortfall);
+  assert(low_clock_time_manager_budget.peg_shadow_seconds == 0.0);
+  assert(low_clock_time_manager_budget.peg_deposit_capped);
+  assert(!low_clock_time_manager_budget.peg_withdrawal_capped);
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+static void test_play_chooser_low_bag_reserve_shortfall(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  // Pair 68, game 1, turn 27 of the 2026-07-31 match. The old policy had
+  // 20.267 seconds left but returned a zero PEG budget because its protected
+  // future forecast no longer fit, then fell through to static TREELINE.
+  load_and_exec_config_or_die(
+      config, "cgp 12V2/9Z2OF1/9E1HERL/9RYU1IO/7VROOM1GU/10JA1SI/10A3E/"
+              "7TWANGLES/8OIS1I2/6GOX3B2/4P1O3PRe2/3KY2INFIELDS/2CHAUNT4A2/"
+              "3U6DONA1/2IDEAED1BAWTIE EEILNRT/AEEMTT? 339/334 5 -lex CSW24;");
+  Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 4);
+
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  GameTimer game_timer;
+  game_timer_reset(&game_timer, 20.266620);
+  const PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .game_timer = &game_timer,
+      .overtime_period_seconds = 1.0,
+      .win_pcts = win_pcts,
+      .num_threads = 10,
+      .peg_scenario_stride = 1,
+      .use_calibrated_peg_time_manager = true,
+      .seed = 68,
+  };
+  const PlayChooserMoveBudget budget =
+      play_chooser_get_move_budget(&strategy, game);
+  assert(budget.seconds > 6.7 && budget.seconds < 6.8);
+  assert(budget.reserve_shortfall);
+  assert(budget.peg_shadow_seconds == 0.0);
+  assert(budget.peg_deposit_capped);
+  assert(!budget.peg_withdrawal_capped);
+
+  play_chooser_benchmark_reset();
+  PlayChooser *play_chooser = play_chooser_create(&strategy);
+  Move move;
+  play_chooser_choose_move(play_chooser, game, &move, error_stack);
+  const PlayChooserMoveBudget used_budget =
+      play_chooser_get_last_move_budget(play_chooser);
+  PlayChooserBenchmarkStats stats;
+  play_chooser_benchmark_get(&stats);
+  play_chooser_benchmark_stop();
+
+  assert(error_stack_is_empty(error_stack));
+  assert(used_budget.reserve_shortfall);
+  assert(used_budget.peg_shadow_seconds == 0.0);
+  assert(used_budget.peg_deposit_capped);
+  assert(!used_budget.peg_withdrawal_capped);
+  assert(fabs(used_budget.seconds - budget.seconds) < 1.0e-9);
+  assert(move_get_type(&move) != GAME_EVENT_UNKNOWN);
+  assert(stats.peg_calls == 1);
+  assert(stats.peg_time_manager_admissions == 0);
+  assert(stats.peg_time_manager_false_starts == 0);
+  assert(stats.peg_final_candidates > 0);
+  assert(stats.static_moves == 0);
+  assert(stats.fallback_moves == 0);
+
+  play_chooser_destroy(play_chooser);
+  win_pct_destroy(win_pcts);
+  error_stack_destroy(error_stack);
+  config_destroy(config);
+}
+
+static void test_play_chooser_peg_withdrawal_cap(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW24 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
+  // Pair 4, game 1, turn 19 of the 2026-07-31 match. The old policy exposed
+  // 23.900 seconds instead of the 14.240-second equal slice. PEG returned WEM;
+  // accepted direct 2/3/4-ply common-sample judges all preferred pass. The
+  // longer root search had changed an interrupted shallow incumbent without
+  // completing a refinement wave.
+  load_and_exec_config_or_die(
+      config,
+      "cgp 14B/9VIGORO/2S9FEY/2PONTINE2R2F/2E3OUTCHEATS/2L6A1L3/"
+      "2D3ANAN1I3/G1R3BOXY1V3/R1I1I1A4E3/EUNUCHS4R3/E2ME10/K2I11/"
+      "2JATO9/3Q2TODDING2/1RESAWED7 AEMOPW?/EILLTZ? 473/319 0 -lex CSW24;");
+  const Game *game = config_get_game(config);
+  assert(bag_get_letters(game_get_bag(game)) == 3);
+
+  ErrorStack *error_stack = error_stack_create();
+  WinPct *win_pcts =
+      win_pct_create(DEFAULT_TEST_DATA_PATH, DEFAULT_WIN_PCT, error_stack);
+  assert(error_stack_is_empty(error_stack));
+  GameTimer game_timer;
+  game_timer_reset(&game_timer, 42.774657);
+  PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+      .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+      .game_timer = &game_timer,
+      .overtime_period_seconds = 1.0,
+      .win_pcts = win_pcts,
+      .num_threads = 10,
+      .peg_scenario_stride = 1,
+  };
+  const double equal_slice = play_chooser_get_seconds_for_move(&strategy, game);
+  strategy.use_calibrated_peg_time_manager = true;
+  const PlayChooserMoveBudget budget =
+      play_chooser_get_move_budget(&strategy, game);
+  assert(equal_slice > 14.2 && equal_slice < 14.3);
+  assert(fabs(budget.seconds - equal_slice) < 1.0e-9);
+  assert(!budget.reserve_shortfall);
+  assert(budget.peg_shadow_seconds > equal_slice);
+  assert(!budget.peg_deposit_capped);
+  assert(budget.peg_withdrawal_capped);
+
   win_pct_destroy(win_pcts);
   error_stack_destroy(error_stack);
   config_destroy(config);
@@ -332,6 +460,10 @@ static void test_challenge_off_blocks_bingo(void) {
   Move our_move;
   play_chooser_choose_move(play_chooser, game, &our_move, error_stack);
   assert(error_stack_is_empty(error_stack));
+  const PlayChooserRegretEstimate static_regret =
+      play_chooser_get_last_regret_estimate(play_chooser);
+  assert(!static_regret.valid);
+  assert(static_regret.model == PLAY_CHOOSER_REGRET_MODEL_NONE);
   assert(move_get_type(&our_move) == GAME_EVENT_TILE_PLACEMENT_MOVE);
   assert(move_get_row_start(&our_move) == 0);
   play_move(&our_move, game, NULL);
@@ -431,6 +563,13 @@ static void test_keep_phony_for_triple_triple(void) {
   assert(error_stack_is_empty(error_stack));
   assert(equity_to_int(move_get_score(&sim_move)) == 131);
   assert(game_timer_get_seconds_used(&game_timer, 1) > 0.0);
+  const PlayChooserRegretEstimate sim_regret =
+      play_chooser_get_last_regret_estimate(sim_play_chooser);
+  assert(sim_regret.valid);
+  assert(sim_regret.model == PLAY_CHOOSER_REGRET_MODEL_SIM_BAI ||
+         sim_regret.model == PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE);
+  assert(isfinite(sim_regret.expected_utility_regret));
+  assert(sim_regret.expected_utility_regret >= 0.0);
   play_chooser_destroy(sim_play_chooser);
   win_pct_destroy(win_pcts);
 
@@ -811,8 +950,9 @@ static void test_peg_challenge_decision(void) {
   };
 
   // The calibrated PEG policy treats the real clock as a bank. At this last
-  // pre-endgame turn it reserves the portable future-endgame envelope but can
-  // withdraw substantially beyond the legacy equal slice.
+  // pre-endgame turn it reserves the portable future-endgame envelope. PEG's
+  // interrupted root nomination is not a monotonic quality boundary, so the
+  // physical surplus remains banked instead of exceeding the equal slice.
   GameTimer time_manager_timer;
   game_timer_reset(&time_manager_timer, 120.0);
   PlayChooserStrategy legacy_clock_strategy = strategy;
@@ -822,10 +962,10 @@ static void test_peg_challenge_decision(void) {
       play_chooser_get_seconds_for_move(&legacy_clock_strategy, game);
   PlayChooserStrategy calibrated_clock_strategy = legacy_clock_strategy;
   calibrated_clock_strategy.use_calibrated_peg_time_manager = true;
-  const double calibrated_budget =
-      play_chooser_get_seconds_for_move(&calibrated_clock_strategy, game);
-  assert(calibrated_budget > legacy_budget);
-  assert(calibrated_budget < 120.0);
+  const PlayChooserMoveBudget calibrated_budget =
+      play_chooser_get_move_budget(&calibrated_clock_strategy, game);
+  assert(fabs(calibrated_budget.seconds - legacy_budget) < 1.0e-9);
+  assert(calibrated_budget.peg_withdrawal_capped);
 
   ChallengeDecision o_decision;
   test_peg_challenge_decision_case(&strategy, game, "2A O.....",
@@ -1062,6 +1202,8 @@ static void test_challenge_stage_combinations(void) {
 void test_play_chooser(void) {
   test_game_timer();
   test_play_chooser_clock_budget();
+  test_play_chooser_low_bag_reserve_shortfall();
+  test_play_chooser_peg_withdrawal_cap();
   test_keep_phony_for_triple_triple();
   test_challenge_off_blocks_bingo();
   test_endgame_keep_phony_for_only_q_play();
