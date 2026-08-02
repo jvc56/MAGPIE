@@ -1271,6 +1271,19 @@ separate expected field remains readable for diagnosis, but its replay is
 explicitly counted as oracle-choice contamination and cannot pass the honest
 surrogate gate.
 
+Replaying the 133 complete games with cross-fitted planning regret for every
+SIM, PEG, and endgame boundary removes the earlier directional result. On the
+20 untouched games, learned-minus-equal scored regret is `+0.000763`, with 95%
+CI `[-0.007069,+0.008594]` and `p=0.849`; calibration is `-0.001729`, with
+95% CI `[-0.006864,+0.003407]` and `p=0.509`. All 2,986 accepted replays used
+separate planning estimates and none used oracle regret to choose a boundary.
+The estimator was conservative on selected actions: test actual-minus-
+expected regret averaged `-0.004511` for learned allocation and `-0.006160`
+for equal slicing. This is a valid null result for the choice protocol, but
+not a final strength result: the broad SIM score still comes from the old
+nominee-only judge and can miss a better move outside the nominees. The
+matched risk-set tail panel supplies the next correction.
+
 The next honest gate must choose current-turn work using only information
 available at that checkpoint: either a cross-fitted expected-regret model or a
 true cumulative solver trace carrying its contemporaneous regret estimate.
