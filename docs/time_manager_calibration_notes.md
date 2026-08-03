@@ -48,3 +48,42 @@ with multiple near-tie challengers. The next model iteration should address
 that event process and continuous move-stability history. It must pass the
 same held-out point and optional-stopping gates on genuinely fresh games before
 the separately required terminal-game match is considered.
+
+## Same-arm horizon-differential replay (2026-08-03)
+
+Status: **target substantially improved; strict reliability gate still
+failed; no fresh panel scheduled; live allocation disabled**.
+
+The absolute common-judge regret target contains error that additional work
+from the current SIM arm cannot remove. In the 96-root checkpoint panel, every
+choice already matched its 3M-node horizon by 750K nodes, while the horizon
+moves retained mean absolute judge regret `0.00023479`. The revised target is
+the signed common-judge improvement from the current incumbent to the same-arm
+3M horizon, represented as horizon-mismatch probability times conditional
+signed improvement. Horizon identities and judge values remain labels only;
+five folds contain complete source games; candidates outside the sorted top-60
+union remain unmeasured.
+
+Across 1,056 fixed-landmark rows, horizon mismatch falls from 49/96 roots at
+25K nodes to 18/96 at 300K, 3/96 at 400K, and zero by 750K. The event predictor
+has `AUC=0.9087`, through-origin slope `0.9281`, and 2/10 bins underpredicting
+by more than 2x (worst `2.404`). The signed target averages `0.002449` actual
+versus `0.002616` predicted. This is a large calibration improvement over the
+absolute target's worst `43.97x` miss, but it does not pass the unchanged
+no-bad-decile gate.
+
+Exploratory replay is encouraging but non-decisive. A 100K-node Rule of Zero
+with two stable checkpoints and no near-tie challengers stops 89/96 roots,
+saves 82.26% of nodes on average, and has zero horizon-choice mismatches. An
+examined cross-fitted score threshold of `0.000025` stops 94/96 and saves
+81.91%, also with zero mismatches. These rules were evaluated on reused
+development outcomes; the zero-event one-sided 95% mismatch upper bound is
+still 3.07%. Neither result is a prospective pass, and the prior
+absolute-regret conformal bound cannot be transferred to the new label.
+
+The implementation therefore exports reproducible model and replay artifacts
+but does not freeze a production threshold or launch another judged panel.
+The next candidate must be specified before fresh outcomes—preferably a
+reviewed Rule-of-Zero controller or game-level conformal risk rule—and must
+still pass fresh stopped/matched/full controls and the separate mirrored
+terminal-game gate.

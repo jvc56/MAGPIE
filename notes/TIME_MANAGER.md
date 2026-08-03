@@ -1746,6 +1746,67 @@ strata and test continuous stability summaries rather than scheduling another
 fresh efficacy run. A subsequent fresh surrogate pass would still not replace
 the separately powered mirrored terminal-game gate.
 
+### Same-arm horizon-differential development replay (2026-08-03)
+
+The absolute-regret target above asks a stopping rule to predict error against
+the 10-ply common judge even when more work from the current p6 SIM arm cannot
+change its choice. The audited checkpoint panel makes that distinction
+observable. At 750K and 1M nodes all 96 roots already chose the same move as
+the 3M-node horizon, but the horizon choices still carried mean absolute
+common-judge regret `0.00023479`. That residual is a **same-arm unpurchasable
+floor**. It may combine evaluator depth bias, judge noise, horizon truncation,
+and candidate-set limits; the data do not identify it exclusively as evaluator
+bias.
+
+The new development tool therefore fits the realizable, signed target
+
+```
+P(choice_at_3M != incumbent_now)
+  * E[judge_regret_now - judge_regret_at_3M | choices differ].
+```
+
+The horizon identity and common-judge values are labels only. The event model
+uses only checkpoint-observable state, is trained at 11 fixed node landmarks,
+and is five-fold cross-fitted by complete source game. Signed severity is
+retained because continuing can replace a better judged incumbent with a
+worse horizon move. The scope remains the sorted top-60 common-judge union;
+regret outside that union is unmeasured.
+
+The target behaves like purchasable work. Across 96 roots, 49 choices differed
+from the 3M horizon at 25K nodes, 35 at 100K, 18 at 300K, three at 400K, four
+at 500K, one at 600K, and none at 750K or 1M. Most changes helped, but not all:
+the 1,056 landmark rows contain 189 helpful and 19 harmful same-arm changes.
+Mean signed value of continuing fell from `0.009546` at 25K to `0.003794` at
+100K, `0.001175` at 300K, `0.000129` at 400K, and zero by 750K. This is direct
+evidence that the old absolute target was pricing work the current arm could
+not buy.
+
+Cross-fitted horizon-mismatch discrimination is strong (`AUC=0.909`) and its
+through-origin reliability slope is `0.928`, a material improvement over the
+absolute-regret model. The signed-value mean is also close (`0.002616`
+predicted versus `0.002449` actual). The strict reliability gate nevertheless
+fails: 2/10 bins underpredict mismatch probability by more than 2x, with a
+worst ratio of `2.40`. This is much smaller than the prior worst ratio of
+`43.97`, but it is still a failed preregistered condition, not license to
+weaken the gate.
+
+Two stopping replays are useful only as development screens. A cross-fitted
+score threshold of `0.000025`, selected while examining these reused data,
+stops 94/96 roots before 3M, saves 81.9% of nodes on average, and has zero
+horizon-choice mismatches. A simpler Rule of Zero—at least 100K nodes, at
+least two stable checkpoints, and zero near-tie challengers—stops 89/96,
+saves 82.3%, and also has zero mismatches. With only 96 roots, the one-sided
+95% upper bound on the mismatch probability is still 3.07%. Both results are
+post-hoc development evidence; neither is prospective validation.
+
+No new judged panel is launched from this replay. The model failed its exact
+point-reliability gate, the threshold grid was explored on reused roots, and
+the old absolute-regret q95 addend does not certify this new target. The next
+decisive step is to freeze either a separately reviewed Rule-of-Zero policy or
+a game-level conformal risk rule before exposing it to fresh outcomes. Live
+allocation remains disabled, and even a fresh surrogate pass would still
+require the independent mirrored terminal-game gate.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
