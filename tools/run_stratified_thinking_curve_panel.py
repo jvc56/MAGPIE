@@ -153,6 +153,7 @@ def validate_chunk_accounting(
     matched_control: bool,
     candidate_control_plays: int | tuple[int, ...] | list[int] = 0,
     combined_regret_stop_target: float = 0.0,
+    checkpoint_audit_interval: int = 0,
 ) -> list[int]:
     """Validate every accepted root before its private log is appended."""
 
@@ -167,6 +168,7 @@ def validate_chunk_accounting(
     arms: dict[tuple[int, int], int] = defaultdict(int)
     samples: dict[tuple[int, int], int] = defaultdict(int)
     combined_stops: dict[int, list[dict[str, str]]] = defaultdict(list)
+    checkpoints: dict[int, list[dict[str, str]]] = defaultdict(list)
     forced: set[int] = set()
     for line in text.splitlines():
         if line.startswith("THINKING_CURVE_POINT "):
@@ -205,6 +207,10 @@ def validate_chunk_accounting(
             row = fields(line)
             if int(row["plies"]) == plies:
                 combined_stops[int(row["source_index"])].append(row)
+        elif line.startswith("THINKING_CURVE_CHECKPOINT "):
+            row = fields(line)
+            if int(row["plies"]) == plies:
+                checkpoints[int(row["source_index"])].append(row)
 
     if set(done) & forced:
         raise ValueError("chunk marks a root both forced and completed")
@@ -216,6 +222,7 @@ def validate_chunk_accounting(
         raise ValueError("protocol has no in-range targets")
     for source_index, done_row in done.items():
         combined_regret = combined_regret_stop_target > 0.0
+        checkpoint_audit = checkpoint_audit_interval > 0
         if int(done_row.get("dropped", "-1")) != 0:
             raise ValueError(f"source {source_index} dropped progress events")
         root_points = points.get(source_index, [])
@@ -262,7 +269,7 @@ def validate_chunk_accounting(
                 + int(matched_control)
                 + len(active_candidate_controls)
             )
-            + (combined_checkpoints if combined_regret else 0)
+            + (combined_checkpoints if combined_regret or checkpoint_audit else 0)
         )
         if int(done_row["events"]) != expected_events:
             raise ValueError(f"source {source_index} has wrong event count")
@@ -441,6 +448,24 @@ def validate_chunk_accounting(
             raise ValueError(
                 f"source {source_index} has unexpected combined-regret output"
             )
+
+        root_checkpoints = checkpoints.get(source_index, [])
+        if checkpoint_audit:
+            if (
+                combined_checkpoints <= 0
+                or len(root_checkpoints) != combined_checkpoints
+            ):
+                raise ValueError(
+                    f"source {source_index} checkpoint audit count differs"
+                )
+            if int(done_row.get("combined_regret", "0")) != 0:
+                raise ValueError(
+                    f"source {source_index} checkpoint audit has combined stop"
+                )
+        elif root_checkpoints:
+            raise ValueError(
+                f"source {source_index} has unexpected checkpoint audit rows"
+            )
         if has_candidate_control:
             controls = by_kind["candidate_limit"]
             if len(controls) != len(active_candidate_controls):
@@ -539,6 +564,90 @@ def validate_chunk_accounting(
                             f"source {source_index} has nonfinite judge {key}"
                         )
 
+        if checkpoint_audit:
+            judge_ranks = {int(row["rank"]) for row in root_judge_rows}
+            if not judge_ranks:
+                raise ValueError(
+                    f"source {source_index} checkpoint audit lacks judge identities"
+                )
+            previous_rank: int | None = None
+            previous_iterations = -1
+            stable_start_iterations = 0
+            stable_checkpoints = 0
+            selected_switches = 0
+            final_selected_rank = int(primary["selected_rank"])
+            for checkpoint_index, checkpoint in enumerate(root_checkpoints):
+                if int(checkpoint.get("checkpoint", "-1")) != checkpoint_index:
+                    raise ValueError(
+                        f"source {source_index} checkpoint indices are not contiguous"
+                    )
+                iterations = int(checkpoint["iterations"])
+                nodes = int(checkpoint["nodes"])
+                selected_rank = int(checkpoint["selected_rank"])
+                arm_plays = int(checkpoint["arm_plays"])
+                if (
+                    iterations <= previous_iterations
+                    or not 0 <= nodes <= included_targets[-1]
+                ):
+                    raise ValueError(
+                        f"source {source_index} checkpoint work is invalid"
+                    )
+                if (
+                    arm_plays != primary_arm_plays
+                    or not 0 <= selected_rank < arm_plays
+                ):
+                    raise ValueError(
+                        f"source {source_index} checkpoint arm identity is invalid"
+                    )
+                if selected_rank not in judge_ranks:
+                    raise ValueError(
+                        f"source {source_index} checkpoint move was not judged"
+                    )
+                if selected_rank == previous_rank:
+                    stable_checkpoints += 1
+                else:
+                    if previous_rank is not None:
+                        selected_switches += 1
+                    previous_rank = selected_rank
+                    stable_checkpoints = 1
+                    stable_start_iterations = iterations
+                stable_iterations = iterations - stable_start_iterations
+                for key, expected in (
+                    ("stable_checkpoints", stable_checkpoints),
+                    ("stable_iterations", stable_iterations),
+                    ("selected_switches", selected_switches),
+                    ("full_selected_rank", final_selected_rank),
+                ):
+                    if int(checkpoint.get(key, "-1")) != expected:
+                        raise ValueError(
+                            f"source {source_index} checkpoint {key} differs"
+                        )
+                near_tie_challengers = int(
+                    checkpoint.get("near_tie_challengers", "-2")
+                )
+                # The estimator deliberately reports -1 until every arm has
+                # enough samples.  Thereafter it is a real challenger count.
+                if (
+                    near_tie_challengers != -1
+                    and near_tie_challengers not in range(arm_plays)
+                ):
+                    raise ValueError(
+                        f"source {source_index} checkpoint near-tie count is invalid"
+                    )
+                for key in (
+                    "judge_regret",
+                    "judge_win_regret",
+                    "judge_spread_regret",
+                ):
+                    value = float(checkpoint[key])
+                    if not math.isfinite(value) or (
+                        key == "judge_regret" and value < -1.0e-12
+                    ):
+                        raise ValueError(
+                            f"source {source_index} checkpoint {key} is invalid"
+                        )
+                previous_iterations = iterations
+
         root_panels = panels.get(source_index, [])
         if regret_trace:
             if len(root_panels) != len(included_targets):
@@ -601,6 +710,7 @@ def main() -> None:
     parser.add_argument(
         "--combined-regret-check-interval", type=int, default=256
     )
+    parser.add_argument("--checkpoint-audit-interval", type=int, default=0)
     parser.add_argument("--chunk-positions", type=int, default=8)
     parser.add_argument("--wall-seconds", type=float, default=0.0)
     args = parser.parse_args()
@@ -654,11 +764,13 @@ def main() -> None:
         or not math.isfinite(args.combined_regret_stop_target)
         or args.combined_regret_stop_target < 0.0
         or args.combined_regret_check_interval <= 0
+        or args.checkpoint_audit_interval < 0
         or not math.isfinite(args.wall_seconds)
         or args.wall_seconds < 0.0
     ):
         parser.error("invalid curve protocol")
     combined_regret = args.combined_regret_model is not None
+    checkpoint_audit = args.checkpoint_audit_interval > 0
     if combined_regret != (args.combined_regret_stop_target > 0.0):
         parser.error("combined-regret model and positive target are both required")
     if (
@@ -683,6 +795,21 @@ def main() -> None:
         parser.error(
             "combined-regret replay requires one full target, matched control, "
             "and no legacy stop, fixed control, regret trace, or candidate control"
+        )
+    if checkpoint_audit and (
+        combined_regret
+        or len(targets) != 1
+        or args.regret_stop_target > 0.0
+        or args.regret_stop_use_joint
+        or args.regret_trace
+        or args.fixed_control
+        or args.matched_control
+        or candidate_controls
+        or args.judge_risk_plays < 2
+    ):
+        parser.error(
+            "checkpoint audit requires one fixed target, a common risk-set judge, "
+            "and no stopping, controls, regret trace, or combined model"
         )
     for plies in plies_values:
         if args.min_play_iterations * args.num_plays > targets[0] // (plies + 1):
@@ -745,6 +872,8 @@ def main() -> None:
                 "combined_regret_check_interval": args.combined_regret_check_interval,
             }
         )
+    if checkpoint_audit:
+        protocol["checkpoint_audit_interval"] = args.checkpoint_audit_interval
     if state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("protocol") != protocol:
@@ -852,6 +981,9 @@ def main() -> None:
                     "THINKING_CURVE_COMBINED_REGRET_CHECK_INTERVAL": str(
                         args.combined_regret_check_interval
                     ),
+                    "THINKING_CURVE_CHECKPOINT_AUDIT_INTERVAL": str(
+                        args.checkpoint_audit_interval
+                    ),
                     "THINKING_CURVE_WALL_SECONDS": (
                         "0" if math.isinf(deadline) else f"{remaining_wall:.6f}"
                     ),
@@ -895,6 +1027,7 @@ def main() -> None:
                 matched_control=args.matched_control,
                 candidate_control_plays=candidate_controls,
                 combined_regret_stop_target=args.combined_regret_stop_target,
+                checkpoint_audit_interval=args.checkpoint_audit_interval,
             )
             expected = eligible[first_missing : first_missing + len(accepted)]
             if accepted != expected or len(accepted) > requested:

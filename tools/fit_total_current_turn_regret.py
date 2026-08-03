@@ -84,6 +84,12 @@ class Row:
     candidate_generation_regret: float
     within_set_bai_regret: float
     total_current_turn_regret: float
+    # Zero denotes that the source protocol did not retain cumulative
+    # checkpoint history. Positive values are live-observable features and
+    # never use the eventual full-budget selection.
+    stable_checkpoints: int = 0
+    stable_iterations: int = 0
+    selected_switches: int = 0
 
     @property
     def static_gap_band(self) -> int:

@@ -411,6 +411,103 @@ class RunStratifiedThinkingCurvePanelTest(unittest.TestCase):
                     combined_regret_stop_target=0.001,
                 )
 
+    @staticmethod
+    def _checkpoint_audit_chunk(*, bad_judge_rank: bool = False) -> str:
+        last_rank = 9 if bad_judge_rank else 0
+        return "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=294 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=0 utility=.2 utility_sem=.01 "
+                "win=.3 spread=4 best=1\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=1 utility=.1 utility_sem=.01 "
+                "win=.2 spread=3 best=0\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=2 utility=.0 utility_sem=.01 "
+                "win=.1 spread=2 best=0\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=0 iterations=10 "
+                "nodes=70 selected_rank=2 selected_id=22 stable_checkpoints=1 "
+                "stable_iterations=0 selected_switches=0 full_selected_rank=0 "
+                "estimated_best=.1 estimated_challenger=.09 estimated_regret=inf "
+                "joint_estimated_regret=inf near_tie_challengers=2 "
+                "judge_regret=.2 judge_win_regret=.2 judge_spread_regret=2\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=1 iterations=20 "
+                "nodes=140 selected_rank=0 selected_id=20 stable_checkpoints=1 "
+                "stable_iterations=0 selected_switches=1 full_selected_rank=0 "
+                "estimated_best=.11 estimated_challenger=.09 "
+                "estimated_regret=.001 joint_estimated_regret=.002 "
+                "near_tie_challengers=1 judge_regret=0 judge_win_regret=0 "
+                "judge_spread_regret=0\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=2 iterations=42 "
+                f"nodes=294 selected_rank={last_rank} selected_id=20 "
+                "stable_checkpoints=2 stable_iterations=22 selected_switches=1 "
+                "full_selected_rank=0 estimated_best=.12 estimated_challenger=.08 "
+                "estimated_regret=.0001 joint_estimated_regret=.0002 "
+                "near_tie_challengers=0 judge_regret=0 judge_win_regret=0 "
+                "judge_spread_regret=0\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=5 dropped=0 final_iterations=42 final_nodes=294 "
+                "judge_candidates=3 judge_iterations=3000 judge_forced=0 "
+                "control=0 matched_control=0 combined_regret=0 "
+                "combined_checkpoints=3 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+
+    def test_validates_checkpoint_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._checkpoint_audit_chunk(), encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=False,
+                checkpoint_audit_interval=10,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_unjudged_checkpoint_move(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(
+                self._checkpoint_audit_chunk(bad_judge_rank=True),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "checkpoint arm identity"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=3,
+                    judge_samples=1000,
+                    regret_stop_target=0.0,
+                    regret_stop_use_joint=False,
+                    regret_trace=False,
+                    regret_risk_plays=3,
+                    regret_paired_samples=4,
+                    fixed_control=False,
+                    matched_control=False,
+                    checkpoint_audit_interval=10,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

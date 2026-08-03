@@ -709,15 +709,15 @@ static int thinking_curve_checkpoint_rank(int arm_index,
   }
   if (arm_index >= num_plays || rank_by_arm[arm_index] < 0 ||
       rank_by_arm[arm_index] >= num_plays) {
-    log_fatal("thinking-curve checkpoint has invalid arm index %d",
-              arm_index);
+    log_fatal("thinking-curve checkpoint has invalid arm index %d", arm_index);
   }
   return rank_by_arm[arm_index];
 }
 
-static void thinking_curve_normalize_checkpoint(
-    AnalysisProgressEvent *checkpoint, const int rank_by_arm[], int num_plays,
-    const ThinkingCurveCandidate candidates[]) {
+static void
+thinking_curve_normalize_checkpoint(AnalysisProgressEvent *checkpoint,
+                                    const int rank_by_arm[], int num_plays,
+                                    const ThinkingCurveCandidate candidates[]) {
   checkpoint->candidate_index = thinking_curve_checkpoint_rank(
       checkpoint->candidate_index, rank_by_arm, num_plays);
   checkpoint->best_index = thinking_curve_checkpoint_rank(
@@ -725,8 +725,8 @@ static void thinking_curve_normalize_checkpoint(
   checkpoint->challenger_index = thinking_curve_checkpoint_rank(
       checkpoint->challenger_index, rank_by_arm, num_plays);
   if (checkpoint->best_index >= 0 && candidates != NULL) {
-    checkpoint->item_id = move_get_fingerprint(
-        &candidates[checkpoint->best_index].move);
+    checkpoint->item_id =
+        move_get_fingerprint(&candidates[checkpoint->best_index].move);
   }
 }
 
@@ -902,6 +902,55 @@ static void thinking_curve_print_point(
       event->challenger_value, estimated_regret, joint_estimated_regret,
       regret_at_stop, joint_regret_at_stop, near_tie_challengers,
       near_tie_challengers_at_stop, regret_stop_target, bai_status);
+}
+
+static void thinking_curve_print_checkpoint_audit(
+    int source_index, int position, int game_index, int bag_tiles, int plies,
+    int num_plays, const ThinkingCurveArmResult *result,
+    const ThinkingCurveJudgeResult *judge) {
+  int previous_rank = -1;
+  int stable_checkpoints = 0;
+  int selected_switches = 0;
+  uint64_t stable_start_iterations = 0;
+  for (size_t index = 0; index < result->checkpoint_count; index++) {
+    const AnalysisProgressEvent *checkpoint = &result->checkpoints[index];
+    const int selected = checkpoint->best_index;
+    if (selected < 0 || selected >= num_plays ||
+        !isfinite(judge->utility[selected])) {
+      log_fatal("thinking-curve checkpoint audit lacks selected judge move");
+    }
+    if (selected == previous_rank) {
+      stable_checkpoints++;
+    } else {
+      if (previous_rank >= 0) {
+        selected_switches++;
+      }
+      previous_rank = selected;
+      stable_checkpoints = 1;
+      stable_start_iterations = checkpoint->iterations;
+    }
+    const uint64_t stable_iterations =
+        checkpoint->iterations - stable_start_iterations;
+    printf("THINKING_CURVE_CHECKPOINT source_index=%d position=%d game=%d "
+           "bag=%d plies=%d arm_plays=%d checkpoint=%zu iterations=%" PRIu64
+           " nodes=%" PRIu64 " selected_rank=%d selected_id=%" PRIu64
+           " stable_checkpoints=%d stable_iterations=%" PRIu64
+           " selected_switches=%d full_selected_rank=%d "
+           "estimated_best=%.12f estimated_challenger=%.12f "
+           "estimated_regret=%.12f joint_estimated_regret=%.12f "
+           "near_tie_challengers=%d judge_regret=%.12f "
+           "judge_win_regret=%+.12f judge_spread_regret=%+.12f\n",
+           source_index, position, game_index, bag_tiles, plies, num_plays,
+           index, checkpoint->iterations, checkpoint->nodes, selected,
+           checkpoint->item_id, stable_checkpoints, stable_iterations,
+           selected_switches, result->decision.best_index,
+           checkpoint->best_value, checkpoint->challenger_value,
+           checkpoint->value, checkpoint->secondary_value,
+           checkpoint->near_tie_challengers,
+           judge->utility[judge->best_rank] - judge->utility[selected],
+           judge->win[judge->best_rank] - judge->win[selected],
+           judge->spread[judge->best_rank] - judge->spread[selected]);
+  }
 }
 
 static void
@@ -1431,7 +1480,7 @@ static void thinking_curve_run_position(
     const ThinkingCurveRegretModel *combined_regret_model,
     double combined_regret_stop_target,
     uint64_t combined_regret_checkpoint_interval,
-    const char *trajectory_policy) {
+    uint64_t checkpoint_audit_interval, const char *trajectory_policy) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -1511,7 +1560,8 @@ static void thinking_curve_run_position(
         combined_regret_enabled ? false : regret_stop_use_joint,
         regret_cross_arm_correlation, regret_calibration, regret_check_interval,
         regret_min_samples_per_arm,
-        combined_regret_enabled ? combined_regret_checkpoint_interval : 0,
+        combined_regret_enabled ? combined_regret_checkpoint_interval
+                                : checkpoint_audit_interval,
         &event_count);
     selected_ranks[decisions[decision_count].decision.best_index] = true;
     if (judge_risk_plays >= 2) {
@@ -1575,6 +1625,19 @@ static void thinking_curve_run_position(
     combined_result.near_tie_challengers_at_stop =
         combined_stop.decision.near_tie_challengers;
     selected_ranks[combined_stop.decision.best_index] = true;
+  }
+  if (checkpoint_audit_interval > 0) {
+    const ThinkingCurveArmResult *audit = &decisions[decision_count - 1];
+    if (audit->checkpoint_count == 0) {
+      log_fatal("thinking-curve checkpoint audit captured no checkpoints");
+    }
+    for (size_t index = 0; index < audit->checkpoint_count; index++) {
+      const int selected = audit->checkpoints[index].best_index;
+      if (selected < 0 || selected >= num_plays) {
+        log_fatal("thinking-curve checkpoint audit selected invalid move");
+      }
+      selected_ranks[selected] = true;
+    }
   }
   ThinkingCurveArmResult control_result = {0};
   ThinkingCurveArmResult matched_control_result = {0};
@@ -1773,6 +1836,11 @@ static void thinking_curve_run_position(
   printf(" trajectory_policy=%s cgp=%s\n", trajectory_policy, cgp);
   thinking_curve_print_judge_candidates(source_index, position, game_index,
                                         bag_tiles, plies, &judge);
+  if (checkpoint_audit_interval > 0) {
+    thinking_curve_print_checkpoint_audit(
+        source_index, position, game_index, bag_tiles, plies, num_plays,
+        &decisions[decision_count - 1], &judge);
+  }
   if (combined_regret_enabled) {
     printf("THINKING_CURVE_COMBINED_STOP source_index=%d position=%d game=%d "
            "bag=%d plies=%d arm_plays=%d checkpoints=%zu "
@@ -2034,9 +2102,8 @@ static void thinking_curve_test_checkpoint_rank_normalization(void) {
   // A heap-backed MoveList can expose this arm-to-rank permutation. Replaying
   // best_index=1 as candidate rank 1 would select the wrong move; it is rank 0.
   const int rank_by_arm[] = {2, 0, 3, 1};
-  AnalysisProgressEvent checkpoint =
-      analysis_progress_event_create(ANALYSIS_MODE_SIM,
-                                     ANALYSIS_EVENT_CHECKPOINT);
+  AnalysisProgressEvent checkpoint = analysis_progress_event_create(
+      ANALYSIS_MODE_SIM, ANALYSIS_EVENT_CHECKPOINT);
   checkpoint.candidate_index = 0;
   checkpoint.best_index = 1;
   checkpoint.challenger_index = 3;
@@ -2116,6 +2183,9 @@ void test_thinking_curve(void) {
   const uint64_t combined_regret_checkpoint_interval =
       thinking_curve_env_positive_uint64(
           "THINKING_CURVE_COMBINED_REGRET_CHECK_INTERVAL", 256);
+  const uint64_t checkpoint_audit_interval =
+      (uint64_t)thinking_curve_env_nonnegative_int(
+          "THINKING_CURVE_CHECKPOINT_AUDIT_INTERVAL", 0);
   const bool combined_regret_enabled =
       strcmp(combined_regret_model_path, "0") != 0 ||
       combined_regret_stop_target > 0.0;
@@ -2186,6 +2256,15 @@ void test_thinking_curve(void) {
         "and no legacy stop, fixed control, regret probe, or candidate "
         "control");
   }
+  if (checkpoint_audit_interval > 0 &&
+      (combined_regret_enabled || target_count != 1 ||
+       regret_stop_target > 0.0 || fixed_control || matched_control ||
+       capture_regret_samples || candidate_control_count > 0 ||
+       judge_risk_plays < 2)) {
+    log_fatal(
+        "checkpoint audit requires one fixed-budget target, a common risk-set "
+        "judge, and no stopping, controls, probes, or candidate controls");
+  }
   for (int control_index = 0; control_index < candidate_control_count;
        control_index++) {
     if (candidate_control_plays[control_index] >= num_plays) {
@@ -2237,6 +2316,7 @@ void test_thinking_curve(void) {
          " matched_control=%d candidate_control_plays=%s"
          " combined_regret_model=%s combined_regret_stop_target=%.12f"
          " combined_regret_check_interval=%" PRIu64
+         " checkpoint_audit_interval=%" PRIu64
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
          corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
@@ -2248,7 +2328,7 @@ void test_thinking_curve(void) {
          regret_check_interval, regret_min_samples_per_arm, fixed_control,
          matched_control, candidate_control_string, combined_regret_model_path,
          combined_regret_stop_target, combined_regret_checkpoint_interval,
-         wall_seconds, target_string);
+         checkpoint_audit_interval, wall_seconds, target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -2313,7 +2393,7 @@ void test_thinking_curve(void) {
               regret_min_samples_per_arm, fixed_control, matched_control,
               candidate_control_plays, candidate_control_count,
               combined_regret_model, combined_regret_stop_target,
-              combined_regret_checkpoint_interval,
+              combined_regret_checkpoint_interval, checkpoint_audit_interval,
               trajectory_policy == NULL ? "unknown" : trajectory_policy);
         } else {
           printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
@@ -2381,7 +2461,8 @@ void test_thinking_curve(void) {
             regret_min_samples_per_arm, fixed_control, matched_control,
             candidate_control_plays, candidate_control_count,
             combined_regret_model, combined_regret_stop_target,
-            combined_regret_checkpoint_interval, "unknown");
+            combined_regret_checkpoint_interval, checkpoint_audit_interval,
+            "unknown");
         evaluated++;
       }
       groups_seen++;
@@ -2459,7 +2540,7 @@ void test_thinking_curve(void) {
           fixed_control, matched_control, candidate_control_plays,
           candidate_control_count, combined_regret_model,
           combined_regret_stop_target, combined_regret_checkpoint_interval,
-          "unknown");
+          checkpoint_audit_interval, "unknown");
       evaluated++;
     }
     groups_seen++;
