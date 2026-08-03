@@ -272,8 +272,20 @@ def validate_chunk_accounting(
             iterations = int(row["iterations"])
             nodes = int(row["nodes"])
             status = int(row["bai_status"])
-            maximum_iterations = target_nodes // (plies + 1)
-            if iterations > maximum_iterations or nodes > target_nodes:
+            # A combined cumulative point reports its actual node receipt as
+            # target_nodes so it joins the exact stopped checkpoint.  Terminal
+            # rollouts can use fewer than ``plies + 1`` nodes, however, so that
+            # receipt is not the iteration budget.  The preregistered full cap
+            # remains the iteration ceiling for both early and capped stops.
+            iteration_target = (
+                included_targets[-1] if combined_regret else target_nodes
+            )
+            maximum_iterations = iteration_target // (plies + 1)
+            if (
+                iterations > maximum_iterations
+                or nodes > target_nodes
+                or (combined_regret and target_nodes > included_targets[-1])
+            ):
                 raise ValueError(f"source {source_index} exceeded stopped budget")
             if status == 3 and iterations != maximum_iterations:
                 raise ValueError(f"source {source_index} missed fixed iteration cap")

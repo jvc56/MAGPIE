@@ -331,6 +331,64 @@ class RunStratifiedThinkingCurvePanelTest(unittest.TestCase):
             )
         self.assertEqual(accepted, [0])
 
+    def test_validates_capped_combined_stop_with_terminal_node_shortfall(
+        self,
+    ) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_COMBINED_STOP source_index=0 position=0 "
+                "game=9 bag=40 plies=6 arm_plays=3 checkpoints=5 "
+                "stopped_iterations=42 stopped_nodes=293 selected_rank=1 "
+                "raw_estimated_regret=.0004 raw_joint_estimated_regret=.0005 "
+                "near_tie_challengers=2 predicted_candidate_regret=.0003 "
+                "predicted_within_regret=.0006 predicted_total_regret=.0009 "
+                "regret_stop_target=.001 capped=1\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=293 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=293 "
+                "min_play_iterations=1 selected_rank=1 bai_status=3 "
+                "regret_at_stop=.0004 joint_regret_at_stop=.0005\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=294 final=0 "
+                "control=1 control_kind=matched iterations=42 nodes=292 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=1 control_kind=full iterations=42 nodes=293 "
+                "min_play_iterations=1 selected_rank=1 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=9 dropped=0 final_iterations=42 "
+                "final_nodes=293 judge_candidates=3 judge_iterations=3000 "
+                "judge_forced=0 control=1 control_iterations=42 "
+                "control_nodes=293 matched_control=1 matched_target_nodes=294 "
+                "matched_iterations=42 matched_nodes=292 combined_regret=1 "
+                "combined_capped=1 combined_checkpoints=5 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=True,
+                combined_regret_stop_target=0.001,
+            )
+        self.assertEqual(accepted, [0])
+
     def test_rejects_nonadditive_combined_regret_prediction(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "chunk.log"
