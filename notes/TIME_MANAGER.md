@@ -1691,6 +1691,61 @@ policy and middle-game bag bands, and then pass another prospective stopping
 gate. Even a surrogate pass would still require the separately preregistered
 mirrored terminal-game gate before production enablement.
 
+### Conditional checkpoint-regret calibration (2026-08-03)
+
+The next development panel measured the signal at the checkpoints where a
+live stop can actually occur. It replayed 96 existing complete games with one
+p6, sorted-top-60 cumulative arm capped at 3M nodes, a checkpoint every 256
+iterations, and a common 10-ply risk-set judge at exactly 100,000 samples per
+distinct nominee. The panel is calibration data, not prospective validation.
+The first launch attempt produced no result because the relocated frozen
+runner had the wrong working directory; it is excluded. Attempts 2--97
+accepted an exact contiguous 0--95 source prefix. The final strict audit
+reconciled 160,704 checkpoint records, 982 judge nominees, 98.2 million judge
+iterations, normalized move identities, monotone work, all stability counters,
+and `dropped=0`, with no accepted partial result.
+
+The conditional model combines the corrected 96-game nested-width panel, the
+corrected prospective combined-regret panel, and 652 fixed checkpoint
+landmarks from the new audit. Overlapping cumulative/checkpoint observations
+share the same game identity, so five outer and four inner complete-game folds
+prevent cross-panel leakage. It predicts candidate-generation and within-set
+BAI event probability and positive severity separately, then adds the two
+expected regrets. Oracle values remain labels only; the full-arm selected move
+is not a feature. The label universe is the common checkpoint-observable
+sorted top-60 union, so regret beyond top 60 remains unmeasured.
+
+At deployment width 60 there are 844 held-out rows from 192 games. Actual
+regret was positive on 68 rows from 33 games; its row-weighted mean was
+`0.00036599`. On the checkpoint-only subset, 51/652 rows from 21/96 games were
+positive. Events were concentrated where the model should look: 33/168 in bag
+16--35, 38/328 on PlayChooser trajectories, and 27/64 when at least two
+near-tie challengers were present, versus 11/530 with none.
+
+The stability-aware point predictor fails the preregistered reliability gate.
+Its through-origin slope is `0.782` (game-clustered bootstrap 95% interval
+`[0.417,1.279]`), but 2/10 tie-preserving bins underpredict by more than 2x;
+the worst actual/predicted ratio is `43.97`. A matched ablation that removes
+only checkpoint-stability history has slope `0.931`
+(`[0.496,1.467]`) and lower absolute error by `0.0000375` per game-weighted
+row (Student-t 95% CI `[0.0000198,0.0000552]`), yet still has 4/10 bins over
+the 2x limit. Stability as currently discretized therefore does not improve
+conditional calibration.
+
+The nested one-sided q95 residual bound is conservative: it covers 98.70% of
+rows and all rows simultaneously in 185/192 games (96.35%), but its mean upper
+regret is `0.006498` against mean actual regret `0.000366`. On checkpoint-only
+rows it covers 98.62%, with simultaneous coverage in 90/96 games (93.75%).
+This is a useful fail-closed safety diagnostic, not a sufficiently precise
+stopping price.
+
+Because the point gate fails, no target is frozen and no new optional-stopping
+panel is launched. Live allocation remains disabled. The next calibration
+iteration should model the sparse event process directly in policy/bag/near-tie
+strata and test continuous stability summaries rather than scheduling another
+fresh efficacy run. A subsequent fresh surrogate pass would still not replace
+the separately powered mirrored terminal-game gate.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

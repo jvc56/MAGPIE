@@ -99,6 +99,20 @@ def stability_band(row: Row) -> int:
     return len(STABLE_CHECKPOINT_UPPER_BOUNDS)
 
 
+def ablate_stability(rows: Iterable[Row]) -> list[Row]:
+    """Remove only checkpoint-history features for a matched ablation."""
+
+    return [
+        replace(
+            row,
+            stable_checkpoints=0,
+            stable_iterations=0,
+            selected_switches=0,
+        )
+        for row in rows
+    ]
+
+
 CANDIDATE_SEVERITY_LEVELS: tuple[KeyFunction, ...] = (
     lambda row: (),
     lambda row: (row.width,),
@@ -1058,6 +1072,11 @@ def main() -> None:
     parser.add_argument("--upper-coverage", type=float, default=0.90)
     parser.add_argument("--minimum-calibration-games", type=int, default=16)
     parser.add_argument("--isotonic-prior-strength", type=float, default=2.0)
+    parser.add_argument(
+        "--ablate-stability",
+        action="store_true",
+        help="zero checkpoint-history features for a matched baseline",
+    )
     args = parser.parse_args()
 
     _reject_invalid_protocol(args.log)
@@ -1079,6 +1098,8 @@ def main() -> None:
         checkpoint_rows += len(checkpoint)
         checkpoint_games.update(row.game for row in checkpoint)
         source_offset = max(row.source_index for row in rows) + 1
+    if args.ablate_stability:
+        rows = ablate_stability(rows)
 
     predictions, calibration_cells, isotonic_blocks = nested_cross_fit_with_bounds(
         rows,
@@ -1117,6 +1138,7 @@ def main() -> None:
         "upper_coverage": args.upper_coverage,
         "minimum_calibration_games": args.minimum_calibration_games,
         "isotonic_prior_strength": args.isotonic_prior_strength,
+        "stability_ablation": args.ablate_stability,
         "candidate_model": _component_artifact(candidate_model),
         "within_set_model": _component_artifact(within_model),
         "calibration_cells": [asdict(cell) for cell in calibration_cells],

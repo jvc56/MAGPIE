@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
 
 from tools.fit_conditional_current_turn_regret import (
+    ablate_stability,
     apply_calibration_cells,
     cross_fit,
     fit_calibration_cells,
@@ -46,6 +48,22 @@ def make_row(game_index: int, width: int = 60) -> Row:
 
 
 class FitConditionalCurrentTurnRegretTest(unittest.TestCase):
+    def test_stability_ablation_removes_only_checkpoint_history(self) -> None:
+        original = replace(
+            make_row(1),
+            stable_checkpoints=8,
+            stable_iterations=2048,
+            selected_switches=3,
+        )
+        [ablated] = ablate_stability([original])
+        self.assertEqual(ablated.stable_checkpoints, 0)
+        self.assertEqual(ablated.stable_iterations, 0)
+        self.assertEqual(ablated.selected_switches, 0)
+        self.assertEqual(
+            ablated.total_current_turn_regret,
+            original.total_current_turn_regret,
+        )
+
     def test_two_part_predictions_are_probabilistic_and_additive(self) -> None:
         rows = [
             make_row(game, width)
