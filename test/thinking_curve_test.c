@@ -1530,11 +1530,22 @@ thinking_curve_generate_candidates(Config *config, const char *cgp,
       .initial_tiles_bv = 0,
   };
   generate_moves(&gen_args);
+  // MOVE_RECORD_ALL leaves MoveList in its bounded min-heap representation.
+  // Production's `generate` command explicitly converts that heap into a
+  // descending equity array before PlayChooser takes a candidate prefix.  Do
+  // the same here: otherwise "top K" controls are merely heap prefixes and
+  // candidate-width conclusions do not describe the production policy.
+  move_list_sort_moves(generated_moves);
   int count = move_list_get_count(generated_moves);
   if (count > num_plays) {
     count = num_plays;
   }
   for (int rank = 0; rank < count; rank++) {
+    if (rank > 0 &&
+        move_get_equity(move_list_get_move(generated_moves, rank - 1)) <
+            move_get_equity(move_list_get_move(generated_moves, rank))) {
+      log_fatal("thinking-curve generated candidates are not equity sorted");
+    }
     ThinkingCurveCandidate *candidate = &candidates[rank];
     move_copy(&candidate->move, move_list_get_move(generated_moves, rank));
     (void)snprintf(candidate->raw_move, sizeof(candidate->raw_move),
@@ -1546,7 +1557,24 @@ thinking_curve_generate_candidates(Config *config, const char *cgp,
   return count;
 }
 
+static void thinking_curve_test_generated_candidate_sort(void) {
+  MoveList *moves = move_list_create(3);
+  const Equity equities[] = {10, 30, 20};
+  for (size_t index = 0; index < sizeof(equities) / sizeof(equities[0]);
+       index++) {
+    Move *move = move_list_get_spare_move(moves);
+    move_set_equity(move, equities[index]);
+    move_list_insert_spare_move(moves, equities[index]);
+  }
+  move_list_sort_moves(moves);
+  assert(move_get_equity(move_list_get_move(moves, 0)) == 30);
+  assert(move_get_equity(move_list_get_move(moves, 1)) == 20);
+  assert(move_get_equity(move_list_get_move(moves, 2)) == 10);
+  move_list_destroy(moves);
+}
+
 void test_thinking_curve(void) {
+  thinking_curve_test_generated_candidate_sort();
   // Regression guard for all-similar candidate panels: TOP_TWO_IDS reports
   // THRESHOLD after the uniform floor even when GK16 thresholding is disabled.
   assert(thinking_curve_bai_can_finish_before_sample_limit(
