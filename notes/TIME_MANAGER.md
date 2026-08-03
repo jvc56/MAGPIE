@@ -1583,54 +1583,37 @@ calibration still fails. The structural joint-minus-pairwise correction is
 real under both covariance models, especially with 2--3 near-tied
 challengers, but neither raw estimator is safe as a live stopping price.
 
-The final correction is a separate candidate-set sensitivity panel. It ranks
-24 hard roots using only checkpoint-visible cap status, near-tie count,
-estimated joint regret, and work used, balanced three per policy and bag band.
-Each root runs one p6 3M-node top-40 arm and an exact-cap top-15 control from
-the same generated move order and nomination seed. Both choices plus
-difference-UCB risk sets enter one 10-ply, 100,000-sample-per-nominee common
-judge. The runner refuses partial roots and audits arm-specific sampling
-floors, progress events, target joins, and judge iterations. This measures a
-candidate-miss sensitivity floor without selecting roots from prior oracle
-outcomes or comparing judges from separate runs.
+The first candidate-width sensitivity result is invalid. The raw-position
+harness requested `MOVE_SORT_EQUITY` but did not call `move_list_sort_moves()`
+after `generate_moves()`. `MOVE_RECORD_ALL` therefore left a bounded min-heap,
+and the supposed top-15/top-40/top-60 sets were heap prefixes rather than
+descending static-equity prefixes. The large top-40-minus-top-15 result and
+every conclusion derived from it must not be quoted. The affected run
+directories carry `INVALID_PROTOCOL.txt`, and a regression test now requires
+the generated candidate order to be nonincreasing in static equity before any
+nested width is cut.
 
-All 24 roots completed. A strict post-run re-audit found the exact contiguous
-0--23 prefix, one top-40 and one top-15 nonfinal arm plus one final row per
-root, exact iteration caps and sampling floors, reconciled common-judge
-unions, `dropped=0`, and empty error logs. Top 40 minus top 15 improved judged
-utility by `+0.044714` (game-clustered 95% CI
-`[+0.013272,+0.076155]`, `p=0.0073`), win probability by `+0.053526`
-(`[+0.012446,+0.094607]`, `p=0.0129`), and spread by `+13.004`
-(`[+6.878,+19.131]`, `p=0.00021`). The measured candidate-miss regret
-mass was `0.044718` (`[0.013278,0.076158]`); positive miss events occurred
-on 22/24 roots. The two arms disagreed on 23/24 roots, the top-40 arm selected
-outside the first 15 on 23/24, and the common judge's best nominee lay outside
-the first 15 on 22/24. There is no compensating dilution signal: regret from
-top-40 losing to the top-15 choice averaged only `0.0000043` (95% CI
-`[-0.0000046,+0.0000131]`). Both arms completed the exact iteration cap; the
-top-40/top-15 node ratio was `0.9920` (95% CI `0.9852--0.9987`) because of
-legitimate terminal node shortfalls, not a different requested budget.
+A corrected saturation experiment reran the same 24 outcome-free hard roots
+at p6 and 3M nodes, comparing genuinely sorted top 60 against top 40 under a
+common 10-ply, 100,000-sample-per-nominee judge. All roots passed the strict
+post-run accounting audit. Top 60 minus top 40 changed the selected move on
+3/24 roots but never selected outside the first 40; the judge's best risk-set
+nominee was also never outside the first 40. Its utility gain was
+`+0.0000722` (game-clustered 95% CI
+`[-0.0001565,+0.0003009]`, `p=0.520`), win gain `+0.0000392`
+(`[-0.0002102,+0.0002887]`, `p=0.748`), and spread gain `+0.0630`
+(`[-0.0383,+0.1643]`, `p=0.211`). The zero-event Wilson upper bound for a
+top-40 candidate miss is still 13.8%, so this small hard-root result supports
+top-40 saturation but does not establish it.
 
-The direction is consistent across the four bag bands, although every
-six-root interval is wide: utility gains are `+0.0606` at bag 5--15,
-`+0.0237` at 16--35, `+0.0472` at 36--60, and `+0.0473` at 61--100.
-Candidate misses occurred on 4/6 late roots and all 18 roots in the other
-bands. The PlayChooser stratum gains `+0.017039` (95% CI
-`[+0.009553,+0.024524]`, 11/12 positive misses); the static stratum gains
-`+0.072389` (`[+0.009547,+0.135231]`, also 11/12).
-
-This is a deliberately hard, 24-root sensitivity sample, not a population
-estimate for ordinary turns. Top 40 is still not an exhaustive move oracle,
-the result covers only p6 at 3M nodes, and common-judge quality remains a
-finite-horizon surrogate. Nevertheless, the outside-top-15 floor is much
-larger than the within-top-15 regret the stopping model was trying to price.
-The stopped-time reliability model cannot be repaired by a small calibration
-factor while its candidate set omits the eventual best nominee this often.
-Future calibration must either use a wider/adaptive production candidate set
-or explicitly model candidate-generation regret separately from sampling
-regret. Live allocation remains off because the required stopped-time
-reliability gate failed, regardless of the optional-stopping noninferiority
-pass and this candidate-set result.
+The preregistered correction is a representative 96-root panel, balanced 12
+per trajectory-policy and bag-band stratum and selected without oracle
+outcomes. It compares nested sorted widths 15/24/32/40/60 under the same p6,
+3M-node, common-judge protocol. Those labels decompose exactly into
+candidate-generation regret and within-set BAI regret. A five-fold,
+source-game cross-fitted model predicts the two components separately; only a
+subsequent fresh cumulative panel may assess the combined stopped-time signal.
+Live allocation remains disabled throughout.
 
 ## Validation
 
