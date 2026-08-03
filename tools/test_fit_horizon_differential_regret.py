@@ -11,6 +11,7 @@ from tools.fit_horizon_differential_regret import (
     HorizonRow,
     cross_fit,
     fit_model,
+    load_horizon_model_artifact,
     predict,
     read_horizon_panel,
     replay_rule_of_zero,
@@ -162,6 +163,26 @@ class FitHorizonDifferentialRegretTest(unittest.TestCase):
         item = predict(model, rows[0], 0)
         self.assertLess(item.conditional_signed_improvement, 0.0)
         self.assertEqual(item.stopping_score, 0.0)
+
+    def test_loads_frozen_shadow_model_without_labels(self) -> None:
+        artifact = {
+            "artifact_kind": "cross_fitted_same_arm_horizon_differential_model",
+            "schema_version": 1,
+            "mismatch_model": [
+                {"level": 0, "key": [], "mean": 0.25, "observations": 20}
+            ],
+            "signed_improvement_model": [
+                {"level": 0, "key": [], "mean": 0.004, "observations": 5}
+            ],
+        }
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "model.json"
+            path.write_text(json.dumps(artifact), encoding="utf-8")
+            model = load_horizon_model_artifact(path)
+        item = predict(model, make_row(0, 100_000, 0, 0.0), -1)
+        self.assertAlmostEqual(item.mismatch_probability, 0.25)
+        self.assertAlmostEqual(item.conditional_signed_improvement, 0.004)
+        self.assertAlmostEqual(item.stopping_score, 0.001)
 
     def test_rule_of_zero_waits_for_safe_checkpoint(self) -> None:
         rows = [

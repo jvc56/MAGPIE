@@ -1807,6 +1807,86 @@ a game-level conformal risk rule before exposing it to fresh outcomes. Live
 allocation remains disabled, and even a fresh surrogate pass would still
 require the independent mirrored terminal-game gate.
 
+### Preregistered judge-light Rule-of-Zero panel (2026-08-03)
+
+Status: **rule and analysis gates frozen before fresh trajectory generation;
+prospective collection pending; live allocation disabled**.
+
+The next candidate is the simple Rule of Zero on the horizon-differential
+target. It stops a cumulative SIM arm only at the first checkpoint satisfying
+all three conditions:
+
+1. at least 100,000 nodes have been received;
+2. the normalized incumbent has survived at least two consecutive
+   checkpoints; and
+3. the live near-tie count is zero.
+
+The near-tie counter is the existing number of challengers whose two-sided
+99% Gaussian difference upper bound reaches zero (`z=2.575829...`). A missing
+or negative counter is invalid and cannot stop. Checkpoints are emitted every
+256 requested iterations. The rule can only stop before a fixed p6 3M-node
+slice; it can never extend one. The 100K/two-checkpoint constants came from the
+development replay grid reported above and are therefore disclosed as
+selected on reused data. The entire rule—not a score threshold—is now frozen
+for prospective testing. The examined `0.000025` score is explicitly not a
+decision input because its model failed the decile gate and the threshold was
+selected after reused outcomes were visible.
+
+The panel contains 320 new complete-game roots, one root from each game and 40
+in each of the four SIM bag bands crossed with static and
+PlayChooser-g3000ms trajectories. It excludes every game in the earlier
+80-root risk-set, 120-root optional-stopping, and 96-root combined-regret
+panels. Panel order is assigned by the selection tool's frozen SHA-256 rank;
+indices congruent to 0 modulo 3 receive an independent arm run for exactly the
+Rule-of-Zero stopped iteration count (107 roots), and indices congruent to 0
+modulo 10 form the random common-judge audit (32 roots). Every horizon-choice
+mismatch is judged regardless of audit membership. Judges use a common-seed
+10-ply risk set with exactly 100,000 samples per distinct nominee and at most
+eight difference-UCB nominees before adding decision moves. Thus the primary
+horizon mismatch label is judge-free; expensive judging is confined to
+mismatches and the frozen audit subset.
+
+An early Rule-of-Zero checkpoint can precede the 3M arm's 10% uniform floor.
+For an exact-iteration matched control in that phase, the independent arm uses
+round-robin sampling through its cap, reproducing the cumulative arm's initial
+sampling regime without overrunning the stopped budget. At or after the full
+arm's uniform-floor boundary it instead uses the normal top-two IDS rule with
+the same absolute per-arm floor. The chosen regime and floor are logged and
+strictly audited per matched root.
+
+Mismatch is scored against both the p6 3M arm and the equal-slice-implied work
+landmark. In the prior 3-minute match telemetry, the smallest equal-slice SIM
+receipt among 80 turns was 3,652,554 nodes (median 6,014,712). Therefore the
+preregistered landmark is `min(3,000,000, 3,652,554) = 3,000,000` nodes: the
+two endpoints coincide in this deliberately capped sensitivity panel, but are
+logged and audited separately so a later wider-cap panel cannot silently
+change the estimand.
+
+The cross-fitted horizon-differential score from the frozen development model
+is logged at every checkpoint as `shadow_only`. It has no access to horizon
+identity or judge values and cannot affect stopping, nomination, judging, or
+acceptance. This preserves the option to replay a later CRC rule without
+spending another judge panel while preventing the contaminated score from
+entering this prospective decision.
+
+The preregistered surrogate passes only if all of the following hold:
+
+- the exact one-sided 95% Clopper--Pearson mismatch upper bound is at most
+  1.5% against each logged horizon;
+- the upper endpoint of the complete-game Student-t 95% interval for judged
+  missed value is at most 0.001 against each horizon;
+- mean node saving relative to the realized full arm is at least 50%; and
+- on the independently matched subset, the stopped-minus-matched judged-value
+  interval includes zero and has upper endpoint at most 0.001.
+
+Any miss rejects this rule. The next candidate would be a CRC rule replayed
+against the already shadow-logged scores, not a post-hoc relaxation of these
+gates. Acceptance requires a contiguous 0--319 prefix, exact checkpoint and
+stopped/matched/horizon joins, frozen subset membership, selective-judge
+accounting, and `dropped=0`; private partial chunks are never appended. Even a
+surrogate pass leaves live allocation off until the separately preregistered
+mirrored terminal-game gate passes.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

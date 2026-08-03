@@ -163,6 +163,16 @@ typedef struct ThinkingCurveCombinedStop {
   bool valid;
 } ThinkingCurveCombinedStop;
 
+typedef struct ThinkingCurveRuleZeroStop {
+  AnalysisProgressEvent decision;
+  size_t checkpoint_index;
+  int stable_checkpoints;
+  uint64_t stable_iterations;
+  int selected_switches;
+  bool capped;
+  bool valid;
+} ThinkingCurveRuleZeroStop;
+
 static ThinkingCurveSampleTrace *
 thinking_curve_sample_trace_create(uint64_t capacity) {
   if (capacity > SIZE_MAX / sizeof(SimSampleEvent)) {
@@ -517,6 +527,93 @@ static ThinkingCurveCombinedStop thinking_curve_choose_combined_stop(
   return stop;
 }
 
+static ThinkingCurveRuleZeroStop
+thinking_curve_choose_rule_zero_stop(const ThinkingCurveArmResult *full_result,
+                                     int width, uint64_t minimum_nodes,
+                                     int minimum_stable_checkpoints) {
+  ThinkingCurveRuleZeroStop stop = {0};
+  int previous_rank = -1;
+  int stable_checkpoints = 0;
+  int selected_switches = 0;
+  uint64_t stable_start_iterations = 0;
+  for (size_t index = 0; index < full_result->checkpoint_count; index++) {
+    const AnalysisProgressEvent *checkpoint = &full_result->checkpoints[index];
+    const int selected = checkpoint->best_index;
+    if (selected < 0 || selected >= width || checkpoint->iterations == 0 ||
+        checkpoint->nodes == 0) {
+      // Missing/invalid checkpoint telemetry is fail-closed: this checkpoint
+      // cannot stop the arm, but a later fully valid checkpoint still can.
+      previous_rank = -1;
+      stable_checkpoints = 0;
+      stable_start_iterations = 0;
+      continue;
+    }
+    if (selected == previous_rank) {
+      stable_checkpoints++;
+    } else {
+      if (previous_rank >= 0) {
+        selected_switches++;
+      }
+      previous_rank = selected;
+      stable_checkpoints = 1;
+      stable_start_iterations = checkpoint->iterations;
+    }
+    const uint64_t stable_iterations =
+        checkpoint->iterations - stable_start_iterations;
+    if (checkpoint->nodes >= minimum_nodes &&
+        stable_checkpoints >= minimum_stable_checkpoints &&
+        checkpoint->near_tie_challengers == 0) {
+      stop.decision = *checkpoint;
+      stop.checkpoint_index = index;
+      stop.stable_checkpoints = stable_checkpoints;
+      stop.stable_iterations = stable_iterations;
+      stop.selected_switches = selected_switches;
+      stop.valid = true;
+      return stop;
+    }
+  }
+
+  stop.decision = full_result->decision;
+  stop.checkpoint_index = full_result->checkpoint_count;
+  stop.stable_checkpoints = previous_rank == full_result->decision.best_index
+                                ? stable_checkpoints
+                                : 1;
+  stop.stable_iterations =
+      previous_rank == full_result->decision.best_index
+          ? full_result->decision.iterations - stable_start_iterations
+          : 0;
+  stop.selected_switches =
+      selected_switches +
+      (previous_rank >= 0 && previous_rank != full_result->decision.best_index);
+  stop.capped = true;
+  stop.valid = true;
+  return stop;
+}
+
+static AnalysisProgressEvent thinking_curve_choose_horizon_landmark(
+    const ThinkingCurveArmResult *full_result, uint64_t target_nodes) {
+  if (target_nodes >= full_result->decision.nodes) {
+    return full_result->decision;
+  }
+  for (size_t index = 0; index < full_result->checkpoint_count; index++) {
+    const AnalysisProgressEvent *checkpoint = &full_result->checkpoints[index];
+    if (checkpoint->nodes >= target_nodes) {
+      return *checkpoint;
+    }
+  }
+  return full_result->decision;
+}
+
+static bool thinking_curve_stop_is_in_initial_round_robin(
+    uint64_t stopped_iterations, uint64_t full_minimum_play_iterations,
+    int num_plays) {
+  if (full_minimum_play_iterations > UINT64_MAX / (uint64_t)num_plays) {
+    log_fatal("Rule-of-Zero uniform-floor accounting overflows");
+  }
+  return stopped_iterations <
+         full_minimum_play_iterations * (uint64_t)num_plays;
+}
+
 static int thinking_curve_parse_targets(const char *value, uint64_t targets[]) {
   char *copy = string_duplicate(value);
   char *saveptr = NULL;
@@ -842,6 +939,25 @@ static ThinkingCurveJudgeResult thinking_curve_run_judge(
   return result;
 }
 
+static ThinkingCurveJudgeResult
+thinking_curve_unjudged_result(int selected_rank) {
+  ThinkingCurveJudgeResult result = {0};
+  for (int rank = 0; rank < THINKING_CURVE_MAX_CANDIDATES; rank++) {
+    result.utility[rank] = NAN;
+    result.utility_sem[rank] = NAN;
+    result.win[rank] = NAN;
+    result.spread[rank] = NAN;
+  }
+  result.utility[selected_rank] = 0.0;
+  result.utility_sem[selected_rank] = 0.0;
+  result.win[selected_rank] = 0.0;
+  result.spread[selected_rank] = 0.0;
+  result.best_rank = selected_rank;
+  result.candidate_count = 1;
+  result.forced = true;
+  return result;
+}
+
 static void thinking_curve_print_point(
     int source_index, int position, int game_index, int bag_tiles, int plies,
     uint64_t target_nodes, bool final, const char *control_kind,
@@ -953,6 +1069,66 @@ static void thinking_curve_print_checkpoint_audit(
   }
 }
 
+static void thinking_curve_print_rule_zero_checkpoints(
+    int source_index, int position, int game_index, int bag_tiles, int plies,
+    int num_plays, const ThinkingCurveArmResult *result,
+    const ThinkingCurveRuleZeroStop *stop, uint64_t minimum_nodes,
+    int minimum_stable_checkpoints) {
+  int previous_rank = -1;
+  int stable_checkpoints = 0;
+  int selected_switches = 0;
+  uint64_t stable_start_iterations = 0;
+  for (size_t index = 0; index < result->checkpoint_count; index++) {
+    const AnalysisProgressEvent *checkpoint = &result->checkpoints[index];
+    const int selected = checkpoint->best_index;
+    const bool identity_valid = selected >= 0 && selected < num_plays &&
+                                checkpoint->iterations > 0 &&
+                                checkpoint->nodes > 0;
+    if (!identity_valid) {
+      previous_rank = -1;
+      stable_checkpoints = 0;
+      stable_start_iterations = 0;
+    } else if (selected == previous_rank) {
+      stable_checkpoints++;
+    } else {
+      if (previous_rank >= 0) {
+        selected_switches++;
+      }
+      previous_rank = selected;
+      stable_checkpoints = 1;
+      stable_start_iterations = checkpoint->iterations;
+    }
+    const uint64_t stable_iterations =
+        stable_checkpoints > 0
+            ? checkpoint->iterations - stable_start_iterations
+            : 0;
+    const bool counters_valid =
+        identity_valid && checkpoint->near_tie_challengers >= 0;
+    const bool eligible = counters_valid &&
+                          checkpoint->nodes >= minimum_nodes &&
+                          stable_checkpoints >= minimum_stable_checkpoints &&
+                          checkpoint->near_tie_challengers == 0;
+    printf("THINKING_CURVE_RULE_ZERO_CHECKPOINT source_index=%d position=%d "
+           "game=%d bag=%d plies=%d arm_plays=%d checkpoint=%zu "
+           "iterations=%" PRIu64 " nodes=%" PRIu64
+           " selected_rank=%d selected_id=%" PRIu64
+           " stable_checkpoints=%d stable_iterations=%" PRIu64
+           " selected_switches=%d full_selected_rank=%d "
+           "estimated_best=%.12f estimated_challenger=%.12f "
+           "estimated_regret=%.12f joint_estimated_regret=%.12f "
+           "near_tie_challengers=%d counters_valid=%d rule_eligible=%d "
+           "rule_selected=%d\n",
+           source_index, position, game_index, bag_tiles, plies, num_plays,
+           index, checkpoint->iterations, checkpoint->nodes, selected,
+           checkpoint->item_id, stable_checkpoints, stable_iterations,
+           selected_switches, result->decision.best_index,
+           checkpoint->best_value, checkpoint->challenger_value,
+           checkpoint->value, checkpoint->secondary_value,
+           checkpoint->near_tie_challengers, counters_valid, eligible,
+           !stop->capped && index == stop->checkpoint_index);
+  }
+}
+
 static void
 thinking_curve_print_judge_candidates(int source_index, int position,
                                       int game_index, int bag_tiles, int plies,
@@ -975,7 +1151,7 @@ thinking_curve_print_judge_candidates(int source_index, int position,
   }
 }
 
-static ThinkingCurveArmResult thinking_curve_run_arm(
+static ThinkingCurveArmResult thinking_curve_run_arm_with_sampling_rule(
     Config *config, ThinkingCurveContext *context,
     const MoveList *candidate_moves, int num_plays,
     const ThinkingCurveCandidate candidates[], int candidate_count, int plies,
@@ -983,7 +1159,8 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
     uint64_t run_id, double regret_stop_target, bool regret_stop_use_joint,
     double regret_cross_arm_correlation, double regret_calibration,
     uint64_t regret_check_interval, uint64_t regret_min_samples_per_arm,
-    uint64_t progress_checkpoint_interval, size_t *event_count_out) {
+    uint64_t progress_checkpoint_interval, bai_sampling_rule_t sampling_rule,
+    size_t *event_count_out) {
   ThinkingCurveArmResult result = {0};
   const uint64_t max_iterations = target_nodes / ((uint64_t)plies + 1);
   if (max_iterations == 0 ||
@@ -1023,7 +1200,7 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
                 /*max_num_display_plies=*/plies, seed, max_iterations,
                 min_play_iterations,
                 /*scond=*/0.0, BAI_THRESHOLD_NONE,
-                /*time_limit_seconds=*/0.0, BAI_SAMPLING_RULE_TOP_TWO_IDS,
+                /*time_limit_seconds=*/0.0, sampling_rule,
                 /*cutoff=*/-1.0, config_get_utility_w_winpct(config),
                 config_get_utility_w_spread(config),
                 config_get_utility_spread_scale(config),
@@ -1147,6 +1324,24 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   free(events);
   analysis_trace_destroy(trace);
   return result;
+}
+
+static ThinkingCurveArmResult thinking_curve_run_arm(
+    Config *config, ThinkingCurveContext *context,
+    const MoveList *candidate_moves, int num_plays,
+    const ThinkingCurveCandidate candidates[], int candidate_count, int plies,
+    uint64_t target_nodes, uint64_t min_play_iterations, uint64_t seed,
+    uint64_t run_id, double regret_stop_target, bool regret_stop_use_joint,
+    double regret_cross_arm_correlation, double regret_calibration,
+    uint64_t regret_check_interval, uint64_t regret_min_samples_per_arm,
+    uint64_t progress_checkpoint_interval, size_t *event_count_out) {
+  return thinking_curve_run_arm_with_sampling_rule(
+      config, context, candidate_moves, num_plays, candidates, candidate_count,
+      plies, target_nodes, min_play_iterations, seed, run_id,
+      regret_stop_target, regret_stop_use_joint, regret_cross_arm_correlation,
+      regret_calibration, regret_check_interval, regret_min_samples_per_arm,
+      progress_checkpoint_interval, BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      event_count_out);
 }
 
 static void thinking_curve_arm_result_destroy(ThinkingCurveArmResult *result) {
@@ -1463,6 +1658,253 @@ static void thinking_curve_print_regret_panel(
   }
 }
 
+static ThinkingCurveArmResult
+thinking_curve_result_from_checkpoint(const AnalysisProgressEvent *event,
+                                      bai_result_status_t status) {
+  ThinkingCurveArmResult result = {0};
+  result.decision = *event;
+  result.bai_status = status;
+  result.estimated_regret = event->value;
+  result.joint_estimated_regret = event->secondary_value;
+  result.regret_at_stop = event->value;
+  result.joint_regret_at_stop = event->secondary_value;
+  result.near_tie_challengers = event->near_tie_challengers;
+  result.near_tie_challengers_at_stop = event->near_tie_challengers;
+  return result;
+}
+
+static void thinking_curve_finish_rule_zero_position(
+    Config *config, ThinkingCurveContext *context, MoveList *candidate_moves,
+    const ThinkingCurveCandidate candidates[], int candidate_count,
+    const char *cgp, int source_index, int position, int game_index,
+    int bag_tiles, int num_plays, int plies, uint64_t max_nodes,
+    int uniform_floor_per_mille, int judge_plies, uint64_t judge_samples,
+    int judge_risk_plays, double regret_cross_arm_correlation,
+    double regret_calibration, uint64_t regret_check_interval,
+    uint64_t regret_min_samples_per_arm, const ThinkingCurveArmResult *full,
+    uint64_t minimum_play_iterations, uint64_t seed, size_t *event_count,
+    uint64_t minimum_nodes, int minimum_stable_checkpoints,
+    uint64_t equal_slice_nodes, uint64_t checkpoint_interval,
+    int matched_modulus, int matched_remainder, int audit_modulus,
+    int audit_remainder, const char *trajectory_policy, int panel_best_index,
+    int candidate_best_index, double static_primary_gap) {
+  const ThinkingCurveRuleZeroStop stop = thinking_curve_choose_rule_zero_stop(
+      full, num_plays, minimum_nodes, minimum_stable_checkpoints);
+  if (!stop.valid || stop.decision.best_index < 0 ||
+      stop.decision.best_index >= num_plays) {
+    log_fatal("Rule-of-Zero replay produced an invalid stop");
+  }
+  const AnalysisProgressEvent equal_horizon =
+      thinking_curve_choose_horizon_landmark(full, equal_slice_nodes);
+  if (equal_horizon.best_index < 0 || equal_horizon.best_index >= num_plays) {
+    log_fatal("Rule-of-Zero equal-slice horizon has an invalid move");
+  }
+
+  const bool has_matched_control =
+      source_index % matched_modulus == matched_remainder;
+  const bool audit_selected = source_index % audit_modulus == audit_remainder;
+  ThinkingCurveArmResult matched = {0};
+  uint64_t matched_target_nodes = 0;
+  uint64_t matched_minimum_play_iterations = 0;
+  bai_sampling_rule_t matched_sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS;
+  if (has_matched_control) {
+    if (stop.decision.iterations > UINT64_MAX / ((uint64_t)plies + 1)) {
+      log_fatal("Rule-of-Zero matched-control budget overflows");
+    }
+    matched_target_nodes = stop.decision.iterations * ((uint64_t)plies + 1);
+    const bool stop_is_in_initial_round_robin =
+        thinking_curve_stop_is_in_initial_round_robin(
+            stop.decision.iterations, minimum_play_iterations, num_plays);
+    matched_minimum_play_iterations =
+        stop_is_in_initial_round_robin ? 1 : minimum_play_iterations;
+    matched_sampling_rule = stop_is_in_initial_round_robin
+                                ? BAI_SAMPLING_RULE_ROUND_ROBIN
+                                : BAI_SAMPLING_RULE_TOP_TWO_IDS;
+    matched = thinking_curve_run_arm_with_sampling_rule(
+        config, context, candidate_moves, num_plays, candidates,
+        candidate_count, plies, matched_target_nodes,
+        matched_minimum_play_iterations, seed ^ UINT64_C(0x8ebc6af09c88c6e3),
+        ((uint64_t)(source_index + 1) << 32) | ((uint64_t)plies << 24) |
+            UINT64_C(0x525a4d),
+        /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
+        regret_cross_arm_correlation, regret_calibration, regret_check_interval,
+        regret_min_samples_per_arm,
+        /*progress_checkpoint_interval=*/0, matched_sampling_rule, event_count);
+  }
+
+  const bool horizon_mismatch =
+      stop.decision.best_index != full->decision.best_index;
+  const bool equal_horizon_mismatch =
+      stop.decision.best_index != equal_horizon.best_index;
+  const bool matched_mismatch =
+      has_matched_control &&
+      stop.decision.best_index != matched.decision.best_index;
+  const bool judge_performed = audit_selected || horizon_mismatch ||
+                               equal_horizon_mismatch || matched_mismatch;
+  bool judged_ranks[THINKING_CURVE_MAX_CANDIDATES] = {false};
+  judged_ranks[stop.decision.best_index] = true;
+  judged_ranks[full->decision.best_index] = true;
+  judged_ranks[equal_horizon.best_index] = true;
+  if (has_matched_control) {
+    judged_ranks[matched.decision.best_index] = true;
+  }
+  if (audit_selected) {
+    bool audit_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
+    thinking_curve_choose_risk_set(full, num_plays, judge_risk_plays,
+                                   regret_cross_arm_correlation,
+                                   audit_risk_set);
+    for (int rank = 0; rank < num_plays; rank++) {
+      judged_ranks[rank] = judged_ranks[rank] || audit_risk_set[rank];
+    }
+  }
+  const ThinkingCurveJudgeResult judge =
+      judge_performed
+          ? thinking_curve_run_judge(config, context, candidate_moves,
+                                     candidates, judged_ranks, candidate_count,
+                                     judge_plies, judge_samples, position)
+          : thinking_curve_unjudged_result(stop.decision.best_index);
+
+  printf("THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
+         "plies=%d candidates=%d max_nodes=%" PRIu64
+         " uniform_floor_per_mille=%d judge_plies=%d judge_samples=%" PRIu64
+         " judge_risk_plays=%d panel_best_rank=%d "
+         "static_best_equity=%.6f static_primary_gap=%.6f "
+         "candidate_control_static_gaps=0 trajectory_policy=%s "
+         "rule_zero=1 cgp=%s\n",
+         source_index, position, game_index, bag_tiles, plies, num_plays,
+         max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
+         judge_risk_plays, panel_best_index,
+         equity_to_double(move_get_equity(&candidates[0].move)),
+         static_primary_gap, trajectory_policy, cgp);
+  if (judge_performed) {
+    thinking_curve_print_judge_candidates(source_index, position, game_index,
+                                          bag_tiles, plies, &judge);
+  }
+  thinking_curve_print_rule_zero_checkpoints(
+      source_index, position, game_index, bag_tiles, plies, num_plays, full,
+      &stop, minimum_nodes, minimum_stable_checkpoints);
+
+  printf(
+      "THINKING_CURVE_RULE_ZERO source_index=%d position=%d game=%d bag=%d "
+      "plies=%d arm_plays=%d checkpoints=%zu checkpoint_interval=%" PRIu64
+      " minimum_nodes=%" PRIu64 " minimum_stable_checkpoints=%d "
+      "stop_checkpoint=%zu stopped_iterations=%" PRIu64
+      " stopped_nodes=%" PRIu64 " stopped_rank=%d stopped_id=%" PRIu64
+      " stable_checkpoints=%d stable_iterations=%" PRIu64
+      " selected_switches=%d near_tie_challengers=%d capped=%d "
+      "full_iterations=%" PRIu64 " full_nodes=%" PRIu64
+      " full_rank=%d full_id=%" PRIu64 " equal_slice_nodes=%" PRIu64
+      " equal_iterations=%" PRIu64 " equal_nodes=%" PRIu64
+      " equal_rank=%d equal_id=%" PRIu64
+      " matched_control=%d matched_target_nodes=%" PRIu64
+      " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64
+      " matched_rank=%d matched_id=%" PRIu64
+      " matched_min_play_iterations=%" PRIu64 " matched_sampling_rule=%s "
+      "matched_modulus=%d matched_remainder=%d audit_selected=%d "
+      "audit_modulus=%d audit_remainder=%d judge_performed=%d "
+      "horizon_mismatch=%d equal_horizon_mismatch=%d "
+      "matched_mismatch=%d\n",
+      source_index, position, game_index, bag_tiles, plies, num_plays,
+      full->checkpoint_count, checkpoint_interval, minimum_nodes,
+      minimum_stable_checkpoints, stop.checkpoint_index,
+      stop.decision.iterations, stop.decision.nodes, stop.decision.best_index,
+      stop.decision.item_id, stop.stable_checkpoints, stop.stable_iterations,
+      stop.selected_switches, stop.decision.near_tie_challengers, stop.capped,
+      full->decision.iterations, full->decision.nodes,
+      full->decision.best_index, full->decision.item_id, equal_slice_nodes,
+      equal_horizon.iterations, equal_horizon.nodes, equal_horizon.best_index,
+      equal_horizon.item_id, has_matched_control, matched_target_nodes,
+      matched.decision.iterations, matched.decision.nodes,
+      has_matched_control ? matched.decision.best_index : -1,
+      has_matched_control ? matched.decision.item_id : UINT64_C(0),
+      matched_minimum_play_iterations,
+      matched_sampling_rule == BAI_SAMPLING_RULE_ROUND_ROBIN
+          ? "round_robin_initial"
+          : "top_two_ids",
+      matched_modulus, matched_remainder, audit_selected, audit_modulus,
+      audit_remainder, judge_performed, horizon_mismatch,
+      equal_horizon_mismatch, matched_mismatch);
+
+  const ThinkingCurveArmResult stopped = thinking_curve_result_from_checkpoint(
+      &stop.decision,
+      stop.capped ? full->bai_status : BAI_RESULT_STATUS_REGRET_LIMIT);
+  const ThinkingCurveArmResult equal_result =
+      thinking_curve_result_from_checkpoint(&equal_horizon, full->bai_status);
+  thinking_curve_print_point(
+      source_index, position, game_index, bag_tiles, plies, stop.decision.nodes,
+      /*final=*/false, "stopped", &stopped.decision, candidates,
+      candidate_count, num_plays, panel_best_index, candidate_best_index,
+      minimum_play_iterations, &judge, stopped.bai_status,
+      stopped.estimated_regret, stopped.joint_estimated_regret,
+      stopped.regret_at_stop, stopped.joint_regret_at_stop,
+      stopped.near_tie_challengers, stopped.near_tie_challengers_at_stop,
+      /*regret_stop_target=*/0.0);
+  thinking_curve_print_point(
+      source_index, position, game_index, bag_tiles, plies, max_nodes,
+      /*final=*/false, "full", &full->decision, candidates, candidate_count,
+      num_plays, panel_best_index, candidate_best_index,
+      minimum_play_iterations, &judge, full->bai_status, full->estimated_regret,
+      full->joint_estimated_regret, full->regret_at_stop,
+      full->joint_regret_at_stop, full->near_tie_challengers,
+      full->near_tie_challengers_at_stop,
+      /*regret_stop_target=*/0.0);
+  thinking_curve_print_point(
+      source_index, position, game_index, bag_tiles, plies, equal_horizon.nodes,
+      /*final=*/false, "equal_horizon", &equal_result.decision, candidates,
+      candidate_count, num_plays, panel_best_index, candidate_best_index,
+      minimum_play_iterations, &judge, equal_result.bai_status,
+      equal_result.estimated_regret, equal_result.joint_estimated_regret,
+      equal_result.regret_at_stop, equal_result.joint_regret_at_stop,
+      equal_result.near_tie_challengers,
+      equal_result.near_tie_challengers_at_stop,
+      /*regret_stop_target=*/0.0);
+  if (has_matched_control) {
+    thinking_curve_print_point(
+        source_index, position, game_index, bag_tiles, plies,
+        matched_target_nodes, /*final=*/false, "matched", &matched.decision,
+        candidates, candidate_count, num_plays, panel_best_index,
+        candidate_best_index, matched_minimum_play_iterations, &judge,
+        matched.bai_status, matched.estimated_regret,
+        matched.joint_estimated_regret, matched.regret_at_stop,
+        matched.joint_regret_at_stop, matched.near_tie_challengers,
+        matched.near_tie_challengers_at_stop,
+        /*regret_stop_target=*/0.0);
+  }
+  thinking_curve_print_point(
+      source_index, position, game_index, bag_tiles, plies,
+      /*target_nodes=*/0, /*final=*/true, "stopped", &stopped.decision,
+      candidates, candidate_count, num_plays, panel_best_index,
+      candidate_best_index, minimum_play_iterations, &judge, stopped.bai_status,
+      stopped.estimated_regret, stopped.joint_estimated_regret,
+      stopped.regret_at_stop, stopped.joint_regret_at_stop,
+      stopped.near_tie_challengers, stopped.near_tie_challengers_at_stop,
+      /*regret_stop_target=*/0.0);
+
+  const int reported_judge_candidates =
+      judge_performed ? judge.candidate_count : 0;
+  printf("THINKING_CURVE_POSITION_DONE source_index=%d position=%d plies=%d "
+         "events=%zu dropped=0 final_iterations=%" PRIu64
+         " final_nodes=%" PRIu64 " judge_candidates=%d "
+         "judge_iterations=%" PRIu64 " judge_nodes=%" PRIu64
+         " judge_seconds=%.6f judge_forced=%d judge_performed=%d "
+         "control=0 control_iterations=0 control_nodes=0 "
+         "matched_control=%d matched_target_nodes=%" PRIu64
+         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64
+         " combined_regret=0 combined_capped=0 combined_checkpoints=%zu "
+         "rule_zero=1 rule_zero_capped=%d horizon_iterations=%" PRIu64
+         " horizon_nodes=%" PRIu64 " candidate_control=0 "
+         "candidate_controls=0 candidate_control_plays=0 "
+         "candidate_control_iterations=0 candidate_control_nodes=0\n",
+         source_index, position, plies, *event_count, stop.decision.iterations,
+         stop.decision.nodes, reported_judge_candidates, judge.iterations,
+         judge.nodes, judge.elapsed_seconds, judge.forced, judge_performed,
+         has_matched_control, matched_target_nodes, matched.decision.iterations,
+         matched.decision.nodes, full->checkpoint_count, stop.capped,
+         full->decision.iterations, full->decision.nodes);
+  thinking_curve_arm_result_destroy(&matched);
+  fflush_or_die(stdout);
+}
+
 static void thinking_curve_run_position(
     Config *config, ThinkingCurveContext *context, MoveList *candidate_moves,
     const ThinkingCurveCandidate candidates[], int candidate_count,
@@ -1480,7 +1922,12 @@ static void thinking_curve_run_position(
     const ThinkingCurveRegretModel *combined_regret_model,
     double combined_regret_stop_target,
     uint64_t combined_regret_checkpoint_interval,
-    uint64_t checkpoint_audit_interval, const char *trajectory_policy) {
+    uint64_t checkpoint_audit_interval, bool rule_zero_enabled,
+    uint64_t rule_zero_minimum_nodes, int rule_zero_minimum_stable_checkpoints,
+    uint64_t rule_zero_equal_slice_nodes,
+    uint64_t rule_zero_checkpoint_interval, int rule_zero_matched_modulus,
+    int rule_zero_matched_remainder, int rule_zero_audit_modulus,
+    int rule_zero_audit_remainder, const char *trajectory_policy) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -1561,10 +2008,11 @@ static void thinking_curve_run_position(
         regret_cross_arm_correlation, regret_calibration, regret_check_interval,
         regret_min_samples_per_arm,
         combined_regret_enabled ? combined_regret_checkpoint_interval
+        : rule_zero_enabled     ? rule_zero_checkpoint_interval
                                 : checkpoint_audit_interval,
         &event_count);
     selected_ranks[decisions[decision_count].decision.best_index] = true;
-    if (judge_risk_plays >= 2) {
+    if (judge_risk_plays >= 2 && !rule_zero_enabled) {
       thinking_curve_choose_risk_set(
           &decisions[decision_count], num_plays, judge_risk_plays,
           regret_cross_arm_correlation, judge_risk_sets[decision_count]);
@@ -1598,6 +2046,25 @@ static void thinking_curve_run_position(
   }
   if (decision_count == 0) {
     log_fatal("thinking-curve position has no in-range target");
+  }
+  if (rule_zero_enabled) {
+    thinking_curve_finish_rule_zero_position(
+        config, context, candidate_moves, candidates, candidate_count, cgp,
+        source_index, position, game_index, bag_tiles, num_plays, plies,
+        max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
+        judge_risk_plays, regret_cross_arm_correlation, regret_calibration,
+        regret_check_interval, regret_min_samples_per_arm,
+        &decisions[decision_count - 1], minimums[decision_count - 1], seed,
+        &event_count, rule_zero_minimum_nodes,
+        rule_zero_minimum_stable_checkpoints, rule_zero_equal_slice_nodes,
+        rule_zero_checkpoint_interval, rule_zero_matched_modulus,
+        rule_zero_matched_remainder, rule_zero_audit_modulus,
+        rule_zero_audit_remainder, trajectory_policy, panel_best_index,
+        candidate_best_index, static_primary_gap);
+    for (int index = 0; index < decision_count; index++) {
+      thinking_curve_arm_result_destroy(&decisions[index]);
+    }
+    return;
   }
   ThinkingCurveCombinedStop combined_stop = {0};
   ThinkingCurveArmResult combined_result = {0};
@@ -2113,9 +2580,57 @@ static void thinking_curve_test_checkpoint_rank_normalization(void) {
   assert(checkpoint.challenger_index == 1);
 }
 
+static void thinking_curve_test_rule_zero_stop(void) {
+  AnalysisProgressEvent checkpoints[4];
+  for (int index = 0; index < 4; index++) {
+    checkpoints[index] = analysis_progress_event_create(
+        ANALYSIS_MODE_SIM, ANALYSIS_EVENT_CHECKPOINT);
+    checkpoints[index].best_index = index == 0 ? 2 : 4;
+    checkpoints[index].item_id = (uint64_t)(100 + index);
+    checkpoints[index].iterations = (uint64_t)(10000 + index * 1000);
+    checkpoints[index].nodes = (uint64_t)(90000 + index * 10000);
+    checkpoints[index].near_tie_challengers = index == 2 ? 1 : 0;
+  }
+  ThinkingCurveArmResult full = {
+      .decision = checkpoints[3],
+      .checkpoints = checkpoints,
+      .checkpoint_count = 4,
+  };
+  const ThinkingCurveRuleZeroStop stop =
+      thinking_curve_choose_rule_zero_stop(&full, 60, UINT64_C(100000), 2);
+  // Checkpoint 1 has only one stable observation after the incumbent switch;
+  // checkpoint 2 still has a near-tie challenger. The first legal stop is 3.
+  assert(stop.valid);
+  assert(!stop.capped);
+  assert(stop.checkpoint_index == 3);
+  assert(stop.decision.best_index == 4);
+  assert(stop.stable_checkpoints == 3);
+  assert(stop.selected_switches == 1);
+
+  for (int index = 0; index < 4; index++) {
+    checkpoints[index].near_tie_challengers = -1;
+  }
+  const ThinkingCurveRuleZeroStop fail_closed =
+      thinking_curve_choose_rule_zero_stop(&full, 60, UINT64_C(100000), 2);
+  assert(fail_closed.valid);
+  assert(fail_closed.capped);
+  assert(fail_closed.checkpoint_index == 4);
+  assert(fail_closed.decision.best_index == full.decision.best_index);
+
+  const AnalysisProgressEvent early =
+      thinking_curve_choose_horizon_landmark(&full, UINT64_C(105000));
+  assert(early.item_id == checkpoints[2].item_id);
+  const AnalysisProgressEvent capped =
+      thinking_curve_choose_horizon_landmark(&full, UINT64_C(3000000));
+  assert(capped.item_id == full.decision.item_id);
+  assert(thinking_curve_stop_is_in_initial_round_robin(14336, 714, 60));
+  assert(!thinking_curve_stop_is_in_initial_round_robin(42840, 714, 60));
+}
+
 void test_thinking_curve(void) {
   thinking_curve_test_generated_candidate_sort();
   thinking_curve_test_checkpoint_rank_normalization();
+  thinking_curve_test_rule_zero_stop();
   // Regression guard for all-similar candidate panels: TOP_TWO_IDS reports
   // THRESHOLD after the uniform floor even when GK16 thresholding is disabled.
   assert(thinking_curve_bai_can_finish_before_sample_limit(
@@ -2186,6 +2701,27 @@ void test_thinking_curve(void) {
   const uint64_t checkpoint_audit_interval =
       (uint64_t)thinking_curve_env_nonnegative_int(
           "THINKING_CURVE_CHECKPOINT_AUDIT_INTERVAL", 0);
+  const bool rule_zero_enabled =
+      thinking_curve_env_nonnegative_int("THINKING_CURVE_RULE_ZERO", 0) != 0;
+  const uint64_t rule_zero_minimum_nodes = thinking_curve_env_positive_uint64(
+      "THINKING_CURVE_RULE_ZERO_MINIMUM_NODES", UINT64_C(100000));
+  const int rule_zero_minimum_stable_checkpoints =
+      thinking_curve_env_positive_int(
+          "THINKING_CURVE_RULE_ZERO_MINIMUM_STABLE_CHECKPOINTS", 2);
+  const uint64_t rule_zero_equal_slice_nodes =
+      thinking_curve_env_positive_uint64(
+          "THINKING_CURVE_RULE_ZERO_EQUAL_SLICE_NODES", UINT64_C(3000000));
+  const uint64_t rule_zero_checkpoint_interval =
+      thinking_curve_env_positive_uint64(
+          "THINKING_CURVE_RULE_ZERO_CHECKPOINT_INTERVAL", 256);
+  const int rule_zero_matched_modulus = thinking_curve_env_positive_int(
+      "THINKING_CURVE_RULE_ZERO_MATCHED_MODULUS", 3);
+  const int rule_zero_matched_remainder = thinking_curve_env_nonnegative_int(
+      "THINKING_CURVE_RULE_ZERO_MATCHED_REMAINDER", 0);
+  const int rule_zero_audit_modulus = thinking_curve_env_positive_int(
+      "THINKING_CURVE_RULE_ZERO_AUDIT_MODULUS", 10);
+  const int rule_zero_audit_remainder = thinking_curve_env_nonnegative_int(
+      "THINKING_CURVE_RULE_ZERO_AUDIT_REMAINDER", 0);
   const bool combined_regret_enabled =
       strcmp(combined_regret_model_path, "0") != 0 ||
       combined_regret_stop_target > 0.0;
@@ -2265,6 +2801,23 @@ void test_thinking_curve(void) {
         "checkpoint audit requires one fixed-budget target, a common risk-set "
         "judge, and no stopping, controls, probes, or candidate controls");
   }
+  if (rule_zero_enabled &&
+      (combined_regret_enabled || checkpoint_audit_interval > 0 ||
+       target_count != 1 || regret_stop_target > 0.0 || fixed_control ||
+       matched_control || capture_regret_samples ||
+       candidate_control_count > 0 || judge_risk_plays < 2)) {
+    log_fatal(
+        "Rule-of-Zero replay requires one full target, a selective common "
+        "risk-set judge, and no other stopping, controls, probes, or "
+        "candidate controls");
+  }
+  if (rule_zero_enabled &&
+      (rule_zero_minimum_nodes > targets[0] ||
+       rule_zero_equal_slice_nodes > targets[0] ||
+       rule_zero_matched_remainder >= rule_zero_matched_modulus ||
+       rule_zero_audit_remainder >= rule_zero_audit_modulus)) {
+    log_fatal("Rule-of-Zero constants do not fit the frozen target/subsets");
+  }
   for (int control_index = 0; control_index < candidate_control_count;
        control_index++) {
     if (candidate_control_plays[control_index] >= num_plays) {
@@ -2317,6 +2870,12 @@ void test_thinking_curve(void) {
          " combined_regret_model=%s combined_regret_stop_target=%.12f"
          " combined_regret_check_interval=%" PRIu64
          " checkpoint_audit_interval=%" PRIu64
+         " rule_zero=%d rule_zero_minimum_nodes=%" PRIu64
+         " rule_zero_minimum_stable_checkpoints=%d"
+         " rule_zero_equal_slice_nodes=%" PRIu64
+         " rule_zero_checkpoint_interval=%" PRIu64
+         " rule_zero_matched_modulus=%d rule_zero_matched_remainder=%d"
+         " rule_zero_audit_modulus=%d rule_zero_audit_remainder=%d"
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
          corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
@@ -2328,7 +2887,11 @@ void test_thinking_curve(void) {
          regret_check_interval, regret_min_samples_per_arm, fixed_control,
          matched_control, candidate_control_string, combined_regret_model_path,
          combined_regret_stop_target, combined_regret_checkpoint_interval,
-         checkpoint_audit_interval, wall_seconds, target_string);
+         checkpoint_audit_interval, rule_zero_enabled, rule_zero_minimum_nodes,
+         rule_zero_minimum_stable_checkpoints, rule_zero_equal_slice_nodes,
+         rule_zero_checkpoint_interval, rule_zero_matched_modulus,
+         rule_zero_matched_remainder, rule_zero_audit_modulus,
+         rule_zero_audit_remainder, wall_seconds, target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -2356,7 +2919,8 @@ void test_thinking_curve(void) {
       const char *cgp_start = strstr(line, " cgp=");
       if (position_value == NULL || game_value == NULL || bag_value == NULL ||
           cgp_start == NULL ||
-          (combined_regret_enabled && trajectory_policy == NULL)) {
+          ((combined_regret_enabled || rule_zero_enabled) &&
+           trajectory_policy == NULL)) {
         log_fatal("malformed TIME_VALUE_POSITION row");
       }
       cgp_start += strlen(" cgp=");
@@ -2394,6 +2958,11 @@ void test_thinking_curve(void) {
               candidate_control_plays, candidate_control_count,
               combined_regret_model, combined_regret_stop_target,
               combined_regret_checkpoint_interval, checkpoint_audit_interval,
+              rule_zero_enabled, rule_zero_minimum_nodes,
+              rule_zero_minimum_stable_checkpoints, rule_zero_equal_slice_nodes,
+              rule_zero_checkpoint_interval, rule_zero_matched_modulus,
+              rule_zero_matched_remainder, rule_zero_audit_modulus,
+              rule_zero_audit_remainder,
               trajectory_policy == NULL ? "unknown" : trajectory_policy);
         } else {
           printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
@@ -2462,7 +3031,11 @@ void test_thinking_curve(void) {
             candidate_control_plays, candidate_control_count,
             combined_regret_model, combined_regret_stop_target,
             combined_regret_checkpoint_interval, checkpoint_audit_interval,
-            "unknown");
+            rule_zero_enabled, rule_zero_minimum_nodes,
+            rule_zero_minimum_stable_checkpoints, rule_zero_equal_slice_nodes,
+            rule_zero_checkpoint_interval, rule_zero_matched_modulus,
+            rule_zero_matched_remainder, rule_zero_audit_modulus,
+            rule_zero_audit_remainder, "unknown");
         evaluated++;
       }
       groups_seen++;
@@ -2540,7 +3113,11 @@ void test_thinking_curve(void) {
           fixed_control, matched_control, candidate_control_plays,
           candidate_control_count, combined_regret_model,
           combined_regret_stop_target, combined_regret_checkpoint_interval,
-          checkpoint_audit_interval, "unknown");
+          checkpoint_audit_interval, rule_zero_enabled, rule_zero_minimum_nodes,
+          rule_zero_minimum_stable_checkpoints, rule_zero_equal_slice_nodes,
+          rule_zero_checkpoint_interval, rule_zero_matched_modulus,
+          rule_zero_matched_remainder, rule_zero_audit_modulus,
+          rule_zero_audit_remainder, "unknown");
       evaluated++;
     }
     groups_seen++;

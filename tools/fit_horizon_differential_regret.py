@@ -802,6 +802,51 @@ def _serialize(model: MeanModel) -> list[dict[str, object]]:
     ]
 
 
+def deserialize_mean_model(rows: object) -> MeanModel:
+    """Load a frozen lookup table for prospective shadow scoring."""
+
+    if not isinstance(rows, list) or not rows:
+        raise ValueError("serialized mean model must be a nonempty list")
+    cells: dict[tuple[int, tuple[object, ...]], MeanCell] = {}
+    for item in rows:
+        if not isinstance(item, dict) or not isinstance(item.get("key"), list):
+            raise ValueError("serialized mean-model row is malformed")
+        level = int(item["level"])
+        key = tuple(item["key"])
+        mean = float(item["mean"])
+        observations = int(item["observations"])
+        cell_key = (level, key)
+        if (
+            level < 0
+            or not math.isfinite(mean)
+            or observations <= 0
+            or cell_key in cells
+        ):
+            raise ValueError("serialized mean-model cell is invalid")
+        cells[cell_key] = MeanCell(mean, observations)
+    if (0, ()) not in cells:
+        raise ValueError("serialized mean model lacks its global cell")
+    return MeanModel(cells)
+
+
+def load_horizon_model_artifact(path: Path) -> HorizonModel:
+    """Load only the deployable, label-free portions of a model artifact."""
+
+    document = json.loads(path.read_text(encoding="utf-8"))
+    if (
+        document.get("artifact_kind")
+        != "cross_fitted_same_arm_horizon_differential_model"
+        or document.get("schema_version") != 1
+    ):
+        raise ValueError("not a supported horizon-differential model artifact")
+    return HorizonModel(
+        mismatch=deserialize_mean_model(document.get("mismatch_model")),
+        signed_improvement=deserialize_mean_model(
+            document.get("signed_improvement_model")
+        ),
+    )
+
+
 def write_predictions(path: Path, predictions: list[HorizonPrediction]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as stream:

@@ -87,3 +87,42 @@ The next candidate must be specified before fresh outcomes—preferably a
 reviewed Rule-of-Zero controller or game-level conformal risk rule—and must
 still pass fresh stopped/matched/full controls and the separate mirrored
 terminal-game gate.
+
+## Rule-of-Zero prospective preregistration (2026-08-03)
+
+Status: **frozen before fresh trajectory generation; live allocation remains
+disabled**.
+
+The prospective candidate stops only when `nodes >= 100000`, the normalized
+incumbent has survived at least two consecutive 256-iteration checkpoints,
+and the existing two-sided 99% difference-CI near-tie counter is zero. Missing
+telemetry runs to the p6 3M-node slice. The constants were selected on the
+96-root development replay and that provenance is part of the frozen claim.
+The previously examined `0.000025` model threshold is shadow-only and cannot
+affect this panel.
+
+Collection is 320 fresh, one-root-per-complete-game units: 40 per static or
+PlayChooser-g3000ms policy crossed with each of four SIM bag bands. A
+SHA-ranked panel order fixes an independent exact-stopped-iteration control on
+indices `0 mod 3` and a common-judge audit on indices `0 mod 10`. Every choice
+mismatch is also judged; all other primary labels require no judge because the
+stopped choice is an incumbent from the same cumulative trace. The frozen
+shadow model is evaluated at every checkpoint without horizon or judge labels.
+Matched arms reproduce the cumulative scheduler's initial round-robin regime
+when a stop precedes the full arm's uniform floor, then use normal top-two IDS
+with the same absolute floor for later stops; every matched iteration count,
+sampling regime, and floor is logged.
+
+Historical 3-minute equal-slice turns all implied more than the experiment's
+3M-node arm cap (minimum 3,652,554 nodes), so the separately logged
+equal-slice landmark is capped at 3M and coincides with the full-arm endpoint
+in this panel. The rule must meet both named mismatch summaries, even though
+they have the same endpoint here.
+
+The exact gates are: one-sided 95% mismatch upper bound at most 1.5%;
+complete-game judged missed-value 95% CI upper at most 0.001; mean node saving
+at least 50%; and a matched stopped-minus-independent interval containing zero
+with upper endpoint at most 0.001. Any failure rejects Rule of Zero and sends
+the shadow scores to a separately frozen CRC replay. It does not authorize a
+threshold search on these outcomes. A pass remains only a surrogate pass; the
+mirrored terminal-game gate is still mandatory.
