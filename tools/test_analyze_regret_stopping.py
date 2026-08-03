@@ -8,6 +8,7 @@ import unittest
 
 from tools.analyze_regret_stopping import (
     clustered_values,
+    load_combined_predictions,
     load_points,
     matched_points,
     pair_points,
@@ -92,6 +93,25 @@ class AnalyzeRegretStoppingTest(unittest.TestCase):
         self.assertEqual(len(pairs), 1)
         self.assertEqual(pairs[0][0].iterations, pairs[0][1].iterations)
         self.assertEqual(pairs[0][1].control_kind, "matched")
+
+    def test_loads_additive_combined_prediction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "combined.log"
+            path.write_text(
+                "THINKING_CURVE_COMBINED_STOP source_index=3 position=3 "
+                "game=7 bag=40 plies=6 arm_plays=60 checkpoints=80 "
+                "stopped_iterations=12000 stopped_nodes=84000 selected_rank=2 "
+                "raw_estimated_regret=.001 raw_joint_estimated_regret=.002 "
+                "near_tie_challengers=3 predicted_candidate_regret=.0004 "
+                "predicted_within_regret=.0007 predicted_total_regret=.0011 "
+                "regret_stop_target=.002 capped=0\n",
+                encoding="utf-8",
+            )
+            predictions = load_combined_predictions(path)
+
+        prediction = predictions[(3, 6)]
+        self.assertAlmostEqual(prediction.predicted_total_regret, 0.0011)
+        self.assertFalse(prediction.capped)
 
 
 if __name__ == "__main__":

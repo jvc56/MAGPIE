@@ -117,29 +117,30 @@ bool analysis_trace_write_tsv(AnalysisTrace *trace, FILE *stream) {
   cpthread_mutex_unlock(&trace->mutex);
 
   bool ok =
-      fprintf(stream,
-              "schema_version\tsequence\trun_id\tparent_run_id\tmode\tevent\t"
-              "status\t"
-              "elapsed_ns\tcpu_ns\tbudget_seconds\tworkers\twork_units\tnodes\t"
-              "iterations\tscenarios\titem_work_units\titem_nodes\t"
-              "expected_next_work_units\tcompletion_bound_work_units\t"
-              "expected_next_nodes\tcompletion_bound_nodes\t"
-              "expected_next_scenarios\tcompletion_bound_scenarios\t"
-              "expected_next_candidates\tcompletion_bound_candidates\t"
-              "expected_next_seconds\tcompletion_bound_seconds\t"
-              "completion_confidence\tadmission\t"
-              "admission_safe_to_enforce\tadmission_enforced\t"
-              "has_time_manager_plan\texpected_regret_reduction\t"
-              "current_value_per_second\tfuture_value_per_second\t"
-              "maximum_current_seconds\tdeposit_seconds\tphase\t"
-              "depth\tcandidate_index\t"
-              "candidates_completed\tcandidates_total\t"
-              "subcandidates_completed\tsubcandidates_total\tbest_index\t"
-              "challenger_index\titem_id\tvalue\tbest_value\t"
-              "challenger_value\tsecondary_value\tplayer_on_turn\tbag_tiles\t"
-              "player_rack_tiles\topponent_rack_tiles\t"
-              "consecutive_scoreless_turns\t"
-              "score_spread\tclock_seconds_remaining\n") >= 0;
+      fprintf(
+          stream,
+          "schema_version\tsequence\trun_id\tparent_run_id\tmode\tevent\t"
+          "status\t"
+          "elapsed_ns\tcpu_ns\tbudget_seconds\tworkers\twork_units\tnodes\t"
+          "iterations\tscenarios\titem_work_units\titem_nodes\t"
+          "expected_next_work_units\tcompletion_bound_work_units\t"
+          "expected_next_nodes\tcompletion_bound_nodes\t"
+          "expected_next_scenarios\tcompletion_bound_scenarios\t"
+          "expected_next_candidates\tcompletion_bound_candidates\t"
+          "expected_next_seconds\tcompletion_bound_seconds\t"
+          "completion_confidence\tadmission\t"
+          "admission_safe_to_enforce\tadmission_enforced\t"
+          "has_time_manager_plan\texpected_regret_reduction\t"
+          "current_value_per_second\tfuture_value_per_second\t"
+          "maximum_current_seconds\tdeposit_seconds\tphase\t"
+          "depth\tcandidate_index\t"
+          "candidates_completed\tcandidates_total\t"
+          "subcandidates_completed\tsubcandidates_total\tbest_index\t"
+          "challenger_index\tnear_tie_challengers\titem_id\tvalue\tbest_value\t"
+          "challenger_value\tsecondary_value\tplayer_on_turn\tbag_tiles\t"
+          "player_rack_tiles\topponent_rack_tiles\t"
+          "consecutive_scoreless_turns\t"
+          "score_spread\tclock_seconds_remaining\n") >= 0;
   for (size_t i = 0; ok && i < count; i++) {
     const AnalysisProgressEvent *event = &events[i];
     ok = fprintf(stream,
@@ -168,19 +169,19 @@ bool analysis_trace_write_tsv(AnalysisTrace *trace, FILE *stream) {
              analysis_admission_name(event->admission),
              event->admission_safe_to_enforce ? 1 : 0,
              event->admission_enforced ? 1 : 0) >= 0;
-    ok =
-        ok &&
-        fprintf(stream,
-                "\t%d\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g"
-                "\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
-                event->has_time_manager_plan ? 1 : 0,
-                event->expected_regret_reduction,
-                event->current_value_per_second, event->future_value_per_second,
-                event->maximum_current_seconds, event->deposit_seconds,
-                event->phase, event->depth, event->candidate_index,
-                event->candidates_completed, event->candidates_total,
-                event->subcandidates_completed, event->subcandidates_total,
-                event->best_index, event->challenger_index) >= 0;
+    ok = ok &&
+         fprintf(stream,
+                 "\t%d\t%.17g\t%.17g\t%.17g\t%.17g\t%.17g"
+                 "\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d\t%d",
+                 event->has_time_manager_plan ? 1 : 0,
+                 event->expected_regret_reduction,
+                 event->current_value_per_second,
+                 event->future_value_per_second, event->maximum_current_seconds,
+                 event->deposit_seconds, event->phase, event->depth,
+                 event->candidate_index, event->candidates_completed,
+                 event->candidates_total, event->subcandidates_completed,
+                 event->subcandidates_total, event->best_index,
+                 event->challenger_index, event->near_tie_challengers) >= 0;
     ok = ok && fprintf(stream,
                        "\t%" PRIu64 "\t%.17g\t%.17g\t%.17g\t%.17g"
                        "\t%d\t%d\t%d\t%d\t%d\t%d\t%.17g\n",

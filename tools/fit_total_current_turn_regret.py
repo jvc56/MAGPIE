@@ -416,6 +416,60 @@ def _serialize_model(model: ComponentModel) -> list[dict[str, object]]:
     ]
 
 
+def write_runtime_model(
+    path: Path, candidate_model: ComponentModel, within_model: ComponentModel
+) -> None:
+    """Write the deliberately small, audit-friendly C harness format.
+
+    Missing coordinates are ``*`` and therefore act as hierarchical
+    backoffs.  The runtime reader always chooses the highest matching level,
+    reproducing :func:`predict_component` without needing a JSON parser in the
+    solver benchmark.
+    """
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8", newline="") as stream:
+        stream.write("SIM_TOTAL_REGRET_MODEL\t1\n")
+        for (level, key), cell in sorted(
+            candidate_model.cells.items(),
+            key=lambda item: (item[0][0], repr(item[0][1])),
+        ):
+            coordinates = ["*", "*", "*", "*"]
+            for index, value in enumerate(key):
+                coordinates[index] = str(value)
+            stream.write(
+                "\t".join(
+                    [
+                        "C",
+                        str(level),
+                        *coordinates,
+                        f"{cell.mean:.17g}",
+                        str(cell.observations),
+                    ]
+                )
+                + "\n"
+            )
+        for (level, key), cell in sorted(
+            within_model.cells.items(),
+            key=lambda item: (item[0][0], repr(item[0][1])),
+        ):
+            coordinates = ["*", "*", "*", "*", "*"]
+            for index, value in enumerate(key):
+                coordinates[index] = str(value)
+            stream.write(
+                "\t".join(
+                    [
+                        "W",
+                        str(level),
+                        *coordinates,
+                        f"{cell.mean:.17g}",
+                        str(cell.observations),
+                    ]
+                )
+                + "\n"
+            )
+
+
 def fit_artifact(
     rows: list[Row], predictions: list[Prediction], prior_strength: float
 ) -> dict[str, object]:
@@ -492,6 +546,11 @@ def main() -> None:
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--predictions", required=True, type=Path)
+    parser.add_argument(
+        "--runtime-model",
+        type=Path,
+        help="optional compact lookup table for cumulative replay",
+    )
     parser.add_argument("--folds", type=int, default=5)
     parser.add_argument("--seed", type=int, default=82604)
     parser.add_argument("--prior-strength", type=float, default=8.0)
@@ -499,6 +558,20 @@ def main() -> None:
     rows = read_rows(args.log, args.manifest)
     predictions = cross_fit(rows, args.folds, args.seed, args.prior_strength)
     artifact = fit_artifact(rows, predictions, args.prior_strength)
+    if args.runtime_model is not None:
+        candidate_model = fit_component_model(
+            rows,
+            CANDIDATE_LEVELS,
+            lambda row: row.candidate_generation_regret,
+            args.prior_strength,
+        )
+        within_model = fit_component_model(
+            rows,
+            WITHIN_LEVELS,
+            lambda row: row.within_set_bai_regret,
+            args.prior_strength,
+        )
+        write_runtime_model(args.runtime_model, candidate_model, within_model)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(
         json.dumps(artifact, indent=2, sort_keys=True) + "\n", encoding="utf-8"

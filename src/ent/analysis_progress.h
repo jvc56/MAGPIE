@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ANALYSIS_PROGRESS_SCHEMA_VERSION 5U
+#define ANALYSIS_PROGRESS_SCHEMA_VERSION 6U
 #define ANALYSIS_PROGRESS_ELAPSED_NOW INT64_C(-1)
 #define ANALYSIS_PROGRESS_CPU_NOW INT64_C(-1)
 #define ANALYSIS_PROGRESS_SCORE_SPREAD_UNSET INT32_MIN
@@ -129,6 +129,10 @@ typedef struct AnalysisProgressEvent {
   int subcandidates_total;
   int best_index;
   int challenger_index;
+  // Number of non-incumbent arms whose calibrated difference interval still
+  // reaches the incumbent. SIM populates this at checkpoints and FINISH;
+  // other solvers leave it at -1.
+  int near_tie_challengers;
 
   // Copy-safe identity for the event's move/arm. SIM uses the arm index,
   // endgame uses tiny_move, and PEG/PlayChooser use a stable Move fingerprint.

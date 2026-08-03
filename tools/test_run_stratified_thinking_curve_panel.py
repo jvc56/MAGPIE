@@ -271,6 +271,88 @@ class RunStratifiedThinkingCurvePanelTest(unittest.TestCase):
                     matched_control=False,
                 )
 
+    @staticmethod
+    def _combined_chunk(predicted_total: float = 0.0009) -> str:
+        return "".join(
+            [
+                "THINKING_CURVE_COMBINED_STOP source_index=0 position=0 "
+                "game=9 bag=40 plies=6 arm_plays=3 checkpoints=5 "
+                "stopped_iterations=30 stopped_nodes=210 selected_rank=1 "
+                "raw_estimated_regret=.0004 raw_joint_estimated_regret=.0005 "
+                "near_tie_challengers=2 predicted_candidate_regret=.0003 "
+                "predicted_within_regret=.0006 "
+                f"predicted_total_regret={predicted_total} "
+                "regret_stop_target=.001 capped=0\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=210 final=0 "
+                "control=0 control_kind=stopped iterations=30 nodes=210 "
+                "min_play_iterations=1 selected_rank=1 bai_status=4 "
+                "regret_at_stop=.0004 joint_regret_at_stop=.0005\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=210 final=0 "
+                "control=1 control_kind=matched iterations=30 nodes=205 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=1 control_kind=full iterations=42 nodes=294 "
+                "min_play_iterations=1 selected_rank=2 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=9 dropped=0 final_iterations=30 "
+                "final_nodes=210 judge_candidates=3 judge_iterations=3000 "
+                "judge_forced=0 control=1 control_iterations=42 "
+                "control_nodes=294 matched_control=1 matched_target_nodes=210 "
+                "matched_iterations=30 matched_nodes=205 combined_regret=1 "
+                "combined_capped=0 combined_checkpoints=5 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+
+    def test_validates_combined_regret_cumulative_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._combined_chunk(), encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=True,
+                combined_regret_stop_target=0.001,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_nonadditive_combined_regret_prediction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._combined_chunk(0.0008), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "prediction is invalid"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=3,
+                    judge_samples=1000,
+                    regret_stop_target=0.0,
+                    regret_stop_use_joint=False,
+                    regret_trace=False,
+                    regret_risk_plays=3,
+                    regret_paired_samples=4,
+                    fixed_control=False,
+                    matched_control=True,
+                    combined_regret_stop_target=0.001,
+                )
+
 
 if __name__ == "__main__":
     unittest.main()

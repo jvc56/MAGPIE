@@ -152,6 +152,7 @@ def validate_chunk_accounting(
     fixed_control: bool,
     matched_control: bool,
     candidate_control_plays: int | tuple[int, ...] | list[int] = 0,
+    combined_regret_stop_target: float = 0.0,
 ) -> list[int]:
     """Validate every accepted root before its private log is appended."""
 
@@ -165,6 +166,7 @@ def validate_chunk_accounting(
     judge_candidate_rows: dict[int, list[dict[str, str]]] = defaultdict(list)
     arms: dict[tuple[int, int], int] = defaultdict(int)
     samples: dict[tuple[int, int], int] = defaultdict(int)
+    combined_stops: dict[int, list[dict[str, str]]] = defaultdict(list)
     forced: set[int] = set()
     for line in text.splitlines():
         if line.startswith("THINKING_CURVE_POINT "):
@@ -199,6 +201,10 @@ def validate_chunk_accounting(
             row = fields(line)
             if int(row["plies"]) == plies:
                 samples[(int(row["source_index"]), int(row["target_nodes"]))] += 1
+        elif line.startswith("THINKING_CURVE_COMBINED_STOP "):
+            row = fields(line)
+            if int(row["plies"]) == plies:
+                combined_stops[int(row["source_index"])].append(row)
 
     if set(done) & forced:
         raise ValueError("chunk marks a root both forced and completed")
@@ -209,6 +215,7 @@ def validate_chunk_accounting(
     if not included_targets:
         raise ValueError("protocol has no in-range targets")
     for source_index, done_row in done.items():
+        combined_regret = combined_regret_stop_target > 0.0
         if int(done_row.get("dropped", "-1")) != 0:
             raise ValueError(f"source {source_index} dropped progress events")
         root_points = points.get(source_index, [])
@@ -227,7 +234,7 @@ def validate_chunk_accounting(
             control for control in candidate_controls if primary_arm_plays > control
         )
         expected_control_kinds = {"stopped"}
-        if fixed_control:
+        if fixed_control or combined_regret:
             expected_control_kinds.add("full")
         if matched_control:
             expected_control_kinds.add("matched")
@@ -242,13 +249,20 @@ def validate_chunk_accounting(
                 f"source {source_index} control kinds {sorted(by_kind)} "
                 f"!= {sorted(expected_control_kinds)}"
             )
-        if tuple(int(row["target_nodes"]) for row in stopped) != included_targets:
+        if combined_regret:
+            if len(stopped) != 1:
+                raise ValueError(f"source {source_index} lacks one combined stop")
+        elif tuple(int(row["target_nodes"]) for row in stopped) != included_targets:
             raise ValueError(f"source {source_index} has wrong stopped targets")
-        expected_events = 2 * (
-            len(included_targets)
-            + int(fixed_control)
-            + int(matched_control)
-            + len(active_candidate_controls)
+        combined_checkpoints = int(done_row.get("combined_checkpoints", "0"))
+        expected_events = (
+            2 * (
+                len(included_targets)
+                + int(fixed_control)
+                + int(matched_control)
+                + len(active_candidate_controls)
+            )
+            + (combined_checkpoints if combined_regret else 0)
         )
         if int(done_row["events"]) != expected_events:
             raise ValueError(f"source {source_index} has wrong event count")
@@ -264,14 +278,18 @@ def validate_chunk_accounting(
             if status == 3 and iterations != maximum_iterations:
                 raise ValueError(f"source {source_index} missed fixed iteration cap")
             if status == 4:
-                estimate_key = (
-                    "joint_regret_at_stop"
-                    if regret_stop_use_joint
-                    else "regret_at_stop"
-                )
-                estimate = float(row[estimate_key])
-                if not math.isfinite(estimate) or estimate > regret_stop_target + 1e-12:
-                    raise ValueError(f"source {source_index} stopped above target")
+                if not combined_regret:
+                    estimate_key = (
+                        "joint_regret_at_stop"
+                        if regret_stop_use_joint
+                        else "regret_at_stop"
+                    )
+                    estimate = float(row[estimate_key])
+                    if (
+                        not math.isfinite(estimate)
+                        or estimate > regret_stop_target + 1e-12
+                    ):
+                        raise ValueError(f"source {source_index} stopped above target")
             if status not in {1, 3, 4}:
                 raise ValueError(f"source {source_index} has invalid BAI status")
             minimum = int(row["min_play_iterations"])
@@ -303,7 +321,7 @@ def validate_chunk_accounting(
             ):
                 if int(done_row.get(key, "-1")) != expected:
                     raise ValueError(f"source {source_index} mismatches {key}")
-        if fixed_control:
+        if fixed_control or combined_regret:
             if len(by_kind["full"]) != 1:
                 raise ValueError(f"source {source_index} lacks one full control")
             full = by_kind["full"][0]
@@ -321,6 +339,96 @@ def validate_chunk_accounting(
                 raise ValueError(f"source {source_index} full iterations do not join")
             if int(done_row.get("control_nodes", "-1")) != int(full["nodes"]):
                 raise ValueError(f"source {source_index} full nodes do not join")
+
+        root_combined = combined_stops.get(source_index, [])
+        if combined_regret:
+            if len(root_combined) != 1:
+                raise ValueError(
+                    f"source {source_index} lacks one combined-regret row"
+                )
+            combined = root_combined[0]
+            stopped_row = stopped[0]
+            if int(done_row.get("combined_regret", "0")) != 1:
+                raise ValueError(
+                    f"source {source_index} done row lacks combined flag"
+                )
+            if combined_checkpoints <= 0 or int(
+                combined.get("checkpoints", "0")
+            ) != combined_checkpoints:
+                raise ValueError(
+                    f"source {source_index} combined checkpoints differ"
+                )
+            for key, expected in (
+                ("source_index", source_index),
+                ("plies", plies),
+                ("arm_plays", primary_arm_plays),
+                ("stopped_iterations", int(stopped_row["iterations"])),
+                ("stopped_nodes", int(stopped_row["nodes"])),
+                ("selected_rank", int(stopped_row["selected_rank"])),
+            ):
+                if int(combined.get(key, "-1")) != expected:
+                    raise ValueError(
+                        f"source {source_index} combined {key} does not join"
+                    )
+            candidate_prediction = float(combined["predicted_candidate_regret"])
+            within_prediction = float(combined["predicted_within_regret"])
+            total_prediction = float(combined["predicted_total_regret"])
+            if (
+                not math.isfinite(candidate_prediction)
+                or candidate_prediction < 0.0
+                or not math.isfinite(within_prediction)
+                or within_prediction < 0.0
+                or not math.isfinite(total_prediction)
+                or total_prediction < 0.0
+                or abs(
+                    total_prediction - candidate_prediction - within_prediction
+                )
+                > 2.0e-12
+            ):
+                raise ValueError(
+                    f"source {source_index} combined prediction is invalid"
+                )
+            capped = int(combined["capped"])
+            if capped not in {0, 1} or int(
+                done_row.get("combined_capped", "-1")
+            ) != capped:
+                raise ValueError(
+                    f"source {source_index} combined cap flag differs"
+                )
+            if not capped and total_prediction > combined_regret_stop_target + 1e-12:
+                raise ValueError(
+                    f"source {source_index} combined stop is above target"
+                )
+            if abs(
+                float(combined["regret_stop_target"])
+                - combined_regret_stop_target
+            ) > 1e-12:
+                raise ValueError(
+                    f"source {source_index} combined target differs"
+                )
+            if int(stopped_row["target_nodes"]) != int(stopped_row["nodes"]):
+                raise ValueError(
+                    f"source {source_index} combined stopped target does not join"
+                )
+            if int(stopped_row["iterations"]) < int(
+                stopped_row["min_play_iterations"]
+            ) * int(stopped_row["arm_plays"]):
+                raise ValueError(
+                    f"source {source_index} combined stop precedes uniform floor"
+                )
+            if capped:
+                full = by_kind["full"][0]
+                if (
+                    int(stopped_row["iterations"]) != int(full["iterations"])
+                    or int(stopped_row["nodes"]) != int(full["nodes"])
+                ):
+                    raise ValueError(
+                        f"source {source_index} capped stop differs from full arm"
+                    )
+        elif root_combined or int(done_row.get("combined_regret", "0")) != 0:
+            raise ValueError(
+                f"source {source_index} has unexpected combined-regret output"
+            )
         if has_candidate_control:
             controls = by_kind["candidate_limit"]
             if len(controls) != len(active_candidate_controls):
@@ -470,6 +578,17 @@ def main() -> None:
     parser.add_argument("--fixed-control", action="store_true")
     parser.add_argument("--matched-control", action="store_true")
     parser.add_argument("--candidate-control-plays", default="0")
+    parser.add_argument(
+        "--combined-regret-model",
+        type=Path,
+        help="frozen total-current-turn regret lookup table",
+    )
+    parser.add_argument(
+        "--combined-regret-stop-target", type=float, default=0.0
+    )
+    parser.add_argument(
+        "--combined-regret-check-interval", type=int, default=256
+    )
     parser.add_argument("--chunk-positions", type=int, default=8)
     parser.add_argument("--wall-seconds", type=float, default=0.0)
     args = parser.parse_args()
@@ -477,10 +596,19 @@ def main() -> None:
     args.corpus = args.corpus.resolve()
     args.binary = args.binary.resolve()
     args.run_dir = args.run_dir.resolve()
+    if args.combined_regret_model is not None:
+        args.combined_regret_model = args.combined_regret_model.resolve()
     # MAGPIE's default data paths are repository-relative. launchd does not
     # guarantee a useful working directory, so make this invariant explicit.
     os.chdir(Path(__file__).resolve().parent.parent)
-    if not args.corpus.is_file() or not args.binary.is_file():
+    if (
+        not args.corpus.is_file()
+        or not args.binary.is_file()
+        or (
+            args.combined_regret_model is not None
+            and not args.combined_regret_model.is_file()
+        )
+    ):
         parser.error("corpus and binary must exist")
     plies_values = parse_csv_ints(args.plies)
     targets = parse_csv_ints(args.targets)
@@ -511,16 +639,39 @@ def main() -> None:
         or args.regret_min_samples_per_arm <= 0
         or not 2 <= args.regret_risk_plays <= args.num_plays
         or args.regret_paired_samples <= 0
+        or not math.isfinite(args.combined_regret_stop_target)
+        or args.combined_regret_stop_target < 0.0
+        or args.combined_regret_check_interval <= 0
         or not math.isfinite(args.wall_seconds)
         or args.wall_seconds < 0.0
     ):
         parser.error("invalid curve protocol")
-    if (args.fixed_control or args.matched_control) and args.regret_stop_target <= 0.0:
+    combined_regret = args.combined_regret_model is not None
+    if combined_regret != (args.combined_regret_stop_target > 0.0):
+        parser.error("combined-regret model and positive target are both required")
+    if (
+        (args.fixed_control or args.matched_control)
+        and args.regret_stop_target <= 0.0
+        and not combined_regret
+    ):
         parser.error("controls require a positive regret stop target")
     if (args.fixed_control or args.matched_control) and len(targets) != 1:
         parser.error("optional-stopping controls require exactly one target")
     if candidate_controls and len(targets) != 1:
         parser.error("candidate-limit control requires exactly one target")
+    if combined_regret and (
+        len(targets) != 1
+        or not args.matched_control
+        or args.fixed_control
+        or args.regret_stop_target > 0.0
+        or args.regret_stop_use_joint
+        or args.regret_trace
+        or candidate_controls
+    ):
+        parser.error(
+            "combined-regret replay requires one full target, matched control, "
+            "and no legacy stop, fixed control, regret trace, or candidate control"
+        )
     for plies in plies_values:
         if args.min_play_iterations * args.num_plays > targets[0] // (plies + 1):
             parser.error("minimum play iterations do not fit the smallest target")
@@ -568,6 +719,20 @@ def main() -> None:
         ),
         "chunk_positions": args.chunk_positions,
     }
+    # Preserve the protocol document of every pre-combined run byte-for-byte;
+    # this runner is used to resume long frozen panels started by older commits.
+    if combined_regret:
+        assert args.combined_regret_model is not None
+        protocol.update(
+            {
+                "combined_regret_model": str(args.combined_regret_model),
+                "combined_regret_model_sha256": sha256(
+                    args.combined_regret_model
+                ),
+                "combined_regret_stop_target": args.combined_regret_stop_target,
+                "combined_regret_check_interval": args.combined_regret_check_interval,
+            }
+        )
     if state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
         if state.get("protocol") != protocol:
@@ -664,6 +829,17 @@ def main() -> None:
                     "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS": ",".join(
                         str(control) for control in candidate_controls
                     ) or "0",
+                    "THINKING_CURVE_COMBINED_REGRET_MODEL": (
+                        "0"
+                        if args.combined_regret_model is None
+                        else str(args.combined_regret_model)
+                    ),
+                    "THINKING_CURVE_COMBINED_REGRET_STOP_TARGET": str(
+                        args.combined_regret_stop_target
+                    ),
+                    "THINKING_CURVE_COMBINED_REGRET_CHECK_INTERVAL": str(
+                        args.combined_regret_check_interval
+                    ),
                     "THINKING_CURVE_WALL_SECONDS": (
                         "0" if math.isinf(deadline) else f"{remaining_wall:.6f}"
                     ),
@@ -706,6 +882,7 @@ def main() -> None:
                 fixed_control=args.fixed_control,
                 matched_control=args.matched_control,
                 candidate_control_plays=candidate_controls,
+                combined_regret_stop_target=args.combined_regret_stop_target,
             )
             expected = eligible[first_missing : first_missing + len(accepted)]
             if accepted != expected or len(accepted) > requested:

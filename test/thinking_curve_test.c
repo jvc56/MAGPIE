@@ -51,6 +51,7 @@ enum {
   THINKING_CURVE_MAX_CANDIDATE_CONTROLS = 8,
   THINKING_CURVE_MAX_TARGETS = 32,
   THINKING_CURVE_RAW_MOVE_CAPACITY = 160,
+  THINKING_CURVE_REGRET_MODEL_STRING_CAPACITY = 48,
 };
 
 static const uint64_t THINKING_CURVE_BASE_SEED = UINT64_C(0x4b4c56334f524143);
@@ -121,7 +122,46 @@ typedef struct ThinkingCurveArmResult {
   uint64_t probe_iterations;
   uint64_t probe_nodes;
   double probe_seconds;
+  AnalysisProgressEvent *checkpoints;
+  size_t checkpoint_count;
 } ThinkingCurveArmResult;
+
+typedef struct ThinkingCurveCandidateRegretCell {
+  int level;
+  int width;
+  int static_gap_band;
+  char bag_band[THINKING_CURVE_REGRET_MODEL_STRING_CAPACITY];
+  char policy[THINKING_CURVE_REGRET_MODEL_STRING_CAPACITY];
+  double mean;
+  int observations;
+} ThinkingCurveCandidateRegretCell;
+
+typedef struct ThinkingCurveWithinRegretCell {
+  int level;
+  int width;
+  int estimated_regret_band;
+  int near_tie_band;
+  int bai_gap_band;
+  char bag_band[THINKING_CURVE_REGRET_MODEL_STRING_CAPACITY];
+  double mean;
+  int observations;
+} ThinkingCurveWithinRegretCell;
+
+typedef struct ThinkingCurveRegretModel {
+  ThinkingCurveCandidateRegretCell *candidate_cells;
+  size_t candidate_count;
+  ThinkingCurveWithinRegretCell *within_cells;
+  size_t within_count;
+} ThinkingCurveRegretModel;
+
+typedef struct ThinkingCurveCombinedStop {
+  AnalysisProgressEvent decision;
+  double predicted_candidate_regret;
+  double predicted_within_regret;
+  double predicted_total_regret;
+  bool capped;
+  bool valid;
+} ThinkingCurveCombinedStop;
 
 static ThinkingCurveSampleTrace *
 thinking_curve_sample_trace_create(uint64_t capacity) {
@@ -218,6 +258,263 @@ static const char *thinking_curve_env_string(const char *name,
                                              const char *default_value) {
   const char *value = getenv(name);
   return value == NULL || value[0] == '\0' ? default_value : value;
+}
+
+static int thinking_curve_regret_band(double value, const double bounds[],
+                                      int bound_count) {
+  for (int index = 0; index < bound_count; index++) {
+    if (value <= bounds[index]) {
+      return index;
+    }
+  }
+  return bound_count - 1;
+}
+
+static int thinking_curve_static_gap_band(double value) {
+  static const double bounds[] = {1.0, 2.0, 4.0, 8.0, 16.0, 32.0, 64.0, 1.0e9};
+  return thinking_curve_regret_band(value, bounds,
+                                    (int)(sizeof(bounds) / sizeof(bounds[0])));
+}
+
+static int thinking_curve_estimated_regret_band(double value) {
+  static const double bounds[] = {0.0,    1.0e-6, 1.0e-5, 1.0e-4,
+                                  2.5e-4, 5.0e-4, 1.0e-3, 2.0e-3,
+                                  5.0e-3, 1.0e-2, 1.0};
+  return thinking_curve_regret_band(value, bounds,
+                                    (int)(sizeof(bounds) / sizeof(bounds[0])));
+}
+
+static int thinking_curve_bai_gap_band(double value) {
+  static const double bounds[] = {0.0,    1.0e-3, 2.5e-3, 5.0e-3,
+                                  1.0e-2, 2.0e-2, 4.0e-2, 1.0};
+  return thinking_curve_regret_band(value, bounds,
+                                    (int)(sizeof(bounds) / sizeof(bounds[0])));
+}
+
+static const char *thinking_curve_bag_band(int bag_tiles) {
+  if (bag_tiles <= 15) {
+    return "late_5_15";
+  }
+  if (bag_tiles <= 35) {
+    return "middle_late_16_35";
+  }
+  if (bag_tiles <= 60) {
+    return "middle_early_36_60";
+  }
+  return "early_61_100";
+}
+
+static int thinking_curve_parse_model_int(const char *value) {
+  if (strcmp(value, "*") == 0) {
+    return -1;
+  }
+  char *end = NULL;
+  const long parsed = strtol(value, &end, 10);
+  if (end == value || *end != '\0' || parsed < 0 || parsed > INT32_MAX) {
+    log_fatal("invalid integer in SIM total-regret runtime model");
+  }
+  return (int)parsed;
+}
+
+static ThinkingCurveRegretModel *
+thinking_curve_regret_model_load(const char *filename) {
+  FILE *stream = fopen(filename, "re");
+  if (stream == NULL) {
+    log_fatal("could not open SIM total-regret runtime model: %s", filename);
+  }
+  ThinkingCurveRegretModel *model =
+      calloc_or_die(1, sizeof(ThinkingCurveRegretModel));
+  char *line = NULL;
+  size_t capacity = 0;
+  if (getline_ignore_carriage_return(&line, &capacity, stream) == -1 ||
+      strcmp(line, "SIM_TOTAL_REGRET_MODEL\t1\n") != 0) {
+    log_fatal("invalid SIM total-regret runtime model header");
+  }
+  while (getline_ignore_carriage_return(&line, &capacity, stream) != -1) {
+    line[strcspn(line, "\r\n")] = '\0';
+    char *tokens[9];
+    int token_count = 0;
+    char *saveptr = NULL;
+    for (char *token = strtok_r(line, "\t", &saveptr); token != NULL;
+         token = strtok_r(NULL, "\t", &saveptr)) {
+      if (token_count >= (int)(sizeof(tokens) / sizeof(tokens[0]))) {
+        log_fatal("SIM total-regret runtime model row is too wide");
+      }
+      tokens[token_count++] = token;
+    }
+    if (token_count == 8 && strcmp(tokens[0], "C") == 0) {
+      model->candidate_cells = realloc_or_die(
+          model->candidate_cells,
+          (model->candidate_count + 1) * sizeof(*model->candidate_cells));
+      ThinkingCurveCandidateRegretCell *cell =
+          &model->candidate_cells[model->candidate_count++];
+      *cell = (ThinkingCurveCandidateRegretCell){
+          .level = thinking_curve_parse_model_int(tokens[1]),
+          .width = thinking_curve_parse_model_int(tokens[2]),
+          .static_gap_band = thinking_curve_parse_model_int(tokens[3]),
+          .mean = strtod(tokens[6], NULL),
+          .observations = thinking_curve_parse_model_int(tokens[7]),
+      };
+      (void)snprintf(cell->bag_band, sizeof(cell->bag_band), "%s", tokens[4]);
+      (void)snprintf(cell->policy, sizeof(cell->policy), "%s", tokens[5]);
+      if (!isfinite(cell->mean) || cell->mean < 0.0) {
+        log_fatal("invalid candidate mean in SIM total-regret model");
+      }
+    } else if (token_count == 9 && strcmp(tokens[0], "W") == 0) {
+      model->within_cells =
+          realloc_or_die(model->within_cells, (model->within_count + 1) *
+                                                  sizeof(*model->within_cells));
+      ThinkingCurveWithinRegretCell *cell =
+          &model->within_cells[model->within_count++];
+      *cell = (ThinkingCurveWithinRegretCell){
+          .level = thinking_curve_parse_model_int(tokens[1]),
+          .width = thinking_curve_parse_model_int(tokens[2]),
+          .estimated_regret_band = thinking_curve_parse_model_int(tokens[3]),
+          .near_tie_band = thinking_curve_parse_model_int(tokens[4]),
+          .bai_gap_band = thinking_curve_parse_model_int(tokens[5]),
+          .mean = strtod(tokens[7], NULL),
+          .observations = thinking_curve_parse_model_int(tokens[8]),
+      };
+      (void)snprintf(cell->bag_band, sizeof(cell->bag_band), "%s", tokens[6]);
+      if (!isfinite(cell->mean) || cell->mean < 0.0) {
+        log_fatal("invalid within-set mean in SIM total-regret model");
+      }
+    } else {
+      log_fatal("invalid SIM total-regret runtime model row");
+    }
+  }
+  free(line);
+  fclose_or_die(stream);
+  if (model->candidate_count == 0 || model->within_count == 0) {
+    log_fatal("SIM total-regret runtime model is incomplete");
+  }
+  return model;
+}
+
+static void
+thinking_curve_regret_model_destroy(ThinkingCurveRegretModel *model) {
+  if (model == NULL) {
+    return;
+  }
+  free(model->candidate_cells);
+  free(model->within_cells);
+  free(model);
+}
+
+static bool thinking_curve_model_string_matches(const char *cell,
+                                                const char *value) {
+  return strcmp(cell, "*") == 0 || strcmp(cell, value) == 0;
+}
+
+static double
+thinking_curve_predict_candidate_regret(const ThinkingCurveRegretModel *model,
+                                        int width, double static_gap,
+                                        int bag_tiles, const char *policy) {
+  const int gap_band = thinking_curve_static_gap_band(static_gap);
+  const char *bag_band = thinking_curve_bag_band(bag_tiles);
+  const ThinkingCurveCandidateRegretCell *best = NULL;
+  for (size_t index = 0; index < model->candidate_count; index++) {
+    const ThinkingCurveCandidateRegretCell *cell =
+        &model->candidate_cells[index];
+    if ((cell->width < 0 || cell->width == width) &&
+        (cell->static_gap_band < 0 || cell->static_gap_band == gap_band) &&
+        thinking_curve_model_string_matches(cell->bag_band, bag_band) &&
+        thinking_curve_model_string_matches(cell->policy, policy) &&
+        (best == NULL || cell->level > best->level)) {
+      best = cell;
+    }
+  }
+  if (best == NULL) {
+    log_fatal("SIM total-regret model has no candidate backoff");
+  }
+  return best->mean;
+}
+
+static double thinking_curve_predict_within_regret(
+    const ThinkingCurveRegretModel *model, int width, double estimated_regret,
+    int near_tie_challengers, double bai_gap, int bag_tiles) {
+  const int regret_band =
+      thinking_curve_estimated_regret_band(estimated_regret);
+  const int near_tie_band = near_tie_challengers < 0   ? 0
+                            : near_tie_challengers > 5 ? 5
+                                                       : near_tie_challengers;
+  const int gap_band = thinking_curve_bai_gap_band(bai_gap);
+  const char *bag_band = thinking_curve_bag_band(bag_tiles);
+  const ThinkingCurveWithinRegretCell *best = NULL;
+  for (size_t index = 0; index < model->within_count; index++) {
+    const ThinkingCurveWithinRegretCell *cell = &model->within_cells[index];
+    if ((cell->width < 0 || cell->width == width) &&
+        (cell->estimated_regret_band < 0 ||
+         cell->estimated_regret_band == regret_band) &&
+        (cell->near_tie_band < 0 || cell->near_tie_band == near_tie_band) &&
+        (cell->bai_gap_band < 0 || cell->bai_gap_band == gap_band) &&
+        thinking_curve_model_string_matches(cell->bag_band, bag_band) &&
+        (best == NULL || cell->level > best->level)) {
+      best = cell;
+    }
+  }
+  if (best == NULL) {
+    log_fatal("SIM total-regret model has no within-set backoff");
+  }
+  return best->mean;
+}
+
+static ThinkingCurveCombinedStop thinking_curve_choose_combined_stop(
+    const ThinkingCurveRegretModel *model,
+    const ThinkingCurveArmResult *full_result, int width, double static_gap,
+    int bag_tiles, const char *policy, int plies,
+    uint64_t minimum_iterations_per_arm, double target) {
+  ThinkingCurveCombinedStop stop = {0};
+  stop.predicted_candidate_regret = thinking_curve_predict_candidate_regret(
+      model, width, static_gap, bag_tiles, policy);
+  for (size_t index = 0; index < full_result->checkpoint_count; index++) {
+    const AnalysisProgressEvent *checkpoint = &full_result->checkpoints[index];
+    if (checkpoint->iterations < (uint64_t)width * minimum_iterations_per_arm ||
+        !isfinite(checkpoint->secondary_value) ||
+        checkpoint->secondary_value < 0.0 ||
+        !isfinite(checkpoint->best_value) ||
+        !isfinite(checkpoint->challenger_value) ||
+        checkpoint->near_tie_challengers < 0 || checkpoint->best_index < 0 ||
+        checkpoint->best_index >= width) {
+      continue;
+    }
+    const double bai_gap =
+        fmax(0.0, checkpoint->best_value - checkpoint->challenger_value);
+    const double within = thinking_curve_predict_within_regret(
+        model, width, checkpoint->secondary_value,
+        checkpoint->near_tie_challengers, bai_gap, bag_tiles);
+    const double total = stop.predicted_candidate_regret + within;
+    if (total <= target) {
+      stop.decision = *checkpoint;
+      if (stop.decision.iterations > UINT64_MAX / ((uint64_t)plies + 1)) {
+        log_fatal("combined-regret checkpoint node accounting overflows");
+      }
+      stop.decision.nodes = stop.decision.iterations * ((uint64_t)plies + 1);
+      stop.predicted_within_regret = within;
+      stop.predicted_total_regret = total;
+      stop.valid = true;
+      return stop;
+    }
+  }
+
+  if (!isfinite(full_result->joint_estimated_regret) ||
+      full_result->joint_estimated_regret < 0.0 ||
+      full_result->near_tie_challengers < 0 ||
+      !isfinite(full_result->decision.best_value) ||
+      !isfinite(full_result->decision.challenger_value)) {
+    log_fatal("combined-regret capped arm lacks finite telemetry");
+  }
+  const double full_gap = fmax(0.0, full_result->decision.best_value -
+                                        full_result->decision.challenger_value);
+  stop.predicted_within_regret = thinking_curve_predict_within_regret(
+      model, width, full_result->joint_estimated_regret,
+      full_result->near_tie_challengers, full_gap, bag_tiles);
+  stop.predicted_total_regret =
+      stop.predicted_candidate_regret + stop.predicted_within_regret;
+  stop.decision = full_result->decision;
+  stop.capped = true;
+  stop.valid = true;
+  return stop;
 }
 
 static int thinking_curve_parse_targets(const char *value, uint64_t targets[]) {
@@ -604,21 +901,28 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
     uint64_t run_id, double regret_stop_target, bool regret_stop_use_joint,
     double regret_cross_arm_correlation, double regret_calibration,
     uint64_t regret_check_interval, uint64_t regret_min_samples_per_arm,
-    size_t *event_count_out) {
+    uint64_t progress_checkpoint_interval, size_t *event_count_out) {
   ThinkingCurveArmResult result = {0};
   const uint64_t max_iterations = target_nodes / ((uint64_t)plies + 1);
   if (max_iterations == 0 ||
       (uint64_t)num_plays * min_play_iterations > max_iterations) {
     log_fatal("thinking-curve arm budget is too small");
   }
-  AnalysisTrace *trace = analysis_trace_create(16);
+  size_t trace_capacity = 16;
+  if (progress_checkpoint_interval > 0) {
+    const uint64_t checkpoint_capacity =
+        max_iterations / progress_checkpoint_interval + 2;
+    if (checkpoint_capacity > SIZE_MAX - trace_capacity) {
+      log_fatal("thinking-curve checkpoint trace capacity overflows");
+    }
+    trace_capacity += (size_t)checkpoint_capacity;
+  }
+  AnalysisTrace *trace = analysis_trace_create(trace_capacity);
   const AnalysisProgressListener listener = {
       .callback = analysis_trace_record,
       .user_data = trace,
       .run_id = run_id,
-      // Structural START/FINISH events are sufficient because every arm is
-      // itself one point on the budget-matched curve.
-      .checkpoint_interval = 0,
+      .checkpoint_interval = progress_checkpoint_interval,
   };
 
   ThreadControl *thread_control = config_get_thread_control(config);
@@ -661,9 +965,11 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   error_stack_destroy(error_stack);
 
   const size_t event_count = analysis_trace_get_count(trace);
-  AnalysisProgressEvent events[16];
-  if (event_count > sizeof(events) / sizeof(events[0]) ||
-      analysis_trace_get_dropped(trace) != 0) {
+  AnalysisProgressEvent *events =
+      event_count > 0
+          ? malloc_or_die(event_count * sizeof(AnalysisProgressEvent))
+          : NULL;
+  if (analysis_trace_get_dropped(trace) != 0) {
     log_fatal("thinking-curve arm trace overflowed");
   }
   for (size_t index = 0; index < event_count; index++) {
@@ -673,6 +979,15 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   }
   const AnalysisProgressEvent *finish =
       thinking_curve_find_finish(events, event_count);
+  for (size_t index = 0; index < event_count; index++) {
+    if (events[index].mode == ANALYSIS_MODE_SIM &&
+        events[index].event == ANALYSIS_EVENT_CHECKPOINT) {
+      result.checkpoints =
+          realloc_or_die(result.checkpoints, (result.checkpoint_count + 1) *
+                                                 sizeof(*result.checkpoints));
+      result.checkpoints[result.checkpoint_count++] = events[index];
+    }
+  }
   BAIResult *bai_result = sim_results_get_bai_result(context->sim_results);
   result.bai_status = bai_result_get_status(bai_result);
   result.estimated_regret = bai_result_get_estimated_regret(bai_result);
@@ -744,8 +1059,20 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   result.decision.best_value =
       sim_results_get_best_move_utility(context->sim_results);
   *event_count_out += event_count;
+  free(events);
   analysis_trace_destroy(trace);
   return result;
+}
+
+static void thinking_curve_arm_result_destroy(ThinkingCurveArmResult *result) {
+  if (result == NULL) {
+    return;
+  }
+  thinking_curve_sample_trace_destroy(result->sample_trace);
+  free(result->checkpoints);
+  result->sample_trace = NULL;
+  result->checkpoints = NULL;
+  result->checkpoint_count = 0;
 }
 
 static void thinking_curve_choose_risk_set(const ThinkingCurveArmResult *result,
@@ -1064,7 +1391,11 @@ static void thinking_curve_run_position(
     double regret_calibration, uint64_t regret_check_interval,
     uint64_t regret_min_samples_per_arm, bool fixed_control,
     bool matched_control, const int candidate_control_plays[],
-    int candidate_control_count) {
+    int candidate_control_count,
+    const ThinkingCurveRegretModel *combined_regret_model,
+    double combined_regret_stop_target,
+    uint64_t combined_regret_checkpoint_interval,
+    const char *trajectory_policy) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -1077,6 +1408,14 @@ static void thinking_curve_run_position(
                      player_get_rack(game_get_player(game, player_index)));
   for (int rank = 0; rank < num_plays; rank++) {
     move_list_add_move(candidate_moves, &candidates[rank].move);
+  }
+  const bool combined_regret_enabled =
+      combined_regret_model != NULL && combined_regret_stop_target > 0.0;
+  const double static_primary_gap =
+      equity_to_double(move_get_equity(&candidates[0].move)) -
+      equity_to_double(move_get_equity(&candidates[num_plays - 1].move));
+  if (static_primary_gap < 0.0) {
+    log_fatal("thinking-curve candidate prefix is not statically ordered");
   }
 
   int panel_best_index = 0;
@@ -1132,8 +1471,11 @@ static void thinking_curve_run_position(
         candidate_count, plies, targets[target_index], minimum, seed,
         ((uint64_t)(source_index + 1) << 16) | ((uint64_t)plies << 8) |
             (uint64_t)(decision_count + 1),
-        regret_stop_target, regret_stop_use_joint, regret_cross_arm_correlation,
-        regret_calibration, regret_check_interval, regret_min_samples_per_arm,
+        combined_regret_enabled ? 0.0 : regret_stop_target,
+        combined_regret_enabled ? false : regret_stop_use_joint,
+        regret_cross_arm_correlation, regret_calibration, regret_check_interval,
+        regret_min_samples_per_arm,
+        combined_regret_enabled ? combined_regret_checkpoint_interval : 0,
         &event_count);
     selected_ranks[decisions[decision_count].decision.best_index] = true;
     if (judge_risk_plays >= 2) {
@@ -1171,6 +1513,33 @@ static void thinking_curve_run_position(
   if (decision_count == 0) {
     log_fatal("thinking-curve position has no in-range target");
   }
+  ThinkingCurveCombinedStop combined_stop = {0};
+  ThinkingCurveArmResult combined_result = {0};
+  if (combined_regret_enabled) {
+    combined_stop = thinking_curve_choose_combined_stop(
+        combined_regret_model, &decisions[decision_count - 1], num_plays,
+        static_primary_gap, bag_tiles, trajectory_policy, plies,
+        minimums[decision_count - 1], combined_regret_stop_target);
+    if (!combined_stop.valid || combined_stop.decision.best_index < 0 ||
+        combined_stop.decision.best_index >= num_plays) {
+      log_fatal("combined-regret replay did not produce a valid decision");
+    }
+    combined_result.decision = combined_stop.decision;
+    combined_result.bai_status = combined_stop.capped
+                                     ? decisions[decision_count - 1].bai_status
+                                     : BAI_RESULT_STATUS_REGRET_LIMIT;
+    combined_result.estimated_regret = combined_stop.decision.value;
+    combined_result.joint_estimated_regret =
+        combined_stop.decision.secondary_value;
+    combined_result.regret_at_stop = combined_stop.decision.value;
+    combined_result.joint_regret_at_stop =
+        combined_stop.decision.secondary_value;
+    combined_result.near_tie_challengers =
+        combined_stop.decision.near_tie_challengers;
+    combined_result.near_tie_challengers_at_stop =
+        combined_stop.decision.near_tie_challengers;
+    selected_ranks[combined_stop.decision.best_index] = true;
+  }
   ThinkingCurveArmResult control_result = {0};
   ThinkingCurveArmResult matched_control_result = {0};
   ThinkingCurveArmResult
@@ -1182,8 +1551,10 @@ static void thinking_curve_run_position(
                                             {false}};
   bool control_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   uint64_t control_target_nodes = 0;
-  const bool has_control = fixed_control && regret_stop_target > 0.0;
-  const bool has_matched_control = matched_control && regret_stop_target > 0.0;
+  const bool has_control =
+      combined_regret_enabled || (fixed_control && regret_stop_target > 0.0);
+  const bool has_matched_control =
+      combined_regret_enabled || (matched_control && regret_stop_target > 0.0);
   int active_candidate_controls[THINKING_CURVE_MAX_CANDIDATE_CONTROLS];
   int active_candidate_control_count = 0;
   for (int control_index = 0; control_index < candidate_control_count;
@@ -1197,7 +1568,9 @@ static void thinking_curve_run_position(
   uint64_t matched_control_target_nodes = 0;
   if (has_matched_control) {
     const uint64_t stopped_iterations =
-        decisions[decision_count - 1].decision.iterations;
+        combined_regret_enabled
+            ? combined_result.decision.iterations
+            : decisions[decision_count - 1].decision.iterations;
     if (stopped_iterations > UINT64_MAX / ((uint64_t)plies + 1)) {
       log_fatal("thinking-curve matched-control budget overflow");
     }
@@ -1210,7 +1583,8 @@ static void thinking_curve_run_position(
             UINT64_C(0x4d4154),
         /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
         regret_cross_arm_correlation, regret_calibration, regret_check_interval,
-        regret_min_samples_per_arm, &event_count);
+        regret_min_samples_per_arm, /*progress_checkpoint_interval=*/0,
+        &event_count);
     selected_ranks[matched_control_result.decision.best_index] = true;
     if (judge_risk_plays >= 2) {
       thinking_curve_choose_risk_set(
@@ -1222,7 +1596,7 @@ static void thinking_curve_run_position(
       }
     }
   }
-  if (has_control) {
+  if (has_control && !combined_regret_enabled) {
     for (int target_index = 0; target_index < target_count; target_index++) {
       if (targets[target_index] <= max_nodes) {
         control_target_nodes = targets[target_index];
@@ -1236,7 +1610,8 @@ static void thinking_curve_run_position(
             UINT64_C(0x434f4e),
         /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
         regret_cross_arm_correlation, regret_calibration, regret_check_interval,
-        regret_min_samples_per_arm, &event_count);
+        regret_min_samples_per_arm, /*progress_checkpoint_interval=*/0,
+        &event_count);
     selected_ranks[control_result.decision.best_index] = true;
     if (judge_risk_plays >= 2) {
       thinking_curve_choose_risk_set(
@@ -1256,6 +1631,16 @@ static void thinking_curve_run_position(
       }
     }
   }
+  if (combined_regret_enabled) {
+    for (int target_index = 0; target_index < target_count; target_index++) {
+      if (targets[target_index] <= max_nodes) {
+        control_target_nodes = targets[target_index];
+      }
+    }
+  }
+  const ThinkingCurveArmResult *full_control_result =
+      combined_regret_enabled ? &decisions[decision_count - 1]
+                              : &control_result;
   uint64_t candidate_control_target_nodes = 0;
   uint64_t candidate_control_minimums[THINKING_CURVE_MAX_CANDIDATE_CONTROLS] = {
       0};
@@ -1303,7 +1688,8 @@ static void thinking_curve_run_position(
               UINT64_C(0x430000) | (uint64_t)control_plays,
           /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
           regret_cross_arm_correlation, regret_calibration,
-          regret_check_interval, regret_min_samples_per_arm, &event_count);
+          regret_check_interval, regret_min_samples_per_arm,
+          /*progress_checkpoint_interval=*/0, &event_count);
       selected_ranks[candidate_control_results[control_index]
                          .decision.best_index] = true;
       if (judge_risk_plays >= 2) {
@@ -1325,19 +1711,18 @@ static void thinking_curve_run_position(
       config, context, candidate_moves, candidates, selected_ranks,
       candidate_count, judge_plies, judge_samples, position);
 
-  printf(
-      "THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
-      "plies=%d candidates=%d max_nodes=%" PRIu64 " uniform_floor_per_mille=%d"
-      " judge_plies=%d judge_samples=%" PRIu64
-      " judge_risk_plays=%d panel_best_rank=%d"
-      " static_best_equity=%.6f static_primary_gap=%.6f"
-      " candidate_control_static_gaps=",
-      source_index, position, game_index, bag_tiles, plies, num_plays,
-      max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
-      judge_risk_plays, panel_best_index,
-      equity_to_double(move_get_equity(&candidates[0].move)),
-      equity_to_double(move_get_equity(&candidates[0].move)) -
-          equity_to_double(move_get_equity(&candidates[num_plays - 1].move)));
+  printf("THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
+         "plies=%d candidates=%d max_nodes=%" PRIu64
+         " uniform_floor_per_mille=%d"
+         " judge_plies=%d judge_samples=%" PRIu64
+         " judge_risk_plays=%d panel_best_rank=%d"
+         " static_best_equity=%.6f static_primary_gap=%.6f"
+         " candidate_control_static_gaps=",
+         source_index, position, game_index, bag_tiles, plies, num_plays,
+         max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
+         judge_risk_plays, panel_best_index,
+         equity_to_double(move_get_equity(&candidates[0].move)),
+         static_primary_gap);
   for (int control_index = 0; control_index < active_candidate_control_count;
        control_index++) {
     const int cutoff_rank = active_candidate_controls[control_index] - 1;
@@ -1349,34 +1734,67 @@ static void thinking_curve_run_position(
   if (!has_candidate_control) {
     printf("0");
   }
-  printf(" cgp=%s\n", cgp);
+  printf(" trajectory_policy=%s cgp=%s\n", trajectory_policy, cgp);
   thinking_curve_print_judge_candidates(source_index, position, game_index,
                                         bag_tiles, plies, &judge);
-  int decision_index = 0;
-  for (int target_index = 0; target_index < target_count; target_index++) {
-    if (targets[target_index] <= max_nodes) {
-      thinking_curve_print_point(
-          source_index, position, game_index, bag_tiles, plies,
-          targets[target_index], /*final=*/false, "stopped",
-          &decisions[decision_index].decision, candidates, candidate_count,
-          num_plays, panel_best_index, candidate_best_index,
-          minimums[decision_index], &judge,
-          decisions[decision_index].bai_status,
-          decisions[decision_index].estimated_regret,
-          decisions[decision_index].joint_estimated_regret,
-          decisions[decision_index].regret_at_stop,
-          decisions[decision_index].joint_regret_at_stop,
-          decisions[decision_index].near_tie_challengers,
-          decisions[decision_index].near_tie_challengers_at_stop,
-          regret_stop_target);
-      if (capture_regret_samples) {
-        thinking_curve_print_regret_panel(
+  if (combined_regret_enabled) {
+    printf("THINKING_CURVE_COMBINED_STOP source_index=%d position=%d game=%d "
+           "bag=%d plies=%d arm_plays=%d checkpoints=%zu "
+           "stopped_iterations=%" PRIu64 " stopped_nodes=%" PRIu64
+           " selected_rank=%d raw_estimated_regret=%.12f "
+           "raw_joint_estimated_regret=%.12f near_tie_challengers=%d "
+           "predicted_candidate_regret=%.12f "
+           "predicted_within_regret=%.12f predicted_total_regret=%.12f "
+           "regret_stop_target=%.12f capped=%d\n",
+           source_index, position, game_index, bag_tiles, plies, num_plays,
+           decisions[decision_count - 1].checkpoint_count,
+           combined_result.decision.iterations, combined_result.decision.nodes,
+           combined_result.decision.best_index,
+           combined_result.estimated_regret,
+           combined_result.joint_estimated_regret,
+           combined_result.near_tie_challengers,
+           combined_stop.predicted_candidate_regret,
+           combined_stop.predicted_within_regret,
+           combined_stop.predicted_total_regret, combined_regret_stop_target,
+           combined_stop.capped);
+    thinking_curve_print_point(
+        source_index, position, game_index, bag_tiles, plies,
+        combined_result.decision.nodes, /*final=*/false, "stopped",
+        &combined_result.decision, candidates, candidate_count, num_plays,
+        panel_best_index, candidate_best_index, minimums[decision_count - 1],
+        &judge, combined_result.bai_status, combined_result.estimated_regret,
+        combined_result.joint_estimated_regret, combined_result.regret_at_stop,
+        combined_result.joint_regret_at_stop,
+        combined_result.near_tie_challengers,
+        combined_result.near_tie_challengers_at_stop,
+        combined_regret_stop_target);
+  } else {
+    int decision_index = 0;
+    for (int target_index = 0; target_index < target_count; target_index++) {
+      if (targets[target_index] <= max_nodes) {
+        thinking_curve_print_point(
             source_index, position, game_index, bag_tiles, plies,
-            targets[target_index], &decisions[decision_index],
-            regret_risk_sets[decision_index], num_plays, regret_paired_samples,
-            &judge);
+            targets[target_index], /*final=*/false, "stopped",
+            &decisions[decision_index].decision, candidates, candidate_count,
+            num_plays, panel_best_index, candidate_best_index,
+            minimums[decision_index], &judge,
+            decisions[decision_index].bai_status,
+            decisions[decision_index].estimated_regret,
+            decisions[decision_index].joint_estimated_regret,
+            decisions[decision_index].regret_at_stop,
+            decisions[decision_index].joint_regret_at_stop,
+            decisions[decision_index].near_tie_challengers,
+            decisions[decision_index].near_tie_challengers_at_stop,
+            regret_stop_target);
+        if (capture_regret_samples) {
+          thinking_curve_print_regret_panel(
+              source_index, position, game_index, bag_tiles, plies,
+              targets[target_index], &decisions[decision_index],
+              regret_risk_sets[decision_index], num_plays,
+              regret_paired_samples, &judge);
+        }
+        decision_index++;
       }
-      decision_index++;
     }
   }
   if (has_matched_control) {
@@ -1397,14 +1815,16 @@ static void thinking_curve_run_position(
   if (has_control) {
     thinking_curve_print_point(
         source_index, position, game_index, bag_tiles, plies,
-        control_target_nodes, /*final=*/false, "full", &control_result.decision,
-        candidates, candidate_count, num_plays, panel_best_index,
-        candidate_best_index, minimums[decision_count - 1], &judge,
-        control_result.bai_status, control_result.estimated_regret,
-        control_result.joint_estimated_regret, control_result.regret_at_stop,
-        control_result.joint_regret_at_stop,
-        control_result.near_tie_challengers,
-        control_result.near_tie_challengers_at_stop,
+        control_target_nodes, /*final=*/false, "full",
+        &full_control_result->decision, candidates, candidate_count, num_plays,
+        panel_best_index, candidate_best_index, minimums[decision_count - 1],
+        &judge, full_control_result->bai_status,
+        full_control_result->estimated_regret,
+        full_control_result->joint_estimated_regret,
+        full_control_result->regret_at_stop,
+        full_control_result->joint_regret_at_stop,
+        full_control_result->near_tie_challengers,
+        full_control_result->near_tie_challengers_at_stop,
         /*regret_stop_target=*/0.0);
   }
   if (has_candidate_control) {
@@ -1429,20 +1849,20 @@ static void thinking_curve_run_position(
           /*regret_stop_target=*/0.0);
     }
   }
+  const ThinkingCurveArmResult *stop_output =
+      combined_regret_enabled ? &combined_result
+                              : &decisions[decision_count - 1];
   thinking_curve_print_point(
       source_index, position, game_index, bag_tiles, plies,
-      /*target_nodes=*/0, /*final=*/true, "stopped",
-      &decisions[decision_count - 1].decision, candidates, candidate_count,
-      num_plays, panel_best_index, candidate_best_index,
-      minimums[decision_count - 1], &judge,
-      decisions[decision_count - 1].bai_status,
-      decisions[decision_count - 1].estimated_regret,
-      decisions[decision_count - 1].joint_estimated_regret,
-      decisions[decision_count - 1].regret_at_stop,
-      decisions[decision_count - 1].joint_regret_at_stop,
-      decisions[decision_count - 1].near_tie_challengers,
-      decisions[decision_count - 1].near_tie_challengers_at_stop,
-      regret_stop_target);
+      /*target_nodes=*/0, /*final=*/true, "stopped", &stop_output->decision,
+      candidates, candidate_count, num_plays, panel_best_index,
+      candidate_best_index, minimums[decision_count - 1], &judge,
+      stop_output->bai_status, stop_output->estimated_regret,
+      stop_output->joint_estimated_regret, stop_output->regret_at_stop,
+      stop_output->joint_regret_at_stop, stop_output->near_tie_challengers,
+      stop_output->near_tie_challengers_at_stop,
+      combined_regret_enabled ? combined_regret_stop_target
+                              : regret_stop_target);
   printf("THINKING_CURVE_POSITION_DONE source_index=%d position=%d plies=%d "
          "events=%zu dropped=0 final_iterations=%" PRIu64
          " final_nodes=%" PRIu64 " judge_candidates=%d "
@@ -1450,16 +1870,18 @@ static void thinking_curve_run_position(
          " judge_seconds=%.6f judge_forced=%d control=%d "
          "control_iterations=%" PRIu64 " control_nodes=%" PRIu64
          " matched_control=%d matched_target_nodes=%" PRIu64
-         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64,
+         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64
+         " combined_regret=%d combined_capped=%d combined_checkpoints=%zu",
          source_index, position, plies, event_count,
-         decisions[decision_count - 1].decision.iterations,
-         decisions[decision_count - 1].decision.nodes, judge.candidate_count,
-         judge.iterations, judge.nodes, judge.elapsed_seconds, judge.forced,
-         has_control, control_result.decision.iterations,
-         control_result.decision.nodes, has_matched_control,
+         stop_output->decision.iterations, stop_output->decision.nodes,
+         judge.candidate_count, judge.iterations, judge.nodes,
+         judge.elapsed_seconds, judge.forced, has_control,
+         full_control_result->decision.iterations,
+         full_control_result->decision.nodes, has_matched_control,
          matched_control_target_nodes,
          matched_control_result.decision.iterations,
-         matched_control_result.decision.nodes);
+         matched_control_result.decision.nodes, combined_regret_enabled,
+         combined_stop.capped, decisions[decision_count - 1].checkpoint_count);
   printf(" candidate_control=%d candidate_controls=%d "
          "candidate_control_plays=",
          has_candidate_control, active_candidate_control_count);
@@ -1493,15 +1915,14 @@ static void thinking_curve_run_position(
   for (int decision_index_to_destroy = 0;
        decision_index_to_destroy < decision_count;
        decision_index_to_destroy++) {
-    thinking_curve_sample_trace_destroy(
-        decisions[decision_index_to_destroy].sample_trace);
+    thinking_curve_arm_result_destroy(&decisions[decision_index_to_destroy]);
   }
-  thinking_curve_sample_trace_destroy(control_result.sample_trace);
-  thinking_curve_sample_trace_destroy(matched_control_result.sample_trace);
+  thinking_curve_arm_result_destroy(&control_result);
+  thinking_curve_arm_result_destroy(&matched_control_result);
   for (int control_index = 0; control_index < active_candidate_control_count;
        control_index++) {
-    thinking_curve_sample_trace_destroy(
-        candidate_control_results[control_index].sample_trace);
+    thinking_curve_arm_result_destroy(
+        &candidate_control_results[control_index]);
   }
   fflush_or_die(stdout);
 }
@@ -1634,6 +2055,17 @@ void test_thinking_curve(void) {
   const uint64_t regret_min_samples_per_arm =
       thinking_curve_env_positive_uint64(
           "THINKING_CURVE_REGRET_MIN_SAMPLES_PER_ARM", 32);
+  const char *combined_regret_model_path =
+      thinking_curve_env_string("THINKING_CURVE_COMBINED_REGRET_MODEL", "0");
+  const double combined_regret_stop_target =
+      thinking_curve_env_nonnegative_double(
+          "THINKING_CURVE_COMBINED_REGRET_STOP_TARGET", 0.0);
+  const uint64_t combined_regret_checkpoint_interval =
+      thinking_curve_env_positive_uint64(
+          "THINKING_CURVE_COMBINED_REGRET_CHECK_INTERVAL", 256);
+  const bool combined_regret_enabled =
+      strcmp(combined_regret_model_path, "0") != 0 ||
+      combined_regret_stop_target > 0.0;
   const bool fixed_control = thinking_curve_env_nonnegative_int(
                                  "THINKING_CURVE_FIXED_CONTROL", 0) != 0;
   const bool matched_control = thinking_curve_env_nonnegative_int(
@@ -1683,8 +2115,23 @@ void test_thinking_curve(void) {
   if (regret_calibration <= 0.0) {
     log_fatal("THINKING_CURVE_REGRET_CALIBRATION must be positive");
   }
-  if ((fixed_control || matched_control) && regret_stop_target <= 0.0) {
+  if ((fixed_control || matched_control) && regret_stop_target <= 0.0 &&
+      !combined_regret_enabled) {
     log_fatal("thinking-curve controls require a positive regret stop target");
+  }
+  if (combined_regret_enabled &&
+      (strcmp(combined_regret_model_path, "0") == 0 ||
+       combined_regret_stop_target <= 0.0)) {
+    log_fatal("combined-regret replay requires both model and target");
+  }
+  if (combined_regret_enabled &&
+      (target_count != 1 || regret_stop_target > 0.0 || fixed_control ||
+       !matched_control || capture_regret_samples ||
+       candidate_control_count > 0)) {
+    log_fatal(
+        "combined-regret replay requires one full target, matched control, "
+        "and no legacy stop, fixed control, regret probe, or candidate "
+        "control");
   }
   for (int control_index = 0; control_index < candidate_control_count;
        control_index++) {
@@ -1714,6 +2161,10 @@ void test_thinking_curve(void) {
     log_fatal("could not open thinking-curve corpus: %s", corpus);
   }
   Config *config = thinking_curve_create_config(num_threads, num_plays);
+  ThinkingCurveRegretModel *combined_regret_model =
+      combined_regret_enabled
+          ? thinking_curve_regret_model_load(combined_regret_model_path)
+          : NULL;
   ThinkingCurveContext context;
   thinking_curve_context_init(&context, config);
   MoveList *candidate_moves = move_list_create(num_plays);
@@ -1731,6 +2182,8 @@ void test_thinking_curve(void) {
          " regret_calibration=%.6f regret_check_interval=%" PRIu64
          " regret_min_samples_per_arm=%" PRIu64 " fixed_control=%d"
          " matched_control=%d candidate_control_plays=%s"
+         " combined_regret_model=%s combined_regret_stop_target=%.12f"
+         " combined_regret_check_interval=%" PRIu64
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
          corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
@@ -1740,8 +2193,9 @@ void test_thinking_curve(void) {
          regret_paired_samples, regret_stop_target, regret_stop_use_joint,
          regret_cross_arm_correlation, regret_calibration,
          regret_check_interval, regret_min_samples_per_arm, fixed_control,
-         matched_control, candidate_control_string, wall_seconds,
-         target_string);
+         matched_control, candidate_control_string, combined_regret_model_path,
+         combined_regret_stop_target, combined_regret_checkpoint_interval,
+         wall_seconds, target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -1764,9 +2218,12 @@ void test_thinking_curve(void) {
       char *position_value = thinking_curve_copy_field(line, "position=");
       char *game_value = thinking_curve_copy_field(line, "game=");
       char *bag_value = thinking_curve_copy_field(line, "bag=");
+      char *trajectory_policy =
+          thinking_curve_copy_field(line, "trajectory_policy=");
       const char *cgp_start = strstr(line, " cgp=");
       if (position_value == NULL || game_value == NULL || bag_value == NULL ||
-          cgp_start == NULL) {
+          cgp_start == NULL ||
+          (combined_regret_enabled && trajectory_policy == NULL)) {
         log_fatal("malformed TIME_VALUE_POSITION row");
       }
       cgp_start += strlen(" cgp=");
@@ -1801,7 +2258,10 @@ void test_thinking_curve(void) {
               regret_stop_use_joint, regret_cross_arm_correlation,
               regret_calibration, regret_check_interval,
               regret_min_samples_per_arm, fixed_control, matched_control,
-              candidate_control_plays, candidate_control_count);
+              candidate_control_plays, candidate_control_count,
+              combined_regret_model, combined_regret_stop_target,
+              combined_regret_checkpoint_interval,
+              trajectory_policy == NULL ? "unknown" : trajectory_policy);
         } else {
           printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
                  "game=%d bag=%d plies=%d candidates=%d regret=0 cgp=%s\n",
@@ -1816,6 +2276,7 @@ void test_thinking_curve(void) {
       free(position_value);
       free(game_value);
       free(bag_value);
+      free(trajectory_policy);
       if (evaluated >= max_positions ||
           (wall_seconds > 0.0 &&
            ctimer_elapsed_seconds(&timer) >= wall_seconds)) {
@@ -1865,7 +2326,9 @@ void test_thinking_curve(void) {
             regret_stop_use_joint, regret_cross_arm_correlation,
             regret_calibration, regret_check_interval,
             regret_min_samples_per_arm, fixed_control, matched_control,
-            candidate_control_plays, candidate_control_count);
+            candidate_control_plays, candidate_control_count,
+            combined_regret_model, combined_regret_stop_target,
+            combined_regret_checkpoint_interval, "unknown");
         evaluated++;
       }
       groups_seen++;
@@ -1941,7 +2404,9 @@ void test_thinking_curve(void) {
           regret_stop_use_joint, regret_cross_arm_correlation,
           regret_calibration, regret_check_interval, regret_min_samples_per_arm,
           fixed_control, matched_control, candidate_control_plays,
-          candidate_control_count);
+          candidate_control_count, combined_regret_model,
+          combined_regret_stop_target, combined_regret_checkpoint_interval,
+          "unknown");
       evaluated++;
     }
     groups_seen++;
@@ -1959,5 +2424,6 @@ void test_thinking_curve(void) {
   move_list_destroy(candidate_moves);
   move_list_destroy(generated_moves);
   thinking_curve_context_destroy(&context);
+  thinking_curve_regret_model_destroy(combined_regret_model);
   config_destroy(config);
 }

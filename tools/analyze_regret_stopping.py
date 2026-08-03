@@ -58,6 +58,8 @@ class Point:
     elapsed_seconds: float
     selected_rank: int
     judge_regret: float
+    judge_win_regret: float
+    judge_spread_regret: float
     estimated_regret: float
     joint_estimated_regret: float
     regret_at_stop: float
@@ -86,6 +88,17 @@ class Point:
 
 
 PointKey = tuple[int, int, int]
+
+
+@dataclass(frozen=True)
+class CombinedPrediction:
+    source_index: int
+    plies: int
+    predicted_candidate_regret: float
+    predicted_within_regret: float
+    predicted_total_regret: float
+    capped: bool
+    checkpoints: int
 
 
 def load_points(path: Path) -> dict[PointKey, dict[str, Point]]:
@@ -117,6 +130,10 @@ def load_points(path: Path) -> dict[PointKey, dict[str, Point]]:
                 elapsed_seconds=int(fields["elapsed_ns"]) / 1e9,
                 selected_rank=int(fields["selected_rank"]),
                 judge_regret=float(fields["judge_regret"]),
+                judge_win_regret=optional_float(fields, "judge_win_regret"),
+                judge_spread_regret=optional_float(
+                    fields, "judge_spread_regret"
+                ),
                 estimated_regret=float(fields["estimated_regret"]),
                 joint_estimated_regret=optional_float(
                     fields, "joint_estimated_regret"
@@ -141,14 +158,89 @@ def load_points(path: Path) -> dict[PointKey, dict[str, Point]]:
     return points
 
 
+def load_combined_predictions(
+    path: Path,
+) -> dict[tuple[int, int], CombinedPrediction]:
+    predictions: dict[tuple[int, int], CombinedPrediction] = {}
+    with path.open(encoding="utf-8") as stream:
+        for line in stream:
+            if not line.startswith("THINKING_CURVE_COMBINED_STOP "):
+                continue
+            fields = parse_fields(line)
+            prediction = CombinedPrediction(
+                source_index=int(fields["source_index"]),
+                plies=int(fields["plies"]),
+                predicted_candidate_regret=float(
+                    fields["predicted_candidate_regret"]
+                ),
+                predicted_within_regret=float(
+                    fields["predicted_within_regret"]
+                ),
+                predicted_total_regret=float(fields["predicted_total_regret"]),
+                capped=bool(int(fields["capped"])),
+                checkpoints=int(fields["checkpoints"]),
+            )
+            key = (prediction.source_index, prediction.plies)
+            if key in predictions:
+                raise ValueError(f"duplicate combined prediction for {key}")
+            if (
+                prediction.checkpoints <= 0
+                or prediction.predicted_candidate_regret < 0.0
+                or prediction.predicted_within_regret < 0.0
+                or prediction.predicted_total_regret < 0.0
+                or not all(
+                    math.isfinite(value)
+                    for value in (
+                        prediction.predicted_candidate_regret,
+                        prediction.predicted_within_regret,
+                        prediction.predicted_total_regret,
+                    )
+                )
+                or abs(
+                    prediction.predicted_candidate_regret
+                    + prediction.predicted_within_regret
+                    - prediction.predicted_total_regret
+                )
+                > 2.0e-12
+            ):
+                raise ValueError(f"invalid combined prediction for {key}")
+            predictions[key] = prediction
+    return predictions
+
+
 def pair_points(
     points: dict[PointKey, dict[str, Point]],
 ) -> list[tuple[Point, Point]]:
-    return [
-        (by_mode["stopped"], by_mode["full"])
-        for by_mode in points.values()
-        if "stopped" in by_mode and "full" in by_mode
-    ]
+    grouped: dict[tuple[int, int], dict[str, list[Point]]] = defaultdict(
+        lambda: defaultdict(list)
+    )
+    for by_mode in points.values():
+        for point in by_mode.values():
+            grouped[(point.source_index, point.plies)][point.control_kind].append(
+                point
+            )
+    result: list[tuple[Point, Point]] = []
+    for key, by_kind in grouped.items():
+        full_controls = by_kind.get("full", [])
+        if not full_controls:
+            continue
+        if len(full_controls) != 1:
+            raise ValueError(f"multiple full controls for {key}")
+        full = full_controls[0]
+        stopped = by_kind.get("stopped", [])
+        same_target = [
+            point for point in stopped if point.target_nodes == full.target_nodes
+        ]
+        if len(same_target) == 1:
+            chosen = same_target[0]
+        elif len(stopped) == 1:
+            # Combined-regret replay prints the observed stopping budget, while
+            # the full arm retains its requested cap.
+            chosen = stopped[0]
+        else:
+            raise ValueError(f"full control for {key} has no unique stopped arm")
+        result.append((chosen, full))
+    return result
 
 
 def matched_points(
@@ -266,6 +358,34 @@ def summarize(
         if regret_delta.clusters >= 2 and regret_delta.high <= margin
         else "fail"
     )
+    win_delta_values = clustered_values(
+        [
+            pair
+            for pair in pairs
+            if math.isfinite(pair[0].judge_win_regret)
+            and math.isfinite(pair[1].judge_win_regret)
+        ],
+        lambda a, b: a.judge_win_regret - b.judge_win_regret,
+    )
+    spread_delta_values = clustered_values(
+        [
+            pair
+            for pair in pairs
+            if math.isfinite(pair[0].judge_spread_regret)
+            and math.isfinite(pair[1].judge_spread_regret)
+        ],
+        lambda a, b: a.judge_spread_regret - b.judge_spread_regret,
+    )
+    win_text = (
+        format_summary(summarize_values(win_delta_values), signed=True)
+        if win_delta_values
+        else "unavailable"
+    )
+    spread_text = (
+        format_summary(summarize_values(spread_delta_values), signed=True)
+        if spread_delta_values
+        else "unavailable"
+    )
     print(
         f"REGRET_STOP_SUMMARY comparison={comparison} stratum={label} "
         f"positions={len(pairs)} "
@@ -273,6 +393,8 @@ def summarize(
         f"stopped_regret={format_summary(stopped_regret)} "
         f"control_regret={format_summary(control_regret)} "
         f"paired_regret_delta={format_summary(regret_delta, signed=True)} "
+        f"paired_win_regret_delta={win_text} "
+        f"paired_spread_regret_delta={spread_text} "
         f"node_savings={node_savings.mean:.4%} "
         f"savings_ci95=[{node_savings.low:.4%},{node_savings.high:.4%}] "
         f"median_node_fraction={statistics.median(node_fractions):.6f} "
@@ -282,22 +404,11 @@ def summarize(
     )
 
 
-def reliability(
-    label: str, pairs: list[tuple[Point, Point]], stratum: str = "all"
+def reliability_observations(
+    label: str,
+    observations: list[tuple[float, float, str]],
+    stratum: str = "all",
 ) -> None:
-    estimator: Callable[[Point], float]
-    estimator = (
-        (lambda point: point.legacy_stop_estimate)
-        if label == "legacy"
-        else (lambda point: point.joint_stop_estimate)
-    )
-    observations = [
-        (estimator(stopped), stopped.judge_regret, stopped.game)
-        for stopped, _control in pairs
-        if math.isfinite(estimator(stopped))
-        and estimator(stopped) >= 0.0
-        and math.isfinite(stopped.judge_regret)
-    ]
     if not observations:
         print(
             f"REGRET_RELIABILITY estimator={label} stratum={stratum} positions=0"
@@ -349,6 +460,81 @@ def reliability(
     )
 
 
+def reliability(
+    label: str, pairs: list[tuple[Point, Point]], stratum: str = "all"
+) -> None:
+    estimator: Callable[[Point], float]
+    estimator = (
+        (lambda point: point.legacy_stop_estimate)
+        if label == "legacy"
+        else (lambda point: point.joint_stop_estimate)
+    )
+    reliability_observations(
+        label,
+        [
+            (estimator(stopped), stopped.judge_regret, stopped.game)
+            for stopped, _control in pairs
+            if math.isfinite(estimator(stopped))
+            and estimator(stopped) >= 0.0
+            and math.isfinite(stopped.judge_regret)
+        ],
+        stratum,
+    )
+
+
+def combined_reliability(
+    pairs: list[tuple[Point, Point]],
+    predictions: dict[tuple[int, int], CombinedPrediction],
+    stratum: str = "all",
+) -> None:
+    observations: list[tuple[float, float, str]] = []
+    components_by_game: dict[str, list[CombinedPrediction]] = defaultdict(list)
+    capped = 0
+    for stopped, _control in pairs:
+        prediction = predictions.get((stopped.source_index, stopped.plies))
+        if prediction is None:
+            continue
+        observations.append(
+            (prediction.predicted_total_regret, stopped.judge_regret, stopped.game)
+        )
+        components_by_game[stopped.game].append(prediction)
+        capped += int(prediction.capped)
+    reliability_observations("combined", observations, stratum)
+    if not observations:
+        return
+    candidate = summarize_values(
+        [
+            statistics.fmean(
+                prediction.predicted_candidate_regret for prediction in group
+            )
+            for group in components_by_game.values()
+        ]
+    )
+    within = summarize_values(
+        [
+            statistics.fmean(
+                prediction.predicted_within_regret for prediction in group
+            )
+            for group in components_by_game.values()
+        ]
+    )
+    total = summarize_values(
+        [
+            statistics.fmean(
+                prediction.predicted_total_regret for prediction in group
+            )
+            for group in components_by_game.values()
+        ]
+    )
+    print(
+        f"COMBINED_REGRET_COMPONENTS stratum={stratum} "
+        f"positions={len(observations)} games={len(components_by_game)} "
+        f"candidate={format_summary(candidate)} "
+        f"within_set={format_summary(within)} total={format_summary(total)} "
+        f"capped={capped} cap_rate={capped / len(observations):.4%}"
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("logs", nargs="+", type=Path)
@@ -367,15 +553,17 @@ def main() -> None:
 
     all_quality_pairs: list[tuple[Point, Point]] = []
     all_optional_pairs: list[tuple[Point, Point]] = []
+    all_combined: dict[tuple[int, int], CombinedPrediction] = {}
     for path in args.logs:
         points = load_points(path)
+        combined = load_combined_predictions(path)
         quality = pair_points(points)
         optional = matched_points(points)
         if not quality and not optional:
             raise ValueError(f"{path}: no stopped/control pairs")
         print(
             f"REGRET_STOP_FILE path={path} full_pairs={len(quality)} "
-            f"matched_pairs={len(optional)}"
+            f"matched_pairs={len(optional)} combined_predictions={len(combined)}"
         )
         if quality:
             summarize(
@@ -392,6 +580,21 @@ def main() -> None:
                 "stopped_vs_matched_n",
             )
             all_optional_pairs.extend(optional)
+        if combined:
+            calibration = optional or quality
+            expected_keys = {
+                (stopped.source_index, stopped.plies)
+                for stopped, _control in calibration
+            }
+            if set(combined) != expected_keys:
+                raise ValueError(
+                    f"{path}: combined predictions do not map calibration roots"
+                )
+            combined_reliability(calibration, combined, "file")
+            overlap = set(all_combined) & set(combined)
+            if overlap:
+                raise ValueError(f"duplicate combined roots across logs: {overlap}")
+            all_combined.update(combined)
 
     if all_quality_pairs:
         summarize(
@@ -410,6 +613,8 @@ def main() -> None:
     calibration_pairs = all_optional_pairs or all_quality_pairs
     reliability("legacy", calibration_pairs)
     reliability("joint", calibration_pairs)
+    if all_combined:
+        combined_reliability(calibration_pairs, all_combined)
     for label, low, high in (
         ("opening", 61, 100),
         ("midgame", 25, 60),
@@ -422,6 +627,8 @@ def main() -> None:
             summarize(label, stratum, args.noninferiority_margin, "calibration")
             reliability("legacy", stratum, label)
             reliability("joint", stratum, label)
+            if all_combined:
+                combined_reliability(stratum, all_combined, label)
     for label, predicate in (
         ("ties0", lambda value: value == 0),
         ("ties1", lambda value: value == 1),
@@ -437,6 +644,8 @@ def main() -> None:
             summarize(label, stratum, args.noninferiority_margin, "calibration")
             reliability("legacy", stratum, label)
             reliability("joint", stratum, label)
+            if all_combined:
+                combined_reliability(stratum, all_combined, label)
 
     if args.manifest is not None:
         document = json.loads(args.manifest.read_text(encoding="utf-8"))
@@ -461,6 +670,8 @@ def main() -> None:
             summarize(label, stratum, args.noninferiority_margin, "calibration")
             reliability("legacy", stratum, label)
             reliability("joint", stratum, label)
+            if all_combined:
+                combined_reliability(stratum, all_combined, label)
 
 
 if __name__ == "__main__":

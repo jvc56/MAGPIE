@@ -746,6 +746,7 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
     progress.value = bai_estimate_expected_regret(sync_data, args->rvs);
     progress.secondary_value =
         bai_estimate_joint_expected_regret(sync_data, args->rvs);
+    progress.near_tie_challengers = bai_count_near_tie_challengers(sync_data);
     const uint64_t interval = sync_data->progress_listener->checkpoint_interval;
     do {
       const uint64_t old_next = sync_data->next_progress_sample;
@@ -1133,6 +1134,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
     progress.value = bai_result_get_estimated_regret(bai_result);
     progress.secondary_value =
         bai_result_get_joint_estimated_regret(bai_result);
+    progress.near_tie_challengers =
+        bai_result_get_near_tie_challengers(bai_result);
     switch (bai_result_get_status(bai_result)) {
     case BAI_RESULT_STATUS_TIMEOUT:
       progress.status = ANALYSIS_STATUS_TIME_LIMIT;
