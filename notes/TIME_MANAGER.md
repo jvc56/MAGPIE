@@ -1809,8 +1809,8 @@ require the independent mirrored terminal-game gate.
 
 ### Preregistered judge-light Rule-of-Zero panel (2026-08-03)
 
-Status: **rule and analysis gates frozen before fresh trajectory generation;
-prospective collection pending; live allocation disabled**.
+Status: **prospective surrogate passed all frozen gates; live allocation remains
+disabled pending the separate mirrored terminal-game gate**.
 
 The next candidate is the simple Rule of Zero on the horizon-differential
 target. It stops a cumulative SIM arm only at the first checkpoint satisfying
@@ -1886,6 +1886,45 @@ stopped/matched/horizon joins, frozen subset membership, selective-judge
 accounting, and `dropped=0`; private partial chunks are never appended. Even a
 surrogate pass leaves live allocation off until the separately preregistered
 mirrored terminal-game gate passes.
+
+#### Prospective result
+
+The complete frozen panel passed a second strict audit over the contiguous
+0--319 prefix. All 320 roots came from distinct complete games, with exactly 40
+roots in each policy-by-bag stratum and no overlap with the 80-, 120-, or
+96-game exclusion manifests. The audit reconciled 535,680 shadow checkpoint
+rows, all stopped/full/equal-horizon joins, 107 exact-iteration matched arms,
+38 selectively judged roots, exact judge iterations, and zero dropped events.
+
+Rule of Zero stopped early on 283/320 roots and saved 78.1170% of nodes on
+average (complete-game Student-t 95% CI `[74.7546%,81.4795%]`). It changed the
+move relative to the p6 3M horizon on 1/320 roots, a 0.3125% observed rate with
+exact one-sided 95% upper bound 1.4738%. Because the capped equal-slice landmark
+coincides with 3M, its result is identical. This passes the frozen 1.5% gate by
+only 0.0262 percentage points; one more mismatch would have failed it.
+
+The sole horizon mismatch was a PlayChooser root at bag 71. The rule stopped at
+100,400 nodes on generated rank 1, while the 3M arm selected rank 0. The common
+judge measured missed blended utility `0.00206846` (win component `0.00157854`,
+spread component 1.7385 points). Across all 320 complete-game units, roots with
+identical choices have exactly zero missed value, yielding mean `0.000006464`
+and 95% CI `[-0.000006253,0.000019181]`, well inside the 0.001
+noninferiority margin.
+
+The independent matched subset also passed: stopped-minus-matched mean judged
+regret was `-0.00005837` over 107 roots, with 95% CI
+`[-0.00012348,0.00000673]`. Five stopped choices differed from their matched
+independent arm and were judged under the frozen selective protocol. There is
+no evidence of harmful optional-selection bias at the declared margin.
+
+This is a **surrogate pass**, not a production authorization. Its mismatch
+bound is close to the gate, each 40-root stratum is too small for a useful
+stratum-specific guarantee (the single early-PlayChooser event has a stratum
+upper bound of 11.32%), the equal-slice endpoint does not extend beyond 3M in
+this panel, and regret outside the sorted top-60 nominee scope remains
+unmeasured. The shadow score did not affect any decision and no CRC rule is
+retrofitted. Live allocation stays off until Rule of Zero passes a separately
+preregistered mirrored terminal-game experiment.
 
 ## Validation
 

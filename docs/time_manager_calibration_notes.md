@@ -90,8 +90,8 @@ terminal-game gate.
 
 ## Rule-of-Zero prospective preregistration (2026-08-03)
 
-Status: **frozen before fresh trajectory generation; live allocation remains
-disabled**.
+Status: **all frozen surrogate gates passed; live allocation remains disabled
+pending the separate mirrored terminal-game gate**.
 
 The prospective candidate stops only when `nodes >= 100000`, the normalized
 incumbent has survived at least two consecutive 256-iteration checkpoints,
@@ -126,3 +126,26 @@ with upper endpoint at most 0.001. Any failure rejects Rule of Zero and sends
 the shadow scores to a separately frozen CRC replay. It does not authorize a
 threshold search on these outcomes. A pass remains only a surrogate pass; the
 mirrored terminal-game gate is still mandatory.
+
+The final strict audit accepted all 320 roots as one contiguous prefix, with
+535,680 shadow checkpoint rows, 107 matched controls, 38 selectively judged
+roots, exact iteration/judge accounting, and `dropped=0`. Rule of Zero stopped
+early on 283 roots and saved 78.117% of nodes on average (95% CI
+`[74.755%,81.479%]`). There was one mismatch against both named 3M endpoints:
+0.3125% observed, exact one-sided 95% upper bound 1.4738%. The gate therefore
+passes narrowly; a second mismatch would have failed it.
+
+That mismatch occurred in an early PlayChooser root (bag 71): the 100,400-node
+incumbent lost `0.00206846` blended utility to the 3M choice under the common
+judge. Averaged over all complete-game units, missed value was `0.000006464`
+with 95% CI `[-0.000006253,0.000019181]`. The 107-root matched subset had mean
+stopped-minus-matched regret `-0.00005837`, 95% CI
+`[-0.00012348,0.00000673]`. Thus the mismatch, value, savings, and matched-bias
+gates all pass exactly as frozen.
+
+This result does not validate the shadow score or authorize a post-hoc CRC
+rule. Nor does it provide a precise guarantee within any individual 40-root
+stratum, test an equal-slice landmark beyond the 3M cap, or measure regret
+outside the sorted top-60 union. It promotes Rule of Zero only to the next,
+separately preregistered mirrored terminal-game gate; live allocation remains
+off.
