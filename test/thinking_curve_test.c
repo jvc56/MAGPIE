@@ -697,6 +697,39 @@ thinking_curve_find_candidate_rank(const ThinkingCurveCandidate candidates[],
   return -1;
 }
 
+// SIM progress events identify plays by SimResults arm index. Candidate
+// prefixes are inserted into MoveList, whose storage remains a heap, so that
+// arm index is not the statically sorted candidate rank used by this harness.
+// Normalize every saved checkpoint before replaying a stopped decision.
+static int thinking_curve_checkpoint_rank(int arm_index,
+                                          const int rank_by_arm[],
+                                          int num_plays) {
+  if (arm_index < 0) {
+    return -1;
+  }
+  if (arm_index >= num_plays || rank_by_arm[arm_index] < 0 ||
+      rank_by_arm[arm_index] >= num_plays) {
+    log_fatal("thinking-curve checkpoint has invalid arm index %d",
+              arm_index);
+  }
+  return rank_by_arm[arm_index];
+}
+
+static void thinking_curve_normalize_checkpoint(
+    AnalysisProgressEvent *checkpoint, const int rank_by_arm[], int num_plays,
+    const ThinkingCurveCandidate candidates[]) {
+  checkpoint->candidate_index = thinking_curve_checkpoint_rank(
+      checkpoint->candidate_index, rank_by_arm, num_plays);
+  checkpoint->best_index = thinking_curve_checkpoint_rank(
+      checkpoint->best_index, rank_by_arm, num_plays);
+  checkpoint->challenger_index = thinking_curve_checkpoint_rank(
+      checkpoint->challenger_index, rank_by_arm, num_plays);
+  if (checkpoint->best_index >= 0 && candidates != NULL) {
+    checkpoint->item_id = move_get_fingerprint(
+        &candidates[checkpoint->best_index].move);
+  }
+}
+
 static ThinkingCurveJudgeResult thinking_curve_run_judge(
     Config *config, ThinkingCurveContext *context, MoveList *candidate_moves,
     const ThinkingCurveCandidate candidates[], const bool selected_ranks[],
@@ -979,15 +1012,6 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
   }
   const AnalysisProgressEvent *finish =
       thinking_curve_find_finish(events, event_count);
-  for (size_t index = 0; index < event_count; index++) {
-    if (events[index].mode == ANALYSIS_MODE_SIM &&
-        events[index].event == ANALYSIS_EVENT_CHECKPOINT) {
-      result.checkpoints =
-          realloc_or_die(result.checkpoints, (result.checkpoint_count + 1) *
-                                                 sizeof(*result.checkpoints));
-      result.checkpoints[result.checkpoint_count++] = events[index];
-    }
-  }
   BAIResult *bai_result = sim_results_get_bai_result(context->sim_results);
   result.bai_status = bai_result_get_status(bai_result);
   result.estimated_regret = bai_result_get_estimated_regret(bai_result);
@@ -1039,6 +1063,18 @@ static ThinkingCurveArmResult thinking_curve_run_arm(
     result.win_variances[rank] = stat_get_variance(win_stat);
     result.spread_means[rank] = stat_get_mean(spread_stat);
     result.spread_variances[rank] = stat_get_variance(spread_stat);
+  }
+  for (size_t index = 0; index < event_count; index++) {
+    if (events[index].mode == ANALYSIS_MODE_SIM &&
+        events[index].event == ANALYSIS_EVENT_CHECKPOINT) {
+      result.checkpoints =
+          realloc_or_die(result.checkpoints, (result.checkpoint_count + 1) *
+                                                 sizeof(*result.checkpoints));
+      AnalysisProgressEvent checkpoint = events[index];
+      thinking_curve_normalize_checkpoint(&checkpoint, result.rank_by_arm,
+                                          num_plays, candidates);
+      result.checkpoints[result.checkpoint_count++] = checkpoint;
+    }
   }
   // BAI's astar index is the sampling controller's current representative.
   // Production ultimately selects with SimResults' comparator, which also
@@ -1994,8 +2030,25 @@ static void thinking_curve_test_generated_candidate_sort(void) {
   move_list_destroy(moves);
 }
 
+static void thinking_curve_test_checkpoint_rank_normalization(void) {
+  // A heap-backed MoveList can expose this arm-to-rank permutation. Replaying
+  // best_index=1 as candidate rank 1 would select the wrong move; it is rank 0.
+  const int rank_by_arm[] = {2, 0, 3, 1};
+  AnalysisProgressEvent checkpoint =
+      analysis_progress_event_create(ANALYSIS_MODE_SIM,
+                                     ANALYSIS_EVENT_CHECKPOINT);
+  checkpoint.candidate_index = 0;
+  checkpoint.best_index = 1;
+  checkpoint.challenger_index = 3;
+  thinking_curve_normalize_checkpoint(&checkpoint, rank_by_arm, 4, NULL);
+  assert(checkpoint.candidate_index == 2);
+  assert(checkpoint.best_index == 0);
+  assert(checkpoint.challenger_index == 1);
+}
+
 void test_thinking_curve(void) {
   thinking_curve_test_generated_candidate_sort();
+  thinking_curve_test_checkpoint_rank_normalization();
   // Regression guard for all-similar candidate panels: TOP_TWO_IDS reports
   // THRESHOLD after the uniform floor even when GK16 thresholding is disabled.
   assert(thinking_curve_bai_can_finish_before_sample_limit(
