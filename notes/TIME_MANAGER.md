@@ -1617,6 +1617,80 @@ That panel's stop target is frozen before collection by snapping the median
 out-of-fold width-60 prediction to a declared logarithmic grid; prospective
 judge outcomes cannot affect it. Live allocation remains disabled throughout.
 
+### Corrected combined-regret prospective gate (2026-08-03)
+
+The corrected representative panel completed all 96 roots and passed the
+strict post-run audit for every nested width. At width 15, mean
+candidate-generation regret was `0.000210` (game-clustered 95% CI
+`[-0.000062,+0.000481]`) and mean within-set BAI regret was `0.000168`
+(`[+0.000045,+0.000290]`). At width 40 those values were `0.000127` and
+`0.000152`. Width 60 defines the checkpoint-observable nominee union, so its
+candidate-generation label is zero by construction; its within-set regret
+was `0.000178` (`[+0.000055,+0.000302]`). Width 60 versus width 15 improved
+utility by `+0.000199` (`[-0.000072,+0.000469]`, `p=0.148`), with 3/96
+positive candidate-miss events and 4/96 common-judge best nominees outside
+the first 15. Width 60 versus width 40 improved utility by `+0.000101`
+(`[-0.000158,+0.000360]`, `p=0.440`), with one positive miss. The experiment
+does not measure candidates outside the sorted top-60 union.
+
+The five-fold complete-game cross-fitted model used 480 checkpoint rows from
+these 96 games. Its fixed-budget total-regret reliability slope was only
+`0.325`, so it failed calibration before prospective stopping. Before any
+prospective judge outcomes existed, the median out-of-fold width-60
+prediction (`0.00003006`) was snapped to the declared grid at a frozen stop
+target of `0.000025`.
+
+The first prospective run is invalid and must never be quoted as an efficacy
+result. Its early stops exposed an experimental-harness coordinate bug: the
+SIM checkpoint's `best_index` names a heap-backed `SimResults` arm, while the
+replay treated it as a static candidate rank. This commonly converted arm 31
+into candidate rank 31. Terminal capped rows already used normalized move
+identities and were unaffected. The invalid run is retained with an
+`INVALID_PROTOCOL.txt` marker. The harness now resolves checkpoint best,
+challenger, and risk-set identities into stable candidate coordinates before
+replay, and a regression reproduces the old failure and verifies the corrected
+move.
+
+The corrected prospective panel deliberately retained the same 96 fresh
+complete games, roots, folds, target, seeds, and protocol; only the fixed
+experimental binary changed. It contained 48 static and 48 PlayChooser
+trajectories, exactly 12 roots per policy and bag band, with no game overlap
+against the 200 calibration games. All 96 one-root chunks passed strict
+stopped/matched/full joins, exact matched-iteration, prediction-additivity,
+checkpoint, floor, event, judge, and `dropped=0` accounting. The repeated
+bogus rank-31 signature disappeared: all 13 early stops selected the same move
+as both their exact-iteration matched control and 3M full control (12 chose
+rank 0 and one chose rank 1), and every early choice had zero common-judge
+regret.
+
+Across all roots, stopped choices agreed with both controls on 96/96 roots.
+Relative to the 3M full control, the rule saved 6.09% of nodes on average
+(`95% CI [2.41%,9.78%]`) with exactly zero paired utility, win, or spread
+difference. The 13 early stops used 55.0% of full nodes on average, a 45.0%
+reduction; 83/96 roots reached the cap. Relative to the independent
+exact-iteration control, paired utility, win, and spread differences were
+also exactly zero. The apparent `-1.21%` node saving against that control
+(`[-2.53%,+0.10%]`) reflects terminal-rollout node variation; iteration
+targets matched exactly. Thus the optional-selection-bias and quality
+noninferiority checks pass for this frozen target.
+
+The stopped-time combined prediction does not pass the full reliability
+gate. Its through-origin slope was `1.138`, within the preregistered
+`[0.7,1.4]` interval, and aggregate prediction-minus-judge bias was
+`-0.000049` (`[-0.000278,+0.000180]`, `p=0.670`). However, 2/10 reliability
+deciles underpredicted actual regret by more than 2x, with a worst ratio of
+`9.16`. The PlayChooser stratum had slope `1.68`; the static stratum had
+slope `0.36`; the middle bag bands were especially poorly calibrated. The
+legacy and uncorrected joint estimators also failed. The safe early subset is
+encouraging evidence for the normalized cumulative replay and frozen target,
+but it cannot override the failed conditional-calibration gate.
+
+Live learned allocation therefore remains disabled. The next model must
+improve conditional calibration on fresh roots, especially across trajectory
+policy and middle-game bag bands, and then pass another prospective stopping
+gate. Even a surrogate pass would still require the separately preregistered
+mirrored terminal-game gate before production enablement.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
