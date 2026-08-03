@@ -1,8 +1,11 @@
 #include "endgame_admission_model_test.h"
 
+#include "../src/impl/endgame.h"
 #include "../src/impl/endgame_admission_model.h"
+#include "../src/impl/time_manager.h"
 #include <assert.h>
 #include <math.h>
+#include <stdint.h>
 #include <string.h>
 
 static void assert_relative_near(double actual, double expected) {

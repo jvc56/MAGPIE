@@ -3,7 +3,10 @@
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
 #include "../util/io_util.h"
+#include "analysis_progress.h"
 #include <inttypes.h>
+#include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 
 struct AnalysisTrace {

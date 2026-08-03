@@ -3,6 +3,7 @@
 #include "../compat/ctime.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 
 AnalysisProgressEvent analysis_progress_event_create(analysis_mode_t mode,
                                                      analysis_event_t event) {

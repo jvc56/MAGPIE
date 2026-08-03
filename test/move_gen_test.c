@@ -662,7 +662,7 @@ void contextual_leave_draw_count_test(void) {
       "set -lex NWL20 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
   Game *game = config_game_create(config);
   const LetterDistribution *ld = game_get_ld(game);
-  Player *player = game_get_player(game, 0);
+  const Player *player = game_get_player(game, 0);
   KLV *klv = (KLV *)player_get_klv(player);
   MoveList *move_list = move_list_create(300);
   const MoveGenArgs move_gen_args = {

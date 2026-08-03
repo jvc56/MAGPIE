@@ -1,8 +1,12 @@
 #include "endgame_admission_model.h"
 
+#include "../def/rack_defs.h"
 #include "../ent/analysis_progress.h"
+#include "endgame.h"
 #include "endgame_admission_model_default_data.h"
+#include "time_manager.h"
 #include <math.h>
+#include <stddef.h>
 #include <stdint.h>
 
 static const EndgameAdmissionDepthModel *

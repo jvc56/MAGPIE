@@ -1,6 +1,8 @@
 #include "time_manager.h"
 
+#include "../ent/analysis_progress.h"
 #include <math.h>
+#include <stddef.h>
 
 static bool time_manager_nonnegative_finite(double value) {
   return isfinite(value) && value >= 0.0;
@@ -180,7 +182,6 @@ time_manager_plan(const TimeManagerClock *clock,
       clock_after_safety / (double)clock->turns_remaining;
   plan.planned_seconds = clock->committed_current_seconds;
   plan.planned_completion_bound_seconds = clock->committed_current_seconds;
-  plan.stop_reason = TIME_MANAGER_STOP_NO_MORE_CHUNKS;
   plan.stopped_chunk_seconds = NAN;
   plan.stopped_chunk_completion_bound_seconds = NAN;
   plan.stopped_chunk_completion_confidence = NAN;

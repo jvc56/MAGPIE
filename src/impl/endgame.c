@@ -13,6 +13,7 @@
 #include "../def/move_defs.h"
 #include "../def/players_data_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/bonus_square.h"

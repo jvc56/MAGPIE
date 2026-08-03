@@ -1,6 +1,8 @@
 #include "peg_time_calibration_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -234,7 +236,7 @@ static void peg_cal_print_stages(const PegResult *result, const char *mode,
   }
 }
 
-static void peg_cal_run_arm(Config *config, const char *mode,
+static void peg_cal_run_arm(const Config *config, const char *mode,
                             const char *position, const char *label) {
   static const int sentinel_schedule[] = {8};
   const bool greedy = strcmp(label, "greedy") == 0;
@@ -384,7 +386,7 @@ static int peg_cal_parse_nominees(const Game *game, ValidatedMoves **validated,
   return count;
 }
 
-static void peg_cal_run_judge(Config *config, const char *position) {
+static void peg_cal_run_judge(const Config *config, const char *position) {
   ValidatedMoves *validated[PEG_CAL_MAX_NOMINEES] = {0};
   const Move *nominees[PEG_CAL_MAX_NOMINEES] = {0};
   char requested_moves[PEG_CAL_MAX_NOMINEES][64] = {{0}};

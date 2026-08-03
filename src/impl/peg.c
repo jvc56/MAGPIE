@@ -12,6 +12,7 @@
 #include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bag.h"
 #include "../ent/board.h"
 #include "../ent/dictionary_word.h"
@@ -3493,11 +3494,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           args->time_manager_policy->use_complete_stage_admission) {
         eval_count = admitted_candidates;
       }
-      if (calibrated_candidate_dispatch) {
-        out->time_manager_admitted_chunks++;
-      } else if (args->time_manager_policy != NULL &&
-                 args->time_manager_policy->use_complete_stage_admission &&
-                 args->enforce_time_manager) {
+      if (calibrated_candidate_dispatch ||
+          (args->time_manager_policy != NULL &&
+           args->time_manager_policy->use_complete_stage_admission &&
+           args->enforce_time_manager)) {
         out->time_manager_admitted_chunks++;
       }
       const bool complete_stage_contract =

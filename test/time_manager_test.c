@@ -1,9 +1,12 @@
 #include "time_manager_test.h"
 
+#include "../src/ent/analysis_progress.h"
 #include "../src/impl/peg_time_manager.h"
 #include "../src/impl/time_manager.h"
 #include <assert.h>
 #include <math.h>
+#include <stddef.h>
+#include <stdint.h>
 
 static void assert_near(double actual, double expected) {
   assert(fabs(actual - expected) < 1.0e-9);

@@ -114,7 +114,8 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
   bai_sync_data->avoid_prune_next_idx = 0;
   bai_sync_data->progress_listener = progress_listener;
   bai_sync_data->next_progress_sample =
-      analysis_progress_is_enabled(progress_listener)
+      progress_listener != NULL &&
+              analysis_progress_is_enabled(progress_listener)
           ? progress_listener->checkpoint_interval
           : 0;
   bai_sync_data->regret_stop_target = 0.0;
@@ -341,6 +342,9 @@ bai_estimate_joint_expected_regret(const BAISyncData *bai_sync_data,
   }
 
   const int num_arms = bai_sync_data->num_arms;
+  if (num_arms <= 0) {
+    return INFINITY;
+  }
   int order[num_arms];
   for (int index = 0; index < num_arms; index++) {
     order[index] = index;
@@ -761,8 +765,7 @@ bai_maybe_stop_for_rule_zero_while_locked(BAISampleArgs *args) {
   const int near_tie_challengers = bai_count_near_tie_challengers(sync_data);
   // `rule_zero_active` requires this pointer, but keep the explicit guard as
   // a permanent fail-closed defense around an atomically read work counter.
-  if (sync_data->rule_zero_sim_results == NULL ||
-      near_tie_challengers != 0 ||
+  if (sync_data->rule_zero_sim_results == NULL || near_tie_challengers != 0 ||
       sync_data->rule_zero_stable_checkpoints <
           sync_data->rule_zero_minimum_stable_checkpoints) {
     return;
@@ -1187,8 +1190,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       bai_options->rule_zero_checkpoint_interval > 0) {
     sync_data->rule_zero_active = true;
     sync_data->rule_zero_shadow = bai_options->rule_zero_shadow;
-    sync_data->rule_zero_minimum_nodes =
-        bai_options->rule_zero_minimum_nodes;
+    sync_data->rule_zero_minimum_nodes = bai_options->rule_zero_minimum_nodes;
     sync_data->rule_zero_minimum_stable_checkpoints =
         bai_options->rule_zero_minimum_stable_checkpoints;
     sync_data->rule_zero_check_interval =

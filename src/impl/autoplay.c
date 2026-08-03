@@ -605,7 +605,7 @@ static void game_runner_create_play_choosers(AutoplayWorker *autoplay_worker,
              game_runner->pair_game_number,
              game_get_starting_player_index(game_runner->game), player_index,
              rng_stream, (unsigned long long)strategy.seed);
-      fflush(stdout);
+      (void)fflush(stdout);
     }
   }
 }
@@ -637,79 +637,78 @@ static void game_runner_print_benchmark_turn(
   const int rng_stream = player_on_turn_index == starting_player ? 0 : 1;
 #define BENCHMARK_DELTA(field)                                                 \
   autoplay_benchmark_delta(after->field, before->field)
-  printf("PCTURN game=%d seed=%llu turn=%d start=%d player=%d policy=%s "
-         "rng_stream=%d "
-         "bag=%d own_rack=%u opp_rack=%u spread_before=%d "
-         "clock_before_ms=%.3f clock_after_ms=%.3f "
-         "elapsed_ms=%.3f budget_ms=%.3f legacy_budget_ms=%.3f move=\"%s\" "
-         "move_score=%d reserve_shortfall=%d peg_shadow_budget_ms=%.3f "
-         "peg_deposit_capped=%d "
-         "peg_withdrawal_capped=%d "
-         "regret_valid=%d expected_utility_regret=%.12f regret_model=%s "
-         "regret_scope=%s value_to_go_valid=0 "
-         "rule_zero_enabled=%d rule_zero_shadow=%d rule_zero_stopped=%d "
-         "rule_zero_would_stop=%d "
-         "rule_zero_nodes=%llu rule_zero_iterations=%llu "
-         "rule_zero_stable_checkpoints=%d rule_zero_selected_switches=%d "
-         "rule_zero_near_tie_challengers=%d rule_zero_selected_rank=%d "
-         "rule_zero_selected_id=%llu "
-         "static=%llu fallbacks=%llu "
-         "sim_call_first=%llu sim_calls=%llu sim_iters=%llu sim_nodes=%llu "
-         "peg_call_first=%llu peg_calls=%llu peg_candidate_completions=%llu "
-         "peg_stages=%llu peg_final_candidates=%llu peg_scenarios=%llu "
-         "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
-         "peg_tm_false_starts=%llu eg_call_first=%llu eg_calls=%llu "
-         "eg_nodes=%llu eg_depth_sum=%llu cgp=\"%s\"\n",
-         game_runner->pair_game_number, (unsigned long long)game_runner->seed,
-         game_runner->turn_number + 1, starting_player, player_on_turn_index,
-         time_manager ? "timemanager" : "equal", rng_stream, bag_tiles,
-         (unsigned int)rack_get_total_letters(player_get_rack(
-             game_get_player(game_runner->game, player_on_turn_index))),
-         (unsigned int)rack_get_total_letters(player_get_rack(
-             game_get_player(game_runner->game, 1 - player_on_turn_index))),
-         score_spread, clock_before_seconds * 1000.0,
-         clock_after_seconds * 1000.0, (double)elapsed_ns / 1.0e6,
-         budget_seconds * 1000.0, legacy_budget_seconds * 1000.0, move_string,
-         equity_to_int(move_get_score(move)), reserve_shortfall,
-         peg_shadow_seconds * 1000.0, peg_deposit_capped, peg_withdrawal_capped,
-         regret_estimate->valid,
-         regret_estimate->valid ? regret_estimate->expected_utility_regret
-                                : NAN,
-         play_chooser_regret_model_string(regret_estimate->model),
-         play_chooser_regret_scope_string(regret_estimate->model),
-         rule_zero_telemetry->enabled ? 1 : 0,
-         rule_zero_telemetry->shadow ? 1 : 0,
-         rule_zero_telemetry->stopped ? 1 : 0,
-         rule_zero_telemetry->would_stop ? 1 : 0,
-         (unsigned long long)rule_zero_telemetry->nodes,
-         (unsigned long long)rule_zero_telemetry->iterations,
-         rule_zero_telemetry->stable_checkpoints,
-         rule_zero_telemetry->selected_switches,
-         rule_zero_telemetry->near_tie_challengers,
-         rule_zero_telemetry->selected_candidate_rank,
-         (unsigned long long)rule_zero_telemetry->selected_move_fingerprint,
-         (unsigned long long)BENCHMARK_DELTA(static_moves),
-         (unsigned long long)BENCHMARK_DELTA(fallback_moves),
-         (unsigned long long)before->sim_calls,
-         (unsigned long long)BENCHMARK_DELTA(sim_calls),
-         (unsigned long long)BENCHMARK_DELTA(sim_iterations),
-         (unsigned long long)BENCHMARK_DELTA(sim_nodes),
-         (unsigned long long)before->peg_calls,
-         (unsigned long long)BENCHMARK_DELTA(peg_calls),
-         (unsigned long long)BENCHMARK_DELTA(peg_candidate_completions),
-         (unsigned long long)BENCHMARK_DELTA(peg_completed_stages),
-         (unsigned long long)BENCHMARK_DELTA(peg_final_candidates),
-         (unsigned long long)BENCHMARK_DELTA(peg_final_scenarios),
-         (unsigned long long)BENCHMARK_DELTA(peg_endgame_nodes),
-         (unsigned long long)BENCHMARK_DELTA(peg_partial_calls),
-         (unsigned long long)BENCHMARK_DELTA(peg_time_manager_admissions),
-         (unsigned long long)BENCHMARK_DELTA(peg_time_manager_false_starts),
-         (unsigned long long)before->endgame_calls,
-         (unsigned long long)BENCHMARK_DELTA(endgame_calls),
-         (unsigned long long)BENCHMARK_DELTA(endgame_nodes),
-         (unsigned long long)BENCHMARK_DELTA(endgame_depth), cgp);
+  printf(
+      "PCTURN game=%d seed=%llu turn=%d start=%d player=%d policy=%s "
+      "rng_stream=%d "
+      "bag=%d own_rack=%u opp_rack=%u spread_before=%d "
+      "clock_before_ms=%.3f clock_after_ms=%.3f "
+      "elapsed_ms=%.3f budget_ms=%.3f legacy_budget_ms=%.3f move=\"%s\" "
+      "move_score=%d reserve_shortfall=%d peg_shadow_budget_ms=%.3f "
+      "peg_deposit_capped=%d "
+      "peg_withdrawal_capped=%d "
+      "regret_valid=%d expected_utility_regret=%.12f regret_model=%s "
+      "regret_scope=%s value_to_go_valid=0 "
+      "rule_zero_enabled=%d rule_zero_shadow=%d rule_zero_stopped=%d "
+      "rule_zero_would_stop=%d "
+      "rule_zero_nodes=%llu rule_zero_iterations=%llu "
+      "rule_zero_stable_checkpoints=%d rule_zero_selected_switches=%d "
+      "rule_zero_near_tie_challengers=%d rule_zero_selected_rank=%d "
+      "rule_zero_selected_id=%llu "
+      "static=%llu fallbacks=%llu "
+      "sim_call_first=%llu sim_calls=%llu sim_iters=%llu sim_nodes=%llu "
+      "peg_call_first=%llu peg_calls=%llu peg_candidate_completions=%llu "
+      "peg_stages=%llu peg_final_candidates=%llu peg_scenarios=%llu "
+      "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
+      "peg_tm_false_starts=%llu eg_call_first=%llu eg_calls=%llu "
+      "eg_nodes=%llu eg_depth_sum=%llu cgp=\"%s\"\n",
+      game_runner->pair_game_number, (unsigned long long)game_runner->seed,
+      game_runner->turn_number + 1, starting_player, player_on_turn_index,
+      time_manager ? "timemanager" : "equal", rng_stream, bag_tiles,
+      (unsigned int)rack_get_total_letters(player_get_rack(
+          game_get_player(game_runner->game, player_on_turn_index))),
+      (unsigned int)rack_get_total_letters(player_get_rack(
+          game_get_player(game_runner->game, 1 - player_on_turn_index))),
+      score_spread, clock_before_seconds * 1000.0, clock_after_seconds * 1000.0,
+      (double)elapsed_ns / 1.0e6, budget_seconds * 1000.0,
+      legacy_budget_seconds * 1000.0, move_string,
+      equity_to_int(move_get_score(move)), reserve_shortfall,
+      peg_shadow_seconds * 1000.0, peg_deposit_capped, peg_withdrawal_capped,
+      regret_estimate->valid,
+      regret_estimate->valid ? regret_estimate->expected_utility_regret : NAN,
+      play_chooser_regret_model_string(regret_estimate->model),
+      play_chooser_regret_scope_string(regret_estimate->model),
+      rule_zero_telemetry->enabled ? 1 : 0, rule_zero_telemetry->shadow ? 1 : 0,
+      rule_zero_telemetry->stopped ? 1 : 0,
+      rule_zero_telemetry->would_stop ? 1 : 0,
+      (unsigned long long)rule_zero_telemetry->nodes,
+      (unsigned long long)rule_zero_telemetry->iterations,
+      rule_zero_telemetry->stable_checkpoints,
+      rule_zero_telemetry->selected_switches,
+      rule_zero_telemetry->near_tie_challengers,
+      rule_zero_telemetry->selected_candidate_rank,
+      (unsigned long long)rule_zero_telemetry->selected_move_fingerprint,
+      (unsigned long long)BENCHMARK_DELTA(static_moves),
+      (unsigned long long)BENCHMARK_DELTA(fallback_moves),
+      (unsigned long long)before->sim_calls,
+      (unsigned long long)BENCHMARK_DELTA(sim_calls),
+      (unsigned long long)BENCHMARK_DELTA(sim_iterations),
+      (unsigned long long)BENCHMARK_DELTA(sim_nodes),
+      (unsigned long long)before->peg_calls,
+      (unsigned long long)BENCHMARK_DELTA(peg_calls),
+      (unsigned long long)BENCHMARK_DELTA(peg_candidate_completions),
+      (unsigned long long)BENCHMARK_DELTA(peg_completed_stages),
+      (unsigned long long)BENCHMARK_DELTA(peg_final_candidates),
+      (unsigned long long)BENCHMARK_DELTA(peg_final_scenarios),
+      (unsigned long long)BENCHMARK_DELTA(peg_endgame_nodes),
+      (unsigned long long)BENCHMARK_DELTA(peg_partial_calls),
+      (unsigned long long)BENCHMARK_DELTA(peg_time_manager_admissions),
+      (unsigned long long)BENCHMARK_DELTA(peg_time_manager_false_starts),
+      (unsigned long long)before->endgame_calls,
+      (unsigned long long)BENCHMARK_DELTA(endgame_calls),
+      (unsigned long long)BENCHMARK_DELTA(endgame_nodes),
+      (unsigned long long)BENCHMARK_DELTA(endgame_depth), cgp);
 #undef BENCHMARK_DELTA
-  fflush(stdout);
+  (void)fflush(stdout);
   free(move_string);
 }
 
@@ -1156,7 +1155,7 @@ void autoplay_add_game(AutoplayWorker *autoplay_worker,
            game_runner->regret_estimated_turns[1],
            game_runner->regret_unknown_turns[0],
            game_runner->regret_unknown_turns[1]);
-    fflush(stdout);
+    (void)fflush(stdout);
   }
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);

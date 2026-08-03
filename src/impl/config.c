@@ -3730,8 +3730,7 @@ void config_fill_autoplay_args(const Config *config,
             .spread_forecast = config->spread_forecast,
             .num_threads = num_worker_threads_per_sim,
             .use_wide_sim_screen = use_wide_sim_screen,
-            .use_rule_zero_sim_stop =
-                rule_zero_p0_only && player_index == 0,
+            .use_rule_zero_sim_stop = rule_zero_p0_only && player_index == 0,
             // Shadow observation is result-neutral, so it may run on both
             // players; enforced stopping on player 0 takes precedence.
             .use_rule_zero_sim_shadow = rule_zero_shadow,

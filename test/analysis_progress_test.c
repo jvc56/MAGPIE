@@ -2,10 +2,14 @@
 
 #include "../src/def/bai_defs.h"
 #include "../src/def/config_defs.h"
+#include "../src/def/equity_defs.h"
+#include "../src/def/game_defs.h"
+#include "../src/def/move_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/analysis_progress.h"
 #include "../src/ent/analysis_trace.h"
 #include "../src/ent/endgame_results.h"
+#include "../src/ent/game.h"
 #include "../src/ent/move.h"
 #include "../src/ent/sim_args.h"
 #include "../src/ent/sim_results.h"
@@ -166,7 +170,8 @@ static void test_trace_storage_and_export(void) {
   FILE *stream = tmpfile();
   assert(stream != NULL);
   assert(analysis_trace_write_tsv(trace, stream));
-  rewind(stream);
+  const int seek_result = fseek(stream, 0L, SEEK_SET);
+  assert(seek_result == 0);
   char header[2048];
   const char *read_result = fgets(header, sizeof(header), stream);
   assert(read_result != NULL);
@@ -189,7 +194,8 @@ static void test_trace_storage_and_export(void) {
   read_result = fgets(row, sizeof(row), stream);
   assert(read_result != NULL);
   assert(count_tabs(row) == count_tabs(header));
-  fclose(stream);
+  const int close_result = fclose(stream);
+  assert(close_result == 0);
 
   analysis_trace_reset(trace);
   assert(analysis_trace_get_count(trace) == 0);
@@ -542,8 +548,13 @@ static void test_endgame_progress_is_observation_only(void) {
   // permission. Enforced mode must fail closed at the same boundary.
   analysis_trace_reset(trace);
   atomic_store(&admission_state.calls, 0);
+  // The previous values were read through the solver's callback pointer, which
+  // cppcheck does not track across the endgame_solve call.
+  // cppcheck-suppress redundantAssignment
   admission_state.valid = false;
+  // cppcheck-suppress redundantAssignment
   admission_state.safe_to_enforce = true;
+  // cppcheck-suppress redundantAssignment
   admission_state.should_start = true;
   enforced_args.num_threads = 1;
   thread_control_set_status(thread_control, THREAD_CONTROL_STATUS_STARTED);

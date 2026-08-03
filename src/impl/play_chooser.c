@@ -12,7 +12,9 @@
 #include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -23,6 +25,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/words.h"
@@ -34,6 +37,7 @@
 #include "peg.h"
 #include "peg_time_manager.h"
 #include "simmer.h"
+#include "time_manager.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -1021,9 +1025,9 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
         sim_results_get_best_move_index(play_chooser->sim_results);
     uint64_t final_move_fingerprint = 0;
     if (final_candidate_rank >= 0) {
-      final_move_fingerprint = move_get_fingerprint(simmed_play_get_move(
-          sim_results_get_simmed_play(play_chooser->sim_results,
-                                      final_candidate_rank)));
+      final_move_fingerprint =
+          move_get_fingerprint(simmed_play_get_move(sim_results_get_simmed_play(
+              play_chooser->sim_results, final_candidate_rank)));
     }
     play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
         .enabled = rule_zero_requested,
@@ -1556,10 +1560,10 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
     chose_move = true;
     break;
   case PLAY_CHOOSER_EVAL_SIM:
-    chose_move = play_chooser_run_sim(
-        play_chooser, game, budget_seconds, out_move,
-        /*out_simulated=*/NULL, decision_progress.run_id,
-        /*primary_decision=*/true, error_stack);
+    chose_move =
+        play_chooser_run_sim(play_chooser, game, budget_seconds, out_move,
+                             /*out_simulated=*/NULL, decision_progress.run_id,
+                             /*primary_decision=*/true, error_stack);
     break;
   case PLAY_CHOOSER_EVAL_ENDGAME: {
     AnalysisProgressListener endgame_progress =

@@ -4,11 +4,17 @@
 #include "../src/compat/memory_info.h"
 #include "../src/def/bai_defs.h"
 #include "../src/def/equity_defs.h"
+#include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/sim_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/analysis_progress.h"
 #include "../src/ent/analysis_trace.h"
+#include "../src/ent/bai_result.h"
+#include "../src/ent/equity.h"
 #include "../src/ent/game.h"
+#include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
 #include "../src/ent/rack.h"
@@ -619,7 +625,7 @@ static int thinking_curve_parse_targets(const char *value, uint64_t targets[]) {
   char *saveptr = NULL;
   int count = 0;
   uint64_t previous = 0;
-  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+  for (const char *token = strtok_r(copy, ",", &saveptr); token != NULL;
        token = strtok_r(NULL, ",", &saveptr)) {
     if (count >= THINKING_CURVE_MAX_TARGETS) {
       log_fatal("THINKING_CURVE_TARGET_NODES exceeds %d entries",
@@ -651,7 +657,7 @@ static int thinking_curve_parse_candidate_controls(const char *value,
   char *saveptr = NULL;
   int count = 0;
   int previous = 0;
-  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+  for (const char *token = strtok_r(copy, ",", &saveptr); token != NULL;
        token = strtok_r(NULL, ",", &saveptr)) {
     if (count >= THINKING_CURVE_MAX_CANDIDATE_CONTROLS) {
       log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS exceeds %d entries",
@@ -676,7 +682,7 @@ static bool thinking_curve_parse_record_move(const char *encoding, Move *move) {
   char *saveptr = NULL;
   int values[8 + MOVE_MAX_TILES];
   int count = 0;
-  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+  for (const char *token = strtok_r(copy, ",", &saveptr); token != NULL;
        token = strtok_r(NULL, ",", &saveptr)) {
     if (count >= (int)(sizeof(values) / sizeof(values[0]))) {
       free(copy);
@@ -728,7 +734,8 @@ static char *thinking_curve_copy_field(const char *line,
   return field;
 }
 
-static void thinking_curve_load_position(Config *config, const char *cgp) {
+static void thinking_curve_load_position(const Config *config,
+                                         const char *cgp) {
   ErrorStack *error_stack = error_stack_create();
   game_load_cgp(config_get_game(config), cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -828,10 +835,10 @@ thinking_curve_normalize_checkpoint(AnalysisProgressEvent *checkpoint,
 }
 
 static ThinkingCurveJudgeResult thinking_curve_run_judge(
-    Config *config, ThinkingCurveContext *context, MoveList *candidate_moves,
-    const ThinkingCurveCandidate candidates[], const bool selected_ranks[],
-    int candidate_count, int judge_plies, uint64_t samples_per_candidate,
-    int position) {
+    const Config *config, ThinkingCurveContext *context,
+    MoveList *candidate_moves, const ThinkingCurveCandidate candidates[],
+    const bool selected_ranks[], int candidate_count, int judge_plies,
+    uint64_t samples_per_candidate, int position) {
   ThinkingCurveJudgeResult result = {
       .best_rank = -1,
   };
@@ -1412,13 +1419,12 @@ static void thinking_curve_choose_risk_set(const ThinkingCurveArmResult *result,
   }
 }
 
-static void
-thinking_curve_run_regret_probe(Config *config, ThinkingCurveContext *context,
-                                const ThinkingCurveCandidate candidates[],
-                                int candidate_count, const bool risk_set[],
-                                int num_plays, int plies,
-                                uint64_t samples_per_candidate, uint64_t seed,
-                                ThinkingCurveArmResult *result) {
+static void thinking_curve_run_regret_probe(
+    const Config *config, ThinkingCurveContext *context,
+    const ThinkingCurveCandidate candidates[], int candidate_count,
+    const bool risk_set[], int num_plays, int plies,
+    uint64_t samples_per_candidate, uint64_t seed,
+    ThinkingCurveArmResult *result) {
   for (int rank = 0; rank < num_plays; rank++) {
     if (risk_set[rank]) {
       result->probe_count++;
@@ -2111,12 +2117,6 @@ static void thinking_curve_run_position(
   ThinkingCurveArmResult
       candidate_control_results[THINKING_CURVE_MAX_CANDIDATE_CONTROLS];
   memset(candidate_control_results, 0, sizeof(candidate_control_results));
-  bool control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
-  bool matched_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
-  bool candidate_control_judge_risk_sets[THINKING_CURVE_MAX_CANDIDATE_CONTROLS]
-                                        [THINKING_CURVE_MAX_CANDIDATES] = {
-                                            {false}};
-  bool control_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   uint64_t control_target_nodes = 0;
   const bool has_control =
       combined_regret_enabled || (fixed_control && regret_stop_target > 0.0);
@@ -2154,6 +2154,8 @@ static void thinking_curve_run_position(
         &event_count);
     selected_ranks[matched_control_result.decision.best_index] = true;
     if (judge_risk_plays >= 2) {
+      bool matched_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {
+          false};
       thinking_curve_choose_risk_set(
           &matched_control_result, num_plays, judge_risk_plays,
           regret_cross_arm_correlation, matched_control_judge_risk_set);
@@ -2181,6 +2183,7 @@ static void thinking_curve_run_position(
         &event_count);
     selected_ranks[control_result.decision.best_index] = true;
     if (judge_risk_plays >= 2) {
+      bool control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
       thinking_curve_choose_risk_set(
           &control_result, num_plays, judge_risk_plays,
           regret_cross_arm_correlation, control_judge_risk_set);
@@ -2190,6 +2193,7 @@ static void thinking_curve_run_position(
       }
     }
     if (capture_regret_samples) {
+      bool control_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
       thinking_curve_choose_risk_set(
           &control_result, num_plays, regret_risk_plays,
           regret_cross_arm_correlation, control_risk_set);
@@ -2262,14 +2266,14 @@ static void thinking_curve_run_position(
       if (judge_risk_plays >= 2) {
         const int candidate_risk_plays =
             judge_risk_plays < control_plays ? judge_risk_plays : control_plays;
+        bool candidate_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
         thinking_curve_choose_risk_set(
             &candidate_control_results[control_index], control_plays,
             candidate_risk_plays, regret_cross_arm_correlation,
-            candidate_control_judge_risk_sets[control_index]);
+            candidate_judge_risk_set);
         for (int rank = 0; rank < control_plays; rank++) {
           selected_ranks[rank] =
-              selected_ranks[rank] ||
-              candidate_control_judge_risk_sets[control_index][rank];
+              selected_ranks[rank] || candidate_judge_risk_set[rank];
         }
       }
     }
@@ -2941,11 +2945,12 @@ void test_thinking_curve(void) {
           const int position_risk_plays = regret_risk_plays < generated_count
                                               ? regret_risk_plays
                                               : generated_count;
-          const int position_judge_risk_plays =
-              judge_risk_plays > 0 && judge_risk_plays < generated_count
-                  ? judge_risk_plays
-              : judge_risk_plays > 0 ? generated_count
-                                     : 0;
+          int position_judge_risk_plays = 0;
+          if (judge_risk_plays > 0) {
+            position_judge_risk_plays = judge_risk_plays < generated_count
+                                            ? judge_risk_plays
+                                            : generated_count;
+          }
           thinking_curve_run_position(
               config, &context, candidate_moves, candidates, generated_count,
               cgp, groups_seen, position, game_index, bag_tiles,
@@ -3121,7 +3126,6 @@ void test_thinking_curve(void) {
           rule_zero_audit_remainder, "unknown");
       evaluated++;
     }
-    groups_seen++;
   }
   free(current_cgp);
   free(line);

@@ -1,7 +1,10 @@
 #include "peg_time_manager.h"
 
+#include "../ent/analysis_progress.h"
+#include "time_manager.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 
 enum {
   PEG_TIME_MANAGER_REFERENCE_WORKERS = 18,

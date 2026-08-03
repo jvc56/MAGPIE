@@ -33,6 +33,7 @@ void test_time_manager_match_replay(void) {
   if (seed_text == NULL || start_text == NULL || moves_text == NULL) {
     log_fatal("tm replay requires TM_REPLAY_GAME_SEED, TM_REPLAY_START, and "
               "TM_REPLAY_MOVES");
+    return;
   }
   char *seed_end = NULL;
   const uint64_t seed = strtoull(seed_text, &seed_end, 10);
@@ -53,8 +54,9 @@ void test_time_manager_match_replay(void) {
   game_set_starting_player_index(game, (int)starting_player);
   draw_starting_racks(game);
 
-  char *moves = malloc_or_die(strlen(moves_text) + 1);
-  strcpy(moves, moves_text);
+  const size_t moves_len = strlen(moves_text);
+  char *moves = malloc_or_die(moves_len + 1);
+  memcpy(moves, moves_text, moves_len + 1);
   ErrorStack *error_stack = error_stack_create();
   char *saveptr = NULL;
   for (char *move_text = strtok_r(moves, "|", &saveptr); move_text != NULL;

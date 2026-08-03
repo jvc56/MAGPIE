@@ -3,8 +3,10 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/analysis_progress.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
@@ -21,6 +23,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>

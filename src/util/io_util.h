@@ -271,7 +271,14 @@ typedef enum {
 #define log_debug(...) log_with_info(LOG_DEBUG, __FILE__, __LINE__, __VA_ARGS__)
 #define log_info(...) log_with_info(LOG_INFO, __FILE__, __LINE__, __VA_ARGS__)
 #define log_warn(...) log_with_info(LOG_WARN, __FILE__, __LINE__, __VA_ARGS__)
-#define log_fatal(...) log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__)
+// log_with_info exits the process at LOG_FATAL; the unreachable abort() makes
+// that termination visible to static analyzers so guarded fatal paths are not
+// reported as falling through.
+#define log_fatal(...)                                                         \
+  do {                                                                         \
+    log_with_info(LOG_FATAL, __FILE__, __LINE__, __VA_ARGS__);                 \
+    abort();                                                                   \
+  } while (0)
 
 void log_with_info(log_level_t log_level, const char *caller_filename,
                    int caller_line, const char *format, ...);

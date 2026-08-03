@@ -6,8 +6,9 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
-#include "../src/ent/analysis_trace.h"
+#include "../src/ent/analysis_progress.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
@@ -1371,9 +1372,10 @@ void test_endgame_value_curve(void) {
         continue;
       }
       int32_t exact_value = 0;
-      assert(endgame_curve_find_exact_value(point->tiny_move, exact_tiny_moves,
-                                            exact_values, exact_count,
-                                            &exact_value));
+      const bool exact_value_found = endgame_curve_find_exact_value(
+          point->tiny_move, exact_tiny_moves, exact_values, exact_count,
+          &exact_value);
+      assert(exact_value_found);
       printf("EGCURVEPOINT pos=%d depth=%d nodes=%llu elapsed_ns=%lld "
              "cpu_ns=%lld root=%d/%d ply2=%d/%d tiny=%llu search=%d "
              "exact=%d regret=%d\n",

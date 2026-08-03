@@ -35,8 +35,8 @@ static const int strategies[][3] = {
 static const int num_strategies_entries =
     sizeof(strategies) / sizeof(strategies[0]);
 
-void bai_wrapper_with_sim_results(BAIOptions *bai_options,
-                                  RandomVariables *rvs, RandomVariables *rng,
+void bai_wrapper_with_sim_results(BAIOptions *bai_options, RandomVariables *rvs,
+                                  RandomVariables *rng,
                                   ThreadControl *thread_control,
                                   BAILogger *bai_logger,
                                   const SimResults *rule_zero_sim_results,
@@ -274,8 +274,8 @@ static void test_bai_rule_zero_stop(int num_threads) {
   rvs_destroy(rvs);
 }
 
-static void test_bai_rule_zero_fails_closed_without_work_counter(
-    int num_threads) {
+static void
+test_bai_rule_zero_fails_closed_without_work_counter(int num_threads) {
   const double means_and_vars[] = {
       0.2, 0.0025, 0.7, 0.0025, 0.1, 0.0025,
   };
@@ -375,8 +375,8 @@ static void test_bai_rule_zero_requires_zero_near_ties(int num_threads) {
   rvs_destroy(rvs);
 }
 
-static void test_bai_rule_zero_shadow_records_without_stopping(
-    int num_threads) {
+static void
+test_bai_rule_zero_shadow_records_without_stopping(int num_threads) {
   // Shadow mode must record the first satisfying checkpoint while the search
   // itself runs to its ordinary sample boundary, so a panel can compare the
   // would-stop choice against the full-horizon choice from one trace.

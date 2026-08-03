@@ -286,7 +286,7 @@ static Config *create_oracle_config(const char *klv_name, int num_threads,
   return config;
 }
 
-static void load_position(Config *config, const char *cgp) {
+static void load_position(const Config *config, const char *cgp) {
   ErrorStack *error_stack = error_stack_create();
   game_load_cgp(config_get_game(config), cgp, error_stack);
   if (!error_stack_is_empty(error_stack)) {
@@ -467,7 +467,7 @@ static int build_nonoverlap_candidate_lists(Config *klv2_config,
 // horizon valuation. The exact minimum equals the total cap, which guarantees
 // equal samples per retained arm.
 static NominationResult nominate_candidate_list_with_klv2_policy(
-    Config *klv2_config, NominationContext *context,
+    const Config *klv2_config, NominationContext *context,
     const MoveList *candidate_moves, int samples_per_arm, uint64_t fixed_seed) {
   const int arm_count = move_list_get_count(candidate_moves);
   assert(arm_count > 0);
@@ -904,7 +904,7 @@ static bool parse_record_move(const char *encoding, Move *move) {
   char *saveptr = NULL;
   int values[8 + MOVE_MAX_TILES];
   int count = 0;
-  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+  for (const char *token = strtok_r(copy, ",", &saveptr); token != NULL;
        token = strtok_r(NULL, ",", &saveptr)) {
     if (count >= (int)(sizeof(values) / sizeof(values[0]))) {
       free(copy);
@@ -1276,6 +1276,7 @@ static void *nested_outer_worker(void *uncasted_worker) {
   for (int sample = worker->worker_index; sample < worker->outer_samples;
        sample += worker->num_workers) {
     HorizonValue root_values[KLV3_ORACLE_MAX_ROOT_CANDIDATES];
+    memset(root_values, 0, sizeof(root_values));
     const uint64_t outer_seed =
         worker->position_seed + (uint64_t)sample * KLV3_ORACLE_SEED_STRIDE;
     const uint64_t nested_seed =
@@ -2568,7 +2569,7 @@ void test_klv3_sim_oracle(void) {
     return;
   }
   if (pruning_cap_enabled) {
-    Game *klv3_game = config_get_game(klv3_config);
+    const Game *klv3_game = config_get_game(klv3_config);
     for (int player_index = 0; player_index < 2; player_index++) {
       KLV *klv =
           (KLV *)player_get_klv(game_get_player(klv3_game, player_index));
