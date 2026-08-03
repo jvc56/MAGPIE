@@ -131,6 +131,11 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->bai_options.regret_calibration = 1.0;
   sim_args->bai_options.regret_check_interval = 256;
   sim_args->bai_options.regret_min_samples_per_arm = 32;
+  sim_args->bai_options.rule_zero_enabled = false;
+  sim_args->bai_options.rule_zero_minimum_nodes = 0;
+  sim_args->bai_options.rule_zero_minimum_stable_checkpoints = 0;
+  sim_args->bai_options.rule_zero_checkpoint_interval = 0;
+  sim_args->bai_options.rule_zero_sim_results = NULL;
   // This will be overwritten in autoplay
   sim_args->bai_options.parent_worker_thread_index = 0;
   sim_args->bai_options.arm_avoid_prune = NULL;

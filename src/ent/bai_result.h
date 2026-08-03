@@ -10,6 +10,7 @@ typedef enum {
   BAI_RESULT_STATUS_WIN_PCT_CUTOFF,
   BAI_RESULT_STATUS_SAMPLE_LIMIT,
   BAI_RESULT_STATUS_REGRET_LIMIT,
+  BAI_RESULT_STATUS_RULE_ZERO_LIMIT,
   BAI_RESULT_STATUS_TIMEOUT,
   BAI_RESULT_STATUS_USER_INTERRUPT,
 } bai_result_status_t;
@@ -47,5 +48,14 @@ void bai_result_set_near_tie_challengers(BAIResult *bai_result,
 int bai_result_get_near_tie_challengers_at_stop(BAIResult *bai_result);
 void bai_result_set_near_tie_challengers_at_stop(BAIResult *bai_result,
                                                  int near_tie_challengers);
+bool bai_result_get_rule_zero_stopped(BAIResult *bai_result);
+uint64_t bai_result_get_rule_zero_stop_nodes(BAIResult *bai_result);
+uint64_t bai_result_get_rule_zero_stop_iterations(BAIResult *bai_result);
+int bai_result_get_rule_zero_stable_checkpoints(BAIResult *bai_result);
+int bai_result_get_rule_zero_selected_switches(BAIResult *bai_result);
+void bai_result_set_rule_zero_stop(BAIResult *bai_result, uint64_t nodes,
+                                   uint64_t iterations,
+                                   int stable_checkpoints,
+                                   int selected_switches);
 
 #endif

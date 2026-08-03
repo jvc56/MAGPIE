@@ -54,6 +54,11 @@ typedef struct PlayChooserStrategy {
   // This flag changes candidate coverage only; TimeManager allocation remains
   // independently fail-closed.
   bool use_wide_sim_screen;
+  // Disabled-by-default, conservative SIM early-stop experiment. When set,
+  // Rule of Zero is evaluated at 256-iteration checkpoints; invalid counters
+  // always run to the ordinary time boundary. This must remain false outside
+  // explicitly preregistered benchmark treatments.
+  bool use_rule_zero_sim_stop;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;
@@ -140,6 +145,20 @@ typedef struct PlayChooserMoveBudget {
   bool peg_deposit_capped;
   bool peg_withdrawal_capped;
 } PlayChooserMoveBudget;
+
+typedef struct PlayChooserRuleZeroTelemetry {
+  bool enabled;
+  bool stopped;
+  uint64_t nodes;
+  uint64_t iterations;
+  int stable_checkpoints;
+  int selected_switches;
+  int near_tie_challengers;
+  // Final decision identity is recorded separately from the BAI's internal
+  // arm index, which is not a candidate rank for replay purposes.
+  int selected_candidate_rank;
+  uint64_t selected_move_fingerprint;
+} PlayChooserRuleZeroTelemetry;
 
 // Residual current-search regret reported by the chooser after one move
 // selection. The value is in the same [0, 1] blended-utility units used to
@@ -302,6 +321,8 @@ PlayChooserMoveBudget
 play_chooser_get_last_move_budget(const PlayChooser *play_chooser);
 PlayChooserRegretEstimate
 play_chooser_get_last_regret_estimate(const PlayChooser *play_chooser);
+PlayChooserRuleZeroTelemetry
+play_chooser_get_last_rule_zero_telemetry(const PlayChooser *play_chooser);
 const char *play_chooser_regret_model_string(PlayChooserRegretModel model);
 // Human-readable statistical scope for trace schemas. Keep this separate from
 // the model name so audit tooling cannot accidentally present SIM_BAI as a

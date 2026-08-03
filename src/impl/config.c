@@ -3711,6 +3711,11 @@ void config_fill_autoplay_args(const Config *config,
                                    (strcmp(wide_sim_screen_env, "1") == 0 ||
                                     strcmp(wide_sim_screen_env, "true") == 0 ||
                                     strcmp(wide_sim_screen_env, "yes") == 0);
+  const char *rule_zero_p0_only_env = getenv("PCBENCH_RULE_ZERO_P0_ONLY");
+  const bool rule_zero_p0_only = rule_zero_p0_only_env != NULL &&
+                                 (strcmp(rule_zero_p0_only_env, "1") == 0 ||
+                                  strcmp(rule_zero_p0_only_env, "true") == 0 ||
+                                  strcmp(rule_zero_p0_only_env, "yes") == 0);
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
@@ -3720,6 +3725,8 @@ void config_fill_autoplay_args(const Config *config,
             .spread_forecast = config->spread_forecast,
             .num_threads = num_worker_threads_per_sim,
             .use_wide_sim_screen = use_wide_sim_screen,
+            .use_rule_zero_sim_stop =
+                rule_zero_p0_only && player_index == 0,
             .peg_scenario_stride = config->peg_scenario_stride,
             .use_calibrated_peg_time_manager =
                 !time_manager_p0_only || player_index == 0,

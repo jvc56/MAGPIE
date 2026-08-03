@@ -21,6 +21,7 @@
 #include "../ent/analysis_progress.h"
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
@@ -72,6 +73,15 @@ typedef struct BAISyncData {
   uint64_t regret_check_interval;
   uint64_t regret_min_samples_per_arm;
   uint64_t next_regret_check_sample;
+  bool rule_zero_active;
+  uint64_t rule_zero_minimum_nodes;
+  int rule_zero_minimum_stable_checkpoints;
+  uint64_t rule_zero_check_interval;
+  uint64_t next_rule_zero_check_sample;
+  const SimResults *rule_zero_sim_results;
+  int rule_zero_last_best_index;
+  int rule_zero_stable_checkpoints;
+  int rule_zero_selected_switches;
 } BAISyncData;
 
 static inline BAISyncData *
@@ -112,6 +122,15 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
   bai_sync_data->regret_check_interval = 0;
   bai_sync_data->regret_min_samples_per_arm = 0;
   bai_sync_data->next_regret_check_sample = 0;
+  bai_sync_data->rule_zero_active = false;
+  bai_sync_data->rule_zero_minimum_nodes = 0;
+  bai_sync_data->rule_zero_minimum_stable_checkpoints = 0;
+  bai_sync_data->rule_zero_check_interval = 0;
+  bai_sync_data->next_rule_zero_check_sample = 0;
+  bai_sync_data->rule_zero_sim_results = NULL;
+  bai_sync_data->rule_zero_last_best_index = -1;
+  bai_sync_data->rule_zero_stable_checkpoints = 0;
+  bai_sync_data->rule_zero_selected_switches = 0;
   return bai_sync_data;
 }
 
@@ -691,6 +710,73 @@ static inline void bai_maybe_stop_for_regret_while_locked(BAISampleArgs *args) {
   }
 }
 
+// The Rule-of-Zero is deliberately a separate, conservative policy from the
+// expected-regret stop. It observes only native work, incumbent stability, and
+// the existing 99% near-tie diagnostic. Invalid telemetry must leave the
+// ordinary time/sample boundary in charge.
+static inline void
+bai_maybe_stop_for_rule_zero_while_locked(BAISampleArgs *args) {
+  BAISyncData *sync_data = args->bai_sync_data;
+  if (!sync_data->rule_zero_active ||
+      sync_data->next_rule_zero_check_sample == 0 ||
+      sync_data->num_total_samples_completed <
+          sync_data->next_rule_zero_check_sample) {
+    return;
+  }
+
+  const uint64_t interval = sync_data->rule_zero_check_interval;
+  do {
+    const uint64_t old_next = sync_data->next_rule_zero_check_sample;
+    sync_data->next_rule_zero_check_sample += interval;
+    if (sync_data->next_rule_zero_check_sample < old_next) {
+      sync_data->next_rule_zero_check_sample = 0;
+      break;
+    }
+  } while (sync_data->next_rule_zero_check_sample > 0 &&
+           sync_data->next_rule_zero_check_sample <=
+               sync_data->num_total_samples_completed);
+
+  const int best_index = sync_data->astar_index;
+  if (best_index < 0 || best_index >= sync_data->num_arms) {
+    sync_data->rule_zero_stable_checkpoints = 0;
+    sync_data->rule_zero_last_best_index = -1;
+    return;
+  }
+  if (sync_data->rule_zero_last_best_index >= 0 &&
+      sync_data->rule_zero_last_best_index != best_index) {
+    sync_data->rule_zero_selected_switches++;
+  }
+  if (sync_data->rule_zero_last_best_index == best_index) {
+    sync_data->rule_zero_stable_checkpoints++;
+  } else {
+    sync_data->rule_zero_stable_checkpoints = 1;
+  }
+  sync_data->rule_zero_last_best_index = best_index;
+
+  const int near_tie_challengers = bai_count_near_tie_challengers(sync_data);
+  // `rule_zero_active` requires this pointer, but keep the explicit guard as
+  // a permanent fail-closed defense around an atomically read work counter.
+  if (sync_data->rule_zero_sim_results == NULL ||
+      near_tie_challengers != 0 ||
+      sync_data->rule_zero_stable_checkpoints <
+          sync_data->rule_zero_minimum_stable_checkpoints) {
+    return;
+  }
+  const uint64_t nodes =
+      sim_results_get_node_count(sync_data->rule_zero_sim_results);
+  if (nodes < sync_data->rule_zero_minimum_nodes ||
+      bai_result_get_status(sync_data->bai_result) != BAI_RESULT_STATUS_NONE) {
+    return;
+  }
+  bai_result_set_near_tie_challengers_at_stop(sync_data->bai_result,
+                                              near_tie_challengers);
+  bai_result_set_rule_zero_stop(
+      sync_data->bai_result, nodes, sync_data->num_total_samples_completed,
+      sync_data->rule_zero_stable_checkpoints,
+      sync_data->rule_zero_selected_switches);
+  bai_result_set_status(sync_data->bai_result, BAI_RESULT_STATUS_RULE_ZERO_LIMIT);
+}
+
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
                                             const int arm_index,
                                             const double sample_value) {
@@ -704,6 +790,7 @@ static inline void bai_sync_data_add_sample_with_regret_stop(
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   bai_maybe_stop_for_regret_while_locked(args);
+  bai_maybe_stop_for_rule_zero_while_locked(args);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
 
@@ -718,6 +805,7 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   bai_maybe_stop_for_regret_while_locked(args);
+  bai_maybe_stop_for_rule_zero_while_locked(args);
   BAISyncData *sync_data = args->bai_sync_data;
   if (sync_data->next_progress_sample > 0 &&
       sync_data->num_total_samples_completed >=
@@ -1067,6 +1155,24 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
             ? minimum_total
             : sync_data->regret_check_interval;
   }
+  // A malformed or incomplete Rule-of-Zero configuration is deliberately
+  // inert. This prevents a telemetry failure from becoming a faster stop.
+  if (bai_options->rule_zero_enabled &&
+      bai_options->rule_zero_sim_results != NULL &&
+      bai_options->rule_zero_minimum_nodes > 0 &&
+      bai_options->rule_zero_minimum_stable_checkpoints > 0 &&
+      bai_options->rule_zero_checkpoint_interval > 0) {
+    sync_data->rule_zero_active = true;
+    sync_data->rule_zero_minimum_nodes =
+        bai_options->rule_zero_minimum_nodes;
+    sync_data->rule_zero_minimum_stable_checkpoints =
+        bai_options->rule_zero_minimum_stable_checkpoints;
+    sync_data->rule_zero_check_interval =
+        bai_options->rule_zero_checkpoint_interval;
+    sync_data->next_rule_zero_check_sample =
+        bai_options->rule_zero_checkpoint_interval;
+    sync_data->rule_zero_sim_results = bai_options->rule_zero_sim_results;
+  }
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
     sync_data->avoid_prune_arms = bai_options->arm_avoid_prune;
@@ -1093,7 +1199,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   void *(*worker_start)(void *) = bai_worker;
   if (sync_data->next_progress_sample > 0) {
     worker_start = bai_worker_with_progress;
-  } else if (sync_data->regret_stop_target > 0.0) {
+  } else if (sync_data->regret_stop_target > 0.0 ||
+             sync_data->rule_zero_active) {
     worker_start = bai_worker_with_regret_stop;
   }
   for (int thread_index = 0; thread_index < bai_options->num_threads;

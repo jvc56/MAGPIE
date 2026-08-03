@@ -622,6 +622,7 @@ static void game_runner_print_benchmark_turn(
     double peg_shadow_seconds, bool peg_deposit_capped,
     bool peg_withdrawal_capped,
     const PlayChooserRegretEstimate *regret_estimate, const char *cgp,
+    const PlayChooserRuleZeroTelemetry *rule_zero_telemetry,
     const PlayChooserBenchmarkStats *before,
     const PlayChooserBenchmarkStats *after) {
   StringBuilder *move_builder = string_builder_create();
@@ -646,6 +647,11 @@ static void game_runner_print_benchmark_turn(
          "peg_withdrawal_capped=%d "
          "regret_valid=%d expected_utility_regret=%.12f regret_model=%s "
          "regret_scope=%s value_to_go_valid=0 "
+         "rule_zero_enabled=%d rule_zero_stopped=%d "
+         "rule_zero_nodes=%llu rule_zero_iterations=%llu "
+         "rule_zero_stable_checkpoints=%d rule_zero_selected_switches=%d "
+         "rule_zero_near_tie_challengers=%d rule_zero_selected_rank=%d "
+         "rule_zero_selected_id=%llu "
          "static=%llu fallbacks=%llu "
          "sim_call_first=%llu sim_calls=%llu sim_iters=%llu sim_nodes=%llu "
          "peg_call_first=%llu peg_calls=%llu peg_candidate_completions=%llu "
@@ -670,6 +676,15 @@ static void game_runner_print_benchmark_turn(
                                 : NAN,
          play_chooser_regret_model_string(regret_estimate->model),
          play_chooser_regret_scope_string(regret_estimate->model),
+         rule_zero_telemetry->enabled ? 1 : 0,
+         rule_zero_telemetry->stopped ? 1 : 0,
+         (unsigned long long)rule_zero_telemetry->nodes,
+         (unsigned long long)rule_zero_telemetry->iterations,
+         rule_zero_telemetry->stable_checkpoints,
+         rule_zero_telemetry->selected_switches,
+         rule_zero_telemetry->near_tie_challengers,
+         rule_zero_telemetry->selected_candidate_rank,
+         (unsigned long long)rule_zero_telemetry->selected_move_fingerprint,
          (unsigned long long)BENCHMARK_DELTA(static_moves),
          (unsigned long long)BENCHMARK_DELTA(fallback_moves),
          (unsigned long long)before->sim_calls,
@@ -952,10 +967,16 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
   PlayChooserRegretEstimate regret_estimate = {0};
+  PlayChooserRuleZeroTelemetry rule_zero_telemetry = {
+      .near_tie_challengers = -1,
+      .selected_candidate_rank = -1,
+  };
   const PlayChooser *const turn_play_chooser =
       game_runner->play_choosers[player_on_turn_index];
   if (turn_play_chooser != NULL) {
     regret_estimate = play_chooser_get_last_regret_estimate(turn_play_chooser);
+    rule_zero_telemetry =
+        play_chooser_get_last_rule_zero_telemetry(turn_play_chooser);
     if (regret_estimate.valid) {
       game_runner->expected_utility_regret[player_on_turn_index] +=
           regret_estimate.expected_utility_regret;
@@ -986,7 +1007,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
         benchmark_move_budget.peg_shadow_seconds,
         benchmark_move_budget.peg_deposit_capped,
         benchmark_move_budget.peg_withdrawal_capped, &regret_estimate,
-        benchmark_cgp, &benchmark_before, &benchmark_after);
+        benchmark_cgp, &rule_zero_telemetry, &benchmark_before,
+        &benchmark_after);
     free(benchmark_cgp);
   }
 

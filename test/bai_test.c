@@ -4,6 +4,7 @@
 #include "../src/def/cpthread_defs.h"
 #include "../src/def/thread_control_defs.h"
 #include "../src/ent/bai_result.h"
+#include "../src/ent/sim_results.h"
 #include "../src/ent/thread_control.h"
 #include "../src/ent/xoshiro.h"
 #include "../src/impl/bai.h"
@@ -200,6 +201,162 @@ void test_bai_regret_limit(int num_threads) {
 
   thread_control_destroy(thread_control);
   bai_result_destroy(bai_result);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+static void test_bai_rule_zero_stop(int num_threads) {
+  // Keep the incumbent well separated: Rule Zero may only stop after the
+  // existing 99%-CI near-tie diagnostic reports no challenger.
+  const double means_and_vars[] = {
+      0.2, 0.0025, 0.7, 0.0025, 0.1, 0.0025,
+  };
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+  SimResults *sim_results = sim_results_create(0);
+  sim_results_increment_node_count(sim_results);
+
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 32,
+      .sample_limit = 100000,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0,
+      .rule_zero_enabled = true,
+      .rule_zero_minimum_nodes = 1,
+      .rule_zero_minimum_stable_checkpoints = 2,
+      .rule_zero_checkpoint_interval = 32,
+      .rule_zero_sim_results = sim_results,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_status(bai_result) ==
+         BAI_RESULT_STATUS_RULE_ZERO_LIMIT);
+  assert(bai_result_get_rule_zero_stopped(bai_result));
+  assert(bai_result_get_rule_zero_stop_nodes(bai_result) >= 1);
+  assert(bai_result_get_rule_zero_stop_iterations(bai_result) <
+         bai_options.sample_limit);
+  assert(bai_result_get_rule_zero_stable_checkpoints(bai_result) >= 2);
+  assert(bai_result_get_near_tie_challengers_at_stop(bai_result) == 0);
+
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  sim_results_destroy(sim_results);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+static void test_bai_rule_zero_fails_closed_without_work_counter(
+    int num_threads) {
+  const double means_and_vars[] = {
+      0.2, 0.0025, 0.7, 0.0025, 0.1, 0.0025,
+  };
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 32,
+      .sample_limit = 320,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0,
+      .rule_zero_enabled = true,
+      .rule_zero_minimum_nodes = 1,
+      .rule_zero_minimum_stable_checkpoints = 2,
+      .rule_zero_checkpoint_interval = 32,
+      .rule_zero_sim_results = NULL,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  assert(!bai_result_get_rule_zero_stopped(bai_result));
+  assert(rvs_get_total_samples(rvs) == bai_options.sample_limit);
+
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  rvs_destroy(rng);
+  rvs_destroy(rvs);
+}
+
+static void test_bai_rule_zero_requires_zero_near_ties(int num_threads) {
+  // Two statistically indistinguishable leading arms are a valid reason to
+  // continue, even after the native-work and incumbent-stability thresholds
+  // have been met.
+  const double means_and_vars[] = {
+      0.7, 0.0025, 0.7, 0.0025, 0.1, 0.0025,
+  };
+  const uint64_t num_rvs = (sizeof(means_and_vars)) / (sizeof(double) * 2);
+  RandomVariablesArgs rv_args = {
+      .type = RANDOM_VARIABLES_NORMAL,
+      .num_rvs = num_rvs,
+      .means_and_vars = means_and_vars,
+      .seed = 10,
+  };
+  RandomVariables *rvs = rvs_create(&rv_args);
+  RandomVariablesArgs rng_args = {
+      .type = RANDOM_VARIABLES_UNIFORM,
+      .num_rvs = num_rvs,
+      .seed = 10,
+  };
+  RandomVariables *rng = rvs_create(&rng_args);
+  SimResults *sim_results = sim_results_create(0);
+  sim_results_increment_node_count(sim_results);
+  BAIOptions bai_options = {
+      .sampling_rule = BAI_SAMPLING_RULE_TOP_TWO_IDS,
+      .threshold = BAI_THRESHOLD_NONE,
+      .delta = 0.05,
+      .sample_minimum = 32,
+      .sample_limit = 320,
+      .time_limit_seconds = 0,
+      .num_threads = num_threads,
+      .cutoff = 0,
+      .rule_zero_enabled = true,
+      .rule_zero_minimum_nodes = 1,
+      .rule_zero_minimum_stable_checkpoints = 2,
+      .rule_zero_checkpoint_interval = 32,
+      .rule_zero_sim_results = sim_results,
+  };
+  ThreadControl *thread_control = thread_control_create();
+  BAIResult *bai_result = bai_result_create();
+  bai_wrapper(&bai_options, rvs, rng, thread_control, NULL, bai_result);
+  assert(bai_result_get_status(bai_result) == BAI_RESULT_STATUS_SAMPLE_LIMIT);
+  assert(!bai_result_get_rule_zero_stopped(bai_result));
+  assert(bai_result_get_near_tie_challengers(bai_result) > 0);
+
+  bai_result_destroy(bai_result);
+  thread_control_destroy(thread_control);
+  sim_results_destroy(sim_results);
   rvs_destroy(rng);
   rvs_destroy(rvs);
 }
@@ -714,6 +871,9 @@ void test_bai(void) {
       const int num_threads_i = num_threads[i];
       test_bai_sample_limit(num_threads_i);
       test_bai_regret_limit(num_threads_i);
+      test_bai_rule_zero_stop(num_threads_i);
+      test_bai_rule_zero_fails_closed_without_work_counter(num_threads_i);
+      test_bai_rule_zero_requires_zero_near_ties(num_threads_i);
       test_bai_regret_requires_minimum_arm_evidence(num_threads_i);
       test_bai_win_pct_cutoff(num_threads_i);
       test_bai_time_limit(num_threads_i);

@@ -361,6 +361,7 @@ struct PlayChooser {
   PlayChooserStrategy strategy;
   PlayChooserMoveBudget last_move_budget;
   PlayChooserRegretEstimate last_regret_estimate;
+  PlayChooserRuleZeroTelemetry last_rule_zero_telemetry;
   MoveList *move_list;
   SimResults *sim_results;
   SimCtx *sim_ctx;
@@ -449,6 +450,7 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->strategy = *strategy;
   play_chooser->last_move_budget = (PlayChooserMoveBudget){0};
   play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){0};
+  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){0};
   play_chooser->move_list =
       move_list_create(play_chooser_get_sim_max_candidates(strategy));
   play_chooser->sim_results = sim_results_create(0.0);
@@ -834,6 +836,11 @@ play_chooser_get_last_regret_estimate(const PlayChooser *play_chooser) {
   return play_chooser->last_regret_estimate;
 }
 
+PlayChooserRuleZeroTelemetry
+play_chooser_get_last_rule_zero_telemetry(const PlayChooser *play_chooser) {
+  return play_chooser->last_rule_zero_telemetry;
+}
+
 const char *play_chooser_regret_model_string(PlayChooserRegretModel model) {
   switch (model) {
   case PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE:
@@ -986,6 +993,13 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*inference_args=*/NULL, &sim_args);
   sim_args.spread_forecast = strategy->spread_forecast;
   sim_args.progress_listener = progress_listener;
+  if (strategy->use_rule_zero_sim_stop) {
+    sim_args.bai_options.rule_zero_enabled = true;
+    sim_args.bai_options.rule_zero_minimum_nodes = UINT64_C(100000);
+    sim_args.bai_options.rule_zero_minimum_stable_checkpoints = 2;
+    sim_args.bai_options.rule_zero_checkpoint_interval = 256;
+    sim_args.bai_options.rule_zero_sim_results = play_chooser->sim_results;
+  }
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
@@ -993,6 +1007,29 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
            error_stack);
   const double estimated_regret = bai_result_get_estimated_regret(
       sim_results_get_bai_result(play_chooser->sim_results));
+  BAIResult *bai_result = sim_results_get_bai_result(play_chooser->sim_results);
+  const int final_candidate_rank =
+      sim_results_get_best_move_index(play_chooser->sim_results);
+  uint64_t final_move_fingerprint = 0;
+  if (final_candidate_rank >= 0) {
+    final_move_fingerprint = move_get_fingerprint(simmed_play_get_move(
+        sim_results_get_simmed_play(play_chooser->sim_results,
+                                    final_candidate_rank)));
+  }
+  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
+      .enabled = strategy->use_rule_zero_sim_stop,
+      .stopped = bai_result_get_rule_zero_stopped(bai_result),
+      .nodes = bai_result_get_rule_zero_stop_nodes(bai_result),
+      .iterations = bai_result_get_rule_zero_stop_iterations(bai_result),
+      .stable_checkpoints = bai_result_get_rule_zero_stable_checkpoints(
+          bai_result),
+      .selected_switches = bai_result_get_rule_zero_selected_switches(
+          bai_result),
+      .near_tie_challengers = bai_result_get_near_tie_challengers_at_stop(
+          bai_result),
+      .selected_candidate_rank = final_candidate_rank,
+      .selected_move_fingerprint = final_move_fingerprint,
+  };
   if (isfinite(estimated_regret) && estimated_regret >= 0.0) {
     play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){
         .expected_utility_regret = estimated_regret,
@@ -1449,6 +1486,11 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   // A missing estimate is not zero regret. Reset before every decision so a
   // PEG/endgame/static turn cannot inherit the preceding sim's value.
   play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){0};
+  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
+      .enabled = strategy->use_rule_zero_sim_stop,
+      .near_tie_challengers = -1,
+      .selected_candidate_rank = -1,
+  };
   AnalysisProgressListener decision_progress =
       play_chooser_progress_for_run(play_chooser, /*parent_run_id=*/0);
   const play_chooser_eval_t eval =

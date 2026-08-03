@@ -231,9 +231,21 @@ the exact-topology panel will report that predeclared stratification.
 
 ## 7. Conditions before this draft becomes a frozen pilot
 
-1. Implement the disabled-by-default p2/top-15 Rule-of-Zero observer with
-   normalized move identity, 256-iteration cadence, and invalid-counter
-   fail-closed regression coverage.
+1. **Completed locally; pending this packet's line review.** The
+   disabled-by-default p2/top-15 observer now lives in the BAI loop, with a
+   256-iteration work-coordinate cadence.  It is enabled only by the
+   benchmark/match flag `PCBENCH_RULE_ZERO_P0_ONLY`; an absent flag leaves the
+   existing path on its ordinary solver boundary with no Rule-of-Zero exit. A malformed Rule
+   Zero configuration (including a missing native-work counter) is inert, and
+   a missing/negative near-tie diagnostic cannot stop.  `PCTURN` records the
+   enabled/stopped state, stop work, iteration, stability, switch, near-tie,
+   and the final selected candidate rank plus move fingerprint.  The latter is
+   explicitly distinct from any raw BAI arm index.  Regressions cover a legal
+   stop, a missing work counter falling through to the ordinary sample
+   boundary, and a nonzero near-tie continuing to that boundary.  The
+   forthcoming exact-topology harness must additionally normalize and record
+   checkpoint risk-set membership; that is panel telemetry, not an excuse to
+   alter this frozen rule.
 2. Freeze and complete the fresh exact-topology, judge-light mismatch panel
    through the per-root actual-live equal-slice landmark (at least 3.65M
    nodes). It must rederive p2/top-15 stop rate, savings, near-tie counts,
