@@ -1613,7 +1613,9 @@ outcomes. It compares nested sorted widths 15/24/32/40/60 under the same p6,
 candidate-generation regret and within-set BAI regret. A five-fold,
 source-game cross-fitted model predicts the two components separately; only a
 subsequent fresh cumulative panel may assess the combined stopped-time signal.
-Live allocation remains disabled throughout.
+That panel's stop target is frozen before collection by snapping the median
+out-of-fold width-60 prediction to a declared logarithmic grid; prospective
+judge outcomes cannot affect it. Live allocation remains disabled throughout.
 
 ## Validation
 
