@@ -48,6 +48,7 @@
 
 enum {
   THINKING_CURVE_MAX_CANDIDATES = 128,
+  THINKING_CURVE_MAX_CANDIDATE_CONTROLS = 8,
   THINKING_CURVE_MAX_TARGETS = 32,
   THINKING_CURVE_RAW_MOVE_CAPACITY = 160,
 };
@@ -244,6 +245,35 @@ static int thinking_curve_parse_targets(const char *value, uint64_t targets[]) {
   if (count == 0) {
     log_fatal("THINKING_CURVE_TARGET_NODES must not be empty");
   }
+  return count;
+}
+
+static int thinking_curve_parse_candidate_controls(const char *value,
+                                                   int controls[]) {
+  if (strcmp(value, "0") == 0) {
+    return 0;
+  }
+  char *copy = string_duplicate(value);
+  char *saveptr = NULL;
+  int count = 0;
+  int previous = 0;
+  for (char *token = strtok_r(copy, ",", &saveptr); token != NULL;
+       token = strtok_r(NULL, ",", &saveptr)) {
+    if (count >= THINKING_CURVE_MAX_CANDIDATE_CONTROLS) {
+      log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS exceeds %d entries",
+                THINKING_CURVE_MAX_CANDIDATE_CONTROLS);
+    }
+    char *end = NULL;
+    const long parsed = strtol(token, &end, 10);
+    if (end == token || *end != '\0' || parsed < 2 || parsed > INT32_MAX ||
+        (count > 0 && parsed <= previous)) {
+      log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS must be strictly "
+                "increasing integers of at least 2");
+    }
+    controls[count++] = (int)parsed;
+    previous = (int)parsed;
+  }
+  free(copy);
   return count;
 }
 
@@ -542,6 +572,28 @@ static void thinking_curve_print_point(
       event->challenger_value, estimated_regret, joint_estimated_regret,
       regret_at_stop, joint_regret_at_stop, near_tie_challengers,
       near_tie_challengers_at_stop, regret_stop_target, bai_status);
+}
+
+static void
+thinking_curve_print_judge_candidates(int source_index, int position,
+                                      int game_index, int bag_tiles, int plies,
+                                      const ThinkingCurveJudgeResult *judge) {
+  int printed = 0;
+  for (int rank = 0; rank < THINKING_CURVE_MAX_CANDIDATES; rank++) {
+    if (!isfinite(judge->utility[rank])) {
+      continue;
+    }
+    printf("THINKING_CURVE_JUDGE_CANDIDATE source_index=%d position=%d "
+           "game=%d bag=%d plies=%d rank=%d utility=%.12f "
+           "utility_sem=%.12f win=%.12f spread=%.12f best=%d\n",
+           source_index, position, game_index, bag_tiles, plies, rank,
+           judge->utility[rank], judge->utility_sem[rank], judge->win[rank],
+           judge->spread[rank], rank == judge->best_rank);
+    printed++;
+  }
+  if (printed != judge->candidate_count) {
+    log_fatal("thinking-curve judge candidate-row accounting differs");
+  }
 }
 
 static ThinkingCurveArmResult thinking_curve_run_arm(
@@ -1011,7 +1063,8 @@ static void thinking_curve_run_position(
     bool regret_stop_use_joint, double regret_cross_arm_correlation,
     double regret_calibration, uint64_t regret_check_interval,
     uint64_t regret_min_samples_per_arm, bool fixed_control,
-    bool matched_control, int candidate_control_plays) {
+    bool matched_control, const int candidate_control_plays[],
+    int candidate_control_count) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -1120,17 +1173,27 @@ static void thinking_curve_run_position(
   }
   ThinkingCurveArmResult control_result = {0};
   ThinkingCurveArmResult matched_control_result = {0};
-  ThinkingCurveArmResult candidate_control_result = {0};
+  ThinkingCurveArmResult
+      candidate_control_results[THINKING_CURVE_MAX_CANDIDATE_CONTROLS] = {{0}};
   bool control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   bool matched_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
-  bool candidate_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {
-      false};
+  bool candidate_control_judge_risk_sets[THINKING_CURVE_MAX_CANDIDATE_CONTROLS]
+                                        [THINKING_CURVE_MAX_CANDIDATES] = {
+                                            {false}};
   bool control_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   uint64_t control_target_nodes = 0;
   const bool has_control = fixed_control && regret_stop_target > 0.0;
   const bool has_matched_control = matched_control && regret_stop_target > 0.0;
-  const bool has_candidate_control =
-      candidate_control_plays >= 2 && candidate_control_plays < num_plays;
+  int active_candidate_controls[THINKING_CURVE_MAX_CANDIDATE_CONTROLS];
+  int active_candidate_control_count = 0;
+  for (int control_index = 0; control_index < candidate_control_count;
+       control_index++) {
+    if (candidate_control_plays[control_index] < num_plays) {
+      active_candidate_controls[active_candidate_control_count++] =
+          candidate_control_plays[control_index];
+    }
+  }
+  const bool has_candidate_control = active_candidate_control_count > 0;
   uint64_t matched_control_target_nodes = 0;
   if (has_matched_control) {
     const uint64_t stopped_iterations =
@@ -1194,58 +1257,67 @@ static void thinking_curve_run_position(
     }
   }
   uint64_t candidate_control_target_nodes = 0;
-  uint64_t candidate_control_minimum = 0;
-  int candidate_control_best_index = 0;
+  uint64_t candidate_control_minimums[THINKING_CURVE_MAX_CANDIDATE_CONTROLS] = {
+      0};
+  int candidate_control_best_indices[THINKING_CURVE_MAX_CANDIDATE_CONTROLS] = {
+      0};
   if (has_candidate_control) {
     for (int target_index = 0; target_index < target_count; target_index++) {
       if (targets[target_index] <= max_nodes) {
         candidate_control_target_nodes = targets[target_index];
       }
     }
-    const uint64_t total_iterations =
-        candidate_control_target_nodes / ((uint64_t)plies + 1);
-    const uint64_t denominator = (uint64_t)candidate_control_plays * 1000;
-    candidate_control_minimum =
-        (total_iterations * (uint64_t)uniform_floor_per_mille +
-         denominator / 2) /
-        denominator;
-    if (candidate_control_minimum == 0) {
-      candidate_control_minimum = 1;
-    }
-    if (explicit_min_play_iterations > 0) {
-      candidate_control_minimum = explicit_min_play_iterations;
-    }
-    move_list_reset(candidate_moves);
-    move_list_set_rack(candidate_moves,
-                       player_get_rack(game_get_player(game, player_index)));
-    for (int rank = 0; rank < candidate_control_plays; rank++) {
-      move_list_add_move(candidate_moves, &candidates[rank].move);
-      if (candidates[rank].oracle_utility >
-          candidates[candidate_control_best_index].oracle_utility) {
-        candidate_control_best_index = rank;
+    for (int control_index = 0; control_index < active_candidate_control_count;
+         control_index++) {
+      const int control_plays = active_candidate_controls[control_index];
+      const uint64_t total_iterations =
+          candidate_control_target_nodes / ((uint64_t)plies + 1);
+      const uint64_t denominator = (uint64_t)control_plays * 1000;
+      candidate_control_minimums[control_index] =
+          (total_iterations * (uint64_t)uniform_floor_per_mille +
+           denominator / 2) /
+          denominator;
+      if (candidate_control_minimums[control_index] == 0) {
+        candidate_control_minimums[control_index] = 1;
       }
-    }
-    candidate_control_result = thinking_curve_run_arm(
-        config, context, candidate_moves, candidate_control_plays, candidates,
-        candidate_count, plies, candidate_control_target_nodes,
-        candidate_control_minimum, seed,
-        ((uint64_t)(source_index + 1) << 32) | ((uint64_t)plies << 24) |
-            UINT64_C(0x43414e),
-        /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
-        regret_cross_arm_correlation, regret_calibration, regret_check_interval,
-        regret_min_samples_per_arm, &event_count);
-    selected_ranks[candidate_control_result.decision.best_index] = true;
-    if (judge_risk_plays >= 2) {
-      const int candidate_risk_plays =
-          judge_risk_plays < candidate_control_plays ? judge_risk_plays
-                                                     : candidate_control_plays;
-      thinking_curve_choose_risk_set(
-          &candidate_control_result, candidate_control_plays,
-          candidate_risk_plays, regret_cross_arm_correlation,
-          candidate_control_judge_risk_set);
-      for (int rank = 0; rank < candidate_control_plays; rank++) {
-        selected_ranks[rank] =
-            selected_ranks[rank] || candidate_control_judge_risk_set[rank];
+      if (explicit_min_play_iterations > 0) {
+        candidate_control_minimums[control_index] =
+            explicit_min_play_iterations;
+      }
+      move_list_reset(candidate_moves);
+      move_list_set_rack(candidate_moves,
+                         player_get_rack(game_get_player(game, player_index)));
+      for (int rank = 0; rank < control_plays; rank++) {
+        move_list_add_move(candidate_moves, &candidates[rank].move);
+        if (candidates[rank].oracle_utility >
+            candidates[candidate_control_best_indices[control_index]]
+                .oracle_utility) {
+          candidate_control_best_indices[control_index] = rank;
+        }
+      }
+      candidate_control_results[control_index] = thinking_curve_run_arm(
+          config, context, candidate_moves, control_plays, candidates,
+          candidate_count, plies, candidate_control_target_nodes,
+          candidate_control_minimums[control_index], seed,
+          ((uint64_t)(source_index + 1) << 32) | ((uint64_t)plies << 24) |
+              UINT64_C(0x430000) | (uint64_t)control_plays,
+          /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
+          regret_cross_arm_correlation, regret_calibration,
+          regret_check_interval, regret_min_samples_per_arm, &event_count);
+      selected_ranks[candidate_control_results[control_index]
+                         .decision.best_index] = true;
+      if (judge_risk_plays >= 2) {
+        const int candidate_risk_plays =
+            judge_risk_plays < control_plays ? judge_risk_plays : control_plays;
+        thinking_curve_choose_risk_set(
+            &candidate_control_results[control_index], control_plays,
+            candidate_risk_plays, regret_cross_arm_correlation,
+            candidate_control_judge_risk_sets[control_index]);
+        for (int rank = 0; rank < control_plays; rank++) {
+          selected_ranks[rank] =
+              selected_ranks[rank] ||
+              candidate_control_judge_risk_sets[control_index][rank];
+        }
       }
     }
   }
@@ -1253,14 +1325,33 @@ static void thinking_curve_run_position(
       config, context, candidate_moves, candidates, selected_ranks,
       candidate_count, judge_plies, judge_samples, position);
 
-  printf("THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
-         "plies=%d candidates=%d max_nodes=%" PRIu64
-         " uniform_floor_per_mille=%d"
-         " judge_plies=%d judge_samples=%" PRIu64
-         " judge_risk_plays=%d panel_best_rank=%d cgp=%s\n",
-         source_index, position, game_index, bag_tiles, plies, num_plays,
-         max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
-         judge_risk_plays, panel_best_index, cgp);
+  printf(
+      "THINKING_CURVE_POSITION source_index=%d position=%d game=%d bag=%d "
+      "plies=%d candidates=%d max_nodes=%" PRIu64 " uniform_floor_per_mille=%d"
+      " judge_plies=%d judge_samples=%" PRIu64
+      " judge_risk_plays=%d panel_best_rank=%d"
+      " static_best_equity=%.6f static_primary_gap=%.6f"
+      " candidate_control_static_gaps=",
+      source_index, position, game_index, bag_tiles, plies, num_plays,
+      max_nodes, uniform_floor_per_mille, judge_plies, judge_samples,
+      judge_risk_plays, panel_best_index,
+      equity_to_double(move_get_equity(&candidates[0].move)),
+      equity_to_double(move_get_equity(&candidates[0].move)) -
+          equity_to_double(move_get_equity(&candidates[num_plays - 1].move)));
+  for (int control_index = 0; control_index < active_candidate_control_count;
+       control_index++) {
+    const int cutoff_rank = active_candidate_controls[control_index] - 1;
+    const double cutoff_gap =
+        equity_to_double(move_get_equity(&candidates[0].move)) -
+        equity_to_double(move_get_equity(&candidates[cutoff_rank].move));
+    printf("%s%.6f", control_index == 0 ? "" : ",", cutoff_gap);
+  }
+  if (!has_candidate_control) {
+    printf("0");
+  }
+  printf(" cgp=%s\n", cgp);
+  thinking_curve_print_judge_candidates(source_index, position, game_index,
+                                        bag_tiles, plies, &judge);
   int decision_index = 0;
   for (int target_index = 0; target_index < target_count; target_index++) {
     if (targets[target_index] <= max_nodes) {
@@ -1317,19 +1408,26 @@ static void thinking_curve_run_position(
         /*regret_stop_target=*/0.0);
   }
   if (has_candidate_control) {
-    thinking_curve_print_point(
-        source_index, position, game_index, bag_tiles, plies,
-        candidate_control_target_nodes, /*final=*/false, "candidate_limit",
-        &candidate_control_result.decision, candidates, candidate_count,
-        candidate_control_plays, panel_best_index, candidate_control_best_index,
-        candidate_control_minimum, &judge, candidate_control_result.bai_status,
-        candidate_control_result.estimated_regret,
-        candidate_control_result.joint_estimated_regret,
-        candidate_control_result.regret_at_stop,
-        candidate_control_result.joint_regret_at_stop,
-        candidate_control_result.near_tie_challengers,
-        candidate_control_result.near_tie_challengers_at_stop,
-        /*regret_stop_target=*/0.0);
+    for (int control_index = 0; control_index < active_candidate_control_count;
+         control_index++) {
+      const int control_plays = active_candidate_controls[control_index];
+      const ThinkingCurveArmResult *candidate_control =
+          &candidate_control_results[control_index];
+      thinking_curve_print_point(
+          source_index, position, game_index, bag_tiles, plies,
+          candidate_control_target_nodes, /*final=*/false, "candidate_limit",
+          &candidate_control->decision, candidates, candidate_count,
+          control_plays, panel_best_index,
+          candidate_control_best_indices[control_index],
+          candidate_control_minimums[control_index], &judge,
+          candidate_control->bai_status, candidate_control->estimated_regret,
+          candidate_control->joint_estimated_regret,
+          candidate_control->regret_at_stop,
+          candidate_control->joint_regret_at_stop,
+          candidate_control->near_tie_challengers,
+          candidate_control->near_tie_challengers_at_stop,
+          /*regret_stop_target=*/0.0);
+    }
   }
   thinking_curve_print_point(
       source_index, position, game_index, bag_tiles, plies,
@@ -1352,10 +1450,7 @@ static void thinking_curve_run_position(
          " judge_seconds=%.6f judge_forced=%d control=%d "
          "control_iterations=%" PRIu64 " control_nodes=%" PRIu64
          " matched_control=%d matched_target_nodes=%" PRIu64
-         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64
-         " candidate_control=%d candidate_control_plays=%d "
-         "candidate_control_iterations=%" PRIu64
-         " candidate_control_nodes=%" PRIu64 "\n",
+         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64,
          source_index, position, plies, event_count,
          decisions[decision_count - 1].decision.iterations,
          decisions[decision_count - 1].decision.nodes, judge.candidate_count,
@@ -1364,10 +1459,37 @@ static void thinking_curve_run_position(
          control_result.decision.nodes, has_matched_control,
          matched_control_target_nodes,
          matched_control_result.decision.iterations,
-         matched_control_result.decision.nodes, has_candidate_control,
-         has_candidate_control ? candidate_control_plays : 0,
-         candidate_control_result.decision.iterations,
-         candidate_control_result.decision.nodes);
+         matched_control_result.decision.nodes);
+  printf(" candidate_control=%d candidate_controls=%d "
+         "candidate_control_plays=",
+         has_candidate_control, active_candidate_control_count);
+  for (int control_index = 0; control_index < active_candidate_control_count;
+       control_index++) {
+    printf("%s%d", control_index == 0 ? "" : ",",
+           active_candidate_controls[control_index]);
+  }
+  if (!has_candidate_control) {
+    printf("0");
+  }
+  printf(" candidate_control_iterations=");
+  for (int control_index = 0; control_index < active_candidate_control_count;
+       control_index++) {
+    printf("%s%" PRIu64, control_index == 0 ? "" : ",",
+           candidate_control_results[control_index].decision.iterations);
+  }
+  if (!has_candidate_control) {
+    printf("0");
+  }
+  printf(" candidate_control_nodes=");
+  for (int control_index = 0; control_index < active_candidate_control_count;
+       control_index++) {
+    printf("%s%" PRIu64, control_index == 0 ? "" : ",",
+           candidate_control_results[control_index].decision.nodes);
+  }
+  if (!has_candidate_control) {
+    printf("0");
+  }
+  printf("\n");
   for (int decision_index_to_destroy = 0;
        decision_index_to_destroy < decision_count;
        decision_index_to_destroy++) {
@@ -1376,7 +1498,11 @@ static void thinking_curve_run_position(
   }
   thinking_curve_sample_trace_destroy(control_result.sample_trace);
   thinking_curve_sample_trace_destroy(matched_control_result.sample_trace);
-  thinking_curve_sample_trace_destroy(candidate_control_result.sample_trace);
+  for (int control_index = 0; control_index < active_candidate_control_count;
+       control_index++) {
+    thinking_curve_sample_trace_destroy(
+        candidate_control_results[control_index].sample_trace);
+  }
   fflush_or_die(stdout);
 }
 
@@ -1484,8 +1610,11 @@ void test_thinking_curve(void) {
                                  "THINKING_CURVE_FIXED_CONTROL", 0) != 0;
   const bool matched_control = thinking_curve_env_nonnegative_int(
                                    "THINKING_CURVE_MATCHED_CONTROL", 0) != 0;
-  const int candidate_control_plays = thinking_curve_env_nonnegative_int(
-      "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS", 0);
+  const char *candidate_control_string =
+      thinking_curve_env_string("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS", "0");
+  int candidate_control_plays[THINKING_CURVE_MAX_CANDIDATE_CONTROLS];
+  const int candidate_control_count = thinking_curve_parse_candidate_controls(
+      candidate_control_string, candidate_control_plays);
   const double wall_seconds =
       thinking_curve_env_nonnegative_double("THINKING_CURVE_WALL_SECONDS", 0.0);
   const char *target_string = thinking_curve_env_string(
@@ -1529,11 +1658,14 @@ void test_thinking_curve(void) {
   if ((fixed_control || matched_control) && regret_stop_target <= 0.0) {
     log_fatal("thinking-curve controls require a positive regret stop target");
   }
-  if (candidate_control_plays == 1 || candidate_control_plays >= num_plays) {
-    log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS must be zero or between "
-              "2 and THINKING_CURVE_NUM_PLAYS - 1");
+  for (int control_index = 0; control_index < candidate_control_count;
+       control_index++) {
+    if (candidate_control_plays[control_index] >= num_plays) {
+      log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS entries must be less "
+                "than THINKING_CURVE_NUM_PLAYS");
+    }
   }
-  if (candidate_control_plays > 0 && target_count != 1) {
+  if (candidate_control_count > 0 && target_count != 1) {
     log_fatal("candidate-limit control requires exactly one target");
   }
   if (explicit_min_play_iterations > 0) {
@@ -1570,7 +1702,7 @@ void test_thinking_curve(void) {
          " regret_correlation=%.6f"
          " regret_calibration=%.6f regret_check_interval=%" PRIu64
          " regret_min_samples_per_arm=%" PRIu64 " fixed_control=%d"
-         " matched_control=%d candidate_control_plays=%d"
+         " matched_control=%d candidate_control_plays=%s"
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
          corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
@@ -1580,7 +1712,8 @@ void test_thinking_curve(void) {
          regret_paired_samples, regret_stop_target, regret_stop_use_joint,
          regret_cross_arm_correlation, regret_calibration,
          regret_check_interval, regret_min_samples_per_arm, fixed_control,
-         matched_control, candidate_control_plays, wall_seconds, target_string);
+         matched_control, candidate_control_string, wall_seconds,
+         target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -1640,7 +1773,7 @@ void test_thinking_curve(void) {
               regret_stop_use_joint, regret_cross_arm_correlation,
               regret_calibration, regret_check_interval,
               regret_min_samples_per_arm, fixed_control, matched_control,
-              candidate_control_plays);
+              candidate_control_plays, candidate_control_count);
         } else {
           printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
                  "game=%d bag=%d plies=%d candidates=%d regret=0 cgp=%s\n",
@@ -1704,7 +1837,7 @@ void test_thinking_curve(void) {
             regret_stop_use_joint, regret_cross_arm_correlation,
             regret_calibration, regret_check_interval,
             regret_min_samples_per_arm, fixed_control, matched_control,
-            candidate_control_plays);
+            candidate_control_plays, candidate_control_count);
         evaluated++;
       }
       groups_seen++;
@@ -1779,7 +1912,8 @@ void test_thinking_curve(void) {
           regret_risk_plays, regret_paired_samples, regret_stop_target,
           regret_stop_use_joint, regret_cross_arm_correlation,
           regret_calibration, regret_check_interval, regret_min_samples_per_arm,
-          fixed_control, matched_control, candidate_control_plays);
+          fixed_control, matched_control, candidate_control_plays,
+          candidate_control_count);
       evaluated++;
     }
     groups_seen++;

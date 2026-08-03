@@ -42,6 +42,25 @@ def parse_csv_ints(value: str) -> tuple[int, ...]:
     return values
 
 
+def parse_optional_csv_ints(value: str) -> tuple[int, ...]:
+    if value in {"", "0"}:
+        return ()
+    return parse_csv_ints(value)
+
+
+def normalize_candidate_controls(
+    value: int | tuple[int, ...] | list[int],
+) -> tuple[int, ...]:
+    if isinstance(value, int):
+        return () if value == 0 else (value,)
+    return tuple(value)
+
+
+def parse_row_csv_ints(row: dict[str, str], key: str) -> tuple[int, ...]:
+    value = row.get(key, "")
+    return () if value in {"", "0"} else tuple(int(item) for item in value.split(","))
+
+
 def eligible_indices(corpus: Path, minimum_bag: int, maximum_bag: int) -> list[int]:
     eligible: list[int] = []
     expected_position = 0
@@ -132,16 +151,18 @@ def validate_chunk_accounting(
     regret_paired_samples: int,
     fixed_control: bool,
     matched_control: bool,
-    candidate_control_plays: int = 0,
+    candidate_control_plays: int | tuple[int, ...] | list[int] = 0,
 ) -> list[int]:
     """Validate every accepted root before its private log is appended."""
 
+    candidate_controls = normalize_candidate_controls(candidate_control_plays)
     text = path.read_text(encoding="utf-8")
     if "THINKING_CURVE_DONE " not in text:
         raise ValueError("successful chunk lacks THINKING_CURVE_DONE")
     points: dict[int, list[dict[str, str]]] = defaultdict(list)
     done: dict[int, dict[str, str]] = {}
     panels: dict[int, list[dict[str, str]]] = defaultdict(list)
+    judge_candidate_rows: dict[int, list[dict[str, str]]] = defaultdict(list)
     arms: dict[tuple[int, int], int] = defaultdict(int)
     samples: dict[tuple[int, int], int] = defaultdict(int)
     forced: set[int] = set()
@@ -166,6 +187,10 @@ def validate_chunk_accounting(
             row = fields(line)
             if int(row["plies"]) == plies:
                 panels[int(row["source_index"])].append(row)
+        elif line.startswith("THINKING_CURVE_JUDGE_CANDIDATE "):
+            row = fields(line)
+            if int(row["plies"]) == plies:
+                judge_candidate_rows[int(row["source_index"])].append(row)
         elif line.startswith("THINKING_CURVE_REGRET_ARM "):
             row = fields(line)
             if int(row["plies"]) == plies:
@@ -198,12 +223,15 @@ def validate_chunk_accounting(
             raise ValueError(f"source {source_index} lacks stopped points")
         primary_arm_plays = int(stopped[-1].get("arm_plays", num_plays))
         has_candidate_control = int(done_row.get("candidate_control", "0")) == 1
+        active_candidate_controls = tuple(
+            control for control in candidate_controls if primary_arm_plays > control
+        )
         expected_control_kinds = {"stopped"}
         if fixed_control:
             expected_control_kinds.add("full")
         if matched_control:
             expected_control_kinds.add("matched")
-        if candidate_control_plays > 0 and primary_arm_plays > candidate_control_plays:
+        if active_candidate_controls:
             if not has_candidate_control:
                 raise ValueError(f"source {source_index} lacks candidate-limit control")
             expected_control_kinds.add("candidate_limit")
@@ -220,7 +248,7 @@ def validate_chunk_accounting(
             len(included_targets)
             + int(fixed_control)
             + int(matched_control)
-            + int(has_candidate_control)
+            + len(active_candidate_controls)
         )
         if int(done_row["events"]) != expected_events:
             raise ValueError(f"source {source_index} has wrong event count")
@@ -295,39 +323,62 @@ def validate_chunk_accounting(
                 raise ValueError(f"source {source_index} full nodes do not join")
         if has_candidate_control:
             controls = by_kind["candidate_limit"]
-            if len(controls) != 1:
+            if len(controls) != len(active_candidate_controls):
                 raise ValueError(
-                    f"source {source_index} lacks one candidate-limit control"
+                    f"source {source_index} has the wrong candidate-limit controls"
                 )
-            candidate = controls[0]
             target = included_targets[-1]
             maximum_iterations = target // (plies + 1)
-            if int(candidate["target_nodes"]) != target:
+            controls_by_size = {
+                int(candidate.get("arm_plays", "-1")): candidate
+                for candidate in controls
+            }
+            if tuple(sorted(controls_by_size)) != active_candidate_controls:
                 raise ValueError(
-                    f"source {source_index} candidate-control target differs"
+                    f"source {source_index} candidate-control sizes differ"
                 )
-            if int(candidate.get("arm_plays", "-1")) != candidate_control_plays:
+            iterations: list[int] = []
+            nodes: list[int] = []
+            for control_plays in active_candidate_controls:
+                candidate = controls_by_size[control_plays]
+                if int(candidate["target_nodes"]) != target:
+                    raise ValueError(
+                        f"source {source_index} candidate-control target differs"
+                    )
+                if (
+                    int(candidate["bai_status"]) == 3
+                    and int(candidate["iterations"]) != maximum_iterations
+                ):
+                    raise ValueError(
+                        f"source {source_index} candidate-control iterations differ"
+                    )
+                if (
+                    int(candidate["iterations"]) > maximum_iterations
+                    or int(candidate["nodes"]) > target
+                ):
+                    raise ValueError(
+                        f"source {source_index} candidate control exceeded budget"
+                    )
+                if (
+                    int(candidate["iterations"])
+                    < int(candidate["min_play_iterations"]) * control_plays
+                ):
+                    raise ValueError(
+                        f"source {source_index} candidate control missed sampling floor"
+                    )
+                iterations.append(int(candidate["iterations"]))
+                nodes.append(int(candidate["nodes"]))
+            done_controls = int(done_row.get("candidate_controls", "1"))
+            if done_controls != len(active_candidate_controls):
                 raise ValueError(
-                    f"source {source_index} candidate-control size differs"
-                )
-            if int(candidate["bai_status"]) == 3 and int(candidate["iterations"]) != maximum_iterations:
-                raise ValueError(
-                    f"source {source_index} candidate-control iterations differ"
-                )
-            if int(candidate["iterations"]) > maximum_iterations or int(candidate["nodes"]) > target:
-                raise ValueError(
-                    f"source {source_index} candidate control exceeded budget"
-                )
-            if int(candidate["iterations"]) < int(candidate["min_play_iterations"]) * candidate_control_plays:
-                raise ValueError(
-                    f"source {source_index} candidate control missed sampling floor"
+                    f"source {source_index} mismatches candidate_controls"
                 )
             for key, expected in (
-                ("candidate_control_plays", candidate_control_plays),
-                ("candidate_control_iterations", int(candidate["iterations"])),
-                ("candidate_control_nodes", int(candidate["nodes"])),
+                ("candidate_control_plays", active_candidate_controls),
+                ("candidate_control_iterations", tuple(iterations)),
+                ("candidate_control_nodes", tuple(nodes)),
             ):
-                if int(done_row.get(key, "-1")) != expected:
+                if parse_row_csv_ints(done_row, key) != expected:
                     raise ValueError(f"source {source_index} mismatches {key}")
 
         if int(done_row["final_iterations"]) != primary_iterations:
@@ -342,6 +393,31 @@ def validate_chunk_accounting(
                 raise ValueError(f"source {source_index} forced judge is invalid")
         elif judge_candidates < 2 or judge_iterations != judge_samples * judge_candidates:
             raise ValueError(f"source {source_index} judge accounting differs")
+
+        root_judge_rows = judge_candidate_rows.get(source_index, [])
+        # Older frozen binaries do not emit per-nominee rows. New binaries do,
+        # and whenever present they must exactly describe the common judge.
+        if root_judge_rows:
+            if len(root_judge_rows) != judge_candidates:
+                raise ValueError(
+                    f"source {source_index} judge candidate rows differ"
+                )
+            ranks = [int(row["rank"]) for row in root_judge_rows]
+            if len(set(ranks)) != judge_candidates:
+                raise ValueError(
+                    f"source {source_index} repeats a judge candidate rank"
+                )
+            best_rows = [row for row in root_judge_rows if int(row["best"]) == 1]
+            if len(best_rows) != 1:
+                raise ValueError(
+                    f"source {source_index} lacks one judge best candidate"
+                )
+            for row in root_judge_rows:
+                for key in ("utility", "utility_sem", "win", "spread"):
+                    if not math.isfinite(float(row[key])):
+                        raise ValueError(
+                            f"source {source_index} has nonfinite judge {key}"
+                        )
 
         root_panels = panels.get(source_index, [])
         if regret_trace:
@@ -393,7 +469,7 @@ def main() -> None:
     parser.add_argument("--regret-paired-samples", type=int, default=512)
     parser.add_argument("--fixed-control", action="store_true")
     parser.add_argument("--matched-control", action="store_true")
-    parser.add_argument("--candidate-control-plays", type=int, default=0)
+    parser.add_argument("--candidate-control-plays", default="0")
     parser.add_argument("--chunk-positions", type=int, default=8)
     parser.add_argument("--wall-seconds", type=float, default=0.0)
     args = parser.parse_args()
@@ -410,11 +486,11 @@ def main() -> None:
     targets = parse_csv_ints(args.targets)
     if args.max_nodes < targets[-1]:
         parser.error("max-nodes must include the largest target")
+    candidate_controls = parse_optional_csv_ints(args.candidate_control_plays)
     if (
         args.threads <= 0
         or args.num_plays < 2
-        or args.candidate_control_plays == 1
-        or args.candidate_control_plays >= args.num_plays
+        or any(control == 1 or control >= args.num_plays for control in candidate_controls)
         or args.chunk_positions <= 0
         or args.judge_plies <= max(plies_values)
         or args.judge_samples <= 0
@@ -443,7 +519,7 @@ def main() -> None:
         parser.error("controls require a positive regret stop target")
     if (args.fixed_control or args.matched_control) and len(targets) != 1:
         parser.error("optional-stopping controls require exactly one target")
-    if args.candidate_control_plays > 0 and len(targets) != 1:
+    if candidate_controls and len(targets) != 1:
         parser.error("candidate-limit control requires exactly one target")
     for plies in plies_values:
         if args.min_play_iterations * args.num_plays > targets[0] // (plies + 1):
@@ -483,7 +559,13 @@ def main() -> None:
         "regret_paired_samples": args.regret_paired_samples,
         "fixed_control": args.fixed_control,
         "matched_control": args.matched_control,
-        "candidate_control_plays": args.candidate_control_plays,
+        "candidate_control_plays": (
+            0
+            if not candidate_controls
+            else candidate_controls[0]
+            if len(candidate_controls) == 1
+            else list(candidate_controls)
+        ),
         "chunk_positions": args.chunk_positions,
     }
     if state_path.exists():
@@ -579,9 +661,9 @@ def main() -> None:
                     "THINKING_CURVE_MATCHED_CONTROL": str(
                         int(args.matched_control)
                     ),
-                    "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS": str(
-                        args.candidate_control_plays
-                    ),
+                    "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS": ",".join(
+                        str(control) for control in candidate_controls
+                    ) or "0",
                     "THINKING_CURVE_WALL_SECONDS": (
                         "0" if math.isinf(deadline) else f"{remaining_wall:.6f}"
                     ),
@@ -623,7 +705,7 @@ def main() -> None:
                 regret_paired_samples=args.regret_paired_samples,
                 fixed_control=args.fixed_control,
                 matched_control=args.matched_control,
-                candidate_control_plays=args.candidate_control_plays,
+                candidate_control_plays=candidate_controls,
             )
             expected = eligible[first_missing : first_missing + len(accepted)]
             if accepted != expected or len(accepted) > requested:

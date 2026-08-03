@@ -47,6 +47,13 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Experimental two-stage candidate policy. When sim_max_candidates is
+  // unset, generate a 60-move equity screen instead of the legacy top 15.
+  // BAI's mandatory per-arm prefix screens every move, after which
+  // TOP_TWO_IDS concentrates work on the incumbent/challenger risk set.
+  // This flag changes candidate coverage only; TimeManager allocation remains
+  // independently fail-closed.
+  bool use_wide_sim_screen;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;
@@ -245,6 +252,9 @@ typedef struct ChallengeDecision {
 
 PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy);
 void play_chooser_destroy(PlayChooser *play_chooser);
+// Effective candidate width after applying explicit, wide-screen, and legacy
+// defaults. Exposed for audit logs and regression tests.
+int play_chooser_get_sim_candidate_limit(const PlayChooser *play_chooser);
 
 // Enable/reset, snapshot, and disable the process-wide benchmark counters.
 // Counters are atomic because autoplay may run chooser games concurrently.

@@ -73,6 +73,26 @@ static void test_game_timer(void) {
   assert(isinf(game_timer_get_seconds_remaining(&game_timer, 1)));
 }
 
+static void test_wide_sim_screen_candidate_limit(void) {
+  PlayChooserStrategy strategy = {
+      .pre_endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+      .endgame_eval = PLAY_CHOOSER_EVAL_STATIC,
+  };
+  PlayChooser *chooser = play_chooser_create(&strategy);
+  assert(play_chooser_get_sim_candidate_limit(chooser) == 15);
+  play_chooser_destroy(chooser);
+
+  strategy.use_wide_sim_screen = true;
+  chooser = play_chooser_create(&strategy);
+  assert(play_chooser_get_sim_candidate_limit(chooser) == 60);
+  play_chooser_destroy(chooser);
+
+  strategy.sim_max_candidates = 24;
+  chooser = play_chooser_create(&strategy);
+  assert(play_chooser_get_sim_candidate_limit(chooser) == 24);
+  play_chooser_destroy(chooser);
+}
+
 static void test_play_chooser_clock_budget(void) {
   Config *config = config_create_or_die(
       "set -lex CSW21 -s1 equity -s2 equity -r1 all -r2 all -threads 1");
@@ -1201,6 +1221,7 @@ static void test_challenge_stage_combinations(void) {
 
 void test_play_chooser(void) {
   test_game_timer();
+  test_wide_sim_screen_candidate_limit();
   test_play_chooser_clock_budget();
   test_play_chooser_low_bag_reserve_shortfall();
   test_play_chooser_peg_withdrawal_cap();

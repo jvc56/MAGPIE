@@ -43,6 +43,7 @@
 enum {
   PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
+  PLAY_CHOOSER_WIDE_SIM_MAX_CANDIDATES = 60,
   // BAI's regret estimate is not identified from a single observation: the
   // empirical variance is exactly zero and its tiny numerical floor can make
   // an unlucky arm look safely dominated. Every production candidate gets a
@@ -412,6 +413,9 @@ play_chooser_get_sim_max_candidates(const PlayChooserStrategy *strategy) {
   if (strategy->sim_max_candidates > 0) {
     return strategy->sim_max_candidates;
   }
+  if (strategy->use_wide_sim_screen) {
+    return PLAY_CHOOSER_WIDE_SIM_MAX_CANDIDATES;
+  }
   return PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES;
 }
 
@@ -475,6 +479,13 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   endgame_ctx_destroy(play_chooser->challenge_endgame_ctx);
   transposition_table_destroy(play_chooser->endgame_tt);
   free(play_chooser);
+}
+
+int play_chooser_get_sim_candidate_limit(const PlayChooser *play_chooser) {
+  if (play_chooser == NULL) {
+    return 0;
+  }
+  return play_chooser_get_sim_max_candidates(&play_chooser->strategy);
 }
 
 // The chooser's shared transposition table, created on first use. Shared
