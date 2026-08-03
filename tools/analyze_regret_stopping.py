@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 from collections import defaultdict
+import json
 import math
 import statistics
 from dataclasses import dataclass
@@ -281,7 +282,9 @@ def summarize(
     )
 
 
-def reliability(label: str, pairs: list[tuple[Point, Point]]) -> None:
+def reliability(
+    label: str, pairs: list[tuple[Point, Point]], stratum: str = "all"
+) -> None:
     estimator: Callable[[Point], float]
     estimator = (
         (lambda point: point.legacy_stop_estimate)
@@ -296,7 +299,9 @@ def reliability(label: str, pairs: list[tuple[Point, Point]]) -> None:
         and math.isfinite(stopped.judge_regret)
     ]
     if not observations:
-        print(f"REGRET_RELIABILITY estimator={label} positions=0")
+        print(
+            f"REGRET_RELIABILITY estimator={label} stratum={stratum} positions=0"
+        )
         return
     denominator = sum(predicted * predicted for predicted, _actual, _ in observations)
     slope = (
@@ -333,7 +338,8 @@ def reliability(label: str, pairs: list[tuple[Point, Point]]) -> None:
     slope_gate = math.isfinite(slope) and 0.7 <= slope <= 1.4
     decile_gate = underpredicting_deciles == 0
     print(
-        f"REGRET_RELIABILITY estimator={label} positions={len(observations)} "
+        f"REGRET_RELIABILITY estimator={label} stratum={stratum} "
+        f"positions={len(observations)} "
         f"games={len(errors_by_game)} calibration_slope={slope:.6f} "
         f"estimate_minus_judge={format_summary(error, signed=True)} "
         f"deciles={decile_count} underpredicting_deciles="
@@ -351,6 +357,11 @@ def main() -> None:
         type=float,
         default=0.0,
         help="maximum allowed stopped-minus-control utility regret",
+    )
+    parser.add_argument(
+        "--manifest",
+        type=Path,
+        help="optional selection manifest carrying policy and bag-band strata",
     )
     args = parser.parse_args()
 
@@ -409,6 +420,8 @@ def main() -> None:
         ]
         if len({pair[0].game for pair in stratum}) >= 2:
             summarize(label, stratum, args.noninferiority_margin, "calibration")
+            reliability("legacy", stratum, label)
+            reliability("joint", stratum, label)
     for label, predicate in (
         ("ties0", lambda value: value == 0),
         ("ties1", lambda value: value == 1),
@@ -422,6 +435,32 @@ def main() -> None:
         ]
         if len({pair[0].game for pair in stratum}) >= 2:
             summarize(label, stratum, args.noninferiority_margin, "calibration")
+            reliability("legacy", stratum, label)
+            reliability("joint", stratum, label)
+
+    if args.manifest is not None:
+        document = json.loads(args.manifest.read_text(encoding="utf-8"))
+        metadata = {
+            int(row["position"]): (
+                str(row["trajectory_policy"]),
+                str(row["bag_band"]),
+            )
+            for row in document.get("mapping", [])
+        }
+        if any(pair[0].source_index not in metadata for pair in calibration_pairs):
+            raise ValueError("manifest does not map every calibration source")
+        groups: dict[str, list[tuple[Point, Point]]] = defaultdict(list)
+        for pair in calibration_pairs:
+            policy, bag_band = metadata[pair[0].source_index]
+            groups[f"policy:{policy}"].append(pair)
+            groups[f"bag:{bag_band}"].append(pair)
+        for label in sorted(groups):
+            stratum = groups[label]
+            if len({pair[0].game for pair in stratum}) < 2:
+                continue
+            summarize(label, stratum, args.noninferiority_margin, "calibration")
+            reliability("legacy", stratum, label)
+            reliability("joint", stratum, label)
 
 
 if __name__ == "__main__":

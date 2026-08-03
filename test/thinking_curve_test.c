@@ -505,43 +505,43 @@ static void thinking_curve_print_point(
       candidates[selected].oracle_utility;
   const double total_regret = candidate_regret + sampling_regret;
   const bool control = strcmp(control_kind, "stopped") != 0;
-  printf("THINKING_CURVE_POINT source_index=%d position=%d game=%d bag=%d "
-         "plies=%d candidates=%d target_nodes=%" PRIu64
-         " final=%d control=%d control_kind=%s "
-         "elapsed_ns=%" PRId64 " cpu_ns=%" PRId64 " iterations=%" PRIu64
-         " nodes=%" PRIu64 " min_play_iterations=%" PRIu64
-         " selected_rank=%d selected_id=%" PRIu64
-         " selected_raw=%s panel_best_rank=%d candidate_best_rank=%d "
-         "candidate_regret=%+.9f sampling_regret=%+.9f "
-         "provisional_total_regret=%+.9f provisional_win_delta=%+.9f "
-         "provisional_spread_delta=%+.9f judge_best_rank=%d "
-         "judge_utility=%.12f judge_utility_sem=%.12f judge_win=%.12f "
-         "judge_regret=%.12f judge_win_regret=%+.12f "
-         "judge_spread_regret=%+.12f judge_candidates=%d judge_forced=%d "
-         "estimated_best=%.12f estimated_challenger=%.12f "
-         "estimated_regret=%.12f joint_estimated_regret=%.12f "
-         "regret_at_stop=%.12f joint_regret_at_stop=%.12f "
-         "near_tie_challengers=%d near_tie_challengers_at_stop=%d "
-         "regret_stop_target=%.12f bai_status=%d\n",
-         source_index, position, game_index, bag_tiles, plies, candidate_count,
-         target_nodes, final, control, control_kind, event->elapsed_ns,
-         event->cpu_ns, event->iterations, event->nodes, min_play_iterations,
-         selected, move_get_fingerprint(&candidates[selected].move),
-         candidates[selected].raw_move, panel_best_index, candidate_best_index,
-         candidate_regret, sampling_regret, total_regret,
-         candidates[selected].oracle_win -
-             candidates[panel_best_index].oracle_win,
-         candidates[selected].oracle_spread -
-             candidates[panel_best_index].oracle_spread,
-         judge->best_rank, judge->utility[selected],
-         judge->utility_sem[selected], judge->win[selected],
-         judge->utility[judge->best_rank] - judge->utility[selected],
-         judge->win[judge->best_rank] - judge->win[selected],
-         judge->spread[judge->best_rank] - judge->spread[selected],
-         judge->candidate_count, judge->forced, event->best_value,
-         event->challenger_value, estimated_regret, joint_estimated_regret,
-         regret_at_stop, joint_regret_at_stop, near_tie_challengers,
-         near_tie_challengers_at_stop, regret_stop_target, bai_status);
+  printf(
+      "THINKING_CURVE_POINT source_index=%d position=%d game=%d bag=%d "
+      "plies=%d candidates=%d arm_plays=%d target_nodes=%" PRIu64
+      " final=%d control=%d control_kind=%s "
+      "elapsed_ns=%" PRId64 " cpu_ns=%" PRId64 " iterations=%" PRIu64
+      " nodes=%" PRIu64 " min_play_iterations=%" PRIu64
+      " selected_rank=%d selected_id=%" PRIu64
+      " selected_raw=%s panel_best_rank=%d candidate_best_rank=%d "
+      "candidate_regret=%+.9f sampling_regret=%+.9f "
+      "provisional_total_regret=%+.9f provisional_win_delta=%+.9f "
+      "provisional_spread_delta=%+.9f judge_best_rank=%d "
+      "judge_utility=%.12f judge_utility_sem=%.12f judge_win=%.12f "
+      "judge_regret=%.12f judge_win_regret=%+.12f "
+      "judge_spread_regret=%+.12f judge_candidates=%d judge_forced=%d "
+      "estimated_best=%.12f estimated_challenger=%.12f "
+      "estimated_regret=%.12f joint_estimated_regret=%.12f "
+      "regret_at_stop=%.12f joint_regret_at_stop=%.12f "
+      "near_tie_challengers=%d near_tie_challengers_at_stop=%d "
+      "regret_stop_target=%.12f bai_status=%d\n",
+      source_index, position, game_index, bag_tiles, plies, candidate_count,
+      num_plays, target_nodes, final, control, control_kind, event->elapsed_ns,
+      event->cpu_ns, event->iterations, event->nodes, min_play_iterations,
+      selected, move_get_fingerprint(&candidates[selected].move),
+      candidates[selected].raw_move, panel_best_index, candidate_best_index,
+      candidate_regret, sampling_regret, total_regret,
+      candidates[selected].oracle_win - candidates[panel_best_index].oracle_win,
+      candidates[selected].oracle_spread -
+          candidates[panel_best_index].oracle_spread,
+      judge->best_rank, judge->utility[selected], judge->utility_sem[selected],
+      judge->win[selected],
+      judge->utility[judge->best_rank] - judge->utility[selected],
+      judge->win[judge->best_rank] - judge->win[selected],
+      judge->spread[judge->best_rank] - judge->spread[selected],
+      judge->candidate_count, judge->forced, event->best_value,
+      event->challenger_value, estimated_regret, joint_estimated_regret,
+      regret_at_stop, joint_regret_at_stop, near_tie_challengers,
+      near_tie_challengers_at_stop, regret_stop_target, bai_status);
 }
 
 static ThinkingCurveArmResult thinking_curve_run_arm(
@@ -1011,7 +1011,7 @@ static void thinking_curve_run_position(
     bool regret_stop_use_joint, double regret_cross_arm_correlation,
     double regret_calibration, uint64_t regret_check_interval,
     uint64_t regret_min_samples_per_arm, bool fixed_control,
-    bool matched_control) {
+    bool matched_control, int candidate_control_plays) {
   if (candidate_count < num_plays) {
     log_fatal("thinking-curve position has %d candidates; requested %d",
               candidate_count, num_plays);
@@ -1120,12 +1120,17 @@ static void thinking_curve_run_position(
   }
   ThinkingCurveArmResult control_result = {0};
   ThinkingCurveArmResult matched_control_result = {0};
+  ThinkingCurveArmResult candidate_control_result = {0};
   bool control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   bool matched_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
+  bool candidate_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {
+      false};
   bool control_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   uint64_t control_target_nodes = 0;
   const bool has_control = fixed_control && regret_stop_target > 0.0;
   const bool has_matched_control = matched_control && regret_stop_target > 0.0;
+  const bool has_candidate_control =
+      candidate_control_plays >= 2 && candidate_control_plays < num_plays;
   uint64_t matched_control_target_nodes = 0;
   if (has_matched_control) {
     const uint64_t stopped_iterations =
@@ -1185,6 +1190,62 @@ static void thinking_curve_run_position(
           regret_cross_arm_correlation, control_risk_set);
       for (int rank = 0; rank < num_plays; rank++) {
         selected_ranks[rank] = selected_ranks[rank] || control_risk_set[rank];
+      }
+    }
+  }
+  uint64_t candidate_control_target_nodes = 0;
+  uint64_t candidate_control_minimum = 0;
+  int candidate_control_best_index = 0;
+  if (has_candidate_control) {
+    for (int target_index = 0; target_index < target_count; target_index++) {
+      if (targets[target_index] <= max_nodes) {
+        candidate_control_target_nodes = targets[target_index];
+      }
+    }
+    const uint64_t total_iterations =
+        candidate_control_target_nodes / ((uint64_t)plies + 1);
+    const uint64_t denominator = (uint64_t)candidate_control_plays * 1000;
+    candidate_control_minimum =
+        (total_iterations * (uint64_t)uniform_floor_per_mille +
+         denominator / 2) /
+        denominator;
+    if (candidate_control_minimum == 0) {
+      candidate_control_minimum = 1;
+    }
+    if (explicit_min_play_iterations > 0) {
+      candidate_control_minimum = explicit_min_play_iterations;
+    }
+    move_list_reset(candidate_moves);
+    move_list_set_rack(candidate_moves,
+                       player_get_rack(game_get_player(game, player_index)));
+    for (int rank = 0; rank < candidate_control_plays; rank++) {
+      move_list_add_move(candidate_moves, &candidates[rank].move);
+      if (candidates[rank].oracle_utility >
+          candidates[candidate_control_best_index].oracle_utility) {
+        candidate_control_best_index = rank;
+      }
+    }
+    candidate_control_result = thinking_curve_run_arm(
+        config, context, candidate_moves, candidate_control_plays, candidates,
+        candidate_count, plies, candidate_control_target_nodes,
+        candidate_control_minimum, seed,
+        ((uint64_t)(source_index + 1) << 32) | ((uint64_t)plies << 24) |
+            UINT64_C(0x43414e),
+        /*regret_stop_target=*/0.0, /*regret_stop_use_joint=*/false,
+        regret_cross_arm_correlation, regret_calibration, regret_check_interval,
+        regret_min_samples_per_arm, &event_count);
+    selected_ranks[candidate_control_result.decision.best_index] = true;
+    if (judge_risk_plays >= 2) {
+      const int candidate_risk_plays =
+          judge_risk_plays < candidate_control_plays ? judge_risk_plays
+                                                     : candidate_control_plays;
+      thinking_curve_choose_risk_set(
+          &candidate_control_result, candidate_control_plays,
+          candidate_risk_plays, regret_cross_arm_correlation,
+          candidate_control_judge_risk_set);
+      for (int rank = 0; rank < candidate_control_plays; rank++) {
+        selected_ranks[rank] =
+            selected_ranks[rank] || candidate_control_judge_risk_set[rank];
       }
     }
   }
@@ -1255,6 +1316,21 @@ static void thinking_curve_run_position(
         control_result.near_tie_challengers_at_stop,
         /*regret_stop_target=*/0.0);
   }
+  if (has_candidate_control) {
+    thinking_curve_print_point(
+        source_index, position, game_index, bag_tiles, plies,
+        candidate_control_target_nodes, /*final=*/false, "candidate_limit",
+        &candidate_control_result.decision, candidates, candidate_count,
+        candidate_control_plays, panel_best_index, candidate_control_best_index,
+        candidate_control_minimum, &judge, candidate_control_result.bai_status,
+        candidate_control_result.estimated_regret,
+        candidate_control_result.joint_estimated_regret,
+        candidate_control_result.regret_at_stop,
+        candidate_control_result.joint_regret_at_stop,
+        candidate_control_result.near_tie_challengers,
+        candidate_control_result.near_tie_challengers_at_stop,
+        /*regret_stop_target=*/0.0);
+  }
   thinking_curve_print_point(
       source_index, position, game_index, bag_tiles, plies,
       /*target_nodes=*/0, /*final=*/true, "stopped",
@@ -1276,7 +1352,10 @@ static void thinking_curve_run_position(
          " judge_seconds=%.6f judge_forced=%d control=%d "
          "control_iterations=%" PRIu64 " control_nodes=%" PRIu64
          " matched_control=%d matched_target_nodes=%" PRIu64
-         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64 "\n",
+         " matched_iterations=%" PRIu64 " matched_nodes=%" PRIu64
+         " candidate_control=%d candidate_control_plays=%d "
+         "candidate_control_iterations=%" PRIu64
+         " candidate_control_nodes=%" PRIu64 "\n",
          source_index, position, plies, event_count,
          decisions[decision_count - 1].decision.iterations,
          decisions[decision_count - 1].decision.nodes, judge.candidate_count,
@@ -1285,7 +1364,10 @@ static void thinking_curve_run_position(
          control_result.decision.nodes, has_matched_control,
          matched_control_target_nodes,
          matched_control_result.decision.iterations,
-         matched_control_result.decision.nodes);
+         matched_control_result.decision.nodes, has_candidate_control,
+         has_candidate_control ? candidate_control_plays : 0,
+         candidate_control_result.decision.iterations,
+         candidate_control_result.decision.nodes);
   for (int decision_index_to_destroy = 0;
        decision_index_to_destroy < decision_count;
        decision_index_to_destroy++) {
@@ -1294,6 +1376,7 @@ static void thinking_curve_run_position(
   }
   thinking_curve_sample_trace_destroy(control_result.sample_trace);
   thinking_curve_sample_trace_destroy(matched_control_result.sample_trace);
+  thinking_curve_sample_trace_destroy(candidate_control_result.sample_trace);
   fflush_or_die(stdout);
 }
 
@@ -1401,6 +1484,8 @@ void test_thinking_curve(void) {
                                  "THINKING_CURVE_FIXED_CONTROL", 0) != 0;
   const bool matched_control = thinking_curve_env_nonnegative_int(
                                    "THINKING_CURVE_MATCHED_CONTROL", 0) != 0;
+  const int candidate_control_plays = thinking_curve_env_nonnegative_int(
+      "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS", 0);
   const double wall_seconds =
       thinking_curve_env_nonnegative_double("THINKING_CURVE_WALL_SECONDS", 0.0);
   const char *target_string = thinking_curve_env_string(
@@ -1444,6 +1529,13 @@ void test_thinking_curve(void) {
   if ((fixed_control || matched_control) && regret_stop_target <= 0.0) {
     log_fatal("thinking-curve controls require a positive regret stop target");
   }
+  if (candidate_control_plays == 1 || candidate_control_plays >= num_plays) {
+    log_fatal("THINKING_CURVE_CANDIDATE_CONTROL_PLAYS must be zero or between "
+              "2 and THINKING_CURVE_NUM_PLAYS - 1");
+  }
+  if (candidate_control_plays > 0 && target_count != 1) {
+    log_fatal("candidate-limit control requires exactly one target");
+  }
   if (explicit_min_play_iterations > 0) {
     for (int target_index = 0; target_index < target_count; target_index++) {
       if (targets[target_index] > max_nodes) {
@@ -1478,7 +1570,7 @@ void test_thinking_curve(void) {
          " regret_correlation=%.6f"
          " regret_calibration=%.6f regret_check_interval=%" PRIu64
          " regret_min_samples_per_arm=%" PRIu64 " fixed_control=%d"
-         " matched_control=%d"
+         " matched_control=%d candidate_control_plays=%d"
          " wall_seconds=%.3f targets=%s oracle=online_common_seed "
          "sampling_rule=budget_matched_top_two_ids\n",
          corpus, skip_positions, max_positions, minimum_bag, maximum_bag,
@@ -1488,7 +1580,7 @@ void test_thinking_curve(void) {
          regret_paired_samples, regret_stop_target, regret_stop_use_joint,
          regret_cross_arm_correlation, regret_calibration,
          regret_check_interval, regret_min_samples_per_arm, fixed_control,
-         matched_control, wall_seconds, target_string);
+         matched_control, candidate_control_plays, wall_seconds, target_string);
   fflush_or_die(stdout);
 
   ThinkingCurveCandidate candidates[THINKING_CURVE_MAX_CANDIDATES];
@@ -1547,7 +1639,8 @@ void test_thinking_curve(void) {
               position_risk_plays, regret_paired_samples, regret_stop_target,
               regret_stop_use_joint, regret_cross_arm_correlation,
               regret_calibration, regret_check_interval,
-              regret_min_samples_per_arm, fixed_control, matched_control);
+              regret_min_samples_per_arm, fixed_control, matched_control,
+              candidate_control_plays);
         } else {
           printf("THINKING_CURVE_FORCED_POSITION source_index=%d position=%d "
                  "game=%d bag=%d plies=%d candidates=%d regret=0 cgp=%s\n",
@@ -1610,7 +1703,8 @@ void test_thinking_curve(void) {
             regret_risk_plays, regret_paired_samples, regret_stop_target,
             regret_stop_use_joint, regret_cross_arm_correlation,
             regret_calibration, regret_check_interval,
-            regret_min_samples_per_arm, fixed_control, matched_control);
+            regret_min_samples_per_arm, fixed_control, matched_control,
+            candidate_control_plays);
         evaluated++;
       }
       groups_seen++;
@@ -1685,7 +1779,7 @@ void test_thinking_curve(void) {
           regret_risk_plays, regret_paired_samples, regret_stop_target,
           regret_stop_use_joint, regret_cross_arm_correlation,
           regret_calibration, regret_check_interval, regret_min_samples_per_arm,
-          fixed_control, matched_control);
+          fixed_control, matched_control, candidate_control_plays);
       evaluated++;
     }
     groups_seen++;

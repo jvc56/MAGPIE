@@ -132,6 +132,48 @@ class RunStratifiedThinkingCurvePanelTest(unittest.TestCase):
                     matched_control=True,
                 )
 
+    def test_validates_candidate_limit_control(self) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=40 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=295 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=15 target_nodes=300 final=0 "
+                "control=1 control_kind=candidate_limit iterations=42 nodes=290 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=4 dropped=0 final_iterations=42 final_nodes=295 "
+                "judge_candidates=3 judge_iterations=3000 judge_forced=0 "
+                "control=0 control_iterations=0 control_nodes=0 "
+                "matched_control=0 matched_target_nodes=0 matched_iterations=0 "
+                "matched_nodes=0 candidate_control=1 candidate_control_plays=15 "
+                "candidate_control_iterations=42 candidate_control_nodes=290\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=40,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=8,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=False,
+                candidate_control_plays=15,
+            )
+        self.assertEqual(accepted, [0])
+
 
 if __name__ == "__main__":
     unittest.main()

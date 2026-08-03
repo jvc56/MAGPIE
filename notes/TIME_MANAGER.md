@@ -1551,6 +1551,51 @@ near-tie strata, and paired stopped-versus-matched-n inference. Live allocation
 stays disabled regardless of nominal node savings unless reliability,
 optional-stopping, and later terminal-game gates all pass.
 
+The powered panel then completed all 120 roots from 120 distinct games, with
+60 static and 60 PlayChooser trajectories and 15 roots per policy in each of
+the four preregistered bag bands. The strict re-audit found a contiguous
+120-root prefix, exact stopped/matched/full joins, complete 8-play by
+512-common-scenario covariance probes, exact non-forced judge accounting,
+`dropped=0`, and no accepted partial chunks. The joint rule stopped 110 roots;
+10 reached the 3M-node cap.
+
+Against the same-seed full arm, stopping used 88.52% fewer nodes on average
+(95% CI 83.55%--93.50%) and increased common-judge utility regret by only
+`+0.000102` (95% CI `[-0.000113,+0.000316]`, `p=0.351`). Its choices agreed
+on 90.83% of roots. Against the independent arm run for the exact stopped
+iteration count, the stopped-minus-matched regret delta was `-0.001156`
+(95% CI `[-0.002810,+0.000497]`, `p=0.169`), with 81.67% choice agreement.
+Both comparisons pass the preregistered `0.001` noninferiority margin. Thus
+there is no evidence that optional stopping itself selects harmful downward
+estimator excursions in this panel; this result does not validate the
+stopping estimate.
+
+That estimate fails decisively. The stopped-time legacy reliability slope is
+`0.361`; 6/10 deciles underpredict by more than 2x and the worst actual to
+predicted ratio is 52.7. The joint slope is `0.313`; 5/10 deciles underpredict
+by more than 2x and the worst ratio is 16.4. Both policy strata and three of
+four bag bands also fail the slope and/or decile gates. The common-scenario
+probe explains part, but not all, of the problem: replacing independence with
+empirical covariance makes the joint estimator's aggregate bias essentially
+zero (`+0.0000005`, `p=0.996`) and reduces mean absolute error by 19.3%, yet
+its interval NLL is worse (`+0.0797`, `p=0.0052`) and stopped-time conditional
+calibration still fails. The structural joint-minus-pairwise correction is
+real under both covariance models, especially with 2--3 near-tied
+challengers, but neither raw estimator is safe as a live stopping price.
+
+The next correction is a separate candidate-set sensitivity panel. It ranks
+24 hard roots using only checkpoint-visible cap status, near-tie count,
+estimated joint regret, and work used, balanced three per policy and bag band.
+Each root runs one p6 3M-node top-40 arm and an exact-cap top-15 control from
+the same generated move order and nomination seed. Both choices plus
+difference-UCB risk sets enter one 10-ply, 100,000-sample-per-nominee common
+judge. The runner refuses partial roots and audits arm-specific sampling
+floors, progress events, target joins, and judge iterations. This measures a
+candidate-miss sensitivity floor without selecting roots from prior oracle
+outcomes or comparing judges from separate runs. Live allocation remains off
+because the required stopped-time reliability gate failed, regardless of the
+optional-stopping noninferiority pass.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

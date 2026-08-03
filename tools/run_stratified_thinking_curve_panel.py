@@ -132,6 +132,7 @@ def validate_chunk_accounting(
     regret_paired_samples: int,
     fixed_control: bool,
     matched_control: bool,
+    candidate_control_plays: int = 0,
 ) -> list[int]:
     """Validate every accepted root before its private log is appended."""
 
@@ -182,12 +183,6 @@ def validate_chunk_accounting(
     included_targets = tuple(target for target in targets if target <= max_nodes)
     if not included_targets:
         raise ValueError("protocol has no in-range targets")
-    expected_control_kinds = {"stopped"}
-    if fixed_control:
-        expected_control_kinds.add("full")
-    if matched_control:
-        expected_control_kinds.add("matched")
-
     for source_index, done_row in done.items():
         if int(done_row.get("dropped", "-1")) != 0:
             raise ValueError(f"source {source_index} dropped progress events")
@@ -195,19 +190,37 @@ def validate_chunk_accounting(
         by_kind: dict[str, list[dict[str, str]]] = defaultdict(list)
         for row in root_points:
             kind = _control_kind(row)
-            if kind not in {"stopped", "matched", "full"}:
+            if kind not in {"stopped", "matched", "full", "candidate_limit"}:
                 raise ValueError(f"source {source_index} has unknown control kind")
             by_kind[kind].append(row)
+        stopped = by_kind["stopped"]
+        if not stopped:
+            raise ValueError(f"source {source_index} lacks stopped points")
+        primary_arm_plays = int(stopped[-1].get("arm_plays", num_plays))
+        has_candidate_control = int(done_row.get("candidate_control", "0")) == 1
+        expected_control_kinds = {"stopped"}
+        if fixed_control:
+            expected_control_kinds.add("full")
+        if matched_control:
+            expected_control_kinds.add("matched")
+        if candidate_control_plays > 0 and primary_arm_plays > candidate_control_plays:
+            if not has_candidate_control:
+                raise ValueError(f"source {source_index} lacks candidate-limit control")
+            expected_control_kinds.add("candidate_limit")
+        elif has_candidate_control:
+            raise ValueError(f"source {source_index} has unexpected candidate control")
         if set(by_kind) != expected_control_kinds:
             raise ValueError(
                 f"source {source_index} control kinds {sorted(by_kind)} "
                 f"!= {sorted(expected_control_kinds)}"
             )
-        stopped = by_kind["stopped"]
         if tuple(int(row["target_nodes"]) for row in stopped) != included_targets:
             raise ValueError(f"source {source_index} has wrong stopped targets")
         expected_events = 2 * (
-            len(included_targets) + int(fixed_control) + int(matched_control)
+            len(included_targets)
+            + int(fixed_control)
+            + int(matched_control)
+            + int(has_candidate_control)
         )
         if int(done_row["events"]) != expected_events:
             raise ValueError(f"source {source_index} has wrong event count")
@@ -234,7 +247,10 @@ def validate_chunk_accounting(
             if status not in {1, 3, 4}:
                 raise ValueError(f"source {source_index} has invalid BAI status")
             minimum = int(row["min_play_iterations"])
-            if iterations < minimum * num_plays:
+            arm_plays = int(row.get("arm_plays", num_plays))
+            if not 2 <= arm_plays <= num_plays:
+                raise ValueError(f"source {source_index} has invalid arm size")
+            if iterations < minimum * arm_plays:
                 raise ValueError(f"source {source_index} missed sampling floor")
 
         primary = stopped[-1]
@@ -277,6 +293,42 @@ def validate_chunk_accounting(
                 raise ValueError(f"source {source_index} full iterations do not join")
             if int(done_row.get("control_nodes", "-1")) != int(full["nodes"]):
                 raise ValueError(f"source {source_index} full nodes do not join")
+        if has_candidate_control:
+            controls = by_kind["candidate_limit"]
+            if len(controls) != 1:
+                raise ValueError(
+                    f"source {source_index} lacks one candidate-limit control"
+                )
+            candidate = controls[0]
+            target = included_targets[-1]
+            maximum_iterations = target // (plies + 1)
+            if int(candidate["target_nodes"]) != target:
+                raise ValueError(
+                    f"source {source_index} candidate-control target differs"
+                )
+            if int(candidate.get("arm_plays", "-1")) != candidate_control_plays:
+                raise ValueError(
+                    f"source {source_index} candidate-control size differs"
+                )
+            if int(candidate["bai_status"]) == 3 and int(candidate["iterations"]) != maximum_iterations:
+                raise ValueError(
+                    f"source {source_index} candidate-control iterations differ"
+                )
+            if int(candidate["iterations"]) > maximum_iterations or int(candidate["nodes"]) > target:
+                raise ValueError(
+                    f"source {source_index} candidate control exceeded budget"
+                )
+            if int(candidate["iterations"]) < int(candidate["min_play_iterations"]) * candidate_control_plays:
+                raise ValueError(
+                    f"source {source_index} candidate control missed sampling floor"
+                )
+            for key, expected in (
+                ("candidate_control_plays", candidate_control_plays),
+                ("candidate_control_iterations", int(candidate["iterations"])),
+                ("candidate_control_nodes", int(candidate["nodes"])),
+            ):
+                if int(done_row.get(key, "-1")) != expected:
+                    raise ValueError(f"source {source_index} mismatches {key}")
 
         if int(done_row["final_iterations"]) != primary_iterations:
             raise ValueError(f"source {source_index} final iterations do not join")
@@ -341,6 +393,7 @@ def main() -> None:
     parser.add_argument("--regret-paired-samples", type=int, default=512)
     parser.add_argument("--fixed-control", action="store_true")
     parser.add_argument("--matched-control", action="store_true")
+    parser.add_argument("--candidate-control-plays", type=int, default=0)
     parser.add_argument("--chunk-positions", type=int, default=8)
     parser.add_argument("--wall-seconds", type=float, default=0.0)
     args = parser.parse_args()
@@ -360,6 +413,8 @@ def main() -> None:
     if (
         args.threads <= 0
         or args.num_plays < 2
+        or args.candidate_control_plays == 1
+        or args.candidate_control_plays >= args.num_plays
         or args.chunk_positions <= 0
         or args.judge_plies <= max(plies_values)
         or args.judge_samples <= 0
@@ -388,6 +443,8 @@ def main() -> None:
         parser.error("controls require a positive regret stop target")
     if (args.fixed_control or args.matched_control) and len(targets) != 1:
         parser.error("optional-stopping controls require exactly one target")
+    if args.candidate_control_plays > 0 and len(targets) != 1:
+        parser.error("candidate-limit control requires exactly one target")
     for plies in plies_values:
         if args.min_play_iterations * args.num_plays > targets[0] // (plies + 1):
             parser.error("minimum play iterations do not fit the smallest target")
@@ -426,6 +483,7 @@ def main() -> None:
         "regret_paired_samples": args.regret_paired_samples,
         "fixed_control": args.fixed_control,
         "matched_control": args.matched_control,
+        "candidate_control_plays": args.candidate_control_plays,
         "chunk_positions": args.chunk_positions,
     }
     if state_path.exists():
@@ -521,6 +579,9 @@ def main() -> None:
                     "THINKING_CURVE_MATCHED_CONTROL": str(
                         int(args.matched_control)
                     ),
+                    "THINKING_CURVE_CANDIDATE_CONTROL_PLAYS": str(
+                        args.candidate_control_plays
+                    ),
                     "THINKING_CURVE_WALL_SECONDS": (
                         "0" if math.isinf(deadline) else f"{remaining_wall:.6f}"
                     ),
@@ -562,6 +623,7 @@ def main() -> None:
                 regret_paired_samples=args.regret_paired_samples,
                 fixed_control=args.fixed_control,
                 matched_control=args.matched_control,
+                candidate_control_plays=args.candidate_control_plays,
             )
             expected = eligible[first_missing : first_missing + len(accepted)]
             if accepted != expected or len(accepted) > requested:
