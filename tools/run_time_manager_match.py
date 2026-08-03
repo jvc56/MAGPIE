@@ -52,6 +52,7 @@ CSV_FIELDS = [
     "tm_static_ms", "equal_static_ms", "tm_sim_calls", "equal_sim_calls",
     "tm_sim_planned_budget_ms", "tm_sim_legacy_budget_ms",
     "tm_sim_released_budget_ms", "tm_sim_released_turns",
+    "rule_zero_enabled_turns", "rule_zero_stops", "rule_zero_would_stops",
     "tm_low_bag_fallbacks", "tm_peg_reserve_shortfalls",
     "tm_peg_shadow_budget_ms", "tm_peg_legacy_budget_ms",
     "tm_peg_deposit_caps", "tm_peg_withdrawal_caps",
@@ -455,6 +456,9 @@ def parse_pair(
     tm_sim_planned_budget_ms = 0.0
     tm_sim_legacy_budget_ms = 0.0
     tm_sim_released_turns = 0
+    rule_zero_enabled_turns = 0
+    rule_zero_stops = 0
+    rule_zero_would_stops = 0
     tm_low_bag_fallbacks = 0
     tm_peg_reserve_shortfalls = 0
     tm_peg_shadow_budget_ms = 0.0
@@ -463,6 +467,27 @@ def parse_pair(
     tm_peg_withdrawal_caps = 0
     for turn in turns:
         policy = turn["policy"]
+        # Older traces predate the Rule-of-Zero fields; when present they must
+        # be internally consistent: a stop implies enablement and a recorded
+        # would-stop, and a shadow turn must never stop the search.
+        if "rule_zero_enabled" in turn:
+            rz_enabled = integer(turn, "rule_zero_enabled")
+            rz_shadow = integer(turn, "rule_zero_shadow")
+            rz_stopped = integer(turn, "rule_zero_stopped")
+            rz_would_stop = integer(turn, "rule_zero_would_stop")
+            assert rz_enabled in (0, 1) and rz_shadow in (0, 1)
+            assert rz_stopped in (0, 1) and rz_would_stop in (0, 1)
+            if rz_stopped:
+                assert rz_enabled == 1 and rz_would_stop == 1 and \
+                    rz_shadow == 0, (
+                        f"inconsistent Rule-of-Zero stop at game "
+                        f"{turn['game']} turn {turn['turn']}"
+                    )
+            if rz_would_stop:
+                assert rz_enabled == 1
+            rule_zero_enabled_turns += rz_enabled
+            rule_zero_stops += rz_stopped
+            rule_zero_would_stops += rz_would_stop
         regret = turn_regret(turn)
         if regret is None:
             regret_unknown_turns[policy] += 1
@@ -603,6 +628,9 @@ def parse_pair(
         "tm_sim_released_budget_ms":
             f"{tm_sim_planned_budget_ms - tm_sim_legacy_budget_ms:.3f}",
         "tm_sim_released_turns": tm_sim_released_turns,
+        "rule_zero_enabled_turns": rule_zero_enabled_turns,
+        "rule_zero_stops": rule_zero_stops,
+        "rule_zero_would_stops": rule_zero_would_stops,
         "tm_low_bag_fallbacks": tm_low_bag_fallbacks,
         "tm_peg_reserve_shortfalls": tm_peg_reserve_shortfalls,
         "tm_peg_shadow_budget_ms": f"{tm_peg_shadow_budget_ms:.3f}",

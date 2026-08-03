@@ -20,6 +20,7 @@ struct BAIResult {
   int near_tie_challengers;
   int near_tie_challengers_at_stop;
   bool rule_zero_stopped;
+  bool rule_zero_would_stop;
   uint64_t rule_zero_stop_nodes;
   uint64_t rule_zero_stop_iterations;
   int rule_zero_stable_checkpoints;
@@ -38,6 +39,7 @@ void bai_result_reset(BAIResult *bai_result, double time_limit_seconds) {
   bai_result->near_tie_challengers = -1;
   bai_result->near_tie_challengers_at_stop = -1;
   bai_result->rule_zero_stopped = false;
+  bai_result->rule_zero_would_stop = false;
   bai_result->rule_zero_stop_nodes = 0;
   bai_result->rule_zero_stop_iterations = 0;
   bai_result->rule_zero_stable_checkpoints = 0;
@@ -195,17 +197,36 @@ int bai_result_get_rule_zero_selected_switches(BAIResult *bai_result) {
   return selected_switches;
 }
 
-void bai_result_set_rule_zero_stop(BAIResult *bai_result, uint64_t nodes,
-                                   uint64_t iterations,
-                                   int stable_checkpoints,
-                                   int selected_switches) {
+bool bai_result_get_rule_zero_would_stop(BAIResult *bai_result) {
   cpthread_mutex_lock(&bai_result->mutex);
-  bai_result->rule_zero_stopped = true;
+  const bool would_stop = bai_result->rule_zero_would_stop;
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return would_stop;
+}
+
+void bai_result_set_rule_zero_trigger(BAIResult *bai_result, uint64_t nodes,
+                                      uint64_t iterations,
+                                      int stable_checkpoints,
+                                      int selected_switches, bool stopped) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  bai_result->rule_zero_would_stop = true;
+  bai_result->rule_zero_stopped = stopped;
   bai_result->rule_zero_stop_nodes = nodes;
   bai_result->rule_zero_stop_iterations = iterations;
   bai_result->rule_zero_stable_checkpoints = stable_checkpoints;
   bai_result->rule_zero_selected_switches = selected_switches;
   cpthread_mutex_unlock(&bai_result->mutex);
+}
+
+bool bai_result_set_status_if_none(BAIResult *bai_result,
+                                   const bai_result_status_t status) {
+  cpthread_mutex_lock(&bai_result->mutex);
+  const bool claimed = bai_result->status == BAI_RESULT_STATUS_NONE;
+  if (claimed) {
+    bai_result->status = status;
+  }
+  cpthread_mutex_unlock(&bai_result->mutex);
+  return claimed;
 }
 
 // Sets user interrupt or timeout status if the conditions for either are met

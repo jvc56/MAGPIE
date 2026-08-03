@@ -4,8 +4,6 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-typedef struct SimResults SimResults;
-
 // A residual-regret estimate is not considered identified until every arm has
 // at least this many observations. Keep this public because callers that want
 // finite telemetry should use the same value for their initial sampling floor.
@@ -55,13 +53,16 @@ typedef struct BAIOptions {
   // Disabled-by-default Rule-of-Zero stop. This is intentionally separate
   // from expected-regret stopping: it may stop only after a fixed minimum
   // amount of native work, a stable incumbent at checkpoint boundaries, and
-  // a valid zero near-tie count. A missing SimResults pointer or malformed
-  // configuration fails closed and runs to the ordinary solver boundary.
+  // a valid zero near-tie count. The native work counter is supplied as a
+  // separate bai() argument; a missing counter or malformed configuration
+  // fails closed and runs to the ordinary solver boundary. In shadow mode
+  // the first satisfying checkpoint is recorded but the search continues to
+  // its ordinary boundary.
   bool rule_zero_enabled;
+  bool rule_zero_shadow;
   uint64_t rule_zero_minimum_nodes;
   int rule_zero_minimum_stable_checkpoints;
   uint64_t rule_zero_checkpoint_interval;
-  const SimResults *rule_zero_sim_results;
   // Array of arm indices to avoid pruning. NULL if none.
   // NOTE: bai() mutates this array in-place via swap-and-shrink during
   // sim_unpruned_to_winner. The caller must not rely on its contents

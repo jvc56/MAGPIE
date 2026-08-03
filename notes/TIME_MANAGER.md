@@ -1926,6 +1926,46 @@ unmeasured. The shadow score did not affect any decision and no CRC rule is
 retrofitted. Live allocation stays off until Rule of Zero passes a separately
 preregistered mirrored terminal-game experiment.
 
+### Rule-of-Zero observer hardening (2026-08-03)
+
+The adversarial review of the first observer implementation produced five
+corrections, all applied before any panel or match uses the code:
+
+1. **Scope restriction.** The rule and its telemetry now apply only to the
+   primary move-decision simulation. The challenge/branch evaluation path
+   calls the same `play_chooser_run_sim` engine but was never in the
+   validated scope; it now explicitly passes `primary_decision=false`, which
+   disables Rule-of-Zero and prevents a branch sim from overwriting the
+   turn's decision telemetry.
+2. **Shadow mode.** `PCBENCH_RULE_ZERO_SHADOW` (or the strategy's
+   `use_rule_zero_sim_shadow`) records the first satisfying checkpoint in
+   `BAIResult` while the search runs to its ordinary boundary. The
+   exact-topology panel must use this production code path, uncapped to the
+   live landmark, so the would-stop choice and the horizon choice come from
+   one trace and the panel exercises the same code the match will run.
+   Shadow observation is result-neutral and may run on both players.
+3. **Atomic status claim.** `bai_result_set_status_if_none` makes both the
+   regret stop and the enforced Rule-of-Zero stop claim the terminal status
+   atomically, so a concurrent timeout or user interrupt can no longer be
+   relabeled as a policy stop in strict audits.
+4. **Layering.** The native work counter is now a separate `bai()` argument
+   supplied by the simmer rather than a `SimResults` pointer smuggled
+   through `BAIOptions`, removing the forward declaration from
+   `src/def/bai_defs.h`. Activation still fails closed without it.
+5. **Trace schema.** `PCTURN` adds `rule_zero_shadow` and
+   `rule_zero_would_stop`. The match auditor verifies internal consistency
+   (a stop implies enablement and a recorded would-stop; a shadow turn never
+   stops) and totals enabled/stop/would-stop counts per pair.
+
+Two parity requirements remain open for the panel preregistration: the
+observer counts checkpoints in completed BAI samples (256 per checkpoint,
+with burst-collapsed checkpoints delaying stops conservatively), and its
+stability counter reaches two at the second consecutive checkpoint with the
+same incumbent. Both definitions must be pinned against the panel harness
+before the exact-topology run is frozen. Regression coverage includes
+enforced stop, missing-counter fail-closed, near-tie continuation, and
+shadow record-without-stop, all under one and multiple threads.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.

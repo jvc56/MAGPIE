@@ -905,9 +905,13 @@ play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
 // out_move. out_simulated (optional) reports whether a sim actually ran: a
 // single-candidate position is short-circuited to that move WITHOUT simming, so
 // sim_results is left untouched and callers that read it must not use it.
+// primary_decision marks the turn's actual move choice; Rule-of-Zero stopping
+// and its telemetry are restricted to that call because challenge/branch
+// evaluations are outside the rule's validated scope.
 static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
                                  double budget_seconds, Move *out_move,
                                  bool *out_simulated, uint64_t parent_run_id,
+                                 bool primary_decision,
                                  ErrorStack *error_stack) {
   if (out_simulated != NULL) {
     *out_simulated = false;
@@ -993,12 +997,15 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*inference_args=*/NULL, &sim_args);
   sim_args.spread_forecast = strategy->spread_forecast;
   sim_args.progress_listener = progress_listener;
-  if (strategy->use_rule_zero_sim_stop) {
+  const bool rule_zero_requested =
+      primary_decision &&
+      (strategy->use_rule_zero_sim_stop || strategy->use_rule_zero_sim_shadow);
+  if (rule_zero_requested) {
     sim_args.bai_options.rule_zero_enabled = true;
+    sim_args.bai_options.rule_zero_shadow = !strategy->use_rule_zero_sim_stop;
     sim_args.bai_options.rule_zero_minimum_nodes = UINT64_C(100000);
     sim_args.bai_options.rule_zero_minimum_stable_checkpoints = 2;
     sim_args.bai_options.rule_zero_checkpoint_interval = 256;
-    sim_args.bai_options.rule_zero_sim_results = play_chooser->sim_results;
   }
 
   // The persistent SimCtx recycles the simmer's allocations across calls
@@ -1007,29 +1014,34 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
            error_stack);
   const double estimated_regret = bai_result_get_estimated_regret(
       sim_results_get_bai_result(play_chooser->sim_results));
-  BAIResult *bai_result = sim_results_get_bai_result(play_chooser->sim_results);
-  const int final_candidate_rank =
-      sim_results_get_best_move_index(play_chooser->sim_results);
-  uint64_t final_move_fingerprint = 0;
-  if (final_candidate_rank >= 0) {
-    final_move_fingerprint = move_get_fingerprint(simmed_play_get_move(
-        sim_results_get_simmed_play(play_chooser->sim_results,
-                                    final_candidate_rank)));
+  if (primary_decision) {
+    BAIResult *bai_result =
+        sim_results_get_bai_result(play_chooser->sim_results);
+    const int final_candidate_rank =
+        sim_results_get_best_move_index(play_chooser->sim_results);
+    uint64_t final_move_fingerprint = 0;
+    if (final_candidate_rank >= 0) {
+      final_move_fingerprint = move_get_fingerprint(simmed_play_get_move(
+          sim_results_get_simmed_play(play_chooser->sim_results,
+                                      final_candidate_rank)));
+    }
+    play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
+        .enabled = rule_zero_requested,
+        .shadow = rule_zero_requested && !strategy->use_rule_zero_sim_stop,
+        .stopped = bai_result_get_rule_zero_stopped(bai_result),
+        .would_stop = bai_result_get_rule_zero_would_stop(bai_result),
+        .nodes = bai_result_get_rule_zero_stop_nodes(bai_result),
+        .iterations = bai_result_get_rule_zero_stop_iterations(bai_result),
+        .stable_checkpoints =
+            bai_result_get_rule_zero_stable_checkpoints(bai_result),
+        .selected_switches =
+            bai_result_get_rule_zero_selected_switches(bai_result),
+        .near_tie_challengers =
+            bai_result_get_near_tie_challengers_at_stop(bai_result),
+        .selected_candidate_rank = final_candidate_rank,
+        .selected_move_fingerprint = final_move_fingerprint,
+    };
   }
-  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
-      .enabled = strategy->use_rule_zero_sim_stop,
-      .stopped = bai_result_get_rule_zero_stopped(bai_result),
-      .nodes = bai_result_get_rule_zero_stop_nodes(bai_result),
-      .iterations = bai_result_get_rule_zero_stop_iterations(bai_result),
-      .stable_checkpoints = bai_result_get_rule_zero_stable_checkpoints(
-          bai_result),
-      .selected_switches = bai_result_get_rule_zero_selected_switches(
-          bai_result),
-      .near_tie_challengers = bai_result_get_near_tie_challengers_at_stop(
-          bai_result),
-      .selected_candidate_rank = final_candidate_rank,
-      .selected_move_fingerprint = final_move_fingerprint,
-  };
   if (isfinite(estimated_regret) && estimated_regret >= 0.0) {
     play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){
         .expected_utility_regret = estimated_regret,
@@ -1487,7 +1499,10 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   // PEG/endgame/static turn cannot inherit the preceding sim's value.
   play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){0};
   play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
-      .enabled = strategy->use_rule_zero_sim_stop,
+      .enabled = strategy->use_rule_zero_sim_stop ||
+                 strategy->use_rule_zero_sim_shadow,
+      .shadow = !strategy->use_rule_zero_sim_stop &&
+                strategy->use_rule_zero_sim_shadow,
       .near_tie_challengers = -1,
       .selected_candidate_rank = -1,
   };
@@ -1543,7 +1558,8 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   case PLAY_CHOOSER_EVAL_SIM:
     chose_move = play_chooser_run_sim(
         play_chooser, game, budget_seconds, out_move,
-        /*out_simulated=*/NULL, decision_progress.run_id, error_stack);
+        /*out_simulated=*/NULL, decision_progress.run_id,
+        /*primary_decision=*/true, error_stack);
     break;
   case PLAY_CHOOSER_EVAL_ENDGAME: {
     AnalysisProgressListener endgame_progress =
@@ -1675,7 +1691,8 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     Move best_move;
     bool simulated = false;
     if (!play_chooser_run_sim(play_chooser, game, budget_seconds, &best_move,
-                              &simulated, /*parent_run_id=*/0, error_stack)) {
+                              &simulated, /*parent_run_id=*/0,
+                              /*primary_decision=*/false, error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     if (!simulated) {

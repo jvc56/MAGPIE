@@ -3716,6 +3716,11 @@ void config_fill_autoplay_args(const Config *config,
                                  (strcmp(rule_zero_p0_only_env, "1") == 0 ||
                                   strcmp(rule_zero_p0_only_env, "true") == 0 ||
                                   strcmp(rule_zero_p0_only_env, "yes") == 0);
+  const char *rule_zero_shadow_env = getenv("PCBENCH_RULE_ZERO_SHADOW");
+  const bool rule_zero_shadow = rule_zero_shadow_env != NULL &&
+                                (strcmp(rule_zero_shadow_env, "1") == 0 ||
+                                 strcmp(rule_zero_shadow_env, "true") == 0 ||
+                                 strcmp(rule_zero_shadow_env, "yes") == 0);
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
@@ -3727,6 +3732,9 @@ void config_fill_autoplay_args(const Config *config,
             .use_wide_sim_screen = use_wide_sim_screen,
             .use_rule_zero_sim_stop =
                 rule_zero_p0_only && player_index == 0,
+            // Shadow observation is result-neutral, so it may run on both
+            // players; enforced stopping on player 0 takes precedence.
+            .use_rule_zero_sim_shadow = rule_zero_shadow,
             .peg_scenario_stride = config->peg_scenario_stride,
             .use_calibrated_peg_time_manager =
                 !time_manager_p0_only || player_index == 0,

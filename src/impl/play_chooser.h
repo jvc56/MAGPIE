@@ -56,9 +56,15 @@ typedef struct PlayChooserStrategy {
   bool use_wide_sim_screen;
   // Disabled-by-default, conservative SIM early-stop experiment. When set,
   // Rule of Zero is evaluated at 256-iteration checkpoints; invalid counters
-  // always run to the ordinary time boundary. This must remain false outside
+  // always run to the ordinary time boundary. It applies only to the primary
+  // move-decision simulation, never to challenge/branch evaluations, which
+  // were not in the validated scope. This must remain false outside
   // explicitly preregistered benchmark treatments.
   bool use_rule_zero_sim_stop;
+  // Result-neutral variant for panel collection: the first satisfying
+  // Rule-of-Zero checkpoint is recorded in telemetry while the search runs
+  // to its ordinary boundary. Ignored when use_rule_zero_sim_stop is set.
+  bool use_rule_zero_sim_shadow;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;
@@ -148,7 +154,9 @@ typedef struct PlayChooserMoveBudget {
 
 typedef struct PlayChooserRuleZeroTelemetry {
   bool enabled;
+  bool shadow;
   bool stopped;
+  bool would_stop;
   uint64_t nodes;
   uint64_t iterations;
   int stable_checkpoints;

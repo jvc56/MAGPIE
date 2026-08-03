@@ -194,7 +194,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     bai_listener.user_data = &progress_context;
   }
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, &bai_listener,
+      sim_args->thread_control, NULL, &bai_listener, sim_results,
       sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for

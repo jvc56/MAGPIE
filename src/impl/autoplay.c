@@ -647,7 +647,8 @@ static void game_runner_print_benchmark_turn(
          "peg_withdrawal_capped=%d "
          "regret_valid=%d expected_utility_regret=%.12f regret_model=%s "
          "regret_scope=%s value_to_go_valid=0 "
-         "rule_zero_enabled=%d rule_zero_stopped=%d "
+         "rule_zero_enabled=%d rule_zero_shadow=%d rule_zero_stopped=%d "
+         "rule_zero_would_stop=%d "
          "rule_zero_nodes=%llu rule_zero_iterations=%llu "
          "rule_zero_stable_checkpoints=%d rule_zero_selected_switches=%d "
          "rule_zero_near_tie_challengers=%d rule_zero_selected_rank=%d "
@@ -677,7 +678,9 @@ static void game_runner_print_benchmark_turn(
          play_chooser_regret_model_string(regret_estimate->model),
          play_chooser_regret_scope_string(regret_estimate->model),
          rule_zero_telemetry->enabled ? 1 : 0,
+         rule_zero_telemetry->shadow ? 1 : 0,
          rule_zero_telemetry->stopped ? 1 : 0,
+         rule_zero_telemetry->would_stop ? 1 : 0,
          (unsigned long long)rule_zero_telemetry->nodes,
          (unsigned long long)rule_zero_telemetry->iterations,
          rule_zero_telemetry->stable_checkpoints,

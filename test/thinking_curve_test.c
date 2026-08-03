@@ -2109,7 +2109,8 @@ static void thinking_curve_run_position(
   ThinkingCurveArmResult control_result = {0};
   ThinkingCurveArmResult matched_control_result = {0};
   ThinkingCurveArmResult
-      candidate_control_results[THINKING_CURVE_MAX_CANDIDATE_CONTROLS] = {{0}};
+      candidate_control_results[THINKING_CURVE_MAX_CANDIDATE_CONTROLS];
+  memset(candidate_control_results, 0, sizeof(candidate_control_results));
   bool control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   bool matched_control_judge_risk_set[THINKING_CURVE_MAX_CANDIDATES] = {false};
   bool candidate_control_judge_risk_sets[THINKING_CURVE_MAX_CANDIDATE_CONTROLS]

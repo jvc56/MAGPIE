@@ -49,13 +49,18 @@ int bai_result_get_near_tie_challengers_at_stop(BAIResult *bai_result);
 void bai_result_set_near_tie_challengers_at_stop(BAIResult *bai_result,
                                                  int near_tie_challengers);
 bool bai_result_get_rule_zero_stopped(BAIResult *bai_result);
+bool bai_result_get_rule_zero_would_stop(BAIResult *bai_result);
 uint64_t bai_result_get_rule_zero_stop_nodes(BAIResult *bai_result);
 uint64_t bai_result_get_rule_zero_stop_iterations(BAIResult *bai_result);
 int bai_result_get_rule_zero_stable_checkpoints(BAIResult *bai_result);
 int bai_result_get_rule_zero_selected_switches(BAIResult *bai_result);
-void bai_result_set_rule_zero_stop(BAIResult *bai_result, uint64_t nodes,
-                                   uint64_t iterations,
-                                   int stable_checkpoints,
-                                   int selected_switches);
+void bai_result_set_rule_zero_trigger(BAIResult *bai_result, uint64_t nodes,
+                                      uint64_t iterations,
+                                      int stable_checkpoints,
+                                      int selected_switches, bool stopped);
+// Claims the terminal status only if no other stop has already claimed it.
+// Returns true when this call set the status.
+bool bai_result_set_status_if_none(BAIResult *bai_result,
+                                   bai_result_status_t status);
 
 #endif

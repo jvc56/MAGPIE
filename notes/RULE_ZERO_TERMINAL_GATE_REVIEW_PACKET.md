@@ -71,15 +71,21 @@ The old p6/top-60 evidence is useful only as a disclosed sensitivity result:
 - their simple union-bound sensitivity is 5.1538%.
 
 It is **not** a validity bound for p2/top-15. The exact-topology panel above
-must instead run each cumulative arm through its **actual per-root live
-equal-slice receipt**, with the historical minimum of 3.65M nodes as the floor
-for the panel's horizon. This kills the prior horizon extrapolation rather
-than attempting to bound it. Each root logs its receipt and the corresponding
-horizon choice. The panel remains judge-light: judge every mismatch plus the
-preregistered random audit sample. Only a pass at that actual-live landmark
-may carry a stop-rule claim into the terminal pilot. A fixed 3M-capped
-treatment is rejected here because it changes every terminal-game SIM decision
-and does not test the intended live controller.
+must instead run each cumulative arm through the live horizon rather than a
+convenient cap. Panel roots come from trajectory corpora that carry no
+3-minute clock, so "the live receipt" must be given an explicit,
+preregistered definition before collection. The frozen choice is: run every
+arm to a fixed superset cap of **8M nodes** and score the would-stop choice
+against three logged landmarks, `3.65M` (the historical minimum equal-slice
+receipt), `6M` (the historical median), and `8M`. The gate applies at the
+6M median landmark; the other two are mandatory reported sensitivities.
+This kills the prior horizon extrapolation rather than attempting to bound
+it, without inventing an unmeasurable per-root clock. The panel remains
+judge-light: judge every mismatch plus the preregistered random audit
+sample. Only a pass at the frozen live landmark may carry a stop-rule claim
+into the terminal pilot. A fixed 3M-capped treatment is rejected here
+because it changes every terminal-game SIM decision and does not test the
+intended live controller.
 
 ## 3. Primary terminal estimand and design
 
@@ -97,8 +103,12 @@ turn/trace audit.  A pair is the inference unit.
 - **Primary analysis:** a one-sided 95% complete-pair Student-t lower bound
   must exceed `-0.020`, and the point estimate must be at least `-0.010`.
   There is no superiority claim.
-- **Outcome-based stopping:** prohibited.  The confirmatory sample size is
-  fixed after a separate variance pilot.  Operational aborts (build/hash,
+- **Outcome-based stopping:** permitted at exactly one preregistered interim
+  analysis, and only to declare noninferiority success early under the alpha
+  spending rule in section 4. Harm and futility stops are prohibited: a
+  treatment that looks harmful at the interim still runs to the full frozen
+  sample, and its final analysis is the result. The confirmatory sample size
+  is fixed after a separate variance pilot. Operational aborts (build/hash,
   trace accounting, penalty safety, or hardware failures) are reported
   separately and never converted into an outcome-based success/failure rule.
 
@@ -165,11 +175,13 @@ different-duration match and is used only as a planning reference.
 
 There is one formal interim look at approximately half the frozen information
 (`ceil(N/2)`, 315 pairs if `N=630`) using one-sided O'Brien--Fleming alpha
-spending. At half information its nominal one-sided alpha is approximately
-0.010; the final cumulative alpha is 0.050. There is no outcome-based futility
-or harm stop. An operational failure is a restart/not-a-result condition under
-the frozen hash and trace protocol, never a favorable or unfavorable endpoint
-stop.
+spending. The interim's only permitted action is an early **noninferiority
+success** declaration at its nominal one-sided alpha of approximately 0.010;
+the final cumulative alpha is 0.050. There is no outcome-based futility or
+harm stop: an interim result that looks harmful changes nothing, and the
+match runs to its full frozen sample. An operational failure is a
+restart/not-a-result condition under the frozen hash and trace protocol,
+never a favorable or unfavorable endpoint stop.
 
 The primary analysis is CUPED-adjusted with the unadjusted paired analysis as
 a required sensitivity analysis. The covariate is the average of the two
@@ -178,7 +190,12 @@ forecasts: it may use only the initial CGP/racks, starting seat, fixed seed,
 clock, and frozen static/equal-slice features available before either game is
 played. Its forecaster and the CUPED slope are fitted only on the excluded
 pilot and prior calibration/control data, then frozen before the first
-confirmatory pair. No confirmatory outcome may refit either object.
+confirmatory pair. No confirmatory outcome may refit either object. Expect
+this covariate to be weak: every mirrored 3-minute game starts from the
+identical empty position, so the only pre-game signal is the seed's draw
+sequence and the starting seat. The power calculation must therefore assume
+zero CUPED benefit; any realized variance reduction is a bonus, never a
+planning input.
 
 ## 5. Secondary operational endpoints
 
@@ -247,11 +264,16 @@ the exact-topology panel will report that predeclared stratification.
    checkpoint risk-set membership; that is panel telemetry, not an excuse to
    alter this frozen rule.
 2. Freeze and complete the fresh exact-topology, judge-light mismatch panel
-   through the per-root actual-live equal-slice landmark (at least 3.65M
-   nodes). It must rederive p2/top-15 stop rate, savings, near-tie counts,
-   mismatch, and missed-value summaries under the existing 1.5% and 0.001
-   gates. A failure ends this candidate; it does not trigger a post-hoc rule
-   adjustment.
+   through the fixed 8M-node superset cap, scoring the 3.65M/6M/8M
+   landmarks with the gate at 6M. It must rederive p2/top-15 stop rate,
+   savings, near-tie counts, mismatch, and missed-value summaries under the
+   existing 1.5% and 0.001 gates, **plus a preregistered usefulness floor:
+   the rule must stop at least 30% of roots and save at least 25% of nodes
+   at the 6M landmark**. p2/top-15 near-tie behavior may legitimately
+   differ from p6/top-60, and a safety pass on a rule that almost never
+   fires must not launch a 630-pair terminal match. A safety failure ends
+   this candidate; a usefulness failure ends the terminal plan without
+   permitting a post-hoc rule adjustment.
 3. Freeze the terminal pilot manifest, hashes, operational thresholds, and
    the variance-pilot sample size.  Run the pilot only after this packet has
    received the requested adversarial review.
