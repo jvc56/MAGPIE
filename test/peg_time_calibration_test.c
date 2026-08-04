@@ -320,9 +320,12 @@ static void peg_cal_run_arm(const Config *config, const char *mode,
                  !result.last_stage_partial);
   const bool refine_is_partial =
       !greedy && stage_idx >= 0 && !refine_is_complete;
-  const char *status = refine_is_complete
-                           ? "completed"
-                           : (stage_idx >= 0 ? "partial" : "seed_only");
+  const char *status = "seed_only";
+  if (refine_is_complete) {
+    status = "completed";
+  } else if (stage_idx >= 0) {
+    status = "partial";
+  }
   char move[64];
   peg_cal_move_string(config_get_game(config), &result.best_move, move,
                       sizeof(move));

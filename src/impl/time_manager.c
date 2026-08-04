@@ -247,12 +247,12 @@ time_manager_plan(const TimeManagerClock *clock,
     }
 
     double value_per_second = 0.0;
-    if (expected_seconds == 0.0) {
-      value_per_second = chunk->expected_regret_reduction > 0.0   ? INFINITY
-                         : chunk->expected_regret_reduction < 0.0 ? -INFINITY
-                                                                  : 0.0;
-    } else {
+    if (expected_seconds != 0.0) {
       value_per_second = chunk->expected_regret_reduction / expected_seconds;
+    } else if (chunk->expected_regret_reduction > 0.0) {
+      value_per_second = INFINITY;
+    } else if (chunk->expected_regret_reduction < 0.0) {
+      value_per_second = -INFINITY;
     }
     if (time_manager_boundary_requires_completion_bound(chunk->boundary) &&
         !chunk->has_completion_bound) {
@@ -345,12 +345,16 @@ time_manager_plan(const TimeManagerClock *clock,
     plan.stopped_chunk_completion_bound_seconds =
         time_manager_estimate_seconds(deadline_cost_model, completion_work);
     plan.stopped_chunk_completion_confidence = stopped->completion_confidence;
-    plan.stopped_chunk_value_per_second =
-        plan.stopped_chunk_seconds == 0.0
-            ? stopped->expected_regret_reduction > 0.0   ? INFINITY
-              : stopped->expected_regret_reduction < 0.0 ? -INFINITY
-                                                         : 0.0
-            : stopped->expected_regret_reduction / plan.stopped_chunk_seconds;
+    if (plan.stopped_chunk_seconds != 0.0) {
+      plan.stopped_chunk_value_per_second =
+          stopped->expected_regret_reduction / plan.stopped_chunk_seconds;
+    } else if (stopped->expected_regret_reduction > 0.0) {
+      plan.stopped_chunk_value_per_second = INFINITY;
+    } else if (stopped->expected_regret_reduction < 0.0) {
+      plan.stopped_chunk_value_per_second = -INFINITY;
+    } else {
+      plan.stopped_chunk_value_per_second = 0.0;
+    }
     plan.stopped_chunk_future_regret_increase = time_manager_get_future_loss(
         clock, fmax(0.0, initial_future_clock_seconds - best_expected_seconds),
         plan.stopped_chunk_seconds);

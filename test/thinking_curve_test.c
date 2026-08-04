@@ -105,6 +105,9 @@ typedef struct ThinkingCurveSampleTrace {
   SimSampleEvent *events;
 } ThinkingCurveSampleTrace;
 
+// Field order groups related state for readability; the analyzer's
+// padding-optimal reordering is not worth scrambling that grouping.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct ThinkingCurveArmResult {
   AnalysisProgressEvent decision;
   bai_result_status_t bai_status;
@@ -451,9 +454,12 @@ static double thinking_curve_predict_within_regret(
     int near_tie_challengers, double bai_gap, int bag_tiles) {
   const int regret_band =
       thinking_curve_estimated_regret_band(estimated_regret);
-  const int near_tie_band = near_tie_challengers < 0   ? 0
-                            : near_tie_challengers > 5 ? 5
-                                                       : near_tie_challengers;
+  int near_tie_band = near_tie_challengers;
+  if (near_tie_band < 0) {
+    near_tie_band = 0;
+  } else if (near_tie_band > 5) {
+    near_tie_band = 5;
+  }
   const int gap_band = thinking_curve_bai_gap_band(bai_gap);
   const char *bag_band = thinking_curve_bag_band(bag_tiles);
   const ThinkingCurveWithinRegretCell *best = NULL;
@@ -1197,6 +1203,9 @@ static ThinkingCurveArmResult thinking_curve_run_arm_with_sampling_rule(
   rack_set_dist_size_and_reset(&context->known_opponent_rack,
                                ld_get_size(config_get_ld(config)));
   SimArgs sim_args = {0};
+  // The first argument is genuinely the ply count; the name-similarity
+  // heuristic confuses it with the display-play cap.
+  // NOLINTNEXTLINE(readability-suspicious-call-argument)
   sim_args_fill(plies, candidate_moves, num_plays,
                 &context->known_opponent_rack, config_get_win_pcts(config),
                 /*inference_results=*/NULL, thread_control,
@@ -2004,6 +2013,12 @@ static void thinking_curve_run_position(
       minimum = explicit_min_play_iterations;
     }
     minimums[decision_count] = minimum;
+    uint64_t cumulative_checkpoint_interval = checkpoint_audit_interval;
+    if (combined_regret_enabled) {
+      cumulative_checkpoint_interval = combined_regret_checkpoint_interval;
+    } else if (rule_zero_enabled) {
+      cumulative_checkpoint_interval = rule_zero_checkpoint_interval;
+    }
     decisions[decision_count] = thinking_curve_run_arm(
         config, context, candidate_moves, num_plays, candidates,
         candidate_count, plies, targets[target_index], minimum, seed,
@@ -2012,10 +2027,7 @@ static void thinking_curve_run_position(
         combined_regret_enabled ? 0.0 : regret_stop_target,
         combined_regret_enabled ? false : regret_stop_use_joint,
         regret_cross_arm_correlation, regret_calibration, regret_check_interval,
-        regret_min_samples_per_arm,
-        combined_regret_enabled ? combined_regret_checkpoint_interval
-        : rule_zero_enabled     ? rule_zero_checkpoint_interval
-                                : checkpoint_audit_interval,
+        regret_min_samples_per_arm, cumulative_checkpoint_interval,
         &event_count);
     selected_ranks[decisions[decision_count].decision.best_index] = true;
     if (judge_risk_plays >= 2 && !rule_zero_enabled) {
@@ -2591,9 +2603,11 @@ static void thinking_curve_test_rule_zero_stop(void) {
     checkpoints[index] = analysis_progress_event_create(
         ANALYSIS_MODE_SIM, ANALYSIS_EVENT_CHECKPOINT);
     checkpoints[index].best_index = index == 0 ? 2 : 4;
-    checkpoints[index].item_id = (uint64_t)(100 + index);
-    checkpoints[index].iterations = (uint64_t)(10000 + index * 1000);
-    checkpoints[index].nodes = (uint64_t)(90000 + index * 10000);
+    checkpoints[index].item_id = UINT64_C(100) + (uint64_t)index;
+    checkpoints[index].iterations =
+        UINT64_C(10000) + (uint64_t)index * UINT64_C(1000);
+    checkpoints[index].nodes =
+        UINT64_C(90000) + (uint64_t)index * UINT64_C(10000);
     checkpoints[index].near_tie_challengers = index == 2 ? 1 : 0;
   }
   ThinkingCurveArmResult full = {

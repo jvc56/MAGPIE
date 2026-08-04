@@ -115,6 +115,9 @@ static float stuck_tile_fraction_from_bv(const LetterDistribution *ld,
 
 typedef struct EndgameCtxWorker EndgameCtxWorker;
 
+// Field order groups related state for readability; the analyzer's
+// padding-optimal reordering is not worth scrambling that grouping.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 struct EndgameCtx {
   int initial_spread;
   int solving_player;
@@ -3157,11 +3160,14 @@ static bool endgame_handle_depth_admission(EndgameCtxWorker *worker, int depth,
       .has_player_clock = solver->has_player_clock,
       .player_clock_remaining_seconds = INFINITY,
       .node_limit = solver->node_limit,
-      .remaining_nodes = solver->node_limit > current.cumulative_nodes
-                             ? solver->node_limit - current.cumulative_nodes
-                         : solver->node_limit > 0 ? 0
-                                                  : UINT64_MAX,
   };
+  if (solver->node_limit > current.cumulative_nodes) {
+    request.remaining_nodes = solver->node_limit - current.cumulative_nodes;
+  } else if (solver->node_limit > 0) {
+    request.remaining_nodes = 0;
+  } else {
+    request.remaining_nodes = UINT64_MAX;
+  }
   if (solver->hard_time_limit > 0.0) {
     request.remaining_seconds =
         fmax(0.0, solver->hard_time_limit - elapsed_seconds);

@@ -1270,11 +1270,14 @@ static bool peg_time_manager_allows_stage(
       event.completion_confidence = decision.completion_confidence;
       event.has_time_manager_plan = true;
       event.expected_regret_reduction = decision.expected_regret_reduction;
-      event.current_value_per_second =
-          decision.pricing_seconds > 0.0
-              ? decision.expected_regret_reduction / decision.pricing_seconds
-          : decision.expected_regret_reduction > 0.0 ? INFINITY
-                                                     : 0.0;
+      if (decision.pricing_seconds > 0.0) {
+        event.current_value_per_second =
+            decision.expected_regret_reduction / decision.pricing_seconds;
+      } else if (decision.expected_regret_reduction > 0.0) {
+        event.current_value_per_second = INFINITY;
+      } else {
+        event.current_value_per_second = 0.0;
+      }
       event.future_value_per_second =
           args->time_manager_policy->clock.future_value_per_second;
       event.maximum_current_seconds = decision.plan.maximum_current_seconds;
@@ -3445,10 +3448,12 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
     // spent. In exhaustive mode the lone stage runs at full endgame depth
     // instead of the stage_idx+1 ramp (see `exhaustive` above).
     for (int stage_idx = 1; stage_idx <= num_stages; stage_idx++) {
-      const int stage_fidelity =
-          args->stage_fidelity_plies > 0
-              ? args->stage_fidelity_plies
-              : (exhaustive ? PEG_EXHAUSTIVE_PLIES : stage_idx + 1);
+      int stage_fidelity = stage_idx + 1;
+      if (args->stage_fidelity_plies > 0) {
+        stage_fidelity = args->stage_fidelity_plies;
+      } else if (exhaustive) {
+        stage_fidelity = PEG_EXHAUSTIVE_PLIES;
+      }
       const int keep = live_count < counts[stage_idx - 1]
                            ? live_count
                            : counts[stage_idx - 1];
@@ -3918,10 +3923,13 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       } else {
         int capture_fidelity = 0;
         if (out->last_completed_stage > 0) {
-          capture_fidelity = args->stage_fidelity_plies > 0
-                                 ? args->stage_fidelity_plies
-                                 : (exhaustive ? PEG_EXHAUSTIVE_PLIES
-                                               : out->last_completed_stage + 1);
+          if (args->stage_fidelity_plies > 0) {
+            capture_fidelity = args->stage_fidelity_plies;
+          } else if (exhaustive) {
+            capture_fidelity = PEG_EXHAUSTIVE_PLIES;
+          } else {
+            capture_fidelity = out->last_completed_stage + 1;
+          }
         }
         PegScenarioCapture capture = {0};
         capture.ld = ld;

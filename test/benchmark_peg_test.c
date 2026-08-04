@@ -116,6 +116,9 @@ typedef struct PegBenchConfig {
 } PegBenchConfig;
 
 // Result of solving one position with one fast config.
+// Field order groups related state for readability; the analyzer's
+// padding-optimal reordering is not worth scrambling that grouping.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct PegBenchOutcome {
   char move_str[32];
   Move move; // kept so the oracle can re-evaluate it via pnoprune
