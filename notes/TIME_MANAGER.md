@@ -1957,14 +1957,20 @@ corrections, all applied before any panel or match uses the code:
    (a stop implies enablement and a recorded would-stop; a shadow turn never
    stops) and totals enabled/stop/would-stop counts per pair.
 
-Two parity requirements remain open for the panel preregistration: the
-observer counts checkpoints in completed BAI samples (256 per checkpoint,
-with burst-collapsed checkpoints delaying stops conservatively), and its
-stability counter reaches two at the second consecutive checkpoint with the
-same incumbent. Both definitions must be pinned against the panel harness
-before the exact-topology run is frozen. Regression coverage includes
-enforced stop, missing-counter fail-closed, near-tie continuation, and
-shadow record-without-stop, all under one and multiple threads.
+Both panel-parity requirements are now verified by direct comparison of
+`bai_maybe_stop_for_rule_zero_while_locked` against the harness's
+`thinking_curve_choose_rule_zero_stop`. Checkpoints fire on the same
+`num_total_samples_completed` counter at the same 256-sample interval with
+the same burst-collapse behavior; the stability counter resets to one on an
+incumbent change and permits a stop at two consecutive checkpoints in both;
+the near-tie count comes from the same `bai_count_near_tie_challengers`
+call evaluated under the sync lock, with the unidentified `-1` unable to
+stop; and the node floor reads the same `SimResults` counter. The only
+divergence is on checkpoints with zero iterations or zero nodes, which
+cannot occur after a real 256-sample interval and which both sides treat as
+unable to stop. Regression coverage includes enforced stop, missing-counter
+fail-closed, near-tie continuation, and shadow record-without-stop, all
+under one and multiple threads.
 
 ## Validation
 
