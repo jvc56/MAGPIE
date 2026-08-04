@@ -1,6 +1,7 @@
 {
-  "artifact_kind": "rule_zero_p2_pathfinding_preregistration",
+  "artifact_kind": "rule_zero_prospective_preregistration",
   "schema_version": 1,
+  "frozen_before_fresh_trajectory_generation": true,
   "evidence_class": "development_pathfinding_not_certification",
   "purpose": "estimate_p2_top15_stop_rate_savings_mismatch_and_near_tie_behavior_before_freezing_the_match_topology_panel",
   "known_divergences_from_certification": {
