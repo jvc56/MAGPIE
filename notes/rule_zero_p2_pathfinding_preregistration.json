@@ -25,7 +25,10 @@
     "roots": 320,
     "source_games": 320,
     "roots_per_policy_bag_stratum": 40,
-    "policies": ["static", "playchooser-g3000ms"],
+    "policies": [
+      "static",
+      "playchooser-g3000ms"
+    ],
     "bag_bands": [
       "late_5_15",
       "middle_late_16_35",
@@ -46,7 +49,7 @@
       "play_analyzed_moves": false
     },
     "playchooser": {
-      "base_seed": 8205001,
+      "base_seed": 8304001,
       "clock_ms": 3000,
       "play_analyzed_moves": true
     }
