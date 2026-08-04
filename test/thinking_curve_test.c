@@ -2509,7 +2509,7 @@ static void thinking_curve_run_position(
 // the live policy. The online common-seed judge remains the only strength
 // label; the legacy oracle fields are diagnostics and therefore zero here.
 static int
-thinking_curve_generate_candidates(Config *config, const char *cgp,
+thinking_curve_generate_candidates(const Config *config, const char *cgp,
                                    MoveList *generated_moves, int num_plays,
                                    ThinkingCurveCandidate candidates[]) {
   thinking_curve_load_position(config, cgp);
