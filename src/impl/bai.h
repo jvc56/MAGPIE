@@ -66,6 +66,10 @@ typedef struct BAISyncData {
   int avoid_prune_best_arm_idx;
   const AnalysisProgressListener *progress_listener;
   uint64_t next_progress_sample;
+  // Serializes checkpoint emission so trace order matches snapshot order.
+  // Acquired hand-over-hand before the main mutex is released; never taken
+  // while trying to acquire the main mutex, so the ordering is deadlock-free.
+  cpthread_mutex_t progress_emit_mutex;
   double regret_stop_target;
   bool regret_stop_use_joint;
   double regret_cross_arm_correlation;
@@ -113,6 +117,7 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
   bai_sync_data->avoid_prune_count = 0;
   bai_sync_data->avoid_prune_next_idx = 0;
   bai_sync_data->progress_listener = progress_listener;
+  cpthread_mutex_init(&bai_sync_data->progress_emit_mutex);
   bai_sync_data->next_progress_sample =
       progress_listener != NULL &&
               analysis_progress_is_enabled(progress_listener)
@@ -872,9 +877,15 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
                  sync_data->num_total_samples_completed);
     emit_progress = true;
   }
+  if (emit_progress) {
+    // Hand-over-hand: claim emission order before releasing the snapshot
+    // lock, so a later snapshot can never be written to the trace first.
+    cpthread_mutex_lock(&sync_data->progress_emit_mutex);
+  }
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
   if (emit_progress) {
     analysis_progress_emit(sync_data->progress_listener, &progress);
+    cpthread_mutex_unlock(&sync_data->progress_emit_mutex);
   }
 }
 
