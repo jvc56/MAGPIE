@@ -126,8 +126,10 @@ def _shadow_row(
 
 
 def decorate_shadow_scores(
-    path: Path, model: HorizonModel, model_sha256: str
+    path: Path, model: HorizonModel | None, model_sha256: str
 ) -> None:
+    if model is None:
+        return
     text = path.read_text(encoding="utf-8")
     if "THINKING_CURVE_HORIZON_SHADOW " in text:
         raise ValueError("chunk already contains shadow-score rows")
@@ -581,7 +583,7 @@ def main() -> None:
     parser.add_argument("--corpus", required=True, type=Path)
     parser.add_argument("--manifest", required=True, type=Path)
     parser.add_argument("--binary", required=True, type=Path)
-    parser.add_argument("--shadow-model", required=True, type=Path)
+    parser.add_argument("--shadow-model", type=Path, default=None)
     parser.add_argument("--preregistration", required=True, type=Path)
     parser.add_argument("--run-dir", required=True, type=Path)
     parser.add_argument("--expected-roots", type=int, default=320)
@@ -607,27 +609,36 @@ def main() -> None:
 
     repository = Path(__file__).resolve().parent.parent
     for name in ("corpus", "manifest", "binary", "shadow_model", "preregistration"):
-        setattr(args, name, getattr(args, name).resolve())
+        value = getattr(args, name)
+        if value is not None:
+            setattr(args, name, value.resolve())
     args.run_dir = args.run_dir.resolve()
     os.chdir(repository)
-    if any(
-        not path.is_file()
-        for path in (
-            args.corpus,
-            args.manifest,
-            args.binary,
-            args.shadow_model,
-            args.preregistration,
-        )
-    ):
+    frozen_inputs = [args.corpus, args.manifest, args.binary, args.preregistration]
+    if args.shadow_model is not None:
+        frozen_inputs.append(args.shadow_model)
+    if any(not path.is_file() for path in frozen_inputs):
         parser.error("all frozen inputs must exist")
+    preregistration = json.loads(args.preregistration.read_text(encoding="utf-8"))
+    if preregistration.get("artifact_kind") != "rule_zero_prospective_preregistration":
+        parser.error("invalid preregistration artifact")
+    arm = preregistration.get("arm", {})
+    rule = preregistration.get("rule", {})
     if (
         args.expected_roots < 300
         or args.expected_roots % 8 != 0
-        or args.plies != 6
-        or args.max_nodes != 3_000_000
-        or args.minimum_nodes != 100_000
-        or args.minimum_stable_checkpoints != 2
+        # The arm and rule constants are frozen in the preregistration; the
+        # runner refuses any invocation that does not match them exactly.
+        or args.plies != int(arm.get("plies", -1))
+        or args.max_nodes != int(arm.get("maximum_nodes", -1))
+        or args.num_plays != int(arm.get("sorted_candidate_width", -1))
+        or args.threads != int(arm.get("threads", -1))
+        or args.uniform_floor_per_mille != int(arm.get("uniform_floor_per_mille", -1))
+        or args.minimum_nodes != int(rule.get("minimum_nodes", -1))
+        or args.minimum_stable_checkpoints
+        != int(rule.get("minimum_stable_checkpoints", -1))
+        or args.checkpoint_interval
+        != int(rule.get("checkpoint_interval_iterations", -1))
         or args.equal_slice_nodes > args.max_nodes
         or args.checkpoint_interval <= 0
         or args.matched_modulus <= 0
@@ -642,12 +653,13 @@ def main() -> None:
         or args.wall_seconds < 0.0
     ):
         parser.error("invalid Rule-of-Zero prospective protocol")
-    preregistration = json.loads(args.preregistration.read_text(encoding="utf-8"))
-    if preregistration.get("artifact_kind") != "rule_zero_prospective_preregistration":
-        parser.error("invalid preregistration artifact")
     _validate_panel_design(args.manifest, args.expected_roots)
-    shadow_model = load_horizon_model_artifact(args.shadow_model)
-    shadow_sha = sha256(args.shadow_model)
+    if args.shadow_model is not None:
+        shadow_model = load_horizon_model_artifact(args.shadow_model)
+        shadow_sha = sha256(args.shadow_model)
+    else:
+        shadow_model = None
+        shadow_sha = ""
     eligible = eligible_indices(args.corpus, 5, 100)
     if eligible != list(range(args.expected_roots)):
         parser.error("selected corpus is not the exact dense prospective panel")
@@ -665,7 +677,7 @@ def main() -> None:
         "manifest_sha256": sha256(args.manifest),
         "binary": str(args.binary),
         "binary_sha256": sha256(args.binary),
-        "shadow_model": str(args.shadow_model),
+        "shadow_model": "" if args.shadow_model is None else str(args.shadow_model),
         "shadow_model_sha256": shadow_sha,
         "preregistration": str(args.preregistration),
         "preregistration_sha256": sha256(args.preregistration),
