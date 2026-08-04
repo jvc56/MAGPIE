@@ -1044,7 +1044,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
                                     const bool short_form) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
-  const char *text = "";
+  const char *text = NULL;
   bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;

@@ -720,7 +720,6 @@ void game_unplay_last_move(Game *game) {
     if (game->backup_cursor == 0) {
       log_fatal("cannot unplay last move without a game backup");
     }
-    // cppcheck-suppress negativeIndex
     state = game->sim_game_backups[game->backup_cursor - 1];
     game->backup_cursor--;
   } else {
