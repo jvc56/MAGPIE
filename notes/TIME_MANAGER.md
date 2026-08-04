@@ -1972,6 +1972,24 @@ unable to stop. Regression coverage includes enforced stop, missing-counter
 fail-closed, near-tie continuation, and shadow record-without-stop, all
 under one and multiple threads.
 
+Two one-pair `run_time_manager_match.py` smokes then exercised the
+production path end to end with `PCBENCH_RULE_ZERO_SHADOW=true` on a
+4-thread cloud VM with locally built CSW24 RIT/WIT data. At a 10-second
+clock, all 46 PCTURN rows carried consistent shadow fields with zero stops
+and zero would-stops (no sim reaches the 100K-node floor), and the match
+audit passed. At the 3-minute clock, 32/46 turns recorded a would-stop with
+sane triggers (nodes just past the floor, node/iteration ratio ~3 matching
+p2, stability counts consistent with 256-sample checkpoints) and still zero
+enforced stops and zero consistency violations. Two notes from that pair:
+`rule_zero_near_tie_challengers` reports `-1` on shadow would-stop rows
+because the at-stop counter is deliberately enforced-only (the trigger
+itself requires zero, so the value is implied); and the audit's spend-down
+floor check failed once by 4ms (`planned 15817.832 < legacy 15817.836`),
+a pre-existing non-atomic-snapshot artifact of the one-sided
+`max(legacy, spend_down)` bridge under noisy timing, unrelated to Rule
+Zero, recorded here for a future look before the terminal match freezes
+its operational thresholds.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
