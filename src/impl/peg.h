@@ -315,6 +315,12 @@ static inline void peg_args_fill(
   peg_args->greedy_seed_only = greedy_seed_only;
   peg_args->stage_top_k = stage_top_k;
   peg_args->num_stages = num_stages;
+  // The fill contract initializes every field: callers pass stack structs
+  // without zeroing them first. Leaving this to the caller made the ordinary
+  // 2,3,4,... ramp depend on stack garbage, which intermittently tripped the
+  // solver's fidelity validation. Callers that want a fixed fidelity set it
+  // after this call.
+  peg_args->stage_fidelity_plies = 0;
   peg_args->inner_top_k = inner_top_k;
   peg_args->opp_model = opp_model;
   peg_args->scenario_stride = scenario_stride;
