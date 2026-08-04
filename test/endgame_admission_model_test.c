@@ -1,5 +1,6 @@
 #include "endgame_admission_model_test.h"
 
+#include "../src/def/rack_defs.h"
 #include "../src/impl/endgame.h"
 #include "../src/impl/endgame_admission_model.h"
 #include "../src/impl/time_manager.h"

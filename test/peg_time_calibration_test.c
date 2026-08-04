@@ -107,6 +107,9 @@ static int peg_cal_parse_schedule(const char *text, int *schedule,
 
 static double peg_cal_process_cpu_seconds(void) {
   struct timespec ts;
+  // glibc defines this clock id in an internal header that include-cleaner
+  // cannot attribute to the directly included <time.h>.
+  // NOLINTNEXTLINE(misc-include-cleaner)
   if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
   }
