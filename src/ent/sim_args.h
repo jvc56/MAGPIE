@@ -9,6 +9,7 @@
 #include "../ent/inference_results.h"
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include <math.h>
 #include <stdint.h>
@@ -20,8 +21,15 @@ typedef struct SimArgs {
   int num_plays;
   Rack *known_opp_rack;
   WinPct *win_pcts;
+  // Optional expected-terminal-spread model. WinPct remains responsible for
+  // win probability; this supplies the spread half of blended sim utility.
+  const SpreadForecast *spread_forecast;
   bool use_inference;
   bool use_heat_map;
+  // Experimental rollout chooser. Root candidate generation and the horizon
+  // leave residual remain ordinary KLV2; only intermediate greedy moves use
+  // the positional reranker.
+  bool use_positional_rollout;
   InferenceResults *inference_results;
   InferenceArgs inference_args;
   int num_threads;
@@ -64,11 +72,13 @@ sim_args_fill(const int num_plies, const MoveList *move_list,
   sim_args->num_plays = num_plays;
   sim_args->known_opp_rack = known_opp_rack;
   sim_args->win_pcts = win_pcts;
+  sim_args->spread_forecast = NULL;
   sim_args->inference_results = inference_results;
   sim_args->thread_control = thread_control;
   sim_args->game = game;
   sim_args->use_inference = sim_with_inference;
   sim_args->use_heat_map = use_heat_map;
+  sim_args->use_positional_rollout = false;
   sim_args->num_threads = num_threads;
   sim_args->print_interval = print_interval;
   sim_args->max_num_display_plays = max_num_display_plays;

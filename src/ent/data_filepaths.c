@@ -9,6 +9,8 @@
 
 static const char *const filepath_type_names[] = {"kwg",
                                                   "klv",
+                                                  "klv3",
+                                                  "spread forecast",
                                                   "board layout",
                                                   "win percentage",
                                                   "letter distribution",
@@ -17,7 +19,8 @@ static const char *const filepath_type_names[] = {"kwg",
                                                   "lexicon",
                                                   "wordmap",
                                                   "rack info table",
-                                                  "packed dawg"};
+                                                  "packed dawg",
+                                                  "word info table"};
 
 void string_builder_add_directory_for_data_type(StringBuilder *sb,
                                                 const char *data_path,
@@ -25,12 +28,17 @@ void string_builder_add_directory_for_data_type(StringBuilder *sb,
   switch (type) {
   case DATA_FILEPATH_TYPE_KWG:
   case DATA_FILEPATH_TYPE_KLV:
+  case DATA_FILEPATH_TYPE_KLV3:
   case DATA_FILEPATH_TYPE_LEXICON:
   case DATA_FILEPATH_TYPE_WORDMAP:
   case DATA_FILEPATH_TYPE_LEAVES:
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
+  case DATA_FILEPATH_TYPE_WORD_INFO_TABLE:
     string_builder_add_formatted_string(sb, "%s/lexica/", data_path);
+    break;
+  case DATA_FILEPATH_TYPE_SPREAD_FORECAST:
+    string_builder_add_formatted_string(sb, "%s/strategy/", data_path);
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
     string_builder_add_formatted_string(sb, "%s/layouts/", data_path);
@@ -64,11 +72,20 @@ char *get_filepath(const char *data_path, const char *data_name,
   case DATA_FILEPATH_TYPE_KLV:
     file_ext = KLV_EXTENSION;
     break;
+  case DATA_FILEPATH_TYPE_KLV3:
+    file_ext = KLV3_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_SPREAD_FORECAST:
+    file_ext = SPREAD_FORECAST_EXTENSION;
+    break;
   case DATA_FILEPATH_TYPE_RACK_INFO_TABLE:
     file_ext = RACK_INFO_TABLE_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_DAWG_PACKED:
     file_ext = DAWG_PACKED_EXTENSION;
+    break;
+  case DATA_FILEPATH_TYPE_WORD_INFO_TABLE:
+    file_ext = WORD_INFO_TABLE_EXTENSION;
     break;
   case DATA_FILEPATH_TYPE_LAYOUT:
     file_ext = TXT_EXTENSION;

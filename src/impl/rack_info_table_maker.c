@@ -134,6 +134,8 @@ typedef struct {
   Rack *leave;
   LeaveMap *leave_map;
   RackInfoTableEntry *entry;
+  Equity *context_capped_best_leaves;
+  Equity *context_capped_nonplaythrough_best_leave_values;
   // 32-bit leave values computed during recursion, packed to 24-bit at end.
   Equity leaves_temp[RACK_INFO_TABLE_LEAVES_PER_ENTRY];
   bool leave_out_of_range;
@@ -154,8 +156,17 @@ static void compute_entry_recursive(EntryComputeState *state,
     const int played_size = rack_get_total_letters(state->player_rack);
     if (played_size > 0) {
       Equity value = 0;
+      Equity context_capped_value = 0;
       if (word_index != KLV_UNFOUND_INDEX) {
-        value = klv_get_indexed_leave_value(state->klv, word_index - 1);
+        const uint32_t leave_index = word_index - 1;
+        value = klv_get_indexed_leave_value(state->klv, leave_index);
+        const int64_t capped =
+            (int64_t)value +
+            (int64_t)klv_get_context_leave_cap(state->klv, leave_index);
+        if (capped > EQUITY_MAX_VALUE || capped < EQUITY_MIN_VALUE) {
+          log_fatal("context capped leave value out of Equity range");
+        }
+        context_capped_value = (Equity)capped;
       }
       state->leaves_temp[state->leave_map->current_index] = value;
       if (value < RACK_INFO_TABLE_LEAVE_MIN ||
@@ -168,6 +179,12 @@ static void compute_entry_recursive(EntryComputeState *state,
           rit_maker_popcount((unsigned int)state->leave_map->current_index);
       if (value > state->entry->best_leaves[leave_size_for_best]) {
         state->entry->best_leaves[leave_size_for_best] = value;
+      }
+      if (state->context_capped_best_leaves != NULL &&
+          context_capped_value >
+              state->context_capped_best_leaves[leave_size_for_best]) {
+        state->context_capped_best_leaves[leave_size_for_best] =
+            context_capped_value;
       }
 
       // Track the overall best exchange across all leave sizes.
@@ -246,6 +263,14 @@ static void compute_entry_recursive(EntryComputeState *state,
               state->entry->nonplaythrough_best_leave_values[leave_size] =
                   value;
             }
+            if (state->context_capped_nonplaythrough_best_leave_values !=
+                    NULL &&
+                context_capped_value >
+                    state->context_capped_nonplaythrough_best_leave_values
+                        [leave_size]) {
+              state->context_capped_nonplaythrough_best_leave_values
+                  [leave_size] = context_capped_value;
+            }
           }
         }
 
@@ -307,11 +332,11 @@ static void compute_entry_recursive(EntryComputeState *state,
   }
 }
 
-static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
-                                   const LetterDistribution *ld,
-                                   uint8_t playthrough_min_played_size,
-                                   const BitRack *bit_rack,
-                                   RackInfoTableEntry *entry) {
+static void compute_entry_for_rack(
+    const KLV *klv, const WMP *wmp, const LetterDistribution *ld,
+    uint8_t playthrough_min_played_size, const BitRack *bit_rack,
+    RackInfoTableEntry *entry, Equity *context_capped_best_leaves,
+    Equity *context_capped_nonplaythrough_best_leave_values) {
   const int ld_size = ld_get_size(ld);
 
   // Reconstruct Rack from BitRack.
@@ -361,6 +386,11 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
   for (int bl_idx = 0; bl_idx < RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
        bl_idx++) {
     entry->best_leaves[bl_idx] = EQUITY_INITIAL_VALUE;
+    if (context_capped_best_leaves != NULL) {
+      context_capped_best_leaves[bl_idx] = EQUITY_INITIAL_VALUE;
+      context_capped_nonplaythrough_best_leave_values[bl_idx] =
+          EQUITY_INITIAL_VALUE;
+    }
   }
 
   EntryComputeState state = {
@@ -373,6 +403,9 @@ static void compute_entry_for_rack(const KLV *klv, const WMP *wmp,
       .leave = &leave,
       .leave_map = &leave_map,
       .entry = entry,
+      .context_capped_best_leaves = context_capped_best_leaves,
+      .context_capped_nonplaythrough_best_leave_values =
+          context_capped_nonplaythrough_best_leave_values,
       .best_exchange_equity = EQUITY_INITIAL_VALUE,
       .best_exchange_tiles_exchanged = 0,
   };
@@ -800,6 +833,8 @@ typedef struct {
   uint8_t playthrough_min_played_size;
   const BitRack *all_racks;
   RackInfoTableEntry *entries;
+  Equity *context_capped_best_leaves;
+  Equity *context_capped_nonplaythrough_best_leave_values;
   const uint32_t *entry_indices;
   uint32_t start;
   uint32_t end;
@@ -810,9 +845,20 @@ static void *compute_entries_thread(void *arg) {
   for (uint32_t rack_idx = a->start; rack_idx < a->end; rack_idx++) {
     const uint32_t entry_idx = a->entry_indices[rack_idx];
     RackInfoTableEntry *entry = &a->entries[entry_idx];
-    compute_entry_for_rack(a->klv, a->wmp, a->ld,
-                           a->playthrough_min_played_size,
-                           &a->all_racks[rack_idx], entry);
+    Equity *context_best =
+        a->context_capped_best_leaves == NULL
+            ? NULL
+            : a->context_capped_best_leaves +
+                  (size_t)entry_idx * RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+    Equity *context_nonplay =
+        a->context_capped_nonplaythrough_best_leave_values == NULL
+            ? NULL
+            : a->context_capped_nonplaythrough_best_leave_values +
+                  (size_t)entry_idx *
+                      RACK_INFO_TABLE_NONPLAYTHROUGH_BEST_LEAVES_PER_ENTRY;
+    compute_entry_for_rack(
+        a->klv, a->wmp, a->ld, a->playthrough_min_played_size,
+        &a->all_racks[rack_idx], entry, context_best, context_nonplay);
   }
   return NULL;
 }
@@ -849,6 +895,12 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
     rit->bucket_starts =
         (uint32_t *)calloc_or_die(RIT_MIN_BUCKETS + 1, sizeof(uint32_t));
     rit->entries = NULL;
+    rit->base_klv_fingerprint = klv_get_base_content_fingerprint(klv);
+    if (klv_has_context_leave_caps(klv)) {
+      rit->flags |= RIT_FLAG_CONTEXT_CAPS_INLINE;
+      rit->context_klv_fingerprint = klv_get_context_content_fingerprint(klv);
+      rit->context_cap_quantile_ppm = klv->context_cap_quantile_ppm;
+    }
     rit->name = NULL;
     return rit;
   }
@@ -885,6 +937,15 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   // 5. Allocate entries and assign racks to buckets
   RackInfoTableEntry *entries =
       malloc_or_die((size_t)total_racks * sizeof(RackInfoTableEntry));
+  Equity *context_capped_best_leaves = NULL;
+  Equity *context_capped_nonplaythrough_best_leave_values = NULL;
+  if (klv_has_context_leave_caps(klv)) {
+    const size_t n =
+        (size_t)total_racks * RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+    context_capped_best_leaves = malloc_or_die(n * sizeof(Equity));
+    context_capped_nonplaythrough_best_leave_values =
+        malloc_or_die(n * sizeof(Equity));
+  }
 
   uint32_t *entry_indices = malloc_or_die(total_racks * sizeof(uint32_t));
   memset(bucket_counts, 0, num_buckets * sizeof(uint32_t));
@@ -909,6 +970,9 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
         .playthrough_min_played_size = effective_min,
         .all_racks = all_racks,
         .entries = entries,
+        .context_capped_best_leaves = context_capped_best_leaves,
+        .context_capped_nonplaythrough_best_leave_values =
+            context_capped_nonplaythrough_best_leave_values,
         .entry_indices = entry_indices,
         .start = 0,
         .end = total_racks,
@@ -936,6 +1000,9 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
           .playthrough_min_played_size = effective_min,
           .all_racks = all_racks,
           .entries = entries,
+          .context_capped_best_leaves = context_capped_best_leaves,
+          .context_capped_nonplaythrough_best_leave_values =
+              context_capped_nonplaythrough_best_leave_values,
           .entry_indices = entry_indices,
           .start = start,
           .end = start + this_chunk,
@@ -956,6 +1023,28 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   free(entry_indices);
   free(all_racks);
 
+  // A model-named KLV3 RIT is dedicated to that contextual evaluator. Store
+  // its capped maxima in the existing per-entry fields so a lookup needs no
+  // second random memory access. The packed leaves remain exact KLV2 base
+  // values, but KLV3 evaluates final leaves from the model and consumes these
+  // fields only as lossy pruning bounds.
+  if (klv_has_context_leave_caps(klv)) {
+    for (uint32_t entry_idx = 0; entry_idx < total_racks; entry_idx++) {
+      const size_t context_offset =
+          (size_t)entry_idx * RACK_INFO_TABLE_BEST_LEAVES_PER_ENTRY;
+      memcpy(entries[entry_idx].best_leaves,
+             context_capped_best_leaves + context_offset,
+             sizeof(entries[entry_idx].best_leaves));
+      memcpy(entries[entry_idx].nonplaythrough_best_leave_values,
+             context_capped_nonplaythrough_best_leave_values + context_offset,
+             sizeof(entries[entry_idx].nonplaythrough_best_leave_values));
+    }
+    free(context_capped_best_leaves);
+    free(context_capped_nonplaythrough_best_leave_values);
+    context_capped_best_leaves = NULL;
+    context_capped_nonplaythrough_best_leave_values = NULL;
+  }
+
   // 7. Build the RackInfoTable
   RackInfoTable *rit = (RackInfoTable *)calloc_or_die(1, sizeof(RackInfoTable));
   rit->version = RIT_VERSION;
@@ -965,6 +1054,15 @@ RackInfoTable *make_rack_info_table(const KLV *klv, const WMP *wmp,
   rit->num_entries = total_racks;
   rit->bucket_starts = bucket_starts;
   rit->entries = entries;
+  rit->context_capped_best_leaves = context_capped_best_leaves;
+  rit->context_capped_nonplaythrough_best_leave_values =
+      context_capped_nonplaythrough_best_leave_values;
+  rit->base_klv_fingerprint = klv_get_base_content_fingerprint(klv);
+  if (klv_has_context_leave_caps(klv)) {
+    rit->flags |= RIT_FLAG_CONTEXT_CAPS_INLINE;
+    rit->context_klv_fingerprint = klv_get_context_content_fingerprint(klv);
+    rit->context_cap_quantile_ppm = klv->context_cap_quantile_ppm;
+  }
   rit->name = NULL;
 
   // 8. Populate the multi-playthrough bitvecs by flipping the walk:

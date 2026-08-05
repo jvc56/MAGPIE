@@ -8,7 +8,10 @@
 #define DAWG_PACKED_EXTENSION ".pdawg"
 #define WORDMAP_EXTENSION ".wmp"
 #define KLV_EXTENSION ".klv2"
+#define KLV3_EXTENSION ".klv3"
+#define SPREAD_FORECAST_EXTENSION ".sfc"
 #define RACK_INFO_TABLE_EXTENSION ".rit"
+#define WORD_INFO_TABLE_EXTENSION ".wit"
 #define TXT_EXTENSION ".txt"
 #define CSV_EXTENSION ".csv"
 #define GCG_EXTENSION ".gcg"
@@ -17,6 +20,8 @@
 typedef enum {
   DATA_FILEPATH_TYPE_KWG,
   DATA_FILEPATH_TYPE_KLV,
+  DATA_FILEPATH_TYPE_KLV3,
+  DATA_FILEPATH_TYPE_SPREAD_FORECAST,
   DATA_FILEPATH_TYPE_LAYOUT,
   DATA_FILEPATH_TYPE_WIN_PCT,
   DATA_FILEPATH_TYPE_LD,
@@ -26,6 +31,7 @@ typedef enum {
   DATA_FILEPATH_TYPE_WORDMAP,
   DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
   DATA_FILEPATH_TYPE_DAWG_PACKED,
+  DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
 } data_filepath_t;
 
 char *data_filepaths_get_readable_filename(const char *data_paths,

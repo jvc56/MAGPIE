@@ -1,13 +1,19 @@
 #include "../src/def/board_defs.h"
 #include "../src/def/equity_defs.h"
 #include "../src/def/game_history_defs.h"
+#include "../src/def/klv_defs.h"
+#include "../src/def/kwg_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/players_data_defs.h"
+#include "../src/ent/bag.h"
 #include "../src/ent/bit_rack.h"
 #include "../src/ent/board.h"
+#include "../src/ent/dictionary_word.h"
 #include "../src/ent/equity.h"
 #include "../src/ent/game.h"
 #include "../src/ent/klv.h"
+#include "../src/ent/kwg.h"
 #include "../src/ent/letter_distribution.h"
 #include "../src/ent/move.h"
 #include "../src/ent/player.h"
@@ -15,9 +21,13 @@
 #include "../src/ent/rack.h"
 #include "../src/ent/validated_move.h"
 #include "../src/ent/wmp.h"
+#include "../src/ent/word_info_table.h"
 #include "../src/impl/config.h"
 #include "../src/impl/gameplay.h"
+#include "../src/impl/kwg_maker.h"
 #include "../src/impl/move_gen.h"
+#include "../src/impl/wmp_maker.h"
+#include "../src/impl/word_info_table_maker.h"
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_constants.h"
@@ -570,6 +580,154 @@ void equity_test(void) {
 
   sorted_move_list_destroy(equity_test_sorted_move_list);
   rack_destroy(move_rack);
+  move_list_destroy(move_list);
+  game_destroy(game);
+  config_destroy(config);
+}
+
+static Equity assert_contextual_move_equities(const Game *game,
+                                              const MoveList *move_list,
+                                              const KLV *klv,
+                                              const LetterDistribution *ld,
+                                              const char *rack_string,
+                                              MachineLetter adjustment_tile) {
+  int unseen_counts[MACHINE_LETTER_MAX_VALUE] = {0};
+  bag_increment_unseen_count(game_get_bag(game), unseen_counts);
+  const Player *opponent =
+      game_get_player(game, 1 - game_get_player_on_turn_index(game));
+  rack_increment_unseen_count(player_get_rack(opponent), unseen_counts);
+  const int unseen_total = bag_get_letters(game_get_bag(game)) +
+                           rack_get_total_letters(player_get_rack(opponent));
+  Equity adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE];
+  klv3_compute_tile_adjustments(klv, unseen_counts, unseen_total, adjustments);
+
+  Rack *move_rack = rack_create(ld_get_size(ld));
+  Rack *context_rack = rack_create(ld_get_size(ld));
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    rack_set_to_string(ld, context_rack, rack_string);
+    const Equity contextual_leave_value =
+        get_leave_value_for_move_with_context(game, move, context_rack);
+    rack_set_to_string(ld, move_rack, rack_string);
+    Equity expected_leave_value =
+        get_leave_value_for_move(klv, move, move_rack);
+    int draw_count = move_get_tiles_played(move);
+    const int bag_count = bag_get_letters(game_get_bag(game));
+    if (draw_count > bag_count) {
+      draw_count = bag_count;
+    }
+    for (int ml = 0; ml < rack_get_dist_size(move_rack); ml++) {
+      expected_leave_value +=
+          rack_get_letter(move_rack, ml) * adjustments[draw_count][ml];
+    }
+    assert(contextual_leave_value == expected_leave_value);
+    assert(move_get_equity(move) ==
+           move_get_score(move) + expected_leave_value);
+  }
+  rack_destroy(context_rack);
+  rack_destroy(move_rack);
+  return adjustments[2][adjustment_tile];
+}
+
+static void assert_base_move_equities(const Game *game,
+                                      const MoveList *move_list, const KLV *klv,
+                                      const LetterDistribution *ld,
+                                      const char *rack_string) {
+  Rack *move_rack = rack_create(ld_get_size(ld));
+  Rack *context_rack = rack_create(ld_get_size(ld));
+  for (int i = 0; i < move_list_get_count(move_list); i++) {
+    const Move *move = move_list_get_move(move_list, i);
+    if (move_get_type(move) == GAME_EVENT_PASS) {
+      continue;
+    }
+    rack_set_to_string(ld, context_rack, rack_string);
+    const Equity contextual_leave_value =
+        get_leave_value_for_move_with_context(game, move, context_rack);
+    rack_set_to_string(ld, move_rack, rack_string);
+    const Equity expected_leave_value =
+        get_leave_value_for_move(klv, move, move_rack);
+    assert(contextual_leave_value == expected_leave_value);
+    assert(move_get_equity(move) ==
+           move_get_score(move) + expected_leave_value);
+  }
+  rack_destroy(context_rack);
+  rack_destroy(move_rack);
+}
+
+void contextual_leave_draw_count_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex NWL20 -s1 equity -s2 equity -r1 all -r2 all -numplays 1");
+  Game *game = config_game_create(config);
+  const LetterDistribution *ld = game_get_ld(game);
+  Player *player = game_get_player(game, 0);
+  KLV *klv = (KLV *)player_get_klv(player);
+  MoveList *move_list = move_list_create(300);
+  const MoveGenArgs move_gen_args = {
+      .game = game,
+      .move_list = move_list,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+
+  klv->context_alphabet_size = ld_get_size(ld);
+  klv->context_num_pool_bins = 1;
+  klv->context_pool_bin_upper_bounds = malloc_or_die(sizeof(uint16_t));
+  klv->context_pool_bin_upper_bounds[0] = 100;
+  const size_t num_biases = KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld);
+  const size_t num_weights =
+      KLV3_DRAW_COUNT_HEADS * (size_t)ld_get_size(ld) * (size_t)ld_get_size(ld);
+  klv->context_biases = calloc_or_die(num_biases, sizeof(Equity));
+  klv->context_weights = calloc_or_die(num_weights, sizeof(Equity));
+  for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
+    for (int ml = 0; ml < ld_get_size(ld); ml++) {
+      klv->context_biases[klv3_bias_index(
+          klv, 0, draw_count, (MachineLetter)ml)] = int_to_equity(draw_count);
+    }
+  }
+  const MachineLetter e = ld_hl_to_ml(ld, "E");
+  for (int draw_count = 1; draw_count < KLV3_DRAW_COUNT_HEADS; draw_count++) {
+    for (int held = 0; held < ld_get_size(ld); held++) {
+      klv->context_weights[klv3_weight_index(
+          klv, draw_count, (MachineLetter)held, e)] = int_to_equity(100);
+    }
+  }
+
+  // This middlegame avoids opening/endgame adjustments and has enough tiles
+  // in the bag for exchanges. The test covers every recorded placement and
+  // exchange, so every draw-count head selected by the canonical leave walk
+  // is checked.
+  load_cgp_or_die(game, VS_ED);
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
+  generate_moves_for_game(&move_gen_args);
+  const Equity first_e_adjustment =
+      assert_contextual_move_equities(game, move_list, klv, ld, "AFGIIIS", e);
+
+  // Keep the player rack (and therefore every rack-only cache key) identical,
+  // but replace one board E with Q. That changes the public unseen multiset.
+  // A stale RIT, mini-KLV, subrack/leave, or derived-best-leave cache would
+  // reuse the first position's values and fail the second equity audit.
+  const char *vs_ed_q =
+      "14Q/14N/14d/14U/4GLOWS5R/8PET3E/7FAXING1R/6JAY1TEEMS/"
+      "2B2BOY4N2/2L1DOE5U2/2ANEW5PI2/2MO1LEU3ON2/2EH7HE2/15/15 "
+      "/ 0/0 0 -lex NWL20;";
+  load_cgp_or_die(game, vs_ed_q);
+  rack_set_to_string(ld, player_get_rack(player), "AFGIIIS");
+  generate_moves_for_game(&move_gen_args);
+  const Equity second_e_adjustment =
+      assert_contextual_move_equities(game, move_list, klv, ld, "AFGIIIS", e);
+  assert(first_e_adjustment != second_e_adjustment);
+
+  // A threshold above every possible sampled magnitude must select the
+  // embedded KLV2 evaluator. This exercises the hybrid base path with the
+  // same KLV3 object and catches accidental consumption of contextual values.
+  klv_set_context_fallback_threshold(klv, true, EQUITY_MAX_VALUE);
+  generate_moves_for_game(&move_gen_args);
+  assert_base_move_equities(game, move_list, klv, ld, "AFGIIIS");
+
   move_list_destroy(move_list);
   game_destroy(game);
   config_destroy(config);
@@ -1659,6 +1817,121 @@ void large_alphabet_movegen_test(void) {
   config_destroy(config);
 }
 
+static void add_wit_prune_test_word(DictionaryWordList *words,
+                                    const LetterDistribution *ld,
+                                    const char *word_string) {
+  MachineLetter word[BOARD_DIM];
+  const int word_length =
+      ld_str_to_mls(ld, word_string, false, word, BOARD_DIM);
+  assert(word_length > 0);
+  dictionary_word_list_add_word(words, word, word_length);
+}
+
+// WIT's per-anchor letter union is a necessary condition for every canonical
+// subrack, not just for the rack as a whole. Exercise a surviving anchor whose
+// rack has both usable tiles (B/C) and a proven-impossible tile (X), then
+// verify that enabling the per-subrack rejection leaves the complete move list
+// exact.
+static void wit_subrack_prune_movegen_test(void) {
+  Config *config = config_create_or_die(
+      "set -lex CSW21 -wmp true -s1 score -s2 score -r1 all -r2 all");
+  PlayersData *players_data = config_get_players_data(config);
+  const LetterDistribution *ld = config_get_ld(config);
+
+  DictionaryWordList *words = dictionary_word_list_create();
+  static const char *const word_strings[] = {
+      "AT", "BAT", "CAT", "RAT", "ATB", "ATC", "BATS", "CATS", "RATS",
+  };
+  for (size_t i = 0; i < sizeof(word_strings) / sizeof(word_strings[0]); i++) {
+    add_wit_prune_test_word(words, ld, word_strings[i]);
+  }
+
+  KWG *test_kwg = make_kwg_from_words(words, KWG_MAKER_OUTPUT_DAWG_AND_GADDAG,
+                                      KWG_MAKER_MERGE_EXACT);
+  WMP *test_wmp = make_wmp_from_words(words, ld, 1);
+  WordInfoTable *test_wit = make_word_info_table_from_words(words);
+
+  KWG *original_kwg = players_data_get_kwg(players_data, 0);
+  WMP *original_wmp = players_data_get_wmp(players_data, 0);
+  assert(players_data_get_kwg(players_data, 1) == original_kwg);
+  assert(players_data_get_wmp(players_data, 1) == original_wmp);
+  assert(players_data_get_word_info_table(players_data, 0) == NULL);
+  assert(players_data_get_word_info_table(players_data, 1) == NULL);
+
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_KWG, 0, test_kwg);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_KWG, 1, test_kwg);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 0, test_wmp);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 1, test_wmp);
+  Game *without_wit = config_game_create(config);
+
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, test_wit);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, test_wit);
+  Game *with_wit = config_game_create(config);
+
+  static const char *const cgp =
+      "15/15/15/15/15/15/15/6AT7/15/15/15/15/15/15/15 BCX/ 0/0 0";
+  load_cgp_or_die(without_wit, cgp);
+  load_cgp_or_die(with_wit, cgp);
+
+  MachineLetter at[2];
+  assert(ld_str_to_mls(ld, "AT", false, at, 2) == 2);
+  const uint32_t *at_row = word_info_table_lookup(test_wit, at, 2);
+  assert(at_row != NULL);
+  const uint32_t length_three_addable = at_row[1];
+  const MachineLetter b = ld_hl_to_ml(ld, "B");
+  const MachineLetter c = ld_hl_to_ml(ld, "C");
+  const MachineLetter x = ld_hl_to_ml(ld, "X");
+  assert((length_three_addable & (1U << b)) != 0);
+  assert((length_three_addable & (1U << c)) != 0);
+  assert((length_three_addable & (1U << x)) == 0);
+
+  MoveList *without_wit_moves = move_list_create(1000);
+  MoveList *with_wit_moves = move_list_create(1000);
+  const MoveGenArgs without_wit_args = {
+      .game = without_wit,
+      .move_list = without_wit_moves,
+      .move_record_type = MOVE_RECORD_ALL,
+      .move_sort_type = MOVE_SORT_SCORE,
+      .eq_margin_movegen = 0,
+      .target_equity = EQUITY_MAX_VALUE,
+      .target_leave_size_for_exchange_cutoff = UNSET_LEAVE_SIZE,
+  };
+  MoveGenArgs with_wit_args = without_wit_args;
+  with_wit_args.game = with_wit;
+  with_wit_args.move_list = with_wit_moves;
+  generate_moves_for_game(&without_wit_args);
+  generate_moves_for_game(&with_wit_args);
+
+  SortedMoveList *without_wit_sorted =
+      sorted_move_list_create(without_wit_moves);
+  SortedMoveList *with_wit_sorted = sorted_move_list_create(with_wit_moves);
+  assert(without_wit_sorted->count > 0);
+  assert(with_wit_sorted->count == without_wit_sorted->count);
+  for (int i = 0; i < without_wit_sorted->count; i++) {
+    assert_moves_are_equal(without_wit_sorted->moves[i],
+                           with_wit_sorted->moves[i]);
+  }
+
+  sorted_move_list_destroy(without_wit_sorted);
+  sorted_move_list_destroy(with_wit_sorted);
+  move_list_destroy(without_wit_moves);
+  move_list_destroy(with_wit_moves);
+  game_destroy(without_wit);
+  game_destroy(with_wit);
+
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_KWG, 0, original_kwg);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_KWG, 1, original_kwg);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 0, original_wmp);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WMP, 1, original_wmp);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 0, NULL);
+  players_data_set_data(players_data, PLAYERS_DATA_TYPE_WIT, 1, NULL);
+  kwg_destroy(test_kwg);
+  wmp_destroy(test_wmp);
+  word_info_table_destroy(test_wit);
+  dictionary_word_list_destroy(words);
+  config_destroy(config);
+}
+
 void test_move_gen(void) {
   test_move_gen_instance_fingerprint();
   leave_lookup_test();
@@ -1666,6 +1939,7 @@ void test_move_gen(void) {
   macondo_tests();
   exchange_tests();
   equity_test();
+  contextual_leave_draw_count_test();
   top_equity_play_recorder_test();
   small_play_recorder_test();
   best_small_play_recorder_test();
@@ -1691,4 +1965,5 @@ void test_move_gen(void) {
   wmp_blank_possibilities_bananas_4();
   wmp_blank_possibilities_bananas_5();
   large_alphabet_movegen_test();
+  wit_subrack_prune_movegen_test();
 }

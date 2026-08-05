@@ -912,6 +912,59 @@ void test_incremental_cross_set_undo(void) {
   config_destroy(dual_config);
 }
 
+void test_positional_hook_features(void) {
+  Config *config =
+      config_create_or_die("set -lex CSW24 -s1 equity -s2 equity");
+  Game *game = config_game_create(config);
+  load_cgp_or_die(
+      game,
+      "3AJUGA1V5/1WEX2E2A5/2FEM1O2U5/6d2L5/3DISUNITE4/6C2Y5/"
+      "6K8/1ANALyST7/15/15/15/15/15/15/15 "
+      "EHIRTWZ/EEGLOPU 191/164 0");
+  ValidatedMoves *vms = validated_moves_create_and_assert_status(
+      game, 0, "7A WHIZ", false, false, ERROR_STATUS_SUCCESS);
+  const Move *move = validated_moves_get_move(vms, 0);
+
+  Game *snapshot = game_duplicate(game);
+  Board *board = game_get_board(game);
+  const uint32_t
+      *old_wit_rows[2 * 2 * BOARD_DIM * BOARD_DIM];
+  uint8_t old_wit_lens[2 * 2 * BOARD_DIM * BOARD_DIM];
+  memcpy(old_wit_rows, board->wit_block_rows, sizeof(old_wit_rows));
+  memcpy(old_wit_lens, board->wit_block_lens, sizeof(old_wit_lens));
+
+  int features[POSITIONAL_HOOK_FEATURE_COUNT];
+  get_positional_hook_features(game, move, features);
+  assert(features[POSITIONAL_HOOK_FEATURE_TOTAL] == 50);
+  assert(features[POSITIONAL_HOOK_FEATURE_HELD] == 36);
+  assert(features[POSITIONAL_HOOK_FEATURE_LIVE] == 49);
+  assert(features[POSITIONAL_HOOK_FEATURE_DEAD] == 1);
+  assert(features[POSITIONAL_HOOK_FEATURE_HELD_SAFE] == 0);
+  assert(features[POSITIONAL_HOOK_FEATURE_HELD_CONTESTED] == 36);
+  assert(features[POSITIONAL_HOOK_FEATURE_OPPONENT_ONLY] == 13);
+  assert(features[POSITIONAL_HOOK_FEATURE_TOTAL] ==
+         features[POSITIONAL_HOOK_FEATURE_LIVE] +
+             features[POSITIONAL_HOOK_FEATURE_DEAD]);
+  assert(features[POSITIONAL_HOOK_FEATURE_LIVE] ==
+         features[POSITIONAL_HOOK_FEATURE_HELD_CONTESTED] +
+             features[POSITIONAL_HOOK_FEATURE_OPPONENT_ONLY]);
+
+  // The hypothetical play/unplay must not perturb game state or WIT's
+  // parallel block caches, including when the full adjustment calls the
+  // extractor a second time.
+  (void)get_positional_adjustment(game, move);
+  assert_games_are_equal(snapshot, game, true);
+  assert(memcmp(old_wit_rows, board->wit_block_rows, sizeof(old_wit_rows)) ==
+         0);
+  assert(memcmp(old_wit_lens, board->wit_block_lens, sizeof(old_wit_lens)) ==
+         0);
+
+  game_destroy(snapshot);
+  validated_moves_destroy(vms);
+  game_destroy(game);
+  config_destroy(config);
+}
+
 void test_gameplay(void) {
   test_draw_to_full_rack();
   test_rack_is_drawable();
@@ -924,4 +977,5 @@ void test_gameplay(void) {
   test_leave_record();
   test_moves_are_similar();
   test_incremental_cross_set_undo();
+  test_positional_hook_features();
 }

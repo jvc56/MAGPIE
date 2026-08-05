@@ -23,6 +23,7 @@
 #include "../ent/board.h"
 #include "../ent/board_layout.h"
 #include "../ent/conversion_results.h"
+#include "../ent/data_filepaths.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -39,6 +40,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include "../ent/trie.h"
 #include "../ent/validated_move.h"
@@ -64,6 +66,7 @@
 #include "inference.h"
 #include "move_gen.h"
 #include "peg.h"
+#include "play_chooser.h"
 #include "simmer.h"
 #include <assert.h>
 #include <ctype.h>
@@ -118,20 +121,25 @@ typedef enum {
   ARG_TOKEN_USE_WMP,
   ARG_TOKEN_USE_RIT,
   ARG_TOKEN_USE_MMAP_FOR_RIT,
+  ARG_TOKEN_KLV3_FALLBACK_THRESHOLD,
+  ARG_TOKEN_USE_WIT,
   ARG_TOKEN_LEAVES,
   ARG_TOKEN_P1_LEXICON,
   ARG_TOKEN_P1_USE_WMP,
   ARG_TOKEN_P1_USE_RIT,
+  ARG_TOKEN_P1_USE_WIT,
   ARG_TOKEN_P1_LEAVES,
   ARG_TOKEN_P1_MOVE_SORT_TYPE,
   ARG_TOKEN_P1_MOVE_RECORD_TYPE,
   ARG_TOKEN_P2_LEXICON,
   ARG_TOKEN_P2_USE_WMP,
   ARG_TOKEN_P2_USE_RIT,
+  ARG_TOKEN_P2_USE_WIT,
   ARG_TOKEN_P2_LEAVES,
   ARG_TOKEN_P2_MOVE_SORT_TYPE,
   ARG_TOKEN_P2_MOVE_RECORD_TYPE,
   ARG_TOKEN_WIN_PCT,
+  ARG_TOKEN_SPREAD_FORECAST,
   ARG_TOKEN_PLIES,
   ARG_TOKEN_SHPLIES,
   ARG_TOKEN_SHOW_BU,
@@ -223,6 +231,10 @@ typedef enum {
   ARG_TOKEN_P2_SIM_WITH_INFERENCE,
   ARG_TOKEN_P1_TIME_LIMIT,
   ARG_TOKEN_P2_TIME_LIMIT,
+  ARG_TOKEN_P1_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_P2_PLAY_CHOOSER_TIME,
+  ARG_TOKEN_OVERTIME_PENALTY_POINTS,
+  ARG_TOKEN_OVERTIME_PERIOD,
   ARG_TOKEN_P1_THRESHOLD,
   ARG_TOKEN_P2_THRESHOLD,
   ARG_TOKEN_P1_SAMPLING_RULE,
@@ -325,6 +337,8 @@ struct Config {
   bool show_prompt;
   bool save_settings;
   bool use_mmap_for_rit;
+  bool klv3_fallback_threshold_enabled;
+  Equity klv3_fallback_threshold;
   bool autosave_gcg;
   bool fg_required;
   bool loaded_settings;
@@ -360,6 +374,12 @@ struct Config {
   bool p2_sim_with_inference;
   double p1_time_limit_seconds;
   double p2_time_limit_seconds;
+  // Milliseconds per game. Negative disables PlayChooser; zero enables it
+  // without a clock.
+  double p1_play_chooser_time_ms;
+  double p2_play_chooser_time_ms;
+  int overtime_penalty_points;
+  double overtime_period_ms;
   bai_threshold_t p1_threshold;
   bai_threshold_t p2_threshold;
   bai_sampling_rule_t p1_sampling_rule;
@@ -374,6 +394,7 @@ struct Config {
   Equity p2_eq_margin_inference;
   multi_threading_mode_t multi_threading_mode;
   WinPct *win_pcts;
+  SpreadForecast *spread_forecast;
   BoardLayout *board_layout;
   LetterDistribution *ld;
   PlayersData *players_data;
@@ -569,6 +590,9 @@ game_variant_t config_get_game_variant(const Config *config) {
 }
 
 WinPct *config_get_win_pcts(const Config *config) { return config->win_pcts; }
+SpreadForecast *config_get_spread_forecast(const Config *config) {
+  return config->spread_forecast;
+}
 
 bool config_get_use_game_pairs(const Config *config) {
   return config->use_game_pairs;
@@ -1494,7 +1518,8 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "future, other per-rack data) for every possible full rack, "
              "enabling a single hash lookup to replace repeated KLV traversal. "
              "Off by default because .rit files are large and must be built "
-             "with the klvwmp2rit convert command.";
+             "with the klvwmp2rit convert command. Contextual KLVs prefer a "
+             "slim <lexicon>_word.rit built with rit2wordrit when present.";
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
       usages[0] = "<true_or_false>";
@@ -1504,6 +1529,26 @@ void add_help_arg_to_string_builder(const Config *config, int token,
              "into allocated memory. This eliminates the startup cost of "
              "loading the file but pages are faulted on demand during play. "
              "Only supported on little-endian architectures.";
+      break;
+    case ARG_TOKEN_KLV3_FALLBACK_THRESHOLD:
+      usages[0] = "<equity_points_or_-1>";
+      examples[0] = "1";
+      examples[1] = "2.5";
+      examples[2] = "-1";
+      text = "Enables hybrid KLV3 evaluation. Positions whose sampled "
+             "contextual-adjustment magnitude is at most this many equity "
+             "points use embedded KLV2 and its full RIT/cache path. -1 "
+             "disables fallback and prefers a slim word-only RIT.";
+      break;
+    case ARG_TOKEN_USE_WIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed word info table when "
+             "generating moves. The table stores, for each word, the letters "
+             "usable in longer words containing it as a substring, letting "
+             "movegen prune subracks that cannot fit. Off by default because "
+             ".wit files must be built with the kwg2wit convert command.";
       break;
     case ARG_TOKEN_LEAVES:
       usages[0] = "<leaves>";
@@ -1535,6 +1580,14 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       examples[0] = "true";
       examples[1] = "false";
       text = "Specifies whether to use the precomputed rack info table when "
+             "generating moves for the given player.";
+      break;
+    case ARG_TOKEN_P1_USE_WIT:
+    case ARG_TOKEN_P2_USE_WIT:
+      usages[0] = "<true_or_false>";
+      examples[0] = "true";
+      examples[1] = "false";
+      text = "Specifies whether to use the precomputed word info table when "
              "generating moves for the given player.";
       break;
     case ARG_TOKEN_P1_LEAVES:
@@ -1571,6 +1624,15 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       usages[0] = "<win_percentage>";
       examples[0] = "winpct";
       text = "Specifies which win percentage file to use for simulations.";
+      break;
+    case ARG_TOKEN_SPREAD_FORECAST:
+      usages[0] = "<forecast_or_none>";
+      examples[0] = "CSW24_spread_v1";
+      examples[1] = "none";
+      text = "Optional expected-final-spread forecast for simulations. The "
+             "forecast uses the exact bag count and both rack sizes at the "
+             "simulation horizon. It affects spread/equity and blended "
+             "utility, while -winpct remains responsible for win probability.";
       break;
     case ARG_TOKEN_PLIES:
       usages[0] = "<plies>";
@@ -2097,6 +2159,31 @@ void add_help_arg_to_string_builder(const Config *config, int token,
       text = "Specifies the time limit in seconds for simulation for player "
              "1 or 2 during autoplay. Fractional values supported.";
       break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      usages[0] = "<milliseconds>";
+      examples[0] = "30000";
+      examples[1] = "-1";
+      text = "Enables PlayChooser for player 1 or 2 during autoplay and sets "
+             "that player's total per-game clock in milliseconds. -1 "
+             "disables PlayChooser for the player (the default); 0 enables "
+             "it without a clock.";
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      usages[0] = "<points>";
+      examples[0] = "10";
+      examples[1] = "1";
+      text = "Points deducted for each started overtime period in timed "
+             "PlayChooser autoplay. Defaults to 10.";
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      usages[0] = "<milliseconds>";
+      examples[0] = "60000";
+      examples[1] = "1000";
+      text = "Length in milliseconds of each started overtime penalty "
+             "period. Defaults to 60000 (one minute); use 1000 with "
+             "-otpenalty 1 for one point per started second.";
+      break;
     case ARG_TOKEN_P1_THRESHOLD:
     case ARG_TOKEN_P2_THRESHOLD:
       usages[0] = "<threshold>";
@@ -2246,28 +2333,32 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
     };
     // Player Options (alphabetical by name)
     static const arg_token_t player_opts[] = {
-        ARG_TOKEN_BINGO_BONUS,         /* bb */
-        ARG_TOKEN_BOARD_LAYOUT,        /* bdn */
-        ARG_TOKEN_CHALLENGE_BONUS,     /* cb */
-        ARG_TOKEN_P1_LEAVES,           /* k1 */
-        ARG_TOKEN_P2_LEAVES,           /* k2 */
-        ARG_TOKEN_P1_LEXICON,          /* l1 */
-        ARG_TOKEN_P2_LEXICON,          /* l2 */
-        ARG_TOKEN_LETTER_DISTRIBUTION, /* ld */
-        ARG_TOKEN_LEAVES,              /* leaves */
-        ARG_TOKEN_LEXICON,             /* lex */
-        ARG_TOKEN_P1_MOVE_RECORD_TYPE, /* r1 */
-        ARG_TOKEN_P2_MOVE_RECORD_TYPE, /* r2 */
-        ARG_TOKEN_USE_RIT,             /* rit */
-        ARG_TOKEN_P1_USE_RIT,          /* rit1 */
-        ARG_TOKEN_P2_USE_RIT,          /* rit2 */
-        ARG_TOKEN_USE_MMAP_FOR_RIT,    /* ritmmap */
-        ARG_TOKEN_P1_MOVE_SORT_TYPE,   /* s1 */
-        ARG_TOKEN_P2_MOVE_SORT_TYPE,   /* s2 */
-        ARG_TOKEN_GAME_VARIANT,        /* var */
-        ARG_TOKEN_P1_USE_WMP,          /* w1 */
-        ARG_TOKEN_P2_USE_WMP,          /* w2 */
-        ARG_TOKEN_USE_WMP,             /* wmp */
+        ARG_TOKEN_BINGO_BONUS,             /* bb */
+        ARG_TOKEN_BOARD_LAYOUT,            /* bdn */
+        ARG_TOKEN_CHALLENGE_BONUS,         /* cb */
+        ARG_TOKEN_P1_LEAVES,               /* k1 */
+        ARG_TOKEN_P2_LEAVES,               /* k2 */
+        ARG_TOKEN_P1_LEXICON,              /* l1 */
+        ARG_TOKEN_P2_LEXICON,              /* l2 */
+        ARG_TOKEN_LETTER_DISTRIBUTION,     /* ld */
+        ARG_TOKEN_LEAVES,                  /* leaves */
+        ARG_TOKEN_LEXICON,                 /* lex */
+        ARG_TOKEN_P1_MOVE_RECORD_TYPE,     /* r1 */
+        ARG_TOKEN_P2_MOVE_RECORD_TYPE,     /* r2 */
+        ARG_TOKEN_USE_RIT,                 /* rit */
+        ARG_TOKEN_P1_USE_RIT,              /* rit1 */
+        ARG_TOKEN_P2_USE_RIT,              /* rit2 */
+        ARG_TOKEN_USE_MMAP_FOR_RIT,        /* ritmmap */
+        ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, /* klv3fallback */
+        ARG_TOKEN_P1_MOVE_SORT_TYPE,       /* s1 */
+        ARG_TOKEN_P2_MOVE_SORT_TYPE,       /* s2 */
+        ARG_TOKEN_GAME_VARIANT,            /* var */
+        ARG_TOKEN_P1_USE_WMP,              /* w1 */
+        ARG_TOKEN_P2_USE_WMP,              /* w2 */
+        ARG_TOKEN_USE_WIT,                 /* wit */
+        ARG_TOKEN_P1_USE_WIT,              /* wit1 */
+        ARG_TOKEN_P2_USE_WIT,              /* wit2 */
+        ARG_TOKEN_USE_WMP,                 /* wmp */
     };
     // Game Analysis Options (alphabetical by name)
     static const arg_token_t game_analysis_opts[] = {
@@ -2291,6 +2382,10 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_NUMBER_OF_SMALL_PLAYS,   /* numsmallplays */
         ARG_TOKEN_P1_NUM_PLAYS,            /* np1 */
         ARG_TOKEN_P2_NUM_PLAYS,            /* np2 */
+        ARG_TOKEN_OVERTIME_PENALTY_POINTS, /* otpenalty */
+        ARG_TOKEN_OVERTIME_PERIOD,         /* otperiod */
+        ARG_TOKEN_P1_PLAY_CHOOSER_TIME,    /* pc1 */
+        ARG_TOKEN_P2_PLAY_CHOOSER_TIME,    /* pc2 */
         ARG_TOKEN_PEG_NESTED,              /* pegnested */
         ARG_TOKEN_PEG_ONLY,                /* pegonly */
         ARG_TOKEN_PEG_OUTCOMES,            /* pegoutcomes */
@@ -2333,6 +2428,7 @@ char *impl_help(Config *config, ErrorStack *error_stack) {
         ARG_TOKEN_P2_UTILITY_W_WINPCT,     /* uwin2 */
         ARG_TOKEN_WRITE_BUFFER_SIZE,       /* wb */
         ARG_TOKEN_WIN_PCT,                 /* winpct */
+        ARG_TOKEN_SPREAD_FORECAST,         /* spreadforecast */
     };
     // Display Options (alphabetical by name)
     static const arg_token_t display_opts[] = {
@@ -2838,6 +2934,7 @@ void config_fill_sim_args(const Config *config, Rack *known_opp_rack,
       config->sampling_rule, config->cutoff, config->utility_w_winpct,
       config->utility_w_spread, config->utility_spread_scale, &inference_args,
       sim_args);
+  sim_args->spread_forecast = config->spread_forecast;
 }
 
 void config_load_win_pcts(Config *config, ErrorStack *error_stack) {
@@ -3499,12 +3596,28 @@ void config_fill_autoplay_args(const Config *config,
   config_fill_game_args(config, autoplay_args->game_args);
   autoplay_args->multi_threading_mode = config->multi_threading_mode;
   autoplay_args->cutoff = config->cutoff;
+  const double play_chooser_time_ms[2] = {config->p1_play_chooser_time_ms,
+                                          config->p2_play_chooser_time_ms};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->use_play_chooser[player_index] =
+        autoplay_type == AUTOPLAY_TYPE_DEFAULT &&
+        play_chooser_time_ms[player_index] >= 0.0;
+    autoplay_args->time_control_seconds[player_index] =
+        autoplay_args->use_play_chooser[player_index]
+            ? play_chooser_time_ms[player_index] / 1000.0
+            : 0.0;
+  }
+  autoplay_args->overtime_penalty_points = config->overtime_penalty_points;
+  autoplay_args->overtime_period_seconds = config->overtime_period_ms / 1000.0;
 
   autoplay_args->num_threads = config->num_threads;
   int num_worker_threads_per_sim = 1;
+  const bool any_player_uses_play_chooser =
+      autoplay_args->use_play_chooser[0] || autoplay_args->use_play_chooser[1];
   if (autoplay_args->multi_threading_mode ==
           MULTI_THREADING_MODE_INTRA_GAME_PARALLELISM &&
-      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0)) {
+      (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+       any_player_uses_play_chooser)) {
     autoplay_args->num_threads = 1;
     num_worker_threads_per_sim = config->num_threads;
   }
@@ -3561,6 +3674,7 @@ void config_fill_autoplay_args(const Config *config,
       config->p1_utility_w_winpct, config->p1_utility_w_spread,
       config->p1_utility_spread_scale, &p1_inference_args,
       &autoplay_args->p1_sim_args);
+  autoplay_args->p1_sim_args.spread_forecast = config->spread_forecast;
 
   sim_args_fill(
       config->p2_sim_plies, /*move_list=*/NULL, config->p2_num_plays,
@@ -3575,6 +3689,28 @@ void config_fill_autoplay_args(const Config *config,
       config->p2_utility_w_winpct, config->p2_utility_w_spread,
       config->p2_utility_spread_scale, &p2_inference_args,
       &autoplay_args->p2_sim_args);
+  autoplay_args->p2_sim_args.spread_forecast = config->spread_forecast;
+
+  const double utility_win_pct[2] = {config->p1_utility_w_winpct,
+                                     config->p2_utility_w_winpct};
+  const double utility_spread[2] = {config->p1_utility_w_spread,
+                                    config->p2_utility_w_spread};
+  const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
+                                          config->p2_utility_spread_scale};
+  for (int player_index = 0; player_index < 2; player_index++) {
+    autoplay_args->play_chooser_strategies[player_index] =
+        (PlayChooserStrategy){
+            .pre_endgame_eval = PLAY_CHOOSER_EVAL_PEG,
+            .endgame_eval = PLAY_CHOOSER_EVAL_ENDGAME,
+            .win_pcts = config->win_pcts,
+            .spread_forecast = config->spread_forecast,
+            .num_threads = num_worker_threads_per_sim,
+            .peg_scenario_stride = config->peg_scenario_stride,
+            .utility_w_winpct = utility_win_pct[player_index],
+            .utility_w_spread = utility_spread[player_index],
+            .utility_spread_scale = utility_spread_scale[player_index],
+        };
+  }
 }
 
 void config_autoplay(const Config *config, AutoplayResults *autoplay_results,
@@ -3599,7 +3735,9 @@ void impl_autoplay(Config *config, ErrorStack *error_stack) {
     return;
   }
 
-  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0) {
+  if (config->p1_sim_plies > 0 || config->p2_sim_plies > 0 ||
+      config->p1_play_chooser_time_ms >= 0.0 ||
+      config->p2_play_chooser_time_ms >= 0.0) {
     config_load_win_pcts(config, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
@@ -5798,8 +5936,9 @@ void config_load_lexicon_dependent_data(
     const bool use_wmp_has_value, const bool p1_use_wmp_has_value,
     const bool p2_use_wmp_has_value, const bool use_rit_has_value,
     const bool p1_use_rit_has_value, const bool p2_use_rit_has_value,
-    const bool use_mmap_for_rit_has_value, const bool is_loading_game_history,
-    ErrorStack *error_stack) {
+    const bool use_mmap_for_rit_has_value, const bool use_wit_has_value,
+    const bool p1_use_wit_has_value, const bool p2_use_wit_has_value,
+    const bool is_loading_game_history, ErrorStack *error_stack) {
   // Lexical player data
 
   // For both the kwg and klv, we disallow any non-NULL -> NULL transitions.
@@ -5939,6 +6078,46 @@ void config_load_lexicon_dependent_data(
     }
   }
 
+  // Determine the status of the word info table for both players, mirroring
+  // the WMP/RIT arg pattern (wit / wit1 / wit2).
+  bool p1_wit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, 0);
+  bool p2_wit_use_when_available = players_data_get_use_when_available(
+      config->players_data, PLAYERS_DATA_TYPE_WIT, 1);
+
+  if (use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_USE_WIT, &p1_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    p2_wit_use_when_available = p1_wit_use_when_available;
+  }
+
+  // The "wit1" and "wit2" args override the "wit" arg.
+  if (p1_use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_P1_USE_WIT, &p1_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  if (p2_use_wit_has_value) {
+    config_load_bool(config, ARG_TOKEN_P2_USE_WIT, &p2_wit_use_when_available,
+                     error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+  }
+
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WIT, 0,
+                                      p1_wit_use_when_available);
+  players_data_set_use_when_available(config->players_data,
+                                      PLAYERS_DATA_TYPE_WIT, 1,
+                                      p2_wit_use_when_available);
+
   // Both lexicons are not specified, so we don't
   // load any of the lexicon dependent data
   if (!updated_p1_lexicon_name && !updated_p2_lexicon_name) {
@@ -6062,19 +6241,94 @@ void config_load_lexicon_dependent_data(
     return;
   }
 
-  // Load rack info tables (if enabled). Like the WMP, the .rit file shares
-  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  for (int player_index = 0; player_index < 2; player_index++) {
+    klv_set_context_fallback_threshold(
+        players_data_get_klv(config->players_data, player_index),
+        config->klv3_fallback_threshold_enabled,
+        config->klv3_fallback_threshold);
+  }
+
+  // Load rack info tables (if enabled). KLV2 uses the full lexicon-named RIT.
+  // A contextual evaluator first looks for <lexicon>_word.rit, which retains
+  // model-independent word facts without mapping the unused KLV2 payload.
+  // Fall back to the legacy full RIT (or a model-named capped experiment) so
+  // existing installations remain usable.
+  char *p1_word_rit_name = NULL;
   const char *p1_rit_name = NULL;
   if (p1_rit_use_when_available) {
-    p1_rit_name = updated_p1_lexicon_name;
+    const KLV *p1_klv = players_data_get_klv(config->players_data, 0);
+    if (klv_has_context_model(p1_klv) &&
+        !config->klv3_fallback_threshold_enabled) {
+      p1_word_rit_name =
+          get_formatted_string("%s_word", updated_p1_lexicon_name);
+      ErrorStack *probe = error_stack_create();
+      char *filename = data_filepaths_get_readable_filename(
+          config->data_paths, p1_word_rit_name,
+          DATA_FILEPATH_TYPE_RACK_INFO_TABLE, probe);
+      free(filename);
+      if (!error_stack_is_empty(probe)) {
+        free(p1_word_rit_name);
+        p1_word_rit_name = NULL;
+      }
+      error_stack_destroy(probe);
+    }
+    if (p1_word_rit_name != NULL) {
+      p1_rit_name = p1_word_rit_name;
+    } else if (klv_has_context_leave_caps(p1_klv)) {
+      p1_rit_name = klv_get_name(p1_klv);
+    } else {
+      p1_rit_name = updated_p1_lexicon_name;
+    }
   }
+  char *p2_word_rit_name = NULL;
   const char *p2_rit_name = NULL;
   if (p2_rit_use_when_available) {
-    p2_rit_name = updated_p2_lexicon_name;
+    const KLV *p2_klv = players_data_get_klv(config->players_data, 1);
+    if (klv_has_context_model(p2_klv) &&
+        !config->klv3_fallback_threshold_enabled) {
+      p2_word_rit_name =
+          get_formatted_string("%s_word", updated_p2_lexicon_name);
+      ErrorStack *probe = error_stack_create();
+      char *filename = data_filepaths_get_readable_filename(
+          config->data_paths, p2_word_rit_name,
+          DATA_FILEPATH_TYPE_RACK_INFO_TABLE, probe);
+      free(filename);
+      if (!error_stack_is_empty(probe)) {
+        free(p2_word_rit_name);
+        p2_word_rit_name = NULL;
+      }
+      error_stack_destroy(probe);
+    }
+    if (p2_word_rit_name != NULL) {
+      p2_rit_name = p2_word_rit_name;
+    } else if (klv_has_context_leave_caps(p2_klv)) {
+      p2_rit_name = klv_get_name(p2_klv);
+    } else {
+      p2_rit_name = updated_p2_lexicon_name;
+    }
   }
   players_data_set(config->players_data, PLAYERS_DATA_TYPE_RIT,
                    config->data_paths, p1_rit_name, p2_rit_name,
                    config->use_mmap_for_rit, error_stack);
+  free(p1_word_rit_name);
+  free(p2_word_rit_name);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
+  // Load word info tables (if enabled). Like the WMP, the .wit file shares
+  // the lexicon name and non-NULL -> NULL transitions are allowed.
+  const char *p1_wit_name = NULL;
+  if (p1_wit_use_when_available) {
+    p1_wit_name = updated_p1_lexicon_name;
+  }
+  const char *p2_wit_name = NULL;
+  if (p2_wit_use_when_available) {
+    p2_wit_name = updated_p2_lexicon_name;
+  }
+  players_data_set(config->players_data, PLAYERS_DATA_TYPE_WIT,
+                   config->data_paths, p1_wit_name, p2_wit_name,
+                   /*use_mmap_for_rit=*/false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6183,7 +6437,8 @@ void config_load_game_history(Config *config, const GameHistory *game_history,
       game_history_get_game_variant(game_history);
   config_load_lexicon_dependent_data(config, lexicon, NULL, NULL, NULL, NULL,
                                      NULL, ld_name, false, false, false, false,
-                                     false, false, false, true, error_stack);
+                                     false, false, false, false, false, false,
+                                     true, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -6707,6 +6962,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     config->data_paths = string_duplicate(new_path);
   }
   autoplay_results_set_data_paths(config->autoplay_results, config->data_paths);
+  if (config_get_parg_num_set_values(config,
+                                     ARG_TOKEN_KLV3_FALLBACK_THRESHOLD) > 0) {
+    double threshold = -1.0;
+    config_load_double(config, ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, -1.0,
+                       EQUITY_MAX_DOUBLE, &threshold, error_stack);
+    if (!error_stack_is_empty(error_stack)) {
+      return;
+    }
+    config->klv3_fallback_threshold_enabled = threshold >= 0.0;
+    config->klv3_fallback_threshold =
+        threshold >= 0.0 ? double_to_equity(threshold) : 0;
+  }
   // Exec Mode
 
   const char *new_exec_mode_str =
@@ -7483,6 +7750,27 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
     return;
   }
 
+  config_load_double(config, ARG_TOKEN_P1_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p1_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_P2_PLAY_CHOOSER_TIME, -1, 1e12,
+                     &config->p2_play_chooser_time_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_int(config, ARG_TOKEN_OVERTIME_PENALTY_POINTS, 0, INT_MAX,
+                  &config->overtime_penalty_points, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  config_load_double(config, ARG_TOKEN_OVERTIME_PERIOD, 1, 1e12,
+                     &config->overtime_period_ms, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+
   if (config_get_parg_value(config, ARG_TOKEN_THRESHOLD, 0) != NULL) {
     config->p1_threshold = config->threshold;
     config->p2_threshold = config->threshold;
@@ -7683,11 +7971,18 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
   const bool use_mmap_for_rit =
       config_get_parg_value(config, ARG_TOKEN_USE_MMAP_FOR_RIT, 0);
 
+  // WIT settings
+  const bool use_wit = config_get_parg_value(config, ARG_TOKEN_USE_WIT, 0);
+  const bool p1_use_wit =
+      config_get_parg_value(config, ARG_TOKEN_P1_USE_WIT, 0);
+  const bool p2_use_wit =
+      config_get_parg_value(config, ARG_TOKEN_P2_USE_WIT, 0);
+
   config_load_lexicon_dependent_data(
       config, new_lexicon_name, new_p1_lexicon_name, new_p2_lexicon_name,
       new_leaves_name, new_p1_leaves_name, new_p2_leaves_name, new_ld_name,
       use_wmp, p1_use_wmp, p2_use_wmp, use_rit, p1_use_rit, p2_use_rit,
-      use_mmap_for_rit, false, error_stack);
+      use_mmap_for_rit, use_wit, p1_use_wit, p2_use_wit, false, error_stack);
   if (!error_stack_is_empty(error_stack)) {
     return;
   }
@@ -7715,6 +8010,26 @@ void config_load_data(Config *config, ErrorStack *error_stack) {
         win_pct_create(config->data_paths, new_win_pct_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
       return;
+    }
+  }
+
+  // Spread forecasting is opt-in while its model and effect on sim utility
+  // are being validated. "none" unloads it without changing -winpct.
+  const char *new_spread_forecast_name =
+      config_get_parg_value(config, ARG_TOKEN_SPREAD_FORECAST, 0);
+  if (new_spread_forecast_name != NULL) {
+    if (strings_equal(new_spread_forecast_name, "none")) {
+      spread_forecast_destroy(config->spread_forecast);
+      config->spread_forecast = NULL;
+    } else if (config->spread_forecast == NULL ||
+               !strings_equal(spread_forecast_get_name(config->spread_forecast),
+                              new_spread_forecast_name)) {
+      spread_forecast_destroy(config->spread_forecast);
+      config->spread_forecast = spread_forecast_create(
+          config->data_paths, new_spread_forecast_name, error_stack);
+      if (!error_stack_is_empty(error_stack)) {
+        return;
+      }
     }
   }
 }
@@ -8186,6 +8501,7 @@ static void analyze_single_game(Config *config, AnalyzeArgs *analyze_args,
     return;
   }
   analyze_args->sim_args.win_pcts = config->win_pcts;
+  analyze_args->sim_args.spread_forecast = config->spread_forecast;
 
   const char *gcg_filename =
       game_history_get_gcg_filename(config->game_history);
@@ -8562,6 +8878,7 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
 
   // win_pcts is loaded lazily on first use (simulation, etc.)
   config->win_pcts = NULL;
+  config->spread_forecast = NULL;
 
   // Command parsed from string input
 #define cmd(token, name, n_req, n_val, func, stat, hotkey)                     \
@@ -8631,20 +8948,25 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_USE_WMP, "wmp", 1, 1);
   arg(ARG_TOKEN_USE_RIT, "rit", 1, 1);
   arg(ARG_TOKEN_USE_MMAP_FOR_RIT, "ritmmap", 1, 1);
+  arg(ARG_TOKEN_KLV3_FALLBACK_THRESHOLD, "klv3fallback", 1, 1);
+  arg(ARG_TOKEN_USE_WIT, "wit", 1, 1);
   arg(ARG_TOKEN_LEAVES, "leaves", 1, 1);
   arg(ARG_TOKEN_P1_LEXICON, "l1", 1, 1);
   arg(ARG_TOKEN_P1_USE_WMP, "w1", 1, 1);
   arg(ARG_TOKEN_P1_USE_RIT, "rit1", 1, 1);
+  arg(ARG_TOKEN_P1_USE_WIT, "wit1", 1, 1);
   arg(ARG_TOKEN_P1_LEAVES, "k1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_SORT_TYPE, "s1", 1, 1);
   arg(ARG_TOKEN_P1_MOVE_RECORD_TYPE, "r1", 1, 1);
   arg(ARG_TOKEN_P2_LEXICON, "l2", 1, 1);
   arg(ARG_TOKEN_P2_USE_WMP, "w2", 1, 1);
   arg(ARG_TOKEN_P2_USE_RIT, "rit2", 1, 1);
+  arg(ARG_TOKEN_P2_USE_WIT, "wit2", 1, 1);
   arg(ARG_TOKEN_P2_LEAVES, "k2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_SORT_TYPE, "s2", 1, 1);
   arg(ARG_TOKEN_P2_MOVE_RECORD_TYPE, "r2", 1, 1);
   arg(ARG_TOKEN_WIN_PCT, "winpct", 1, 1);
+  arg(ARG_TOKEN_SPREAD_FORECAST, "spreadforecast", 1, 1);
   arg(ARG_TOKEN_PLIES, "plies", 1, 1);
   arg(ARG_TOKEN_SHPLIES, "shplies", 1, 1);
   arg(ARG_TOKEN_SHOW_BU, "showbu", 1, 1);
@@ -8707,6 +9029,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   arg(ARG_TOKEN_P2_SIM_WITH_INFERENCE, "si2", 1, 1);
   arg(ARG_TOKEN_P1_TIME_LIMIT, "tl1", 1, 1);
   arg(ARG_TOKEN_P2_TIME_LIMIT, "tl2", 1, 1);
+  arg(ARG_TOKEN_P1_PLAY_CHOOSER_TIME, "pc1", 1, 1);
+  arg(ARG_TOKEN_P2_PLAY_CHOOSER_TIME, "pc2", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PENALTY_POINTS, "otpenalty", 1, 1);
+  arg(ARG_TOKEN_OVERTIME_PERIOD, "otperiod", 1, 1);
   arg(ARG_TOKEN_P1_THRESHOLD, "th1", 1, 1);
   arg(ARG_TOKEN_P2_THRESHOLD, "th2", 1, 1);
   arg(ARG_TOKEN_P1_SAMPLING_RULE, "sa1", 1, 1);
@@ -8766,6 +9092,8 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->plies = 5;
   config->shplies = 2;
   config->show_bu = false;
+  config->klv3_fallback_threshold_enabled = false;
+  config->klv3_fallback_threshold = 0;
   config->endgame_plies = 6;
   config->endgame_top_k = 1;
   // -1 = no peg results yet; 0 stages = built-in schedule; 0 stride = solver
@@ -8815,6 +9143,10 @@ Config *config_create(const ConfigArgs *config_args, ErrorStack *error_stack) {
   config->p2_sim_with_inference = config->sim_with_inference;
   config->p1_time_limit_seconds = config->time_limit_seconds;
   config->p2_time_limit_seconds = config->time_limit_seconds;
+  config->p1_play_chooser_time_ms = -1.0;
+  config->p2_play_chooser_time_ms = -1.0;
+  config->overtime_penalty_points = 10;
+  config->overtime_period_ms = 60000.0;
   config->p1_threshold = config->threshold;
   config->p2_threshold = config->threshold;
   config->p1_sampling_rule = config->sampling_rule;
@@ -8870,6 +9202,7 @@ void config_destroy(Config *config) {
     parsed_arg_destroy(config->pargs[i]);
   }
   win_pct_destroy(config->win_pcts);
+  spread_forecast_destroy(config->spread_forecast);
   board_layout_destroy(config->board_layout);
   ld_destroy(config->ld);
   players_data_destroy(config->players_data);
@@ -9034,12 +9367,20 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_LEXICON:
     case ARG_TOKEN_USE_WMP:
     case ARG_TOKEN_USE_RIT:
+    case ARG_TOKEN_USE_WIT:
     case ARG_TOKEN_LEAVES:
       // Set these values on a per-player basis
       break;
     case ARG_TOKEN_USE_MMAP_FOR_RIT:
       config_add_bool_setting_to_string_builder(config, sb, arg_token,
                                                 config->use_mmap_for_rit);
+      break;
+    case ARG_TOKEN_KLV3_FALLBACK_THRESHOLD:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token,
+          config->klv3_fallback_threshold_enabled
+              ? equity_to_double(config->klv3_fallback_threshold)
+              : -1.0);
       break;
     case ARG_TOKEN_P1_LEXICON:
       config_add_string_setting_to_string_builder(
@@ -9058,6 +9399,12 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_RIT, 0));
+      break;
+    case ARG_TOKEN_P1_USE_WIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WIT, 0));
       break;
     case ARG_TOKEN_P1_LEAVES:
       config_add_string_setting_to_string_builder(
@@ -9095,6 +9442,12 @@ void config_add_settings_to_string_builder(const Config *config,
           players_data_get_use_when_available(config->players_data,
                                               PLAYERS_DATA_TYPE_RIT, 1));
       break;
+    case ARG_TOKEN_P2_USE_WIT:
+      config_add_bool_setting_to_string_builder(
+          config, sb, arg_token,
+          players_data_get_use_when_available(config->players_data,
+                                              PLAYERS_DATA_TYPE_WIT, 1));
+      break;
     case ARG_TOKEN_P2_LEAVES:
       config_add_string_setting_to_string_builder(
           config, sb, arg_token,
@@ -9118,6 +9471,13 @@ void config_add_settings_to_string_builder(const Config *config,
           config, sb, arg_token,
           config->win_pcts ? win_pct_get_name(config->win_pcts)
                            : DEFAULT_WIN_PCT);
+      break;
+    case ARG_TOKEN_SPREAD_FORECAST:
+      config_add_string_setting_to_string_builder(
+          config, sb, arg_token,
+          config->spread_forecast
+              ? spread_forecast_get_name(config->spread_forecast)
+              : "none");
       break;
     case ARG_TOKEN_PLIES:
       config_add_int_setting_to_string_builder(config, sb, arg_token,
@@ -9344,6 +9704,22 @@ void config_add_settings_to_string_builder(const Config *config,
     case ARG_TOKEN_P2_TIME_LIMIT:
       config_add_double_setting_to_string_builder(
           config, sb, arg_token, config->p2_time_limit_seconds);
+      break;
+    case ARG_TOKEN_P1_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p1_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_P2_PLAY_CHOOSER_TIME:
+      config_add_double_setting_to_string_builder(
+          config, sb, arg_token, config->p2_play_chooser_time_ms);
+      break;
+    case ARG_TOKEN_OVERTIME_PENALTY_POINTS:
+      config_add_int_setting_to_string_builder(config, sb, arg_token,
+                                               config->overtime_penalty_points);
+      break;
+    case ARG_TOKEN_OVERTIME_PERIOD:
+      config_add_double_setting_to_string_builder(config, sb, arg_token,
+                                                  config->overtime_period_ms);
       break;
     case ARG_TOKEN_SAMPLING_RULE:
       string_builder_add_formatted_string(sb, " -%s ",

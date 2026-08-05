@@ -709,8 +709,17 @@ static inline void move_list_resize(MoveList *ml, int new_capacity) {
     return;
   }
   int old_moves_size = ml->moves_size;
+  int new_moves_size = new_capacity + 1;
+  if (new_moves_size < old_moves_size) {
+    for (int i = new_moves_size; i < old_moves_size; i++) {
+      move_destroy(ml->moves[i]);
+    }
+    if (ml->count > new_capacity) {
+      ml->count = new_capacity;
+    }
+  }
   ml->capacity = new_capacity;
-  ml->moves_size = new_capacity + 1;
+  ml->moves_size = new_moves_size;
   ml->moves =
       (Move **)realloc_or_die(ml->moves, sizeof(Move *) * ml->moves_size);
   for (int i = old_moves_size; i < ml->moves_size; i++) {

@@ -31,6 +31,7 @@
 #include "heat_map_test.h"
 #include "infer_cmp_test.h"
 #include "infer_test.h"
+#include "klv3_sim_oracle_test.h"
 #include "klv_test.h"
 #include "kwg_alpha_test.h"
 #include "kwg_maker_test.h"
@@ -55,6 +56,7 @@
 #include "shadow_test.h"
 #include "sim_benchmark_test.h"
 #include "sim_test.h"
+#include "spread_forecast_test.h"
 #include "stats_test.h"
 #include "string_util_test.h"
 #include "transposition_table_test.h"
@@ -63,6 +65,7 @@
 #include "wmp_maker_test.h"
 #include "wmp_move_gen_test.h"
 #include "wmp_test.h"
+#include "word_info_table_test.h"
 #include "word_prune_test.h"
 #include "word_test.h"
 #include "zobrist_test.h"
@@ -86,6 +89,7 @@ static TestEntry test_table[] = {
     {"l", test_leaves},
     {"leavemap", test_leave_map},
     {"rit", test_rack_info_table},
+    {"wit", test_word_info_table},
     {"kwg", test_kwg_alpha},
     {"bag", test_bag},
     {"rack", test_rack},
@@ -102,6 +106,7 @@ static TestEntry test_table[] = {
     {"eqadj", test_equity_adjustments},
     {"gameplay", test_gameplay},
     {"stats", test_stats},
+    {"spreadforecast", test_spread_forecast},
     {"infer", test_infer},
     {"rv", test_random_variable},
     {"am", test_alias_method},
@@ -166,6 +171,7 @@ static TestEntry on_demand_test_table[] = {
     {"benchfp", test_benchmark_forced_pass},
     {"benchns", test_benchmark_nonstuck},
     {"benchns3v3", test_benchmark_nonstuck_3v3},
+    {"tilesbench", test_tiles_played_bench},
     {"egspeedbench", test_endgame_speed_bench},
     {"egplayout", test_endgame_playout_bench},
     {"egmove1", test_endgame_move1},
@@ -178,6 +184,9 @@ static TestEntry on_demand_test_table[] = {
     {"kue", test_kue},
     {"monsterq", test_monster_q},
     {"simbench", test_sim_benchmark},
+    {"klv3oracle", test_klv3_sim_oracle},
+    {"poshooks", test_positional_hook_features},
+    {"pcbench", test_play_chooser_benchmark},
     {"ap_rit", test_autoplay_rit_correctness},
     // Pre-endgame (PEG) solver
     {"peg1pb", test_peg_1bag_pass_best},

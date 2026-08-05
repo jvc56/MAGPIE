@@ -5,6 +5,7 @@
 #include "../compat/ctime.h"
 #include "../def/autoplay_defs.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_history_defs.h"
 #include "../def/letter_distribution_defs.h"
 #include "../def/players_data_defs.h"
@@ -12,10 +13,13 @@
 #include "../def/thread_control_defs.h"
 #include "../ent/autoplay_results.h"
 #include "../ent/bag.h"
+#include "../ent/board_layout.h"
 #include "../ent/checkpoint.h"
 #include "../ent/data_filepaths.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
+#include "../ent/game_history.h"
+#include "../ent/game_timer.h"
 #include "../ent/inference_args.h"
 #include "../ent/inference_results.h"
 #include "../ent/klv.h"
@@ -27,6 +31,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
+#include "../ent/validated_move.h"
 #include "../ent/xoshiro.h"
 #include "../str/game_string.h"
 #include "../str/inference_string.h"
@@ -35,14 +40,17 @@
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "gameplay.h"
+#include "gcg.h"
+#include "play_chooser.h"
 #include "rack_list.h"
 #include "simmer.h"
-#include <limits.h>
+#include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 
 // Benchmark instrumentation: accumulates total sim iterations across all
 // turns in all games. Read/reset via autoplay_get_total_sim_iterations().
@@ -65,6 +73,21 @@ void autoplay_reset_total_sim_iterations(void) {
 // variants run through the same sequence of positions.
 static _Atomic bool autoplay_bench_static_move_enabled;
 
+int autoplay_overtime_penalty_points(double overtime_seconds,
+                                     int points_per_period,
+                                     double period_seconds) {
+  if (overtime_seconds <= 0.0 || points_per_period <= 0 ||
+      period_seconds <= 0.0) {
+    return 0;
+  }
+  const double periods = ceil(overtime_seconds / period_seconds);
+  const int max_penalty_points = (int)EQUITY_MAX_DOUBLE;
+  if (periods >= (double)max_penalty_points / (double)points_per_period) {
+    return max_penalty_points;
+  }
+  return (int)periods * points_per_period;
+}
+
 void autoplay_set_bench_static_move(bool enabled) {
   atomic_store_explicit(&autoplay_bench_static_move_enabled, enabled,
                         memory_order_relaxed);
@@ -73,6 +96,58 @@ void autoplay_set_bench_static_move(bool enabled) {
 bool autoplay_get_bench_static_move(void) {
   return atomic_load_explicit(&autoplay_bench_static_move_enabled,
                               memory_order_relaxed);
+}
+
+static unsigned int autoplay_positional_player_mask(void) {
+  const char *value = getenv("MAGPIE_AUTOPLAY_POSITIONAL");
+  if (value == NULL || value[0] == '\0' || strcmp(value, "none") == 0) {
+    return 0;
+  }
+  if (strcmp(value, "both") == 0) {
+    return 3;
+  }
+  if (strcmp(value, "p1") == 0 || strcmp(value, "1") == 0) {
+    return 1;
+  }
+  if (strcmp(value, "p2") == 0 || strcmp(value, "2") == 0) {
+    return 2;
+  }
+  log_fatal("MAGPIE_AUTOPLAY_POSITIONAL must be none, p1, p2, or both");
+  return 0;
+}
+
+static int autoplay_positional_env_int(const char *name, int default_value,
+                                       int minimum, int maximum) {
+  const char *value = getenv(name);
+  if (value == NULL || value[0] == '\0') {
+    return default_value;
+  }
+  char *end = NULL;
+  const long parsed = strtol(value, &end, 10);
+  if (*end != '\0' || parsed < minimum || parsed > maximum) {
+    log_fatal("%s must be an integer from %d through %d", name, minimum,
+              maximum);
+  }
+  return (int)parsed;
+}
+
+static Equity autoplay_positional_env_equity(const char *name,
+                                             double default_value,
+                                             double minimum,
+                                             double maximum) {
+  const char *value = getenv(name);
+  double parsed = default_value;
+  if (value != NULL && value[0] != '\0') {
+    char *end = NULL;
+    parsed = strtod(value, &end);
+    if (*end != '\0') {
+      log_fatal("%s must be numeric", name);
+    }
+  }
+  if (parsed < minimum || parsed > maximum) {
+    log_fatal("%s must be from %.3f through %.3f", name, minimum, maximum);
+  }
+  return double_to_equity(parsed);
 }
 
 typedef struct LeavegenSharedData {
@@ -318,6 +393,11 @@ typedef struct AutoplayWorker {
   Rack nontarget_known_rack;
   Rack target_known_rack;
   MoveList *move_lists[2];
+  unsigned int positional_player_mask;
+  int positional_candidate_count;
+  Equity positional_equity_margin;
+  int positional_adjustment_scale_thousandths;
+  Equity positional_adjustment_cap;
 } AutoplayWorker;
 
 AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
@@ -326,6 +406,16 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
                                        AutoplaySharedData *shared_data) {
   AutoplayWorker *autoplay_worker = malloc_or_die(sizeof(AutoplayWorker));
   autoplay_worker->args = *args;
+  autoplay_worker->positional_player_mask =
+      autoplay_positional_player_mask();
+  autoplay_worker->positional_candidate_count = autoplay_positional_env_int(
+      "MAGPIE_POSITIONAL_TOP", 3, 1, 15);
+  autoplay_worker->positional_equity_margin = autoplay_positional_env_equity(
+      "MAGPIE_POSITIONAL_MARGIN", 3.0, 0.0, EQUITY_MAX_DOUBLE);
+  autoplay_worker->positional_adjustment_scale_thousandths =
+      autoplay_positional_env_int("MAGPIE_POSITIONAL_SCALE", 750, 0, 10000);
+  autoplay_worker->positional_adjustment_cap = autoplay_positional_env_equity(
+      "MAGPIE_POSITIONAL_CAP", EQUITY_MAX_DOUBLE, 0.0, EQUITY_MAX_DOUBLE);
   // 0 plies indicate that the player is using static equity, so the move list
   // only needs a capacity of 1
   if (autoplay_worker->args.p1_sim_args.num_plays == 0) {
@@ -356,12 +446,21 @@ AutoplayWorker *autoplay_worker_create(const AutoplayArgs *args,
   autoplay_worker->inference_results = NULL;
   autoplay_worker->error_stack = NULL;
 
-  // Only allocate sim structs if at least one of the players running a sim.
-  if (ap_args->p1_sim_args.num_plies > 0 ||
-      ap_args->p2_sim_args.num_plies > 0) {
+  const bool any_player_sims =
+      ap_args->p1_sim_args.num_plies > 0 || ap_args->p2_sim_args.num_plies > 0;
+  const bool any_player_uses_play_chooser =
+      ap_args->use_play_chooser[0] || ap_args->use_play_chooser[1];
+  // PlayChooser needs an error stack. The remaining objects are specific to
+  // the legacy autoplay simmer.
+  if (any_player_uses_play_chooser) {
+    autoplay_worker->error_stack = error_stack_create();
+  }
+  if (any_player_sims) {
     autoplay_worker->sim_results = sim_results_create(ap_args->cutoff);
     autoplay_worker->inference_results = inference_results_create(NULL);
-    autoplay_worker->error_stack = error_stack_create();
+    if (autoplay_worker->error_stack == NULL) {
+      autoplay_worker->error_stack = error_stack_create();
+    }
     rack_set_dist_size_and_reset(&autoplay_worker->target_played_tiles,
                                  ld_get_size(ap_args->game_args->ld));
     rack_set_dist_size_and_reset(&autoplay_worker->nontarget_known_rack,
@@ -489,24 +588,44 @@ typedef struct GameRunner {
   uint64_t game_number;
   uint64_t seed;
   Game *game;
+  // Experimental corpus export: when MAGPIE_AUTOPLAY_GCG_DIR is set, retain
+  // the moves for this game and write a complete GCG after it finishes.
+  GameHistory *game_history;
   // Used for inference args in autoplay with
   // inference
   Game *game_one_move_behind;
   Move previous_move;
+  Move play_chooser_move;
+  PlayChooser *play_choosers[2];
+  GameTimer game_timer;
+  AutoplayGameTiming timing;
   AutoplaySharedData *shared_data;
 } GameRunner;
+
+static void game_runner_destroy_play_choosers(GameRunner *game_runner) {
+  for (int player_index = 0; player_index < 2; player_index++) {
+    play_chooser_destroy(game_runner->play_choosers[player_index]);
+    game_runner->play_choosers[player_index] = NULL;
+  }
+}
 
 GameRunner *game_runner_create(AutoplayWorker *autoplay_worker) {
   const AutoplayArgs *args = &autoplay_worker->args;
   GameRunner *game_runner = malloc_or_die(sizeof(GameRunner));
   game_runner->shared_data = autoplay_worker->shared_data;
   game_runner->game = game_create(args->game_args);
+  game_runner->game_history =
+      getenv("MAGPIE_AUTOPLAY_GCG_DIR") != NULL ? game_history_create() : NULL;
   game_runner->game_one_move_behind = NULL;
   if (args->p1_sim_args.use_inference || args->p2_sim_args.use_inference) {
     game_runner->game_one_move_behind = game_create(args->game_args);
   }
   game_runner->pair_game_number =
       0; // Will be set in game_runner_start if using pairs
+  game_runner->play_choosers[0] = NULL;
+  game_runner->play_choosers[1] = NULL;
+  game_timer_reset(&game_runner->game_timer, 0.0);
+  game_runner->timing = (AutoplayGameTiming){0};
   return game_runner;
 }
 
@@ -514,9 +633,28 @@ void game_runner_destroy(GameRunner *game_runner) {
   if (!game_runner) {
     return;
   }
+  game_runner_destroy_play_choosers(game_runner);
   game_destroy(game_runner->game);
+  game_history_destroy(game_runner->game_history);
   game_destroy(game_runner->game_one_move_behind);
   free(game_runner);
+}
+
+static void game_runner_create_play_choosers(AutoplayWorker *autoplay_worker,
+                                             GameRunner *game_runner,
+                                             uint64_t seed) {
+  game_runner_destroy_play_choosers(game_runner);
+  const AutoplayArgs *args = &autoplay_worker->args;
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (!args->use_play_chooser[player_index]) {
+      continue;
+    }
+    PlayChooserStrategy strategy = args->play_chooser_strategies[player_index];
+    strategy.game_timer = &game_runner->game_timer;
+    strategy.overtime_period_seconds = args->overtime_period_seconds;
+    strategy.seed = seed + (uint64_t)player_index;
+    game_runner->play_choosers[player_index] = play_chooser_create(&strategy);
+  }
 }
 
 void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
@@ -532,6 +670,27 @@ void game_runner_start(AutoplayWorker *autoplay_worker, GameRunner *game_runner,
   autoplay_worker->args.p2_sim_args.seed = iter_output->seed;
   game_set_starting_player_index(game, starting_player_index);
   draw_starting_racks(game);
+  if (game_runner->game_history != NULL) {
+    GameHistory *history = game_runner->game_history;
+    const GameArgs *game_args = autoplay_worker->args.game_args;
+    game_history_reset(history);
+    game_history_set_title(history, "MAGPIE short-sim autoplay");
+    game_history_set_lexicon_name(
+        history, players_data_get_data_name(game_args->players_data,
+                                            PLAYERS_DATA_TYPE_KWG, 0));
+    game_history_set_ld_name(history, ld_get_name(game_args->ld));
+    game_history_set_board_layout_name(
+        history, board_layout_get_name(game_args->board_layout));
+    game_history_set_game_variant(history, game_args->game_variant);
+    game_history_player_reset(history, 0, "MAGPIE short sim 1", "magpie1");
+    game_history_player_reset(history, 1, "MAGPIE short sim 2", "magpie2");
+  }
+  game_timer_reset_for_players(&game_runner->game_timer,
+                               autoplay_worker->args.time_control_seconds[0],
+                               autoplay_worker->args.time_control_seconds[1]);
+  game_runner->timing = (AutoplayGameTiming){0};
+  game_runner_create_play_choosers(autoplay_worker, game_runner,
+                                   iter_output->seed);
   if (game_runner->game_one_move_behind) {
     Game *game_one_move_behind = game_runner->game_one_move_behind;
     game_reset(game_one_move_behind);
@@ -655,10 +814,40 @@ const Move *game_runner_get_best_move(AutoplayWorker *autoplay_worker,
                                       GameRunner *game_runner) {
   const int player_on_turn_index =
       game_get_player_on_turn_index(game_runner->game);
+  PlayChooser *play_chooser = game_runner->play_choosers[player_on_turn_index];
+  if (play_chooser != NULL) {
+    game_timer_start_turn(&game_runner->game_timer, player_on_turn_index);
+    play_chooser_choose_move(play_chooser, game_runner->game,
+                             &game_runner->play_chooser_move,
+                             autoplay_worker->error_stack);
+    game_timer_end_turn(&game_runner->game_timer);
+    if (!error_stack_is_empty(autoplay_worker->error_stack)) {
+      error_stack_print_and_reset(autoplay_worker->error_stack);
+      log_fatal("autoplay PlayChooser failed for player %d on turn %d of "
+                "game number %llu with seed %llu",
+                player_on_turn_index + 1, game_runner->turn_number + 1,
+                (unsigned long long)game_runner->game_number + 1,
+                (unsigned long long)game_runner->seed);
+    }
+    if (autoplay_get_bench_static_move()) {
+      return get_top_equity_move(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
+    }
+    return &game_runner->play_chooser_move;
+  }
   const SimArgs *sim_args = (player_on_turn_index == 0)
                                 ? &autoplay_worker->args.p1_sim_args
                                 : &autoplay_worker->args.p2_sim_args;
   if (sim_args->num_plies == 0) {
+    if (autoplay_worker->positional_player_mask &
+        (1U << player_on_turn_index)) {
+      return get_top_positional_move_with_options(
+          game_runner->game, autoplay_worker->move_lists[player_on_turn_index],
+          autoplay_worker->positional_candidate_count,
+          autoplay_worker->positional_equity_margin,
+          autoplay_worker->positional_adjustment_scale_thousandths,
+          autoplay_worker->positional_adjustment_cap);
+    }
     return get_top_equity_move(
         game_runner->game, autoplay_worker->move_lists[player_on_turn_index]);
   }
@@ -713,6 +902,38 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
 
   const Move *move = game_runner_get_best_move(autoplay_worker, game_runner);
 
+  if (game_runner->game_history != NULL) {
+    StringBuilder *move_string = string_builder_create();
+    string_builder_add_ucgi_move(move_string, move, game_get_board(game),
+                                 game_get_ld(game));
+    ValidatedMoves *vms = validated_moves_create(
+        game, player_on_turn_index, string_builder_peek(move_string),
+        /*allow_phonies=*/false, /*allow_playthrough=*/true,
+        autoplay_worker->error_stack);
+    string_builder_destroy(move_string);
+    if (!error_stack_is_empty(autoplay_worker->error_stack)) {
+      validated_moves_destroy(vms);
+      error_stack_print_and_reset(autoplay_worker->error_stack);
+      log_fatal("failed to record autoplay move in GCG corpus");
+    }
+    GameEvent *event = game_history_add_game_event(
+        game_runner->game_history, autoplay_worker->error_stack);
+    if (!error_stack_is_empty(autoplay_worker->error_stack)) {
+      validated_moves_destroy(vms);
+      error_stack_print_and_reset(autoplay_worker->error_stack);
+      log_fatal("failed to add autoplay move to GCG corpus");
+    }
+    game_event_set_player_index(event, player_on_turn_index);
+    game_event_set_type(event, move_get_type(move));
+    game_event_set_cumulative_score(
+        event, player_get_score(game_get_player(game, player_on_turn_index)) +
+                   move_get_score(move));
+    game_event_set_move_score(event, move_get_score(move));
+    rack_copy(game_event_get_rack(event),
+              player_get_rack(game_get_player(game, player_on_turn_index)));
+    game_event_set_vms(event, vms);
+  }
+
   if (lg_shared_data) {
     rack_list_add_rack(lg_shared_data->rack_list, player_rack,
                        equity_to_double(move_get_equity(move)));
@@ -743,7 +964,8 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
     const SimArgs *sim_args = (player_on_turn_index == 0)
                                   ? &autoplay_worker->args.p1_sim_args
                                   : &autoplay_worker->args.p2_sim_args;
-    if (sim_args->num_plies > 0) {
+    if (sim_args->num_plies > 0 &&
+        !autoplay_worker->args.use_play_chooser[player_on_turn_index]) {
       char *sim_str = sim_results_get_string(
           game, autoplay_worker->sim_results, sim_args->max_num_display_plays,
           sim_args->max_num_display_plies, -1, -1, NULL, 0, false, false, false,
@@ -770,6 +992,88 @@ const Move *game_runner_play_move(AutoplayWorker *autoplay_worker,
   move_copy(&game_runner->previous_move, move);
   game_runner->turn_number++;
   return move;
+}
+
+static void game_runner_add_end_event(GameRunner *game_runner, int player_index,
+                                      game_event_t event_type, const Rack *rack,
+                                      Equity adjustment,
+                                      ErrorStack *error_stack) {
+  GameEvent *event =
+      game_history_add_game_event(game_runner->game_history, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  game_event_set_player_index(event, player_index);
+  game_event_set_type(event, event_type);
+  game_event_set_score_adjustment(event, adjustment);
+  game_event_set_cumulative_score(event, player_get_score(game_get_player(
+                                             game_runner->game, player_index)));
+  rack_copy(game_event_get_rack(event), rack);
+}
+
+static void game_runner_write_gcg(AutoplayWorker *autoplay_worker,
+                                  GameRunner *game_runner) {
+  if (game_runner->game_history == NULL) {
+    return;
+  }
+  Game *game = game_runner->game;
+  const LetterDistribution *ld = game_get_ld(game);
+  ErrorStack *error_stack = autoplay_worker->error_stack;
+  if (game_get_game_end_reason(game) == GAME_END_REASON_STANDARD) {
+    const int played_out_player = 1 - game_get_player_on_turn_index(game);
+    const Rack *opponent_rack =
+        player_get_rack(game_get_player(game, 1 - played_out_player));
+    game_runner_add_end_event(game_runner, played_out_player,
+                              GAME_EVENT_END_RACK_POINTS, opponent_rack,
+                              calculate_end_rack_points(opponent_rack, ld),
+                              error_stack);
+  } else if (game_get_game_end_reason(game) ==
+             GAME_END_REASON_CONSECUTIVE_ZEROS) {
+    for (int player_index = 0; player_index < 2; player_index++) {
+      const Rack *rack = player_get_rack(game_get_player(game, player_index));
+      game_runner_add_end_event(
+          game_runner, player_index, GAME_EVENT_END_RACK_PENALTY, rack,
+          calculate_end_rack_penalty(rack, ld), error_stack);
+    }
+  }
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to finalize autoplay GCG corpus game");
+  }
+
+  const char *gcg_dir = getenv("MAGPIE_AUTOPLAY_GCG_DIR");
+  char *filename = get_formatted_string(
+      "%s/game-%06llu-pair-%d-seed-%llu.gcg", gcg_dir,
+      (unsigned long long)game_runner->game_number + 1,
+      game_runner->pair_game_number, (unsigned long long)game_runner->seed);
+  write_gcg(filename, ld, game_runner->game_history, error_stack);
+  free(filename);
+  if (!error_stack_is_empty(error_stack)) {
+    error_stack_print_and_reset(error_stack);
+    log_fatal("failed to write autoplay GCG corpus game");
+  }
+}
+
+static void game_runner_assess_overtime(AutoplayWorker *autoplay_worker,
+                                        GameRunner *game_runner) {
+  const AutoplayArgs *args = &autoplay_worker->args;
+  game_timer_end_turn(&game_runner->game_timer);
+  for (int player_index = 0; player_index < 2; player_index++) {
+    if (!args->use_play_chooser[player_index]) {
+      continue;
+    }
+    game_runner->timing.active[player_index] = true;
+    game_runner->timing.seconds_used[player_index] =
+        game_timer_get_seconds_used(&game_runner->game_timer, player_index);
+    game_runner->timing.overtime_seconds[player_index] =
+        game_timer_get_overtime_seconds(&game_runner->game_timer, player_index);
+    const int penalty_points = autoplay_overtime_penalty_points(
+        game_runner->timing.overtime_seconds[player_index],
+        args->overtime_penalty_points, args->overtime_period_seconds);
+    game_runner->timing.penalty_points[player_index] = penalty_points;
+    player_add_to_score(game_get_player(game_runner->game, player_index),
+                        -int_to_equity(penalty_points));
+  }
 }
 
 void print_current_status(AutoplayWorker *autoplay_worker,
@@ -800,9 +1104,10 @@ void print_current_status(AutoplayWorker *autoplay_worker,
 
 void autoplay_add_game(AutoplayWorker *autoplay_worker,
                        const GameRunner *game_runner, bool divergent) {
-  autoplay_results_add_game(autoplay_worker->autoplay_results,
-                            game_runner->game, game_runner->turn_number,
-                            divergent, game_runner->seed);
+  autoplay_results_add_game_with_timing(
+      autoplay_worker->autoplay_results, game_runner->game,
+      game_runner->turn_number, divergent, game_runner->seed,
+      &game_runner->timing);
   AutoplayIterCompletedOutput iter_completed_output;
   autoplay_complete_iter(autoplay_worker->shared_data, &iter_completed_output);
   if (iter_completed_output.print_info) {
@@ -849,6 +1154,14 @@ void play_autoplay_game_or_game_pair(AutoplayWorker *autoplay_worker,
          compare_moves_without_equity(move1, move2, true) != -1)) {
       games_are_divergent = true;
     }
+  }
+  game_runner_assess_overtime(autoplay_worker, game_runner1);
+  if (game_runner2) {
+    game_runner_assess_overtime(autoplay_worker, game_runner2);
+  }
+  game_runner_write_gcg(autoplay_worker, game_runner1);
+  if (game_runner2) {
+    game_runner_write_gcg(autoplay_worker, game_runner2);
   }
   if (autoplay_worker->args.print_boards) {
     StringBuilder *output = string_builder_create();
@@ -1018,6 +1331,9 @@ void autoplay(const AutoplayArgs *args, AutoplayResults *autoplay_results,
   }
 
   const bool is_leavegen_mode = args->type == AUTOPLAY_TYPE_LEAVE_GEN;
+  autoplay_results_set_play_chooser_config(
+      autoplay_results, args->use_play_chooser, args->time_control_seconds,
+      args->overtime_penalty_points, args->overtime_period_seconds);
   int num_gens = 1;
   int *min_rack_targets = NULL;
   uint64_t first_gen_num_games;

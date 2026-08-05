@@ -2,6 +2,7 @@
 
 #include "../compat/cpthread.h"
 #include "../def/cpthread_defs.h"
+#include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../ent/alias_method.h"
 #include "../ent/bag.h"
@@ -14,6 +15,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/spread_forecast.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../ent/xoshiro.h"
@@ -385,8 +387,10 @@ typedef struct Simmer {
   SimmerWorker **workers;
   // Owned by the caller
   const WinPct *win_pcts;
+  const SpreadForecast *spread_forecast;
   bool use_inference;
   bool use_alias_method;
+  bool use_positional_rollout;
   const InferenceResults *inference_results;
   int num_threads;
   // In PGP mode, each autoplay worker has its own simmer with num_threads
@@ -488,9 +492,8 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     const Player *player_on_turn =
         game_get_player(game, simmer->initial_player);
     rack_copy(&candidate_rack, player_get_rack(player_on_turn));
-    leftover += get_leave_value_for_move(player_get_klv(player_on_turn),
-                                         simmed_play_get_move(simmed_play),
-                                         &candidate_rack);
+    leftover += get_leave_value_for_move_with_context(
+        game, simmed_play_get_move(simmed_play), &candidate_rack);
   }
   // play move
   play_move(simmed_play_get_move(simmed_play), game, NULL);
@@ -506,8 +509,16 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
       break;
     }
 
-    const Move *best_play = get_top_equity_move(game, move_list);
+    const Move *best_play =
+        simmer->use_positional_rollout
+            ? get_top_positional_move(game, move_list)
+            : get_top_equity_move(game, move_list);
     rack_copy(&spare_rack, player_get_rack(player_on_turn));
+    Equity this_leftover = 0;
+    if (ply == plies - 2 || ply == plies - 1) {
+      this_leftover =
+          get_leave_value_for_move_with_context(game, best_play, &spare_rack);
+    }
 
     // On the final ply the resulting cross-sets are never read (no further move
     // generation happens before game_unplay_last_move restores the board), so
@@ -519,8 +530,6 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
     }
     sim_results_increment_node_count(sim_results);
     if (ply == plies - 2 || ply == plies - 1) {
-      Equity this_leftover = get_leave_value_for_move(
-          player_get_klv(player_on_turn), best_play, &spare_rack);
       if (player_on_turn_index == simmer->initial_player) {
         leftover += this_leftover;
       } else {
@@ -533,8 +542,23 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   const Equity spread =
       player_get_score(game_get_player(game, simmer->initial_player)) -
       player_get_score(game_get_player(game, 1 - simmer->initial_player));
+  Equity projected_spread = spread;
+  Equity projected_residual = leftover;
+  if (simmer->spread_forecast != NULL &&
+      game_get_game_end_reason(game) == GAME_END_REASON_NONE) {
+    projected_spread = spread_forecast_get(simmer->spread_forecast, game,
+                                           simmer->initial_player);
+    const int64_t residual = (int64_t)projected_spread - (int64_t)spread;
+    if (residual > EQUITY_MAX_VALUE || residual < EQUITY_MIN_VALUE) {
+      log_fatal("spread forecast residual out of Equity range");
+    }
+    projected_residual = (Equity)residual;
+  }
   simmed_play_add_equity_stat(simmed_play, simmer->initial_spread, spread,
-                              leftover);
+                              projected_residual);
+  // Keep probability calibration independent from the spread experiment.
+  // -winpct continues to consume the ordinary horizon spread + leave residual;
+  // the forecast supplies only equity and the spread side of blended utility.
   const double wpct = simmed_play_add_win_pct_stat(
       simmer->win_pcts, simmed_play, spread, leftover,
       game_get_game_end_reason(game),
@@ -556,7 +580,7 @@ double rv_sim_sample(RandomVariables *rvs, const uint64_t play_index,
   sim_results_increment_iteration_count(sim_results);
 
   const double utility =
-      sim_utility_blend(wpct, spread, simmer->utility_w_winpct,
+      sim_utility_blend(wpct, projected_spread, simmer->utility_w_winpct,
                         simmer->utility_w_spread, simmer->utility_spread_scale);
   // With a zero spread weight, utility_stat is never read: BU is hidden from
   // display (see show_bu in sim_string.c) and both the best-move choice and
@@ -635,7 +659,9 @@ RandomVariables *rv_sim_create(RandomVariables *rvs, const SimArgs *sim_args,
   }
 
   simmer->win_pcts = sim_args->win_pcts;
+  simmer->spread_forecast = sim_args->spread_forecast;
   simmer->use_inference = sim_args->use_inference;
+  simmer->use_positional_rollout = sim_args->use_positional_rollout;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
@@ -689,10 +715,12 @@ void rv_sim_reset(RandomVariables *rvs, const SimArgs *sim_args) {
   }
 
   simmer->use_inference = sim_args->use_inference;
+  simmer->use_positional_rollout = sim_args->use_positional_rollout;
   simmer->use_alias_method =
       simmer->use_inference &&
       (!simmer->known_opp_rack || rack_is_empty(simmer->known_opp_rack));
 
+  simmer->spread_forecast = sim_args->spread_forecast;
   simmer->utility_w_winpct = sim_args->utility_w_winpct;
   simmer->utility_w_spread = sim_args->utility_w_spread;
   simmer->utility_spread_scale = sim_args->utility_spread_scale;

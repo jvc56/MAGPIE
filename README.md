@@ -39,7 +39,66 @@ You should now be able to run the compiled MAGPIE executable:
 ./bin/magpie
 ```
 
+### Release builds
+
+The production release is a native profile-guided build. Install Clang and
+`llvm-profdata`, then run:
+
+```
+make release
+```
+
+This always discards old profile data, reuses `data/lexica/CSW24.rit` when it is
+already present (and creates it otherwise), and replaces `bin/magpie` with a
+profile-guided native build. The release profile comes from short static
+autoplay games using production WMP and RIT data. This was the fastest general
+profile across simulation, PlayChooser, endgame, and full PEG measurements.
+
+To build the former optimized release without PGO:
+
+```
+make magpie BUILD=no_pgo_release
+```
+
+Focused targets are available when the resulting binary will spend most of a
+long-running job in one workload:
+
+```
+make leavegen_pgo_release  # leave generation
+make pgo_sim               # experimental simulation profile
+make pgo_peg               # experimental pre-endgame profile
+make pgo_eg                # experimental endgame profile
+make pgo                   # experimental mixed PlayChooser profile
+```
+
+The defaults train 16 games, give each player a 1000 ms clock in the mixed
+PlayChooser workload, use 0.05 seconds per move in focused game workloads, and
+use the machine's detected hardware concurrency. Override them with
+`PGO_TRAIN_GAMES`, `PGO_TRAIN_TIME_MS`, `PGO_TRAIN_SECONDS`, and
+`PGO_TRAIN_THREADS`.
+
+The result is tailored to the machine that ran the build, making it suitable
+for long-running jobs and release builds on that target.
+
+Run the selected release target again after changing source, and run it
+separately on each target architecture. Override the tool names when a system
+installs versioned LLVM binaries:
+
+```
+make release \
+  PGO_CC=clang-18 \
+  LLVM_PROFDATA=/usr/lib/llvm-18/bin/llvm-profdata \
+  PGO_LDFLAGS=-fuse-ld=lld
+```
+
 This will start MAGPIE in async interactive mode by default. For more details on different ways to run MAGPIE, see [Execution Modes](#execution-modes).
+
+### Contextual leave values
+
+MAGPIE can load `.klv3` files that add fast, pool-aware tile interaction
+adjustments to an ordinary KLV2. See [notes/KLV3.md](notes/KLV3.md) for the
+format, training workflow, slim word-only RIT, hybrid KLV2 fallback,
+contextual RIT experiment, and initial CSW24 evaluation.
 
 ## Usage
 
@@ -62,6 +121,28 @@ magpie> autoplay games 50 -lex CSW21 -threads 4 -hr true
 ```
 
 will play 50 games in the CSW21 lexicon with 4 threads and print the results in a human readable format.
+
+Autoplay can use `PlayChooser` for either or both players. `-pc1` and `-pc2`
+set each player's total per-game clock in milliseconds; `-1` disables it (the
+default), and `0` enables it without a clock. For example, this gives both
+players a 30-second clock:
+
+```
+magpie> autoplay games 100 -pc1 30000 -pc2 30000 -hr true
+```
+
+PlayChooser selects its evaluation mode from the position, using simulation,
+pre-endgame, or endgame analysis as appropriate. Timed games deduct 10 points
+per started minute of overtime by default. The penalty and period are
+configurable independently, so blitz runs can deduct one point per started
+second:
+
+```
+magpie> autoplay games 100 -pc1 5000 -pc2 5000 -otpenalty 1 -otperiod 1000 -hr true
+```
+
+When at least one player uses PlayChooser, the final report includes clock
+usage, overtime, and deducted penalty points for each active player.
 
 All commands and settings can be specified by the shortest unambiguous string. For example, the generate command can be specified by any of the following strings:
 
@@ -166,7 +247,7 @@ This directory contains the layout files which specify the start square and bonu
 The height and width of the board are denoted by the compile time constant `BOARD_DIM` which can be overwritten during compilation. For example, compiling with:
 
 ```
-make magpie BUILD=release BOARD_DIM=21
+make magpie BUILD=no_pgo_release BOARD_DIM=21
 ```
 
 will compile a MAGPIE executable that only accepts layouts of 21x21.

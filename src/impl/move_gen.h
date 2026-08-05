@@ -16,6 +16,7 @@
 #include "../ent/move.h"
 #include "../ent/rack.h"
 #include "../ent/rack_info_table.h"
+#include "../ent/word_info_table.h"
 #include "wmp_move_gen.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -61,10 +62,11 @@ typedef struct SubrackEnumCacheEntry {
   // Flat array indexed by subracks_get_combination_offset(size) + idx_for_size.
   BitRack subracks[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   Equity leave_values[MOVEGEN_SUBRACK_CACHE_ENTRIES];
-  // wmp_entry pointers per subrack, also rack-determined. Storing them
-  // lets us skip the per-subrack wmp_get_word_entry hash lookups on
-  // cache hit. Invalidated when the WMP pointer changes.
+  // Lazily populated wmp_entry pointers per subrack, also rack-determined.
+  // The parallel flags distinguish an unresolved entry from a resolved miss
+  // (NULL). Invalidated when the WMP pointer changes.
   const WMPEntry *wmp_entries[MOVEGEN_SUBRACK_CACHE_ENTRIES];
+  bool wmp_entries_are_set[MOVEGEN_SUBRACK_CACHE_ENTRIES];
   uint8_t count_by_size[RACK_SIZE + 1];
 } SubrackEnumCacheEntry;
 
@@ -105,8 +107,16 @@ typedef struct MoveGen {
   Rack leave;
   // Read-only view into the board's lanes for the current cross index;
   // refreshed by gen_load_position each call.
-  const Square *lanes_cache;
-  Square row_cache[BOARD_DIM];
+  // Direct views into the board (not copies): board_lanes points at all lane
+  // squares for the cross index, row_squares at the current row/dir within it.
+  // Square grew large enough that copying a row per anchor cost more than the
+  // locality it bought, so move generation reads the board in place.
+  const Square *board_lanes;
+  const Square *row_squares;
+  // Parallel WIT block data for the current lane (see Board.wit_block_rows),
+  // set alongside row_squares. NULL when no word info table is loaded.
+  const uint32_t *const *wit_row_lane;
+  const uint8_t *wit_len_lane;
   uint8_t row_number_of_anchors_cache[(BOARD_DIM) * 2];
   Equity opening_move_penalties[(BOARD_DIM) * 2];
   int board_number_of_tiles_played;
@@ -143,20 +153,19 @@ typedef struct MoveGen {
   int current_left_col;
   int current_right_col;
 
-  // Used to insert "unrestricted" multipliers into a descending list for
-  // calculating the maximum score for an anchor. We don't know which tiles will
-  // go in which multipliers so we keep a sorted list. The inner product of
-  // those and the descending tile scores is the highest possible score of a
-  // permutation of tiles in those squares.
-  UnrestrictedMultiplier
-      descending_cross_word_multipliers[WORD_ALIGNING_RACK_SIZE];
+  // Used to calculate the maximum score for an anchor. We don't know which
+  // tiles will go in which unrestricted squares, so effective multipliers are
+  // kept in descending order. The cross-word components need no ordering; they
+  // are retained only to rebuild the effective list when the main-word
+  // multiplier changes.
+  UnrestrictedMultiplier unrestricted_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint16_t descending_effective_letter_multipliers[WORD_ALIGNING_RACK_SIZE];
   uint8_t num_unrestricted_multipliers;
   uint8_t last_word_multiplier;
 
   // Used to reset the arrays after finishing shadow_play_right, which may have
   // rearranged the ordering of the multipliers used while shadowing left.
-  UnrestrictedMultiplier desc_xw_muls_copy[WORD_ALIGNING_RACK_SIZE];
+  UnrestrictedMultiplier unrestricted_multipliers_copy[WORD_ALIGNING_RACK_SIZE];
   uint16_t desc_eff_letter_muls_copy[WORD_ALIGNING_RACK_SIZE];
 
   // Since shadow does not have backtracking besides when switching from going
@@ -181,6 +190,14 @@ typedef struct MoveGen {
   int number_of_letters_on_rack;
   const KWG *kwg;
   const KLV *klv;
+  // KLV3 pool-context adjustment computed once by gen_load_position and then
+  // reused while the canonical leave subsets are enumerated.
+  int unseen_counts[MACHINE_LETTER_MAX_VALUE];
+  int unseen_total;
+  Equity klv3_tile_adjustments[KLV3_DRAW_COUNT_HEADS][MACHINE_LETTER_MAX_VALUE];
+  // A KLV3 file embeds its ordinary KLV2 base. Hybrid evaluation can choose
+  // that base for positions whose contextual adjustment range is small.
+  bool use_context_model;
   // Snapshot of klv->mutation_counter captured at the last gen_load_position
   // call. If the KLV's leave_values have been mutated in place since then
   // (test-only set_klv_leave_value path), leave-derived caches (the subrack
@@ -198,17 +215,46 @@ typedef struct MoveGen {
   uint64_t klv_instance_fp_at_load;
   uint64_t wmp_instance_fp_at_load;
   const RackInfoTable *rack_info_table;
+  // Optional precomputed word info table (loaded with -wit). When non-NULL,
+  // wmp_move_gen prunes subracks whose letters cannot appear in any word
+  // containing the playthrough blocks. NULL disables the optimization.
+  const WordInfoTable *word_info_table;
   // RIT entry for the current player_rack, looked up once in
   // gen_look_up_leaves_and_record_exchanges and cached here for the duration
   // of this move generation. NULL if rack_info_table is NULL, the rack isn't
   // a full RACK_SIZE rack, or the rack wasn't found in the table.
   const RackInfoTableEntry *rit_entry;
+  // Compact model-independent word facts for the current rack. This points
+  // into the per-thread cache below regardless of whether the source was a
+  // full or word-only RIT, keeping shadow independent of the file layout.
+  const RackInfoTableWordEntry *rit_word_entry;
+  // Whether rit_entry's packed leaves and leave-derived fields match the
+  // active evaluator. KLV3 can still use rit_entry's structural word facts,
+  // but its pool-dependent leave values, bounds, and best exchange must be
+  // computed for the current position.
+  bool rit_leave_values_usable;
+  // A fingerprint-matched KLV3-capable RIT exposes lossy capped-best
+  // overlays. Exact leaves are still computed from the current position; the
+  // overlays are used only for pruning.
+  bool rit_context_caps_usable;
   // Small per-thread RIT lookup cache. In sim rollouts, the same racks
   // recur across iterations within a turn (limited bag composition).
   // Direct-mapped by low bits of BitRack hash.
   BitRack rit_cache_keys[MOVEGEN_RIT_CACHE_SIZE];
   const RackInfoTableEntry *rit_cache_entries[MOVEGEN_RIT_CACHE_SIZE];
+  RackInfoTableWordEntry rit_cache_word_entries[MOVEGEN_RIT_CACHE_SIZE];
+  bool rit_cache_entry_found[MOVEGEN_RIT_CACHE_SIZE];
+  // Copy the contextual overlay into the same small per-thread cache. The
+  // on-disk overlay is separate from the 1.8 GiB base table; repeatedly
+  // touching both random mappings was measurably more expensive than the
+  // pruning saved.
+  Equity rit_cache_context_capped_best_leaves[MOVEGEN_RIT_CACHE_SIZE]
+                                             [RACK_SIZE + 1];
+  Equity rit_cache_context_capped_nonplaythrough_best_leaves
+      [MOVEGEN_RIT_CACHE_SIZE][RACK_SIZE + 1];
   bool rit_cache_valid[MOVEGEN_RIT_CACHE_SIZE];
+  const Equity *rit_context_capped_best_leaves;
+  const Equity *rit_context_capped_nonplaythrough_best_leaves;
   // Cache of wmp_move_gen_enumerate_nonplaythrough_subracks output
   // (purely rack-determined). Hit rate tracks rack-repeat rate in sims.
   SubrackEnumCacheEntry subrack_cache[MOVEGEN_SUBRACK_CACHE_SIZE];
@@ -234,10 +280,20 @@ typedef struct MoveGen {
   Equity descending_tile_scores[RACK_SIZE];
   Equity descending_tile_scores_copy[RACK_SIZE];
   WMPMoveGen wmp_move_gen;
+  // WMPMoveGen also has standalone test users whose storage is not
+  // necessarily zero-initialized. Keep this lifecycle bit in the calloc-owned
+  // MoveGen rather than making WMPMoveGen read an indeterminate first-use
+  // flag.
+  bool wmp_anchor_slots_initialized;
   uint64_t rack_cross_set;
   bool target_word_full_rack_existence[RACK_SIZE + 1];
 
   Equity best_leaves[RACK_SIZE + 1];
+  // Exact rack-only maxima collected alongside KLV3 evaluation, and the
+  // possibly capped bounds used only by shadow/WMP pruning. best_leaves stays
+  // exact for exchange handling and diagnostics.
+  Equity klv3_base_best_leaves[RACK_SIZE + 1];
+  Equity shadow_best_leaves[RACK_SIZE + 1];
 
   MachineLetter playthrough_marked[BOARD_DIM];
 } MoveGen;

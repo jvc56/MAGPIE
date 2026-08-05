@@ -39,6 +39,13 @@ void test_move_resize(void) {
   assert(move_get_score(move2) == move2_score);
   assert(move_get_score(move3) == move3_score);
 
+  move_list_resize(ml, 2);
+  assert(move_list_get_capacity(ml) == 2);
+  assert(move_list_get_move(ml, 0) == move1);
+  assert(move_list_get_move(ml, 1) == move2);
+  assert(move_get_score(move1) == move1_score);
+  assert(move_get_score(move2) == move2_score);
+
   move_list_destroy(ml);
 }
 

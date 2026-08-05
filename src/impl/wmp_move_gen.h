@@ -21,12 +21,14 @@ enum {
   MAX_POSSIBLE_PLAYTHROUGH_BLOCKS = ((BOARD_DIM / 2) + 1),
   MAX_WMP_MOVE_GEN_ANCHORS =
       ((RACK_SIZE + 1) * MAX_POSSIBLE_PLAYTHROUGH_BLOCKS),
+  WMP_ANCHOR_MASK_WORDS = (MAX_WMP_MOVE_GEN_ANCHORS + 63) / 64,
 };
 
 typedef struct SubrackInfo {
   BitRack subrack;
   const WMPEntry *wmp_entry;
   Equity leave_value;
+  bool wmp_entry_is_set;
 } SubrackInfo;
 
 // NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
@@ -49,15 +51,11 @@ typedef struct WMPMoveGen {
   uint8_t count_by_size[RACK_SIZE + 1];
 
   Anchor anchors[MAX_WMP_MOVE_GEN_ANCHORS];
-  // Sparse list of anchor slot indices that have been touched since the
-  // last wmp_move_gen_reset_anchors call. wmp_move_gen_maybe_update_anchor
-  // pushes a slot index here on its first touch (detected via the
-  // tiles_to_play==0 sentinel left by the previous reset); reset only
-  // clears these slots instead of iterating all MAX_WMP_MOVE_GEN_ANCHORS.
-  // Typical shadow_play_for_anchor touches <=8 slots, so this is ~8x
-  // cheaper than the full-array reset on realistic workloads.
-  uint8_t touched_anchor_slots[MAX_WMP_MOVE_GEN_ANCHORS];
-  int num_touched_anchor_slots;
+  // Bit i marks anchor slot i as touched since the last reset. Typical
+  // shadow_play_for_anchor calls touch <=8 of 64 slots. Walking set bits keeps
+  // both reset and emission sparse while preserving the full scan's ascending
+  // slot order (and therefore deterministic tie order).
+  uint64_t touched_anchor_masks[WMP_ANCHOR_MASK_WORDS];
   int playthrough_blocks;
   int playthrough_blocks_copy;
 
@@ -70,24 +68,64 @@ typedef struct WMPMoveGen {
   int word_length;
   int num_words;
   Equity leave_value;
+  // When the caller has an active per-rack cache, lazily resolved
+  // nonplaythrough WMP entries are written through to it for the next
+  // occurrence of the rack.
+  const WMPEntry **nonplaythrough_wmp_entry_cache;
+  bool *nonplaythrough_wmp_entry_cache_set;
+  // AND, over this anchor's playthrough blocks, of each block's word info table
+  // letter set at this anchor's word length (bit ml set iff some word of that
+  // length containing the block uses ml). Accumulated for free while scanning
+  // the blocks in wmp_move_gen_set_playthrough_bit_rack. Every placed tile must
+  // be one of these letters, so move generation can skip the whole anchor when
+  // the rack cannot supply enough of them. All-ones when no table is loaded.
+  uint32_t playthrough_addable;
+  // Absolute row positions occupied by this anchor's playthrough tiles.
+  // Collected during the same block scan as playthrough_bit_rack.
+  uint32_t playthrough_positions;
 } WMPMoveGen;
 
-static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
-  for (int i = 0; i < wmp_move_gen->num_touched_anchor_slots; i++) {
-    const int slot_idx = wmp_move_gen->touched_anchor_slots[i];
-    wmp_move_gen->anchors[slot_idx].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
-    wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
+static inline int wmp_move_gen_get_lowest_set_bit(uint64_t bits) {
+#if defined(__has_builtin) && __has_builtin(__builtin_ctzll)
+  return __builtin_ctzll(bits);
+#else
+  int bit = 0;
+  while ((bits & 1ULL) == 0) {
+    bits >>= 1;
+    bit++;
   }
-  wmp_move_gen->num_touched_anchor_slots = 0;
+  return bit;
+#endif
 }
 
+static inline void wmp_move_gen_reset_anchors(WMPMoveGen *wmp_move_gen) {
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wmp_move_gen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      wmp_move_gen->anchors[slot_idx].highest_possible_equity =
+          EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[slot_idx].highest_possible_score = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[slot_idx].rightmost_start_col = 0;
+      wmp_move_gen->anchors[slot_idx].leftmost_start_col = BOARD_DIM - 1;
+      wmp_move_gen->anchors[slot_idx].tiles_to_play = 0;
+      touched &= touched - 1;
+    }
+    wmp_move_gen->touched_anchor_masks[word_idx] = 0;
+  }
+}
+
+// anchor_slots_initialized must either be NULL (always seed, for standalone
+// WMPMoveGen storage) or point to state with the same lifetime as wmp_move_gen,
+// initially false.
 static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
                                      const LetterDistribution *ld,
-                                     const Rack *player_rack, const WMP *wmp) {
+                                     const Rack *player_rack, const WMP *wmp,
+                                     bool *anchor_slots_initialized) {
   wmp_move_gen->wmp = wmp;
+  wmp_move_gen->nonplaythrough_wmp_entry_cache = NULL;
+  wmp_move_gen->nonplaythrough_wmp_entry_cache_set = NULL;
   if (wmp == NULL || player_rack == NULL || ld == NULL) {
     return;
   }
@@ -95,21 +133,29 @@ static inline void wmp_move_gen_init(WMPMoveGen *wmp_move_gen,
   wmp_move_gen->full_rack_size = rack_get_total_letters(player_rack);
   memset(wmp_move_gen->nonplaythrough_has_word_of_length, false,
          sizeof(wmp_move_gen->nonplaythrough_has_word_of_length));
-  // One-time full anchor slot initialization. wmp_move_gen_reset_anchors()
-  // is a sparse reset keyed on the touched_anchor_slots list; untouched
-  // slots retain their prior default values rather than being reset. The
-  // calloc-zero defaults for highest_possible_equity and leftmost_start_col
-  // differ from the expected-on-first-touch sentinels (EQUITY_MIN_VALUE and
-  // BOARD_DIM-1 respectively), so we must seed them once here before the
-  // sparse-reset protocol takes over.
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
-    wmp_move_gen->anchors[i].rightmost_start_col = 0;
-    wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
-    wmp_move_gen->anchors[i].tiles_to_play = 0;
+  if (anchor_slots_initialized != NULL && *anchor_slots_initialized) {
+    // The prior position can leave its final board anchor touched. Reset
+    // those slots before reusing the tracker; clearing the masks alone would
+    // lose the only record that their values are stale.
+    wmp_move_gen_reset_anchors(wmp_move_gen);
+  } else {
+    // The calloc-zero defaults for highest_possible_equity and
+    // leftmost_start_col differ from the expected-on-first-touch sentinels
+    // (EQUITY_MIN_VALUE and BOARD_DIM-1 respectively), so seed every slot
+    // before the sparse-reset protocol takes over.
+    for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
+      wmp_move_gen->anchors[i].highest_possible_equity = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[i].highest_possible_score = EQUITY_MIN_VALUE;
+      wmp_move_gen->anchors[i].rightmost_start_col = 0;
+      wmp_move_gen->anchors[i].leftmost_start_col = BOARD_DIM - 1;
+      wmp_move_gen->anchors[i].tiles_to_play = 0;
+    }
+    memset(wmp_move_gen->touched_anchor_masks, 0,
+           sizeof(wmp_move_gen->touched_anchor_masks));
+    if (anchor_slots_initialized != NULL) {
+      *anchor_slots_initialized = true;
+    }
   }
-  wmp_move_gen->num_touched_anchor_slots = 0;
 }
 
 static inline bool wmp_move_gen_is_active(const WMPMoveGen *wmp_move_gen) {
@@ -123,39 +169,61 @@ static inline uint8_t subracks_get_combination_offset(int size) {
   return subracks_combination_offsets[size];
 }
 
-static inline void
-wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
-                                               BitRack *current, int next_ml,
-                                               int count, LeaveMap *leave_map) {
-  int max_num_this = 0;
-  for (; next_ml < BIT_RACK_MAX_ALPHABET_SIZE; next_ml++) {
-    max_num_this = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, next_ml);
-    if (max_num_this > 0) {
-      break;
-    }
-  }
-  if (next_ml >= BIT_RACK_MAX_ALPHABET_SIZE) {
+// Walk only the occupied rack letters. Rescanning every BitRack alphabet lane
+// at each recursion level is expensive when a rack contains at most seven
+// tiles.
+static inline void wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+    WMPMoveGen *wmp_move_gen, BitRack *current,
+    const MachineLetter *rack_letters, const uint8_t *rack_letter_counts,
+    int num_rack_letters, int rack_letter_idx, int count, LeaveMap *leave_map) {
+  if (rack_letter_idx >= num_rack_letters) {
     const int insert_index = subracks_get_combination_offset(count) +
                              wmp_move_gen->count_by_size[count];
     SubrackInfo *subrack_info =
         wmp_move_gen->nonplaythrough_infos + insert_index;
     subrack_info->subrack = *current;
     subrack_info->leave_value = leave_map_get_current_value(leave_map);
+    subrack_info->wmp_entry_is_set = false;
     wmp_move_gen->count_by_size[count]++;
     return;
   }
+
+  const MachineLetter ml = rack_letters[rack_letter_idx];
+  const int max_num_this = rack_letter_counts[rack_letter_idx];
   for (int i = 0; i < max_num_this; i++) {
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, current, next_ml + 1, count + i, leave_map);
-    bit_rack_add_letter(current, next_ml);
-    leave_map_complement_add_letter(leave_map, next_ml, i);
+    wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+        wmp_move_gen, current, rack_letters, rack_letter_counts,
+        num_rack_letters, rack_letter_idx + 1, count + i, leave_map);
+    bit_rack_add_letter(current, ml);
+    leave_map_complement_add_letter(leave_map, ml, i);
   }
-  wmp_move_gen_enumerate_nonplaythrough_subracks(
-      wmp_move_gen, current, next_ml + 1, count + max_num_this, leave_map);
+  wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+      wmp_move_gen, current, rack_letters, rack_letter_counts, num_rack_letters,
+      rack_letter_idx + 1, count + max_num_this, leave_map);
   for (int i = max_num_this - 1; i >= 0; i--) {
-    bit_rack_take_letter(current, next_ml);
-    leave_map_complement_take_letter(leave_map, next_ml, i);
+    bit_rack_take_letter(current, ml);
+    leave_map_complement_take_letter(leave_map, ml, i);
   }
+}
+
+static inline void
+wmp_move_gen_enumerate_nonplaythrough_subracks(WMPMoveGen *wmp_move_gen,
+                                               LeaveMap *leave_map) {
+  MachineLetter rack_letters[RACK_SIZE] = {0};
+  uint8_t rack_letter_counts[RACK_SIZE] = {0};
+  int num_rack_letters = 0;
+  for (int ml = BLANK_MACHINE_LETTER; ml < BIT_RACK_MAX_ALPHABET_SIZE; ml++) {
+    const int count = bit_rack_get_letter(&wmp_move_gen->player_bit_rack, ml);
+    if (count > 0) {
+      rack_letters[num_rack_letters] = (MachineLetter)ml;
+      rack_letter_counts[num_rack_letters] = (uint8_t)count;
+      num_rack_letters++;
+    }
+  }
+  BitRack empty = bit_rack_create_empty();
+  wmp_move_gen_enumerate_compact_nonplaythrough_subracks(
+      wmp_move_gen, &empty, rack_letters, rack_letter_counts, num_rack_letters,
+      0, 0, leave_map);
 }
 
 static inline void
@@ -255,7 +323,7 @@ wmp_move_gen_multi_pt_bitvec_says_prune(const WMPMoveGen *wmp_move_gen,
 // (which IS a valid prune signal -- "no letter is compatible with this
 // rack at this length").
 static inline bool wmp_move_gen_get_multi_pt_bitvec_for_tiles_played(
-    const RackInfoTableEntry *rit_entry, int tiles_played, int word_length,
+    const RackInfoTableWordEntry *rit_entry, int tiles_played, int word_length,
     uint32_t *out_bitvec) {
   switch (tiles_played) {
   case RACK_SIZE:
@@ -317,6 +385,9 @@ wmp_move_gen_check_nonplaythroughs_of_size(WMPMoveGen *wmp_move_gen, int size,
     if (!wmp_entries_precomputed) {
       subrack_info->wmp_entry =
           wmp_get_word_entry(wmp_move_gen->wmp, &subrack_info->subrack, size);
+      subrack_info->wmp_entry_is_set = true;
+    } else {
+      assert(subrack_info->wmp_entry_is_set);
     }
     if (subrack_info->wmp_entry == NULL) {
       continue;
@@ -346,9 +417,7 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
     memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-    BitRack empty = bit_rack_create_empty();
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+    wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
   }
   for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
        size++) {
@@ -357,14 +426,10 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
   }
 }
 
-// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. Skips
-// the per-size wmp_get_word_entry loop for any size where the RIT entry
-// says there is no canonical size-k subrack that forms a valid k-letter
-// word. For sizes that do have words, still runs the existing walk to
-// populate subrack_info->wmp_entry pointers needed at record time. Also
-// seeds nonplaythrough_best_leave_values from the RIT entry directly so
-// that even for the walked sizes we avoid the running-max update inside
-// the inner loop.
+// RIT-backed variant of wmp_move_gen_check_nonplaythrough_existence. The RIT
+// supplies both the per-size existence result and best leave, so no WMP hash
+// walk is needed here. Nonplaythrough WMP entries are resolved lazily if
+// record-time generation actually reaches their subrack.
 //
 // Precondition: rit_entry is non-NULL and corresponds to this move_gen's
 // full player_rack.
@@ -373,15 +438,13 @@ static inline void wmp_move_gen_check_nonplaythrough_existence(
 // cache), so we skip the enumerate_nonplaythrough_subracks step.
 static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
     WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
-    const RackInfoTableEntry *rit_entry, bool subracks_precomputed,
-    bool wmp_entries_precomputed) {
+    const RackInfoTableEntry *rit_entry,
+    const Equity *best_leave_values_override, bool subracks_precomputed) {
   leave_map_set_current_index(leave_map,
                               (1 << wmp_move_gen->full_rack_size) - 1);
   if (!subracks_precomputed) {
     memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
-    BitRack empty = bit_rack_create_empty();
-    wmp_move_gen_enumerate_nonplaythrough_subracks(
-        wmp_move_gen, &empty, BLANK_MACHINE_LETTER, 0, leave_map);
+    wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
   }
 
   // Seed has_word_of_length and best_leave_values from the RIT entry. The
@@ -396,8 +459,11 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
                                                                 size);
   }
   for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
-    Equity rit_best = rack_info_table_entry_get_nonplaythrough_best_leave_value(
-        rit_entry, leave_size);
+    Equity rit_best =
+        best_leave_values_override == NULL
+            ? rack_info_table_entry_get_nonplaythrough_best_leave_value(
+                  rit_entry, leave_size)
+            : best_leave_values_override[leave_size];
     // The non-RIT path writes 0 instead of EQUITY_MIN_VALUE when
     // check_leaves is false. Match that convention so the field is always
     // well-defined downstream.
@@ -408,35 +474,44 @@ static inline void wmp_move_gen_check_nonplaythrough_existence_with_rit(
       wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = rit_best;
     }
   }
+}
 
-  // For sizes that have at least one valid nonplaythrough word we still
-  // need to populate subrack_info->wmp_entry pointers for the eventual
-  // record-time wmp_entry_write_words_to_buffer call. But we can skip the
-  // walk entirely for sizes where no canonical subrack makes a word -- the
-  // wmp_entry cache for those sizes is never read because shadow_record
-  // early-returns on wmp_move_gen_nonplaythrough_word_of_length_exists
-  // before getting to the record stage.
-  for (int size = MINIMUM_WORD_LENGTH; size <= wmp_move_gen->full_rack_size;
-       size++) {
-    if (!wmp_move_gen->nonplaythrough_has_word_of_length[size]) {
-      continue;
+// Structural-only RIT variant for context-dependent leave evaluators. The
+// entry's word-existence bitmask is independent of leave values and remains
+// exact. Its precomputed best-leave fields are not safe, so use the current
+// position's best leave over all same-sized subracks as a conservative upper
+// bound. This can make shadow looser than the full WMP walk, but cannot prune
+// a legal best move.
+static inline void
+wmp_move_gen_check_nonplaythrough_existence_with_rit_structure(
+    WMPMoveGen *wmp_move_gen, bool check_leaves, LeaveMap *leave_map,
+    const RackInfoTableWordEntry *rit_entry,
+    const Equity *current_best_leaves) {
+  leave_map_set_current_index(leave_map,
+                              (1 << wmp_move_gen->full_rack_size) - 1);
+  memset(wmp_move_gen->count_by_size, 0, sizeof(wmp_move_gen->count_by_size));
+  wmp_move_gen_enumerate_nonplaythrough_subracks(wmp_move_gen, leave_map);
+
+  for (int size = 0; size <= RACK_SIZE; size++) {
+    wmp_move_gen->nonplaythrough_has_word_of_length[size] =
+        rack_info_table_word_entry_has_nonplaythrough_word_of_length(rit_entry,
+                                                                     size);
+  }
+  for (int leave_size = 0; leave_size <= RACK_SIZE; leave_size++) {
+    const int played_size = wmp_move_gen->full_rack_size - leave_size;
+    const bool word_exists =
+        played_size >= 0 &&
+        rack_info_table_word_entry_has_nonplaythrough_word_of_length(
+            rit_entry, played_size);
+    if (!check_leaves) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] = 0;
+    } else if (word_exists) {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          current_best_leaves[leave_size];
+    } else {
+      wmp_move_gen->nonplaythrough_best_leave_values[leave_size] =
+          EQUITY_MIN_VALUE;
     }
-    const int leave_size = wmp_move_gen->full_rack_size - size;
-    // The existing wmp_move_gen_check_nonplaythroughs_of_size writes to
-    // nonplaythrough_best_leave_values[leave_size] and runs a max update
-    // across subracks. We already seeded the final value from the RIT, so
-    // stash it and restore after the walk (the walk only keeps a running
-    // max vs EQUITY_MIN_VALUE, which matches the RIT-seeded max).
-    const Equity seeded_best =
-        wmp_move_gen->nonplaythrough_best_leave_values[leave_size];
-    wmp_move_gen_check_nonplaythroughs_of_size(wmp_move_gen, size, check_leaves,
-                                               wmp_entries_precomputed);
-    // Assert the walk's max matches what RIT already stored. Cheap sanity
-    // check that catches maker/consumer drift.
-    assert(!check_leaves ||
-           wmp_move_gen->nonplaythrough_best_leave_values[leave_size] ==
-               seeded_best);
-    (void)seeded_best;
   }
 }
 
@@ -546,13 +621,13 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
       wmp_move_gen_anchor_index(wmp_move_gen->playthrough_blocks, tiles_played);
   Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
   // First touch detection: tiles_to_play == 0 means this slot has been
-  // reset (or is initial-state) and isn't already on the touched list.
+  // reset (or is initial-state) and isn't already marked as touched.
   // We set tiles_to_play to a nonzero value below, so subsequent calls
-  // in the same shadow pass won't double-push.
+  // in the same shadow pass won't need to mark it again.
   if (anchor->tiles_to_play == 0) {
-    wmp_move_gen
-        ->touched_anchor_slots[wmp_move_gen->num_touched_anchor_slots++] =
-        (uint8_t)slot_idx;
+    const int mask_idx = slot_idx / 64;
+    const uint64_t slot_mask = 1ULL << (slot_idx % 64);
+    wmp_move_gen->touched_anchor_masks[mask_idx] |= slot_mask;
   }
   anchor->tiles_to_play = tiles_played;
   anchor->playthrough_blocks = wmp_move_gen->playthrough_blocks;
@@ -571,11 +646,12 @@ static inline void wmp_move_gen_maybe_update_anchor(WMPMoveGen *wmp_move_gen,
   }
 }
 
-static inline void
-wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
-                                      const Anchor *anchor,
-                                      Square row_cache[BOARD_DIM]) {
+static inline void wmp_move_gen_set_playthrough_bit_rack(
+    WMPMoveGen *wmp_move_gen, const Anchor *anchor, const Square *row_cache,
+    const uint32_t *const *wit_row_lane, const uint8_t *wit_len_lane) {
   wmp_move_gen_reset_playthrough(wmp_move_gen);
+  wmp_move_gen->playthrough_addable = 0xFFFFFFFFu;
+  wmp_move_gen->playthrough_positions = 0;
   if (anchor->playthrough_blocks == 0) {
     return;
   }
@@ -594,9 +670,26 @@ wmp_move_gen_set_playthrough_bit_rack(WMPMoveGen *wmp_move_gen,
     }
     const MachineLetter unblanked_ml = get_unblanked_machine_letter(ml);
     wmp_move_gen_add_playthrough_letter(wmp_move_gen, unblanked_ml);
+    wmp_move_gen->playthrough_positions |= 1U << col;
     if (!in_block) {
       in_block = true;
       blocks_found++;
+      // `col` is this block's leftmost tile; fold in the cached letter set of
+      // words of this length that contain the block. A NULL row means uncached
+      // or no table loaded (treat as permit-all).
+      const uint32_t *block_row = wit_row_lane[col];
+      if (block_row != NULL) {
+        const int block_len = wit_len_lane[col];
+        const int extension_len = anchor->word_length - block_len;
+        // Shadow anchors can begin inside a longer cached board block. That
+        // block is not wholly contained in this candidate word, so its WIT
+        // row has no entry at this (negative) extension length. Skipping this
+        // optional prune is conservative; normal playthrough validation
+        // still rejects candidates that do not match the board.
+        if (extension_len >= 0) {
+          wmp_move_gen->playthrough_addable &= block_row[extension_len];
+        }
+      }
     }
   }
   assert(blocks_found == anchor->playthrough_blocks);
@@ -625,11 +718,18 @@ static inline bool wmp_move_gen_get_subrack_words(WMPMoveGen *wmp_move_gen,
   SubrackInfo *subrack_info =
       is_playthrough ? &wmp_move_gen->playthrough_infos[subrack_idx]
                      : &wmp_move_gen->nonplaythrough_infos[subrack_idx];
-  // Nonplaythrough subracks' wmp entries were already looked up during
-  // shadow.
   if (is_playthrough) {
     subrack_info->wmp_entry = wmp_get_word_entry(
         wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+  } else if (!subrack_info->wmp_entry_is_set) {
+    subrack_info->wmp_entry = wmp_get_word_entry(
+        wmp_move_gen->wmp, &subrack_info->subrack, wmp_move_gen->word_length);
+    subrack_info->wmp_entry_is_set = true;
+    if (wmp_move_gen->nonplaythrough_wmp_entry_cache != NULL) {
+      wmp_move_gen->nonplaythrough_wmp_entry_cache[subrack_idx] =
+          subrack_info->wmp_entry;
+      wmp_move_gen->nonplaythrough_wmp_entry_cache_set[subrack_idx] = true;
+    }
   }
 
   if (subrack_info->wmp_entry == NULL) {
@@ -665,27 +765,29 @@ static inline void wmp_move_gen_add_anchors(WMPMoveGen *wmp_move_gen, int row,
                                             int dir,
                                             Equity inference_cutoff_equity,
                                             AnchorHeap *anchor_heap) {
-  for (int i = 0; i < MAX_WMP_MOVE_GEN_ANCHORS; i++) {
-    const Anchor *anchor = &wmp_move_gen->anchors[i];
-    if (anchor->tiles_to_play == 0) {
-      continue;
-    }
+  for (int word_idx = 0; word_idx < WMP_ANCHOR_MASK_WORDS; word_idx++) {
+    uint64_t touched = wmp_move_gen->touched_anchor_masks[word_idx];
+    while (touched != 0) {
+      const int slot_idx =
+          word_idx * 64 + wmp_move_gen_get_lowest_set_bit(touched);
+      const Anchor *anchor = &wmp_move_gen->anchors[slot_idx];
 
-    // Skip subanchors whose highest possible equity is below the cutoff
-    // threshold. This is safe when cutoff_equity is fixed (as in inference
-    // with stop_on_threshold).
-    if (inference_cutoff_equity != EQUITY_MAX_VALUE &&
-        anchor->highest_possible_equity < inference_cutoff_equity) {
-      continue;
-    }
+      // Skip subanchors whose highest possible equity is below the cutoff
+      // threshold. This is safe when cutoff_equity is fixed (as in inference
+      // with stop_on_threshold).
+      if (inference_cutoff_equity == EQUITY_MAX_VALUE ||
+          anchor->highest_possible_equity >= inference_cutoff_equity) {
+        assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
+        assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
+        anchor_heap_add_unheaped_wmp_anchor(
+            anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
+            anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
+            anchor->highest_possible_score, anchor->tiles_to_play,
+            anchor->playthrough_blocks, anchor->word_length);
+      }
 
-    assert(anchor->word_length >= MINIMUM_WORD_LENGTH);
-    assert(anchor->word_length <= wmp_move_gen->wmp->board_dim);
-    anchor_heap_add_unheaped_wmp_anchor(
-        anchor_heap, row, col, last_anchor_col, anchor->leftmost_start_col,
-        anchor->rightmost_start_col, dir, anchor->highest_possible_equity,
-        anchor->highest_possible_score, anchor->tiles_to_play,
-        anchor->playthrough_blocks, anchor->word_length);
+      touched &= touched - 1;
+    }
   }
 }
 

@@ -14,12 +14,14 @@
 #include "../ent/letter_distribution.h"
 #include "../ent/rack_info_table.h"
 #include "../ent/wmp.h"
+#include "../ent/word_info_table.h"
 #include "../util/fileproxy.h"
 #include "../util/io_util.h"
 #include "../util/string_util.h"
 #include "kwg_maker.h"
 #include "rack_info_table_maker.h"
 #include "wmp_maker.h"
+#include "word_info_table_maker.h"
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -179,6 +181,62 @@ void convert_from_text_with_dwl(const LetterDistribution *ld,
   }
 }
 
+static void convert_klv_wmp_to_rit(const LetterDistribution *ld,
+                                   const char *data_paths, const char *klv_name,
+                                   const char *wmp_name,
+                                   const char *base_rit_name,
+                                   const char *output_name, int num_threads,
+                                   ErrorStack *error_stack) {
+  KLV *klv = klv_create(data_paths, klv_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    return;
+  }
+  WMP *wmp = wmp_create(data_paths, wmp_name, error_stack);
+  if (!error_stack_is_empty(error_stack)) {
+    klv_destroy(klv);
+    return;
+  }
+  char *rit_output_filename = data_filepaths_get_writable_filename(
+      data_paths, output_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE, error_stack);
+  if (error_stack_is_empty(error_stack)) {
+    // Default coverage is the full interval [1, RACK_SIZE]. The rit_sweep
+    // on-demand test showed that widening coverage down to played_size == 1
+    // monotonically improves movegen while the base entry size stays fixed.
+    const uint8_t playthrough_min_played_size = 1;
+    RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads,
+                                              playthrough_min_played_size);
+    if (base_rit_name == NULL) {
+      rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
+    } else {
+      RackInfoTable *base_rit =
+          rack_info_table_create(data_paths, base_rit_name, true, error_stack);
+      char *base_rit_filename = NULL;
+      if (error_stack_is_empty(error_stack)) {
+        base_rit_filename = data_filepaths_get_readable_filename(
+            data_paths, base_rit_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+            error_stack);
+      }
+      if (error_stack_is_empty(error_stack)) {
+        rack_info_table_write_contextual_clone(
+            rit, base_rit, base_rit_filename, rit_output_filename, error_stack);
+      }
+      free(base_rit_filename);
+      rack_info_table_destroy(base_rit);
+    }
+    if (!error_stack_is_empty(error_stack)) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+          get_formatted_string("could not write rack info table to output "
+                               "file: %s",
+                               rit_output_filename));
+    }
+    rack_info_table_destroy(rit);
+  }
+  free(rit_output_filename);
+  wmp_destroy(wmp);
+  klv_destroy(klv);
+}
+
 void convert_with_names(const LetterDistribution *ld,
                         conversion_type_t conversion_type,
                         const char *data_paths, const char *input_name,
@@ -239,43 +297,43 @@ void convert_with_names(const LetterDistribution *ld,
     }
     klv_destroy(klv);
   } else if (conversion_type == CONVERT_KLVWMP2RIT) {
-    KLV *klv = klv_create(data_paths, input_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      return;
-    }
-    WMP *wmp = wmp_create(data_paths, input_name, error_stack);
-    if (!error_stack_is_empty(error_stack)) {
-      klv_destroy(klv);
-      return;
-    }
-    char *rit_output_filename = data_filepaths_get_writable_filename(
-        data_paths, output_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
-        error_stack);
+    convert_klv_wmp_to_rit(ld, data_paths, input_name, input_name, NULL,
+                           output_name, num_threads, error_stack);
+  } else if (conversion_type == CONVERT_RIT2WORDRIT) {
+    RackInfoTable *rit =
+        rack_info_table_create(data_paths, input_name, true, error_stack);
+    char *output_filename = NULL;
     if (error_stack_is_empty(error_stack)) {
-      // Default coverage is the full interval [1, RACK_SIZE]. The rit_sweep
-      // on-demand test (test/rack_info_table_test.c) showed that widening
-      // coverage from played_size == RACK_SIZE down to played_size == 1
-      // monotonically improves CSW24 movegen user time by ~3% while the
-      // on-disk file stays flat at ~1.69 GB (entry size is fixed at 560 B
-      // regardless of min because playthrough_union is a fixed-size
-      // leave_size-indexed array, not variable-length per-slot storage).
-      // So there's no lighter variant worth shipping.
-      const uint8_t playthrough_min_played_size = 1;
-      RackInfoTable *rit = make_rack_info_table(klv, wmp, ld, num_threads,
-                                                playthrough_min_played_size);
-      rack_info_table_write_to_file(rit, rit_output_filename, error_stack);
-      if (!error_stack_is_empty(error_stack)) {
-        error_stack_push(
-            error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
-            get_formatted_string(
-                "could not write rack info table to output file: %s",
-                rit_output_filename));
-      }
-      rack_info_table_destroy(rit);
+      output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_RACK_INFO_TABLE,
+          error_stack);
     }
-    free(rit_output_filename);
-    wmp_destroy(wmp);
-    klv_destroy(klv);
+    if (error_stack_is_empty(error_stack)) {
+      rack_info_table_write_word_only_copy(rit, output_filename, error_stack);
+    }
+    free(output_filename);
+    rack_info_table_destroy(rit);
+  } else if (conversion_type == CONVERT_KWG2WIT) {
+    KWG *kwg = kwg_create(data_paths, input_name, error_stack);
+    if (error_stack_is_empty(error_stack)) {
+      char *wit_output_filename = data_filepaths_get_writable_filename(
+          data_paths, output_name, DATA_FILEPATH_TYPE_WORD_INFO_TABLE,
+          error_stack);
+      if (error_stack_is_empty(error_stack)) {
+        WordInfoTable *wit = make_word_info_table_from_kwg(kwg);
+        word_info_table_write_to_file(wit, wit_output_filename, error_stack);
+        if (!error_stack_is_empty(error_stack)) {
+          error_stack_push(
+              error_stack, ERROR_STATUS_CONVERT_OUTPUT_FILE_NOT_WRITABLE,
+              get_formatted_string(
+                  "could not write word info table to output file: %s",
+                  wit_output_filename));
+        }
+        word_info_table_destroy(wit);
+      }
+      free(wit_output_filename);
+    }
+    kwg_destroy(kwg);
   } else {
     error_stack_push(error_stack,
                      ERROR_STATUS_CONVERT_UNIMPLEMENTED_CONVERSION_TYPE,
@@ -312,6 +370,10 @@ get_conversion_type_from_string(const char *conversion_type_string) {
     conversion_type = CONVERT_DAWG2WORDMAP;
   } else if (strings_equal(conversion_type_string, "klvwmp2rit")) {
     conversion_type = CONVERT_KLVWMP2RIT;
+  } else if (strings_equal(conversion_type_string, "rit2wordrit")) {
+    conversion_type = CONVERT_RIT2WORDRIT;
+  } else if (strings_equal(conversion_type_string, "kwg2wit")) {
+    conversion_type = CONVERT_KWG2WIT;
   }
   return conversion_type;
 }
@@ -336,25 +398,75 @@ void convert(const ConversionArgs *args, ConversionResults *conversion_results,
     return;
   }
 
+  const char *input_name = args->input_and_output_name;
+  const char *output_name = input_name;
+  const char *wmp_name = input_name;
+  const char *base_rit_name = NULL;
+  StringSplitter *rit_names = NULL;
+  if (conversion_type == CONVERT_KLVWMP2RIT) {
+    rit_names = split_string(args->input_and_output_name, ',', false);
+    const int name_count = string_splitter_get_number_of_items(rit_names);
+    if (name_count == 3) {
+      input_name = string_splitter_get_item(rit_names, 0);
+      wmp_name = string_splitter_get_item(rit_names, 1);
+      output_name = string_splitter_get_item(rit_names, 2);
+    } else if (name_count == 4) {
+      input_name = string_splitter_get_item(rit_names, 0);
+      wmp_name = string_splitter_get_item(rit_names, 1);
+      base_rit_name = string_splitter_get_item(rit_names, 2);
+      output_name = string_splitter_get_item(rit_names, 3);
+    } else if (name_count != 1) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
+          string_duplicate("klvwmp2rit expects NAME, "
+                           "KLV_NAME,WMP_NAME,OUTPUT_NAME, or "
+                           "KLV_NAME,WMP_NAME,BASE_RIT_NAME,OUTPUT_NAME"));
+      string_splitter_destroy(rit_names);
+      return;
+    }
+  } else if (conversion_type == CONVERT_RIT2WORDRIT) {
+    rit_names = split_string(args->input_and_output_name, ',', false);
+    const int name_count = string_splitter_get_number_of_items(rit_names);
+    if (name_count != 2) {
+      error_stack_push(
+          error_stack, ERROR_STATUS_CONVERT_INPUT_FILE_ERROR,
+          string_duplicate("rit2wordrit expects RIT_NAME,OUTPUT_NAME"));
+      string_splitter_destroy(rit_names);
+      return;
+    }
+    input_name = string_splitter_get_item(rit_names, 0);
+    wmp_name = input_name;
+    output_name = string_splitter_get_item(rit_names, 1);
+  }
+
   char *ld_name = NULL;
   if (args->ld_name != NULL) {
     ld_name = string_duplicate(args->ld_name);
   } else {
-    ld_name = ld_get_default_name_from_lexicon_name(args->input_and_output_name,
-                                                    error_stack);
+    ld_name = ld_get_default_name_from_lexicon_name(wmp_name, error_stack);
     if (!error_stack_is_empty(error_stack)) {
+      string_splitter_destroy(rit_names);
       return;
     }
   }
 
   LetterDistribution *ld = ld_create(args->data_paths, ld_name, error_stack);
   if (!error_stack_is_empty(error_stack)) {
+    string_splitter_destroy(rit_names);
     return;
   }
   free(ld_name);
 
-  convert_with_names(ld, conversion_type, args->data_paths,
-                     args->input_and_output_name, args->input_and_output_name,
-                     conversion_results, args->num_threads, error_stack);
+  if (conversion_type == CONVERT_KLVWMP2RIT &&
+      (base_rit_name != NULL || !strings_equal(input_name, wmp_name))) {
+    convert_klv_wmp_to_rit(ld, args->data_paths, input_name, wmp_name,
+                           base_rit_name, output_name, args->num_threads,
+                           error_stack);
+  } else {
+    convert_with_names(ld, conversion_type, args->data_paths, input_name,
+                       output_name, conversion_results, args->num_threads,
+                       error_stack);
+  }
   ld_destroy(ld);
+  string_splitter_destroy(rit_names);
 }
