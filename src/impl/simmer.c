@@ -52,9 +52,20 @@ static void sim_forward_progress(const AnalysisProgressEvent *event,
                                  void *user_data) {
   const SimProgressContext *context = user_data;
   AnalysisProgressEvent forwarded = *event;
-  forwarded.nodes = sim_results_get_node_count(context->sim_results);
-  forwarded.iterations = sim_results_get_iteration_count(context->sim_results);
-  forwarded.work_units = forwarded.iterations;
+  // Checkpoint events already carry an iterations/nodes snapshot taken under
+  // the BAI mutex at the moment the checkpoint fired. Re-reading the live
+  // counters here would attach emission-time values instead: a delayed
+  // emission then reports work from a later point in the run, so two
+  // consecutive checkpoints can show nearly identical (or identical)
+  // counters even though their snapshots are a full interval apart. Only
+  // non-checkpoint events (FINISH) read the live counters, which are stable
+  // by the time bai() emits them.
+  if (event->event != ANALYSIS_EVENT_CHECKPOINT) {
+    forwarded.nodes = sim_results_get_node_count(context->sim_results);
+    forwarded.iterations =
+        sim_results_get_iteration_count(context->sim_results);
+    forwarded.work_units = forwarded.iterations;
+  }
   forwarded.budget_seconds = context->budget_seconds;
   context->listener->callback(&forwarded, context->listener->user_data);
 }

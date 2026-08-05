@@ -66,6 +66,10 @@ typedef struct BAISyncData {
   int avoid_prune_best_arm_idx;
   const AnalysisProgressListener *progress_listener;
   uint64_t next_progress_sample;
+  // Source for the checkpoint node-count snapshot, read under the main mutex
+  // so nodes and iterations describe the same instant. NULL when the caller
+  // has no native work counter; checkpoints then report zero nodes.
+  const SimResults *progress_sim_results;
   // Serializes checkpoint emission so trace order matches snapshot order.
   // Acquired hand-over-hand before the main mutex is released; never taken
   // while trying to acquire the main mutex, so the ordering is deadlock-free.
@@ -117,6 +121,7 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
   bai_sync_data->avoid_prune_count = 0;
   bai_sync_data->avoid_prune_next_idx = 0;
   bai_sync_data->progress_listener = progress_listener;
+  bai_sync_data->progress_sim_results = NULL;
   cpthread_mutex_init(&bai_sync_data->progress_emit_mutex);
   bai_sync_data->next_progress_sample =
       progress_listener != NULL &&
@@ -849,6 +854,15 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
             : 0;
     progress.work_units = sync_data->num_total_samples_completed;
     progress.iterations = sync_data->num_total_samples_completed;
+    // Snapshot the native work counter under the same lock as iterations so
+    // the pair is coherent and strictly ordered across checkpoints. The
+    // emitting layer must forward this snapshot unchanged (see
+    // sim_forward_progress); emission can be delayed arbitrarily by the
+    // scheduler while other workers keep sampling.
+    if (sync_data->progress_sim_results != NULL) {
+      progress.nodes =
+          sim_results_get_node_count(sync_data->progress_sim_results);
+    }
     progress.candidate_index = arm_index;
     progress.candidates_total = sync_data->num_arms;
     progress.best_index = best_index;
@@ -1156,8 +1170,10 @@ static void *bai_worker_with_regret_stop(void *args) {
 
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
-// `rule_zero_sim_results` supplies the native work counter for the optional
-// Rule-of-Zero stop; NULL keeps that policy inert regardless of the options.
+// `rule_zero_sim_results` supplies the native work counter for progress
+// checkpoint node snapshots and for the optional Rule-of-Zero stop; NULL
+// zeroes checkpoint nodes and keeps that stop policy inert regardless of the
+// options.
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
                        BAILogger *bai_logger,
@@ -1193,6 +1209,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
             ? minimum_total
             : sync_data->regret_check_interval;
   }
+  sync_data->progress_sim_results = rule_zero_sim_results;
   // A malformed or incomplete Rule-of-Zero configuration is deliberately
   // inert. This prevents a telemetry failure from becoming a faster stop.
   if (bai_options->rule_zero_enabled && rule_zero_sim_results != NULL &&

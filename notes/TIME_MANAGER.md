@@ -1990,6 +1990,46 @@ a pre-existing non-atomic-snapshot artifact of the one-sided
 Zero, recorded here for a future look before the terminal match freezes
 its operational thresholds.
 
+### Checkpoint counters must be snapshotted, not read at emission (2026-08-05)
+
+The strict panel audit (`validate_rule_zero_chunk_accounting`) surfaced two
+rare checkpoint-trace races on 4-thread runs (~1 per 100-200 roots). The
+first — a later snapshot written to the trace before an earlier one — was
+fixed by hand-over-hand emission ordering in
+`bai_sync_data_add_sample_with_progress` (the `progress_emit_mutex` is
+claimed before the main mutex is released). The second appeared after that
+fix: two consecutive checkpoint rows whose iterations differ by exactly 1
+with identical node counts (e.g. 919041 -> 919042, nodes 2757126 both).
+
+Root cause: `sim_forward_progress` in `src/impl/simmer.c` discarded the
+iterations snapshot taken under the BAI mutex and re-read
+`sim_results_get_iteration_count`/`_node_count` at emission time (nodes
+were never snapshotted at all). Emission order was serialized, but the
+values were not: when the scheduler preempts a worker between releasing the
+main mutex and emitting, other workers keep sampling, so the delayed
+checkpoint reports counters from far past its crossing. The next checkpoint,
+already blocked on `progress_emit_mutex`, then emits microseconds later and
+reads nearly identical live values. The exact +1/equal-nodes signature comes
+from a third worker sitting between its last
+`sim_results_increment_node_count` and its
+`sim_results_increment_iteration_count` (in `rv_sim_sample`): its nodes are
+in both reads while its iteration lands only in the second. The completed
+p2 run corroborates this — inter-checkpoint iteration deltas in accepted
+logs form a tail from the nominal 256 down to 10, and one first checkpoint
+reported iterations=457 at a 256-sample interval.
+
+Fix: `bai_sync_data_add_sample_with_progress` now snapshots
+`progress.nodes` from the sim's native counter under the same main-mutex
+hold that snapshots `progress.iterations` (the `bai()` work-counter
+argument is stored as `progress_sim_results` unconditionally, not only when
+Rule-of-Zero is configured), and `sim_forward_progress` forwards checkpoint
+events unchanged, re-reading live counters only for non-checkpoint events
+(FINISH, emitted after the workers join, when the counters are stable).
+Checkpoint iterations are now exactly interval-spaced and nodes strictly
+increase whenever the interval exceeds the number of in-flight samples
+(bounded by the thread count). This also makes checkpoint node counts the
+same measurement the Rule-of-Zero stop check reads under the same lock.
+
 ## Validation
 
 1. Fit curves on source-game-clustered training positions.
