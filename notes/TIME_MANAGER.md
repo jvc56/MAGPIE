@@ -97,8 +97,13 @@ future turns under the remaining clock and predicted mode/phase mix.
 Take another computation chunk only when:
 
 ```text
-expected current regret reduction / predicted chunk seconds > lambda
+expected current regret reduction
+    > F(future state, future clock - predicted chunk seconds)
+      - F(future state, future clock)
 ```
+
+For a sufficiently small interruptible checkpoint, dividing both sides by its
+seconds recovers the local `current value/second > lambda` rule.
 
 and the safety reserve remains intact. Stopping before the old equal slice is a
 deposit. Continuing past it is a withdrawal. The equal slice is a comparison
@@ -110,6 +115,167 @@ Chunks align with useful result boundaries:
 - endgame: the predicted nodes needed to finish the next IDS depth;
 - PEG: the predicted nodes needed to finish the current candidate, then the
   current stage. Do not buy half a candidate whose result will be discarded.
+
+## Learned rest-of-game value
+
+Current-search confidence is not a time-allocation policy. A BAI posterior can
+estimate sampling regret inside the candidates and rollout policy it has seen;
+a PEG or endgame trace can estimate the value of its next completed boundary.
+Neither says how valuable the same second would be on positions that have not
+yet occurred. TimeManager therefore needs two independently calibrated sides
+of every decision:
+
+```text
+current gain = E[R_current(work now) - R_current(work after next chunk)]
+future loss  = F(next state, future clock - chunk seconds)
+             - F(next state, future clock)
+```
+
+The true target is game-level, not a sum invented for convenient telemetry:
+
+```text
+J(state, clock) = maximum expected terminal win/spread utility achievable
+                  by the search-and-play policy over the rest of the game
+F(state, clock) = J(state, unlimited clock) - J(state, clock)
+```
+
+Its finite difference is the price of a proposed chunk. For an indivisible
+PEG wave or endgame depth use
+`F(state, clock - chunk_seconds) - F(state, clock)` directly; a single local
+slope `lambda` is only an approximation for a tiny simulation checkpoint.
+Recompute after every completed boundary because the curve can steepen as the
+clock shrinks. Buy the next chunk only when current gain exceeds that future
+loss, subject to the separate hard completion and clock-safety gates. A fixed
+residual-regret target is not a substitute for `F`: it spends the same way in
+a trivial position with surplus clock and in a hard position before several
+more valuable turns.
+
+The first offline labeler uses the minimum expected sum of oracle decision
+regrets over later turns as a *surrogate* for `F`. That decomposition is valid
+in the ideal performance-difference setting only when every per-turn oracle is
+a consistent action-value estimate for the same continuation policy and the
+expectation uses the evaluated policy's state distribution. Our finite-horizon
+judges and fixed observed trajectories do not fully meet those conditions.
+Suffix-DP labels can therefore train and debug the first model, but cannot by
+themselves pass the live gate. Held-out complete-game allocation backtests must
+verify terminal win/spread utility, including changed future positions.
+
+Training labels come from full-game, source-game-grouped work/value curves.
+For every observed turn, retain discrete legal result boundaries:
+
+```text
+(mode, work, oracle regret, result identity)
+```
+
+Then solve an offline suffix allocation problem for many remaining-clock
+budgets. For a realized sequence of same-player turns `t..T`:
+
+```text
+F_t(B) = min over legal work choices n_t..n_T
+         sum_i R_i(n_i), subject to sum_i seconds_i(n_i) <= B
+```
+
+This dynamic program creates initial supervision for both total rest-of-game
+regret and the marginal value of the next unit of clock. It must include a terminal
+state where unused time has zero value and the configured overtime penalty,
+otherwise a model can learn to hoard clock forever. Training, calibration, and
+test splits are by complete source game, never by position, so future turns of
+the same game cannot leak into the fitted value-to-go.
+
+The runtime artifact should remain hardware-independent. Source curves store
+mode-native opportunity curves (simulation rollout nodes, endgame nodes at
+completed depths, and PEG scenarios/candidates/nested-endgame nodes). Runtime
+rate profiles convert those opportunities to seconds during suffix-label
+generation; the model is conditioned on that rate-profile grid. Live robust
+work rates select/interpolate a profile. Given the remaining clock and
+predicted future phase mix, a small monotone solver evaluates `F` and its exact
+finite difference. This lets the same portable artifact react to throttling or
+contention rather than learning the calibration machine as a hidden feature.
+
+The first auditable predictor is a hierarchical monotone table:
+
+```text
+rate profile -> bag phase -> expected future own turns -> score-spread band
+             -> combined rack-size band
+```
+
+Sparse cells shrink toward their parent and every clock curve is forced
+nonincreasing in expected regret. This is intentionally less expressive than
+a generic tree ensemble: it is fast enough for every SIM checkpoint and makes
+bad extrapolation visible. More state features earn their way in only through
+source-game-held-out policy regret, not in-sample fit.
+
+Useful state features must be known before the future positions occur:
+
+- bag count, both rack sizes, score spread/win region, and expected own turns;
+- predicted counts of future SIM, PEG, and endgame decisions;
+- current clock, overtime schedule, and live mode-specific work rates; and
+- only for the current opportunity, search-progress features such as candidate
+  count, arm gaps/variances, completed PEG stage, or completed endgame depth.
+
+Current-search features must not be smuggled into forecasts for unknown future
+turns. Position-specific future difficulty is integrated out by the learned
+conditional distribution. The first model can be a conservative monotone
+table/spline by phase and clock pressure; a more expressive model is justified
+only if held-out source games show better regret calibration.
+
+The existing experiments do not yet identify this full model. They provide
+three important ingredients: average SIM regret-versus-node curves, one
+operating-point calibration of conditional BAI sampling regret, and discrete
+PEG/endgame cost/value boundaries. They do **not** provide a matched
+production-topology curve at every turn of complete games, nor an online
+forecast of the unseen suffix. In particular, the current thinking-curve
+corpus ends around bag 50, uses top-60 candidates, and most regret panels use
+6-ply at 300K nodes, while production PlayChooser uses top-15 and defaults to
+2-ply. Those data may initialize priors, but they cannot certify a live
+rest-of-game allocator.
+Concretely, the reusable July 29 panel contains 168 SIM turn curves from 21
+source games, all at bag 50--86. The 72-pair live TimeManager run recorded
+3,388 turns but predates replayable per-turn CGP and seed fields, so it cannot
+be converted into the missing full-game opportunity corpus after the fact.
+
+Before allocation changes are re-enabled, collect matched top-15 curves along
+complete game trajectories, join the held-out PEG/endgame boundary data, fit
+the suffix value model, and back-test these separately:
+
+1. conditional current-search regret;
+2. oracle current-turn regret, including candidate/depth/horizon bias;
+3. predicted value of the next work tranche; and
+4. predicted rest-of-game regret and shadow price.
+
+The game-pair trace should log all four. A reverse sum of estimates observed on
+the eventual path is useful retrospective accounting, but it is not (4) and
+must never be labeled as a pre-turn rest-of-game prediction.
+
+The concrete shadow pipeline is:
+
+1. `tools/collect_time_value_positions.py` records complete sequential source
+   games with every pre-move CGP and rejects killed/truncated games. Collect a
+   declared mixture of static trajectories and trajectories that actually
+   play short-PlayChooser moves; the former are cheap and reproducible while
+   the latter cover policy-induced states. The trajectory policy is retained
+   as provenance and never inferred from a post-game outcome.
+2. `thinkingcurve` accepts raw positions, generates the production top-15
+   panel, and measures independent fixed-node SIM arms with a common deeper
+   judge. Bag filters keep SIM at bag > 4 while preserving source-position IDs
+   for later PEG/endgame joins.
+3. `tools/convert_time_value_work_costs.py` applies a grid of runtime-rate
+   scenarios to native work coordinates.
+4. `tools/build_rest_game_value_labels.py` evaluates a declared
+   nonanticipating baseline policy on each same-player suffix for every rate
+   profile and clock budget. Its old hindsight optimizer is retained only as
+   an explicitly labeled prophet bound.
+5. `tools/fit_rest_game_value_model.py` fits the monotone hierarchical table.
+   It always emits a shadow artifact: predictive error alone cannot enable it.
+6. `tools/backtest_rest_game_value_policy.py` replays the learned allocator and
+   equal slicing turn by turn on held-out complete source games. It clusters
+   uncertainty by source game and may pass only the realized-trajectory
+   oracle-regret *surrogate* gate.
+7. Mirrored game pairs must then improve terminal utility before the compiled
+   artifact's live gate is set. A source game is keyed by seed and starting
+   seat, not a corpus-local game number, and predicted future-turn features
+   are computed from the current bag/rack state rather than realized suffix
+   length.
 
 Completion is a hard gate independent of value. Before starting an endgame
 depth, estimate the conditional distribution of its added nodes from the
@@ -639,20 +805,22 @@ opt-in. It can plan exact first-two 2-ply waves for bags 1--4 and exact
 first-two 3-ply waves after a completed 16-candidate 2-ply boundary for bags
 2--3. It also exposes the direct-4 2-ply value observations.
 
-The experimental PlayChooser policy now opts into that finite-corpus evidence
+The first experimental PlayChooser policy opted into that finite-corpus evidence
 without mislabeling it as certified p99. It uses a 0.95 evidence threshold,
 multiplies the empirical maximum's portable nodes and scenarios by 1.5, and
 uses a separate 1.5 slowdown in the deadline wall conversion. The 1.5 factors
 are conservative engineering choices, not values selected on an untouched
 safety-factor sweep. They require an online audit before a release default.
 
-Enforced PEG changes only the no-poll 2-ply dispatcher. It submits the first
+Candidate-level enforcement changes only the no-poll 2-ply dispatcher. It submits the first
 two candidates together, then submits one candidate at a time with the whole
-worker pool and replans after every completed candidate. The default stopping
-rule completes at least eight candidates, then stops after four consecutive
-candidate completions without a change in the leading move, with a hard cap
-of 32. A deliberate stop publishes the completed prefix as a usable partial
-2-ply tier; a deadline-interrupted candidate is discarded. Shadow and
+worker pool and replans after every completed candidate. The intended
+stability rule cannot stop before eight candidates and then stops after four
+consecutive candidate completions without a change in the leading move, with a
+hard cap of 32. Admission was nevertheless independent and could refuse a
+candidate before eight; the long-match audit below showed that this distinction
+was unsafe. A deliberate stop publishes the completed prefix as a usable
+partial 2-ply tier; a deadline-interrupted candidate is discarded. Shadow and
 interactive-poll solves preserve their old topology.
 
 The first-two price is the calibration median. A later single-candidate price
@@ -665,13 +833,23 @@ The unmeasured greedy→2 gain borrows the 2→4 block only as a weak prior.
 
 Wall conversion starts from the loaded-M5 fit, adjusted inversely for the
 current worker count. Once the same solve has completed its greedy prefix, the
-policy rescales both expected and deadline models by actual/modelled prefix
-time, clamped to 0.25×--4×. This is a load-adaptive bridge, not a replacement
-for a larger cross-hardware calibration. Benchmark telemetry reports admitted
-chunks and deadline false starts; user interrupts are excluded from the miss
-count.
+policy rescales the observed work coordinates in both expected and deadline
+models by actual/modelled prefix time, clamped to 0.25×--4×. Unobserved
+coordinates retain their cold-start rates. This is a load-adaptive bridge, not
+a replacement for a larger cross-hardware calibration. Benchmark telemetry
+reports admitted chunks and deadline false starts; user interrupts are
+excluded from the miss count.
 
-The live policy currently buys only a 2-ply tier. It does not yet attempt the
+Pair 45 of the first long match demonstrated why that qualification matters.
+Its bag-3 prefix completed 49,276 scenarios in 0.691 seconds but searched zero
+endgame nodes. The old uniform 0.43× live scale was nevertheless applied to
+the endgame-node coefficient and admitted candidate three; that candidate then
+consumed the remaining 15-second window without completing. The corrected
+planner scales scenario/fixed overhead from this prefix but leaves the
+unobserved endgame-node rate conservative, so the same recorded request is
+refused before launch.
+
+The candidate experiment buys only a 2-ply tier. It does not attempt the
 calibrated 3-ply boundary because the complete path to 16 shallow candidates,
 the post-wave deep-candidate tail, and a sufficiently precise deep value prior
 have not all been validated together.
@@ -685,14 +863,13 @@ expected regret reduction / predicted seconds > future shadow price
 ```
 
 The plan reports its deposit (positive) or withdrawal (negative) relative to
-equal slicing. For timed autoplay PEG, the player's real remaining clock is
-now the bank: a clock/latency reserve and the observed-max future depth-5
-endgame trajectory are protected, and the rest becomes the current physical
-window. That allows a late pre-endgame turn to withdraw beyond equal slicing
-when future endgame work is forecast to be cheap. The future reserve stays in
-portable nodes until runtime, when the live PEG nested-endgame rate and a 1.5
-lower-throughput factor convert it to seconds. Overtime and untimed/fixed-time
-paths retain their legacy behavior.
+equal slicing. The original timed-autoplay integration treated the player's
+real remaining clock as the bank: a clock/latency reserve and the observed-max
+future depth-5 endgame trajectory were protected, and the rest became the
+current physical window. The future reserve stays in portable nodes until
+runtime, when the live PEG nested-endgame rate and a 1.5 lower-throughput
+factor convert it to seconds. The audit below moved both PEG directions behind
+a shadow gate; overtime and untimed/fixed-time paths retain legacy behavior.
 
 The endgame admission model now has a one-boundary TimeManager bridge for
 shadow evaluation. At every completed depth it places expected nodes and the
@@ -717,6 +894,1141 @@ The bridge is not wired to live PlayChooser admission yet because the
 position-aware regret-reduction callback and production shared-TT calibration
 are still missing; neither should be replaced by an arbitrary constant in a
 shipping policy.
+
+### Cross-phase spend-down bridge (2026-07-31)
+
+The first common-RNG game-pair match exposed a different integration failure:
+the calibrated PEG policy saved `108.7` seconds over 20 games, but only `9.6`
+seconds reappeared as additional simulation time. TimeManager consequently
+finished with about `5.5` more unused seconds per game. Its 9--11 game result
+and `-17.4` spread/game estimate were inconclusive, but the clock accounting
+was decisive: a deposit with no later withdrawal has no game value.
+
+Before PEG, the timed PlayChooser now forecasts the protected late-phase work
+instead of assigning it equal future slices. The forecast consists of:
+
+- the worst expected bag-1--4 time to complete PEG's minimum useful
+  eight-candidate 2-ply prefix; the measured first pair pays one boundary
+  setup cost and each later single candidate pays a fresh setup cost plus half
+  the pair's portable variable work;
+- the existing depth-5 future endgame trajectory in portable nodes, converted
+  at runtime with the local PEG nested-endgame rate and the existing 1.5
+  lower-throughput factor; and
+- the ordinary response/overtime safety reserve.
+
+The remaining discretionary clock is divided only across the estimated sim
+turns before PEG. This releases predicted PEG savings early enough for sims to
+use them. The bridge is deliberately one-sided: its budget is
+`max(legacy_equal_slice, spend_down_slice)`. Missing calibration, an invalid
+forecast, or a sufficiently slow worker topology therefore preserves the old
+allocation exactly. It cannot make a sim turn shorter, and it does not weaken
+PEG candidate or endgame-depth completion gates. At the opening the protected
+late work is typically close to the equal slices it replaces, so the policy
+does not manufacture a large speculative withdrawal; it releases time as the
+real clock moves ahead of the remaining-work forecast.
+
+The original integration applied the same floor inside the low-bag PEG budget.
+Pair 68 exposed a path
+that subtracted the PEG/endgame reserves and returned zero with 20.267 seconds
+still on the player's clock, although legacy equal slicing offered 6.737
+seconds. When the protected forecast does not fit, that path now returns the
+legacy slice rather than forcing a static fallback; the later audit also
+restored the ordinary depth cascade and shadowed all PEG budget differences.
+
+The remaining-sim-turn divisor keeps the ordinary eight-tiles-per-pair mean
+but adds one contingency turn. In a 12-pair/24-game trace panel, the raw mean
+estimate undercounted 40 of 463 pre-PEG decisions, always by exactly one turn;
+adding one covered all 463. This matters most near the boundary: an initial
+validation run spent down at bag 12, the next two plays removed only seven
+tiles, and an unforecast bag-5 sim turn then consumed the intended PEG reserve.
+That run was stopped and excluded. The contingency preserves the observed
+coverage without replacing the useful mean by an overly pessimistic
+five-tiles-per-pair rate across the entire game.
+
+The corrected validation then exposed the analogous boundary inside PEG. In
+3 of 42 observed player/game trajectories that reached PEG, the player had two
+PEG turns; all three were bag 4 followed by bag 1. An indivisible bag-4 first
+stage once consumed its entire 28.7-second physical window and left the bag-1
+turn with no clock above the protected endgame reserve. Reserving a second full
+eight-candidate proxy proved too pessimistic: two validation pairs then made no
+cross-phase withdrawal because that model serializes a fresh fixed boundary
+cost for every later candidate, while observed second-turn prefixes completed
+in roughly 0.7--0.9 seconds. The refined pre-sim forecast protects one full
+minimum eight-candidate prefix plus the worst expected bag-1--3 first-two entry
+wave. A live bag-4 PEG budget separately holds back that entry wave; its live
+measurement then admits toward eight. Other PEG entries keep the single-prefix
+policy. The validation gate counts any TimeManager static fallback at bag 0--4
+as a failure.
+
+Before a long strength match, require a five-pair operational panel with
+mirrored RNG streams and full turn/candidate/depth traces. Admission requires
+zero penalties, zero trace drops, no low-bag TimeManager fallbacks for lack of
+budget, no PEG candidate false starts, and clear accounting evidence that
+reduced PEG time is reallocated to earlier sims rather than merely increasing
+the terminal clock. Match strength remains a separate, much larger experiment.
+
+`tools/run_time_manager_match.py` preserves that protocol for both the gate and
+the subsequent long match. It writes every turn, sim-arm sample count, PEG
+candidate completion, and endgame call to joinable CSVs; records terminal
+clocks and per-mode time in the pair summary; and treats the two-game pair as
+the inference unit. A time-based run persists its original wall-clock deadline
+before launching the first pair, so restarting cannot silently extend a
+24-hour experiment. Resume also fails closed if its base seed, binary hash,
+runner hash, thread count, clock, or other recorded protocol settings differ.
+
+The final five-pair gate passed on the 10-core M4 Mini. All 10 games and their
+candidate/depth joins audited with zero event drops, penalties, low-bag static
+fallbacks, or PEG false starts. The spend-down policy released `4.803` seconds
+of direct legacy-counterfactual sim budget over 13 turns. It retained `31.971`
+seconds per player/game at the terminal position versus `25.960` for equal
+slicing, so this conservative bridge still leaves room for a later online
+hardware/position calibration. The five-pair strength point estimates favored
+equal slicing (`-39.4` spread/game, `-0.200` win score, and `-0.1627` terminal
+utility for TimeManager), but none was significant (`p = 0.091`, `0.178`, and
+`0.158`, respectively). This panel is an operational admission test, not
+strength evidence; the common-prefix median was only 11 turns.
+
+### First long-match audit and constrained PEG fallback (2026-08-01)
+
+The first long match was stopped after 72 complete game pairs when the trace
+found one candidate false start (pair 45) and one zero-budget low-bag fallback
+(pair 68). Its aggregate result was still inconclusive: TimeManager's paired
+spread was `-3.26` points/game with 95% CI `[-11.88, +5.35]` (`p = 0.453`),
+and neither win score nor terminal utility was significant. More importantly,
+the common-RNG trace separated allocation effects from ordinary wall-timed
+search noise:
+
+- 12 pairs played identical moves throughout;
+- 49 of the 60 first divergences occurred in SIM (47) or endgame (2) with
+  exactly the same nominal move budget, so they do not test a TimeManager
+  allocation decision; multithreaded, deadline-limited search can complete a
+  different number of iterations despite identical RNG streams; and
+- only 11 first divergences coincided with an allocation change: ten PEG roots
+  and one SIM root. Their descriptive mean spread was `-10.77`, with 95% CI
+  `[-23.84, +2.29]`. That small, selected subset is concerning enough to
+  oracle, but terminal play after the first split is not causal evidence about
+  the root move.
+
+Clock accounting showed a real policy weakness independent of game outcomes.
+Across the 72 pairs, TimeManager used `511.112` seconds in PEG versus
+`1369.584` for equal slicing, but only `45.101` seconds was explicitly released
+into earlier SIM turns. It finished with `28.280` seconds per player/game
+versus `20.716`: useful reserve, but too much of the PEG deposit still reached
+the terminal position unspent. Further strength tuning should therefore use
+oracle regret at the ten differing PEG roots before either relaxing or
+tightening admissions globally.
+
+Pair 68 showed that a future-reserve shortfall must never turn usable clock
+into a zero-budget static move. The first repair gave the legacy equal slice
+only to PEG's greedy ranking. The broader oracle audit below rejected that
+restriction too: shallow PEG checkpoints are not reliable substitutes for a
+completed deeper stage. The production fallback now runs the ordinary PEG
+cascade under the legacy equal slice. The turn trace records
+`reserve_shortfall` and the match audit requires the turn to complete PEG
+without a static fallback. A bag-4 shadow plan still prices the calibrated
+entry wave for a possible bag-1 follow-up, but it cannot yet shorten live PEG.
+Fixed-per-move and untimed analyses do not carry this cross-turn reserve.
+
+The first oracle follow-up exposed a second, distinct PEG hazard. At pair 4's
+bag-3 root, TimeManager spent `23.900` seconds versus an equal slice of
+`14.240` and chose `WEM`; equal slicing chose `pass`. Common-sample direct
+2/3/4-ply judges all preferred `pass` (by about 15, 25, and 24
+spread-equivalent points respectively). A controlled 6/12/24-second PEG sweep
+returned three different moves; the 6- and 12-second runs never finished root
+nomination, while the 24-second run finished root but only one of 32 refinement
+candidates. Thus extra time was changing an interrupted shallow incumbent,
+not purchasing a calibrated quality boundary.
+
+The ten allocation-linked PEG roots then received common-sample direct-3
+judges. The old live policy won only one root and lost nine; its selected-root
+mean utility delta was `-0.07089`. This is not a population strength estimate,
+but it exposed a categorical implementation error. The advertised minimum of
+eight 2-ply candidates constrained only the stability stop; candidate
+admission could still refuse candidates 3--8. At pair 15 the live policy used
+only `1.922` of its `19.250` seconds, stopped after six 2-ply candidates, and
+played `EN`. The direct-3 judge preferred equal slicing's `GRIM` by `0.564875`
+utility. Fixed 8, 12, and 16-candidate 2-ply replays all still chose `EN`; the
+ordinary cascade completed 32 at 2 ply and 16 at 3 ply and recovered `GRIM`.
+The problem is therefore depth allocation, not merely an off-by-two minimum.
+
+Replaying all ten roots with the ordinary PEG cascade and the proposed outer
+caps exactly recovered the equal-slice move in five cases. It also found two
+oracle improvements (`AWN` over `pass` at pair 4 and `MEL` over `dON` at pair
+47), one small loss (`HIRE` versus `HIE` at pair 46), and retained the two
+larger losses at pairs 33 and 43. The selected-root mean delta improved to
+`-0.01369`, but remained negative and was dominated by pair 43's incomplete
+bag-4 root nomination. That is not sufficient evidence to enforce deposits.
+
+The live gate is consequently symmetric and fail-safe: calibrated PEG
+deposits and withdrawals are both shadow-only, actual PEG receives exactly the
+legacy equal slice, and candidate-level admission is disabled in PlayChooser.
+`peg_deposit_capped` and `peg_withdrawal_capped` record the shadow direction;
+`reserve_shortfall` identifies a shadow recommendation below the minimum move
+budget, and `peg_shadow_budget_ms` preserves the rejected recommendation's
+magnitude whenever it is executable (otherwise zero). The generic candidate
+dispatcher and its calibration remain
+available for experiments. Unused time from an early-completing ordinary
+cascade is still banked naturally by the game clock, while earlier SIM
+spend-down remains enabled. Re-enforcement requires a depth-aware policy that
+predicts complete stages and passes held-out oracle replay.
+
+Finally, every traced turn now includes a player-on-turn-normalized CGP. The
+two mirrored roots must be identical through the first divergence. This makes
+the exact candidate disagreement directly replayable and removes seed-plus-
+history reconstruction from future oracle analysis.
+
+### Complete-stage PEG admission (2026-08-01)
+
+The replacement policy plans at PEG's actual publication boundary: every
+survivor at the next depth. It makes one decision before the stage-wide
+scenario barrier. A refusal launches no work and leaves the previous complete
+depth published. If an enforced admitted stage nevertheless reaches its hard
+deadline before every candidate finishes, PEG counts one false start,
+discards every result and per-scenario outcome from that depth, and restores
+the previous complete ranking. Candidate-level admission is disabled whenever
+this mode is selected, so a collection of individually admitted candidates
+cannot masquerade as a completed depth.
+
+The portable predictor uses information that exists at the boundary:
+
+- the exact sum of scenario counts for all selected survivors;
+- for 3 ply and later, the exact node count those same survivors used at the
+  preceding depth; and
+- the immediately preceding whole-stage scenarios, nodes, and elapsed time to
+  rescale the hardware conversion under current thermal/load conditions.
+
+The first 2-ply depth has no exact-endgame observation from the current solve.
+PlayChooser therefore retains a normalized seconds-per-endgame-node rate from
+completed PEG work on prior turns. Its first PEG call remains legacy-only to
+warm that rate. A larger bag-conditioned residual protects the cold case; a
+smaller residual remains even after the rate is warm because the wall cost of
+a counted endgame node is position dependent. A node-free greedy prefix may
+make expected pricing cheaper, but it may not shrink an unseen node tail. A
+slow prefix still expands the deadline envelope. Later depths use the maximum
+of a scenarios-based floor and a conservative multiplier on the selected
+survivors' preceding nodes. Unsupported depth/topology combinations fail
+closed.
+
+An initial implementation incorrectly extrapolated a two-candidate empirical
+maximum across 32 candidates and was operationally useless. The direct
+whole-stage v1 replacement looked safe under an audit that counted any stage
+finishing inside the generous 180-second observation window. That audit was
+too weak: production would start as soon as the model's much smaller bound fit
+the clock. Under the corrected definition, an admitted stage is a false start
+if it is incomplete *or completes after its own predicted bound*. Replaying 47
+prospective roots found 40 v1 admissions and nine false starts.
+
+Each failed panel was then reclassified as training before a new artifact was
+frozen. V2 widened the node envelope but missed a warm bag-1 root: 44.43s
+actual versus a 31.99s bound even though its 7.80M nodes were below the 16.5M
+node cap. V3 added a persistent hardware/load rate with 1.75x deadline safety,
+but a fresh balanced block still found a bag-2 stage at 99.47s versus 43.34s
+and a bag-3 stage that completed only 25/32 candidates in 178.71s versus an
+87.63s bound. A single normalized NPS rate was not enough.
+
+V4 retains the portable rate and adds outward-rounded warm residuals by bag
+(2.0x, 3.0x, 2.5x, 1.25x for bags 1--4). Deeper stages use the immediately
+preceding depth and retain a 1.0x residual. It replays every v1--v3 failure
+panel with zero strict false starts. Its first untouched four-root smoke block
+also had zero strict misses: 2/3 warm 2-ply stages, 3/3 warm 3-ply stages, and
+2/3 4-ply stages were admitted and completed within their bounds. The bag-4
+root warmed the runtime rate and is excluded from the gate. The subsequent
+expansion stayed safe but was stopped after 14 roots because the full-32 rule
+was operationally useless: it admitted only 3/14 warm 2-ply, 5/13 warm 3-ply,
+and 3/12 warm 4-ply opportunities.
+
+V5 kept the conservative envelope and, before launching any work, tried the
+ordinary complete survivor prefixes 32, 16, and 8. The selected depth remains
+indivisible: a deadline-truncated admitted depth is discarded in full and the
+exact previous-depth ranking is restored. Its first direct prefix-8 block
+found no envelope miss, but exposed a bookkeeping defect: if the deepest
+scored stage used zero exact-endgame nodes, it erased a valid shallower
+positive-node hardware-rate sample. That panel is training evidence, not
+held-out evidence.
+
+V6 fixes both production and replay to retain the deepest positive-node stage.
+It also refuses invalid candidate pointers and restricts adaptive narrowing to
+the frozen 16/8 cutoffs rather than inventing an uncalibrated midpoint. Three
+untouched balanced blocks directly exercised every possible adaptive
+trajectory: 8/8/8, 16/16/8, and 32/16/8. Across the combined 12 roots, the one
+cold hardware-rate root was excluded as preregistered. The strict replay then
+had 8/11 warm 2-ply admissions, 4/11 warm 3-ply admissions, and 2/10 warm
+4-ply admissions, with zero false starts. Every incomplete observed depth was
+prospectively refused, including bag 2 at 1/8 candidates in the prefix-8 block,
+bag 4 before completing its second prefix-16 depth, and bag 3 at 5/8 in the
+full-prefix block. This is encouraging safety evidence, but still far short of
+the usefulness and sample-size gates. The frozen artifact SHA-256 is
+`35a445a9bfefc11674bc8a100f2fef69099700bcd2fa41ecf82103c9376426c4`;
+the validating binary SHA-256 is
+`8c0dee86beffdec70c38deeb71582ff7b517b7b0accfb3a4d067d2d4abf812d6`;
+and the combined strict-analysis SHA-256 is
+`06ff8d2f9c325220a8dc193e10d301bcdec4b530a37423884b48f8b21682b07a`.
+
+The preregistered live gate requires at least 59 independently admitted stages
+with zero false starts (`1 - 0.95^59 = 95.15%` evidence for p95) and at least
+16 held-out roots in every bag stratum. Only admitted stages count toward the
+evidence; refusing everything cannot pass. `heldout_gate_passed` remains false
+in every compiled calibration and PlayChooser's live allocation switch remains
+off. V1--v5 are retained to reproduce the failed analyses. The active frozen
+artifact, resumable sequential runner, and strict replay audit are:
+
+- `tools/peg_time_calibration/adaptive_complete_stage_admission_v6_20260801.json`;
+- `tools/run_peg_stage_admission_validation.py`; and
+- `tools/analyze_peg_stage_admission.py`.
+
+### Game-pair regret back-test trace (2026-08-01)
+
+The paired-match harness now records residual decision regret rather than only
+terminal strength and work. After every simulation, PlayChooser copies BAI's
+final expected regret in the exact blended-utility units used to rank its arms.
+A genuinely forced one-candidate decision is zero. Static, PEG, and endgame
+turns remain explicitly unknown: their marginal-value observations do not yet
+constitute calibrated residual-regret models, so filling them with zero would
+make the game forecast look much more certain than it is.
+
+Each `PCTURN` row contains `regret_valid`, `expected_utility_regret`, and the
+model name. Each `PCGAME` row independently totals known regret and
+known/unknown turn counts for both players. The match auditor verifies those
+totals against the turn rows and writes a reverse cumulative sum for every turn
+on the *realized* later path. That rest-of-game column is retrospective
+accounting over estimates that were individually made before their moves; it is
+not presented as an online prediction of positions that had not yet occurred.
+The human-readable match update also prints the latest pair's four separate
+game/player totals and coverage, rather than hiding them in a policy average.
+
+The pair summary reports two complementary back-tests:
+
+- whole-game and post-first-divergence expected regret per policy, always with
+  coverage counts; and
+- before and including the first different move, `equal regret - TimeManager
+  regret` on the identical mirrored roots. This is the model-predicted utility
+  benefit of the allocation change. Later roots are deliberately excluded from
+  that paired prediction because the game states are no longer comparable.
+
+It also reports terminal utility minus the same-root prediction. Across many
+independent game pairs, a calibrated estimator should have a mean residual near
+zero and the predicted deltas should explain some of the observed utility
+deltas. This is a calibration test, not a license to interpret uncovered
+late-phase decisions as regret-free.
+
+A one-pair 10-second-clock smoke test exercised the complete schema: all 44
+turn rows reconciled with the two game totals, 34 turns had BAI estimates, ten
+PEG/endgame turns remained unknown, 17 identical roots were comparable, and
+the pair audit passed with no trace drops.
+
+### Stratified rest-of-game value panel (2026-08-02)
+
+The complete-game panel now has strict, mode-native curves for 133/140 source
+games (68 PlayChooser trajectories and 65 static trajectories). A sparse
+180-second continuation resolved 52/60 originally hard roots. All 366
+endgames are usable; eight PEG roots across seven games remain censored. The
+joined complete-game corpus has 3,006 turn roots and 31,530 measured work
+boundaries. Source-game splitting leaves 93 training, 20 calibration, and 20
+untouched test games.
+
+The first shadow allocator favors learned allocation over equal slicing, but
+does not pass its held-out surrogate gate. On the untouched games its mean
+learned-minus-equal utility regret is `-0.001305`, with 95% CI
+`[-0.003066,+0.000456]` and `p=0.146`. Calibration is `-0.003651`, with 95%
+CI `[-0.007869,+0.000567]` and `p=0.090`. These are directional results, not
+live-policy evidence; the terminal game gate also remains absent.
+
+More importantly, the broad SIM panel stops at 300K nodes. Every one of its
+2,493 SIM roots has at least one zero-oracle-regret hit among the 12
+independently sampled depth/budget arms. Consequently the per-root lower
+envelope saturates around 35 seconds of whole-game clock and an imputed tail
+cannot improve it. This exposes oracle selection in the replay: a runtime
+allocator cannot know which independently sampled arm happened to match the
+judge. The replay is therefore an optimistic allocation upper bound, not a
+valid three-minute stopping-policy test.
+
+There is a second optimism bug in that panel: the online judge received only
+the distinct moves nominated by the tested budgets. If every budget returned
+the same wrong move, the single-candidate judge was forced to assign it zero
+regret. The corrected harness can add a *checkpoint-observable risk set* for
+each arm: its selected move plus the highest uncertainty-bound challengers,
+chosen from that arm's means, variances, and sample counts. The union is sent
+to the common-seed judge only after every nomination finishes. Oracle values
+therefore score choices but cannot affect nomination, risk-set construction,
+or stopping. A one-root top-15 smoke exposed the practical difference: the
+4-ply policy returned the same move from 300K through 10M nodes, while the
+eight-move risk-set judge found a different move worth `0.02335` utility. The
+old nominee-only protocol would have reported zero at all four budgets.
+
+An independent top-60 deep panel was retained only as a sensitivity prior.
+After clustering by its 19--21 source games, lower-95% evidence credits a
+6-ply regret retention of 0.846 at 1M nodes, 0.811 at 3M, and 0.629 at 10M
+relative to 300K. It credits no p2/p4 tail improvement. Central and lower-95%
+tail scenarios were both generated, but zero tail options survive the broad
+panel's oracle envelope and their backtests are therefore exactly unchanged.
+The top-60/top-15 topology mismatch is an additional reason these priors are
+not live-eligible.
+
+The replay itself now represents planning and scoring separately. A curve may
+carry cross-fitted `expected_regret` for allocation and held-out `regret` for
+scoring. Learned allocation can only see the former. Equal slicing commits to
+the deepest completed boundary fitting its slice rather than selecting the
+oracle-best affordable result after the fact. A legacy curve without the
+separate expected field remains readable for diagnosis, but its replay is
+explicitly counted as oracle-choice contamination and cannot pass the honest
+surrogate gate.
+
+The first 133-game replay with cross-fitted planning regret removed the
+oracle-envelope choice but still priced the suffix with hindsight-optimal
+allocation. Its test delta was `+0.000763`; that number is retained only as a
+historical diagnostic and is not a valid value-to-go result.
+
+Regenerating all labels under nonanticipating equal-slice policy evaluation
+changes the 20 untouched games to learned-minus-equal scored regret
+`-0.001664`, with game-clustered Student-t 95% CI
+`[-0.007950,+0.004622]` and `p=0.586`. Calibration is essentially flat at
+`-0.000118`, with 95% CI `[-0.006552,+0.006315]` and `p=0.970`. All 2,996
+accepted replays used separate planning estimates, predicted rather than
+realized turn counts, and `allocation_policy=equal_slice_policy`; none used
+oracle regret to choose a boundary. The estimator remained conservative on
+selected actions: test actual-minus-expected regret averaged `-0.005350` for
+learned allocation and `-0.008190` for equal slicing. This is the honest
+nonanticipating null: directionally favorable on test, but radically
+underpowered and nowhere near a surrogate gate. It is also not a final
+strength result because the broad SIM score still comes from the old
+nominee-only judge and can miss a better move outside the nominees. The
+matched risk-set tail panel supplies the next correction.
+
+The backtest gate is now conditional on allocation-changing replays and can
+apply a CUPED slope fitted only on calibration games. In this panel, 1,405 of
+1,472 test replays diverged and covered all 20 test games. Calibration-trained
+CUPED gives a test delta of `-0.001951`, 95% CI
+`[-0.007834,+0.003932]`, `p=0.496`; it does not change the mean and only
+modestly narrows the interval. The raw divergent calibration SD is `0.01387`,
+which implies about 61 games for a 0.005 effect or 378 for a 0.002 effect by
+the normal planning approximation. Those estimates themselves come from only
+20 games, so the next gate should conservatively preregister at least 100 and
+640 games respectively unless a larger calibration corpus justifies less.
+The old `>=20 games && CI upper < 0` rule can no longer arm the gate: both a
+minimum detectable effect and a preregistered minimum game count are required.
+
+The next honest gate must choose current-turn work using only information
+available at that checkpoint: either a cross-fitted expected-regret model or a
+true cumulative solver trace carrying its contemporaneous regret estimate.
+Held-out oracle regret may score that choice, but may not choose it. A matched
+top-15 deep subset is also required to calibrate the 300K--10M tail relevant
+to game-in-three-minutes clocks. The frozen follow-up panel contains 80 roots
+from 80 distinct games, balanced 40/40 by trajectory policy and 10 per policy
+in each of four bag phases. It measures independent 300K/1M/3M/10M arms at
+4 and 6 ply and judges the union of eight-play checkpoint risk sets. Live
+rest-of-game allocation remains off.
+
+New risk sets rank challengers by the upper confidence bound of their utility
+*difference from the incumbent*, including the configured shared-scenario
+correlation, rather than by each arm's marginal upper bound. This avoids
+spending scarce judge slots on high-variance arms whose uncertainty is mostly
+common with the incumbent. The paired-sample covariance audit remains the gate
+for replacing the scalar correlation with an empirical matrix.
+
+`tools/fit_sim_checkpoint_regret.py` implements the first of those gates. It
+splits by complete source game and emits two distinct cross-fitted estimates.
+The state estimate uses only pre-search state, candidate count, ply, and the
+fixed node budget; its node curve is forced nonincreasing and can supply
+future-turn opportunity curves. The checkpoint estimate adds only the BAI
+regret estimate and best/challenger gap observed at that checkpoint; it is the
+candidate current-turn stopping signal. The common judge supplies utility,
+win, and spread labels only after every arm has finished. It is never a model
+feature or an allocator input. The fitted artifact is shadow-only, and fixed
+budget plus paired-tail summaries remain clustered by source game.
+
+### Nonanticipating-policy correction (2026-08-02)
+
+An external methodological review found a deeper problem in the first
+rest-of-game target. Cross-fitted per-turn planning regrets prevented oracle
+scores from choosing a boundary, but `_suffix_regret_tables` still allocated
+clock after seeing the difficulty of every realized later turn. That is a
+prophet bound, not the value of a policy that can run online. Its finite
+differences can overprice saved clock by concentrating it on whichever future
+turn happened to be hard.
+
+`build_rest_game_value_labels.py` therefore defaults to evaluating the
+realizable equal-slice policy. It uses each future position's state-derived
+`predicted_future_turns`, commits to the deepest measured boundary fitting the
+slice, and never reallocates after inspecting later curves. The old dynamic
+program remains available only as `prophet_bound` and its label scope cannot
+pass a live gate. The backtest likewise uses predicted rather than realized
+turn counts for both policies, including its last-turn decision.
+
+The generic planner now compares complete sequential prefixes. A weak PEG
+wave or IDS depth can be bought when it is required to reach a later boundary
+whose cumulative value exceeds the exact cumulative loss of future clock.
+Hard completion bounds still truncate the admissible prefix, and callers
+still execute only the next chunk before replanning. Current production
+admission callers supply one chunk, so this fixes the multi-boundary contract
+before it becomes live rather than changing their present behavior.
+
+Small held-out panels now use Student-t rather than normal intervals. The
+minimum of 20 held-out games remains a validity floor, not a powered sample
+size: the observed per-game standard deviation implies roughly 100 games for
+a 0.005 utility effect and roughly 640 for a 0.002 effect at conventional
+80% power. Future surrogate tests should emphasize preregistered,
+game-clustered same-root divergences and report shared-root coverage.
+
+Two first-order SIM issues remain open. The live BAI stopping signal estimates
+the maximum of pairwise expected positive regrets rather than the expected
+regret of the maximum challenger, which is optimistic when many moves are near
+tied. BAI now also computes a Clark recursive joint-Gaussian maximum in shadow
+mode, using the same shared-seed covariance convention, and records both
+values at completion and at the exact legacy stop boundary. It also records
+the number of challengers whose 99% difference interval still reaches the
+incumbent. Two-arm, flat-six-arm, and separated-arm regression tests establish
+the intended structural behavior. The joint estimate is deliberately not yet
+allowed to stop production: common-scenario samples must first test the scalar
+covariance approximation and calibrate error by near-tie count.
+
+`tools/analyze_regret_estimators.py` now makes that audit explicit. For each
+trace panel it reconstructs the deployed `max_i E[(U_i-U*)+]` lower bound and
+Monte Carlo `E[(max_i U_i-U*)+]` under both independent and empirical
+common-scenario covariance, while retaining the exact legacy and Clark shadow
+values logged by the solver. It reports the structural joint-minus-pairwise
+gap by 0, 1, 2--3, and 4+ near-tie challengers, calibration against the common
+10-ply judge, and source-game-clustered Student-t intervals. Per-panel normal
+or bootstrap intervals are no longer accepted as inferential evidence. The
+active frozen tail predates these extra trace fields and remains untouched;
+the optional-stopping panel will use the corrected binary after that run.
+
+The correction model is still trained on independent fixed-budget arms while
+a live rule would stop on downward excursions of a cumulative trace. The
+thinking-curve harness can now retain the legacy and joint regrets at the
+stopping boundary alongside a same-seed fixed-budget control. The next SIM
+gate is therefore a cumulative optional-stopping replay scored by the common
+10-ply judge, stratified by near-tie count. Passing fixed-budget reliability is
+not sufficient. Live allocation remains disabled.
+
+The learned value table is no longer the sole production candidate. Once the
+nonanticipating per-turn curves are calibrated, a dual water-filling replay
+will choose a phase/rate-conditioned shadow price by bisection so expected
+spend exhausts the available clock. This directly prevents systematic hoarding
+and will be compared against one-step improvement over evaluated equal slicing.
+The prophet DP remains only an upper bound. PEG/endgame boundary PAVA has been
+removed because the solver currently plays the deepest completed move rather
+than retaining an earlier result. Nonmonotone marginal values, including a
+negative intermediate chunk followed by a positive rescue, now remain visible
+to package planning. Censored hard roots must still enter value-side
+sensitivity bounds rather than being silently dropped.
+
+The first dual comparator now evaluates future spend under each *fixed* lambda
+on training games, fits that expected-demand curve from current-state features,
+and only then chooses lambda on a held-out turn. It never chooses a separate
+lambda after seeing each realized suffix. Replanning with the remaining clock
+provides the feedback correction. On the historical split, water-filling
+minus equal slicing is `-0.003892` on calibration (95% CI
+`[-0.008589,+0.000805]`, `p=0.099`) and `-0.006577` on test (95% CI
+`[-0.013375,+0.000222]`, `p=0.057`). The allocation-divergent,
+calibration-CUPED test estimate is `-0.007221`, with CI
+`[-0.014447,+0.000004]`, `p=0.0501`. Directly against one-step improvement
+over evaluated equal slicing, the test delta is `-0.004047`, CI
+`[-0.008219,+0.000125]`, `p=0.0566`; calibration has the same direction.
+
+These are encouraging exploratory comparisons, not a gate. The held-out split
+had already been inspected during earlier allocator development, the current
+turn scores still use the nominee-only broad judge, and the 300K broad curves
+do not cover a three-minute clock. At an average accepted test budget of
+`58.68s`, water-filling could spend only `11.04s` and equal slicing `11.63s`
+before the measured option sets saturated. Thus this panel shows better
+allocation *within the measured envelope*, not successful full-clock
+water-filling. The risk-set 300K--10M tail must extend those curves before the
+dual policy is frozen and tested on new complete games.
+
+### Matched risk-set SIM tail (2026-08-02)
+
+The 80-root correction panel finished all 160 depth cells. It contains one
+root from each of 80 source games, balanced 40/40 between static and
+PlayChooser trajectories and 20 roots in each bag band (`<=15`, `16--35`,
+`36--60`, `61--100`). Every p4 and p6 cell completed independent
+300K/1M/3M/10M-node arms with the 10% uniform floor. All 160 accepted logs
+have four exact iteration schedules, nodes at or below their requested cap,
+`events=8`, `dropped=0`, and a non-forced 10-ply common-seed judge over the
+8--13 distinct checkpoint-risk nominees. Judge iterations equal
+`100000 * nominees`; there were no partial or rejected terminal cells. The
+frozen binary and corpus hashes match the manifest.
+
+The fixed-arm oracle means below are utility regret, win-probability delta,
+and spread delta against the best utility nominee in the risk-set union. The
+unit of inference is the source game and intervals are Student-t intervals.
+The signed win/spread columns need not be nonnegative because the
+utility-best nominee need not maximize either component separately.
+
+| Ply | Nodes | Utility regret (95% CI) | Win delta | Spread delta | Nonzero utility roots |
+| --- | ---: | --- | ---: | ---: | ---: |
+| 4 | 300K | 0.000744 [0.000019, 0.001469] | 0.000811 | 0.285 | 11/80 |
+| 4 | 1M | 0.000653 [-0.000068, 0.001375] | 0.000700 | 0.271 | 9/80 |
+| 4 | 3M | 0.000655 [-0.000067, 0.001377] | 0.000695 | 0.277 | 8/80 |
+| 4 | 10M | 0.000661 [-0.000061, 0.001382] | 0.000709 | 0.273 | 9/80 |
+| 6 | 300K | 0.000233 [-0.000082, 0.000548] | 0.000249 | 0.120 | 5/80 |
+| 6 | 1M | 0.000221 [-0.000093, 0.000536] | 0.000255 | 0.089 | 3/80 |
+| 6 | 3M | 0.000057 [-0.000011, 0.000125] | 0.000019 | 0.087 | 4/80 |
+| 6 | 10M | 0.000057 [-0.000011, 0.000125] | 0.000019 | 0.087 | 4/80 |
+
+At equal node budgets, p6-minus-p4 is directionally favorable at all four
+checkpoints. Expressed as p4 regret minus p6 regret, the utility reductions
+are `+0.000511` at 300K (95% CI `[-0.000030,+0.001052]`, `p=0.064`),
+`+0.000432` at 1M (`[-0.000114,+0.000978]`, `p=0.119`), `+0.000598` at
+3M (`[-0.000125,+0.001321]`, `p=0.104`), and `+0.000604` at 10M
+(`[-0.000119,+0.001326]`, `p=0.100`). The corresponding win reductions are
+`+0.000563`, `+0.000445`, `+0.000676`, and `+0.000690`; only the 300K win
+comparison is nominally significant (`p=0.0416`), and it is not significant
+after accounting for the multiple exploratory comparisons. Spread reductions
+are `+0.165`, `+0.182`, `+0.190`, and `+0.186`, all `p>=0.244`.
+
+The p6-versus-p4 choice differs on 7.5--11.25% of roots. Its apparent utility
+advantage is concentrated in bag `<=35`; no bag or source-policy stratum is
+individually significant. At 3M nodes, the matched utility reductions are
+`+0.000451` on PlayChooser roots and `+0.000745` on static roots, again with
+wide intervals crossing zero. This supports p6 as the more promising
+equal-node arm, but does not establish a live depth rule.
+
+Additional nodes rarely change the selected move. For p4, adjacent choice
+changes are 5/80 from 300K to 1M, 3/80 from 1M to 3M, and 3/80 from 3M to
+10M; none of the adjacent utility improvements is significant. For p6 they
+are 2/80, 4/80, and **0/80**. The p6 3M and 10M arms select the same move and
+therefore have exactly the same judged utility, win, and spread on every root.
+The exact one-sided 95% upper bound on the population probability of a p6
+3M-to-10M choice change is 3.68%. This is evidence of saturation within the
+top-15 risk-set panel, not proof that 10M nodes have no value in the full move
+space or on a different state distribution.
+
+The five-fold, complete-game cross-fitted model has state-only RMSE
+`0.002519` and checkpoint RMSE `0.002516`; the extra checkpoint features add
+almost no aggregate accuracy. More decisively, both models fail the
+preregistered reliability-shape gate even though their aggregate bias is near
+zero. The state model's through-origin calibration slope is `0.240`, with 4
+of 10 tie-preserving reliability bins underpredicting actual regret by more
+than 2x. The checkpoint model's slope is `0.305`; 326/640 rows receive an
+exact zero prediction despite positive mean judge regret, and 7 of 10 bins
+underpredict by more than 2x. Its worst finite bin ratio is 13.62. Aggregate
+mean calibration is therefore hiding severe conditional miscalibration in
+the sparse hard roots that matter for stopping.
+
+This panel is a correction/sensitivity sample, not a rescoring of the full
+complete-game corpus. It measures only nominees reachable inside the static
+top 15, so the outside-top-15 candidate-miss floor remains unknown. It also
+contains independent fixed-budget arms, not cumulative traces stopped on a
+downward estimator excursion, and its frozen binary predates the new joint
+multi-arm regret telemetry. Consequently it fails the current-turn stopping
+gate and cannot enable live allocation. The next decisive SIM experiment is
+the corrected cumulative optional-stopping panel with a matched fixed-budget
+control, common-scenario covariance, near-tie strata, and the common risk-set
+judge. Water-filling may use these curves only in offline sensitivity replay
+until that gate and a fresh terminal-game gate both pass.
+
+### Cumulative optional-stopping protocol (2026-08-02)
+
+The thinking-curve harness now separates two questions that the earlier
+same-seed control conflated. For every root it can run (1) the cumulative BAI
+arm stopped by the selected regret estimator, (2) an independent arm with the
+same sampling policy and **exactly the stopped iteration count**, and (3) a
+same-seed arm continuing to the preregistered maximum. The independent
+matched-n comparison measures optional-stopping selection bias; the full arm
+measures the quality/cost tradeoff from continuing. All three choices and
+their checkpoint-observable risk sets enter one 10-ply common-seed judge.
+The joint-max estimator may control only this experimental arm; its default
+remains off for every production caller.
+
+The resumable runner now refuses to append a root unless stopped, matched,
+full, progress-event, judge, and covariance-probe accounting all reconcile.
+The matched target must equal `stopped_iterations * (plies + 1)`, and the
+matched arm must complete exactly that many iterations. The covariance probe
+must retain every requested common-scenario sample for every risk move. New
+panels can exclude source-game identities from prior manifests, making the
+next panel fresh to the 80-root matched risk-set tail while preserving policy
+and bag-band balance.
+
+An eight-game, p6, 300K-node smoke test passed all structural checks. Seven
+arms hit the joint-regret boundary and one hit the cap; median stopped work
+was 20.9% of the cap. This is deliberately not efficacy evidence: only eight
+games and 2,000 judge samples were used. Indeed, raw stopped regret was badly
+underpredicted (joint through-origin slope 15.9), confirming that the
+uncalibrated estimator cannot be enabled merely because the harness works.
+The powered panel therefore remains a diagnostic gate, not a route around
+calibration. It will use fresh, game-clustered roots, 100,000 judge samples,
+near-tie strata, and paired stopped-versus-matched-n inference. Live allocation
+stays disabled regardless of nominal node savings unless reliability,
+optional-stopping, and later terminal-game gates all pass.
+
+The powered panel then completed all 120 roots from 120 distinct games, with
+60 static and 60 PlayChooser trajectories and 15 roots per policy in each of
+the four preregistered bag bands. The strict re-audit found a contiguous
+120-root prefix, exact stopped/matched/full joins, complete 8-play by
+512-common-scenario covariance probes, exact non-forced judge accounting,
+`dropped=0`, and no accepted partial chunks. The joint rule stopped 110 roots;
+10 reached the 3M-node cap.
+
+Against the same-seed full arm, stopping used 88.52% fewer nodes on average
+(95% CI 83.55%--93.50%) and increased common-judge utility regret by only
+`+0.000102` (95% CI `[-0.000113,+0.000316]`, `p=0.351`). Its choices agreed
+on 90.83% of roots. Against the independent arm run for the exact stopped
+iteration count, the stopped-minus-matched regret delta was `-0.001156`
+(95% CI `[-0.002810,+0.000497]`, `p=0.169`), with 81.67% choice agreement.
+Both comparisons pass the preregistered `0.001` noninferiority margin. Thus
+there is no evidence that optional stopping itself selects harmful downward
+estimator excursions in this panel; this result does not validate the
+stopping estimate.
+
+That estimate fails decisively. The stopped-time legacy reliability slope is
+`0.361`; 6/10 deciles underpredict by more than 2x and the worst actual to
+predicted ratio is 52.7. The joint slope is `0.313`; 5/10 deciles underpredict
+by more than 2x and the worst ratio is 16.4. Both policy strata and three of
+four bag bands also fail the slope and/or decile gates. The common-scenario
+probe explains part, but not all, of the problem: replacing independence with
+empirical covariance makes the joint estimator's aggregate bias essentially
+zero (`+0.0000005`, `p=0.996`) and reduces mean absolute error by 19.3%, yet
+its interval NLL is worse (`+0.0797`, `p=0.0052`) and stopped-time conditional
+calibration still fails. The structural joint-minus-pairwise correction is
+real under both covariance models, especially with 2--3 near-tied
+challengers, but neither raw estimator is safe as a live stopping price.
+
+The first candidate-width sensitivity result is invalid. The raw-position
+harness requested `MOVE_SORT_EQUITY` but did not call `move_list_sort_moves()`
+after `generate_moves()`. `MOVE_RECORD_ALL` therefore left a bounded min-heap,
+and the supposed top-15/top-40/top-60 sets were heap prefixes rather than
+descending static-equity prefixes. The large top-40-minus-top-15 result and
+every conclusion derived from it must not be quoted. The affected run
+directories carry `INVALID_PROTOCOL.txt`, and a regression test now requires
+the generated candidate order to be nonincreasing in static equity before any
+nested width is cut.
+
+A corrected saturation experiment reran the same 24 outcome-free hard roots
+at p6 and 3M nodes, comparing genuinely sorted top 60 against top 40 under a
+common 10-ply, 100,000-sample-per-nominee judge. All roots passed the strict
+post-run accounting audit. Top 60 minus top 40 changed the selected move on
+3/24 roots but never selected outside the first 40; the judge's best risk-set
+nominee was also never outside the first 40. Its utility gain was
+`+0.0000722` (game-clustered 95% CI
+`[-0.0001565,+0.0003009]`, `p=0.520`), win gain `+0.0000392`
+(`[-0.0002102,+0.0002887]`, `p=0.748`), and spread gain `+0.0630`
+(`[-0.0383,+0.1643]`, `p=0.211`). The zero-event Wilson upper bound for a
+top-40 candidate miss is still 13.8%, so this small hard-root result supports
+top-40 saturation but does not establish it.
+
+The preregistered correction is a representative 96-root panel, balanced 12
+per trajectory-policy and bag-band stratum and selected without oracle
+outcomes. It compares nested sorted widths 15/24/32/40/60 under the same p6,
+3M-node, common-judge protocol. Those labels decompose exactly into
+candidate-generation regret and within-set BAI regret. A five-fold,
+source-game cross-fitted model predicts the two components separately; only a
+subsequent fresh cumulative panel may assess the combined stopped-time signal.
+That panel's stop target is frozen before collection by snapping the median
+out-of-fold width-60 prediction to a declared logarithmic grid; prospective
+judge outcomes cannot affect it. Live allocation remains disabled throughout.
+
+### Corrected combined-regret prospective gate (2026-08-03)
+
+The corrected representative panel completed all 96 roots and passed the
+strict post-run audit for every nested width. At width 15, mean
+candidate-generation regret was `0.000210` (game-clustered 95% CI
+`[-0.000062,+0.000481]`) and mean within-set BAI regret was `0.000168`
+(`[+0.000045,+0.000290]`). At width 40 those values were `0.000127` and
+`0.000152`. Width 60 defines the checkpoint-observable nominee union, so its
+candidate-generation label is zero by construction; its within-set regret
+was `0.000178` (`[+0.000055,+0.000302]`). Width 60 versus width 15 improved
+utility by `+0.000199` (`[-0.000072,+0.000469]`, `p=0.148`), with 3/96
+positive candidate-miss events and 4/96 common-judge best nominees outside
+the first 15. Width 60 versus width 40 improved utility by `+0.000101`
+(`[-0.000158,+0.000360]`, `p=0.440`), with one positive miss. The experiment
+does not measure candidates outside the sorted top-60 union.
+
+The five-fold complete-game cross-fitted model used 480 checkpoint rows from
+these 96 games. Its fixed-budget total-regret reliability slope was only
+`0.325`, so it failed calibration before prospective stopping. Before any
+prospective judge outcomes existed, the median out-of-fold width-60
+prediction (`0.00003006`) was snapped to the declared grid at a frozen stop
+target of `0.000025`.
+
+The first prospective run is invalid and must never be quoted as an efficacy
+result. Its early stops exposed an experimental-harness coordinate bug: the
+SIM checkpoint's `best_index` names a heap-backed `SimResults` arm, while the
+replay treated it as a static candidate rank. This commonly converted arm 31
+into candidate rank 31. Terminal capped rows already used normalized move
+identities and were unaffected. The invalid run is retained with an
+`INVALID_PROTOCOL.txt` marker. The harness now resolves checkpoint best,
+challenger, and risk-set identities into stable candidate coordinates before
+replay, and a regression reproduces the old failure and verifies the corrected
+move.
+
+The corrected prospective panel deliberately retained the same 96 fresh
+complete games, roots, folds, target, seeds, and protocol; only the fixed
+experimental binary changed. It contained 48 static and 48 PlayChooser
+trajectories, exactly 12 roots per policy and bag band, with no game overlap
+against the 200 calibration games. All 96 one-root chunks passed strict
+stopped/matched/full joins, exact matched-iteration, prediction-additivity,
+checkpoint, floor, event, judge, and `dropped=0` accounting. The repeated
+bogus rank-31 signature disappeared: all 13 early stops selected the same move
+as both their exact-iteration matched control and 3M full control (12 chose
+rank 0 and one chose rank 1), and every early choice had zero common-judge
+regret.
+
+Across all roots, stopped choices agreed with both controls on 96/96 roots.
+Relative to the 3M full control, the rule saved 6.09% of nodes on average
+(`95% CI [2.41%,9.78%]`) with exactly zero paired utility, win, or spread
+difference. The 13 early stops used 55.0% of full nodes on average, a 45.0%
+reduction; 83/96 roots reached the cap. Relative to the independent
+exact-iteration control, paired utility, win, and spread differences were
+also exactly zero. The apparent `-1.21%` node saving against that control
+(`[-2.53%,+0.10%]`) reflects terminal-rollout node variation; iteration
+targets matched exactly. Thus the optional-selection-bias and quality
+noninferiority checks pass for this frozen target.
+
+The stopped-time combined prediction does not pass the full reliability
+gate. Its through-origin slope was `1.138`, within the preregistered
+`[0.7,1.4]` interval, and aggregate prediction-minus-judge bias was
+`-0.000049` (`[-0.000278,+0.000180]`, `p=0.670`). However, 2/10 reliability
+deciles underpredicted actual regret by more than 2x, with a worst ratio of
+`9.16`. The PlayChooser stratum had slope `1.68`; the static stratum had
+slope `0.36`; the middle bag bands were especially poorly calibrated. The
+legacy and uncorrected joint estimators also failed. The safe early subset is
+encouraging evidence for the normalized cumulative replay and frozen target,
+but it cannot override the failed conditional-calibration gate.
+
+Live learned allocation therefore remains disabled. The next model must
+improve conditional calibration on fresh roots, especially across trajectory
+policy and middle-game bag bands, and then pass another prospective stopping
+gate. Even a surrogate pass would still require the separately preregistered
+mirrored terminal-game gate before production enablement.
+
+### Conditional checkpoint-regret calibration (2026-08-03)
+
+The next development panel measured the signal at the checkpoints where a
+live stop can actually occur. It replayed 96 existing complete games with one
+p6, sorted-top-60 cumulative arm capped at 3M nodes, a checkpoint every 256
+iterations, and a common 10-ply risk-set judge at exactly 100,000 samples per
+distinct nominee. The panel is calibration data, not prospective validation.
+The first launch attempt produced no result because the relocated frozen
+runner had the wrong working directory; it is excluded. Attempts 2--97
+accepted an exact contiguous 0--95 source prefix. The final strict audit
+reconciled 160,704 checkpoint records, 982 judge nominees, 98.2 million judge
+iterations, normalized move identities, monotone work, all stability counters,
+and `dropped=0`, with no accepted partial result.
+
+The conditional model combines the corrected 96-game nested-width panel, the
+corrected prospective combined-regret panel, and 652 fixed checkpoint
+landmarks from the new audit. Overlapping cumulative/checkpoint observations
+share the same game identity, so five outer and four inner complete-game folds
+prevent cross-panel leakage. It predicts candidate-generation and within-set
+BAI event probability and positive severity separately, then adds the two
+expected regrets. Oracle values remain labels only; the full-arm selected move
+is not a feature. The label universe is the common checkpoint-observable
+sorted top-60 union, so regret beyond top 60 remains unmeasured.
+
+At deployment width 60 there are 844 held-out rows from 192 games. Actual
+regret was positive on 68 rows from 33 games; its row-weighted mean was
+`0.00036599`. On the checkpoint-only subset, 51/652 rows from 21/96 games were
+positive. Events were concentrated where the model should look: 33/168 in bag
+16--35, 38/328 on PlayChooser trajectories, and 27/64 when at least two
+near-tie challengers were present, versus 11/530 with none.
+
+The stability-aware point predictor fails the preregistered reliability gate.
+Its through-origin slope is `0.782` (game-clustered bootstrap 95% interval
+`[0.417,1.279]`), but 2/10 tie-preserving bins underpredict by more than 2x;
+the worst actual/predicted ratio is `43.97`. A matched ablation that removes
+only checkpoint-stability history has slope `0.931`
+(`[0.496,1.467]`) and lower absolute error by `0.0000375` per game-weighted
+row (Student-t 95% CI `[0.0000198,0.0000552]`), yet still has 4/10 bins over
+the 2x limit. Stability as currently discretized therefore does not improve
+conditional calibration.
+
+The nested one-sided q95 residual bound is conservative: it covers 98.70% of
+rows and all rows simultaneously in 185/192 games (96.35%), but its mean upper
+regret is `0.006498` against mean actual regret `0.000366`. On checkpoint-only
+rows it covers 98.62%, with simultaneous coverage in 90/96 games (93.75%).
+This is a useful fail-closed safety diagnostic, not a sufficiently precise
+stopping price.
+
+Because the point gate fails, no target is frozen and no new optional-stopping
+panel is launched. Live allocation remains disabled. The next calibration
+iteration should model the sparse event process directly in policy/bag/near-tie
+strata and test continuous stability summaries rather than scheduling another
+fresh efficacy run. A subsequent fresh surrogate pass would still not replace
+the separately powered mirrored terminal-game gate.
+
+### Same-arm horizon-differential development replay (2026-08-03)
+
+The absolute-regret target above asks a stopping rule to predict error against
+the 10-ply common judge even when more work from the current p6 SIM arm cannot
+change its choice. The audited checkpoint panel makes that distinction
+observable. At 750K and 1M nodes all 96 roots already chose the same move as
+the 3M-node horizon, but the horizon choices still carried mean absolute
+common-judge regret `0.00023479`. That residual is a **same-arm unpurchasable
+floor**. It may combine evaluator depth bias, judge noise, horizon truncation,
+and candidate-set limits; the data do not identify it exclusively as evaluator
+bias.
+
+The new development tool therefore fits the realizable, signed target
+
+```
+P(choice_at_3M != incumbent_now)
+  * E[judge_regret_now - judge_regret_at_3M | choices differ].
+```
+
+The horizon identity and common-judge values are labels only. The event model
+uses only checkpoint-observable state, is trained at 11 fixed node landmarks,
+and is five-fold cross-fitted by complete source game. Signed severity is
+retained because continuing can replace a better judged incumbent with a
+worse horizon move. The scope remains the sorted top-60 common-judge union;
+regret outside that union is unmeasured.
+
+The target behaves like purchasable work. Across 96 roots, 49 choices differed
+from the 3M horizon at 25K nodes, 35 at 100K, 18 at 300K, three at 400K, four
+at 500K, one at 600K, and none at 750K or 1M. Most changes helped, but not all:
+the 1,056 landmark rows contain 189 helpful and 19 harmful same-arm changes.
+Mean signed value of continuing fell from `0.009546` at 25K to `0.003794` at
+100K, `0.001175` at 300K, `0.000129` at 400K, and zero by 750K. This is direct
+evidence that the old absolute target was pricing work the current arm could
+not buy.
+
+Cross-fitted horizon-mismatch discrimination is strong (`AUC=0.909`) and its
+through-origin reliability slope is `0.928`, a material improvement over the
+absolute-regret model. The signed-value mean is also close (`0.002616`
+predicted versus `0.002449` actual). The strict reliability gate nevertheless
+fails: 2/10 bins underpredict mismatch probability by more than 2x, with a
+worst ratio of `2.40`. This is much smaller than the prior worst ratio of
+`43.97`, but it is still a failed preregistered condition, not license to
+weaken the gate.
+
+Two stopping replays are useful only as development screens. A cross-fitted
+score threshold of `0.000025`, selected while examining these reused data,
+stops 94/96 roots before 3M, saves 81.9% of nodes on average, and has zero
+horizon-choice mismatches. A simpler Rule of Zero—at least 100K nodes, at
+least two stable checkpoints, and zero near-tie challengers—stops 89/96,
+saves 82.3%, and also has zero mismatches. With only 96 roots, the one-sided
+95% upper bound on the mismatch probability is still 3.07%. Both results are
+post-hoc development evidence; neither is prospective validation.
+
+No new judged panel is launched from this replay. The model failed its exact
+point-reliability gate, the threshold grid was explored on reused roots, and
+the old absolute-regret q95 addend does not certify this new target. The next
+decisive step is to freeze either a separately reviewed Rule-of-Zero policy or
+a game-level conformal risk rule before exposing it to fresh outcomes. Live
+allocation remains disabled, and even a fresh surrogate pass would still
+require the independent mirrored terminal-game gate.
+
+### Preregistered judge-light Rule-of-Zero panel (2026-08-03)
+
+Status: **prospective surrogate passed all frozen gates; live allocation remains
+disabled pending the separate mirrored terminal-game gate**.
+
+The next candidate is the simple Rule of Zero on the horizon-differential
+target. It stops a cumulative SIM arm only at the first checkpoint satisfying
+all three conditions:
+
+1. at least 100,000 nodes have been received;
+2. the normalized incumbent has survived at least two consecutive
+   checkpoints; and
+3. the live near-tie count is zero.
+
+The near-tie counter is the existing number of challengers whose two-sided
+99% Gaussian difference upper bound reaches zero (`z=2.575829...`). A missing
+or negative counter is invalid and cannot stop. Checkpoints are emitted every
+256 requested iterations. The rule can only stop before a fixed p6 3M-node
+slice; it can never extend one. The 100K/two-checkpoint constants came from the
+development replay grid reported above and are therefore disclosed as
+selected on reused data. The entire rule—not a score threshold—is now frozen
+for prospective testing. The examined `0.000025` score is explicitly not a
+decision input because its model failed the decile gate and the threshold was
+selected after reused outcomes were visible.
+
+The panel contains 320 new complete-game roots, one root from each game and 40
+in each of the four SIM bag bands crossed with static and
+PlayChooser-g3000ms trajectories. It excludes every game in the earlier
+80-root risk-set, 120-root optional-stopping, and 96-root combined-regret
+panels. Panel order is assigned by the selection tool's frozen SHA-256 rank;
+indices congruent to 0 modulo 3 receive an independent arm run for exactly the
+Rule-of-Zero stopped iteration count (107 roots), and indices congruent to 0
+modulo 10 form the random common-judge audit (32 roots). Every horizon-choice
+mismatch is judged regardless of audit membership. Judges use a common-seed
+10-ply risk set with exactly 100,000 samples per distinct nominee and at most
+eight difference-UCB nominees before adding decision moves. Thus the primary
+horizon mismatch label is judge-free; expensive judging is confined to
+mismatches and the frozen audit subset.
+
+An early Rule-of-Zero checkpoint can precede the 3M arm's 10% uniform floor.
+For an exact-iteration matched control in that phase, the independent arm uses
+round-robin sampling through its cap, reproducing the cumulative arm's initial
+sampling regime without overrunning the stopped budget. At or after the full
+arm's uniform-floor boundary it instead uses the normal top-two IDS rule with
+the same absolute per-arm floor. The chosen regime and floor are logged and
+strictly audited per matched root.
+
+Mismatch is scored against both the p6 3M arm and the equal-slice-implied work
+landmark. In the prior 3-minute match telemetry, the smallest equal-slice SIM
+receipt among 80 turns was 3,652,554 nodes (median 6,014,712). Therefore the
+preregistered landmark is `min(3,000,000, 3,652,554) = 3,000,000` nodes: the
+two endpoints coincide in this deliberately capped sensitivity panel, but are
+logged and audited separately so a later wider-cap panel cannot silently
+change the estimand.
+
+The cross-fitted horizon-differential score from the frozen development model
+is logged at every checkpoint as `shadow_only`. It has no access to horizon
+identity or judge values and cannot affect stopping, nomination, judging, or
+acceptance. This preserves the option to replay a later CRC rule without
+spending another judge panel while preventing the contaminated score from
+entering this prospective decision.
+
+The preregistered surrogate passes only if all of the following hold:
+
+- the exact one-sided 95% Clopper--Pearson mismatch upper bound is at most
+  1.5% against each logged horizon;
+- the upper endpoint of the complete-game Student-t 95% interval for judged
+  missed value is at most 0.001 against each horizon;
+- mean node saving relative to the realized full arm is at least 50%; and
+- on the independently matched subset, the stopped-minus-matched judged-value
+  interval includes zero and has upper endpoint at most 0.001.
+
+Any miss rejects this rule. The next candidate would be a CRC rule replayed
+against the already shadow-logged scores, not a post-hoc relaxation of these
+gates. Acceptance requires a contiguous 0--319 prefix, exact checkpoint and
+stopped/matched/horizon joins, frozen subset membership, selective-judge
+accounting, and `dropped=0`; private partial chunks are never appended. Even a
+surrogate pass leaves live allocation off until the separately preregistered
+mirrored terminal-game gate passes.
+
+#### Prospective result
+
+The complete frozen panel passed a second strict audit over the contiguous
+0--319 prefix. All 320 roots came from distinct complete games, with exactly 40
+roots in each policy-by-bag stratum and no overlap with the 80-, 120-, or
+96-game exclusion manifests. The audit reconciled 535,680 shadow checkpoint
+rows, all stopped/full/equal-horizon joins, 107 exact-iteration matched arms,
+38 selectively judged roots, exact judge iterations, and zero dropped events.
+
+Rule of Zero stopped early on 283/320 roots and saved 78.1170% of nodes on
+average (complete-game Student-t 95% CI `[74.7546%,81.4795%]`). It changed the
+move relative to the p6 3M horizon on 1/320 roots, a 0.3125% observed rate with
+exact one-sided 95% upper bound 1.4738%. Because the capped equal-slice landmark
+coincides with 3M, its result is identical. This passes the frozen 1.5% gate by
+only 0.0262 percentage points; one more mismatch would have failed it.
+
+The sole horizon mismatch was a PlayChooser root at bag 71. The rule stopped at
+100,400 nodes on generated rank 1, while the 3M arm selected rank 0. The common
+judge measured missed blended utility `0.00206846` (win component `0.00157854`,
+spread component 1.7385 points). Across all 320 complete-game units, roots with
+identical choices have exactly zero missed value, yielding mean `0.000006464`
+and 95% CI `[-0.000006253,0.000019181]`, well inside the 0.001
+noninferiority margin.
+
+The independent matched subset also passed: stopped-minus-matched mean judged
+regret was `-0.00005837` over 107 roots, with 95% CI
+`[-0.00012348,0.00000673]`. Five stopped choices differed from their matched
+independent arm and were judged under the frozen selective protocol. There is
+no evidence of harmful optional-selection bias at the declared margin.
+
+This is a **surrogate pass**, not a production authorization. Its mismatch
+bound is close to the gate, each 40-root stratum is too small for a useful
+stratum-specific guarantee (the single early-PlayChooser event has a stratum
+upper bound of 11.32%), the equal-slice endpoint does not extend beyond 3M in
+this panel, and regret outside the sorted top-60 nominee scope remains
+unmeasured. The shadow score did not affect any decision and no CRC rule is
+retrofitted. Live allocation stays off until Rule of Zero passes a separately
+preregistered mirrored terminal-game experiment.
+
+### Rule-of-Zero observer hardening (2026-08-03)
+
+The adversarial review of the first observer implementation produced five
+corrections, all applied before any panel or match uses the code:
+
+1. **Scope restriction.** The rule and its telemetry now apply only to the
+   primary move-decision simulation. The challenge/branch evaluation path
+   calls the same `play_chooser_run_sim` engine but was never in the
+   validated scope; it now explicitly passes `primary_decision=false`, which
+   disables Rule-of-Zero and prevents a branch sim from overwriting the
+   turn's decision telemetry.
+2. **Shadow mode.** `PCBENCH_RULE_ZERO_SHADOW` (or the strategy's
+   `use_rule_zero_sim_shadow`) records the first satisfying checkpoint in
+   `BAIResult` while the search runs to its ordinary boundary. The
+   exact-topology panel must use this production code path, uncapped to the
+   live landmark, so the would-stop choice and the horizon choice come from
+   one trace and the panel exercises the same code the match will run.
+   Shadow observation is result-neutral and may run on both players.
+3. **Atomic status claim.** `bai_result_set_status_if_none` makes both the
+   regret stop and the enforced Rule-of-Zero stop claim the terminal status
+   atomically, so a concurrent timeout or user interrupt can no longer be
+   relabeled as a policy stop in strict audits.
+4. **Layering.** The native work counter is now a separate `bai()` argument
+   supplied by the simmer rather than a `SimResults` pointer smuggled
+   through `BAIOptions`, removing the forward declaration from
+   `src/def/bai_defs.h`. Activation still fails closed without it.
+5. **Trace schema.** `PCTURN` adds `rule_zero_shadow` and
+   `rule_zero_would_stop`. The match auditor verifies internal consistency
+   (a stop implies enablement and a recorded would-stop; a shadow turn never
+   stops) and totals enabled/stop/would-stop counts per pair.
+
+Both panel-parity requirements are now verified by direct comparison of
+`bai_maybe_stop_for_rule_zero_while_locked` against the harness's
+`thinking_curve_choose_rule_zero_stop`. Checkpoints fire on the same
+`num_total_samples_completed` counter at the same 256-sample interval with
+the same burst-collapse behavior; the stability counter resets to one on an
+incumbent change and permits a stop at two consecutive checkpoints in both;
+the near-tie count comes from the same `bai_count_near_tie_challengers`
+call evaluated under the sync lock, with the unidentified `-1` unable to
+stop; and the node floor reads the same `SimResults` counter. The only
+divergence is on checkpoints with zero iterations or zero nodes, which
+cannot occur after a real 256-sample interval and which both sides treat as
+unable to stop. Regression coverage includes enforced stop, missing-counter
+fail-closed, near-tie continuation, and shadow record-without-stop, all
+under one and multiple threads.
+
+Two one-pair `run_time_manager_match.py` smokes then exercised the
+production path end to end with `PCBENCH_RULE_ZERO_SHADOW=true` on a
+4-thread cloud VM with locally built CSW24 RIT/WIT data. At a 10-second
+clock, all 46 PCTURN rows carried consistent shadow fields with zero stops
+and zero would-stops (no sim reaches the 100K-node floor), and the match
+audit passed. At the 3-minute clock, 32/46 turns recorded a would-stop with
+sane triggers (nodes just past the floor, node/iteration ratio ~3 matching
+p2, stability counts consistent with 256-sample checkpoints) and still zero
+enforced stops and zero consistency violations. Two notes from that pair:
+`rule_zero_near_tie_challengers` reports `-1` on shadow would-stop rows
+because the at-stop counter is deliberately enforced-only (the trigger
+itself requires zero, so the value is implied); and the audit's spend-down
+floor check failed once by 4ms (`planned 15817.832 < legacy 15817.836`),
+a pre-existing non-atomic-snapshot artifact of the one-sided
+`max(legacy, spend_down)` bridge under noisy timing, unrelated to Rule
+Zero, recorded here for a future look before the terminal match freezes
+its operational thresholds.
+
+### Checkpoint counters must be snapshotted, not read at emission (2026-08-05)
+
+The strict panel audit (`validate_rule_zero_chunk_accounting`) surfaced two
+rare checkpoint-trace races on 4-thread runs (~1 per 100-200 roots). The
+first — a later snapshot written to the trace before an earlier one — was
+fixed by hand-over-hand emission ordering in
+`bai_sync_data_add_sample_with_progress` (the `progress_emit_mutex` is
+claimed before the main mutex is released). The second appeared after that
+fix: two consecutive checkpoint rows whose iterations differ by exactly 1
+with identical node counts (e.g. 919041 -> 919042, nodes 2757126 both).
+
+Root cause: `sim_forward_progress` in `src/impl/simmer.c` discarded the
+iterations snapshot taken under the BAI mutex and re-read
+`sim_results_get_iteration_count`/`_node_count` at emission time (nodes
+were never snapshotted at all). Emission order was serialized, but the
+values were not: when the scheduler preempts a worker between releasing the
+main mutex and emitting, other workers keep sampling, so the delayed
+checkpoint reports counters from far past its crossing. The next checkpoint,
+already blocked on `progress_emit_mutex`, then emits microseconds later and
+reads nearly identical live values. The exact +1/equal-nodes signature comes
+from a third worker sitting between its last
+`sim_results_increment_node_count` and its
+`sim_results_increment_iteration_count` (in `rv_sim_sample`): its nodes are
+in both reads while its iteration lands only in the second. The completed
+p2 run corroborates this — inter-checkpoint iteration deltas in accepted
+logs form a tail from the nominal 256 down to 10, and one first checkpoint
+reported iterations=457 at a 256-sample interval.
+
+Fix: `bai_sync_data_add_sample_with_progress` now snapshots
+`progress.nodes` from the sim's native counter under the same main-mutex
+hold that snapshots `progress.iterations` (the `bai()` work-counter
+argument is stored as `progress_sim_results` unconditionally, not only when
+Rule-of-Zero is configured), and `sim_forward_progress` forwards checkpoint
+events unchanged, re-reading live counters only for non-checkpoint events
+(FINISH, emitted after the workers join, when the counters are stable).
+Checkpoint iterations are now exactly interval-spaced and nodes strictly
+increase whenever the interval exceeds the number of in-flight samples
+(bounded by the thread count). This also makes checkpoint node counts the
+same measurement the Rule-of-Zero stop check reads under the same lock.
 
 ## Validation
 

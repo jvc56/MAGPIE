@@ -3,8 +3,10 @@
 #include "../src/compat/ctime.h"
 #include "../src/compat/memory_info.h"
 #include "../src/def/game_defs.h"
+#include "../src/def/peg_defs.h"
 #include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
+#include "../src/ent/analysis_progress.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/move.h"
@@ -21,6 +23,7 @@
 #include "test_util.h"
 #include <assert.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -94,11 +97,11 @@ typedef struct PegBenchConfig {
   double time_budget_seconds; // 0 = unbounded
   int max_stage;              // 0 = full configured cascade
   bool greedy_seed_only;
-  int scenario_stride;        // <= 1 = full enumeration (bag >= 3 only)
-  const int *stage_top_k;     // NULL = built-in default cascade
-  int num_stages;             // 0 = default cascade length
-  int stage_fidelity_plies;   // 0 = normal 2,3,4,... ramp
-  bool nested_enabled;        // nested-PEG non-emptier lookahead
+  int scenario_stride;      // <= 1 = full enumeration (bag >= 3 only)
+  const int *stage_top_k;   // NULL = built-in default cascade
+  int num_stages;           // 0 = default cascade length
+  int stage_fidelity_plies; // 0 = normal 2,3,4,... ramp
+  bool nested_enabled;      // nested-PEG non-emptier lookahead
   int nested_cand_cap;
   const int *nested_cand_caps; // per-level cap sequence (NULL = flat cap)
   int nested_n_cand_caps;
@@ -113,6 +116,9 @@ typedef struct PegBenchConfig {
 } PegBenchConfig;
 
 // Result of solving one position with one fast config.
+// Field order groups related state for readability; the analyzer's
+// padding-optimal reordering is not worth scrambling that grouping.
+// NOLINTNEXTLINE(clang-analyzer-optin.performance.Padding)
 typedef struct PegBenchOutcome {
   char move_str[32];
   Move move; // kept so the oracle can re-evaluate it via pnoprune
@@ -163,10 +169,9 @@ typedef struct PegBenchWork {
 
 static void atomic_store_max(atomic_uint_fast64_t *target, uint64_t value) {
   uint64_t current = atomic_load_explicit(target, memory_order_relaxed);
-  while (current < value &&
-         !atomic_compare_exchange_weak_explicit(
-             target, &current, value, memory_order_relaxed,
-             memory_order_relaxed)) {
+  while (current < value && !atomic_compare_exchange_weak_explicit(
+                                target, &current, value, memory_order_relaxed,
+                                memory_order_relaxed)) {
   }
 }
 
@@ -181,13 +186,13 @@ static void peg_bench_work_record(const AnalysisProgressEvent *event,
   }
   atomic_store_max(&work->scenarios, event->scenarios);
   atomic_store_max(&work->endgame_nodes, event->nodes);
-  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET &&
-      event->phase == 0 && event->candidates_total > 0) {
+  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET && event->phase == 0 &&
+      event->candidates_total > 0) {
     atomic_store_explicit(&work->root_candidates, event->candidates_total,
                           memory_order_relaxed);
   }
-  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET &&
-      event->phase >= 0 && event->phase < PEG_BENCH_MAX_STAGES) {
+  if (event->event == ANALYSIS_EVENT_CANDIDATE_SET && event->phase >= 0 &&
+      event->phase < PEG_BENCH_MAX_STAGES) {
     PegBenchCandidateTrace *trace = work->candidate_trace;
     if (trace != NULL) {
       atomic_store_explicit(&trace->stage_start_ns[event->phase],
@@ -201,10 +206,10 @@ static void peg_bench_work_record(const AnalysisProgressEvent *event,
     }
   }
   if (event->event == ANALYSIS_EVENT_CHECKPOINT && event->phase == 0) {
-    atomic_store_explicit(
-        &work->greedy_elapsed_ns,
-        event->elapsed_ns > 0 ? (uint64_t)event->elapsed_ns : 0,
-        memory_order_relaxed);
+    atomic_store_explicit(&work->greedy_elapsed_ns,
+                          event->elapsed_ns > 0 ? (uint64_t)event->elapsed_ns
+                                                : 0,
+                          memory_order_relaxed);
     atomic_store_explicit(&work->greedy_cpu_ns,
                           event->cpu_ns > 0 ? (uint64_t)event->cpu_ns : 0,
                           memory_order_relaxed);
@@ -214,8 +219,7 @@ static void peg_bench_work_record(const AnalysisProgressEvent *event,
                           memory_order_relaxed);
   }
   if (event->event == ANALYSIS_EVENT_CANDIDATE_DONE) {
-    atomic_fetch_add_explicit(&work->candidate_evals, 1,
-                              memory_order_relaxed);
+    atomic_fetch_add_explicit(&work->candidate_evals, 1, memory_order_relaxed);
     if (work->candidate_trace != NULL) {
       PegBenchCandidateTrace *trace = work->candidate_trace;
       const uint64_t event_index = atomic_fetch_add_explicit(
@@ -253,21 +257,19 @@ static void peg_bench_work_record(const AnalysisProgressEvent *event,
       advanced = true;
     }
     if (advanced) {
-      atomic_store_explicit(&work->deepest_candidates, 0,
-                            memory_order_relaxed);
+      atomic_store_explicit(&work->deepest_candidates, 0, memory_order_relaxed);
       atomic_store_explicit(&work->deepest_candidates_total,
                             event->candidates_total, memory_order_relaxed);
     }
-    if (event->phase == atomic_load_explicit(&work->deepest_stage,
-                                             memory_order_relaxed) &&
+    if (event->phase ==
+            atomic_load_explicit(&work->deepest_stage, memory_order_relaxed) &&
         event->candidates_completed >= 0) {
       if (event->candidates_total > 0) {
         atomic_store_explicit(&work->deepest_candidates_total,
-                              event->candidates_total,
-                              memory_order_relaxed);
+                              event->candidates_total, memory_order_relaxed);
       }
-      int completed = atomic_load_explicit(&work->deepest_candidates,
-                                           memory_order_relaxed);
+      int completed =
+          atomic_load_explicit(&work->deepest_candidates, memory_order_relaxed);
       while (completed < event->candidates_completed &&
              !atomic_compare_exchange_weak_explicit(
                  &work->deepest_candidates, &completed,
@@ -428,10 +430,9 @@ static PegBenchOutcome run_one_peg(const Config *config,
       atomic_load_explicit(&work.scenarios, memory_order_relaxed);
   outcome.endgame_nodes =
       atomic_load_explicit(&work.endgame_nodes, memory_order_relaxed);
-  outcome.greedy_elapsed =
-      (double)atomic_load_explicit(&work.greedy_elapsed_ns,
-                                   memory_order_relaxed) /
-      1.0e9;
+  outcome.greedy_elapsed = (double)atomic_load_explicit(&work.greedy_elapsed_ns,
+                                                        memory_order_relaxed) /
+                           1.0e9;
   outcome.greedy_cpu_seconds =
       (double)atomic_load_explicit(&work.greedy_cpu_ns, memory_order_relaxed) /
       1.0e9;
@@ -449,8 +450,8 @@ static PegBenchOutcome run_one_peg(const Config *config,
     outcome.total_evals =
         atomic_load_explicit(&work.candidate_evals, memory_order_relaxed);
   }
-  outcome.deep_total = atomic_load_explicit(
-      &work.deepest_candidates_total, memory_order_relaxed);
+  outcome.deep_total = atomic_load_explicit(&work.deepest_candidates_total,
+                                            memory_order_relaxed);
   error_stack_destroy(err);
   peg_result_destroy(&result);
   return outcome;
@@ -936,13 +937,10 @@ void test_peg_pegtopk_all(void) {
 // file, printing per-position wall time + chosen move/win/spread + the total. A
 // simple timing harness (used to A/B the chained-wordprune cache).
 
-static void peg_bench_on_candidate_done(int stage_idx, int cand_rank,
-                                        const Move *cand, double win_pct,
-                                        double mean_spread,
-                                        int scenarios_completed,
-                                        uint64_t endgame_nodes,
-                                        int64_t completed_ns, bool reordered,
-                                        void *user_data) {
+static void peg_bench_on_candidate_done(
+    int stage_idx, int cand_rank, const Move *cand, double win_pct,
+    double mean_spread, int scenarios_completed, uint64_t endgame_nodes,
+    int64_t completed_ns, bool reordered, void *user_data) {
   (void)reordered;
   PegBenchCandidateTrace *trace = user_data;
   const uint64_t event_idx =
@@ -1045,8 +1043,7 @@ void test_peg_bench_fixture(void) {
              event->scenarios_completed,
              (unsigned long long)event->endgame_nodes,
              (unsigned long long)event->item_id, event->win_pct,
-             event->mean_spread,
-             (double)event->elapsed_ns / 1.0e6,
+             event->mean_spread, (double)event->elapsed_ns / 1.0e6,
              (double)event->cpu_ns / 1.0e6);
     }
 
@@ -1716,54 +1713,52 @@ static int peg_struct_candidate_event_cmp(const void *lhs, const void *rhs) {
   return a->cand_rank - b->cand_rank;
 }
 
-static void peg_struct_print_candidate_trace(
-    int bag, int pos, int requested_stage, const char *order,
-    PegBenchCandidateTrace *trace) {
+static void peg_struct_print_candidate_trace(int bag, int pos,
+                                             int requested_stage,
+                                             const char *order,
+                                             PegBenchCandidateTrace *trace) {
   for (int phase = 0; phase < PEG_BENCH_MAX_STAGES; phase++) {
     const int total =
         atomic_load_explicit(&trace->stage_total[phase], memory_order_relaxed);
     if (total <= 0) {
       continue;
     }
-    printf("PEGSTRUCTSTAGE bag=%d pos=%d requested_stage=%d order=%s "
-           "phase=%d depth=%d total=%d start_ns=%lld start_cpu_ns=%lld\n",
-           bag, pos, requested_stage, order, phase,
-           atomic_load_explicit(&trace->stage_depth[phase],
-                                memory_order_relaxed),
-           total,
-           (long long)atomic_load_explicit(&trace->stage_start_ns[phase],
-                                           memory_order_relaxed),
-           (long long)atomic_load_explicit(&trace->stage_start_cpu_ns[phase],
-                                           memory_order_relaxed));
+    printf(
+        "PEGSTRUCTSTAGE bag=%d pos=%d requested_stage=%d order=%s "
+        "phase=%d depth=%d total=%d start_ns=%lld start_cpu_ns=%lld\n",
+        bag, pos, requested_stage, order, phase,
+        atomic_load_explicit(&trace->stage_depth[phase], memory_order_relaxed),
+        total,
+        (long long)atomic_load_explicit(&trace->stage_start_ns[phase],
+                                        memory_order_relaxed),
+        (long long)atomic_load_explicit(&trace->stage_start_cpu_ns[phase],
+                                        memory_order_relaxed));
   }
-  const uint64_t reported = atomic_load_explicit(
-      &trace->event_count, memory_order_relaxed);
-  const uint64_t retained =
-      reported < PEG_BENCH_MAX_CANDIDATE_EVENTS
-          ? reported
-          : PEG_BENCH_MAX_CANDIDATE_EVENTS;
+  const uint64_t reported =
+      atomic_load_explicit(&trace->event_count, memory_order_relaxed);
+  const uint64_t retained = reported < PEG_BENCH_MAX_CANDIDATE_EVENTS
+                                ? reported
+                                : PEG_BENCH_MAX_CANDIDATE_EVENTS;
   qsort(trace->events, (size_t)retained, sizeof(trace->events[0]),
         peg_struct_candidate_event_cmp);
   for (uint64_t event_index = 0; event_index < retained; event_index++) {
     const PegBenchCandidateEvent *event = &trace->events[event_index];
-    printf("PEGSTRUCTCAND bag=%d pos=%d requested_stage=%d order=%s "
-           "phase=%d depth=%d rank=%d completed=%d total=%d elapsed_ns=%lld "
-           "cpu_ns=%lld scenarios=%d endgame_nodes=%llu item=%llu "
-           "win=%.8f spread=%.4f\n",
-           bag, pos, requested_stage, order, event->stage_idx, event->depth,
-           event->cand_rank, event->candidates_completed,
-           event->candidates_total,
-           (long long)event->elapsed_ns, (long long)event->cpu_ns,
-           event->scenarios_completed,
-           (unsigned long long)event->endgame_nodes,
-           (unsigned long long)event->item_id, event->win_pct,
-           event->mean_spread);
+    printf(
+        "PEGSTRUCTCAND bag=%d pos=%d requested_stage=%d order=%s "
+        "phase=%d depth=%d rank=%d completed=%d total=%d elapsed_ns=%lld "
+        "cpu_ns=%lld scenarios=%d endgame_nodes=%llu item=%llu "
+        "win=%.8f spread=%.4f\n",
+        bag, pos, requested_stage, order, event->stage_idx, event->depth,
+        event->cand_rank, event->candidates_completed, event->candidates_total,
+        (long long)event->elapsed_ns, (long long)event->cpu_ns,
+        event->scenarios_completed, (unsigned long long)event->endgame_nodes,
+        (unsigned long long)event->item_id, event->win_pct, event->mean_spread);
   }
   if (reported > retained) {
     printf("PEGSTRUCTCANDDROP bag=%d pos=%d requested_stage=%d order=%s "
            "reported=%llu retained=%llu\n",
-           bag, pos, requested_stage, order,
-           (unsigned long long)reported, (unsigned long long)retained);
+           bag, pos, requested_stage, order, (unsigned long long)reported,
+           (unsigned long long)retained);
   }
 }
 
@@ -1773,10 +1768,8 @@ void test_peg_structural_curve(void) {
   if (dir == NULL || dir[0] == '\0') {
     dir = "notes/peg_positions";
   }
-  const int max_positions =
-      peg_bench_env_int("MAGPIE_PEG_STRUCT_MAX", 25);
-  const int start_position =
-      peg_bench_env_int("MAGPIE_PEG_STRUCT_START", 0);
+  const int max_positions = peg_bench_env_int("MAGPIE_PEG_STRUCT_MAX", 25);
+  const int start_position = peg_bench_env_int("MAGPIE_PEG_STRUCT_START", 0);
   const int kmax = peg_bench_env_int("MAGPIE_PEG_STRUCT_KMAX", 4);
   const int threads =
       peg_bench_env_int("MAGPIE_PEG_STRUCT_THREADS", get_num_cores());
@@ -1801,8 +1794,7 @@ void test_peg_structural_curve(void) {
   assert(max_bag >= min_bag && max_bag <= 4);
   assert(arm_max_seconds >= 0.0);
   assert(oracle_seconds > 0.0);
-  assert(oracle_fidelity >= 2 &&
-         oracle_fidelity <= PEG_EXHAUSTIVE_PLIES);
+  assert(oracle_fidelity >= 2 && oracle_fidelity <= PEG_EXHAUSTIVE_PLIES);
   assert(oracle_stride > 0);
 
   Config *config =
@@ -1814,15 +1806,13 @@ void test_peg_structural_curve(void) {
          "oracle_stride=%d only=%s\n",
          threads, kmax, start_position, max_positions, min_bag, max_bag,
          arm_max_seconds, oracle_seconds, dir, oracle_fidelity, oracle_stride,
-         only_positions != NULL && only_positions[0] != '\0'
-             ? only_positions
-             : "all");
+         only_positions != NULL && only_positions[0] != '\0' ? only_positions
+                                                             : "all");
   (void)fflush(stdout);
 
   for (int bag = min_bag; bag <= max_bag; bag++) {
     char filename[1024];
-    (void)snprintf(filename, sizeof(filename), "%s/random_%dpeg.txt", dir,
-                   bag);
+    (void)snprintf(filename, sizeof(filename), "%s/random_%dpeg.txt", dir, bag);
     FILE *fp = fopen(filename, "re");
     if (fp == NULL) {
       printf("PEGSTRUCTERR no %s\n", filename);
@@ -1985,7 +1975,7 @@ void test_peg_structural_curve(void) {
         continue;
       }
       peg_struct_print_candidate_trace(bag, pos, kmax, "oracle",
-                                      oracle_candidate_trace);
+                                       oracle_candidate_trace);
 
       const Game *game = config_get_game(config);
       int protected_scored = 0;
@@ -1996,8 +1986,7 @@ void test_peg_structural_curve(void) {
           char candidate_string[32];
           move_to_string(game, &oracle.top_cands[candidate].move,
                          candidate_string, sizeof(candidate_string));
-          if (strcmp(candidate_string,
-                     protected_strings[protected_idx]) == 0) {
+          if (strcmp(candidate_string, protected_strings[protected_idx]) == 0) {
             found = true;
             break;
           }
@@ -2006,8 +1995,7 @@ void test_peg_structural_curve(void) {
       }
       const bool oracle_complete =
           num_protected <= 1 ||
-          (oracle.last_completed_stage >= 1 &&
-           !oracle.last_stage_partial &&
+          (oracle.last_completed_stage >= 1 && !oracle.last_stage_partial &&
            protected_scored == num_protected);
       printf("PEGSTRUCTORACLE bag=%d pos=%d requested_stage=%d "
              "last_stage=%d partial=%d elapsed=%.6f candidates=%d "
@@ -2047,10 +2035,10 @@ void test_peg_structural_curve(void) {
                stage, arms[stage].move_str, oracle_win, oracle_spread,
                arms[stage].elapsed, arms[stage].cpu_seconds,
                (unsigned long long)arms[stage].scenarios,
-               (unsigned long long)arms[stage].endgame_nodes,
-               arms[stage].stage, arms[stage].deep_work,
-               arms[stage].root_cands, arms[stage].total_evals,
-               arms[stage].greedy_elapsed, arms[stage].greedy_cpu_seconds,
+               (unsigned long long)arms[stage].endgame_nodes, arms[stage].stage,
+               arms[stage].deep_work, arms[stage].root_cands,
+               arms[stage].total_evals, arms[stage].greedy_elapsed,
+               arms[stage].greedy_cpu_seconds,
                (unsigned long long)arms[stage].greedy_scenarios,
                (unsigned long long)arms[stage].greedy_endgame_nodes);
         if (!all_boundaries_complete) {

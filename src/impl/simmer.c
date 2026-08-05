@@ -1,15 +1,19 @@
 #include "simmer.h"
 
+#include "../compat/ctime.h"
 #include "../def/equity_defs.h"
 #include "../def/game_defs.h"
 #include "../def/inference_defs.h"
 #include "../def/move_defs.h"
 #include "../def/sim_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bag.h"
+#include "../ent/equity.h"
 #include "../ent/game.h"
 #include "../ent/inference_results.h"
 #include "../ent/move.h"
+#include "../ent/player.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
 #include "../ent/stats.h"
@@ -48,9 +52,20 @@ static void sim_forward_progress(const AnalysisProgressEvent *event,
                                  void *user_data) {
   const SimProgressContext *context = user_data;
   AnalysisProgressEvent forwarded = *event;
-  forwarded.nodes = sim_results_get_node_count(context->sim_results);
-  forwarded.iterations = sim_results_get_iteration_count(context->sim_results);
-  forwarded.work_units = forwarded.iterations;
+  // Checkpoint events already carry an iterations/nodes snapshot taken under
+  // the BAI mutex at the moment the checkpoint fired. Re-reading the live
+  // counters here would attach emission-time values instead: a delayed
+  // emission then reports work from a later point in the run, so two
+  // consecutive checkpoints can show nearly identical (or identical)
+  // counters even though their snapshots are a full interval apart. Only
+  // non-checkpoint events (FINISH) read the live counters, which are stable
+  // by the time bai() emits them.
+  if (event->event != ANALYSIS_EVENT_CHECKPOINT) {
+    forwarded.nodes = sim_results_get_node_count(context->sim_results);
+    forwarded.iterations =
+        sim_results_get_iteration_count(context->sim_results);
+    forwarded.work_units = forwarded.iterations;
+  }
   forwarded.budget_seconds = context->budget_seconds;
   context->listener->callback(&forwarded, context->listener->user_data);
 }
@@ -194,7 +209,7 @@ void simulate(SimArgs *sim_args, SimCtx **sim_ctx, SimResults *sim_results,
     bai_listener.user_data = &progress_context;
   }
   bai(&sim_args->bai_options, (*sim_ctx)->rvs, (*sim_ctx)->rng,
-      sim_args->thread_control, NULL, &bai_listener,
+      sim_args->thread_control, NULL, &bai_listener, sim_results,
       sim_results_get_bai_result(sim_results));
 
   // Reset the sim args to their original values in case they were modified for

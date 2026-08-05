@@ -6,8 +6,9 @@
 #include "../src/def/game_history_defs.h"
 #include "../src/def/letter_distribution_defs.h"
 #include "../src/def/move_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/def/thread_control_defs.h"
-#include "../src/ent/analysis_trace.h"
+#include "../src/ent/analysis_progress.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/endgame_results.h"
 #include "../src/ent/equity.h"
@@ -1055,9 +1056,9 @@ void test_endgame_value_curve(void) {
         .run_id = (uint64_t)pos + 1,
     };
     const int solving_player = game_get_player_on_turn_index(game);
-    const int turns_remaining =
-        MAX(1, (int)rack_get_total_letters(
-                   player_get_rack(game_get_player(game, solving_player))));
+    const int solving_rack_tiles = (int)rack_get_total_letters(
+        player_get_rack(game_get_player(game, solving_player)));
+    const int turns_remaining = solving_rack_tiles > 1 ? solving_rack_tiles : 1;
     const uint64_t tm_future_reserve_nodes =
         tm_auto_future_nodes ? endgame_future_depth5_reserve_nodes(rack_tiles)
                              : 0;
@@ -1371,9 +1372,10 @@ void test_endgame_value_curve(void) {
         continue;
       }
       int32_t exact_value = 0;
-      assert(endgame_curve_find_exact_value(point->tiny_move, exact_tiny_moves,
-                                            exact_values, exact_count,
-                                            &exact_value));
+      const bool exact_value_found = endgame_curve_find_exact_value(
+          point->tiny_move, exact_tiny_moves, exact_values, exact_count,
+          &exact_value);
+      assert(exact_value_found);
       printf("EGCURVEPOINT pos=%d depth=%d nodes=%llu elapsed_ns=%lld "
              "cpu_ns=%lld root=%d/%d ply2=%d/%d tiny=%llu search=%d "
              "exact=%d regret=%d\n",

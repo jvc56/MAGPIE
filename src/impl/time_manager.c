@@ -1,6 +1,8 @@
 #include "time_manager.h"
 
+#include "../ent/analysis_progress.h"
 #include <math.h>
+#include <stddef.h>
 
 static bool time_manager_nonnegative_finite(double value) {
   return isfinite(value) && value >= 0.0;
@@ -12,6 +14,70 @@ time_manager_boundary_requires_completion_bound(TimeManagerBoundary boundary) {
          boundary == TIME_MANAGER_BOUNDARY_PEG_CANDIDATE ||
          boundary == TIME_MANAGER_BOUNDARY_PEG_WAVE ||
          boundary == TIME_MANAGER_BOUNDARY_PEG_STAGE;
+}
+
+bool time_manager_value_curve_is_valid(const TimeManagerValueCurve *curve) {
+  if (curve == NULL || curve->knots == NULL || curve->num_knots == 0 ||
+      !curve->surrogate_allocation_gate_passed ||
+      !curve->terminal_game_gate_passed) {
+    return false;
+  }
+  for (size_t index = 0; index < curve->num_knots; index++) {
+    const TimeManagerValueKnot *knot = &curve->knots[index];
+    if (!time_manager_nonnegative_finite(knot->budget_seconds) ||
+        !time_manager_nonnegative_finite(knot->expected_future_regret) ||
+        (index > 0 &&
+         (knot->budget_seconds <= curve->knots[index - 1].budget_seconds ||
+          knot->expected_future_regret >
+              curve->knots[index - 1].expected_future_regret))) {
+      return false;
+    }
+  }
+  return true;
+}
+
+double time_manager_value_curve_predict(const TimeManagerValueCurve *curve,
+                                        double budget_seconds) {
+  if (!time_manager_value_curve_is_valid(curve) ||
+      !time_manager_nonnegative_finite(budget_seconds) ||
+      budget_seconds < curve->knots[0].budget_seconds) {
+    return NAN;
+  }
+  if (budget_seconds >= curve->knots[curve->num_knots - 1].budget_seconds) {
+    return curve->knots[curve->num_knots - 1].expected_future_regret;
+  }
+  for (size_t upper_index = 1; upper_index < curve->num_knots; upper_index++) {
+    const TimeManagerValueKnot *upper = &curve->knots[upper_index];
+    if (budget_seconds <= upper->budget_seconds) {
+      const TimeManagerValueKnot *lower = &curve->knots[upper_index - 1];
+      const double fraction = (budget_seconds - lower->budget_seconds) /
+                              (upper->budget_seconds - lower->budget_seconds);
+      return lower->expected_future_regret +
+             fraction * (upper->expected_future_regret -
+                         lower->expected_future_regret);
+    }
+  }
+  return NAN;
+}
+
+double time_manager_value_curve_future_loss(double future_clock_seconds,
+                                            double spend_seconds,
+                                            const void *context) {
+  const TimeManagerValueCurve *curve = context;
+  if (!time_manager_nonnegative_finite(future_clock_seconds) ||
+      !time_manager_nonnegative_finite(spend_seconds) ||
+      spend_seconds > future_clock_seconds) {
+    return NAN;
+  }
+  const double before =
+      time_manager_value_curve_predict(curve, future_clock_seconds);
+  const double after = time_manager_value_curve_predict(
+      curve, future_clock_seconds - spend_seconds);
+  if (!time_manager_nonnegative_finite(before) ||
+      !time_manager_nonnegative_finite(after) || after < before) {
+    return NAN;
+  }
+  return after - before;
 }
 
 double time_manager_estimate_seconds(const TimeManagerCostModel *model,
@@ -71,7 +137,18 @@ static TimeManagerPlan time_manager_invalid_plan(void) {
   plan.stopped_chunk_completion_bound_seconds = NAN;
   plan.stopped_chunk_completion_confidence = NAN;
   plan.stopped_chunk_value_per_second = NAN;
+  plan.stopped_chunk_future_regret_increase = NAN;
   return plan;
+}
+
+static double time_manager_get_future_loss(const TimeManagerClock *clock,
+                                           double future_clock_seconds,
+                                           double spend_seconds) {
+  if (clock->future_loss_callback != NULL) {
+    return clock->future_loss_callback(future_clock_seconds, spend_seconds,
+                                       clock->future_loss_context);
+  }
+  return spend_seconds * clock->future_value_per_second;
 }
 
 TimeManagerPlan
@@ -105,17 +182,39 @@ time_manager_plan(const TimeManagerClock *clock,
       clock_after_safety / (double)clock->turns_remaining;
   plan.planned_seconds = clock->committed_current_seconds;
   plan.planned_completion_bound_seconds = clock->committed_current_seconds;
-  plan.stop_reason = TIME_MANAGER_STOP_NO_MORE_CHUNKS;
   plan.stopped_chunk_seconds = NAN;
   plan.stopped_chunk_completion_bound_seconds = NAN;
   plan.stopped_chunk_completion_confidence = NAN;
   plan.stopped_chunk_value_per_second = NAN;
+  plan.stopped_chunk_future_regret_increase = NAN;
 
   if (plan.planned_seconds > maximum_current_seconds) {
     plan.stop_reason = TIME_MANAGER_STOP_CLOCK_RESERVE;
     plan.deposit_seconds = plan.equal_slice_seconds - plan.planned_seconds;
     return plan;
   }
+
+  // Search every physically admissible sequential prefix. A weak intermediate
+  // boundary may be necessary to reach a later high-value boundary, so the
+  // first individually unprofitable chunk must not hide a profitable package.
+  const double initial_future_clock_seconds =
+      fmax(0.0, clock_after_safety - clock->committed_current_seconds);
+  double cumulative_expected_seconds = 0.0;
+  double cumulative_completion_bound_seconds = 0.0;
+  double cumulative_regret_reduction = 0.0;
+  size_t feasible_chunks = 0;
+  size_t best_chunks = 0;
+  double best_net_value = 0.0;
+  double best_expected_seconds = 0.0;
+  double best_completion_bound_seconds = 0.0;
+  double best_regret_reduction = 0.0;
+  double best_future_regret_increase = 0.0;
+  bool hard_stop = false;
+  TimeManagerStopReason hard_stop_reason = TIME_MANAGER_STOP_NO_MORE_CHUNKS;
+  double hard_stop_seconds = NAN;
+  double hard_stop_completion_bound_seconds = NAN;
+  double hard_stop_completion_confidence = NAN;
+  double hard_stop_value_per_second = NAN;
 
   for (size_t chunk_index = 0; chunk_index < num_chunks; chunk_index++) {
     const TimeManagerChunk *chunk = &chunks[chunk_index];
@@ -136,7 +235,7 @@ time_manager_plan(const TimeManagerClock *clock,
           chunk->completion_confidence <= 1.0));
     if (!time_manager_nonnegative_finite(expected_seconds) ||
         !valid_completion_bound ||
-        !time_manager_nonnegative_finite(chunk->expected_regret_reduction)) {
+        !isfinite(chunk->expected_regret_reduction)) {
       plan.valid = false;
       plan.stop_reason = TIME_MANAGER_STOP_INVALID_INPUT;
       plan.stopped_chunk_seconds = expected_seconds;
@@ -148,54 +247,117 @@ time_manager_plan(const TimeManagerClock *clock,
     }
 
     double value_per_second = 0.0;
-    if (expected_seconds == 0.0) {
-      value_per_second =
-          chunk->expected_regret_reduction > 0.0 ? INFINITY : 0.0;
-    } else {
+    if (expected_seconds != 0.0) {
       value_per_second = chunk->expected_regret_reduction / expected_seconds;
+    } else if (chunk->expected_regret_reduction > 0.0) {
+      value_per_second = INFINITY;
+    } else if (chunk->expected_regret_reduction < 0.0) {
+      value_per_second = -INFINITY;
     }
     if (time_manager_boundary_requires_completion_bound(chunk->boundary) &&
         !chunk->has_completion_bound) {
-      plan.stop_reason = TIME_MANAGER_STOP_COMPLETION_RISK;
-      plan.stopped_chunk_seconds = expected_seconds;
-      plan.stopped_chunk_completion_bound_seconds = NAN;
-      plan.stopped_chunk_completion_confidence = NAN;
-      plan.stopped_chunk_value_per_second = value_per_second;
+      hard_stop = true;
+      hard_stop_reason = TIME_MANAGER_STOP_COMPLETION_RISK;
+      hard_stop_seconds = expected_seconds;
+      hard_stop_completion_bound_seconds = NAN;
+      hard_stop_completion_confidence = NAN;
+      hard_stop_value_per_second = value_per_second;
       break;
     }
     if (time_manager_boundary_requires_completion_bound(chunk->boundary) &&
         chunk->completion_confidence < clock->minimum_completion_confidence) {
-      plan.stop_reason = TIME_MANAGER_STOP_COMPLETION_RISK;
-      plan.stopped_chunk_seconds = expected_seconds;
-      plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
-      plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
-      plan.stopped_chunk_value_per_second = value_per_second;
+      hard_stop = true;
+      hard_stop_reason = TIME_MANAGER_STOP_COMPLETION_RISK;
+      hard_stop_seconds = expected_seconds;
+      hard_stop_completion_bound_seconds = completion_bound_seconds;
+      hard_stop_completion_confidence = chunk->completion_confidence;
+      hard_stop_value_per_second = value_per_second;
       break;
     }
-    if (plan.planned_completion_bound_seconds + completion_bound_seconds >
+    if (clock->committed_current_seconds + cumulative_completion_bound_seconds +
+            completion_bound_seconds >
         maximum_current_seconds) {
-      plan.stop_reason = chunk->has_completion_bound
+      hard_stop = true;
+      hard_stop_reason = chunk->has_completion_bound
                              ? TIME_MANAGER_STOP_COMPLETION_RISK
                              : TIME_MANAGER_STOP_CLOCK_RESERVE;
-      plan.stopped_chunk_seconds = expected_seconds;
-      plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
-      plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
-      plan.stopped_chunk_value_per_second = value_per_second;
-      break;
-    }
-    if (value_per_second <= clock->future_value_per_second) {
-      plan.stop_reason = TIME_MANAGER_STOP_FUTURE_VALUE;
-      plan.stopped_chunk_seconds = expected_seconds;
-      plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
-      plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
-      plan.stopped_chunk_value_per_second = value_per_second;
+      hard_stop_seconds = expected_seconds;
+      hard_stop_completion_bound_seconds = completion_bound_seconds;
+      hard_stop_completion_confidence = chunk->completion_confidence;
+      hard_stop_value_per_second = value_per_second;
       break;
     }
 
-    plan.chunks_bought++;
-    plan.planned_seconds += expected_seconds;
-    plan.planned_completion_bound_seconds += completion_bound_seconds;
-    plan.expected_regret_reduction += chunk->expected_regret_reduction;
+    cumulative_expected_seconds += expected_seconds;
+    cumulative_completion_bound_seconds += completion_bound_seconds;
+    cumulative_regret_reduction += chunk->expected_regret_reduction;
+    feasible_chunks = chunk_index + 1;
+    const double future_regret_increase = time_manager_get_future_loss(
+        clock, initial_future_clock_seconds, cumulative_expected_seconds);
+    if (!time_manager_nonnegative_finite(future_regret_increase)) {
+      plan.valid = false;
+      plan.stop_reason = TIME_MANAGER_STOP_INVALID_INPUT;
+      plan.stopped_chunk_seconds = expected_seconds;
+      plan.stopped_chunk_completion_bound_seconds = completion_bound_seconds;
+      plan.stopped_chunk_completion_confidence = chunk->completion_confidence;
+      plan.stopped_chunk_value_per_second = value_per_second;
+      plan.stopped_chunk_future_regret_increase = future_regret_increase;
+      plan.deposit_seconds = plan.equal_slice_seconds - plan.planned_seconds;
+      return plan;
+    }
+    const double net_value =
+        cumulative_regret_reduction - future_regret_increase;
+    if (net_value > best_net_value) {
+      best_chunks = chunk_index + 1;
+      best_net_value = net_value;
+      best_expected_seconds = cumulative_expected_seconds;
+      best_completion_bound_seconds = cumulative_completion_bound_seconds;
+      best_regret_reduction = cumulative_regret_reduction;
+      best_future_regret_increase = future_regret_increase;
+    }
+  }
+
+  plan.chunks_bought = best_chunks;
+  plan.planned_seconds =
+      clock->committed_current_seconds + best_expected_seconds;
+  plan.planned_completion_bound_seconds =
+      clock->committed_current_seconds + best_completion_bound_seconds;
+  plan.expected_regret_reduction = best_regret_reduction;
+  plan.expected_future_regret_increase = best_future_regret_increase;
+
+  if (best_chunks == num_chunks) {
+    plan.stop_reason = TIME_MANAGER_STOP_NO_MORE_CHUNKS;
+  } else if (hard_stop && best_chunks == feasible_chunks) {
+    plan.stop_reason = hard_stop_reason;
+    plan.stopped_chunk_seconds = hard_stop_seconds;
+    plan.stopped_chunk_completion_bound_seconds =
+        hard_stop_completion_bound_seconds;
+    plan.stopped_chunk_completion_confidence = hard_stop_completion_confidence;
+    plan.stopped_chunk_value_per_second = hard_stop_value_per_second;
+  } else {
+    plan.stop_reason = TIME_MANAGER_STOP_FUTURE_VALUE;
+    const TimeManagerChunk *stopped = &chunks[best_chunks];
+    plan.stopped_chunk_seconds =
+        time_manager_estimate_seconds(expected_cost_model, &stopped->work);
+    const TimeManagerWork *completion_work =
+        stopped->has_completion_bound ? &stopped->completion_bound_work
+                                      : &stopped->work;
+    plan.stopped_chunk_completion_bound_seconds =
+        time_manager_estimate_seconds(deadline_cost_model, completion_work);
+    plan.stopped_chunk_completion_confidence = stopped->completion_confidence;
+    if (plan.stopped_chunk_seconds != 0.0) {
+      plan.stopped_chunk_value_per_second =
+          stopped->expected_regret_reduction / plan.stopped_chunk_seconds;
+    } else if (stopped->expected_regret_reduction > 0.0) {
+      plan.stopped_chunk_value_per_second = INFINITY;
+    } else if (stopped->expected_regret_reduction < 0.0) {
+      plan.stopped_chunk_value_per_second = -INFINITY;
+    } else {
+      plan.stopped_chunk_value_per_second = 0.0;
+    }
+    plan.stopped_chunk_future_regret_increase = time_manager_get_future_loss(
+        clock, fmax(0.0, initial_future_clock_seconds - best_expected_seconds),
+        plan.stopped_chunk_seconds);
   }
 
   plan.deposit_seconds = plan.equal_slice_seconds - plan.planned_seconds;

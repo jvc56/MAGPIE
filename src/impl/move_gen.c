@@ -125,8 +125,6 @@ MoveGen *get_movegen(void) {
     log_fatal("movegen pool exhausted: more than %d concurrent threads",
               MAX_THREADS);
   }
-  // cppcheck-suppress negativeIndex ; slot >= 0 here (log_fatal above is
-  // noreturn)
   gen = cached_gens[slot];
   if (gen == NULL) {
     gen = calloc_or_die(1, sizeof(MoveGen));

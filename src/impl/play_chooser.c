@@ -12,7 +12,9 @@
 #include "../def/peg_defs.h"
 #include "../def/rack_defs.h"
 #include "../def/thread_control_defs.h"
+#include "../ent/analysis_progress.h"
 #include "../ent/bag.h"
+#include "../ent/bai_result.h"
 #include "../ent/endgame_results.h"
 #include "../ent/equity.h"
 #include "../ent/game.h"
@@ -23,6 +25,7 @@
 #include "../ent/rack.h"
 #include "../ent/sim_args.h"
 #include "../ent/sim_results.h"
+#include "../ent/stats.h"
 #include "../ent/thread_control.h"
 #include "../ent/transposition_table.h"
 #include "../ent/words.h"
@@ -34,6 +37,7 @@
 #include "peg.h"
 #include "peg_time_manager.h"
 #include "simmer.h"
+#include "time_manager.h"
 #include <math.h>
 #include <stdatomic.h>
 #include <stdbool.h>
@@ -43,6 +47,15 @@
 enum {
   PLAY_CHOOSER_DEFAULT_SIM_PLIES = 2,
   PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES = 15,
+  PLAY_CHOOSER_WIDE_SIM_MAX_CANDIDATES = 60,
+  // BAI's regret estimate is not identified from a single observation: the
+  // empirical variance is exactly zero and its tiny numerical floor can make
+  // an unlucky arm look safely dominated. Every production candidate gets a
+  // modest common-scenario prefix before adaptive sampling begins.
+  PLAY_CHOOSER_MIN_SIM_SAMPLES_PER_CANDIDATE =
+      BAI_MINIMUM_REGRET_SAMPLES_PER_ARM,
+  PLAY_CHOOSER_PEG_TM_MINIMUM_CANDIDATES = 8,
+  PLAY_CHOOSER_SPEND_DOWN_CONTINGENCY_SIM_PLAYS = 1,
   // Assume roughly four tiles per play across both players when splitting
   // the remaining clock into per-move budgets.
   PLAY_CHOOSER_TILES_PER_PLAY_PAIR = 8,
@@ -65,7 +78,18 @@ static const double PLAY_CHOOSER_RESERVE_PER_PLAY_SECONDS = 0.002;
 static const double PLAY_CHOOSER_PEG_TM_MINIMUM_CONFIDENCE = 0.95;
 static const double PLAY_CHOOSER_PEG_TM_COMPLETION_MULTIPLIER = 1.5;
 static const double PLAY_CHOOSER_PEG_TM_DEADLINE_SLOWDOWN = 1.5;
+// The persistent rate is already a slowly decaying high-water mark measured
+// from whole-stage wall time (therefore including non-node overhead). The
+// 1.5x portable-work envelope remains separate; multiplying this rate again
+// made every bag-2+ stage unaffordable in replay.
+static const double PLAY_CHOOSER_PEG_TM_RUNTIME_RATE_SAFETY = 1.75;
 static const double PLAY_CHOOSER_PEG_TM_FUTURE_RATE_SAFETY = 1.5;
+// The 72-pair live audit invalidated candidate-only enforcement as a
+// production policy: it could stop after 2--6 shallow candidates even when a
+// complete next depth fit comfortably in the equal-slice window. Observe the
+// complete-stage replacement below, but do not let it steer a PlayChooser move
+// until its prospective held-out gate passes.
+static const bool PLAY_CHOOSER_ENFORCE_PEG_STAGE_ADMISSION = false;
 // Held-out mean utility gain of the next useful endgame depth. It provides a
 // deliberately small future shadow price; the portable future-work reserve is
 // the hard protection for later turns.
@@ -88,6 +112,7 @@ typedef struct PlayChooserBenchmarkAtomicStats {
   _Atomic uint64_t sim_calls;
   _Atomic uint64_t sim_iterations;
   _Atomic uint64_t sim_nodes;
+  _Atomic uint64_t sim_candidate_events_dropped;
   _Atomic uint64_t peg_calls;
   _Atomic uint64_t peg_candidate_completions;
   _Atomic uint64_t peg_candidate_events_dropped;
@@ -101,17 +126,24 @@ typedef struct PlayChooserBenchmarkAtomicStats {
   _Atomic uint64_t endgame_calls;
   _Atomic uint64_t endgame_nodes;
   _Atomic uint64_t endgame_depth;
+  _Atomic uint64_t endgame_events_dropped;
 } PlayChooserBenchmarkAtomicStats;
 
 static _Atomic bool play_chooser_benchmark_enabled;
 static PlayChooserBenchmarkAtomicStats play_chooser_benchmark_stats;
 static _Atomic uint64_t play_chooser_progress_next_run_id = 1;
 
-enum { PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS = 65536 };
+enum { PLAY_CHOOSER_MAX_BENCHMARK_EVENTS = 65536 };
 
+static PlayChooserSimCandidateEvent
+    play_chooser_sim_candidate_events[PLAY_CHOOSER_MAX_BENCHMARK_EVENTS];
+static _Atomic uint64_t play_chooser_sim_candidate_event_count;
 static PlayChooserPegCandidateEvent
-    play_chooser_peg_candidate_events[PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS];
+    play_chooser_peg_candidate_events[PLAY_CHOOSER_MAX_BENCHMARK_EVENTS];
 static _Atomic uint64_t play_chooser_peg_candidate_event_count;
+static PlayChooserEndgameEvent
+    play_chooser_endgame_events[PLAY_CHOOSER_MAX_BENCHMARK_EVENTS];
+static _Atomic uint64_t play_chooser_endgame_event_count;
 
 static bool play_chooser_benchmark_is_enabled(void) {
   return atomic_load_explicit(&play_chooser_benchmark_enabled,
@@ -134,6 +166,7 @@ void play_chooser_benchmark_reset(void) {
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_candidate_events_dropped);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
@@ -147,8 +180,13 @@ void play_chooser_benchmark_reset(void) {
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
   RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_depth);
+  RESET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_events_dropped);
 #undef RESET_PLAY_CHOOSER_BENCHMARK_FIELD
+  atomic_store_explicit(&play_chooser_sim_candidate_event_count, 0,
+                        memory_order_relaxed);
   atomic_store_explicit(&play_chooser_peg_candidate_event_count, 0,
+                        memory_order_relaxed);
+  atomic_store_explicit(&play_chooser_endgame_event_count, 0,
                         memory_order_relaxed);
   atomic_store_explicit(&play_chooser_benchmark_enabled, true,
                         memory_order_relaxed);
@@ -163,6 +201,7 @@ void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_iterations);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_nodes);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(sim_candidate_events_dropped);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_completions);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(peg_candidate_events_dropped);
@@ -176,15 +215,35 @@ void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats) {
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_calls);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_nodes);
   GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_depth);
+  GET_PLAY_CHOOSER_BENCHMARK_FIELD(endgame_events_dropped);
 #undef GET_PLAY_CHOOSER_BENCHMARK_FIELD
+}
+
+size_t play_chooser_benchmark_get_sim_candidate_events(
+    PlayChooserSimCandidateEvent *events, size_t capacity) {
+  uint64_t retained = atomic_load_explicit(
+      &play_chooser_sim_candidate_event_count, memory_order_relaxed);
+  if (retained > PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
+    retained = PLAY_CHOOSER_MAX_BENCHMARK_EVENTS;
+  }
+  if (events == NULL || capacity == 0) {
+    return (size_t)retained;
+  }
+  if (retained > capacity) {
+    retained = capacity;
+  }
+  for (size_t i = 0; i < (size_t)retained; i++) {
+    events[i] = play_chooser_sim_candidate_events[i];
+  }
+  return (size_t)retained;
 }
 
 size_t play_chooser_benchmark_get_peg_candidate_events(
     PlayChooserPegCandidateEvent *events, size_t capacity) {
   uint64_t retained = atomic_load_explicit(
       &play_chooser_peg_candidate_event_count, memory_order_relaxed);
-  if (retained > PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS) {
-    retained = PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS;
+  if (retained > PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
+    retained = PLAY_CHOOSER_MAX_BENCHMARK_EVENTS;
   }
   if (events == NULL || capacity == 0) {
     return (size_t)retained;
@@ -194,6 +253,26 @@ size_t play_chooser_benchmark_get_peg_candidate_events(
   }
   for (size_t i = 0; i < (size_t)retained; i++) {
     events[i] = play_chooser_peg_candidate_events[i];
+  }
+  return (size_t)retained;
+}
+
+size_t
+play_chooser_benchmark_get_endgame_events(PlayChooserEndgameEvent *events,
+                                          size_t capacity) {
+  uint64_t retained = atomic_load_explicit(&play_chooser_endgame_event_count,
+                                           memory_order_relaxed);
+  if (retained > PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
+    retained = PLAY_CHOOSER_MAX_BENCHMARK_EVENTS;
+  }
+  if (events == NULL || capacity == 0) {
+    return (size_t)retained;
+  }
+  if (retained > capacity) {
+    retained = capacity;
+  }
+  for (size_t i = 0; i < (size_t)retained; i++) {
+    events[i] = play_chooser_endgame_events[i];
   }
   return (size_t)retained;
 }
@@ -210,6 +289,38 @@ static void play_chooser_benchmark_record_static(bool fallback) {
   play_chooser_benchmark_add(&play_chooser_benchmark_stats.static_moves, 1);
   if (fallback) {
     play_chooser_benchmark_add(&play_chooser_benchmark_stats.fallback_moves, 1);
+  }
+}
+
+static void
+play_chooser_benchmark_record_sim_candidates(uint64_t call_index,
+                                             const SimResults *sim_results) {
+  int best_index = sim_results_get_best_move_index(sim_results);
+  if (best_index < 0 && sim_results_get_number_of_plays(sim_results) > 0) {
+    best_index = 0;
+  }
+  for (int rank = 0; rank < sim_results_get_number_of_plays(sim_results);
+       rank++) {
+    const uint64_t event_index = atomic_fetch_add_explicit(
+        &play_chooser_sim_candidate_event_count, 1, memory_order_relaxed);
+    if (event_index >= PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
+      play_chooser_benchmark_add(
+          &play_chooser_benchmark_stats.sim_candidate_events_dropped, 1);
+      continue;
+    }
+    const SimmedPlay *simmed_play =
+        sim_results_get_simmed_play(sim_results, rank);
+    PlayChooserSimCandidateEvent *event =
+        &play_chooser_sim_candidate_events[event_index];
+    event->call_index = call_index;
+    event->iterations =
+        stat_get_num_samples(simmed_play_get_equity_stat(simmed_play));
+    event->item_id = move_get_fingerprint(simmed_play_get_move(simmed_play));
+    event->candidate_rank = rank;
+    event->selected = rank == best_index;
+    event->win_pct = stat_get_mean(simmed_play_get_win_pct_stat(simmed_play));
+    event->utility = stat_get_mean(simmed_play_get_utility_stat(simmed_play));
+    event->equity = stat_get_mean(simmed_play_get_equity_stat(simmed_play));
   }
 }
 
@@ -231,7 +342,7 @@ static void play_chooser_benchmark_peg_candidate_done(
                              endgame_nodes);
   const uint64_t event_index = atomic_fetch_add_explicit(
       &play_chooser_peg_candidate_event_count, 1, memory_order_relaxed);
-  if (event_index >= PLAY_CHOOSER_MAX_PEG_CANDIDATE_EVENTS) {
+  if (event_index >= PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
     play_chooser_benchmark_add(
         &play_chooser_benchmark_stats.peg_candidate_events_dropped, 1);
     return;
@@ -252,6 +363,9 @@ static void play_chooser_benchmark_peg_candidate_done(
 
 struct PlayChooser {
   PlayChooserStrategy strategy;
+  PlayChooserMoveBudget last_move_budget;
+  PlayChooserRegretEstimate last_regret_estimate;
+  PlayChooserRuleZeroTelemetry last_rule_zero_telemetry;
   MoveList *move_list;
   SimResults *sim_results;
   SimCtx *sim_ctx;
@@ -266,6 +380,7 @@ struct PlayChooser {
   EndgameCtx *challenge_endgame_ctx;
   // Lazily created on the first endgame solve; owned.
   TranspositionTable *endgame_tt;
+  PegTimeManagerRuntimeRate peg_runtime_rate;
 };
 
 static AnalysisProgressListener
@@ -303,6 +418,9 @@ play_chooser_get_sim_max_candidates(const PlayChooserStrategy *strategy) {
   if (strategy->sim_max_candidates > 0) {
     return strategy->sim_max_candidates;
   }
+  if (strategy->use_wide_sim_screen) {
+    return PLAY_CHOOSER_WIDE_SIM_MAX_CANDIDATES;
+  }
   return PLAY_CHOOSER_DEFAULT_SIM_MAX_CANDIDATES;
 }
 
@@ -334,6 +452,9 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   }
   PlayChooser *play_chooser = (PlayChooser *)malloc_or_die(sizeof(PlayChooser));
   play_chooser->strategy = *strategy;
+  play_chooser->last_move_budget = (PlayChooserMoveBudget){0};
+  play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){0};
+  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){0};
   play_chooser->move_list =
       move_list_create(play_chooser_get_sim_max_candidates(strategy));
   play_chooser->sim_results = sim_results_create(0.0);
@@ -345,6 +466,7 @@ PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy) {
   play_chooser->challenge_endgame_results = endgame_results_create();
   play_chooser->challenge_endgame_ctx = endgame_ctx_create();
   play_chooser->endgame_tt = NULL;
+  play_chooser->peg_runtime_rate = (PegTimeManagerRuntimeRate){0};
   return play_chooser;
 }
 
@@ -363,6 +485,13 @@ void play_chooser_destroy(PlayChooser *play_chooser) {
   endgame_ctx_destroy(play_chooser->challenge_endgame_ctx);
   transposition_table_destroy(play_chooser->endgame_tt);
   free(play_chooser);
+}
+
+int play_chooser_get_sim_candidate_limit(const PlayChooser *play_chooser) {
+  if (play_chooser == NULL) {
+    return 0;
+  }
+  return play_chooser_get_sim_max_candidates(&play_chooser->strategy);
 }
 
 // The chooser's shared transposition table, created on first use. Shared
@@ -448,10 +577,21 @@ static int play_chooser_get_combined_rack_tiles(const Game *game) {
          (int)rack_get_total_letters(player_get_rack(game_get_player(game, 1)));
 }
 
+static bool play_chooser_get_peg_reference_cost_models_for_bag(
+    const PlayChooserStrategy *strategy, int bag_tiles,
+    TimeManagerCostModel *expected, TimeManagerCostModel *deadline);
+
 static bool play_chooser_get_peg_reference_cost_models(
     const PlayChooserStrategy *strategy, const Game *game,
     TimeManagerCostModel *expected, TimeManagerCostModel *deadline) {
   const int bag_tiles = play_chooser_get_peg_bag_tiles(game);
+  return play_chooser_get_peg_reference_cost_models_for_bag(strategy, bag_tiles,
+                                                            expected, deadline);
+}
+
+static bool play_chooser_get_peg_reference_cost_models_for_bag(
+    const PlayChooserStrategy *strategy, int bag_tiles,
+    TimeManagerCostModel *expected, TimeManagerCostModel *deadline) {
   const PegTimeManagerCalibration *calibration =
       peg_time_manager_default_calibration(
           PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY, bag_tiles);
@@ -470,6 +610,87 @@ static bool play_chooser_get_peg_reference_cost_models(
       expected, deadline);
 }
 
+int play_chooser_estimated_sim_plays_before_peg(int bag_tiles) {
+  const int tiles_before_peg = bag_tiles - PEG_MAX_BAG;
+  if (tiles_before_peg <= 0) {
+    return 0;
+  }
+  // Eight tiles per pair is a useful mean for ordinary equal slicing, but it
+  // undercounted by one turn in 40/463 traced pre-PEG decisions. The maximum
+  // miss in that panel was one, so protect one contingency sim turn before
+  // releasing late-phase reserves. This also covers the observed bag-12 ->
+  // bag-5 transition that would otherwise strand the following PEG turn.
+  return (tiles_before_peg + PLAY_CHOOSER_TILES_PER_PLAY_PAIR - 1) /
+             PLAY_CHOOSER_TILES_PER_PLAY_PAIR +
+         PLAY_CHOOSER_SPEND_DOWN_CONTINGENCY_SIM_PLAYS;
+}
+
+static double play_chooser_get_peg_prefix_seconds(
+    const TimeManagerCostModel *expected_cost, int minimum_bag_tiles,
+    int maximum_bag_tiles, int minimum_candidates) {
+  double seconds = 0.0;
+  for (int bag_tiles = minimum_bag_tiles; bag_tiles <= maximum_bag_tiles;
+       bag_tiles++) {
+    const PegTimeManagerCalibration *calibration =
+        peg_time_manager_default_calibration(
+            PEG_TIME_MANAGER_BOUNDARY_FIRST_TWO_2PLY, bag_tiles);
+    const double forecast = peg_time_manager_estimate_minimum_2ply_seconds(
+        calibration, expected_cost, minimum_candidates);
+    if (!isfinite(forecast) || forecast < 0.0) {
+      return NAN;
+    }
+    seconds = fmax(seconds, forecast);
+  }
+  return seconds;
+}
+
+// Forecast the protected work after the remaining sim turns. PEG uses the
+// minimum useful eight-candidate prefix and the worst expected bag-1..4
+// calibration. A second entry wave covers the observed bag-4 -> bag-1 second
+// PEG turn. Endgame remains in portable nodes until this local conversion.
+// This is deliberately an expected phase forecast; indivisible PEG/endgame
+// boundaries retain their separate conservative admission gates when they
+// actually run.
+static double play_chooser_get_future_analysis_reserve_seconds(
+    const PlayChooserStrategy *strategy, const Game *game) {
+  TimeManagerCostModel expected_cost;
+  TimeManagerCostModel deadline_cost;
+  if (!play_chooser_get_peg_reference_cost_models_for_bag(
+          strategy, PEG_MAX_BAG, &expected_cost, &deadline_cost)) {
+    return NAN;
+  }
+  double peg_seconds = 0.0;
+  if (strategy->pre_endgame_eval == PLAY_CHOOSER_EVAL_PEG) {
+    const double first_peg_seconds = play_chooser_get_peg_prefix_seconds(
+        &expected_cost, PEG_MIN_BAG, PEG_MAX_BAG,
+        PLAY_CHOOSER_PEG_TM_MINIMUM_CANDIDATES);
+    // A second PEG turn is uncommon (3/42 observed PEG-reaching player/game
+    // trajectories). Reserve its calibrated entry wave rather than charging
+    // every game for six more serialized fixed-boundary proxies. The live
+    // solve uses this first wave to estimate speed and admit toward eight.
+    const double second_peg_seconds = play_chooser_get_peg_prefix_seconds(
+        &expected_cost, PEG_MIN_BAG, PEG_MAX_BAG - 1, 2);
+    if (!isfinite(first_peg_seconds) || !isfinite(second_peg_seconds)) {
+      return NAN;
+    }
+    peg_seconds = first_peg_seconds + second_peg_seconds;
+  }
+  double endgame_seconds = 0.0;
+  if (strategy->endgame_eval == PLAY_CHOOSER_EVAL_ENDGAME) {
+    const uint64_t future_nodes = endgame_future_depth5_reserve_nodes(
+        play_chooser_get_combined_rack_tiles(game));
+    if (future_nodes == UINT64_MAX) {
+      return NAN;
+    }
+    endgame_seconds = (double)future_nodes *
+                      expected_cost.peg_seconds_per_endgame_node *
+                      PLAY_CHOOSER_PEG_TM_FUTURE_RATE_SAFETY;
+  }
+  const double reserve_seconds = peg_seconds + endgame_seconds;
+  return isfinite(reserve_seconds) && reserve_seconds >= 0.0 ? reserve_seconds
+                                                             : NAN;
+}
+
 static double
 play_chooser_get_clock_safety_reserve(int plays_remaining_for_player) {
   return PLAY_CHOOSER_CLOCK_RESERVE_SECONDS +
@@ -480,16 +701,20 @@ play_chooser_get_clock_safety_reserve(int plays_remaining_for_player) {
 // Budget for the on-turn player's current move: a flat budget when
 // configured, otherwise the safely spendable part of the player's remaining
 // clock (or current overtime period) split across their estimated plays.
-double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
-                                         const Game *game) {
+PlayChooserMoveBudget
+play_chooser_get_move_budget(const PlayChooserStrategy *strategy,
+                             const Game *game) {
+  PlayChooserMoveBudget move_budget = {0};
   if (strategy->fixed_seconds_per_move > 0.0) {
-    return strategy->fixed_seconds_per_move;
+    move_budget.seconds = strategy->fixed_seconds_per_move;
+    return move_budget;
   }
   const GameTimer *game_timer = strategy->game_timer;
   const int player_on_turn_index = game_get_player_on_turn_index(game);
   if (game_timer == NULL ||
       game_timer_player_is_untimed(game_timer, player_on_turn_index)) {
-    return PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS;
+    move_budget.seconds = PLAY_CHOOSER_DEFAULT_UNTIMED_MOVE_SECONDS;
+    return move_budget;
   }
   const int plays_remaining_for_player =
       play_chooser_estimated_plays_remaining(game);
@@ -497,13 +722,11 @@ double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
       game_timer_get_seconds_remaining(game_timer, player_on_turn_index);
   const bool in_overtime = seconds_remaining <= 0.0;
 
-  // At the last pre-endgame decision, equal slicing protects far more time
-  // than later endgame turns normally consume. The calibrated PEG policy uses
-  // the game clock as the bank: reserve the observed-max future endgame work
-  // in portable nodes, convert it with a conservative cold-start local rate,
-  // and expose the rest as the physical solver window. TimeManager still
-  // admits each candidate separately inside that window and may reserve more
-  // after the greedy prefix observes a slower live rate.
+  // Price the calibrated PEG/endgame reserve against the game clock, but keep
+  // the result shadow-only. The first live audit showed that neither a shorter
+  // shallow prefix nor a longer interrupted root search is a monotone quality
+  // boundary. The recommendation is therefore recorded below while the proven
+  // equal-slice depth cascade remains the physical solver window.
   if (strategy->use_calibrated_peg_time_manager && !in_overtime &&
       play_chooser_get_eval_for_phase(strategy, game) ==
           PLAY_CHOOSER_EVAL_PEG &&
@@ -520,12 +743,39 @@ double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
               : (double)future_nodes *
                     expected_cost.peg_seconds_per_endgame_node *
                     PLAY_CHOOSER_PEG_TM_FUTURE_RATE_SAFETY;
+      // In the trace panel, every second PEG turn followed an initial bag-4
+      // turn and entered at bag 1. Protect its calibrated entry wave here;
+      // otherwise an indivisible first PEG stage can consume the entire
+      // pre-endgame window and force the bag-1 turn to static.
+      double future_peg_seconds = 0.0;
+      if (bag_get_letters(game_get_bag(game)) == PEG_MAX_BAG) {
+        future_peg_seconds = play_chooser_get_peg_prefix_seconds(
+            &expected_cost, PEG_MIN_BAG, PEG_MAX_BAG - 1, 2);
+        if (!isfinite(future_peg_seconds)) {
+          future_peg_seconds = INFINITY;
+        }
+      }
       const double safety_seconds =
           play_chooser_get_clock_safety_reserve(plays_remaining_for_player);
-      const double available =
-          seconds_remaining - safety_seconds - future_seconds;
-      return available >= PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS ? available
-                                                               : 0.0;
+      const double available = seconds_remaining - safety_seconds -
+                               future_seconds - future_peg_seconds;
+      const double equal_slice = (seconds_remaining - safety_seconds) /
+                                 (double)plays_remaining_for_player;
+      // Neither direction of the calibrated PEG budget is ready to steer live
+      // play. Withdrawals changed interrupted root incumbents without buying a
+      // completed depth, while deposits often stopped before the next useful
+      // depth despite ample clock. Preserve the proven equal-slice cascade and
+      // keep the calibrated recommendation in shadow through these flags.
+      if (equal_slice >= PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS) {
+        move_budget.seconds = equal_slice;
+        move_budget.peg_shadow_seconds =
+            available >= PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS ? available : 0.0;
+        move_budget.reserve_shortfall =
+            available < PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS;
+        move_budget.peg_deposit_capped = available < equal_slice;
+        move_budget.peg_withdrawal_capped = available > equal_slice;
+      }
+      return move_budget;
     }
   }
 
@@ -542,14 +792,81 @@ double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
   reserve_seconds += (double)plays_remaining_for_player *
                      PLAY_CHOOSER_RESERVE_PER_PLAY_SECONDS;
   if (spendable_window_seconds <= reserve_seconds) {
-    return 0.0;
+    return move_budget;
   }
   const double budget_seconds = (spendable_window_seconds - reserve_seconds) /
                                 (double)plays_remaining_for_player;
-  if (budget_seconds < PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS) {
-    return 0.0;
+  double adjusted_budget_seconds = budget_seconds;
+  if (strategy->use_calibrated_peg_time_manager && !in_overtime &&
+      strategy->pre_endgame_eval == PLAY_CHOOSER_EVAL_PEG &&
+      play_chooser_get_eval_for_phase(strategy, game) ==
+          PLAY_CHOOSER_EVAL_SIM &&
+      strategy->peg_scenario_stride <= 1) {
+    const int sim_plays_remaining = play_chooser_estimated_sim_plays_before_peg(
+        bag_get_letters(game_get_bag(game)));
+    const double future_reserve_seconds =
+        play_chooser_get_future_analysis_reserve_seconds(strategy, game);
+    if (sim_plays_remaining > 0 && isfinite(future_reserve_seconds)) {
+      const double spend_down_seconds =
+          (spendable_window_seconds - reserve_seconds -
+           future_reserve_seconds) /
+          (double)sim_plays_remaining;
+      // This first production bridge only releases predictable late-phase
+      // surplus; it never makes a sim turn shorter than legacy equal slicing.
+      // Slow/mismatched hardware therefore fails back to existing behavior.
+      adjusted_budget_seconds =
+          fmax(adjusted_budget_seconds, spend_down_seconds);
+    }
   }
-  return budget_seconds;
+  if (adjusted_budget_seconds < PLAY_CHOOSER_MIN_MOVE_BUDGET_SECONDS) {
+    return move_budget;
+  }
+  move_budget.seconds = adjusted_budget_seconds;
+  return move_budget;
+}
+
+double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
+                                         const Game *game) {
+  return play_chooser_get_move_budget(strategy, game).seconds;
+}
+
+PlayChooserMoveBudget
+play_chooser_get_last_move_budget(const PlayChooser *play_chooser) {
+  return play_chooser->last_move_budget;
+}
+
+PlayChooserRegretEstimate
+play_chooser_get_last_regret_estimate(const PlayChooser *play_chooser) {
+  return play_chooser->last_regret_estimate;
+}
+
+PlayChooserRuleZeroTelemetry
+play_chooser_get_last_rule_zero_telemetry(const PlayChooser *play_chooser) {
+  return play_chooser->last_rule_zero_telemetry;
+}
+
+const char *play_chooser_regret_model_string(PlayChooserRegretModel model) {
+  switch (model) {
+  case PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE:
+    return "forced";
+  case PLAY_CHOOSER_REGRET_MODEL_SIM_BAI:
+    return "sim_bai";
+  case PLAY_CHOOSER_REGRET_MODEL_NONE:
+  default:
+    return "none";
+  }
+}
+
+const char *play_chooser_regret_scope_string(PlayChooserRegretModel model) {
+  switch (model) {
+  case PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE:
+    return "exact_forced_current_turn";
+  case PLAY_CHOOSER_REGRET_MODEL_SIM_BAI:
+    return "conditional_candidate_sampling";
+  case PLAY_CHOOSER_REGRET_MODEL_NONE:
+  default:
+    return "none";
+  }
 }
 
 static double play_chooser_get_min_budget_for_eval(play_chooser_eval_t eval) {
@@ -592,9 +909,13 @@ play_chooser_util_spread_scale(const PlayChooserStrategy *strategy);
 // out_move. out_simulated (optional) reports whether a sim actually ran: a
 // single-candidate position is short-circuited to that move WITHOUT simming, so
 // sim_results is left untouched and callers that read it must not use it.
+// primary_decision marks the turn's actual move choice; Rule-of-Zero stopping
+// and its telemetry are restricted to that call because challenge/branch
+// evaluations are outside the rule's validated scope.
 static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
                                  double budget_seconds, Move *out_move,
                                  bool *out_simulated, uint64_t parent_run_id,
+                                 bool primary_decision,
                                  ErrorStack *error_stack) {
   if (out_simulated != NULL) {
     *out_simulated = false;
@@ -634,6 +955,11 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
   }
   if (num_candidates == 1) {
     move_copy(out_move, move_list_get_move(move_list, 0));
+    play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){
+        .expected_utility_regret = 0.0,
+        .model = PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE,
+        .valid = true,
+    };
     AnalysisProgressEvent start =
         analysis_progress_event_create(ANALYSIS_MODE_SIM, ANALYSIS_EVENT_START);
     start.budget_seconds = budget_seconds;
@@ -667,26 +993,77 @@ static bool play_chooser_run_sim(PlayChooser *play_chooser, Game *game,
       /*max_num_display_plays=*/num_candidates,
       /*max_num_display_plies=*/sim_plies, strategy->seed,
       /*max_iterations=*/(uint64_t)1e15,
-      /*min_play_iterations=*/1, /*scond=*/0.0, BAI_THRESHOLD_NONE,
+      /*min_play_iterations=*/PLAY_CHOOSER_MIN_SIM_SAMPLES_PER_CANDIDATE,
+      /*scond=*/0.0, BAI_THRESHOLD_NONE,
       /*time_limit_seconds=*/budget_seconds, BAI_SAMPLING_RULE_TOP_TWO_IDS,
       /*cutoff=*/0.0, play_chooser_util_w_winpct(strategy),
       strategy->utility_w_spread, play_chooser_util_spread_scale(strategy),
       /*inference_args=*/NULL, &sim_args);
   sim_args.spread_forecast = strategy->spread_forecast;
   sim_args.progress_listener = progress_listener;
+  const bool rule_zero_requested =
+      primary_decision &&
+      (strategy->use_rule_zero_sim_stop || strategy->use_rule_zero_sim_shadow);
+  if (rule_zero_requested) {
+    sim_args.bai_options.rule_zero_enabled = true;
+    sim_args.bai_options.rule_zero_shadow = !strategy->use_rule_zero_sim_stop;
+    sim_args.bai_options.rule_zero_minimum_nodes = UINT64_C(100000);
+    sim_args.bai_options.rule_zero_minimum_stable_checkpoints = 2;
+    sim_args.bai_options.rule_zero_checkpoint_interval = 256;
+  }
 
   // The persistent SimCtx recycles the simmer's allocations across calls
   // (samples themselves are reset per simulation by the engine).
   simulate(&sim_args, &play_chooser->sim_ctx, play_chooser->sim_results,
            error_stack);
+  const double estimated_regret = bai_result_get_estimated_regret(
+      sim_results_get_bai_result(play_chooser->sim_results));
+  if (primary_decision) {
+    BAIResult *bai_result =
+        sim_results_get_bai_result(play_chooser->sim_results);
+    const int final_candidate_rank =
+        sim_results_get_best_move_index(play_chooser->sim_results);
+    uint64_t final_move_fingerprint = 0;
+    if (final_candidate_rank >= 0) {
+      final_move_fingerprint =
+          move_get_fingerprint(simmed_play_get_move(sim_results_get_simmed_play(
+              play_chooser->sim_results, final_candidate_rank)));
+    }
+    play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
+        .enabled = rule_zero_requested,
+        .shadow = rule_zero_requested && !strategy->use_rule_zero_sim_stop,
+        .stopped = bai_result_get_rule_zero_stopped(bai_result),
+        .would_stop = bai_result_get_rule_zero_would_stop(bai_result),
+        .nodes = bai_result_get_rule_zero_stop_nodes(bai_result),
+        .iterations = bai_result_get_rule_zero_stop_iterations(bai_result),
+        .stable_checkpoints =
+            bai_result_get_rule_zero_stable_checkpoints(bai_result),
+        .selected_switches =
+            bai_result_get_rule_zero_selected_switches(bai_result),
+        .near_tie_challengers =
+            bai_result_get_near_tie_challengers_at_stop(bai_result),
+        .selected_candidate_rank = final_candidate_rank,
+        .selected_move_fingerprint = final_move_fingerprint,
+    };
+  }
+  if (isfinite(estimated_regret) && estimated_regret >= 0.0) {
+    play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){
+        .expected_utility_regret = estimated_regret,
+        .model = PLAY_CHOOSER_REGRET_MODEL_SIM_BAI,
+        .valid = true,
+    };
+  }
   if (play_chooser_benchmark_is_enabled()) {
-    play_chooser_benchmark_add(&play_chooser_benchmark_stats.sim_calls, 1);
+    const uint64_t call_index = atomic_fetch_add_explicit(
+        &play_chooser_benchmark_stats.sim_calls, 1, memory_order_relaxed);
     play_chooser_benchmark_add(
         &play_chooser_benchmark_stats.sim_iterations,
         sim_results_get_iteration_count(play_chooser->sim_results));
     play_chooser_benchmark_add(
         &play_chooser_benchmark_stats.sim_nodes,
         sim_results_get_node_count(play_chooser->sim_results));
+    play_chooser_benchmark_record_sim_candidates(call_index,
+                                                 play_chooser->sim_results);
   }
   thread_control_destroy(thread_control);
   if (!error_stack_is_empty(error_stack)) {
@@ -730,6 +1107,8 @@ static bool play_chooser_run_endgame(
     int32_t window_alpha, int32_t window_beta,
     const AnalysisProgressListener *progress_listener, Move *out_move,
     int32_t *out_value, ErrorStack *error_stack) {
+  const bool benchmarking = play_chooser_benchmark_is_enabled();
+  const int64_t benchmark_start_ns = benchmarking ? ctimer_monotonic_ns() : 0;
   const int64_t deadline_ns =
       budget_seconds > 0.0
           ? ctimer_monotonic_ns() + (int64_t)(budget_seconds * 1.0e9)
@@ -783,17 +1162,37 @@ static bool play_chooser_run_endgame(
       /*actual_move=*/NULL, progress_listener, &endgame_args);
 
   endgame_solve(endgame_ctx, &endgame_args, endgame_results, error_stack);
-  if (play_chooser_benchmark_is_enabled()) {
-    play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_calls, 1);
-    if (*endgame_ctx != NULL) {
-      play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_nodes,
-                                 endgame_ctx_get_nodes_searched(*endgame_ctx));
-    }
+  if (benchmarking) {
+    const uint64_t call_index = atomic_fetch_add_explicit(
+        &play_chooser_benchmark_stats.endgame_calls, 1, memory_order_relaxed);
+    const uint64_t nodes =
+        *endgame_ctx != NULL ? endgame_ctx_get_nodes_searched(*endgame_ctx) : 0;
+    play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_nodes,
+                               nodes);
     const PVLine *const benchmark_pv =
         endgame_results_get_pvline(endgame_results, ENDGAME_RESULT_BEST);
+    const int depth =
+        benchmark_pv->num_moves > 0 && benchmark_pv->negamax_depth > 0
+            ? benchmark_pv->negamax_depth
+            : 0;
     if (benchmark_pv->num_moves > 0 && benchmark_pv->negamax_depth > 0) {
       play_chooser_benchmark_add(&play_chooser_benchmark_stats.endgame_depth,
                                  (uint64_t)benchmark_pv->negamax_depth);
+    }
+    const uint64_t event_index = atomic_fetch_add_explicit(
+        &play_chooser_endgame_event_count, 1, memory_order_relaxed);
+    if (event_index >= PLAY_CHOOSER_MAX_BENCHMARK_EVENTS) {
+      play_chooser_benchmark_add(
+          &play_chooser_benchmark_stats.endgame_events_dropped, 1);
+    } else {
+      play_chooser_endgame_events[event_index] = (PlayChooserEndgameEvent){
+          .call_index = call_index,
+          .elapsed_ns = (uint64_t)(ctimer_monotonic_ns() - benchmark_start_ns),
+          .nodes = nodes,
+          .depth = depth,
+          .completed = benchmark_pv->num_moves > 0,
+          .windowed = use_window,
+      };
     }
   }
   if (external_thread_control == NULL) {
@@ -936,16 +1335,26 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
                                        strategy->game_timer, player_index))
                        : 0.0;
   PegTimeManagerPolicy time_manager_policy = {0};
-  const int calibrated_stage_top_k[] = {32};
-  bool use_time_manager =
+  const bool observe_time_manager =
       strategy->use_calibrated_peg_time_manager && !greedy_only &&
       strategy->peg_scenario_stride <= 1 &&
       play_chooser_get_peg_reference_cost_models(
           strategy, game, &time_manager_policy.expected_cost_model,
           &time_manager_policy.deadline_cost_model);
-  if (use_time_manager) {
+  const bool has_runtime_endgame_rate =
+      observe_time_manager && play_chooser->peg_runtime_rate.observations > 0 &&
+      peg_time_manager_runtime_rate_apply(
+          &play_chooser->peg_runtime_rate, num_threads,
+          PLAY_CHOOSER_PEG_TM_RUNTIME_RATE_SAFETY,
+          &time_manager_policy.expected_cost_model,
+          &time_manager_policy.deadline_cost_model);
+  const bool enforce_time_manager = PLAY_CHOOSER_ENFORCE_PEG_STAGE_ADMISSION &&
+                                    observe_time_manager &&
+                                    has_runtime_endgame_rate;
+  if (observe_time_manager) {
     const int turns_remaining = play_chooser_estimated_plays_remaining(game);
     uint64_t future_reserve_nodes = 0;
+    double future_peg_reserve_seconds = 0.0;
     double future_value_per_second = 0.0;
     double safety_reserve_seconds = 0.0;
     if (has_player_clock && player_clock_seconds_at_start > 0.0) {
@@ -968,11 +1377,25 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
         }
       }
     }
+    if (has_player_clock &&
+        bag_get_letters(game_get_bag(game)) == PEG_MAX_BAG) {
+      future_peg_reserve_seconds = play_chooser_get_peg_prefix_seconds(
+          &time_manager_policy.expected_cost_model, PEG_MIN_BAG,
+          PEG_MAX_BAG - 1, 2);
+      if (!isfinite(future_peg_reserve_seconds) ||
+          future_peg_reserve_seconds < 0.0) {
+        // Fail closed at the refinement boundary. The greedy PEG seed remains
+        // available, but no candidate wave may be admitted without a valid
+        // price for the observed bag-4 -> bag-1 follow-up turn.
+        future_peg_reserve_seconds = INFINITY;
+      }
+    }
     time_manager_policy.clock = (TimeManagerClock){
         .remaining_seconds =
             has_player_clock ? player_clock_seconds_at_start : budget_seconds,
         .turns_remaining = has_player_clock ? turns_remaining : 1,
         .safety_reserve_seconds = safety_reserve_seconds,
+        .future_reserve_seconds = future_peg_reserve_seconds,
         .future_value_per_second = future_value_per_second,
         .minimum_completion_confidence = PLAY_CHOOSER_PEG_TM_MINIMUM_CONFIDENCE,
     };
@@ -982,20 +1405,23 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
         PLAY_CHOOSER_PEG_TM_COMPLETION_MULTIPLIER;
     time_manager_policy.allow_provisional_enforcement = true;
     time_manager_policy.use_live_cost_scale = true;
+    time_manager_policy.has_runtime_endgame_rate = has_runtime_endgame_rate;
     time_manager_policy.future_reserve_endgame_nodes = future_reserve_nodes;
     time_manager_policy.future_rate_safety_multiplier =
         PLAY_CHOOSER_PEG_TM_FUTURE_RATE_SAFETY;
-    time_manager_policy.minimum_2ply_candidates = 8;
+    time_manager_policy.minimum_2ply_candidates =
+        PLAY_CHOOSER_PEG_TM_MINIMUM_CANDIDATES;
     time_manager_policy.stability_patience_candidates = 4;
     time_manager_policy.maximum_2ply_candidates = 32;
+    time_manager_policy.use_complete_stage_admission = true;
   }
   PegArgs peg_args = {0};
   peg_args_fill(
       game, thread_control, /*num_threads=*/
       num_threads > 0 ? num_threads : 1,
       /*time_budget_seconds=*/budget_seconds, /*max_stage=*/0, greedy_only,
-      /*stage_top_k=*/use_time_manager ? calibrated_stage_top_k : NULL,
-      /*num_stages=*/use_time_manager ? 1 : 0,
+      /*stage_top_k=*/NULL,
+      /*num_stages=*/0,
       /*inner_top_k=*/0, PEG_OPP_RATIONAL, strategy->peg_scenario_stride,
       /*force_small_bag_stride=*/false, /*nested_enabled=*/false,
       /*nested_cand_cap=*/0, /*nested_cand_caps=*/NULL,
@@ -1010,11 +1436,18 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
       /*on_scenario_done=*/NULL,
       /*user_data=*/benchmarking ? &benchmark_context : NULL,
       &progress_listener,
-      /*time_manager_policy=*/use_time_manager ? &time_manager_policy : NULL,
-      /*enforce_time_manager=*/use_time_manager, has_player_clock,
+      /*time_manager_policy=*/
+      observe_time_manager ? &time_manager_policy : NULL,
+      /*enforce_time_manager=*/enforce_time_manager, has_player_clock,
       player_clock_seconds_at_start, /*poll=*/NULL, &peg_args);
   PegResult peg_result = {0};
   peg_solve(&peg_args, &peg_result, error_stack);
+  if (observe_time_manager) {
+    (void)peg_time_manager_runtime_rate_update(
+        &play_chooser->peg_runtime_rate, num_threads,
+        peg_result.last_stage_work_seconds,
+        peg_result.last_stage_work_endgame_nodes);
+  }
   if (benchmarking) {
     uint64_t final_scenarios = 0;
     for (int cand_idx = 0; cand_idx < peg_result.n_top_cands; cand_idx++) {
@@ -1066,12 +1499,25 @@ static bool play_chooser_run_peg(PlayChooser *play_chooser, const Game *game,
 void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
                               Move *out_move, ErrorStack *error_stack) {
   const PlayChooserStrategy *strategy = &play_chooser->strategy;
+  // A missing estimate is not zero regret. Reset before every decision so a
+  // PEG/endgame/static turn cannot inherit the preceding sim's value.
+  play_chooser->last_regret_estimate = (PlayChooserRegretEstimate){0};
+  play_chooser->last_rule_zero_telemetry = (PlayChooserRuleZeroTelemetry){
+      .enabled = strategy->use_rule_zero_sim_stop ||
+                 strategy->use_rule_zero_sim_shadow,
+      .shadow = !strategy->use_rule_zero_sim_stop &&
+                strategy->use_rule_zero_sim_shadow,
+      .near_tie_challengers = -1,
+      .selected_candidate_rank = -1,
+  };
   AnalysisProgressListener decision_progress =
       play_chooser_progress_for_run(play_chooser, /*parent_run_id=*/0);
   const play_chooser_eval_t eval =
       play_chooser_get_eval_for_phase(strategy, game);
-  const double budget_seconds =
-      play_chooser_get_seconds_for_move(strategy, game);
+  const PlayChooserMoveBudget move_budget =
+      play_chooser_get_move_budget(strategy, game);
+  play_chooser->last_move_budget = move_budget;
+  const double budget_seconds = move_budget.seconds;
   if (analysis_progress_is_enabled(&decision_progress)) {
     const int player_index = game_get_player_on_turn_index(game);
     AnalysisProgressEvent start = analysis_progress_event_create(
@@ -1114,9 +1560,10 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
     chose_move = true;
     break;
   case PLAY_CHOOSER_EVAL_SIM:
-    chose_move = play_chooser_run_sim(
-        play_chooser, game, budget_seconds, out_move,
-        /*out_simulated=*/NULL, decision_progress.run_id, error_stack);
+    chose_move =
+        play_chooser_run_sim(play_chooser, game, budget_seconds, out_move,
+                             /*out_simulated=*/NULL, decision_progress.run_id,
+                             /*primary_decision=*/true, error_stack);
     break;
   case PLAY_CHOOSER_EVAL_ENDGAME: {
     AnalysisProgressListener endgame_progress =
@@ -1131,7 +1578,9 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
   }
   case PLAY_CHOOSER_EVAL_PEG:
     // Selecting the actual play: run the full cascade so the halving stages'
-    // exact endgame refinement picks between the top candidates.
+    // exact endgame refinement picks between the top candidates. Candidate-
+    // level TimeManager remains shadow-only after the first live audit showed
+    // that shallow stability is not a substitute for completing a new depth.
     chose_move = play_chooser_run_peg(play_chooser, game, budget_seconds,
                                       play_chooser_get_num_threads(strategy),
                                       /*greedy_only=*/false, out_move,
@@ -1246,7 +1695,8 @@ play_chooser_evaluate_position(PlayChooser *play_chooser, Game *game,
     Move best_move;
     bool simulated = false;
     if (!play_chooser_run_sim(play_chooser, game, budget_seconds, &best_move,
-                              &simulated, /*parent_run_id=*/0, error_stack)) {
+                              &simulated, /*parent_run_id=*/0,
+                              /*primary_decision=*/false, error_stack)) {
       return PLAY_CHOOSER_BRANCH_INVALID;
     }
     if (!simulated) {

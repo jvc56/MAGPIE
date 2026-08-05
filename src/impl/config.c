@@ -1044,7 +1044,7 @@ void add_help_arg_to_string_builder(const Config *config, int token,
                                     const bool short_form) {
   const char *examples[10] = {NULL};
   const char *usages[10] = {NULL};
-  const char *text = "";
+  const char *text = NULL;
   bool is_hotkey = false;
   const char *name = NULL;
   const char *shortest_unambiguous_name = NULL;
@@ -3700,6 +3700,27 @@ void config_fill_autoplay_args(const Config *config,
                                     config->p2_utility_w_spread};
   const double utility_spread_scale[2] = {config->p1_utility_spread_scale,
                                           config->p2_utility_spread_scale};
+  const char *time_manager_p0_only_env = getenv("PCBENCH_TM_P0_ONLY");
+  const bool time_manager_p0_only =
+      time_manager_p0_only_env != NULL &&
+      (strcmp(time_manager_p0_only_env, "1") == 0 ||
+       strcmp(time_manager_p0_only_env, "true") == 0 ||
+       strcmp(time_manager_p0_only_env, "yes") == 0);
+  const char *wide_sim_screen_env = getenv("PCBENCH_WIDE_SIM_SCREEN");
+  const bool use_wide_sim_screen = wide_sim_screen_env != NULL &&
+                                   (strcmp(wide_sim_screen_env, "1") == 0 ||
+                                    strcmp(wide_sim_screen_env, "true") == 0 ||
+                                    strcmp(wide_sim_screen_env, "yes") == 0);
+  const char *rule_zero_p0_only_env = getenv("PCBENCH_RULE_ZERO_P0_ONLY");
+  const bool rule_zero_p0_only = rule_zero_p0_only_env != NULL &&
+                                 (strcmp(rule_zero_p0_only_env, "1") == 0 ||
+                                  strcmp(rule_zero_p0_only_env, "true") == 0 ||
+                                  strcmp(rule_zero_p0_only_env, "yes") == 0);
+  const char *rule_zero_shadow_env = getenv("PCBENCH_RULE_ZERO_SHADOW");
+  const bool rule_zero_shadow = rule_zero_shadow_env != NULL &&
+                                (strcmp(rule_zero_shadow_env, "1") == 0 ||
+                                 strcmp(rule_zero_shadow_env, "true") == 0 ||
+                                 strcmp(rule_zero_shadow_env, "yes") == 0);
   for (int player_index = 0; player_index < 2; player_index++) {
     autoplay_args->play_chooser_strategies[player_index] =
         (PlayChooserStrategy){
@@ -3708,8 +3729,14 @@ void config_fill_autoplay_args(const Config *config,
             .win_pcts = config->win_pcts,
             .spread_forecast = config->spread_forecast,
             .num_threads = num_worker_threads_per_sim,
+            .use_wide_sim_screen = use_wide_sim_screen,
+            .use_rule_zero_sim_stop = rule_zero_p0_only && player_index == 0,
+            // Shadow observation is result-neutral, so it may run on both
+            // players; enforced stopping on player 0 takes precedence.
+            .use_rule_zero_sim_shadow = rule_zero_shadow,
             .peg_scenario_stride = config->peg_scenario_stride,
-            .use_calibrated_peg_time_manager = true,
+            .use_calibrated_peg_time_manager =
+                !time_manager_p0_only || player_index == 0,
             .utility_w_winpct = utility_win_pct[player_index],
             .utility_w_spread = utility_spread[player_index],
             .utility_spread_scale = utility_spread_scale[player_index],

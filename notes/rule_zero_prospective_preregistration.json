@@ -1,0 +1,123 @@
+{
+  "artifact_kind": "rule_zero_prospective_preregistration",
+  "schema_version": 1,
+  "frozen_before_fresh_trajectory_generation": true,
+  "decision": "validate_rule_zero_only_cross_fitted_score_is_shadow_only_no_crc_rule",
+  "target": "same_arm_horizon_choice_and_signed_common_judge_improvement",
+  "rule": {
+    "checkpoint_interval_iterations": 256,
+    "minimum_nodes": 100000,
+    "minimum_stable_checkpoints": 2,
+    "near_tie_challengers": 0,
+    "near_tie_definition": "two_sided_99_percent_gaussian_difference_upper_bound_reaches_zero",
+    "missing_or_invalid_counters": "run_to_slice",
+    "scope": "early_stop_only_never_extend"
+  },
+  "constant_provenance": {
+    "development_commit": "a0be93a0",
+    "selection": "100K_and_two_checkpoints_were_selected_from_reused_development_grid",
+    "cross_fitted_score_threshold_0_000025": "not_a_decision_input_selected_on_reused_outcomes_and_failed_decile_gate"
+  },
+  "panel": {
+    "roots": 320,
+    "source_games": 320,
+    "roots_per_policy_bag_stratum": 40,
+    "policies": [
+      "static",
+      "playchooser-g3000ms"
+    ],
+    "bag_bands": [
+      "late_5_15",
+      "middle_late_16_35",
+      "middle_early_36_60",
+      "early_61_100"
+    ],
+    "selection_seed": 98317,
+    "selection_unit": "one_root_per_complete_source_game_without_oracle_outcomes",
+    "panel_order": "sha256_ranked"
+  },
+  "fresh_trajectory_generation": {
+    "games_per_policy": 160,
+    "games_per_resumable_chunk": 16,
+    "threads": 10,
+    "static": {
+      "base_seed": 960001,
+      "clock_ms": 1,
+      "play_analyzed_moves": false
+    },
+    "playchooser": {
+      "base_seed": 970001,
+      "clock_ms": 3000,
+      "play_analyzed_moves": true
+    }
+  },
+  "exclusions": [
+    {
+      "games": 80,
+      "path": "obj/rest-game-stratified-panel-20260801/sim-tail-top15-80-manifest.json",
+      "sha256": "bd8ba219538ca372db5e7f9c292d1d5c6f1ba245fdd4b9b01da475ed8730740d"
+    },
+    {
+      "games": 120,
+      "path": "obj/rest-game-stratified-panel-20260801/optional-stop-top15-120-manifest.json",
+      "sha256": "59b1d3fe1caa9e27fb145e40ce5f5fab1f554a8b94e7ba3c97bdd04fa44404c4"
+    },
+    {
+      "games": 96,
+      "path": "obj/rest-game-stratified-panel-20260801/combined-regret-fresh-96-20260803/selection-manifest.json",
+      "sha256": "c47c2dd71fd718c8c7af18a94a7d780c42ac01cd0cd98206b078dc9e68bc8066"
+    }
+  ],
+  "arm": {
+    "plies": 6,
+    "sorted_candidate_width": 60,
+    "maximum_nodes": 3000000,
+    "threads": 10,
+    "uniform_floor_per_mille": 100,
+    "sampling_rule": "top_two_ids_after_initial_round_robin"
+  },
+  "matched_control": {
+    "membership": "panel_source_index_mod_3_equals_0",
+    "expected_roots": 107,
+    "budget": "independent_exact_stopped_iteration_count",
+    "scheduler": "round_robin_if_stop_precedes_full_uniform_floor_otherwise_top_two_ids_with_full_absolute_floor"
+  },
+  "selective_judge": {
+    "plies": 10,
+    "samples_per_distinct_nominee": 100000,
+    "risk_plays": 8,
+    "audit_membership": "panel_source_index_mod_10_equals_0",
+    "expected_random_audit_roots": 32,
+    "also_judge": "every_3M_equal_slice_or_matched_choice_mismatch"
+  },
+  "horizons": {
+    "same_arm_full_nodes": 3000000,
+    "equal_slice_historical_minimum_nodes": 3652554,
+    "equal_slice_landmark_nodes": 3000000,
+    "equal_slice_rule": "min(panel_cap,historical_minimum_equal_slice_receipt)",
+    "note": "the_two_logged_horizons_coincide_in_this_capped_panel"
+  },
+  "shadow_model": {
+    "path": "obj/rest-game-stratified-panel-20260801/conditional-checkpoint-audit-96-20260803/horizon-differential-model.json",
+    "sha256": "a938fc67f7934555aa347ca4d4b60d0e8ffd103b8e1129f43f9db003132f0c0b",
+    "logged_at": "every_checkpoint",
+    "decision_role": "shadow_only",
+    "future_use": "crc_replay_only_after_a_separate_rule_is_frozen"
+  },
+  "gates": {
+    "mismatch": "each_horizon_exact_one_sided_95_percent_upper_at_most_0_015",
+    "judged_missed_value": "each_horizon_complete_game_student_t_95_percent_ci_upper_at_most_0_001",
+    "node_savings": "mean_at_least_0_50",
+    "matched_bias": "stopped_minus_matched_ci_contains_zero_and_upper_at_most_0_001",
+    "failure_action": "rule_does_not_ship_next_candidate_is_separately_frozen_crc_shadow_replay"
+  },
+  "accounting": {
+    "required_prefix": "0_through_319_contiguous",
+    "dropped": 0,
+    "private_partial_chunks": "never_append",
+    "inference_unit": "complete_source_game",
+    "nonanticipating": true
+  },
+  "live_allocation": "disabled",
+  "terminal_game_gate": "separate_mirrored_preregistered_gate_remains_mandatory"
+}

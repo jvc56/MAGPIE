@@ -1,0 +1,513 @@
+#!/usr/bin/env python3
+
+from __future__ import annotations
+
+from pathlib import Path
+import tempfile
+import unittest
+
+from tools.run_stratified_thinking_curve_panel import (
+    completed_by_plies,
+    eligible_indices,
+    validate_chunk_accounting,
+    validate_prefix,
+)
+
+
+class RunStratifiedThinkingCurvePanelTest(unittest.TestCase):
+    def test_eligible_indices_and_completed_prefix(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            corpus = root / "panel.positions"
+            corpus.write_text(
+                "".join(
+                    "TIME_VALUE_POSITION "
+                    f"position={index} game=0 source_seed=1 start=0 "
+                    f"turn={index + 1} player={index % 2} bag={bag} "
+                    "own_rack=7 opp_rack=7 spread=0 predicted_future_turns=1 "
+                    "trajectory_policy=static cgp=15 A/B 0/0 0\n"
+                    for index, bag in enumerate((86, 12, 4, 0))
+                ),
+                encoding="utf-8",
+            )
+            log = root / "curve.log"
+            log.write_text(
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=2 events=8 dropped=0 final_iterations=1 final_nodes=3\n"
+                "THINKING_CURVE_FORCED_POSITION source_index=1 position=1 "
+                "game=0 bag=12 plies=2 candidates=1 regret=0 cgp=x\n",
+                encoding="utf-8",
+            )
+            eligible = eligible_indices(corpus, 5, 100)
+            completed = completed_by_plies(log)[2]
+        self.assertEqual(eligible, [0, 1])
+        self.assertEqual(completed, {0, 1})
+        self.assertEqual(validate_prefix(eligible, completed), 2)
+
+    def test_rejects_nonprefix_completion(self) -> None:
+        with self.assertRaises(ValueError):
+            validate_prefix([0, 2, 4], {0, 4})
+
+    @staticmethod
+    def _matched_chunk(matched_iterations: int = 30) -> str:
+        rows = [
+            "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+            "plies=6 target_nodes=300 final=0 control=0 control_kind=stopped "
+            "iterations=30 nodes=200 min_play_iterations=1 bai_status=4 "
+            "regret_at_stop=.001 joint_regret_at_stop=.005\n",
+            "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+            "plies=6 target_nodes=210 final=0 control=1 control_kind=matched "
+            f"iterations={matched_iterations} nodes=205 min_play_iterations=1 "
+            "bai_status=3 regret_at_stop=nan joint_regret_at_stop=nan\n",
+            "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+            "plies=6 target_nodes=300 final=0 control=1 control_kind=full "
+            "iterations=42 nodes=290 min_play_iterations=1 bai_status=3 "
+            "regret_at_stop=nan joint_regret_at_stop=nan\n",
+            "THINKING_CURVE_REGRET_PANEL source_index=0 position=0 game=9 "
+            "bag=40 plies=6 target_nodes=300 risk_count=2 paired_rows=4 "
+            "probe_iterations=8\n",
+            "THINKING_CURVE_REGRET_ARM source_index=0 plies=6 "
+            "target_nodes=300 rank=0\n",
+            "THINKING_CURVE_REGRET_ARM source_index=0 plies=6 "
+            "target_nodes=300 rank=1\n",
+        ]
+        for pair_row in range(4):
+            for rank in range(2):
+                rows.append(
+                    "THINKING_CURVE_REGRET_SAMPLE source_index=0 plies=6 "
+                    f"target_nodes=300 pair_row={pair_row} rank={rank}\n"
+                )
+        rows.extend(
+            [
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=6 dropped=0 final_iterations=30 "
+                "final_nodes=200 judge_candidates=3 judge_iterations=3000 "
+                "judge_forced=0 control=1 control_iterations=42 "
+                "control_nodes=290 matched_control=1 matched_target_nodes=210 "
+                f"matched_iterations={matched_iterations} matched_nodes=205\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        return "".join(rows)
+
+    def test_validates_exact_matched_control_and_regret_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._matched_chunk(), encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.01,
+                regret_stop_use_joint=True,
+                regret_trace=True,
+                regret_risk_plays=2,
+                regret_paired_samples=4,
+                fixed_control=True,
+                matched_control=True,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_mismatched_iteration_control(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._matched_chunk(29), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "matched iterations differ"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=3,
+                    judge_samples=1000,
+                    regret_stop_target=0.01,
+                    regret_stop_use_joint=True,
+                    regret_trace=True,
+                    regret_risk_plays=2,
+                    regret_paired_samples=4,
+                    fixed_control=True,
+                    matched_control=True,
+                )
+
+    def test_validates_candidate_limit_control(self) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=40 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=295 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=15 target_nodes=300 final=0 "
+                "control=1 control_kind=candidate_limit iterations=42 nodes=290 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=4 dropped=0 final_iterations=42 final_nodes=295 "
+                "judge_candidates=3 judge_iterations=3000 judge_forced=0 "
+                "control=0 control_iterations=0 control_nodes=0 "
+                "matched_control=0 matched_target_nodes=0 matched_iterations=0 "
+                "matched_nodes=0 candidate_control=1 candidate_control_plays=15 "
+                "candidate_control_iterations=42 candidate_control_nodes=290\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=40,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=8,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=False,
+                candidate_control_plays=15,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_validates_multiple_candidate_limit_controls(self) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=40 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=295 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=15 target_nodes=300 final=0 "
+                "control=1 control_kind=candidate_limit iterations=42 nodes=290 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=24 target_nodes=300 final=0 "
+                "control=1 control_kind=candidate_limit iterations=42 nodes=292 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=1 utility=.1 utility_sem=.01 "
+                "win=.2 spread=3 best=0\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=9 utility=.2 utility_sem=.01 "
+                "win=.3 spread=4 best=1\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=18 utility=.15 utility_sem=.01 "
+                "win=.25 spread=3.5 best=0\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=30 utility=.05 utility_sem=.01 "
+                "win=.1 spread=2 best=0\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=6 dropped=0 final_iterations=42 final_nodes=295 "
+                "judge_candidates=4 judge_iterations=4000 judge_forced=0 "
+                "control=0 control_iterations=0 control_nodes=0 "
+                "matched_control=0 matched_target_nodes=0 matched_iterations=0 "
+                "matched_nodes=0 candidate_control=1 candidate_controls=2 "
+                "candidate_control_plays=15,24 "
+                "candidate_control_iterations=42,42 "
+                "candidate_control_nodes=290,292\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=40,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=8,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=False,
+                candidate_control_plays=(15, 24),
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_incomplete_judge_candidate_rows(self) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=40 arm_plays=40 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=295 "
+                "min_play_iterations=1 bai_status=3\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=1 utility=.1 utility_sem=.01 "
+                "win=.2 spread=3 best=1\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=2 dropped=0 final_iterations=42 final_nodes=295 "
+                "judge_candidates=2 judge_iterations=2000 judge_forced=0 "
+                "control=0 matched_control=0 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "candidate rows differ"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=40,
+                    judge_samples=1000,
+                    regret_stop_target=0.0,
+                    regret_stop_use_joint=False,
+                    regret_trace=False,
+                    regret_risk_plays=8,
+                    regret_paired_samples=4,
+                    fixed_control=False,
+                    matched_control=False,
+                )
+
+    @staticmethod
+    def _combined_chunk(predicted_total: float = 0.0009) -> str:
+        return "".join(
+            [
+                "THINKING_CURVE_COMBINED_STOP source_index=0 position=0 "
+                "game=9 bag=40 plies=6 arm_plays=3 checkpoints=5 "
+                "stopped_iterations=30 stopped_nodes=210 selected_rank=1 "
+                "raw_estimated_regret=.0004 raw_joint_estimated_regret=.0005 "
+                "near_tie_challengers=2 predicted_candidate_regret=.0003 "
+                "predicted_within_regret=.0006 "
+                f"predicted_total_regret={predicted_total} "
+                "regret_stop_target=.001 capped=0\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=210 final=0 "
+                "control=0 control_kind=stopped iterations=30 nodes=210 "
+                "min_play_iterations=1 selected_rank=1 bai_status=4 "
+                "regret_at_stop=.0004 joint_regret_at_stop=.0005\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=210 final=0 "
+                "control=1 control_kind=matched iterations=30 nodes=205 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=1 control_kind=full iterations=42 nodes=294 "
+                "min_play_iterations=1 selected_rank=2 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=9 dropped=0 final_iterations=30 "
+                "final_nodes=210 judge_candidates=3 judge_iterations=3000 "
+                "judge_forced=0 control=1 control_iterations=42 "
+                "control_nodes=294 matched_control=1 matched_target_nodes=210 "
+                "matched_iterations=30 matched_nodes=205 combined_regret=1 "
+                "combined_capped=0 combined_checkpoints=5 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+
+    def test_validates_combined_regret_cumulative_replay(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._combined_chunk(), encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=True,
+                combined_regret_stop_target=0.001,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_validates_capped_combined_stop_with_terminal_node_shortfall(
+        self,
+    ) -> None:
+        text = "".join(
+            [
+                "THINKING_CURVE_COMBINED_STOP source_index=0 position=0 "
+                "game=9 bag=40 plies=6 arm_plays=3 checkpoints=5 "
+                "stopped_iterations=42 stopped_nodes=293 selected_rank=1 "
+                "raw_estimated_regret=.0004 raw_joint_estimated_regret=.0005 "
+                "near_tie_challengers=2 predicted_candidate_regret=.0003 "
+                "predicted_within_regret=.0006 predicted_total_regret=.0009 "
+                "regret_stop_target=.001 capped=1\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=293 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=293 "
+                "min_play_iterations=1 selected_rank=1 bai_status=3 "
+                "regret_at_stop=.0004 joint_regret_at_stop=.0005\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=294 final=0 "
+                "control=1 control_kind=matched iterations=42 nodes=292 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=1 control_kind=full iterations=42 nodes=293 "
+                "min_play_iterations=1 selected_rank=1 bai_status=3 "
+                "regret_at_stop=nan joint_regret_at_stop=nan\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=9 dropped=0 final_iterations=42 "
+                "final_nodes=293 judge_candidates=3 judge_iterations=3000 "
+                "judge_forced=0 control=1 control_iterations=42 "
+                "control_nodes=293 matched_control=1 matched_target_nodes=294 "
+                "matched_iterations=42 matched_nodes=292 combined_regret=1 "
+                "combined_capped=1 combined_checkpoints=5 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(text, encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=True,
+                combined_regret_stop_target=0.001,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_nonadditive_combined_regret_prediction(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._combined_chunk(0.0008), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "prediction is invalid"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=3,
+                    judge_samples=1000,
+                    regret_stop_target=0.0,
+                    regret_stop_use_joint=False,
+                    regret_trace=False,
+                    regret_risk_plays=3,
+                    regret_paired_samples=4,
+                    fixed_control=False,
+                    matched_control=True,
+                    combined_regret_stop_target=0.001,
+                )
+
+    @staticmethod
+    def _checkpoint_audit_chunk(*, bad_judge_rank: bool = False) -> str:
+        last_rank = 9 if bad_judge_rank else 0
+        return "".join(
+            [
+                "THINKING_CURVE_POINT source_index=0 position=0 game=9 bag=40 "
+                "plies=6 candidates=3 arm_plays=3 target_nodes=300 final=0 "
+                "control=0 control_kind=stopped iterations=42 nodes=294 "
+                "min_play_iterations=1 selected_rank=0 bai_status=3\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=0 utility=.2 utility_sem=.01 "
+                "win=.3 spread=4 best=1\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=1 utility=.1 utility_sem=.01 "
+                "win=.2 spread=3 best=0\n",
+                "THINKING_CURVE_JUDGE_CANDIDATE source_index=0 position=0 "
+                "game=9 bag=40 plies=6 rank=2 utility=.0 utility_sem=.01 "
+                "win=.1 spread=2 best=0\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=0 iterations=10 "
+                "nodes=70 selected_rank=2 selected_id=22 stable_checkpoints=1 "
+                "stable_iterations=0 selected_switches=0 full_selected_rank=0 "
+                "estimated_best=.1 estimated_challenger=.09 estimated_regret=inf "
+                "joint_estimated_regret=inf near_tie_challengers=2 "
+                "judge_regret=.2 judge_win_regret=.2 judge_spread_regret=2\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=1 iterations=20 "
+                "nodes=140 selected_rank=0 selected_id=20 stable_checkpoints=1 "
+                "stable_iterations=0 selected_switches=1 full_selected_rank=0 "
+                "estimated_best=.11 estimated_challenger=.09 "
+                "estimated_regret=.001 joint_estimated_regret=.002 "
+                "near_tie_challengers=1 judge_regret=0 judge_win_regret=0 "
+                "judge_spread_regret=0\n",
+                "THINKING_CURVE_CHECKPOINT source_index=0 position=0 game=9 "
+                "bag=40 plies=6 arm_plays=3 checkpoint=2 iterations=42 "
+                f"nodes=294 selected_rank={last_rank} selected_id=20 "
+                "stable_checkpoints=2 stable_iterations=22 selected_switches=1 "
+                "full_selected_rank=0 estimated_best=.12 estimated_challenger=.08 "
+                "estimated_regret=.0001 joint_estimated_regret=.0002 "
+                "near_tie_challengers=0 judge_regret=0 judge_win_regret=0 "
+                "judge_spread_regret=0\n",
+                "THINKING_CURVE_POSITION_DONE source_index=0 position=0 "
+                "plies=6 events=5 dropped=0 final_iterations=42 final_nodes=294 "
+                "judge_candidates=3 judge_iterations=3000 judge_forced=0 "
+                "control=0 matched_control=0 combined_regret=0 "
+                "combined_checkpoints=3 candidate_control=0\n",
+                "THINKING_CURVE_DONE plies=6 evaluated=1\n",
+            ]
+        )
+
+    def test_validates_checkpoint_audit(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(self._checkpoint_audit_chunk(), encoding="utf-8")
+            accepted = validate_chunk_accounting(
+                path,
+                plies=6,
+                targets=(300,),
+                max_nodes=300,
+                num_plays=3,
+                judge_samples=1000,
+                regret_stop_target=0.0,
+                regret_stop_use_joint=False,
+                regret_trace=False,
+                regret_risk_plays=3,
+                regret_paired_samples=4,
+                fixed_control=False,
+                matched_control=False,
+                checkpoint_audit_interval=10,
+            )
+        self.assertEqual(accepted, [0])
+
+    def test_rejects_unjudged_checkpoint_move(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "chunk.log"
+            path.write_text(
+                self._checkpoint_audit_chunk(bad_judge_rank=True),
+                encoding="utf-8",
+            )
+            with self.assertRaisesRegex(ValueError, "checkpoint arm identity"):
+                validate_chunk_accounting(
+                    path,
+                    plies=6,
+                    targets=(300,),
+                    max_nodes=300,
+                    num_plays=3,
+                    judge_samples=1000,
+                    regret_stop_target=0.0,
+                    regret_stop_use_joint=False,
+                    regret_trace=False,
+                    regret_risk_plays=3,
+                    regret_paired_samples=4,
+                    fixed_control=False,
+                    matched_control=False,
+                    checkpoint_audit_interval=10,
+                )
+
+
+if __name__ == "__main__":
+    unittest.main()

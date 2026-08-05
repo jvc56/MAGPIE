@@ -1,0 +1,102 @@
+{
+  "artifact_kind": "rule_zero_prospective_preregistration",
+  "schema_version": 1,
+  "frozen_before_fresh_trajectory_generation": true,
+  "evidence_class": "development_pathfinding_not_certification",
+  "purpose": "estimate_p2_top15_stop_rate_savings_mismatch_and_near_tie_behavior_before_freezing_the_match_topology_panel",
+  "known_divergences_from_certification": {
+    "threads": "4_cloud_vm_not_match_machine",
+    "sampling_floor": "uniform_floor_per_mille_100_not_production_32_sample_prefix",
+    "exclusions": "empty_fresh_seed_blocks_cannot_overlap_prior_panels",
+    "shadow_model": "absent_logged_shadow_disabled"
+  },
+  "decision": "advisory_only_no_gate_may_be_armed_from_this_run",
+  "target": "same_arm_horizon_choice_and_signed_common_judge_improvement",
+  "rule": {
+    "checkpoint_interval_iterations": 256,
+    "minimum_nodes": 100000,
+    "minimum_stable_checkpoints": 2,
+    "near_tie_challengers": 0,
+    "near_tie_definition": "two_sided_99_percent_gaussian_difference_upper_bound_reaches_zero",
+    "missing_or_invalid_counters": "run_to_slice",
+    "scope": "early_stop_only_never_extend"
+  },
+  "panel": {
+    "roots": 320,
+    "source_games": 320,
+    "roots_per_policy_bag_stratum": 40,
+    "policies": [
+      "static",
+      "playchooser-g3000ms"
+    ],
+    "bag_bands": [
+      "late_5_15",
+      "middle_late_16_35",
+      "middle_early_36_60",
+      "early_61_100"
+    ],
+    "selection_seed": 81043,
+    "selection_unit": "one_root_per_complete_source_game_without_oracle_outcomes",
+    "panel_order": "sha256_ranked"
+  },
+  "fresh_trajectory_generation": {
+    "games_per_policy": 160,
+    "games_per_resumable_chunk": 16,
+    "threads": 4,
+    "static": {
+      "base_seed": 8204001,
+      "clock_ms": 1,
+      "play_analyzed_moves": false
+    },
+    "playchooser": {
+      "base_seed": 8304001,
+      "clock_ms": 3000,
+      "play_analyzed_moves": true
+    }
+  },
+  "exclusions": [],
+  "arm": {
+    "plies": 2,
+    "sorted_candidate_width": 15,
+    "maximum_nodes": 8000000,
+    "threads": 4,
+    "uniform_floor_per_mille": 100,
+    "sampling_rule": "top_two_ids_after_initial_round_robin"
+  },
+  "matched_control": {
+    "membership": "panel_source_index_mod_3_equals_0",
+    "expected_roots": 107,
+    "budget": "independent_exact_stopped_iteration_count",
+    "scheduler": "round_robin_if_stop_precedes_full_uniform_floor_otherwise_top_two_ids_with_full_absolute_floor"
+  },
+  "selective_judge": {
+    "plies": 10,
+    "samples_per_distinct_nominee": 100000,
+    "risk_plays": 8,
+    "audit_membership": "panel_source_index_mod_10_equals_0",
+    "expected_random_audit_roots": 32,
+    "also_judge": "every_landmark_or_matched_choice_mismatch"
+  },
+  "horizons": {
+    "same_arm_full_nodes": 8000000,
+    "equal_slice_historical_minimum_nodes": 3652554,
+    "equal_slice_landmark_nodes": 6000000,
+    "equal_slice_rule": "historical_median_6M_gate_with_3652554_and_8M_reported_sensitivities"
+  },
+  "advisory_readouts": {
+    "usefulness_floor": "stop_rate_at_least_0_30_and_node_savings_at_least_0_25_at_6M_landmark",
+    "mismatch": "each_landmark_exact_one_sided_95_percent_upper_bound_reported",
+    "judged_missed_value": "complete_game_student_t_95_percent_ci_reported",
+    "near_tie_distribution": "per_checkpoint_and_at_would_stop_reported",
+    "consequence": "certification_panel_on_match_topology_proceeds_only_if_usefulness_floor_plausible"
+  },
+  "accounting": {
+    "required_prefix": "0_through_319_contiguous",
+    "dropped": 0,
+    "private_partial_chunks": "never_append",
+    "inference_unit": "complete_source_game",
+    "nonanticipating": true
+  },
+  "live_allocation": "disabled",
+  "terminal_game_gate": "separate_mirrored_preregistered_gate_remains_mandatory"
+}

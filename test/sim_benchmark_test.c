@@ -26,7 +26,15 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include <time.h>
+
+static bool benchmark_env_true(const char *name) {
+  const char *value = getenv(name);
+  return value != NULL &&
+         (strcmp(value, "1") == 0 || strcmp(value, "true") == 0 ||
+          strcmp(value, "yes") == 0);
+}
 
 void test_sim_benchmark(void) {
   struct timespec start;
@@ -102,6 +110,12 @@ void test_play_chooser_benchmark(void) {
                                           : get_num_cores();
   const char *wit_env = getenv("PCBENCH_WIT");
   const char *wit = wit_env != NULL ? wit_env : "false";
+  const char *seed_env = getenv("PCBENCH_SEED");
+  const int seed = seed_env != NULL ? (int)strtol(seed_env, NULL, 10) : 24301;
+  const bool game_pairs = benchmark_env_true("PCBENCH_GAME_PAIR");
+  const bool play_analyzed_moves =
+      game_pairs || benchmark_env_true("PCBENCH_PLAY_MOVES");
+  const bool detail_events = benchmark_env_true("PCBENCH_DETAIL_EVENTS");
 
   char settings[512];
   (void)snprintf(
@@ -114,18 +128,29 @@ void test_play_chooser_benchmark(void) {
   Config *config = config_create_or_die(settings);
   char command[256];
   (void)snprintf(command, sizeof(command),
-                 "autoplay games %d -pc1 %d -pc2 %d -mtmode igp -gp false "
-                 "-otpenalty 0 -otperiod 1 -seed 24301",
-                 games, clock_ms, clock_ms);
+                 "autoplay games %d -pc1 %d -pc2 %d -mtmode igp -gp %s "
+                 "-otpenalty %d -otperiod 1 -seed %d",
+                 games, clock_ms, clock_ms, game_pairs ? "true" : "false",
+                 game_pairs ? 1 : 0, seed);
 
-  // Run every analysis but pin the played move to top static equity, as
-  // simbench does. Every binary therefore sees the same positions; the
-  // comparison is how much search work it completes under the same clocks.
-  autoplay_set_bench_static_move(true);
+  // The ordinary benchmark pins the played move to top static equity, as
+  // simbench does, so binaries see the same positions. Complete-trajectory
+  // collection may opt into the analyzed move to sample the state
+  // distribution induced by PlayChooser itself.
+  autoplay_set_bench_static_move(!play_analyzed_moves);
   play_chooser_benchmark_reset();
   load_and_exec_config_or_die(config, command);
   PlayChooserBenchmarkStats stats;
   play_chooser_benchmark_get(&stats);
+  const size_t sim_event_count =
+      play_chooser_benchmark_get_sim_candidate_events(NULL, 0);
+  PlayChooserSimCandidateEvent *sim_events = NULL;
+  size_t copied_sim_event_count = 0;
+  if (detail_events && sim_event_count > 0) {
+    sim_events = malloc_or_die(sim_event_count * sizeof(*sim_events));
+    copied_sim_event_count = play_chooser_benchmark_get_sim_candidate_events(
+        sim_events, sim_event_count);
+  }
   const size_t peg_event_count =
       play_chooser_benchmark_get_peg_candidate_events(NULL, 0);
   PlayChooserPegCandidateEvent *peg_events = NULL;
@@ -135,21 +160,35 @@ void test_play_chooser_benchmark(void) {
     copied_peg_event_count = play_chooser_benchmark_get_peg_candidate_events(
         peg_events, peg_event_count);
   }
+  const size_t endgame_event_count =
+      play_chooser_benchmark_get_endgame_events(NULL, 0);
+  PlayChooserEndgameEvent *endgame_events = NULL;
+  size_t copied_endgame_event_count = 0;
+  if (detail_events && endgame_event_count > 0) {
+    endgame_events =
+        malloc_or_die(endgame_event_count * sizeof(*endgame_events));
+    copied_endgame_event_count = play_chooser_benchmark_get_endgame_events(
+        endgame_events, endgame_event_count);
+  }
   play_chooser_benchmark_stop();
   autoplay_set_bench_static_move(false);
 
-  printf("PCBENCH games=%d clock_ms=%d static=%llu fallbacks=%llu "
-         "sim_calls=%llu sim_iters=%llu sim_nodes=%llu peg_calls=%llu "
+  printf("PCBENCH games=%d clock_ms=%d played_analysis=%d static=%llu "
+         "fallbacks=%llu "
+         "sim_calls=%llu sim_iters=%llu sim_nodes=%llu sim_event_drops=%llu "
+         "peg_calls=%llu "
          "peg_candidate_completions=%llu peg_event_drops=%llu "
          "peg_stages=%llu peg_candidates=%llu peg_scenarios=%llu "
          "peg_endgame_nodes=%llu peg_partials=%llu peg_tm_admissions=%llu "
          "peg_tm_false_starts=%llu eg_calls=%llu eg_nodes=%llu "
-         "eg_depth=%llu\n",
-         games, clock_ms, (unsigned long long)stats.static_moves,
+         "eg_depth=%llu eg_event_drops=%llu\n",
+         games, clock_ms, play_analyzed_moves ? 1 : 0,
+         (unsigned long long)stats.static_moves,
          (unsigned long long)stats.fallback_moves,
          (unsigned long long)stats.sim_calls,
          (unsigned long long)stats.sim_iterations,
          (unsigned long long)stats.sim_nodes,
+         (unsigned long long)stats.sim_candidate_events_dropped,
          (unsigned long long)stats.peg_calls,
          (unsigned long long)stats.peg_candidate_completions,
          (unsigned long long)stats.peg_candidate_events_dropped,
@@ -162,7 +201,18 @@ void test_play_chooser_benchmark(void) {
          (unsigned long long)stats.peg_time_manager_false_starts,
          (unsigned long long)stats.endgame_calls,
          (unsigned long long)stats.endgame_nodes,
-         (unsigned long long)stats.endgame_depth);
+         (unsigned long long)stats.endgame_depth,
+         (unsigned long long)stats.endgame_events_dropped);
+
+  for (size_t i = 0; i < copied_sim_event_count; i++) {
+    const PlayChooserSimCandidateEvent *event = &sim_events[i];
+    printf("PCSIMCAND call=%llu rank=%d iterations=%llu item=%llu "
+           "selected=%d win=%.9f utility=%.9f equity=%+.6f\n",
+           (unsigned long long)event->call_index, event->candidate_rank,
+           (unsigned long long)event->iterations,
+           (unsigned long long)event->item_id, event->selected ? 1 : 0,
+           event->win_pct, event->utility, event->equity);
+  }
 
   for (size_t i = 0; i < copied_peg_event_count; i++) {
     const PlayChooserPegCandidateEvent *event = &peg_events[i];
@@ -176,7 +226,17 @@ void test_play_chooser_benchmark(void) {
            event->mean_spread, (double)event->elapsed_ns / 1.0e6,
            (double)event->cpu_ns / 1.0e6);
   }
+  for (size_t i = 0; i < copied_endgame_event_count; i++) {
+    const PlayChooserEndgameEvent *event = &endgame_events[i];
+    printf("PCEG call=%llu depth=%d nodes=%llu completed=%d windowed=%d "
+           "elapsed_ms=%.3f\n",
+           (unsigned long long)event->call_index, event->depth,
+           (unsigned long long)event->nodes, event->completed ? 1 : 0,
+           event->windowed ? 1 : 0, (double)event->elapsed_ns / 1.0e6);
+  }
+  free(sim_events);
   free(peg_events);
+  free(endgame_events);
 
   config_destroy(config);
 }

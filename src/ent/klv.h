@@ -246,10 +246,9 @@ klv3_sample_rack_adjustment_magnitude(const KLV *klv, const int *unseen_counts,
   if (!klv_has_context_model(klv) || unseen_total <= 0 || tiles_in_bag <= 0) {
     return 0;
   }
-  int draw_count = tiles_in_bag < 4 ? tiles_in_bag : 4;
-  if (draw_count >= KLV3_DRAW_COUNT_HEADS) {
-    draw_count = KLV3_DRAW_COUNT_HEADS - 1;
-  }
+  static_assert(KLV3_DRAW_COUNT_HEADS > 4,
+                "the four-tile draw cap must stay within the head count");
+  const int draw_count = tiles_in_bag < 4 ? tiles_in_bag : 4;
   const int pool_bin = klv3_get_pool_bin(klv, unseen_total);
   int64_t magnitude = 0;
   for (int held = 0; held < klv->context_alphabet_size; held++) {
@@ -284,8 +283,9 @@ static inline Equity klv3_get_rack_adjustment_range(
     for (int i = 0; i < count; i++) {
       if (num_rack_tiles >= RACK_SIZE) {
         log_fatal("rack exceeds RACK_SIZE while measuring KLV3 adjustment");
+      } else {
+        rack_tiles[num_rack_tiles++] = (MachineLetter)ml;
       }
-      rack_tiles[num_rack_tiles++] = (MachineLetter)ml;
     }
   }
 

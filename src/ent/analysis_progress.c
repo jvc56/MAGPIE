@@ -3,6 +3,7 @@
 #include "../compat/ctime.h"
 #include <math.h>
 #include <stddef.h>
+#include <stdint.h>
 
 AnalysisProgressEvent analysis_progress_event_create(analysis_mode_t mode,
                                                      analysis_event_t event) {
@@ -22,6 +23,7 @@ AnalysisProgressEvent analysis_progress_event_create(analysis_mode_t mode,
       .subcandidates_total = -1,
       .best_index = -1,
       .challenger_index = -1,
+      .near_tie_challengers = -1,
       .value = NAN,
       .best_value = NAN,
       .challenger_value = NAN,

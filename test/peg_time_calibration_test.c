@@ -1,6 +1,8 @@
 #include "peg_time_calibration_test.h"
 
 #include "../src/compat/ctime.h"
+#include "../src/def/game_history_defs.h"
+#include "../src/def/rack_defs.h"
 #include "../src/ent/bag.h"
 #include "../src/ent/game.h"
 #include "../src/ent/game_history.h"
@@ -16,8 +18,8 @@
 #include "../src/util/io_util.h"
 #include "../src/util/string_util.h"
 #include "test_util.h"
-#include <inttypes.h>
 #include <glob.h>
+#include <inttypes.h>
 #include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
@@ -105,6 +107,9 @@ static int peg_cal_parse_schedule(const char *text, int *schedule,
 
 static double peg_cal_process_cpu_seconds(void) {
   struct timespec ts;
+  // glibc defines this clock id in an internal header that include-cleaner
+  // cannot attribute to the directly included <time.h>.
+  // NOLINTNEXTLINE(misc-include-cleaner)
   if (clock_gettime(CLOCK_PROCESS_CPUTIME_ID, &ts) == 0) {
     return (double)ts.tv_sec + (double)ts.tv_nsec / 1.0e9;
   }
@@ -234,7 +239,7 @@ static void peg_cal_print_stages(const PegResult *result, const char *mode,
   }
 }
 
-static void peg_cal_run_arm(Config *config, const char *mode,
+static void peg_cal_run_arm(const Config *config, const char *mode,
                             const char *position, const char *label) {
   static const int sentinel_schedule[] = {8};
   const bool greedy = strcmp(label, "greedy") == 0;
@@ -308,43 +313,42 @@ static void peg_cal_run_arm(Config *config, const char *mode,
   const int root_completed =
       result.n_stage_history > 0 ? result.stage_history[0].cands_done : 0;
   const bool refine_is_complete =
-      greedy ||
-      (deepest_stage_idx >= 0 &&
-       result.stage_history[deepest_stage_idx].end_ns > 0 &&
-       deepest_completed == deepest_total &&
-       result.last_completed_stage == requested_stages &&
-       !result.last_stage_partial);
-  const bool refine_is_partial = !greedy && stage_idx >= 0 &&
-                                 !refine_is_complete;
-  const char *status = refine_is_complete
-                           ? "completed"
-                           : (stage_idx >= 0 ? "partial" : "seed_only");
+      greedy || (deepest_stage_idx >= 0 &&
+                 result.stage_history[deepest_stage_idx].end_ns > 0 &&
+                 deepest_completed == deepest_total &&
+                 result.last_completed_stage == requested_stages &&
+                 !result.last_stage_partial);
+  const bool refine_is_partial =
+      !greedy && stage_idx >= 0 && !refine_is_complete;
+  const char *status = "seed_only";
+  if (refine_is_complete) {
+    status = "completed";
+  } else if (stage_idx >= 0) {
+    status = "partial";
+  }
   char move[64];
   peg_cal_move_string(config_get_game(config), &result.best_move, move,
                       sizeof(move));
   const double occupancy =
-      wall_seconds > 0.0
-          ? cpu_seconds / (wall_seconds * (double)threads)
-          : 0.0;
-  (void)printf("PEGCAL_ARM\tmode=%s\tposition=%s\tlabel=%s\tbudget_seconds=%.3f"
-               "\tmove=%s\tself_win=%.9f\tself_spread=%.6f"
-               "\tlast_completed_stage=%d\tstatus=%s\tpartial=%d"
-               "\tpublished_partial=%d"
-               "\troot_candidate_total=%d\troot_completed_candidates=%d"
-               "\trefine_candidate_total=%d\trefine_completed_candidates=%d"
-               "\trequested_stages=%d\tdeepest_candidate_total=%d"
-               "\tdeepest_completed_candidates=%d"
-               "\tcumulative_scenarios=%" PRIu64
-               "\tnested_endgame_nodes=%" PRIu64
-               "\twall_seconds=%.9f\tprocess_cpu_seconds=%.9f"
-               "\tscheduled_core_occupancy=%.9f\tthreads=%d\n",
-               mode, position, label, budget, move, result.best_win,
-               result.best_spread, result.last_completed_stage, status,
-               refine_is_partial ? 1 : 0, result.last_stage_partial ? 1 : 0,
-               root_total, root_completed, refine_total, refine_completed,
-               requested_stages, deepest_total, deepest_completed,
-               cumulative_scenarios, result.nested_endgame_nodes, wall_seconds,
-               cpu_seconds, occupancy, threads);
+      wall_seconds > 0.0 ? cpu_seconds / (wall_seconds * (double)threads) : 0.0;
+  (void)printf(
+      "PEGCAL_ARM\tmode=%s\tposition=%s\tlabel=%s\tbudget_seconds=%.3f"
+      "\tmove=%s\tself_win=%.9f\tself_spread=%.6f"
+      "\tlast_completed_stage=%d\tstatus=%s\tpartial=%d"
+      "\tpublished_partial=%d"
+      "\troot_candidate_total=%d\troot_completed_candidates=%d"
+      "\trefine_candidate_total=%d\trefine_completed_candidates=%d"
+      "\trequested_stages=%d\tdeepest_candidate_total=%d"
+      "\tdeepest_completed_candidates=%d"
+      "\tcumulative_scenarios=%" PRIu64 "\tnested_endgame_nodes=%" PRIu64
+      "\twall_seconds=%.9f\tprocess_cpu_seconds=%.9f"
+      "\tscheduled_core_occupancy=%.9f\tthreads=%d\n",
+      mode, position, label, budget, move, result.best_win, result.best_spread,
+      result.last_completed_stage, status, refine_is_partial ? 1 : 0,
+      result.last_stage_partial ? 1 : 0, root_total, root_completed,
+      refine_total, refine_completed, requested_stages, deepest_total,
+      deepest_completed, cumulative_scenarios, result.nested_endgame_nodes,
+      wall_seconds, cpu_seconds, occupancy, threads);
   (void)fflush(stdout);
 
   error_stack_destroy(error_stack);
@@ -388,7 +392,7 @@ static int peg_cal_parse_nominees(const Game *game, ValidatedMoves **validated,
   return count;
 }
 
-static void peg_cal_run_judge(Config *config, const char *position) {
+static void peg_cal_run_judge(const Config *config, const char *position) {
   ValidatedMoves *validated[PEG_CAL_MAX_NOMINEES] = {0};
   const Move *nominees[PEG_CAL_MAX_NOMINEES] = {0};
   char requested_moves[PEG_CAL_MAX_NOMINEES][64] = {{0}};
@@ -474,9 +478,7 @@ static void peg_cal_run_judge(Config *config, const char *position) {
     }
   }
   const double occupancy =
-      wall_seconds > 0.0
-          ? cpu_seconds / (wall_seconds * (double)threads)
-          : 0.0;
+      wall_seconds > 0.0 ? cpu_seconds / (wall_seconds * (double)threads) : 0.0;
   (void)printf(
       "PEGCAL_JUDGE\tposition=%s\tlabel=%s\tjudge_ply=%d\tstride=%d"
       "\tbudget_seconds=%.3f\tnominee_count=%d\taccepted=%d"
@@ -518,8 +520,7 @@ void test_peg_time_calibration(void) {
 }
 
 static const Rack *peg_cal_next_player_rack(const GameHistory *history,
-                                            int event_index,
-                                            int player_index) {
+                                            int event_index, int player_index) {
   const int event_count = game_history_get_num_events(history);
   for (int index = event_index + 1; index < event_count; index++) {
     const GameEvent *event = game_history_get_event(history, index);
@@ -577,8 +578,7 @@ void test_peg_extract_gcg_panel(void) {
   ErrorStack *error_stack = error_stack_create();
   int valid_sources = 0;
   int emitted_by_bag[5] = {0};
-  for (size_t source_index = 0; source_index < paths.gl_pathc;
-       source_index++) {
+  for (size_t source_index = 0; source_index < paths.gl_pathc; source_index++) {
     const int starting_player =
         peg_cal_gcg_starting_player(paths.gl_pathv[source_index]);
     GameHistory *history = game_history_create();
@@ -629,10 +629,9 @@ void test_peg_extract_gcg_panel(void) {
       const int on_turn = game_event_get_player_index(event);
       const int off_turn = 1 - on_turn;
       const Rack *on_turn_rack = game_event_get_const_rack(event);
-      const int unseen =
-          bag_get_letters(game_get_bag(game)) +
-          rack_get_total_letters(
-              player_get_rack(game_get_player(game, off_turn)));
+      const int unseen = bag_get_letters(game_get_bag(game)) +
+                         rack_get_total_letters(
+                             player_get_rack(game_get_player(game, off_turn)));
       const int peg_bag = unseen - RACK_SIZE;
       if (peg_bag >= 1 && peg_bag <= 4 && !emitted[peg_bag] &&
           rack_get_total_letters(on_turn_rack) == RACK_SIZE) {
@@ -671,11 +670,10 @@ void test_peg_extract_gcg_panel(void) {
     game_destroy(game);
     game_history_destroy(history);
   }
-  (void)printf(
-      "PEG_PANEL_DONE\tsources=%zu\tvalid_sources=%d"
-      "\tbag1=%d\tbag2=%d\tbag3=%d\tbag4=%d\n",
-      paths.gl_pathc, valid_sources, emitted_by_bag[1], emitted_by_bag[2],
-      emitted_by_bag[3], emitted_by_bag[4]);
+  (void)printf("PEG_PANEL_DONE\tsources=%zu\tvalid_sources=%d"
+               "\tbag1=%d\tbag2=%d\tbag3=%d\tbag4=%d\n",
+               paths.gl_pathc, valid_sources, emitted_by_bag[1],
+               emitted_by_bag[2], emitted_by_bag[3], emitted_by_bag[4]);
   (void)fflush(stdout);
 
   globfree(&paths);

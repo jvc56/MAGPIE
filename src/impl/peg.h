@@ -262,11 +262,12 @@ typedef struct PegArgs {
   AnalysisProgressListener progress_listener;
 
   // Optional TimeManager shadow/admission policy. Shadow mode emits ADMISSION
-  // events without changing dispatcher topology or results. Enforced no-poll
-  // mode splits the 2-ply stage into the calibrated first-two wave followed by
-  // individually replanned candidates. The policy must explicitly opt into
-  // the provisional finite-corpus envelope; zero-initialized policies remain
-  // fail-closed.
+  // events without changing dispatcher topology or results. The current model
+  // admits only a complete no-poll depth: enforcement either submits the
+  // ordinary stage-wide barrier or retains the previous fully completed
+  // depth. The legacy first-two/single-candidate dispatcher remains available
+  // only when use_complete_stage_admission is false. Every enforcement mode
+  // is explicit opt-in; zero-initialized policies remain fail-closed.
   PegTimeManagerPolicy *time_manager_policy;
   bool enforce_time_manager;
   // TimeManager plans against the player's game clock when present. The
@@ -314,6 +315,12 @@ static inline void peg_args_fill(
   peg_args->greedy_seed_only = greedy_seed_only;
   peg_args->stage_top_k = stage_top_k;
   peg_args->num_stages = num_stages;
+  // The fill contract initializes every field: callers pass stack structs
+  // without zeroing them first. Leaving this to the caller made the ordinary
+  // 2,3,4,... ramp depend on stack garbage, which intermittently tripped the
+  // solver's fidelity validation. Callers that want a fixed fidelity set it
+  // after this call.
+  peg_args->stage_fidelity_plies = 0;
   peg_args->inner_top_k = inner_top_k;
   peg_args->opp_model = opp_model;
   peg_args->scenario_stride = scenario_stride;
@@ -417,6 +424,17 @@ typedef struct PegResult {
   // machine-independent work counter; unlike wall time it remains meaningful
   // when the host is carrying another load.
   uint64_t nested_endgame_nodes;
+
+  // Work and wall time observed in the most recently scored non-greedy stage
+  // with positive exact-endgame-node work, including a legacy
+  // deadline-truncated stage. A later zero-node depth does not erase this
+  // usable hardware-rate sample. This is throughput calibration only;
+  // `last_completed_stage` remains the publication boundary. A persistent
+  // TimeManager can use these values to price the next PEG call on the current
+  // hardware without treating partial values as a completed ranking.
+  double last_stage_work_seconds;
+  uint64_t last_stage_work_scenarios;
+  uint64_t last_stage_work_endgame_nodes;
 
   // Top-K cand list from the last completed stage, sorted descending by
   // (win_pct + 1e-4 * mean_spread). Caller owns/frees via peg_result_destroy.

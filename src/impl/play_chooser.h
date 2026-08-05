@@ -47,6 +47,24 @@ typedef struct PlayChooserStrategy {
   play_chooser_eval_t endgame_eval;
   int sim_plies;          // 0 = default
   int sim_max_candidates; // 0 = default
+  // Experimental two-stage candidate policy. When sim_max_candidates is
+  // unset, generate a 60-move equity screen instead of the legacy top 15.
+  // BAI's mandatory per-arm prefix screens every move, after which
+  // TOP_TWO_IDS concentrates work on the incumbent/challenger risk set.
+  // This flag changes candidate coverage only; TimeManager allocation remains
+  // independently fail-closed.
+  bool use_wide_sim_screen;
+  // Disabled-by-default, conservative SIM early-stop experiment. When set,
+  // Rule of Zero is evaluated at 256-iteration checkpoints; invalid counters
+  // always run to the ordinary time boundary. It applies only to the primary
+  // move-decision simulation, never to challenge/branch evaluations, which
+  // were not in the validated scope. This must remain false outside
+  // explicitly preregistered benchmark treatments.
+  bool use_rule_zero_sim_stop;
+  // Result-neutral variant for panel collection: the first satisfying
+  // Rule-of-Zero checkpoint is recorded in telemetry while the search runs
+  // to its ordinary boundary. Ignored when use_rule_zero_sim_stop is set.
+  bool use_rule_zero_sim_shadow;
   // Maximum endgame solve depth in plies; 0 = solve as deep as the time
   // budget allows.
   int endgame_plies;
@@ -119,6 +137,57 @@ typedef struct PlayChooserStrategy {
 
 typedef struct PlayChooser PlayChooser;
 
+// Search budget selected for the current move. The first live PEG calibration
+// did not establish a monotone value curve for either shortening or extending
+// the ordinary depth cascade, so calibrated PEG budgets are shadow-only for
+// now. The two cap flags record which direction the shadow recommendation
+// differed from the legacy equal slice; reserve_shortfall is the stronger case
+// where the protected future forecast did not leave even a minimum move
+// budget. Actual PEG search still receives the equal slice in all three cases.
+typedef struct PlayChooserMoveBudget {
+  double seconds;
+  double peg_shadow_seconds;
+  bool reserve_shortfall;
+  bool peg_deposit_capped;
+  bool peg_withdrawal_capped;
+} PlayChooserMoveBudget;
+
+typedef struct PlayChooserRuleZeroTelemetry {
+  bool enabled;
+  bool shadow;
+  bool stopped;
+  bool would_stop;
+  uint64_t nodes;
+  uint64_t iterations;
+  int stable_checkpoints;
+  int selected_switches;
+  int near_tie_challengers;
+  // Final decision identity is recorded separately from the BAI's internal
+  // arm index, which is not a candidate rank for replay purposes.
+  int selected_candidate_rank;
+  uint64_t selected_move_fingerprint;
+} PlayChooserRuleZeroTelemetry;
+
+// Residual current-search regret reported by the chooser after one move
+// selection. The value is in the same [0, 1] blended-utility units used to
+// rank the candidate arms. SIM_BAI is conditional on the generated candidate
+// set, rollout horizon/policy, and BAI sampling model: it is not oracle
+// current-turn regret and is not a rest-of-game forecast. `valid == false` is
+// deliberately distinct from zero: PEG, endgame, and static play do not yet
+// have a calibrated residual-regret model and must not look exact in
+// retrospective accounting.
+typedef enum PlayChooserRegretModel {
+  PLAY_CHOOSER_REGRET_MODEL_NONE,
+  PLAY_CHOOSER_REGRET_MODEL_FORCED_MOVE,
+  PLAY_CHOOSER_REGRET_MODEL_SIM_BAI,
+} PlayChooserRegretModel;
+
+typedef struct PlayChooserRegretEstimate {
+  double expected_utility_regret;
+  PlayChooserRegretModel model;
+  bool valid;
+} PlayChooserRegretEstimate;
+
 // Aggregate work completed by PlayChooser while benchmark collection is
 // enabled. Timed searches should be compared by this work, not by wall time:
 // their wall time is intentionally bounded by the same clock.
@@ -128,6 +197,7 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t sim_calls;
   uint64_t sim_iterations;
   uint64_t sim_nodes;
+  uint64_t sim_candidate_events_dropped;
   uint64_t peg_calls;
   uint64_t peg_candidate_completions;
   uint64_t peg_candidate_events_dropped;
@@ -141,7 +211,22 @@ typedef struct PlayChooserBenchmarkStats {
   uint64_t endgame_calls;
   uint64_t endgame_nodes;
   uint64_t endgame_depth;
+  uint64_t endgame_events_dropped;
 } PlayChooserBenchmarkStats;
+
+// One arm snapshot at the end of a simulation call. The call index joins the
+// row to aggregate benchmark counters and, in the autoplay match harness, to
+// the turn that owned the call.
+typedef struct PlayChooserSimCandidateEvent {
+  uint64_t call_index;
+  uint64_t iterations;
+  uint64_t item_id;
+  int candidate_rank;
+  bool selected;
+  double win_pct;
+  double utility;
+  double equity;
+} PlayChooserSimCandidateEvent;
 
 // One completed PEG candidate. A call index identifies the PEG solve and the
 // elapsed and process CPU time are measured from the start of that solve.
@@ -163,6 +248,19 @@ typedef struct PlayChooserPegCandidateEvent {
   double mean_spread;
 } PlayChooserPegCandidateEvent;
 
+// One completed PlayChooser endgame call. Nodes and depth describe the last
+// usable result returned by the call; elapsed time is measured around the
+// solver invocation. Windowed calls are challenge-decision subsolves and can
+// be separated from ordinary move selection by offline analysis.
+typedef struct PlayChooserEndgameEvent {
+  uint64_t call_index;
+  uint64_t elapsed_ns;
+  uint64_t nodes;
+  int depth;
+  bool completed;
+  bool windowed;
+} PlayChooserEndgameEvent;
+
 typedef struct ChallengeDecision {
   // True if the move forms at least one word that is invalid in the
   // chooser's lexicon. The chooser never advises challenging valid plays.
@@ -181,6 +279,9 @@ typedef struct ChallengeDecision {
 
 PlayChooser *play_chooser_create(const PlayChooserStrategy *strategy);
 void play_chooser_destroy(PlayChooser *play_chooser);
+// Effective candidate width after applying explicit, wide-screen, and legacy
+// defaults. Exposed for audit logs and regression tests.
+int play_chooser_get_sim_candidate_limit(const PlayChooser *play_chooser);
 
 // Enable/reset, snapshot, and disable the process-wide benchmark counters.
 // Counters are atomic because autoplay may run chooser games concurrently.
@@ -188,12 +289,17 @@ void play_chooser_destroy(PlayChooser *play_chooser);
 // chooser operation when unused.
 void play_chooser_benchmark_reset(void);
 void play_chooser_benchmark_get(PlayChooserBenchmarkStats *stats);
+size_t play_chooser_benchmark_get_sim_candidate_events(
+    PlayChooserSimCandidateEvent *events, size_t capacity);
 // Copies up to capacity PEG candidate events into events and returns the
 // number copied. With a NULL events pointer or zero capacity, returns the
 // number currently retained without copying. The stats snapshot reports any
 // events dropped because the fixed process-wide event buffer filled.
 size_t play_chooser_benchmark_get_peg_candidate_events(
     PlayChooserPegCandidateEvent *events, size_t capacity);
+size_t
+play_chooser_benchmark_get_endgame_events(PlayChooserEndgameEvent *events,
+                                          size_t capacity);
 void play_chooser_benchmark_stop(void);
 
 // Choose a move for the player on turn in game, delegating to static
@@ -207,6 +313,34 @@ void play_chooser_choose_move(PlayChooser *play_chooser, Game *game,
 // is not enough safely spendable clock for a non-static search.
 double play_chooser_get_seconds_for_move(const PlayChooserStrategy *strategy,
                                          const Game *game);
+
+// Returns the live budget together with the shadow PEG recommendation and its
+// fail-safe reason. Ordinary callers can use play_chooser_get_seconds_for_move;
+// move selection and audit tooling use this form to prove that a reserve
+// shortfall still runs the ordinary equal-slice cascade.
+PlayChooserMoveBudget
+play_chooser_get_move_budget(const PlayChooserStrategy *strategy,
+                             const Game *game);
+
+// Returns the exact budget decision used by the most recent
+// play_chooser_choose_move call. This avoids benchmark telemetry recomputing a
+// clock-sensitive decision after the game timer has advanced.
+PlayChooserMoveBudget
+play_chooser_get_last_move_budget(const PlayChooser *play_chooser);
+PlayChooserRegretEstimate
+play_chooser_get_last_regret_estimate(const PlayChooser *play_chooser);
+PlayChooserRuleZeroTelemetry
+play_chooser_get_last_rule_zero_telemetry(const PlayChooser *play_chooser);
+const char *play_chooser_regret_model_string(PlayChooserRegretModel model);
+// Human-readable statistical scope for trace schemas. Keep this separate from
+// the model name so audit tooling cannot accidentally present SIM_BAI as a
+// learned value-to-go estimate.
+const char *play_chooser_regret_scope_string(PlayChooserRegretModel model);
+
+// Conservative count of the on-turn player's remaining sim decisions before
+// the bag reaches PEG range. Includes one contingency turn because the usual
+// eight-tiles-per-pair estimate can undercount low-tile plays.
+int play_chooser_estimated_sim_plays_before_peg(int bag_tiles);
 
 // Decide whether opp_move, announced by the player on turn in
 // game_before_move, should be challenged off. game_before_move must be

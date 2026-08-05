@@ -11,6 +11,8 @@
   "csw24-peg-hc-local-wall-shadow-v1-20260730"
 #define PEG_TIME_MANAGER_VALUE_ARTIFACT_ID                                     \
   "csw24-peg-direct4-quality-shadow-v1-20260730"
+#define PEG_TIME_MANAGER_STAGE_ARTIFACT_ID                                     \
+  "csw24-peg-adaptive-complete-stage-shadow-v6-20260801"
 
 // The first useful PEG result at a new fidelity needs two completed
 // candidates: one candidate cannot re-rank anything. Later candidates may be
@@ -107,6 +109,102 @@ typedef struct PegTimeManagerRequest {
   double player_clock_remaining_seconds;
 } PegTimeManagerRequest;
 
+// One indivisible PEG depth. Unlike the legacy first-two/candidate request,
+// this request describes every survivor which will be submitted behind the
+// next stage barrier. `stage_scenarios` is known exactly at the boundary: the
+// candidate's bag enumeration does not change with endgame depth. For depth 3
+// and later, the previous depth's node count for these same survivors is the
+// strongest portable predictor of the next depth's work.
+typedef struct PegTimeManagerStageRequest {
+  int bag_tiles;
+  int stage_index;
+  int fidelity_plies;
+  int previous_fidelity_plies;
+  int workers;
+  int candidates;
+  bool nested_enabled;
+  int scenario_stride;
+  // True only when the entire requested stage is submitted as one barrier.
+  // Candidate-at-a-time live polling is not covered by this model.
+  bool parallel_stage_dispatch;
+  uint64_t stage_scenarios;
+  uint64_t previous_stage_scenarios;
+  uint64_t previous_stage_endgame_nodes;
+  // Whole previous-stage totals (before survivor narrowing) are used only to
+  // measure the local stage rate. The fields above refer to the selected
+  // survivors and drive the next-depth work forecast.
+  uint64_t observed_previous_stage_scenarios;
+  uint64_t observed_previous_stage_endgame_nodes;
+  double observed_previous_stage_elapsed_seconds;
+  // Work/time already spent on this move, normally including the greedy seed
+  // and every fully completed shallower stage.
+  uint64_t completed_scenarios;
+  uint64_t completed_endgame_nodes;
+  double elapsed_seconds;
+  double remaining_seconds;
+  bool has_player_clock;
+  double player_clock_remaining_seconds;
+} PegTimeManagerStageRequest;
+
+// Frozen form of the complete-stage work model. The first depth is a cold
+// estimate from exact scenario count; later depths combine that floor with a
+// multiplier on the same survivors' previous-depth nodes. Work remains
+// hardware independent and the caller's live cost model converts it to wall
+// time.
+typedef struct PegTimeManagerStageCalibration {
+  int bag_tiles;
+  int stage_index;
+  int fidelity_plies;
+  int previous_fidelity_plies;
+  int maximum_candidates;
+  int source_positions;
+  int heldout_positions;
+  int heldout_false_starts;
+  // The bound is tuned as a prospective p95 completion envelope. The source
+  // sample is deliberately kept separate from the held-out enforcement gate:
+  // source_quantile_evidence is 1 - target_quantile^source_positions for an
+  // observed source maximum, and is diagnostic rather than permission to run
+  // the policy live.
+  double target_completion_quantile;
+  double source_quantile_evidence;
+  double expected_nodes_per_scenario;
+  double completion_nodes_per_scenario;
+  // Optional whole-stage cap learned directly from complete stage totals.
+  // The scenarios-based and absolute models are two alternative estimates of
+  // the same stage work, so the smaller is used before the policy's global
+  // completion safety multiplier. Zero disables the cap (deeper stages).
+  uint64_t completion_absolute_nodes;
+  double expected_previous_node_multiplier;
+  double completion_previous_node_multiplier;
+  // One-sided residual multiplier for converting the portable completion
+  // envelope to time. The cold first depth cannot observe endgame NPS from its
+  // greedy prefix, and the calibration's worst wall/node residual was highly
+  // bag dependent (especially bag 4). Later depths can use the just-completed
+  // endgame stage and therefore need much less cold-start protection.
+  double deadline_cost_multiplier;
+  // A persistent endgame-node rate removes hardware/load variation, but the
+  // same counted node can still have very different wall cost across bag
+  // sizes and positions. This residual is fitted separately from the larger
+  // cold-start multiplier and remains in force after the rate is warm.
+  double warm_deadline_cost_multiplier;
+  double expected_regret_reduction;
+  double provisional_completion_confidence;
+  // This is deliberately false until a prospective held-out replay shows
+  // that every stage admitted by the model completes. A provisional work
+  // envelope can still be observed in shadow while this gate is closed.
+  bool heldout_gate_passed;
+} PegTimeManagerStageCalibration;
+
+// Persistent hardware/load conversion learned from completed PEG work. Rates
+// are normalized to one worker so the same chooser can change thread counts.
+// The deadline rate retains a slowly decaying high-water mark; expected rate
+// is an EWMA used only for value pricing.
+typedef struct PegTimeManagerRuntimeRate {
+  uint64_t observations;
+  double expected_normalized_seconds_per_endgame_node;
+  double deadline_normalized_seconds_per_endgame_node;
+} PegTimeManagerRuntimeRate;
+
 typedef double (*PegTimeManagerRegretReductionCallback)(
     const PegTimeManagerRequest *request,
     const PegTimeManagerCalibration *calibration, void *user_data);
@@ -130,16 +228,30 @@ typedef struct PegTimeManagerPolicy {
   // Rescale the supplied local cost models from work already completed in the
   // current solve. This lets the portable calibration adapt to hardware,
   // thermal state, and co-load before admitting the first refinement wave.
+  // The scale is applied only to work coordinates observed in that prefix;
+  // an unobserved endgame-node rate retains its conservative cold estimate.
   bool use_live_cost_scale;
+  // A cold first 2-ply stage has no same-solve exact-endgame observation.
+  // Production enforcement therefore requires a persistent rate learned from
+  // an earlier PEG call. Deeper stages can calibrate from their immediately
+  // preceding completed stage and do not require this bit.
+  bool has_runtime_endgame_rate;
   // Portable reserve for later same-player endgame work. It is converted with
   // the effective live PEG endgame-node rate and this safety multiplier.
   uint64_t future_reserve_endgame_nodes;
   double future_rate_safety_multiplier;
   // Candidate-wave stopping policy. Zero selects the calibrated defaults
-  // (minimum 8, stability patience 4, maximum 32).
+  // (minimum 8, stability patience 4, maximum 32). Under complete-stage
+  // admission the minimum is also the survivor-prefix floor: the planner may
+  // choose 32, 16, or 8 before launch, but never stop partway through one.
   int minimum_2ply_candidates;
   int stability_patience_candidates;
   int maximum_2ply_candidates;
+  // Plan at the actual useful boundary: the entire next depth. When true,
+  // peg_solve never switches to the legacy first-two/single-candidate
+  // dispatcher. It either submits the ordinary complete stage or, under
+  // enforcement, does not start it at all.
+  bool use_complete_stage_admission;
 } PegTimeManagerPolicy;
 
 typedef struct PegTimeManagerDecision {
@@ -152,6 +264,8 @@ typedef struct PegTimeManagerDecision {
   // True for a post-wave candidate because its deadline envelope is the whole
   // first-two maximum, not a separately calibrated single-candidate tail.
   bool uses_post_wave_tail_proxy;
+  bool is_complete_stage;
+  bool heldout_gate_passed;
   bool has_provisional_completion_bound;
   TimeManagerWork pricing_work;
   TimeManagerWork empirical_p99_work;
@@ -160,12 +274,25 @@ typedef struct PegTimeManagerDecision {
   double empirical_p99_seconds;
   double provisional_completion_bound_seconds;
   double completion_confidence;
-  // Multiplicative adjustment inferred from this solve's completed work. 1.0
-  // means the caller's supplied model was retained.
+  // Multiplicative adjustment inferred from this solve's completed work. It
+  // applies only to observed work coordinates; 1.0 means the caller's supplied
+  // model was retained throughout.
   double live_cost_scale;
   double expected_regret_reduction;
   TimeManagerPlan plan;
 } PegTimeManagerDecision;
+
+const PegTimeManagerStageCalibration *
+peg_time_manager_default_stage_calibration(int bag_tiles, int stage_index,
+                                           int fidelity_plies);
+
+// Plans one complete PEG depth. The returned recommendation is useful in
+// shadow even while heldout_gate_passed is false, but safe_to_enforce remains
+// false until both the prospective validation gate and the policy's explicit
+// opt-in are present.
+PegTimeManagerDecision
+peg_time_manager_plan_stage(const PegTimeManagerPolicy *policy,
+                            const PegTimeManagerStageRequest *request);
 
 const PegTimeManagerCalibration *
 peg_time_manager_default_calibration(PegTimeManagerBoundaryKind boundary_kind,
@@ -193,6 +320,25 @@ bool peg_time_manager_reference_cost_models(
     double deadline_slowdown_multiplier,
     TimeManagerCostModel *expected_cost_model,
     TimeManagerCostModel *deadline_cost_model);
+
+bool peg_time_manager_runtime_rate_update(PegTimeManagerRuntimeRate *rate,
+                                          int workers, double stage_seconds,
+                                          uint64_t stage_endgame_nodes);
+
+bool peg_time_manager_runtime_rate_apply(const PegTimeManagerRuntimeRate *rate,
+                                         int workers,
+                                         double deadline_safety_multiplier,
+                                         TimeManagerCostModel *expected_cost,
+                                         TimeManagerCostModel *deadline_cost);
+
+// Forecast the expected wall time to reach the minimum usable 2-ply prefix.
+// The first two candidates use the measured pair work. Later candidates use
+// the live policy's one-candidate proxy: half the pair's variable work plus a
+// fresh per-boundary fixed cost. Returns NAN for an invalid calibration,
+// model, or candidate count.
+double peg_time_manager_estimate_minimum_2ply_seconds(
+    const PegTimeManagerCalibration *calibration,
+    const TimeManagerCostModel *expected_cost_model, int minimum_candidates);
 
 // Plans either the exact first-two wave or one subsequent 2-ply candidate. The
 // latter keeps the whole pair maximum as a conservative, clearly labeled

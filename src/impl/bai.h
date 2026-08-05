@@ -21,6 +21,7 @@
 #include "../ent/analysis_progress.h"
 #include "../ent/bai_result.h"
 #include "../ent/checkpoint.h"
+#include "../ent/sim_results.h"
 #include "../ent/thread_control.h"
 #include "../ent/win_pct.h"
 #include "../util/io_util.h"
@@ -65,12 +66,32 @@ typedef struct BAISyncData {
   int avoid_prune_best_arm_idx;
   const AnalysisProgressListener *progress_listener;
   uint64_t next_progress_sample;
+  // Source for the checkpoint node-count snapshot, read under the main mutex
+  // so nodes and iterations describe the same instant. NULL when the caller
+  // has no native work counter; checkpoints then report zero nodes.
+  const SimResults *progress_sim_results;
+  // Serializes checkpoint emission so trace order matches snapshot order.
+  // Acquired hand-over-hand before the main mutex is released; never taken
+  // while trying to acquire the main mutex, so the ordering is deadlock-free.
+  cpthread_mutex_t progress_emit_mutex;
   double regret_stop_target;
+  bool regret_stop_use_joint;
   double regret_cross_arm_correlation;
   double regret_calibration;
   uint64_t regret_check_interval;
   uint64_t regret_min_samples_per_arm;
   uint64_t next_regret_check_sample;
+  bool rule_zero_active;
+  bool rule_zero_shadow;
+  bool rule_zero_would_stop_recorded;
+  uint64_t rule_zero_minimum_nodes;
+  int rule_zero_minimum_stable_checkpoints;
+  uint64_t rule_zero_check_interval;
+  uint64_t next_rule_zero_check_sample;
+  const SimResults *rule_zero_sim_results;
+  int rule_zero_last_best_index;
+  int rule_zero_stable_checkpoints;
+  int rule_zero_selected_switches;
 } BAISyncData;
 
 static inline BAISyncData *
@@ -100,16 +121,31 @@ bai_sync_data_create(BAIResult *bai_result, ThreadControl *thread_control,
   bai_sync_data->avoid_prune_count = 0;
   bai_sync_data->avoid_prune_next_idx = 0;
   bai_sync_data->progress_listener = progress_listener;
+  bai_sync_data->progress_sim_results = NULL;
+  cpthread_mutex_init(&bai_sync_data->progress_emit_mutex);
   bai_sync_data->next_progress_sample =
-      analysis_progress_is_enabled(progress_listener)
+      progress_listener != NULL &&
+              analysis_progress_is_enabled(progress_listener)
           ? progress_listener->checkpoint_interval
           : 0;
   bai_sync_data->regret_stop_target = 0.0;
+  bai_sync_data->regret_stop_use_joint = false;
   bai_sync_data->regret_cross_arm_correlation = 0.0;
   bai_sync_data->regret_calibration = 1.0;
   bai_sync_data->regret_check_interval = 0;
   bai_sync_data->regret_min_samples_per_arm = 0;
   bai_sync_data->next_regret_check_sample = 0;
+  bai_sync_data->rule_zero_active = false;
+  bai_sync_data->rule_zero_shadow = false;
+  bai_sync_data->rule_zero_would_stop_recorded = false;
+  bai_sync_data->rule_zero_minimum_nodes = 0;
+  bai_sync_data->rule_zero_minimum_stable_checkpoints = 0;
+  bai_sync_data->rule_zero_check_interval = 0;
+  bai_sync_data->next_rule_zero_check_sample = 0;
+  bai_sync_data->rule_zero_sim_results = NULL;
+  bai_sync_data->rule_zero_last_best_index = -1;
+  bai_sync_data->rule_zero_stable_checkpoints = 0;
+  bai_sync_data->rule_zero_selected_switches = 0;
   return bai_sync_data;
 }
 
@@ -191,11 +227,74 @@ static inline double bai_standard_normal_cdf(const double value) {
   return 0.5 * erfc(-value * inv_sqrt_two);
 }
 
-// Expected loss from returning astar under a joint Gaussian approximation.
-// Each challenger contributes E[max(U_i - U_astar, 0)]; the maximum
-// contribution is used rather than their sum because only one alternative can
-// be selected. Simulation arms consume identical scenario-seed prefixes, so
-// Cov(mean_i, mean_j) = Cov(sample_i, sample_j) / max(n_i, n_j).
+static inline bool
+bai_regret_has_minimum_evidence(const BAISyncData *bai_sync_data) {
+  if (bai_sync_data->astar_index < 0 || bai_sync_data->num_arms <= 0) {
+    return false;
+  }
+  const uint64_t minimum_samples =
+      bai_sync_data->regret_min_samples_per_arm > 2
+          ? bai_sync_data->regret_min_samples_per_arm
+          : 2;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (bai_sync_data->arm_data[arm_index].num_samples < minimum_samples) {
+      return false;
+    }
+  }
+  return true;
+}
+
+static inline double bai_arm_sample_variance(const BAIArmDatum *arm) {
+  // BAIArmDatum stores the population-form empirical variance (M2 / n).
+  return arm->var * (double)arm->num_samples / (double)(arm->num_samples - 1);
+}
+
+// Simulation arms consume identical scenario-seed prefixes. With the current
+// scalar correlation model, Cov(mean_i, mean_j) is the paired sample
+// covariance divided by the larger sample count. The common-scenario audit
+// will determine whether this approximation is adequate before it controls
+// stopping.
+static inline double bai_mean_covariance(const BAISyncData *bai_sync_data,
+                                         int first_index, int second_index) {
+  const BAIArmDatum *first = &bai_sync_data->arm_data[first_index];
+  const double first_sample_variance = bai_arm_sample_variance(first);
+  if (first_index == second_index) {
+    return first_sample_variance / (double)first->num_samples;
+  }
+  const BAIArmDatum *second = &bai_sync_data->arm_data[second_index];
+  const double second_sample_variance = bai_arm_sample_variance(second);
+  const double correlation =
+      fmax(-0.99, fmin(0.99, bai_sync_data->regret_cross_arm_correlation));
+  const uint64_t denominator = first->num_samples > second->num_samples
+                                   ? first->num_samples
+                                   : second->num_samples;
+  return correlation * sqrt(first_sample_variance * second_sample_variance) /
+         (double)denominator;
+}
+
+static inline double
+bai_difference_standard_deviation(const BAISyncData *bai_sync_data,
+                                  int first_index, int second_index) {
+  double variance =
+      bai_mean_covariance(bai_sync_data, first_index, first_index) +
+      bai_mean_covariance(bai_sync_data, second_index, second_index) -
+      2.0 * bai_mean_covariance(bai_sync_data, first_index, second_index);
+  if (variance < MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
+    variance = MINIMUM_VARIANCE * MINIMUM_VARIANCE;
+  }
+  return sqrt(variance);
+}
+
+static inline double bai_regret_calibration(const BAISyncData *bai_sync_data) {
+  return bai_sync_data->regret_calibration > 0.0
+             ? bai_sync_data->regret_calibration
+             : 1.0;
+}
+
+// Legacy expected-loss signal. Each challenger contributes
+// E[(U_i - U_astar)+], and the maximum pairwise contribution is returned.
+// This is a lower bound on E[(max_i U_i - U_astar)+] and remains the live
+// stopping signal only until the joint estimator below is calibrated.
 //
 // Assumes the caller has locked bai_sync_data or all workers have joined.
 static inline double
@@ -203,35 +302,25 @@ bai_estimate_expected_regret(const BAISyncData *bai_sync_data,
                              RandomVariables *rvs) {
   (void)rvs;
   const int best_index = bai_sync_data->astar_index;
-  if (best_index < 0) {
+  if (!bai_regret_has_minimum_evidence(bai_sync_data)) {
     return INFINITY;
   }
   const BAIArmDatum *best = &bai_sync_data->arm_data[best_index];
-  if (best->num_samples == 0) {
-    return INFINITY;
-  }
-  const double correlation =
-      fmax(-0.99, fmin(0.99, bai_sync_data->regret_cross_arm_correlation));
+  // A one-sample arm has empirical variance zero. Treating the variance floor
+  // as evidence in that state can make a plausible arm look certain and drive
+  // estimated regret to zero. Regret is therefore unknown until every arm has
+  // the same minimum evidence required by the stopping rule. This remains a
+  // separate requirement from BAI's sampling policy: callers that choose a
+  // smaller initial phase may still select a move, but they may not claim a
+  // finite residual-regret estimate.
   double expected_regret = 0.0;
   for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
     if (arm_index == best_index) {
       continue;
     }
     const BAIArmDatum *arm = &bai_sync_data->arm_data[arm_index];
-    if (arm->num_samples == 0) {
-      return INFINITY;
-    }
-    const double covariance =
-        correlation * sqrt(best->var * arm->var) /
-        (double)(best->num_samples > arm->num_samples ? best->num_samples
-                                                      : arm->num_samples);
-    double difference_variance = best->var / (double)best->num_samples +
-                                 arm->var / (double)arm->num_samples -
-                                 2.0 * covariance;
-    if (difference_variance < MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
-      difference_variance = MINIMUM_VARIANCE * MINIMUM_VARIANCE;
-    }
-    const double difference_sd = sqrt(difference_variance);
+    const double difference_sd =
+        bai_difference_standard_deviation(bai_sync_data, best_index, arm_index);
     const double difference_mean = arm->mean - best->mean;
     const double z = difference_mean / difference_sd;
     double arm_regret = difference_sd * bai_standard_normal_pdf(z) +
@@ -243,10 +332,143 @@ bai_estimate_expected_regret(const BAISyncData *bai_sync_data,
       expected_regret = arm_regret;
     }
   }
-  const double calibration = bai_sync_data->regret_calibration > 0.0
-                                 ? bai_sync_data->regret_calibration
-                                 : 1.0;
-  return calibration * expected_regret;
+  return bai_regret_calibration(bai_sync_data) * expected_regret;
+}
+
+// Clark's recursive moment approximation for E[max_i U_i]. Unlike the legacy
+// maximum of pairwise expectations, this accounts for the simultaneous chance
+// that any of several near-tied challengers is better. Arms are combined in
+// descending empirical-mean order to reduce the approximation's order
+// dependence. The legacy lower bound is enforced numerically.
+//
+// This is emitted in shadow mode only. It must pass the common-scenario
+// covariance and optional-stopping audits before it may stop a live search.
+// Assumes the caller has locked bai_sync_data or all workers have joined.
+static inline double
+bai_estimate_joint_expected_regret(const BAISyncData *bai_sync_data,
+                                   RandomVariables *rvs) {
+  if (!bai_regret_has_minimum_evidence(bai_sync_data)) {
+    return INFINITY;
+  }
+
+  const int num_arms = bai_sync_data->num_arms;
+  if (num_arms <= 0) {
+    return INFINITY;
+  }
+  int order[num_arms];
+  for (int index = 0; index < num_arms; index++) {
+    order[index] = index;
+  }
+  for (int index = 1; index < num_arms; index++) {
+    const int arm_index = order[index];
+    int insertion_index = index;
+    while (insertion_index > 0 &&
+           bai_sync_data->arm_data[order[insertion_index - 1]].mean <
+               bai_sync_data->arm_data[arm_index].mean) {
+      order[insertion_index] = order[insertion_index - 1];
+      insertion_index--;
+    }
+    order[insertion_index] = arm_index;
+  }
+
+  const int first_index = order[0];
+  double maximum_mean = bai_sync_data->arm_data[first_index].mean;
+  double maximum_variance =
+      bai_mean_covariance(bai_sync_data, first_index, first_index);
+  double covariance_with_maximum[num_arms];
+  for (int arm_index = 0; arm_index < num_arms; arm_index++) {
+    covariance_with_maximum[arm_index] =
+        bai_mean_covariance(bai_sync_data, first_index, arm_index);
+  }
+
+  for (int order_index = 1; order_index < num_arms; order_index++) {
+    const int arm_index = order[order_index];
+    const double arm_mean = bai_sync_data->arm_data[arm_index].mean;
+    const double arm_variance =
+        bai_mean_covariance(bai_sync_data, arm_index, arm_index);
+    const double covariance = covariance_with_maximum[arm_index];
+    double difference_variance =
+        maximum_variance + arm_variance - 2.0 * covariance;
+    double weight_maximum;
+    double next_mean;
+    double next_variance;
+    if (difference_variance <= MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
+      if (maximum_mean == arm_mean) {
+        weight_maximum = 0.5;
+      } else {
+        weight_maximum = maximum_mean > arm_mean ? 1.0 : 0.0;
+      }
+      next_mean = weight_maximum > 0.0 ? maximum_mean : arm_mean;
+      next_variance = weight_maximum > 0.0 ? maximum_variance : arm_variance;
+    } else {
+      const double difference_sd = sqrt(difference_variance);
+      const double alpha = (maximum_mean - arm_mean) / difference_sd;
+      weight_maximum = bai_standard_normal_cdf(alpha);
+      const double weight_arm = 1.0 - weight_maximum;
+      const double density = bai_standard_normal_pdf(alpha);
+      next_mean = maximum_mean * weight_maximum + arm_mean * weight_arm +
+                  difference_sd * density;
+      const double second_moment =
+          (maximum_variance + maximum_mean * maximum_mean) * weight_maximum +
+          (arm_variance + arm_mean * arm_mean) * weight_arm +
+          (maximum_mean + arm_mean) * difference_sd * density;
+      next_variance = second_moment - next_mean * next_mean;
+      if (next_variance < MINIMUM_VARIANCE * MINIMUM_VARIANCE) {
+        next_variance = MINIMUM_VARIANCE * MINIMUM_VARIANCE;
+      }
+    }
+
+    for (int future_order_index = order_index + 1;
+         future_order_index < num_arms; future_order_index++) {
+      const int future_index = order[future_order_index];
+      covariance_with_maximum[future_index] =
+          weight_maximum * covariance_with_maximum[future_index] +
+          (1.0 - weight_maximum) *
+              bai_mean_covariance(bai_sync_data, arm_index, future_index);
+    }
+    maximum_mean = next_mean;
+    maximum_variance = next_variance;
+  }
+
+  const double joint_regret =
+      bai_regret_calibration(bai_sync_data) *
+      fmax(0.0, maximum_mean -
+                    bai_sync_data->arm_data[bai_sync_data->astar_index].mean);
+  return fmax(joint_regret, bai_estimate_expected_regret(bai_sync_data, rvs));
+}
+
+// Number of challengers whose two-sided 99% Gaussian upper confidence bound
+// on U_i - U_astar reaches zero. This is a diagnostic for the dimension of the
+// live near-tie set, not a stopping rule.
+static inline int
+bai_count_near_tie_challengers(const BAISyncData *bai_sync_data) {
+  static const double z_99_two_sided = 2.5758293035489004;
+  if (!bai_regret_has_minimum_evidence(bai_sync_data)) {
+    return -1;
+  }
+  const int best_index = bai_sync_data->astar_index;
+  const double best_mean = bai_sync_data->arm_data[best_index].mean;
+  int count = 0;
+  for (int arm_index = 0; arm_index < bai_sync_data->num_arms; arm_index++) {
+    if (arm_index == best_index) {
+      continue;
+    }
+    const double difference_mean =
+        bai_sync_data->arm_data[arm_index].mean - best_mean;
+    const double difference_sd =
+        bai_difference_standard_deviation(bai_sync_data, best_index, arm_index);
+    if (difference_mean + z_99_two_sided * difference_sd >= 0.0) {
+      count++;
+    }
+  }
+  return count;
+}
+
+static inline double bai_regret_stop_estimate(const BAISyncData *bai_sync_data,
+                                              double legacy_estimate,
+                                              double joint_estimate) {
+  return bai_sync_data->regret_stop_use_joint ? joint_estimate
+                                              : legacy_estimate;
 }
 
 static inline int
@@ -487,12 +709,106 @@ static inline void bai_maybe_stop_for_regret_while_locked(BAISampleArgs *args) {
   }
   const double estimated_regret =
       bai_estimate_expected_regret(sync_data, args->rvs);
+  const double joint_estimated_regret =
+      bai_estimate_joint_expected_regret(sync_data, args->rvs);
   bai_result_set_estimated_regret(sync_data->bai_result, estimated_regret);
-  if (estimated_regret <= sync_data->regret_stop_target) {
+  bai_result_set_joint_estimated_regret(sync_data->bai_result,
+                                        joint_estimated_regret);
+  const double stopping_estimate = bai_regret_stop_estimate(
+      sync_data, estimated_regret, joint_estimated_regret);
+  if (stopping_estimate <= sync_data->regret_stop_target &&
+      bai_result_set_status_if_none(sync_data->bai_result,
+                                    BAI_RESULT_STATUS_REGRET_LIMIT)) {
+    const int near_tie_challengers = bai_count_near_tie_challengers(sync_data);
     bai_result_set_regret_at_stop(sync_data->bai_result, estimated_regret);
-    bai_result_set_status(sync_data->bai_result,
-                          BAI_RESULT_STATUS_REGRET_LIMIT);
+    bai_result_set_joint_regret_at_stop(sync_data->bai_result,
+                                        joint_estimated_regret);
+    bai_result_set_near_tie_challengers_at_stop(sync_data->bai_result,
+                                                near_tie_challengers);
   }
+}
+
+// The Rule-of-Zero is deliberately a separate, conservative policy from the
+// expected-regret stop. It observes only native work, incumbent stability, and
+// the existing 99% near-tie diagnostic. Invalid telemetry must leave the
+// ordinary time/sample boundary in charge.
+static inline void
+bai_maybe_stop_for_rule_zero_while_locked(BAISampleArgs *args) {
+  BAISyncData *sync_data = args->bai_sync_data;
+  if (!sync_data->rule_zero_active ||
+      sync_data->rule_zero_would_stop_recorded ||
+      sync_data->next_rule_zero_check_sample == 0 ||
+      sync_data->num_total_samples_completed <
+          sync_data->next_rule_zero_check_sample) {
+    return;
+  }
+
+  const uint64_t interval = sync_data->rule_zero_check_interval;
+  do {
+    const uint64_t old_next = sync_data->next_rule_zero_check_sample;
+    sync_data->next_rule_zero_check_sample += interval;
+    if (sync_data->next_rule_zero_check_sample < old_next) {
+      sync_data->next_rule_zero_check_sample = 0;
+      break;
+    }
+  } while (sync_data->next_rule_zero_check_sample > 0 &&
+           sync_data->next_rule_zero_check_sample <=
+               sync_data->num_total_samples_completed);
+
+  const int best_index = sync_data->astar_index;
+  if (best_index < 0 || best_index >= sync_data->num_arms) {
+    sync_data->rule_zero_stable_checkpoints = 0;
+    sync_data->rule_zero_last_best_index = -1;
+    return;
+  }
+  if (sync_data->rule_zero_last_best_index >= 0 &&
+      sync_data->rule_zero_last_best_index != best_index) {
+    sync_data->rule_zero_selected_switches++;
+  }
+  if (sync_data->rule_zero_last_best_index == best_index) {
+    sync_data->rule_zero_stable_checkpoints++;
+  } else {
+    sync_data->rule_zero_stable_checkpoints = 1;
+  }
+  sync_data->rule_zero_last_best_index = best_index;
+
+  const int near_tie_challengers = bai_count_near_tie_challengers(sync_data);
+  // `rule_zero_active` requires this pointer, but keep the explicit guard as
+  // a permanent fail-closed defense around an atomically read work counter.
+  if (sync_data->rule_zero_sim_results == NULL || near_tie_challengers != 0 ||
+      sync_data->rule_zero_stable_checkpoints <
+          sync_data->rule_zero_minimum_stable_checkpoints) {
+    return;
+  }
+  const uint64_t nodes =
+      sim_results_get_node_count(sync_data->rule_zero_sim_results);
+  if (nodes < sync_data->rule_zero_minimum_nodes) {
+    return;
+  }
+  if (sync_data->rule_zero_shadow) {
+    // Shadow mode records the first satisfying checkpoint and lets the search
+    // run to its ordinary boundary, so panels can score the would-stop choice
+    // against the full-horizon choice from one production trace.
+    sync_data->rule_zero_would_stop_recorded = true;
+    bai_result_set_rule_zero_trigger(
+        sync_data->bai_result, nodes, sync_data->num_total_samples_completed,
+        sync_data->rule_zero_stable_checkpoints,
+        sync_data->rule_zero_selected_switches, /*stopped=*/false);
+    return;
+  }
+  // Claim the terminal status atomically so a concurrent timeout or user
+  // interrupt is never relabeled as a Rule-of-Zero stop.
+  if (!bai_result_set_status_if_none(sync_data->bai_result,
+                                     BAI_RESULT_STATUS_RULE_ZERO_LIMIT)) {
+    return;
+  }
+  sync_data->rule_zero_would_stop_recorded = true;
+  bai_result_set_near_tie_challengers_at_stop(sync_data->bai_result,
+                                              near_tie_challengers);
+  bai_result_set_rule_zero_trigger(
+      sync_data->bai_result, nodes, sync_data->num_total_samples_completed,
+      sync_data->rule_zero_stable_checkpoints,
+      sync_data->rule_zero_selected_switches, /*stopped=*/true);
 }
 
 static inline void bai_sync_data_add_sample(BAISampleArgs *args,
@@ -508,6 +824,7 @@ static inline void bai_sync_data_add_sample_with_regret_stop(
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   bai_maybe_stop_for_regret_while_locked(args);
+  bai_maybe_stop_for_rule_zero_while_locked(args);
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
 }
 
@@ -522,6 +839,7 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
   cpthread_mutex_lock(&args->bai_sync_data->mutex);
   bai_sync_data_add_sample_while_locked(args, arm_index, sample_value);
   bai_maybe_stop_for_regret_while_locked(args);
+  bai_maybe_stop_for_rule_zero_while_locked(args);
   BAISyncData *sync_data = args->bai_sync_data;
   if (sync_data->next_progress_sample > 0 &&
       sync_data->num_total_samples_completed >=
@@ -536,6 +854,15 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
             : 0;
     progress.work_units = sync_data->num_total_samples_completed;
     progress.iterations = sync_data->num_total_samples_completed;
+    // Snapshot the native work counter under the same lock as iterations so
+    // the pair is coherent and strictly ordered across checkpoints. The
+    // emitting layer must forward this snapshot unchanged (see
+    // sim_forward_progress); emission can be delayed arbitrarily by the
+    // scheduler while other workers keep sampling.
+    if (sync_data->progress_sim_results != NULL) {
+      progress.nodes =
+          sim_results_get_node_count(sync_data->progress_sim_results);
+    }
     progress.candidate_index = arm_index;
     progress.candidates_total = sync_data->num_arms;
     progress.best_index = best_index;
@@ -548,6 +875,9 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
       progress.challenger_value = sync_data->arm_data[challenger_index].mean;
     }
     progress.value = bai_estimate_expected_regret(sync_data, args->rvs);
+    progress.secondary_value =
+        bai_estimate_joint_expected_regret(sync_data, args->rvs);
+    progress.near_tie_challengers = bai_count_near_tie_challengers(sync_data);
     const uint64_t interval = sync_data->progress_listener->checkpoint_interval;
     do {
       const uint64_t old_next = sync_data->next_progress_sample;
@@ -561,9 +891,15 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
                  sync_data->num_total_samples_completed);
     emit_progress = true;
   }
+  if (emit_progress) {
+    // Hand-over-hand: claim emission order before releasing the snapshot
+    // lock, so a later snapshot can never be written to the trace first.
+    cpthread_mutex_lock(&sync_data->progress_emit_mutex);
+  }
   cpthread_mutex_unlock(&args->bai_sync_data->mutex);
   if (emit_progress) {
     analysis_progress_emit(sync_data->progress_listener, &progress);
+    cpthread_mutex_unlock(&sync_data->progress_emit_mutex);
   }
 }
 
@@ -834,10 +1170,15 @@ static void *bai_worker_with_regret_stop(void *args) {
 
 // Assumes rvs are normally distributed.
 // Assumes rng is uniformly distributed between 0 and 1.
+// `rule_zero_sim_results` supplies the native work counter for progress
+// checkpoint node snapshots and for the optional Rule-of-Zero stop; NULL
+// zeroes checkpoint nodes and keeps that stop policy inert regardless of the
+// options.
 static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                        RandomVariables *rng, ThreadControl *thread_control,
                        BAILogger *bai_logger,
                        const AnalysisProgressListener *progress_listener,
+                       const SimResults *rule_zero_sim_results,
                        BAIResult *bai_result) {
   bai_result_reset(bai_result, bai_options->time_limit_seconds);
 
@@ -848,6 +1189,7 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
       bai_sync_data_create(bai_result, thread_control,
                            (int)rvs_get_num_rvs(rvs), rng, progress_listener);
   sync_data->regret_stop_target = bai_options->regret_stop_target;
+  sync_data->regret_stop_use_joint = bai_options->regret_stop_use_joint;
   sync_data->regret_cross_arm_correlation =
       bai_options->regret_cross_arm_correlation;
   sync_data->regret_calibration = bai_options->regret_calibration;
@@ -855,9 +1197,10 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
                                          ? bai_options->regret_check_interval
                                          : 256;
   sync_data->regret_min_samples_per_arm =
-      bai_options->regret_min_samples_per_arm > 0
+      bai_options->regret_min_samples_per_arm >
+              BAI_MINIMUM_REGRET_SAMPLES_PER_ARM
           ? bai_options->regret_min_samples_per_arm
-          : 32;
+          : BAI_MINIMUM_REGRET_SAMPLES_PER_ARM;
   if (sync_data->regret_stop_target > 0.0) {
     const uint64_t minimum_total =
         (uint64_t)sync_data->num_arms * sync_data->regret_min_samples_per_arm;
@@ -865,6 +1208,24 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
         minimum_total > sync_data->regret_check_interval
             ? minimum_total
             : sync_data->regret_check_interval;
+  }
+  sync_data->progress_sim_results = rule_zero_sim_results;
+  // A malformed or incomplete Rule-of-Zero configuration is deliberately
+  // inert. This prevents a telemetry failure from becoming a faster stop.
+  if (bai_options->rule_zero_enabled && rule_zero_sim_results != NULL &&
+      bai_options->rule_zero_minimum_nodes > 0 &&
+      bai_options->rule_zero_minimum_stable_checkpoints > 0 &&
+      bai_options->rule_zero_checkpoint_interval > 0) {
+    sync_data->rule_zero_active = true;
+    sync_data->rule_zero_shadow = bai_options->rule_zero_shadow;
+    sync_data->rule_zero_minimum_nodes = bai_options->rule_zero_minimum_nodes;
+    sync_data->rule_zero_minimum_stable_checkpoints =
+        bai_options->rule_zero_minimum_stable_checkpoints;
+    sync_data->rule_zero_check_interval =
+        bai_options->rule_zero_checkpoint_interval;
+    sync_data->next_rule_zero_check_sample =
+        bai_options->rule_zero_checkpoint_interval;
+    sync_data->rule_zero_sim_results = rule_zero_sim_results;
   }
 
   if (bai_options->arm_avoid_prune && bai_options->num_arm_avoid_prune > 0) {
@@ -892,7 +1253,8 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   void *(*worker_start)(void *) = bai_worker;
   if (sync_data->next_progress_sample > 0) {
     worker_start = bai_worker_with_progress;
-  } else if (sync_data->regret_stop_target > 0.0) {
+  } else if (sync_data->regret_stop_target > 0.0 ||
+             sync_data->rule_zero_active) {
     worker_start = bai_worker_with_regret_stop;
   }
   for (int thread_index = 0; thread_index < bai_options->num_threads;
@@ -908,6 +1270,10 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
   }
   bai_result_set_estimated_regret(bai_result,
                                   bai_estimate_expected_regret(sync_data, rvs));
+  bai_result_set_joint_estimated_regret(
+      bai_result, bai_estimate_joint_expected_regret(sync_data, rvs));
+  bai_result_set_near_tie_challengers(
+      bai_result, bai_count_near_tie_challengers(sync_data));
   bai_result_set_best_arm(bai_result, sync_data->astar_index);
   bai_result_stop_timer(bai_result);
   if (analysis_progress_is_enabled(progress_listener)) {
@@ -927,6 +1293,10 @@ static inline void bai(const BAIOptions *bai_options, RandomVariables *rvs,
           sync_data->arm_data[sync_data->challenger_index].mean;
     }
     progress.value = bai_result_get_estimated_regret(bai_result);
+    progress.secondary_value =
+        bai_result_get_joint_estimated_regret(bai_result);
+    progress.near_tie_challengers =
+        bai_result_get_near_tie_challengers(bai_result);
     switch (bai_result_get_status(bai_result)) {
     case BAI_RESULT_STATUS_TIMEOUT:
       progress.status = ANALYSIS_STATUS_TIME_LIMIT;
