@@ -2409,6 +2409,7 @@ static void *peg_injector_main(void *arg) {
 void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   memset(out, 0, sizeof(*out));
   out->last_completed_stage = -1;
+  out->status = PEG_RESULT_STATUS_NONE;
 
   // Anchor the wall-clock deadline at the very start so the whole solve —
   // including KWG pruning and the initial greedy move generation, not just the
@@ -2419,6 +2420,10 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   const double budget = args->time_budget_seconds;
   const int64_t deadline_ns =
       budget > 0.0 ? ctimer_monotonic_ns() + (int64_t)(budget * 1.0e9) : 0;
+  // Set at any point below where a stage or candidate is cut short because
+  // deadline_ns passed, so the final status can report a time-capped solve
+  // as PEG_RESULT_STATUS_TIMEOUT instead of FINISHED.
+  bool deadline_exceeded = false;
   const Game *game = args->game;
   const int mover_idx = game_get_player_on_turn_index(game);
   const int raw_bag_size = bag_get_letters(game_get_bag(game));
@@ -2766,6 +2771,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       peg_force_protected_to_front(ranked, eval_count, protect_moves,
                                    n_protect);
       if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+        deadline_exceeded = true;
         break;
       }
       if (thread_control_get_status(args->thread_control) ==
@@ -2817,6 +2823,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // evaluated within budget; the finished ones (if >= 2) still form a
           // usable, if partial, tier at this stage's depth.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+            deadline_exceeded = true;
             break;
           }
           if (thread_control_get_status(args->thread_control) ==
@@ -2840,6 +2847,7 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
           // its scenarios bailed (above), so its score is incomplete — drop it
           // rather than show or rank a partial result, and stop the stage.
           if (deadline_ns != 0 && ctimer_monotonic_ns() >= deadline_ns) {
+            deadline_exceeded = true;
             if (args->include_per_scenario) {
               free(cand_oc.rows);
             }
@@ -3108,6 +3116,15 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
   game_destroy(prepared_base);
   kwg_destroy(pruned_kwg);
   ctimer_stop(&out->timer);
+
+  if (thread_control_get_status(args->thread_control) ==
+      THREAD_CONTROL_STATUS_USER_INTERRUPT) {
+    out->status = PEG_RESULT_STATUS_INTERRUPTED;
+  } else if (deadline_exceeded) {
+    out->status = PEG_RESULT_STATUS_TIMEOUT;
+  } else {
+    out->status = PEG_RESULT_STATUS_FINISHED;
+  }
 }
 
 void peg_result_destroy(PegResult *r) {
