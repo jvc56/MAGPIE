@@ -2936,6 +2936,14 @@ void peg_solve(const PegArgs *args, PegResult *out, ErrorStack *error_stack) {
       if (done_count < 2) {
         n_graded = n_graded_before_stage;
         free(restaged);
+        // Frees memory this stage still owns: stage_outcomes[0, done_count)
+        // are completed captures that were never upserted, since the store
+        // only takes them on the accept path below. The cut tail
+        // [done_count, eval_count) was already freed by whichever evaluation
+        // path cut it -- the live path frees the deadline-cut candidate on its
+        // break, the batch path frees the tail after stable-partitioning. With
+        // accept upserting exactly [0, done_count), every rows allocation is
+        // freed exactly once across all three exits.
         peg_cand_outcomes_destroy_array(stage_outcomes, done_count);
         // This stage cleared the live poll at its start but contributed
         // nothing, so restore the previous stage's ranking (still in `ranked`)
