@@ -838,6 +838,22 @@ thinking_curve_normalize_checkpoint(AnalysisProgressEvent *checkpoint,
     checkpoint->item_id =
         move_get_fingerprint(&candidates[checkpoint->best_index].move);
   }
+  // Remap the risk-set membership bitmask from BAI arm-index bits to
+  // statically sorted candidate-rank bits, matching the other normalized
+  // indices. After this call the mask's bits are candidate ranks.
+  uint64_t rank_mask = 0;
+  for (int arm_index = 0; arm_index < num_plays && arm_index < 64;
+       arm_index++) {
+    if ((checkpoint->near_tie_member_mask & ((uint64_t)1 << arm_index)) == 0) {
+      continue;
+    }
+    const int rank =
+        thinking_curve_checkpoint_rank(arm_index, rank_by_arm, num_plays);
+    if (rank >= 0 && rank < 64) {
+      rank_mask |= ((uint64_t)1 << rank);
+    }
+  }
+  checkpoint->near_tie_member_mask = rank_mask;
 }
 
 static ThinkingCurveJudgeResult thinking_curve_run_judge(
@@ -1121,6 +1137,16 @@ static void thinking_curve_print_rule_zero_checkpoints(
                           checkpoint->nodes >= minimum_nodes &&
                           stable_checkpoints >= minimum_stable_checkpoints &&
                           checkpoint->near_tie_challengers == 0;
+    // Risk-set membership (packet section 6): the mask holds candidate-rank
+    // bits after normalization; the incumbent is implicit via selected_rank.
+    // The full-horizon selection is in the risk set when it is the incumbent
+    // itself or a near-tie challenger at this checkpoint.
+    const int full_rank = result->decision.best_index;
+    const bool full_in_risk_set =
+        counters_valid && full_rank >= 0 &&
+        (full_rank == selected ||
+         (full_rank < 64 && (checkpoint->near_tie_member_mask &
+                             ((uint64_t)1 << full_rank)) != 0));
     printf("THINKING_CURVE_RULE_ZERO_CHECKPOINT source_index=%d position=%d "
            "game=%d bag=%d plies=%d arm_plays=%d checkpoint=%zu "
            "iterations=%" PRIu64 " nodes=%" PRIu64
@@ -1130,7 +1156,8 @@ static void thinking_curve_print_rule_zero_checkpoints(
            "estimated_best=%.12f estimated_challenger=%.12f "
            "estimated_regret=%.12f joint_estimated_regret=%.12f "
            "near_tie_challengers=%d counters_valid=%d rule_eligible=%d "
-           "rule_selected=%d\n",
+           "rule_selected=%d risk_set_ranks=0x%" PRIx64
+           " full_horizon_rank_in_risk_set=%d\n",
            source_index, position, game_index, bag_tiles, plies, num_plays,
            index, checkpoint->iterations, checkpoint->nodes, selected,
            checkpoint->item_id, stable_checkpoints, stable_iterations,
@@ -1138,7 +1165,8 @@ static void thinking_curve_print_rule_zero_checkpoints(
            checkpoint->best_value, checkpoint->challenger_value,
            checkpoint->value, checkpoint->secondary_value,
            checkpoint->near_tie_challengers, counters_valid, eligible,
-           !stop->capped && index == stop->checkpoint_index);
+           !stop->capped && index == stop->checkpoint_index,
+           checkpoint->near_tie_member_mask, full_in_risk_set ? 1 : 0);
   }
 }
 
@@ -1818,7 +1846,8 @@ static void thinking_curve_finish_rule_zero_position(
       "matched_modulus=%d matched_remainder=%d audit_selected=%d "
       "audit_modulus=%d audit_remainder=%d judge_performed=%d "
       "horizon_mismatch=%d equal_horizon_mismatch=%d "
-      "matched_mismatch=%d\n",
+      "matched_mismatch=%d stop_risk_set_ranks=0x%" PRIx64
+      " stop_full_horizon_rank_in_risk_set=%d\n",
       source_index, position, game_index, bag_tiles, plies, num_plays,
       full->checkpoint_count, checkpoint_interval, minimum_nodes,
       minimum_stable_checkpoints, stop.checkpoint_index,
@@ -1838,7 +1867,16 @@ static void thinking_curve_finish_rule_zero_position(
           : "top_two_ids",
       matched_modulus, matched_remainder, audit_selected, audit_modulus,
       audit_remainder, judge_performed, horizon_mismatch,
-      equal_horizon_mismatch, matched_mismatch);
+      equal_horizon_mismatch, matched_mismatch,
+      stop.decision.near_tie_member_mask,
+      (stop.decision.near_tie_challengers >= 0 &&
+       full->decision.best_index >= 0 &&
+       (full->decision.best_index == stop.decision.best_index ||
+        (full->decision.best_index < 64 &&
+         (stop.decision.near_tie_member_mask &
+          ((uint64_t)1 << full->decision.best_index)) != 0)))
+          ? 1
+          : 0);
 
   const ThinkingCurveArmResult stopped = thinking_curve_result_from_checkpoint(
       &stop.decision,

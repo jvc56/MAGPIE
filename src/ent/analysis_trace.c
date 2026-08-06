@@ -120,30 +120,30 @@ bool analysis_trace_write_tsv(AnalysisTrace *trace, FILE *stream) {
   cpthread_mutex_unlock(&trace->mutex);
 
   bool ok =
-      fprintf(
-          stream,
-          "schema_version\tsequence\trun_id\tparent_run_id\tmode\tevent\t"
-          "status\t"
-          "elapsed_ns\tcpu_ns\tbudget_seconds\tworkers\twork_units\tnodes\t"
-          "iterations\tscenarios\titem_work_units\titem_nodes\t"
-          "expected_next_work_units\tcompletion_bound_work_units\t"
-          "expected_next_nodes\tcompletion_bound_nodes\t"
-          "expected_next_scenarios\tcompletion_bound_scenarios\t"
-          "expected_next_candidates\tcompletion_bound_candidates\t"
-          "expected_next_seconds\tcompletion_bound_seconds\t"
-          "completion_confidence\tadmission\t"
-          "admission_safe_to_enforce\tadmission_enforced\t"
-          "has_time_manager_plan\texpected_regret_reduction\t"
-          "current_value_per_second\tfuture_value_per_second\t"
-          "maximum_current_seconds\tdeposit_seconds\tphase\t"
-          "depth\tcandidate_index\t"
-          "candidates_completed\tcandidates_total\t"
-          "subcandidates_completed\tsubcandidates_total\tbest_index\t"
-          "challenger_index\tnear_tie_challengers\titem_id\tvalue\tbest_value\t"
-          "challenger_value\tsecondary_value\tplayer_on_turn\tbag_tiles\t"
-          "player_rack_tiles\topponent_rack_tiles\t"
-          "consecutive_scoreless_turns\t"
-          "score_spread\tclock_seconds_remaining\n") >= 0;
+      fprintf(stream,
+              "schema_version\tsequence\trun_id\tparent_run_id\tmode\tevent\t"
+              "status\t"
+              "elapsed_ns\tcpu_ns\tbudget_seconds\tworkers\twork_units\tnodes\t"
+              "iterations\tscenarios\titem_work_units\titem_nodes\t"
+              "expected_next_work_units\tcompletion_bound_work_units\t"
+              "expected_next_nodes\tcompletion_bound_nodes\t"
+              "expected_next_scenarios\tcompletion_bound_scenarios\t"
+              "expected_next_candidates\tcompletion_bound_candidates\t"
+              "expected_next_seconds\tcompletion_bound_seconds\t"
+              "completion_confidence\tadmission\t"
+              "admission_safe_to_enforce\tadmission_enforced\t"
+              "has_time_manager_plan\texpected_regret_reduction\t"
+              "current_value_per_second\tfuture_value_per_second\t"
+              "maximum_current_seconds\tdeposit_seconds\tphase\t"
+              "depth\tcandidate_index\t"
+              "candidates_completed\tcandidates_total\t"
+              "subcandidates_completed\tsubcandidates_total\tbest_index\t"
+              "challenger_index\tnear_tie_challengers\tnear_tie_member_mask\t"
+              "item_id\tvalue\tbest_value\t"
+              "challenger_value\tsecondary_value\tplayer_on_turn\tbag_tiles\t"
+              "player_rack_tiles\topponent_rack_tiles\t"
+              "consecutive_scoreless_turns\t"
+              "score_spread\tclock_seconds_remaining\n") >= 0;
   for (size_t i = 0; ok && i < count; i++) {
     const AnalysisProgressEvent *event = &events[i];
     ok = fprintf(stream,
@@ -185,15 +185,16 @@ bool analysis_trace_write_tsv(AnalysisTrace *trace, FILE *stream) {
                  event->candidates_total, event->subcandidates_completed,
                  event->subcandidates_total, event->best_index,
                  event->challenger_index, event->near_tie_challengers) >= 0;
-    ok = ok && fprintf(stream,
-                       "\t%" PRIu64 "\t%.17g\t%.17g\t%.17g\t%.17g"
-                       "\t%d\t%d\t%d\t%d\t%d\t%d\t%.17g\n",
-                       event->item_id, event->value, event->best_value,
-                       event->challenger_value, event->secondary_value,
-                       event->player_on_turn, event->bag_tiles,
-                       event->player_rack_tiles, event->opponent_rack_tiles,
-                       event->consecutive_scoreless_turns, event->score_spread,
-                       event->clock_seconds_remaining) >= 0;
+    ok = ok &&
+         fprintf(stream,
+                 "\t%" PRIu64 "\t%" PRIu64 "\t%.17g\t%.17g\t%.17g\t%.17g"
+                 "\t%d\t%d\t%d\t%d\t%d\t%d\t%.17g\n",
+                 event->near_tie_member_mask, event->item_id, event->value,
+                 event->best_value, event->challenger_value,
+                 event->secondary_value, event->player_on_turn,
+                 event->bag_tiles, event->player_rack_tiles,
+                 event->opponent_rack_tiles, event->consecutive_scoreless_turns,
+                 event->score_spread, event->clock_seconds_remaining) >= 0;
   }
   free(events);
   return ok;

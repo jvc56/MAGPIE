@@ -162,7 +162,10 @@ static const EndgameAdmissionDepthModel
 static const EndgameAdmissionModel ENDGAME_ADMISSION_DEFAULT_MODEL = {
     .artifact_version = ENDGAME_ADMISSION_MODEL_ARTIFACT_VERSION,
     .feature_schema_version = ENDGAME_ADMISSION_FEATURE_SCHEMA_VERSION,
-    .source_progress_schema_version = ANALYSIS_PROGRESS_SCHEMA_VERSION,
+    // Provenance: this artifact was calibrated from schema-6 progress events.
+    // Pinned rather than tracking ANALYSIS_PROGRESS_SCHEMA_VERSION so later
+    // additive schema bumps do not silently misdescribe the training source.
+    .source_progress_schema_version = 6U,
     .artifact_id = "csw24-eg-ridge-p99-10t-v1-20260729",
     .workers = 10,
     .tt_fraction_of_mem = 0.050000000000000003,

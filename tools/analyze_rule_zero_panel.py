@@ -130,6 +130,8 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
     stopped_early = 0
     judged = 0
     audit = 0
+    stop_in_risk_set = 0
+    stop_out_of_risk_set_mismatches = 0
     strata: dict[tuple[str, str], list[int]] = defaultdict(list)
     for source in sorted(roots):
         rule = rules[source]
@@ -161,6 +163,15 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
         stopped_early += int(rule["capped"]) == 0
         judged += int(rule["judge_performed"])
         audit += int(rule["audit_selected"])
+        # Risk-set membership at the stopping checkpoint (packet section 6):
+        # count uncapped stops whose full-horizon selection was in the risk
+        # set, and mismatches where it was not (the ambiguity class the p2
+        # panel could not resolve).
+        if int(rule["capped"]) == 0:
+            in_risk_set = int(rule["stop_full_horizon_rank_in_risk_set"])
+            stop_in_risk_set += in_risk_set
+            if horizon_mismatch and not in_risk_set:
+                stop_out_of_risk_set_mismatches += 1
         if int(rule["matched_control"]):
             matched = root_points.get("matched")
             if matched is None:
@@ -200,6 +211,12 @@ def analyze(log: Path, manifest: Path) -> dict[str, object]:
         "judged_roots": judged,
         "random_audit_roots": audit,
         "shadow_checkpoint_rows": shadow_rows,
+        "stop_full_horizon_rank_in_risk_set": {
+            "in_risk_set": stop_in_risk_set,
+            "stops": stopped_early,
+            "rate": stop_in_risk_set / stopped_early if stopped_early else None,
+            "out_of_risk_set_mismatches": stop_out_of_risk_set_mismatches,
+        },
         "horizon_3m_mismatch": horizon,
         "equal_slice_landmark_mismatch": equal,
         "horizon_3m_judged_missed_value": horizon_value,

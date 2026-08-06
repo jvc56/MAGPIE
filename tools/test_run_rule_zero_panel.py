@@ -30,7 +30,8 @@ def synthetic_chunk() -> str:
         "full_selected_rank=0 estimated_best=.52 estimated_challenger=.50 "
         "estimated_regret=.0001 joint_estimated_regret=.0002 "
         "near_tie_challengers=0 counters_valid=1 rule_eligible={eligible} "
-        "rule_selected={selected}\n"
+        "rule_selected={selected} risk_set_ranks=0x0 "
+        "full_horizon_rank_in_risk_set=1\n"
     )
     checkpoints = checkpoint_template.format(
         checkpoint=0,
@@ -63,7 +64,8 @@ def synthetic_chunk() -> str:
         "matched_min_play_iterations=0 matched_sampling_rule=top_two_ids "
         "matched_modulus=3 matched_remainder=0 audit_selected=0 "
         "audit_modulus=10 audit_remainder=0 judge_performed=0 "
-        "horizon_mismatch=0 equal_horizon_mismatch=0 matched_mismatch=0\n"
+        "horizon_mismatch=0 equal_horizon_mismatch=0 matched_mismatch=0 "
+        "stop_risk_set_ranks=0x0 stop_full_horizon_rank_in_risk_set=1\n"
     )
     point_template = (
         "THINKING_CURVE_POINT source_index=1 position=1 game=1 bag=40 plies=6 "

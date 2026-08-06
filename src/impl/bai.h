@@ -439,10 +439,20 @@ bai_estimate_joint_expected_regret(const BAISyncData *bai_sync_data,
 
 // Number of challengers whose two-sided 99% Gaussian upper confidence bound
 // on U_i - U_astar reaches zero. This is a diagnostic for the dimension of the
-// live near-tie set, not a stopping rule.
+// live near-tie set, not a stopping rule. When mask_out is non-NULL it
+// additionally receives the risk-set membership bitmask: bit arm_index set for
+// each counted challenger (arm indices 0..63; the incumbent's own bit is never
+// set — it is implicit via best_index). Arms at index 64 and above cannot be
+// represented in the mask; the count remains authoritative and such arms only
+// affect the count. On missing minimum evidence the mask is 0 and the count is
+// -1, matching the existing fail-closed convention.
 static inline int
-bai_count_near_tie_challengers(const BAISyncData *bai_sync_data) {
+bai_count_near_tie_challengers_with_mask(const BAISyncData *bai_sync_data,
+                                         uint64_t *mask_out) {
   static const double z_99_two_sided = 2.5758293035489004;
+  if (mask_out != NULL) {
+    *mask_out = 0;
+  }
   if (!bai_regret_has_minimum_evidence(bai_sync_data)) {
     return -1;
   }
@@ -459,9 +469,17 @@ bai_count_near_tie_challengers(const BAISyncData *bai_sync_data) {
         bai_difference_standard_deviation(bai_sync_data, best_index, arm_index);
     if (difference_mean + z_99_two_sided * difference_sd >= 0.0) {
       count++;
+      if (mask_out != NULL && arm_index < 64) {
+        *mask_out |= ((uint64_t)1 << arm_index);
+      }
     }
   }
   return count;
+}
+
+static inline int
+bai_count_near_tie_challengers(const BAISyncData *bai_sync_data) {
+  return bai_count_near_tie_challengers_with_mask(bai_sync_data, NULL);
 }
 
 static inline double bai_regret_stop_estimate(const BAISyncData *bai_sync_data,
@@ -877,7 +895,8 @@ bai_sync_data_add_sample_with_progress(BAISampleArgs *args, const int arm_index,
     progress.value = bai_estimate_expected_regret(sync_data, args->rvs);
     progress.secondary_value =
         bai_estimate_joint_expected_regret(sync_data, args->rvs);
-    progress.near_tie_challengers = bai_count_near_tie_challengers(sync_data);
+    progress.near_tie_challengers = bai_count_near_tie_challengers_with_mask(
+        sync_data, &progress.near_tie_member_mask);
     const uint64_t interval = sync_data->progress_listener->checkpoint_interval;
     do {
       const uint64_t old_next = sync_data->next_progress_sample;

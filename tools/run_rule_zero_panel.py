@@ -357,6 +357,48 @@ def validate_rule_zero_chunk_accounting(
             for key, value in expected.items():
                 if _int(checkpoint, key) != value:
                     raise ValueError(f"source {source} checkpoint {key} differs")
+            # Risk-set membership (packet section 6): required as of progress
+            # schema 7. The mask holds candidate-rank bits; the incumbent's
+            # own bit is never set, the popcount must equal the near-tie
+            # count, and the full-horizon indicator must be derivable from
+            # the mask plus the incumbent rank. Fail-closed rows report 0/0.
+            if "risk_set_ranks" not in checkpoint or (
+                "full_horizon_rank_in_risk_set" not in checkpoint
+            ):
+                raise ValueError(
+                    f"source {source} checkpoint lacks risk-set telemetry"
+                )
+            risk_mask = int(checkpoint["risk_set_ranks"], 16)
+            in_risk_set = _int(checkpoint, "full_horizon_rank_in_risk_set")
+            full_rank_at_checkpoint = _int(checkpoint, "full_selected_rank")
+            if valid:
+                if bin(risk_mask).count("1") != near_ties:
+                    raise ValueError(
+                        f"source {source} risk-set popcount differs"
+                    )
+                if (risk_mask >> rank) & 1:
+                    raise ValueError(
+                        f"source {source} risk set contains the incumbent"
+                    )
+                if width < 64 and risk_mask >> width:
+                    raise ValueError(
+                        f"source {source} risk set exceeds the panel width"
+                    )
+                expected_in_risk_set = int(
+                    full_rank_at_checkpoint == rank
+                    or (
+                        full_rank_at_checkpoint < 64
+                        and (risk_mask >> full_rank_at_checkpoint) & 1
+                    )
+                )
+                if in_risk_set != expected_in_risk_set:
+                    raise ValueError(
+                        f"source {source} risk-set indicator differs"
+                    )
+            elif risk_mask != 0 or in_risk_set != 0:
+                raise ValueError(
+                    f"source {source} invalid checkpoint reports a risk set"
+                )
             if eligible and first_eligible is None:
                 first_eligible = checkpoint
             selected = _int(checkpoint, "rule_selected")
@@ -370,6 +412,22 @@ def validate_rule_zero_chunk_accounting(
         stop_checkpoint = len(root_checkpoints) if capped else _int(chosen, "checkpoint")
         if _int(rule, "capped") != int(capped) or _int(rule, "stop_checkpoint") != stop_checkpoint:
             raise ValueError(f"source {source} cap/stop checkpoint differs")
+        # Summary risk-set fields must mirror the replay-selected stopping
+        # checkpoint. Capped roots reuse the full decision, whose mask is 0
+        # (FINISH events carry no mask); the keys must still be present.
+        if "stop_risk_set_ranks" not in rule or (
+            "stop_full_horizon_rank_in_risk_set" not in rule
+        ):
+            raise ValueError(f"source {source} summary lacks risk-set fields")
+        if not capped:
+            if int(rule["stop_risk_set_ranks"], 16) != int(
+                chosen["risk_set_ranks"], 16
+            ) or _int(rule, "stop_full_horizon_rank_in_risk_set") != _int(
+                chosen, "full_horizon_rank_in_risk_set"
+            ):
+                raise ValueError(
+                    f"source {source} summary risk-set fields differ"
+                )
         full_iterations = _int(rule, "full_iterations")
         full_nodes = _int(rule, "full_nodes")
         full_rank = _int(rule, "full_rank")
