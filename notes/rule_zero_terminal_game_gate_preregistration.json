@@ -1,8 +1,8 @@
 {
   "artifact_kind": "rule_zero_terminal_game_gate_preregistration",
-  "schema_version": 1,
+  "schema_version": 2,
   "frozen_before_confirmatory_generation": true,
-  "status": "draft_pending_owner_confirmation_of_the_metric_choice_and_freeze",
+  "status": "metric_sizing_and_threshold_frozen_by_owner_2026_08_06_pending_run_and_arm",
   "purpose": "confirm_in_real_mirrored_terminal_play_that_enforced_rule_zero_is_judged_value_equivalent_to_the_full_horizon_policy_under_production_settings_before_live_allocation",
   "depends_on": {
     "surrogate_gate": "notes/rule_zero_exact_topology_results.json",
@@ -14,42 +14,52 @@
     "treatment": "p0_rule_zero_enforced_sim_stop_via_PCBENCH_RULE_ZERO_P0_ONLY",
     "control": "p1_production_full_horizon_policy",
     "games_played_to_terminal": true,
-    "time_control": "production_target_control_frozen_at_run_time",
+    "time_control": "three_minutes_per_player_per_game_180000_ms",
+    "wall_budget": "thirty_two_hours_continuous_on_the_match_machine",
     "sampling_prefix": "production_regret_min_samples_per_arm_32_not_the_uniform_floor_100_used_by_the_surrogate_panel",
     "common_rng": "stream_0_starting_seat_stream_1_replying_seat_mirrored",
     "rationale": "the_surrogate_panel_used_synthetic_single_decision_roots_and_a_uniform_floor_this_gate_adds_real_full_game_trajectories_the_production_32_sample_prefix_and_real_clock_banking"
   },
   "primary_metric": {
-    "name": "per_rule_zero_stopped_decision_judged_missed_value",
+    "name": "per_rule_zero_stopped_decision_judged_missed_value_game_pair_clustered",
     "definition": "for_each_enforced_rule_zero_stop_pin_the_stopped_move_and_the_full_horizon_move_oracle_judge_both_missed_value_equals_full_horizon_utility_minus_stopped_utility",
     "judge_protocol": "identical_to_the_surrogate_panel_selective_judge_only_mismatched_nominees_and_a_random_audit_subset_are_solved_nonmismatches_are_exact_zero_missed_value",
-    "inference_clustering": "game_pair_is_the_independent_unit_use_cluster_robust_game_pair_cluster_one_sided_95_percent_upper_bound_on_the_mean_per_decision_missed_value",
-    "why_per_decision_and_not_per_game_sum": "the_per_decision_metric_reuses_the_surrogate_panel_variance_estimate_directly_a_per_game_sum_would_change_the_units_and_require_a_new_variance_pilot_to_freeze_n"
+    "inference": "game_pair_is_the_independent_unit_cluster_robust_game_pair_cluster_one_sided_95_percent_upper_bound_on_the_mean_per_decision_missed_value_normal_critical_value",
+    "chosen_over_per_game_sum": "confirmed_by_owner_2026_08_06_the_per_game_or_per_pair_sum_metric_is_the_purer_complete_game_inference_unit_but_at_this_sample_size_summing_concentrates_the_rare_large_missed_value_event_into_too_few_pairs_and_its_upper_bound_is_badly_anti_conservative_per_decision_clustered_spreads_the_same_events_across_all_decisions_and_calibrates_far_better"
   },
   "gates": {
-    "primary": "cluster_robust_one_sided_95_percent_upper_bound_on_mean_per_decision_judged_missed_value_at_most_0_001",
+    "primary": "cluster_robust_one_sided_95_percent_upper_bound_on_mean_per_decision_judged_missed_value_at_most_the_operating_threshold_0_0008",
+    "tolerance": 0.001,
+    "operating_threshold": 0.0008,
+    "operating_threshold_rationale": "the_certification_tolerance_is_0_001_the_gate_is_set_tighter_at_0_0008_to_absorb_the_residual_heavy_tail_anti_conservatism_of_the_cluster_robust_upper_bound_at_this_event_count_this_buys_type_i_control_while_rule_zero_still_passes_with_full_margin",
     "secondary_reported_not_gated": {
+      "per_pair_sum_judged_missed_value": "same_events_aggregated_to_one_number_per_pair_reported_as_a_directional_cross_check_a_disagreement_with_the_primary_is_a_heavy_tail_alarm_that_blocks_arming",
       "terminal_utility_equivalence": "pair_terminal_utility_delta_two_sided_95_percent_interval_within_plus_or_minus_0_020_expected_trivially_satisfied_the_excluded_variance_pilot_pair_sd_was_0_003176_which_makes_this_test_near_vacuous_under_mirroring",
       "mismatch_rate": "per_decision_stopped_vs_full_horizon_move_disagreement_with_exact_clopper_pearson_bounds",
       "risk_set_membership": "fraction_of_stops_with_the_full_horizon_selection_inside_the_near_tie_risk_set_and_the_out_of_risk_set_mismatch_count_progress_schema_at_least_7"
     },
-    "pass": "primary_and_no_overtime_penalties_and_clean_trace_audit"
+    "pass": "primary_and_per_pair_sum_cross_check_agree_and_no_overtime_penalties_and_clean_trace_audit"
   },
   "sizing": {
-    "method": "packet_formula_n_equals_ceil_8_57_times_sd_over_margin_squared_with_margin_equal_to_the_0_001_primary_threshold_and_sd_the_per_decision_judged_missed_value_sd",
-    "why_not_utility_sd": "the_excluded_terminal_variance_pilot_returned_mirrored_terminal_utility_pair_sd_0_003176_which_gives_n_equals_1_the_utility_outcome_test_is_near_vacuous_under_mirroring_so_sizing_follows_the_primary_judged_missed_value_gate",
-    "planning_sd_source": "surrogate_exact_topology_panel_per_decision_judged_missed_value",
-    "planning_sd_point": 0.00283,
-    "planning_sd_upper_95": 0.00303,
-    "n_scored_decisions_at_point_sd": 69,
-    "n_scored_decisions_at_upper_95_sd": 79,
+    "method": "budget_set_by_the_thirty_two_hour_wall_at_three_minute_time_control_then_verified_against_the_judged_missed_value_calibration",
+    "why_not_utility_sd": "the_excluded_terminal_variance_pilot_returned_mirrored_terminal_utility_pair_sd_0_003176_which_gives_n_equals_1_the_utility_outcome_test_is_near_vacuous_under_mirroring_so_the_binding_gate_is_judged_missed_value",
+    "frozen_n_pairs": 260,
+    "n_derivation": "the_180s_variance_pilot_ran_444_seconds_per_pair_so_thirty_two_hours_yields_about_259_pairs_frozen_at_260_at_the_observed_17_5_rule_zero_stops_per_pair_this_is_about_4500_scored_decisions_and_260_game_pair_clusters",
+    "analytic_floor_check": "the_packet_formula_n_equals_ceil_8_57_times_sd_over_margin_squared_with_the_surrogate_per_decision_jmv_sd_0_00283_upper_95_0_00303_and_margin_0_001_requires_only_69_to_79_scored_decisions_the_260_pair_budget_exceeds_this_by_more_than_ten_times_more_pairs_also_shrink_the_heavy_tail_anti_conservatism",
     "expected_rule_zero_stops_per_pair": 17.5,
-    "expected_stops_per_pair_source": "180s_variance_pilot_525_stops_over_30_pairs_production_time_control_may_differ",
-    "cluster_floor_pairs_for_stable_cluster_robust_inference": 40,
-    "frozen_n_pairs": 60,
-    "frozen_n_justification": "60_mirrored_pairs_yield_about_1050_scored_decisions_more_than_ten_times_the_79_decision_requirement_and_60_game_pair_clusters_above_the_40_cluster_floor_the_judge_load_is_light_because_only_the_roughly_1_25_percent_mismatched_decisions_and_the_random_audit_subset_are_solved",
-    "cap_pairs": 800,
-    "refreeze_note": "if_the_production_time_control_yields_a_materially_different_per_decision_missed_value_sd_or_stops_per_pair_than_the_surrogate_prior_run_a_small_excluded_terminal_variance_pilot_and_refreeze_frozen_n_pairs_before_the_confirmatory_run"
+    "judge_load": "light_only_the_roughly_1_25_percent_mismatched_decisions_and_the_random_audit_subset_are_oracle_solved",
+    "cap_pairs": 800
+  },
+  "calibration_evidence": {
+    "method": "monte_carlo_3000_experiments_at_260_pairs_resampling_the_panel_per_decision_jmv_law_316_zeros_plus_the_four_mismatch_magnitudes_minus_0_0481_plus_0_002_plus_0_0047_plus_0_0151",
+    "observed_law_pass_rate": "100_percent_for_every_metric_rule_zero_true_upper_about_minus_1e_5",
+    "type_i_at_tolerance_0_001": {
+      "per_pair_sum_student_t": "about_22_percent",
+      "per_pair_sum_bootstrap": "about_20_percent",
+      "per_decision_clustered": "about_8_percent",
+      "per_decision_clustered_at_operating_threshold_0_0008": "0_percent"
+    },
+    "conclusion": "per_decision_clustered_at_the_0_0008_operating_threshold_holds_type_i_at_or_below_nominal_while_rule_zero_passes_with_full_margin_the_per_pair_sum_is_reported_only_as_a_cross_check"
   },
   "seeds": {
     "base_seed": 41001,
@@ -65,12 +75,13 @@
     "nonanticipating": true,
     "dropped": 0,
     "trace_audit": "zero_sim_peg_eg_event_drops_zero_penalties_required",
-    "exclusions": "this_gate_and_its_optional_variance_pilot_are_separate_seed_blocks"
+    "exclusions": "this_gate_is_a_separate_seed_block"
   },
   "live_allocation": "remains_disabled_until_this_gate_passes_and_the_owner_arms_it",
-  "open_decisions_for_owner": [
-    "confirm_per_decision_clustered_judged_missed_value_as_the_primary_metric_versus_a_per_game_summed_alternative",
-    "confirm_the_production_time_control_to_freeze",
-    "confirm_frozen_n_pairs_60_or_authorize_a_small_terminal_variance_pilot_first"
+  "resolved_owner_decisions_2026_08_06": [
+    "primary_metric_per_decision_game_pair_clustered_judged_missed_value",
+    "frozen_n_260_pairs_thirty_two_hours_at_three_minute_time_control",
+    "operating_threshold_0_0008_with_certification_tolerance_0_001",
+    "per_pair_sum_judged_missed_value_reported_as_a_secondary_cross_check_not_gated"
   ]
 }
