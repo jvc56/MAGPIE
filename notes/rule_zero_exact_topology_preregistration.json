@@ -1,0 +1,111 @@
+{
+  "artifact_kind": "rule_zero_prospective_preregistration",
+  "schema_version": 2,
+  "frozen_before_fresh_trajectory_generation": true,
+  "evidence_class": "certification_exact_topology_panel",
+  "purpose": "certify_p2_top15_rule_zero_on_fresh_match_topology_roots_under_the_frozen_primary_gate",
+  "primary_gate_decision": "notes/rule_zero_primary_gate_decision.md",
+  "known_divergences_from_certification": {
+    "threads": "10_match_machine_m4",
+    "sampling_floor": "uniform_floor_per_mille_100_matching_the_frozen_rule_calibration_production_prefix_is_regret_min_samples_per_arm_32",
+    "exclusions": "fresh_seed_blocks_8404001_and_8504001_disjoint_from_p2_panel_8204001_8304001_and_match_runner_pilot_blocks_25001_25030_31001_31040",
+    "shadow_model": "absent_logged_shadow_disabled"
+  },
+  "decision": "gates_armed_as_preregistered_primary_judged_missed_value",
+  "target": "same_arm_horizon_choice_and_signed_common_judge_improvement",
+  "rule": {
+    "checkpoint_interval_iterations": 256,
+    "minimum_nodes": 100000,
+    "minimum_stable_checkpoints": 2,
+    "near_tie_challengers": 0,
+    "near_tie_definition": "two_sided_99_percent_gaussian_difference_upper_bound_reaches_zero",
+    "missing_or_invalid_counters": "run_to_slice",
+    "scope": "early_stop_only_never_extend"
+  },
+  "panel": {
+    "roots": 320,
+    "source_games": 320,
+    "roots_per_policy_bag_stratum": 40,
+    "policies": ["static", "playchooser-g3000ms"],
+    "bag_bands": [
+      "late_5_15",
+      "middle_late_16_35",
+      "middle_early_36_60",
+      "early_61_100"
+    ],
+    "selection_seed": 81057,
+    "selection_unit": "one_root_per_complete_source_game_without_oracle_outcomes",
+    "panel_order": "sha256_ranked"
+  },
+  "fresh_trajectory_generation": {
+    "games_per_policy": 160,
+    "games_per_resumable_chunk": 16,
+    "threads": 10,
+    "static": {
+      "base_seed": 8404001,
+      "clock_ms": 1,
+      "play_analyzed_moves": false
+    },
+    "playchooser": {
+      "base_seed": 8504001,
+      "clock_ms": 3000,
+      "play_analyzed_moves": true
+    }
+  },
+  "exclusions": [],
+  "arm": {
+    "plies": 2,
+    "sorted_candidate_width": 15,
+    "maximum_nodes": 8000000,
+    "threads": 10,
+    "uniform_floor_per_mille": 100,
+    "sampling_rule": "top_two_ids_after_initial_round_robin"
+  },
+  "matched_control": {
+    "membership": "panel_source_index_mod_3_equals_0",
+    "expected_roots": 107,
+    "budget": "independent_exact_stopped_iteration_count",
+    "scheduler": "round_robin_if_stop_precedes_full_uniform_floor_otherwise_top_two_ids_with_full_absolute_floor"
+  },
+  "selective_judge": {
+    "plies": 10,
+    "samples_per_distinct_nominee": 100000,
+    "risk_plays": 8,
+    "audit_membership": "panel_source_index_mod_10_equals_0",
+    "expected_random_audit_roots": 32,
+    "also_judge": "every_landmark_or_matched_choice_mismatch"
+  },
+  "horizons": {
+    "same_arm_full_nodes": 8000000,
+    "equal_slice_historical_minimum_nodes": 3652554,
+    "equal_slice_landmark_nodes": 6000000,
+    "equal_slice_rule": "historical_median_6M_gate_with_3652554_and_8M_reported_sensitivities"
+  },
+  "risk_set_telemetry": {
+    "required": true,
+    "minimum_progress_schema_version": 7,
+    "fields": [
+      "risk_set_ranks_on_every_checkpoint_row",
+      "full_horizon_rank_in_risk_set_on_every_checkpoint_row",
+      "stop_risk_set_ranks_and_stop_full_horizon_rank_in_risk_set_on_the_summary_row"
+    ],
+    "consequence": "panel_invalid_without_it_per_packet_section_6"
+  },
+  "gates": {
+    "primary": "complete_game_student_t_95_percent_upper_bound_on_judged_missed_value_at_most_0_001_at_the_6M_gate_landmark_and_the_8M_full_horizon",
+    "usefulness_floor": "stop_rate_at_least_0_30_and_node_savings_at_least_0_25_at_the_6M_gate_landmark",
+    "matched_subset": "no_harmful_optional_stopping_bias",
+    "secondary_reported_not_gated": "each_landmark_exact_one_sided_95_percent_mismatch_upper_bound",
+    "sensitivities": "mismatch_reported_at_3652554_and_8M_landmarks",
+    "pass": "primary_and_usefulness_floor_and_matched_subset_and_clean_accounting"
+  },
+  "accounting": {
+    "required_prefix": "0_through_319_contiguous",
+    "dropped": 0,
+    "private_partial_chunks": "never_append",
+    "inference_unit": "complete_source_game",
+    "nonanticipating": true
+  },
+  "live_allocation": "disabled",
+  "terminal_game_gate": "separate_mirrored_preregistered_gate_remains_mandatory"
+}
