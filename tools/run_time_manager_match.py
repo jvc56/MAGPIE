@@ -505,13 +505,19 @@ def parse_pair(
         if policy == "timemanager" and mode == "sim":
             planned = float(turn["budget_ms"])
             legacy = float(turn["legacy_budget_ms"])
-            assert planned + 0.001 >= legacy, (
+            # Budgets are printed to 0.001 ms, so a truly-equal planned/legacy
+            # pair can differ by one print quantum; at fast time controls the
+            # tiny per-turn budgets sit exactly on that boundary. Tolerate 0.01
+            # ms (well above the quantum + IEEE754 slack, far below any real
+            # ms-scale shortening) so a 1 us artifact is not read as the
+            # TimeManager shortening the sim below the equal slice.
+            assert planned + 0.01 >= legacy, (
                 f"TimeManager shortened sim budget at game {turn['game']} "
                 f"turn {turn['turn']}: {planned} < {legacy}"
             )
             tm_sim_planned_budget_ms += planned
             tm_sim_legacy_budget_ms += legacy
-            if planned > legacy + 0.001:
+            if planned > legacy + 0.01:
                 tm_sim_released_turns += 1
         if (
             policy == "timemanager"
