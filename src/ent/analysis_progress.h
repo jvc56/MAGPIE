@@ -4,7 +4,7 @@
 #include <stdbool.h>
 #include <stdint.h>
 
-#define ANALYSIS_PROGRESS_SCHEMA_VERSION 6U
+#define ANALYSIS_PROGRESS_SCHEMA_VERSION 7U
 #define ANALYSIS_PROGRESS_ELAPSED_NOW INT64_C(-1)
 #define ANALYSIS_PROGRESS_CPU_NOW INT64_C(-1)
 #define ANALYSIS_PROGRESS_SCORE_SPREAD_UNSET INT32_MIN
@@ -133,6 +133,15 @@ typedef struct AnalysisProgressEvent {
   // reaches the incumbent. SIM populates this at checkpoints and FINISH;
   // other solvers leave it at -1.
   int near_tie_challengers;
+  // Risk-set membership bitmask matching near_tie_challengers: bit arm_index
+  // is set for each counted near-tie challenger (arm indices 0..63; the
+  // incumbent's bit is never set — it is implicit via best_index). Arms at
+  // index 64 and above cannot be represented; the count stays authoritative.
+  // SIM populates this on CHECKPOINT events only (FINISH reports the count
+  // recorded at stop and leaves the mask 0); other solvers leave it 0. Bits
+  // are raw BAI arm indices — consumers that need candidate ranks must remap
+  // through their own arm-to-rank tables (see the thinking-curve harness).
+  uint64_t near_tie_member_mask;
 
   // Copy-safe identity for the event's move/arm. SIM uses the arm index,
   // endgame uses tiny_move, and PEG/PlayChooser use a stable Move fingerprint.
