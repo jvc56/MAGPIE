@@ -1,0 +1,76 @@
+{
+  "artifact_kind": "rule_zero_terminal_game_gate_preregistration",
+  "schema_version": 1,
+  "frozen_before_confirmatory_generation": true,
+  "status": "draft_pending_owner_confirmation_of_the_metric_choice_and_freeze",
+  "purpose": "confirm_in_real_mirrored_terminal_play_that_enforced_rule_zero_is_judged_value_equivalent_to_the_full_horizon_policy_under_production_settings_before_live_allocation",
+  "depends_on": {
+    "surrogate_gate": "notes/rule_zero_exact_topology_results.json",
+    "surrogate_gate_status": "passed_2026_08_06",
+    "primary_gate_decision": "notes/rule_zero_primary_gate_decision.md"
+  },
+  "design": {
+    "unit": "mirrored_common_rng_game_pair_alternating_starting_seat",
+    "treatment": "p0_rule_zero_enforced_sim_stop_via_PCBENCH_RULE_ZERO_P0_ONLY",
+    "control": "p1_production_full_horizon_policy",
+    "games_played_to_terminal": true,
+    "time_control": "production_target_control_frozen_at_run_time",
+    "sampling_prefix": "production_regret_min_samples_per_arm_32_not_the_uniform_floor_100_used_by_the_surrogate_panel",
+    "common_rng": "stream_0_starting_seat_stream_1_replying_seat_mirrored",
+    "rationale": "the_surrogate_panel_used_synthetic_single_decision_roots_and_a_uniform_floor_this_gate_adds_real_full_game_trajectories_the_production_32_sample_prefix_and_real_clock_banking"
+  },
+  "primary_metric": {
+    "name": "per_rule_zero_stopped_decision_judged_missed_value",
+    "definition": "for_each_enforced_rule_zero_stop_pin_the_stopped_move_and_the_full_horizon_move_oracle_judge_both_missed_value_equals_full_horizon_utility_minus_stopped_utility",
+    "judge_protocol": "identical_to_the_surrogate_panel_selective_judge_only_mismatched_nominees_and_a_random_audit_subset_are_solved_nonmismatches_are_exact_zero_missed_value",
+    "inference_clustering": "game_pair_is_the_independent_unit_use_cluster_robust_game_pair_cluster_one_sided_95_percent_upper_bound_on_the_mean_per_decision_missed_value",
+    "why_per_decision_and_not_per_game_sum": "the_per_decision_metric_reuses_the_surrogate_panel_variance_estimate_directly_a_per_game_sum_would_change_the_units_and_require_a_new_variance_pilot_to_freeze_n"
+  },
+  "gates": {
+    "primary": "cluster_robust_one_sided_95_percent_upper_bound_on_mean_per_decision_judged_missed_value_at_most_0_001",
+    "secondary_reported_not_gated": {
+      "terminal_utility_equivalence": "pair_terminal_utility_delta_two_sided_95_percent_interval_within_plus_or_minus_0_020_expected_trivially_satisfied_the_excluded_variance_pilot_pair_sd_was_0_003176_which_makes_this_test_near_vacuous_under_mirroring",
+      "mismatch_rate": "per_decision_stopped_vs_full_horizon_move_disagreement_with_exact_clopper_pearson_bounds",
+      "risk_set_membership": "fraction_of_stops_with_the_full_horizon_selection_inside_the_near_tie_risk_set_and_the_out_of_risk_set_mismatch_count_progress_schema_at_least_7"
+    },
+    "pass": "primary_and_no_overtime_penalties_and_clean_trace_audit"
+  },
+  "sizing": {
+    "method": "packet_formula_n_equals_ceil_8_57_times_sd_over_margin_squared_with_margin_equal_to_the_0_001_primary_threshold_and_sd_the_per_decision_judged_missed_value_sd",
+    "why_not_utility_sd": "the_excluded_terminal_variance_pilot_returned_mirrored_terminal_utility_pair_sd_0_003176_which_gives_n_equals_1_the_utility_outcome_test_is_near_vacuous_under_mirroring_so_sizing_follows_the_primary_judged_missed_value_gate",
+    "planning_sd_source": "surrogate_exact_topology_panel_per_decision_judged_missed_value",
+    "planning_sd_point": 0.00283,
+    "planning_sd_upper_95": 0.00303,
+    "n_scored_decisions_at_point_sd": 69,
+    "n_scored_decisions_at_upper_95_sd": 79,
+    "expected_rule_zero_stops_per_pair": 17.5,
+    "expected_stops_per_pair_source": "180s_variance_pilot_525_stops_over_30_pairs_production_time_control_may_differ",
+    "cluster_floor_pairs_for_stable_cluster_robust_inference": 40,
+    "frozen_n_pairs": 60,
+    "frozen_n_justification": "60_mirrored_pairs_yield_about_1050_scored_decisions_more_than_ten_times_the_79_decision_requirement_and_60_game_pair_clusters_above_the_40_cluster_floor_the_judge_load_is_light_because_only_the_roughly_1_25_percent_mismatched_decisions_and_the_random_audit_subset_are_solved",
+    "cap_pairs": 800,
+    "refreeze_note": "if_the_production_time_control_yields_a_materially_different_per_decision_missed_value_sd_or_stops_per_pair_than_the_surrogate_prior_run_a_small_excluded_terminal_variance_pilot_and_refreeze_frozen_n_pairs_before_the_confirmatory_run"
+  },
+  "seeds": {
+    "base_seed": 41001,
+    "seed_schedule": "base_seed_plus_pair_number_minus_1",
+    "disjoint_from": [
+      "surrogate_static_8404001_and_playchooser_8504001",
+      "p2_panel_8204001_8304001",
+      "variance_pilot_25001_25030_and_15s_31001_31040"
+    ]
+  },
+  "accounting": {
+    "inference_unit": "complete_mirrored_game_pair",
+    "nonanticipating": true,
+    "dropped": 0,
+    "trace_audit": "zero_sim_peg_eg_event_drops_zero_penalties_required",
+    "exclusions": "this_gate_and_its_optional_variance_pilot_are_separate_seed_blocks"
+  },
+  "live_allocation": "remains_disabled_until_this_gate_passes_and_the_owner_arms_it",
+  "open_decisions_for_owner": [
+    "confirm_per_decision_clustered_judged_missed_value_as_the_primary_metric_versus_a_per_game_summed_alternative",
+    "confirm_the_production_time_control_to_freeze",
+    "confirm_frozen_n_pairs_60_or_authorize_a_small_terminal_variance_pilot_first"
+  ]
+}
